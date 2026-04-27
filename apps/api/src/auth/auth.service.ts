@@ -9,6 +9,7 @@ import { UserRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoginDto, RegisterDto } from './auth.dto';
 import { AuthenticatedUser, AuthTokenPayload } from './auth.types';
+import { EmailVerificationService } from './email-verification.service';
 import { PasswordService } from './password.service';
 
 type AuthResponse = {
@@ -34,6 +35,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly passwordService: PasswordService,
     private readonly jwtService: JwtService,
+    private readonly emailVerificationService: EmailVerificationService,
   ) {}
 
   async register(dto: RegisterDto): Promise<AuthResponse> {
@@ -89,6 +91,11 @@ export class AuthService {
     if (!owner) {
       throw new BadRequestException('Failed to create organization owner');
     }
+
+    await this.emailVerificationService.sendVerificationEmail(
+      owner.id,
+      owner.email,
+    );
 
     return this.createAuthResponse({
       id: owner.id,
@@ -149,6 +156,16 @@ export class AuthService {
     }
 
     return this.toAuthenticatedUser(user);
+  }
+
+  confirmEmail(token: string) {
+    return this.emailVerificationService.confirmEmail(token);
+  }
+
+  resendVerificationEmail(email: string) {
+    const normalizedEmail = this.normalizeEmail(email);
+    this.assertEmail(normalizedEmail);
+    return this.emailVerificationService.resendByEmail(normalizedEmail);
   }
 
   private async createAuthResponse(

@@ -7,6 +7,7 @@ import { JwtService } from '@nestjs/jwt';
 import { UserRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from './auth.service';
+import { EmailVerificationService } from './email-verification.service';
 
 type PrismaMock = {
   user: {
@@ -27,6 +28,12 @@ type JwtMock = {
   signAsync: jest.Mock;
 };
 
+type EmailVerificationMock = {
+  sendVerificationEmail: jest.Mock;
+  confirmEmail: jest.Mock;
+  resendByEmail: jest.Mock;
+};
+
 function createUserWithTenant() {
   return {
     id: 'user-1',
@@ -45,6 +52,7 @@ describe('AuthService', () => {
   let prisma: PrismaMock;
   let passwordService: PasswordMock;
   let jwtService: JwtMock;
+  let emailVerificationService: EmailVerificationMock;
   let service: AuthService;
 
   beforeEach(() => {
@@ -64,10 +72,16 @@ describe('AuthService', () => {
     jwtService = {
       signAsync: jest.fn().mockResolvedValue('signed-token'),
     };
+    emailVerificationService = {
+      sendVerificationEmail: jest.fn(),
+      confirmEmail: jest.fn(),
+      resendByEmail: jest.fn(),
+    };
     service = new AuthService(
       prisma as unknown as PrismaService,
       passwordService,
       jwtService as unknown as JwtService,
+      emailVerificationService as unknown as EmailVerificationService,
     );
   });
 
@@ -118,6 +132,10 @@ describe('AuthService', () => {
         users: true,
       },
     });
+    expect(emailVerificationService.sendVerificationEmail).toHaveBeenCalledWith(
+      'user-1',
+      'owner@club-a.leetplus.ru',
+    );
   });
 
   it('rejects duplicate email during registration', async () => {
@@ -183,5 +201,27 @@ describe('AuthService', () => {
       email: 'owner@club-a.leetplus.ru',
       tenantSlug: 'club-a',
     });
+  });
+
+  it('confirms email by verification token', async () => {
+    emailVerificationService.confirmEmail.mockResolvedValue({ ok: true });
+
+    await expect(service.confirmEmail('token-1')).resolves.toEqual({
+      ok: true,
+    });
+    expect(emailVerificationService.confirmEmail).toHaveBeenCalledWith(
+      'token-1',
+    );
+  });
+
+  it('resends verification email for normalized address', async () => {
+    emailVerificationService.resendByEmail.mockResolvedValue({ ok: true });
+
+    await expect(
+      service.resendVerificationEmail(' OWNER@CLUB-A.LEETPLUS.RU '),
+    ).resolves.toEqual({ ok: true });
+    expect(emailVerificationService.resendByEmail).toHaveBeenCalledWith(
+      'owner@club-a.leetplus.ru',
+    );
   });
 });

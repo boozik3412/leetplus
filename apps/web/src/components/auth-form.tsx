@@ -81,7 +81,11 @@ export function AuthForm({ mode }: AuthFormProps) {
         return;
       }
 
-      router.push("/dashboard");
+      router.push(
+        isRegister
+          ? `/verify-email?email=${encodeURIComponent(form.email)}`
+          : "/dashboard",
+      );
       router.refresh();
     } catch {
       setError("Backend недоступен. Проверьте, что API запущен.");

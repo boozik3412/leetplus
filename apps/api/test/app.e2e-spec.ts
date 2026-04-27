@@ -11,6 +11,7 @@ import { AuthenticatedRequest } from '../src/auth/auth.types';
 import { JwtAuthGuard } from '../src/auth/jwt-auth.guard';
 import { DashboardModule } from '../src/dashboard/dashboard.module';
 import { DashboardService } from '../src/dashboard/dashboard.service';
+import { PrismaService } from '../src/prisma/prisma.service';
 import { ProductsModule } from '../src/products/products.module';
 import { ProductsService } from '../src/products/products.service';
 import { StoresModule } from '../src/stores/stores.module';
@@ -32,9 +33,13 @@ describe('API routes (e2e)', () => {
     findAll: jest.fn(),
   };
 
+  const prismaService = {};
+
   const authService = {
     register: jest.fn(),
     login: jest.fn(),
+    confirmEmail: jest.fn(),
+    resendVerificationEmail: jest.fn(),
     me: jest.fn(),
   };
 
@@ -52,6 +57,8 @@ describe('API routes (e2e)', () => {
       .useValue(dashboardService)
       .overrideProvider(StoresService)
       .useValue(storesService)
+      .overrideProvider(PrismaService)
+      .useValue(prismaService)
       .overrideGuard(JwtAuthGuard)
       .useValue({
         canActivate: (context: ExecutionContext) => {
@@ -149,6 +156,26 @@ describe('API routes (e2e)', () => {
           tenantSlug: 'club-a',
         },
       });
+  });
+
+  it('/auth/confirm-email (POST)', () => {
+    authService.confirmEmail.mockResolvedValue({ ok: true });
+
+    return request(app.getHttpServer())
+      .post('/auth/confirm-email')
+      .send({ token: 'verification-token' })
+      .expect(201)
+      .expect({ ok: true });
+  });
+
+  it('/auth/resend-verification (POST)', () => {
+    authService.resendVerificationEmail.mockResolvedValue({ ok: true });
+
+    return request(app.getHttpServer())
+      .post('/auth/resend-verification')
+      .send({ email: 'owner@club-a.leetplus.ru' })
+      .expect(201)
+      .expect({ ok: true });
   });
 
   it('/auth/me (GET)', () => {

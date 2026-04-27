@@ -5,6 +5,7 @@ import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { CategoriesModule } from './categories/categories.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { ImportsModule } from './imports/imports.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProductsModule } from './products/products.module';
 import { StoresModule } from './stores/stores.module';
@@ -23,6 +24,7 @@ import { TenancyModule } from './tenancy/tenancy.module';
     ProductsModule,
     StoresModule,
     SuppliersModule,
+    ImportsModule,
     DashboardModule,
   ],
   controllers: [AppController],

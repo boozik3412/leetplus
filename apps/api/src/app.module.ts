@@ -8,6 +8,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { ImportsModule } from './imports/imports.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProductsModule } from './products/products.module';
+import { ReportsModule } from './reports/reports.module';
 import { StoresModule } from './stores/stores.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 import { TenancyModule } from './tenancy/tenancy.module';
@@ -25,6 +26,7 @@ import { TenancyModule } from './tenancy/tenancy.module';
     StoresModule,
     SuppliersModule,
     ImportsModule,
+    ReportsModule,
     DashboardModule,
   ],
   controllers: [AppController],

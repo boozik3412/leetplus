@@ -14,6 +14,8 @@ import { DashboardService } from '../src/dashboard/dashboard.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { ProductsModule } from '../src/products/products.module';
 import { ProductsService } from '../src/products/products.service';
+import { ReportsModule } from '../src/reports/reports.module';
+import { ReportsService } from '../src/reports/reports.service';
 import { StoresModule } from '../src/stores/stores.module';
 import { StoresService } from '../src/stores/stores.service';
 
@@ -33,6 +35,10 @@ describe('API routes (e2e)', () => {
     findAll: jest.fn(),
   };
 
+  const reportsService = {
+    getAssortmentReport: jest.fn(),
+  };
+
   const prismaService = {};
 
   const authService = {
@@ -45,7 +51,13 @@ describe('API routes (e2e)', () => {
 
   beforeEach(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [AuthModule, ProductsModule, StoresModule, DashboardModule],
+      imports: [
+        AuthModule,
+        ProductsModule,
+        StoresModule,
+        ReportsModule,
+        DashboardModule,
+      ],
       controllers: [AppController],
       providers: [AppService],
     })
@@ -57,6 +69,8 @@ describe('API routes (e2e)', () => {
       .useValue(dashboardService)
       .overrideProvider(StoresService)
       .useValue(storesService)
+      .overrideProvider(ReportsService)
+      .useValue(reportsService)
       .overrideProvider(PrismaService)
       .useValue(prismaService)
       .overrideGuard(JwtAuthGuard)
@@ -266,6 +280,37 @@ describe('API routes (e2e)', () => {
         suppliersCount: 10,
         averageMarginPercent: 55.5,
         averageFacing: 2.4,
+      });
+  });
+
+  it('/reports/assortment (GET)', () => {
+    reportsService.getAssortmentReport.mockResolvedValue({
+      tenantId: 'tenant-1',
+      tenantSlug: 'club-a',
+      totalSku: 3,
+      activeSku: 2,
+      inactiveSku: 1,
+      averageMarginPercent: 35.5,
+      averageMarkupPercent: 55.2,
+      categoryBreakdown: [],
+      supplierBreakdown: [],
+      lowMarginProducts: [],
+    });
+
+    return request(app.getHttpServer())
+      .get('/reports/assortment')
+      .expect(200)
+      .expect({
+        tenantId: 'tenant-1',
+        tenantSlug: 'club-a',
+        totalSku: 3,
+        activeSku: 2,
+        inactiveSku: 1,
+        averageMarginPercent: 35.5,
+        averageMarkupPercent: 55.2,
+        categoryBreakdown: [],
+        supplierBreakdown: [],
+        lowMarginProducts: [],
       });
   });
 

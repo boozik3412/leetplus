@@ -1,4 +1,12 @@
+import {
+  ProductArchiveButton,
+  ProductCreateForm,
+  ProductEditRow,
+} from "@/components/product-actions";
+import { requireCurrentUser } from "@/lib/auth";
+import { getCategories, getSuppliers } from "@/lib/catalog";
 import { getProducts } from "@/lib/products";
+import { Fragment } from "react";
 
 function formatCurrency(value: string) {
   return new Intl.NumberFormat("ru-RU", {
@@ -20,7 +28,12 @@ function calculateMarginPercent(purchasePrice: string, salePrice: string) {
 }
 
 export default async function ProductsPage() {
-  const products = await getProducts();
+  const [user, products, categories, suppliers] = await Promise.all([
+    requireCurrentUser(),
+    getProducts(),
+    getCategories(),
+    getSuppliers(),
+  ]);
 
   return (
     <main className="px-6 py-8 text-zinc-950">
@@ -29,9 +42,13 @@ export default async function ProductsPage() {
           <p className="text-sm font-medium text-zinc-500">LeetPlus</p>
           <h1 className="mt-1 text-3xl font-semibold tracking-tight">Товары</h1>
           <p className="mt-2 max-w-3xl text-sm text-zinc-600">
-            Демо-справочник ассортимента. Данные загружаются из NestJS API и
-            PostgreSQL через Prisma.
+            Ассортимент tenant <code>{user.tenantSlug}</code>. Данные
+            загружаются из NestJS API и PostgreSQL через Prisma.
           </p>
+        </div>
+
+        <div className="mb-6">
+          <ProductCreateForm categories={categories} suppliers={suppliers} />
         </div>
 
         <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -100,10 +117,22 @@ export default async function ProductsPage() {
                   <th className="px-5 py-3 text-right font-medium">
                     Срок годности
                   </th>
+                  <th className="px-5 py-3 text-right font-medium">Действия</th>
                 </tr>
               </thead>
 
               <tbody className="divide-y divide-zinc-100">
+                {products.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={10}
+                      className="px-5 py-8 text-center text-sm text-zinc-500"
+                    >
+                      Пока нет товаров. Добавьте первый SKU через форму выше.
+                    </td>
+                  </tr>
+                ) : null}
+
                 {products.map((product) => {
                   const marginPercent = calculateMarginPercent(
                     product.purchasePrice,
@@ -111,45 +140,57 @@ export default async function ProductsPage() {
                   );
 
                   return (
-                    <tr key={product.id} className="hover:bg-zinc-50">
-                      <td className="whitespace-nowrap px-5 py-4 font-mono text-xs text-zinc-600">
-                        {product.article}
-                      </td>
+                    <Fragment key={product.id}>
+                      <tr className="hover:bg-zinc-50">
+                        <td className="whitespace-nowrap px-5 py-4 font-mono text-xs text-zinc-600">
+                          {product.article}
+                        </td>
 
-                      <td className="px-5 py-4 font-medium text-zinc-950">
-                        {product.name}
-                      </td>
+                        <td className="px-5 py-4 font-medium text-zinc-950">
+                          {product.name}
+                        </td>
 
-                      <td className="px-5 py-4 text-zinc-700">
-                        {product.category?.name ?? "—"}
-                      </td>
+                        <td className="px-5 py-4 text-zinc-700">
+                          {product.category?.name ?? "—"}
+                        </td>
 
-                      <td className="px-5 py-4 text-zinc-700">
-                        {product.supplier?.name ?? "—"}
-                      </td>
+                        <td className="px-5 py-4 text-zinc-700">
+                          {product.supplier?.name ?? "—"}
+                        </td>
 
-                      <td className="whitespace-nowrap px-5 py-4 text-right text-zinc-700">
-                        {formatCurrency(product.purchasePrice)}
-                      </td>
+                        <td className="whitespace-nowrap px-5 py-4 text-right text-zinc-700">
+                          {formatCurrency(product.purchasePrice)}
+                        </td>
 
-                      <td className="whitespace-nowrap px-5 py-4 text-right text-zinc-950">
-                        {formatCurrency(product.salePrice)}
-                      </td>
+                        <td className="whitespace-nowrap px-5 py-4 text-right text-zinc-950">
+                          {formatCurrency(product.salePrice)}
+                        </td>
 
-                      <td className="whitespace-nowrap px-5 py-4 text-right text-zinc-700">
-                        {marginPercent.toFixed(1)}%
-                      </td>
+                        <td className="whitespace-nowrap px-5 py-4 text-right text-zinc-700">
+                          {marginPercent.toFixed(1)}%
+                        </td>
 
-                      <td className="whitespace-nowrap px-5 py-4 text-right text-zinc-700">
-                        {product.facing}
-                      </td>
+                        <td className="whitespace-nowrap px-5 py-4 text-right text-zinc-700">
+                          {product.facing}
+                        </td>
 
-                      <td className="whitespace-nowrap px-5 py-4 text-right text-zinc-700">
-                        {product.shelfLifeDays
-                          ? `${product.shelfLifeDays} дн.`
-                          : "—"}
-                      </td>
-                    </tr>
+                        <td className="whitespace-nowrap px-5 py-4 text-right text-zinc-700">
+                          {product.shelfLifeDays
+                            ? `${product.shelfLifeDays} дн.`
+                            : "—"}
+                        </td>
+
+                        <td className="whitespace-nowrap px-5 py-4 text-right">
+                          <ProductArchiveButton id={product.id} />
+                        </td>
+                      </tr>
+
+                      <ProductEditRow
+                        product={product}
+                        categories={categories}
+                        suppliers={suppliers}
+                      />
+                    </Fragment>
                   );
                 })}
               </tbody>

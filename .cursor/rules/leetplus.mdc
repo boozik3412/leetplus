@@ -1,0 +1,56 @@
+# LeetPlus Project Rules
+
+LeetPlus is a SaaS web application for assortment management in computer clubs.
+
+Main domain: leetplus.ru.
+
+Each client organization uses a subdomain:
+- club-a.leetplus.ru
+- network-name.leetplus.ru
+
+## Tech stack
+
+Frontend:
+- Next.js
+- React
+- TypeScript
+- Tailwind CSS
+
+Backend:
+- NestJS
+- TypeScript
+- PostgreSQL
+- Prisma
+- Redis
+- BullMQ
+
+Architecture:
+- Monorepo
+- apps/web for frontend
+- apps/api for backend
+- packages/shared for shared types
+- packages/database for Prisma schema and migrations
+
+## Coding rules
+
+- Use TypeScript everywhere.
+- Avoid implicit any.
+- Keep business logic outside controllers.
+- Use service classes for domain logic.
+- All tenant-owned data must use tenantId.
+- Never query tenant-owned data without tenantId filtering.
+- UI must be business-like, minimal, and support light/dark themes.
+
+## MVP priority
+
+Build in this order:
+1. Project skeleton
+2. Auth
+3. Tenant and organization model
+4. Products, categories, suppliers
+5. Demo data seed
+6. Sales and stock data model
+7. Dashboard
+8. Reports
+9. Import/export
+10. Integrations

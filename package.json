@@ -1,0 +1,22 @@
+{
+  "name": "leetplus",
+  "version": "0.1.0",
+  "private": true,
+  "description": "LeetPlus SaaS application for assortment management in computer clubs",
+  "scripts": {
+    "dev": "pnpm --parallel --filter web --filter api dev",
+    "dev:web": "pnpm --filter web dev",
+    "dev:api": "pnpm --filter api start:dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint"
+  },
+  "keywords": [
+    "leetplus",
+    "saas",
+    "assortment",
+    "computer-clubs"
+  ],
+  "author": "",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@10.33.2"
+}

@@ -1,10 +1,59 @@
-export default function CategoriesPage() {
+import {
+  CatalogCreateForm,
+  CatalogDeleteButton,
+  CatalogRenameForm,
+} from "@/components/catalog-actions";
+import { getCategories } from "@/lib/catalog";
+import { requireCurrentUser } from "@/lib/auth";
+
+export default async function CategoriesPage() {
+  const user = await requireCurrentUser();
+  const categories = await getCategories();
+
   return (
-    <main className="px-6 py-8">
-      <h1 className="text-2xl font-semibold">Категории</h1>
-      <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-        Раздел в разработке.
-      </p>
+    <main className="px-6 py-8 text-zinc-950">
+      <div className="mx-auto max-w-5xl">
+        <div className="mb-8">
+          <h1 className="text-2xl font-semibold tracking-tight">Категории</h1>
+          <p className="mt-1 text-sm text-zinc-600">
+            Справочник категорий для организации {user.tenantSlug}.leetplus.ru.
+          </p>
+        </div>
+
+        <CatalogCreateForm kind="categories" />
+
+        <div className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
+          <div className="border-b border-zinc-200 px-5 py-4">
+            <h2 className="text-base font-semibold">Список категорий</h2>
+          </div>
+          <div className="divide-y divide-zinc-100">
+            {categories.map((category) => (
+              <div
+                key={category.id}
+                className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div>
+                  <CatalogRenameForm
+                    id={category.id}
+                    name={category.name}
+                    kind="categories"
+                  />
+                  <p className="mt-1 text-xs text-zinc-500">
+                    SKU в категории: {category._count.products}
+                  </p>
+                </div>
+                <CatalogDeleteButton id={category.id} kind="categories" />
+              </div>
+            ))}
+
+            {categories.length === 0 ? (
+              <p className="px-5 py-6 text-sm text-zinc-500">
+                Категорий пока нет.
+              </p>
+            ) : null}
+          </div>
+        </div>
+      </div>
     </main>
   );
 }

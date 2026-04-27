@@ -1,8 +1,12 @@
-export default function AuthLayout({
+import { redirectIfAuthenticated } from "@/lib/auth";
+
+export default async function AuthLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  await redirectIfAuthenticated();
+
   return (
     <main className="flex min-h-screen flex-1 bg-zinc-50 text-zinc-950">
       <section className="hidden w-1/2 border-r border-zinc-200 bg-white px-12 py-10 lg:flex lg:flex-col lg:justify-between">

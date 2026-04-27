@@ -1,4 +1,5 @@
 import { getApiUrl, getAuthHeaders } from "./api";
+import { redirect } from "next/navigation";
 
 export type AuthUser = {
   id: string;
@@ -31,4 +32,22 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
   }
 
   return response.json() as Promise<AuthUser>;
+}
+
+export async function redirectIfAuthenticated() {
+  const user = await getCurrentUser();
+
+  if (user) {
+    redirect("/dashboard");
+  }
+}
+
+export async function requireCurrentUser() {
+  const user = await getCurrentUser();
+
+  if (!user) {
+    redirect("/login");
+  }
+
+  return user;
 }

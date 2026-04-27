@@ -13,6 +13,8 @@ import { DashboardModule } from '../src/dashboard/dashboard.module';
 import { DashboardService } from '../src/dashboard/dashboard.service';
 import { ProductsModule } from '../src/products/products.module';
 import { ProductsService } from '../src/products/products.service';
+import { StoresModule } from '../src/stores/stores.module';
+import { StoresService } from '../src/stores/stores.service';
 
 describe('API routes (e2e)', () => {
   let app: INestApplication<App>;
@@ -26,6 +28,10 @@ describe('API routes (e2e)', () => {
     getSummary: jest.fn(),
   };
 
+  const storesService = {
+    findAll: jest.fn(),
+  };
+
   const authService = {
     register: jest.fn(),
     login: jest.fn(),
@@ -34,7 +40,7 @@ describe('API routes (e2e)', () => {
 
   beforeEach(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [AuthModule, ProductsModule, DashboardModule],
+      imports: [AuthModule, ProductsModule, StoresModule, DashboardModule],
       controllers: [AppController],
       providers: [AppService],
     })
@@ -44,6 +50,8 @@ describe('API routes (e2e)', () => {
       .useValue(productsService)
       .overrideProvider(DashboardService)
       .useValue(dashboardService)
+      .overrideProvider(StoresService)
+      .useValue(storesService)
       .overrideGuard(JwtAuthGuard)
       .useValue({
         canActivate: (context: ExecutionContext) => {
@@ -180,6 +188,29 @@ describe('API routes (e2e)', () => {
           id: 'product-1',
           article: 'DRK-001',
           name: 'Adrenaline Rush 0.449',
+        },
+      ]);
+  });
+
+  it('/stores (GET)', () => {
+    storesService.findAll.mockResolvedValue([
+      {
+        id: 'store-1',
+        name: 'Club A',
+        address: 'Main street',
+        isActive: true,
+      },
+    ]);
+
+    return request(app.getHttpServer())
+      .get('/stores')
+      .expect(200)
+      .expect([
+        {
+          id: 'store-1',
+          name: 'Club A',
+          address: 'Main street',
+          isActive: true,
         },
       ]);
   });

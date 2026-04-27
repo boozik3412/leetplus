@@ -15,11 +15,25 @@ type PrismaMock = {
   product: {
     upsert: jest.Mock;
   };
+  importJob: {
+    create: jest.Mock;
+    findMany: jest.Mock;
+  };
   $transaction: jest.Mock;
 };
 
 type TenantContextMock = {
   resolve: jest.Mock;
+};
+
+type ImportJobCreateArgs = {
+  data: {
+    tenantId: string;
+    sourceFileName: string | null;
+    status: string;
+    importedRows: number;
+    errorsCount: number;
+  };
 };
 
 const user: AuthenticatedUser = {
@@ -42,10 +56,27 @@ function createPrismaMock(): PrismaMock {
     product: {
       upsert: jest.fn((args: unknown) => args),
     },
+    importJob: {
+      create: jest.fn((args: unknown) => Promise.resolve(args)),
+      findMany: jest.fn(),
+    },
     $transaction: jest.fn((operations: unknown[]) =>
       Promise.resolve(operations),
     ),
   };
+}
+
+function lastImportJobCreateData(prisma: PrismaMock) {
+  const calls = prisma.importJob.create.mock.calls as unknown as [
+    ImportJobCreateArgs,
+  ][];
+  const lastCall = calls.at(-1);
+
+  if (!lastCall) {
+    throw new Error('Expected import job create to be called');
+  }
+
+  return lastCall[0].data;
 }
 
 describe('ProductCsvImportService', () => {
@@ -122,12 +153,19 @@ describe('ProductCsvImportService', () => {
         user,
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
+
+    const data = lastImportJobCreateData(prisma);
+    expect(data.status).toBe('FAILED');
+    expect(data.errorsCount).toBe(1);
+    expect(data.importedRows).toBe(0);
+    expect(data.tenantId).toBe('tenant-1');
   });
 
   it('upserts valid rows by tenant and article', async () => {
-    await service.import(
+    const result = await service.import(
       'article,name,purchasePrice,salePrice\nDRK-001,Adrenaline Rush,62,139',
       user,
+      'products.csv',
     );
 
     expect(prisma.product.upsert).toHaveBeenCalledWith(
@@ -141,5 +179,33 @@ describe('ProductCsvImportService', () => {
       }),
     );
     expect(prisma.$transaction).toHaveBeenCalled();
+    const data = lastImportJobCreateData(prisma);
+    expect(data.sourceFileName).toBe('products.csv');
+    expect(data.status).toBe('COMPLETED');
+    expect(data.importedRows).toBe(1);
+    expect(data.errorsCount).toBe(0);
+    expect(result.importedRows).toBe(1);
+  });
+
+  it('returns recent import jobs for tenant', async () => {
+    prisma.importJob.findMany.mockResolvedValue([
+      {
+        id: 'import-1',
+        status: 'COMPLETED',
+      },
+    ]);
+
+    await expect(service.findRecent(user)).resolves.toEqual([
+      {
+        id: 'import-1',
+        status: 'COMPLETED',
+      },
+    ]);
+    expect(prisma.importJob.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { tenantId: 'tenant-1' },
+        take: 20,
+      }),
+    );
   });
 });

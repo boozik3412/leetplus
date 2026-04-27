@@ -96,7 +96,7 @@ export function ProductCsvImport() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ csv }),
+        body: JSON.stringify({ csv, sourceFileName: fileName }),
       });
 
       const data = (await response.json()) as unknown;

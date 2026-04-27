@@ -39,6 +39,10 @@ export type ProductImportPreview = {
   rows: ProductImportRow[];
 };
 
+const PRODUCT_IMPORT_TYPE = 'PRODUCT_CSV' as const;
+const IMPORT_STATUS_COMPLETED = 'COMPLETED' as const;
+const IMPORT_STATUS_FAILED = 'FAILED' as const;
+
 @Injectable()
 export class ProductCsvImportService {
   constructor(
@@ -93,11 +97,40 @@ export class ProductCsvImportService {
     };
   }
 
-  async import(csv: string, user: AuthenticatedUser) {
+  async findRecent(user: AuthenticatedUser) {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+
+    return this.prisma.importJob.findMany({
+      where: { tenantId },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+      include: {
+        user: {
+          select: {
+            email: true,
+            fullName: true,
+          },
+        },
+      },
+    });
+  }
+
+  async import(csv: string, user: AuthenticatedUser, sourceFileName?: string) {
     const { tenantId } = await this.tenantContextService.resolve(user);
     const preview = await this.preview(csv, user);
 
     if (preview.errors.length > 0) {
+      await this.createImportJob({
+        tenantId,
+        userId: user.id,
+        sourceFileName,
+        status: IMPORT_STATUS_FAILED,
+        totalRows: preview.totalRows,
+        validRows: preview.validRows,
+        importedRows: 0,
+        errors: preview.errors,
+      });
+
       throw new BadRequestException({
         message: 'CSV contains validation errors',
         preview,
@@ -138,13 +171,60 @@ export class ProductCsvImportService {
       ),
     );
 
+    const importJob = await this.createImportJob({
+      tenantId,
+      userId: user.id,
+      sourceFileName,
+      status: IMPORT_STATUS_COMPLETED,
+      totalRows: preview.totalRows,
+      validRows: preview.validRows,
+      importedRows: imported.length,
+      errors: [],
+    });
+
     return {
       importedRows: imported.length,
+      importJob,
       preview,
     };
   }
 
-  private parseCsv(csv: string) {
+  private createImportJob({
+    tenantId,
+    userId,
+    sourceFileName,
+    status,
+    totalRows,
+    validRows,
+    importedRows,
+    errors,
+  }: {
+    tenantId: string;
+    userId: string;
+    sourceFileName?: string;
+    status: typeof IMPORT_STATUS_COMPLETED | typeof IMPORT_STATUS_FAILED;
+    totalRows: number;
+    validRows: number;
+    importedRows: number;
+    errors: ProductImportError[];
+  }) {
+    return this.prisma.importJob.create({
+      data: {
+        tenantId,
+        userId,
+        type: PRODUCT_IMPORT_TYPE,
+        sourceFileName: sourceFileName?.trim() || null,
+        status,
+        totalRows,
+        validRows,
+        importedRows,
+        errorsCount: errors.length,
+        errorSummary: errors.slice(0, 20),
+      },
+    });
+  }
+
+  private parseCsv(csv: string): CsvRecord[] {
     if (!csv?.trim()) {
       throw new BadRequestException('CSV content is required');
     }

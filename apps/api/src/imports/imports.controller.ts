@@ -1,4 +1,4 @@
-import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { AuthenticatedUser } from '../auth/auth.types';
@@ -11,6 +11,11 @@ export class ImportsController {
   constructor(
     private readonly productCsvImportService: ProductCsvImportService,
   ) {}
+
+  @Get()
+  findRecent(@CurrentUser() user: AuthenticatedUser) {
+    return this.productCsvImportService.findRecent(user);
+  }
 
   @Post('products/preview')
   previewProducts(
@@ -25,6 +30,10 @@ export class ImportsController {
     @Body() dto: ProductCsvImportDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.productCsvImportService.import(dto.csv, user);
+    return this.productCsvImportService.import(
+      dto.csv,
+      user,
+      dto.sourceFileName,
+    );
   }
 }

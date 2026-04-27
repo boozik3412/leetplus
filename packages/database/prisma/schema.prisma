@@ -27,6 +27,7 @@ model Tenant {
   suppliers Supplier[]
   products  Product[]
   categories Category[]
+  importJobs ImportJob[]
 }
 
 model User {
@@ -42,8 +43,30 @@ model User {
 
   tenant                  Tenant                   @relation(fields: [tenantId], references: [id])
   emailVerificationTokens EmailVerificationToken[]
+  importJobs              ImportJob[]
 
   @@index([tenantId])
+}
+
+model ImportJob {
+  id             String   @id @default(uuid())
+  tenantId       String
+  userId         String?
+  type           String
+  sourceFileName String?
+  status         String
+  totalRows      Int      @default(0)
+  validRows      Int      @default(0)
+  importedRows   Int      @default(0)
+  errorsCount    Int      @default(0)
+  errorSummary   Json?
+  createdAt      DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  user   User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@index([userId])
 }
 
 model EmailVerificationToken {

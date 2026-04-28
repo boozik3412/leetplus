@@ -4,6 +4,7 @@ import { ReportsService } from './reports.service';
 import type {
   AssortmentReport,
   OperationalReport,
+  ReplenishmentReport,
   SkuPerformanceReport,
   SuppliersPerformanceReport,
 } from './reports.service';
@@ -12,6 +13,7 @@ type ReportsServiceMock = {
   getAssortmentReport: jest.Mock;
   getOperationalReport: jest.Mock;
   getSkuPerformanceReport: jest.Mock;
+  getReplenishmentReport: jest.Mock;
   getSuppliersPerformanceReport: jest.Mock;
 };
 
@@ -173,6 +175,34 @@ const suppliersPerformanceReport: SuppliersPerformanceReport = {
   ],
 };
 
+const replenishmentReport: ReplenishmentReport = {
+  tenantId: 'tenant-1',
+  tenantSlug: 'club-a',
+  from: '2026-04-01',
+  to: '2026-04-30',
+  storeId: null,
+  totalStockQuantity: 1,
+  totalDailyNeed: 2,
+  totalRecommendedOrder: 6,
+  rows: [
+    {
+      productId: 'product-1',
+      article: 'DRK-001',
+      name: 'Cola',
+      categoryName: 'Напитки',
+      supplierName: 'Supplier A',
+      stockQuantity: 1,
+      soldQuantity: 90,
+      averageDailySales: 3,
+      stockDays: 0.3,
+      dailyNeed: 2,
+      recommendedOrder: 6,
+      orderMultiplicity: 6,
+      risk: 'LOW_STOCK',
+    },
+  ],
+};
+
 describe('ReportsExportService', () => {
   let reportsService: ReportsServiceMock;
   let service: ReportsExportService;
@@ -184,6 +214,7 @@ describe('ReportsExportService', () => {
       getSkuPerformanceReport: jest
         .fn()
         .mockResolvedValue(skuPerformanceReport),
+      getReplenishmentReport: jest.fn().mockResolvedValue(replenishmentReport),
       getSuppliersPerformanceReport: jest
         .fn()
         .mockResolvedValue(suppliersPerformanceReport),
@@ -202,6 +233,8 @@ describe('ReportsExportService', () => {
     expect(content).toContain('Operations summary');
     expect(content).toContain('ABC by revenue');
     expect(content).toContain('Top SKU by revenue');
+    expect(content).toContain('Replenishment');
+    expect(content).toContain('LOW_STOCK;DRK-001;Cola');
     expect(content).toContain('Top suppliers');
     expect(content).toContain('Supplier A;2;10;1000');
     expect(content).toContain('Assortment summary');

@@ -167,6 +167,40 @@ export type SuppliersPerformanceReport = {
   rows: SupplierPerformanceRow[];
 };
 
+export type ReplenishmentRisk =
+  | 'OUT_OF_STOCK'
+  | 'LOW_STOCK'
+  | 'OK'
+  | 'NO_SALES';
+
+export type ReplenishmentRow = {
+  productId: string;
+  article: string;
+  name: string;
+  categoryName: string | null;
+  supplierName: string | null;
+  stockQuantity: number;
+  soldQuantity: number;
+  averageDailySales: number;
+  stockDays: number | null;
+  dailyNeed: number;
+  recommendedOrder: number;
+  orderMultiplicity: number | null;
+  risk: ReplenishmentRisk;
+};
+
+export type ReplenishmentReport = {
+  tenantId: string;
+  tenantSlug: string;
+  from: string;
+  to: string;
+  storeId: string | null;
+  totalStockQuantity: number;
+  totalDailyNeed: number;
+  totalRecommendedOrder: number;
+  rows: ReplenishmentRow[];
+};
+
 type GroupAccumulator = {
   id: string | null;
   name: string;
@@ -191,6 +225,12 @@ type ProductSales = {
   quantity: number;
   revenue: number;
   cost: number;
+};
+
+type StockSnapshot = {
+  storeId: string;
+  productId: string;
+  quantity: { toNumber: () => number };
 };
 
 @Injectable()
@@ -717,13 +757,156 @@ export class ReportsService {
     };
   }
 
-  private latestStockByProduct(
-    snapshots: {
-      storeId: string;
-      productId: string;
-      quantity: { toNumber: () => number };
-    }[],
-  ) {
+  async getReplenishmentReport(
+    user: AuthenticatedUser,
+    query: OperationalReportQuery,
+  ): Promise<ReplenishmentReport> {
+    const { tenantId, tenantSlug } =
+      await this.tenantContextService.resolve(user);
+    const period = this.resolvePeriod(query);
+    const storeFilter = query.storeId ? { storeId: query.storeId } : {};
+
+    if (query.storeId) {
+      const store = await this.prisma.store.findFirst({
+        where: { id: query.storeId, tenantId, isActive: true },
+        select: { id: true },
+      });
+
+      if (!store) {
+        throw new BadRequestException('Store not found');
+      }
+    }
+
+    const [activeProducts, inventorySnapshots, salesFacts] = await Promise.all([
+      this.prisma.product.findMany({
+        where: { tenantId, isActive: true },
+        select: {
+          id: true,
+          article: true,
+          name: true,
+          category: {
+            select: { name: true },
+          },
+          supplier: {
+            select: {
+              name: true,
+              orderMultiplicity: true,
+            },
+          },
+        },
+        orderBy: { name: 'asc' },
+      }),
+      this.prisma.inventorySnapshot.findMany({
+        where: {
+          tenantId,
+          ...storeFilter,
+          snapshotDate: {
+            lte: period.toDate,
+          },
+        },
+        select: {
+          storeId: true,
+          productId: true,
+          quantity: true,
+        },
+        orderBy: {
+          snapshotDate: 'desc',
+        },
+      }),
+      this.prisma.salesFact.findMany({
+        where: {
+          tenantId,
+          ...storeFilter,
+          saleDate: {
+            gte: period.fromDate,
+            lte: period.toDate,
+          },
+        },
+        select: {
+          productId: true,
+          quantity: true,
+        },
+      }),
+    ]);
+
+    const stockByProduct = this.latestStockByProduct(inventorySnapshots);
+    const soldByProduct = new Map<string, number>();
+
+    salesFacts.forEach((fact) => {
+      soldByProduct.set(
+        fact.productId,
+        (soldByProduct.get(fact.productId) ?? 0) + fact.quantity.toNumber(),
+      );
+    });
+
+    const periodDays = this.periodDays(period.fromDate, period.toDate);
+    let totalStockQuantity = 0;
+    let totalDailyNeed = 0;
+    let totalRecommendedOrder = 0;
+
+    const rows = activeProducts.map((product) => {
+      const stockQuantity = this.round(stockByProduct.get(product.id) ?? 0);
+      const soldQuantity = this.round(soldByProduct.get(product.id) ?? 0);
+      const averageDailySales = this.round(soldQuantity / periodDays);
+      const stockDays =
+        averageDailySales > 0
+          ? this.round(stockQuantity / averageDailySales)
+          : null;
+      const dailyNeed = this.round(
+        Math.max(0, averageDailySales - stockQuantity),
+      );
+      const orderMultiplicity = product.supplier?.orderMultiplicity ?? null;
+      const recommendedOrder = this.recommendedOrder(
+        dailyNeed,
+        orderMultiplicity,
+      );
+      const row = {
+        productId: product.id,
+        article: product.article,
+        name: product.name,
+        categoryName: product.category?.name ?? null,
+        supplierName: product.supplier?.name ?? null,
+        stockQuantity,
+        soldQuantity,
+        averageDailySales,
+        stockDays,
+        dailyNeed,
+        recommendedOrder,
+        orderMultiplicity,
+        risk: this.replenishmentRisk(
+          stockQuantity,
+          averageDailySales,
+          stockDays,
+        ),
+      };
+
+      totalStockQuantity += stockQuantity;
+      totalDailyNeed += dailyNeed;
+      totalRecommendedOrder += recommendedOrder;
+
+      return row;
+    });
+
+    return {
+      tenantId,
+      tenantSlug,
+      from: this.toDateInputValue(period.fromDate),
+      to: this.toDateInputValue(period.toDate),
+      storeId: query.storeId ?? null,
+      totalStockQuantity: this.round(totalStockQuantity),
+      totalDailyNeed: this.round(totalDailyNeed),
+      totalRecommendedOrder: this.round(totalRecommendedOrder),
+      rows: rows.sort(
+        (a, b) =>
+          this.replenishmentRiskRank(a.risk) -
+            this.replenishmentRiskRank(b.risk) ||
+          b.recommendedOrder - a.recommendedOrder ||
+          a.name.localeCompare(b.name),
+      ),
+    };
+  }
+
+  private latestStockByProduct(snapshots: StockSnapshot[]) {
     const seen = new Set<string>();
     const stockByProduct = new Map<string, number>();
 
@@ -743,6 +926,52 @@ export class ReportsService {
     });
 
     return stockByProduct;
+  }
+
+  private recommendedOrder(
+    dailyNeed: number,
+    orderMultiplicity: number | null,
+  ) {
+    if (dailyNeed <= 0) {
+      return 0;
+    }
+
+    if (!orderMultiplicity || orderMultiplicity <= 1) {
+      return Math.ceil(dailyNeed);
+    }
+
+    return Math.ceil(dailyNeed / orderMultiplicity) * orderMultiplicity;
+  }
+
+  private replenishmentRisk(
+    stockQuantity: number,
+    averageDailySales: number,
+    stockDays: number | null,
+  ): ReplenishmentRisk {
+    if (averageDailySales <= 0) {
+      return 'NO_SALES';
+    }
+
+    if (stockQuantity <= 0) {
+      return 'OUT_OF_STOCK';
+    }
+
+    if (stockDays !== null && stockDays <= 3) {
+      return 'LOW_STOCK';
+    }
+
+    return 'OK';
+  }
+
+  private replenishmentRiskRank(risk: ReplenishmentRisk) {
+    const ranks: Record<ReplenishmentRisk, number> = {
+      OUT_OF_STOCK: 0,
+      LOW_STOCK: 1,
+      OK: 2,
+      NO_SALES: 3,
+    };
+
+    return ranks[risk];
   }
 
   private outOfStockRiskProducts(

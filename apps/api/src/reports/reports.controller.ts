@@ -21,6 +21,7 @@ import {
   type AssortmentReport,
   type OperationalReport,
   type OperationalReportQuery,
+  type ReplenishmentReport,
   type SkuPerformanceReport,
   type SuppliersPerformanceReport,
 } from './reports.service';
@@ -63,6 +64,14 @@ export class ReportsController {
     @Query() query: OperationalReportQuery,
   ): Promise<SuppliersPerformanceReport> {
     return this.reportsService.getSuppliersPerformanceReport(user, query);
+  }
+
+  @Get('replenishment')
+  getReplenishmentReport(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: OperationalReportQuery,
+  ): Promise<ReplenishmentReport> {
+    return this.reportsService.getReplenishmentReport(user, query);
   }
 
   @Get('export')

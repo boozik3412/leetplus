@@ -6,6 +6,7 @@ import {
   type AssortmentReport,
   type OperationalReport,
   type OperationalReportQuery,
+  type ReplenishmentReport,
   type SkuPerformanceReport,
   type SuppliersPerformanceReport,
 } from './reports.service';
@@ -40,11 +41,13 @@ export class ReportsExportService {
       assortmentReport,
       operationalReport,
       skuPerformanceReport,
+      replenishmentReport,
       suppliersPerformanceReport,
     ] = await Promise.all([
       this.reportsService.getAssortmentReport(user),
       this.reportsService.getOperationalReport(user, query),
       this.reportsService.getSkuPerformanceReport(user, query),
+      this.reportsService.getReplenishmentReport(user, query),
       this.reportsService.getSuppliersPerformanceReport(user, query),
     ]);
     const fileName = `leetplus-reports-${operationalReport.from}-${operationalReport.to}.${format}`;
@@ -56,6 +59,7 @@ export class ReportsExportService {
             assortmentReport,
             operationalReport,
             skuPerformanceReport,
+            replenishmentReport,
             suppliersPerformanceReport,
           ),
           'utf8',
@@ -73,6 +77,7 @@ export class ReportsExportService {
         assortmentReport,
         operationalReport,
         skuPerformanceReport,
+        replenishmentReport,
         suppliersPerformanceReport,
       ),
       contentType:
@@ -100,6 +105,7 @@ export class ReportsExportService {
     assortmentReport: AssortmentReport,
     operationalReport: OperationalReport,
     skuPerformanceReport: SkuPerformanceReport,
+    replenishmentReport: ReplenishmentReport,
     suppliersPerformanceReport: SuppliersPerformanceReport,
   ) {
     const rows: CsvCell[][] = [
@@ -165,6 +171,36 @@ export class ReportsExportService {
         item.categoryName,
         item.supplierName,
         item.stockQuantity,
+      ]),
+      [],
+      ['Replenishment'],
+      [
+        'Risk',
+        'Article',
+        'Product',
+        'Category',
+        'Supplier',
+        'Stock quantity',
+        'Quantity',
+        'Average daily sales',
+        'Stock days',
+        'Daily need',
+        'Recommended order',
+        'Order multiplicity',
+      ],
+      ...replenishmentReport.rows.map((item) => [
+        item.risk,
+        item.article,
+        item.name,
+        item.categoryName,
+        item.supplierName,
+        item.stockQuantity,
+        item.soldQuantity,
+        item.averageDailySales,
+        item.stockDays,
+        item.dailyNeed,
+        item.recommendedOrder,
+        item.orderMultiplicity,
       ]),
       [],
       ['ABC by revenue'],
@@ -329,6 +365,7 @@ export class ReportsExportService {
     assortmentReport: AssortmentReport,
     operationalReport: OperationalReport,
     skuPerformanceReport: SkuPerformanceReport,
+    replenishmentReport: ReplenishmentReport,
     suppliersPerformanceReport: SuppliersPerformanceReport,
   ) {
     const workbook = new ExcelJS.Workbook();
@@ -339,6 +376,7 @@ export class ReportsExportService {
     this.addRecommendationsSheet(workbook, operationalReport);
     this.addStockRiskSheet(workbook, operationalReport);
     this.addNoSalesSheet(workbook, operationalReport);
+    this.addReplenishmentSheet(workbook, replenishmentReport);
     this.addAbcSheet(workbook, skuPerformanceReport);
     this.addTopSkuSheet(workbook, skuPerformanceReport);
     this.addTopSuppliersSheet(workbook, suppliersPerformanceReport);
@@ -493,6 +531,29 @@ export class ReportsExportService {
       { header: 'Stock quantity', key: 'stockQuantity', width: 18 },
     ];
     sheet.addRows(operationalReport.productsWithoutSales);
+    this.styleHeader(sheet);
+  }
+
+  private addReplenishmentSheet(
+    workbook: ExcelJS.Workbook,
+    replenishmentReport: ReplenishmentReport,
+  ) {
+    const sheet = workbook.addWorksheet('Replenishment');
+    sheet.columns = [
+      { header: 'Risk', key: 'risk', width: 18 },
+      { header: 'Article', key: 'article', width: 18 },
+      { header: 'Product', key: 'name', width: 36 },
+      { header: 'Category', key: 'categoryName', width: 24 },
+      { header: 'Supplier', key: 'supplierName', width: 24 },
+      { header: 'Stock quantity', key: 'stockQuantity', width: 18 },
+      { header: 'Quantity', key: 'soldQuantity', width: 14 },
+      { header: 'Average daily sales', key: 'averageDailySales', width: 22 },
+      { header: 'Stock days', key: 'stockDays', width: 16 },
+      { header: 'Daily need', key: 'dailyNeed', width: 16 },
+      { header: 'Recommended order', key: 'recommendedOrder', width: 20 },
+      { header: 'Order multiplicity', key: 'orderMultiplicity', width: 20 },
+    ];
+    sheet.addRows(replenishmentReport.rows);
     this.styleHeader(sheet);
   }
 

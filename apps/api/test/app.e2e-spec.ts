@@ -44,6 +44,7 @@ describe('API routes (e2e)', () => {
     getAssortmentReport: jest.fn(),
     getOperationalReport: jest.fn(),
     getSkuPerformanceReport: jest.fn(),
+    getReplenishmentReport: jest.fn(),
     getSuppliersPerformanceReport: jest.fn(),
   };
 
@@ -455,6 +456,35 @@ describe('API routes (e2e)', () => {
         storeId: null,
         totalRevenue: 1000,
         totalGrossProfit: 400,
+        rows: [],
+      });
+  });
+
+  it('/reports/replenishment (GET)', () => {
+    reportsService.getReplenishmentReport.mockResolvedValue({
+      tenantId: 'tenant-1',
+      tenantSlug: 'club-a',
+      from: '2026-04-01',
+      to: '2026-04-30',
+      storeId: null,
+      totalStockQuantity: 5,
+      totalDailyNeed: 2,
+      totalRecommendedOrder: 6,
+      rows: [],
+    });
+
+    return request(app.getHttpServer())
+      .get('/reports/replenishment?from=2026-04-01&to=2026-04-30')
+      .expect(200)
+      .expect({
+        tenantId: 'tenant-1',
+        tenantSlug: 'club-a',
+        from: '2026-04-01',
+        to: '2026-04-30',
+        storeId: null,
+        totalStockQuantity: 5,
+        totalDailyNeed: 2,
+        totalRecommendedOrder: 6,
         rows: [],
       });
   });

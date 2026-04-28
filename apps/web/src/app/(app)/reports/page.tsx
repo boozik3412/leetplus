@@ -3,6 +3,7 @@ import { ReportEmailForm } from "@/components/report-email-form";
 import {
   getAssortmentReport,
   getOperationalReport,
+  getReplenishmentReport,
   getSkuPerformanceReport,
   getSuppliersPerformanceReport,
   type AbcGroup,
@@ -10,6 +11,8 @@ import {
   type LowMarginProduct,
   type OutOfStockRiskProduct,
   type ProductWithoutSales,
+  type ReplenishmentRisk,
+  type ReplenishmentRow,
   type ReportRecommendation,
   type ReportGroup,
   type SkuPerformanceRow,
@@ -76,12 +79,14 @@ export default async function ReportsPage({
     assortmentReport,
     operationalReport,
     skuPerformanceReport,
+    replenishmentReport,
     suppliersPerformanceReport,
     stores,
   ] = await Promise.all([
     getAssortmentReport(),
     getOperationalReport(filters),
     getSkuPerformanceReport(filters),
+    getReplenishmentReport(filters),
     getSuppliersPerformanceReport(filters),
     getStores(),
   ]);
@@ -161,6 +166,10 @@ export default async function ReportsPage({
             label="Риск out-of-stock"
             value={operationalReport.outOfStockRiskProducts.length}
           />
+          <Metric
+            label="Реком. заказ, шт"
+            value={formatQuantity(replenishmentReport.totalRecommendedOrder)}
+          />
         </section>
 
         <RecommendationsPanel rows={operationalReport.recommendations} />
@@ -169,6 +178,8 @@ export default async function ReportsPage({
           <RiskTable rows={operationalReport.outOfStockRiskProducts} />
           <NoSalesTable rows={operationalReport.productsWithoutSales} />
         </section>
+
+        <ReplenishmentTable rows={replenishmentReport.rows} />
 
         <section className="mt-6 grid gap-6 xl:grid-cols-2">
           <AbcSummary
@@ -521,6 +532,116 @@ function NoSalesTable({ rows }: { rows: ProductWithoutSales[] }) {
       )}
     </div>
   );
+}
+
+function ReplenishmentTable({ rows }: { rows: ReplenishmentRow[] }) {
+  return (
+    <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
+      <div className="border-b border-zinc-200 px-5 py-4">
+        <h2 className="text-base font-semibold">Остатки и потребность</h2>
+        <p className="mt-1 text-sm text-zinc-500">
+          Прогноз пополнения по текущему остатку, среднедневным продажам и
+          кратности заказа.
+        </p>
+      </div>
+
+      {rows.length > 0 ? (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[1240px] text-left text-sm">
+            <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
+              <tr>
+                <th className="px-5 py-3 font-medium">Статус</th>
+                <th className="px-5 py-3 font-medium">Артикул</th>
+                <th className="px-5 py-3 font-medium">Товар</th>
+                <th className="px-5 py-3 font-medium">Категория</th>
+                <th className="px-5 py-3 font-medium">Поставщик</th>
+                <th className="px-5 py-3 text-right font-medium">Остаток</th>
+                <th className="px-5 py-3 text-right font-medium">Продано</th>
+                <th className="px-5 py-3 text-right font-medium">Прод./день</th>
+                <th className="px-5 py-3 text-right font-medium">Дней</th>
+                <th className="px-5 py-3 text-right font-medium">Потребность</th>
+                <th className="px-5 py-3 text-right font-medium">Заказать</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100">
+              {rows.map((row) => (
+                <tr key={row.productId}>
+                  <td className="px-5 py-4">
+                    <span
+                      className={[
+                        "inline-flex rounded-full px-2.5 py-1 text-xs font-medium",
+                        replenishmentRiskClassName(row.risk),
+                      ].join(" ")}
+                    >
+                      {replenishmentRiskLabel(row.risk)}
+                    </span>
+                  </td>
+                  <td className="px-5 py-4 font-mono text-xs text-zinc-600">
+                    {row.article}
+                  </td>
+                  <td className="px-5 py-4 font-medium text-zinc-950">
+                    {row.name}
+                  </td>
+                  <td className="px-5 py-4 text-zinc-700">
+                    {row.categoryName ?? "—"}
+                  </td>
+                  <td className="px-5 py-4 text-zinc-700">
+                    {row.supplierName ?? "—"}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {formatQuantity(row.stockQuantity)}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {formatQuantity(row.soldQuantity)}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {formatQuantity(row.averageDailySales)}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {row.stockDays === null ? "—" : formatQuantity(row.stockDays)}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {formatQuantity(row.dailyNeed)}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums font-semibold text-zinc-950">
+                    {row.recommendedOrder > 0
+                      ? formatQuantity(row.recommendedOrder)
+                      : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="px-5 py-6 text-sm text-zinc-500">
+          Активных SKU для расчёта пополнения нет.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function replenishmentRiskLabel(risk: ReplenishmentRisk) {
+  const labels: Record<ReplenishmentRisk, string> = {
+    OUT_OF_STOCK: "Нет остатка",
+    LOW_STOCK: "Мало",
+    OK: "ОК",
+    NO_SALES: "Нет продаж",
+  };
+
+  return labels[risk];
+}
+
+function replenishmentRiskClassName(risk: ReplenishmentRisk) {
+  const classNames: Record<ReplenishmentRisk, string> = {
+    OUT_OF_STOCK: "bg-red-50 text-red-700",
+    LOW_STOCK: "bg-amber-50 text-amber-700",
+    OK: "bg-emerald-50 text-emerald-700",
+    NO_SALES: "bg-zinc-100 text-zinc-700",
+  };
+
+  return classNames[risk];
 }
 
 function AbcSummary({

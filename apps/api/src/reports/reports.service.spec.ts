@@ -457,4 +457,99 @@ describe('ReportsService', () => {
       },
     ]);
   });
+
+  it('builds replenishment report from latest stock and sales demand', async () => {
+    prisma.store.findFirst.mockResolvedValue({ id: 'store-1' });
+    prisma.product.findMany.mockResolvedValue([
+      {
+        id: 'product-1',
+        article: 'DRK-001',
+        name: 'Energy Drink',
+        category: { name: 'Напитки' },
+        supplier: {
+          name: 'Supplier A',
+          orderMultiplicity: 6,
+        },
+      },
+      {
+        id: 'product-2',
+        article: 'SNK-001',
+        name: 'Chips',
+        category: { name: 'Снеки' },
+        supplier: null,
+      },
+    ]);
+    prisma.inventorySnapshot.findMany.mockResolvedValue([
+      {
+        storeId: 'store-1',
+        productId: 'product-1',
+        quantity: new Prisma.Decimal(1),
+      },
+      {
+        storeId: 'store-1',
+        productId: 'product-1',
+        quantity: new Prisma.Decimal(12),
+      },
+      {
+        storeId: 'store-1',
+        productId: 'product-2',
+        quantity: new Prisma.Decimal(5),
+      },
+    ]);
+    prisma.salesFact.findMany.mockResolvedValue([
+      {
+        productId: 'product-1',
+        quantity: new Prisma.Decimal(30),
+      },
+    ]);
+
+    const report = await service.getReplenishmentReport(user, {
+      from: '2026-04-01',
+      to: '2026-04-10',
+      storeId: 'store-1',
+    });
+
+    expect(report).toMatchObject({
+      tenantId: 'tenant-1',
+      tenantSlug: 'club-a',
+      from: '2026-04-01',
+      to: '2026-04-10',
+      storeId: 'store-1',
+      totalStockQuantity: 6,
+      totalDailyNeed: 2,
+      totalRecommendedOrder: 6,
+    });
+    expect(report.rows).toEqual([
+      {
+        productId: 'product-1',
+        article: 'DRK-001',
+        name: 'Energy Drink',
+        categoryName: 'Напитки',
+        supplierName: 'Supplier A',
+        stockQuantity: 1,
+        soldQuantity: 30,
+        averageDailySales: 3,
+        stockDays: 0.3,
+        dailyNeed: 2,
+        recommendedOrder: 6,
+        orderMultiplicity: 6,
+        risk: 'LOW_STOCK',
+      },
+      {
+        productId: 'product-2',
+        article: 'SNK-001',
+        name: 'Chips',
+        categoryName: 'Снеки',
+        supplierName: null,
+        stockQuantity: 5,
+        soldQuantity: 0,
+        averageDailySales: 0,
+        stockDays: null,
+        dailyNeed: 0,
+        recommendedOrder: 0,
+        orderMultiplicity: null,
+        risk: 'NO_SALES',
+      },
+    ]);
+  });
 });

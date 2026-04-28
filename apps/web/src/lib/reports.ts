@@ -164,6 +164,40 @@ export type SuppliersPerformanceReport = {
   rows: SupplierPerformanceRow[];
 };
 
+export type ReplenishmentRisk =
+  | "OUT_OF_STOCK"
+  | "LOW_STOCK"
+  | "OK"
+  | "NO_SALES";
+
+export type ReplenishmentRow = {
+  productId: string;
+  article: string;
+  name: string;
+  categoryName: string | null;
+  supplierName: string | null;
+  stockQuantity: number;
+  soldQuantity: number;
+  averageDailySales: number;
+  stockDays: number | null;
+  dailyNeed: number;
+  recommendedOrder: number;
+  orderMultiplicity: number | null;
+  risk: ReplenishmentRisk;
+};
+
+export type ReplenishmentReport = {
+  tenantId: string;
+  tenantSlug: string;
+  from: string;
+  to: string;
+  storeId: string | null;
+  totalStockQuantity: number;
+  totalDailyNeed: number;
+  totalRecommendedOrder: number;
+  rows: ReplenishmentRow[];
+};
+
 export async function getAssortmentReport(): Promise<AssortmentReport> {
   const response = await fetch(`${getApiUrl()}/reports/assortment`, {
     cache: "no-store",
@@ -274,4 +308,37 @@ export async function getSuppliersPerformanceReport(
   }
 
   return response.json() as Promise<SuppliersPerformanceReport>;
+}
+
+export async function getReplenishmentReport(
+  filters: OperationalReportFilters,
+): Promise<ReplenishmentReport> {
+  const params = new URLSearchParams();
+
+  if (filters.from) {
+    params.set("from", filters.from);
+  }
+
+  if (filters.to) {
+    params.set("to", filters.to);
+  }
+
+  if (filters.storeId) {
+    params.set("storeId", filters.storeId);
+  }
+
+  const query = params.toString();
+  const response = await fetch(
+    `${getApiUrl()}/reports/replenishment${query ? `?${query}` : ""}`,
+    {
+      cache: "no-store",
+      headers: await getAuthHeaders(),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch replenishment report");
+  }
+
+  return response.json() as Promise<ReplenishmentReport>;
 }

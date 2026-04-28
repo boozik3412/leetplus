@@ -43,6 +43,7 @@ describe('API routes (e2e)', () => {
   const reportsService = {
     getAssortmentReport: jest.fn(),
     getOperationalReport: jest.fn(),
+    getSkuPerformanceReport: jest.fn(),
   };
 
   const reportsExportService = {
@@ -390,6 +391,43 @@ describe('API routes (e2e)', () => {
         recommendations: [],
         outOfStockRiskProducts: [],
         productsWithoutSales: [],
+      });
+  });
+
+  it('/reports/sku-performance (GET)', () => {
+    reportsService.getSkuPerformanceReport.mockResolvedValue({
+      tenantId: 'tenant-1',
+      tenantSlug: 'club-a',
+      from: '2026-04-01',
+      to: '2026-04-30',
+      storeId: null,
+      rows: [],
+      abcByRevenue: [],
+      abcByProfit: [],
+      topByRevenue: [],
+      topByProfit: [],
+      topByQuantity: [],
+      topBySalesPerFacing: [],
+      topByProfitPerFacing: [],
+    });
+
+    return request(app.getHttpServer())
+      .get('/reports/sku-performance?from=2026-04-01&to=2026-04-30')
+      .expect(200)
+      .expect({
+        tenantId: 'tenant-1',
+        tenantSlug: 'club-a',
+        from: '2026-04-01',
+        to: '2026-04-30',
+        storeId: null,
+        rows: [],
+        abcByRevenue: [],
+        abcByProfit: [],
+        topByRevenue: [],
+        topByProfit: [],
+        topByQuantity: [],
+        topBySalesPerFacing: [],
+        topByProfitPerFacing: [],
       });
   });
 

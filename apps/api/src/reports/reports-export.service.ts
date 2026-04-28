@@ -6,6 +6,7 @@ import {
   type AssortmentReport,
   type OperationalReport,
   type OperationalReportQuery,
+  type SkuPerformanceReport,
 } from './reports.service';
 
 export type ReportExportFormat = 'csv' | 'xlsx';
@@ -34,16 +35,22 @@ export class ReportsExportService {
     query: ReportExportQuery,
   ): Promise<ReportExportFile> {
     const format = this.resolveFormat(query.format);
-    const [assortmentReport, operationalReport] = await Promise.all([
-      this.reportsService.getAssortmentReport(user),
-      this.reportsService.getOperationalReport(user, query),
-    ]);
+    const [assortmentReport, operationalReport, skuPerformanceReport] =
+      await Promise.all([
+        this.reportsService.getAssortmentReport(user),
+        this.reportsService.getOperationalReport(user, query),
+        this.reportsService.getSkuPerformanceReport(user, query),
+      ]);
     const fileName = `leetplus-reports-${operationalReport.from}-${operationalReport.to}.${format}`;
 
     if (format === 'csv') {
       return {
         buffer: Buffer.from(
-          this.buildCsv(assortmentReport, operationalReport),
+          this.buildCsv(
+            assortmentReport,
+            operationalReport,
+            skuPerformanceReport,
+          ),
           'utf8',
         ),
         contentType: 'text/csv; charset=utf-8',
@@ -55,7 +62,11 @@ export class ReportsExportService {
     }
 
     return {
-      buffer: await this.buildXlsx(assortmentReport, operationalReport),
+      buffer: await this.buildXlsx(
+        assortmentReport,
+        operationalReport,
+        skuPerformanceReport,
+      ),
       contentType:
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       fileName,
@@ -80,6 +91,7 @@ export class ReportsExportService {
   private buildCsv(
     assortmentReport: AssortmentReport,
     operationalReport: OperationalReport,
+    skuPerformanceReport: SkuPerformanceReport,
   ) {
     const rows: CsvCell[][] = [
       ['LeetPlus reports'],
@@ -144,6 +156,68 @@ export class ReportsExportService {
         item.categoryName,
         item.supplierName,
         item.stockQuantity,
+      ]),
+      [],
+      ['ABC by revenue'],
+      [
+        'Group',
+        'SKU',
+        'Assortment share, %',
+        'Revenue share, %',
+        'Profit share, %',
+      ],
+      ...skuPerformanceReport.abcByRevenue.map((item) => [
+        item.group,
+        item.productsCount,
+        item.assortmentSharePercent,
+        item.revenueSharePercent,
+        item.profitSharePercent,
+      ]),
+      [],
+      ['ABC by profit'],
+      [
+        'Group',
+        'SKU',
+        'Assortment share, %',
+        'Revenue share, %',
+        'Profit share, %',
+      ],
+      ...skuPerformanceReport.abcByProfit.map((item) => [
+        item.group,
+        item.productsCount,
+        item.assortmentSharePercent,
+        item.revenueSharePercent,
+        item.profitSharePercent,
+      ]),
+      [],
+      ['Top SKU by revenue'],
+      [
+        'Article',
+        'Product',
+        'Category',
+        'Supplier',
+        'Quantity',
+        'Revenue',
+        'Gross profit',
+        'Margin, %',
+        'Sales/facing',
+        'Profit/facing',
+        'ABC revenue',
+        'ABC profit',
+      ],
+      ...skuPerformanceReport.topByRevenue.map((item) => [
+        item.article,
+        item.name,
+        item.categoryName,
+        item.supplierName,
+        item.soldQuantity,
+        item.revenue,
+        item.grossProfit,
+        item.marginPercent,
+        item.salesPerFacing,
+        item.profitPerFacing,
+        item.abcRevenueGroup,
+        item.abcProfitGroup,
       ]),
       [],
       ['Assortment summary'],
@@ -215,6 +289,7 @@ export class ReportsExportService {
   private async buildXlsx(
     assortmentReport: AssortmentReport,
     operationalReport: OperationalReport,
+    skuPerformanceReport: SkuPerformanceReport,
   ) {
     const workbook = new ExcelJS.Workbook();
     workbook.creator = 'LeetPlus';
@@ -224,6 +299,8 @@ export class ReportsExportService {
     this.addRecommendationsSheet(workbook, operationalReport);
     this.addStockRiskSheet(workbook, operationalReport);
     this.addNoSalesSheet(workbook, operationalReport);
+    this.addAbcSheet(workbook, skuPerformanceReport);
+    this.addTopSkuSheet(workbook, skuPerformanceReport);
     this.addAssortmentGroupsSheet(workbook, assortmentReport);
     this.addLowMarginSheet(workbook, assortmentReport);
 
@@ -375,6 +452,59 @@ export class ReportsExportService {
       { header: 'Stock quantity', key: 'stockQuantity', width: 18 },
     ];
     sheet.addRows(operationalReport.productsWithoutSales);
+    this.styleHeader(sheet);
+  }
+
+  private addAbcSheet(
+    workbook: ExcelJS.Workbook,
+    skuPerformanceReport: SkuPerformanceReport,
+  ) {
+    const sheet = workbook.addWorksheet('ABC');
+    sheet.columns = [
+      { header: 'Basis', key: 'basis', width: 18 },
+      { header: 'Group', key: 'group', width: 10 },
+      { header: 'SKU', key: 'productsCount', width: 12 },
+      {
+        header: 'Assortment share, %',
+        key: 'assortmentSharePercent',
+        width: 22,
+      },
+      { header: 'Revenue share, %', key: 'revenueSharePercent', width: 20 },
+      { header: 'Profit share, %', key: 'profitSharePercent', width: 18 },
+    ];
+    sheet.addRows([
+      ...skuPerformanceReport.abcByRevenue.map((item) => ({
+        basis: 'Revenue',
+        ...item,
+      })),
+      ...skuPerformanceReport.abcByProfit.map((item) => ({
+        basis: 'Profit',
+        ...item,
+      })),
+    ]);
+    this.styleHeader(sheet);
+  }
+
+  private addTopSkuSheet(
+    workbook: ExcelJS.Workbook,
+    skuPerformanceReport: SkuPerformanceReport,
+  ) {
+    const sheet = workbook.addWorksheet('Top SKU');
+    sheet.columns = [
+      { header: 'Article', key: 'article', width: 18 },
+      { header: 'Product', key: 'name', width: 36 },
+      { header: 'Category', key: 'categoryName', width: 24 },
+      { header: 'Supplier', key: 'supplierName', width: 24 },
+      { header: 'Quantity', key: 'soldQuantity', width: 14 },
+      { header: 'Revenue', key: 'revenue', width: 16 },
+      { header: 'Gross profit', key: 'grossProfit', width: 18 },
+      { header: 'Margin, %', key: 'marginPercent', width: 14 },
+      { header: 'Sales/facing', key: 'salesPerFacing', width: 16 },
+      { header: 'Profit/facing', key: 'profitPerFacing', width: 16 },
+      { header: 'ABC revenue', key: 'abcRevenueGroup', width: 14 },
+      { header: 'ABC profit', key: 'abcProfitGroup', width: 14 },
+    ];
+    sheet.addRows(skuPerformanceReport.topByRevenue);
     this.styleHeader(sheet);
   }
 

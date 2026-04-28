@@ -257,4 +257,113 @@ describe('ReportsService', () => {
       }),
     ).rejects.toThrow('Store not found');
   });
+
+  it('builds SKU performance report with ABC groups', async () => {
+    prisma.store.findFirst.mockResolvedValue({ id: 'store-1' });
+    prisma.salesFact.findMany.mockResolvedValue([
+      {
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        productId: 'product-1',
+        quantity: new Prisma.Decimal(10),
+        revenue: new Prisma.Decimal(800),
+        cost: new Prisma.Decimal(500),
+        product: {
+          id: 'product-1',
+          article: 'DRK-001',
+          name: 'Energy Drink',
+          facing: 2,
+          category: { name: 'Напитки' },
+          supplier: { name: 'Supplier A' },
+        },
+      },
+      {
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        productId: 'product-2',
+        quantity: new Prisma.Decimal(5),
+        revenue: new Prisma.Decimal(150),
+        cost: new Prisma.Decimal(100),
+        product: {
+          id: 'product-2',
+          article: 'SNK-001',
+          name: 'Chips',
+          facing: 1,
+          category: { name: 'Снеки' },
+          supplier: null,
+        },
+      },
+      {
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        productId: 'product-3',
+        quantity: new Prisma.Decimal(2),
+        revenue: new Prisma.Decimal(50),
+        cost: new Prisma.Decimal(40),
+        product: {
+          id: 'product-3',
+          article: 'SWT-001',
+          name: 'Chocolate',
+          facing: 2,
+          category: { name: 'Сладости' },
+          supplier: null,
+        },
+      },
+    ]);
+
+    const report = await service.getSkuPerformanceReport(user, {
+      from: '2026-04-01',
+      to: '2026-04-10',
+      storeId: 'store-1',
+    });
+
+    expect(report).toMatchObject({
+      tenantId: 'tenant-1',
+      tenantSlug: 'club-a',
+      from: '2026-04-01',
+      to: '2026-04-10',
+      storeId: 'store-1',
+    });
+    expect(report.rows.map((row) => row.article)).toEqual([
+      'DRK-001',
+      'SNK-001',
+      'SWT-001',
+    ]);
+    expect(report.rows[0]).toMatchObject({
+      revenue: 800,
+      grossProfit: 300,
+      marginPercent: 37.5,
+      revenueSharePercent: 80,
+      profitSharePercent: 83.3,
+      salesPerFacing: 5,
+      profitPerFacing: 150,
+      abcRevenueGroup: 'A',
+      abcProfitGroup: 'A',
+    });
+    expect(report.abcByRevenue).toEqual([
+      {
+        group: 'A',
+        productsCount: 1,
+        assortmentSharePercent: 33.3,
+        revenueSharePercent: 80,
+        profitSharePercent: 83.3,
+      },
+      {
+        group: 'B',
+        productsCount: 1,
+        assortmentSharePercent: 33.3,
+        revenueSharePercent: 15,
+        profitSharePercent: 13.9,
+      },
+      {
+        group: 'C',
+        productsCount: 1,
+        assortmentSharePercent: 33.3,
+        revenueSharePercent: 5,
+        profitSharePercent: 2.8,
+      },
+    ]);
+    expect(report.topByQuantity[0].article).toBe('DRK-001');
+    expect(report.topByProfitPerFacing[0].article).toBe('DRK-001');
+  });
 });

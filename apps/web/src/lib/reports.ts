@@ -90,6 +90,52 @@ export type OperationalReport = {
   productsWithoutSales: ProductWithoutSales[];
 };
 
+export type AbcGroup = "A" | "B" | "C";
+
+export type SkuPerformanceRow = {
+  productId: string;
+  article: string;
+  name: string;
+  categoryName: string | null;
+  supplierName: string | null;
+  facing: number;
+  soldQuantity: number;
+  revenue: number;
+  cost: number;
+  grossProfit: number;
+  marginPercent: number;
+  revenueSharePercent: number;
+  profitSharePercent: number;
+  salesPerFacing: number;
+  profitPerFacing: number;
+  abcRevenueGroup: AbcGroup;
+  abcProfitGroup: AbcGroup;
+};
+
+export type AbcSummaryRow = {
+  group: AbcGroup;
+  productsCount: number;
+  assortmentSharePercent: number;
+  revenueSharePercent: number;
+  profitSharePercent: number;
+};
+
+export type SkuPerformanceReport = {
+  tenantId: string;
+  tenantSlug: string;
+  from: string;
+  to: string;
+  storeId: string | null;
+  rows: SkuPerformanceRow[];
+  abcByRevenue: AbcSummaryRow[];
+  abcByProfit: AbcSummaryRow[];
+  topByRevenue: SkuPerformanceRow[];
+  topByProfit: SkuPerformanceRow[];
+  topByQuantity: SkuPerformanceRow[];
+  topBySalesPerFacing: SkuPerformanceRow[];
+  topByProfitPerFacing: SkuPerformanceRow[];
+};
+
 export async function getAssortmentReport(): Promise<AssortmentReport> {
   const response = await fetch(`${getApiUrl()}/reports/assortment`, {
     cache: "no-store",
@@ -134,4 +180,37 @@ export async function getOperationalReport(
   }
 
   return response.json() as Promise<OperationalReport>;
+}
+
+export async function getSkuPerformanceReport(
+  filters: OperationalReportFilters,
+): Promise<SkuPerformanceReport> {
+  const params = new URLSearchParams();
+
+  if (filters.from) {
+    params.set("from", filters.from);
+  }
+
+  if (filters.to) {
+    params.set("to", filters.to);
+  }
+
+  if (filters.storeId) {
+    params.set("storeId", filters.storeId);
+  }
+
+  const query = params.toString();
+  const response = await fetch(
+    `${getApiUrl()}/reports/sku-performance${query ? `?${query}` : ""}`,
+    {
+      cache: "no-store",
+      headers: await getAuthHeaders(),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch SKU performance report");
+  }
+
+  return response.json() as Promise<SkuPerformanceReport>;
 }

@@ -93,6 +93,52 @@ export type OperationalReport = {
   productsWithoutSales: ProductWithoutSales[];
 };
 
+export type AbcGroup = 'A' | 'B' | 'C';
+
+export type SkuPerformanceRow = {
+  productId: string;
+  article: string;
+  name: string;
+  categoryName: string | null;
+  supplierName: string | null;
+  facing: number;
+  soldQuantity: number;
+  revenue: number;
+  cost: number;
+  grossProfit: number;
+  marginPercent: number;
+  revenueSharePercent: number;
+  profitSharePercent: number;
+  salesPerFacing: number;
+  profitPerFacing: number;
+  abcRevenueGroup: AbcGroup;
+  abcProfitGroup: AbcGroup;
+};
+
+export type AbcSummaryRow = {
+  group: AbcGroup;
+  productsCount: number;
+  assortmentSharePercent: number;
+  revenueSharePercent: number;
+  profitSharePercent: number;
+};
+
+export type SkuPerformanceReport = {
+  tenantId: string;
+  tenantSlug: string;
+  from: string;
+  to: string;
+  storeId: string | null;
+  rows: SkuPerformanceRow[];
+  abcByRevenue: AbcSummaryRow[];
+  abcByProfit: AbcSummaryRow[];
+  topByRevenue: SkuPerformanceRow[];
+  topByProfit: SkuPerformanceRow[];
+  topByQuantity: SkuPerformanceRow[];
+  topBySalesPerFacing: SkuPerformanceRow[];
+  topByProfitPerFacing: SkuPerformanceRow[];
+};
+
 type GroupAccumulator = {
   id: string | null;
   name: string;
@@ -369,6 +415,145 @@ export class ReportsService {
     };
   }
 
+  async getSkuPerformanceReport(
+    user: AuthenticatedUser,
+    query: OperationalReportQuery,
+  ): Promise<SkuPerformanceReport> {
+    const { tenantId, tenantSlug } =
+      await this.tenantContextService.resolve(user);
+    const period = this.resolvePeriod(query);
+    const storeFilter = query.storeId ? { storeId: query.storeId } : {};
+
+    if (query.storeId) {
+      const store = await this.prisma.store.findFirst({
+        where: { id: query.storeId, tenantId, isActive: true },
+        select: { id: true },
+      });
+
+      if (!store) {
+        throw new BadRequestException('Store not found');
+      }
+    }
+
+    const salesFacts = await this.prisma.salesFact.findMany({
+      where: {
+        tenantId,
+        ...storeFilter,
+        saleDate: {
+          gte: period.fromDate,
+          lte: period.toDate,
+        },
+      },
+      include: {
+        product: {
+          select: {
+            id: true,
+            article: true,
+            name: true,
+            facing: true,
+            category: {
+              select: { name: true },
+            },
+            supplier: {
+              select: { name: true },
+            },
+          },
+        },
+      },
+    });
+
+    const rowsByProduct = new Map<string, SkuPerformanceRow>();
+
+    salesFacts.forEach((fact) => {
+      const quantity = fact.quantity.toNumber();
+      const revenue = fact.revenue.toNumber();
+      const cost = fact.cost.toNumber();
+      const grossProfit = revenue - cost;
+      const current = rowsByProduct.get(fact.productId) ?? {
+        productId: fact.productId,
+        article: fact.product.article,
+        name: fact.product.name,
+        categoryName: fact.product.category?.name ?? null,
+        supplierName: fact.product.supplier?.name ?? null,
+        facing: fact.product.facing,
+        soldQuantity: 0,
+        revenue: 0,
+        cost: 0,
+        grossProfit: 0,
+        marginPercent: 0,
+        revenueSharePercent: 0,
+        profitSharePercent: 0,
+        salesPerFacing: 0,
+        profitPerFacing: 0,
+        abcRevenueGroup: 'C' as const,
+        abcProfitGroup: 'C' as const,
+      };
+
+      current.soldQuantity += quantity;
+      current.revenue += revenue;
+      current.cost += cost;
+      current.grossProfit += grossProfit;
+      rowsByProduct.set(fact.productId, current);
+    });
+
+    const rows = [...rowsByProduct.values()];
+    const totalRevenue = rows.reduce((sum, row) => sum + row.revenue, 0);
+    const totalProfit = rows.reduce((sum, row) => sum + row.grossProfit, 0);
+
+    rows.forEach((row) => {
+      row.soldQuantity = this.round(row.soldQuantity);
+      row.revenue = this.round(row.revenue);
+      row.cost = this.round(row.cost);
+      row.grossProfit = this.round(row.grossProfit);
+      row.marginPercent = this.marginPercent(row.cost, row.revenue);
+      row.revenueSharePercent = this.sharePercent(row.revenue, totalRevenue);
+      row.profitSharePercent = this.sharePercent(row.grossProfit, totalProfit);
+      row.salesPerFacing =
+        row.facing > 0 ? this.round(row.soldQuantity / row.facing) : 0;
+      row.profitPerFacing =
+        row.facing > 0 ? this.round(row.grossProfit / row.facing) : 0;
+    });
+
+    this.assignAbcGroup(rows, 'revenue', 'abcRevenueGroup');
+    this.assignAbcGroup(rows, 'grossProfit', 'abcProfitGroup');
+
+    const sortedRows = [...rows].sort(
+      (a, b) => b.revenue - a.revenue || a.name.localeCompare(b.name),
+    );
+
+    return {
+      tenantId,
+      tenantSlug,
+      from: this.toDateInputValue(period.fromDate),
+      to: this.toDateInputValue(period.toDate),
+      storeId: query.storeId ?? null,
+      rows: sortedRows,
+      abcByRevenue: this.buildAbcSummary(
+        sortedRows,
+        totalRevenue,
+        totalProfit,
+        'abcRevenueGroup',
+      ),
+      abcByProfit: this.buildAbcSummary(
+        sortedRows,
+        totalRevenue,
+        totalProfit,
+        'abcProfitGroup',
+      ),
+      topByRevenue: this.topRows(sortedRows, (row) => row.revenue),
+      topByProfit: this.topRows(sortedRows, (row) => row.grossProfit),
+      topByQuantity: this.topRows(sortedRows, (row) => row.soldQuantity),
+      topBySalesPerFacing: this.topRows(
+        sortedRows,
+        (row) => row.salesPerFacing,
+      ),
+      topByProfitPerFacing: this.topRows(
+        sortedRows,
+        (row) => row.profitPerFacing,
+      ),
+    };
+  }
+
   private latestStockByProduct(
     snapshots: {
       storeId: string;
@@ -531,6 +716,75 @@ export class ReportsService {
     return ranks[severity];
   }
 
+  private assignAbcGroup(
+    rows: SkuPerformanceRow[],
+    metric: 'revenue' | 'grossProfit',
+    groupKey: 'abcRevenueGroup' | 'abcProfitGroup',
+  ) {
+    const total = rows.reduce((sum, row) => sum + Math.max(0, row[metric]), 0);
+    let cumulative = 0;
+
+    [...rows]
+      .sort((a, b) => b[metric] - a[metric] || a.name.localeCompare(b.name))
+      .forEach((row) => {
+        if (total <= 0 || row[metric] <= 0) {
+          row[groupKey] = 'C';
+          return;
+        }
+
+        const cumulativeShareBefore = (cumulative / total) * 100;
+        cumulative += row[metric];
+
+        if (cumulativeShareBefore < 80) {
+          row[groupKey] = 'A';
+        } else if (cumulativeShareBefore < 95) {
+          row[groupKey] = 'B';
+        } else {
+          row[groupKey] = 'C';
+        }
+      });
+  }
+
+  private buildAbcSummary(
+    rows: SkuPerformanceRow[],
+    totalRevenue: number,
+    totalProfit: number,
+    groupKey: 'abcRevenueGroup' | 'abcProfitGroup',
+  ): AbcSummaryRow[] {
+    const groups: AbcGroup[] = ['A', 'B', 'C'];
+
+    return groups.map((group) => {
+      const groupRows = rows.filter((row) => row[groupKey] === group);
+      const revenue = groupRows.reduce((sum, row) => sum + row.revenue, 0);
+      const profit = groupRows.reduce((sum, row) => sum + row.grossProfit, 0);
+
+      return {
+        group,
+        productsCount: groupRows.length,
+        assortmentSharePercent: this.sharePercent(
+          groupRows.length,
+          rows.length,
+        ),
+        revenueSharePercent: this.sharePercent(revenue, totalRevenue),
+        profitSharePercent: this.sharePercent(profit, totalProfit),
+      };
+    });
+  }
+
+  private topRows(
+    rows: SkuPerformanceRow[],
+    getMetric: (row: SkuPerformanceRow) => number,
+  ) {
+    return [...rows]
+      .sort(
+        (a, b) =>
+          getMetric(b) - getMetric(a) ||
+          b.revenue - a.revenue ||
+          a.name.localeCompare(b.name),
+      )
+      .slice(0, 10);
+  }
+
   private resolvePeriod(query: OperationalReportQuery) {
     const now = new Date();
     const defaultTo = new Date(
@@ -648,6 +902,10 @@ export class ReportsService {
 
   private average(sum: number, count: number) {
     return count > 0 ? this.round(sum / count) : 0;
+  }
+
+  private sharePercent(value: number, total: number) {
+    return total > 0 ? this.round((value / total) * 100) : 0;
   }
 
   private round(value: number) {

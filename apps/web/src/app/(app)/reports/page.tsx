@@ -3,11 +3,15 @@ import { ReportEmailForm } from "@/components/report-email-form";
 import {
   getAssortmentReport,
   getOperationalReport,
+  getSkuPerformanceReport,
+  type AbcGroup,
+  type AbcSummaryRow,
   type LowMarginProduct,
   type OutOfStockRiskProduct,
   type ProductWithoutSales,
   type ReportRecommendation,
   type ReportGroup,
+  type SkuPerformanceRow,
 } from "@/lib/reports";
 import { getStores, type Store } from "@/lib/stores";
 
@@ -66,9 +70,11 @@ export default async function ReportsPage({
     to: searchParam(params.to),
     storeId: searchParam(params.storeId),
   };
-  const [assortmentReport, operationalReport, stores] = await Promise.all([
+  const [assortmentReport, operationalReport, skuPerformanceReport, stores] =
+    await Promise.all([
     getAssortmentReport(),
     getOperationalReport(filters),
+      getSkuPerformanceReport(filters),
     getStores(),
   ]);
 
@@ -155,6 +161,21 @@ export default async function ReportsPage({
           <RiskTable rows={operationalReport.outOfStockRiskProducts} />
           <NoSalesTable rows={operationalReport.productsWithoutSales} />
         </section>
+
+        <section className="mt-6 grid gap-6 xl:grid-cols-2">
+          <AbcSummary
+            title="ABC по выручке"
+            description="Группы A/B/C по накопительной доле выручки."
+            rows={skuPerformanceReport.abcByRevenue}
+          />
+          <AbcSummary
+            title="ABC по прибыли"
+            description="Группы A/B/C по накопительной доле валовой прибыли."
+            rows={skuPerformanceReport.abcByProfit}
+          />
+        </section>
+
+        <TopSkuTable rows={skuPerformanceReport.topByRevenue} />
 
         <section className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
           <Metric label="Всего SKU" value={assortmentReport.totalSku} />
@@ -490,6 +511,157 @@ function NoSalesTable({ rows }: { rows: ProductWithoutSales[] }) {
       )}
     </div>
   );
+}
+
+function AbcSummary({
+  title,
+  description,
+  rows,
+}: {
+  title: string;
+  description: string;
+  rows: AbcSummaryRow[];
+}) {
+  return (
+    <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
+      <div className="border-b border-zinc-200 px-5 py-4">
+        <h2 className="text-base font-semibold">{title}</h2>
+        <p className="mt-1 text-sm text-zinc-500">{description}</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[560px] text-left text-sm">
+          <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
+            <tr>
+              <th className="px-5 py-3 font-medium">Группа</th>
+              <th className="px-5 py-3 text-right font-medium">SKU</th>
+              <th className="px-5 py-3 text-right font-medium">Доля ассорт.</th>
+              <th className="px-5 py-3 text-right font-medium">Доля выручки</th>
+              <th className="px-5 py-3 text-right font-medium">Доля прибыли</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-zinc-100">
+            {rows.map((row) => (
+              <tr key={row.group}>
+                <td className="px-5 py-4">
+                  <span
+                    className={[
+                      "inline-flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold",
+                      abcGroupClassName(row.group),
+                    ].join(" ")}
+                  >
+                    {row.group}
+                  </span>
+                </td>
+                <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                  {row.productsCount}
+                </td>
+                <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                  {formatPercent(row.assortmentSharePercent)}
+                </td>
+                <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                  {formatPercent(row.revenueSharePercent)}
+                </td>
+                <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                  {formatPercent(row.profitSharePercent)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function TopSkuTable({ rows }: { rows: SkuPerformanceRow[] }) {
+  return (
+    <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
+      <div className="border-b border-zinc-200 px-5 py-4">
+        <h2 className="text-base font-semibold">ТОП SKU по выручке</h2>
+        <p className="mt-1 text-sm text-zinc-500">
+          Рейтинг товаров с прибылью, маржой и эффективностью на 1 фейс.
+        </p>
+      </div>
+
+      {rows.length > 0 ? (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[1120px] text-left text-sm">
+            <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
+              <tr>
+                <th className="px-5 py-3 font-medium">ABC</th>
+                <th className="px-5 py-3 font-medium">Артикул</th>
+                <th className="px-5 py-3 font-medium">Товар</th>
+                <th className="px-5 py-3 font-medium">Категория</th>
+                <th className="px-5 py-3 text-right font-medium">Продано</th>
+                <th className="px-5 py-3 text-right font-medium">Выручка</th>
+                <th className="px-5 py-3 text-right font-medium">Прибыль</th>
+                <th className="px-5 py-3 text-right font-medium">Маржа</th>
+                <th className="px-5 py-3 text-right font-medium">Прод./фейс</th>
+                <th className="px-5 py-3 text-right font-medium">Приб./фейс</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100">
+              {rows.map((row) => (
+                <tr key={row.productId}>
+                  <td className="px-5 py-4">
+                    <span
+                      className={[
+                        "inline-flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold",
+                        abcGroupClassName(row.abcRevenueGroup),
+                      ].join(" ")}
+                    >
+                      {row.abcRevenueGroup}
+                    </span>
+                  </td>
+                  <td className="px-5 py-4 font-mono text-xs text-zinc-600">
+                    {row.article}
+                  </td>
+                  <td className="px-5 py-4 font-medium text-zinc-950">
+                    {row.name}
+                  </td>
+                  <td className="px-5 py-4 text-zinc-700">
+                    {row.categoryName ?? "—"}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {formatQuantity(row.soldQuantity)}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {formatMoney(row.revenue)}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {formatMoney(row.grossProfit)}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {formatPercent(row.marginPercent)}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {formatQuantity(row.salesPerFacing)}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {formatMoney(row.profitPerFacing)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="px-5 py-6 text-sm text-zinc-500">
+          Продаж по текущему фильтру нет.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function abcGroupClassName(group: AbcGroup) {
+  const classNames: Record<AbcGroup, string> = {
+    A: "bg-emerald-50 text-emerald-700",
+    B: "bg-amber-50 text-amber-700",
+    C: "bg-zinc-100 text-zinc-700",
+  };
+
+  return classNames[group];
 }
 
 function GroupTable({ title, rows }: { title: string; rows: ReportGroup[] }) {

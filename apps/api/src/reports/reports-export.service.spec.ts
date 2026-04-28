@@ -1,11 +1,16 @@
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { ReportsExportService } from './reports-export.service';
 import { ReportsService } from './reports.service';
-import type { AssortmentReport, OperationalReport } from './reports.service';
+import type {
+  AssortmentReport,
+  OperationalReport,
+  SkuPerformanceReport,
+} from './reports.service';
 
 type ReportsServiceMock = {
   getAssortmentReport: jest.Mock;
   getOperationalReport: jest.Mock;
+  getSkuPerformanceReport: jest.Mock;
 };
 
 const user = {
@@ -80,6 +85,64 @@ const operationalReport: OperationalReport = {
   productsWithoutSales: [],
 };
 
+const skuPerformanceReport: SkuPerformanceReport = {
+  tenantId: 'tenant-1',
+  tenantSlug: 'club-a',
+  from: '2026-04-01',
+  to: '2026-04-30',
+  storeId: null,
+  rows: [],
+  abcByRevenue: [
+    {
+      group: 'A',
+      productsCount: 1,
+      assortmentSharePercent: 100,
+      revenueSharePercent: 100,
+      profitSharePercent: 100,
+    },
+    {
+      group: 'B',
+      productsCount: 0,
+      assortmentSharePercent: 0,
+      revenueSharePercent: 0,
+      profitSharePercent: 0,
+    },
+    {
+      group: 'C',
+      productsCount: 0,
+      assortmentSharePercent: 0,
+      revenueSharePercent: 0,
+      profitSharePercent: 0,
+    },
+  ],
+  abcByProfit: [],
+  topByRevenue: [
+    {
+      productId: 'product-1',
+      article: 'DRK-001',
+      name: 'Cola',
+      categoryName: 'Напитки',
+      supplierName: null,
+      facing: 2,
+      soldQuantity: 10,
+      revenue: 1000,
+      cost: 700,
+      grossProfit: 300,
+      marginPercent: 30,
+      revenueSharePercent: 100,
+      profitSharePercent: 100,
+      salesPerFacing: 5,
+      profitPerFacing: 150,
+      abcRevenueGroup: 'A',
+      abcProfitGroup: 'A',
+    },
+  ],
+  topByProfit: [],
+  topByQuantity: [],
+  topBySalesPerFacing: [],
+  topByProfitPerFacing: [],
+};
+
 describe('ReportsExportService', () => {
   let reportsService: ReportsServiceMock;
   let service: ReportsExportService;
@@ -88,6 +151,9 @@ describe('ReportsExportService', () => {
     reportsService = {
       getAssortmentReport: jest.fn().mockResolvedValue(assortmentReport),
       getOperationalReport: jest.fn().mockResolvedValue(operationalReport),
+      getSkuPerformanceReport: jest
+        .fn()
+        .mockResolvedValue(skuPerformanceReport),
     };
     service = new ReportsExportService(
       reportsService as unknown as ReportsService,
@@ -101,6 +167,8 @@ describe('ReportsExportService', () => {
     expect(file.fileName).toBe('leetplus-reports-2026-04-01-2026-04-30.csv');
     expect(file.contentType).toBe('text/csv; charset=utf-8');
     expect(content).toContain('Operations summary');
+    expect(content).toContain('ABC by revenue');
+    expect(content).toContain('Top SKU by revenue');
     expect(content).toContain('Assortment summary');
     expect(content).toContain('DRK-001;Cola');
     expect(reportsService.getOperationalReport).toHaveBeenCalledWith(user, {

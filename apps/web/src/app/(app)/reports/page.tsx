@@ -5,6 +5,7 @@ import {
   type LowMarginProduct,
   type OutOfStockRiskProduct,
   type ProductWithoutSales,
+  type ReportRecommendation,
   type ReportGroup,
 } from "@/lib/reports";
 import { getStores, type Store } from "@/lib/stores";
@@ -107,6 +108,8 @@ export default async function ReportsPage({
             value={operationalReport.outOfStockRiskProducts.length}
           />
         </section>
+
+        <RecommendationsPanel rows={operationalReport.recommendations} />
 
         <section className="mt-6 grid gap-6 xl:grid-cols-2">
           <RiskTable rows={operationalReport.outOfStockRiskProducts} />
@@ -241,6 +244,85 @@ function Metric({ label, value }: { label: string; value: number | string }) {
       </p>
     </div>
   );
+}
+
+function RecommendationsPanel({ rows }: { rows: ReportRecommendation[] }) {
+  return (
+    <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
+      <div className="border-b border-zinc-200 px-5 py-4">
+        <h2 className="text-base font-semibold">Рекомендации</h2>
+        <p className="mt-1 text-sm text-zinc-500">
+          Автоматические действия на основе продаж, остатков и маржинальности.
+        </p>
+      </div>
+
+      {rows.length > 0 ? (
+        <div className="divide-y divide-zinc-100">
+          {rows.map((row) => (
+            <article
+              key={row.id}
+              className="grid gap-3 px-5 py-4 lg:grid-cols-[160px_1fr_180px]"
+            >
+              <div>
+                <span
+                  className={[
+                    "inline-flex rounded-full px-2.5 py-1 text-xs font-medium",
+                    severityClassName(row.severity),
+                  ].join(" ")}
+                >
+                  {severityLabel(row.severity)}
+                </span>
+                <p className="mt-2 font-mono text-xs text-zinc-500">
+                  {row.article}
+                </p>
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-zinc-950">
+                  {row.title}
+                </h3>
+                <p className="mt-1 text-sm leading-6 text-zinc-600">
+                  {row.description}
+                </p>
+                <p className="mt-2 text-sm font-medium text-zinc-800">
+                  {row.action}
+                </p>
+              </div>
+              <div className="text-left lg:text-right">
+                <p className="text-xs text-zinc-500">{row.metricLabel}</p>
+                <p className="mt-1 text-xl font-semibold tabular-nums text-zinc-900">
+                  {row.metricValue}
+                </p>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="px-5 py-6 text-sm text-zinc-500">
+          Критичных рекомендаций по текущему фильтру нет.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function severityLabel(severity: ReportRecommendation["severity"]) {
+  const labels: Record<ReportRecommendation["severity"], string> = {
+    HIGH: "Высокий",
+    MEDIUM: "Средний",
+    LOW: "Низкий",
+  };
+
+  return labels[severity];
+}
+
+function severityClassName(severity: ReportRecommendation["severity"]) {
+  const classNames: Record<ReportRecommendation["severity"], string> = {
+    HIGH: "bg-red-50 text-red-700",
+    MEDIUM: "bg-amber-50 text-amber-700",
+    LOW: "bg-zinc-100 text-zinc-700",
+  };
+
+  return classNames[severity];
 }
 
 function RiskTable({ rows }: { rows: OutOfStockRiskProduct[] }) {

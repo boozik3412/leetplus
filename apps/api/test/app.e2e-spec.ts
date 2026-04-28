@@ -351,6 +351,7 @@ describe('API routes (e2e)', () => {
       averageDailyRevenue: 33.3,
       stockQuantity: 25,
       stockDays: 75,
+      recommendations: [],
       outOfStockRiskProducts: [],
       productsWithoutSales: [],
     });
@@ -372,6 +373,7 @@ describe('API routes (e2e)', () => {
         averageDailyRevenue: 33.3,
         stockQuantity: 25,
         stockDays: 75,
+        recommendations: [],
         outOfStockRiskProducts: [],
         productsWithoutSales: [],
       });

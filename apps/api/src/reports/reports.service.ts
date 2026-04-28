@@ -60,6 +60,20 @@ export type ProductWithoutSales = {
   supplierName: string | null;
 };
 
+export type ReportRecommendation = {
+  id: string;
+  kind: 'REPLENISH_STOCK' | 'NO_SALES' | 'LOW_MARGIN';
+  severity: 'HIGH' | 'MEDIUM' | 'LOW';
+  title: string;
+  description: string;
+  action: string;
+  productId: string;
+  article: string;
+  productName: string;
+  metricLabel: string;
+  metricValue: string;
+};
+
 export type OperationalReport = {
   tenantId: string;
   tenantSlug: string;
@@ -74,6 +88,7 @@ export type OperationalReport = {
   averageDailyRevenue: number;
   stockQuantity: number;
   stockDays: number | null;
+  recommendations: ReportRecommendation[];
   outOfStockRiskProducts: OutOfStockRiskProduct[];
   productsWithoutSales: ProductWithoutSales[];
 };
@@ -316,6 +331,16 @@ export class ReportsService {
     );
     const grossProfit = totalRevenue - totalCost;
     const periodDays = this.periodDays(period.fromDate, period.toDate);
+    const outOfStockRiskProducts = this.outOfStockRiskProducts(
+      productSales,
+      stockByProduct,
+      periodDays,
+    );
+    const productsWithoutSales = this.productsWithoutSales(
+      activeProducts,
+      productSales,
+      stockByProduct,
+    );
 
     return {
       tenantId,
@@ -334,16 +359,13 @@ export class ReportsService {
         soldQuantity > 0
           ? this.round(stockQuantity / (soldQuantity / periodDays))
           : null,
-      outOfStockRiskProducts: this.outOfStockRiskProducts(
+      recommendations: this.buildRecommendations(
         productSales,
-        stockByProduct,
-        periodDays,
+        outOfStockRiskProducts,
+        productsWithoutSales,
       ),
-      productsWithoutSales: this.productsWithoutSales(
-        activeProducts,
-        productSales,
-        stockByProduct,
-      ),
+      outOfStockRiskProducts,
+      productsWithoutSales,
     };
   }
 
@@ -427,6 +449,86 @@ export class ReportsService {
           b.stockQuantity - a.stockQuantity || a.name.localeCompare(b.name),
       )
       .slice(0, 10);
+  }
+
+  private buildRecommendations(
+    productSales: Map<string, ProductSales>,
+    outOfStockRiskProducts: OutOfStockRiskProduct[],
+    productsWithoutSales: ProductWithoutSales[],
+  ): ReportRecommendation[] {
+    const recommendations: ReportRecommendation[] = [
+      ...outOfStockRiskProducts.map((product) => ({
+        id: `stock:${product.productId}`,
+        kind: 'REPLENISH_STOCK' as const,
+        severity:
+          product.stockDays <= 1 ? ('HIGH' as const) : ('MEDIUM' as const),
+        title: `Пополнить запас: ${product.name}`,
+        description: `Текущего остатка хватит примерно на ${product.stockDays} дн. при среднем спросе ${product.averageDailySales} шт/день.`,
+        action: 'Проверить поставщика и ближайший заказ.',
+        productId: product.productId,
+        article: product.article,
+        productName: product.name,
+        metricLabel: 'Дней запаса',
+        metricValue: String(product.stockDays),
+      })),
+      ...productsWithoutSales
+        .filter((product) => product.stockQuantity > 0)
+        .slice(0, 5)
+        .map((product) => ({
+          id: `no-sales:${product.productId}`,
+          kind: 'NO_SALES' as const,
+          severity: 'LOW' as const,
+          title: `Разобрать товар без продаж: ${product.name}`,
+          description: `В выбранном периоде продаж нет, но на остатке ${product.stockQuantity} шт.`,
+          action: 'Проверить цену, выкладку или необходимость архивации.',
+          productId: product.productId,
+          article: product.article,
+          productName: product.name,
+          metricLabel: 'Остаток',
+          metricValue: String(product.stockQuantity),
+        })),
+      ...[...productSales.values()]
+        .filter((sale) => sale.revenue > 0)
+        .map((sale) => ({
+          sale,
+          marginPercent: this.marginPercent(sale.cost, sale.revenue),
+        }))
+        .filter((item) => item.marginPercent < 20)
+        .sort((a, b) => a.marginPercent - b.marginPercent)
+        .slice(0, 5)
+        .map((item) => ({
+          id: `margin:${item.sale.productId}`,
+          kind: 'LOW_MARGIN' as const,
+          severity:
+            item.marginPercent < 10 ? ('MEDIUM' as const) : ('LOW' as const),
+          title: `Пересмотреть маржу: ${item.sale.name}`,
+          description: `Маржа продаж ${this.round(item.marginPercent)}% при выручке ${this.round(item.sale.revenue)}.`,
+          action: 'Проверить закупочную цену, розничную цену и промо-условия.',
+          productId: item.sale.productId,
+          article: item.sale.article,
+          productName: item.sale.name,
+          metricLabel: 'Маржа',
+          metricValue: `${this.round(item.marginPercent)}%`,
+        })),
+    ];
+
+    return recommendations
+      .sort(
+        (a, b) =>
+          this.severityRank(a.severity) - this.severityRank(b.severity) ||
+          a.title.localeCompare(b.title),
+      )
+      .slice(0, 12);
+  }
+
+  private severityRank(severity: ReportRecommendation['severity']) {
+    const ranks: Record<ReportRecommendation['severity'], number> = {
+      HIGH: 0,
+      MEDIUM: 1,
+      LOW: 2,
+    };
+
+    return ranks[severity];
   }
 
   private resolvePeriod(query: OperationalReportQuery) {

@@ -161,7 +161,7 @@ describe('ReportsService', () => {
         productId: 'product-1',
         quantity: new Prisma.Decimal(10),
         revenue: new Prisma.Decimal(1000),
-        cost: new Prisma.Decimal(600),
+        cost: new Prisma.Decimal(850),
         product: {
           id: 'product-1',
           article: 'DRK-001',
@@ -211,13 +211,23 @@ describe('ReportsService', () => {
       to: '2026-04-10',
       storeId: 'store-1',
       totalRevenue: 1000,
-      totalCost: 600,
-      grossProfit: 400,
-      marginPercent: 40,
+      totalCost: 850,
+      grossProfit: 150,
+      marginPercent: 15,
       soldQuantity: 10,
       averageDailyRevenue: 100,
       stockQuantity: 2,
       stockDays: 2,
+    });
+    expect(report.recommendations.map((item) => item.kind)).toEqual([
+      'REPLENISH_STOCK',
+      'LOW_MARGIN',
+    ]);
+    expect(report.recommendations[0]).toMatchObject({
+      severity: 'MEDIUM',
+      productId: 'product-1',
+      metricLabel: 'Дней запаса',
+      metricValue: '2',
     });
     expect(report.outOfStockRiskProducts).toEqual([
       {

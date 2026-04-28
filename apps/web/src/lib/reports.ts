@@ -57,6 +57,20 @@ export type ProductWithoutSales = {
   supplierName: string | null;
 };
 
+export type ReportRecommendation = {
+  id: string;
+  kind: "REPLENISH_STOCK" | "NO_SALES" | "LOW_MARGIN";
+  severity: "HIGH" | "MEDIUM" | "LOW";
+  title: string;
+  description: string;
+  action: string;
+  productId: string;
+  article: string;
+  productName: string;
+  metricLabel: string;
+  metricValue: string;
+};
+
 export type OperationalReport = {
   tenantId: string;
   tenantSlug: string;
@@ -71,6 +85,7 @@ export type OperationalReport = {
   averageDailyRevenue: number;
   stockQuantity: number;
   stockDays: number | null;
+  recommendations: ReportRecommendation[];
   outOfStockRiskProducts: OutOfStockRiskProduct[];
   productsWithoutSales: ProductWithoutSales[];
 };

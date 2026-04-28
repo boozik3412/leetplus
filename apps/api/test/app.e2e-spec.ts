@@ -17,6 +17,7 @@ import { ProductCsvImportService } from '../src/imports/product-csv-import.servi
 import { PrismaService } from '../src/prisma/prisma.service';
 import { ProductsModule } from '../src/products/products.module';
 import { ProductsService } from '../src/products/products.service';
+import { ReportsExportService } from '../src/reports/reports-export.service';
 import { ReportsModule } from '../src/reports/reports.module';
 import { ReportsService } from '../src/reports/reports.service';
 import { StoresModule } from '../src/stores/stores.module';
@@ -41,6 +42,10 @@ describe('API routes (e2e)', () => {
   const reportsService = {
     getAssortmentReport: jest.fn(),
     getOperationalReport: jest.fn(),
+  };
+
+  const reportsExportService = {
+    exportReports: jest.fn(),
   };
 
   const productCsvImportService = {
@@ -89,6 +94,8 @@ describe('API routes (e2e)', () => {
       .useValue(storesService)
       .overrideProvider(ReportsService)
       .useValue(reportsService)
+      .overrideProvider(ReportsExportService)
+      .useValue(reportsExportService)
       .overrideProvider(ProductCsvImportService)
       .useValue(productCsvImportService)
       .overrideProvider(FactCsvImportService)
@@ -377,6 +384,24 @@ describe('API routes (e2e)', () => {
         outOfStockRiskProducts: [],
         productsWithoutSales: [],
       });
+  });
+
+  it('/reports/export (GET)', () => {
+    reportsExportService.exportReports.mockResolvedValue({
+      buffer: Buffer.from('report'),
+      contentType: 'text/csv; charset=utf-8',
+      fileName: 'leetplus-reports-2026-04-01-2026-04-30.csv',
+    });
+
+    return request(app.getHttpServer())
+      .get('/reports/export?format=csv&from=2026-04-01&to=2026-04-30')
+      .expect(200)
+      .expect('content-type', /text\/csv/)
+      .expect(
+        'content-disposition',
+        'attachment; filename="leetplus-reports-2026-04-01-2026-04-30.csv"',
+      )
+      .expect('report');
   });
 
   it('/imports/inventory/preview (POST)', () => {

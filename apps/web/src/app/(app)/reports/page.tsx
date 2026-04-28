@@ -33,6 +33,26 @@ function searchParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
+function buildExportHref({
+  format,
+  from,
+  to,
+  storeId,
+}: {
+  format: "csv" | "xlsx";
+  from: string;
+  to: string;
+  storeId: string | null;
+}) {
+  const params = new URLSearchParams({ format, from, to });
+
+  if (storeId) {
+    params.set("storeId", storeId);
+  }
+
+  return `/api/reports/export?${params.toString()}`;
+}
+
 export default async function ReportsPage({
   searchParams,
 }: {
@@ -68,6 +88,18 @@ export default async function ReportsPage({
           to={operationalReport.to}
           storeId={operationalReport.storeId}
           stores={stores}
+          csvHref={buildExportHref({
+            format: "csv",
+            from: operationalReport.from,
+            to: operationalReport.to,
+            storeId: operationalReport.storeId,
+          })}
+          xlsxHref={buildExportHref({
+            format: "xlsx",
+            from: operationalReport.from,
+            to: operationalReport.to,
+            storeId: operationalReport.storeId,
+          })}
         />
 
         <section className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -180,11 +212,15 @@ function ReportFilters({
   to,
   storeId,
   stores,
+  csvHref,
+  xlsxHref,
 }: {
   from: string;
   to: string;
   storeId: string | null;
   stores: Store[];
+  csvHref: string;
+  xlsxHref: string;
 }) {
   return (
     <form className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
@@ -230,6 +266,21 @@ function ReportFilters({
         >
           Применить
         </button>
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-zinc-100 pt-4">
+        <span className="text-sm text-zinc-500">Выгрузить текущий отчёт:</span>
+        <a
+          href={csvHref}
+          className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50"
+        >
+          CSV
+        </a>
+        <a
+          href={xlsxHref}
+          className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50"
+        >
+          XLSX
+        </a>
       </div>
     </form>
   );

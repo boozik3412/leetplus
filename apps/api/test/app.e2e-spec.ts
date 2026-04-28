@@ -11,6 +11,9 @@ import { AuthenticatedRequest } from '../src/auth/auth.types';
 import { JwtAuthGuard } from '../src/auth/jwt-auth.guard';
 import { DashboardModule } from '../src/dashboard/dashboard.module';
 import { DashboardService } from '../src/dashboard/dashboard.service';
+import { FactCsvImportService } from '../src/imports/fact-csv-import.service';
+import { ImportsModule } from '../src/imports/imports.module';
+import { ProductCsvImportService } from '../src/imports/product-csv-import.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { ProductsModule } from '../src/products/products.module';
 import { ProductsService } from '../src/products/products.service';
@@ -39,6 +42,19 @@ describe('API routes (e2e)', () => {
     getAssortmentReport: jest.fn(),
   };
 
+  const productCsvImportService = {
+    findRecent: jest.fn(),
+    preview: jest.fn(),
+    import: jest.fn(),
+  };
+
+  const factCsvImportService = {
+    previewInventory: jest.fn(),
+    importInventory: jest.fn(),
+    previewSales: jest.fn(),
+    importSales: jest.fn(),
+  };
+
   const prismaService = {};
 
   const authService = {
@@ -56,6 +72,7 @@ describe('API routes (e2e)', () => {
         ProductsModule,
         StoresModule,
         ReportsModule,
+        ImportsModule,
         DashboardModule,
       ],
       controllers: [AppController],
@@ -71,6 +88,10 @@ describe('API routes (e2e)', () => {
       .useValue(storesService)
       .overrideProvider(ReportsService)
       .useValue(reportsService)
+      .overrideProvider(ProductCsvImportService)
+      .useValue(productCsvImportService)
+      .overrideProvider(FactCsvImportService)
+      .useValue(factCsvImportService)
       .overrideProvider(PrismaService)
       .useValue(prismaService)
       .overrideGuard(JwtAuthGuard)
@@ -311,6 +332,52 @@ describe('API routes (e2e)', () => {
         categoryBreakdown: [],
         supplierBreakdown: [],
         lowMarginProducts: [],
+      });
+  });
+
+  it('/imports/inventory/preview (POST)', () => {
+    factCsvImportService.previewInventory.mockResolvedValue({
+      totalRows: 1,
+      validRows: 1,
+      errors: [],
+      rows: [],
+    });
+
+    return request(app.getHttpServer())
+      .post('/imports/inventory/preview')
+      .send({ csv: 'Дата,Торговая точка,Артикул,Остаток' })
+      .expect(201)
+      .expect({
+        totalRows: 1,
+        validRows: 1,
+        errors: [],
+        rows: [],
+      });
+  });
+
+  it('/imports/sales (POST)', () => {
+    factCsvImportService.importSales.mockResolvedValue({
+      importedRows: 1,
+      preview: {
+        totalRows: 1,
+        validRows: 1,
+        errors: [],
+        rows: [],
+      },
+    });
+
+    return request(app.getHttpServer())
+      .post('/imports/sales')
+      .send({ csv: 'Дата,Торговая точка,Артикул,Количество,Выручка' })
+      .expect(201)
+      .expect({
+        importedRows: 1,
+        preview: {
+          totalRows: 1,
+          validRows: 1,
+          errors: [],
+          rows: [],
+        },
       });
   });
 

@@ -1,3 +1,4 @@
+import { FactCsvImport } from "@/components/fact-csv-import";
 import { ProductCsvImport } from "@/components/product-csv-import";
 import { requireCurrentUser } from "@/lib/auth";
 import { getImportJobs, type ImportJob } from "@/lib/imports";
@@ -12,12 +13,16 @@ export default async function ImportPage() {
         <div className="mb-8">
           <h1 className="text-2xl font-semibold tracking-tight">Импорт</h1>
           <p className="mt-1 max-w-3xl text-sm text-zinc-600">
-            Ручная загрузка CSV для организации {user.tenantSlug}.leetplus.ru.
-            На этом шаге импортируем товары и проверяем ошибки до записи в БД.
+            Ручная загрузка CSV для организации {user.tenantSlug}.leetplus.ru:
+            товары, остатки и продажи с проверкой ошибок до записи в БД.
           </p>
         </div>
 
-        <ProductCsvImport />
+        <div className="space-y-6">
+          <ProductCsvImport />
+          <FactCsvImport kind="inventory" />
+          <FactCsvImport kind="sales" />
+        </div>
 
         <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
           <div className="border-b border-zinc-200 px-5 py-4">
@@ -30,6 +35,7 @@ export default async function ImportPage() {
                 <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
                   <tr>
                     <th className="px-5 py-3 font-medium">Дата</th>
+                    <th className="px-5 py-3 font-medium">Тип</th>
                     <th className="px-5 py-3 font-medium">Файл</th>
                     <th className="px-5 py-3 font-medium">Статус</th>
                     <th className="px-5 py-3 text-right font-medium">Строк</th>
@@ -64,6 +70,7 @@ function ImportJobRow({ job }: { job: ImportJob }) {
       <td className="whitespace-nowrap px-5 py-4 text-zinc-700">
         {formatDate(job.createdAt)}
       </td>
+      <td className="px-5 py-4 text-zinc-700">{formatImportType(job.type)}</td>
       <td className="px-5 py-4 font-medium text-zinc-950">
         {job.sourceFileName ?? "CSV без имени"}
       </td>
@@ -93,6 +100,16 @@ function ImportJobRow({ job }: { job: ImportJob }) {
       </td>
     </tr>
   );
+}
+
+function formatImportType(type: string) {
+  const labels: Record<string, string> = {
+    PRODUCT_CSV: "Товары",
+    INVENTORY_CSV: "Остатки",
+    SALES_CSV: "Продажи",
+  };
+
+  return labels[type] ?? type;
 }
 
 function formatDate(value: string) {

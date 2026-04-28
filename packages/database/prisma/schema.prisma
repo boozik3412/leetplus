@@ -28,6 +28,8 @@ model Tenant {
   products  Product[]
   categories Category[]
   importJobs ImportJob[]
+  salesFacts SalesFact[]
+  inventorySnapshots InventorySnapshot[]
 }
 
 model User {
@@ -93,6 +95,8 @@ model Store {
   updatedAt DateTime @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id])
+  salesFacts SalesFact[]
+  inventorySnapshots InventorySnapshot[]
 
   @@index([tenantId])
 }
@@ -147,9 +151,53 @@ model Product {
   tenant   Tenant    @relation(fields: [tenantId], references: [id])
   category Category? @relation(fields: [categoryId], references: [id])
   supplier Supplier? @relation(fields: [supplierId], references: [id])
+  salesFacts SalesFact[]
+  inventorySnapshots InventorySnapshot[]
 
   @@unique([tenantId, article])
   @@index([tenantId])
   @@index([categoryId])
   @@index([supplierId])
+}
+
+model SalesFact {
+  id        String   @id @default(uuid())
+  tenantId  String
+  storeId   String
+  productId String
+  saleDate  DateTime
+  quantity  Decimal
+  revenue   Decimal
+  cost      Decimal
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id])
+  store   Store   @relation(fields: [storeId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+
+  @@unique([tenantId, storeId, productId, saleDate])
+  @@index([tenantId, saleDate])
+  @@index([storeId])
+  @@index([productId])
+}
+
+model InventorySnapshot {
+  id           String   @id @default(uuid())
+  tenantId     String
+  storeId      String
+  productId    String
+  snapshotDate DateTime
+  quantity     Decimal
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id])
+  store   Store   @relation(fields: [storeId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+
+  @@unique([tenantId, storeId, productId, snapshotDate])
+  @@index([tenantId, snapshotDate])
+  @@index([storeId])
+  @@index([productId])
 }

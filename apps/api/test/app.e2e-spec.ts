@@ -40,6 +40,7 @@ describe('API routes (e2e)', () => {
 
   const reportsService = {
     getAssortmentReport: jest.fn(),
+    getOperationalReport: jest.fn(),
   };
 
   const productCsvImportService = {
@@ -332,6 +333,47 @@ describe('API routes (e2e)', () => {
         categoryBreakdown: [],
         supplierBreakdown: [],
         lowMarginProducts: [],
+      });
+  });
+
+  it('/reports/operations (GET)', () => {
+    reportsService.getOperationalReport.mockResolvedValue({
+      tenantId: 'tenant-1',
+      tenantSlug: 'club-a',
+      from: '2026-04-01',
+      to: '2026-04-30',
+      storeId: null,
+      totalRevenue: 1000,
+      totalCost: 600,
+      grossProfit: 400,
+      marginPercent: 40,
+      soldQuantity: 10,
+      averageDailyRevenue: 33.3,
+      stockQuantity: 25,
+      stockDays: 75,
+      outOfStockRiskProducts: [],
+      productsWithoutSales: [],
+    });
+
+    return request(app.getHttpServer())
+      .get('/reports/operations?from=2026-04-01&to=2026-04-30')
+      .expect(200)
+      .expect({
+        tenantId: 'tenant-1',
+        tenantSlug: 'club-a',
+        from: '2026-04-01',
+        to: '2026-04-30',
+        storeId: null,
+        totalRevenue: 1000,
+        totalCost: 600,
+        grossProfit: 400,
+        marginPercent: 40,
+        soldQuantity: 10,
+        averageDailyRevenue: 33.3,
+        stockQuantity: 25,
+        stockDays: 75,
+        outOfStockRiskProducts: [],
+        productsWithoutSales: [],
       });
   });
 

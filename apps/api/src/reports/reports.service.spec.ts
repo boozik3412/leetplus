@@ -9,6 +9,15 @@ type ReportsPrismaMock = {
     count: jest.Mock;
     findMany: jest.Mock;
   };
+  store: {
+    findFirst: jest.Mock;
+  };
+  salesFact: {
+    findMany: jest.Mock;
+  };
+  inventorySnapshot: {
+    findMany: jest.Mock;
+  };
 };
 
 type TenantContextMock = {
@@ -25,6 +34,15 @@ function createPrismaMock(): ReportsPrismaMock {
   return {
     product: {
       count: jest.fn(),
+      findMany: jest.fn(),
+    },
+    store: {
+      findFirst: jest.fn(),
+    },
+    salesFact: {
+      findMany: jest.fn(),
+    },
+    inventorySnapshot: {
       findMany: jest.fn(),
     },
   };
@@ -132,5 +150,101 @@ describe('ReportsService', () => {
       supplierBreakdown: [],
       lowMarginProducts: [],
     });
+  });
+
+  it('builds operational report from sales and latest stock', async () => {
+    prisma.store.findFirst.mockResolvedValue({ id: 'store-1' });
+    prisma.salesFact.findMany.mockResolvedValue([
+      {
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        productId: 'product-1',
+        quantity: new Prisma.Decimal(10),
+        revenue: new Prisma.Decimal(1000),
+        cost: new Prisma.Decimal(600),
+        product: {
+          id: 'product-1',
+          article: 'DRK-001',
+          name: 'Adrenaline Rush',
+        },
+      },
+    ]);
+    prisma.inventorySnapshot.findMany.mockResolvedValue([
+      {
+        storeId: 'store-1',
+        productId: 'product-1',
+        quantity: new Prisma.Decimal(2),
+      },
+      {
+        storeId: 'store-1',
+        productId: 'product-1',
+        quantity: new Prisma.Decimal(20),
+      },
+    ]);
+    prisma.product.findMany.mockResolvedValue([
+      {
+        id: 'product-1',
+        article: 'DRK-001',
+        name: 'Adrenaline Rush',
+        category: null,
+        supplier: null,
+      },
+      {
+        id: 'product-2',
+        article: 'SNK-001',
+        name: 'Chips',
+        category: { name: 'Снеки' },
+        supplier: null,
+      },
+    ]);
+
+    const report = await service.getOperationalReport(user, {
+      from: '2026-04-01',
+      to: '2026-04-10',
+      storeId: 'store-1',
+    });
+
+    expect(report).toMatchObject({
+      tenantId: 'tenant-1',
+      tenantSlug: 'club-a',
+      from: '2026-04-01',
+      to: '2026-04-10',
+      storeId: 'store-1',
+      totalRevenue: 1000,
+      totalCost: 600,
+      grossProfit: 400,
+      marginPercent: 40,
+      soldQuantity: 10,
+      averageDailyRevenue: 100,
+      stockQuantity: 2,
+      stockDays: 2,
+    });
+    expect(report.outOfStockRiskProducts).toEqual([
+      {
+        productId: 'product-1',
+        article: 'DRK-001',
+        name: 'Adrenaline Rush',
+        stockQuantity: 2,
+        averageDailySales: 1,
+        stockDays: 2,
+      },
+    ]);
+    expect(report.productsWithoutSales[0]).toMatchObject({
+      productId: 'product-2',
+      article: 'SNK-001',
+      stockQuantity: 0,
+    });
+  });
+
+  it('rejects unknown store filter for operational report', async () => {
+    prisma.store.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.getOperationalReport(user, {
+        from: '2026-04-01',
+        to: '2026-04-10',
+        storeId: 'missing-store',
+      }),
+    ).rejects.toThrow('Store not found');
   });
 });

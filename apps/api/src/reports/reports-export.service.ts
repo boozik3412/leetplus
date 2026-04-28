@@ -18,6 +18,9 @@ export type ReportExportFile = {
   buffer: Buffer;
   contentType: string;
   fileName: string;
+  tenantSlug: string;
+  from: string;
+  to: string;
 };
 
 type CsvCell = string | number | null;
@@ -45,6 +48,9 @@ export class ReportsExportService {
         ),
         contentType: 'text/csv; charset=utf-8',
         fileName,
+        tenantSlug: operationalReport.tenantSlug,
+        from: operationalReport.from,
+        to: operationalReport.to,
       };
     }
 
@@ -53,6 +59,9 @@ export class ReportsExportService {
       contentType:
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       fileName,
+      tenantSlug: operationalReport.tenantSlug,
+      from: operationalReport.from,
+      to: operationalReport.to,
     };
   }
 

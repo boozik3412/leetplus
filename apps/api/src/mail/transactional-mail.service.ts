@@ -1,6 +1,19 @@
 import { MailerService } from '@nestjs-modules/mailer';
 import { Injectable } from '@nestjs/common';
 
+export type MailAttachment = {
+  fileName: string;
+  contentType: string;
+  buffer: Buffer;
+};
+
+export type ReportEmailContext = {
+  tenantSlug: string;
+  from: string;
+  to: string;
+  attachment: MailAttachment;
+};
+
 @Injectable()
 export class TransactionalMailService {
   constructor(private readonly mailerService: MailerService) {}
@@ -23,6 +36,34 @@ export class TransactionalMailService {
         `<p><a href="${verificationUrl}">Подтвердить email</a></p>`,
         '<p>Если вы не регистрировались в LeetPlus, просто проигнорируйте это письмо.</p>',
       ].join(''),
+    });
+  }
+
+  async sendReportExport(to: string, context: ReportEmailContext) {
+    await this.mailerService.sendMail({
+      to,
+      subject: `Отчёт LeetPlus ${context.from} - ${context.to}`,
+      text: [
+        'Здравствуйте!',
+        '',
+        `Во вложении отчёт LeetPlus по организации ${context.tenantSlug}.`,
+        `Период: ${context.from} - ${context.to}.`,
+        '',
+        'Письмо сформировано автоматически.',
+      ].join('\n'),
+      html: [
+        '<p>Здравствуйте!</p>',
+        `<p>Во вложении отчёт LeetPlus по организации <b>${context.tenantSlug}</b>.</p>`,
+        `<p>Период: ${context.from} - ${context.to}.</p>`,
+        '<p>Письмо сформировано автоматически.</p>',
+      ].join(''),
+      attachments: [
+        {
+          filename: context.attachment.fileName,
+          content: context.attachment.buffer,
+          contentType: context.attachment.contentType,
+        },
+      ],
     });
   }
 }

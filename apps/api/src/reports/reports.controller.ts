@@ -1,6 +1,8 @@
 import {
+  Body,
   Controller,
   Get,
+  Post,
   Query,
   StreamableFile,
   UseGuards,
@@ -8,10 +10,12 @@ import {
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { ReportsEmailService } from './reports-email.service';
 import {
   ReportsExportService,
   type ReportExportQuery,
 } from './reports-export.service';
+import type { SendReportEmailDto } from './reports.dto';
 import {
   ReportsService,
   type AssortmentReport,
@@ -25,6 +29,7 @@ export class ReportsController {
   constructor(
     private readonly reportsService: ReportsService,
     private readonly reportsExportService: ReportsExportService,
+    private readonly reportsEmailService: ReportsEmailService,
   ) {}
 
   @Get('assortment')
@@ -54,5 +59,13 @@ export class ReportsController {
       disposition: `attachment; filename="${file.fileName}"`,
       length: file.buffer.byteLength,
     });
+  }
+
+  @Post('email')
+  sendReportEmail(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: SendReportEmailDto,
+  ) {
+    return this.reportsEmailService.sendReport(user, dto);
   }
 }

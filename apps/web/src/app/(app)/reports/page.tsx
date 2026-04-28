@@ -1,4 +1,5 @@
 import { requireCurrentUser } from "@/lib/auth";
+import { ReportEmailForm } from "@/components/report-email-form";
 import {
   getAssortmentReport,
   getOperationalReport,
@@ -58,7 +59,7 @@ export default async function ReportsPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  const user = await requireCurrentUser();
   const params = await searchParams;
   const filters = {
     from: searchParam(params.from),
@@ -100,6 +101,13 @@ export default async function ReportsPage({
             to: operationalReport.to,
             storeId: operationalReport.storeId,
           })}
+        />
+
+        <ReportEmailForm
+          defaultEmail={user.email}
+          from={operationalReport.from}
+          to={operationalReport.to}
+          storeId={operationalReport.storeId}
         />
 
         <section className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

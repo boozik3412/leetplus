@@ -17,6 +17,7 @@ import { ProductCsvImportService } from '../src/imports/product-csv-import.servi
 import { PrismaService } from '../src/prisma/prisma.service';
 import { ProductsModule } from '../src/products/products.module';
 import { ProductsService } from '../src/products/products.service';
+import { ReportsEmailService } from '../src/reports/reports-email.service';
 import { ReportsExportService } from '../src/reports/reports-export.service';
 import { ReportsModule } from '../src/reports/reports.module';
 import { ReportsService } from '../src/reports/reports.service';
@@ -46,6 +47,10 @@ describe('API routes (e2e)', () => {
 
   const reportsExportService = {
     exportReports: jest.fn(),
+  };
+
+  const reportsEmailService = {
+    sendReport: jest.fn(),
   };
 
   const productCsvImportService = {
@@ -96,6 +101,8 @@ describe('API routes (e2e)', () => {
       .useValue(reportsService)
       .overrideProvider(ReportsExportService)
       .useValue(reportsExportService)
+      .overrideProvider(ReportsEmailService)
+      .useValue(reportsEmailService)
       .overrideProvider(ProductCsvImportService)
       .useValue(productCsvImportService)
       .overrideProvider(FactCsvImportService)
@@ -402,6 +409,28 @@ describe('API routes (e2e)', () => {
         'attachment; filename="leetplus-reports-2026-04-01-2026-04-30.csv"',
       )
       .expect('report');
+  });
+
+  it('/reports/email (POST)', () => {
+    reportsEmailService.sendReport.mockResolvedValue({
+      ok: true,
+      recipientEmail: 'owner@club-a.leetplus.ru',
+      fileName: 'leetplus-reports-2026-04-01-2026-04-30.xlsx',
+    });
+
+    return request(app.getHttpServer())
+      .post('/reports/email')
+      .send({
+        format: 'xlsx',
+        from: '2026-04-01',
+        to: '2026-04-30',
+      })
+      .expect(201)
+      .expect({
+        ok: true,
+        recipientEmail: 'owner@club-a.leetplus.ru',
+        fileName: 'leetplus-reports-2026-04-01-2026-04-30.xlsx',
+      });
   });
 
   it('/imports/inventory/preview (POST)', () => {

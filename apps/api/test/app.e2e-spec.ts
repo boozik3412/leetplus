@@ -44,6 +44,7 @@ describe('API routes (e2e)', () => {
     getAssortmentReport: jest.fn(),
     getOperationalReport: jest.fn(),
     getSkuPerformanceReport: jest.fn(),
+    getSuppliersPerformanceReport: jest.fn(),
   };
 
   const reportsExportService = {
@@ -428,6 +429,33 @@ describe('API routes (e2e)', () => {
         topByQuantity: [],
         topBySalesPerFacing: [],
         topByProfitPerFacing: [],
+      });
+  });
+
+  it('/reports/suppliers-performance (GET)', () => {
+    reportsService.getSuppliersPerformanceReport.mockResolvedValue({
+      tenantId: 'tenant-1',
+      tenantSlug: 'club-a',
+      from: '2026-04-01',
+      to: '2026-04-30',
+      storeId: null,
+      totalRevenue: 1000,
+      totalGrossProfit: 400,
+      rows: [],
+    });
+
+    return request(app.getHttpServer())
+      .get('/reports/suppliers-performance?from=2026-04-01&to=2026-04-30')
+      .expect(200)
+      .expect({
+        tenantId: 'tenant-1',
+        tenantSlug: 'club-a',
+        from: '2026-04-01',
+        to: '2026-04-30',
+        storeId: null,
+        totalRevenue: 1000,
+        totalGrossProfit: 400,
+        rows: [],
       });
   });
 

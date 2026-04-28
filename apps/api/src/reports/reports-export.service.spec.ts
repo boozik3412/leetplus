@@ -5,12 +5,14 @@ import type {
   AssortmentReport,
   OperationalReport,
   SkuPerformanceReport,
+  SuppliersPerformanceReport,
 } from './reports.service';
 
 type ReportsServiceMock = {
   getAssortmentReport: jest.Mock;
   getOperationalReport: jest.Mock;
   getSkuPerformanceReport: jest.Mock;
+  getSuppliersPerformanceReport: jest.Mock;
 };
 
 const user = {
@@ -143,6 +145,34 @@ const skuPerformanceReport: SkuPerformanceReport = {
   topByProfitPerFacing: [],
 };
 
+const suppliersPerformanceReport: SuppliersPerformanceReport = {
+  tenantId: 'tenant-1',
+  tenantSlug: 'club-a',
+  from: '2026-04-01',
+  to: '2026-04-30',
+  storeId: null,
+  totalRevenue: 1000,
+  totalGrossProfit: 300,
+  rows: [
+    {
+      supplierId: 'supplier-1',
+      supplierName: 'Supplier A',
+      activeSku: 2,
+      soldQuantity: 10,
+      revenue: 1000,
+      cost: 700,
+      grossProfit: 300,
+      marginPercent: 30,
+      salesSharePercent: 100,
+      profitSharePercent: 100,
+      averageRevenuePerSku: 500,
+      paymentDelayDays: 14,
+      minOrderAmount: '5000',
+      orderMultiplicity: 6,
+    },
+  ],
+};
+
 describe('ReportsExportService', () => {
   let reportsService: ReportsServiceMock;
   let service: ReportsExportService;
@@ -154,6 +184,9 @@ describe('ReportsExportService', () => {
       getSkuPerformanceReport: jest
         .fn()
         .mockResolvedValue(skuPerformanceReport),
+      getSuppliersPerformanceReport: jest
+        .fn()
+        .mockResolvedValue(suppliersPerformanceReport),
     };
     service = new ReportsExportService(
       reportsService as unknown as ReportsService,
@@ -169,6 +202,8 @@ describe('ReportsExportService', () => {
     expect(content).toContain('Operations summary');
     expect(content).toContain('ABC by revenue');
     expect(content).toContain('Top SKU by revenue');
+    expect(content).toContain('Top suppliers');
+    expect(content).toContain('Supplier A;2;10;1000');
     expect(content).toContain('Assortment summary');
     expect(content).toContain('DRK-001;Cola');
     expect(reportsService.getOperationalReport).toHaveBeenCalledWith(user, {

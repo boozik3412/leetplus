@@ -4,6 +4,7 @@ import {
   getAssortmentReport,
   getOperationalReport,
   getSkuPerformanceReport,
+  getSuppliersPerformanceReport,
   type AbcGroup,
   type AbcSummaryRow,
   type LowMarginProduct,
@@ -12,6 +13,7 @@ import {
   type ReportRecommendation,
   type ReportGroup,
   type SkuPerformanceRow,
+  type SupplierPerformanceRow,
 } from "@/lib/reports";
 import { getStores, type Store } from "@/lib/stores";
 
@@ -70,11 +72,17 @@ export default async function ReportsPage({
     to: searchParam(params.to),
     storeId: searchParam(params.storeId),
   };
-  const [assortmentReport, operationalReport, skuPerformanceReport, stores] =
-    await Promise.all([
+  const [
+    assortmentReport,
+    operationalReport,
+    skuPerformanceReport,
+    suppliersPerformanceReport,
+    stores,
+  ] = await Promise.all([
     getAssortmentReport(),
     getOperationalReport(filters),
-      getSkuPerformanceReport(filters),
+    getSkuPerformanceReport(filters),
+    getSuppliersPerformanceReport(filters),
     getStores(),
   ]);
 
@@ -176,6 +184,8 @@ export default async function ReportsPage({
         </section>
 
         <TopSkuTable rows={skuPerformanceReport.topByRevenue} />
+
+        <TopSuppliersTable rows={suppliersPerformanceReport.rows} />
 
         <section className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
           <Metric label="Всего SKU" value={assortmentReport.totalSku} />
@@ -648,6 +658,84 @@ function TopSkuTable({ rows }: { rows: SkuPerformanceRow[] }) {
       ) : (
         <p className="px-5 py-6 text-sm text-zinc-500">
           Продаж по текущему фильтру нет.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function TopSuppliersTable({ rows }: { rows: SupplierPerformanceRow[] }) {
+  return (
+    <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
+      <div className="border-b border-zinc-200 px-5 py-4">
+        <h2 className="text-base font-semibold">ТОП поставщиков</h2>
+        <p className="mt-1 text-sm text-zinc-500">
+          Выручка, прибыль, доля продаж и условия поставщика по текущему фильтру.
+        </p>
+      </div>
+
+      {rows.length > 0 ? (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[1120px] text-left text-sm">
+            <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
+              <tr>
+                <th className="px-5 py-3 font-medium">Поставщик</th>
+                <th className="px-5 py-3 text-right font-medium">SKU</th>
+                <th className="px-5 py-3 text-right font-medium">Продано</th>
+                <th className="px-5 py-3 text-right font-medium">Выручка</th>
+                <th className="px-5 py-3 text-right font-medium">Прибыль</th>
+                <th className="px-5 py-3 text-right font-medium">Маржа</th>
+                <th className="px-5 py-3 text-right font-medium">Доля продаж</th>
+                <th className="px-5 py-3 text-right font-medium">Выручка/SKU</th>
+                <th className="px-5 py-3 text-right font-medium">Отсрочка</th>
+                <th className="px-5 py-3 text-right font-medium">Мин. заказ</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100">
+              {rows.map((row) => (
+                <tr key={row.supplierId ?? "without-supplier"}>
+                  <td className="px-5 py-4 font-medium text-zinc-950">
+                    {row.supplierName}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {row.activeSku}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {formatQuantity(row.soldQuantity)}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {formatMoney(row.revenue)}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {formatMoney(row.grossProfit)}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {formatPercent(row.marginPercent)}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {formatPercent(row.salesSharePercent)}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {formatMoney(row.averageRevenuePerSku)}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {row.paymentDelayDays === null
+                      ? "—"
+                      : `${row.paymentDelayDays} дн.`}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {row.minOrderAmount === null
+                      ? "—"
+                      : formatMoney(row.minOrderAmount)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="px-5 py-6 text-sm text-zinc-500">
+          Продаж по поставщикам в текущем фильтре нет.
         </p>
       )}
     </section>

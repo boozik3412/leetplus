@@ -136,6 +136,34 @@ export type SkuPerformanceReport = {
   topByProfitPerFacing: SkuPerformanceRow[];
 };
 
+export type SupplierPerformanceRow = {
+  supplierId: string | null;
+  supplierName: string;
+  activeSku: number;
+  soldQuantity: number;
+  revenue: number;
+  cost: number;
+  grossProfit: number;
+  marginPercent: number;
+  salesSharePercent: number;
+  profitSharePercent: number;
+  averageRevenuePerSku: number;
+  paymentDelayDays: number | null;
+  minOrderAmount: string | null;
+  orderMultiplicity: number | null;
+};
+
+export type SuppliersPerformanceReport = {
+  tenantId: string;
+  tenantSlug: string;
+  from: string;
+  to: string;
+  storeId: string | null;
+  totalRevenue: number;
+  totalGrossProfit: number;
+  rows: SupplierPerformanceRow[];
+};
+
 export async function getAssortmentReport(): Promise<AssortmentReport> {
   const response = await fetch(`${getApiUrl()}/reports/assortment`, {
     cache: "no-store",
@@ -213,4 +241,37 @@ export async function getSkuPerformanceReport(
   }
 
   return response.json() as Promise<SkuPerformanceReport>;
+}
+
+export async function getSuppliersPerformanceReport(
+  filters: OperationalReportFilters,
+): Promise<SuppliersPerformanceReport> {
+  const params = new URLSearchParams();
+
+  if (filters.from) {
+    params.set("from", filters.from);
+  }
+
+  if (filters.to) {
+    params.set("to", filters.to);
+  }
+
+  if (filters.storeId) {
+    params.set("storeId", filters.storeId);
+  }
+
+  const query = params.toString();
+  const response = await fetch(
+    `${getApiUrl()}/reports/suppliers-performance${query ? `?${query}` : ""}`,
+    {
+      cache: "no-store",
+      headers: await getAuthHeaders(),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch suppliers performance report");
+  }
+
+  return response.json() as Promise<SuppliersPerformanceReport>;
 }

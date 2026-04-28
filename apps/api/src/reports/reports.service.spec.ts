@@ -366,4 +366,95 @@ describe('ReportsService', () => {
     expect(report.topByQuantity[0].article).toBe('DRK-001');
     expect(report.topByProfitPerFacing[0].article).toBe('DRK-001');
   });
+
+  it('builds suppliers performance report', async () => {
+    prisma.store.findFirst.mockResolvedValue({ id: 'store-1' });
+    prisma.product.findMany.mockResolvedValue([
+      { supplierId: 'supplier-1' },
+      { supplierId: 'supplier-1' },
+      { supplierId: null },
+    ]);
+    prisma.salesFact.findMany.mockResolvedValue([
+      {
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        productId: 'product-1',
+        quantity: new Prisma.Decimal(10),
+        revenue: new Prisma.Decimal(1000),
+        cost: new Prisma.Decimal(700),
+        product: {
+          supplierId: 'supplier-1',
+          supplier: {
+            id: 'supplier-1',
+            name: 'Supplier A',
+            paymentDelayDays: 14,
+            minOrderAmount: new Prisma.Decimal(5000),
+            orderMultiplicity: 6,
+          },
+        },
+      },
+      {
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        productId: 'product-2',
+        quantity: new Prisma.Decimal(2),
+        revenue: new Prisma.Decimal(200),
+        cost: new Prisma.Decimal(100),
+        product: {
+          supplierId: null,
+          supplier: null,
+        },
+      },
+    ]);
+
+    const report = await service.getSuppliersPerformanceReport(user, {
+      from: '2026-04-01',
+      to: '2026-04-10',
+      storeId: 'store-1',
+    });
+
+    expect(report).toMatchObject({
+      tenantId: 'tenant-1',
+      tenantSlug: 'club-a',
+      from: '2026-04-01',
+      to: '2026-04-10',
+      storeId: 'store-1',
+      totalRevenue: 1200,
+      totalGrossProfit: 400,
+    });
+    expect(report.rows).toEqual([
+      {
+        supplierId: 'supplier-1',
+        supplierName: 'Supplier A',
+        activeSku: 2,
+        soldQuantity: 10,
+        revenue: 1000,
+        cost: 700,
+        grossProfit: 300,
+        marginPercent: 30,
+        salesSharePercent: 83.3,
+        profitSharePercent: 75,
+        averageRevenuePerSku: 500,
+        paymentDelayDays: 14,
+        minOrderAmount: '5000',
+        orderMultiplicity: 6,
+      },
+      {
+        supplierId: null,
+        supplierName: 'Без поставщика',
+        activeSku: 1,
+        soldQuantity: 2,
+        revenue: 200,
+        cost: 100,
+        grossProfit: 100,
+        marginPercent: 50,
+        salesSharePercent: 16.7,
+        profitSharePercent: 25,
+        averageRevenuePerSku: 200,
+        paymentDelayDays: null,
+        minOrderAmount: null,
+        orderMultiplicity: null,
+      },
+    ]);
+  });
 });

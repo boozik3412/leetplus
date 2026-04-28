@@ -139,6 +139,34 @@ export type SkuPerformanceReport = {
   topByProfitPerFacing: SkuPerformanceRow[];
 };
 
+export type SupplierPerformanceRow = {
+  supplierId: string | null;
+  supplierName: string;
+  activeSku: number;
+  soldQuantity: number;
+  revenue: number;
+  cost: number;
+  grossProfit: number;
+  marginPercent: number;
+  salesSharePercent: number;
+  profitSharePercent: number;
+  averageRevenuePerSku: number;
+  paymentDelayDays: number | null;
+  minOrderAmount: string | null;
+  orderMultiplicity: number | null;
+};
+
+export type SuppliersPerformanceReport = {
+  tenantId: string;
+  tenantSlug: string;
+  from: string;
+  to: string;
+  storeId: string | null;
+  totalRevenue: number;
+  totalGrossProfit: number;
+  rows: SupplierPerformanceRow[];
+};
+
 type GroupAccumulator = {
   id: string | null;
   name: string;
@@ -551,6 +579,141 @@ export class ReportsService {
         sortedRows,
         (row) => row.profitPerFacing,
       ),
+    };
+  }
+
+  async getSuppliersPerformanceReport(
+    user: AuthenticatedUser,
+    query: OperationalReportQuery,
+  ): Promise<SuppliersPerformanceReport> {
+    const { tenantId, tenantSlug } =
+      await this.tenantContextService.resolve(user);
+    const period = this.resolvePeriod(query);
+    const storeFilter = query.storeId ? { storeId: query.storeId } : {};
+
+    if (query.storeId) {
+      const store = await this.prisma.store.findFirst({
+        where: { id: query.storeId, tenantId, isActive: true },
+        select: { id: true },
+      });
+
+      if (!store) {
+        throw new BadRequestException('Store not found');
+      }
+    }
+
+    const [salesFacts, activeProducts] = await Promise.all([
+      this.prisma.salesFact.findMany({
+        where: {
+          tenantId,
+          ...storeFilter,
+          saleDate: {
+            gte: period.fromDate,
+            lte: period.toDate,
+          },
+        },
+        include: {
+          product: {
+            select: {
+              supplierId: true,
+              supplier: {
+                select: {
+                  id: true,
+                  name: true,
+                  paymentDelayDays: true,
+                  minOrderAmount: true,
+                  orderMultiplicity: true,
+                },
+              },
+            },
+          },
+        },
+      }),
+      this.prisma.product.findMany({
+        where: { tenantId, isActive: true },
+        select: {
+          supplierId: true,
+        },
+      }),
+    ]);
+
+    const activeSkuBySupplier = new Map<string, number>();
+
+    activeProducts.forEach((product) => {
+      const key = product.supplierId ?? 'without-supplier';
+      activeSkuBySupplier.set(key, (activeSkuBySupplier.get(key) ?? 0) + 1);
+    });
+
+    const rowsBySupplier = new Map<string, SupplierPerformanceRow>();
+    let totalRevenue = 0;
+    let totalGrossProfit = 0;
+
+    salesFacts.forEach((fact) => {
+      const supplier = fact.product.supplier;
+      const supplierId = fact.product.supplierId;
+      const key = supplierId ?? 'without-supplier';
+      const quantity = fact.quantity.toNumber();
+      const revenue = fact.revenue.toNumber();
+      const cost = fact.cost.toNumber();
+      const grossProfit = revenue - cost;
+      const current = rowsBySupplier.get(key) ?? {
+        supplierId,
+        supplierName: supplier?.name ?? 'Без поставщика',
+        activeSku: activeSkuBySupplier.get(key) ?? 0,
+        soldQuantity: 0,
+        revenue: 0,
+        cost: 0,
+        grossProfit: 0,
+        marginPercent: 0,
+        salesSharePercent: 0,
+        profitSharePercent: 0,
+        averageRevenuePerSku: 0,
+        paymentDelayDays: supplier?.paymentDelayDays ?? null,
+        minOrderAmount: supplier?.minOrderAmount?.toString() ?? null,
+        orderMultiplicity: supplier?.orderMultiplicity ?? null,
+      };
+
+      current.soldQuantity += quantity;
+      current.revenue += revenue;
+      current.cost += cost;
+      current.grossProfit += grossProfit;
+      rowsBySupplier.set(key, current);
+
+      totalRevenue += revenue;
+      totalGrossProfit += grossProfit;
+    });
+
+    const rows = [...rowsBySupplier.values()]
+      .map((row) => ({
+        ...row,
+        soldQuantity: this.round(row.soldQuantity),
+        revenue: this.round(row.revenue),
+        cost: this.round(row.cost),
+        grossProfit: this.round(row.grossProfit),
+        marginPercent: this.marginPercent(row.cost, row.revenue),
+        salesSharePercent: this.sharePercent(row.revenue, totalRevenue),
+        profitSharePercent: this.sharePercent(
+          row.grossProfit,
+          totalGrossProfit,
+        ),
+        averageRevenuePerSku:
+          row.activeSku > 0 ? this.round(row.revenue / row.activeSku) : 0,
+      }))
+      .sort(
+        (a, b) =>
+          b.revenue - a.revenue || a.supplierName.localeCompare(b.supplierName),
+      )
+      .slice(0, 20);
+
+    return {
+      tenantId,
+      tenantSlug,
+      from: this.toDateInputValue(period.fromDate),
+      to: this.toDateInputValue(period.toDate),
+      storeId: query.storeId ?? null,
+      totalRevenue: this.round(totalRevenue),
+      totalGrossProfit: this.round(totalGrossProfit),
+      rows,
     };
   }
 

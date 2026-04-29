@@ -189,6 +189,8 @@ export class DashboardService {
     }
 
     const salesByProduct = new Map<string, DashboardTopSku>();
+    const networkSkuKeyByName = new Map<string, string>();
+    const networkSkuKeyByArticle = new Map<string, string>();
     const soldByProduct = new Map<string, number>();
     let totalRevenue = 0;
     let totalCost = 0;
@@ -200,13 +202,15 @@ export class DashboardService {
       const cost = fact.cost.toNumber();
       const skuKey =
         skuGrouping === 'network'
-          ? this.networkSkuKey(fact.product.name, fact.product.article)
+          ? this.resolveNetworkSkuKey(
+              fact.product.name,
+              fact.product.article,
+              networkSkuKeyByName,
+              networkSkuKeyByArticle,
+            )
           : `${fact.store.id}:${fact.productId}`;
       const current = salesByProduct.get(skuKey) ?? {
-        productId:
-          skuGrouping === 'network'
-            ? `network:${this.networkSkuKey(fact.product.name, fact.product.article)}`
-            : fact.product.id,
+        productId: skuGrouping === 'network' ? skuKey : fact.product.id,
         article: fact.product.article,
         name: fact.product.name,
         storeId: skuGrouping === 'network' ? null : fact.store.id,
@@ -381,8 +385,31 @@ export class DashboardService {
     );
   }
 
-  private networkSkuKey(name: string, article: string) {
-    return (name || article).trim().toLowerCase().replace(/ё/g, 'е');
+  private resolveNetworkSkuKey(
+    name: string,
+    article: string,
+    keyByName: Map<string, string>,
+    keyByArticle: Map<string, string>,
+  ) {
+    const normalizedName = this.normalizeKey(name);
+    const normalizedArticle = this.normalizeKey(article);
+    const existingKey =
+      keyByName.get(normalizedName) ?? keyByArticle.get(normalizedArticle);
+    const key = existingKey ?? `network:${normalizedName || normalizedArticle}`;
+
+    if (normalizedName) {
+      keyByName.set(normalizedName, key);
+    }
+
+    if (normalizedArticle) {
+      keyByArticle.set(normalizedArticle, key);
+    }
+
+    return key;
+  }
+
+  private normalizeKey(value: string) {
+    return value.trim().toLowerCase().replace(/ё/g, 'е');
   }
 
   private latestStockByProduct(

@@ -19,6 +19,10 @@ enum StockMovementType {
   RETURN
 }
 
+enum IntegrationProvider {
+  LANGAME
+}
+
 model Tenant {
   id        String   @id @default(uuid())
   name      String
@@ -36,6 +40,8 @@ model Tenant {
   salesFacts SalesFact[]
   inventorySnapshots InventorySnapshot[]
   stockMovements StockMovement[]
+  integrationCredentials IntegrationCredential[]
+  integrationSources IntegrationSource[]
 }
 
 model User {
@@ -92,20 +98,27 @@ model EmailVerificationToken {
 }
 
 model Store {
-  id        String   @id @default(uuid())
-  tenantId  String
-  name      String
-  address   String?
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                  String               @id @default(uuid())
+  tenantId            String
+  name                String
+  address             String?
+  isActive            Boolean              @default(true)
+  externalProvider    IntegrationProvider?
+  externalDomain      String?
+  externalClubId      String?
+  integrationSourceId String?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id])
+  integrationSource IntegrationSource? @relation(fields: [integrationSourceId], references: [id], onDelete: SetNull)
   salesFacts SalesFact[]
   inventorySnapshots InventorySnapshot[]
   stockMovements StockMovement[]
 
+  @@unique([tenantId, externalProvider, externalDomain, externalClubId])
   @@index([tenantId])
+  @@index([integrationSourceId])
 }
 
 model Category {
@@ -141,19 +154,22 @@ model Supplier {
 }
 
 model Product {
-  id            String   @id @default(uuid())
-  tenantId      String
-  categoryId    String?
-  supplierId    String?
-  article       String
-  name          String
-  purchasePrice Decimal
-  salePrice     Decimal
-  facing        Int      @default(1)
-  shelfLifeDays Int?
-  isActive      Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id                String               @id @default(uuid())
+  tenantId          String
+  categoryId        String?
+  supplierId        String?
+  article           String
+  name              String
+  purchasePrice     Decimal
+  salePrice         Decimal
+  facing            Int                  @default(1)
+  shelfLifeDays     Int?
+  isActive          Boolean              @default(true)
+  externalProvider  IntegrationProvider?
+  externalDomain    String?
+  externalProductId String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
 
   tenant   Tenant    @relation(fields: [tenantId], references: [id])
   category Category? @relation(fields: [categoryId], references: [id])
@@ -163,42 +179,50 @@ model Product {
   stockMovements StockMovement[]
 
   @@unique([tenantId, article])
+  @@unique([tenantId, externalProvider, externalDomain, externalProductId])
   @@index([tenantId])
   @@index([categoryId])
   @@index([supplierId])
 }
 
 model SalesFact {
-  id        String   @id @default(uuid())
-  tenantId  String
-  storeId   String
-  productId String
-  saleDate  DateTime
-  quantity  Decimal
-  revenue   Decimal
-  cost      Decimal
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id               String               @id @default(uuid())
+  tenantId         String
+  storeId          String
+  productId        String
+  saleDate         DateTime
+  quantity         Decimal
+  revenue          Decimal
+  cost             Decimal
+  externalProvider IntegrationProvider?
+  externalDomain   String?
+  externalSaleId   String?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
 
   tenant  Tenant  @relation(fields: [tenantId], references: [id])
   store   Store   @relation(fields: [storeId], references: [id])
   product Product @relation(fields: [productId], references: [id])
 
   @@unique([tenantId, storeId, productId, saleDate])
+  @@unique([tenantId, externalProvider, externalDomain, externalSaleId])
   @@index([tenantId, saleDate])
   @@index([storeId])
   @@index([productId])
 }
 
 model InventorySnapshot {
-  id           String   @id @default(uuid())
-  tenantId     String
-  storeId      String
-  productId    String
-  snapshotDate DateTime
-  quantity     Decimal
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id               String               @id @default(uuid())
+  tenantId         String
+  storeId          String
+  productId        String
+  snapshotDate     DateTime
+  quantity         Decimal
+  externalProvider IntegrationProvider?
+  externalDomain   String?
+  externalClubId   String?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
 
   tenant  Tenant  @relation(fields: [tenantId], references: [id])
   store   Store   @relation(fields: [storeId], references: [id])
@@ -208,6 +232,46 @@ model InventorySnapshot {
   @@index([tenantId, snapshotDate])
   @@index([storeId])
   @@index([productId])
+}
+
+model IntegrationCredential {
+  id              String              @id @default(uuid())
+  tenantId        String
+  provider        IntegrationProvider
+  name            String
+  apiKeyEncrypted String?
+  apiKeyEnvVar    String?
+  isActive        Boolean             @default(true)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  tenant  Tenant              @relation(fields: [tenantId], references: [id])
+  sources IntegrationSource[]
+
+  @@unique([tenantId, provider, name])
+  @@index([tenantId])
+}
+
+model IntegrationSource {
+  id           String              @id @default(uuid())
+  tenantId     String
+  credentialId String
+  provider     IntegrationProvider
+  name         String
+  baseUrl      String
+  domain       String
+  isActive     Boolean             @default(true)
+  lastSyncedAt DateTime?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  tenant     Tenant                @relation(fields: [tenantId], references: [id])
+  credential IntegrationCredential @relation(fields: [credentialId], references: [id])
+  stores     Store[]
+
+  @@unique([tenantId, provider, domain])
+  @@index([tenantId])
+  @@index([credentialId])
 }
 
 model StockMovement {

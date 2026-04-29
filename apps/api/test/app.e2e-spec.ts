@@ -13,6 +13,8 @@ import { DashboardModule } from '../src/dashboard/dashboard.module';
 import { DashboardService } from '../src/dashboard/dashboard.service';
 import { FactCsvImportService } from '../src/imports/fact-csv-import.service';
 import { ImportsModule } from '../src/imports/imports.module';
+import { IntegrationsModule } from '../src/integrations/integrations.module';
+import { LangameSyncService } from '../src/integrations/langame-sync.service';
 import { ProductCsvImportService } from '../src/imports/product-csv-import.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { ProductsModule } from '../src/products/products.module';
@@ -71,6 +73,10 @@ describe('API routes (e2e)', () => {
     importStockMovements: jest.fn(),
   };
 
+  const langameSyncService = {
+    syncTenant: jest.fn(),
+  };
+
   const prismaService = {};
 
   const authService = {
@@ -89,6 +95,7 @@ describe('API routes (e2e)', () => {
         StoresModule,
         ReportsModule,
         ImportsModule,
+        IntegrationsModule,
         DashboardModule,
       ],
       controllers: [AppController],
@@ -112,6 +119,8 @@ describe('API routes (e2e)', () => {
       .useValue(productCsvImportService)
       .overrideProvider(FactCsvImportService)
       .useValue(factCsvImportService)
+      .overrideProvider(LangameSyncService)
+      .useValue(langameSyncService)
       .overrideProvider(PrismaService)
       .useValue(prismaService)
       .overrideGuard(JwtAuthGuard)
@@ -660,6 +669,33 @@ describe('API routes (e2e)', () => {
           errors: [],
           rows: [],
         },
+      });
+  });
+
+  it('/integrations/langame/sync (POST)', () => {
+    langameSyncService.syncTenant.mockResolvedValue({
+      tenantId: 'tenant-1',
+      sources: 3,
+      stores: 4,
+      products: 100,
+      inventorySnapshots: 80,
+      salesFacts: 25,
+    });
+
+    return request(app.getHttpServer())
+      .post('/integrations/langame/sync')
+      .send({
+        dateFrom: '2026-04-01',
+        dateTo: '2026-04-30',
+      })
+      .expect(201)
+      .expect({
+        tenantId: 'tenant-1',
+        sources: 3,
+        stores: 4,
+        products: 100,
+        inventorySnapshots: 80,
+        salesFacts: 25,
       });
   });
 

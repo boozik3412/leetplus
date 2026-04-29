@@ -35,6 +35,8 @@ export type DashboardTopSku = {
 type DashboardTrendGranularity = 'day' | 'week' | 'month' | 'quarter' | 'year';
 type DashboardTrendMode = DashboardTrendGranularity | 'custom';
 
+const DEMAND_PERIOD_DAYS = 21;
+
 export type DashboardSalesTrendSegment = {
   index: number;
   label: string;
@@ -97,6 +99,7 @@ export class DashboardService {
     const storeFilter =
       selectedStoreIds.length > 0 ? { storeId: { in: selectedStoreIds } } : {};
     const skuGrouping = query.skuGrouping === 'network' ? 'network' : 'club';
+    const demandPeriod = this.resolveDemandPeriod();
 
     const [
       tenant,
@@ -108,6 +111,7 @@ export class DashboardService {
       salesFacts,
       trendSalesFacts,
       trendClubRevenueFacts,
+      demandSalesFacts,
       inventorySnapshots,
       stockMovements,
     ] = await Promise.all([
@@ -150,6 +154,12 @@ export class DashboardService {
               id: true,
               article: true,
               name: true,
+              canonicalProduct: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
             },
           },
           store: {
@@ -188,6 +198,20 @@ export class DashboardService {
         select: {
           revenueDate: true,
           totalRevenue: true,
+        },
+      }),
+      this.prisma.salesFact.findMany({
+        where: {
+          tenantId,
+          ...storeFilter,
+          saleDate: {
+            gte: demandPeriod.fromDate,
+            lte: demandPeriod.toDate,
+          },
+        },
+        select: {
+          productId: true,
+          quantity: true,
         },
       }),
       this.prisma.inventorySnapshot.findMany({
@@ -258,17 +282,22 @@ export class DashboardService {
       const cost = fact.cost.toNumber();
       const skuKey =
         skuGrouping === 'network'
-          ? this.resolveNetworkSkuKey(
-              fact.product.name,
-              fact.product.article,
-              networkSkuKeyByName,
-              networkSkuKeyByArticle,
-            )
+          ? fact.product.canonicalProduct
+            ? `canonical:${fact.product.canonicalProduct.id}`
+            : this.resolveNetworkSkuKey(
+                fact.product.name,
+                fact.product.article,
+                networkSkuKeyByName,
+                networkSkuKeyByArticle,
+              )
           : `${fact.store.id}:${fact.productId}`;
       const current = salesByProduct.get(skuKey) ?? {
         productId: skuGrouping === 'network' ? skuKey : fact.product.id,
         article: fact.product.article,
-        name: fact.product.name,
+        name:
+          skuGrouping === 'network'
+            ? (fact.product.canonicalProduct?.name ?? fact.product.name)
+            : fact.product.name,
         storeId: skuGrouping === 'network' ? null : fact.store.id,
         storeName: skuGrouping === 'network' ? null : fact.store.name,
         revenue: 0,
@@ -295,11 +324,11 @@ export class DashboardService {
     const adjustedGrossProfit =
       grossProfit - movementImpact.writeOffAmount - movementImpact.returnAmount;
     const stockByProduct = this.latestStockByProduct(inventorySnapshots);
+    const demandSoldByProduct = this.soldQuantityByProduct(demandSalesFacts);
     const stockQuantity = [...stockByProduct.values()].reduce(
       (sum, quantity) => sum + quantity,
       0,
     );
-    const periodDays = this.periodDays(period.fromDate, period.toDate);
     const salesTrend = this.buildSalesTrend(
       trendSalesFacts,
       trendClubRevenueFacts,
@@ -309,8 +338,8 @@ export class DashboardService {
       period.trendMode,
     );
     const demand = productsForAverages.map((product) => {
-      const sold = soldByProduct.get(product.id) ?? 0;
-      const averageDailySales = sold / periodDays;
+      const sold = demandSoldByProduct.get(product.id) ?? 0;
+      const averageDailySales = sold / DEMAND_PERIOD_DAYS;
       const stock = stockByProduct.get(product.id) ?? 0;
 
       return {
@@ -463,6 +492,37 @@ export class DashboardService {
     const values = Array.isArray(storeIds) ? storeIds : storeIds.split(',');
 
     return values.map((value) => value.trim()).filter(Boolean);
+  }
+
+  private resolveDemandPeriod() {
+    const now = new Date();
+    const toDate = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1),
+    );
+    const fromDate = new Date(toDate);
+    fromDate.setUTCDate(fromDate.getUTCDate() - (DEMAND_PERIOD_DAYS - 1));
+    fromDate.setUTCHours(0, 0, 0, 0);
+    toDate.setUTCHours(23, 59, 59, 999);
+
+    return { fromDate, toDate };
+  }
+
+  private soldQuantityByProduct(
+    salesFacts: {
+      productId: string;
+      quantity: { toNumber: () => number };
+    }[],
+  ) {
+    const soldByProduct = new Map<string, number>();
+
+    salesFacts.forEach((fact) => {
+      soldByProduct.set(
+        fact.productId,
+        (soldByProduct.get(fact.productId) ?? 0) + fact.quantity.toNumber(),
+      );
+    });
+
+    return soldByProduct;
   }
 
   private buildSalesTrend(

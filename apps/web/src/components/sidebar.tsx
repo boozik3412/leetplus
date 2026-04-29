@@ -20,6 +20,7 @@ const navItems: NavItem[] = [
   { href: "/stores", label: "Торговые точки" },
   { href: "/reports", label: "Отчёты" },
   { href: "/import", label: "Импорт" },
+  { href: "/utilities", label: "Утилиты" },
   { href: "/settings", label: "Настройки" },
 ];
 

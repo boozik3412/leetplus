@@ -160,21 +160,37 @@ describe('ReportsService', () => {
 
   it('builds operational report from sales and latest stock', async () => {
     prisma.store.findFirst.mockResolvedValue({ id: 'store-1' });
-    prisma.salesFact.findMany.mockResolvedValue([
-      {
-        tenantId: 'tenant-1',
-        storeId: 'store-1',
-        productId: 'product-1',
-        quantity: new Prisma.Decimal(10),
-        revenue: new Prisma.Decimal(1000),
-        cost: new Prisma.Decimal(850),
-        product: {
-          id: 'product-1',
-          article: 'DRK-001',
-          name: 'Adrenaline Rush',
+    prisma.salesFact.findMany
+      .mockResolvedValueOnce([
+        {
+          tenantId: 'tenant-1',
+          storeId: 'store-1',
+          productId: 'product-1',
+          quantity: new Prisma.Decimal(10),
+          revenue: new Prisma.Decimal(1000),
+          cost: new Prisma.Decimal(850),
+          product: {
+            id: 'product-1',
+            article: 'DRK-001',
+            name: 'Adrenaline Rush',
+          },
         },
-      },
-    ]);
+      ])
+      .mockResolvedValueOnce([
+        {
+          tenantId: 'tenant-1',
+          storeId: 'store-1',
+          productId: 'product-1',
+          quantity: new Prisma.Decimal(21),
+          revenue: new Prisma.Decimal(2100),
+          cost: new Prisma.Decimal(1700),
+          product: {
+            id: 'product-1',
+            article: 'DRK-001',
+            name: 'Adrenaline Rush',
+          },
+        },
+      ]);
     prisma.inventorySnapshot.findMany.mockResolvedValue([
       {
         storeId: 'store-1',
@@ -523,7 +539,7 @@ describe('ReportsService', () => {
     prisma.salesFact.findMany.mockResolvedValue([
       {
         productId: 'product-1',
-        quantity: new Prisma.Decimal(30),
+        quantity: new Prisma.Decimal(63),
       },
     ]);
 
@@ -551,7 +567,7 @@ describe('ReportsService', () => {
         categoryName: 'Напитки',
         supplierName: 'Supplier A',
         stockQuantity: 1,
-        soldQuantity: 30,
+        soldQuantity: 63,
         averageDailySales: 3,
         stockDays: 0.3,
         dailyNeed: 2,

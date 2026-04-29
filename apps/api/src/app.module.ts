@@ -14,6 +14,7 @@ import { ReportsModule } from './reports/reports.module';
 import { StoresModule } from './stores/stores.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 import { TenancyModule } from './tenancy/tenancy.module';
+import { UtilitiesModule } from './utilities/utilities.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { TenancyModule } from './tenancy/tenancy.module';
     IntegrationsModule,
     ReportsModule,
     DashboardModule,
+    UtilitiesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

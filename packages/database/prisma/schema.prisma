@@ -41,6 +41,12 @@ enum IntegrationSyncMode {
   FULL
 }
 
+enum ProductParsingSuggestionStatus {
+  PENDING
+  APPLIED
+  REJECTED
+}
+
 model Tenant {
   id        String   @id @default(uuid())
   name      String
@@ -53,6 +59,9 @@ model Tenant {
   stores    Store[]
   suppliers Supplier[]
   products  Product[]
+  canonicalProducts CanonicalProduct[]
+  productParsingRuns ProductParsingRun[]
+  productParsingSuggestions ProductParsingSuggestion[]
   categories Category[]
   importJobs ImportJob[]
   salesFacts SalesFact[]
@@ -190,12 +199,14 @@ model Product {
   externalProvider  IntegrationProvider?
   externalDomain    String?
   externalProductId String?
+  canonicalProductId String?
   createdAt         DateTime             @default(now())
   updatedAt         DateTime             @updatedAt
 
   tenant   Tenant    @relation(fields: [tenantId], references: [id])
   category Category? @relation(fields: [categoryId], references: [id])
   supplier Supplier? @relation(fields: [supplierId], references: [id])
+  canonicalProduct CanonicalProduct? @relation(fields: [canonicalProductId], references: [id], onDelete: SetNull)
   salesFacts SalesFact[]
   inventorySnapshots InventorySnapshot[]
   stockMovements StockMovement[]
@@ -205,6 +216,70 @@ model Product {
   @@index([tenantId])
   @@index([categoryId])
   @@index([supplierId])
+  @@index([canonicalProductId])
+}
+
+model CanonicalProduct {
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String
+  normalizedKey String
+  brand       String?
+  volumeValue Int?
+  volumeUnit  String?
+  flavor      String?
+  packageType String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id])
+  products Product[]
+  suggestions ProductParsingSuggestion[]
+
+  @@unique([tenantId, normalizedKey])
+  @@index([tenantId])
+}
+
+model ProductParsingRun {
+  id               String   @id @default(uuid())
+  tenantId         String
+  status           String   @default("COMPLETED")
+  totalProducts    Int      @default(0)
+  suggestionsCount Int      @default(0)
+  appliedCount     Int      @default(0)
+  rejectedCount    Int      @default(0)
+  createdAt        DateTime @default(now())
+  finishedAt       DateTime?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  suggestions ProductParsingSuggestion[]
+
+  @@index([tenantId, createdAt])
+}
+
+model ProductParsingSuggestion {
+  id                 String                         @id @default(uuid())
+  tenantId           String
+  runId              String
+  canonicalProductId String?
+  suggestedName      String
+  selectedName       String?
+  normalizedKey      String
+  confidence         Int
+  rationale          Json
+  productIds         String[]
+  candidateNames     String[]
+  status             ProductParsingSuggestionStatus @default(PENDING)
+  createdAt          DateTime                       @default(now())
+  updatedAt          DateTime                       @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  run ProductParsingRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  canonicalProduct CanonicalProduct? @relation(fields: [canonicalProductId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status])
+  @@index([runId])
+  @@index([canonicalProductId])
 }
 
 model SalesFact {

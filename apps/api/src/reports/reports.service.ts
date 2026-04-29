@@ -240,6 +240,8 @@ type StockSnapshot = {
   quantity: { toNumber: () => number };
 };
 
+const DEMAND_PERIOD_DAYS = 21;
+
 @Injectable()
 export class ReportsService {
   constructor(
@@ -347,6 +349,7 @@ export class ReportsService {
       await this.tenantContextService.resolve(user);
     const period = this.resolvePeriod(query);
     const storeFilter = query.storeId ? { storeId: query.storeId } : {};
+    const demandPeriod = this.resolveDemandPeriod();
 
     if (query.storeId) {
       const store = await this.prisma.store.findFirst({
@@ -359,79 +362,103 @@ export class ReportsService {
       }
     }
 
-    const [salesFacts, inventorySnapshots, activeProducts, stockMovements] =
-      await Promise.all([
-        this.prisma.salesFact.findMany({
-          where: {
-            tenantId,
-            ...storeFilter,
-            saleDate: {
-              gte: period.fromDate,
-              lte: period.toDate,
+    const [
+      salesFacts,
+      demandSalesFacts,
+      inventorySnapshots,
+      activeProducts,
+      stockMovements,
+    ] = await Promise.all([
+      this.prisma.salesFact.findMany({
+        where: {
+          tenantId,
+          ...storeFilter,
+          saleDate: {
+            gte: period.fromDate,
+            lte: period.toDate,
+          },
+        },
+        include: {
+          product: {
+            select: {
+              id: true,
+              article: true,
+              name: true,
             },
           },
-          include: {
-            product: {
-              select: {
-                id: true,
-                article: true,
-                name: true,
-              },
+        },
+      }),
+      this.prisma.salesFact.findMany({
+        where: {
+          tenantId,
+          ...storeFilter,
+          saleDate: {
+            gte: demandPeriod.fromDate,
+            lte: demandPeriod.toDate,
+          },
+        },
+        include: {
+          product: {
+            select: {
+              id: true,
+              article: true,
+              name: true,
             },
           },
-        }),
-        this.prisma.inventorySnapshot.findMany({
-          where: {
-            tenantId,
-            ...storeFilter,
-            snapshotDate: {
-              lte: period.toDate,
+        },
+      }),
+      this.prisma.inventorySnapshot.findMany({
+        where: {
+          tenantId,
+          ...storeFilter,
+          snapshotDate: {
+            lte: period.toDate,
+          },
+        },
+        include: {
+          product: {
+            select: {
+              id: true,
+              article: true,
+              name: true,
             },
           },
-          include: {
-            product: {
-              select: {
-                id: true,
-                article: true,
-                name: true,
-              },
-            },
+        },
+        orderBy: {
+          snapshotDate: 'desc',
+        },
+      }),
+      this.prisma.product.findMany({
+        where: { tenantId, isActive: true },
+        select: {
+          id: true,
+          article: true,
+          name: true,
+          category: {
+            select: { name: true },
           },
-          orderBy: {
-            snapshotDate: 'desc',
+          supplier: {
+            select: { name: true },
           },
-        }),
-        this.prisma.product.findMany({
-          where: { tenantId, isActive: true },
-          select: {
-            id: true,
-            article: true,
-            name: true,
-            category: {
-              select: { name: true },
-            },
-            supplier: {
-              select: { name: true },
-            },
+        },
+        orderBy: { name: 'asc' },
+      }),
+      this.prisma.stockMovement.findMany({
+        where: {
+          tenantId,
+          ...storeFilter,
+          movementDate: {
+            gte: period.fromDate,
+            lte: period.toDate,
           },
-          orderBy: { name: 'asc' },
-        }),
-        this.prisma.stockMovement.findMany({
-          where: {
-            tenantId,
-            ...storeFilter,
-            movementDate: {
-              gte: period.fromDate,
-              lte: period.toDate,
-            },
-          },
-          select: {
-            type: true,
-            quantity: true,
-            amount: true,
-          },
-        }),
-      ]);
+        },
+        select: {
+          type: true,
+          quantity: true,
+          amount: true,
+        },
+      }),
+    ]);
 
     const productSales = new Map<string, ProductSales>();
     let totalRevenue = 0;
@@ -462,6 +489,7 @@ export class ReportsService {
     });
 
     const stockByProduct = this.latestStockByProduct(inventorySnapshots);
+    const demandProductSales = this.productSalesByProduct(demandSalesFacts);
     const stockQuantity = [...stockByProduct.values()].reduce(
       (sum, quantity) => sum + quantity,
       0,
@@ -472,9 +500,9 @@ export class ReportsService {
       grossProfit - movementImpact.writeOffAmount - movementImpact.returnAmount;
     const periodDays = this.periodDays(period.fromDate, period.toDate);
     const outOfStockRiskProducts = this.outOfStockRiskProducts(
-      productSales,
+      demandProductSales,
       stockByProduct,
-      periodDays,
+      DEMAND_PERIOD_DAYS,
     );
     const productsWithoutSales = this.productsWithoutSales(
       activeProducts,
@@ -800,6 +828,7 @@ export class ReportsService {
       await this.tenantContextService.resolve(user);
     const period = this.resolvePeriod(query);
     const storeFilter = query.storeId ? { storeId: query.storeId } : {};
+    const demandPeriod = this.resolveDemandPeriod();
 
     if (query.storeId) {
       const store = await this.prisma.store.findFirst({
@@ -853,8 +882,8 @@ export class ReportsService {
           tenantId,
           ...storeFilter,
           saleDate: {
-            gte: period.fromDate,
-            lte: period.toDate,
+            gte: demandPeriod.fromDate,
+            lte: demandPeriod.toDate,
           },
         },
         select: {
@@ -874,7 +903,6 @@ export class ReportsService {
       );
     });
 
-    const periodDays = this.periodDays(period.fromDate, period.toDate);
     let totalStockQuantity = 0;
     let totalDailyNeed = 0;
     let totalRecommendedOrder = 0;
@@ -882,7 +910,7 @@ export class ReportsService {
     const rows = activeProducts.map((product) => {
       const stockQuantity = this.round(stockByProduct.get(product.id) ?? 0);
       const soldQuantity = this.round(soldByProduct.get(product.id) ?? 0);
-      const averageDailySales = this.round(soldQuantity / periodDays);
+      const averageDailySales = this.round(soldQuantity / DEMAND_PERIOD_DAYS);
       const stockDays =
         averageDailySales > 0
           ? this.round(stockQuantity / averageDailySales)
@@ -1064,6 +1092,39 @@ export class ReportsService {
       .filter((item) => item.averageDailySales > 0 && item.stockDays <= 3)
       .sort((a, b) => a.stockDays - b.stockDays)
       .slice(0, 10);
+  }
+
+  private productSalesByProduct(
+    salesFacts: {
+      productId: string;
+      quantity: { toNumber: () => number };
+      revenue: { toNumber: () => number };
+      cost: { toNumber: () => number };
+      product: {
+        article: string;
+        name: string;
+      };
+    }[],
+  ) {
+    const productSales = new Map<string, ProductSales>();
+
+    salesFacts.forEach((fact) => {
+      const current = productSales.get(fact.productId) ?? {
+        productId: fact.productId,
+        article: fact.product.article,
+        name: fact.product.name,
+        quantity: 0,
+        revenue: 0,
+        cost: 0,
+      };
+
+      current.quantity += fact.quantity.toNumber();
+      current.revenue += fact.revenue.toNumber();
+      current.cost += fact.cost.toNumber();
+      productSales.set(fact.productId, current);
+    });
+
+    return productSales;
   }
 
   private productsWithoutSales(
@@ -1260,6 +1321,19 @@ export class ReportsService {
     if (fromDate > toDate) {
       throw new BadRequestException('From date must be before to date');
     }
+
+    return { fromDate, toDate };
+  }
+
+  private resolveDemandPeriod() {
+    const now = new Date();
+    const toDate = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1),
+    );
+    const fromDate = new Date(toDate);
+    fromDate.setUTCDate(fromDate.getUTCDate() - (DEMAND_PERIOD_DAYS - 1));
+    fromDate.setUTCHours(0, 0, 0, 0);
+    toDate.setUTCHours(23, 59, 59, 999);
 
     return { fromDate, toDate };
   }

@@ -6,6 +6,7 @@ export type Capability =
   | "manage_integrations"
   | "run_sync"
   | "import_data"
+  | "use_utilities"
   | "edit_products"
   | "edit_catalog"
   | "edit_stores";
@@ -17,6 +18,7 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "manage_integrations",
     "run_sync",
     "import_data",
+    "use_utilities",
     "edit_products",
     "edit_catalog",
     "edit_stores",
@@ -27,6 +29,7 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "manage_integrations",
     "run_sync",
     "import_data",
+    "use_utilities",
     "edit_products",
     "edit_catalog",
     "edit_stores",
@@ -35,11 +38,12 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "view_dashboard",
     "view_reports",
     "import_data",
+    "use_utilities",
     "edit_products",
     "edit_catalog",
     "edit_stores",
   ],
-  BUYER: ["view_dashboard", "view_reports", "edit_products"],
+  BUYER: ["view_dashboard", "view_reports", "use_utilities", "edit_products"],
 };
 
 export function can(user: AuthUser | null, capability: Capability) {
@@ -61,6 +65,10 @@ export function canAccessPath(user: AuthUser | null, href: string) {
 
   if (href === "/import") {
     return can(user, "import_data");
+  }
+
+  if (href === "/utilities") {
+    return can(user, "use_utilities");
   }
 
   return true;

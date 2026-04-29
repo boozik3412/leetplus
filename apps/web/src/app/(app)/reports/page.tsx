@@ -552,7 +552,10 @@ function NoSalesTable({ rows }: { rows: ProductWithoutSales[] }) {
 
 function ReplenishmentTable({ rows }: { rows: ReplenishmentRow[] }) {
   return (
-    <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
+    <section
+      id="replenishment"
+      className="mt-6 scroll-mt-8 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm"
+    >
       <div className="border-b border-zinc-200 px-5 py-4">
         <h2 className="text-base font-semibold">Остатки и потребность</h2>
         <p className="mt-1 text-sm text-zinc-500">

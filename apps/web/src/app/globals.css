@@ -47,3 +47,51 @@ body::before {
     radial-gradient(circle at 85% 0%, rgb(14 165 233 / 0.10), transparent 26rem);
   pointer-events: none;
 }
+
+/*
+  Transitional dark-mode bridge for legacy screens.
+  New components should prefer explicit semantic classes, but this keeps older
+  report/catalog/import tables readable while the UI system is being unified.
+*/
+.dark .bg-white {
+  background-color: var(--surface) !important;
+}
+
+.dark .bg-zinc-50,
+.dark .bg-zinc-100 {
+  background-color: var(--surface-muted) !important;
+}
+
+.dark .border-zinc-100,
+.dark .border-zinc-200,
+.dark .border-zinc-300 {
+  border-color: var(--border-soft) !important;
+}
+
+.dark .text-zinc-950,
+.dark .text-zinc-900,
+.dark .text-zinc-800 {
+  color: #f4f4f5 !important;
+}
+
+.dark .text-zinc-700,
+.dark .text-zinc-600 {
+  color: #d4d4d8 !important;
+}
+
+.dark .text-zinc-500 {
+  color: #a1a1aa !important;
+}
+
+.dark input,
+.dark select,
+.dark textarea {
+  background-color: #111827;
+  border-color: var(--border-soft);
+  color: #f4f4f5;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #71717a;
+}

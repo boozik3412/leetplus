@@ -2,7 +2,10 @@ import {
   getDashboardSummary,
   type DashboardTopSku,
 } from "@/lib/dashboard-summary";
-import { getStores, type Store } from "@/lib/stores";
+import { DashboardFilters } from "@/components/dashboard-filters";
+import { requireCurrentUser } from "@/lib/auth";
+import { getStores } from "@/lib/stores";
+import Link from "next/link";
 
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
 
@@ -40,6 +43,7 @@ export default async function DashboardPage({
   searchParams: SearchParams;
 }) {
   const params = await searchParams;
+  await requireCurrentUser();
   const filters = {
     period: searchParam(params.period) ?? "month",
     dateFrom: searchParam(params.dateFrom),
@@ -134,9 +138,10 @@ export default async function DashboardPage({
 
         <section className="mt-6 grid gap-4 lg:grid-cols-3">
           <InsightCard
-            label="Рекомендованный заказ"
-            value={`${formatQuantity(summary.recommendedOrderQuantity)} шт`}
-            description="Потребность по SKU, где текущего остатка не хватает на средний спрос."
+            href="/reports#replenishment"
+            label="Остатки менее 3-х дней продаж"
+            value={`${formatQuantity(summary.outOfStockRiskCount)} SKU`}
+            description="Перейти к полному отчёту по остаткам, дням запаса и рекомендованному заказу по SKU."
           />
           <InsightCard
             label="Активный ассортимент"
@@ -158,127 +163,6 @@ export default async function DashboardPage({
         />
       </div>
     </main>
-  );
-}
-
-function DashboardFilters({
-  period,
-  dateFrom,
-  dateTo,
-  skuGrouping,
-  stores,
-  selectedStoreIds,
-}: {
-  period: string;
-  dateFrom: string;
-  dateTo: string;
-  skuGrouping: "club" | "network";
-  stores: Store[];
-  selectedStoreIds: string[];
-}) {
-  const selected = new Set(selectedStoreIds);
-
-  return (
-    <form className="mt-6 rounded-3xl border border-zinc-200 bg-white/85 p-5 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/80">
-      <div className="grid gap-4 lg:grid-cols-[1fr_1fr_1fr_auto] lg:items-end">
-        <label className="block">
-          <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-            Период
-          </span>
-          <select
-            name="period"
-            defaultValue={period}
-            className="mt-2 block w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-          >
-            <option value="month">Текущий месяц</option>
-            <option value="week">Текущая неделя</option>
-            <option value="day">Текущие сутки</option>
-            <option value="custom">Произвольный период</option>
-          </select>
-        </label>
-        <label className="block">
-          <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-            С даты
-          </span>
-          <input
-            type="date"
-            name="dateFrom"
-            defaultValue={dateFrom}
-            className="mt-2 block w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-          />
-        </label>
-        <label className="block">
-          <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-            По дату
-          </span>
-          <input
-            type="date"
-            name="dateTo"
-            defaultValue={dateTo}
-            className="mt-2 block w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-          />
-        </label>
-        <button
-          type="submit"
-          className="rounded-xl bg-zinc-950 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
-        >
-          Применить
-        </button>
-      </div>
-
-      <div className="mt-5 grid gap-5 border-t border-zinc-100 pt-5 dark:border-zinc-800 lg:grid-cols-2">
-        <fieldset>
-          <legend className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-            Клубы
-          </legend>
-          <p className="mt-1 text-xs text-zinc-500">
-            Ничего не выбрано = вся сеть.
-          </p>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2">
-            {stores.map((store) => (
-              <label
-                key={store.id}
-                className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900/70"
-              >
-                <input
-                  type="checkbox"
-                  name="storeIds"
-                  value={store.id}
-                  defaultChecked={selected.has(store.id)}
-                />
-                <span>{store.name}</span>
-              </label>
-            ))}
-          </div>
-        </fieldset>
-
-        <fieldset>
-          <legend className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-            Группировка ТОП SKU
-          </legend>
-          <div className="mt-3 grid gap-2">
-            <label className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900/70">
-              <input
-                type="radio"
-                name="skuGrouping"
-                value="club"
-                defaultChecked={skuGrouping === "club"}
-              />
-              <span>Отдельно по клубам</span>
-            </label>
-            <label className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900/70">
-              <input
-                type="radio"
-                name="skuGrouping"
-                value="network"
-                defaultChecked={skuGrouping === "network"}
-              />
-              <span>По всей сети, одинаковые товары суммируются</span>
-            </label>
-          </div>
-        </fieldset>
-      </div>
-    </form>
   );
 }
 
@@ -345,16 +229,18 @@ function SignalMetric({
 }
 
 function InsightCard({
+  href,
   label,
   value,
   description,
 }: {
+  href?: string;
   label: string;
   value: string;
   description: string;
 }) {
-  return (
-    <div className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+  const content = (
+    <>
       <p className="text-sm text-zinc-500">{label}</p>
       <p className="mt-3 text-2xl font-semibold text-zinc-950 dark:text-zinc-50">
         {value}
@@ -362,6 +248,23 @@ function InsightCard({
       <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
         {description}
       </p>
+    </>
+  );
+
+  if (href) {
+    return (
+      <Link
+        href={href}
+        className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-md dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-emerald-700"
+      >
+        {content}
+      </Link>
+    );
+  }
+
+  return (
+    <div className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      {content}
     </div>
   );
 }

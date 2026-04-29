@@ -1,17 +1,6 @@
 services:
-  postgres:
-    image: postgres:16
-    container_name: leetplus_postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: leetplus
-      POSTGRES_USER: leetplus
-      POSTGRES_PASSWORD: leetplus_password
-    ports:
-      - "5432:5432"
-    volumes:
-      - leetplus_postgres_data:/var/lib/postgresql/data
-
+  # PostgreSQL intentionally lives outside Docker:
+  # WSL locally, native PostgreSQL or managed service on VDS.
   redis:
     image: redis:7
     container_name: leetplus_redis
@@ -26,6 +15,3 @@ services:
     ports:
       - "1025:1025"
       - "8025:8025"
-
-volumes:
-  leetplus_postgres_data:

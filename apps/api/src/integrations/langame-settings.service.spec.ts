@@ -6,6 +6,10 @@ import { LangameSettingsService } from './langame-settings.service';
 import { SecretEncryptionService } from './secret-encryption.service';
 
 type PrismaMock = {
+  tenant: {
+    findUnique: jest.Mock;
+    update: jest.Mock;
+  };
   integrationCredential: {
     findFirst: jest.Mock;
     upsert: jest.Mock;
@@ -52,6 +56,10 @@ const user: AuthenticatedUser = {
 
 function createPrismaMock(): PrismaMock {
   return {
+    tenant: {
+      findUnique: jest.fn(),
+      update: jest.fn(),
+    },
     integrationCredential: {
       findFirst: jest.fn(),
       upsert: jest.fn(),
@@ -85,6 +93,13 @@ describe('LangameSettingsService', () => {
       encrypt: jest.fn((value: string) => `encrypted:${value}`),
       decrypt: jest.fn((value: string) => value.replace('encrypted:', '')),
     };
+    prisma.tenant.findUnique.mockResolvedValue({
+      name: 'Demo Cyber Club',
+    });
+    prisma.tenant.update.mockResolvedValue({
+      id: 'tenant-1',
+      name: 'Demo Cyber Club',
+    });
     prisma.integrationCredential.findFirst.mockResolvedValue(null);
     prisma.integrationCredential.upsert.mockResolvedValue({
       id: 'credential-1',
@@ -109,6 +124,9 @@ describe('LangameSettingsService', () => {
   });
 
   it('saves encrypted API key and active domains for tenant', async () => {
+    prisma.tenant.findUnique.mockResolvedValue({
+      name: 'F5',
+    });
     prisma.integrationCredential.findFirst
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({
@@ -118,12 +136,18 @@ describe('LangameSettingsService', () => {
 
     await expect(
       service.saveSettings(user, {
+        tenantName: 'F5',
         apiKey: 'secret-key',
         domains: ['https://443.langame.ru/public_api', '46.langamepro.ru'],
       }),
     ).resolves.toMatchObject({
       hasApiKey: true,
+      tenantName: 'F5',
       domains: ['443.langame.ru'],
+    });
+    expect(prisma.tenant.update).toHaveBeenCalledWith({
+      where: { id: 'tenant-1' },
+      data: { name: 'F5' },
     });
     expect(encryption.encrypt).toHaveBeenCalledWith('secret-key');
     const [credentialUpsert] = prisma.integrationCredential.upsert.mock

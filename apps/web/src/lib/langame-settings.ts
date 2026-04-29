@@ -10,6 +10,7 @@ export type LangameSourceSettings = {
 };
 
 export type LangameSettings = {
+  tenantName: string;
   hasApiKey: boolean;
   domains: string[];
   sources: LangameSourceSettings[];

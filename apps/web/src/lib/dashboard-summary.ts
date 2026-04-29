@@ -4,14 +4,28 @@ export type DashboardTopSku = {
   productId: string;
   article: string;
   name: string;
+  storeId: string | null;
+  storeName: string | null;
   revenue: number;
   grossProfit: number;
   soldQuantity: number;
 };
 
+export type DashboardSummaryFilters = {
+  period?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  storeIds?: string[];
+  skuGrouping?: "club" | "network";
+};
+
 export type DashboardSummary = {
   tenantId: string;
   tenantSlug: string;
+  tenantName: string;
+  periodLabel: string;
+  skuGrouping: "club" | "network";
+  selectedStoreIds: string[];
   periodFrom: string;
   periodTo: string;
   totalSku: number;
@@ -34,8 +48,33 @@ export type DashboardSummary = {
   topSkuByRevenue: DashboardTopSku[];
 };
 
-export async function getDashboardSummary(): Promise<DashboardSummary> {
-  const response = await fetch(`${getApiUrl()}/dashboard/summary`, {
+export async function getDashboardSummary(
+  filters: DashboardSummaryFilters = {},
+): Promise<DashboardSummary> {
+  const params = new URLSearchParams();
+
+  if (filters.period) {
+    params.set("period", filters.period);
+  }
+
+  if (filters.dateFrom) {
+    params.set("dateFrom", filters.dateFrom);
+  }
+
+  if (filters.dateTo) {
+    params.set("dateTo", filters.dateTo);
+  }
+
+  if (filters.skuGrouping) {
+    params.set("skuGrouping", filters.skuGrouping);
+  }
+
+  filters.storeIds?.forEach((storeId) => {
+    params.append("storeIds", storeId);
+  });
+
+  const query = params.toString();
+  const response = await fetch(`${getApiUrl()}/dashboard/summary${query ? `?${query}` : ""}`, {
     cache: "no-store",
     headers: await getAuthHeaders(),
   });

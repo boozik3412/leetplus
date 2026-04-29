@@ -1,13 +1,26 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { StockMovementType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 
+export type DashboardPeriod = 'day' | 'week' | 'month' | 'custom';
+export type DashboardSkuGrouping = 'club' | 'network';
+
+export type DashboardQuery = {
+  period?: DashboardPeriod;
+  dateFrom?: string;
+  dateTo?: string;
+  storeIds?: string | string[];
+  skuGrouping?: DashboardSkuGrouping;
+};
+
 export type DashboardTopSku = {
   productId: string;
   article: string;
   name: string;
+  storeId: string | null;
+  storeName: string | null;
   revenue: number;
   grossProfit: number;
   soldQuantity: number;
@@ -16,6 +29,10 @@ export type DashboardTopSku = {
 export type DashboardSummary = {
   tenantId: string;
   tenantSlug: string;
+  tenantName: string;
+  periodLabel: string;
+  skuGrouping: DashboardSkuGrouping;
+  selectedStoreIds: string[];
   periodFrom: string;
   periodTo: string;
   totalSku: number;
@@ -45,12 +62,20 @@ export class DashboardService {
     private readonly tenantContextService: TenantContextService,
   ) {}
 
-  async getSummary(user?: AuthenticatedUser): Promise<DashboardSummary> {
+  async getSummary(
+    user?: AuthenticatedUser,
+    query: DashboardQuery = {},
+  ): Promise<DashboardSummary> {
     const { tenantId, tenantSlug } =
       await this.tenantContextService.resolve(user);
-    const period = this.resolvePeriod();
+    const period = this.resolvePeriod(query);
+    const selectedStoreIds = this.resolveStoreIds(query.storeIds);
+    const storeFilter =
+      selectedStoreIds.length > 0 ? { storeId: { in: selectedStoreIds } } : {};
+    const skuGrouping = query.skuGrouping === 'network' ? 'network' : 'club';
 
     const [
+      tenant,
       totalSku,
       activeSku,
       categoriesCount,
@@ -60,6 +85,10 @@ export class DashboardService {
       inventorySnapshots,
       stockMovements,
     ] = await Promise.all([
+      this.prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { name: true },
+      }),
       this.prisma.product.count({ where: { tenantId } }),
       this.prisma.product.count({ where: { tenantId, isActive: true } }),
       this.prisma.category.count({ where: { tenantId } }),
@@ -83,6 +112,7 @@ export class DashboardService {
       this.prisma.salesFact.findMany({
         where: {
           tenantId,
+          ...storeFilter,
           saleDate: {
             gte: period.fromDate,
             lte: period.toDate,
@@ -96,11 +126,18 @@ export class DashboardService {
               name: true,
             },
           },
+          store: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
         },
       }),
       this.prisma.inventorySnapshot.findMany({
         where: {
           tenantId,
+          ...storeFilter,
           snapshotDate: {
             lte: period.toDate,
           },
@@ -117,6 +154,7 @@ export class DashboardService {
       this.prisma.stockMovement.findMany({
         where: {
           tenantId,
+          ...storeFilter,
           movementDate: {
             gte: period.fromDate,
             lte: period.toDate,
@@ -151,6 +189,7 @@ export class DashboardService {
     }
 
     const salesByProduct = new Map<string, DashboardTopSku>();
+    const soldByProduct = new Map<string, number>();
     let totalRevenue = 0;
     let totalCost = 0;
     let soldQuantity = 0;
@@ -159,10 +198,19 @@ export class DashboardService {
       const quantity = fact.quantity.toNumber();
       const revenue = fact.revenue.toNumber();
       const cost = fact.cost.toNumber();
-      const current = salesByProduct.get(fact.productId) ?? {
-        productId: fact.product.id,
+      const skuKey =
+        skuGrouping === 'network'
+          ? this.networkSkuKey(fact.product.name, fact.product.article)
+          : `${fact.store.id}:${fact.productId}`;
+      const current = salesByProduct.get(skuKey) ?? {
+        productId:
+          skuGrouping === 'network'
+            ? `network:${this.networkSkuKey(fact.product.name, fact.product.article)}`
+            : fact.product.id,
         article: fact.product.article,
         name: fact.product.name,
+        storeId: skuGrouping === 'network' ? null : fact.store.id,
+        storeName: skuGrouping === 'network' ? null : fact.store.name,
         revenue: 0,
         grossProfit: 0,
         soldQuantity: 0,
@@ -171,7 +219,11 @@ export class DashboardService {
       current.revenue += revenue;
       current.grossProfit += revenue - cost;
       current.soldQuantity += quantity;
-      salesByProduct.set(fact.productId, current);
+      salesByProduct.set(skuKey, current);
+      soldByProduct.set(
+        fact.productId,
+        (soldByProduct.get(fact.productId) ?? 0) + quantity,
+      );
 
       totalRevenue += revenue;
       totalCost += cost;
@@ -189,7 +241,7 @@ export class DashboardService {
     );
     const periodDays = this.periodDays(period.fromDate, period.toDate);
     const demand = productsForAverages.map((product) => {
-      const sold = salesByProduct.get(product.id)?.soldQuantity ?? 0;
+      const sold = soldByProduct.get(product.id) ?? 0;
       const averageDailySales = sold / periodDays;
       const stock = stockByProduct.get(product.id) ?? 0;
 
@@ -207,6 +259,10 @@ export class DashboardService {
     return {
       tenantId,
       tenantSlug,
+      tenantName: tenant?.name ?? tenantSlug,
+      periodLabel: period.label,
+      skuGrouping,
+      selectedStoreIds,
       periodFrom: this.toDateInputValue(period.fromDate),
       periodTo: this.toDateInputValue(period.toDate),
       totalSku,
@@ -243,7 +299,7 @@ export class DashboardService {
             b.grossProfit - a.grossProfit ||
             a.name.localeCompare(b.name),
         )
-        .slice(0, 5)
+        .slice(0, 10)
         .map((item) => ({
           ...item,
           revenue: this.round(item.revenue),
@@ -253,14 +309,80 @@ export class DashboardService {
     };
   }
 
-  private resolvePeriod() {
-    const toDate = new Date();
+  private resolvePeriod(query: DashboardQuery) {
+    const now = new Date();
+    const toDate = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+    );
+    let fromDate = new Date(toDate);
+    const period = query.period ?? 'month';
+    let label = 'Текущий месяц';
+
+    if (period === 'day') {
+      label = 'Текущие сутки';
+    } else if (period === 'week') {
+      const dayOfWeek = fromDate.getUTCDay();
+      const mondayOffset = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+      fromDate.setUTCDate(fromDate.getUTCDate() - mondayOffset);
+      label = 'Текущая неделя';
+    } else if (period === 'custom') {
+      fromDate = query.dateFrom
+        ? this.parseDate(query.dateFrom, 'dateFrom')
+        : fromDate;
+      const customToDate = query.dateTo
+        ? this.parseDate(query.dateTo, 'dateTo')
+        : toDate;
+      customToDate.setUTCHours(23, 59, 59, 999);
+
+      if (fromDate > customToDate) {
+        return {
+          fromDate: customToDate,
+          toDate: customToDate,
+          label: 'Произвольный период',
+        };
+      }
+
+      return {
+        fromDate,
+        toDate: customToDate,
+        label: 'Произвольный период',
+      };
+    } else {
+      fromDate = new Date(
+        Date.UTC(toDate.getUTCFullYear(), toDate.getUTCMonth(), 1),
+      );
+    }
+
     toDate.setUTCHours(23, 59, 59, 999);
-    const fromDate = new Date(toDate);
-    fromDate.setUTCDate(fromDate.getUTCDate() - 29);
     fromDate.setUTCHours(0, 0, 0, 0);
 
-    return { fromDate, toDate };
+    return { fromDate, toDate, label };
+  }
+
+  private resolveStoreIds(storeIds?: string | string[]) {
+    if (!storeIds) {
+      return [];
+    }
+
+    const values = Array.isArray(storeIds) ? storeIds : storeIds.split(',');
+
+    return values.map((value) => value.trim()).filter(Boolean);
+  }
+
+  private parseDate(value: string, field: string) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+
+    if (!match) {
+      throw new BadRequestException(`${field} must be YYYY-MM-DD`);
+    }
+
+    return new Date(
+      Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])),
+    );
+  }
+
+  private networkSkuKey(name: string, article: string) {
+    return (name || article).trim().toLowerCase().replace(/ё/g, 'е');
   }
 
   private latestStockByProduct(

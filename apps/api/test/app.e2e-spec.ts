@@ -318,6 +318,10 @@ describe('API routes (e2e)', () => {
     dashboardService.getSummary.mockResolvedValue({
       tenantId: 'tenant-demo',
       tenantSlug: 'demo',
+      tenantName: 'Demo Cyber Club',
+      periodLabel: 'Текущий месяц',
+      skuGrouping: 'club',
+      selectedStoreIds: [],
       periodFrom: '2026-04-01',
       periodTo: '2026-04-30',
       totalSku: 30,
@@ -346,6 +350,10 @@ describe('API routes (e2e)', () => {
       .expect({
         tenantId: 'tenant-demo',
         tenantSlug: 'demo',
+        tenantName: 'Demo Cyber Club',
+        periodLabel: 'Текущий месяц',
+        skuGrouping: 'club',
+        selectedStoreIds: [],
         periodFrom: '2026-04-01',
         periodTo: '2026-04-30',
         totalSku: 30,
@@ -715,6 +723,7 @@ describe('API routes (e2e)', () => {
 
   it('/integrations/langame/settings (GET)', () => {
     langameSettingsService.getSettings.mockResolvedValue({
+      tenantName: 'Demo Cyber Club',
       hasApiKey: true,
       domains: ['443.langame.ru'],
       sources: [],
@@ -726,6 +735,7 @@ describe('API routes (e2e)', () => {
       .expect(200)
       .expect({
         hasApiKey: true,
+        tenantName: 'Demo Cyber Club',
         domains: ['443.langame.ru'],
         sources: [],
         syncJobs: [],
@@ -734,6 +744,7 @@ describe('API routes (e2e)', () => {
 
   it('/integrations/langame/settings (PUT)', () => {
     langameSettingsService.saveSettings.mockResolvedValue({
+      tenantName: 'Demo Cyber Club',
       hasApiKey: true,
       domains: ['443.langame.ru'],
       sources: [],
@@ -749,6 +760,7 @@ describe('API routes (e2e)', () => {
       .expect(200)
       .expect({
         hasApiKey: true,
+        tenantName: 'Demo Cyber Club',
         domains: ['443.langame.ru'],
         sources: [],
         syncJobs: [],

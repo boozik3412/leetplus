@@ -4,6 +4,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 
 type DashboardPrismaMock = {
+  tenant: {
+    findUnique: jest.Mock;
+  };
   product: {
     count: jest.Mock;
     findMany: jest.Mock;
@@ -31,6 +34,9 @@ type TenantContextMock = {
 
 function createPrismaMock(): DashboardPrismaMock {
   return {
+    tenant: {
+      findUnique: jest.fn(),
+    },
     product: {
       count: jest.fn(),
       findMany: jest.fn(),
@@ -66,6 +72,9 @@ describe('DashboardService', () => {
         tenantSlug: 'demo',
       }),
     };
+    prisma.tenant.findUnique.mockResolvedValue({
+      name: 'Demo Cyber Club',
+    });
     service = new DashboardService(
       prisma as unknown as PrismaService,
       tenantContext as unknown as TenantContextService,
@@ -107,6 +116,10 @@ describe('DashboardService', () => {
           article: 'DRK-001',
           name: 'Energy Drink',
         },
+        store: {
+          id: 'store-1',
+          name: 'Club A',
+        },
       },
       {
         productId: 'product-2',
@@ -117,6 +130,10 @@ describe('DashboardService', () => {
           id: 'product-2',
           article: 'SNK-001',
           name: 'Chips',
+        },
+        store: {
+          id: 'store-1',
+          name: 'Club A',
         },
       },
     ]);
@@ -148,6 +165,10 @@ describe('DashboardService', () => {
     expect(summary).toMatchObject({
       tenantId: 'tenant-demo',
       tenantSlug: 'demo',
+      tenantName: 'Demo Cyber Club',
+      periodLabel: 'Текущий месяц',
+      skuGrouping: 'club',
+      selectedStoreIds: [],
       totalSku: 2,
       activeSku: 1,
       categoriesCount: 3,
@@ -173,6 +194,8 @@ describe('DashboardService', () => {
         productId: 'product-1',
         article: 'DRK-001',
         name: 'Energy Drink',
+        storeId: 'store-1',
+        storeName: 'Club A',
         revenue: 1000,
         grossProfit: 500,
         soldQuantity: 10,
@@ -181,6 +204,8 @@ describe('DashboardService', () => {
         productId: 'product-2',
         article: 'SNK-001',
         name: 'Chips',
+        storeId: 'store-1',
+        storeName: 'Club A',
         revenue: 240,
         grossProfit: 120,
         soldQuantity: 2,

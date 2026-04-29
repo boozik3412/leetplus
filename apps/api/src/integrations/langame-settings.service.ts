@@ -9,6 +9,7 @@ import { SecretEncryptionService } from './secret-encryption.service';
 const CREDENTIAL_NAME = 'LAngame API key';
 
 export type LangameSettingsDto = {
+  tenantName?: string;
   apiKey?: string;
   domains?: string[];
 };
@@ -23,7 +24,11 @@ export class LangameSettingsService {
 
   async getSettings(user: AuthenticatedUser) {
     const { tenantId } = await this.tenantContextService.resolve(user);
-    const [credential, sources, syncJobs] = await Promise.all([
+    const [tenant, credential, sources, syncJobs] = await Promise.all([
+      this.prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { name: true },
+      }),
       this.findCredential(tenantId),
       this.prisma.integrationSource.findMany({
         where: {
@@ -43,6 +48,7 @@ export class LangameSettingsService {
     ]);
 
     return {
+      tenantName: tenant?.name ?? '',
       hasApiKey: Boolean(credential?.apiKeyEncrypted),
       domains: sources
         .filter((source) => source.isActive)
@@ -76,6 +82,7 @@ export class LangameSettingsService {
     const { tenantId } = await this.tenantContextService.resolve(user);
     const domains = this.normalizeDomains(dto.domains ?? []);
     const apiKey = dto.apiKey?.trim();
+    const tenantName = dto.tenantName?.trim();
 
     if (domains.length === 0) {
       throw new BadRequestException('At least one LAngame domain is required');
@@ -85,6 +92,13 @@ export class LangameSettingsService {
 
     if (!apiKey && !existingCredential?.apiKeyEncrypted) {
       throw new BadRequestException('LAngame API key is required');
+    }
+
+    if (tenantName) {
+      await this.prisma.tenant.update({
+        where: { id: tenantId },
+        data: { name: tenantName },
+      });
     }
 
     const credential = await this.prisma.integrationCredential.upsert({

@@ -42,6 +42,7 @@ export function LangameSettingsForm({
 }: {
   initialSettings: LangameSettings;
 }) {
+  const [tenantName, setTenantName] = useState(initialSettings.tenantName);
   const [apiKey, setApiKey] = useState("");
   const [domains, setDomains] = useState(initialSettings.domains.join("\n"));
   const [settings, setSettings] = useState(initialSettings);
@@ -64,6 +65,7 @@ export function LangameSettingsForm({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          tenantName: tenantName.trim(),
           apiKey: apiKey.trim() || undefined,
           domains: domains
             .split(/\r?\n/)
@@ -135,6 +137,18 @@ export function LangameSettingsForm({
           Ключ сохраняется в зашифрованном виде и применяется только внутри
           текущей организации. Назад в интерфейс ключ не выводится.
         </p>
+
+        <label className="mt-5 block">
+          <span className="text-sm font-medium text-zinc-700">
+            Название сети
+          </span>
+          <input
+            type="text"
+            value={tenantName}
+            onChange={(event) => setTenantName(event.target.value)}
+            className="mt-2 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm"
+          />
+        </label>
 
         <label className="mt-5 block">
           <span className="text-sm font-medium text-zinc-700">API-ключ</span>

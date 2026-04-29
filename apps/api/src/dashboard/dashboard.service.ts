@@ -4,7 +4,13 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuthenticatedUser } from '../auth/auth.types';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 
-export type DashboardPeriod = 'day' | 'week' | 'month' | 'custom';
+export type DashboardPeriod =
+  | 'day'
+  | 'week'
+  | 'month'
+  | 'quarter'
+  | 'year'
+  | 'custom';
 export type DashboardSkuGrouping = 'club' | 'network';
 
 export type DashboardQuery = {
@@ -24,6 +30,21 @@ export type DashboardTopSku = {
   revenue: number;
   grossProfit: number;
   soldQuantity: number;
+};
+
+type DashboardTrendGranularity = 'day' | 'week' | 'month' | 'quarter' | 'year';
+type DashboardTrendMode = DashboardTrendGranularity | 'custom';
+
+export type DashboardSalesTrendSegment = {
+  index: number;
+  label: string;
+  from: string;
+  to: string;
+  revenue: number;
+  soldQuantity: number;
+  grossProfit: number;
+  revenueDeltaPercent: number | null;
+  quantityDeltaPercent: number | null;
 };
 
 export type DashboardSummary = {
@@ -52,6 +73,7 @@ export type DashboardSummary = {
   stockQuantity: number;
   outOfStockRiskCount: number;
   recommendedOrderQuantity: number;
+  salesTrend: DashboardSalesTrendSegment[];
   topSkuByRevenue: DashboardTopSku[];
 };
 
@@ -82,6 +104,7 @@ export class DashboardService {
       suppliersCount,
       productsForAverages,
       salesFacts,
+      trendSalesFacts,
       inventorySnapshots,
       stockMovements,
     ] = await Promise.all([
@@ -132,6 +155,22 @@ export class DashboardService {
               name: true,
             },
           },
+        },
+      }),
+      this.prisma.salesFact.findMany({
+        where: {
+          tenantId,
+          ...storeFilter,
+          saleDate: {
+            gte: period.trendFromDate,
+            lte: period.trendToDate,
+          },
+        },
+        select: {
+          saleDate: true,
+          quantity: true,
+          revenue: true,
+          cost: true,
         },
       }),
       this.prisma.inventorySnapshot.findMany({
@@ -244,6 +283,13 @@ export class DashboardService {
       0,
     );
     const periodDays = this.periodDays(period.fromDate, period.toDate);
+    const salesTrend = this.buildSalesTrend(
+      trendSalesFacts,
+      period.trendFromDate,
+      period.trendToDate,
+      period.labelGranularity,
+      period.trendMode,
+    );
     const demand = productsForAverages.map((product) => {
       const sold = soldByProduct.get(product.id) ?? 0;
       const averageDailySales = sold / periodDays;
@@ -296,6 +342,7 @@ export class DashboardService {
       recommendedOrderQuantity: this.round(
         demand.reduce((sum, item) => sum + item.recommendedOrder, 0),
       ),
+      salesTrend,
       topSkuByRevenue: [...salesByProduct.values()]
         .sort(
           (a, b) =>
@@ -329,6 +376,15 @@ export class DashboardService {
       const mondayOffset = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
       fromDate.setUTCDate(fromDate.getUTCDate() - mondayOffset);
       label = 'Текущая неделя';
+    } else if (period === 'quarter') {
+      const quarterStartMonth = Math.floor(toDate.getUTCMonth() / 3) * 3;
+      fromDate = new Date(
+        Date.UTC(toDate.getUTCFullYear(), quarterStartMonth, 1),
+      );
+      label = 'Текущий квартал';
+    } else if (period === 'year') {
+      fromDate = new Date(Date.UTC(toDate.getUTCFullYear(), 0, 1));
+      label = 'Текущий год';
     } else if (period === 'custom') {
       fromDate = query.dateFrom
         ? this.parseDate(query.dateFrom, 'dateFrom')
@@ -342,14 +398,24 @@ export class DashboardService {
         return {
           fromDate: customToDate,
           toDate: customToDate,
+          trendFromDate: customToDate,
+          trendToDate: customToDate,
           label: 'Произвольный период',
+          labelGranularity: 'day' as const,
+          trendMode: 'custom' as const,
         };
       }
 
       return {
         fromDate,
         toDate: customToDate,
+        trendFromDate: fromDate,
+        trendToDate: customToDate,
         label: 'Произвольный период',
+        labelGranularity: this.resolveTrendLabelGranularity(
+          customToDate.getTime() - fromDate.getTime(),
+        ),
+        trendMode: 'custom' as const,
       };
     } else {
       fromDate = new Date(
@@ -360,7 +426,15 @@ export class DashboardService {
     toDate.setUTCHours(23, 59, 59, 999);
     fromDate.setUTCHours(0, 0, 0, 0);
 
-    return { fromDate, toDate, label };
+    return {
+      fromDate,
+      toDate,
+      trendFromDate: this.resolveTrendFromDate(period, fromDate),
+      trendToDate: toDate,
+      label,
+      labelGranularity: this.resolveTrendLabelGranularityByPeriod(period),
+      trendMode: this.resolveTrendModeByPeriod(period),
+    };
   }
 
   private resolveStoreIds(storeIds?: string | string[]) {
@@ -371,6 +445,283 @@ export class DashboardService {
     const values = Array.isArray(storeIds) ? storeIds : storeIds.split(',');
 
     return values.map((value) => value.trim()).filter(Boolean);
+  }
+
+  private buildSalesTrend(
+    salesFacts: {
+      saleDate: Date;
+      quantity: { toNumber: () => number };
+      revenue: { toNumber: () => number };
+      cost: { toNumber: () => number };
+    }[],
+    fromDate: Date,
+    toDate: Date,
+    labelGranularity: DashboardTrendGranularity,
+    trendMode: DashboardTrendMode,
+  ): DashboardSalesTrendSegment[] {
+    const segments =
+      trendMode === 'custom'
+        ? this.buildEqualTrendSegments(fromDate, toDate, labelGranularity)
+        : this.buildCalendarTrendSegments(fromDate, toDate, trendMode);
+
+    salesFacts.forEach((fact) => {
+      const saleTime = fact.saleDate.getTime();
+      const segment = segments.find(
+        (item) =>
+          saleTime >= item.fromDate.getTime() &&
+          saleTime <= item.toDate.getTime(),
+      );
+
+      if (!segment) {
+        return;
+      }
+
+      const revenue = fact.revenue.toNumber();
+      const cost = fact.cost.toNumber();
+
+      segment.revenue += revenue;
+      segment.soldQuantity += fact.quantity.toNumber();
+      segment.grossProfit += revenue - cost;
+    });
+
+    return segments.map((segment, index) => {
+      const previous = segments[index - 1];
+
+      return {
+        index: segment.index,
+        label: segment.label,
+        from: this.toDateInputValue(segment.fromDate),
+        to: this.toDateInputValue(segment.toDate),
+        revenue: this.round(segment.revenue),
+        soldQuantity: this.round(segment.soldQuantity),
+        grossProfit: this.round(segment.grossProfit),
+        revenueDeltaPercent: previous
+          ? this.deltaPercent(segment.revenue, previous.revenue)
+          : null,
+        quantityDeltaPercent: previous
+          ? this.deltaPercent(segment.soldQuantity, previous.soldQuantity)
+          : null,
+      };
+    });
+  }
+
+  private buildCalendarTrendSegments(
+    fromDate: Date,
+    toDate: Date,
+    granularity: DashboardTrendGranularity,
+  ) {
+    return Array.from({ length: 8 }, (_, index) => {
+      const segmentFrom = this.addTrendPeriods(fromDate, granularity, index);
+      const nextSegmentFrom = this.addTrendPeriods(
+        fromDate,
+        granularity,
+        index + 1,
+      );
+      const segmentTo =
+        index === 7 ? toDate : new Date(nextSegmentFrom.getTime() - 1);
+
+      return this.createEmptyTrendSegment(
+        index,
+        segmentFrom,
+        segmentTo,
+        granularity,
+      );
+    });
+  }
+
+  private buildEqualTrendSegments(
+    fromDate: Date,
+    toDate: Date,
+    labelGranularity: DashboardTrendGranularity,
+  ) {
+    const fromTime = fromDate.getTime();
+    const toTime = toDate.getTime();
+    const segmentDuration = Math.max(1, (toTime - fromTime + 1) / 8);
+
+    return Array.from({ length: 8 }, (_, index) => {
+      const segmentFrom = new Date(fromTime + segmentDuration * index);
+      const segmentTo = new Date(
+        index === 7 ? toTime : fromTime + segmentDuration * (index + 1) - 1,
+      );
+
+      return this.createEmptyTrendSegment(
+        index,
+        segmentFrom,
+        segmentTo,
+        labelGranularity,
+      );
+    });
+  }
+
+  private createEmptyTrendSegment(
+    index: number,
+    fromDate: Date,
+    toDate: Date,
+    labelGranularity: DashboardTrendGranularity,
+  ) {
+    return {
+      index: index + 1,
+      label: this.segmentLabel(fromDate, toDate, labelGranularity),
+      fromDate,
+      toDate,
+      revenue: 0,
+      soldQuantity: 0,
+      grossProfit: 0,
+      revenueDeltaPercent: null,
+      quantityDeltaPercent: null,
+    };
+  }
+
+  private segmentLabel(
+    fromDate: Date,
+    toDate: Date,
+    granularity: DashboardTrendGranularity,
+  ) {
+    const from = this.formatSegmentPoint(fromDate, granularity);
+    const to = this.formatSegmentPoint(toDate, granularity);
+
+    return from === to ? from : `${from}–${to}`;
+  }
+
+  private formatSegmentPoint(
+    date: Date,
+    granularity: DashboardTrendGranularity,
+  ) {
+    if (granularity === 'year') {
+      return String(date.getUTCFullYear());
+    }
+
+    if (granularity === 'quarter') {
+      return `Q${Math.floor(date.getUTCMonth() / 3) + 1}.${date.getUTCFullYear()}`;
+    }
+
+    if (granularity === 'month') {
+      return `${this.pad2(date.getUTCMonth() + 1)}.${date.getUTCFullYear()}`;
+    }
+
+    if (granularity === 'week') {
+      const isoWeek = this.isoWeek(date);
+
+      return `${isoWeek.week}.${isoWeek.year}`;
+    }
+
+    return `${this.pad2(date.getUTCDate())}.${this.pad2(date.getUTCMonth() + 1)}`;
+  }
+
+  private resolveTrendLabelGranularity(milliseconds: number) {
+    const days = milliseconds / (24 * 60 * 60 * 1000);
+
+    if (days > 730) {
+      return 'quarter' as const;
+    }
+
+    if (days > 180) {
+      return 'month' as const;
+    }
+
+    if (days > 62) {
+      return 'week' as const;
+    }
+
+    return 'day' as const;
+  }
+
+  private resolveTrendLabelGranularityByPeriod(period: DashboardPeriod) {
+    if (period === 'year') {
+      return 'year' as const;
+    }
+
+    if (period === 'quarter') {
+      return 'quarter' as const;
+    }
+
+    if (period === 'month') {
+      return 'month' as const;
+    }
+
+    if (period === 'week') {
+      return 'week' as const;
+    }
+
+    if (period === 'custom') {
+      return 'day' as const;
+    }
+
+    return 'day' as const;
+  }
+
+  private resolveTrendModeByPeriod(
+    period: DashboardPeriod,
+  ): DashboardTrendMode {
+    return period === 'custom' ? 'custom' : period;
+  }
+
+  private resolveTrendFromDate(period: DashboardPeriod, fromDate: Date) {
+    const trendFromDate = new Date(fromDate);
+
+    if (period === 'day') {
+      trendFromDate.setUTCDate(trendFromDate.getUTCDate() - 7);
+    } else if (period === 'week') {
+      trendFromDate.setUTCDate(trendFromDate.getUTCDate() - 7 * 7);
+    } else if (period === 'month') {
+      trendFromDate.setUTCMonth(trendFromDate.getUTCMonth() - 7);
+    } else if (period === 'quarter') {
+      trendFromDate.setUTCMonth(trendFromDate.getUTCMonth() - 7 * 3);
+    } else if (period === 'year') {
+      trendFromDate.setUTCFullYear(trendFromDate.getUTCFullYear() - 7);
+    }
+
+    return trendFromDate;
+  }
+
+  private addTrendPeriods(
+    date: Date,
+    granularity: DashboardTrendGranularity,
+    amount: number,
+  ) {
+    const nextDate = new Date(date);
+
+    if (granularity === 'day') {
+      nextDate.setUTCDate(nextDate.getUTCDate() + amount);
+    } else if (granularity === 'week') {
+      nextDate.setUTCDate(nextDate.getUTCDate() + amount * 7);
+    } else if (granularity === 'month') {
+      nextDate.setUTCMonth(nextDate.getUTCMonth() + amount);
+    } else if (granularity === 'quarter') {
+      nextDate.setUTCMonth(nextDate.getUTCMonth() + amount * 3);
+    } else {
+      nextDate.setUTCFullYear(nextDate.getUTCFullYear() + amount);
+    }
+
+    return nextDate;
+  }
+
+  private isoWeek(date: Date) {
+    const current = new Date(
+      Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
+    );
+    const day = current.getUTCDay() || 7;
+    current.setUTCDate(current.getUTCDate() + 4 - day);
+    const yearStart = new Date(Date.UTC(current.getUTCFullYear(), 0, 1));
+
+    return {
+      week: Math.ceil(
+        ((current.getTime() - yearStart.getTime()) / 86400000 + 1) / 7,
+      ),
+      year: current.getUTCFullYear(),
+    };
+  }
+
+  private pad2(value: number) {
+    return String(value).padStart(2, '0');
+  }
+
+  private deltaPercent(current: number, previous: number) {
+    if (previous === 0) {
+      return current === 0 ? 0 : null;
+    }
+
+    return this.round(((current - previous) / previous) * 100);
   }
 
   private parseDate(value: string, field: string) {

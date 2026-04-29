@@ -352,6 +352,7 @@ describe('API routes (e2e)', () => {
       stockQuantity: 340,
       outOfStockRiskCount: 4,
       recommendedOrderQuantity: 24,
+      salesTrend: [],
       topSkuByRevenue: [],
     });
 
@@ -384,6 +385,7 @@ describe('API routes (e2e)', () => {
         stockQuantity: 340,
         outOfStockRiskCount: 4,
         recommendedOrderQuantity: 24,
+        salesTrend: [],
         topSkuByRevenue: [],
       });
   });

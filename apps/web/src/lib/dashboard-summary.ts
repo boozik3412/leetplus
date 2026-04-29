@@ -11,6 +11,18 @@ export type DashboardTopSku = {
   soldQuantity: number;
 };
 
+export type DashboardSalesTrendSegment = {
+  index: number;
+  label: string;
+  from: string;
+  to: string;
+  revenue: number;
+  soldQuantity: number;
+  grossProfit: number;
+  revenueDeltaPercent: number | null;
+  quantityDeltaPercent: number | null;
+};
+
 export type DashboardSummaryFilters = {
   period?: string;
   dateFrom?: string;
@@ -45,6 +57,7 @@ export type DashboardSummary = {
   stockQuantity: number;
   outOfStockRiskCount: number;
   recommendedOrderQuantity: number;
+  salesTrend: DashboardSalesTrendSegment[];
   topSkuByRevenue: DashboardTopSku[];
 };
 

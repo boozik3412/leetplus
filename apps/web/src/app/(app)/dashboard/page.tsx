@@ -1,5 +1,6 @@
 import {
   getDashboardSummary,
+  type DashboardSalesTrendSegment,
   type DashboardTopSku,
 } from "@/lib/dashboard-summary";
 import { DashboardFilters } from "@/components/dashboard-filters";
@@ -136,6 +137,8 @@ export default async function DashboardPage({
           selectedStoreIds={summary.selectedStoreIds}
         />
 
+        <SalesTrendPanel rows={summary.salesTrend} period={filters.period} />
+
         <section className="mt-6 grid gap-4 lg:grid-cols-3">
           <InsightCard
             href="/reports#replenishment"
@@ -193,6 +196,240 @@ function HeroMetric({
       <p className="mt-2 text-sm opacity-70">{caption}</p>
     </div>
   );
+}
+
+function SalesTrendPanel({
+  rows,
+  period,
+}: {
+  rows: DashboardSalesTrendSegment[];
+  period: string;
+}) {
+  const totalRevenue = rows.reduce((sum, row) => sum + row.revenue, 0);
+  const totalQuantity = rows.reduce((sum, row) => sum + row.soldQuantity, 0);
+
+  return (
+    <section className="mt-6 overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <h2 className="text-base font-semibold">Динамика продаж</h2>
+            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+              8 отрезков выбранного периода: деньги, штуки и изменение к
+              предыдущему отрезку.
+            </p>
+          </div>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+            Итого: {formatMoney(totalRevenue)} · {formatQuantity(totalQuantity)} шт
+          </p>
+        </div>
+      </div>
+      <div className="grid gap-6 p-5 xl:grid-cols-2">
+        <TrendChart
+          title="Выручка"
+          rows={rows}
+          getValue={(row) => row.revenue}
+          getDelta={(row) => row.revenueDeltaPercent}
+          formatValue={formatMoney}
+          tone="money"
+          period={period}
+        />
+        <TrendChart
+          title="Продано, шт"
+          rows={rows}
+          getValue={(row) => row.soldQuantity}
+          getDelta={(row) => row.quantityDeltaPercent}
+          formatValue={formatQuantity}
+          tone="quantity"
+          period={period}
+        />
+      </div>
+    </section>
+  );
+}
+
+function TrendChart({
+  title,
+  rows,
+  getValue,
+  getDelta,
+  formatValue,
+  tone,
+  period,
+}: {
+  title: string;
+  rows: DashboardSalesTrendSegment[];
+  getValue: (row: DashboardSalesTrendSegment) => number;
+  getDelta: (row: DashboardSalesTrendSegment) => number | null;
+  formatValue: (value: number) => string;
+  tone: "money" | "quantity";
+  period: string;
+}) {
+  const maxValue = Math.max(...rows.map(getValue), 1);
+  const colorClass = tone === "money" ? "bg-emerald-500" : "bg-sky-500";
+
+  return (
+    <div className="rounded-3xl border border-zinc-100 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+      <h3 className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+        {title}
+      </h3>
+      <div className="mt-4 grid h-56 grid-cols-8 items-end gap-2">
+        {rows.map((row) => {
+          const value = getValue(row);
+          const height = Math.max(4, (value / maxValue) * 100);
+          const delta = getDelta(row);
+          const weekday = getDailyWeekday(row.from, period);
+
+          return (
+            <div
+              key={`${title}-${row.index}`}
+              className="group flex h-full flex-col justify-end gap-2"
+              title={weekday?.fullLabel}
+            >
+              <div className="min-h-12 text-center">
+                <p className="text-[11px] font-semibold tabular-nums text-zinc-800 dark:text-zinc-200">
+                  {formatValue(value)}
+                </p>
+                <p
+                  className={[
+                    "mt-1 text-[10px] tabular-nums",
+                    delta === null
+                      ? "text-zinc-400"
+                      : delta >= 0
+                        ? "text-emerald-600 dark:text-emerald-300"
+                        : "text-red-600 dark:text-red-300",
+                  ].join(" ")}
+                >
+                  {formatDelta(delta)}
+                </p>
+              </div>
+              <div
+                className={[
+                  "flex h-36 items-end rounded-xl border p-1 transition-colors",
+                  weekday?.isAccent
+                    ? weekday.containerClass
+                    : "border-transparent bg-white dark:bg-zinc-950",
+                ].join(" ")}
+              >
+                <div
+                  className={[
+                    "w-full rounded-lg transition-all",
+                    colorClass,
+                  ].join(" ")}
+                  style={{ height: `${height}%` }}
+                />
+              </div>
+              <div className="min-h-8 text-center">
+                {weekday ? (
+                  <p
+                    className={[
+                      "mx-auto mb-1 w-fit rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase opacity-0 transition-opacity group-hover:opacity-100",
+                      weekday.badgeClass,
+                    ].join(" ")}
+                  >
+                    {weekday.shortLabel}
+                  </p>
+                ) : null}
+                <p
+                  className={[
+                    "truncate text-[10px]",
+                    weekday?.isAccent
+                      ? weekday.labelClass
+                      : "text-zinc-500 dark:text-zinc-400",
+                  ].join(" ")}
+                >
+                  {row.label}
+                </p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function getDailyWeekday(dateValue: string, period: string) {
+  if (period !== "day") {
+    return null;
+  }
+
+  const date = parseDateInput(dateValue);
+
+  if (!date) {
+    return null;
+  }
+
+  const weekdays = [
+    { shortLabel: "вскр", fullLabel: "Воскресенье" },
+    { shortLabel: "пн", fullLabel: "Понедельник" },
+    { shortLabel: "вт", fullLabel: "Вторник" },
+    { shortLabel: "ср", fullLabel: "Среда" },
+    { shortLabel: "чт", fullLabel: "Четверг" },
+    { shortLabel: "пт", fullLabel: "Пятница" },
+    { shortLabel: "сб", fullLabel: "Суббота" },
+  ] as const;
+  const weekday = date.getUTCDay();
+  const accent =
+    weekday === 5
+      ? {
+          containerClass:
+            "border-amber-200 bg-amber-50 dark:border-amber-900/70 dark:bg-amber-950/30",
+          badgeClass:
+            "bg-amber-100 text-amber-800 dark:bg-amber-900/70 dark:text-amber-200",
+          labelClass: "font-semibold text-amber-700 dark:text-amber-300",
+        }
+      : weekday === 6
+        ? {
+            containerClass:
+              "border-orange-200 bg-orange-50 dark:border-orange-900/70 dark:bg-orange-950/30",
+            badgeClass:
+              "bg-orange-100 text-orange-800 dark:bg-orange-900/70 dark:text-orange-200",
+            labelClass: "font-semibold text-orange-700 dark:text-orange-300",
+          }
+        : weekday === 0
+          ? {
+              containerClass:
+                "border-red-200 bg-red-50 dark:border-red-900/70 dark:bg-red-950/30",
+              badgeClass:
+                "bg-red-100 text-red-800 dark:bg-red-900/70 dark:text-red-200",
+              labelClass: "font-semibold text-red-700 dark:text-red-300",
+            }
+          : null;
+
+  return {
+    ...weekdays[weekday],
+    isAccent: Boolean(accent),
+    containerClass: accent?.containerClass ?? "",
+    badgeClass:
+      accent?.badgeClass ??
+      "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-300",
+    labelClass: accent?.labelClass ?? "",
+  };
+}
+
+function parseDateInput(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+
+  if (!match) {
+    return null;
+  }
+
+  return new Date(
+    Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])),
+  );
+}
+
+function formatDelta(value: number | null) {
+  if (value === null) {
+    return "нов.";
+  }
+
+  if (value === 0) {
+    return "0%";
+  }
+
+  return `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
 }
 
 function SignalMetric({

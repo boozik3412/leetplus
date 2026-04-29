@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 type AuthMode = "login" | "register";
 
@@ -26,6 +26,8 @@ const initialState: FormState = {
   tenantSlug: "",
 };
 
+const REMEMBER_EMAIL_KEY = "leetplus_remembered_email";
+
 function getErrorMessage(data: unknown) {
   if (
     data &&
@@ -42,10 +44,28 @@ function getErrorMessage(data: unknown) {
 export function AuthForm({ mode }: AuthFormProps) {
   const router = useRouter();
   const [form, setForm] = useState<FormState>(initialState);
+  const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const isRegister = mode === "register";
+
+  useEffect(() => {
+    if (isRegister) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      const rememberedEmail = window.localStorage.getItem(REMEMBER_EMAIL_KEY);
+
+      if (rememberedEmail) {
+        setForm((current) => ({ ...current, email: rememberedEmail }));
+        setRememberMe(true);
+      }
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [isRegister]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -64,6 +84,7 @@ export function AuthForm({ mode }: AuthFormProps) {
       : {
           email: form.email,
           password: form.password,
+          rememberMe,
         };
 
     try {
@@ -79,6 +100,14 @@ export function AuthForm({ mode }: AuthFormProps) {
         const data = (await response.json()) as unknown;
         setError(getErrorMessage(data));
         return;
+      }
+
+      if (!isRegister) {
+        if (rememberMe) {
+          window.localStorage.setItem(REMEMBER_EMAIL_KEY, form.email);
+        } else {
+          window.localStorage.removeItem(REMEMBER_EMAIL_KEY);
+        }
       }
 
       router.push(
@@ -103,6 +132,8 @@ export function AuthForm({ mode }: AuthFormProps) {
               Имя владельца
             </span>
             <input
+              name="name"
+              autoComplete="name"
               value={form.fullName}
               onChange={(event) =>
                 setForm((current) => ({
@@ -120,6 +151,8 @@ export function AuthForm({ mode }: AuthFormProps) {
               Организация
             </span>
             <input
+              name="organization"
+              autoComplete="organization"
               value={form.organizationName}
               onChange={(event) =>
                 setForm((current) => ({
@@ -139,6 +172,8 @@ export function AuthForm({ mode }: AuthFormProps) {
             </span>
             <div className="mt-1 flex rounded-md border border-zinc-300 bg-white focus-within:border-zinc-500 focus-within:ring-2 focus-within:ring-zinc-200">
               <input
+                name="tenantSlug"
+                autoComplete="off"
                 value={form.tenantSlug}
                 onChange={(event) =>
                   setForm((current) => ({
@@ -161,7 +196,9 @@ export function AuthForm({ mode }: AuthFormProps) {
       <label className="block">
         <span className="text-sm font-medium text-zinc-700">Email</span>
         <input
+          name="email"
           type="email"
+          autoComplete="email"
           value={form.email}
           onChange={(event) =>
             setForm((current) => ({ ...current, email: event.target.value }))
@@ -175,7 +212,9 @@ export function AuthForm({ mode }: AuthFormProps) {
       <label className="block">
         <span className="text-sm font-medium text-zinc-700">Пароль</span>
         <input
+          name="password"
           type="password"
+          autoComplete={isRegister ? "new-password" : "current-password"}
           value={form.password}
           onChange={(event) =>
             setForm((current) => ({ ...current, password: event.target.value }))
@@ -185,6 +224,26 @@ export function AuthForm({ mode }: AuthFormProps) {
           required
         />
       </label>
+
+      {!isRegister ? (
+        <label className="flex items-start gap-3 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
+          <input
+            type="checkbox"
+            checked={rememberMe}
+            onChange={(event) => setRememberMe(event.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-zinc-300"
+          />
+          <span>
+            <span className="block font-medium text-zinc-900">
+              Запомнить меня
+            </span>
+            <span className="mt-0.5 block text-xs text-zinc-500">
+              Email сохранится в этом браузере, а сессия будет действовать
+              дольше. Пароль сохраняет менеджер паролей браузера.
+            </span>
+          </span>
+        </label>
+      ) : null}
 
       {error ? (
         <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">

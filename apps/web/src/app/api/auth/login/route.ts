@@ -8,11 +8,13 @@ import {
 import type { AuthResponse } from "@/lib/auth";
 
 const AUTH_COOKIE_MAX_AGE = 60 * 60;
+const REMEMBERED_AUTH_COOKIE_MAX_AGE = 60 * 60 * 24 * 30;
 
 export async function POST(request: Request) {
   const payload = (await request.json()) as {
     email?: string;
     password?: string;
+    rememberMe?: boolean;
   };
 
   const response = await fetch(`${getApiUrl()}/auth/login`, {
@@ -20,7 +22,10 @@ export async function POST(request: Request) {
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      email: payload.email,
+      password: payload.password,
+    }),
   });
 
   if (!response.ok) {
@@ -39,7 +44,9 @@ export async function POST(request: Request) {
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: AUTH_COOKIE_MAX_AGE,
+    maxAge: payload.rememberMe
+      ? REMEMBERED_AUTH_COOKIE_MAX_AGE
+      : AUTH_COOKIE_MAX_AGE,
   });
 
   return nextResponse;

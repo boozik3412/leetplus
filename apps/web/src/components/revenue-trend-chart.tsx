@@ -8,15 +8,18 @@ type RevenueMode = "money" | "share";
 export function RevenueTrendChart({
   rows,
   period,
+  canShowShare,
 }: {
   rows: DashboardSalesTrendSegment[];
   period: string;
+  canShowShare: boolean;
 }) {
   const [mode, setMode] = useState<RevenueMode>("money");
+  const activeMode = canShowShare ? mode : "money";
   const values = rows.map((row) =>
-    mode === "money" ? row.revenue : (row.revenueSharePercent ?? 0),
+    activeMode === "money" ? row.revenue : (row.revenueSharePercent ?? 0),
   );
-  const maxValue = Math.max(...values, mode === "money" ? 1 : 100);
+  const maxValue = Math.max(...values, activeMode === "money" ? 1 : 100);
 
   return (
     <div className="rounded-3xl border border-zinc-100 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
@@ -26,37 +29,39 @@ export function RevenueTrendChart({
             Выручка
           </h3>
           <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-            {mode === "money"
+            {activeMode === "money"
               ? "Товарная выручка ассортимента"
               : "Доля ассортимента в общей выручке клубов"}
           </p>
         </div>
-        <div className="flex rounded-full border border-zinc-200 bg-white p-1 text-xs dark:border-zinc-800 dark:bg-zinc-950">
-          <button
-            type="button"
-            onClick={() => setMode("money")}
-            className={[
-              "rounded-full px-2.5 py-1 font-semibold transition",
-              mode === "money"
-                ? "bg-zinc-950 text-white dark:bg-emerald-400 dark:text-zinc-950"
-                : "text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100",
-            ].join(" ")}
-          >
-            ₽
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode("share")}
-            className={[
-              "rounded-full px-2.5 py-1 font-semibold transition",
-              mode === "share"
-                ? "bg-zinc-950 text-white dark:bg-emerald-400 dark:text-zinc-950"
-                : "text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100",
-            ].join(" ")}
-          >
-            %
-          </button>
-        </div>
+        {canShowShare ? (
+          <div className="flex rounded-full border border-zinc-200 bg-white p-1 text-xs dark:border-zinc-800 dark:bg-zinc-950">
+            <button
+              type="button"
+              onClick={() => setMode("money")}
+              className={[
+                "rounded-full px-2.5 py-1 font-semibold transition",
+                activeMode === "money"
+                  ? "bg-zinc-950 text-white dark:bg-emerald-400 dark:text-zinc-950"
+                  : "text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100",
+              ].join(" ")}
+            >
+              ₽
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("share")}
+              className={[
+                "rounded-full px-2.5 py-1 font-semibold transition",
+                activeMode === "share"
+                  ? "bg-zinc-950 text-white dark:bg-emerald-400 dark:text-zinc-950"
+                  : "text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100",
+              ].join(" ")}
+            >
+              %
+            </button>
+          </div>
+        ) : null}
       </div>
 
       <div className="mt-4 grid h-56 grid-cols-8 items-end gap-2">
@@ -66,7 +71,7 @@ export function RevenueTrendChart({
           const weekday = getDailyWeekday(row.from, period);
           const previous = rows[index - 1];
           const delta =
-            mode === "money"
+            activeMode === "money"
               ? row.revenueDeltaPercent
               : previous?.revenueSharePercent !== null &&
                   previous?.revenueSharePercent !== undefined &&
@@ -78,11 +83,11 @@ export function RevenueTrendChart({
             <div
               key={`revenue-${row.index}`}
               className="group flex h-full flex-col justify-end gap-2"
-              title={revenueTooltip(row, mode, weekday?.fullLabel)}
+              title={revenueTooltip(row, activeMode, weekday?.fullLabel)}
             >
               <div className="min-h-12 text-center">
                 <p className="text-[11px] font-semibold tabular-nums text-zinc-800 dark:text-zinc-200">
-                  {mode === "money"
+                  {activeMode === "money"
                     ? formatMoney(row.revenue)
                     : formatShare(row.revenueSharePercent)}
                 </p>
@@ -96,7 +101,7 @@ export function RevenueTrendChart({
                         : "text-red-600 dark:text-red-300",
                   ].join(" ")}
                 >
-                  {mode === "money"
+                  {activeMode === "money"
                     ? formatDeltaPercent(delta)
                     : formatDeltaPoints(delta)}
                 </p>

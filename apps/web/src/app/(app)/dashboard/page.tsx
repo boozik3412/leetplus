@@ -143,7 +143,11 @@ export default async function DashboardPage({
           selectedStoreIds={summary.selectedStoreIds}
         />
 
-        <SalesTrendPanel rows={summary.salesTrend} period={filters.period} />
+        <SalesTrendPanel
+          rows={summary.salesTrend}
+          period={filters.period}
+          canShowRevenueShare={summary.selectedStoreIds.length === 0}
+        />
 
         <section className="mt-6 grid gap-4 lg:grid-cols-3">
           <InsightCard
@@ -207,9 +211,11 @@ function HeroMetric({
 function SalesTrendPanel({
   rows,
   period,
+  canShowRevenueShare,
 }: {
   rows: DashboardSalesTrendSegment[];
   period: string;
+  canShowRevenueShare: boolean;
 }) {
   const totalRevenue = rows.reduce((sum, row) => sum + row.revenue, 0);
   const totalQuantity = rows.reduce((sum, row) => sum + row.soldQuantity, 0);
@@ -231,7 +237,11 @@ function SalesTrendPanel({
         </div>
       </div>
       <div className="grid gap-6 p-5 xl:grid-cols-2">
-        <RevenueTrendChart rows={rows} period={period} />
+        <RevenueTrendChart
+          rows={rows}
+          period={period}
+          canShowShare={canShowRevenueShare}
+        />
         <TrendChart
           title="Продано, шт"
           rows={rows}

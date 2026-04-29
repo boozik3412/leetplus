@@ -80,7 +80,8 @@ type ClubRevenueFactUpsertCall = [
   {
     create: {
       tenantId: string;
-      storeId: string;
+      storeId: string | null;
+      externalClubId: string | null;
       totalRevenue: Prisma.Decimal;
     };
   },
@@ -214,6 +215,12 @@ describe('LangameSyncService', () => {
           type: 'minus',
           sum: 100,
         },
+        {
+          date_normal: '2026-04-29 12:12:16',
+          club_id: 0,
+          type: 'plus',
+          sum: 300,
+        },
       ]),
     };
     prisma.integrationCredential.upsert.mockResolvedValue({
@@ -276,7 +283,7 @@ describe('LangameSyncService', () => {
       products: 1,
       inventorySnapshots: 1,
       salesFacts: 1,
-      clubRevenueFacts: 1,
+      clubRevenueFacts: 2,
       discrepancies: 0,
       sourceResults: [
         {
@@ -286,7 +293,7 @@ describe('LangameSyncService', () => {
           products: 1,
           inventorySnapshots: 1,
           salesFacts: 1,
-          clubRevenueFacts: 1,
+          clubRevenueFacts: 2,
           discrepancies: 0,
           discrepancyLogPath: null,
           errorMessage: null,
@@ -311,6 +318,13 @@ describe('LangameSyncService', () => {
     expect(clubRevenueUpsert.create.storeId).toBe('store-1');
     expect(clubRevenueUpsert.create.totalRevenue).toEqual(
       new Prisma.Decimal(500),
+    );
+    const [networkRevenueUpsert] = prisma.clubRevenueFact.upsert.mock
+      .calls[1] as ClubRevenueFactUpsertCall;
+    expect(networkRevenueUpsert.create.storeId).toBeNull();
+    expect(networkRevenueUpsert.create.externalClubId).toBe('0');
+    expect(networkRevenueUpsert.create.totalRevenue).toEqual(
+      new Prisma.Decimal(300),
     );
     const [syncJobUpdate] = prisma.integrationSyncJob.update.mock
       .calls[0] as SyncJobUpdateCall;

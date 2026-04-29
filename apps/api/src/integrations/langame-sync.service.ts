@@ -654,7 +654,7 @@ export class LangameSyncService {
     const revenueByStoreAndDate = new Map<
       string,
       {
-        storeId: string;
+        storeId: string | null;
         externalClubId: string;
         revenueDate: Date;
         totalRevenue: Prisma.Decimal;
@@ -673,17 +673,18 @@ export class LangameSyncService {
       const storeId = externalClubId
         ? storesByExternalClubId.get(externalClubId)
         : null;
+      const resolvedStoreId = storeId ?? null;
 
-      if (!storeId || !externalClubId) {
+      if (!externalClubId || (!resolvedStoreId && externalClubId !== '0')) {
         continue;
       }
 
       const revenueDate = this.startOfUtcDay(
         this.parseLangameDate(operation.date_normal),
       );
-      const key = `${storeId}:${revenueDate.toISOString()}`;
+      const key = `${resolvedStoreId ?? externalClubId}:${revenueDate.toISOString()}`;
       const current = revenueByStoreAndDate.get(key) ?? {
-        storeId,
+        storeId: resolvedStoreId,
         externalClubId,
         revenueDate,
         totalRevenue: new Prisma.Decimal(0),
@@ -707,9 +708,11 @@ export class LangameSyncService {
     for (const item of revenueByStoreAndDate.values()) {
       await this.prisma.clubRevenueFact.upsert({
         where: {
-          tenantId_storeId_revenueDate: {
+          tenantId_externalProvider_externalDomain_externalClubId_revenueDate: {
             tenantId,
-            storeId: item.storeId,
+            externalProvider: IntegrationProvider.LANGAME,
+            externalDomain: domain,
+            externalClubId: item.externalClubId,
             revenueDate: item.revenueDate,
           },
         },

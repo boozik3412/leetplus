@@ -236,7 +236,7 @@ model SalesFact {
 model ClubRevenueFact {
   id               String               @id @default(uuid())
   tenantId         String
-  storeId          String
+  storeId          String?
   revenueDate      DateTime
   totalRevenue     Decimal
   externalProvider IntegrationProvider?
@@ -246,9 +246,10 @@ model ClubRevenueFact {
   updatedAt        DateTime             @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id])
-  store  Store  @relation(fields: [storeId], references: [id])
+  store  Store? @relation(fields: [storeId], references: [id], onDelete: SetNull)
 
   @@unique([tenantId, storeId, revenueDate])
+  @@unique([tenantId, externalProvider, externalDomain, externalClubId, revenueDate])
   @@index([tenantId, revenueDate])
   @@index([storeId])
 }

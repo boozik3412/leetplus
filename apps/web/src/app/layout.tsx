@@ -30,18 +30,6 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="flex min-h-full flex-col">
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              try {
-                var theme = localStorage.getItem('leetplus-theme') || 'system';
-                var dark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-                document.documentElement.classList.toggle('dark', dark);
-                document.documentElement.dataset.theme = theme;
-              } catch (_) {}
-            `,
-          }}
-        />
         <ThemeProvider>{children}</ThemeProvider>
       </body>
     </html>

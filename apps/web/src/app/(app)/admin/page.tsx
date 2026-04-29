@@ -17,10 +17,10 @@ export default async function PlatformAdminPage() {
 
   if (!user.isPlatformAdmin) {
     return (
-      <main className="px-6 py-8 text-zinc-950">
-        <div className="mx-auto max-w-3xl rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">
+      <main className="px-6 py-8 text-zinc-950 dark:text-zinc-100">
+        <div className="mx-auto max-w-3xl rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
           <h1 className="text-2xl font-semibold">Нет доступа</h1>
-          <p className="mt-2 text-sm text-zinc-600">
+          <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
             Панель администратора платформы доступна только владельцу LeetPlus.
           </p>
         </div>
@@ -39,13 +39,16 @@ export default async function PlatformAdminPage() {
   ];
 
   return (
-    <main className="px-6 py-8 text-zinc-950">
+    <main className="px-6 py-8 text-zinc-950 dark:text-zinc-100">
       <div className="mx-auto max-w-7xl">
         <div className="mb-8">
-          <h1 className="text-2xl font-semibold tracking-tight">
+          <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300">
+            LeetPlus control plane
+          </p>
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight">
             Админ платформы
           </h1>
-          <p className="mt-2 max-w-3xl text-sm text-zinc-600">
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
             Служебная панель владельца LeetPlus: сети, источники LAngame и
             последние синхронизации.
           </p>
@@ -55,9 +58,9 @@ export default async function PlatformAdminPage() {
           {cards.map((card) => (
             <div
               key={card.label}
-              className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm"
+              className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
             >
-              <p className="text-sm text-zinc-500">{card.label}</p>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">{card.label}</p>
               <p className="mt-2 text-2xl font-semibold tabular-nums">
                 {card.value}
               </p>
@@ -65,13 +68,13 @@ export default async function PlatformAdminPage() {
           ))}
         </section>
 
-        <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
-          <div className="border-b border-zinc-200 px-5 py-4">
+        <section className="mt-6 overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
             <h2 className="text-base font-semibold">Сети tenant</h2>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[920px] text-left text-sm">
-              <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
+              <thead className="bg-zinc-100 text-xs uppercase text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
                 <tr>
                   <th className="px-5 py-3 font-medium">Сеть</th>
                   <th className="px-5 py-3 text-right font-medium">Users</th>
@@ -81,11 +84,11 @@ export default async function PlatformAdminPage() {
                   <th className="px-5 py-3 font-medium">LAngame источники</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-100">
+              <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
                 {overview.tenants.map((tenant) => (
                   <tr key={tenant.id}>
                     <td className="px-5 py-4">
-                      <p className="font-medium text-zinc-950">{tenant.name}</p>
+                      <p className="font-medium text-zinc-950 dark:text-zinc-50">{tenant.name}</p>
                       <p className="mt-1 text-xs text-zinc-500">{tenant.slug}</p>
                     </td>
                     <td className="px-5 py-4 text-right tabular-nums">
@@ -100,7 +103,7 @@ export default async function PlatformAdminPage() {
                     <td className="px-5 py-4 text-right tabular-nums">
                       {tenant.salesFactsCount}
                     </td>
-                    <td className="px-5 py-4 text-zinc-700">
+                    <td className="px-5 py-4 text-zinc-700 dark:text-zinc-300">
                       {tenant.langameSources.length > 0
                         ? tenant.langameSources
                             .map(
@@ -117,17 +120,17 @@ export default async function PlatformAdminPage() {
           </div>
         </section>
 
-        <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
-          <div className="border-b border-zinc-200 px-5 py-4">
+        <section className="mt-6 overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
             <h2 className="text-base font-semibold">Последние sync jobs</h2>
           </div>
-          <div className="divide-y divide-zinc-100">
+          <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
             {overview.recentSyncJobs.map((job) => (
               <div key={job.id} className="px-5 py-4 text-sm">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <p className="font-medium text-zinc-950">{job.domain}</p>
-                    <p className="mt-1 text-zinc-500">
+                    <p className="font-medium text-zinc-950 dark:text-zinc-50">{job.domain}</p>
+                    <p className="mt-1 text-zinc-500 dark:text-zinc-400">
                       {job.mode} / {job.trigger} / {formatDate(job.startedAt)}
                     </p>
                   </div>
@@ -142,7 +145,7 @@ export default async function PlatformAdminPage() {
                     {job.status}
                   </span>
                 </div>
-                <p className="mt-2 text-zinc-600">
+                <p className="mt-2 text-zinc-600 dark:text-zinc-400">
                   Клубов: {job.storesCount}, товаров: {job.productsCount},
                   остатков: {job.inventoryCount}, продаж: {job.salesCount},
                   расхождений: {job.discrepancyCount}

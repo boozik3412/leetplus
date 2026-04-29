@@ -131,27 +131,27 @@ export function LangameSettingsForm({
 
   return (
     <section className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,420px)_1fr]">
-      <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+      <div className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
         <h2 className="text-base font-semibold">LAngame API</h2>
-        <p className="mt-2 text-sm leading-6 text-zinc-600">
+        <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
           Ключ сохраняется в зашифрованном виде и применяется только внутри
           текущей организации. Назад в интерфейс ключ не выводится.
         </p>
 
         <label className="mt-5 block">
-          <span className="text-sm font-medium text-zinc-700">
+          <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
             Название сети
           </span>
           <input
             type="text"
             value={tenantName}
             onChange={(event) => setTenantName(event.target.value)}
-            className="mt-2 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm"
+            className="mt-2 block w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
           />
         </label>
 
         <label className="mt-5 block">
-          <span className="text-sm font-medium text-zinc-700">API-ключ</span>
+          <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">API-ключ</span>
           <input
             type="password"
             value={apiKey}
@@ -161,19 +161,19 @@ export function LangameSettingsForm({
                 ? "Ключ уже сохранён. Введите новый только для замены."
                 : "Вставьте X-API-KEY"
             }
-            className="mt-2 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm"
+            className="mt-2 block w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
           />
         </label>
 
         <label className="mt-5 block">
-          <span className="text-sm font-medium text-zinc-700">
+          <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
             Домены клубов
           </span>
           <textarea
             value={domains}
             onChange={(event) => setDomains(event.target.value)}
             rows={5}
-            className="mt-2 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm"
+            className="mt-2 block w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
           />
         </label>
 
@@ -207,7 +207,7 @@ export function LangameSettingsForm({
             type="button"
             onClick={saveSettings}
             disabled={isSaving || isSyncing}
-            className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400"
+            className="rounded-xl bg-zinc-950 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
           >
             {isSaving ? "Сохранение..." : "Сохранить"}
           </button>
@@ -215,29 +215,29 @@ export function LangameSettingsForm({
             type="button"
             onClick={syncLangame}
             disabled={!settings.hasApiKey || isSaving || isSyncing}
-            className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+            className="rounded-xl border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-900"
           >
             {isSyncing ? "Синхронизация..." : "Синхронизировать"}
           </button>
         </div>
       </div>
 
-      <div className="rounded-lg border border-zinc-200 bg-white shadow-sm">
-        <div className="border-b border-zinc-200 px-5 py-4">
+      <div className="rounded-3xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+        <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
           <h2 className="text-base font-semibold">Подключённые источники</h2>
-          <p className="mt-1 text-sm text-zinc-500">
+          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
             Эти домены будут использоваться только для данных текущего tenant.
           </p>
         </div>
 
         {settings.sources.length > 0 ? (
-          <div className="divide-y divide-zinc-100">
+          <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
             {settings.sources.map((source) => (
               <div key={source.id} className="px-5 py-4">
                 <div className="flex items-center justify-between gap-4">
                   <div>
-                    <p className="font-medium text-zinc-950">{source.domain}</p>
-                    <p className="mt-1 text-sm text-zinc-500">
+                    <p className="font-medium text-zinc-950 dark:text-zinc-50">{source.domain}</p>
+                    <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
                       {source.baseUrl}
                     </p>
                   </div>
@@ -252,7 +252,7 @@ export function LangameSettingsForm({
                     {source.isActive ? "Активен" : "Отключён"}
                   </span>
                 </div>
-                <p className="mt-2 text-sm text-zinc-500">
+                <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
                   Последняя синхронизация:{" "}
                   {source.lastSyncedAt
                     ? new Intl.DateTimeFormat("ru-RU", {
@@ -271,7 +271,7 @@ export function LangameSettingsForm({
         )}
 
         {syncResult ? (
-          <div className="border-t border-zinc-200 p-5">
+          <div className="border-t border-zinc-200 p-5 dark:border-zinc-800">
             <h3 className="text-sm font-semibold">Результат синхронизации</h3>
             <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
               <Metric label="Источников" value={syncResult.sources} />
@@ -282,13 +282,13 @@ export function LangameSettingsForm({
               <Metric label="Продаж" value={syncResult.salesFacts} />
               <Metric label="Расхождений" value={syncResult.discrepancies} />
             </div>
-            <div className="mt-4 divide-y divide-zinc-100 rounded-md border border-zinc-100">
+            <div className="mt-4 divide-y divide-zinc-100 rounded-2xl border border-zinc-100 dark:divide-zinc-800 dark:border-zinc-800">
               {syncResult.sourceResults.map((result) => (
                 <div
                   key={result.domain}
                   className="grid gap-2 px-3 py-3 text-sm lg:grid-cols-[180px_90px_1fr]"
                 >
-                  <span className="font-medium text-zinc-950">
+                  <span className="font-medium text-zinc-950 dark:text-zinc-50">
                     {result.domain}
                   </span>
                   <span
@@ -300,7 +300,7 @@ export function LangameSettingsForm({
                   >
                     {result.status === "SUCCESS" ? "Успешно" : "Ошибка"}
                   </span>
-                  <span className="text-zinc-600">
+                  <span className="text-zinc-600 dark:text-zinc-400">
                     {result.errorMessage ??
                       `Клубов: ${result.stores}, товаров: ${result.products}, остатков: ${result.inventorySnapshots}, продаж: ${result.salesFacts}, расхождений: ${result.discrepancies}`}
                   </span>
@@ -311,15 +311,15 @@ export function LangameSettingsForm({
         ) : null}
 
         {settings.syncJobs.length > 0 ? (
-          <div className="border-t border-zinc-200 p-5">
+          <div className="border-t border-zinc-200 p-5 dark:border-zinc-800">
             <h3 className="text-sm font-semibold">История синхронизаций</h3>
-            <div className="mt-3 divide-y divide-zinc-100 rounded-md border border-zinc-100">
+            <div className="mt-3 divide-y divide-zinc-100 rounded-2xl border border-zinc-100 dark:divide-zinc-800 dark:border-zinc-800">
               {settings.syncJobs.map((job) => (
                 <div key={job.id} className="px-3 py-3 text-sm">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <p className="font-medium text-zinc-950">{job.domain}</p>
-                      <p className="mt-1 text-zinc-500">
+                      <p className="font-medium text-zinc-950 dark:text-zinc-50">{job.domain}</p>
+                      <p className="mt-1 text-zinc-500 dark:text-zinc-400">
                         {formatDateTime(job.startedAt)}
                       </p>
                     </div>
@@ -334,7 +334,7 @@ export function LangameSettingsForm({
                       {job.status === "SUCCESS" ? "Успешно" : "Ошибка"}
                     </span>
                   </div>
-                  <p className="mt-2 text-zinc-600">
+                  <p className="mt-2 text-zinc-600 dark:text-zinc-400">
                     {job.errorMessage ??
                       `Клубов: ${job.storesCount}, товаров: ${job.productsCount}, остатков: ${job.inventoryCount}, продаж: ${job.salesCount}, расхождений: ${job.discrepancyCount}`}
                   </p>

@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import type {
   LangameClub,
   LangameGood,
+  LangameOperationLog,
   LangameProduct,
   LangameProductExpense,
 } from './langame.types';
@@ -45,6 +46,25 @@ export class LangameClient {
       {
         page: String(params.page),
         page_limit: String(params.pageLimit),
+        date_from: params.dateFrom,
+        date_to: params.dateTo,
+      },
+    );
+  }
+
+  async listAllOperationsLog(
+    baseUrl: string,
+    apiKey: string,
+    params: {
+      dateFrom: string;
+      dateTo: string;
+    },
+  ) {
+    return this.getList<LangameOperationLog>(
+      baseUrl,
+      '/all_operations_log/list',
+      apiKey,
+      {
         date_from: params.dateFrom,
         date_to: params.dateTo,
       },

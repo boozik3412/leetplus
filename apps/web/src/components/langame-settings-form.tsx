@@ -12,6 +12,7 @@ type SyncResult = {
   products: number;
   inventorySnapshots: number;
   salesFacts: number;
+  clubRevenueFacts: number;
   discrepancies: number;
   sourceResults: {
     domain: string;
@@ -20,6 +21,7 @@ type SyncResult = {
     products: number;
     inventorySnapshots: number;
     salesFacts: number;
+    clubRevenueFacts: number;
     discrepancies: number;
     discrepancyLogPath: string | null;
     errorMessage: string | null;
@@ -289,13 +291,14 @@ export function LangameSettingsForm({
                 {formatDateLabel(syncDateFrom)} — {formatDateLabel(syncDateTo)}
               </p>
             </div>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-7">
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
               <Metric label="Источников" value={syncResult.sources} />
               <Metric label="Ошибок" value={syncResult.failedSources} />
               <Metric label="Клубов" value={syncResult.stores} />
               <Metric label="Товаров" value={syncResult.products} />
               <Metric label="Остатков" value={syncResult.inventorySnapshots} />
               <Metric label="Продаж" value={syncResult.salesFacts} />
+              <Metric label="Выручка клубов" value={syncResult.clubRevenueFacts} />
               <Metric label="Расхождений" value={syncResult.discrepancies} />
             </div>
           </div>

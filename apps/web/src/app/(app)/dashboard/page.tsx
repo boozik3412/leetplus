@@ -5,6 +5,7 @@ import {
 } from "@/lib/dashboard-summary";
 import { DashboardFilters } from "@/components/dashboard-filters";
 import { DashboardQuickSyncButton } from "@/components/dashboard-quick-sync-button";
+import { RevenueTrendChart } from "@/components/revenue-trend-chart";
 import { requireCurrentUser } from "@/lib/auth";
 import { getStores } from "@/lib/stores";
 import Link from "next/link";
@@ -230,15 +231,7 @@ function SalesTrendPanel({
         </div>
       </div>
       <div className="grid gap-6 p-5 xl:grid-cols-2">
-        <TrendChart
-          title="Выручка"
-          rows={rows}
-          getValue={(row) => row.revenue}
-          getDelta={(row) => row.revenueDeltaPercent}
-          formatValue={formatMoney}
-          tone="money"
-          period={period}
-        />
+        <RevenueTrendChart rows={rows} period={period} />
         <TrendChart
           title="Продано, шт"
           rows={rows}

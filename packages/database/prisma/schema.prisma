@@ -56,6 +56,7 @@ model Tenant {
   categories Category[]
   importJobs ImportJob[]
   salesFacts SalesFact[]
+  clubRevenueFacts ClubRevenueFact[]
   inventorySnapshots InventorySnapshot[]
   stockMovements StockMovement[]
   integrationCredentials IntegrationCredential[]
@@ -133,6 +134,7 @@ model Store {
   tenant Tenant @relation(fields: [tenantId], references: [id])
   integrationSource IntegrationSource? @relation(fields: [integrationSourceId], references: [id], onDelete: SetNull)
   salesFacts SalesFact[]
+  clubRevenueFacts ClubRevenueFact[]
   inventorySnapshots InventorySnapshot[]
   stockMovements StockMovement[]
 
@@ -229,6 +231,26 @@ model SalesFact {
   @@index([tenantId, storeId, productId, saleDate])
   @@index([storeId])
   @@index([productId])
+}
+
+model ClubRevenueFact {
+  id               String               @id @default(uuid())
+  tenantId         String
+  storeId          String
+  revenueDate      DateTime
+  totalRevenue     Decimal
+  externalProvider IntegrationProvider?
+  externalDomain   String?
+  externalClubId   String?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  store  Store  @relation(fields: [storeId], references: [id])
+
+  @@unique([tenantId, storeId, revenueDate])
+  @@index([tenantId, revenueDate])
+  @@index([storeId])
 }
 
 model InventorySnapshot {

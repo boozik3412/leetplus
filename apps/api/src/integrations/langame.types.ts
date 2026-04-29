@@ -28,6 +28,13 @@ export type LangameProductExpense = {
   cancel: number;
 };
 
+export type LangameOperationLog = {
+  date_normal: string;
+  club_id: string | number | null;
+  type: string;
+  sum: number | string | null;
+};
+
 export type LangameSyncQuery = {
   dateFrom?: string;
   dateTo?: string;
@@ -44,6 +51,7 @@ export type LangameSyncResult = {
   products: number;
   inventorySnapshots: number;
   salesFacts: number;
+  clubRevenueFacts: number;
   discrepancies: number;
   sourceResults: LangameSyncSourceResult[];
 };
@@ -55,6 +63,7 @@ export type LangameSyncSourceResult = {
   products: number;
   inventorySnapshots: number;
   salesFacts: number;
+  clubRevenueFacts: number;
   discrepancies: number;
   discrepancyLogPath: string | null;
   errorMessage: string | null;

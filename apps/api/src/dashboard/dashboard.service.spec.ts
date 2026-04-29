@@ -20,6 +20,9 @@ type DashboardPrismaMock = {
   salesFact: {
     findMany: jest.Mock;
   };
+  clubRevenueFact: {
+    findMany: jest.Mock;
+  };
   inventorySnapshot: {
     findMany: jest.Mock;
   };
@@ -116,6 +119,9 @@ function createPrismaMock(): DashboardPrismaMock {
     salesFact: {
       findMany: jest.fn(),
     },
+    clubRevenueFact: {
+      findMany: jest.fn(),
+    },
     inventorySnapshot: {
       findMany: jest.fn(),
     },
@@ -153,6 +159,7 @@ describe('DashboardService', () => {
     prisma.supplier.count.mockResolvedValue(0);
     prisma.product.findMany.mockResolvedValue([]);
     prisma.salesFact.findMany.mockResolvedValue([]);
+    prisma.clubRevenueFact.findMany.mockResolvedValue([]);
     prisma.inventorySnapshot.findMany.mockResolvedValue([]);
     prisma.stockMovement.findMany.mockResolvedValue([]);
   }
@@ -227,6 +234,12 @@ describe('DashboardService', () => {
         quantity: new Prisma.Decimal(20),
       },
     ]);
+    prisma.clubRevenueFact.findMany.mockResolvedValue([
+      {
+        revenueDate: new Date(),
+        totalRevenue: new Prisma.Decimal(2000),
+      },
+    ]);
     prisma.stockMovement.findMany.mockResolvedValue([
       {
         type: 'WRITEOFF',
@@ -268,6 +281,9 @@ describe('DashboardService', () => {
     expect(summary.periodFrom).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(summary.periodTo).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(summary.salesTrend).toHaveLength(8);
+    expect(summary.salesTrend.some((segment) => segment.clubRevenue > 0)).toBe(
+      true,
+    );
     expect(summary.topSkuByRevenue).toEqual([
       {
         productId: 'product-1',
@@ -399,6 +415,12 @@ describe('DashboardService', () => {
         },
       ]);
       prisma.inventorySnapshot.findMany.mockResolvedValue([]);
+      prisma.clubRevenueFact.findMany.mockResolvedValue([
+        {
+          revenueDate: new Date('2026-04-29T00:00:00.000Z'),
+          totalRevenue: new Prisma.Decimal(1000),
+        },
+      ]);
       prisma.stockMovement.findMany.mockResolvedValue([]);
 
       const summary = await service.getSummary(undefined, { period: 'day' });
@@ -410,6 +432,8 @@ describe('DashboardService', () => {
       expect(summary.salesTrend[7]).toMatchObject({
         label: '29.04',
         revenue: 300,
+        clubRevenue: 1000,
+        revenueSharePercent: 30,
         soldQuantity: 3,
       });
       expect(summary.salesTrend.map((segment) => segment.label)).toEqual([

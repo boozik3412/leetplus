@@ -34,6 +34,10 @@ type PrismaMock = {
     findUnique: jest.Mock;
     upsert: jest.Mock;
   };
+  clubRevenueFact: {
+    deleteMany: jest.Mock;
+    upsert: jest.Mock;
+  };
 };
 
 type TenantContextMock = {
@@ -45,6 +49,7 @@ type LangameClientMock = {
   listProducts: jest.Mock;
   listGoods: jest.Mock;
   listProductExpenses: jest.Mock;
+  listAllOperationsLog: jest.Mock;
 };
 
 type LangameSettingsMock = {
@@ -67,6 +72,16 @@ type SalesFactUpsertCall = [
       tenantId: string;
       revenue: Prisma.Decimal;
       cost: Prisma.Decimal;
+    };
+  },
+];
+
+type ClubRevenueFactUpsertCall = [
+  {
+    create: {
+      tenantId: string;
+      storeId: string;
+      totalRevenue: Prisma.Decimal;
     };
   },
 ];
@@ -126,6 +141,10 @@ function createPrismaMock(): PrismaMock {
       findUnique: jest.fn(),
       upsert: jest.fn(),
     },
+    clubRevenueFact: {
+      deleteMany: jest.fn(),
+      upsert: jest.fn(),
+    },
   };
 }
 
@@ -182,6 +201,20 @@ describe('LangameSyncService', () => {
           },
         ])
         .mockResolvedValueOnce([]),
+      listAllOperationsLog: jest.fn().mockResolvedValue([
+        {
+          date_normal: '2026-04-29 10:12:16',
+          club_id: 1,
+          type: 'plus',
+          sum: 500,
+        },
+        {
+          date_normal: '2026-04-29 11:12:16',
+          club_id: 1,
+          type: 'minus',
+          sum: 100,
+        },
+      ]),
     };
     prisma.integrationCredential.upsert.mockResolvedValue({
       id: 'credential-1',
@@ -243,6 +276,7 @@ describe('LangameSyncService', () => {
       products: 1,
       inventorySnapshots: 1,
       salesFacts: 1,
+      clubRevenueFacts: 1,
       discrepancies: 0,
       sourceResults: [
         {
@@ -252,6 +286,7 @@ describe('LangameSyncService', () => {
           products: 1,
           inventorySnapshots: 1,
           salesFacts: 1,
+          clubRevenueFacts: 1,
           discrepancies: 0,
           discrepancyLogPath: null,
           errorMessage: null,
@@ -269,6 +304,14 @@ describe('LangameSyncService', () => {
     expect(salesUpsert.create.tenantId).toBe('tenant-1');
     expect(salesUpsert.create.revenue).toEqual(new Prisma.Decimal(100).mul(2));
     expect(salesUpsert.create.cost).toEqual(new Prisma.Decimal('50.00').mul(2));
+    expect(prisma.clubRevenueFact.deleteMany).toHaveBeenCalled();
+    const [clubRevenueUpsert] = prisma.clubRevenueFact.upsert.mock
+      .calls[0] as ClubRevenueFactUpsertCall;
+    expect(clubRevenueUpsert.create.tenantId).toBe('tenant-1');
+    expect(clubRevenueUpsert.create.storeId).toBe('store-1');
+    expect(clubRevenueUpsert.create.totalRevenue).toEqual(
+      new Prisma.Decimal(500),
+    );
     const [syncJobUpdate] = prisma.integrationSyncJob.update.mock
       .calls[0] as SyncJobUpdateCall;
     expect(syncJobUpdate.where.id).toBe('sync-job-1');

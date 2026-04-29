@@ -19,6 +19,8 @@ export type DashboardSalesTrendSegment = {
   revenue: number;
   soldQuantity: number;
   grossProfit: number;
+  clubRevenue: number;
+  revenueSharePercent: number | null;
   revenueDeltaPercent: number | null;
   quantityDeltaPercent: number | null;
 };

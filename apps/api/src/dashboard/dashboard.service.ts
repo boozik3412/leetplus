@@ -43,6 +43,8 @@ export type DashboardSalesTrendSegment = {
   revenue: number;
   soldQuantity: number;
   grossProfit: number;
+  clubRevenue: number;
+  revenueSharePercent: number | null;
   revenueDeltaPercent: number | null;
   quantityDeltaPercent: number | null;
 };
@@ -105,6 +107,7 @@ export class DashboardService {
       productsForAverages,
       salesFacts,
       trendSalesFacts,
+      trendClubRevenueFacts,
       inventorySnapshots,
       stockMovements,
     ] = await Promise.all([
@@ -171,6 +174,20 @@ export class DashboardService {
           quantity: true,
           revenue: true,
           cost: true,
+        },
+      }),
+      this.prisma.clubRevenueFact.findMany({
+        where: {
+          tenantId,
+          ...storeFilter,
+          revenueDate: {
+            gte: period.trendFromDate,
+            lte: period.trendToDate,
+          },
+        },
+        select: {
+          revenueDate: true,
+          totalRevenue: true,
         },
       }),
       this.prisma.inventorySnapshot.findMany({
@@ -285,6 +302,7 @@ export class DashboardService {
     const periodDays = this.periodDays(period.fromDate, period.toDate);
     const salesTrend = this.buildSalesTrend(
       trendSalesFacts,
+      trendClubRevenueFacts,
       period.trendFromDate,
       period.trendToDate,
       period.labelGranularity,
@@ -454,6 +472,10 @@ export class DashboardService {
       revenue: { toNumber: () => number };
       cost: { toNumber: () => number };
     }[],
+    clubRevenueFacts: {
+      revenueDate: Date;
+      totalRevenue: { toNumber: () => number };
+    }[],
     fromDate: Date,
     toDate: Date,
     labelGranularity: DashboardTrendGranularity,
@@ -484,6 +506,21 @@ export class DashboardService {
       segment.grossProfit += revenue - cost;
     });
 
+    clubRevenueFacts.forEach((fact) => {
+      const revenueTime = fact.revenueDate.getTime();
+      const segment = segments.find(
+        (item) =>
+          revenueTime >= item.fromDate.getTime() &&
+          revenueTime <= item.toDate.getTime(),
+      );
+
+      if (!segment) {
+        return;
+      }
+
+      segment.clubRevenue += fact.totalRevenue.toNumber();
+    });
+
     return segments.map((segment, index) => {
       const previous = segments[index - 1];
 
@@ -495,6 +532,11 @@ export class DashboardService {
         revenue: this.round(segment.revenue),
         soldQuantity: this.round(segment.soldQuantity),
         grossProfit: this.round(segment.grossProfit),
+        clubRevenue: this.round(segment.clubRevenue),
+        revenueSharePercent:
+          segment.clubRevenue > 0
+            ? this.round((segment.revenue / segment.clubRevenue) * 100)
+            : null,
         revenueDeltaPercent: previous
           ? this.deltaPercent(segment.revenue, previous.revenue)
           : null,
@@ -567,6 +609,7 @@ export class DashboardService {
       revenue: 0,
       soldQuantity: 0,
       grossProfit: 0,
+      clubRevenue: 0,
       revenueDeltaPercent: null,
       quantityDeltaPercent: null,
     };

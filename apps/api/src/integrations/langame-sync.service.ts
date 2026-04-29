@@ -15,6 +15,7 @@ import { LangameClient } from './langame.client';
 import { LangameSettingsService } from './langame-settings.service';
 import type {
   LangameGood,
+  LangameOperationLog,
   LangameProduct,
   LangameSyncQuery,
   LangameSyncResult,
@@ -107,6 +108,7 @@ export class LangameSyncService {
       products: 0,
       inventorySnapshots: 0,
       salesFacts: 0,
+      clubRevenueFacts: 0,
       discrepancies: 0,
       sourceResults: [],
     };
@@ -117,6 +119,7 @@ export class LangameSyncService {
       mode,
     );
     const shouldSyncSales = ['QUICK', 'BACKFILL', 'FULL'].includes(mode);
+    const shouldSyncClubRevenue = shouldSyncSales;
 
     for (const source of sources) {
       const syncJob = await this.prisma.integrationSyncJob.create({
@@ -138,6 +141,7 @@ export class LangameSyncService {
         products: 0,
         inventorySnapshots: 0,
         salesFacts: 0,
+        clubRevenueFacts: 0,
         discrepancies: 0,
         discrepancyLogPath: null,
         errorMessage: null,
@@ -232,6 +236,17 @@ export class LangameSyncService {
           );
           result.salesFacts += salesFacts;
           sourceResult.salesFacts = salesFacts;
+        }
+        if (shouldSyncClubRevenue) {
+          const clubRevenueFacts = await this.syncClubRevenueFacts(
+            tenantId,
+            source.baseUrl,
+            source.domain,
+            apiKey,
+            period,
+          );
+          result.clubRevenueFacts += clubRevenueFacts;
+          sourceResult.clubRevenueFacts = clubRevenueFacts;
         }
         sourceResult.discrepancies = discrepancies.length;
         result.discrepancies += discrepancies.length;
@@ -607,6 +622,118 @@ export class LangameSyncService {
     return synced;
   }
 
+  private async syncClubRevenueFacts(
+    tenantId: string,
+    baseUrl: string,
+    domain: string,
+    apiKey: string,
+    period: { from: string; to: string; fromDate: Date; toDate: Date },
+  ) {
+    const stores = await this.prisma.store.findMany({
+      where: {
+        tenantId,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: domain,
+      },
+      select: {
+        id: true,
+        externalClubId: true,
+      },
+    });
+    const storesByExternalClubId = new Map(
+      stores.map((store) => [store.externalClubId, store.id]),
+    );
+    const operations = await this.langameClient.listAllOperationsLog(
+      baseUrl,
+      apiKey,
+      {
+        dateFrom: period.from,
+        dateTo: period.to,
+      },
+    );
+    const revenueByStoreAndDate = new Map<
+      string,
+      {
+        storeId: string;
+        externalClubId: string;
+        revenueDate: Date;
+        totalRevenue: Prisma.Decimal;
+      }
+    >();
+
+    for (const operation of operations) {
+      const totalRevenue = this.operationRevenue(operation);
+
+      if (totalRevenue.lte(0)) {
+        continue;
+      }
+
+      const externalClubId =
+        operation.club_id === null ? null : String(operation.club_id);
+      const storeId = externalClubId
+        ? storesByExternalClubId.get(externalClubId)
+        : null;
+
+      if (!storeId || !externalClubId) {
+        continue;
+      }
+
+      const revenueDate = this.startOfUtcDay(
+        this.parseLangameDate(operation.date_normal),
+      );
+      const key = `${storeId}:${revenueDate.toISOString()}`;
+      const current = revenueByStoreAndDate.get(key) ?? {
+        storeId,
+        externalClubId,
+        revenueDate,
+        totalRevenue: new Prisma.Decimal(0),
+      };
+      current.totalRevenue = current.totalRevenue.add(totalRevenue);
+      revenueByStoreAndDate.set(key, current);
+    }
+
+    await this.prisma.clubRevenueFact.deleteMany({
+      where: {
+        tenantId,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: domain,
+        revenueDate: {
+          gte: this.startOfUtcDay(period.fromDate),
+          lte: this.startOfUtcDay(period.toDate),
+        },
+      },
+    });
+
+    for (const item of revenueByStoreAndDate.values()) {
+      await this.prisma.clubRevenueFact.upsert({
+        where: {
+          tenantId_storeId_revenueDate: {
+            tenantId,
+            storeId: item.storeId,
+            revenueDate: item.revenueDate,
+          },
+        },
+        create: {
+          tenantId,
+          storeId: item.storeId,
+          revenueDate: item.revenueDate,
+          totalRevenue: item.totalRevenue,
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: domain,
+          externalClubId: item.externalClubId,
+        },
+        update: {
+          totalRevenue: item.totalRevenue,
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: domain,
+          externalClubId: item.externalClubId,
+        },
+      });
+    }
+
+    return revenueByStoreAndDate.size;
+  }
+
   private resolvePeriod(query: LangameSyncQuery) {
     const now = new Date();
     const mode = this.resolveMode(query.mode);
@@ -699,6 +826,20 @@ export class LangameSyncService {
         Number(match[5]),
         Number(match[6]),
       ),
+    );
+  }
+
+  private operationRevenue(operation: LangameOperationLog) {
+    if (operation.type !== 'plus') {
+      return new Prisma.Decimal(0);
+    }
+
+    return new Prisma.Decimal(operation.sum ?? 0);
+  }
+
+  private startOfUtcDay(date: Date) {
+    return new Date(
+      Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
     );
   }
 

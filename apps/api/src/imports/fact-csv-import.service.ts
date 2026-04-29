@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, StockMovementType } from '@prisma/client';
 import { parse } from 'csv-parse/sync';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
@@ -16,7 +16,13 @@ type ImportError = {
 type StoreLookup = Map<string, { id: string; name: string }>;
 type ProductLookup = Map<
   string,
-  { id: string; article: string; name: string; purchasePrice: Prisma.Decimal }
+  {
+    id: string;
+    article: string;
+    name: string;
+    purchasePrice: Prisma.Decimal;
+    salePrice: Prisma.Decimal;
+  }
 >;
 
 type FactLookup = {
@@ -40,6 +46,12 @@ export type SalesImportRow = InventoryImportRow & {
   cost: string;
 };
 
+export type StockMovementImportRow = InventoryImportRow & {
+  type: StockMovementType;
+  amount: string;
+  reason: string | null;
+};
+
 export type FactImportPreview<T> = {
   totalRows: number;
   validRows: number;
@@ -49,6 +61,7 @@ export type FactImportPreview<T> = {
 
 const INVENTORY_IMPORT_TYPE = 'INVENTORY_CSV' as const;
 const SALES_IMPORT_TYPE = 'SALES_CSV' as const;
+const STOCK_MOVEMENT_IMPORT_TYPE = 'STOCK_MOVEMENT_CSV' as const;
 const IMPORT_STATUS_COMPLETED = 'COMPLETED' as const;
 const IMPORT_STATUS_FAILED = 'FAILED' as const;
 
@@ -140,6 +153,53 @@ export class FactCsvImportService {
           row: rowNumber,
           field: 'article',
           message: 'Продажи для этой даты, точки и SKU дублируются внутри CSV',
+        });
+        return;
+      }
+
+      seen.add(key);
+      rows.push(normalized);
+    });
+
+    return this.preview(records.length, rows, errors);
+  }
+
+  async previewStockMovements(
+    csv: string,
+    user: AuthenticatedUser,
+  ): Promise<FactImportPreview<StockMovementImportRow>> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const records = this.parseCsv(csv);
+    const lookup = await this.loadLookup(tenantId);
+    const errors: ImportError[] = [];
+    const rows: StockMovementImportRow[] = [];
+    const seen = new Set<string>();
+
+    records.forEach((record, index) => {
+      const rowNumber = index + 2;
+      const normalized = this.normalizeStockMovementRecord(
+        record,
+        rowNumber,
+        lookup,
+        errors,
+      );
+
+      if (!normalized) {
+        return;
+      }
+
+      const key = `${this.factKey(
+        normalized.date,
+        normalized.storeId,
+        normalized.productId,
+      )}:${normalized.type}`;
+
+      if (seen.has(key)) {
+        errors.push({
+          row: rowNumber,
+          field: 'type',
+          message:
+            'Движение для этой даты, точки, SKU и типа дублируется внутри CSV',
         });
         return;
       }
@@ -297,6 +357,83 @@ export class FactCsvImportService {
     };
   }
 
+  async importStockMovements(
+    csv: string,
+    user: AuthenticatedUser,
+    sourceFileName?: string,
+  ) {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const preview = await this.previewStockMovements(csv, user);
+
+    if (preview.errors.length > 0) {
+      await this.createImportJob({
+        tenantId,
+        userId: user.id,
+        sourceFileName,
+        type: STOCK_MOVEMENT_IMPORT_TYPE,
+        status: IMPORT_STATUS_FAILED,
+        totalRows: preview.totalRows,
+        validRows: preview.validRows,
+        importedRows: 0,
+        errors: preview.errors,
+      });
+
+      throw new BadRequestException({
+        message: 'CSV contains validation errors',
+        preview,
+      });
+    }
+
+    const imported = await this.prisma.$transaction(
+      preview.rows.map((row) =>
+        this.prisma.stockMovement.upsert({
+          where: {
+            tenantId_storeId_productId_movementDate_type: {
+              tenantId,
+              storeId: row.storeId,
+              productId: row.productId,
+              movementDate: new Date(row.date),
+              type: row.type,
+            },
+          },
+          create: {
+            tenantId,
+            storeId: row.storeId,
+            productId: row.productId,
+            movementDate: new Date(row.date),
+            type: row.type,
+            quantity: new Prisma.Decimal(row.quantity),
+            amount: new Prisma.Decimal(row.amount),
+            reason: row.reason,
+          },
+          update: {
+            quantity: new Prisma.Decimal(row.quantity),
+            amount: new Prisma.Decimal(row.amount),
+            reason: row.reason,
+          },
+        }),
+      ),
+    );
+
+    const importJob = await this.createImportJob({
+      tenantId,
+      userId: user.id,
+      sourceFileName,
+      type: STOCK_MOVEMENT_IMPORT_TYPE,
+      status: IMPORT_STATUS_COMPLETED,
+      totalRows: preview.totalRows,
+      validRows: preview.validRows,
+      importedRows: imported.length,
+      errors: [],
+    });
+
+    return {
+      importedRows: imported.length,
+      importJob,
+      preview,
+    };
+  }
+
   private preview<T>(
     totalRows: number,
     rows: T[],
@@ -323,6 +460,7 @@ export class FactCsvImportService {
           article: true,
           name: true,
           purchasePrice: true,
+          salePrice: true,
         },
       }),
     ]);
@@ -476,6 +614,107 @@ export class FactCsvImportService {
     };
   }
 
+  private normalizeStockMovementRecord(
+    record: CsvRecord,
+    rowNumber: number,
+    lookup: FactLookup,
+    errors: ImportError[],
+  ): StockMovementImportRow | null {
+    const base = this.normalizeInventoryRecord(
+      record,
+      rowNumber,
+      lookup,
+      errors,
+      {
+        aliases: ['quantity', 'количество', 'qty'],
+        requiredMessage: 'Количество движения обязательно',
+      },
+    );
+    const typeValue = this.readField(record, ['type', 'тип', 'движение']);
+    const type = this.parseStockMovementType(typeValue);
+    const amountFromCsv = this.readNumberField(record, [
+      'amount',
+      'сумма',
+      'стоимость',
+    ]);
+    const reason = this.readField(record, ['reason', 'причина', 'comment']);
+
+    this.requireValue(
+      typeValue,
+      rowNumber,
+      'type',
+      'Тип движения обязателен',
+      errors,
+    );
+
+    if (typeValue && !type) {
+      errors.push({
+        row: rowNumber,
+        field: 'type',
+        message: 'Тип должен быть списание/writeoff или возврат/return',
+      });
+    }
+
+    if (amountFromCsv) {
+      this.validateNonNegativeNumber(
+        amountFromCsv,
+        rowNumber,
+        'amount',
+        errors,
+      );
+    }
+
+    if (!base || !type) {
+      return null;
+    }
+
+    const product = lookup.products.get(this.key(base.article));
+    const amount =
+      amountFromCsv ||
+      this.defaultMovementAmount(type, product, base.quantity).toString();
+
+    return {
+      ...base,
+      type,
+      amount,
+      reason: reason || null,
+    };
+  }
+
+  private parseStockMovementType(value: string) {
+    const normalized = this.key(value);
+
+    if (
+      ['writeoff', 'write-off', 'списание', 'списания'].includes(normalized)
+    ) {
+      return StockMovementType.WRITEOFF;
+    }
+
+    if (['return', 'returns', 'возврат', 'возвраты'].includes(normalized)) {
+      return StockMovementType.RETURN;
+    }
+
+    return null;
+  }
+
+  private defaultMovementAmount(
+    type: StockMovementType,
+    product:
+      | {
+          purchasePrice: Prisma.Decimal;
+          salePrice: Prisma.Decimal;
+        }
+      | undefined,
+    quantity: string,
+  ) {
+    const price =
+      type === StockMovementType.WRITEOFF
+        ? product?.purchasePrice
+        : product?.salePrice;
+
+    return (price ?? new Prisma.Decimal(0)).mul(new Prisma.Decimal(quantity));
+  }
+
   private createImportJob({
     tenantId,
     userId,
@@ -490,7 +729,10 @@ export class FactCsvImportService {
     tenantId: string;
     userId: string;
     sourceFileName?: string;
-    type: typeof INVENTORY_IMPORT_TYPE | typeof SALES_IMPORT_TYPE;
+    type:
+      | typeof INVENTORY_IMPORT_TYPE
+      | typeof SALES_IMPORT_TYPE
+      | typeof STOCK_MOVEMENT_IMPORT_TYPE;
     status: typeof IMPORT_STATUS_COMPLETED | typeof IMPORT_STATUS_FAILED;
     totalRows: number;
     validRows: number;

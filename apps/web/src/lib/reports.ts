@@ -80,8 +80,14 @@ export type OperationalReport = {
   totalRevenue: number;
   totalCost: number;
   grossProfit: number;
+  adjustedGrossProfit: number;
   marginPercent: number;
+  adjustedMarginPercent: number;
   soldQuantity: number;
+  writeOffQuantity: number;
+  writeOffAmount: number;
+  returnQuantity: number;
+  returnAmount: number;
   averageDailyRevenue: number;
   stockQuantity: number;
   stockDays: number | null;

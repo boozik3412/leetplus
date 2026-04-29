@@ -18,6 +18,9 @@ type ReportsPrismaMock = {
   inventorySnapshot: {
     findMany: jest.Mock;
   };
+  stockMovement: {
+    findMany: jest.Mock;
+  };
 };
 
 type TenantContextMock = {
@@ -43,6 +46,9 @@ function createPrismaMock(): ReportsPrismaMock {
       findMany: jest.fn(),
     },
     inventorySnapshot: {
+      findMany: jest.fn(),
+    },
+    stockMovement: {
       findMany: jest.fn(),
     },
   };
@@ -181,6 +187,18 @@ describe('ReportsService', () => {
         quantity: new Prisma.Decimal(20),
       },
     ]);
+    prisma.stockMovement.findMany.mockResolvedValue([
+      {
+        type: 'WRITEOFF',
+        quantity: new Prisma.Decimal(1),
+        amount: new Prisma.Decimal(80),
+      },
+      {
+        type: 'RETURN',
+        quantity: new Prisma.Decimal(2),
+        amount: new Prisma.Decimal(200),
+      },
+    ]);
     prisma.product.findMany.mockResolvedValue([
       {
         id: 'product-1',
@@ -213,8 +231,14 @@ describe('ReportsService', () => {
       totalRevenue: 1000,
       totalCost: 850,
       grossProfit: 150,
+      adjustedGrossProfit: -130,
       marginPercent: 15,
+      adjustedMarginPercent: -13,
       soldQuantity: 10,
+      writeOffQuantity: 1,
+      writeOffAmount: 80,
+      returnQuantity: 2,
+      returnAmount: 200,
       averageDailyRevenue: 100,
       stockQuantity: 2,
       stockDays: 2,

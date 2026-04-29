@@ -139,12 +139,28 @@ export default async function ReportsPage({
             value={formatMoney(operationalReport.grossProfit)}
           />
           <Metric
+            label="Прибыль с потерями"
+            value={formatMoney(operationalReport.adjustedGrossProfit)}
+          />
+          <Metric
             label="Маржа продаж"
             value={formatPercent(operationalReport.marginPercent)}
           />
           <Metric
+            label="Маржа с потерями"
+            value={formatPercent(operationalReport.adjustedMarginPercent)}
+          />
+          <Metric
             label="Продано, шт"
             value={formatQuantity(operationalReport.soldQuantity)}
+          />
+          <Metric
+            label="Списания"
+            value={formatMoney(operationalReport.writeOffAmount)}
+          />
+          <Metric
+            label="Возвраты"
+            value={formatMoney(operationalReport.returnAmount)}
           />
           <Metric
             label="Средняя выручка/день"

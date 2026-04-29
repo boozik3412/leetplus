@@ -18,6 +18,9 @@ type FactImportRow = {
   quantity: string;
   revenue?: string;
   cost?: string;
+  type?: "WRITEOFF" | "RETURN";
+  amount?: string;
+  reason?: string | null;
 };
 
 type FactImportPreview = {
@@ -32,7 +35,7 @@ type FactImportResult = {
   preview: FactImportPreview;
 };
 
-type FactImportKind = "inventory" | "sales";
+type FactImportKind = "inventory" | "sales" | "movements";
 
 const copy: Record<
   FactImportKind,
@@ -59,6 +62,15 @@ const copy: Record<
     columns: "Дата, Торговая точка, Артикул, Количество, Выручка, Себестоимость",
     previewUrl: "/api/imports/sales/preview",
     importUrl: "/api/imports/sales",
+  },
+  movements: {
+    title: "CSV списаний и возвратов",
+    description:
+      "Загрузите дневные списания и возвраты по SKU. Сумму можно передать колонкой или рассчитать от цены товара.",
+    columns:
+      "Дата, Торговая точка, Артикул, Тип, Количество, Сумма, Причина",
+    previewUrl: "/api/imports/movements/preview",
+    importUrl: "/api/imports/movements",
   },
 };
 
@@ -247,6 +259,15 @@ export function FactCsvImport({ kind }: { kind: FactImportKind }) {
                         Выручка
                       </th>
                     ) : null}
+                    {kind === "movements" ? (
+                      <>
+                        <th className="px-3 py-2 font-medium">Тип</th>
+                        <th className="px-3 py-2 text-right font-medium">
+                          Сумма
+                        </th>
+                        <th className="px-3 py-2 font-medium">Причина</th>
+                      </>
+                    ) : null}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-100">
@@ -271,6 +292,19 @@ export function FactCsvImport({ kind }: { kind: FactImportKind }) {
                         <td className="px-3 py-2 text-right text-zinc-700">
                           {row.revenue}
                         </td>
+                      ) : null}
+                      {kind === "movements" ? (
+                        <>
+                          <td className="px-3 py-2 text-zinc-700">
+                            {formatMovementType(row.type)}
+                          </td>
+                          <td className="px-3 py-2 text-right text-zinc-700">
+                            {row.amount}
+                          </td>
+                          <td className="px-3 py-2 text-zinc-700">
+                            {row.reason ?? "—"}
+                          </td>
+                        </>
                       ) : null}
                     </tr>
                   ))}
@@ -301,4 +335,13 @@ function formatDate(value: string) {
   return new Intl.DateTimeFormat("ru-RU", {
     dateStyle: "short",
   }).format(new Date(value));
+}
+
+function formatMovementType(value: FactImportRow["type"]) {
+  const labels: Record<NonNullable<FactImportRow["type"]>, string> = {
+    WRITEOFF: "Списание",
+    RETURN: "Возврат",
+  };
+
+  return value ? labels[value] : "—";
 }

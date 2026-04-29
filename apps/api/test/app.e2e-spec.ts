@@ -67,6 +67,8 @@ describe('API routes (e2e)', () => {
     importInventory: jest.fn(),
     previewSales: jest.fn(),
     importSales: jest.fn(),
+    previewStockMovements: jest.fn(),
+    importStockMovements: jest.fn(),
   };
 
   const prismaService = {};
@@ -363,8 +365,14 @@ describe('API routes (e2e)', () => {
       totalRevenue: 1000,
       totalCost: 600,
       grossProfit: 400,
+      adjustedGrossProfit: 350,
       marginPercent: 40,
+      adjustedMarginPercent: 35,
       soldQuantity: 10,
+      writeOffQuantity: 1,
+      writeOffAmount: 50,
+      returnQuantity: 0,
+      returnAmount: 0,
       averageDailyRevenue: 33.3,
       stockQuantity: 25,
       stockDays: 75,
@@ -385,8 +393,14 @@ describe('API routes (e2e)', () => {
         totalRevenue: 1000,
         totalCost: 600,
         grossProfit: 400,
+        adjustedGrossProfit: 350,
         marginPercent: 40,
+        adjustedMarginPercent: 35,
         soldQuantity: 10,
+        writeOffQuantity: 1,
+        writeOffAmount: 50,
+        returnQuantity: 0,
+        returnAmount: 0,
         averageDailyRevenue: 33.3,
         stockQuantity: 25,
         stockDays: 75,
@@ -563,6 +577,52 @@ describe('API routes (e2e)', () => {
     return request(app.getHttpServer())
       .post('/imports/sales')
       .send({ csv: 'Дата,Торговая точка,Артикул,Количество,Выручка' })
+      .expect(201)
+      .expect({
+        importedRows: 1,
+        preview: {
+          totalRows: 1,
+          validRows: 1,
+          errors: [],
+          rows: [],
+        },
+      });
+  });
+
+  it('/imports/movements/preview (POST)', () => {
+    factCsvImportService.previewStockMovements.mockResolvedValue({
+      totalRows: 1,
+      validRows: 1,
+      errors: [],
+      rows: [],
+    });
+
+    return request(app.getHttpServer())
+      .post('/imports/movements/preview')
+      .send({ csv: 'Дата,Торговая точка,Артикул,Тип,Количество' })
+      .expect(201)
+      .expect({
+        totalRows: 1,
+        validRows: 1,
+        errors: [],
+        rows: [],
+      });
+  });
+
+  it('/imports/movements (POST)', () => {
+    factCsvImportService.importStockMovements.mockResolvedValue({
+      importedRows: 1,
+      preview: {
+        totalRows: 1,
+        validRows: 1,
+        errors: [],
+        rows: [],
+      },
+    });
+
+    return request(app.getHttpServer())
+      .post('/imports/movements')
+      .send({ csv: 'Дата,Торговая точка,Артикул,Тип,Количество' })
       .expect(201)
       .expect({
         importedRows: 1,

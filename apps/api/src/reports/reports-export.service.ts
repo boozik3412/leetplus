@@ -119,8 +119,14 @@ export class ReportsExportService {
       ['Revenue', operationalReport.totalRevenue],
       ['Cost', operationalReport.totalCost],
       ['Gross profit', operationalReport.grossProfit],
+      ['Adjusted gross profit', operationalReport.adjustedGrossProfit],
       ['Sales margin, %', operationalReport.marginPercent],
+      ['Adjusted margin, %', operationalReport.adjustedMarginPercent],
       ['Sold quantity', operationalReport.soldQuantity],
+      ['Write-off quantity', operationalReport.writeOffQuantity],
+      ['Write-off amount', operationalReport.writeOffAmount],
+      ['Return quantity', operationalReport.returnQuantity],
+      ['Return amount', operationalReport.returnAmount],
       ['Average daily revenue', operationalReport.averageDailyRevenue],
       ['Stock quantity', operationalReport.stockQuantity],
       ['Stock days', operationalReport.stockDays],
@@ -431,13 +437,43 @@ export class ReportsExportService {
       },
       {
         section: 'Operations',
+        metric: 'Adjusted gross profit',
+        value: operationalReport.adjustedGrossProfit,
+      },
+      {
+        section: 'Operations',
         metric: 'Sales margin, %',
         value: operationalReport.marginPercent,
       },
       {
         section: 'Operations',
+        metric: 'Adjusted margin, %',
+        value: operationalReport.adjustedMarginPercent,
+      },
+      {
+        section: 'Operations',
         metric: 'Sold quantity',
         value: operationalReport.soldQuantity,
+      },
+      {
+        section: 'Operations',
+        metric: 'Write-off quantity',
+        value: operationalReport.writeOffQuantity,
+      },
+      {
+        section: 'Operations',
+        metric: 'Write-off amount',
+        value: operationalReport.writeOffAmount,
+      },
+      {
+        section: 'Operations',
+        metric: 'Return quantity',
+        value: operationalReport.returnQuantity,
+      },
+      {
+        section: 'Operations',
+        metric: 'Return amount',
+        value: operationalReport.returnAmount,
       },
       {
         section: 'Operations',

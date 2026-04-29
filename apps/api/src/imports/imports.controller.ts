@@ -78,4 +78,24 @@ export class ImportsController {
       dto.sourceFileName,
     );
   }
+
+  @Post('movements/preview')
+  previewStockMovements(
+    @Body() dto: ProductCsvImportDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.factCsvImportService.previewStockMovements(dto.csv, user);
+  }
+
+  @Post('movements')
+  importStockMovements(
+    @Body() dto: ProductCsvImportDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.factCsvImportService.importStockMovements(
+      dto.csv,
+      user,
+      dto.sourceFileName,
+    );
+  }
 }

@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { StockMovementType } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
@@ -83,8 +84,14 @@ export type OperationalReport = {
   totalRevenue: number;
   totalCost: number;
   grossProfit: number;
+  adjustedGrossProfit: number;
   marginPercent: number;
+  adjustedMarginPercent: number;
   soldQuantity: number;
+  writeOffQuantity: number;
+  writeOffAmount: number;
+  returnQuantity: number;
+  returnAmount: number;
   averageDailyRevenue: number;
   stockQuantity: number;
   stockDays: number | null;
@@ -352,63 +359,79 @@ export class ReportsService {
       }
     }
 
-    const [salesFacts, inventorySnapshots, activeProducts] = await Promise.all([
-      this.prisma.salesFact.findMany({
-        where: {
-          tenantId,
-          ...storeFilter,
-          saleDate: {
-            gte: period.fromDate,
-            lte: period.toDate,
-          },
-        },
-        include: {
-          product: {
-            select: {
-              id: true,
-              article: true,
-              name: true,
+    const [salesFacts, inventorySnapshots, activeProducts, stockMovements] =
+      await Promise.all([
+        this.prisma.salesFact.findMany({
+          where: {
+            tenantId,
+            ...storeFilter,
+            saleDate: {
+              gte: period.fromDate,
+              lte: period.toDate,
             },
           },
-        },
-      }),
-      this.prisma.inventorySnapshot.findMany({
-        where: {
-          tenantId,
-          ...storeFilter,
-          snapshotDate: {
-            lte: period.toDate,
-          },
-        },
-        include: {
-          product: {
-            select: {
-              id: true,
-              article: true,
-              name: true,
+          include: {
+            product: {
+              select: {
+                id: true,
+                article: true,
+                name: true,
+              },
             },
           },
-        },
-        orderBy: {
-          snapshotDate: 'desc',
-        },
-      }),
-      this.prisma.product.findMany({
-        where: { tenantId, isActive: true },
-        select: {
-          id: true,
-          article: true,
-          name: true,
-          category: {
-            select: { name: true },
+        }),
+        this.prisma.inventorySnapshot.findMany({
+          where: {
+            tenantId,
+            ...storeFilter,
+            snapshotDate: {
+              lte: period.toDate,
+            },
           },
-          supplier: {
-            select: { name: true },
+          include: {
+            product: {
+              select: {
+                id: true,
+                article: true,
+                name: true,
+              },
+            },
           },
-        },
-        orderBy: { name: 'asc' },
-      }),
-    ]);
+          orderBy: {
+            snapshotDate: 'desc',
+          },
+        }),
+        this.prisma.product.findMany({
+          where: { tenantId, isActive: true },
+          select: {
+            id: true,
+            article: true,
+            name: true,
+            category: {
+              select: { name: true },
+            },
+            supplier: {
+              select: { name: true },
+            },
+          },
+          orderBy: { name: 'asc' },
+        }),
+        this.prisma.stockMovement.findMany({
+          where: {
+            tenantId,
+            ...storeFilter,
+            movementDate: {
+              gte: period.fromDate,
+              lte: period.toDate,
+            },
+          },
+          select: {
+            type: true,
+            quantity: true,
+            amount: true,
+          },
+        }),
+      ]);
 
     const productSales = new Map<string, ProductSales>();
     let totalRevenue = 0;
@@ -444,6 +467,9 @@ export class ReportsService {
       0,
     );
     const grossProfit = totalRevenue - totalCost;
+    const movementImpact = this.stockMovementImpact(stockMovements);
+    const adjustedGrossProfit =
+      grossProfit - movementImpact.writeOffAmount - movementImpact.returnAmount;
     const periodDays = this.periodDays(period.fromDate, period.toDate);
     const outOfStockRiskProducts = this.outOfStockRiskProducts(
       productSales,
@@ -465,8 +491,17 @@ export class ReportsService {
       totalRevenue: this.round(totalRevenue),
       totalCost: this.round(totalCost),
       grossProfit: this.round(grossProfit),
+      adjustedGrossProfit: this.round(adjustedGrossProfit),
       marginPercent: this.marginPercent(totalCost, totalRevenue),
+      adjustedMarginPercent: this.marginPercent(
+        totalRevenue - adjustedGrossProfit,
+        totalRevenue,
+      ),
       soldQuantity: this.round(soldQuantity),
+      writeOffQuantity: this.round(movementImpact.writeOffQuantity),
+      writeOffAmount: this.round(movementImpact.writeOffAmount),
+      returnQuantity: this.round(movementImpact.returnQuantity),
+      returnAmount: this.round(movementImpact.returnAmount),
       averageDailyRevenue: this.round(totalRevenue / periodDays),
       stockQuantity: this.round(stockQuantity),
       stockDays:
@@ -904,6 +939,37 @@ export class ReportsService {
           a.name.localeCompare(b.name),
       ),
     };
+  }
+
+  private stockMovementImpact(
+    movements: {
+      type: StockMovementType;
+      quantity: { toNumber: () => number };
+      amount: { toNumber: () => number };
+    }[],
+  ) {
+    return movements.reduce(
+      (impact, movement) => {
+        const quantity = movement.quantity.toNumber();
+        const amount = movement.amount.toNumber();
+
+        if (movement.type === StockMovementType.WRITEOFF) {
+          impact.writeOffQuantity += quantity;
+          impact.writeOffAmount += amount;
+        } else {
+          impact.returnQuantity += quantity;
+          impact.returnAmount += amount;
+        }
+
+        return impact;
+      },
+      {
+        writeOffQuantity: 0,
+        writeOffAmount: 0,
+        returnQuantity: 0,
+        returnAmount: 0,
+      },
+    );
   }
 
   private latestStockByProduct(snapshots: StockSnapshot[]) {

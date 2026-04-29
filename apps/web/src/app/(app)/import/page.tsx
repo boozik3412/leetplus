@@ -14,7 +14,8 @@ export default async function ImportPage() {
           <h1 className="text-2xl font-semibold tracking-tight">Импорт</h1>
           <p className="mt-1 max-w-3xl text-sm text-zinc-600">
             Ручная загрузка CSV для организации {user.tenantSlug}.leetplus.ru:
-            товары, остатки и продажи с проверкой ошибок до записи в БД.
+            товары, остатки, продажи, списания и возвраты с проверкой ошибок до
+            записи в БД.
           </p>
         </div>
 
@@ -22,6 +23,7 @@ export default async function ImportPage() {
           <ProductCsvImport />
           <FactCsvImport kind="inventory" />
           <FactCsvImport kind="sales" />
+          <FactCsvImport kind="movements" />
         </div>
 
         <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
@@ -107,6 +109,7 @@ function formatImportType(type: string) {
     PRODUCT_CSV: "Товары",
     INVENTORY_CSV: "Остатки",
     SALES_CSV: "Продажи",
+    STOCK_MOVEMENT_CSV: "Списания/возвраты",
   };
 
   return labels[type] ?? type;

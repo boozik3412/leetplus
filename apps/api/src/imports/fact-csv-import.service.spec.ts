@@ -18,6 +18,9 @@ type PrismaMock = {
   salesFact: {
     upsert: jest.Mock;
   };
+  stockMovement: {
+    upsert: jest.Mock;
+  };
   importJob: {
     create: jest.Mock;
   };
@@ -40,6 +43,12 @@ type UpsertCall = {
       storeId: string;
       productId: string;
     };
+    tenantId_storeId_productId_movementDate_type?: {
+      tenantId: string;
+      storeId: string;
+      productId: string;
+      type: string;
+    };
   };
   create: {
     tenantId: string;
@@ -48,6 +57,8 @@ type UpsertCall = {
     quantity: Prisma.Decimal;
     revenue?: Prisma.Decimal;
     cost?: Prisma.Decimal;
+    amount?: Prisma.Decimal;
+    type?: string;
   };
 };
 
@@ -81,6 +92,9 @@ function createPrismaMock(): PrismaMock {
       upsert: jest.fn((args: unknown) => args),
     },
     salesFact: {
+      upsert: jest.fn((args: unknown) => args),
+    },
+    stockMovement: {
       upsert: jest.fn((args: unknown) => args),
     },
     importJob: {
@@ -138,6 +152,7 @@ describe('FactCsvImportService', () => {
         article: 'DRK-001',
         name: 'Adrenaline Rush',
         purchasePrice: new Prisma.Decimal(62),
+        salePrice: new Prisma.Decimal(139),
       },
     ]);
     service = new FactCsvImportService(
@@ -177,6 +192,21 @@ describe('FactCsvImportService', () => {
     expect(preview.rows[0]?.cost).toBe('124');
   });
 
+  it('previews stock movement rows and calculates default amount', async () => {
+    const preview = await service.previewStockMovements(
+      'Дата,Торговая точка,Артикул,Тип,Количество,Причина\n28.04.2026,Club A,DRK-001,списание,2,Брак',
+      user,
+    );
+
+    expect(preview.errors).toEqual([]);
+    expect(preview.rows[0]).toMatchObject({
+      type: 'WRITEOFF',
+      quantity: '2',
+      amount: '124',
+      reason: 'Брак',
+    });
+  });
+
   it('returns validation errors for unknown store and product', async () => {
     const preview = await service.previewInventory(
       'Дата,Торговая точка,Артикул,Остаток\n2026-04-28,Missing,UNKNOWN,5',
@@ -209,6 +239,31 @@ describe('FactCsvImportService', () => {
     expect(importJob.type).toBe('INVENTORY_CSV');
     expect(importJob.status).toBe('COMPLETED');
     expect(importJob.errorsCount).toBe(0);
+  });
+
+  it('upserts stock movement rows and writes completed import job', async () => {
+    const result = await service.importStockMovements(
+      'Дата,Торговая точка,Артикул,Тип,Количество,Сумма\n2026-04-28,Club A,DRK-001,возврат,1,139',
+      user,
+      'movements.csv',
+    );
+
+    const upsert = firstUpsertCall(prisma.stockMovement.upsert);
+    expect(
+      upsert.where.tenantId_storeId_productId_movementDate_type,
+    ).toMatchObject({
+      tenantId: 'tenant-1',
+      storeId: 'store-1',
+      productId: 'product-1',
+      type: 'RETURN',
+    });
+    expect(upsert.create.quantity).toEqual(new Prisma.Decimal(1));
+    expect(upsert.create.amount).toEqual(new Prisma.Decimal(139));
+    expect(result.importedRows).toBe(1);
+
+    const importJob = lastImportJobCreateData(prisma);
+    expect(importJob.type).toBe('STOCK_MOVEMENT_CSV');
+    expect(importJob.status).toBe('COMPLETED');
   });
 
   it('rejects sales import with validation errors and writes failed import job', async () => {

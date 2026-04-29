@@ -14,6 +14,7 @@ import { DashboardService } from '../src/dashboard/dashboard.service';
 import { FactCsvImportService } from '../src/imports/fact-csv-import.service';
 import { ImportsModule } from '../src/imports/imports.module';
 import { IntegrationsModule } from '../src/integrations/integrations.module';
+import { LangameSettingsService } from '../src/integrations/langame-settings.service';
 import { LangameSyncService } from '../src/integrations/langame-sync.service';
 import { ProductCsvImportService } from '../src/imports/product-csv-import.service';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -77,6 +78,11 @@ describe('API routes (e2e)', () => {
     syncTenant: jest.fn(),
   };
 
+  const langameSettingsService = {
+    getSettings: jest.fn(),
+    saveSettings: jest.fn(),
+  };
+
   const prismaService = {};
 
   const authService = {
@@ -119,6 +125,8 @@ describe('API routes (e2e)', () => {
       .useValue(productCsvImportService)
       .overrideProvider(FactCsvImportService)
       .useValue(factCsvImportService)
+      .overrideProvider(LangameSettingsService)
+      .useValue(langameSettingsService)
       .overrideProvider(LangameSyncService)
       .useValue(langameSyncService)
       .overrideProvider(PrismaService)
@@ -696,6 +704,44 @@ describe('API routes (e2e)', () => {
         products: 100,
         inventorySnapshots: 80,
         salesFacts: 25,
+      });
+  });
+
+  it('/integrations/langame/settings (GET)', () => {
+    langameSettingsService.getSettings.mockResolvedValue({
+      hasApiKey: true,
+      domains: ['443.langame.ru'],
+      sources: [],
+    });
+
+    return request(app.getHttpServer())
+      .get('/integrations/langame/settings')
+      .expect(200)
+      .expect({
+        hasApiKey: true,
+        domains: ['443.langame.ru'],
+        sources: [],
+      });
+  });
+
+  it('/integrations/langame/settings (PUT)', () => {
+    langameSettingsService.saveSettings.mockResolvedValue({
+      hasApiKey: true,
+      domains: ['443.langame.ru'],
+      sources: [],
+    });
+
+    return request(app.getHttpServer())
+      .put('/integrations/langame/settings')
+      .send({
+        apiKey: 'secret-key',
+        domains: ['443.langame.ru'],
+      })
+      .expect(200)
+      .expect({
+        hasApiKey: true,
+        domains: ['443.langame.ru'],
+        sources: [],
       });
   });
 

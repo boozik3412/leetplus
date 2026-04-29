@@ -1,14 +1,10 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import {
-  IntegrationProvider,
-  Prisma,
-  type IntegrationSource,
-} from '@prisma/client';
+import { IntegrationProvider, Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { LangameClient } from './langame.client';
+import { LangameSettingsService } from './langame-settings.service';
 import type {
   LangameGood,
   LangameProduct,
@@ -23,8 +19,8 @@ export class LangameSyncService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
-    private readonly configService: ConfigService,
     private readonly langameClient: LangameClient,
+    private readonly langameSettingsService: LangameSettingsService,
   ) {}
 
   async syncTenant(
@@ -32,9 +28,9 @@ export class LangameSyncService {
     query: LangameSyncQuery,
   ): Promise<LangameSyncResult> {
     const { tenantId } = await this.tenantContextService.resolve(user);
-    const apiKey = this.resolveApiKey();
     const period = this.resolvePeriod(query);
-    const sources = await this.ensureSourcesFromEnv(tenantId);
+    const { apiKey, sources } =
+      await this.langameSettingsService.resolveTenantAccess(tenantId);
     const result: LangameSyncResult = {
       tenantId,
       sources: sources.length,
@@ -119,60 +115,6 @@ export class LangameSyncService {
     }
 
     return result;
-  }
-
-  private async ensureSourcesFromEnv(tenantId: string) {
-    const domains = this.resolveDomains();
-    const credential = await this.prisma.integrationCredential.upsert({
-      where: {
-        tenantId_provider_name: {
-          tenantId,
-          provider: IntegrationProvider.LANGAME,
-          name: 'LAngame env key',
-        },
-      },
-      create: {
-        tenantId,
-        provider: IntegrationProvider.LANGAME,
-        name: 'LAngame env key',
-        apiKeyEnvVar: 'LANGAME_API_KEY',
-      },
-      update: {
-        apiKeyEnvVar: 'LANGAME_API_KEY',
-        isActive: true,
-      },
-    });
-
-    const sources: IntegrationSource[] = [];
-
-    for (const domain of domains) {
-      sources.push(
-        await this.prisma.integrationSource.upsert({
-          where: {
-            tenantId_provider_domain: {
-              tenantId,
-              provider: IntegrationProvider.LANGAME,
-              domain,
-            },
-          },
-          create: {
-            tenantId,
-            credentialId: credential.id,
-            provider: IntegrationProvider.LANGAME,
-            name: domain,
-            domain,
-            baseUrl: `https://${domain}/public_api`,
-          },
-          update: {
-            credentialId: credential.id,
-            baseUrl: `https://${domain}/public_api`,
-            isActive: true,
-          },
-        }),
-      );
-    }
-
-    return sources;
   }
 
   private async syncProducts(
@@ -349,31 +291,6 @@ export class LangameSyncService {
     }
 
     return synced;
-  }
-
-  private resolveApiKey() {
-    const apiKey = this.configService.get<string>('LANGAME_API_KEY')?.trim();
-
-    if (!apiKey) {
-      throw new BadRequestException('LANGAME_API_KEY is not configured');
-    }
-
-    return apiKey;
-  }
-
-  private resolveDomains() {
-    const domains = this.configService
-      .get<string>('LANGAME_DOMAINS')
-      ?.split(',')
-      .map((domain) => domain.trim().replace(/^https?:\/\//, ''))
-      .map((domain) => domain.replace(/\/.*$/, ''))
-      .filter(Boolean);
-
-    if (!domains?.length) {
-      throw new BadRequestException('LANGAME_DOMAINS is not configured');
-    }
-
-    return domains;
   }
 
   private resolvePeriod(query: LangameSyncQuery) {

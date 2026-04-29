@@ -1,9 +1,9 @@
-import { ConfigService } from '@nestjs/config';
-import { IntegrationProvider, Prisma, UserRole } from '@prisma/client';
+import { Prisma, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { LangameClient } from './langame.client';
+import { LangameSettingsService } from './langame-settings.service';
 import { LangameSyncService } from './langame-sync.service';
 
 type PrismaMock = {
@@ -33,15 +33,15 @@ type TenantContextMock = {
   resolve: jest.Mock;
 };
 
-type ConfigMock = {
-  get: jest.Mock;
-};
-
 type LangameClientMock = {
   listClubs: jest.Mock;
   listProducts: jest.Mock;
   listGoods: jest.Mock;
   listProductExpenses: jest.Mock;
+};
+
+type LangameSettingsMock = {
+  resolveTenantAccess: jest.Mock;
 };
 
 type StoreUpsertCall = [
@@ -101,8 +101,8 @@ function createPrismaMock(): PrismaMock {
 describe('LangameSyncService', () => {
   let prisma: PrismaMock;
   let tenantContext: TenantContextMock;
-  let config: ConfigMock;
   let client: LangameClientMock;
+  let settings: LangameSettingsMock;
   let service: LangameSyncService;
 
   beforeEach(() => {
@@ -111,16 +111,6 @@ describe('LangameSyncService', () => {
       resolve: jest.fn().mockResolvedValue({
         tenantId: 'tenant-1',
         tenantSlug: 'demo',
-      }),
-    };
-    config = {
-      get: jest.fn((key: string) => {
-        const values: Record<string, string> = {
-          LANGAME_API_KEY: 'test-key',
-          LANGAME_DOMAINS: '443.langame.ru',
-        };
-
-        return values[key];
       }),
     };
     client = {
@@ -170,6 +160,18 @@ describe('LangameSyncService', () => {
       domain: '443.langame.ru',
       baseUrl: 'https://443.langame.ru/public_api',
     });
+    settings = {
+      resolveTenantAccess: jest.fn().mockResolvedValue({
+        apiKey: 'test-key',
+        sources: [
+          {
+            id: 'source-1',
+            domain: '443.langame.ru',
+            baseUrl: 'https://443.langame.ru/public_api',
+          },
+        ],
+      }),
+    };
     prisma.product.upsert.mockResolvedValue({
       id: 'product-1',
     });
@@ -185,8 +187,8 @@ describe('LangameSyncService', () => {
     service = new LangameSyncService(
       prisma as unknown as PrismaService,
       tenantContext as unknown as TenantContextService,
-      config as unknown as ConfigService,
       client as unknown as LangameClient,
+      settings as unknown as LangameSettingsService,
     );
   });
 
@@ -204,17 +206,7 @@ describe('LangameSyncService', () => {
       inventorySnapshots: 1,
       salesFacts: 1,
     });
-    expect(prisma.integrationCredential.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          tenantId_provider_name: {
-            tenantId: 'tenant-1',
-            provider: IntegrationProvider.LANGAME,
-            name: 'LAngame env key',
-          },
-        },
-      }),
-    );
+    expect(settings.resolveTenantAccess).toHaveBeenCalledWith('tenant-1');
     const [storeUpsert] = prisma.store.upsert.mock.calls[0] as StoreUpsertCall;
     expect(storeUpsert.create.tenantId).toBe('tenant-1');
     expect(storeUpsert.create.externalDomain).toBe('443.langame.ru');
@@ -228,12 +220,12 @@ describe('LangameSyncService', () => {
   });
 
   it('rejects sync without API key', async () => {
-    config.get.mockImplementation((key: string) =>
-      key === 'LANGAME_DOMAINS' ? '443.langame.ru' : '',
+    settings.resolveTenantAccess.mockRejectedValue(
+      new Error('LAngame API key is not configured'),
     );
 
     await expect(service.syncTenant(user, {})).rejects.toThrow(
-      'LANGAME_API_KEY is not configured',
+      'LAngame API key is not configured',
     );
   });
 });

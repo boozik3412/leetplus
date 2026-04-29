@@ -309,34 +309,51 @@ export class FactCsvImportService {
       });
     }
 
-    const imported = await this.prisma.$transaction(
-      preview.rows.map((row) =>
-        this.prisma.salesFact.upsert({
+    const imported = await this.prisma.$transaction(async (tx) => {
+      const results: unknown[] = [];
+
+      for (const row of preview.rows) {
+        const existing = await tx.salesFact.findFirst({
           where: {
-            tenantId_storeId_productId_saleDate: {
-              tenantId,
-              storeId: row.storeId,
-              productId: row.productId,
-              saleDate: new Date(row.date),
-            },
-          },
-          create: {
             tenantId,
             storeId: row.storeId,
             productId: row.productId,
             saleDate: new Date(row.date),
-            quantity: new Prisma.Decimal(row.quantity),
-            revenue: new Prisma.Decimal(row.revenue),
-            cost: new Prisma.Decimal(row.cost),
+            externalProvider: null,
           },
-          update: {
-            quantity: new Prisma.Decimal(row.quantity),
-            revenue: new Prisma.Decimal(row.revenue),
-            cost: new Prisma.Decimal(row.cost),
-          },
-        }),
-      ),
-    );
+          select: { id: true },
+        });
+
+        if (existing) {
+          results.push(
+            await tx.salesFact.update({
+              where: { id: existing.id },
+              data: {
+                quantity: new Prisma.Decimal(row.quantity),
+                revenue: new Prisma.Decimal(row.revenue),
+                cost: new Prisma.Decimal(row.cost),
+              },
+            }),
+          );
+        } else {
+          results.push(
+            await tx.salesFact.create({
+              data: {
+                tenantId,
+                storeId: row.storeId,
+                productId: row.productId,
+                saleDate: new Date(row.date),
+                quantity: new Prisma.Decimal(row.quantity),
+                revenue: new Prisma.Decimal(row.revenue),
+                cost: new Prisma.Decimal(row.cost),
+              },
+            }),
+          );
+        }
+      }
+
+      return results;
+    });
 
     const importJob = await this.createImportJob({
       tenantId,

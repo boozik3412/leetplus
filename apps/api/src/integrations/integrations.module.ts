@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { AuthModule } from '../auth/auth.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { TenancyModule } from '../tenancy/tenancy.module';
 import { LangameClient } from './langame.client';
@@ -9,7 +10,7 @@ import { LangameSyncService } from './langame-sync.service';
 import { SecretEncryptionService } from './secret-encryption.service';
 
 @Module({
-  imports: [ConfigModule, PrismaModule, TenancyModule],
+  imports: [AuthModule, ConfigModule, PrismaModule, TenancyModule],
   controllers: [LangameController],
   providers: [
     LangameClient,

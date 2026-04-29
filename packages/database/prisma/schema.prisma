@@ -223,9 +223,9 @@ model SalesFact {
   store   Store   @relation(fields: [storeId], references: [id])
   product Product @relation(fields: [productId], references: [id])
 
-  @@unique([tenantId, storeId, productId, saleDate])
   @@unique([tenantId, externalProvider, externalDomain, externalSaleId])
   @@index([tenantId, saleDate])
+  @@index([tenantId, storeId, productId, saleDate])
   @@index([storeId])
   @@index([productId])
 }

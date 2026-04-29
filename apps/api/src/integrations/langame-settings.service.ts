@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { IntegrationProvider } from '@prisma/client';
+import { readFile } from 'node:fs/promises';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
@@ -64,6 +65,8 @@ export class LangameSettingsService {
         productsCount: job.productsCount,
         inventoryCount: job.inventoryCount,
         salesCount: job.salesCount,
+        discrepancyCount: job.discrepancyCount,
+        hasDiscrepancyLog: Boolean(job.discrepancyLogPath),
         errorMessage: job.errorMessage,
       })),
     };
@@ -179,6 +182,28 @@ export class LangameSettingsService {
     }
 
     return { apiKey, sources };
+  }
+
+  async getDiscrepancyLog(user: AuthenticatedUser, syncJobId: string) {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const syncJob = await this.prisma.integrationSyncJob.findFirst({
+      where: {
+        id: syncJobId,
+        tenantId,
+        provider: IntegrationProvider.LANGAME,
+      },
+      select: {
+        discrepancyLogPath: true,
+      },
+    });
+
+    if (!syncJob?.discrepancyLogPath) {
+      throw new BadRequestException('Discrepancy log is not available');
+    }
+
+    return JSON.parse(
+      await readFile(syncJob.discrepancyLogPath, 'utf8'),
+    ) as unknown;
   }
 
   private findCredential(tenantId: string) {

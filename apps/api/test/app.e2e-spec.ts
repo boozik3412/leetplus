@@ -689,6 +689,7 @@ describe('API routes (e2e)', () => {
       products: 100,
       inventorySnapshots: 80,
       salesFacts: 25,
+      discrepancies: 0,
       sourceResults: [],
     });
 
@@ -707,6 +708,7 @@ describe('API routes (e2e)', () => {
         products: 100,
         inventorySnapshots: 80,
         salesFacts: 25,
+        discrepancies: 0,
         sourceResults: [],
       });
   });

@@ -19,6 +19,7 @@ type PrismaMock = {
     update: jest.Mock;
   };
   product: {
+    findUnique: jest.Mock;
     upsert: jest.Mock;
   };
   store: {
@@ -26,9 +27,11 @@ type PrismaMock = {
     findMany: jest.Mock;
   };
   inventorySnapshot: {
+    findUnique: jest.Mock;
     upsert: jest.Mock;
   };
   salesFact: {
+    findUnique: jest.Mock;
     upsert: jest.Mock;
   };
 };
@@ -79,6 +82,8 @@ type SyncJobUpdateCall = [
       productsCount: number;
       inventoryCount: number;
       salesCount: number;
+      discrepancyCount: number;
+      discrepancyLogPath?: string | null;
     };
   },
 ];
@@ -106,6 +111,7 @@ function createPrismaMock(): PrismaMock {
       update: jest.fn(),
     },
     product: {
+      findUnique: jest.fn(),
       upsert: jest.fn(),
     },
     store: {
@@ -113,9 +119,11 @@ function createPrismaMock(): PrismaMock {
       findMany: jest.fn(),
     },
     inventorySnapshot: {
+      findUnique: jest.fn(),
       upsert: jest.fn(),
     },
     salesFact: {
+      findUnique: jest.fn(),
       upsert: jest.fn(),
     },
   };
@@ -201,6 +209,7 @@ describe('LangameSyncService', () => {
     prisma.product.upsert.mockResolvedValue({
       id: 'product-1',
     });
+    prisma.product.findUnique.mockResolvedValue(null);
     prisma.store.upsert.mockResolvedValue({
       id: 'store-1',
     });
@@ -210,6 +219,8 @@ describe('LangameSyncService', () => {
         externalClubId: '1',
       },
     ]);
+    prisma.inventorySnapshot.findUnique.mockResolvedValue(null);
+    prisma.salesFact.findUnique.mockResolvedValue(null);
     service = new LangameSyncService(
       prisma as unknown as PrismaService,
       tenantContext as unknown as TenantContextService,
@@ -232,6 +243,7 @@ describe('LangameSyncService', () => {
       products: 1,
       inventorySnapshots: 1,
       salesFacts: 1,
+      discrepancies: 0,
       sourceResults: [
         {
           domain: '443.langame.ru',
@@ -240,6 +252,8 @@ describe('LangameSyncService', () => {
           products: 1,
           inventorySnapshots: 1,
           salesFacts: 1,
+          discrepancies: 0,
+          discrepancyLogPath: null,
           errorMessage: null,
         },
       ],
@@ -263,6 +277,7 @@ describe('LangameSyncService', () => {
     expect(syncJobUpdate.data.productsCount).toBe(1);
     expect(syncJobUpdate.data.inventoryCount).toBe(1);
     expect(syncJobUpdate.data.salesCount).toBe(1);
+    expect(syncJobUpdate.data.discrepancyCount).toBe(0);
   });
 
   it('rejects sync without API key', async () => {

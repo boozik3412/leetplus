@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Post, Put, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Put,
+  UseGuards,
+} from '@nestjs/common';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -28,6 +36,14 @@ export class LangameController {
     @Body() dto: LangameSettingsDto,
   ) {
     return this.langameSettingsService.saveSettings(user, dto);
+  }
+
+  @Get('sync-jobs/:id/discrepancy-log')
+  getDiscrepancyLog(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ) {
+    return this.langameSettingsService.getDiscrepancyLog(user, id);
   }
 
   @Post('sync')

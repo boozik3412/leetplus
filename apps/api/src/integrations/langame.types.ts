@@ -31,6 +31,8 @@ export type LangameProductExpense = {
 export type LangameSyncQuery = {
   dateFrom?: string;
   dateTo?: string;
+  mode?: 'QUICK' | 'INVENTORY' | 'CATALOG' | 'BACKFILL' | 'FULL';
+  trigger?: 'MANUAL' | 'AUTO';
 };
 
 export type LangameSyncResult = {
@@ -41,6 +43,7 @@ export type LangameSyncResult = {
   products: number;
   inventorySnapshots: number;
   salesFacts: number;
+  discrepancies: number;
   sourceResults: LangameSyncSourceResult[];
 };
 
@@ -51,5 +54,7 @@ export type LangameSyncSourceResult = {
   products: number;
   inventorySnapshots: number;
   salesFacts: number;
+  discrepancies: number;
+  discrepancyLogPath: string | null;
   errorMessage: string | null;
 };

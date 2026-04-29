@@ -10,6 +10,7 @@ type SyncResult = {
   products: number;
   inventorySnapshots: number;
   salesFacts: number;
+  discrepancies: number;
   sourceResults: {
     domain: string;
     status: "SUCCESS" | "FAILED";
@@ -17,6 +18,8 @@ type SyncResult = {
     products: number;
     inventorySnapshots: number;
     salesFacts: number;
+    discrepancies: number;
+    discrepancyLogPath: string | null;
     errorMessage: string | null;
   }[];
 };
@@ -249,6 +252,7 @@ export function LangameSettingsForm({
               <Metric label="Товаров" value={syncResult.products} />
               <Metric label="Остатков" value={syncResult.inventorySnapshots} />
               <Metric label="Продаж" value={syncResult.salesFacts} />
+              <Metric label="Расхождений" value={syncResult.discrepancies} />
             </div>
             <div className="mt-4 divide-y divide-zinc-100 rounded-md border border-zinc-100">
               {syncResult.sourceResults.map((result) => (
@@ -270,7 +274,7 @@ export function LangameSettingsForm({
                   </span>
                   <span className="text-zinc-600">
                     {result.errorMessage ??
-                      `Клубов: ${result.stores}, товаров: ${result.products}, остатков: ${result.inventorySnapshots}, продаж: ${result.salesFacts}`}
+                      `Клубов: ${result.stores}, товаров: ${result.products}, остатков: ${result.inventorySnapshots}, продаж: ${result.salesFacts}, расхождений: ${result.discrepancies}`}
                   </span>
                 </div>
               ))}
@@ -304,8 +308,16 @@ export function LangameSettingsForm({
                   </div>
                   <p className="mt-2 text-zinc-600">
                     {job.errorMessage ??
-                      `Клубов: ${job.storesCount}, товаров: ${job.productsCount}, остатков: ${job.inventoryCount}, продаж: ${job.salesCount}`}
+                      `Клубов: ${job.storesCount}, товаров: ${job.productsCount}, остатков: ${job.inventoryCount}, продаж: ${job.salesCount}, расхождений: ${job.discrepancyCount}`}
                   </p>
+                  {job.hasDiscrepancyLog ? (
+                    <a
+                      href={`/api/integrations/langame/sync-jobs/${job.id}/discrepancy-log`}
+                      className="mt-2 inline-flex text-sm font-medium text-zinc-900 underline underline-offset-4"
+                    >
+                      Скачать файл расхождений
+                    </a>
+                  ) : null}
                 </div>
               ))}
             </div>

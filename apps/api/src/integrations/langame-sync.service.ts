@@ -1,9 +1,13 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import {
+  IntegrationSyncMode,
   IntegrationProvider,
   IntegrationSyncStatus,
+  IntegrationSyncTrigger,
   Prisma,
 } from '@prisma/client';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
@@ -18,6 +22,14 @@ import type {
 } from './langame.types';
 
 const DEFAULT_PAGE_LIMIT = 200;
+
+type DiscrepancyLogEntry = {
+  entity: 'Product' | 'InventorySnapshot' | 'SalesFact';
+  externalId: string;
+  field: string;
+  previousValue: string | number | null;
+  nextValue: string | number | null;
+};
 
 @Injectable()
 export class LangameSyncService {
@@ -44,8 +56,11 @@ export class LangameSyncService {
       products: 0,
       inventorySnapshots: 0,
       salesFacts: 0,
+      discrepancies: 0,
       sourceResults: [],
     };
+    const mode = this.resolveMode(query.mode);
+    const trigger = this.resolveTrigger(query.trigger);
 
     for (const source of sources) {
       const syncJob = await this.prisma.integrationSyncJob.create({
@@ -55,8 +70,11 @@ export class LangameSyncService {
           provider: IntegrationProvider.LANGAME,
           domain: source.domain,
           status: IntegrationSyncStatus.FAILED,
+          mode,
+          trigger,
         },
       });
+      const discrepancies: DiscrepancyLogEntry[] = [];
       const sourceResult: LangameSyncSourceResult = {
         domain: source.domain,
         status: 'FAILED',
@@ -64,6 +82,8 @@ export class LangameSyncService {
         products: 0,
         inventorySnapshots: 0,
         salesFacts: 0,
+        discrepancies: 0,
+        discrepancyLogPath: null,
         errorMessage: null,
       };
 
@@ -80,6 +100,7 @@ export class LangameSyncService {
           tenantId,
           source.domain,
           products,
+          discrepancies,
         );
 
         result.products += products.length;
@@ -130,6 +151,7 @@ export class LangameSyncService {
             productsByExternalId,
             goods,
             period.toDate,
+            discrepancies,
           );
           result.inventorySnapshots += inventorySnapshots;
           sourceResult.inventorySnapshots += inventorySnapshots;
@@ -142,9 +164,22 @@ export class LangameSyncService {
           apiKey,
           productsByExternalId,
           period,
+          discrepancies,
         );
         result.salesFacts += salesFacts;
         sourceResult.salesFacts = salesFacts;
+        sourceResult.discrepancies = discrepancies.length;
+        result.discrepancies += discrepancies.length;
+        const discrepancyLogPath =
+          trigger === IntegrationSyncTrigger.MANUAL && discrepancies.length > 0
+            ? await this.writeDiscrepancyLog({
+                tenantId,
+                domain: source.domain,
+                syncJobId: syncJob.id,
+                discrepancies,
+              })
+            : null;
+        sourceResult.discrepancyLogPath = discrepancyLogPath;
 
         await this.prisma.integrationSource.update({
           where: { id: source.id },
@@ -159,6 +194,8 @@ export class LangameSyncService {
             productsCount: sourceResult.products,
             inventoryCount: sourceResult.inventorySnapshots,
             salesCount: sourceResult.salesFacts,
+            discrepancyCount: sourceResult.discrepancies,
+            discrepancyLogPath,
             errorMessage: null,
           },
         });
@@ -177,6 +214,7 @@ export class LangameSyncService {
             productsCount: sourceResult.products,
             inventoryCount: sourceResult.inventorySnapshots,
             salesCount: sourceResult.salesFacts,
+            discrepancyCount: sourceResult.discrepancies,
             errorMessage,
           },
         });
@@ -192,10 +230,40 @@ export class LangameSyncService {
     tenantId: string,
     domain: string,
     products: LangameProduct[],
+    discrepancies: DiscrepancyLogEntry[],
   ) {
     const byExternalId = new Map<string, string>();
 
     for (const product of products) {
+      const existing = await this.prisma.product.findUnique({
+        where: {
+          tenantId_externalProvider_externalDomain_externalProductId: {
+            tenantId,
+            externalProvider: IntegrationProvider.LANGAME,
+            externalDomain: domain,
+            externalProductId: String(product.id),
+          },
+        },
+        select: {
+          name: true,
+          isActive: true,
+        },
+      });
+      this.addDiscrepancy(discrepancies, {
+        entity: 'Product',
+        externalId: String(product.id),
+        field: 'name',
+        previousValue: existing?.name ?? null,
+        nextValue: product.name,
+      });
+      this.addDiscrepancy(discrepancies, {
+        entity: 'Product',
+        externalId: String(product.id),
+        field: 'isActive',
+        previousValue:
+          existing?.isActive === undefined ? null : Number(existing.isActive),
+        nextValue: Number(product.active === 1),
+      });
       const created = await this.prisma.product.upsert({
         where: {
           tenantId_externalProvider_externalDomain_externalProductId: {
@@ -236,6 +304,7 @@ export class LangameSyncService {
     productsByExternalId: Map<string, string>,
     goods: LangameGood[],
     snapshotDate: Date,
+    discrepancies: DiscrepancyLogEntry[],
   ) {
     let synced = 0;
 
@@ -246,6 +315,26 @@ export class LangameSyncService {
         continue;
       }
 
+      const existing = await this.prisma.inventorySnapshot.findUnique({
+        where: {
+          tenantId_storeId_productId_snapshotDate: {
+            tenantId,
+            storeId,
+            productId,
+            snapshotDate,
+          },
+        },
+        select: {
+          quantity: true,
+        },
+      });
+      this.addDiscrepancy(discrepancies, {
+        entity: 'InventorySnapshot',
+        externalId: `${domain}:${externalClubId}:${item.id}:${this.toDateInputValue(snapshotDate)}`,
+        field: 'quantity',
+        previousValue: existing?.quantity.toNumber() ?? null,
+        nextValue: item.count,
+      });
       await this.prisma.inventorySnapshot.upsert({
         where: {
           tenantId_storeId_productId_snapshotDate: {
@@ -285,6 +374,7 @@ export class LangameSyncService {
     apiKey: string,
     productsByExternalId: Map<string, string>,
     period: { from: string; to: string },
+    discrepancies: DiscrepancyLogEntry[],
   ) {
     const stores = await this.prisma.store.findMany({
       where: {
@@ -323,6 +413,73 @@ export class LangameSyncService {
           continue;
         }
 
+        const nextRevenue = new Prisma.Decimal(row.price_sale).mul(row.count);
+        const nextCost = new Prisma.Decimal(row.price_purchase ?? 0).mul(
+          row.count,
+        );
+        const nextSaleDate = this.parseLangameDate(row.date);
+        const existing = await this.prisma.salesFact.findUnique({
+          where: {
+            tenantId_externalProvider_externalDomain_externalSaleId: {
+              tenantId,
+              externalProvider: IntegrationProvider.LANGAME,
+              externalDomain: domain,
+              externalSaleId: String(row.id),
+            },
+          },
+          select: {
+            storeId: true,
+            productId: true,
+            saleDate: true,
+            quantity: true,
+            revenue: true,
+            cost: true,
+          },
+        });
+        this.addDiscrepancy(discrepancies, {
+          entity: 'SalesFact',
+          externalId: String(row.id),
+          field: 'storeId',
+          previousValue: existing?.storeId ?? null,
+          nextValue: storeId,
+        });
+        this.addDiscrepancy(discrepancies, {
+          entity: 'SalesFact',
+          externalId: String(row.id),
+          field: 'productId',
+          previousValue: existing?.productId ?? null,
+          nextValue: productId,
+        });
+        this.addDiscrepancy(discrepancies, {
+          entity: 'SalesFact',
+          externalId: String(row.id),
+          field: 'saleDate',
+          previousValue: existing
+            ? this.toDateTimeValue(existing.saleDate)
+            : null,
+          nextValue: this.toDateTimeValue(nextSaleDate),
+        });
+        this.addDiscrepancy(discrepancies, {
+          entity: 'SalesFact',
+          externalId: String(row.id),
+          field: 'quantity',
+          previousValue: existing?.quantity.toNumber() ?? null,
+          nextValue: row.count,
+        });
+        this.addDiscrepancy(discrepancies, {
+          entity: 'SalesFact',
+          externalId: String(row.id),
+          field: 'revenue',
+          previousValue: existing?.revenue.toNumber() ?? null,
+          nextValue: nextRevenue.toNumber(),
+        });
+        this.addDiscrepancy(discrepancies, {
+          entity: 'SalesFact',
+          externalId: String(row.id),
+          field: 'cost',
+          previousValue: existing?.cost.toNumber() ?? null,
+          nextValue: nextCost.toNumber(),
+        });
         await this.prisma.salesFact.upsert({
           where: {
             tenantId_externalProvider_externalDomain_externalSaleId: {
@@ -336,19 +493,19 @@ export class LangameSyncService {
             tenantId,
             storeId,
             productId,
-            saleDate: this.parseLangameDate(row.date),
+            saleDate: nextSaleDate,
             quantity: new Prisma.Decimal(row.count),
-            revenue: new Prisma.Decimal(row.price_sale).mul(row.count),
-            cost: new Prisma.Decimal(row.price_purchase ?? 0).mul(row.count),
+            revenue: nextRevenue,
+            cost: nextCost,
             externalProvider: IntegrationProvider.LANGAME,
             externalDomain: domain,
             externalSaleId: String(row.id),
           },
           update: {
-            saleDate: this.parseLangameDate(row.date),
+            saleDate: nextSaleDate,
             quantity: new Prisma.Decimal(row.count),
-            revenue: new Prisma.Decimal(row.price_sale).mul(row.count),
-            cost: new Prisma.Decimal(row.price_purchase ?? 0).mul(row.count),
+            revenue: nextRevenue,
+            cost: nextCost,
           },
         });
         synced += 1;
@@ -388,6 +545,30 @@ export class LangameSyncService {
     };
   }
 
+  private resolveMode(mode: LangameSyncQuery['mode']) {
+    if (!mode) {
+      return IntegrationSyncMode.BACKFILL;
+    }
+
+    if (!Object.values(IntegrationSyncMode).includes(mode)) {
+      throw new BadRequestException('Invalid LAngame sync mode');
+    }
+
+    return mode;
+  }
+
+  private resolveTrigger(trigger: LangameSyncQuery['trigger']) {
+    if (!trigger) {
+      return IntegrationSyncTrigger.MANUAL;
+    }
+
+    if (!Object.values(IntegrationSyncTrigger).includes(trigger)) {
+      throw new BadRequestException('Invalid LAngame sync trigger');
+    }
+
+    return trigger;
+  }
+
   private parseDateInput(value: string, field: string) {
     const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
 
@@ -413,6 +594,60 @@ export class LangameSyncService {
 
   private toDateInputValue(date: Date) {
     return date.toISOString().slice(0, 10);
+  }
+
+  private toDateTimeValue(date: Date) {
+    return date.toISOString();
+  }
+
+  private addDiscrepancy(
+    discrepancies: DiscrepancyLogEntry[],
+    entry: DiscrepancyLogEntry,
+  ) {
+    if (entry.previousValue === null) {
+      return;
+    }
+
+    if (String(entry.previousValue) === String(entry.nextValue)) {
+      return;
+    }
+
+    discrepancies.push(entry);
+  }
+
+  private async writeDiscrepancyLog({
+    tenantId,
+    domain,
+    syncJobId,
+    discrepancies,
+  }: {
+    tenantId: string;
+    domain: string;
+    syncJobId: string;
+    discrepancies: DiscrepancyLogEntry[];
+  }) {
+    const directory = join(process.cwd(), 'logs', 'langame-sync', tenantId);
+    await mkdir(directory, { recursive: true });
+    const fileName = `${new Date().toISOString().replace(/[:.]/g, '-')}-${domain}-${syncJobId}.json`;
+    const filePath = join(directory, fileName);
+
+    await writeFile(
+      filePath,
+      JSON.stringify(
+        {
+          tenantId,
+          domain,
+          syncJobId,
+          createdAt: new Date().toISOString(),
+          discrepancies,
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+
+    return filePath;
   }
 
   private knownAddress(domain: string, clubId: number) {

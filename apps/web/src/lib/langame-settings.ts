@@ -26,6 +26,8 @@ export type LangameSyncJob = {
   productsCount: number;
   inventoryCount: number;
   salesCount: number;
+  discrepancyCount: number;
+  hasDiscrepancyLog: boolean;
   errorMessage: string | null;
 };
 

@@ -534,6 +534,7 @@ async function main() {
         email: testUserEmail,
         fullName: "Тестовый пользователь",
         role: UserRole.OWNER,
+        isPlatformAdmin: true,
         passwordHash: testUserPasswordHash,
         emailVerifiedAt: new Date(),
       },

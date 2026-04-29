@@ -11,6 +11,7 @@ type NavItem = {
 };
 
 const navItems: NavItem[] = [
+  { href: "/admin", label: "Админ платформы" },
   { href: "/dashboard", label: "Дашборд" },
   { href: "/products", label: "Товары" },
   { href: "/categories", label: "Категории" },

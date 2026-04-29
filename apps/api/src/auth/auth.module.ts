@@ -9,6 +9,7 @@ import { EmailVerificationService } from './email-verification.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { OptionalJwtAuthGuard } from './optional-jwt-auth.guard';
 import { PasswordService } from './password.service';
+import { PlatformAdminGuard } from './platform-admin.guard';
 import { RolesGuard } from './roles.guard';
 
 const DEV_JWT_SECRET = 'leetplus-dev-jwt-secret-change-before-production';
@@ -36,6 +37,7 @@ type JwtExpiresIn = NonNullable<JwtModuleOptions['signOptions']>['expiresIn'];
     AuthService,
     EmailVerificationService,
     PasswordService,
+    PlatformAdminGuard,
     JwtAuthGuard,
     OptionalJwtAuthGuard,
     RolesGuard,
@@ -45,6 +47,7 @@ type JwtExpiresIn = NonNullable<JwtModuleOptions['signOptions']>['expiresIn'];
     JwtModule,
     JwtAuthGuard,
     OptionalJwtAuthGuard,
+    PlatformAdminGuard,
     RolesGuard,
   ],
 })

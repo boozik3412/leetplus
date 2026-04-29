@@ -6,6 +6,7 @@ export type AuthUser = {
   email: string;
   fullName: string | null;
   role: "OWNER" | "MANAGER" | "BUYER" | "ADMIN";
+  isPlatformAdmin: boolean;
   tenantId: string;
   tenantSlug: string;
 };

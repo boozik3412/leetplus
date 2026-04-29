@@ -40,6 +40,7 @@ function createUserWithTenant() {
     email: 'owner@club-a.leetplus.ru',
     fullName: 'Owner',
     role: UserRole.OWNER,
+    isPlatformAdmin: false,
     passwordHash: 'hash',
     tenantId: 'tenant-1',
     tenant: {
@@ -109,6 +110,7 @@ describe('AuthService', () => {
         email: 'owner@club-a.leetplus.ru',
         fullName: 'Owner',
         role: UserRole.OWNER,
+        isPlatformAdmin: false,
         tenantId: 'tenant-1',
         tenantSlug: 'club-a',
       },

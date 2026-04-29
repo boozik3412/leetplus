@@ -51,6 +51,10 @@ export function can(user: AuthUser | null, capability: Capability) {
 }
 
 export function canAccessPath(user: AuthUser | null, href: string) {
+  if (href === "/admin") {
+    return Boolean(user?.isPlatformAdmin);
+  }
+
   if (href === "/settings") {
     return can(user, "manage_integrations");
   }

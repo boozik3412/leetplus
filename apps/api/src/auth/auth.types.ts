@@ -6,6 +6,7 @@ export type AuthenticatedUser = {
   email: string;
   fullName: string | null;
   role: UserRole;
+  isPlatformAdmin: boolean;
   tenantId: string;
   tenantSlug: string;
 };
@@ -14,6 +15,7 @@ export type AuthTokenPayload = {
   sub: string;
   email: string;
   role: UserRole;
+  isPlatformAdmin: boolean;
   tenantId: string;
   tenantSlug: string;
 };

@@ -22,6 +22,7 @@ type UserWithTenant = {
   email: string;
   fullName: string | null;
   role: UserRole;
+  isPlatformAdmin: boolean;
   passwordHash: string;
   tenantId: string;
   tenant: {
@@ -102,6 +103,7 @@ export class AuthService {
       email: owner.email,
       fullName: owner.fullName,
       role: owner.role,
+      isPlatformAdmin: owner.isPlatformAdmin,
       passwordHash: owner.passwordHash,
       tenantId: owner.tenantId,
       tenant: {
@@ -176,6 +178,7 @@ export class AuthService {
       sub: authenticatedUser.id,
       email: authenticatedUser.email,
       role: authenticatedUser.role,
+      isPlatformAdmin: authenticatedUser.isPlatformAdmin,
       tenantId: authenticatedUser.tenantId,
       tenantSlug: authenticatedUser.tenantSlug,
     };
@@ -192,6 +195,7 @@ export class AuthService {
       email: user.email,
       fullName: user.fullName,
       role: user.role,
+      isPlatformAdmin: user.isPlatformAdmin,
       tenantId: user.tenantId,
       tenantSlug: user.tenant.slug,
     };

@@ -15,6 +15,9 @@ type PrismaMock = {
     updateMany: jest.Mock;
     upsert: jest.Mock;
   };
+  integrationSyncJob: {
+    findMany: jest.Mock;
+  };
 };
 
 type TenantContextMock = {
@@ -58,6 +61,9 @@ function createPrismaMock(): PrismaMock {
       updateMany: jest.fn(),
       upsert: jest.fn(),
     },
+    integrationSyncJob: {
+      findMany: jest.fn(),
+    },
   };
 }
 
@@ -94,6 +100,7 @@ describe('LangameSettingsService', () => {
         lastSyncedAt: null,
       },
     ]);
+    prisma.integrationSyncJob.findMany.mockResolvedValue([]);
     service = new LangameSettingsService(
       prisma as unknown as PrismaService,
       tenantContext as unknown as TenantContextService,

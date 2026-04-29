@@ -14,6 +14,10 @@ type PrismaMock = {
     upsert: jest.Mock;
     update: jest.Mock;
   };
+  integrationSyncJob: {
+    create: jest.Mock;
+    update: jest.Mock;
+  };
   product: {
     upsert: jest.Mock;
   };
@@ -64,6 +68,21 @@ type SalesFactUpsertCall = [
   },
 ];
 
+type SyncJobUpdateCall = [
+  {
+    where: {
+      id: string;
+    };
+    data: {
+      status: string;
+      storesCount: number;
+      productsCount: number;
+      inventoryCount: number;
+      salesCount: number;
+    };
+  },
+];
+
 const user: AuthenticatedUser = {
   id: 'user-1',
   email: 'owner@example.com',
@@ -80,6 +99,10 @@ function createPrismaMock(): PrismaMock {
     },
     integrationSource: {
       upsert: jest.fn(),
+      update: jest.fn(),
+    },
+    integrationSyncJob: {
+      create: jest.fn(),
       update: jest.fn(),
     },
     product: {
@@ -160,6 +183,9 @@ describe('LangameSyncService', () => {
       domain: '443.langame.ru',
       baseUrl: 'https://443.langame.ru/public_api',
     });
+    prisma.integrationSyncJob.create.mockResolvedValue({
+      id: 'sync-job-1',
+    });
     settings = {
       resolveTenantAccess: jest.fn().mockResolvedValue({
         apiKey: 'test-key',
@@ -201,10 +227,22 @@ describe('LangameSyncService', () => {
     ).resolves.toEqual({
       tenantId: 'tenant-1',
       sources: 1,
+      failedSources: 0,
       stores: 1,
       products: 1,
       inventorySnapshots: 1,
       salesFacts: 1,
+      sourceResults: [
+        {
+          domain: '443.langame.ru',
+          status: 'SUCCESS',
+          stores: 1,
+          products: 1,
+          inventorySnapshots: 1,
+          salesFacts: 1,
+          errorMessage: null,
+        },
+      ],
     });
     expect(settings.resolveTenantAccess).toHaveBeenCalledWith('tenant-1');
     const [storeUpsert] = prisma.store.upsert.mock.calls[0] as StoreUpsertCall;
@@ -217,6 +255,14 @@ describe('LangameSyncService', () => {
     expect(salesUpsert.create.tenantId).toBe('tenant-1');
     expect(salesUpsert.create.revenue).toEqual(new Prisma.Decimal(100).mul(2));
     expect(salesUpsert.create.cost).toEqual(new Prisma.Decimal('50.00').mul(2));
+    const [syncJobUpdate] = prisma.integrationSyncJob.update.mock
+      .calls[0] as SyncJobUpdateCall;
+    expect(syncJobUpdate.where.id).toBe('sync-job-1');
+    expect(syncJobUpdate.data.status).toBe('SUCCESS');
+    expect(syncJobUpdate.data.storesCount).toBe(1);
+    expect(syncJobUpdate.data.productsCount).toBe(1);
+    expect(syncJobUpdate.data.inventoryCount).toBe(1);
+    expect(syncJobUpdate.data.salesCount).toBe(1);
   });
 
   it('rejects sync without API key', async () => {

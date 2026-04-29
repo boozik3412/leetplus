@@ -22,7 +22,7 @@ export class LangameSettingsService {
 
   async getSettings(user: AuthenticatedUser) {
     const { tenantId } = await this.tenantContextService.resolve(user);
-    const [credential, sources] = await Promise.all([
+    const [credential, sources, syncJobs] = await Promise.all([
       this.findCredential(tenantId),
       this.prisma.integrationSource.findMany({
         where: {
@@ -30,6 +30,14 @@ export class LangameSettingsService {
           provider: IntegrationProvider.LANGAME,
         },
         orderBy: { domain: 'asc' },
+      }),
+      this.prisma.integrationSyncJob.findMany({
+        where: {
+          tenantId,
+          provider: IntegrationProvider.LANGAME,
+        },
+        orderBy: { startedAt: 'desc' },
+        take: 10,
       }),
     ]);
 
@@ -45,6 +53,18 @@ export class LangameSettingsService {
         baseUrl: source.baseUrl,
         isActive: source.isActive,
         lastSyncedAt: source.lastSyncedAt?.toISOString() ?? null,
+      })),
+      syncJobs: syncJobs.map((job) => ({
+        id: job.id,
+        domain: job.domain,
+        status: job.status,
+        startedAt: job.startedAt.toISOString(),
+        finishedAt: job.finishedAt?.toISOString() ?? null,
+        storesCount: job.storesCount,
+        productsCount: job.productsCount,
+        inventoryCount: job.inventoryCount,
+        salesCount: job.salesCount,
+        errorMessage: job.errorMessage,
       })),
     };
   }

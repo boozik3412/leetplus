@@ -36,8 +36,20 @@ export type LangameSyncQuery = {
 export type LangameSyncResult = {
   tenantId: string;
   sources: number;
+  failedSources: number;
   stores: number;
   products: number;
   inventorySnapshots: number;
   salesFacts: number;
+  sourceResults: LangameSyncSourceResult[];
+};
+
+export type LangameSyncSourceResult = {
+  domain: string;
+  status: 'SUCCESS' | 'FAILED';
+  stores: number;
+  products: number;
+  inventorySnapshots: number;
+  salesFacts: number;
+  errorMessage: string | null;
 };

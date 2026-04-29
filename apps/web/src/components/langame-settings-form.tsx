@@ -5,10 +5,20 @@ import type { LangameSettings } from "@/lib/langame-settings";
 
 type SyncResult = {
   sources: number;
+  failedSources: number;
   stores: number;
   products: number;
   inventorySnapshots: number;
   salesFacts: number;
+  sourceResults: {
+    domain: string;
+    status: "SUCCESS" | "FAILED";
+    stores: number;
+    products: number;
+    inventorySnapshots: number;
+    salesFacts: number;
+    errorMessage: string | null;
+  }[];
 };
 
 function getErrorMessage(data: unknown) {
@@ -98,10 +108,19 @@ export function LangameSettingsForm({
 
       setSyncResult(data as SyncResult);
       setSuccess("Синхронизация LAngame завершена.");
+      await refreshSettings();
     } catch {
       setError("API недоступен");
     } finally {
       setIsSyncing(false);
+    }
+  }
+
+  async function refreshSettings() {
+    const response = await fetch("/api/integrations/langame/settings");
+
+    if (response.ok) {
+      setSettings((await response.json()) as LangameSettings);
     }
   }
 
@@ -225,10 +244,70 @@ export function LangameSettingsForm({
             <h3 className="text-sm font-semibold">Результат синхронизации</h3>
             <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
               <Metric label="Источников" value={syncResult.sources} />
+              <Metric label="Ошибок" value={syncResult.failedSources} />
               <Metric label="Клубов" value={syncResult.stores} />
               <Metric label="Товаров" value={syncResult.products} />
               <Metric label="Остатков" value={syncResult.inventorySnapshots} />
               <Metric label="Продаж" value={syncResult.salesFacts} />
+            </div>
+            <div className="mt-4 divide-y divide-zinc-100 rounded-md border border-zinc-100">
+              {syncResult.sourceResults.map((result) => (
+                <div
+                  key={result.domain}
+                  className="grid gap-2 px-3 py-3 text-sm lg:grid-cols-[180px_90px_1fr]"
+                >
+                  <span className="font-medium text-zinc-950">
+                    {result.domain}
+                  </span>
+                  <span
+                    className={
+                      result.status === "SUCCESS"
+                        ? "text-emerald-700"
+                        : "text-red-700"
+                    }
+                  >
+                    {result.status === "SUCCESS" ? "Успешно" : "Ошибка"}
+                  </span>
+                  <span className="text-zinc-600">
+                    {result.errorMessage ??
+                      `Клубов: ${result.stores}, товаров: ${result.products}, остатков: ${result.inventorySnapshots}, продаж: ${result.salesFacts}`}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {settings.syncJobs.length > 0 ? (
+          <div className="border-t border-zinc-200 p-5">
+            <h3 className="text-sm font-semibold">История синхронизаций</h3>
+            <div className="mt-3 divide-y divide-zinc-100 rounded-md border border-zinc-100">
+              {settings.syncJobs.map((job) => (
+                <div key={job.id} className="px-3 py-3 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="font-medium text-zinc-950">{job.domain}</p>
+                      <p className="mt-1 text-zinc-500">
+                        {formatDateTime(job.startedAt)}
+                      </p>
+                    </div>
+                    <span
+                      className={[
+                        "rounded-full px-2.5 py-1 text-xs font-medium",
+                        job.status === "SUCCESS"
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "bg-red-50 text-red-700",
+                      ].join(" ")}
+                    >
+                      {job.status === "SUCCESS" ? "Успешно" : "Ошибка"}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-zinc-600">
+                    {job.errorMessage ??
+                      `Клубов: ${job.storesCount}, товаров: ${job.productsCount}, остатков: ${job.inventoryCount}, продаж: ${job.salesCount}`}
+                  </p>
+                </div>
+              ))}
             </div>
           </div>
         ) : null}
@@ -244,4 +323,11 @@ function Metric({ label, value }: { label: string; value: number }) {
       <p className="mt-1 text-xl font-semibold tabular-nums">{value}</p>
     </div>
   );
+}
+
+function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat("ru-RU", {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(new Date(value));
 }

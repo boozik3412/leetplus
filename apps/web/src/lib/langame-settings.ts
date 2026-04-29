@@ -13,6 +13,20 @@ export type LangameSettings = {
   hasApiKey: boolean;
   domains: string[];
   sources: LangameSourceSettings[];
+  syncJobs: LangameSyncJob[];
+};
+
+export type LangameSyncJob = {
+  id: string;
+  domain: string;
+  status: "SUCCESS" | "FAILED";
+  startedAt: string;
+  finishedAt: string | null;
+  storesCount: number;
+  productsCount: number;
+  inventoryCount: number;
+  salesCount: number;
+  errorMessage: string | null;
 };
 
 export async function getLangameSettings(): Promise<LangameSettings> {

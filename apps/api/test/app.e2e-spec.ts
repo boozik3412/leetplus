@@ -684,10 +684,12 @@ describe('API routes (e2e)', () => {
     langameSyncService.syncTenant.mockResolvedValue({
       tenantId: 'tenant-1',
       sources: 3,
+      failedSources: 1,
       stores: 4,
       products: 100,
       inventorySnapshots: 80,
       salesFacts: 25,
+      sourceResults: [],
     });
 
     return request(app.getHttpServer())
@@ -700,10 +702,12 @@ describe('API routes (e2e)', () => {
       .expect({
         tenantId: 'tenant-1',
         sources: 3,
+        failedSources: 1,
         stores: 4,
         products: 100,
         inventorySnapshots: 80,
         salesFacts: 25,
+        sourceResults: [],
       });
   });
 
@@ -712,6 +716,7 @@ describe('API routes (e2e)', () => {
       hasApiKey: true,
       domains: ['443.langame.ru'],
       sources: [],
+      syncJobs: [],
     });
 
     return request(app.getHttpServer())
@@ -721,6 +726,7 @@ describe('API routes (e2e)', () => {
         hasApiKey: true,
         domains: ['443.langame.ru'],
         sources: [],
+        syncJobs: [],
       });
   });
 
@@ -729,6 +735,7 @@ describe('API routes (e2e)', () => {
       hasApiKey: true,
       domains: ['443.langame.ru'],
       sources: [],
+      syncJobs: [],
     });
 
     return request(app.getHttpServer())
@@ -742,6 +749,7 @@ describe('API routes (e2e)', () => {
         hasApiKey: true,
         domains: ['443.langame.ru'],
         sources: [],
+        syncJobs: [],
       });
   });
 

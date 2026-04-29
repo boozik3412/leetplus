@@ -1,5 +1,9 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { IntegrationProvider, Prisma } from '@prisma/client';
+import {
+  IntegrationProvider,
+  IntegrationSyncStatus,
+  Prisma,
+} from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
@@ -10,6 +14,7 @@ import type {
   LangameProduct,
   LangameSyncQuery,
   LangameSyncResult,
+  LangameSyncSourceResult,
 } from './langame.types';
 
 const DEFAULT_PAGE_LIMIT = 200;
@@ -34,84 +39,150 @@ export class LangameSyncService {
     const result: LangameSyncResult = {
       tenantId,
       sources: sources.length,
+      failedSources: 0,
       stores: 0,
       products: 0,
       inventorySnapshots: 0,
       salesFacts: 0,
+      sourceResults: [],
     };
 
     for (const source of sources) {
-      const clubs = await this.langameClient.listClubs(source.baseUrl, apiKey);
-      const products = await this.langameClient.listProducts(
-        source.baseUrl,
-        apiKey,
-      );
-      const productsByExternalId = await this.syncProducts(
-        tenantId,
-        source.domain,
-        products,
-      );
+      const syncJob = await this.prisma.integrationSyncJob.create({
+        data: {
+          tenantId,
+          integrationSourceId: source.id,
+          provider: IntegrationProvider.LANGAME,
+          domain: source.domain,
+          status: IntegrationSyncStatus.FAILED,
+        },
+      });
+      const sourceResult: LangameSyncSourceResult = {
+        domain: source.domain,
+        status: 'FAILED',
+        stores: 0,
+        products: 0,
+        inventorySnapshots: 0,
+        salesFacts: 0,
+        errorMessage: null,
+      };
 
-      result.products += products.length;
+      try {
+        const clubs = await this.langameClient.listClubs(
+          source.baseUrl,
+          apiKey,
+        );
+        const products = await this.langameClient.listProducts(
+          source.baseUrl,
+          apiKey,
+        );
+        const productsByExternalId = await this.syncProducts(
+          tenantId,
+          source.domain,
+          products,
+        );
 
-      for (const club of clubs) {
-        const store = await this.prisma.store.upsert({
-          where: {
-            tenantId_externalProvider_externalDomain_externalClubId: {
+        result.products += products.length;
+        sourceResult.products = products.length;
+
+        for (const club of clubs) {
+          const store = await this.prisma.store.upsert({
+            where: {
+              tenantId_externalProvider_externalDomain_externalClubId: {
+                tenantId,
+                externalProvider: IntegrationProvider.LANGAME,
+                externalDomain: source.domain,
+                externalClubId: String(club.id),
+              },
+            },
+            create: {
               tenantId,
+              name: club.name,
+              address:
+                this.knownAddress(source.domain, club.id) ?? club.address,
+              isActive: club.active === 1,
               externalProvider: IntegrationProvider.LANGAME,
               externalDomain: source.domain,
               externalClubId: String(club.id),
+              integrationSourceId: source.id,
             },
-          },
-          create: {
+            update: {
+              name: club.name,
+              address:
+                this.knownAddress(source.domain, club.id) ?? club.address,
+              isActive: club.active === 1,
+              integrationSourceId: source.id,
+            },
+          });
+          const goods = await this.langameClient.listGoods(
+            source.baseUrl,
+            apiKey,
+            club.id,
+          );
+
+          result.stores += 1;
+          sourceResult.stores += 1;
+          const inventorySnapshots = await this.syncInventory(
             tenantId,
-            name: club.name,
-            address: this.knownAddress(source.domain, club.id) ?? club.address,
-            isActive: club.active === 1,
-            externalProvider: IntegrationProvider.LANGAME,
-            externalDomain: source.domain,
-            externalClubId: String(club.id),
-            integrationSourceId: source.id,
-          },
-          update: {
-            name: club.name,
-            address: this.knownAddress(source.domain, club.id) ?? club.address,
-            isActive: club.active === 1,
-            integrationSourceId: source.id,
+            source.domain,
+            store.id,
+            String(club.id),
+            productsByExternalId,
+            goods,
+            period.toDate,
+          );
+          result.inventorySnapshots += inventorySnapshots;
+          sourceResult.inventorySnapshots += inventorySnapshots;
+        }
+
+        const salesFacts = await this.syncProductExpenses(
+          tenantId,
+          source.baseUrl,
+          source.domain,
+          apiKey,
+          productsByExternalId,
+          period,
+        );
+        result.salesFacts += salesFacts;
+        sourceResult.salesFacts = salesFacts;
+
+        await this.prisma.integrationSource.update({
+          where: { id: source.id },
+          data: { lastSyncedAt: new Date() },
+        });
+        await this.prisma.integrationSyncJob.update({
+          where: { id: syncJob.id },
+          data: {
+            status: IntegrationSyncStatus.SUCCESS,
+            finishedAt: new Date(),
+            storesCount: sourceResult.stores,
+            productsCount: sourceResult.products,
+            inventoryCount: sourceResult.inventorySnapshots,
+            salesCount: sourceResult.salesFacts,
+            errorMessage: null,
           },
         });
-        const goods = await this.langameClient.listGoods(
-          source.baseUrl,
-          apiKey,
-          club.id,
-        );
-
-        result.stores += 1;
-        result.inventorySnapshots += await this.syncInventory(
-          tenantId,
-          source.domain,
-          store.id,
-          String(club.id),
-          productsByExternalId,
-          goods,
-          period.toDate,
-        );
+        sourceResult.status = 'SUCCESS';
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : 'Unknown LAngame sync error';
+        result.failedSources += 1;
+        sourceResult.errorMessage = errorMessage;
+        await this.prisma.integrationSyncJob.update({
+          where: { id: syncJob.id },
+          data: {
+            status: IntegrationSyncStatus.FAILED,
+            finishedAt: new Date(),
+            storesCount: sourceResult.stores,
+            productsCount: sourceResult.products,
+            inventoryCount: sourceResult.inventorySnapshots,
+            salesCount: sourceResult.salesFacts,
+            errorMessage,
+          },
+        });
       }
 
-      result.salesFacts += await this.syncProductExpenses(
-        tenantId,
-        source.baseUrl,
-        source.domain,
-        apiKey,
-        productsByExternalId,
-        period,
-      );
-
-      await this.prisma.integrationSource.update({
-        where: { id: source.id },
-        data: { lastSyncedAt: new Date() },
-      });
+      result.sourceResults.push(sourceResult);
     }
 
     return result;

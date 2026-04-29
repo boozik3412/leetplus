@@ -301,12 +301,26 @@ describe('API routes (e2e)', () => {
     dashboardService.getSummary.mockResolvedValue({
       tenantId: 'tenant-demo',
       tenantSlug: 'demo',
+      periodFrom: '2026-04-01',
+      periodTo: '2026-04-30',
       totalSku: 30,
       activeSku: 30,
       categoriesCount: 13,
       suppliersCount: 10,
       averageMarginPercent: 55.5,
       averageFacing: 2.4,
+      totalRevenue: 100000,
+      grossProfit: 52000,
+      adjustedGrossProfit: 50000,
+      marginPercent: 52,
+      adjustedMarginPercent: 50,
+      soldQuantity: 1200,
+      writeOffAmount: 1500,
+      returnAmount: 500,
+      stockQuantity: 340,
+      outOfStockRiskCount: 4,
+      recommendedOrderQuantity: 24,
+      topSkuByRevenue: [],
     });
 
     return request(app.getHttpServer())
@@ -315,12 +329,26 @@ describe('API routes (e2e)', () => {
       .expect({
         tenantId: 'tenant-demo',
         tenantSlug: 'demo',
+        periodFrom: '2026-04-01',
+        periodTo: '2026-04-30',
         totalSku: 30,
         activeSku: 30,
         categoriesCount: 13,
         suppliersCount: 10,
         averageMarginPercent: 55.5,
         averageFacing: 2.4,
+        totalRevenue: 100000,
+        grossProfit: 52000,
+        adjustedGrossProfit: 50000,
+        marginPercent: 52,
+        adjustedMarginPercent: 50,
+        soldQuantity: 1200,
+        writeOffAmount: 1500,
+        returnAmount: 500,
+        stockQuantity: 340,
+        outOfStockRiskCount: 4,
+        recommendedOrderQuantity: 24,
+        topSkuByRevenue: [],
       });
   });
 

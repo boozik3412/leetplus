@@ -1,8 +1,13 @@
-import { PrismaClient, UserRole } from "@prisma/client";
+import { PrismaClient, StockMovementType, UserRole } from "@prisma/client";
+import { randomBytes, scrypt } from "node:crypto";
+import { promisify } from "node:util";
 
 const prisma = new PrismaClient();
+const scryptAsync = promisify(scrypt);
 
 const tenantSlug = "demo";
+const testUserEmail = "123@123.ru";
+const testUserPassword = "12345678";
 
 const categories = [
   "Энергетики",
@@ -386,6 +391,20 @@ const products = [
   },
 ];
 
+function daysAgo(days: number) {
+  const date = new Date();
+  date.setUTCHours(0, 0, 0, 0);
+  date.setUTCDate(date.getUTCDate() - days);
+  return date;
+}
+
+async function hashPassword(password: string) {
+  const salt = randomBytes(16).toString("hex");
+  const derivedKey = (await scryptAsync(password, salt, 64)) as Buffer;
+
+  return `scrypt$${salt}$${derivedKey.toString("hex")}`;
+}
+
 async function main() {
   console.log("Start seeding LeetPlus demo data...");
 
@@ -401,6 +420,30 @@ async function main() {
       name: "Demo Cyber Club",
       slug: tenantSlug,
       domain: "demo.leetplus.ru",
+    },
+  });
+
+  await prisma.stockMovement.deleteMany({
+    where: {
+      tenantId: tenant.id,
+    },
+  });
+
+  await prisma.salesFact.deleteMany({
+    where: {
+      tenantId: tenant.id,
+    },
+  });
+
+  await prisma.inventorySnapshot.deleteMany({
+    where: {
+      tenantId: tenant.id,
+    },
+  });
+
+  await prisma.importJob.deleteMany({
+    where: {
+      tenantId: tenant.id,
     },
   });
 
@@ -421,6 +464,11 @@ async function main() {
       tenantId: tenant.id,
     },
   });
+  await prisma.user.deleteMany({
+    where: {
+      email: testUserEmail,
+    },
+  });
 
   await prisma.category.deleteMany({
     where: {
@@ -436,6 +484,14 @@ async function main() {
 
   const createdCategories = new Map<string, string>();
   const createdSuppliers = new Map<string, string>();
+  const createdProducts = new Map<
+    string,
+    {
+      id: string;
+      purchasePrice: string;
+      salePrice: string;
+    }
+  >();
 
   for (const categoryName of categories) {
     const category = await prisma.category.create({
@@ -462,14 +518,26 @@ async function main() {
     createdSuppliers.set(supplierData.name, supplier.id);
   }
 
-  await prisma.user.create({
-    data: {
-      tenantId: tenant.id,
-      email: "owner@demo.leetplus.ru",
-      fullName: "Demo Owner",
-      role: UserRole.OWNER,
-      passwordHash: "dev_seed_password_hash_not_for_auth",
-    },
+  const testUserPasswordHash = await hashPassword(testUserPassword);
+
+  await prisma.user.createMany({
+    data: [
+      {
+        tenantId: tenant.id,
+        email: "owner@demo.leetplus.ru",
+        fullName: "Demo Owner",
+        role: UserRole.OWNER,
+        passwordHash: "dev_seed_password_hash_not_for_auth",
+      },
+      {
+        tenantId: tenant.id,
+        email: testUserEmail,
+        fullName: "Тестовый пользователь",
+        role: UserRole.OWNER,
+        passwordHash: testUserPasswordHash,
+        emailVerifiedAt: new Date(),
+      },
+    ],
   });
 
   await prisma.store.createMany({
@@ -501,7 +569,7 @@ async function main() {
       throw new Error(`Supplier not found: ${product.supplier}`);
     }
 
-    await prisma.product.create({
+    const createdProduct = await prisma.product.create({
       data: {
         tenantId: tenant.id,
         article: product.article,
@@ -515,13 +583,142 @@ async function main() {
         isActive: true,
       },
     });
+    createdProducts.set(product.article, {
+      id: createdProduct.id,
+      purchasePrice: product.purchasePrice,
+      salePrice: product.salePrice,
+    });
   }
+
+  const stores = await prisma.store.findMany({
+    where: { tenantId: tenant.id },
+    orderBy: { name: "asc" },
+  });
+  const primaryStore = stores[0];
+  const secondaryStore = stores[1];
+
+  if (!primaryStore || !secondaryStore) {
+    throw new Error("Demo stores were not created");
+  }
+
+  const fastArticles = ["DRK-001", "DRK-004", "SNK-001", "COF-002", "FST-003"];
+  const steadyArticles = ["DRK-005", "SWT-001", "NOO-001", "SNK-004", "COF-001"];
+
+  await prisma.salesFact.createMany({
+    data: products.flatMap((product, productIndex) => {
+      const createdProduct = createdProducts.get(product.article);
+
+      if (!createdProduct) {
+        throw new Error(`Product not found: ${product.article}`);
+      }
+
+      return Array.from({ length: 14 }, (_, dayIndex) => {
+        const store = dayIndex % 3 === 0 ? secondaryStore : primaryStore;
+        const speedFactor = fastArticles.includes(product.article)
+          ? 2.4
+          : steadyArticles.includes(product.article)
+            ? 1.5
+            : 0.8;
+        const quantity = Math.max(
+          1,
+          Math.round(((productIndex % 4) + 1) * speedFactor + (dayIndex % 3)),
+        );
+        const revenue = quantity * Number(product.salePrice);
+        const cost = quantity * Number(product.purchasePrice);
+
+        return {
+          tenantId: tenant.id,
+          storeId: store.id,
+          productId: createdProduct.id,
+          saleDate: daysAgo(13 - dayIndex),
+          quantity: String(quantity),
+          revenue: String(revenue),
+          cost: String(cost),
+        };
+      });
+    }),
+  });
+
+  await prisma.inventorySnapshot.createMany({
+    data: products.flatMap((product, productIndex) => {
+      const createdProduct = createdProducts.get(product.article);
+
+      if (!createdProduct) {
+        throw new Error(`Product not found: ${product.article}`);
+      }
+
+      const riskyStock = fastArticles.includes(product.article);
+      const primaryQuantity = riskyStock ? (productIndex % 3) + 1 : 10 + productIndex;
+      const secondaryQuantity = riskyStock ? productIndex % 2 : 6 + (productIndex % 5);
+
+      return [
+        {
+          tenantId: tenant.id,
+          storeId: primaryStore.id,
+          productId: createdProduct.id,
+          snapshotDate: daysAgo(0),
+          quantity: String(primaryQuantity),
+        },
+        {
+          tenantId: tenant.id,
+          storeId: secondaryStore.id,
+          productId: createdProduct.id,
+          snapshotDate: daysAgo(0),
+          quantity: String(secondaryQuantity),
+        },
+      ];
+    }),
+  });
+
+  const movementArticles = ["FST-001", "FST-002", "DRK-001", "SNK-001", "COF-002"];
+
+  await prisma.stockMovement.createMany({
+    data: movementArticles.flatMap((article, index) => {
+      const createdProduct = createdProducts.get(article);
+
+      if (!createdProduct) {
+        throw new Error(`Product not found: ${article}`);
+      }
+
+      const writeOffQuantity = index + 1;
+      const returnQuantity = index % 2 === 0 ? 1 : 0;
+      const movements = [
+        {
+          tenantId: tenant.id,
+          storeId: primaryStore.id,
+          productId: createdProduct.id,
+          movementDate: daysAgo(5 + index),
+          type: StockMovementType.WRITEOFF,
+          quantity: String(writeOffQuantity),
+          amount: String(writeOffQuantity * Number(createdProduct.purchasePrice)),
+          reason: index < 2 ? "Истёк срок годности" : "Повреждение упаковки",
+        },
+      ];
+
+      if (returnQuantity > 0) {
+        movements.push({
+          tenantId: tenant.id,
+          storeId: secondaryStore.id,
+          productId: createdProduct.id,
+          movementDate: daysAgo(3 + index),
+          type: StockMovementType.RETURN,
+          quantity: String(returnQuantity),
+          amount: String(returnQuantity * Number(createdProduct.salePrice)),
+          reason: "Возврат гостя",
+        });
+      }
+
+      return movements;
+    }),
+  });
 
   console.log("Seed completed successfully.");
   console.log(`Tenant: ${tenant.name}`);
   console.log(`Domain: ${tenant.domain}`);
   console.log("Demo user: owner@demo.leetplus.ru");
+  console.log(`Test user: ${testUserEmail} / ${testUserPassword}`);
   console.log(`Products created: ${products.length}`);
+  console.log("Sales, inventory and stock movements created for reports.");
 }
 
 main()

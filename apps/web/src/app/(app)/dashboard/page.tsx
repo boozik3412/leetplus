@@ -4,6 +4,7 @@ import {
   type DashboardTopSku,
 } from "@/lib/dashboard-summary";
 import { DashboardFilters } from "@/components/dashboard-filters";
+import { DashboardQuickSyncButton } from "@/components/dashboard-quick-sync-button";
 import { requireCurrentUser } from "@/lib/auth";
 import { getStores } from "@/lib/stores";
 import Link from "next/link";
@@ -72,7 +73,11 @@ export default async function DashboardPage({
           <div className="grid gap-8 p-6 lg:grid-cols-[1.1fr_0.9fr] lg:p-8">
             <div>
               <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300">
-                {summary.periodLabel} · {selectedStoresLabel}
+                <span>{summary.periodLabel} · {selectedStoresLabel}</span>
+                <span className="mx-2 text-emerald-300 dark:text-emerald-700">
+                  ·
+                </span>
+                <DashboardQuickSyncButton />
               </p>
               <h1 className="mt-3 max-w-3xl text-4xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
                 {summary.tenantName}: операционная картина ассортимента

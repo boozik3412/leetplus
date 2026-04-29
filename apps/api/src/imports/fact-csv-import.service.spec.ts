@@ -145,6 +145,8 @@ describe('FactCsvImportService', () => {
     };
     prisma.store.findMany.mockResolvedValue([
       { id: 'store-1', name: 'Club A' },
+      { id: 'store-2', name: 'LeetPlus Arena Центр' },
+      { id: 'store-3', name: 'LeetPlus Arena Север' },
     ]);
     prisma.product.findMany.mockResolvedValue([
       {
@@ -153,6 +155,27 @@ describe('FactCsvImportService', () => {
         name: 'Adrenaline Rush',
         purchasePrice: new Prisma.Decimal(62),
         salePrice: new Prisma.Decimal(139),
+      },
+      {
+        id: 'product-2',
+        article: 'SNK-001',
+        name: "Lay's Сметана и зелень 140 г",
+        purchasePrice: new Prisma.Decimal(81),
+        salePrice: new Prisma.Decimal(179),
+      },
+      {
+        id: 'product-3',
+        article: 'COF-002',
+        name: 'Капучино 250 мл',
+        purchasePrice: new Prisma.Decimal(26),
+        salePrice: new Prisma.Decimal(139),
+      },
+      {
+        id: 'product-4',
+        article: 'FST-001',
+        name: 'Ролл Цезарь охлажденный',
+        purchasePrice: new Prisma.Decimal(112),
+        salePrice: new Prisma.Decimal(249),
       },
     ]);
     service = new FactCsvImportService(
@@ -190,6 +213,43 @@ describe('FactCsvImportService', () => {
 
     expect(preview.errors).toEqual([]);
     expect(preview.rows[0]?.cost).toBe('124');
+  });
+
+  it('previews downloadable fact templates without errors', async () => {
+    const inventory = await service.previewInventory(
+      [
+        'Дата,Торговая точка,Артикул,Остаток',
+        '2026-04-28,LeetPlus Arena Центр,DRK-001,24',
+        '2026-04-28,LeetPlus Arena Центр,SNK-001,16',
+        '2026-04-28,LeetPlus Arena Север,COF-002,8',
+      ].join('\n'),
+      user,
+    );
+    const sales = await service.previewSales(
+      [
+        'Дата,Торговая точка,Артикул,Количество,Выручка,Себестоимость',
+        '2026-04-28,LeetPlus Arena Центр,DRK-001,4,556,248',
+        '2026-04-28,LeetPlus Arena Центр,SNK-001,2,358,162',
+        '2026-04-28,LeetPlus Arena Север,COF-002,6,834,156',
+      ].join('\n'),
+      user,
+    );
+    const movements = await service.previewStockMovements(
+      [
+        'Дата,Торговая точка,Артикул,Тип,Количество,Сумма,Причина',
+        '2026-04-28,LeetPlus Arena Центр,FST-001,списание,2,224,Истёк срок годности',
+        '2026-04-28,LeetPlus Arena Центр,DRK-001,списание,1,62,Повреждение упаковки',
+        '2026-04-28,LeetPlus Arena Север,SNK-001,возврат,1,179,Возврат гостя',
+      ].join('\n'),
+      user,
+    );
+
+    expect(inventory.errors).toEqual([]);
+    expect(inventory.validRows).toBe(3);
+    expect(sales.errors).toEqual([]);
+    expect(sales.validRows).toBe(3);
+    expect(movements.errors).toEqual([]);
+    expect(movements.validRows).toBe(3);
   });
 
   it('previews stock movement rows and calculates default amount', async () => {

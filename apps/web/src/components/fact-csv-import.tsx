@@ -2,6 +2,11 @@
 
 import { ChangeEvent, useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  buildCsvDownloadHref,
+  getImportTemplate,
+  type ImportTemplateKind,
+} from "@/lib/import-templates";
 
 type FactImportError = {
   row: number;
@@ -45,6 +50,7 @@ const copy: Record<
     columns: string;
     previewUrl: string;
     importUrl: string;
+    templateKind: ImportTemplateKind;
   }
 > = {
   inventory: {
@@ -54,6 +60,7 @@ const copy: Record<
     columns: "Дата, Торговая точка, Артикул, Остаток",
     previewUrl: "/api/imports/inventory/preview",
     importUrl: "/api/imports/inventory",
+    templateKind: "inventory",
   },
   sales: {
     title: "CSV продаж",
@@ -62,6 +69,7 @@ const copy: Record<
     columns: "Дата, Торговая точка, Артикул, Количество, Выручка, Себестоимость",
     previewUrl: "/api/imports/sales/preview",
     importUrl: "/api/imports/sales",
+    templateKind: "sales",
   },
   movements: {
     title: "CSV списаний и возвратов",
@@ -71,6 +79,7 @@ const copy: Record<
       "Дата, Торговая точка, Артикул, Тип, Количество, Сумма, Причина",
     previewUrl: "/api/imports/movements/preview",
     importUrl: "/api/imports/movements",
+    templateKind: "movements",
   },
 };
 
@@ -90,6 +99,7 @@ function getErrorMessage(data: unknown) {
 export function FactCsvImport({ kind }: { kind: FactImportKind }) {
   const router = useRouter();
   const config = copy[kind];
+  const template = getImportTemplate(config.templateKind);
   const [csv, setCsv] = useState("");
   const [fileName, setFileName] = useState<string | null>(null);
   const [preview, setPreview] = useState<FactImportPreview | null>(null);
@@ -184,6 +194,14 @@ export function FactCsvImport({ kind }: { kind: FactImportKind }) {
           <p className="font-medium text-zinc-800">Поддерживаемые колонки:</p>
           <p>{config.columns}</p>
         </div>
+
+        <a
+          href={buildCsvDownloadHref(template.csv)}
+          download={template.fileName}
+          className="mt-3 inline-flex rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50"
+        >
+          Скачать шаблон CSV
+        </a>
 
         {error ? (
           <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">

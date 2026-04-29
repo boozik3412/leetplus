@@ -94,9 +94,13 @@ describe('ProductCsvImportService', () => {
     };
     prisma.category.findMany.mockResolvedValue([
       { id: 'category-1', name: 'Энергетики' },
+      { id: 'category-2', name: 'Чипсы' },
+      { id: 'category-3', name: 'Горячие напитки' },
     ]);
     prisma.supplier.findMany.mockResolvedValue([
       { id: 'supplier-1', name: 'Напитки Pro' },
+      { id: 'supplier-2', name: 'Snack Line' },
+      { id: 'supplier-3', name: 'Internal Bar' },
     ]);
     service = new ProductCsvImportService(
       prisma as unknown as PrismaService,
@@ -125,6 +129,21 @@ describe('ProductCsvImportService', () => {
         supplierId: 'supplier-1',
       }),
     ]);
+  });
+
+  it('previews downloadable product template without errors', async () => {
+    const preview = await service.preview(
+      [
+        'Артикул,Наименование,Категория,Поставщик,Входящая цена,Цена продажи,Фейсинг,Срок годности',
+        'DRK-001,Adrenaline Rush 0.449,Энергетики,Напитки Pro,62,139,4,180',
+        "SNK-001,Lay's Сметана и зелень 140 г,Чипсы,Snack Line,81,179,3,100",
+        'COF-002,Капучино 250 мл,Горячие напитки,Internal Bar,26,139,1,365',
+      ].join('\n'),
+      user,
+    );
+
+    expect(preview.errors).toEqual([]);
+    expect(preview.validRows).toBe(3);
   });
 
   it('returns validation errors for unknown relations and bad prices', async () => {

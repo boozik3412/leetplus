@@ -2,6 +2,10 @@
 
 import { ChangeEvent, useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  buildCsvDownloadHref,
+  getImportTemplate,
+} from "@/lib/import-templates";
 
 type ProductImportError = {
   row: number;
@@ -48,6 +52,7 @@ function getErrorMessage(data: unknown) {
 
 export function ProductCsvImport() {
   const router = useRouter();
+  const template = getImportTemplate("products");
   const [csv, setCsv] = useState("");
   const [fileName, setFileName] = useState<string | null>(null);
   const [preview, setPreview] = useState<ProductImportPreview | null>(null);
@@ -141,8 +146,19 @@ export function ProductCsvImport() {
 
         <div className="mt-5 rounded-md bg-zinc-50 p-3 text-xs leading-5 text-zinc-600">
           <p className="font-medium text-zinc-800">Поддерживаемые колонки:</p>
-          <p>Артикул, Наименование, Категория, Поставщик, Входящая цена, Цена продажи, Фейсинг, Срок годности</p>
+          <p>
+            Артикул, Наименование, Категория, Поставщик, Входящая цена, Цена
+            продажи, Фейсинг, Срок годности
+          </p>
         </div>
+
+        <a
+          href={buildCsvDownloadHref(template.csv)}
+          download={template.fileName}
+          className="mt-3 inline-flex rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50"
+        >
+          Скачать шаблон CSV
+        </a>
 
         {error ? (
           <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">

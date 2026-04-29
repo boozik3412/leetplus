@@ -173,6 +173,20 @@ export function LangameSettingsForm({
             {success}
           </p>
         ) : null}
+        {isSyncing ? (
+          <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800">
+            <div className="flex items-center gap-3">
+              <span className="h-3 w-3 animate-pulse rounded-full bg-amber-500" />
+              <div>
+                <p className="font-medium">Синхронизация выполняется</p>
+                <p className="mt-1 text-amber-700">
+                  Идёт загрузка данных из LAngame. Не закрывайте страницу, после
+                  завершения появится результат по каждому домену.
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         <div className="mt-5 flex flex-wrap gap-3">
           <button

@@ -1,7 +1,9 @@
 import { LangameSettingsForm } from "@/components/langame-settings-form";
+import { requireCurrentUser } from "@/lib/auth";
 import { getLangameSettings } from "@/lib/langame-settings";
 
 export default async function SettingsPage() {
+  await requireCurrentUser();
   const langameSettings = await getLangameSettings();
 
   return (

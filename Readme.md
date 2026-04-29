@@ -262,6 +262,40 @@ pnpm --filter database db:generate
 7. Настроить backup PostgreSQL.
 8. Проверить `api build`, `web build`, миграции и login.
 
+## Автосинхронизация LAngame
+
+Для VDS предусмотрен сервисный endpoint:
+
+```text
+POST /integrations/langame/scheduled/sync
+Header: x-sync-service-token: <SYNC_SERVICE_TOKEN>
+```
+
+Переменная окружения:
+
+```env
+SYNC_SERVICE_TOKEN="long_random_secret"
+```
+
+Режимы:
+
+- `QUICK` — продажи за текущий день, можно запускать каждые 5 минут.
+- `INVENTORY` — остатки, обычно каждые 15-30 минут.
+- `CATALOG` — клубы и товары, обычно раз в день.
+- `BACKFILL` — последние 7 дней, удобно ночью.
+- `FULL` — полный ручной/сервисный backfill с заданным периодом.
+
+Пример cron-вызова:
+
+```powershell
+curl -X POST "https://api.example.ru/integrations/langame/scheduled/sync" `
+  -H "x-sync-service-token: <SYNC_SERVICE_TOKEN>" `
+  -H "Content-Type: application/json" `
+  -d "{\"mode\":\"QUICK\"}"
+```
+
+Для `AUTO`-синхронизаций отдельные JSON-файлы расхождений не создаются; информация пишется в общий журнал `IntegrationSyncJob`.
+
 ## Важные правила
 
 - Не коммитить `.env` и реальные API-ключи.

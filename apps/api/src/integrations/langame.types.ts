@@ -33,6 +33,7 @@ export type LangameSyncQuery = {
   dateTo?: string;
   mode?: 'QUICK' | 'INVENTORY' | 'CATALOG' | 'BACKFILL' | 'FULL';
   trigger?: 'MANUAL' | 'AUTO';
+  tenantSlug?: string;
 };
 
 export type LangameSyncResult = {
@@ -57,4 +58,10 @@ export type LangameSyncSourceResult = {
   discrepancies: number;
   discrepancyLogPath: string | null;
   errorMessage: string | null;
+};
+
+export type LangameScheduledSyncResult = {
+  mode: NonNullable<LangameSyncQuery['mode']>;
+  tenants: number;
+  results: LangameSyncResult[];
 };

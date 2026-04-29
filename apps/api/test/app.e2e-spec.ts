@@ -76,6 +76,7 @@ describe('API routes (e2e)', () => {
 
   const langameSyncService = {
     syncTenant: jest.fn(),
+    syncConfiguredTenants: jest.fn(),
   };
 
   const langameSettingsService = {
@@ -94,6 +95,7 @@ describe('API routes (e2e)', () => {
   };
 
   beforeEach(async () => {
+    process.env.SYNC_SERVICE_TOKEN = 'test-sync-token';
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [
         AuthModule,
@@ -718,6 +720,27 @@ describe('API routes (e2e)', () => {
         salesFacts: 25,
         discrepancies: 0,
         sourceResults: [],
+      });
+  });
+
+  it('/integrations/langame/scheduled/sync (POST)', () => {
+    langameSyncService.syncConfiguredTenants.mockResolvedValue({
+      mode: 'QUICK',
+      tenants: 1,
+      results: [],
+    });
+
+    return request(app.getHttpServer())
+      .post('/integrations/langame/scheduled/sync')
+      .set('x-sync-service-token', 'test-sync-token')
+      .send({
+        mode: 'QUICK',
+      })
+      .expect(201)
+      .expect({
+        mode: 'QUICK',
+        tenants: 1,
+        results: [],
       });
   });
 

@@ -18,6 +18,7 @@ import type {
   LangameProduct,
   LangameSyncQuery,
   LangameSyncResult,
+  LangameScheduledSyncResult,
   LangameSyncSourceResult,
 } from './langame.types';
 
@@ -45,6 +46,56 @@ export class LangameSyncService {
     query: LangameSyncQuery,
   ): Promise<LangameSyncResult> {
     const { tenantId } = await this.tenantContextService.resolve(user);
+    return this.syncTenantById(tenantId, query);
+  }
+
+  async syncConfiguredTenants(
+    query: LangameSyncQuery,
+  ): Promise<LangameScheduledSyncResult> {
+    const mode = query.mode ?? 'QUICK';
+    const tenants = await this.prisma.tenant.findMany({
+      where: {
+        ...(query.tenantSlug ? { slug: query.tenantSlug } : {}),
+        integrationCredentials: {
+          some: {
+            provider: IntegrationProvider.LANGAME,
+            isActive: true,
+            apiKeyEncrypted: { not: null },
+          },
+        },
+        integrationSources: {
+          some: {
+            provider: IntegrationProvider.LANGAME,
+            isActive: true,
+          },
+        },
+      },
+      select: { id: true },
+    });
+
+    const results: LangameSyncResult[] = [];
+
+    for (const tenant of tenants) {
+      results.push(
+        await this.syncTenantById(tenant.id, {
+          ...query,
+          mode,
+          trigger: 'AUTO',
+        }),
+      );
+    }
+
+    return {
+      mode,
+      tenants: tenants.length,
+      results,
+    };
+  }
+
+  private async syncTenantById(
+    tenantId: string,
+    query: LangameSyncQuery,
+  ): Promise<LangameSyncResult> {
     const period = this.resolvePeriod(query);
     const { apiKey, sources } =
       await this.langameSettingsService.resolveTenantAccess(tenantId);
@@ -61,6 +112,11 @@ export class LangameSyncService {
     };
     const mode = this.resolveMode(query.mode);
     const trigger = this.resolveTrigger(query.trigger);
+    const shouldSyncCatalog = ['CATALOG', 'BACKFILL', 'FULL'].includes(mode);
+    const shouldSyncInventory = ['INVENTORY', 'BACKFILL', 'FULL'].includes(
+      mode,
+    );
+    const shouldSyncSales = ['QUICK', 'BACKFILL', 'FULL'].includes(mode);
 
     for (const source of sources) {
       const syncJob = await this.prisma.integrationSyncJob.create({
@@ -88,86 +144,95 @@ export class LangameSyncService {
       };
 
       try {
-        const clubs = await this.langameClient.listClubs(
-          source.baseUrl,
-          apiKey,
-        );
-        const products = await this.langameClient.listProducts(
-          source.baseUrl,
-          apiKey,
-        );
-        const productsByExternalId = await this.syncProducts(
-          tenantId,
-          source.domain,
-          products,
-          discrepancies,
-        );
+        const products = shouldSyncCatalog
+          ? await this.langameClient.listProducts(source.baseUrl, apiKey)
+          : [];
+        const productsByExternalId = shouldSyncCatalog
+          ? await this.syncProducts(
+              tenantId,
+              source.domain,
+              products,
+              discrepancies,
+            )
+          : await this.loadProductMap(tenantId, source.domain);
 
         result.products += products.length;
         sourceResult.products = products.length;
 
-        for (const club of clubs) {
-          const store = await this.prisma.store.upsert({
-            where: {
-              tenantId_externalProvider_externalDomain_externalClubId: {
+        if (shouldSyncCatalog || shouldSyncInventory) {
+          const clubs = await this.langameClient.listClubs(
+            source.baseUrl,
+            apiKey,
+          );
+
+          for (const club of clubs) {
+            const store = await this.prisma.store.upsert({
+              where: {
+                tenantId_externalProvider_externalDomain_externalClubId: {
+                  tenantId,
+                  externalProvider: IntegrationProvider.LANGAME,
+                  externalDomain: source.domain,
+                  externalClubId: String(club.id),
+                },
+              },
+              create: {
                 tenantId,
+                name: club.name,
+                address:
+                  this.knownAddress(source.domain, club.id) ?? club.address,
+                isActive: club.active === 1,
                 externalProvider: IntegrationProvider.LANGAME,
                 externalDomain: source.domain,
                 externalClubId: String(club.id),
+                integrationSourceId: source.id,
               },
-            },
-            create: {
-              tenantId,
-              name: club.name,
-              address:
-                this.knownAddress(source.domain, club.id) ?? club.address,
-              isActive: club.active === 1,
-              externalProvider: IntegrationProvider.LANGAME,
-              externalDomain: source.domain,
-              externalClubId: String(club.id),
-              integrationSourceId: source.id,
-            },
-            update: {
-              name: club.name,
-              address:
-                this.knownAddress(source.domain, club.id) ?? club.address,
-              isActive: club.active === 1,
-              integrationSourceId: source.id,
-            },
-          });
-          const goods = await this.langameClient.listGoods(
-            source.baseUrl,
-            apiKey,
-            club.id,
-          );
+              update: {
+                name: club.name,
+                address:
+                  this.knownAddress(source.domain, club.id) ?? club.address,
+                isActive: club.active === 1,
+                integrationSourceId: source.id,
+              },
+            });
 
-          result.stores += 1;
-          sourceResult.stores += 1;
-          const inventorySnapshots = await this.syncInventory(
-            tenantId,
-            source.domain,
-            store.id,
-            String(club.id),
-            productsByExternalId,
-            goods,
-            period.toDate,
-            discrepancies,
-          );
-          result.inventorySnapshots += inventorySnapshots;
-          sourceResult.inventorySnapshots += inventorySnapshots;
+            result.stores += 1;
+            sourceResult.stores += 1;
+
+            if (shouldSyncInventory) {
+              const goods = await this.langameClient.listGoods(
+                source.baseUrl,
+                apiKey,
+                club.id,
+              );
+              const inventorySnapshots = await this.syncInventory(
+                tenantId,
+                source.domain,
+                store.id,
+                String(club.id),
+                productsByExternalId,
+                goods,
+                period.toDate,
+                discrepancies,
+              );
+              result.inventorySnapshots += inventorySnapshots;
+              sourceResult.inventorySnapshots += inventorySnapshots;
+            }
+          }
         }
 
-        const salesFacts = await this.syncProductExpenses(
-          tenantId,
-          source.baseUrl,
-          source.domain,
-          apiKey,
-          productsByExternalId,
-          period,
-          discrepancies,
-        );
-        result.salesFacts += salesFacts;
-        sourceResult.salesFacts = salesFacts;
+        if (shouldSyncSales) {
+          const salesFacts = await this.syncProductExpenses(
+            tenantId,
+            source.baseUrl,
+            source.domain,
+            apiKey,
+            productsByExternalId,
+            period,
+            discrepancies,
+          );
+          result.salesFacts += salesFacts;
+          sourceResult.salesFacts = salesFacts;
+        }
         sourceResult.discrepancies = discrepancies.length;
         result.discrepancies += discrepancies.length;
         const discrepancyLogPath =
@@ -224,6 +289,27 @@ export class LangameSyncService {
     }
 
     return result;
+  }
+
+  private async loadProductMap(tenantId: string, domain: string) {
+    const products = await this.prisma.product.findMany({
+      where: {
+        tenantId,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: domain,
+        externalProductId: { not: null },
+      },
+      select: {
+        id: true,
+        externalProductId: true,
+      },
+    });
+
+    return new Map(
+      products
+        .filter((product) => product.externalProductId)
+        .map((product) => [product.externalProductId as string, product.id]),
+    );
   }
 
   private async syncProducts(
@@ -523,15 +609,29 @@ export class LangameSyncService {
 
   private resolvePeriod(query: LangameSyncQuery) {
     const now = new Date();
+    const mode = this.resolveMode(query.mode);
+    const defaultTo = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+    );
     const toDate = query.dateTo
       ? this.parseDateInput(query.dateTo, 'dateTo')
-      : new Date(
-          Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-        );
+      : defaultTo;
     const fromDate = query.dateFrom
       ? this.parseDateInput(query.dateFrom, 'dateFrom')
       : new Date(toDate);
-    fromDate.setUTCDate(fromDate.getUTCDate() - 6);
+
+    if (!query.dateFrom) {
+      if (mode === 'QUICK' || mode === 'INVENTORY' || mode === 'CATALOG') {
+        fromDate.setUTCDate(fromDate.getUTCDate());
+      } else if (mode === 'FULL') {
+        fromDate.setUTCFullYear(2022, 0, 1);
+      } else {
+        fromDate.setUTCDate(fromDate.getUTCDate() - 6);
+      }
+    }
+
+    fromDate.setUTCHours(0, 0, 0, 0);
+    toDate.setUTCHours(23, 59, 59, 999);
 
     if (fromDate > toDate) {
       throw new BadRequestException('dateFrom must be before dateTo');

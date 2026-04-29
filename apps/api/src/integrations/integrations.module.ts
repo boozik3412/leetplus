@@ -5,13 +5,14 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { TenancyModule } from '../tenancy/tenancy.module';
 import { LangameClient } from './langame.client';
 import { LangameController } from './langame.controller';
+import { LangameScheduledController } from './langame-scheduled.controller';
 import { LangameSettingsService } from './langame-settings.service';
 import { LangameSyncService } from './langame-sync.service';
 import { SecretEncryptionService } from './secret-encryption.service';
 
 @Module({
   imports: [AuthModule, ConfigModule, PrismaModule, TenancyModule],
-  controllers: [LangameController],
+  controllers: [LangameController, LangameScheduledController],
   providers: [
     LangameClient,
     LangameSettingsService,

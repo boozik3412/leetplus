@@ -5,6 +5,7 @@ import {
 } from "@/components/product-actions";
 import { requireCurrentUser } from "@/lib/auth";
 import { getCategories, getSuppliers } from "@/lib/catalog";
+import { can } from "@/lib/permissions";
 import { getProducts } from "@/lib/products";
 import { Fragment } from "react";
 
@@ -34,6 +35,7 @@ export default async function ProductsPage() {
     getCategories(),
     getSuppliers(),
   ]);
+  const canEditProducts = can(user, "edit_products");
 
   return (
     <main className="px-6 py-8 text-zinc-950">
@@ -47,9 +49,11 @@ export default async function ProductsPage() {
           </p>
         </div>
 
-        <div className="mb-6">
-          <ProductCreateForm categories={categories} suppliers={suppliers} />
-        </div>
+        {canEditProducts ? (
+          <div className="mb-6">
+            <ProductCreateForm categories={categories} suppliers={suppliers} />
+          </div>
+        ) : null}
 
         <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
@@ -117,7 +121,11 @@ export default async function ProductsPage() {
                   <th className="px-5 py-3 text-right font-medium">
                     Срок годности
                   </th>
-                  <th className="px-5 py-3 text-right font-medium">Действия</th>
+                  {canEditProducts ? (
+                    <th className="px-5 py-3 text-right font-medium">
+                      Действия
+                    </th>
+                  ) : null}
                 </tr>
               </thead>
 
@@ -125,7 +133,7 @@ export default async function ProductsPage() {
                 {products.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={10}
+                      colSpan={canEditProducts ? 10 : 9}
                       className="px-5 py-8 text-center text-sm text-zinc-500"
                     >
                       Пока нет товаров. Добавьте первый SKU через форму выше.
@@ -180,16 +188,20 @@ export default async function ProductsPage() {
                             : "—"}
                         </td>
 
-                        <td className="whitespace-nowrap px-5 py-4 text-right">
-                          <ProductArchiveButton id={product.id} />
-                        </td>
+                        {canEditProducts ? (
+                          <td className="whitespace-nowrap px-5 py-4 text-right">
+                            <ProductArchiveButton id={product.id} />
+                          </td>
+                        ) : null}
                       </tr>
 
-                      <ProductEditRow
-                        product={product}
-                        categories={categories}
-                        suppliers={suppliers}
-                      />
+                      {canEditProducts ? (
+                        <ProductEditRow
+                          product={product}
+                          categories={categories}
+                          suppliers={suppliers}
+                        />
+                      ) : null}
                     </Fragment>
                   );
                 })}

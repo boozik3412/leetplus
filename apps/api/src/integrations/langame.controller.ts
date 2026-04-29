@@ -10,6 +10,9 @@ import {
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { Roles } from '../auth/roles.decorator';
+import { RolesGuard } from '../auth/roles.guard';
+import { UserRole } from '@prisma/client';
 import {
   LangameSettingsService,
   type LangameSettingsDto,
@@ -18,7 +21,8 @@ import { LangameSyncService } from './langame-sync.service';
 import type { LangameSyncQuery } from './langame.types';
 
 @Controller('integrations/langame')
-@UseGuards(JwtAuthGuard)
+@Roles(UserRole.OWNER, UserRole.ADMIN)
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class LangameController {
   constructor(
     private readonly langameSettingsService: LangameSettingsService,

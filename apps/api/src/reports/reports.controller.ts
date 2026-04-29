@@ -10,6 +10,9 @@ import {
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { Roles } from '../auth/roles.decorator';
+import { RolesGuard } from '../auth/roles.guard';
+import { UserRole } from '@prisma/client';
 import { ReportsEmailService } from './reports-email.service';
 import {
   ReportsExportService,
@@ -27,7 +30,8 @@ import {
 } from './reports.service';
 
 @Controller('reports')
-@UseGuards(JwtAuthGuard)
+@Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.BUYER)
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class ReportsController {
   constructor(
     private readonly reportsService: ReportsService,

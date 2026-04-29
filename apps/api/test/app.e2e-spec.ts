@@ -29,6 +29,7 @@ import { StoresService } from '../src/stores/stores.service';
 
 describe('API routes (e2e)', () => {
   let app: INestApplication<App>;
+  let currentRole: UserRole;
 
   const productsService = {
     findAll: jest.fn(),
@@ -96,6 +97,7 @@ describe('API routes (e2e)', () => {
 
   beforeEach(async () => {
     process.env.SYNC_SERVICE_TOKEN = 'test-sync-token';
+    currentRole = UserRole.OWNER;
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [
         AuthModule,
@@ -143,7 +145,7 @@ describe('API routes (e2e)', () => {
             id: 'user-1',
             email: 'owner@club-a.leetplus.ru',
             fullName: 'Owner',
-            role: UserRole.OWNER,
+            role: currentRole,
             tenantId: 'tenant-1',
             tenantSlug: 'club-a',
           };
@@ -618,6 +620,15 @@ describe('API routes (e2e)', () => {
       });
   });
 
+  it('/imports/sales (POST) rejects buyer role', () => {
+    currentRole = UserRole.BUYER;
+
+    return request(app.getHttpServer())
+      .post('/imports/sales')
+      .send({ csv: 'Дата,Торговая точка,Артикул,Количество,Выручка' })
+      .expect(403);
+  });
+
   it('/imports/sales (POST)', () => {
     factCsvImportService.importSales.mockResolvedValue({
       importedRows: 1,
@@ -721,6 +732,18 @@ describe('API routes (e2e)', () => {
         discrepancies: 0,
         sourceResults: [],
       });
+  });
+
+  it('/integrations/langame/sync (POST) rejects manager role', () => {
+    currentRole = UserRole.MANAGER;
+
+    return request(app.getHttpServer())
+      .post('/integrations/langame/sync')
+      .send({
+        dateFrom: '2026-04-01',
+        dateTo: '2026-04-30',
+      })
+      .expect(403);
   });
 
   it('/integrations/langame/scheduled/sync (POST)', () => {

@@ -2,10 +2,12 @@ import { FactCsvImport } from "@/components/fact-csv-import";
 import { ProductCsvImport } from "@/components/product-csv-import";
 import { requireCurrentUser } from "@/lib/auth";
 import { getImportJobs, type ImportJob } from "@/lib/imports";
+import { can } from "@/lib/permissions";
 
 export default async function ImportPage() {
   const user = await requireCurrentUser();
-  const importJobs = await getImportJobs();
+  const canImport = can(user, "import_data");
+  const importJobs = canImport ? await getImportJobs() : [];
 
   return (
     <main className="px-6 py-8 text-zinc-950">
@@ -19,12 +21,19 @@ export default async function ImportPage() {
           </p>
         </div>
 
-        <div className="space-y-6">
-          <ProductCsvImport />
-          <FactCsvImport kind="inventory" />
-          <FactCsvImport kind="sales" />
-          <FactCsvImport kind="movements" />
-        </div>
+        {canImport ? (
+          <div className="space-y-6">
+            <ProductCsvImport />
+            <FactCsvImport kind="inventory" />
+            <FactCsvImport kind="sales" />
+            <FactCsvImport kind="movements" />
+          </div>
+        ) : (
+          <p className="rounded-lg border border-zinc-200 bg-white p-5 text-sm text-zinc-600 shadow-sm">
+            У вашей роли нет доступа к загрузке CSV. Журнал импортов доступен
+            только для просмотра.
+          </p>
+        )}
 
         <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
           <div className="border-b border-zinc-200 px-5 py-4">

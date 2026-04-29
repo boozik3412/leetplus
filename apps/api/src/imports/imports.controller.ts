@@ -2,12 +2,16 @@ import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { Roles } from '../auth/roles.decorator';
+import { RolesGuard } from '../auth/roles.guard';
+import { UserRole } from '@prisma/client';
 import type { ProductCsvImportDto } from './imports.dto';
 import { FactCsvImportService } from './fact-csv-import.service';
 import { ProductCsvImportService } from './product-csv-import.service';
 
 @Controller('imports')
-@UseGuards(JwtAuthGuard)
+@Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class ImportsController {
   constructor(
     private readonly productCsvImportService: ProductCsvImportService,

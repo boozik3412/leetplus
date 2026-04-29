@@ -11,6 +11,9 @@ import {
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard';
+import { Roles } from '../auth/roles.decorator';
+import { RolesGuard } from '../auth/roles.guard';
+import { UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { ProductsService } from './products.service';
 import type { CreateProductDto, UpdateProductDto } from './products.dto';
@@ -34,7 +37,8 @@ export class ProductsController {
     return this.productsService.findById(id, user);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.BUYER)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Post()
   create(
     @Body() dto: CreateProductDto,
@@ -43,7 +47,8 @@ export class ProductsController {
     return this.productsService.create(dto, user);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.BUYER)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Patch(':id')
   update(
     @Param('id') id: string,
@@ -53,7 +58,8 @@ export class ProductsController {
     return this.productsService.update(id, dto, user);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.BUYER)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Delete(':id')
   archive(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.productsService.archive(id, user);

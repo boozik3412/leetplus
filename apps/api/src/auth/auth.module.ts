@@ -9,6 +9,7 @@ import { EmailVerificationService } from './email-verification.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { OptionalJwtAuthGuard } from './optional-jwt-auth.guard';
 import { PasswordService } from './password.service';
+import { RolesGuard } from './roles.guard';
 
 const DEV_JWT_SECRET = 'leetplus-dev-jwt-secret-change-before-production';
 type JwtExpiresIn = NonNullable<JwtModuleOptions['signOptions']>['expiresIn'];
@@ -37,7 +38,14 @@ type JwtExpiresIn = NonNullable<JwtModuleOptions['signOptions']>['expiresIn'];
     PasswordService,
     JwtAuthGuard,
     OptionalJwtAuthGuard,
+    RolesGuard,
   ],
-  exports: [AuthService, JwtModule, JwtAuthGuard, OptionalJwtAuthGuard],
+  exports: [
+    AuthService,
+    JwtModule,
+    JwtAuthGuard,
+    OptionalJwtAuthGuard,
+    RolesGuard,
+  ],
 })
 export class AuthModule {}

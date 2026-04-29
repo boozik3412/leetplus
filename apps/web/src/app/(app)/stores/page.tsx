@@ -4,11 +4,13 @@ import {
   StoreEditForm,
 } from "@/components/store-actions";
 import { requireCurrentUser } from "@/lib/auth";
+import { can } from "@/lib/permissions";
 import { getStores } from "@/lib/stores";
 
 export default async function StoresPage() {
   const user = await requireCurrentUser();
   const stores = await getStores();
+  const canEditStores = can(user, "edit_stores");
 
   return (
     <main className="px-6 py-8 text-zinc-950">
@@ -23,7 +25,7 @@ export default async function StoresPage() {
           </p>
         </div>
 
-        <StoreCreateForm />
+        {canEditStores ? <StoreCreateForm /> : null}
 
         <div className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
           <div className="border-b border-zinc-200 px-5 py-4">
@@ -35,21 +37,38 @@ export default async function StoresPage() {
                 <tr>
                   <th className="px-5 py-3 font-medium">Название и адрес</th>
                   <th className="px-5 py-3 font-medium">Статус</th>
-                  <th className="px-5 py-3 text-right font-medium">Действия</th>
+                  {canEditStores ? (
+                    <th className="px-5 py-3 text-right font-medium">
+                      Действия
+                    </th>
+                  ) : null}
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-100">
                 {stores.map((store) => (
                   <tr key={store.id}>
                     <td className="px-5 py-4">
-                      <StoreEditForm store={store} />
+                      {canEditStores ? (
+                        <StoreEditForm store={store} />
+                      ) : (
+                        <div>
+                          <p className="font-medium text-zinc-950">
+                            {store.name}
+                          </p>
+                          <p className="mt-1 text-sm text-zinc-500">
+                            {store.address ?? "—"}
+                          </p>
+                        </div>
+                      )}
                     </td>
                     <td className="px-5 py-4 text-zinc-700">
                       {store.isActive ? "Активна" : "Архив"}
                     </td>
-                    <td className="px-5 py-4 text-right">
-                      <StoreArchiveButton id={store.id} />
-                    </td>
+                    {canEditStores ? (
+                      <td className="px-5 py-4 text-right">
+                        <StoreArchiveButton id={store.id} />
+                      </td>
+                    ) : null}
                   </tr>
                 ))}
               </tbody>

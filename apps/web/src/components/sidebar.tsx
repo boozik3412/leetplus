@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import type { AuthUser } from "@/lib/auth";
+import { canAccessPath } from "@/lib/permissions";
 
 type NavItem = {
   href: string;
@@ -61,9 +62,11 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
         </p>
       </div>
       <nav className="flex-1 space-y-0.5 p-2">
-        {navItems.map((item) => (
-          <NavLink key={item.href} {...item} />
-        ))}
+        {navItems
+          .filter((item) => canAccessPath(user, item.href))
+          .map((item) => (
+            <NavLink key={item.href} {...item} />
+          ))}
       </nav>
       <div className="border-t border-zinc-200 p-3 dark:border-zinc-800">
         {user ? (

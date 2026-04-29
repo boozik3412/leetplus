@@ -5,6 +5,7 @@ import {
 } from "@/components/catalog-actions";
 import { requireCurrentUser } from "@/lib/auth";
 import { getSuppliers } from "@/lib/catalog";
+import { can } from "@/lib/permissions";
 
 function formatMoney(value: string | null) {
   if (!value) {
@@ -21,6 +22,7 @@ function formatMoney(value: string | null) {
 export default async function SuppliersPage() {
   const user = await requireCurrentUser();
   const suppliers = await getSuppliers();
+  const canEditSuppliers = can(user, "edit_products");
 
   return (
     <main className="px-6 py-8 text-zinc-950">
@@ -32,7 +34,7 @@ export default async function SuppliersPage() {
           </p>
         </div>
 
-        <CatalogCreateForm kind="suppliers" />
+        {canEditSuppliers ? <CatalogCreateForm kind="suppliers" /> : null}
 
         <div className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
           <div className="border-b border-zinc-200 px-5 py-4">
@@ -48,18 +50,28 @@ export default async function SuppliersPage() {
                   <th className="px-5 py-3 font-medium">Кратность</th>
                   <th className="px-5 py-3 font-medium">SKU</th>
                   <th className="px-5 py-3 font-medium">Статус</th>
-                  <th className="px-5 py-3 text-right font-medium">Действия</th>
+                  {canEditSuppliers ? (
+                    <th className="px-5 py-3 text-right font-medium">
+                      Действия
+                    </th>
+                  ) : null}
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-100">
                 {suppliers.map((supplier) => (
                   <tr key={supplier.id}>
                     <td className="px-5 py-4">
-                      <CatalogRenameForm
-                        id={supplier.id}
-                        name={supplier.name}
-                        kind="suppliers"
-                      />
+                      {canEditSuppliers ? (
+                        <CatalogRenameForm
+                          id={supplier.id}
+                          name={supplier.name}
+                          kind="suppliers"
+                        />
+                      ) : (
+                        <p className="font-medium text-zinc-950">
+                          {supplier.name}
+                        </p>
+                      )}
                     </td>
                     <td className="px-5 py-4 text-zinc-700">
                       {supplier.paymentDelayDays ?? "—"}
@@ -76,13 +88,15 @@ export default async function SuppliersPage() {
                     <td className="px-5 py-4 text-zinc-700">
                       {supplier.isActive ? "Активен" : "Архив"}
                     </td>
-                    <td className="px-5 py-4 text-right">
-                      <CatalogDeleteButton
-                        id={supplier.id}
-                        kind="suppliers"
-                        label="В архив"
-                      />
-                    </td>
+                    {canEditSuppliers ? (
+                      <td className="px-5 py-4 text-right">
+                        <CatalogDeleteButton
+                          id={supplier.id}
+                          kind="suppliers"
+                          label="В архив"
+                        />
+                      </td>
+                    ) : null}
                   </tr>
                 ))}
               </tbody>

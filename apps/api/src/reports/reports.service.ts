@@ -63,6 +63,8 @@ export type ProductOosExclusionRow = {
 
 export type OutOfStockRiskProduct = {
   productId: string;
+  storeId: string;
+  storeName: string;
   article: string;
   name: string;
   isCanonical: boolean;
@@ -74,6 +76,8 @@ export type OutOfStockRiskProduct = {
 
 export type ProductWithoutSales = {
   productId: string;
+  storeId: string;
+  storeName: string;
   article: string;
   name: string;
   isCanonical: boolean;
@@ -91,6 +95,8 @@ export type ReportRecommendation = {
   description: string;
   action: string;
   productId: string;
+  storeId: string | null;
+  storeName: string | null;
   article: string;
   productName: string;
   metricLabel: string;
@@ -206,6 +212,8 @@ export type ReplenishmentRisk =
 
 export type ReplenishmentRow = {
   productId: string;
+  storeId: string;
+  storeName: string;
   article: string;
   name: string;
   isCanonical: boolean;
@@ -253,6 +261,8 @@ type ReportItem = {
 
 type ProductSales = {
   productId: string;
+  storeId: string | null;
+  storeName: string | null;
   article: string;
   name: string;
   isCanonical: boolean;
@@ -264,8 +274,29 @@ type ProductSales = {
 
 type StockSnapshot = {
   storeId: string;
+  store: { name: string };
   productId: string;
+  product: {
+    article: string;
+    name: string;
+    canonicalProduct: { name: string } | null;
+    category: { name: string } | null;
+    supplier: { name: string } | null;
+  };
   quantity: { toNumber: () => number };
+};
+
+type StockByStoreProductItem = {
+  productId: string;
+  storeId: string;
+  storeName: string;
+  article: string;
+  name: string;
+  isCanonical: boolean;
+  canonicalProductName: string | null;
+  categoryName: string | null;
+  supplierName: string | null;
+  stockQuantity: number;
 };
 
 const DEMAND_PERIOD_DAYS = 21;
@@ -394,7 +425,6 @@ export class ReportsService {
       salesFacts,
       demandSalesFacts,
       inventorySnapshots,
-      activeProducts,
       stockMovements,
       oosExclusions,
     ] = await Promise.all([
@@ -420,6 +450,12 @@ export class ReportsService {
               },
             },
           },
+          store: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
         },
       }),
       this.prisma.salesFact.findMany({
@@ -440,6 +476,18 @@ export class ReportsService {
               canonicalProduct: {
                 select: { name: true },
               },
+              category: {
+                select: { name: true },
+              },
+              supplier: {
+                select: { name: true },
+              },
+            },
+          },
+          store: {
+            select: {
+              id: true,
+              name: true,
             },
           },
         },
@@ -458,30 +506,26 @@ export class ReportsService {
               id: true,
               article: true,
               name: true,
+              canonicalProduct: {
+                select: { name: true },
+              },
+              category: {
+                select: { name: true },
+              },
+              supplier: {
+                select: { name: true },
+              },
+            },
+          },
+          store: {
+            select: {
+              name: true,
             },
           },
         },
         orderBy: {
           snapshotDate: 'desc',
         },
-      }),
-      this.prisma.product.findMany({
-        where: { tenantId, isActive: true },
-        select: {
-          id: true,
-          article: true,
-          name: true,
-          canonicalProduct: {
-            select: { name: true },
-          },
-          category: {
-            select: { name: true },
-          },
-          supplier: {
-            select: { name: true },
-          },
-        },
-        orderBy: { name: 'asc' },
       }),
       this.prisma.stockMovement.findMany({
         where: {
@@ -518,6 +562,8 @@ export class ReportsService {
       const cost = fact.cost.toNumber();
       const current = productSales.get(fact.productId) ?? {
         productId: fact.productId,
+        storeId: fact.store.id,
+        storeName: fact.store.name,
         article: fact.product.article,
         name: fact.product.name,
         isCanonical: Boolean(fact.product.canonicalProduct),
@@ -526,6 +572,11 @@ export class ReportsService {
         revenue: 0,
         cost: 0,
       };
+
+      if (current.storeId !== fact.store.id) {
+        current.storeId = 'multiple';
+        current.storeName = 'Несколько клубов';
+      }
 
       current.quantity += quantity;
       current.revenue += revenue;
@@ -538,7 +589,12 @@ export class ReportsService {
     });
 
     const stockByProduct = this.latestStockByProduct(inventorySnapshots);
-    const demandProductSales = this.productSalesByProduct(demandSalesFacts);
+    const stockByStoreProduct =
+      this.latestStockByStoreProduct(inventorySnapshots);
+    const demandProductSales =
+      this.productSalesByStoreProduct(demandSalesFacts);
+    const periodProductSalesByStoreProduct =
+      this.productSalesByStoreProduct(salesFacts);
     const stockQuantity = [...stockByProduct.values()].reduce(
       (sum, quantity) => sum + quantity,
       0,
@@ -550,14 +606,14 @@ export class ReportsService {
     const periodDays = this.periodDays(period.fromDate, period.toDate);
     const outOfStockRiskProducts = this.outOfStockRiskProducts(
       demandProductSales,
-      stockByProduct,
+      stockByStoreProduct,
       DEMAND_PERIOD_DAYS,
       excludedProductIds,
     );
     const productsWithoutSales = this.productsWithoutSales(
-      activeProducts,
-      productSales,
-      stockByProduct,
+      stockByStoreProduct,
+      periodProductSalesByStoreProduct,
+      excludedProductIds,
     );
 
     return {
@@ -967,10 +1023,25 @@ export class ReportsService {
               lte: period.toDate,
             },
           },
-          select: {
-            storeId: true,
-            productId: true,
-            quantity: true,
+          include: {
+            store: {
+              select: { name: true },
+            },
+            product: {
+              select: {
+                article: true,
+                name: true,
+                canonicalProduct: {
+                  select: { name: true },
+                },
+                category: {
+                  select: { name: true },
+                },
+                supplier: {
+                  select: { name: true },
+                },
+              },
+            },
           },
           orderBy: {
             snapshotDate: 'desc',
@@ -986,6 +1057,7 @@ export class ReportsService {
             },
           },
           select: {
+            storeId: true,
             productId: true,
             quantity: true,
           },
@@ -999,13 +1071,15 @@ export class ReportsService {
       oosExclusions.map((exclusion) => exclusion.productId),
     );
 
-    const stockByProduct = this.latestStockByProduct(inventorySnapshots);
+    const stockByStoreProduct =
+      this.latestStockByStoreProduct(inventorySnapshots);
     const soldByProduct = new Map<string, number>();
 
     salesFacts.forEach((fact) => {
+      const key = `${fact.storeId}:${fact.productId}`;
       soldByProduct.set(
-        fact.productId,
-        (soldByProduct.get(fact.productId) ?? 0) + fact.quantity.toNumber(),
+        key,
+        (soldByProduct.get(key) ?? 0) + fact.quantity.toNumber(),
       );
     });
 
@@ -1013,11 +1087,17 @@ export class ReportsService {
     let totalDailyNeed = 0;
     let totalRecommendedOrder = 0;
 
-    const rows = activeProducts
-      .filter((product) => !excludedProductIds.has(product.id))
-      .map((product) => {
-        const stockQuantity = this.round(stockByProduct.get(product.id) ?? 0);
-        const soldQuantity = this.round(soldByProduct.get(product.id) ?? 0);
+    const productsById = new Map(
+      activeProducts.map((product) => [product.id, product]),
+    );
+    const rows = [...stockByStoreProduct.values()]
+      .filter((item) => !excludedProductIds.has(item.productId))
+      .map((item) => {
+        const product = productsById.get(item.productId);
+        const stockQuantity = this.round(item.stockQuantity);
+        const soldQuantity = this.round(
+          soldByProduct.get(`${item.storeId}:${item.productId}`) ?? 0,
+        );
         const averageDailySales = this.round(soldQuantity / DEMAND_PERIOD_DAYS);
         const stockDays =
           averageDailySales > 0
@@ -1026,19 +1106,21 @@ export class ReportsService {
         const dailyNeed = this.round(
           Math.max(0, averageDailySales - stockQuantity),
         );
-        const orderMultiplicity = product.supplier?.orderMultiplicity ?? null;
+        const orderMultiplicity = product?.supplier?.orderMultiplicity ?? null;
         const recommendedOrder = this.recommendedOrder(
           dailyNeed,
           orderMultiplicity,
         );
         const row = {
-          productId: product.id,
-          article: product.article,
-          name: product.name,
-          isCanonical: Boolean(product.canonicalProduct),
-          canonicalProductName: product.canonicalProduct?.name ?? null,
-          categoryName: product.category?.name ?? null,
-          supplierName: product.supplier?.name ?? null,
+          productId: item.productId,
+          storeId: item.storeId,
+          storeName: item.storeName,
+          article: item.article,
+          name: item.name,
+          isCanonical: item.isCanonical,
+          canonicalProductName: item.canonicalProductName,
+          categoryName: item.categoryName,
+          supplierName: item.supplierName,
           stockQuantity,
           soldQuantity,
           averageDailySales,
@@ -1211,6 +1293,35 @@ export class ReportsService {
     return stockByProduct;
   }
 
+  private latestStockByStoreProduct(snapshots: StockSnapshot[]) {
+    const seen = new Set<string>();
+    const stockByStoreProduct = new Map<string, StockByStoreProductItem>();
+
+    snapshots.forEach((snapshot) => {
+      const snapshotKey = `${snapshot.storeId}:${snapshot.productId}`;
+
+      if (seen.has(snapshotKey)) {
+        return;
+      }
+
+      seen.add(snapshotKey);
+      stockByStoreProduct.set(snapshotKey, {
+        productId: snapshot.productId,
+        storeId: snapshot.storeId,
+        storeName: snapshot.store.name,
+        article: snapshot.product.article,
+        name: snapshot.product.name,
+        isCanonical: Boolean(snapshot.product.canonicalProduct),
+        canonicalProductName: snapshot.product.canonicalProduct?.name ?? null,
+        categoryName: snapshot.product.category?.name ?? null,
+        supplierName: snapshot.product.supplier?.name ?? null,
+        stockQuantity: snapshot.quantity.toNumber(),
+      });
+    });
+
+    return stockByStoreProduct;
+  }
+
   private recommendedOrder(
     dailyNeed: number,
     orderMultiplicity: number | null,
@@ -1259,20 +1370,28 @@ export class ReportsService {
 
   private outOfStockRiskProducts(
     productSales: Map<string, ProductSales>,
-    stockByProduct: Map<string, number>,
+    stockByStoreProduct: Map<string, StockByStoreProductItem>,
     periodDays: number,
     excludedProductIds: Set<string>,
   ): OutOfStockRiskProduct[] {
     return [...productSales.values()]
       .filter((sale) => !excludedProductIds.has(sale.productId))
+      .filter(
+        (sale): sale is ProductSales & { storeId: string; storeName: string } =>
+          Boolean(sale.storeId && sale.storeName),
+      )
       .map((sale) => {
         const averageDailySales = sale.quantity / periodDays;
-        const stockQuantity = stockByProduct.get(sale.productId) ?? 0;
+        const stockQuantity =
+          stockByStoreProduct.get(`${sale.storeId}:${sale.productId}`)
+            ?.stockQuantity ?? 0;
         const stockDays =
           averageDailySales > 0 ? stockQuantity / averageDailySales : 0;
 
         return {
           productId: sale.productId,
+          storeId: sale.storeId,
+          storeName: sale.storeName,
           article: sale.article,
           name: sale.name,
           isCanonical: sale.isCanonical,
@@ -1305,6 +1424,8 @@ export class ReportsService {
     salesFacts.forEach((fact) => {
       const current = productSales.get(fact.productId) ?? {
         productId: fact.productId,
+        storeId: null,
+        storeName: null,
         article: fact.product.article,
         name: fact.product.name,
         isCanonical: Boolean(fact.product.canonicalProduct),
@@ -1323,29 +1444,68 @@ export class ReportsService {
     return productSales;
   }
 
-  private productsWithoutSales(
-    products: {
-      id: string;
-      article: string;
-      name: string;
-      canonicalProduct: { name: string } | null;
-      category: { name: string } | null;
-      supplier: { name: string } | null;
+  private productSalesByStoreProduct(
+    salesFacts: {
+      productId: string;
+      quantity: { toNumber: () => number };
+      revenue: { toNumber: () => number };
+      cost: { toNumber: () => number };
+      store: {
+        id: string;
+        name: string;
+      };
+      product: {
+        article: string;
+        name: string;
+        canonicalProduct: { name: string } | null;
+      };
     }[],
+  ) {
+    const productSales = new Map<string, ProductSales>();
+
+    salesFacts.forEach((fact) => {
+      const key = `${fact.store.id}:${fact.productId}`;
+      const current = productSales.get(key) ?? {
+        productId: fact.productId,
+        storeId: fact.store.id,
+        storeName: fact.store.name,
+        article: fact.product.article,
+        name: fact.product.name,
+        isCanonical: Boolean(fact.product.canonicalProduct),
+        canonicalProductName: fact.product.canonicalProduct?.name ?? null,
+        quantity: 0,
+        revenue: 0,
+        cost: 0,
+      };
+
+      current.quantity += fact.quantity.toNumber();
+      current.revenue += fact.revenue.toNumber();
+      current.cost += fact.cost.toNumber();
+      productSales.set(key, current);
+    });
+
+    return productSales;
+  }
+
+  private productsWithoutSales(
+    stockByStoreProduct: Map<string, StockByStoreProductItem>,
     productSales: Map<string, ProductSales>,
-    stockByProduct: Map<string, number>,
+    excludedProductIds: Set<string>,
   ): ProductWithoutSales[] {
-    return products
-      .filter((product) => !productSales.has(product.id))
-      .map((product) => ({
-        productId: product.id,
-        article: product.article,
-        name: product.name,
-        isCanonical: Boolean(product.canonicalProduct),
-        canonicalProductName: product.canonicalProduct?.name ?? null,
-        stockQuantity: this.round(stockByProduct.get(product.id) ?? 0),
-        categoryName: product.category?.name ?? null,
-        supplierName: product.supplier?.name ?? null,
+    return [...stockByStoreProduct.values()]
+      .filter((item) => !excludedProductIds.has(item.productId))
+      .filter((item) => !productSales.has(`${item.storeId}:${item.productId}`))
+      .map((item) => ({
+        productId: item.productId,
+        storeId: item.storeId,
+        storeName: item.storeName,
+        article: item.article,
+        name: item.name,
+        isCanonical: item.isCanonical,
+        canonicalProductName: item.canonicalProductName,
+        stockQuantity: this.round(item.stockQuantity),
+        categoryName: item.categoryName,
+        supplierName: item.supplierName,
       }))
       .sort(
         (a, b) =>
@@ -1369,6 +1529,8 @@ export class ReportsService {
         description: `Текущего остатка хватит примерно на ${product.stockDays} дн. при среднем спросе ${product.averageDailySales} шт/день.`,
         action: 'Проверить поставщика и ближайший заказ.',
         productId: product.productId,
+        storeId: product.storeId,
+        storeName: product.storeName,
         article: product.article,
         productName: product.name,
         metricLabel: 'Дней запаса',
@@ -1385,6 +1547,8 @@ export class ReportsService {
           description: `В выбранном периоде продаж нет, но на остатке ${product.stockQuantity} шт.`,
           action: 'Проверить цену, выкладку или необходимость архивации.',
           productId: product.productId,
+          storeId: product.storeId,
+          storeName: product.storeName,
           article: product.article,
           productName: product.name,
           metricLabel: 'Остаток',
@@ -1408,6 +1572,8 @@ export class ReportsService {
           description: `Маржа продаж ${this.round(item.marginPercent)}% при выручке ${this.round(item.sale.revenue)}.`,
           action: 'Проверить закупочную цену, розничную цену и промо-условия.',
           productId: item.sale.productId,
+          storeId: item.sale.storeId,
+          storeName: item.sale.storeName,
           article: item.sale.article,
           productName: item.sale.name,
           metricLabel: 'Маржа',

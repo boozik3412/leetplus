@@ -12,7 +12,6 @@ import {
   type LowMarginProduct,
   type OutOfStockRiskProduct,
   type ProductWithoutSales,
-  type ReplenishmentRisk,
   type ReplenishmentRow,
   type ReportRecommendation,
   type ReportGroup,
@@ -191,12 +190,15 @@ export default async function ReportsPage({
 
         <RecommendationsPanel rows={operationalReport.recommendations} />
 
-        <section className="mt-6 grid gap-6 xl:grid-cols-2">
-          <RiskTable rows={operationalReport.outOfStockRiskProducts} />
-          <NoSalesTable rows={operationalReport.productsWithoutSales} />
-        </section>
+        <RiskTable rows={operationalReport.outOfStockRiskProducts} />
+        <NoSalesTable rows={operationalReport.productsWithoutSales} />
 
-        <ReplenishmentTable rows={replenishmentReport.rows} />
+        <ReplenishmentTable
+          rows={replenishmentReport.rows}
+          from={replenishmentReport.from}
+          to={replenishmentReport.to}
+          storeId={replenishmentReport.storeId}
+        />
 
         <section className="mt-6 grid gap-6 xl:grid-cols-2">
           <AbcSummary
@@ -403,6 +405,9 @@ function RecommendationsPanel({ rows }: { rows: ReportRecommendation[] }) {
                 <p className="mt-2 font-mono text-xs text-zinc-500">
                   {row.article}
                 </p>
+                <p className="mt-1 text-xs text-zinc-500">
+                  {row.storeName ?? "—"}
+                </p>
               </div>
               <div>
                 <h3 className="text-sm font-semibold text-zinc-950">
@@ -458,7 +463,7 @@ function severityClassName(severity: ReportRecommendation["severity"]) {
 
 function RiskTable({ rows }: { rows: OutOfStockRiskProduct[] }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
+    <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
       <div className="border-b border-zinc-200 px-5 py-4">
         <h2 className="text-base font-semibold">Риск out-of-stock</h2>
         <p className="mt-1 text-sm text-zinc-500">
@@ -472,6 +477,7 @@ function RiskTable({ rows }: { rows: OutOfStockRiskProduct[] }) {
             <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
               <tr>
                 <th className="px-5 py-3 font-medium">Артикул</th>
+                <th className="px-5 py-3 font-medium">Клуб</th>
                 <th className="px-5 py-3 font-medium">Товар</th>
                 <th className="px-5 py-3 text-right font-medium">Остаток</th>
                 <th className="px-5 py-3 text-right font-medium">Продажи/день</th>
@@ -480,9 +486,12 @@ function RiskTable({ rows }: { rows: OutOfStockRiskProduct[] }) {
             </thead>
             <tbody className="divide-y divide-zinc-100">
               {rows.map((row) => (
-                <tr key={row.productId}>
+                <tr key={`${row.storeId}:${row.productId}`}>
                   <td className="px-5 py-4 font-mono text-xs text-zinc-600">
                     {row.article}
+                  </td>
+                  <td className="px-5 py-4 text-zinc-700">
+                    {row.storeName}
                   </td>
                   <td className="px-5 py-4 font-medium text-zinc-950">
                     <span className="inline-flex items-center gap-2">
@@ -509,26 +518,29 @@ function RiskTable({ rows }: { rows: OutOfStockRiskProduct[] }) {
           Критичных остатков по текущему фильтру нет.
         </p>
       )}
-    </div>
+    </section>
   );
 }
 
 function NoSalesTable({ rows }: { rows: ProductWithoutSales[] }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
+    <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
       <div className="border-b border-zinc-200 px-5 py-4">
-        <h2 className="text-base font-semibold">Товары без продаж</h2>
+        <h2 className="text-base font-semibold">
+          Высокие риски невыставленного товара
+        </h2>
         <p className="mt-1 text-sm text-zinc-500">
-          Активные SKU без продаж в выбранном периоде.
+          Активные SKU с остатком, но без продаж в выбранном периоде.
         </p>
       </div>
 
       {rows.length > 0 ? (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-left text-sm">
+          <table className="w-full min-w-[820px] text-left text-sm">
             <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
               <tr>
                 <th className="px-5 py-3 font-medium">Артикул</th>
+                <th className="px-5 py-3 font-medium">Клуб</th>
                 <th className="px-5 py-3 font-medium">Товар</th>
                 <th className="px-5 py-3 font-medium">Категория</th>
                 <th className="px-5 py-3 font-medium">Поставщик</th>
@@ -537,9 +549,12 @@ function NoSalesTable({ rows }: { rows: ProductWithoutSales[] }) {
             </thead>
             <tbody className="divide-y divide-zinc-100">
               {rows.map((row) => (
-                <tr key={row.productId}>
+                <tr key={`${row.storeId}:${row.productId}`}>
                   <td className="px-5 py-4 font-mono text-xs text-zinc-600">
                     {row.article}
+                  </td>
+                  <td className="px-5 py-4 text-zinc-700">
+                    {row.storeName}
                   </td>
                   <td className="px-5 py-4 font-medium text-zinc-950">
                     <span className="inline-flex items-center gap-2">
@@ -566,58 +581,65 @@ function NoSalesTable({ rows }: { rows: ProductWithoutSales[] }) {
           Все активные SKU продавались в выбранном периоде.
         </p>
       )}
-    </div>
+    </section>
   );
 }
 
-function ReplenishmentTable({ rows }: { rows: ReplenishmentRow[] }) {
+function ReplenishmentTable({
+  rows,
+  from,
+  to,
+  storeId,
+}: {
+  rows: ReplenishmentRow[];
+  from: string;
+  to: string;
+  storeId: string | null;
+}) {
+  const compactRows = topReplenishmentRowsByStore(rows);
+  const params = new URLSearchParams({ from, to });
+
+  if (storeId) {
+    params.set("storeId", storeId);
+  }
+
   return (
     <section
       id="replenishment"
       className="mt-6 scroll-mt-8 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm"
     >
-      <div className="border-b border-zinc-200 px-5 py-4">
-        <h2 className="text-base font-semibold">Остатки и потребность</h2>
-        <p className="mt-1 text-sm text-zinc-500">
-          Прогноз пополнения по текущему остатку, среднедневным продажам и
-          кратности заказа.
-        </p>
+      <div className="flex flex-col gap-2 border-b border-zinc-200 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-base font-semibold">Остатки и потребность</h2>
+          <p className="mt-1 text-sm text-zinc-500">
+            TOP-5 позиций к заказу в каждом клубе.
+          </p>
+        </div>
+        <a
+          href={`/reports/replenishment/table?${params.toString()}`}
+          target="_blank"
+          className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+        >
+          Открыть полный отчёт
+        </a>
       </div>
 
-      {rows.length > 0 ? (
+      {compactRows.length > 0 ? (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1240px] text-left text-sm">
+          <table className="w-full min-w-[900px] text-left text-sm">
             <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
               <tr>
-                <th className="px-5 py-3 font-medium">Статус</th>
-                <th className="px-5 py-3 font-medium">Артикул</th>
                 <th className="px-5 py-3 font-medium">Товар</th>
-                <th className="px-5 py-3 font-medium">Категория</th>
-                <th className="px-5 py-3 font-medium">Поставщик</th>
+                <th className="px-5 py-3 font-medium">Клуб</th>
                 <th className="px-5 py-3 text-right font-medium">Остаток</th>
-                <th className="px-5 py-3 text-right font-medium">Продано</th>
-                <th className="px-5 py-3 text-right font-medium">Прод./день</th>
-                <th className="px-5 py-3 text-right font-medium">Дней</th>
+                <th className="px-5 py-3 text-right font-medium">ССР</th>
+                <th className="px-5 py-3 text-right font-medium">Остаток в днях</th>
                 <th className="px-5 py-3 text-right font-medium">Потребность</th>
-                <th className="px-5 py-3 text-right font-medium">Заказать</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100">
-              {rows.map((row) => (
-                <tr key={row.productId}>
-                  <td className="px-5 py-4">
-                    <span
-                      className={[
-                        "inline-flex rounded-full px-2.5 py-1 text-xs font-medium",
-                        replenishmentRiskClassName(row.risk),
-                      ].join(" ")}
-                    >
-                      {replenishmentRiskLabel(row.risk)}
-                    </span>
-                  </td>
-                  <td className="px-5 py-4 font-mono text-xs text-zinc-600">
-                    {row.article}
-                  </td>
+              {compactRows.map((row) => (
+                <tr key={`${row.storeId}:${row.productId}`}>
                   <td className="px-5 py-4 font-medium text-zinc-950">
                     <span className="inline-flex items-center gap-2">
                       {row.name}
@@ -625,16 +647,10 @@ function ReplenishmentTable({ rows }: { rows: ReplenishmentRow[] }) {
                     </span>
                   </td>
                   <td className="px-5 py-4 text-zinc-700">
-                    {row.categoryName ?? "—"}
-                  </td>
-                  <td className="px-5 py-4 text-zinc-700">
-                    {row.supplierName ?? "—"}
+                    {row.storeName}
                   </td>
                   <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
                     {formatQuantity(row.stockQuantity)}
-                  </td>
-                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                    {formatQuantity(row.soldQuantity)}
                   </td>
                   <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
                     {formatQuantity(row.averageDailySales)}
@@ -644,11 +660,6 @@ function ReplenishmentTable({ rows }: { rows: ReplenishmentRow[] }) {
                   </td>
                   <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
                     {formatQuantity(row.dailyNeed)}
-                  </td>
-                  <td className="px-5 py-4 text-right tabular-nums font-semibold text-zinc-950">
-                    {row.recommendedOrder > 0
-                      ? formatQuantity(row.recommendedOrder)
-                      : "—"}
                   </td>
                 </tr>
               ))}
@@ -664,26 +675,24 @@ function ReplenishmentTable({ rows }: { rows: ReplenishmentRow[] }) {
   );
 }
 
-function replenishmentRiskLabel(risk: ReplenishmentRisk) {
-  const labels: Record<ReplenishmentRisk, string> = {
-    OUT_OF_STOCK: "Нет остатка",
-    LOW_STOCK: "Мало",
-    OK: "ОК",
-    NO_SALES: "Нет продаж",
-  };
+function topReplenishmentRowsByStore(rows: ReplenishmentRow[]) {
+  const rowsByStore = new Map<string, ReplenishmentRow[]>();
 
-  return labels[risk];
-}
+  rows.forEach((row) => {
+    rowsByStore.set(row.storeId, [...(rowsByStore.get(row.storeId) ?? []), row]);
+  });
 
-function replenishmentRiskClassName(risk: ReplenishmentRisk) {
-  const classNames: Record<ReplenishmentRisk, string> = {
-    OUT_OF_STOCK: "bg-red-50 text-red-700",
-    LOW_STOCK: "bg-amber-50 text-amber-700",
-    OK: "bg-emerald-50 text-emerald-700",
-    NO_SALES: "bg-zinc-100 text-zinc-700",
-  };
-
-  return classNames[risk];
+  return [...rowsByStore.values()].flatMap((storeRows) =>
+    storeRows
+      .filter((row) => row.recommendedOrder > 0 || row.dailyNeed > 0)
+      .sort(
+        (a, b) =>
+          b.recommendedOrder - a.recommendedOrder ||
+          b.dailyNeed - a.dailyNeed ||
+          a.name.localeCompare(b.name),
+      )
+      .slice(0, 5),
+  );
 }
 
 function AbcSummary({

@@ -56,6 +56,8 @@ export type ProductOosExclusion = {
 
 export type OutOfStockRiskProduct = {
   productId: string;
+  storeId: string;
+  storeName: string;
   article: string;
   name: string;
   isCanonical: boolean;
@@ -67,6 +69,8 @@ export type OutOfStockRiskProduct = {
 
 export type ProductWithoutSales = {
   productId: string;
+  storeId: string;
+  storeName: string;
   article: string;
   name: string;
   isCanonical: boolean;
@@ -84,6 +88,8 @@ export type ReportRecommendation = {
   description: string;
   action: string;
   productId: string;
+  storeId: string | null;
+  storeName: string | null;
   article: string;
   productName: string;
   metricLabel: string;
@@ -199,6 +205,8 @@ export type ReplenishmentRisk =
 
 export type ReplenishmentRow = {
   productId: string;
+  storeId: string;
+  storeName: string;
   article: string;
   name: string;
   isCanonical: boolean;

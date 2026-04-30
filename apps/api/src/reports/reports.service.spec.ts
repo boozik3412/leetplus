@@ -179,7 +179,9 @@ describe('ReportsService', () => {
             id: 'product-1',
             article: 'DRK-001',
             name: 'Adrenaline Rush',
+            canonicalProduct: null,
           },
+          store: { id: 'store-1', name: 'Club A' },
         },
       ])
       .mockResolvedValueOnce([
@@ -194,18 +196,36 @@ describe('ReportsService', () => {
             id: 'product-1',
             article: 'DRK-001',
             name: 'Adrenaline Rush',
+            canonicalProduct: null,
           },
+          store: { id: 'store-1', name: 'Club A' },
         },
       ]);
     prisma.inventorySnapshot.findMany.mockResolvedValue([
       {
         storeId: 'store-1',
+        store: { name: 'Club A' },
         productId: 'product-1',
+        product: {
+          article: 'DRK-001',
+          name: 'Adrenaline Rush',
+          canonicalProduct: null,
+          category: null,
+          supplier: null,
+        },
         quantity: new Prisma.Decimal(2),
       },
       {
         storeId: 'store-1',
+        store: { name: 'Club A' },
         productId: 'product-1',
+        product: {
+          article: 'DRK-001',
+          name: 'Adrenaline Rush',
+          canonicalProduct: null,
+          category: null,
+          supplier: null,
+        },
         quantity: new Prisma.Decimal(20),
       },
     ]);
@@ -279,6 +299,8 @@ describe('ReportsService', () => {
     expect(report.outOfStockRiskProducts).toEqual([
       {
         productId: 'product-1',
+        storeId: 'store-1',
+        storeName: 'Club A',
         article: 'DRK-001',
         name: 'Adrenaline Rush',
         isCanonical: false,
@@ -288,11 +310,7 @@ describe('ReportsService', () => {
         stockDays: 2,
       },
     ]);
-    expect(report.productsWithoutSales[0]).toMatchObject({
-      productId: 'product-2',
-      article: 'SNK-001',
-      stockQuantity: 0,
-    });
+    expect(report.productsWithoutSales).toEqual([]);
   });
 
   it('rejects unknown store filter for operational report', async () => {
@@ -515,6 +533,7 @@ describe('ReportsService', () => {
         id: 'product-1',
         article: 'DRK-001',
         name: 'Energy Drink',
+        canonicalProduct: null,
         category: { name: 'Напитки' },
         supplier: {
           name: 'Supplier A',
@@ -525,6 +544,7 @@ describe('ReportsService', () => {
         id: 'product-2',
         article: 'SNK-001',
         name: 'Chips',
+        canonicalProduct: null,
         category: { name: 'Снеки' },
         supplier: null,
       },
@@ -532,22 +552,47 @@ describe('ReportsService', () => {
     prisma.inventorySnapshot.findMany.mockResolvedValue([
       {
         storeId: 'store-1',
+        store: { name: 'Club A' },
         productId: 'product-1',
+        product: {
+          article: 'DRK-001',
+          name: 'Energy Drink',
+          canonicalProduct: null,
+          category: { name: 'Напитки' },
+          supplier: { name: 'Supplier A' },
+        },
         quantity: new Prisma.Decimal(1),
       },
       {
         storeId: 'store-1',
+        store: { name: 'Club A' },
         productId: 'product-1',
+        product: {
+          article: 'DRK-001',
+          name: 'Energy Drink',
+          canonicalProduct: null,
+          category: { name: 'Напитки' },
+          supplier: { name: 'Supplier A' },
+        },
         quantity: new Prisma.Decimal(12),
       },
       {
         storeId: 'store-1',
+        store: { name: 'Club A' },
         productId: 'product-2',
+        product: {
+          article: 'SNK-001',
+          name: 'Chips',
+          canonicalProduct: null,
+          category: { name: 'Снеки' },
+          supplier: null,
+        },
         quantity: new Prisma.Decimal(5),
       },
     ]);
     prisma.salesFact.findMany.mockResolvedValue([
       {
+        storeId: 'store-1',
         productId: 'product-1',
         quantity: new Prisma.Decimal(63),
       },
@@ -573,6 +618,8 @@ describe('ReportsService', () => {
     expect(report.rows).toEqual([
       {
         productId: 'product-1',
+        storeId: 'store-1',
+        storeName: 'Club A',
         article: 'DRK-001',
         name: 'Energy Drink',
         isCanonical: false,
@@ -590,6 +637,8 @@ describe('ReportsService', () => {
       },
       {
         productId: 'product-2',
+        storeId: 'store-1',
+        storeName: 'Club A',
         article: 'SNK-001',
         name: 'Chips',
         isCanonical: false,

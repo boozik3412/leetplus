@@ -1,4 +1,6 @@
 import { requireCurrentUser } from "@/lib/auth";
+import { AbcReportToggle } from "@/components/abc-report-toggle";
+import { NoSalesPeriodTable } from "@/components/no-sales-period-table";
 import { OosExclusionActions } from "@/components/oos-exclusion-actions";
 import { ReportEmailForm } from "@/components/report-email-form";
 import {
@@ -8,10 +10,8 @@ import {
   getSkuPerformanceReport,
   getSuppliersPerformanceReport,
   type AbcGroup,
-  type AbcSummaryRow,
   type LowMarginProduct,
   type OutOfStockRiskProduct,
-  type ProductWithoutSales,
   type ReplenishmentRow,
   type ReportRecommendation,
   type ReportGroup,
@@ -63,6 +63,38 @@ function buildExportHref({
   return `/api/reports/export?${params.toString()}`;
 }
 
+function abcTableHref({
+  from,
+  to,
+  storeId,
+}: {
+  from: string;
+  to: string;
+  storeId: string | null;
+}) {
+  const params = new URLSearchParams({ from, to });
+
+  if (storeId) {
+    params.set("storeId", storeId);
+  }
+
+  return `/reports/abc/table?${params.toString()}`;
+}
+
+function lastFullDaysRange(days: number) {
+  const now = new Date();
+  const toDate = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1),
+  );
+  const fromDate = new Date(toDate);
+  fromDate.setUTCDate(fromDate.getUTCDate() - (days - 1));
+
+  return {
+    from: fromDate.toISOString().slice(0, 10),
+    to: toDate.toISOString().slice(0, 10),
+  };
+}
+
 export default async function ReportsPage({
   searchParams,
 }: {
@@ -75,12 +107,27 @@ export default async function ReportsPage({
     to: searchParam(params.to),
     storeId: searchParam(params.storeId),
   };
+  const noSalesFilters = {
+    storeId: filters.storeId,
+    ...lastFullDaysRange(7),
+  };
+  const noSalesFilters14 = {
+    storeId: filters.storeId,
+    ...lastFullDaysRange(14),
+  };
+  const noSalesFilters21 = {
+    storeId: filters.storeId,
+    ...lastFullDaysRange(21),
+  };
   const [
     assortmentReport,
     operationalReport,
     skuPerformanceReport,
     replenishmentReport,
     suppliersPerformanceReport,
+    noSalesReport7,
+    noSalesReport14,
+    noSalesReport21,
     stores,
   ] = await Promise.all([
     getAssortmentReport(),
@@ -88,6 +135,9 @@ export default async function ReportsPage({
     getSkuPerformanceReport(filters),
     getReplenishmentReport(filters),
     getSuppliersPerformanceReport(filters),
+    getOperationalReport(noSalesFilters),
+    getOperationalReport(noSalesFilters14),
+    getOperationalReport(noSalesFilters21),
     getStores(),
   ]);
 
@@ -129,69 +179,17 @@ export default async function ReportsPage({
           storeId={operationalReport.storeId}
         />
 
-        <section className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Metric
-            label="Выручка"
-            value={formatMoney(operationalReport.totalRevenue)}
-          />
-          <Metric
-            label="Валовая прибыль"
-            value={formatMoney(operationalReport.grossProfit)}
-          />
-          <Metric
-            label="Прибыль с потерями"
-            value={formatMoney(operationalReport.adjustedGrossProfit)}
-          />
-          <Metric
-            label="Маржа продаж"
-            value={formatPercent(operationalReport.marginPercent)}
-          />
-          <Metric
-            label="Маржа с потерями"
-            value={formatPercent(operationalReport.adjustedMarginPercent)}
-          />
-          <Metric
-            label="Продано, шт"
-            value={formatQuantity(operationalReport.soldQuantity)}
-          />
-          <Metric
-            label="Списания"
-            value={formatMoney(operationalReport.writeOffAmount)}
-          />
-          <Metric
-            label="Возвраты"
-            value={formatMoney(operationalReport.returnAmount)}
-          />
-          <Metric
-            label="Средняя выручка/день"
-            value={formatMoney(operationalReport.averageDailyRevenue)}
-          />
-          <Metric
-            label="Остаток, шт"
-            value={formatQuantity(operationalReport.stockQuantity)}
-          />
-          <Metric
-            label="Дней запаса"
-            value={
-              operationalReport.stockDays === null
-                ? "—"
-                : formatQuantity(operationalReport.stockDays)
-            }
-          />
-          <Metric
-            label="Риск out-of-stock"
-            value={operationalReport.outOfStockRiskProducts.length}
-          />
-          <Metric
-            label="Реком. заказ, шт"
-            value={formatQuantity(replenishmentReport.totalRecommendedOrder)}
-          />
-        </section>
-
         <RecommendationsPanel rows={operationalReport.recommendations} />
 
         <RiskTable rows={operationalReport.outOfStockRiskProducts} />
-        <NoSalesTable rows={operationalReport.productsWithoutSales} />
+        <NoSalesPeriodTable
+          rowsByPeriod={{
+            7: noSalesReport7.productsWithoutSales,
+            14: noSalesReport14.productsWithoutSales,
+            21: noSalesReport21.productsWithoutSales,
+          }}
+          networkBadge={<NetworkSkuBadge />}
+        />
 
         <ReplenishmentTable
           rows={replenishmentReport.rows}
@@ -200,18 +198,15 @@ export default async function ReportsPage({
           storeId={replenishmentReport.storeId}
         />
 
-        <section className="mt-6 grid gap-6 xl:grid-cols-2">
-          <AbcSummary
-            title="ABC по выручке"
-            description="Группы A/B/C по накопительной доле выручки."
-            rows={skuPerformanceReport.abcByRevenue}
-          />
-          <AbcSummary
-            title="ABC по прибыли"
-            description="Группы A/B/C по накопительной доле валовой прибыли."
-            rows={skuPerformanceReport.abcByProfit}
-          />
-        </section>
+        <AbcReportToggle
+          revenueRows={skuPerformanceReport.abcByRevenue}
+          profitRows={skuPerformanceReport.abcByProfit}
+          href={abcTableHref({
+            from: operationalReport.from,
+            to: operationalReport.to,
+            storeId: operationalReport.storeId,
+          })}
+        />
 
         <TopSkuTable rows={skuPerformanceReport.topByRevenue} />
 
@@ -249,7 +244,6 @@ export default async function ReportsPage({
               <table className="w-full min-w-[920px] text-left text-sm">
                 <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
                   <tr>
-                    <th className="px-5 py-3 font-medium">Артикул</th>
                     <th className="px-5 py-3 font-medium">Товар</th>
                     <th className="px-5 py-3 font-medium">Категория</th>
                     <th className="px-5 py-3 font-medium">Поставщик</th>
@@ -402,9 +396,6 @@ function RecommendationsPanel({ rows }: { rows: ReportRecommendation[] }) {
                 >
                   {severityLabel(row.severity)}
                 </span>
-                <p className="mt-2 font-mono text-xs text-zinc-500">
-                  {row.article}
-                </p>
                 <p className="mt-1 text-xs text-zinc-500">
                   {row.storeName ?? "—"}
                 </p>
@@ -476,7 +467,6 @@ function RiskTable({ rows }: { rows: OutOfStockRiskProduct[] }) {
           <table className="w-full min-w-[640px] text-left text-sm">
             <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
               <tr>
-                <th className="px-5 py-3 font-medium">Артикул</th>
                 <th className="px-5 py-3 font-medium">Клуб</th>
                 <th className="px-5 py-3 font-medium">Товар</th>
                 <th className="px-5 py-3 text-right font-medium">Остаток</th>
@@ -487,9 +477,6 @@ function RiskTable({ rows }: { rows: OutOfStockRiskProduct[] }) {
             <tbody className="divide-y divide-zinc-100">
               {rows.map((row) => (
                 <tr key={`${row.storeId}:${row.productId}`}>
-                  <td className="px-5 py-4 font-mono text-xs text-zinc-600">
-                    {row.article}
-                  </td>
                   <td className="px-5 py-4 text-zinc-700">
                     {row.storeName}
                   </td>
@@ -516,69 +503,6 @@ function RiskTable({ rows }: { rows: OutOfStockRiskProduct[] }) {
       ) : (
         <p className="px-5 py-6 text-sm text-zinc-500">
           Критичных остатков по текущему фильтру нет.
-        </p>
-      )}
-    </section>
-  );
-}
-
-function NoSalesTable({ rows }: { rows: ProductWithoutSales[] }) {
-  return (
-    <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
-      <div className="border-b border-zinc-200 px-5 py-4">
-        <h2 className="text-base font-semibold">
-          Высокие риски невыставленного товара
-        </h2>
-        <p className="mt-1 text-sm text-zinc-500">
-          Активные SKU с остатком, но без продаж в выбранном периоде.
-        </p>
-      </div>
-
-      {rows.length > 0 ? (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[820px] text-left text-sm">
-            <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
-              <tr>
-                <th className="px-5 py-3 font-medium">Артикул</th>
-                <th className="px-5 py-3 font-medium">Клуб</th>
-                <th className="px-5 py-3 font-medium">Товар</th>
-                <th className="px-5 py-3 font-medium">Категория</th>
-                <th className="px-5 py-3 font-medium">Поставщик</th>
-                <th className="px-5 py-3 text-right font-medium">Остаток</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-100">
-              {rows.map((row) => (
-                <tr key={`${row.storeId}:${row.productId}`}>
-                  <td className="px-5 py-4 font-mono text-xs text-zinc-600">
-                    {row.article}
-                  </td>
-                  <td className="px-5 py-4 text-zinc-700">
-                    {row.storeName}
-                  </td>
-                  <td className="px-5 py-4 font-medium text-zinc-950">
-                    <span className="inline-flex items-center gap-2">
-                      {row.name}
-                      {row.isCanonical ? <NetworkSkuBadge /> : null}
-                    </span>
-                  </td>
-                  <td className="px-5 py-4 text-zinc-700">
-                    {row.categoryName ?? "—"}
-                  </td>
-                  <td className="px-5 py-4 text-zinc-700">
-                    {row.supplierName ?? "—"}
-                  </td>
-                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                    {formatQuantity(row.stockQuantity)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <p className="px-5 py-6 text-sm text-zinc-500">
-          Все активные SKU продавались в выбранном периоде.
         </p>
       )}
     </section>
@@ -695,66 +619,6 @@ function topReplenishmentRowsByStore(rows: ReplenishmentRow[]) {
   );
 }
 
-function AbcSummary({
-  title,
-  description,
-  rows,
-}: {
-  title: string;
-  description: string;
-  rows: AbcSummaryRow[];
-}) {
-  return (
-    <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
-      <div className="border-b border-zinc-200 px-5 py-4">
-        <h2 className="text-base font-semibold">{title}</h2>
-        <p className="mt-1 text-sm text-zinc-500">{description}</p>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[560px] text-left text-sm">
-          <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
-            <tr>
-              <th className="px-5 py-3 font-medium">Группа</th>
-              <th className="px-5 py-3 text-right font-medium">SKU</th>
-              <th className="px-5 py-3 text-right font-medium">Доля ассорт.</th>
-              <th className="px-5 py-3 text-right font-medium">Доля выручки</th>
-              <th className="px-5 py-3 text-right font-medium">Доля прибыли</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-zinc-100">
-            {rows.map((row) => (
-              <tr key={row.group}>
-                <td className="px-5 py-4">
-                  <span
-                    className={[
-                      "inline-flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold",
-                      abcGroupClassName(row.group),
-                    ].join(" ")}
-                  >
-                    {row.group}
-                  </span>
-                </td>
-                <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                  {row.productsCount}
-                </td>
-                <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                  {formatPercent(row.assortmentSharePercent)}
-                </td>
-                <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                  {formatPercent(row.revenueSharePercent)}
-                </td>
-                <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                  {formatPercent(row.profitSharePercent)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
 function TopSkuTable({ rows }: { rows: SkuPerformanceRow[] }) {
   return (
     <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
@@ -771,7 +635,6 @@ function TopSkuTable({ rows }: { rows: SkuPerformanceRow[] }) {
             <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
               <tr>
                 <th className="px-5 py-3 font-medium">ABC</th>
-                <th className="px-5 py-3 font-medium">Артикул</th>
                 <th className="px-5 py-3 font-medium">Товар</th>
                 <th className="px-5 py-3 font-medium">Категория</th>
                 <th className="px-5 py-3 text-right font-medium">Продано</th>
@@ -794,9 +657,6 @@ function TopSkuTable({ rows }: { rows: SkuPerformanceRow[] }) {
                     >
                       {row.abcRevenueGroup}
                     </span>
-                  </td>
-                  <td className="px-5 py-4 font-mono text-xs text-zinc-600">
-                    {row.article}
                   </td>
                   <td className="px-5 py-4 font-medium text-zinc-950">
                     <span className="inline-flex items-center gap-2">
@@ -991,9 +851,6 @@ function GroupTable({ title, rows }: { title: string; rows: ReportGroup[] }) {
 function LowMarginRow({ product }: { product: LowMarginProduct }) {
   return (
     <tr>
-      <td className="px-5 py-4 font-mono text-xs text-zinc-600">
-        {product.article}
-      </td>
       <td className="px-5 py-4 font-medium text-zinc-950">{product.name}</td>
       <td className="px-5 py-4 text-zinc-700">
         {product.categoryName ?? "—"}

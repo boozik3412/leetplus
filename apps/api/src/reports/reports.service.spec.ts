@@ -107,6 +107,13 @@ describe('ReportsService', () => {
         supplier: null,
       },
     ]);
+    prisma.inventorySnapshot.findMany.mockResolvedValue([
+      {
+        storeId: 'store-1',
+        productId: 'product-2',
+        quantity: new Prisma.Decimal(5),
+      },
+    ]);
 
     const report = await service.getAssortmentReport(user);
 
@@ -151,6 +158,7 @@ describe('ReportsService', () => {
   it('returns zero metrics without active products', async () => {
     prisma.product.count.mockResolvedValue(0);
     prisma.product.findMany.mockResolvedValue([]);
+    prisma.inventorySnapshot.findMany.mockResolvedValue([]);
 
     await expect(service.getAssortmentReport(user)).resolves.toMatchObject({
       totalSku: 0,
@@ -413,6 +421,8 @@ describe('ReportsService', () => {
         group: 'A',
         productsCount: 1,
         assortmentSharePercent: 33.3,
+        revenue: 800,
+        grossProfit: 300,
         revenueSharePercent: 80,
         profitSharePercent: 83.3,
       },
@@ -420,6 +430,8 @@ describe('ReportsService', () => {
         group: 'B',
         productsCount: 1,
         assortmentSharePercent: 33.3,
+        revenue: 150,
+        grossProfit: 50,
         revenueSharePercent: 15,
         profitSharePercent: 13.9,
       },
@@ -427,6 +439,8 @@ describe('ReportsService', () => {
         group: 'C',
         productsCount: 1,
         assortmentSharePercent: 33.3,
+        revenue: 50,
+        grossProfit: 10,
         revenueSharePercent: 5,
         profitSharePercent: 2.8,
       },

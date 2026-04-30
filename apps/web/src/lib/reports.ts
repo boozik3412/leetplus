@@ -149,6 +149,8 @@ export type AbcSummaryRow = {
   group: AbcGroup;
   productsCount: number;
   assortmentSharePercent: number;
+  revenue: number;
+  grossProfit: number;
   revenueSharePercent: number;
   profitSharePercent: number;
 };

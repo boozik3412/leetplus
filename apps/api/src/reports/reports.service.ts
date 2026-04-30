@@ -156,6 +156,8 @@ export type AbcSummaryRow = {
   group: AbcGroup;
   productsCount: number;
   assortmentSharePercent: number;
+  revenue: number;
+  grossProfit: number;
   revenueSharePercent: number;
   profitSharePercent: number;
 };
@@ -314,7 +316,7 @@ export class ReportsService {
     const { tenantId, tenantSlug } =
       await this.tenantContextService.resolve(user);
 
-    const [totalSku, activeProducts] = await Promise.all([
+    const [totalSku, activeProducts, inventorySnapshots] = await Promise.all([
       this.prisma.product.count({ where: { tenantId } }),
       this.prisma.product.findMany({
         where: { tenantId, isActive: true },
@@ -340,7 +342,17 @@ export class ReportsService {
         },
         orderBy: { name: 'asc' },
       }),
+      this.prisma.inventorySnapshot.findMany({
+        where: { tenantId },
+        select: {
+          storeId: true,
+          productId: true,
+          quantity: true,
+        },
+        orderBy: { snapshotDate: 'desc' },
+      }),
     ]);
+    const stockByProduct = this.latestStockByProduct(inventorySnapshots);
 
     const activeSku = activeProducts.length;
     const margins = activeProducts.map((product) => {
@@ -385,6 +397,8 @@ export class ReportsService {
       ),
       lowMarginProducts: margins
         .filter((item) => item.marginPercent < 20)
+        .filter((item) => item.purchasePrice > 0 && item.salePrice > 0)
+        .filter((item) => (stockByProduct.get(item.product.id) ?? 0) > 0)
         .sort((a, b) => a.marginPercent - b.marginPercent)
         .slice(0, 10)
         .map((item) => ({
@@ -1271,7 +1285,13 @@ export class ReportsService {
     );
   }
 
-  private latestStockByProduct(snapshots: StockSnapshot[]) {
+  private latestStockByProduct(
+    snapshots: {
+      storeId: string;
+      productId: string;
+      quantity: { toNumber: () => number };
+    }[],
+  ) {
     const seen = new Set<string>();
     const stockByProduct = new Map<string, number>();
 
@@ -1649,6 +1669,8 @@ export class ReportsService {
           groupRows.length,
           rows.length,
         ),
+        revenue: this.round(revenue),
+        grossProfit: this.round(profit),
         revenueSharePercent: this.sharePercent(revenue, totalRevenue),
         profitSharePercent: this.sharePercent(profit, totalProfit),
       };

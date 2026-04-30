@@ -9,7 +9,6 @@ import {
   getReplenishmentReport,
   getSkuPerformanceReport,
   getSuppliersPerformanceReport,
-  type AbcGroup,
   type LowMarginProduct,
   type OutOfStockRiskProduct,
   type ReplenishmentRow,
@@ -208,7 +207,13 @@ export default async function ReportsPage({
           })}
         />
 
-        <TopSkuTable rows={skuPerformanceReport.topByRevenue} />
+        <TopSkuTable
+          rows={skuPerformanceReport.topByRevenue}
+          stores={stores}
+          storeId={operationalReport.storeId}
+          from={operationalReport.from}
+          to={operationalReport.to}
+        />
 
         <TopSuppliersTable rows={suppliersPerformanceReport.rows} />
 
@@ -453,13 +458,28 @@ function severityClassName(severity: ReportRecommendation["severity"]) {
 }
 
 function RiskTable({ rows }: { rows: OutOfStockRiskProduct[] }) {
+  const hasOverflow = hasMoreThanFivePerStore(rows);
   return (
     <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
-      <div className="border-b border-zinc-200 px-5 py-4">
-        <h2 className="text-base font-semibold">Риск out-of-stock</h2>
-        <p className="mt-1 text-sm text-zinc-500">
-          Товары, где текущего остатка хватит на 3 дня или меньше.
-        </p>
+      <div className="flex flex-col gap-2 border-b border-zinc-200 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-base font-semibold">Риск out-of-stock</h2>
+          <p className="mt-1 text-sm text-zinc-500">
+            Товары, где текущего остатка хватит на 3 дня или меньше.
+          </p>
+        </div>
+        <a
+          href="/reports/oos/table"
+          target="_blank"
+          className={[
+            "rounded-md border px-3 py-2 text-sm font-medium hover:bg-zinc-50",
+            hasOverflow
+              ? "border-amber-300 bg-amber-50 text-amber-800"
+              : "border-zinc-300 text-zinc-700",
+          ].join(" ")}
+        >
+          Открыть полный отчёт{hasOverflow ? " • есть ещё" : ""}
+        </a>
       </div>
 
       {rows.length > 0 ? (
@@ -619,14 +639,75 @@ function topReplenishmentRowsByStore(rows: ReplenishmentRow[]) {
   );
 }
 
-function TopSkuTable({ rows }: { rows: SkuPerformanceRow[] }) {
+function hasMoreThanFivePerStore(rows: OutOfStockRiskProduct[]) {
+  const counts = new Map<string, number>();
+
+  rows.forEach((row) => {
+    counts.set(row.storeId, (counts.get(row.storeId) ?? 0) + 1);
+  });
+
+  return [...counts.values()].some((count) => count > 5);
+}
+
+function TopSkuTable({
+  rows,
+  stores,
+  storeId,
+  from,
+  to,
+}: {
+  rows: SkuPerformanceRow[];
+  stores: Store[];
+  storeId: string | null;
+  from: string;
+  to: string;
+}) {
+  const params = new URLSearchParams({ from, to });
+
+  if (storeId) {
+    params.set("storeId", storeId);
+  }
+
   return (
     <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
-      <div className="border-b border-zinc-200 px-5 py-4">
-        <h2 className="text-base font-semibold">ТОП SKU по выручке</h2>
-        <p className="mt-1 text-sm text-zinc-500">
-          Рейтинг товаров с прибылью, маржой и эффективностью на 1 фейс.
-        </p>
+      <div className="flex flex-col gap-3 border-b border-zinc-200 px-5 py-4 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <h2 className="text-base font-semibold">ТОП SKU по выручке</h2>
+          <p className="mt-1 text-sm text-zinc-500">
+            Рейтинг товаров с прибылью, маржой и эффективностью на 1 фейс.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <form>
+            <input type="hidden" name="from" value={from} />
+            <input type="hidden" name="to" value={to} />
+            <select
+              name="storeId"
+              defaultValue={storeId ?? ""}
+              className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm"
+            >
+              <option value="">Вся сеть</option>
+              {stores.map((store) => (
+                <option key={store.id} value={store.id}>
+                  {store.name}
+                </option>
+              ))}
+            </select>
+            <button
+              type="submit"
+              className="ml-2 rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium hover:bg-zinc-50"
+            >
+              Применить
+            </button>
+          </form>
+          <a
+            href={`/reports/top-sku/table?${params.toString()}`}
+            target="_blank"
+            className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+          >
+            Открыть полный отчёт
+          </a>
+        </div>
       </div>
 
       {rows.length > 0 ? (
@@ -634,7 +715,7 @@ function TopSkuTable({ rows }: { rows: SkuPerformanceRow[] }) {
           <table className="w-full min-w-[1120px] text-left text-sm">
             <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
               <tr>
-                <th className="px-5 py-3 font-medium">ABC</th>
+                <th className="px-5 py-3 font-medium">Клуб</th>
                 <th className="px-5 py-3 font-medium">Товар</th>
                 <th className="px-5 py-3 font-medium">Категория</th>
                 <th className="px-5 py-3 text-right font-medium">Продано</th>
@@ -648,15 +729,11 @@ function TopSkuTable({ rows }: { rows: SkuPerformanceRow[] }) {
             <tbody className="divide-y divide-zinc-100">
               {rows.map((row) => (
                 <tr key={row.productId}>
-                  <td className="px-5 py-4">
-                    <span
-                      className={[
-                        "inline-flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold",
-                        abcGroupClassName(row.abcRevenueGroup),
-                      ].join(" ")}
-                    >
-                      {row.abcRevenueGroup}
-                    </span>
+                  <td className="px-5 py-4 text-zinc-700">
+                    {storeId
+                      ? (stores.find((store) => store.id === storeId)?.name ??
+                        "Клуб")
+                      : "Вся сеть"}
                   </td>
                   <td className="px-5 py-4 font-medium text-zinc-950">
                     <span className="inline-flex items-center gap-2">
@@ -787,16 +864,6 @@ function TopSuppliersTable({ rows }: { rows: SupplierPerformanceRow[] }) {
       )}
     </section>
   );
-}
-
-function abcGroupClassName(group: AbcGroup) {
-  const classNames: Record<AbcGroup, string> = {
-    A: "bg-emerald-50 text-emerald-700",
-    B: "bg-amber-50 text-amber-700",
-    C: "bg-zinc-100 text-zinc-700",
-  };
-
-  return classNames[group];
 }
 
 function GroupTable({ title, rows }: { title: string; rows: ReportGroup[] }) {

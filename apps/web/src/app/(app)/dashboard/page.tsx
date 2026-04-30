@@ -40,6 +40,28 @@ function formatQuantity(value: number) {
   }).format(value);
 }
 
+function formatDashboardPeriodHighlight(from: string, to: string) {
+  const fromDate = parseDateInput(from);
+  const toDate = parseDateInput(to);
+
+  if (!fromDate || !toDate) {
+    return null;
+  }
+
+  if (
+    fromDate.getUTCFullYear() === toDate.getUTCFullYear() &&
+    fromDate.getUTCMonth() === toDate.getUTCMonth()
+  ) {
+    return new Intl.DateTimeFormat("ru-RU", {
+      month: "long",
+      year: "numeric",
+      timeZone: "UTC",
+    }).format(fromDate);
+  }
+
+  return null;
+}
+
 export default async function DashboardPage({
   searchParams,
 }: {
@@ -66,6 +88,10 @@ export default async function DashboardPage({
           .filter((store) => summary.selectedStoreIds.includes(store.id))
           .map((store) => store.name)
           .join(", ");
+  const highlightedPeriod = formatDashboardPeriodHighlight(
+    summary.periodFrom,
+    summary.periodTo,
+  );
 
   return (
     <main className="px-6 py-8 text-zinc-950 dark:text-zinc-100">
@@ -84,9 +110,12 @@ export default async function DashboardPage({
                 {summary.tenantName}: операционная картина ассортимента
               </h1>
               <p className="mt-4 max-w-2xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                Период {summary.periodFrom} — {summary.periodTo}. В фокусе
-                продажи, прибыльность, потери, риск дефицита и товары, которые
-                формируют оборот.
+                Период -{" "}
+                <span className="font-semibold text-zinc-950 dark:text-zinc-50">
+                  {highlightedPeriod ?? `${summary.periodFrom} — ${summary.periodTo}`}
+                </span>
+                . В фокусе продажи, прибыльность, потери, риск дефицита и
+                товары, которые формируют оборот.
               </p>
             </div>
 
@@ -114,22 +143,26 @@ export default async function DashboardPage({
               label="Продано"
               value={formatQuantity(summary.soldQuantity)}
               suffix="шт"
+              href="/reports/top-sku/table"
             />
             <SignalMetric
               label="Списания"
               value={formatMoney(summary.writeOffAmount)}
               tone="danger"
+              href="/reports"
             />
             <SignalMetric
               label="Остатки"
               value={formatQuantity(summary.stockQuantity)}
               suffix="шт"
+              href="/products"
             />
             <SignalMetric
               label="Риск out-of-stock"
               value={formatQuantity(summary.outOfStockRiskCount)}
               suffix="SKU"
               tone={summary.outOfStockRiskCount > 0 ? "danger" : "good"}
+              href="/reports/oos/table"
             />
           </div>
         </section>
@@ -445,13 +478,15 @@ function SignalMetric({
   value,
   suffix,
   tone = "neutral",
+  href,
 }: {
   label: string;
   value: string;
   suffix?: string;
   tone?: "neutral" | "good" | "danger";
+  href?: string;
 }) {
-  return (
+  const content = (
     <div className="border-b border-zinc-200 px-6 py-4 dark:border-zinc-800 md:border-b-0 md:border-r last:md:border-r-0">
       <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
         {label}
@@ -471,6 +506,19 @@ function SignalMetric({
       </p>
     </div>
   );
+
+  if (href) {
+    return (
+      <Link
+        href={href}
+        className="block transition-colors hover:bg-zinc-100/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70 dark:hover:bg-zinc-900/70"
+      >
+        {content}
+      </Link>
+    );
+  }
+
+  return content;
 }
 
 function InsightCard({
@@ -539,27 +587,37 @@ function TopSkuTable({
           {rows.map((row, index) => (
             <div
               key={row.productId}
-              className="grid gap-4 px-5 py-4 lg:grid-cols-[48px_1fr_180px_160px]"
+              className="grid gap-3 px-4 py-3 md:grid-cols-[40px_minmax(0,1fr)_240px] md:items-center"
             >
-              <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-zinc-100 text-sm font-semibold text-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
+              <div className="flex h-8 w-8 items-center justify-center rounded-2xl bg-zinc-100 text-xs font-semibold text-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
                 {index + 1}
               </div>
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <p className="font-medium text-zinc-950 dark:text-zinc-50">
+                  <p className="truncate text-sm font-semibold text-zinc-950 dark:text-zinc-50">
                     {row.name}
                   </p>
                   {row.isCanonical ? <NetworkSkuBadge /> : null}
-                  <span className="rounded-full bg-zinc-100 px-2 py-0.5 font-mono text-xs text-zinc-500 dark:bg-zinc-900">
+                  <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 font-mono text-[10px] text-zinc-500 dark:bg-zinc-900">
                     {row.article}
                   </span>
                 </div>
-                {grouping === "club" ? (
-                  <p className="mt-1 text-sm text-zinc-500">
-                    {row.storeName ?? "—"}
-                  </p>
-                ) : null}
-                <div className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-900">
+                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400">
+                  {grouping === "club" ? (
+                    <span className="truncate font-medium text-zinc-600 dark:text-zinc-300">
+                      {row.storeName ?? "—"}
+                    </span>
+                  ) : (
+                    <span>По сети</span>
+                  )}
+                  <span className="tabular-nums">
+                    {formatQuantity(row.soldQuantity)} шт
+                  </span>
+                  <span className="tabular-nums">
+                    {formatMoney(row.grossProfit)} прибыли
+                  </span>
+                </div>
+                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-900">
                   <div
                     className="h-full rounded-full bg-emerald-500"
                     style={{
@@ -568,22 +626,28 @@ function TopSkuTable({
                   />
                 </div>
               </div>
-              <div className="text-left lg:text-right">
-                <p className="text-xs text-zinc-500">Выручка</p>
-                <p className="mt-1 text-xl font-semibold tabular-nums">
-                  {formatMoney(row.revenue)}
-                </p>
-              </div>
-              <div className="grid grid-cols-2 gap-3 text-sm lg:block lg:text-right">
-                <div>
-                  <p className="text-xs text-zinc-500">Продано</p>
-                  <p className="mt-1 font-medium tabular-nums">
+              <div className="grid grid-cols-3 gap-3 text-xs md:text-right">
+                <div className="rounded-2xl bg-zinc-50 px-3 py-2 dark:bg-zinc-900/80">
+                  <p className="text-[10px] uppercase tracking-wide text-zinc-500">
+                    Выручка
+                  </p>
+                  <p className="mt-1 text-base font-semibold tabular-nums text-zinc-950 dark:text-zinc-50">
+                    {formatMoney(row.revenue)}
+                  </p>
+                </div>
+                <div className="rounded-2xl bg-zinc-50 px-3 py-2 dark:bg-zinc-900/80">
+                  <p className="text-[10px] uppercase tracking-wide text-zinc-500">
+                    Продано
+                  </p>
+                  <p className="mt-1 font-medium tabular-nums text-zinc-950 dark:text-zinc-50">
                     {formatQuantity(row.soldQuantity)}
                   </p>
                 </div>
-                <div className="lg:mt-3">
-                  <p className="text-xs text-zinc-500">Прибыль</p>
-                  <p className="mt-1 font-medium tabular-nums">
+                <div className="rounded-2xl bg-zinc-50 px-3 py-2 dark:bg-zinc-900/80">
+                  <p className="text-[10px] uppercase tracking-wide text-zinc-500">
+                    Прибыль
+                  </p>
+                  <p className="mt-1 font-medium tabular-nums text-zinc-950 dark:text-zinc-50">
                     {formatMoney(row.grossProfit)}
                   </p>
                 </div>

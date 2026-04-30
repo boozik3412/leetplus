@@ -1,18 +1,78 @@
 # LeetPlus
 
-LeetPlus — SaaS-приложение для управления ассортиментом компьютерных клубов. Цель проекта: помогать сетям клубов видеть продажи, остатки, прибыльность, риски out-of-stock, рекомендации по пополнению и влияние списаний/возвратов.
+LeetPlus — SaaS-система для управления ассортиментом компьютерных клубов и сетей клубов. Продукт помогает видеть продажи товаров, остатки, прибыльность, риски дефицита, рекомендации к заказу и качество выкладки по всей сети в едином интерфейсе.
 
-## Стек
+## Что уже реализовано
 
-- Monorepo: `pnpm workspaces`
-- Frontend: `Next.js`, `React`, `TypeScript`, `Tailwind CSS`
-- Backend: `NestJS`, `TypeScript`
-- Database: `PostgreSQL`, `Prisma 6.19.3`
-- Cache/infra: `Redis`
-- Email dev: `Mailpit` или `maildev`
-- Интеграция: `LAngame Public API`
+### Дашборд
 
-## Структура
+- KPI по выручке, прибыли, списаниям, остаткам и риску `out-of-stock`
+- динамика продаж в деньгах и штуках по 8 сегментам выбранного периода
+- быстрый запуск синхронизации прямо с дашборда
+- ТОП SKU по выручке
+- переходы из KPI-блоков в соответствующие разделы системы
+- поддержка сетевой группировки SKU через канонические товары
+
+### Отчёты
+
+- рекомендации по ассортименту и пополнению
+- исключения из OOS-рекомендаций с типами `Сделать услугой` и `В исключение`
+- `Риск out-of-stock`
+- `Товары без продаж` с переключателями `7 / 14 / 21` дней
+- `Остатки и потребность`
+- ABC-анализ с переключением между выручкой и прибылью
+- ТОП SKU
+- SKU с низкой маржой
+- полные табличные страницы для ключевых отчётов
+- экспорт отчётов в `CSV` и `XLSX`
+- экспорт полных таблиц в `Excel`, `1C` и `PDF`
+- отправка отчётов на email
+
+### Справочники и операции
+
+- категории
+- поставщики
+- клубы
+- товары
+- inline-редактирование товаров
+- сортировка, фильтры и отдельное окно для полной товарной таблицы
+
+### Импорт данных
+
+- импорт товаров из CSV
+- импорт продаж, остатков, списаний и возвратов из CSV
+- предварительная проверка CSV перед загрузкой
+- шаблоны CSV на странице `/import`
+- история и служебные маршруты импорта на backend
+
+### Интеграции и утилиты
+
+- подключение `LAngame Public API`
+- ручная синхронизация из интерфейса
+- сервисный endpoint для плановой синхронизации на VDS
+- утилита умного парсинга товаров между клубами
+- подтверждение/отклонение найденных групп
+- создание канонических SKU для сетевой отчётности
+
+### Доступ и мультиарендность
+
+- регистрация и вход
+- подтверждение email
+- tenant-scoped данные
+- роли пользователей внутри tenant
+
+## Технологии
+
+- monorepo: `pnpm workspaces`
+- frontend: `Next.js 16`, `React 19`, `TypeScript`, `Tailwind CSS 4`
+- backend: `NestJS 11`, `TypeScript`
+- database: `PostgreSQL`, `Prisma 6.19.3`
+- email для разработки: `Mailpit`
+- интеграция: `LAngame Public API`
+
+`Redis` поднят как инфраструктурный сервис в `docker-compose.yml`, но на текущем этапе не является обязательной частью прикладной логики.
+
+## Структура репозитория
 
 ```text
 apps/
@@ -22,37 +82,48 @@ packages/
   database/ Prisma schema, migrations, seed
 ```
 
-## Локальная база данных
+## Локальная разработка
 
-В проекте используется один локальный вариант БД: PostgreSQL в WSL.
+### База данных
 
-Docker больше не поднимает PostgreSQL, чтобы не путать источники данных. В `docker-compose.yml` оставлены только вспомогательные сервисы:
+Локально проект ожидает один источник PostgreSQL. В текущем процессе разработки используется PostgreSQL вне Docker, обычно в WSL.
+
+`docker-compose.yml` поднимает только вспомогательные сервисы:
 
 - `redis`
 - `mailpit`
 
-Проверить БД:
+Проверка подключения к БД:
 
 ```powershell
 wsl env PGPASSWORD=leetplus_password psql -h 127.0.0.1 -U leetplus -d leetplus -c "select 1;"
 ```
 
-## Переменные окружения
+### Переменные окружения
 
-Пример лежит в `.env.example`.
+Базовый пример лежит в `.env.example`.
 
-Минимально нужны:
+Минимальный набор для запуска:
 
 ```env
 DATABASE_URL="postgresql://leetplus:leetplus_password@127.0.0.1:5432/leetplus?schema=public"
-JWT_SECRET="change_me_in_development"
+JWT_SECRET="change_me_in_production"
 APP_ENCRYPTION_KEY="change_me_32_plus_chars_in_production"
+WEB_URL="http://localhost:3000"
+API_URL="http://localhost:4000"
 NEXT_PUBLIC_API_URL="http://localhost:4000"
 ```
 
-Для LAngame API ключ не нужно хранить в репозитории. Пользователь может сохранить ключ через UI в `/settings`; backend сохранит его в БД в зашифрованном виде.
+Дополнительно для почты и сервисной синхронизации:
 
-`APP_ENCRYPTION_KEY` обязателен для production. Его нужно задать до первого сохранения реальных API-ключей пользователей. Если ключ потерять или заменить без процедуры ротации, сохранённые API-ключи нельзя будет расшифровать.
+```env
+MAIL_HOST="localhost"
+MAIL_PORT="1025"
+MAIL_FROM="LeetPlus <no-reply@leetplus.ru>"
+SYNC_SERVICE_TOKEN="change_me_for_cron"
+```
+
+`APP_ENCRYPTION_KEY` нужно задать до первого сохранения реальных ключей интеграции. Если заменить его без ротации, сохранённые API-ключи нельзя будет расшифровать.
 
 Сгенерировать ключ:
 
@@ -60,13 +131,50 @@ NEXT_PUBLIC_API_URL="http://localhost:4000"
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-## Установка
+## Установка и запуск
+
+Установка зависимостей:
 
 ```powershell
 pnpm install
 ```
 
-## Миграции и Prisma
+### Текущий репозиторий
+
+- локальное имя проекта: `leetplus`
+- основной remote: `origin`
+- URL репозитория: `https://github.com/boozik3412/leetplus.git`
+- основная ветка: `main`
+- тип репозитория: monorepo с приложениями `apps/web`, `apps/api` и пакетом `packages/database`
+
+Если проект клонируется заново, базовая последовательность выглядит так:
+
+```powershell
+git clone https://github.com/boozik3412/leetplus.git
+cd leetplus
+pnpm install
+```
+
+Запуск web и api вместе:
+
+```powershell
+pnpm dev
+```
+
+Запуск по отдельности:
+
+```powershell
+pnpm dev:web
+pnpm dev:api
+```
+
+Обычно используются адреса:
+
+- web: `http://localhost:3000`
+- api: `http://localhost:4000`
+- mailpit: `http://localhost:8025`
+
+## Prisma, миграции и seed
 
 Локальная разработка:
 
@@ -74,7 +182,7 @@ pnpm install
 pnpm --filter database db:migrate
 ```
 
-Production/VDS:
+Production / VDS:
 
 ```powershell
 pnpm --filter database db:deploy
@@ -92,13 +200,13 @@ pnpm --filter database db:generate
 pnpm --filter database exec prisma migrate status
 ```
 
-## Seed
-
-Seed создаёт demo tenant, справочники, товары, магазины, продажи, остатки, списания и возвраты.
+Demo seed:
 
 ```powershell
 pnpm --filter database db:seed
 ```
+
+Seed создаёт demo tenant, справочники, товары, клубы, продажи, остатки, списания и возвраты.
 
 Тестовый пользователь:
 
@@ -108,26 +216,6 @@ pnpm --filter database db:seed
 Роль: OWNER
 Tenant: demo
 ```
-
-## Запуск
-
-Запуск API и Web вместе:
-
-```powershell
-pnpm dev
-```
-
-Отдельно:
-
-```powershell
-pnpm dev:api
-pnpm dev:web
-```
-
-Обычно:
-
-- Web: `http://localhost:3000`
-- API: `http://localhost:4000`
 
 ## Проверки
 
@@ -154,138 +242,58 @@ pnpm --filter web lint
 pnpm --filter web build
 ```
 
-## Основные возможности
+## LAngame
 
-- Авторизация и email verification
-- Tenant-scoped данные
-- CRUD справочников: категории, поставщики, товары, клубы
-- CSV импорт:
-  - товары
-  - продажи
-  - остатки
-  - списания/возвраты
-- CSV-шаблоны на странице `/import`
-- Dashboard с KPI
-- Отчёты:
-  - ассортимент
-  - операции
-  - ABC-анализ
-  - ТОП SKU
-  - ТОП поставщиков
-  - остатки и потребность
-- CSV/XLSX экспорт отчётов
-- Email-отправка отчётов
-- LAngame integration settings и ручная синхронизация
+Подключение выполняется через `/settings`:
 
-## LAngame API
+1. Указать API-ключ.
+2. Добавить домены клубов.
+3. Сохранить настройки.
+4. Запустить синхронизацию.
 
-Документация:
+Ключ сохраняется на backend в зашифрованном виде и привязывается к текущему `tenant`.
 
-```text
-https://443.langame.ru/public_api/doc
-```
-
-Базовый URL для домена:
+Базовый URL домена:
 
 ```text
 https://<domain>/public_api
 ```
 
-Авторизация:
+Заголовок авторизации:
 
 ```text
-Header: X-API-KEY
+X-API-KEY
 ```
 
-Ключевые методы:
+Ключевые методы, используемые интеграцией:
 
-- `GET /clubs/list` — клубы/точки
-- `GET /products/list` — товары
-- `GET /goods/list?club_id=...` — остатки
-- `GET /products/expense?page_limit=&page=&date_from=&date_to=` — продажи товаров
-- `GET /products/arrival?page_limit=&page=` — поступления
-- `GET /transactions/list` — денежные операции
-- `GET /log_cash_transaction/list` — кассовые операции
-- `GET /all_operations_log/list` — общий лог операций
+- `GET /clubs/list`
+- `GET /products/list`
+- `GET /goods/list?club_id=...`
+- `GET /products/expense?page_limit=&page=&date_from=&date_to=`
+- `GET /products/arrival?page_limit=&page=`
+- `GET /transactions/list`
+- `GET /log_cash_transaction/list`
+- `GET /all_operations_log/list`
 
-Подключение выполняется на странице `/settings`:
+### Плановая синхронизация
 
-1. Вставить API-ключ.
-2. Указать домены клубов построчно.
-3. Сохранить настройки.
-4. Запустить синхронизацию.
-
-Данные LAngame сохраняются строго в рамках текущего `tenantId`.
-
-## Домены текущей сети
-
-```text
-1337.langame.ru      Екатеринбург, ул. Радищева, 12
-443.langame.ru       Екатеринбург, ул. Родонитовая, 33
-46.langamepro.ru     Ижевск, ул. Пушкинская, 217
-46.langamepro.ru     Ижевск, ул. Холмогорова, 43
-```
-
-Адрес `Холмогорова, 43` взят из LAngame API и используется как источник истины.
-
-## Multi-tenancy и доступы
-
-`Tenant` — сеть клубов. Пользователь принадлежит одному tenant и видит только данные своей сети.
-
-`Store` — конкретный клуб/точка. Для LAngame хранятся:
-
-- `externalProvider`
-- `externalDomain`
-- `externalClubId`
-- `integrationSourceId`
-
-`IntegrationCredential` хранит зашифрованный API-ключ tenant.
-
-`IntegrationSource` хранит домены/источники интеграции tenant.
-
-## Production/VDS checklist
-
-Перед деплоем:
-
-1. Настроить production `.env`.
-2. Сгенерировать и сохранить постоянный `APP_ENCRYPTION_KEY`.
-3. Настроить PostgreSQL на VDS или managed PostgreSQL.
-4. Выполнить:
-
-```powershell
-pnpm --filter database db:deploy
-pnpm --filter database db:generate
-```
-
-5. Настроить SMTP.
-6. Настроить reverse proxy и HTTPS.
-7. Настроить backup PostgreSQL.
-8. Проверить `api build`, `web build`, миграции и login.
-
-## Автосинхронизация LAngame
-
-Для VDS предусмотрен сервисный endpoint:
+Для cron и сервисных вызовов предусмотрен endpoint:
 
 ```text
 POST /integrations/langame/scheduled/sync
 Header: x-sync-service-token: <SYNC_SERVICE_TOKEN>
 ```
 
-Переменная окружения:
+Поддерживаемые режимы:
 
-```env
-SYNC_SERVICE_TOKEN="long_random_secret"
-```
+- `QUICK`
+- `INVENTORY`
+- `CATALOG`
+- `BACKFILL`
+- `FULL`
 
-Режимы:
-
-- `QUICK` — продажи за текущий день, можно запускать каждые 5 минут.
-- `INVENTORY` — остатки, обычно каждые 15-30 минут.
-- `CATALOG` — клубы и товары, обычно раз в день.
-- `BACKFILL` — последние 7 дней, удобно ночью.
-- `FULL` — полный ручной/сервисный backfill с заданным периодом.
-
-Пример cron-вызова:
+Пример вызова:
 
 ```powershell
 curl -X POST "https://api.example.ru/integrations/langame/scheduled/sync" `
@@ -294,11 +302,17 @@ curl -X POST "https://api.example.ru/integrations/langame/scheduled/sync" `
   -d "{\"mode\":\"QUICK\"}"
 ```
 
-Для `AUTO`-синхронизаций отдельные JSON-файлы расхождений не создаются; информация пишется в общий журнал `IntegrationSyncJob`.
+## Модель доступа
+
+`Tenant` — сеть клубов. Пользователь принадлежит одному tenant и видит только данные своей сети.
+
+`Store` — конкретный клуб внутри сети.
+
+Для интеграции по клубам сохраняются внешние идентификаторы и домены, а tenant-уровневые ключи лежат в зашифрованном виде.
 
 ## Важные правила
 
-- Не коммитить `.env` и реальные API-ключи.
-- Не менять Prisma на v7 без отдельного решения.
-- Не поднимать вторую PostgreSQL в Docker локально, чтобы не путать данные.
-- Для production не менять `APP_ENCRYPTION_KEY` без процедуры ротации.
+- не коммитить `.env` и реальные API-ключи
+- не менять Prisma на `v7` без отдельного решения
+- не поднимать вторую PostgreSQL в Docker локально
+- не менять `APP_ENCRYPTION_KEY` без процедуры ротации

@@ -1,32 +1,11 @@
 import {
-  ProductArchiveButton,
   ProductCreateForm,
-  ProductEditRow,
 } from "@/components/product-actions";
+import { ProductsTable } from "@/components/products-table";
 import { requireCurrentUser } from "@/lib/auth";
 import { getCategories, getSuppliers } from "@/lib/catalog";
 import { can } from "@/lib/permissions";
 import { getProducts } from "@/lib/products";
-import { Fragment } from "react";
-
-function formatCurrency(value: string) {
-  return new Intl.NumberFormat("ru-RU", {
-    style: "currency",
-    currency: "RUB",
-    maximumFractionDigits: 0,
-  }).format(Number(value));
-}
-
-function calculateMarginPercent(purchasePrice: string, salePrice: string) {
-  const purchase = Number(purchasePrice);
-  const sale = Number(salePrice);
-
-  if (!sale || sale <= 0) {
-    return 0;
-  }
-
-  return ((sale - purchase) / sale) * 100;
-}
 
 export default async function ProductsPage() {
   const [user, products, categories, suppliers] = await Promise.all([
@@ -100,113 +79,8 @@ export default async function ProductsPage() {
             <h2 className="text-base font-semibold">Ассортимент</h2>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[1100px] border-collapse text-left text-sm">
-              <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
-                <tr>
-                  <th className="px-5 py-3 font-medium">Артикул</th>
-                  <th className="px-5 py-3 font-medium">Наименование</th>
-                  <th className="px-5 py-3 font-medium">Категория</th>
-                  <th className="px-5 py-3 font-medium">Поставщик</th>
-                  <th className="px-5 py-3 text-right font-medium">
-                    Входящая цена
-                  </th>
-                  <th className="px-5 py-3 text-right font-medium">
-                    Цена продажи
-                  </th>
-                  <th className="px-5 py-3 text-right font-medium">
-                    Маржинальность
-                  </th>
-                  <th className="px-5 py-3 text-right font-medium">Фейсинг</th>
-                  <th className="px-5 py-3 text-right font-medium">
-                    Срок годности
-                  </th>
-                  {canEditProducts ? (
-                    <th className="px-5 py-3 text-right font-medium">
-                      Действия
-                    </th>
-                  ) : null}
-                </tr>
-              </thead>
-
-              <tbody className="divide-y divide-zinc-100">
-                {products.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={canEditProducts ? 10 : 9}
-                      className="px-5 py-8 text-center text-sm text-zinc-500"
-                    >
-                      Пока нет товаров. Добавьте первый SKU через форму выше.
-                    </td>
-                  </tr>
-                ) : null}
-
-                {products.map((product) => {
-                  const marginPercent = calculateMarginPercent(
-                    product.purchasePrice,
-                    product.salePrice,
-                  );
-
-                  return (
-                    <Fragment key={product.id}>
-                      <tr className="hover:bg-zinc-50">
-                        <td className="whitespace-nowrap px-5 py-4 font-mono text-xs text-zinc-600">
-                          {product.article}
-                        </td>
-
-                        <td className="px-5 py-4 font-medium text-zinc-950">
-                          {product.name}
-                        </td>
-
-                        <td className="px-5 py-4 text-zinc-700">
-                          {product.category?.name ?? "—"}
-                        </td>
-
-                        <td className="px-5 py-4 text-zinc-700">
-                          {product.supplier?.name ?? "—"}
-                        </td>
-
-                        <td className="whitespace-nowrap px-5 py-4 text-right text-zinc-700">
-                          {formatCurrency(product.purchasePrice)}
-                        </td>
-
-                        <td className="whitespace-nowrap px-5 py-4 text-right text-zinc-950">
-                          {formatCurrency(product.salePrice)}
-                        </td>
-
-                        <td className="whitespace-nowrap px-5 py-4 text-right text-zinc-700">
-                          {marginPercent.toFixed(1)}%
-                        </td>
-
-                        <td className="whitespace-nowrap px-5 py-4 text-right text-zinc-700">
-                          {product.facing}
-                        </td>
-
-                        <td className="whitespace-nowrap px-5 py-4 text-right text-zinc-700">
-                          {product.shelfLifeDays
-                            ? `${product.shelfLifeDays} дн.`
-                            : "—"}
-                        </td>
-
-                        {canEditProducts ? (
-                          <td className="whitespace-nowrap px-5 py-4 text-right">
-                            <ProductArchiveButton id={product.id} />
-                          </td>
-                        ) : null}
-                      </tr>
-
-                      {canEditProducts ? (
-                        <ProductEditRow
-                          product={product}
-                          categories={categories}
-                          suppliers={suppliers}
-                        />
-                      ) : null}
-                    </Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div>
+            <ProductsTable products={products} canEditProducts={canEditProducts} />
           </div>
         </div>
       </div>

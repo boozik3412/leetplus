@@ -25,6 +25,8 @@ export type DashboardTopSku = {
   productId: string;
   article: string;
   name: string;
+  isCanonical: boolean;
+  canonicalProductName: string | null;
   storeId: string | null;
   storeName: string | null;
   revenue: number;
@@ -298,6 +300,8 @@ export class DashboardService {
           skuGrouping === 'network'
             ? (fact.product.canonicalProduct?.name ?? fact.product.name)
             : fact.product.name,
+        isCanonical: Boolean(fact.product.canonicalProduct),
+        canonicalProductName: fact.product.canonicalProduct?.name ?? null,
         storeId: skuGrouping === 'network' ? null : fact.store.id,
         storeName: skuGrouping === 'network' ? null : fact.store.name,
         revenue: 0,

@@ -43,6 +43,8 @@ export type OutOfStockRiskProduct = {
   productId: string;
   article: string;
   name: string;
+  isCanonical: boolean;
+  canonicalProductName: string | null;
   stockQuantity: number;
   averageDailySales: number;
   stockDays: number;
@@ -52,6 +54,8 @@ export type ProductWithoutSales = {
   productId: string;
   article: string;
   name: string;
+  isCanonical: boolean;
+  canonicalProductName: string | null;
   stockQuantity: number;
   categoryName: string | null;
   supplierName: string | null;
@@ -102,6 +106,8 @@ export type SkuPerformanceRow = {
   productId: string;
   article: string;
   name: string;
+  isCanonical: boolean;
+  canonicalProductName: string | null;
   categoryName: string | null;
   supplierName: string | null;
   facing: number;
@@ -180,6 +186,8 @@ export type ReplenishmentRow = {
   productId: string;
   article: string;
   name: string;
+  isCanonical: boolean;
+  canonicalProductName: string | null;
   categoryName: string | null;
   supplierName: string | null;
   stockQuantity: number;

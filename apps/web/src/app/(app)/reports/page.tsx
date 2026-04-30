@@ -471,7 +471,10 @@ function RiskTable({ rows }: { rows: OutOfStockRiskProduct[] }) {
                     {row.article}
                   </td>
                   <td className="px-5 py-4 font-medium text-zinc-950">
-                    {row.name}
+                    <span className="inline-flex items-center gap-2">
+                      {row.name}
+                      {row.isCanonical ? <NetworkSkuBadge /> : null}
+                    </span>
                   </td>
                   <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
                     {formatQuantity(row.stockQuantity)}
@@ -525,7 +528,10 @@ function NoSalesTable({ rows }: { rows: ProductWithoutSales[] }) {
                     {row.article}
                   </td>
                   <td className="px-5 py-4 font-medium text-zinc-950">
-                    {row.name}
+                    <span className="inline-flex items-center gap-2">
+                      {row.name}
+                      {row.isCanonical ? <NetworkSkuBadge /> : null}
+                    </span>
                   </td>
                   <td className="px-5 py-4 text-zinc-700">
                     {row.categoryName ?? "—"}
@@ -599,7 +605,10 @@ function ReplenishmentTable({ rows }: { rows: ReplenishmentRow[] }) {
                     {row.article}
                   </td>
                   <td className="px-5 py-4 font-medium text-zinc-950">
-                    {row.name}
+                    <span className="inline-flex items-center gap-2">
+                      {row.name}
+                      {row.isCanonical ? <NetworkSkuBadge /> : null}
+                    </span>
                   </td>
                   <td className="px-5 py-4 text-zinc-700">
                     {row.categoryName ?? "—"}
@@ -767,7 +776,10 @@ function TopSkuTable({ rows }: { rows: SkuPerformanceRow[] }) {
                     {row.article}
                   </td>
                   <td className="px-5 py-4 font-medium text-zinc-950">
-                    {row.name}
+                    <span className="inline-flex items-center gap-2">
+                      {row.name}
+                      {row.isCanonical ? <NetworkSkuBadge /> : null}
+                    </span>
                   </td>
                   <td className="px-5 py-4 text-zinc-700">
                     {row.categoryName ?? "—"}
@@ -801,6 +813,18 @@ function TopSkuTable({ rows }: { rows: SkuPerformanceRow[] }) {
         </p>
       )}
     </section>
+  );
+}
+
+function NetworkSkuBadge() {
+  return (
+    <span
+      title="Товар является сетевым: составлен из одинаковых товаров, но с разными названиями в разных клубах."
+      aria-label="Сетевой товар"
+      className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-50 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-100"
+    >
+      ⇄
+    </span>
   );
 }
 

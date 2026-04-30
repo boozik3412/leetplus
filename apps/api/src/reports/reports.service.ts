@@ -47,6 +47,8 @@ export type OutOfStockRiskProduct = {
   productId: string;
   article: string;
   name: string;
+  isCanonical: boolean;
+  canonicalProductName: string | null;
   stockQuantity: number;
   averageDailySales: number;
   stockDays: number;
@@ -56,6 +58,8 @@ export type ProductWithoutSales = {
   productId: string;
   article: string;
   name: string;
+  isCanonical: boolean;
+  canonicalProductName: string | null;
   stockQuantity: number;
   categoryName: string | null;
   supplierName: string | null;
@@ -106,6 +110,8 @@ export type SkuPerformanceRow = {
   productId: string;
   article: string;
   name: string;
+  isCanonical: boolean;
+  canonicalProductName: string | null;
   categoryName: string | null;
   supplierName: string | null;
   facing: number;
@@ -184,6 +190,8 @@ export type ReplenishmentRow = {
   productId: string;
   article: string;
   name: string;
+  isCanonical: boolean;
+  canonicalProductName: string | null;
   categoryName: string | null;
   supplierName: string | null;
   stockQuantity: number;
@@ -229,6 +237,8 @@ type ProductSales = {
   productId: string;
   article: string;
   name: string;
+  isCanonical: boolean;
+  canonicalProductName: string | null;
   quantity: number;
   revenue: number;
   cost: number;
@@ -384,6 +394,11 @@ export class ReportsService {
               id: true,
               article: true,
               name: true,
+              canonicalProduct: {
+                select: {
+                  name: true,
+                },
+              },
             },
           },
         },
@@ -403,6 +418,9 @@ export class ReportsService {
               id: true,
               article: true,
               name: true,
+              canonicalProduct: {
+                select: { name: true },
+              },
             },
           },
         },
@@ -434,6 +452,9 @@ export class ReportsService {
           id: true,
           article: true,
           name: true,
+          canonicalProduct: {
+            select: { name: true },
+          },
           category: {
             select: { name: true },
           },
@@ -473,6 +494,8 @@ export class ReportsService {
         productId: fact.productId,
         article: fact.product.article,
         name: fact.product.name,
+        isCanonical: Boolean(fact.product.canonicalProduct),
+        canonicalProductName: fact.product.canonicalProduct?.name ?? null,
         quantity: 0,
         revenue: 0,
         cost: 0,
@@ -582,6 +605,12 @@ export class ReportsService {
             article: true,
             name: true,
             facing: true,
+            canonicalProduct: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
             category: {
               select: { name: true },
             },
@@ -593,45 +622,84 @@ export class ReportsService {
       },
     });
 
-    const rowsByProduct = new Map<string, SkuPerformanceRow>();
+    const shouldUseCanonicalGrouping = !query.storeId;
+    const buildRows = (useCanonicalGrouping: boolean) => {
+      const rowsByProduct = new Map<string, SkuPerformanceRow>();
+      const facingProductsByRow = new Map<string, Set<string>>();
 
-    salesFacts.forEach((fact) => {
-      const quantity = fact.quantity.toNumber();
-      const revenue = fact.revenue.toNumber();
-      const cost = fact.cost.toNumber();
-      const grossProfit = revenue - cost;
-      const current = rowsByProduct.get(fact.productId) ?? {
-        productId: fact.productId,
-        article: fact.product.article,
-        name: fact.product.name,
-        categoryName: fact.product.category?.name ?? null,
-        supplierName: fact.product.supplier?.name ?? null,
-        facing: fact.product.facing,
-        soldQuantity: 0,
-        revenue: 0,
-        cost: 0,
-        grossProfit: 0,
-        marginPercent: 0,
-        revenueSharePercent: 0,
-        profitSharePercent: 0,
-        salesPerFacing: 0,
-        profitPerFacing: 0,
-        abcRevenueGroup: 'C' as const,
-        abcProfitGroup: 'C' as const,
-      };
+      salesFacts.forEach((fact) => {
+        const quantity = fact.quantity.toNumber();
+        const revenue = fact.revenue.toNumber();
+        const cost = fact.cost.toNumber();
+        const grossProfit = revenue - cost;
+        const canonicalProduct = fact.product.canonicalProduct;
+        const rowKey =
+          useCanonicalGrouping && canonicalProduct
+            ? `canonical:${canonicalProduct.id}`
+            : fact.productId;
+        const current = rowsByProduct.get(rowKey) ?? {
+          productId: rowKey,
+          article: fact.product.article,
+          name:
+            useCanonicalGrouping && canonicalProduct
+              ? canonicalProduct.name
+              : fact.product.name,
+          isCanonical: Boolean(canonicalProduct),
+          canonicalProductName: canonicalProduct?.name ?? null,
+          categoryName: fact.product.category?.name ?? null,
+          supplierName: fact.product.supplier?.name ?? null,
+          facing: 0,
+          soldQuantity: 0,
+          revenue: 0,
+          cost: 0,
+          grossProfit: 0,
+          marginPercent: 0,
+          revenueSharePercent: 0,
+          profitSharePercent: 0,
+          salesPerFacing: 0,
+          profitPerFacing: 0,
+          abcRevenueGroup: 'C' as const,
+          abcProfitGroup: 'C' as const,
+        };
 
-      current.soldQuantity += quantity;
-      current.revenue += revenue;
-      current.cost += cost;
-      current.grossProfit += grossProfit;
-      rowsByProduct.set(fact.productId, current);
-    });
+        const facingProducts =
+          facingProductsByRow.get(rowKey) ?? new Set<string>();
 
-    const rows = [...rowsByProduct.values()];
+        if (!facingProducts.has(fact.product.id)) {
+          current.facing += fact.product.facing;
+          facingProducts.add(fact.product.id);
+          facingProductsByRow.set(rowKey, facingProducts);
+        }
+
+        current.soldQuantity += quantity;
+        current.revenue += revenue;
+        current.cost += cost;
+        current.grossProfit += grossProfit;
+        rowsByProduct.set(rowKey, current);
+      });
+
+      return [...rowsByProduct.values()];
+    };
+
+    const rows = buildRows(shouldUseCanonicalGrouping);
+    const facingRows = shouldUseCanonicalGrouping ? buildRows(false) : rows;
     const totalRevenue = rows.reduce((sum, row) => sum + row.revenue, 0);
     const totalProfit = rows.reduce((sum, row) => sum + row.grossProfit, 0);
 
     rows.forEach((row) => {
+      row.soldQuantity = this.round(row.soldQuantity);
+      row.revenue = this.round(row.revenue);
+      row.cost = this.round(row.cost);
+      row.grossProfit = this.round(row.grossProfit);
+      row.marginPercent = this.marginPercent(row.cost, row.revenue);
+      row.revenueSharePercent = this.sharePercent(row.revenue, totalRevenue);
+      row.profitSharePercent = this.sharePercent(row.grossProfit, totalProfit);
+      row.salesPerFacing =
+        row.facing > 0 ? this.round(row.soldQuantity / row.facing) : 0;
+      row.profitPerFacing =
+        row.facing > 0 ? this.round(row.grossProfit / row.facing) : 0;
+    });
+    facingRows.forEach((row) => {
       row.soldQuantity = this.round(row.soldQuantity);
       row.revenue = this.round(row.revenue);
       row.cost = this.round(row.cost);
@@ -675,11 +743,11 @@ export class ReportsService {
       topByProfit: this.topRows(sortedRows, (row) => row.grossProfit),
       topByQuantity: this.topRows(sortedRows, (row) => row.soldQuantity),
       topBySalesPerFacing: this.topRows(
-        sortedRows,
+        facingRows,
         (row) => row.salesPerFacing,
       ),
       topByProfitPerFacing: this.topRows(
-        sortedRows,
+        facingRows,
         (row) => row.profitPerFacing,
       ),
     };
@@ -848,6 +916,9 @@ export class ReportsService {
           id: true,
           article: true,
           name: true,
+          canonicalProduct: {
+            select: { name: true },
+          },
           category: {
             select: { name: true },
           },
@@ -927,6 +998,8 @@ export class ReportsService {
         productId: product.id,
         article: product.article,
         name: product.name,
+        isCanonical: Boolean(product.canonicalProduct),
+        canonicalProductName: product.canonicalProduct?.name ?? null,
         categoryName: product.category?.name ?? null,
         supplierName: product.supplier?.name ?? null,
         stockQuantity,
@@ -1084,6 +1157,8 @@ export class ReportsService {
           productId: sale.productId,
           article: sale.article,
           name: sale.name,
+          isCanonical: sale.isCanonical,
+          canonicalProductName: sale.canonicalProductName,
           stockQuantity: this.round(stockQuantity),
           averageDailySales: this.round(averageDailySales),
           stockDays: this.round(stockDays),
@@ -1103,6 +1178,7 @@ export class ReportsService {
       product: {
         article: string;
         name: string;
+        canonicalProduct: { name: string } | null;
       };
     }[],
   ) {
@@ -1113,6 +1189,8 @@ export class ReportsService {
         productId: fact.productId,
         article: fact.product.article,
         name: fact.product.name,
+        isCanonical: Boolean(fact.product.canonicalProduct),
+        canonicalProductName: fact.product.canonicalProduct?.name ?? null,
         quantity: 0,
         revenue: 0,
         cost: 0,
@@ -1132,6 +1210,7 @@ export class ReportsService {
       id: string;
       article: string;
       name: string;
+      canonicalProduct: { name: string } | null;
       category: { name: string } | null;
       supplier: { name: string } | null;
     }[],
@@ -1144,6 +1223,8 @@ export class ReportsService {
         productId: product.id,
         article: product.article,
         name: product.name,
+        isCanonical: Boolean(product.canonicalProduct),
+        canonicalProductName: product.canonicalProduct?.name ?? null,
         stockQuantity: this.round(stockByProduct.get(product.id) ?? 0),
         categoryName: product.category?.name ?? null,
         supplierName: product.supplier?.name ?? null,

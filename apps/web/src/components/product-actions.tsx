@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import type { InputHTMLAttributes } from "react";
 import { useRouter } from "next/navigation";
 import type { Category, Supplier } from "@/lib/catalog";
@@ -14,6 +14,14 @@ type ProductFormOptions = {
 type ErrorResponse = {
   message?: string;
 };
+
+type InlineProductField =
+  | "article"
+  | "name"
+  | "purchasePrice"
+  | "salePrice"
+  | "facing"
+  | "shelfLifeDays";
 
 function getErrorMessage(data: unknown) {
   if (
@@ -169,6 +177,135 @@ export function ProductArchiveButton({ id }: { id: string }) {
   );
 }
 
+export function ProductInlineEditable({
+  product,
+  field,
+  value,
+  displayValue,
+  inputType = "text",
+  canEdit,
+}: {
+  product: Product;
+  field: InlineProductField;
+  value: string;
+  displayValue?: string;
+  inputType?: "text" | "number";
+  canEdit: boolean;
+}) {
+  const router = useRouter();
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const [isSaving, setIsSaving] = useState(false);
+  const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    if (isEditing) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
+  }, [isEditing]);
+
+  async function save() {
+    const normalizedDraft = draft.trim();
+
+    if (normalizedDraft === value) {
+      setIsEditing(false);
+      return;
+    }
+
+    setIsSaving(true);
+    setHasError(false);
+
+    const response = await fetch(`/api/products/${product.id}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(buildInlinePayload(product, field, normalizedDraft)),
+    });
+
+    setIsSaving(false);
+
+    if (!response.ok) {
+      setHasError(true);
+      return;
+    }
+
+    setIsEditing(false);
+    router.refresh();
+  }
+
+  function cancel() {
+    setDraft(value);
+    setHasError(false);
+    setIsEditing(false);
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void save();
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancel();
+    }
+  }
+
+  if (!canEdit) {
+    return <span>{displayValue ?? value}</span>;
+  }
+
+  if (isEditing) {
+    return (
+      <span className="inline-flex flex-col items-end gap-1">
+        <input
+          ref={inputRef}
+          type={inputType}
+          min={inputType === "number" ? "0" : undefined}
+          step={
+            field === "purchasePrice" || field === "salePrice"
+              ? "0.01"
+              : inputType === "number"
+                ? "1"
+                : undefined
+          }
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={() => void save()}
+          onKeyDown={handleKeyDown}
+          disabled={isSaving}
+          className={[
+            "w-full min-w-24 rounded-md border bg-white px-2 py-1 text-sm outline-none focus:ring-2",
+            hasError
+              ? "border-red-300 focus:border-red-500 focus:ring-red-100"
+              : "border-zinc-300 focus:border-zinc-500 focus:ring-zinc-200",
+          ].join(" ")}
+        />
+        {hasError ? (
+          <span className="text-xs text-red-600">Не сохранено</span>
+        ) : null}
+      </span>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onDoubleClick={() => {
+        setDraft(value);
+        setIsEditing(true);
+      }}
+      title="Двойной клик для редактирования"
+      className="rounded-md px-1 py-0.5 text-left transition hover:bg-zinc-100"
+    >
+      {displayValue ?? value}
+    </button>
+  );
+}
+
 function ProductFields({
   product,
   categories,
@@ -294,6 +431,33 @@ async function submitProductForm(
       supplierId: optionalString(formData.get("supplierId")) ?? null,
     }),
   });
+}
+
+function buildInlinePayload(
+  product: Product,
+  field: InlineProductField,
+  value: string,
+) {
+  const base = {
+    article: product.article,
+    name: product.name,
+    purchasePrice: product.purchasePrice,
+    salePrice: product.salePrice,
+    facing: product.facing,
+    shelfLifeDays: product.shelfLifeDays,
+    categoryId: product.categoryId,
+    supplierId: product.supplierId,
+  };
+
+  if (field === "facing") {
+    return { ...base, facing: Number(value || 0) };
+  }
+
+  if (field === "shelfLifeDays") {
+    return { ...base, shelfLifeDays: value ? Number(value) : null };
+  }
+
+  return { ...base, [field]: value };
 }
 
 function requiredString(value: FormDataEntryValue | null) {

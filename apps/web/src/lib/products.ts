@@ -19,6 +19,8 @@ export type Product = {
   facing: number;
   shelfLifeDays: number | null;
   isActive: boolean;
+  createdAt: string;
+  externalDomain: string | null;
   categoryId: string | null;
   supplierId: string | null;
   category: Category | null;

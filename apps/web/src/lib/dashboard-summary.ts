@@ -4,6 +4,8 @@ export type DashboardTopSku = {
   productId: string;
   article: string;
   name: string;
+  isCanonical: boolean;
+  canonicalProductName: string | null;
   storeId: string | null;
   storeName: string | null;
   revenue: number;

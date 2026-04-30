@@ -549,6 +549,7 @@ function TopSkuTable({
                   <p className="font-medium text-zinc-950 dark:text-zinc-50">
                     {row.name}
                   </p>
+                  {row.isCanonical ? <NetworkSkuBadge /> : null}
                   <span className="rounded-full bg-zinc-100 px-2 py-0.5 font-mono text-xs text-zinc-500 dark:bg-zinc-900">
                     {row.article}
                   </span>
@@ -596,5 +597,17 @@ function TopSkuTable({
         </p>
       )}
     </section>
+  );
+}
+
+function NetworkSkuBadge() {
+  return (
+    <span
+      title="Товар является сетевым: составлен из одинаковых товаров, но с разными названиями в разных клубах."
+      aria-label="Сетевой товар"
+      className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-50 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-900"
+    >
+      ⇄
+    </span>
   );
 }

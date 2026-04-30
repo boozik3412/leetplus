@@ -30,7 +30,7 @@ export class ProductsService {
         supplier: true,
       },
       orderBy: {
-        name: 'asc',
+        createdAt: 'desc',
       },
     });
   }

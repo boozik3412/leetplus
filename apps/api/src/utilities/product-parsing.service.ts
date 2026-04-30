@@ -9,6 +9,7 @@ type ProductForParsing = {
   name: string;
   article: string;
   externalDomain: string | null;
+  sourceLabel: string;
   canonicalProductId: string | null;
 };
 
@@ -18,7 +19,10 @@ type ParsedProductName = {
   volumeValue: number | null;
   volumeUnit: string | null;
   flavor: string | null;
+  variant: string | null;
   packageType: string | null;
+  residualTokens: string[];
+  hardBlockers: string[];
   normalizedKey: string | null;
 };
 
@@ -26,9 +30,27 @@ type ProductParsingRationale = {
   brand: string | null;
   volume: string | null;
   flavor: string | null;
+  variant: string | null;
   packageType: string | null;
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+  warnings: string[];
+  hardBlockers: string[];
   domains: string[];
   names: string[];
+  products: {
+    id: string;
+    name: string;
+    article: string;
+    sourceLabel: string;
+    parsed: {
+      brand: string | null;
+      volume: string | null;
+      flavor: string | null;
+      variant: string | null;
+      packageType: string | null;
+      residualTokens: string[];
+    };
+  }[];
 };
 
 const knownFlavors: Record<string, string> = {
@@ -46,11 +68,59 @@ const knownFlavors: Record<string, string> = {
   lemon: 'лимон',
   лайм: 'лайм',
   lime: 'лайм',
+  тропический: 'тропический',
+  tropical: 'тропический',
+  персик: 'персик',
+  peach: 'персик',
+  ананас: 'ананас',
+  pineapple: 'ананас',
+  драгон: 'dragon fruit',
+  dragon: 'dragon fruit',
+  яблоко: 'яблоко',
+  apple: 'яблоко',
+  карамель: 'карамель',
+  дыня: 'дыня',
+  маракуйя: 'маракуйя',
+  маракуя: 'маракуйя',
+  maracuya: 'маракуйя',
+  мохито: 'мохито',
+  mojito: 'мохито',
+  кокос: 'кокос',
+  coconut: 'кокос',
+  кола: 'кола',
+  cola: 'кола',
+  киви: 'киви',
+  kiwi: 'киви',
+  гранат: 'гранат',
+  pomegranate: 'гранат',
+  blueberry: 'blueberry',
+  черника: 'blueberry',
+  donut: 'donut',
+  пончик: 'donut',
+  feijoa: 'feijoa',
+  фейхоа: 'feijoa',
+  berry: 'berry',
+  raspberry: 'raspberry',
+  малина: 'raspberry',
+  tropic: 'тропический',
+  ирга: 'ирга',
+  абрикос: 'абрикос',
+  apricot: 'абрикос',
+  bubblegum: 'bubblegum',
+};
+
+const knownVariants: Record<string, string> = {
   оригинал: 'original',
   original: 'original',
+  classic: 'original',
+  классик: 'original',
   'без сахара': 'zero',
   zero: 'zero',
   'sugar free': 'zero',
+  ultra: 'ultra',
+  'blue edition': 'blue edition',
+  'sea blue edition': 'sea blue edition',
+  'summer edition': 'summer edition',
 };
 
 const packageAliases: Record<string, string> = {
@@ -79,9 +149,47 @@ const ignoredBrandTokens = new Set([
   'жевательная',
   'резинка',
   'вкус',
+  'лимонад',
+  'газировка',
+  'напитки',
   'со',
   'с',
 ]);
+
+const brandAliases: { alias: string; brand: string }[] = [
+  { alias: 'добрый coca-cola', brand: 'добрый cola' },
+  { alias: 'добрый кока-кола', brand: 'добрый cola' },
+  { alias: 'добрый кола', brand: 'добрый cola' },
+  { alias: 'добрый cola', brand: 'добрый cola' },
+  { alias: 'coca-cola', brand: 'coca-cola' },
+  { alias: 'coca cola', brand: 'coca-cola' },
+  { alias: 'lit energy', brand: 'lit energy' },
+  { alias: 'red bull', brand: 'redbull' },
+  { alias: 'redbull', brand: 'redbull' },
+  { alias: 'monster energy', brand: 'monster' },
+  { alias: 'monster', brand: 'monster' },
+  { alias: 'burn', brand: 'burn' },
+  { alias: 'gorilla', brand: 'gorilla' },
+  { alias: 'adrenaline rush', brand: 'adrenaline' },
+  { alias: 'adrenaline', brand: 'adrenaline' },
+  { alias: 'mountain dew', brand: 'mountain dew' },
+  { alias: 'bonaqua', brand: 'bonaqua' },
+  { alias: 'bon aqua', brand: 'bonaqua' },
+  { alias: 'lipton', brand: 'lipton' },
+  { alias: 'rich', brand: 'rich' },
+  { alias: 'j7', brand: 'j7' },
+  { alias: 'chupa-chups', brand: 'chupa-chups' },
+  { alias: 'chupa chups', brand: 'chupa-chups' },
+  { alias: 'fanta', brand: 'fanta' },
+  { alias: 'sprite', brand: 'sprite' },
+].sort((a, b) => b.alias.length - a.alias.length);
+
+const hardBlockerTokens: Record<string, RegExp> = {
+  combo: /\b(комбо|combo|сет|набор|акци[яи]|2\+1)\b/i,
+  service: /\b(услуга|аренда|депозит|залог|пополнение|скидка|промокод|час)\b/i,
+  hookah: /\b(кальян|чаша|забивка|уголь|табак)\b/i,
+  vape: /\b(жидкость|затяж|однораз|pod|вейп|nic|мг)\b/i,
+};
 
 @Injectable()
 export class ProductParsingService {
@@ -120,24 +228,56 @@ export class ProductParsingService {
 
   async analyze(user: AuthenticatedUser) {
     const { tenantId } = await this.tenantContextService.resolve(user);
-    const products = await this.prisma.product.findMany({
-      where: { tenantId, isActive: true },
-      select: {
-        id: true,
-        name: true,
-        article: true,
-        externalDomain: true,
-        canonicalProductId: true,
-      },
+    const [products, stores] = await Promise.all([
+      this.prisma.product.findMany({
+        where: { tenantId, isActive: true },
+        select: {
+          id: true,
+          name: true,
+          article: true,
+          externalDomain: true,
+          canonicalProductId: true,
+        },
+      }),
+      this.prisma.store.findMany({
+        where: { tenantId, externalProvider: 'LANGAME' },
+        select: {
+          name: true,
+          externalDomain: true,
+        },
+      }),
+    ]);
+    const sourceNamesByDomain = new Map<string, string[]>();
+
+    stores.forEach((store) => {
+      if (!store.externalDomain) {
+        return;
+      }
+
+      sourceNamesByDomain.set(store.externalDomain, [
+        ...(sourceNamesByDomain.get(store.externalDomain) ?? []),
+        store.name,
+      ]);
+    });
+    const productsForParsing = products.map((product) => ({
+      ...product,
+      sourceLabel: this.sourceLabel(
+        product.externalDomain,
+        sourceNamesByDomain.get(product.externalDomain ?? '') ?? [],
+      ),
+    }));
+    await this.prisma.productParsingSuggestion.updateMany({
+      where: { tenantId, status: ProductParsingSuggestionStatus.PENDING },
+      data: { status: ProductParsingSuggestionStatus.REJECTED },
     });
     const run = await this.prisma.productParsingRun.create({
       data: {
         tenantId,
         status: 'RUNNING',
-        totalProducts: products.length,
+        totalProducts: productsForParsing.length,
       },
     });
-    const suggestions = this.buildSuggestions(products);
+    const suggestions = this.buildSuggestions(productsForParsing);
 
     for (const suggestion of suggestions) {
       await this.prisma.productParsingSuggestion.create({
@@ -213,6 +353,7 @@ export class ProductParsingService {
         volumeValue: parsed.volumeValue,
         volumeUnit: parsed.volumeUnit,
         flavor: parsed.flavor,
+        variant: parsed.variant,
         packageType: parsed.packageType,
       },
       update: {
@@ -221,6 +362,7 @@ export class ProductParsingService {
         volumeValue: parsed.volumeValue,
         volumeUnit: parsed.volumeUnit,
         flavor: parsed.flavor,
+        variant: parsed.variant,
         packageType: parsed.packageType,
       },
     });
@@ -293,7 +435,7 @@ export class ProductParsingService {
     products.forEach((product) => {
       const parsed = this.parseName(product.name);
 
-      if (!parsed.normalizedKey) {
+      if (!parsed.normalizedKey || parsed.hardBlockers.length > 0) {
         return;
       }
 
@@ -310,6 +452,8 @@ export class ProductParsingService {
         this.groupToSuggestion(normalizedKey, group.parsed, group.products),
       )
       .filter((suggestion) => suggestion.productIds.length >= 2)
+      .filter((suggestion) => suggestion.rationale.domains.length >= 2)
+      .filter((suggestion) => suggestion.rationale.hardBlockers.length === 0)
       .filter((suggestion) => suggestion.confidence >= 70)
       .sort(
         (a, b) =>
@@ -334,12 +478,22 @@ export class ProductParsingService {
     ];
     const candidateNames = uniqueNames.sort((a, b) => a.length - b.length);
     const suggestedName = candidateNames[0] ?? products[0]?.name ?? '';
+    const parsedProducts = products.map((product) => ({
+      product,
+      parsed: this.parseName(product.name),
+    }));
+    const warnings = this.groupWarnings(parsedProducts);
+    const hardBlockers = [
+      ...new Set(parsedProducts.flatMap((item) => item.parsed.hardBlockers)),
+    ];
     const confidence =
       (parsed.brand ? 30 : 0) +
-      (parsed.volumeValue ? 30 : 0) +
-      (parsed.flavor ? 20 : 0) +
+      (parsed.volumeValue ? 25 : 0) +
+      (parsed.flavor || parsed.residualTokens.length > 0 ? 20 : 0) +
+      (parsed.variant ? 10 : 0) +
       (parsed.packageType ? 10 : 0) +
-      Math.min(10, products.length * 2);
+      Math.min(5, products.length) -
+      warnings.length * 5;
     const rationale: ProductParsingRationale = {
       brand: parsed.brand,
       volume:
@@ -347,15 +501,36 @@ export class ProductParsingService {
           ? `${parsed.volumeValue}${parsed.volumeUnit}`
           : null,
       flavor: parsed.flavor,
+      variant: parsed.variant,
       packageType: parsed.packageType,
+      riskLevel: this.riskLevel(confidence, warnings),
+      warnings,
+      hardBlockers,
       domains,
       names: uniqueNames,
+      products: parsedProducts.map(({ product, parsed: parsedProduct }) => ({
+        id: product.id,
+        name: product.name,
+        article: product.article,
+        sourceLabel: product.sourceLabel,
+        parsed: {
+          brand: parsedProduct.brand,
+          volume:
+            parsedProduct.volumeValue && parsedProduct.volumeUnit
+              ? `${parsedProduct.volumeValue}${parsedProduct.volumeUnit}`
+              : null,
+          flavor: parsedProduct.flavor,
+          variant: parsedProduct.variant,
+          packageType: parsedProduct.packageType,
+          residualTokens: parsedProduct.residualTokens,
+        },
+      })),
     };
 
     return {
       suggestedName,
       normalizedKey,
-      confidence,
+      confidence: Math.max(0, Math.min(100, confidence)),
       rationale,
       productIds: products.map((product) => product.id),
       candidateNames,
@@ -366,8 +541,15 @@ export class ProductParsingService {
     const normalizedName = this.normalizeName(name);
     const volume = this.extractVolume(normalizedName);
     const flavor = this.extractFlavor(normalizedName);
+    const variant = this.extractVariant(normalizedName);
     const packageType = this.extractPackageType(normalizedName);
     const brand = this.extractBrand(normalizedName);
+    const residualTokens = this.extractResidualTokens(normalizedName, {
+      brand,
+      flavor,
+      variant,
+    });
+    const hardBlockers = this.extractHardBlockers(normalizedName);
 
     if (!brand || !volume) {
       return {
@@ -376,10 +558,16 @@ export class ProductParsingService {
         volumeValue: volume?.value ?? null,
         volumeUnit: volume?.unit ?? null,
         flavor,
+        variant,
         packageType,
+        residualTokens,
+        hardBlockers,
         normalizedKey: null,
       };
     }
+
+    const flavorKey = (flavor ?? residualTokens.join('+')) || 'no-flavor';
+    const variantKey = variant ?? 'regular';
 
     return {
       normalizedName,
@@ -387,11 +575,15 @@ export class ProductParsingService {
       volumeValue: volume.value,
       volumeUnit: volume.unit,
       flavor,
+      variant,
       packageType,
+      residualTokens,
+      hardBlockers,
       normalizedKey: [
         brand,
         `${volume.value}${volume.unit}`,
-        flavor ?? 'no-flavor',
+        flavorKey,
+        variantKey,
         packageType ?? 'no-package',
       ].join('|'),
     };
@@ -411,20 +603,26 @@ export class ProductParsingService {
     const match =
       /(\d+(?:[,.]\d+)?)\s?(л|l|литр|литра|мл|ml|г|гр|g|кг|kg)\b/i.exec(
         normalizedName,
-      );
+      ) ?? /\b0[,.](\d{2,3})\b/.exec(normalizedName);
 
     if (!match) {
       return null;
     }
 
-    const rawValue = Number(match[1].replace(',', '.'));
-    const rawUnit = match[2].toLowerCase();
+    const rawUnit = match[2]?.toLowerCase() ?? 'l';
+    const rawValue = match[2]
+      ? Number(match[1].replace(',', '.'))
+      : Number(`0.${match[1]}`);
 
     if (['л', 'l', 'литр', 'литра'].includes(rawUnit)) {
       return { value: Math.round(rawValue * 1000), unit: 'ml' };
     }
 
     if (['мл', 'ml'].includes(rawUnit)) {
+      if (rawValue > 0 && rawValue < 10) {
+        return { value: Math.round(rawValue * 1000), unit: 'ml' };
+      }
+
       return { value: Math.round(rawValue), unit: 'ml' };
     }
 
@@ -436,22 +634,46 @@ export class ProductParsingService {
   }
 
   private extractFlavor(normalizedName: string) {
-    const found = Object.entries(knownFlavors).find(([token]) =>
-      normalizedName.includes(token),
-    );
+    const found = [
+      ...new Set(
+        Object.entries(knownFlavors)
+          .filter(([token]) => this.hasToken(normalizedName, token))
+          .map(([, flavor]) => flavor),
+      ),
+    ].sort();
 
-    return found?.[1] ?? null;
+    return found.length > 0 ? found.join('+') : null;
+  }
+
+  private extractVariant(normalizedName: string) {
+    const found = [
+      ...new Set(
+        Object.entries(knownVariants)
+          .filter(([token]) => this.hasToken(normalizedName, token))
+          .map(([, variant]) => variant),
+      ),
+    ].sort();
+
+    return found.length > 0 ? found.join('+') : null;
   }
 
   private extractPackageType(normalizedName: string) {
     const found = Object.entries(packageAliases).find(([token]) =>
-      normalizedName.includes(token),
+      this.hasToken(normalizedName, token),
     );
 
     return found?.[1] ?? null;
   }
 
   private extractBrand(normalizedName: string) {
+    const knownBrand = brandAliases.find(({ alias }) =>
+      this.hasToken(normalizedName, alias),
+    );
+
+    if (knownBrand) {
+      return knownBrand.brand;
+    }
+
     const tokens = normalizedName
       .replace(/\d+(?:[,.]\d+)?\s?(л|l|литр|литра|мл|ml|г|гр|g|кг|kg)\b/g, ' ')
       .split(/\s+/)
@@ -462,5 +684,115 @@ export class ProductParsingService {
       .filter((token) => !packageAliases[token]);
 
     return tokens[0] ?? null;
+  }
+
+  private extractResidualTokens(
+    normalizedName: string,
+    parsed: {
+      brand: string | null;
+      flavor: string | null;
+      variant: string | null;
+    },
+  ) {
+    const brandTokens = new Set(parsed.brand?.split(/\s+/) ?? []);
+    const knownFlavorValues = new Set(Object.values(knownFlavors));
+    const knownVariantValues = new Set(Object.values(knownVariants));
+
+    return [
+      ...new Set(
+        normalizedName
+          .replace(
+            /\d+(?:[,.]\d+)?\s?(л|l|литр|литра|мл|ml|г|гр|g|кг|kg)\b/g,
+            ' ',
+          )
+          .split(/\s+/)
+          .map((token) => token.replace(/[^a-zа-я0-9-]/g, ''))
+          .filter(Boolean)
+          .filter((token) => token.length > 2)
+          .filter((token) => !ignoredBrandTokens.has(token))
+          .filter((token) => !brandTokens.has(token))
+          .filter((token) => !knownFlavors[token])
+          .filter((token) => !knownFlavorValues.has(token))
+          .filter((token) => !knownVariants[token])
+          .filter((token) => !knownVariantValues.has(token))
+          .filter((token) => !packageAliases[token]),
+      ),
+    ].sort();
+  }
+
+  private extractHardBlockers(normalizedName: string) {
+    return Object.entries(hardBlockerTokens)
+      .filter(([, pattern]) => pattern.test(normalizedName))
+      .map(([key]) => key);
+  }
+
+  private groupWarnings(
+    parsedProducts: {
+      product: ProductForParsing;
+      parsed: ParsedProductName;
+    }[],
+  ) {
+    const warnings: string[] = [];
+    const flavors = new Set(parsedProducts.map((item) => item.parsed.flavor));
+    const variants = new Set(parsedProducts.map((item) => item.parsed.variant));
+    const packages = new Set(
+      parsedProducts.map((item) => item.parsed.packageType),
+    );
+    const residuals = new Set(
+      parsedProducts.map((item) => item.parsed.residualTokens.join('+')),
+    );
+    const hasUnknownFlavor = parsedProducts.some((item) => !item.parsed.flavor);
+    const hasCanonical = parsedProducts.some(
+      (item) => item.product.canonicalProductId,
+    );
+
+    if (flavors.size > 1) {
+      warnings.push('Разные распознанные вкусы');
+    }
+
+    if (variants.size > 1) {
+      warnings.push('Разные варианты товара');
+    }
+
+    if (packages.size > 1) {
+      warnings.push('Разная или нераспознанная упаковка');
+    }
+
+    if (hasUnknownFlavor && residuals.size > 1) {
+      warnings.push('Вкус не распознан, но остаточные токены отличаются');
+    }
+
+    if (hasCanonical) {
+      warnings.push('Часть товаров уже привязана к сетевому SKU');
+    }
+
+    return warnings;
+  }
+
+  private riskLevel(confidence: number, warnings: string[]) {
+    if (warnings.length >= 2 || confidence < 80) {
+      return 'HIGH' as const;
+    }
+
+    if (warnings.length === 1 || confidence < 90) {
+      return 'MEDIUM' as const;
+    }
+
+    return 'LOW' as const;
+  }
+
+  private hasToken(normalizedName: string, token: string) {
+    const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(^|[^a-zа-я0-9])${escaped}([^a-zа-я0-9]|$)`, 'i').test(
+      normalizedName,
+    );
+  }
+
+  private sourceLabel(externalDomain: string | null, storeNames: string[]) {
+    if (storeNames.length > 0) {
+      return `${storeNames.join(', ')} (${externalDomain ?? 'без домена'})`;
+    }
+
+    return externalDomain ?? 'Источник не определён';
   }
 }

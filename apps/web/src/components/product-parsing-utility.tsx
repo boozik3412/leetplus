@@ -27,6 +27,7 @@ export function ProductParsingUtility({
   const [overview, setOverview] = useState(initialOverview);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   async function refreshOverview() {
     const response = await fetch("/api/utilities/product-parsing");
@@ -47,6 +48,7 @@ export function ProductParsingUtility({
 
     setIsAnalyzing(true);
     setError(null);
+    setNotice(null);
 
     try {
       const response = await fetch("/api/utilities/product-parsing/analyze", {
@@ -61,6 +63,10 @@ export function ProductParsingUtility({
         return;
       }
 
+      const run = data as { totalProducts?: number; suggestionsCount?: number };
+      setNotice(
+        `Анализ завершён: обработано ${run.totalProducts ?? 0} товаров, найдено ${run.suggestionsCount ?? 0} групп для проверки.`,
+      );
       await refreshOverview();
     } catch {
       setError("API недоступен");
@@ -116,6 +122,11 @@ export function ProductParsingUtility({
         {error ? (
           <p className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
             {error}
+          </p>
+        ) : null}
+        {notice ? (
+          <p className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+            {notice}
           </p>
         ) : null}
       </div>
@@ -218,16 +229,43 @@ function SuggestionCard({
             <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
               {suggestion.confidence}% совпадение
             </span>
+            <span
+              className={[
+                "rounded-full px-2.5 py-1 text-xs font-semibold",
+                suggestion.rationale.riskLevel === "LOW"
+                  ? "bg-emerald-50 text-emerald-700"
+                  : suggestion.rationale.riskLevel === "MEDIUM"
+                    ? "bg-amber-50 text-amber-700"
+                    : "bg-red-50 text-red-700",
+              ].join(" ")}
+            >
+              {suggestion.rationale.riskLevel === "LOW"
+                ? "низкий риск"
+                : suggestion.rationale.riskLevel === "MEDIUM"
+                  ? "средний риск"
+                  : "высокий риск"}
+            </span>
           </div>
           <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
             Бренд: {suggestion.rationale.brand ?? "не найден"} · Объём:{" "}
             {suggestion.rationale.volume ?? "не найден"} · Вкус:{" "}
-            {suggestion.rationale.flavor ?? "не найден"} · Упаковка:{" "}
+            {suggestion.rationale.flavor ?? "не найден"} · Вариант:{" "}
+            {suggestion.rationale.variant ?? "обычный"} · Упаковка:{" "}
             {suggestion.rationale.packageType ?? "не найдена"}
           </p>
           <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
             Домены: {suggestion.rationale.domains.join(", ") || "нет данных"}
           </p>
+          {suggestion.rationale.warnings.length > 0 ? (
+            <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              <p className="font-medium">Что настораживает</p>
+              <ul className="mt-1 list-disc space-y-1 pl-5">
+                {suggestion.rationale.warnings.map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </div>
         <div className="flex gap-2">
           <button
@@ -272,23 +310,37 @@ function SuggestionCard({
             Товары в группе
           </p>
           <div className="mt-2 grid gap-2">
-            {suggestion.productIds.map((productId, index) => (
+            {suggestion.rationale.products.map((product) => (
               <label
-                key={productId}
+                key={product.id}
                 className="flex items-start gap-3 rounded-xl border border-zinc-100 bg-zinc-50 px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900/60"
               >
                 <input
                   type="checkbox"
-                  checked={selectedProductIds.includes(productId)}
-                  onChange={() => toggleProduct(productId)}
+                  checked={selectedProductIds.includes(product.id)}
+                  onChange={() => toggleProduct(product.id)}
                   className="mt-0.5 h-4 w-4 rounded border-zinc-300"
                 />
                 <span>
                   <span className="font-medium">
-                    {suggestion.rationale.names[index] ?? productId}
+                    {product.name}
                   </span>
                   <span className="mt-0.5 block text-xs text-zinc-500">
-                    {productId}
+                    {product.sourceLabel} · {product.article}
+                  </span>
+                  <span className="mt-1 block text-xs text-zinc-500">
+                    {[
+                      product.parsed.brand,
+                      product.parsed.volume,
+                      product.parsed.flavor,
+                      product.parsed.variant,
+                      product.parsed.packageType,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                    {product.parsed.residualTokens.length > 0
+                      ? ` · остаток: ${product.parsed.residualTokens.join(", ")}`
+                      : ""}
                   </span>
                 </span>
               </label>

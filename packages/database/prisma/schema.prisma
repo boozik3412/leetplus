@@ -228,6 +228,7 @@ model CanonicalProduct {
   volumeValue Int?
   volumeUnit  String?
   flavor      String?
+  variant     String?
   packageType String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

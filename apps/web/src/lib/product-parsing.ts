@@ -10,9 +10,27 @@ export type ProductParsingSuggestion = {
     brand: string | null;
     volume: string | null;
     flavor: string | null;
+    variant: string | null;
     packageType: string | null;
+    riskLevel: "LOW" | "MEDIUM" | "HIGH";
+    warnings: string[];
+    hardBlockers: string[];
     domains: string[];
     names: string[];
+    products: {
+      id: string;
+      name: string;
+      article: string;
+      sourceLabel: string;
+      parsed: {
+        brand: string | null;
+        volume: string | null;
+        flavor: string | null;
+        variant: string | null;
+        packageType: string | null;
+        residualTokens: string[];
+      };
+    }[];
   };
   productIds: string[];
   candidateNames: string[];

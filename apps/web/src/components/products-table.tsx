@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
   ProductArchiveButton,
   ProductInlineEditable,
@@ -52,6 +52,8 @@ export function ProductsTable({
 }) {
   const topScrollRef = useRef<HTMLDivElement | null>(null);
   const tableScrollRef = useRef<HTMLDivElement | null>(null);
+  const tableElementRef = useRef<HTMLTableElement | null>(null);
+  const topSpacerRef = useRef<HTMLDivElement | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("createdAt");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [nameFilter, setNameFilter] = useState("");
@@ -95,30 +97,69 @@ export function ProductsTable({
     setSortDirection(nextKey === "createdAt" ? "desc" : "asc");
   }
 
+  useEffect(() => {
+    const updateTopScrollWidth = () => {
+      if (!topSpacerRef.current || !tableElementRef.current) {
+        return;
+      }
+
+      topSpacerRef.current.style.width = `${tableElementRef.current.scrollWidth}px`;
+    };
+
+    updateTopScrollWidth();
+    window.addEventListener("resize", updateTopScrollWidth);
+
+    return () => window.removeEventListener("resize", updateTopScrollWidth);
+  }, [sortedProducts.length]);
+
+  function exportRows(format: "excel" | "1c" | "pdf") {
+    const rows = sortedProducts.map((product) => productToExportRow(product));
+
+    if (format === "excel") {
+      downloadFile(
+        `leetplus-products-${dateStamp()}.xls`,
+        tableHtml(rows),
+        "application/vnd.ms-excel;charset=utf-8",
+      );
+      return;
+    }
+
+    if (format === "1c") {
+      downloadFile(
+        `leetplus-products-1c-${dateStamp()}.csv`,
+        `\uFEFF${toCsv(rows)}`,
+        "text/csv;charset=utf-8",
+      );
+      return;
+    }
+
+    openPrintWindow(rows);
+  }
+
   return (
     <div>
-      <div className="border-b border-zinc-200 bg-white px-5 py-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-          <div className="grid gap-3 sm:grid-cols-[minmax(260px,1fr)_220px]">
+      <div className="border-b border-zinc-200 bg-white px-3 py-3">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
+          <div className="grid gap-2 sm:grid-cols-[minmax(220px,1fr)_190px]">
             <label className="block">
-              <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+              <span className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">
                 Наименование
               </span>
               <input
                 value={nameFilter}
                 onChange={(event) => setNameFilter(event.target.value)}
                 placeholder="Фильтр по названию"
-                className="mt-2 block w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+                className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-2 py-1.5 text-xs outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
               />
             </label>
             <label className="block">
-              <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+              <span className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">
                 Клуб / источник
               </span>
               <select
                 value={sourceFilter}
                 onChange={(event) => setSourceFilter(event.target.value)}
-                className="mt-2 block w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+                className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-2 py-1.5 text-xs outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
               >
                 <option value="all">Все источники</option>
                 {sources.map((source) => (
@@ -130,15 +171,38 @@ export function ProductsTable({
             </label>
           </div>
 
-          <div className="flex items-center gap-3">
-            <p className="text-sm text-zinc-500">
+          <div className="flex items-center gap-2">
+            <p className="text-xs text-zinc-500">
               Показано {sortedProducts.length} из {products.length}
             </p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => exportRows("excel")}
+                className="rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50"
+              >
+                Excel
+              </button>
+              <button
+                type="button"
+                onClick={() => exportRows("1c")}
+                className="rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50"
+              >
+                1C
+              </button>
+              <button
+                type="button"
+                onClick={() => exportRows("pdf")}
+                className="rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50"
+              >
+                PDF
+              </button>
+            </div>
             {!tableMode ? (
               <button
                 type="button"
                 onClick={() => window.open("/products/table", "_blank", "noopener,noreferrer")}
-                className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+                className="rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50"
               >
                 Открыть в новом окне
               </button>
@@ -152,7 +216,7 @@ export function ProductsTable({
         onScroll={() => syncHorizontalScroll(topScrollRef, tableScrollRef)}
         className="overflow-x-auto border-b border-zinc-100 bg-zinc-50"
       >
-        <div className="h-3 min-w-[1280px]" />
+        <div ref={topSpacerRef} className="h-2 min-w-[1140px]" />
       </div>
 
       <div
@@ -160,7 +224,10 @@ export function ProductsTable({
         onScroll={() => syncHorizontalScroll(tableScrollRef, topScrollRef)}
         className="overflow-x-auto"
       >
-    <table className="w-full min-w-[1280px] border-collapse text-left text-sm">
+    <table
+      ref={tableElementRef}
+      className="w-full min-w-[1140px] border-collapse text-left text-[11px]"
+    >
       <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
         <tr>
           <SortableTh label="Артикул" sortKey="article" activeKey={sortKey} direction={sortDirection} onSort={setSort} />
@@ -174,7 +241,7 @@ export function ProductsTable({
           <SortableTh label="Фейсинг" sortKey="facing" activeKey={sortKey} direction={sortDirection} onSort={setSort} align="right" />
           <SortableTh label="Срок годности" sortKey="shelfLifeDays" activeKey={sortKey} direction={sortDirection} onSort={setSort} align="right" />
           {canEditProducts ? (
-            <th className="px-5 py-3 text-right font-medium">Действия</th>
+            <th className="px-2 py-2 text-right font-medium">Действия</th>
           ) : null}
         </tr>
       </thead>
@@ -184,7 +251,7 @@ export function ProductsTable({
           <tr>
             <td
               colSpan={canEditProducts ? 11 : 10}
-              className="px-5 py-8 text-center text-sm text-zinc-500"
+              className="px-3 py-8 text-center text-xs text-zinc-500"
             >
               Пока нет товаров. Добавьте первый SKU через форму выше.
             </td>
@@ -199,7 +266,7 @@ export function ProductsTable({
 
           return (
             <tr key={product.id} className="hover:bg-zinc-50">
-              <td className="whitespace-nowrap px-5 py-4 font-mono text-xs text-zinc-600">
+              <td className="w-[132px] whitespace-nowrap px-2 py-2 font-mono text-[10px] text-zinc-600">
                 <ProductInlineEditable
                   product={product}
                   field="article"
@@ -208,11 +275,11 @@ export function ProductsTable({
                 />
               </td>
 
-              <td className="whitespace-nowrap px-5 py-4 text-xs text-zinc-500">
+              <td className="w-[105px] whitespace-nowrap px-2 py-2 text-[10px] text-zinc-500">
                 {product.externalDomain ?? "—"}
               </td>
 
-              <td className="px-5 py-4 font-medium text-zinc-950">
+              <td className="w-[230px] px-2 py-2 font-medium leading-4 text-zinc-950">
                 <ProductInlineEditable
                   product={product}
                   field="name"
@@ -221,15 +288,15 @@ export function ProductsTable({
                 />
               </td>
 
-              <td className="px-5 py-4 text-zinc-700">
+              <td className="w-[95px] px-2 py-2 text-zinc-700">
                 {product.category?.name ?? "—"}
               </td>
 
-              <td className="px-5 py-4 text-zinc-700">
+              <td className="w-[95px] px-2 py-2 text-zinc-700">
                 {product.supplier?.name ?? "—"}
               </td>
 
-              <td className="whitespace-nowrap px-5 py-4 text-right text-zinc-700">
+              <td className="w-[90px] whitespace-nowrap px-2 py-2 text-right text-zinc-700">
                 <ProductInlineEditable
                   product={product}
                   field="purchasePrice"
@@ -240,7 +307,7 @@ export function ProductsTable({
                 />
               </td>
 
-              <td className="whitespace-nowrap px-5 py-4 text-right text-zinc-950">
+              <td className="w-[90px] whitespace-nowrap px-2 py-2 text-right text-zinc-950">
                 <ProductInlineEditable
                   product={product}
                   field="salePrice"
@@ -251,11 +318,11 @@ export function ProductsTable({
                 />
               </td>
 
-              <td className="whitespace-nowrap px-5 py-4 text-right text-zinc-700">
+              <td className="w-[85px] whitespace-nowrap px-2 py-2 text-right text-zinc-700">
                 {marginPercent.toFixed(1)}%
               </td>
 
-              <td className="whitespace-nowrap px-5 py-4 text-right text-zinc-700">
+              <td className="w-[70px] whitespace-nowrap px-2 py-2 text-right text-zinc-700">
                 <ProductInlineEditable
                   product={product}
                   field="facing"
@@ -265,7 +332,7 @@ export function ProductsTable({
                 />
               </td>
 
-              <td className="whitespace-nowrap px-5 py-4 text-right text-zinc-700">
+              <td className="w-[85px] whitespace-nowrap px-2 py-2 text-right text-zinc-700">
                 <ProductInlineEditable
                   product={product}
                   field="shelfLifeDays"
@@ -279,7 +346,7 @@ export function ProductsTable({
               </td>
 
               {canEditProducts ? (
-                <td className="whitespace-nowrap px-5 py-4 text-right">
+                <td className="w-[88px] whitespace-nowrap px-2 py-2 text-right">
                   <ProductArchiveButton id={product.id} />
                 </td>
               ) : null}
@@ -311,11 +378,11 @@ function SortableTh({
   const isActive = activeKey === sortKey;
 
   return (
-    <th className={["px-5 py-3 font-medium", align === "right" ? "text-right" : ""].join(" ")}>
+    <th className={["px-2 py-2 font-medium", align === "right" ? "text-right" : ""].join(" ")}>
       <button
         type="button"
         onClick={() => onSort(sortKey)}
-        className="inline-flex items-center gap-1 uppercase transition hover:text-zinc-900"
+        className="inline-flex items-center gap-0.5 uppercase leading-3 transition hover:text-zinc-900"
       >
         {label}
         <span className={isActive ? "text-zinc-900" : "text-zinc-300"}>
@@ -363,6 +430,128 @@ function compareProducts(a: Product, b: Product, sortKey: SortKey) {
   }
 
   return a[sortKey].localeCompare(b[sortKey], "ru");
+}
+
+type ExportRow = {
+  article: string;
+  source: string;
+  name: string;
+  category: string;
+  supplier: string;
+  purchasePrice: string;
+  salePrice: string;
+  marginPercent: string;
+  facing: string;
+  shelfLifeDays: string;
+};
+
+const exportHeaders: { key: keyof ExportRow; label: string }[] = [
+  { key: "article", label: "Артикул" },
+  { key: "source", label: "Клуб / источник" },
+  { key: "name", label: "Наименование" },
+  { key: "category", label: "Категория" },
+  { key: "supplier", label: "Поставщик" },
+  { key: "purchasePrice", label: "Входящая цена" },
+  { key: "salePrice", label: "Цена продажи" },
+  { key: "marginPercent", label: "Маржинальность" },
+  { key: "facing", label: "Фейсинг" },
+  { key: "shelfLifeDays", label: "Срок годности" },
+];
+
+function productToExportRow(product: Product): ExportRow {
+  return {
+    article: product.article,
+    source: product.externalDomain ?? "",
+    name: product.name,
+    category: product.category?.name ?? "",
+    supplier: product.supplier?.name ?? "",
+    purchasePrice: product.purchasePrice,
+    salePrice: product.salePrice,
+    marginPercent: calculateMarginPercent(
+      product.purchasePrice,
+      product.salePrice,
+    ).toFixed(1),
+    facing: String(product.facing),
+    shelfLifeDays: product.shelfLifeDays?.toString() ?? "",
+  };
+}
+
+function downloadFile(filename: string, content: string, type: string) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function toCsv(rows: ExportRow[]) {
+  return [
+    exportHeaders.map((header) => escapeCsv(header.label)).join(";"),
+    ...rows.map((row) =>
+      exportHeaders.map((header) => escapeCsv(row[header.key])).join(";"),
+    ),
+  ].join("\r\n");
+}
+
+function escapeCsv(value: string) {
+  return `"${value.replace(/"/g, '""')}"`;
+}
+
+function tableHtml(rows: ExportRow[]) {
+  return `<!doctype html><html><head><meta charset="utf-8" /></head><body><table border="1"><thead><tr>${exportHeaders
+    .map((header) => `<th>${escapeHtml(header.label)}</th>`)
+    .join("")}</tr></thead><tbody>${rows
+    .map(
+      (row) =>
+        `<tr>${exportHeaders
+          .map((header) => `<td>${escapeHtml(row[header.key])}</td>`)
+          .join("")}</tr>`,
+    )
+    .join("")}</tbody></table></body></html>`;
+}
+
+function openPrintWindow(rows: ExportRow[]) {
+  const printWindow = window.open("", "_blank", "noopener,noreferrer");
+
+  if (!printWindow) {
+    return;
+  }
+
+  printWindow.document.write(`<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>LeetPlus товары</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 24px; color: #111; }
+    h1 { margin: 0 0 16px; font-size: 22px; }
+    table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    th, td { border: 1px solid #ddd; padding: 6px; text-align: left; }
+    th { background: #f3f4f6; }
+    @media print { body { padding: 0; } }
+  </style>
+</head>
+<body>
+  <h1>LeetPlus товары</h1>
+  ${tableHtml(rows).replace(/^<!doctype html><html><head><meta charset="utf-8" \/><\/head><body>/, "").replace(/<\/body><\/html>$/, "")}
+  <script>window.onload = () => window.print();</script>
+</body>
+</html>`);
+  printWindow.document.close();
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function dateStamp() {
+  return new Date().toISOString().slice(0, 10);
 }
 
 function syncHorizontalScroll(

@@ -278,7 +278,7 @@ export function ProductInlineEditable({
           onKeyDown={handleKeyDown}
           disabled={isSaving}
           className={[
-            "w-full min-w-24 rounded-md border bg-white px-2 py-1 text-sm outline-none focus:ring-2",
+            "w-full min-w-16 rounded-md border bg-white px-1.5 py-1 text-[11px] outline-none focus:ring-2",
             hasError
               ? "border-red-300 focus:border-red-500 focus:ring-red-100"
               : "border-zinc-300 focus:border-zinc-500 focus:ring-zinc-200",
@@ -299,7 +299,7 @@ export function ProductInlineEditable({
         setIsEditing(true);
       }}
       title="Двойной клик для редактирования"
-      className="rounded-md px-1 py-0.5 text-left transition hover:bg-zinc-100"
+      className="rounded-md px-1 py-0.5 text-left leading-4 transition hover:bg-zinc-100"
     >
       {displayValue ?? value}
     </button>

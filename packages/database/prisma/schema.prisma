@@ -47,6 +47,11 @@ enum ProductParsingSuggestionStatus {
   REJECTED
 }
 
+enum ProductOosExclusionType {
+  SERVICE
+  OOS_EXCLUDED
+}
+
 model Tenant {
   id        String   @id @default(uuid())
   name      String
@@ -62,6 +67,7 @@ model Tenant {
   canonicalProducts CanonicalProduct[]
   productParsingRuns ProductParsingRun[]
   productParsingSuggestions ProductParsingSuggestion[]
+  productOosExclusions ProductOosExclusion[]
   categories Category[]
   importJobs ImportJob[]
   salesFacts SalesFact[]
@@ -210,6 +216,7 @@ model Product {
   salesFacts SalesFact[]
   inventorySnapshots InventorySnapshot[]
   stockMovements StockMovement[]
+  oosExclusions ProductOosExclusion[]
 
   @@unique([tenantId, article])
   @@unique([tenantId, externalProvider, externalDomain, externalProductId])
@@ -281,6 +288,22 @@ model ProductParsingSuggestion {
   @@index([tenantId, status])
   @@index([runId])
   @@index([canonicalProductId])
+}
+
+model ProductOosExclusion {
+  id        String                @id @default(uuid())
+  tenantId  String
+  productId String
+  type      ProductOosExclusionType
+  createdAt DateTime              @default(now())
+  updatedAt DateTime              @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id])
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, productId])
+  @@index([tenantId, type])
+  @@index([productId])
 }
 
 model SalesFact {

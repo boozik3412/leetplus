@@ -39,6 +39,21 @@ export type OperationalReportFilters = {
   storeId?: string;
 };
 
+export type ProductOosExclusionType = "SERVICE" | "OOS_EXCLUDED";
+
+export type ProductOosExclusion = {
+  id: string;
+  productId: string;
+  type: ProductOosExclusionType;
+  createdAt: string;
+  product: {
+    id: string;
+    article: string;
+    name: string;
+    externalDomain: string | null;
+  };
+};
+
 export type OutOfStockRiskProduct = {
   productId: string;
   article: string;
@@ -355,4 +370,17 @@ export async function getReplenishmentReport(
   }
 
   return response.json() as Promise<ReplenishmentReport>;
+}
+
+export async function getOosExclusions(): Promise<ProductOosExclusion[]> {
+  const response = await fetch(`${getApiUrl()}/reports/oos-exclusions`, {
+    cache: "no-store",
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch OOS exclusions");
+  }
+
+  return response.json() as Promise<ProductOosExclusion[]>;
 }

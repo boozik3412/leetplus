@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { StockMovementType } from '@prisma/client';
+import { ProductOosExclusionType, StockMovementType } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
@@ -41,6 +41,24 @@ export type OperationalReportQuery = {
   from?: string;
   to?: string;
   storeId?: string;
+};
+
+export type ProductOosExclusionDto = {
+  productId: string;
+  type: ProductOosExclusionType;
+};
+
+export type ProductOosExclusionRow = {
+  id: string;
+  productId: string;
+  type: ProductOosExclusionType;
+  createdAt: string;
+  product: {
+    id: string;
+    article: string;
+    name: string;
+    externalDomain: string | null;
+  };
 };
 
 export type OutOfStockRiskProduct = {
@@ -378,6 +396,7 @@ export class ReportsService {
       inventorySnapshots,
       activeProducts,
       stockMovements,
+      oosExclusions,
     ] = await Promise.all([
       this.prisma.salesFact.findMany({
         where: {
@@ -479,7 +498,14 @@ export class ReportsService {
           amount: true,
         },
       }),
+      this.prisma.productOosExclusion.findMany({
+        where: { tenantId },
+        select: { productId: true },
+      }),
     ]);
+    const excludedProductIds = new Set(
+      oosExclusions.map((exclusion) => exclusion.productId),
+    );
 
     const productSales = new Map<string, ProductSales>();
     let totalRevenue = 0;
@@ -526,6 +552,7 @@ export class ReportsService {
       demandProductSales,
       stockByProduct,
       DEMAND_PERIOD_DAYS,
+      excludedProductIds,
     );
     const productsWithoutSales = this.productsWithoutSales(
       activeProducts,
@@ -909,60 +936,68 @@ export class ReportsService {
       }
     }
 
-    const [activeProducts, inventorySnapshots, salesFacts] = await Promise.all([
-      this.prisma.product.findMany({
-        where: { tenantId, isActive: true },
-        select: {
-          id: true,
-          article: true,
-          name: true,
-          canonicalProduct: {
-            select: { name: true },
-          },
-          category: {
-            select: { name: true },
-          },
-          supplier: {
-            select: {
-              name: true,
-              orderMultiplicity: true,
+    const [activeProducts, inventorySnapshots, salesFacts, oosExclusions] =
+      await Promise.all([
+        this.prisma.product.findMany({
+          where: { tenantId, isActive: true },
+          select: {
+            id: true,
+            article: true,
+            name: true,
+            canonicalProduct: {
+              select: { name: true },
+            },
+            category: {
+              select: { name: true },
+            },
+            supplier: {
+              select: {
+                name: true,
+                orderMultiplicity: true,
+              },
             },
           },
-        },
-        orderBy: { name: 'asc' },
-      }),
-      this.prisma.inventorySnapshot.findMany({
-        where: {
-          tenantId,
-          ...storeFilter,
-          snapshotDate: {
-            lte: period.toDate,
+          orderBy: { name: 'asc' },
+        }),
+        this.prisma.inventorySnapshot.findMany({
+          where: {
+            tenantId,
+            ...storeFilter,
+            snapshotDate: {
+              lte: period.toDate,
+            },
           },
-        },
-        select: {
-          storeId: true,
-          productId: true,
-          quantity: true,
-        },
-        orderBy: {
-          snapshotDate: 'desc',
-        },
-      }),
-      this.prisma.salesFact.findMany({
-        where: {
-          tenantId,
-          ...storeFilter,
-          saleDate: {
-            gte: demandPeriod.fromDate,
-            lte: demandPeriod.toDate,
+          select: {
+            storeId: true,
+            productId: true,
+            quantity: true,
           },
-        },
-        select: {
-          productId: true,
-          quantity: true,
-        },
-      }),
-    ]);
+          orderBy: {
+            snapshotDate: 'desc',
+          },
+        }),
+        this.prisma.salesFact.findMany({
+          where: {
+            tenantId,
+            ...storeFilter,
+            saleDate: {
+              gte: demandPeriod.fromDate,
+              lte: demandPeriod.toDate,
+            },
+          },
+          select: {
+            productId: true,
+            quantity: true,
+          },
+        }),
+        this.prisma.productOosExclusion.findMany({
+          where: { tenantId },
+          select: { productId: true },
+        }),
+      ]);
+    const excludedProductIds = new Set(
+      oosExclusions.map((exclusion) => exclusion.productId),
+    );
 
     const stockByProduct = this.latestStockByProduct(inventorySnapshots);
     const soldByProduct = new Map<string, number>();
@@ -978,50 +1013,52 @@ export class ReportsService {
     let totalDailyNeed = 0;
     let totalRecommendedOrder = 0;
 
-    const rows = activeProducts.map((product) => {
-      const stockQuantity = this.round(stockByProduct.get(product.id) ?? 0);
-      const soldQuantity = this.round(soldByProduct.get(product.id) ?? 0);
-      const averageDailySales = this.round(soldQuantity / DEMAND_PERIOD_DAYS);
-      const stockDays =
-        averageDailySales > 0
-          ? this.round(stockQuantity / averageDailySales)
-          : null;
-      const dailyNeed = this.round(
-        Math.max(0, averageDailySales - stockQuantity),
-      );
-      const orderMultiplicity = product.supplier?.orderMultiplicity ?? null;
-      const recommendedOrder = this.recommendedOrder(
-        dailyNeed,
-        orderMultiplicity,
-      );
-      const row = {
-        productId: product.id,
-        article: product.article,
-        name: product.name,
-        isCanonical: Boolean(product.canonicalProduct),
-        canonicalProductName: product.canonicalProduct?.name ?? null,
-        categoryName: product.category?.name ?? null,
-        supplierName: product.supplier?.name ?? null,
-        stockQuantity,
-        soldQuantity,
-        averageDailySales,
-        stockDays,
-        dailyNeed,
-        recommendedOrder,
-        orderMultiplicity,
-        risk: this.replenishmentRisk(
+    const rows = activeProducts
+      .filter((product) => !excludedProductIds.has(product.id))
+      .map((product) => {
+        const stockQuantity = this.round(stockByProduct.get(product.id) ?? 0);
+        const soldQuantity = this.round(soldByProduct.get(product.id) ?? 0);
+        const averageDailySales = this.round(soldQuantity / DEMAND_PERIOD_DAYS);
+        const stockDays =
+          averageDailySales > 0
+            ? this.round(stockQuantity / averageDailySales)
+            : null;
+        const dailyNeed = this.round(
+          Math.max(0, averageDailySales - stockQuantity),
+        );
+        const orderMultiplicity = product.supplier?.orderMultiplicity ?? null;
+        const recommendedOrder = this.recommendedOrder(
+          dailyNeed,
+          orderMultiplicity,
+        );
+        const row = {
+          productId: product.id,
+          article: product.article,
+          name: product.name,
+          isCanonical: Boolean(product.canonicalProduct),
+          canonicalProductName: product.canonicalProduct?.name ?? null,
+          categoryName: product.category?.name ?? null,
+          supplierName: product.supplier?.name ?? null,
           stockQuantity,
+          soldQuantity,
           averageDailySales,
           stockDays,
-        ),
-      };
+          dailyNeed,
+          recommendedOrder,
+          orderMultiplicity,
+          risk: this.replenishmentRisk(
+            stockQuantity,
+            averageDailySales,
+            stockDays,
+          ),
+        };
 
-      totalStockQuantity += stockQuantity;
-      totalDailyNeed += dailyNeed;
-      totalRecommendedOrder += recommendedOrder;
+        totalStockQuantity += stockQuantity;
+        totalDailyNeed += dailyNeed;
+        totalRecommendedOrder += recommendedOrder;
 
-      return row;
-    });
+        return row;
+      });
 
     return {
       tenantId,
@@ -1040,6 +1077,85 @@ export class ReportsService {
           a.name.localeCompare(b.name),
       ),
     };
+  }
+
+  async getOosExclusions(
+    user: AuthenticatedUser,
+  ): Promise<ProductOosExclusionRow[]> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const rows = await this.prisma.productOosExclusion.findMany({
+      where: { tenantId },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        product: {
+          select: {
+            id: true,
+            article: true,
+            name: true,
+            externalDomain: true,
+          },
+        },
+      },
+    });
+
+    return rows.map((row) => ({
+      id: row.id,
+      productId: row.productId,
+      type: row.type,
+      createdAt: row.createdAt.toISOString(),
+      product: row.product,
+    }));
+  }
+
+  async createOosExclusion(
+    user: AuthenticatedUser,
+    dto: ProductOosExclusionDto,
+  ) {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+
+    if (!Object.values(ProductOosExclusionType).includes(dto.type)) {
+      throw new BadRequestException('Invalid exclusion type');
+    }
+
+    const product = await this.prisma.product.findFirst({
+      where: { id: dto.productId, tenantId },
+      select: { id: true },
+    });
+
+    if (!product) {
+      throw new BadRequestException('Product not found');
+    }
+
+    return this.prisma.productOosExclusion.upsert({
+      where: {
+        tenantId_productId: {
+          tenantId,
+          productId: dto.productId,
+        },
+      },
+      create: {
+        tenantId,
+        productId: dto.productId,
+        type: dto.type,
+      },
+      update: {
+        type: dto.type,
+      },
+    });
+  }
+
+  async deleteOosExclusion(user: AuthenticatedUser, id: string) {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const row = await this.prisma.productOosExclusion.findFirst({
+      where: { id, tenantId },
+      select: { id: true },
+    });
+
+    if (!row) {
+      throw new BadRequestException('Exclusion not found');
+    }
+
+    return this.prisma.productOosExclusion.delete({ where: { id } });
   }
 
   private stockMovementImpact(
@@ -1145,8 +1261,10 @@ export class ReportsService {
     productSales: Map<string, ProductSales>,
     stockByProduct: Map<string, number>,
     periodDays: number,
+    excludedProductIds: Set<string>,
   ): OutOfStockRiskProduct[] {
     return [...productSales.values()]
+      .filter((sale) => !excludedProductIds.has(sale.productId))
       .map((sale) => {
         const averageDailySales = sale.quantity / periodDays;
         const stockQuantity = stockByProduct.get(sale.productId) ?? 0;

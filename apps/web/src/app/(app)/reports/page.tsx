@@ -1,4 +1,5 @@
 import { requireCurrentUser } from "@/lib/auth";
+import { OosExclusionActions } from "@/components/oos-exclusion-actions";
 import { ReportEmailForm } from "@/components/report-email-form";
 import {
   getAssortmentReport,
@@ -367,10 +368,20 @@ function RecommendationsPanel({ rows }: { rows: ReportRecommendation[] }) {
   return (
     <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
       <div className="border-b border-zinc-200 px-5 py-4">
-        <h2 className="text-base font-semibold">Рекомендации</h2>
-        <p className="mt-1 text-sm text-zinc-500">
-          Автоматические действия на основе продаж, остатков и маржинальности.
-        </p>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-base font-semibold">Рекомендации</h2>
+            <p className="mt-1 text-sm text-zinc-500">
+              Автоматические действия на основе продаж, остатков и маржинальности.
+            </p>
+          </div>
+          <a
+            href="/reports/oos-exclusions"
+            className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+          >
+            Исключённые позиции
+          </a>
+        </div>
       </div>
 
       {rows.length > 0 ? (
@@ -403,6 +414,9 @@ function RecommendationsPanel({ rows }: { rows: ReportRecommendation[] }) {
                 <p className="mt-2 text-sm font-medium text-zinc-800">
                   {row.action}
                 </p>
+                {row.kind === "REPLENISH_STOCK" ? (
+                  <OosExclusionActions productId={row.productId} />
+                ) : null}
               </div>
               <div className="text-left lg:text-right">
                 <p className="text-xs text-zinc-500">{row.metricLabel}</p>

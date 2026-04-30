@@ -21,6 +21,9 @@ type ReportsPrismaMock = {
   stockMovement: {
     findMany: jest.Mock;
   };
+  productOosExclusion: {
+    findMany: jest.Mock;
+  };
 };
 
 type TenantContextMock = {
@@ -49,6 +52,9 @@ function createPrismaMock(): ReportsPrismaMock {
       findMany: jest.fn(),
     },
     stockMovement: {
+      findMany: jest.fn(),
+    },
+    productOosExclusion: {
       findMany: jest.fn(),
     },
   };
@@ -215,6 +221,7 @@ describe('ReportsService', () => {
         amount: new Prisma.Decimal(200),
       },
     ]);
+    prisma.productOosExclusion.findMany.mockResolvedValue([]);
     prisma.product.findMany.mockResolvedValue([
       {
         id: 'product-1',
@@ -352,6 +359,7 @@ describe('ReportsService', () => {
         },
       },
     ]);
+    prisma.productOosExclusion.findMany.mockResolvedValue([]);
 
     const report = await service.getSkuPerformanceReport(user, {
       from: '2026-04-01',
@@ -544,6 +552,7 @@ describe('ReportsService', () => {
         quantity: new Prisma.Decimal(63),
       },
     ]);
+    prisma.productOosExclusion.findMany.mockResolvedValue([]);
 
     const report = await service.getReplenishmentReport(user, {
       from: '2026-04-01',

@@ -1,7 +1,9 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  Param,
   Post,
   Query,
   StreamableFile,
@@ -24,6 +26,8 @@ import {
   type AssortmentReport,
   type OperationalReport,
   type OperationalReportQuery,
+  type ProductOosExclusionDto,
+  type ProductOosExclusionRow,
   type ReplenishmentReport,
   type SkuPerformanceReport,
   type SuppliersPerformanceReport,
@@ -76,6 +80,29 @@ export class ReportsController {
     @Query() query: OperationalReportQuery,
   ): Promise<ReplenishmentReport> {
     return this.reportsService.getReplenishmentReport(user, query);
+  }
+
+  @Get('oos-exclusions')
+  getOosExclusions(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<ProductOosExclusionRow[]> {
+    return this.reportsService.getOosExclusions(user);
+  }
+
+  @Post('oos-exclusions')
+  createOosExclusion(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: ProductOosExclusionDto,
+  ) {
+    return this.reportsService.createOosExclusion(user, dto);
+  }
+
+  @Delete('oos-exclusions/:id')
+  deleteOosExclusion(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ) {
+    return this.reportsService.deleteOosExclusion(user, id);
   }
 
   @Get('export')

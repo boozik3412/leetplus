@@ -21,6 +21,7 @@ type ParsedProductName = {
   flavor: string | null;
   variant: string | null;
   packageType: string | null;
+  productKind: string | null;
   residualTokens: string[];
   hardBlockers: string[];
   normalizedKey: string | null;
@@ -32,6 +33,7 @@ type ProductParsingRationale = {
   flavor: string | null;
   variant: string | null;
   packageType: string | null;
+  productKind: string | null;
   riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
   warnings: string[];
   hardBlockers: string[];
@@ -48,6 +50,7 @@ type ProductParsingRationale = {
       flavor: string | null;
       variant: string | null;
       packageType: string | null;
+      productKind: string | null;
       residualTokens: string[];
     };
   }[];
@@ -184,11 +187,29 @@ const brandAliases: { alias: string; brand: string }[] = [
   { alias: 'sprite', brand: 'sprite' },
 ].sort((a, b) => b.alias.length - a.alias.length);
 
-const hardBlockerTokens: Record<string, RegExp> = {
-  combo: /\b(комбо|combo|сет|набор|акци[яи]|2\+1)\b/i,
-  service: /\b(услуга|аренда|депозит|залог|пополнение|скидка|промокод|час)\b/i,
-  hookah: /\b(кальян|чаша|забивка|уголь|табак)\b/i,
-  vape: /\b(жидкость|затяж|однораз|pod|вейп|nic|мг)\b/i,
+const hardBlockerTokens: Record<string, string[]> = {
+  combo: ['комбо', 'combo', 'сет', 'набор', 'акция', 'акции', '2+1'],
+  service: [
+    'услуга',
+    'аренда',
+    'депозит',
+    'залог',
+    'пополнение',
+    'скидка',
+    'промокод',
+    'час',
+  ],
+  hookah: ['кальян', 'чаша', 'забивка', 'уголь', 'табак'],
+  vape: [
+    'жидкость',
+    'затяжек',
+    'затяжки',
+    'однораз',
+    'pod',
+    'вейп',
+    'nic',
+    'мг',
+  ],
 };
 
 @Injectable()
@@ -492,6 +513,7 @@ export class ProductParsingService {
       (parsed.flavor || parsed.residualTokens.length > 0 ? 20 : 0) +
       (parsed.variant ? 10 : 0) +
       (parsed.packageType ? 10 : 0) +
+      (parsed.productKind === 'hookah-service' ? 15 : 0) +
       Math.min(5, products.length) -
       warnings.length * 5;
     const rationale: ProductParsingRationale = {
@@ -503,6 +525,7 @@ export class ProductParsingService {
       flavor: parsed.flavor,
       variant: parsed.variant,
       packageType: parsed.packageType,
+      productKind: parsed.productKind,
       riskLevel: this.riskLevel(confidence, warnings),
       warnings,
       hardBlockers,
@@ -522,6 +545,7 @@ export class ProductParsingService {
           flavor: parsedProduct.flavor,
           variant: parsedProduct.variant,
           packageType: parsedProduct.packageType,
+          productKind: parsedProduct.productKind,
           residualTokens: parsedProduct.residualTokens,
         },
       })),
@@ -542,14 +566,28 @@ export class ProductParsingService {
     const volume = this.extractVolume(normalizedName);
     const flavor = this.extractFlavor(normalizedName);
     const variant = this.extractVariant(normalizedName);
-    const packageType = this.extractPackageType(normalizedName);
-    const brand = this.extractBrand(normalizedName);
+    const rawHardBlockers = this.extractHardBlockers(normalizedName);
+    const isHookahServiceSku = this.isHookahServiceSku(
+      normalizedName,
+      volume,
+      rawHardBlockers,
+    );
+    const packageType = isHookahServiceSku
+      ? 'услуга'
+      : this.extractPackageType(normalizedName);
+    const brand = isHookahServiceSku
+      ? 'кальян'
+      : this.extractBrand(normalizedName);
+    const productKind = isHookahServiceSku ? 'hookah-service' : null;
     const residualTokens = this.extractResidualTokens(normalizedName, {
       brand,
       flavor,
       variant,
+      productKind,
     });
-    const hardBlockers = this.extractHardBlockers(normalizedName);
+    const hardBlockers = isHookahServiceSku
+      ? rawHardBlockers.filter((blocker) => blocker !== 'hookah')
+      : rawHardBlockers;
 
     if (!brand || !volume) {
       return {
@@ -560,6 +598,7 @@ export class ProductParsingService {
         flavor,
         variant,
         packageType,
+        productKind,
         residualTokens,
         hardBlockers,
         normalizedKey: null,
@@ -577,6 +616,7 @@ export class ProductParsingService {
       flavor,
       variant,
       packageType,
+      productKind,
       residualTokens,
       hardBlockers,
       normalizedKey: [
@@ -600,19 +640,21 @@ export class ProductParsingService {
   }
 
   private extractVolume(normalizedName: string) {
-    const match =
-      /(\d+(?:[,.]\d+)?)\s?(л|l|литр|литра|мл|ml|г|гр|g|кг|kg)\b/i.exec(
+    const explicitMatch =
+      /(\d+(?:[,.]\d+)?)\s?(литра|литр|мл|ml|кг|kg|гр|г|g|л|l)(?=$|[^a-zа-я0-9])/i.exec(
         normalizedName,
-      ) ?? /\b0[,.](\d{2,3})\b/.exec(normalizedName);
+      );
+    const decimalLiterMatch =
+      /(^|[^a-zа-я0-9])0[,.](\d{2,3})(?=$|[^a-zа-я0-9])/.exec(normalizedName);
 
-    if (!match) {
+    if (!explicitMatch && !decimalLiterMatch) {
       return null;
     }
 
-    const rawUnit = match[2]?.toLowerCase() ?? 'l';
-    const rawValue = match[2]
-      ? Number(match[1].replace(',', '.'))
-      : Number(`0.${match[1]}`);
+    const rawUnit = explicitMatch?.[2].toLowerCase() ?? 'l';
+    const rawValue = explicitMatch
+      ? Number(explicitMatch[1].replace(',', '.'))
+      : Number(`0.${decimalLiterMatch?.[2]}`);
 
     if (['л', 'l', 'литр', 'литра'].includes(rawUnit)) {
       return { value: Math.round(rawValue * 1000), unit: 'ml' };
@@ -692,6 +734,7 @@ export class ProductParsingService {
       brand: string | null;
       flavor: string | null;
       variant: string | null;
+      productKind: string | null;
     },
   ) {
     const brandTokens = new Set(parsed.brand?.split(/\s+/) ?? []);
@@ -702,7 +745,7 @@ export class ProductParsingService {
       ...new Set(
         normalizedName
           .replace(
-            /\d+(?:[,.]\d+)?\s?(л|l|литр|литра|мл|ml|г|гр|g|кг|kg)\b/g,
+            /\d+(?:[,.]\d+)?\s?(литра|литр|мл|ml|кг|kg|гр|г|g|л|l)(?=$|[^a-zа-я0-9])/g,
             ' ',
           )
           .split(/\s+/)
@@ -711,6 +754,10 @@ export class ProductParsingService {
           .filter((token) => token.length > 2)
           .filter((token) => !ignoredBrandTokens.has(token))
           .filter((token) => !brandTokens.has(token))
+          .filter(
+            (token) =>
+              !(parsed.productKind === 'hookah-service' && token === 'кальян'),
+          )
           .filter((token) => !knownFlavors[token])
           .filter((token) => !knownFlavorValues.has(token))
           .filter((token) => !knownVariants[token])
@@ -722,8 +769,33 @@ export class ProductParsingService {
 
   private extractHardBlockers(normalizedName: string) {
     return Object.entries(hardBlockerTokens)
-      .filter(([, pattern]) => pattern.test(normalizedName))
+      .filter(([, tokens]) =>
+        tokens.some((token) => this.hasToken(normalizedName, token)),
+      )
       .map(([key]) => key);
+  }
+
+  private isHookahServiceSku(
+    normalizedName: string,
+    volume: { value: number; unit: string } | null,
+    hardBlockers: string[],
+  ) {
+    if (!this.hasToken(normalizedName, 'кальян') || !volume) {
+      return false;
+    }
+
+    if (volume.unit !== 'g') {
+      return false;
+    }
+
+    const unsafeHookahTokens = ['чаша', 'забивка', 'уголь', 'табак'];
+    const hasUnsafeToken = unsafeHookahTokens.some((token) =>
+      this.hasToken(normalizedName, token),
+    );
+
+    return (
+      hardBlockers.every((blocker) => blocker === 'hookah') && !hasUnsafeToken
+    );
   }
 
   private groupWarnings(

@@ -12,6 +12,7 @@ export type ProductParsingSuggestion = {
     flavor: string | null;
     variant: string | null;
     packageType: string | null;
+    productKind: string | null;
     riskLevel: "LOW" | "MEDIUM" | "HIGH";
     warnings: string[];
     hardBlockers: string[];
@@ -28,6 +29,7 @@ export type ProductParsingSuggestion = {
         flavor: string | null;
         variant: string | null;
         packageType: string | null;
+        productKind: string | null;
         residualTokens: string[];
       };
     }[];

@@ -252,6 +252,9 @@ function SuggestionCard({
             {suggestion.rationale.flavor ?? "не найден"} · Вариант:{" "}
             {suggestion.rationale.variant ?? "обычный"} · Упаковка:{" "}
             {suggestion.rationale.packageType ?? "не найдена"}
+            {suggestion.rationale.productKind === "hookah-service"
+              ? " · Тип: услуга / кальян"
+              : ""}
           </p>
           <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
             Домены: {suggestion.rationale.domains.join(", ") || "нет данных"}
@@ -335,6 +338,9 @@ function SuggestionCard({
                       product.parsed.flavor,
                       product.parsed.variant,
                       product.parsed.packageType,
+                      product.parsed.productKind === "hookah-service"
+                        ? "услуга / кальян"
+                        : null,
                     ]
                       .filter(Boolean)
                       .join(" · ")}

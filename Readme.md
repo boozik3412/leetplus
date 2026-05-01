@@ -155,6 +155,59 @@ cd leetplus
 pnpm install
 ```
 
+## Production / VDS
+
+Продакшн-развертывание доступно по адресам:
+
+- web: `https://leetplus.ru`
+- www: `https://www.leetplus.ru`
+- api: `https://api.leetplus.ru`
+
+Инфраструктура:
+
+- VDS: Ubuntu 24.04 LTS
+- приложение на сервере: `/home/admin/leetplus`
+- web: Next.js, systemd unit `leetplus-web.service`, порт `127.0.0.1:3000`
+- api: NestJS, systemd unit `leetplus-api.service`, порт `4000`
+- reverse proxy: `nginx`
+- database: PostgreSQL 16
+- cache/service dependency: Redis
+- SSL: Let's Encrypt certificate for `leetplus.ru`, `www.leetplus.ru`, `api.leetplus.ru`
+
+DNS-записи `leetplus.ru`, `www.leetplus.ru` и `api.leetplus.ru` должны указывать на VDS. Если в браузере видна заглушка хостинга, сначала проверить DNS-кэш провайдера или локальной машины:
+
+```powershell
+Resolve-DnsName leetplus.ru -Type A
+Resolve-DnsName api.leetplus.ru -Type A
+```
+
+Быстрая проверка продакшна:
+
+```powershell
+curl -I https://leetplus.ru/login
+curl https://api.leetplus.ru/dashboard/summary
+```
+
+Автообновление настроено через systemd timer `leetplus-deploy.timer`. Скрипт `/usr/local/bin/leetplus-deploy.sh` на VDS проверяет `origin/main`, при наличии нового коммита выполняет:
+
+```bash
+git pull --ff-only origin main
+pnpm install --frozen-lockfile
+pnpm --filter database db:generate
+pnpm --filter database db:deploy
+pnpm build
+systemctl restart leetplus-api.service
+systemctl restart leetplus-web.service
+```
+
+Ручная проверка сервисов на VDS:
+
+```bash
+systemctl status leetplus-api.service
+systemctl status leetplus-web.service
+systemctl status leetplus-deploy.timer
+```
+
 Запуск web и api вместе:
 
 ```powershell

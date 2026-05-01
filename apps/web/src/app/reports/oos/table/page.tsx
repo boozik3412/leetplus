@@ -1,3 +1,4 @@
+import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { SimpleReportTable } from "@/components/simple-report-table";
 import { requireCurrentUser } from "@/lib/auth";
 import { getOperationalReport } from "@/lib/reports";
@@ -16,6 +17,7 @@ export default async function OosTablePage() {
   return (
     <main className="min-h-screen bg-[var(--background)] text-zinc-950">
       <div className="px-4 py-4">
+        <ReportBreadcrumbs current="Риск out-of-stock" />
         <h1 className="text-3xl font-semibold tracking-tight">
           Риск out-of-stock
         </h1>

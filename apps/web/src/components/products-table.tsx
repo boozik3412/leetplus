@@ -21,6 +21,7 @@ type SortKey =
   | "shelfLifeDays";
 
 type SortDirection = "asc" | "desc";
+const COMPACT_PAGE_SIZE = 50;
 
 function formatCurrency(value: string) {
   return new Intl.NumberFormat("ru-RU", {
@@ -58,6 +59,7 @@ export function ProductsTable({
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [nameFilter, setNameFilter] = useState("");
   const [sourceFilter, setSourceFilter] = useState("all");
+  const [visibleCount, setVisibleCount] = useState(COMPACT_PAGE_SIZE);
   const sources = useMemo(
     () =>
       [...new Set(products.map((product) => product.externalDomain ?? "Без источника"))]
@@ -86,8 +88,21 @@ export function ProductsTable({
       }),
     [filteredProducts, sortDirection, sortKey],
   );
+  const visibleProducts = tableMode
+    ? sortedProducts
+    : sortedProducts.slice(0, visibleCount);
+  const hasMoreRows = !tableMode && visibleProducts.length < sortedProducts.length;
+  const columnCount = tableMode
+    ? canEditProducts
+      ? 11
+      : 10
+    : canEditProducts
+      ? 10
+      : 9;
 
   function setSort(nextKey: SortKey) {
+    setVisibleCount(COMPACT_PAGE_SIZE);
+
     if (nextKey === sortKey) {
       setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
       return;
@@ -110,7 +125,7 @@ export function ProductsTable({
     window.addEventListener("resize", updateTopScrollWidth);
 
     return () => window.removeEventListener("resize", updateTopScrollWidth);
-  }, [sortedProducts.length]);
+  }, [visibleProducts.length]);
 
   function exportRows(format: "excel" | "1c" | "pdf") {
     const rows = sortedProducts.map((product) => productToExportRow(product));
@@ -147,7 +162,10 @@ export function ProductsTable({
               </span>
               <input
                 value={nameFilter}
-                onChange={(event) => setNameFilter(event.target.value)}
+                onChange={(event) => {
+                  setNameFilter(event.target.value);
+                  setVisibleCount(COMPACT_PAGE_SIZE);
+                }}
                 placeholder="Фильтр по названию"
                 className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-2 py-1.5 text-xs outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
               />
@@ -158,7 +176,10 @@ export function ProductsTable({
               </span>
               <select
                 value={sourceFilter}
-                onChange={(event) => setSourceFilter(event.target.value)}
+                onChange={(event) => {
+                  setSourceFilter(event.target.value);
+                  setVisibleCount(COMPACT_PAGE_SIZE);
+                }}
                 className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-2 py-1.5 text-xs outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
               >
                 <option value="all">Все источники</option>
@@ -173,7 +194,7 @@ export function ProductsTable({
 
           <div className="flex items-center gap-2">
             <p className="text-xs text-zinc-500">
-              Показано {sortedProducts.length} из {products.length}
+              Показано {visibleProducts.length} из {sortedProducts.length}
             </p>
             <div className="flex flex-wrap gap-2">
               <button
@@ -204,7 +225,7 @@ export function ProductsTable({
                 onClick={() => window.open("/products/table", "_blank", "noopener,noreferrer")}
                 className="rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50"
               >
-                Открыть в новом окне
+                Открыть полный отчёт
               </button>
             ) : null}
           </div>
@@ -230,7 +251,9 @@ export function ProductsTable({
     >
       <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
         <tr>
-          <SortableTh label="Артикул" sortKey="article" activeKey={sortKey} direction={sortDirection} onSort={setSort} />
+          {tableMode ? (
+            <SortableTh label="Артикул" sortKey="article" activeKey={sortKey} direction={sortDirection} onSort={setSort} />
+          ) : null}
           <SortableTh label="Клуб / источник" sortKey="source" activeKey={sortKey} direction={sortDirection} onSort={setSort} />
           <SortableTh label="Наименование" sortKey="name" activeKey={sortKey} direction={sortDirection} onSort={setSort} />
           <SortableTh label="Категория" sortKey="category" activeKey={sortKey} direction={sortDirection} onSort={setSort} />
@@ -250,7 +273,7 @@ export function ProductsTable({
         {sortedProducts.length === 0 ? (
           <tr>
             <td
-              colSpan={canEditProducts ? 11 : 10}
+              colSpan={columnCount}
               className="px-3 py-8 text-center text-xs text-zinc-500"
             >
               Пока нет товаров. Добавьте первый SKU через форму выше.
@@ -258,7 +281,7 @@ export function ProductsTable({
           </tr>
         ) : null}
 
-        {sortedProducts.map((product) => {
+        {visibleProducts.map((product) => {
           const marginPercent = calculateMarginPercent(
             product.purchasePrice,
             product.salePrice,
@@ -266,14 +289,16 @@ export function ProductsTable({
 
           return (
             <tr key={product.id} className="hover:bg-zinc-50">
-              <td className="w-[132px] whitespace-nowrap px-2 py-2 font-mono text-[10px] text-zinc-600">
-                <ProductInlineEditable
-                  product={product}
-                  field="article"
-                  value={product.article}
-                  canEdit={canEditProducts}
-                />
-              </td>
+              {tableMode ? (
+                <td className="w-[132px] whitespace-nowrap px-2 py-2 font-mono text-[10px] text-zinc-600">
+                  <ProductInlineEditable
+                    product={product}
+                    field="article"
+                    value={product.article}
+                    canEdit={canEditProducts}
+                  />
+                </td>
+              ) : null}
 
               <td className="w-[105px] whitespace-nowrap px-2 py-2 text-[10px] text-zinc-500">
                 {product.externalDomain ?? "—"}
@@ -356,6 +381,19 @@ export function ProductsTable({
       </tbody>
     </table>
       </div>
+      {hasMoreRows ? (
+        <div className="border-t border-zinc-100 bg-white px-3 py-4 text-center">
+          <button
+            type="button"
+            onClick={() =>
+              setVisibleCount((current) => current + COMPACT_PAGE_SIZE)
+            }
+            className="rounded-xl border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+          >
+            Показать ещё
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

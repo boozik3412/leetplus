@@ -1,3 +1,4 @@
+import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
 import { getReplenishmentReport, type ReplenishmentRisk } from "@/lib/reports";
 
@@ -40,6 +41,7 @@ export default async function ReplenishmentTablePage({
   return (
     <main className="min-h-screen bg-[var(--background)] text-zinc-950">
       <div className="px-4 py-4">
+        <ReportBreadcrumbs current="Остатки и потребность" />
         <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="text-sm font-medium text-emerald-700">

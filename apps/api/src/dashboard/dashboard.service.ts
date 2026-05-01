@@ -51,6 +51,10 @@ export type DashboardSalesTrendSegment = {
   revenueSharePercent: number | null;
   revenueDeltaPercent: number | null;
   quantityDeltaPercent: number | null;
+  noSalesSkuCount: number;
+  noSalesSkuDeltaPercent: number | null;
+  outOfStockSkuCount: number;
+  outOfStockSkuDeltaPercent: number | null;
 };
 
 export type DashboardSummary = {
@@ -69,6 +73,13 @@ export type DashboardSummary = {
   averageMarginPercent: number;
   averageFacing: number;
   totalRevenue: number;
+  fullDayRevenueDate: string;
+  fullDayRevenue: number;
+  averageDailyRevenue: number;
+  fullDayRevenueToAveragePercent: number | null;
+  writeOffRevenuePercent: number | null;
+  previousWriteOffRevenuePercent: number | null;
+  writeOffRevenuePercentDelta: number | null;
   grossProfit: number;
   adjustedGrossProfit: number;
   marginPercent: number;
@@ -100,8 +111,14 @@ export class DashboardService {
     const selectedStoreIds = this.resolveStoreIds(query.storeIds);
     const storeFilter =
       selectedStoreIds.length > 0 ? { storeId: { in: selectedStoreIds } } : {};
-    const skuGrouping = query.skuGrouping === 'network' ? 'network' : 'club';
+    const skuGrouping = query.skuGrouping === 'club' ? 'club' : 'network';
     const demandPeriod = this.resolveDemandPeriod();
+    const fullDayPeriod = this.resolveFullDayRevenuePeriod();
+    const previousPeriod = this.resolvePreviousComparablePeriod(
+      period.fromDate,
+      period.toDate,
+      period.mode,
+    );
 
     const [
       tenant,
@@ -116,6 +133,9 @@ export class DashboardService {
       demandSalesFacts,
       inventorySnapshots,
       stockMovements,
+      fullDayRevenueFacts,
+      previousSalesFacts,
+      previousStockMovements,
     ] = await Promise.all([
       this.prisma.tenant.findUnique({
         where: { id: tenantId },
@@ -182,6 +202,7 @@ export class DashboardService {
           },
         },
         select: {
+          productId: true,
           saleDate: true,
           quantity: true,
           revenue: true,
@@ -227,6 +248,7 @@ export class DashboardService {
         select: {
           storeId: true,
           productId: true,
+          snapshotDate: true,
           quantity: true,
         },
         orderBy: {
@@ -240,6 +262,47 @@ export class DashboardService {
           movementDate: {
             gte: period.fromDate,
             lte: period.toDate,
+          },
+        },
+        select: {
+          type: true,
+          amount: true,
+        },
+      }),
+      this.prisma.salesFact.findMany({
+        where: {
+          tenantId,
+          ...storeFilter,
+          saleDate: {
+            gte: fullDayPeriod.currentFromDate,
+            lte: fullDayPeriod.currentToDate,
+          },
+        },
+        select: {
+          saleDate: true,
+          revenue: true,
+        },
+      }),
+      this.prisma.salesFact.findMany({
+        where: {
+          tenantId,
+          ...storeFilter,
+          saleDate: {
+            gte: previousPeriod.fromDate,
+            lte: previousPeriod.toDate,
+          },
+        },
+        select: {
+          revenue: true,
+        },
+      }),
+      this.prisma.stockMovement.findMany({
+        where: {
+          tenantId,
+          ...storeFilter,
+          movementDate: {
+            gte: previousPeriod.fromDate,
+            lte: previousPeriod.toDate,
           },
         },
         select: {
@@ -340,6 +403,8 @@ export class DashboardService {
       period.trendToDate,
       period.labelGranularity,
       period.trendMode,
+      productsForAverages,
+      inventorySnapshots,
     );
     const demand = productsForAverages.map((product) => {
       const sold = demandSoldByProduct.get(product.id) ?? 0;
@@ -356,6 +421,29 @@ export class DashboardService {
         ),
       };
     });
+    const fullDayRevenue = this.fullDayRevenueComparison(
+      fullDayRevenueFacts,
+      fullDayPeriod,
+    );
+    const averageDailyRevenue = this.averageDailyRevenue(
+      totalRevenue,
+      period.fromDate,
+      period.toDate,
+    );
+    const previousRevenue = previousSalesFacts.reduce(
+      (sum, fact) => sum + fact.revenue.toNumber(),
+      0,
+    );
+    const previousMovementImpact =
+      this.stockMovementImpact(previousStockMovements);
+    const writeOffRevenuePercent = this.ratioPercent(
+      movementImpact.writeOffAmount,
+      totalRevenue,
+    );
+    const previousWriteOffRevenuePercent = this.ratioPercent(
+      previousMovementImpact.writeOffAmount,
+      previousRevenue,
+    );
 
     return {
       tenantId,
@@ -373,6 +461,24 @@ export class DashboardService {
       averageMarginPercent: this.round(averageMarginPercent),
       averageFacing: this.round(averageFacing),
       totalRevenue: this.round(totalRevenue),
+      fullDayRevenueDate: this.toDateInputValue(fullDayPeriod.currentFromDate),
+      fullDayRevenue: this.round(fullDayRevenue.current),
+      averageDailyRevenue: this.round(averageDailyRevenue),
+      fullDayRevenueToAveragePercent:
+        averageDailyRevenue > 0
+          ? this.round(
+              ((fullDayRevenue.current - averageDailyRevenue) /
+                averageDailyRevenue) *
+                100,
+            )
+          : null,
+      writeOffRevenuePercent,
+      previousWriteOffRevenuePercent,
+      writeOffRevenuePercentDelta:
+        writeOffRevenuePercent !== null &&
+        previousWriteOffRevenuePercent !== null
+          ? this.round(writeOffRevenuePercent - previousWriteOffRevenuePercent)
+          : null,
       grossProfit: this.round(grossProfit),
       adjustedGrossProfit: this.round(adjustedGrossProfit),
       marginPercent: this.marginPercent(totalCost, totalRevenue),
@@ -451,6 +557,7 @@ export class DashboardService {
           toDate: customToDate,
           trendFromDate: customToDate,
           trendToDate: customToDate,
+          mode: period,
           label: 'Произвольный период',
           labelGranularity: 'day' as const,
           trendMode: 'custom' as const,
@@ -462,6 +569,7 @@ export class DashboardService {
         toDate: customToDate,
         trendFromDate: fromDate,
         trendToDate: customToDate,
+        mode: period,
         label: 'Произвольный период',
         labelGranularity: this.resolveTrendLabelGranularity(
           customToDate.getTime() - fromDate.getTime(),
@@ -482,6 +590,7 @@ export class DashboardService {
       toDate,
       trendFromDate: this.resolveTrendFromDate(period, fromDate),
       trendToDate: toDate,
+      mode: period,
       label,
       labelGranularity: this.resolveTrendLabelGranularityByPeriod(period),
       trendMode: this.resolveTrendModeByPeriod(period),
@@ -511,6 +620,125 @@ export class DashboardService {
     return { fromDate, toDate };
   }
 
+  private resolveFullDayRevenuePeriod() {
+    const now = new Date();
+    const currentFromDate = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1),
+    );
+    const currentToDate = new Date(currentFromDate);
+    currentToDate.setUTCHours(23, 59, 59, 999);
+
+    return {
+      currentFromDate,
+      currentToDate,
+    };
+  }
+
+  private resolvePreviousComparablePeriod(
+    fromDate: Date,
+    toDate: Date,
+    period: DashboardPeriod,
+  ) {
+    const currentFromDate = new Date(fromDate);
+    const currentToDate = new Date(toDate);
+    currentFromDate.setUTCHours(0, 0, 0, 0);
+    currentToDate.setUTCHours(23, 59, 59, 999);
+
+    if (period === 'month') {
+      const previousFromDate = new Date(
+        Date.UTC(
+          currentFromDate.getUTCFullYear(),
+          currentFromDate.getUTCMonth() - 1,
+          1,
+        ),
+      );
+      const previousToDate = new Date(
+        Date.UTC(
+          currentFromDate.getUTCFullYear(),
+          currentFromDate.getUTCMonth(),
+          0,
+          23,
+          59,
+          59,
+          999,
+        ),
+      );
+
+      return {
+        fromDate: previousFromDate,
+        toDate: previousToDate,
+      };
+    }
+
+    const days = Math.max(
+      1,
+      Math.floor(
+        (currentToDate.getTime() - currentFromDate.getTime()) / 86400000,
+      ) + 1,
+    );
+    const previousToDate = new Date(currentFromDate);
+    previousToDate.setUTCDate(previousToDate.getUTCDate() - 1);
+    previousToDate.setUTCHours(23, 59, 59, 999);
+    const previousFromDate = new Date(previousToDate);
+    previousFromDate.setUTCDate(previousFromDate.getUTCDate() - (days - 1));
+    previousFromDate.setUTCHours(0, 0, 0, 0);
+
+    return {
+      fromDate: previousFromDate,
+      toDate: previousToDate,
+    };
+  }
+
+  private fullDayRevenueComparison(
+    facts: {
+      saleDate: Date;
+      revenue: { toNumber: () => number };
+    }[],
+    period: ReturnType<DashboardService['resolveFullDayRevenuePeriod']>,
+  ) {
+    let current = 0;
+
+    facts.forEach((fact) => {
+      const saleTime = fact.saleDate.getTime();
+
+      if (
+        saleTime >= period.currentFromDate.getTime() &&
+        saleTime <= period.currentToDate.getTime()
+      ) {
+        current += fact.revenue.toNumber();
+      }
+    });
+
+    return {
+      current,
+    };
+  }
+
+  private averageDailyRevenue(totalRevenue: number, fromDate: Date, toDate: Date) {
+    return this.averageDailyValue(totalRevenue, fromDate, toDate);
+  }
+
+  private averageDailyValue(value: number, fromDate: Date, toDate: Date) {
+    const from = new Date(fromDate);
+    const to = new Date(toDate);
+    from.setUTCHours(0, 0, 0, 0);
+    to.setUTCHours(0, 0, 0, 0);
+    const days = Math.max(
+      1,
+      Math.floor((to.getTime() - from.getTime()) / 86400000) + 1,
+    );
+
+    return value / days;
+  }
+
+  private ratioPercent(value: number, total: number) {
+    if (total <= 0) {
+      return null;
+    }
+
+    return this.round((value / total) * 100);
+  }
+
   private soldQuantityByProduct(
     salesFacts: {
       productId: string;
@@ -531,6 +759,7 @@ export class DashboardService {
 
   private buildSalesTrend(
     salesFacts: {
+      productId: string;
       saleDate: Date;
       quantity: { toNumber: () => number };
       revenue: { toNumber: () => number };
@@ -544,6 +773,13 @@ export class DashboardService {
     toDate: Date,
     labelGranularity: DashboardTrendGranularity,
     trendMode: DashboardTrendMode,
+    activeProducts: { id: string }[],
+    inventorySnapshots: {
+      storeId: string;
+      productId: string;
+      snapshotDate: Date;
+      quantity: { toNumber: () => number };
+    }[],
   ): DashboardSalesTrendSegment[] {
     const segments =
       trendMode === 'custom'
@@ -568,6 +804,11 @@ export class DashboardService {
       segment.revenue += revenue;
       segment.soldQuantity += fact.quantity.toNumber();
       segment.grossProfit += revenue - cost;
+      segment.soldByProduct.set(
+        fact.productId,
+        (segment.soldByProduct.get(fact.productId) ?? 0) +
+          fact.quantity.toNumber(),
+      );
     });
 
     clubRevenueFacts.forEach((fact) => {
@@ -587,6 +828,27 @@ export class DashboardService {
 
     return segments.map((segment, index) => {
       const previous = segments[index - 1];
+      const stockByProduct = this.latestStockByProductAt(
+        inventorySnapshots,
+        segment.toDate,
+      );
+      const segmentDays = this.periodDays(segment.fromDate, segment.toDate);
+      const noSalesSkuCount = activeProducts.filter((product) => {
+        const stock = stockByProduct.get(product.id) ?? 0;
+
+        return stock > 0 && !segment.soldByProduct.has(product.id);
+      }).length;
+      const outOfStockSkuCount = activeProducts.filter((product) => {
+        const sold = segment.soldByProduct.get(product.id) ?? 0;
+        const averageDailySales = sold / segmentDays;
+        const stock = stockByProduct.get(product.id) ?? 0;
+        const stockDays =
+          averageDailySales > 0 ? stock / averageDailySales : null;
+
+        return averageDailySales > 0 && stockDays !== null && stockDays <= 3;
+      }).length;
+      segment.noSalesSkuCount = noSalesSkuCount;
+      segment.outOfStockSkuCount = outOfStockSkuCount;
 
       return {
         index: segment.index,
@@ -606,6 +868,14 @@ export class DashboardService {
           : null,
         quantityDeltaPercent: previous
           ? this.deltaPercent(segment.soldQuantity, previous.soldQuantity)
+          : null,
+        noSalesSkuCount,
+        noSalesSkuDeltaPercent: previous
+          ? this.deltaPercent(noSalesSkuCount, previous.noSalesSkuCount)
+          : null,
+        outOfStockSkuCount,
+        outOfStockSkuDeltaPercent: previous
+          ? this.deltaPercent(outOfStockSkuCount, previous.outOfStockSkuCount)
           : null,
       };
     });
@@ -674,6 +944,9 @@ export class DashboardService {
       soldQuantity: 0,
       grossProfit: 0,
       clubRevenue: 0,
+      soldByProduct: new Map<string, number>(),
+      noSalesSkuCount: 0,
+      outOfStockSkuCount: 0,
       revenueDeltaPercent: null,
       quantityDeltaPercent: null,
     };
@@ -881,6 +1154,41 @@ export class DashboardService {
     const stockByProduct = new Map<string, number>();
 
     snapshots.forEach((snapshot) => {
+      const snapshotKey = `${snapshot.storeId}:${snapshot.productId}`;
+
+      if (seen.has(snapshotKey)) {
+        return;
+      }
+
+      seen.add(snapshotKey);
+      stockByProduct.set(
+        snapshot.productId,
+        (stockByProduct.get(snapshot.productId) ?? 0) +
+          snapshot.quantity.toNumber(),
+      );
+    });
+
+    return stockByProduct;
+  }
+
+  private latestStockByProductAt(
+    snapshots: {
+      storeId: string;
+      productId: string;
+      snapshotDate: Date;
+      quantity: { toNumber: () => number };
+    }[],
+    atDate: Date,
+  ) {
+    const seen = new Set<string>();
+    const stockByProduct = new Map<string, number>();
+    const atTime = atDate.getTime();
+
+    snapshots.forEach((snapshot) => {
+      if (snapshot.snapshotDate.getTime() > atTime) {
+        return;
+      }
+
       const snapshotKey = `${snapshot.storeId}:${snapshot.productId}`;
 
       if (seen.has(snapshotKey)) {

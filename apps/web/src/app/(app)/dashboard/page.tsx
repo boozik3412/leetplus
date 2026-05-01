@@ -28,6 +28,10 @@ function formatPercent(value: number) {
   return `${value.toFixed(1)}%`;
 }
 
+function formatSignedPercent(value: number) {
+  return `${value > 0 ? "+" : ""}${formatPercent(value)}`;
+}
+
 function formatMoney(value: number) {
   return new Intl.NumberFormat("ru-RU", {
     maximumFractionDigits: 0,
@@ -38,6 +42,20 @@ function formatQuantity(value: number) {
   return new Intl.NumberFormat("ru-RU", {
     maximumFractionDigits: 1,
   }).format(value);
+}
+
+function formatShortDate(value: string) {
+  const date = parseDateInput(value);
+
+  if (!date) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone: "UTC",
+  }).format(date);
 }
 
 function formatDashboardPeriodHighlight(from: string, to: string) {
@@ -75,7 +93,7 @@ export default async function DashboardPage({
     dateTo: searchParam(params.dateTo),
     storeIds: searchParamsArray(params.storeIds),
     skuGrouping:
-      searchParam(params.skuGrouping) === "network" ? "network" : "club",
+      searchParam(params.skuGrouping) === "club" ? "club" : "network",
   } as const;
   const [summary, stores] = await Promise.all([
     getDashboardSummary(filters),
@@ -124,7 +142,13 @@ export default async function DashboardPage({
                 label="Выручка"
                 value={formatMoney(summary.totalRevenue)}
                 caption="оборот за выбранный период"
-              />
+              >
+                <FullDayRevenue
+                  date={summary.fullDayRevenueDate}
+                  revenue={summary.fullDayRevenue}
+                  deltaPercent={summary.fullDayRevenueToAveragePercent}
+                />
+              </HeroMetric>
               <HeroMetric
                 label="Прибыль с потерями"
                 value={formatMoney(summary.adjustedGrossProfit)}
@@ -134,7 +158,12 @@ export default async function DashboardPage({
                     ? "warning"
                     : "good"
                 }
-              />
+              >
+                <WriteOffRevenueShare
+                  percent={summary.writeOffRevenuePercent}
+                  deltaPercent={summary.writeOffRevenuePercentDelta}
+                />
+              </HeroMetric>
             </div>
           </div>
 
@@ -217,11 +246,13 @@ function HeroMetric({
   value,
   caption,
   tone = "neutral",
+  children,
 }: {
   label: string;
   value: string;
   caption: string;
   tone?: "neutral" | "good" | "warning";
+  children?: React.ReactNode;
 }) {
   return (
     <div
@@ -237,6 +268,81 @@ function HeroMetric({
       <p className="text-sm opacity-70">{label}</p>
       <p className="mt-3 text-3xl font-semibold tabular-nums">{value}</p>
       <p className="mt-2 text-sm opacity-70">{caption}</p>
+      {children}
+    </div>
+  );
+}
+
+function FullDayRevenue({
+  date,
+  revenue,
+  deltaPercent,
+}: {
+  date: string;
+  revenue: number;
+  deltaPercent: number | null;
+}) {
+  const deltaTone =
+    deltaPercent === null
+      ? "text-zinc-500"
+      : deltaPercent >= 0
+        ? "text-emerald-600 dark:text-emerald-300"
+        : "text-red-600 dark:text-red-300";
+
+  return (
+    <div className="mt-4 grid gap-2 border-t border-zinc-200/70 pt-3 dark:border-zinc-800/80">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-xs text-zinc-500 dark:text-zinc-400">
+          Полные сутки {formatShortDate(date)}
+        </span>
+        <span className="text-sm font-semibold tabular-nums">
+          {formatMoney(revenue)}
+        </span>
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-xs text-zinc-500 dark:text-zinc-400">
+          К среднесуточной
+        </span>
+        <span className={["text-sm font-semibold tabular-nums", deltaTone].join(" ")}>
+          {deltaPercent === null ? "нет базы" : formatPercent(deltaPercent)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function WriteOffRevenueShare({
+  percent,
+  deltaPercent,
+}: {
+  percent: number | null;
+  deltaPercent: number | null;
+}) {
+  const deltaTone =
+    deltaPercent === null
+      ? "text-zinc-500"
+      : deltaPercent <= 0
+        ? "text-emerald-600 dark:text-emerald-300"
+        : "text-red-600 dark:text-red-300";
+
+  return (
+    <div className="mt-4 grid gap-2 border-t border-zinc-200/70 pt-3 dark:border-zinc-800/80">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-xs text-zinc-500 dark:text-zinc-400">
+          Списания / выручка
+        </span>
+        <span className="text-sm font-semibold tabular-nums text-red-600 dark:text-red-300">
+          {percent === null ? "нет базы" : formatPercent(percent)}
+        </span>
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-xs text-zinc-500 dark:text-zinc-400">
+          К предыдущему периоду
+        </span>
+        <span className={["text-sm font-semibold tabular-nums", deltaTone].join(" ")}>
+          {deltaPercent === null ? "нет базы" : formatSignedPercent(deltaPercent)}
+        </span>
+      </div>
     </div>
   );
 }
@@ -250,9 +356,6 @@ function SalesTrendPanel({
   period: string;
   canShowRevenueShare: boolean;
 }) {
-  const totalRevenue = rows.reduce((sum, row) => sum + row.revenue, 0);
-  const totalQuantity = rows.reduce((sum, row) => sum + row.soldQuantity, 0);
-
   return (
     <section className="mt-6 overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
       <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
@@ -264,26 +367,49 @@ function SalesTrendPanel({
               предыдущему отрезку.
             </p>
           </div>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            Итого: {formatMoney(totalRevenue)} · {formatQuantity(totalQuantity)} шт
-          </p>
         </div>
       </div>
       <div className="grid gap-6 p-5 xl:grid-cols-2">
-        <RevenueTrendChart
-          rows={rows}
-          period={period}
-          canShowShare={canShowRevenueShare}
-        />
-        <TrendChart
-          title="Продано, шт"
-          rows={rows}
-          getValue={(row) => row.soldQuantity}
-          getDelta={(row) => row.quantityDeltaPercent}
-          formatValue={formatQuantity}
-          tone="quantity"
-          period={period}
-        />
+        <div className="grid gap-6">
+          <RevenueTrendChart
+            rows={rows}
+            period={period}
+            canShowShare={canShowRevenueShare}
+          />
+          <TrendChart
+            title="SKU без движения"
+            description="Товары на остатке без продаж в отрезке"
+            rows={rows}
+            getValue={(row) => row.noSalesSkuCount}
+            getDelta={(row) => row.noSalesSkuDeltaPercent}
+            formatValue={formatQuantity}
+            tone="warning"
+            period={period}
+            deltaDirection="lowerGood"
+          />
+        </div>
+        <div className="grid gap-6">
+          <TrendChart
+            title="Продано, шт"
+            rows={rows}
+            getValue={(row) => row.soldQuantity}
+            getDelta={(row) => row.quantityDeltaPercent}
+            formatValue={formatQuantity}
+            tone="quantity"
+            period={period}
+          />
+          <TrendChart
+            title="OOS, SKU"
+            description="SKU с риском out-of-stock"
+            rows={rows}
+            getValue={(row) => row.outOfStockSkuCount}
+            getDelta={(row) => row.outOfStockSkuDeltaPercent}
+            formatValue={formatQuantity}
+            tone="danger"
+            period={period}
+            deltaDirection="lowerGood"
+          />
+        </div>
       </div>
     </section>
   );
@@ -291,35 +417,55 @@ function SalesTrendPanel({
 
 function TrendChart({
   title,
+  description,
   rows,
   getValue,
   getDelta,
   formatValue,
   tone,
   period,
+  deltaDirection = "higherGood",
 }: {
   title: string;
+  description?: string;
   rows: DashboardSalesTrendSegment[];
   getValue: (row: DashboardSalesTrendSegment) => number;
   getDelta: (row: DashboardSalesTrendSegment) => number | null;
   formatValue: (value: number) => string;
-  tone: "money" | "quantity";
+  tone: "money" | "quantity" | "warning" | "danger";
   period: string;
+  deltaDirection?: "higherGood" | "lowerGood";
 }) {
   const maxValue = Math.max(...rows.map(getValue), 1);
-  const colorClass = tone === "money" ? "bg-emerald-500" : "bg-sky-500";
+  const colorClass =
+    tone === "money"
+      ? "bg-emerald-500"
+      : tone === "warning"
+        ? "bg-amber-500"
+        : tone === "danger"
+          ? "bg-red-500"
+          : "bg-sky-500";
 
   return (
     <div className="rounded-3xl border border-zinc-100 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
       <h3 className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
         {title}
       </h3>
+      {description ? (
+        <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+          {description}
+        </p>
+      ) : null}
       <div className="mt-4 grid h-56 grid-cols-8 items-end gap-2">
         {rows.map((row) => {
           const value = getValue(row);
           const height = Math.max(4, (value / maxValue) * 100);
           const delta = getDelta(row);
           const weekday = getDailyWeekday(row.from, period);
+          const isGood =
+            delta !== null &&
+            delta !== 0 &&
+            (deltaDirection === "higherGood" ? delta > 0 : delta < 0);
 
           return (
             <div
@@ -336,7 +482,9 @@ function TrendChart({
                     "mt-1 text-[10px] tabular-nums",
                     delta === null
                       ? "text-zinc-400"
-                      : delta >= 0
+                      : delta === 0
+                        ? "text-zinc-400"
+                        : isGood
                         ? "text-emerald-600 dark:text-emerald-300"
                         : "text-red-600 dark:text-red-300",
                   ].join(" ")}
@@ -577,7 +725,7 @@ function TopSkuTable({
         <h2 className="text-base font-semibold">ТОП-10 SKU по выручке</h2>
         <p className="mt-1 text-sm text-zinc-500">
           {grouping === "network"
-            ? "Товары суммируются по всей сети при совпадении названия или артикула."
+            ? "По умолчанию показаны данные по всей сети с учетом спарсенных товаров."
             : "Позиции показаны отдельно по каждому клубу."}
         </p>
       </div>
@@ -598,9 +746,6 @@ function TopSkuTable({
                     {row.name}
                   </p>
                   {row.isCanonical ? <NetworkSkuBadge /> : null}
-                  <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 font-mono text-[10px] text-zinc-500 dark:bg-zinc-900">
-                    {row.article}
-                  </span>
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400">
                   {grouping === "club" ? (

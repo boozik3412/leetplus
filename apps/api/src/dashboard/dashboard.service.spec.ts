@@ -226,11 +226,13 @@ describe('DashboardService', () => {
       {
         storeId: 'store-1',
         productId: 'product-1',
+        snapshotDate: new Date(),
         quantity: new Prisma.Decimal(1),
       },
       {
         storeId: 'store-1',
         productId: 'product-2',
+        snapshotDate: new Date(),
         quantity: new Prisma.Decimal(20),
       },
     ]);
@@ -258,7 +260,7 @@ describe('DashboardService', () => {
       tenantSlug: 'demo',
       tenantName: 'Demo Cyber Club',
       periodLabel: 'Текущий месяц',
-      skuGrouping: 'club',
+      skuGrouping: 'network',
       selectedStoreIds: [],
       totalSku: 2,
       activeSku: 1,
@@ -286,25 +288,25 @@ describe('DashboardService', () => {
     );
     expect(summary.topSkuByRevenue).toEqual([
       {
-        productId: 'product-1',
+        productId: 'network:energy drink',
         article: 'DRK-001',
         name: 'Energy Drink',
         isCanonical: false,
         canonicalProductName: null,
-        storeId: 'store-1',
-        storeName: 'Club A',
+        storeId: null,
+        storeName: null,
         revenue: 1000,
         grossProfit: 500,
         soldQuantity: 10,
       },
       {
-        productId: 'product-2',
+        productId: 'network:chips',
         article: 'SNK-001',
         name: 'Chips',
         isCanonical: false,
         canonicalProductName: null,
-        storeId: 'store-1',
-        storeName: 'Club A',
+        storeId: null,
+        storeName: null,
         revenue: 240,
         grossProfit: 120,
         soldQuantity: 2,
@@ -439,6 +441,8 @@ describe('DashboardService', () => {
         clubRevenue: 1000,
         revenueSharePercent: 30,
         soldQuantity: 3,
+        noSalesSkuCount: 0,
+        outOfStockSkuCount: 1,
       });
       expect(summary.salesTrend.map((segment) => segment.label)).toEqual([
         '22.04',

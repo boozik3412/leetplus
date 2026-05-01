@@ -1,3 +1,4 @@
+import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
 import {
   getSkuPerformanceReport,
@@ -66,6 +67,7 @@ export default async function AbcTablePage({
   return (
     <main className="min-h-screen bg-[var(--background)] text-zinc-950">
       <div className="px-4 py-4">
+        <ReportBreadcrumbs current="ABC-анализ" />
         <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="text-sm font-medium text-emerald-700">Полный отчёт</p>

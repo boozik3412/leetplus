@@ -57,18 +57,19 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
   return (
     <aside className="flex w-64 shrink-0 flex-col border-r border-zinc-200/80 bg-white/75 shadow-[inset_-1px_0_0_rgb(255_255_255_/_0.5)] backdrop-blur-xl dark:border-zinc-800/80 dark:bg-zinc-950/70">
       <div className="border-b border-zinc-200/80 px-4 py-4 dark:border-zinc-800">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-zinc-950 text-sm font-semibold text-white dark:bg-emerald-400 dark:text-zinc-950">
             LP
           </div>
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-xs font-medium uppercase tracking-wide text-zinc-500">
               LeetPlus
             </p>
-            <p className="mt-0.5 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+            <p className="mt-0.5 truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
               Ассортимент
             </p>
           </div>
+          <ThemeSwitcher variant="compact" />
         </div>
       </div>
       <nav className="flex-1 space-y-1 p-3">
@@ -79,7 +80,6 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
           ))}
       </nav>
       <div className="space-y-3 border-t border-zinc-200/80 p-3 dark:border-zinc-800">
-        <ThemeSwitcher />
         {user ? (
           <div className="space-y-3">
             <div className="rounded-2xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">

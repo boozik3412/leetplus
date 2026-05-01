@@ -25,6 +25,10 @@ export type DashboardSalesTrendSegment = {
   revenueSharePercent: number | null;
   revenueDeltaPercent: number | null;
   quantityDeltaPercent: number | null;
+  noSalesSkuCount: number;
+  noSalesSkuDeltaPercent: number | null;
+  outOfStockSkuCount: number;
+  outOfStockSkuDeltaPercent: number | null;
 };
 
 export type DashboardSummaryFilters = {
@@ -51,6 +55,13 @@ export type DashboardSummary = {
   averageMarginPercent: number;
   averageFacing: number;
   totalRevenue: number;
+  fullDayRevenueDate: string;
+  fullDayRevenue: number;
+  averageDailyRevenue: number;
+  fullDayRevenueToAveragePercent: number | null;
+  writeOffRevenuePercent: number | null;
+  previousWriteOffRevenuePercent: number | null;
+  writeOffRevenuePercentDelta: number | null;
   grossProfit: number;
   adjustedGrossProfit: number;
   marginPercent: number;

@@ -6,5 +6,6 @@ dist
 .env.*.local
 coverage
 logs
+*.log
 .DS_Store
 .vscode

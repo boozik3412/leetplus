@@ -80,6 +80,7 @@ export function LangameSettingsForm({
   const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [domainsError, setDomainsError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
 
@@ -102,6 +103,16 @@ export function LangameSettingsForm({
     setError(null);
     setSuccess(null);
     setSyncResult(null);
+    setDomainsError(null);
+
+    const parsedDomains = parseDomainInput(domains);
+
+    if (!parsedDomains.ok) {
+      setDomainsError(parsedDomains.message);
+      setError(parsedDomains.message);
+      return;
+    }
+
     setIsSaving(true);
 
     try {
@@ -113,10 +124,7 @@ export function LangameSettingsForm({
         body: JSON.stringify({
           tenantName: tenantName.trim(),
           apiKey: apiKey.trim() || undefined,
-          domains: domains
-            .split(/\r?\n/)
-            .map((domain) => domain.trim())
-            .filter(Boolean),
+          domains: parsedDomains.domains,
         }),
       });
       const data = (await response.json()) as unknown;
@@ -357,10 +365,32 @@ export function LangameSettingsForm({
           </span>
           <textarea
             value={domains}
-            onChange={(event) => setDomains(event.target.value)}
+            onChange={(event) => {
+              setDomains(event.target.value);
+              setDomainsError(null);
+            }}
+            placeholder={
+              "Например: 1337.langame.ru, 443.langame.ru\nили каждый домен с новой строки"
+            }
+            aria-invalid={Boolean(domainsError)}
             rows={5}
-            className="mt-2 block w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+            className={[
+              "mt-2 block w-full rounded-xl border bg-white px-3 py-2 text-sm dark:bg-zinc-900",
+              domainsError
+                ? "border-red-400 text-red-900 outline outline-2 outline-red-100 dark:border-red-500 dark:text-red-100 dark:outline-red-950"
+                : "border-zinc-300 dark:border-zinc-700",
+            ].join(" ")}
           />
+          {domainsError ? (
+            <p className="mt-2 text-sm text-red-600 dark:text-red-300">
+              {domainsError}
+            </p>
+          ) : (
+            <p className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+              Формат: домены через запятую с пробелом или каждый домен с новой строки.
+              Без протокола и пути.
+            </p>
+          )}
         </label>
 
         <div className="mt-5 flex flex-wrap gap-3">
@@ -495,6 +525,54 @@ function shiftDateInput(value: string, days: number) {
   date.setUTCDate(date.getUTCDate() + days);
 
   return date.toISOString().slice(0, 10);
+}
+
+type DomainParseResult =
+  | { ok: true; domains: string[] }
+  | { ok: false; message: string };
+
+function parseDomainInput(value: string): DomainParseResult {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return {
+      ok: false,
+      message: "Укажите хотя бы один домен клуба.",
+    };
+  }
+
+  if (/,(\S)/.test(trimmed)) {
+    return {
+      ok: false,
+      message:
+        "Домены через запятую нужно разделять запятой и пробелом: 1337.langame.ru, 443.langame.ru.",
+    };
+  }
+
+  const domains = [
+    ...new Set(
+      trimmed
+        .split(/\r?\n|, /)
+        .map((domain) => domain.trim())
+        .filter(Boolean)
+        .map((domain) => domain.replace(/^https?:\/\//i, ""))
+        .map((domain) => domain.replace(/\/.*$/, "").toLowerCase()),
+    ),
+  ];
+  const invalidDomain = domains.find(
+    (domain) =>
+      !/^(?!-)(?:[a-z0-9-]{1,63}\.)+[a-z]{2,63}$/i.test(domain) ||
+      domain.includes(".."),
+  );
+
+  if (invalidDomain) {
+    return {
+      ok: false,
+      message: `Проверьте домен "${invalidDomain}": нужен формат 1337.langame.ru без https:// и без пути.`,
+    };
+  }
+
+  return { ok: true, domains };
 }
 
 function formatDateLabel(value: string) {

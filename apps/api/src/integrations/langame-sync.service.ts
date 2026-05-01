@@ -24,6 +24,7 @@ import type {
 } from './langame.types';
 
 const DEFAULT_PAGE_LIMIT = 200;
+const MAX_LANGAME_PERIOD_DAYS = 365;
 
 type DiscrepancyLogEntry = {
   entity: 'Product' | 'InventorySnapshot' | 'SalesFact';
@@ -492,131 +493,134 @@ export class LangameSyncService {
       stores.map((store) => [store.externalClubId, store.id]),
     );
     let synced = 0;
-    let page = 1;
 
-    while (true) {
-      const rows = await this.langameClient.listProductExpenses(
-        baseUrl,
-        apiKey,
-        {
-          page,
-          pageLimit: DEFAULT_PAGE_LIMIT,
-          dateFrom: period.from,
-          dateTo: period.to,
-        },
-      );
+    for (const chunk of this.splitPeriodByLangameLimit(period)) {
+      let page = 1;
 
-      for (const row of rows.filter((item) => item.cancel !== 1)) {
-        const productId = productsByExternalId.get(String(row.list_goods_id));
-        const storeId = storesByExternalClubId.get(String(row.list_clubs_id));
+      while (true) {
+        const rows = await this.langameClient.listProductExpenses(
+          baseUrl,
+          apiKey,
+          {
+            page,
+            pageLimit: DEFAULT_PAGE_LIMIT,
+            dateFrom: chunk.from,
+            dateTo: chunk.to,
+          },
+        );
 
-        if (!productId || !storeId) {
-          continue;
+        for (const row of rows.filter((item) => item.cancel !== 1)) {
+          const productId = productsByExternalId.get(String(row.list_goods_id));
+          const storeId = storesByExternalClubId.get(String(row.list_clubs_id));
+
+          if (!productId || !storeId) {
+            continue;
+          }
+
+          const nextRevenue = new Prisma.Decimal(row.price_sale).mul(row.count);
+          const nextCost = new Prisma.Decimal(row.price_purchase ?? 0).mul(
+            row.count,
+          );
+          const nextSaleDate = this.parseLangameDate(row.date);
+          const existing = await this.prisma.salesFact.findUnique({
+            where: {
+              tenantId_externalProvider_externalDomain_externalSaleId: {
+                tenantId,
+                externalProvider: IntegrationProvider.LANGAME,
+                externalDomain: domain,
+                externalSaleId: String(row.id),
+              },
+            },
+            select: {
+              storeId: true,
+              productId: true,
+              saleDate: true,
+              quantity: true,
+              revenue: true,
+              cost: true,
+            },
+          });
+          this.addDiscrepancy(discrepancies, {
+            entity: 'SalesFact',
+            externalId: String(row.id),
+            field: 'storeId',
+            previousValue: existing?.storeId ?? null,
+            nextValue: storeId,
+          });
+          this.addDiscrepancy(discrepancies, {
+            entity: 'SalesFact',
+            externalId: String(row.id),
+            field: 'productId',
+            previousValue: existing?.productId ?? null,
+            nextValue: productId,
+          });
+          this.addDiscrepancy(discrepancies, {
+            entity: 'SalesFact',
+            externalId: String(row.id),
+            field: 'saleDate',
+            previousValue: existing
+              ? this.toDateTimeValue(existing.saleDate)
+              : null,
+            nextValue: this.toDateTimeValue(nextSaleDate),
+          });
+          this.addDiscrepancy(discrepancies, {
+            entity: 'SalesFact',
+            externalId: String(row.id),
+            field: 'quantity',
+            previousValue: existing?.quantity.toNumber() ?? null,
+            nextValue: row.count,
+          });
+          this.addDiscrepancy(discrepancies, {
+            entity: 'SalesFact',
+            externalId: String(row.id),
+            field: 'revenue',
+            previousValue: existing?.revenue.toNumber() ?? null,
+            nextValue: nextRevenue.toNumber(),
+          });
+          this.addDiscrepancy(discrepancies, {
+            entity: 'SalesFact',
+            externalId: String(row.id),
+            field: 'cost',
+            previousValue: existing?.cost.toNumber() ?? null,
+            nextValue: nextCost.toNumber(),
+          });
+          await this.prisma.salesFact.upsert({
+            where: {
+              tenantId_externalProvider_externalDomain_externalSaleId: {
+                tenantId,
+                externalProvider: IntegrationProvider.LANGAME,
+                externalDomain: domain,
+                externalSaleId: String(row.id),
+              },
+            },
+            create: {
+              tenantId,
+              storeId,
+              productId,
+              saleDate: nextSaleDate,
+              quantity: new Prisma.Decimal(row.count),
+              revenue: nextRevenue,
+              cost: nextCost,
+              externalProvider: IntegrationProvider.LANGAME,
+              externalDomain: domain,
+              externalSaleId: String(row.id),
+            },
+            update: {
+              saleDate: nextSaleDate,
+              quantity: new Prisma.Decimal(row.count),
+              revenue: nextRevenue,
+              cost: nextCost,
+            },
+          });
+          synced += 1;
         }
 
-        const nextRevenue = new Prisma.Decimal(row.price_sale).mul(row.count);
-        const nextCost = new Prisma.Decimal(row.price_purchase ?? 0).mul(
-          row.count,
-        );
-        const nextSaleDate = this.parseLangameDate(row.date);
-        const existing = await this.prisma.salesFact.findUnique({
-          where: {
-            tenantId_externalProvider_externalDomain_externalSaleId: {
-              tenantId,
-              externalProvider: IntegrationProvider.LANGAME,
-              externalDomain: domain,
-              externalSaleId: String(row.id),
-            },
-          },
-          select: {
-            storeId: true,
-            productId: true,
-            saleDate: true,
-            quantity: true,
-            revenue: true,
-            cost: true,
-          },
-        });
-        this.addDiscrepancy(discrepancies, {
-          entity: 'SalesFact',
-          externalId: String(row.id),
-          field: 'storeId',
-          previousValue: existing?.storeId ?? null,
-          nextValue: storeId,
-        });
-        this.addDiscrepancy(discrepancies, {
-          entity: 'SalesFact',
-          externalId: String(row.id),
-          field: 'productId',
-          previousValue: existing?.productId ?? null,
-          nextValue: productId,
-        });
-        this.addDiscrepancy(discrepancies, {
-          entity: 'SalesFact',
-          externalId: String(row.id),
-          field: 'saleDate',
-          previousValue: existing
-            ? this.toDateTimeValue(existing.saleDate)
-            : null,
-          nextValue: this.toDateTimeValue(nextSaleDate),
-        });
-        this.addDiscrepancy(discrepancies, {
-          entity: 'SalesFact',
-          externalId: String(row.id),
-          field: 'quantity',
-          previousValue: existing?.quantity.toNumber() ?? null,
-          nextValue: row.count,
-        });
-        this.addDiscrepancy(discrepancies, {
-          entity: 'SalesFact',
-          externalId: String(row.id),
-          field: 'revenue',
-          previousValue: existing?.revenue.toNumber() ?? null,
-          nextValue: nextRevenue.toNumber(),
-        });
-        this.addDiscrepancy(discrepancies, {
-          entity: 'SalesFact',
-          externalId: String(row.id),
-          field: 'cost',
-          previousValue: existing?.cost.toNumber() ?? null,
-          nextValue: nextCost.toNumber(),
-        });
-        await this.prisma.salesFact.upsert({
-          where: {
-            tenantId_externalProvider_externalDomain_externalSaleId: {
-              tenantId,
-              externalProvider: IntegrationProvider.LANGAME,
-              externalDomain: domain,
-              externalSaleId: String(row.id),
-            },
-          },
-          create: {
-            tenantId,
-            storeId,
-            productId,
-            saleDate: nextSaleDate,
-            quantity: new Prisma.Decimal(row.count),
-            revenue: nextRevenue,
-            cost: nextCost,
-            externalProvider: IntegrationProvider.LANGAME,
-            externalDomain: domain,
-            externalSaleId: String(row.id),
-          },
-          update: {
-            saleDate: nextSaleDate,
-            quantity: new Prisma.Decimal(row.count),
-            revenue: nextRevenue,
-            cost: nextCost,
-          },
-        });
-        synced += 1;
-      }
+        if (rows.length < DEFAULT_PAGE_LIMIT) {
+          break;
+        }
 
-      if (rows.length < DEFAULT_PAGE_LIMIT) {
-        break;
+        page += 1;
       }
-
-      page += 1;
     }
 
     return synced;
@@ -643,14 +647,16 @@ export class LangameSyncService {
     const storesByExternalClubId = new Map(
       stores.map((store) => [store.externalClubId, store.id]),
     );
-    const operations = await this.langameClient.listAllOperationsLog(
-      baseUrl,
-      apiKey,
-      {
-        dateFrom: period.from,
-        dateTo: period.to,
-      },
-    );
+    const operations = (
+      await Promise.all(
+        this.splitPeriodByLangameLimit(period).map((chunk) =>
+          this.langameClient.listAllOperationsLog(baseUrl, apiKey, {
+            dateFrom: chunk.from,
+            dateTo: chunk.to,
+          }),
+        ),
+      )
+    ).flat();
     const revenueByStoreAndDate = new Map<
       string,
       {
@@ -844,6 +850,30 @@ export class LangameSyncService {
     return new Date(
       Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
     );
+  }
+
+  private splitPeriodByLangameLimit(period: { from: string; to: string }) {
+    const chunks: { from: string; to: string }[] = [];
+    let cursor = this.parseDateInput(period.from, 'dateFrom');
+    const end = this.parseDateInput(period.to, 'dateTo');
+
+    while (cursor <= end) {
+      const chunkEnd = new Date(cursor);
+      chunkEnd.setUTCDate(chunkEnd.getUTCDate() + MAX_LANGAME_PERIOD_DAYS - 1);
+
+      if (chunkEnd > end) {
+        chunkEnd.setTime(end.getTime());
+      }
+
+      chunks.push({
+        from: this.toDateInputValue(cursor),
+        to: this.toDateInputValue(chunkEnd),
+      });
+      cursor = new Date(chunkEnd);
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+
+    return chunks;
   }
 
   private toDateInputValue(date: Date) {

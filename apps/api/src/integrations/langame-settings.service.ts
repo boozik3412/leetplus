@@ -232,7 +232,7 @@ export class LangameSettingsService {
   }
 
   private normalizeDomains(domains: string[]) {
-    return [
+    const normalized = [
       ...new Set(
         domains
           .map((domain) => domain.trim().replace(/^https?:\/\//, ''))
@@ -240,5 +240,18 @@ export class LangameSettingsService {
           .filter(Boolean),
       ),
     ];
+    const invalidDomain = normalized.find(
+      (domain) =>
+        !/^(?!-)(?:[a-z0-9-]{1,63}\.)+[a-z]{2,63}$/i.test(domain) ||
+        domain.includes('..'),
+    );
+
+    if (invalidDomain) {
+      throw new BadRequestException(
+        `Invalid LAngame domain: ${invalidDomain}. Use domains like 1337.langame.ru without protocol or path.`,
+      );
+    }
+
+    return normalized;
   }
 }

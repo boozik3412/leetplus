@@ -58,16 +58,23 @@ export class LangameClient {
     params: {
       dateFrom: string;
       dateTo: string;
+      clubId?: string | number;
     },
   ) {
+    const queryParams: Record<string, string> = {
+      date_from: params.dateFrom,
+      date_to: params.dateTo,
+    };
+
+    if (params.clubId !== undefined) {
+      queryParams.club_id = String(params.clubId);
+    }
+
     return this.getList<LangameOperationLog>(
       baseUrl,
       '/all_operations_log/list',
       apiKey,
-      {
-        date_from: params.dateFrom,
-        date_to: params.dateTo,
-      },
+      queryParams,
     );
   }
 

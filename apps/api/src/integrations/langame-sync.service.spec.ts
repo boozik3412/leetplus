@@ -312,6 +312,14 @@ describe('LangameSyncService', () => {
     expect(salesUpsert.create.revenue).toEqual(new Prisma.Decimal(100).mul(2));
     expect(salesUpsert.create.cost).toEqual(new Prisma.Decimal('50.00').mul(2));
     expect(prisma.clubRevenueFact.deleteMany).toHaveBeenCalled();
+    expect(client.listAllOperationsLog).toHaveBeenCalledWith(
+      'https://443.langame.ru/public_api',
+      'test-key',
+      {
+        dateFrom: '29.04.2026',
+        dateTo: '29.04.2026',
+      },
+    );
     const [clubRevenueUpsert] = prisma.clubRevenueFact.upsert.mock
       .calls[0] as ClubRevenueFactUpsertCall;
     expect(clubRevenueUpsert.create.tenantId).toBe('tenant-1');

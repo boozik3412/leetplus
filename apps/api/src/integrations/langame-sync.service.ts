@@ -25,6 +25,7 @@ import type {
 
 const DEFAULT_PAGE_LIMIT = 200;
 const MAX_LANGAME_PERIOD_DAYS = 365;
+const MAX_LANGAME_OPERATION_LOG_PERIOD_DAYS = 31;
 
 type DiscrepancyLogEntry = {
   entity: 'Product' | 'InventorySnapshot' | 'SalesFact';
@@ -647,16 +648,19 @@ export class LangameSyncService {
     const storesByExternalClubId = new Map(
       stores.map((store) => [store.externalClubId, store.id]),
     );
-    const operations = (
-      await Promise.all(
-        this.splitPeriodByLangameLimit(period).map((chunk) =>
-          this.langameClient.listAllOperationsLog(baseUrl, apiKey, {
-            dateFrom: chunk.from,
-            dateTo: chunk.to,
-          }),
-        ),
-      )
-    ).flat();
+    const operations: LangameOperationLog[] = [];
+
+    for (const chunk of this.splitPeriodByDays(
+      period,
+      MAX_LANGAME_OPERATION_LOG_PERIOD_DAYS,
+    )) {
+      operations.push(
+        ...(await this.langameClient.listAllOperationsLog(baseUrl, apiKey, {
+          dateFrom: this.toLangameOperationDateValue(chunk.from),
+          dateTo: this.toLangameOperationDateValue(chunk.to),
+        })),
+      );
+    }
     const revenueByStoreAndDate = new Map<
       string,
       {
@@ -853,13 +857,20 @@ export class LangameSyncService {
   }
 
   private splitPeriodByLangameLimit(period: { from: string; to: string }) {
+    return this.splitPeriodByDays(period, MAX_LANGAME_PERIOD_DAYS);
+  }
+
+  private splitPeriodByDays(
+    period: { from: string; to: string },
+    maxDays: number,
+  ) {
     const chunks: { from: string; to: string }[] = [];
     let cursor = this.parseDateInput(period.from, 'dateFrom');
     const end = this.parseDateInput(period.to, 'dateTo');
 
     while (cursor <= end) {
       const chunkEnd = new Date(cursor);
-      chunkEnd.setUTCDate(chunkEnd.getUTCDate() + MAX_LANGAME_PERIOD_DAYS - 1);
+      chunkEnd.setUTCDate(chunkEnd.getUTCDate() + maxDays - 1);
 
       if (chunkEnd > end) {
         chunkEnd.setTime(end.getTime());
@@ -874,6 +885,12 @@ export class LangameSyncService {
     }
 
     return chunks;
+  }
+
+  private toLangameOperationDateValue(value: string) {
+    const [year, month, day] = value.split('-');
+
+    return `${day}.${month}.${year}`;
   }
 
   private toDateInputValue(date: Date) {

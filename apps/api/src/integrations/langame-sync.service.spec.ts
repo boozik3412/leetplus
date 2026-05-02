@@ -67,6 +67,13 @@ type StoreUpsertCall = [
   },
 ];
 
+type ProductUpsertCall = [
+  {
+    create: Record<string, unknown>;
+    update: Record<string, unknown>;
+  },
+];
+
 type SalesFactUpsertCall = [
   {
     create: {
@@ -348,6 +355,19 @@ describe('LangameSyncService', () => {
     expect(syncJobUpdate.data.inventoryCount).toBe(1);
     expect(syncJobUpdate.data.salesCount).toBe(1);
     expect(syncJobUpdate.data.discrepancyCount).toBe(0);
+  });
+
+  it('does not auto-link synced products to canonical groups', async () => {
+    await service.syncTenant(user, {
+      dateFrom: '2026-04-29',
+      dateTo: '2026-04-29',
+    });
+
+    for (const [productUpsert] of prisma.product.upsert.mock
+      .calls as ProductUpsertCall[]) {
+      expect(productUpsert.create).not.toHaveProperty('canonicalProductId');
+      expect(productUpsert.update).not.toHaveProperty('canonicalProductId');
+    }
   });
 
   it('rejects sync without API key', async () => {

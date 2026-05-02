@@ -430,6 +430,9 @@ export class LangameSyncService {
           externalDomain: domain,
           externalProductId: String(product.id),
           externalMissingSince: null,
+          // Canonical grouping is intentionally not assigned during sync:
+          // product merging is allowed only after a fresh parsing analysis
+          // and explicit user confirmation in the utilities workflow.
         },
         update: {
           name: product.name,

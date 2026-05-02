@@ -27,6 +27,12 @@ export type DashboardSalesTrendSegment = {
   quantityDeltaPercent: number | null;
   noSalesSkuCount: number;
   noSalesSkuDeltaPercent: number | null;
+  noSalesSkuCount7: number;
+  noSalesSkuDeltaPercent7: number | null;
+  noSalesSkuCount14: number;
+  noSalesSkuDeltaPercent14: number | null;
+  noSalesSkuCount21: number;
+  noSalesSkuDeltaPercent21: number | null;
   outOfStockSkuCount: number;
   outOfStockSkuDeltaPercent: number | null;
 };

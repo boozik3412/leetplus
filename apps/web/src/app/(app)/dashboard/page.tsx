@@ -7,6 +7,7 @@ import { DashboardFilters } from "@/components/dashboard-filters";
 import { DashboardAutoSync } from "@/components/dashboard-auto-sync";
 import { DashboardQuickSyncButton } from "@/components/dashboard-quick-sync-button";
 import { RevenueTrendChart } from "@/components/revenue-trend-chart";
+import { NoSalesTrendChart } from "@/components/no-sales-trend-chart";
 import { requireCurrentUser } from "@/lib/auth";
 import { getStores } from "@/lib/stores";
 import Link from "next/link";
@@ -100,13 +101,6 @@ export default async function DashboardPage({
     getDashboardSummary(filters),
     getStores(),
   ]);
-  const selectedStoresLabel =
-    summary.selectedStoreIds.length === 0
-      ? "Вся сеть"
-      : stores
-          .filter((store) => summary.selectedStoreIds.includes(store.id))
-          .map((store) => store.name)
-          .join(", ");
   const highlightedPeriod = formatDashboardPeriodHighlight(
     summary.periodFrom,
     summary.periodTo,
@@ -116,16 +110,20 @@ export default async function DashboardPage({
     <main className="px-6 py-8 text-zinc-950 dark:text-zinc-100">
       <DashboardAutoSync />
       <div className="mx-auto max-w-7xl">
-        <section className="overflow-hidden rounded-[2rem] border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+        <section className="overflow-visible rounded-[2rem] border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
           <div className="grid gap-8 p-6 lg:grid-cols-[1.1fr_0.9fr] lg:p-8">
             <div>
-              <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300">
-                <span>{summary.periodLabel} · {selectedStoresLabel}</span>
-                <span className="mx-2 text-emerald-300 dark:text-emerald-700">
-                  ·
-                </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <DashboardFilters
+                  period={filters.period}
+                  dateFrom={summary.periodFrom}
+                  dateTo={summary.periodTo}
+                  skuGrouping={summary.skuGrouping}
+                  stores={stores}
+                  selectedStoreIds={summary.selectedStoreIds}
+                />
                 <DashboardQuickSyncButton />
-              </p>
+              </div>
               <h1 className="mt-3 max-w-3xl text-4xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
                 {summary.tenantName}: операционная картина ассортимента
               </h1>
@@ -200,15 +198,6 @@ export default async function DashboardPage({
             />
           </div>
         </section>
-
-        <DashboardFilters
-          period={filters.period}
-          dateFrom={summary.periodFrom}
-          dateTo={summary.periodTo}
-          skuGrouping={summary.skuGrouping}
-          stores={stores}
-          selectedStoreIds={summary.selectedStoreIds}
-        />
 
         <SalesTrendPanel
           rows={summary.salesTrend}
@@ -381,17 +370,7 @@ function SalesTrendPanel({
             period={period}
             canShowShare={canShowRevenueShare}
           />
-          <TrendChart
-            title="SKU без движения"
-            description="Товары на остатке без продаж в отрезке"
-            rows={rows}
-            getValue={(row) => row.noSalesSkuCount}
-            getDelta={(row) => row.noSalesSkuDeltaPercent}
-            formatValue={formatQuantity}
-            tone="warning"
-            period={period}
-            deltaDirection="lowerGood"
-          />
+          <NoSalesTrendChart rows={rows} />
         </div>
         <div className="grid gap-6">
           <TrendChart

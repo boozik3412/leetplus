@@ -1427,7 +1427,12 @@ export class ReportsService {
         };
       })
       .filter((item) => item.averageDailySales > 0 && item.stockDays <= 3)
-      .sort((a, b) => a.stockDays - b.stockDays)
+      .sort(
+        (a, b) =>
+          a.storeName.localeCompare(b.storeName, 'ru') ||
+          b.averageDailySales - a.averageDailySales ||
+          a.name.localeCompare(b.name, 'ru'),
+      )
       .slice(0, 10);
   }
 

@@ -131,9 +131,9 @@ export function DashboardFilters({
   return (
     <section
       ref={rootRef}
-      className="relative z-10 mt-6 rounded-3xl border border-zinc-200 bg-white/85 p-4 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/80"
+      className="relative z-30 inline-flex max-w-full"
     >
-      <div className="grid gap-3 lg:grid-cols-[1fr_1fr_1fr_auto] lg:items-center">
+      <div className="flex flex-wrap items-center gap-2">
         <FilterButton
           label="Период"
           value={periodLabels[selectedPeriod]}
@@ -157,14 +157,14 @@ export function DashboardFilters({
         <button
           type="button"
           onClick={() => applyFilters()}
-          className="h-full rounded-2xl bg-zinc-950 px-5 py-3 text-sm font-semibold text-white hover:bg-zinc-800 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
+          className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-500/15 dark:text-emerald-300"
         >
           Применить
         </button>
       </div>
 
       {openPanel === "period" ? (
-        <DropdownPanel className="left-4 top-[calc(100%-0.5rem)] w-[min(520px,calc(100vw-3rem))]">
+        <DropdownPanel className="left-0 top-full w-[min(520px,calc(100vw-3rem))]">
           <div className="grid gap-2">
             {(Object.keys(periodLabels) as DashboardPeriod[]).map((value) => (
               <button
@@ -229,7 +229,7 @@ export function DashboardFilters({
       ) : null}
 
       {openPanel === "clubs" ? (
-        <DropdownPanel className="left-4 top-[calc(100%-0.5rem)] w-[min(620px,calc(100vw-3rem))] lg:left-[calc(33.33%+0.25rem)]">
+        <DropdownPanel className="left-0 top-full w-[min(620px,calc(100vw-3rem))]">
           <div className="grid gap-2 sm:grid-cols-2">
             {stores.map((store) => (
               <button
@@ -280,7 +280,7 @@ export function DashboardFilters({
       ) : null}
 
       {openPanel === "grouping" ? (
-        <DropdownPanel className="right-4 top-[calc(100%-0.5rem)] w-[min(520px,calc(100vw-3rem))]">
+        <DropdownPanel className="left-0 top-full w-[min(520px,calc(100vw-3rem))]">
           <div className="grid gap-2">
             {(["club", "network"] as DashboardSkuGrouping[]).map((value) => (
               <button
@@ -338,21 +338,21 @@ function FilterButton({
       type="button"
       onClick={onClick}
       className={[
-        "flex min-h-16 items-center justify-between gap-4 rounded-2xl border px-4 py-3 text-left transition-colors",
+        "inline-flex items-center justify-between gap-2 rounded-full border px-3 py-2 text-left text-sm transition-colors",
         isOpen
           ? "border-zinc-950 bg-zinc-950 text-white dark:border-emerald-400 dark:bg-emerald-400 dark:text-zinc-950"
-          : "border-zinc-200 bg-zinc-50 text-zinc-950 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-50 dark:hover:bg-zinc-900",
+          : "border-zinc-200 bg-zinc-50/80 text-zinc-950 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-50 dark:hover:bg-zinc-900",
       ].join(" ")}
     >
-      <span>
-        <span className="block text-xs font-medium uppercase tracking-wide opacity-60">
+      <span className="min-w-0">
+        <span className="mr-1 text-[10px] font-medium uppercase tracking-wide opacity-60">
           {label}
         </span>
-        <span className="mt-1 line-clamp-1 block text-sm font-semibold">
+        <span className="inline-block max-w-[190px] truncate align-bottom font-semibold">
           {value}
         </span>
       </span>
-      <span className="text-lg leading-none opacity-60">⌄</span>
+      <span className="text-sm leading-none opacity-60">⌄</span>
     </button>
   );
 }
@@ -367,7 +367,7 @@ function DropdownPanel({
   return (
     <div
       className={[
-        "absolute z-20 mt-4 rounded-3xl border border-zinc-200 bg-white p-4 shadow-2xl shadow-zinc-950/10 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/40",
+        "absolute z-40 mt-2 rounded-3xl border border-zinc-200 bg-white p-4 shadow-2xl shadow-zinc-950/10 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/40",
         className,
       ].join(" ")}
     >

@@ -21,7 +21,9 @@ type InlineProductField =
   | "purchasePrice"
   | "salePrice"
   | "facing"
-  | "shelfLifeDays";
+  | "shelfLifeDays"
+  | "categoryId"
+  | "supplierId";
 
 function getErrorMessage(data: unknown) {
   if (
@@ -306,6 +308,113 @@ export function ProductInlineEditable({
   );
 }
 
+export function ProductInlineSelectEditable({
+  product,
+  field,
+  value,
+  displayValue,
+  options,
+  canEdit,
+}: {
+  product: Product;
+  field: "categoryId" | "supplierId";
+  value: string;
+  displayValue: string;
+  options: Array<{ value: string; label: string }>;
+  canEdit: boolean;
+}) {
+  const router = useRouter();
+  const selectRef = useRef<HTMLSelectElement | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const [isSaving, setIsSaving] = useState(false);
+  const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    if (isEditing) {
+      selectRef.current?.focus();
+    }
+  }, [isEditing]);
+
+  async function save(nextValue = draft) {
+    if (nextValue === value) {
+      setIsEditing(false);
+      return;
+    }
+
+    setIsSaving(true);
+    setHasError(false);
+
+    const response = await fetch(`/api/products/${product.id}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(buildInlinePayload(product, field, nextValue)),
+    });
+
+    setIsSaving(false);
+
+    if (!response.ok) {
+      setHasError(true);
+      return;
+    }
+
+    setIsEditing(false);
+    router.refresh();
+  }
+
+  if (!canEdit) {
+    return <span>{displayValue}</span>;
+  }
+
+  if (isEditing) {
+    return (
+      <span className="inline-flex flex-col gap-1">
+        <select
+          ref={selectRef}
+          value={draft}
+          onChange={(event) => {
+            setDraft(event.target.value);
+            void save(event.target.value);
+          }}
+          onBlur={() => setIsEditing(false)}
+          disabled={isSaving}
+          className={[
+            "w-full min-w-32 rounded-md border bg-white px-1.5 py-1 text-[11px] outline-none focus:ring-2",
+            hasError
+              ? "border-red-300 focus:border-red-500 focus:ring-red-100"
+              : "border-zinc-300 focus:border-zinc-500 focus:ring-zinc-200",
+          ].join(" ")}
+        >
+          {options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        {hasError ? (
+          <span className="text-xs text-red-600">Не сохранено</span>
+        ) : null}
+      </span>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onDoubleClick={() => {
+        setDraft(value);
+        setIsEditing(true);
+      }}
+      title="Двойной клик для редактирования"
+      className="rounded-md px-1 py-0.5 text-left leading-4 transition hover:bg-zinc-100"
+    >
+      {displayValue}
+    </button>
+  );
+}
+
 function ProductFields({
   product,
   categories,
@@ -455,6 +564,10 @@ function buildInlinePayload(
 
   if (field === "shelfLifeDays") {
     return { ...base, shelfLifeDays: value ? Number(value) : null };
+  }
+
+  if (field === "categoryId" || field === "supplierId") {
+    return { ...base, [field]: value || null };
   }
 
   return { ...base, [field]: value };

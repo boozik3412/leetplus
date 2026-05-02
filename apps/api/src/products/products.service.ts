@@ -20,18 +20,69 @@ export class ProductsService {
   async findAll(user?: AuthenticatedUser) {
     const { tenantId } = await this.tenantContextService.resolve(user);
 
-    return this.prisma.product.findMany({
-      where: {
-        tenantId,
-        isActive: true,
-      },
-      include: {
-        category: true,
-        supplier: true,
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
+    const [products, productStores] = await Promise.all([
+      this.prisma.product.findMany({
+        where: {
+          tenantId,
+          isActive: true,
+        },
+        include: {
+          category: true,
+          supplier: true,
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+      }),
+      this.prisma.inventorySnapshot.findMany({
+        where: {
+          tenantId,
+        },
+        distinct: ['productId', 'storeId'],
+        select: {
+          productId: true,
+          storeId: true,
+          store: {
+            select: {
+              name: true,
+            },
+          },
+        },
+      }),
+    ]);
+    const storesByProduct = new Map<
+      string,
+      { storeIds: string[]; storeNames: string[] }
+    >();
+
+    productStores.forEach((snapshot) => {
+      const current = storesByProduct.get(snapshot.productId) ?? {
+        storeIds: [],
+        storeNames: [],
+      };
+
+      if (!current.storeIds.includes(snapshot.storeId)) {
+        current.storeIds.push(snapshot.storeId);
+      }
+
+      if (!current.storeNames.includes(snapshot.store.name)) {
+        current.storeNames.push(snapshot.store.name);
+      }
+
+      storesByProduct.set(snapshot.productId, current);
+    });
+
+    return products.map((product) => {
+      const storeInfo = storesByProduct.get(product.id) ?? {
+        storeIds: [],
+        storeNames: [],
+      };
+
+      return {
+        ...product,
+        storeIds: storeInfo.storeIds,
+        storeNames: storeInfo.storeNames.sort((a, b) => a.localeCompare(b)),
+      };
     });
   }
 

@@ -4,8 +4,10 @@ import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
   ProductArchiveButton,
   ProductInlineEditable,
+  ProductInlineSelectEditable,
 } from "@/components/product-actions";
-import type { Product } from "@/lib/products";
+import type { Category, Product, Supplier } from "@/lib/products";
+import type { Store } from "@/lib/stores";
 
 type SortKey =
   | "createdAt"
@@ -44,10 +46,16 @@ function calculateMarginPercent(purchasePrice: string, salePrice: string) {
 
 export function ProductsTable({
   products,
+  categories,
+  suppliers,
+  stores,
   canEditProducts,
   tableMode = false,
 }: {
   products: Product[];
+  categories: Category[];
+  suppliers: Supplier[];
+  stores: Store[];
   canEditProducts: boolean;
   tableMode?: boolean;
 }) {
@@ -58,14 +66,19 @@ export function ProductsTable({
   const [sortKey, setSortKey] = useState<SortKey>("createdAt");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [nameFilter, setNameFilter] = useState("");
-  const [sourceFilter, setSourceFilter] = useState("all");
+  const [selectedStoreIds, setSelectedStoreIds] = useState<string[]>([]);
+  const [isStoreFilterOpen, setIsStoreFilterOpen] = useState(false);
   const [visibleCount, setVisibleCount] = useState(COMPACT_PAGE_SIZE);
-  const sources = useMemo(
+  const storeFilterRef = useRef<HTMLDivElement | null>(null);
+  const selectedStoresLabel = useMemo(
     () =>
-      [...new Set(products.map((product) => product.externalDomain ?? "Без источника"))]
-        .filter(Boolean)
-        .sort((a, b) => a.localeCompare(b, "ru")),
-    [products],
+      selectedStoreIds.length === 0
+        ? "Все клубы"
+        : stores
+            .filter((store) => selectedStoreIds.includes(store.id))
+            .map((store) => store.name)
+            .join(", "),
+    [selectedStoreIds, stores],
   );
   const filteredProducts = useMemo(() => {
     const normalizedNameFilter = nameFilter.trim().toLowerCase();
@@ -74,12 +87,13 @@ export function ProductsTable({
       const matchesName = normalizedNameFilter
         ? product.name.toLowerCase().includes(normalizedNameFilter)
         : true;
-      const source = product.externalDomain ?? "Без источника";
-      const matchesSource = sourceFilter === "all" || source === sourceFilter;
+      const matchesStores =
+        selectedStoreIds.length === 0 ||
+        selectedStoreIds.some((storeId) => product.storeIds.includes(storeId));
 
-      return matchesName && matchesSource;
+      return matchesName && matchesStores;
     });
-  }, [nameFilter, products, sourceFilter]);
+  }, [nameFilter, products, selectedStoreIds]);
   const sortedProducts = useMemo(
     () =>
       [...filteredProducts].sort((a, b) => {
@@ -112,6 +126,15 @@ export function ProductsTable({
     setSortDirection(nextKey === "createdAt" ? "desc" : "asc");
   }
 
+  function toggleStore(storeId: string) {
+    setVisibleCount(COMPACT_PAGE_SIZE);
+    setSelectedStoreIds((current) =>
+      current.includes(storeId)
+        ? current.filter((id) => id !== storeId)
+        : [...current, storeId],
+    );
+  }
+
   useEffect(() => {
     const updateTopScrollWidth = () => {
       if (!topSpacerRef.current || !tableElementRef.current) {
@@ -126,6 +149,26 @@ export function ProductsTable({
 
     return () => window.removeEventListener("resize", updateTopScrollWidth);
   }, [visibleProducts.length]);
+
+  useEffect(() => {
+    if (!isStoreFilterOpen) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      if (
+        event.target instanceof Node &&
+        storeFilterRef.current?.contains(event.target)
+      ) {
+        return;
+      }
+
+      setIsStoreFilterOpen(false);
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [isStoreFilterOpen]);
 
   function exportRows(format: "excel" | "1c" | "pdf") {
     const rows = sortedProducts.map((product) => productToExportRow(product));
@@ -155,7 +198,7 @@ export function ProductsTable({
     <div>
       <div className="border-b border-zinc-200 bg-white px-3 py-3">
         <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
-          <div className="grid gap-2 sm:grid-cols-[minmax(220px,1fr)_190px]">
+          <div className="grid gap-2 sm:grid-cols-[minmax(220px,1fr)_240px]">
             <label className="block">
               <span className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">
                 Наименование
@@ -170,26 +213,64 @@ export function ProductsTable({
                 className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-2 py-1.5 text-xs outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
               />
             </label>
-            <label className="block">
+            <div className="relative" ref={storeFilterRef}>
               <span className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">
-                Клуб / источник
+                Клубы
               </span>
-              <select
-                value={sourceFilter}
-                onChange={(event) => {
-                  setSourceFilter(event.target.value);
-                  setVisibleCount(COMPACT_PAGE_SIZE);
-                }}
-                className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-2 py-1.5 text-xs outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              <button
+                type="button"
+                onClick={() => setIsStoreFilterOpen((current) => !current)}
+                className="mt-1 flex w-full items-center justify-between gap-2 rounded-lg border border-zinc-300 bg-white px-2 py-1.5 text-left text-xs outline-none transition hover:bg-zinc-50 focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
               >
-                <option value="all">Все источники</option>
-                {sources.map((source) => (
-                  <option key={source} value={source}>
-                    {source}
-                  </option>
-                ))}
-              </select>
-            </label>
+                <span className="truncate">{selectedStoresLabel}</span>
+                <span className="text-zinc-400">⌄</span>
+              </button>
+              {isStoreFilterOpen ? (
+                <div className="absolute left-0 top-full z-30 mt-2 w-[min(360px,calc(100vw-3rem))] rounded-2xl border border-zinc-200 bg-white p-3 shadow-2xl shadow-zinc-950/10 dark:border-zinc-800 dark:bg-zinc-950">
+                  <div className="grid max-h-72 gap-2 overflow-y-auto">
+                    {stores.map((store) => (
+                      <button
+                        key={store.id}
+                        type="button"
+                        onClick={() => toggleStore(store.id)}
+                        className={[
+                          "flex items-center gap-2 rounded-xl border px-3 py-2 text-left text-xs transition",
+                          selectedStoreIds.includes(store.id)
+                            ? "border-emerald-500/70 bg-emerald-500/15 text-emerald-700 dark:text-emerald-200"
+                            : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200",
+                        ].join(" ")}
+                      >
+                        <span
+                          className={[
+                            "h-3 w-3 rounded border",
+                            selectedStoreIds.includes(store.id)
+                              ? "border-emerald-500 bg-emerald-500"
+                              : "border-zinc-400",
+                          ].join(" ")}
+                        />
+                        <span>{store.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="mt-3 flex items-center justify-between border-t border-zinc-100 pt-3 text-xs dark:border-zinc-800">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedStoreIds([])}
+                      className="font-medium text-zinc-700 underline underline-offset-4 dark:text-zinc-200"
+                    >
+                      Очистить
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsStoreFilterOpen(false)}
+                      className="rounded-lg bg-emerald-500 px-3 py-1.5 font-semibold text-zinc-950"
+                    >
+                      Готово
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
@@ -220,13 +301,12 @@ export function ProductsTable({
               </button>
             </div>
             {!tableMode ? (
-              <button
-                type="button"
-                onClick={() => window.open("/products/table", "_blank", "noopener,noreferrer")}
+              <a
+                href="/products/table"
                 className="rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50"
               >
                 Открыть полный отчёт
-              </button>
+              </a>
             ) : null}
           </div>
         </div>
@@ -301,7 +381,7 @@ export function ProductsTable({
               ) : null}
 
               <td className="w-[105px] whitespace-nowrap px-2 py-2 text-[10px] text-zinc-500">
-                {product.externalDomain ?? "—"}
+                {productStoreLabel(product)}
               </td>
 
               <td className="w-[230px] px-2 py-2 font-medium leading-4 text-zinc-950">
@@ -314,11 +394,37 @@ export function ProductsTable({
               </td>
 
               <td className="w-[95px] px-2 py-2 text-zinc-700">
-                {product.category?.name ?? "—"}
+                <ProductInlineSelectEditable
+                  product={product}
+                  field="categoryId"
+                  value={product.categoryId ?? ""}
+                  displayValue={product.category?.name ?? "—"}
+                  options={[
+                    { value: "", label: "Без категории" },
+                    ...categories.map((category) => ({
+                      value: category.id,
+                      label: category.name,
+                    })),
+                  ]}
+                  canEdit={canEditProducts}
+                />
               </td>
 
               <td className="w-[95px] px-2 py-2 text-zinc-700">
-                {product.supplier?.name ?? "—"}
+                <ProductInlineSelectEditable
+                  product={product}
+                  field="supplierId"
+                  value={product.supplierId ?? ""}
+                  displayValue={product.supplier?.name ?? "—"}
+                  options={[
+                    { value: "", label: "Без поставщика" },
+                    ...suppliers.map((supplier) => ({
+                      value: supplier.id,
+                      label: supplier.name,
+                    })),
+                  ]}
+                  canEdit={canEditProducts}
+                />
               </td>
 
               <td className="w-[90px] whitespace-nowrap px-2 py-2 text-right text-zinc-700">
@@ -464,10 +570,18 @@ function compareProducts(a: Product, b: Product, sortKey: SortKey) {
   }
 
   if (sortKey === "source") {
-    return (a.externalDomain ?? "").localeCompare(b.externalDomain ?? "", "ru");
+    return productStoreLabel(a).localeCompare(productStoreLabel(b), "ru");
   }
 
   return a[sortKey].localeCompare(b[sortKey], "ru");
+}
+
+function productStoreLabel(product: Product) {
+  if (product.storeNames.length > 0) {
+    return product.storeNames.join(", ");
+  }
+
+  return product.externalDomain ?? "—";
 }
 
 type ExportRow = {
@@ -499,7 +613,7 @@ const exportHeaders: { key: keyof ExportRow; label: string }[] = [
 function productToExportRow(product: Product): ExportRow {
   return {
     article: product.article,
-    source: product.externalDomain ?? "",
+    source: productStoreLabel(product),
     name: product.name,
     category: product.category?.name ?? "",
     supplier: product.supplier?.name ?? "",
@@ -520,8 +634,11 @@ function downloadFile(filename: string, content: string, type: string) {
   const link = document.createElement("a");
   link.href = url;
   link.download = filename;
+  link.style.display = "none";
+  document.body.appendChild(link);
   link.click();
-  URL.revokeObjectURL(url);
+  document.body.removeChild(link);
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 function toCsv(rows: ExportRow[]) {

@@ -4,6 +4,8 @@ export type Store = {
   id: string;
   name: string;
   address: string | null;
+  externalDomain?: string | null;
+  externalClubId?: string | null;
   isActive: boolean;
 };
 

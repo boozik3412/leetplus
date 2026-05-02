@@ -95,3 +95,20 @@ body::before {
 .dark textarea::placeholder {
   color: #71717a;
 }
+
+.dark .hover\:bg-zinc-50:hover,
+.dark .hover\:bg-zinc-100:hover,
+.dark .hover\:bg-zinc-800:hover,
+.dark .hover\:bg-zinc-900:hover,
+.dark .dark\:hover\:bg-zinc-900:hover {
+  background-color: rgb(39 47 61 / 0.55) !important;
+}
+
+.dark .dark\:hover\:bg-emerald-300:hover,
+.dark .hover\:bg-emerald-500\/15:hover {
+  background-color: rgb(16 185 129 / 0.22) !important;
+}
+
+.dark tr.hover\:bg-zinc-50:hover {
+  background-color: rgb(24 29 38 / 0.72) !important;
+}

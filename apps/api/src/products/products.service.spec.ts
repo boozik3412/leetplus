@@ -11,6 +11,9 @@ type ProductsPrismaMock = {
     create: jest.Mock;
     update: jest.Mock;
   };
+  inventorySnapshot: {
+    findMany: jest.Mock;
+  };
   category: {
     findFirst: jest.Mock;
   };
@@ -30,6 +33,9 @@ function createPrismaMock(): ProductsPrismaMock {
       findFirst: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+    },
+    inventorySnapshot: {
+      findMany: jest.fn(),
     },
     category: {
       findFirst: jest.fn(),
@@ -69,6 +75,7 @@ describe('ProductsService', () => {
 
   it('filters product list by resolved tenant and active status', async () => {
     prisma.product.findMany.mockResolvedValue([]);
+    prisma.inventorySnapshot.findMany.mockResolvedValue([]);
 
     await service.findAll();
 
@@ -79,6 +86,12 @@ describe('ProductsService', () => {
           tenantId: 'tenant-demo',
           isActive: true,
         },
+      }),
+    );
+    expect(prisma.inventorySnapshot.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { tenantId: 'tenant-demo' },
+        distinct: ['productId', 'storeId'],
       }),
     );
   });

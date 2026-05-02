@@ -7,20 +7,35 @@ import type { ProductOosExclusionType } from "@/lib/reports";
 export function OosExclusionActions({ productId }: { productId: string }) {
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
+  const [appliedLabel, setAppliedLabel] = useState<string | null>(null);
 
   async function addExclusion(type: ProductOosExclusionType) {
     setIsSaving(true);
 
     try {
-      await fetch("/api/reports/oos-exclusions", {
+      const response = await fetch("/api/reports/oos-exclusions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ productId, type }),
       });
+
+      if (!response.ok) {
+        return;
+      }
+
+      setAppliedLabel(type === "SERVICE" ? "Сделано услугой" : "В исключении");
       router.refresh();
     } finally {
       setIsSaving(false);
     }
+  }
+
+  if (appliedLabel) {
+    return (
+      <p className="mt-3 text-xs font-medium text-emerald-700 dark:text-emerald-300">
+        {appliedLabel}. Обновляем рекомендации...
+      </p>
+    );
   }
 
   return (

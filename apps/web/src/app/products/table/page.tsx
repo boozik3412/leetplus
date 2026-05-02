@@ -1,12 +1,17 @@
 import { ProductsTable } from "@/components/products-table";
 import { requireCurrentUser } from "@/lib/auth";
+import { getCategories, getSuppliers } from "@/lib/catalog";
 import { can } from "@/lib/permissions";
 import { getProducts } from "@/lib/products";
+import { getStores } from "@/lib/stores";
 
 export default async function ProductsTablePage() {
-  const [user, products] = await Promise.all([
+  const [user, products, categories, suppliers, stores] = await Promise.all([
     requireCurrentUser(),
     getProducts(),
+    getCategories(),
+    getSuppliers(),
+    getStores(),
   ]);
   const canEditProducts = can(user, "edit_products");
 
@@ -37,6 +42,9 @@ export default async function ProductsTablePage() {
 
       <ProductsTable
         products={products}
+        categories={categories}
+        suppliers={suppliers}
+        stores={stores}
         canEditProducts={canEditProducts}
         tableMode
       />

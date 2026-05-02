@@ -38,6 +38,9 @@ type DashboardTrendGranularity = 'day' | 'week' | 'month' | 'quarter' | 'year';
 type DashboardTrendMode = DashboardTrendGranularity | 'custom';
 
 const DEMAND_PERIOD_DAYS = 21;
+const NO_SALES_PERIOD_DAYS = [7, 14, 21] as const;
+
+type NoSalesPeriodDays = (typeof NO_SALES_PERIOD_DAYS)[number];
 
 export type DashboardSalesTrendSegment = {
   index: number;
@@ -53,6 +56,12 @@ export type DashboardSalesTrendSegment = {
   quantityDeltaPercent: number | null;
   noSalesSkuCount: number;
   noSalesSkuDeltaPercent: number | null;
+  noSalesSkuCount7: number;
+  noSalesSkuDeltaPercent7: number | null;
+  noSalesSkuCount14: number;
+  noSalesSkuDeltaPercent14: number | null;
+  noSalesSkuCount21: number;
+  noSalesSkuDeltaPercent21: number | null;
   outOfStockSkuCount: number;
   outOfStockSkuDeltaPercent: number | null;
 };
@@ -199,7 +208,7 @@ export class DashboardService {
           isCanceled: false,
           ...storeFilter,
           saleDate: {
-            gte: period.trendFromDate,
+            gte: this.noSalesTrendFromDate(period.trendFromDate),
             lte: period.trendToDate,
           },
         },
@@ -439,8 +448,9 @@ export class DashboardService {
       (sum, fact) => sum + fact.revenue.toNumber(),
       0,
     );
-    const previousMovementImpact =
-      this.stockMovementImpact(previousStockMovements);
+    const previousMovementImpact = this.stockMovementImpact(
+      previousStockMovements,
+    );
     const writeOffRevenuePercent = this.ratioPercent(
       movementImpact.writeOffAmount,
       totalRevenue,
@@ -719,7 +729,11 @@ export class DashboardService {
     };
   }
 
-  private averageDailyRevenue(totalRevenue: number, fromDate: Date, toDate: Date) {
+  private averageDailyRevenue(
+    totalRevenue: number,
+    fromDate: Date,
+    toDate: Date,
+  ) {
     return this.averageDailyValue(totalRevenue, fromDate, toDate);
   }
 
@@ -838,11 +852,13 @@ export class DashboardService {
         segment.toDate,
       );
       const segmentDays = this.periodDays(segment.fromDate, segment.toDate);
-      const noSalesSkuCount = activeProducts.filter((product) => {
-        const stock = stockByProduct.get(product.id) ?? 0;
-
-        return stock > 0 && !segment.soldByProduct.has(product.id);
-      }).length;
+      const noSalesCounts = this.noSalesCountsByPeriod(
+        activeProducts,
+        stockByProduct,
+        salesFacts,
+        segment.toDate,
+      );
+      const noSalesSkuCount = noSalesCounts[7];
       const outOfStockSkuCount = activeProducts.filter((product) => {
         const sold = segment.soldByProduct.get(product.id) ?? 0;
         const averageDailySales = sold / segmentDays;
@@ -853,6 +869,9 @@ export class DashboardService {
         return averageDailySales > 0 && stockDays !== null && stockDays <= 3;
       }).length;
       segment.noSalesSkuCount = noSalesSkuCount;
+      segment.noSalesSkuCount7 = noSalesCounts[7];
+      segment.noSalesSkuCount14 = noSalesCounts[14];
+      segment.noSalesSkuCount21 = noSalesCounts[21];
       segment.outOfStockSkuCount = outOfStockSkuCount;
 
       return {
@@ -877,6 +896,18 @@ export class DashboardService {
         noSalesSkuCount,
         noSalesSkuDeltaPercent: previous
           ? this.deltaPercent(noSalesSkuCount, previous.noSalesSkuCount)
+          : null,
+        noSalesSkuCount7: noSalesCounts[7],
+        noSalesSkuDeltaPercent7: previous
+          ? this.deltaPercent(noSalesCounts[7], previous.noSalesSkuCount7)
+          : null,
+        noSalesSkuCount14: noSalesCounts[14],
+        noSalesSkuDeltaPercent14: previous
+          ? this.deltaPercent(noSalesCounts[14], previous.noSalesSkuCount14)
+          : null,
+        noSalesSkuCount21: noSalesCounts[21],
+        noSalesSkuDeltaPercent21: previous
+          ? this.deltaPercent(noSalesCounts[21], previous.noSalesSkuCount21)
           : null,
         outOfStockSkuCount,
         outOfStockSkuDeltaPercent: previous
@@ -951,6 +982,9 @@ export class DashboardService {
       clubRevenue: 0,
       soldByProduct: new Map<string, number>(),
       noSalesSkuCount: 0,
+      noSalesSkuCount7: 0,
+      noSalesSkuCount14: 0,
+      noSalesSkuCount21: 0,
       outOfStockSkuCount: 0,
       revenueDeltaPercent: null,
       quantityDeltaPercent: null,
@@ -977,11 +1011,11 @@ export class DashboardService {
     }
 
     if (granularity === 'quarter') {
-      return `Q${Math.floor(date.getUTCMonth() / 3) + 1}.${date.getUTCFullYear()}`;
+      return `Q${Math.floor(date.getUTCMonth() / 3) + 1}.${this.formatShortYear(date)}`;
     }
 
     if (granularity === 'month') {
-      return `${this.pad2(date.getUTCMonth() + 1)}.${date.getUTCFullYear()}`;
+      return `${this.formatShortMonth(date)}.${this.formatShortYear(date)}`;
     }
 
     if (granularity === 'week') {
@@ -991,6 +1025,65 @@ export class DashboardService {
     }
 
     return `${this.pad2(date.getUTCDate())}.${this.pad2(date.getUTCMonth() + 1)}`;
+  }
+
+  private noSalesTrendFromDate(trendFromDate: Date) {
+    const maxDays = Math.max(...NO_SALES_PERIOD_DAYS);
+    const fromDate = new Date(trendFromDate);
+    fromDate.setUTCDate(fromDate.getUTCDate() - (maxDays - 1));
+    fromDate.setUTCHours(0, 0, 0, 0);
+    return fromDate;
+  }
+
+  private noSalesCountsByPeriod(
+    activeProducts: Array<{ id: string }>,
+    stockByProduct: Map<string, number>,
+    salesFacts: Array<{ productId: string; saleDate: Date }>,
+    toDate: Date,
+  ): Record<NoSalesPeriodDays, number> {
+    return NO_SALES_PERIOD_DAYS.reduce(
+      (acc, days) => {
+        const fromDate = new Date(toDate);
+        fromDate.setUTCDate(fromDate.getUTCDate() - (days - 1));
+        fromDate.setUTCHours(0, 0, 0, 0);
+        const soldProductIds = new Set(
+          salesFacts
+            .filter(
+              (fact) => fact.saleDate >= fromDate && fact.saleDate <= toDate,
+            )
+            .map((fact) => fact.productId),
+        );
+
+        acc[days] = activeProducts.filter((product) => {
+          const stock = stockByProduct.get(product.id) ?? 0;
+          return stock > 0 && !soldProductIds.has(product.id);
+        }).length;
+
+        return acc;
+      },
+      {} as Record<NoSalesPeriodDays, number>,
+    );
+  }
+
+  private formatShortMonth(date: Date) {
+    return [
+      'янв',
+      'фев',
+      'мар',
+      'апр',
+      'май',
+      'июн',
+      'июл',
+      'авг',
+      'сен',
+      'окт',
+      'ноя',
+      'дек',
+    ][date.getUTCMonth()];
+  }
+
+  private formatShortYear(date: Date) {
+    return String(date.getUTCFullYear()).slice(-2);
   }
 
   private resolveTrendLabelGranularity(milliseconds: number) {

@@ -21,6 +21,8 @@ export type Product = {
   isActive: boolean;
   createdAt: string;
   externalDomain: string | null;
+  storeIds: string[];
+  storeNames: string[];
   categoryId: string | null;
   supplierId: string | null;
   category: Category | null;

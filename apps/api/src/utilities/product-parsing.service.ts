@@ -11,6 +11,7 @@ type ProductForParsing = {
   externalDomain: string | null;
   sourceLabel: string;
   canonicalProductId: string | null;
+  canonicalProductName: string | null;
 };
 
 type ParsedProductName = {
@@ -44,6 +45,8 @@ type ProductParsingRationale = {
     name: string;
     article: string;
     sourceLabel: string;
+    canonicalProductId: string | null;
+    canonicalProductName: string | null;
     parsed: {
       brand: string | null;
       volume: string | null;
@@ -258,6 +261,11 @@ export class ProductParsingService {
           article: true,
           externalDomain: true,
           canonicalProductId: true,
+          canonicalProduct: {
+            select: {
+              name: true,
+            },
+          },
         },
       }),
       this.prisma.store.findMany({
@@ -282,6 +290,7 @@ export class ProductParsingService {
     });
     const productsForParsing = products.map((product) => ({
       ...product,
+      canonicalProductName: product.canonicalProduct?.name ?? null,
       sourceLabel: this.sourceLabel(
         product.externalDomain,
         sourceNamesByDomain.get(product.externalDomain ?? '') ?? [],
@@ -536,6 +545,8 @@ export class ProductParsingService {
         name: product.name,
         article: product.article,
         sourceLabel: product.sourceLabel,
+        canonicalProductId: product.canonicalProductId,
+        canonicalProductName: product.canonicalProductName,
         parsed: {
           brand: parsedProduct.brand,
           volume:

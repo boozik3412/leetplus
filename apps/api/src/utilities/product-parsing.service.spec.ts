@@ -40,6 +40,11 @@ type SuggestionCreateCall = [
       productIds: string[];
       rationale: {
         warnings: string[];
+        products: {
+          id: string;
+          canonicalProductId: string | null;
+          canonicalProductName: string | null;
+        }[];
       };
     };
   },
@@ -141,6 +146,7 @@ describe('ProductParsingService', () => {
         article: 'LG-443-10',
         externalDomain: '443.langame.ru',
         canonicalProductId: 'canonical-1',
+        canonicalProduct: { name: 'ADRENALINE Rush 500ml can' },
       },
       {
         id: 'product-new',
@@ -148,6 +154,7 @@ describe('ProductParsingService', () => {
         article: 'LG-46-99',
         externalDomain: '46.langamepro.ru',
         canonicalProductId: null,
+        canonicalProduct: null,
       },
     ]);
     prisma.store.findMany.mockResolvedValue([]);
@@ -168,6 +175,20 @@ describe('ProductParsingService', () => {
     ]);
     expect(suggestionCreate.data.rationale.warnings).toContain(
       'Часть товаров уже привязана к сетевому SKU',
+    );
+    expect(suggestionCreate.data.rationale.products).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'product-existing',
+          canonicalProductId: 'canonical-1',
+          canonicalProductName: 'ADRENALINE Rush 500ml can',
+        }),
+        expect.objectContaining({
+          id: 'product-new',
+          canonicalProductId: null,
+          canonicalProductName: null,
+        }),
+      ]),
     );
   });
 

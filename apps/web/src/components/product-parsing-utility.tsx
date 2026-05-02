@@ -313,44 +313,68 @@ function SuggestionCard({
             Товары в группе
           </p>
           <div className="mt-2 grid gap-2">
-            {suggestion.rationale.products.map((product) => (
-              <label
-                key={product.id}
-                className="flex items-start gap-3 rounded-xl border border-zinc-100 bg-zinc-50 px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900/60"
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedProductIds.includes(product.id)}
-                  onChange={() => toggleProduct(product.id)}
-                  className="mt-0.5 h-4 w-4 rounded border-zinc-300"
-                />
-                <span>
-                  <span className="font-medium">
-                    {product.name}
+            {suggestion.rationale.products.map((product) => {
+              const isLinkedToCanonical = Boolean(product.canonicalProductId);
+
+              return (
+                <label
+                  key={product.id}
+                  title={
+                    isLinkedToCanonical
+                      ? "Эта позиция уже была привязана к сетевому SKU в предыдущем парсинге"
+                      : undefined
+                  }
+                  className={[
+                    "flex items-start gap-3 rounded-xl border px-3 py-2 text-sm",
+                    isLinkedToCanonical
+                      ? "border-amber-300 bg-amber-50/80 dark:border-amber-800/80 dark:bg-amber-950/30"
+                      : "border-zinc-100 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/60",
+                  ].join(" ")}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedProductIds.includes(product.id)}
+                    onChange={() => toggleProduct(product.id)}
+                    className="mt-0.5 h-4 w-4 rounded border-zinc-300"
+                  />
+                  <span>
+                    <span className="flex flex-wrap items-center gap-2 font-medium">
+                      <span>{product.name}</span>
+                      {isLinkedToCanonical ? (
+                        <span className="rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-800 dark:border-amber-700 dark:bg-amber-900/60 dark:text-amber-100">
+                          Уже в сетевом SKU
+                        </span>
+                      ) : null}
+                    </span>
+                    <span className="mt-0.5 block text-xs text-zinc-500">
+                      {product.sourceLabel} · {product.article}
+                    </span>
+                    {isLinkedToCanonical ? (
+                      <span className="mt-1 block text-xs font-medium text-amber-700 dark:text-amber-300">
+                        Привязан к: {product.canonicalProductName ?? "сетевой SKU"}
+                      </span>
+                    ) : null}
+                    <span className="mt-1 block text-xs text-zinc-500">
+                      {[
+                        product.parsed.brand,
+                        product.parsed.volume,
+                        product.parsed.flavor,
+                        product.parsed.variant,
+                        product.parsed.packageType,
+                        product.parsed.productKind === "hookah-service"
+                          ? "услуга / кальян"
+                          : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                      {product.parsed.residualTokens.length > 0
+                        ? ` · остаток: ${product.parsed.residualTokens.join(", ")}`
+                        : ""}
+                    </span>
                   </span>
-                  <span className="mt-0.5 block text-xs text-zinc-500">
-                    {product.sourceLabel} · {product.article}
-                  </span>
-                  <span className="mt-1 block text-xs text-zinc-500">
-                    {[
-                      product.parsed.brand,
-                      product.parsed.volume,
-                      product.parsed.flavor,
-                      product.parsed.variant,
-                      product.parsed.packageType,
-                      product.parsed.productKind === "hookah-service"
-                        ? "услуга / кальян"
-                        : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                    {product.parsed.residualTokens.length > 0
-                      ? ` · остаток: ${product.parsed.residualTokens.join(", ")}`
-                      : ""}
-                  </span>
-                </span>
-              </label>
-            ))}
+                </label>
+              );
+            })}
           </div>
         </div>
       </div>

@@ -23,6 +23,8 @@ export type ProductParsingSuggestion = {
       name: string;
       article: string;
       sourceLabel: string;
+      canonicalProductId: string | null;
+      canonicalProductName: string | null;
       parsed: {
         brand: string | null;
         volume: string | null;

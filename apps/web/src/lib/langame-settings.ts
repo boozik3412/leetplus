@@ -7,6 +7,7 @@ export type LangameSourceSettings = {
   baseUrl: string;
   isActive: boolean;
   lastSyncedAt: string | null;
+  lastSyncedDate: string | null;
 };
 
 export type LangameSettings = {

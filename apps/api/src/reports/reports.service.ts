@@ -445,6 +445,7 @@ export class ReportsService {
       this.prisma.salesFact.findMany({
         where: {
           tenantId,
+          isCanceled: false,
           ...storeFilter,
           saleDate: {
             gte: period.fromDate,
@@ -475,6 +476,7 @@ export class ReportsService {
       this.prisma.salesFact.findMany({
         where: {
           tenantId,
+          isCanceled: false,
           ...storeFilter,
           saleDate: {
             gte: demandPeriod.fromDate,
@@ -689,6 +691,7 @@ export class ReportsService {
     const salesFacts = await this.prisma.salesFact.findMany({
       where: {
         tenantId,
+        isCanceled: false,
         ...storeFilter,
         saleDate: {
           gte: period.fromDate,
@@ -874,6 +877,7 @@ export class ReportsService {
       this.prisma.salesFact.findMany({
         where: {
           tenantId,
+          isCanceled: false,
           ...storeFilter,
           saleDate: {
             gte: period.fromDate,
@@ -1064,6 +1068,7 @@ export class ReportsService {
         this.prisma.salesFact.findMany({
           where: {
             tenantId,
+            isCanceled: false,
             ...storeFilter,
             saleDate: {
               gte: demandPeriod.fromDate,

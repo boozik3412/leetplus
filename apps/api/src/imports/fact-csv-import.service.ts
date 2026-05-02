@@ -313,6 +313,16 @@ export class FactCsvImportService {
       const results: unknown[] = [];
 
       for (const row of preview.rows) {
+        const [product, store] = await Promise.all([
+          tx.product.findUnique({
+            where: { id: row.productId },
+            select: { name: true },
+          }),
+          tx.store.findUnique({
+            where: { id: row.storeId },
+            select: { name: true },
+          }),
+        ]);
         const existing = await tx.salesFact.findFirst({
           where: {
             tenantId,
@@ -332,6 +342,10 @@ export class FactCsvImportService {
                 quantity: new Prisma.Decimal(row.quantity),
                 revenue: new Prisma.Decimal(row.revenue),
                 cost: new Prisma.Decimal(row.cost),
+                productNameAtSale: product?.name ?? null,
+                storeNameAtSale: store?.name ?? null,
+                isCanceled: false,
+                canceledAt: null,
               },
             }),
           );
@@ -346,6 +360,8 @@ export class FactCsvImportService {
                 quantity: new Prisma.Decimal(row.quantity),
                 revenue: new Prisma.Decimal(row.revenue),
                 cost: new Prisma.Decimal(row.cost),
+                productNameAtSale: product?.name ?? null,
+                storeNameAtSale: store?.name ?? null,
               },
             }),
           );

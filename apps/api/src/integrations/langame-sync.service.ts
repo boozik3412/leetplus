@@ -6,6 +6,7 @@ import {
   IntegrationSyncTrigger,
   Prisma,
 } from '@prisma/client';
+import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AuthenticatedUser } from '../auth/auth.types';
@@ -17,6 +18,7 @@ import type {
   LangameGood,
   LangameOperationLog,
   LangameProduct,
+  LangameProductExpense,
   LangameSyncQuery,
   LangameSyncResult,
   LangameScheduledSyncResult,
@@ -33,6 +35,23 @@ type DiscrepancyLogEntry = {
   field: string;
   previousValue: string | number | null;
   nextValue: string | number | null;
+};
+
+type ProductSyncRef = {
+  id: string;
+  name: string;
+};
+
+type StoreSyncRef = {
+  id: string;
+  name: string;
+};
+
+type ResolvedSyncPeriod = {
+  fromDate: Date;
+  toDate: Date;
+  from: string;
+  to: string;
 };
 
 @Injectable()
@@ -99,7 +118,7 @@ export class LangameSyncService {
     tenantId: string,
     query: LangameSyncQuery,
   ): Promise<LangameSyncResult> {
-    const period = this.resolvePeriod(query);
+    const requestedPeriod = this.resolvePeriod(query);
     const { apiKey, sources } =
       await this.langameSettingsService.resolveTenantAccess(tenantId);
     const result: LangameSyncResult = {
@@ -124,6 +143,16 @@ export class LangameSyncService {
     const shouldSyncClubRevenue = shouldSyncSales;
 
     for (const source of sources) {
+      const period = this.resolveSourcePeriod(
+        query,
+        requestedPeriod,
+        source.lastSyncedDate ?? null,
+      );
+
+      if (!period) {
+        continue;
+      }
+
       const syncJob = await this.prisma.integrationSyncJob.create({
         data: {
           tenantId,
@@ -265,7 +294,13 @@ export class LangameSyncService {
 
         await this.prisma.integrationSource.update({
           where: { id: source.id },
-          data: { lastSyncedAt: new Date() },
+          data: {
+            lastSyncedAt: new Date(),
+            lastSyncedDate: this.maxSyncedDate(
+              source.lastSyncedDate ?? null,
+              period.toDate,
+            ),
+          },
         });
         await this.prisma.integrationSyncJob.update({
           where: { id: syncJob.id },
@@ -318,6 +353,7 @@ export class LangameSyncService {
       },
       select: {
         id: true,
+        name: true,
         externalProductId: true,
       },
     });
@@ -325,7 +361,13 @@ export class LangameSyncService {
     return new Map(
       products
         .filter((product) => product.externalProductId)
-        .map((product) => [product.externalProductId as string, product.id]),
+        .map((product) => [
+          product.externalProductId as string,
+          {
+            id: product.id,
+            name: product.name,
+          },
+        ]),
     );
   }
 
@@ -335,7 +377,8 @@ export class LangameSyncService {
     products: LangameProduct[],
     discrepancies: DiscrepancyLogEntry[],
   ) {
-    const byExternalId = new Map<string, string>();
+    const byExternalId = new Map<string, ProductSyncRef>();
+    const syncedExternalIds = products.map((product) => String(product.id));
 
     for (const product of products) {
       const existing = await this.prisma.product.findUnique({
@@ -386,14 +429,37 @@ export class LangameSyncService {
           externalProvider: IntegrationProvider.LANGAME,
           externalDomain: domain,
           externalProductId: String(product.id),
+          externalMissingSince: null,
         },
         update: {
           name: product.name,
           isActive: product.active === 1,
+          externalMissingSince: null,
         },
       });
 
-      byExternalId.set(String(product.id), created.id);
+      byExternalId.set(String(product.id), {
+        id: created.id,
+        name: product.name,
+      });
+    }
+
+    if (syncedExternalIds.length > 0) {
+      await this.prisma.product.updateMany({
+        where: {
+          tenantId,
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: domain,
+          externalProductId: {
+            notIn: syncedExternalIds,
+          },
+          externalMissingSince: null,
+        },
+        data: {
+          isActive: false,
+          externalMissingSince: new Date(),
+        },
+      });
     }
 
     return byExternalId;
@@ -404,7 +470,7 @@ export class LangameSyncService {
     domain: string,
     storeId: string,
     externalClubId: string,
-    productsByExternalId: Map<string, string>,
+    productsByExternalId: Map<string, ProductSyncRef>,
     goods: LangameGood[],
     snapshotDate: Date,
     discrepancies: DiscrepancyLogEntry[],
@@ -412,7 +478,7 @@ export class LangameSyncService {
     let synced = 0;
 
     for (const item of goods) {
-      const productId = productsByExternalId.get(String(item.id));
+      const productId = productsByExternalId.get(String(item.id))?.id;
 
       if (!productId) {
         continue;
@@ -475,7 +541,7 @@ export class LangameSyncService {
     baseUrl: string,
     domain: string,
     apiKey: string,
-    productsByExternalId: Map<string, string>,
+    productsByExternalId: Map<string, ProductSyncRef>,
     period: { from: string; to: string },
     discrepancies: DiscrepancyLogEntry[],
   ) {
@@ -487,11 +553,18 @@ export class LangameSyncService {
       },
       select: {
         id: true,
+        name: true,
         externalClubId: true,
       },
     });
     const storesByExternalClubId = new Map(
-      stores.map((store) => [store.externalClubId, store.id]),
+      stores.map((store) => [
+        store.externalClubId,
+        {
+          id: store.id,
+          name: store.name,
+        },
+      ]),
     );
     let synced = 0;
 
@@ -510,19 +583,39 @@ export class LangameSyncService {
           },
         );
 
-        for (const row of rows.filter((item) => item.cancel !== 1)) {
-          const productId = productsByExternalId.get(String(row.list_goods_id));
-          const storeId = storesByExternalClubId.get(String(row.list_clubs_id));
+        for (const row of rows) {
+          const externalProductId = String(row.list_goods_id);
+          const externalClubId =
+            row.list_clubs_id === null ? null : String(row.list_clubs_id);
+          const product = await this.resolveSaleProduct(
+            tenantId,
+            domain,
+            productsByExternalId,
+            externalProductId,
+          );
+          const store = externalClubId
+            ? await this.resolveSaleStore(
+                tenantId,
+                domain,
+                storesByExternalClubId,
+                externalClubId,
+              )
+            : null;
 
-          if (!productId || !storeId) {
+          if (!store) {
             continue;
           }
 
-          const nextRevenue = new Prisma.Decimal(row.price_sale).mul(row.count);
-          const nextCost = new Prisma.Decimal(row.price_purchase ?? 0).mul(
-            row.count,
-          );
+          const isCanceled = row.cancel === 1;
+          const nextRevenue = isCanceled
+            ? new Prisma.Decimal(0)
+            : new Prisma.Decimal(row.price_sale).mul(row.count);
+          const nextCost = isCanceled
+            ? new Prisma.Decimal(0)
+            : new Prisma.Decimal(row.price_purchase ?? 0).mul(row.count);
+          const nextQuantity = isCanceled ? 0 : row.count;
           const nextSaleDate = this.parseLangameDate(row.date);
+          const sourcePayloadHash = this.langameSalePayloadHash(row);
           const existing = await this.prisma.salesFact.findUnique({
             where: {
               tenantId_externalProvider_externalDomain_externalSaleId: {
@@ -539,6 +632,11 @@ export class LangameSyncService {
               quantity: true,
               revenue: true,
               cost: true,
+              externalProductId: true,
+              externalClubId: true,
+              productNameAtSale: true,
+              storeNameAtSale: true,
+              isCanceled: true,
             },
           });
           this.addDiscrepancy(discrepancies, {
@@ -546,14 +644,28 @@ export class LangameSyncService {
             externalId: String(row.id),
             field: 'storeId',
             previousValue: existing?.storeId ?? null,
-            nextValue: storeId,
+            nextValue: store.id,
           });
           this.addDiscrepancy(discrepancies, {
             entity: 'SalesFact',
             externalId: String(row.id),
             field: 'productId',
             previousValue: existing?.productId ?? null,
-            nextValue: productId,
+            nextValue: product.id,
+          });
+          this.addDiscrepancy(discrepancies, {
+            entity: 'SalesFact',
+            externalId: String(row.id),
+            field: 'externalProductId',
+            previousValue: existing?.externalProductId ?? null,
+            nextValue: externalProductId,
+          });
+          this.addDiscrepancy(discrepancies, {
+            entity: 'SalesFact',
+            externalId: String(row.id),
+            field: 'externalClubId',
+            previousValue: existing?.externalClubId ?? null,
+            nextValue: externalClubId,
           });
           this.addDiscrepancy(discrepancies, {
             entity: 'SalesFact',
@@ -569,7 +681,7 @@ export class LangameSyncService {
             externalId: String(row.id),
             field: 'quantity',
             previousValue: existing?.quantity.toNumber() ?? null,
-            nextValue: row.count,
+            nextValue: nextQuantity,
           });
           this.addDiscrepancy(discrepancies, {
             entity: 'SalesFact',
@@ -585,6 +697,22 @@ export class LangameSyncService {
             previousValue: existing?.cost.toNumber() ?? null,
             nextValue: nextCost.toNumber(),
           });
+          this.addDiscrepancy(discrepancies, {
+            entity: 'SalesFact',
+            externalId: String(row.id),
+            field: 'isCanceled',
+            previousValue:
+              existing?.isCanceled === undefined
+                ? null
+                : Number(existing.isCanceled),
+            nextValue: Number(isCanceled),
+          });
+          const productChanged = existing?.productId
+            ? existing.productId !== product.id
+            : false;
+          const storeChanged = existing?.storeId
+            ? existing.storeId !== store.id
+            : false;
           await this.prisma.salesFact.upsert({
             where: {
               tenantId_externalProvider_externalDomain_externalSaleId: {
@@ -596,21 +724,43 @@ export class LangameSyncService {
             },
             create: {
               tenantId,
-              storeId,
-              productId,
+              storeId: store.id,
+              productId: product.id,
               saleDate: nextSaleDate,
-              quantity: new Prisma.Decimal(row.count),
+              quantity: new Prisma.Decimal(nextQuantity),
               revenue: nextRevenue,
               cost: nextCost,
               externalProvider: IntegrationProvider.LANGAME,
               externalDomain: domain,
               externalSaleId: String(row.id),
+              externalProductId,
+              externalClubId,
+              productNameAtSale: product.name,
+              storeNameAtSale: store.name,
+              sourcePayloadHash,
+              isCanceled,
+              canceledAt: isCanceled ? new Date() : null,
             },
             update: {
+              storeId: store.id,
+              productId: product.id,
               saleDate: nextSaleDate,
-              quantity: new Prisma.Decimal(row.count),
+              quantity: new Prisma.Decimal(nextQuantity),
               revenue: nextRevenue,
               cost: nextCost,
+              externalProductId,
+              externalClubId,
+              productNameAtSale:
+                productChanged || !existing?.productNameAtSale
+                  ? product.name
+                  : existing.productNameAtSale,
+              storeNameAtSale:
+                storeChanged || !existing?.storeNameAtSale
+                  ? store.name
+                  : existing.storeNameAtSale,
+              sourcePayloadHash,
+              isCanceled,
+              canceledAt: isCanceled ? new Date() : null,
             },
           });
           synced += 1;
@@ -625,6 +775,109 @@ export class LangameSyncService {
     }
 
     return synced;
+  }
+
+  private async resolveSaleProduct(
+    tenantId: string,
+    domain: string,
+    productsByExternalId: Map<string, ProductSyncRef>,
+    externalProductId: string,
+  ) {
+    const existing = productsByExternalId.get(externalProductId);
+
+    if (existing) {
+      return existing;
+    }
+
+    const placeholderName = `LAngame product #${externalProductId}`;
+    const product = await this.prisma.product.upsert({
+      where: {
+        tenantId_externalProvider_externalDomain_externalProductId: {
+          tenantId,
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: domain,
+          externalProductId,
+        },
+      },
+      create: {
+        tenantId,
+        article: `LG-${domain}-${externalProductId}`,
+        name: placeholderName,
+        purchasePrice: new Prisma.Decimal(0),
+        salePrice: new Prisma.Decimal(0),
+        isActive: false,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: domain,
+        externalProductId,
+        externalMissingSince: new Date(),
+      },
+      update: {
+        isActive: false,
+        externalMissingSince: new Date(),
+      },
+      select: {
+        id: true,
+        name: true,
+      },
+    });
+    const resolved = {
+      id: product.id,
+      name: product.name,
+    };
+    productsByExternalId.set(externalProductId, resolved);
+
+    return resolved;
+  }
+
+  private async resolveSaleStore(
+    tenantId: string,
+    domain: string,
+    storesByExternalClubId: Map<string | null, StoreSyncRef>,
+    externalClubId: string,
+  ) {
+    const existing = storesByExternalClubId.get(externalClubId);
+
+    if (existing) {
+      return existing;
+    }
+
+    const placeholderName = `LAngame club #${externalClubId}`;
+    const store = await this.prisma.store.upsert({
+      where: {
+        tenantId_externalProvider_externalDomain_externalClubId: {
+          tenantId,
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: domain,
+          externalClubId,
+        },
+      },
+      create: {
+        tenantId,
+        name: placeholderName,
+        isActive: false,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: domain,
+        externalClubId,
+      },
+      update: {
+        isActive: false,
+      },
+      select: {
+        id: true,
+        name: true,
+      },
+    });
+    const resolved = {
+      id: store.id,
+      name: store.name,
+    };
+    storesByExternalClubId.set(externalClubId, resolved);
+
+    return resolved;
+  }
+
+  private langameSalePayloadHash(row: LangameProductExpense) {
+    return createHash('sha256').update(JSON.stringify(row)).digest('hex');
   }
 
   private async syncClubRevenueFacts(
@@ -785,6 +1038,39 @@ export class LangameSyncService {
     };
   }
 
+  private resolveSourcePeriod(
+    query: LangameSyncQuery,
+    requestedPeriod: ResolvedSyncPeriod,
+    lastSyncedDate: Date | null,
+  ) {
+    if (!query.catchUp) {
+      return requestedPeriod;
+    }
+
+    const now = new Date();
+    const today = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+    );
+    const fromDate = lastSyncedDate
+      ? this.startOfUtcDay(lastSyncedDate)
+      : new Date(today);
+
+    if (lastSyncedDate && fromDate >= today) {
+      return null;
+    }
+
+    const toDate = new Date(today);
+    fromDate.setUTCHours(0, 0, 0, 0);
+    toDate.setUTCHours(23, 59, 59, 999);
+
+    return {
+      fromDate,
+      toDate,
+      from: this.toDateInputValue(fromDate),
+      to: this.toDateInputValue(toDate),
+    };
+  }
+
   private resolveMode(mode: LangameSyncQuery['mode']) {
     if (!mode) {
       return IntegrationSyncMode.BACKFILL;
@@ -854,6 +1140,18 @@ export class LangameSyncService {
     return new Date(
       Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
     );
+  }
+
+  private maxSyncedDate(current: Date | null, next: Date) {
+    const nextDay = this.startOfUtcDay(next);
+
+    if (!current) {
+      return nextDay;
+    }
+
+    const currentDay = this.startOfUtcDay(current);
+
+    return currentDay > nextDay ? currentDay : nextDay;
   }
 
   private splitPeriodByLangameLimit(period: { from: string; to: string }) {

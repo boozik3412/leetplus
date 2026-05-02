@@ -60,6 +60,7 @@ export class LangameSettingsService {
         baseUrl: source.baseUrl,
         isActive: source.isActive,
         lastSyncedAt: source.lastSyncedAt?.toISOString() ?? null,
+        lastSyncedDate: source.lastSyncedDate?.toISOString() ?? null,
       })),
       syncJobs: syncJobs.map((job) => ({
         id: job.id,

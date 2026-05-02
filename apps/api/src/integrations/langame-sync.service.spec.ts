@@ -20,6 +20,7 @@ type PrismaMock = {
   };
   product: {
     findUnique: jest.Mock;
+    updateMany: jest.Mock;
     upsert: jest.Mock;
   };
   store: {
@@ -128,6 +129,7 @@ function createPrismaMock(): PrismaMock {
     },
     product: {
       findUnique: jest.fn(),
+      updateMany: jest.fn(),
       upsert: jest.fn(),
     },
     store: {
@@ -248,7 +250,9 @@ describe('LangameSyncService', () => {
     };
     prisma.product.upsert.mockResolvedValue({
       id: 'product-1',
+      name: 'Cola',
     });
+    prisma.product.updateMany.mockResolvedValue({ count: 0 });
     prisma.product.findUnique.mockResolvedValue(null);
     prisma.store.upsert.mockResolvedValue({
       id: 'store-1',
@@ -257,6 +261,7 @@ describe('LangameSyncService', () => {
       {
         id: 'store-1',
         externalClubId: '1',
+        name: '1337',
       },
     ]);
     prisma.inventorySnapshot.findUnique.mockResolvedValue(null);

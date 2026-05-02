@@ -41,6 +41,7 @@ export type LangameSyncQuery = {
   mode?: 'QUICK' | 'INVENTORY' | 'CATALOG' | 'BACKFILL' | 'FULL';
   trigger?: 'MANUAL' | 'AUTO';
   tenantSlug?: string;
+  catchUp?: boolean;
 };
 
 export type LangameSyncResult = {

@@ -164,6 +164,7 @@ export class DashboardService {
       this.prisma.salesFact.findMany({
         where: {
           tenantId,
+          isCanceled: false,
           ...storeFilter,
           saleDate: {
             gte: period.fromDate,
@@ -195,6 +196,7 @@ export class DashboardService {
       this.prisma.salesFact.findMany({
         where: {
           tenantId,
+          isCanceled: false,
           ...storeFilter,
           saleDate: {
             gte: period.trendFromDate,
@@ -226,6 +228,7 @@ export class DashboardService {
       this.prisma.salesFact.findMany({
         where: {
           tenantId,
+          isCanceled: false,
           ...storeFilter,
           saleDate: {
             gte: demandPeriod.fromDate,
@@ -272,6 +275,7 @@ export class DashboardService {
       this.prisma.salesFact.findMany({
         where: {
           tenantId,
+          isCanceled: false,
           ...storeFilter,
           saleDate: {
             gte: fullDayPeriod.currentFromDate,
@@ -286,6 +290,7 @@ export class DashboardService {
       this.prisma.salesFact.findMany({
         where: {
           tenantId,
+          isCanceled: false,
           ...storeFilter,
           saleDate: {
             gte: previousPeriod.fromDate,

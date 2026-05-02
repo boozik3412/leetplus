@@ -4,6 +4,7 @@ import {
   type DashboardTopSku,
 } from "@/lib/dashboard-summary";
 import { DashboardFilters } from "@/components/dashboard-filters";
+import { DashboardAutoSync } from "@/components/dashboard-auto-sync";
 import { DashboardQuickSyncButton } from "@/components/dashboard-quick-sync-button";
 import { RevenueTrendChart } from "@/components/revenue-trend-chart";
 import { requireCurrentUser } from "@/lib/auth";
@@ -113,6 +114,7 @@ export default async function DashboardPage({
 
   return (
     <main className="px-6 py-8 text-zinc-950 dark:text-zinc-100">
+      <DashboardAutoSync />
       <div className="mx-auto max-w-7xl">
         <section className="overflow-hidden rounded-[2rem] border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
           <div className="grid gap-8 p-6 lg:grid-cols-[1.1fr_0.9fr] lg:p-8">
@@ -132,8 +134,11 @@ export default async function DashboardPage({
                 <span className="font-semibold text-zinc-950 dark:text-zinc-50">
                   {highlightedPeriod ?? `${summary.periodFrom} — ${summary.periodTo}`}
                 </span>
-                . В фокусе продажи, прибыльность, потери, риск дефицита и
-                товары, которые формируют оборот.
+                .
+                <span className="block">
+                  В фокусе продажи, прибыльность, потери, риск дефицита и
+                  товары, которые формируют оборот.
+                </span>
               </p>
             </div>
 

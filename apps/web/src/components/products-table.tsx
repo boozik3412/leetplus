@@ -17,6 +17,7 @@ type SortKey =
   | "category"
   | "supplier"
   | "purchasePrice"
+  | "unitCost"
   | "salePrice"
   | "margin"
   | "facing"
@@ -25,12 +26,16 @@ type SortKey =
 type SortDirection = "asc" | "desc";
 const COMPACT_PAGE_SIZE = 50;
 
-function formatCurrency(value: string) {
+function formatCurrency(value: string | number | null) {
+  if (value === null) {
+    return "—";
+  }
+
   return new Intl.NumberFormat("ru-RU", {
     style: "currency",
     currency: "RUB",
     maximumFractionDigits: 0,
-  }).format(Number(value));
+  }).format(Number(value ?? 0));
 }
 
 function calculateMarginPercent(purchasePrice: string, salePrice: string) {
@@ -42,6 +47,10 @@ function calculateMarginPercent(purchasePrice: string, salePrice: string) {
   }
 
   return ((sale - purchase) / sale) * 100;
+}
+
+function productUnitCost(product: Product) {
+  return product.unitCost ?? Number(product.purchasePrice);
 }
 
 export function ProductsTable({
@@ -108,11 +117,11 @@ export function ProductsTable({
   const hasMoreRows = !tableMode && visibleProducts.length < sortedProducts.length;
   const columnCount = tableMode
     ? canEditProducts
-      ? 11
-      : 10
+      ? 12
+      : 11
     : canEditProducts
-      ? 10
-      : 9;
+      ? 11
+      : 10;
 
   function setSort(nextKey: SortKey) {
     setVisibleCount(COMPACT_PAGE_SIZE);
@@ -317,7 +326,7 @@ export function ProductsTable({
         onScroll={() => syncHorizontalScroll(topScrollRef, tableScrollRef)}
         className="overflow-x-auto border-b border-zinc-100 bg-zinc-50"
       >
-        <div ref={topSpacerRef} className="h-2 min-w-[1140px]" />
+        <div ref={topSpacerRef} className="h-2 min-w-[1240px]" />
       </div>
 
       <div
@@ -327,7 +336,7 @@ export function ProductsTable({
       >
     <table
       ref={tableElementRef}
-      className="w-full min-w-[1140px] border-collapse text-left text-[11px]"
+      className="w-full min-w-[1240px] border-collapse text-left text-[11px]"
     >
       <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
         <tr>
@@ -339,6 +348,7 @@ export function ProductsTable({
           <SortableTh label="Категория" sortKey="category" activeKey={sortKey} direction={sortDirection} onSort={setSort} />
           <SortableTh label="Поставщик" sortKey="supplier" activeKey={sortKey} direction={sortDirection} onSort={setSort} />
           <SortableTh label="Входящая цена" sortKey="purchasePrice" activeKey={sortKey} direction={sortDirection} onSort={setSort} align="right" />
+          <SortableTh label="Себестоимость шт." sortKey="unitCost" activeKey={sortKey} direction={sortDirection} onSort={setSort} align="right" />
           <SortableTh label="Цена продажи" sortKey="salePrice" activeKey={sortKey} direction={sortDirection} onSort={setSort} align="right" />
           <SortableTh label="Маржинальность" sortKey="margin" activeKey={sortKey} direction={sortDirection} onSort={setSort} align="right" />
           <SortableTh label="Фейсинг" sortKey="facing" activeKey={sortKey} direction={sortDirection} onSort={setSort} align="right" />
@@ -363,7 +373,7 @@ export function ProductsTable({
 
         {visibleProducts.map((product) => {
           const marginPercent = calculateMarginPercent(
-            product.purchasePrice,
+            String(productUnitCost(product)),
             product.salePrice,
           );
 
@@ -436,6 +446,10 @@ export function ProductsTable({
                   inputType="number"
                   canEdit={canEditProducts}
                 />
+              </td>
+
+              <td className="w-[105px] whitespace-nowrap px-2 py-2 text-right text-zinc-700">
+                {formatCurrency(product.unitCost)}
               </td>
 
               <td className="w-[90px] whitespace-nowrap px-2 py-2 text-right text-zinc-950">
@@ -546,6 +560,10 @@ function compareProducts(a: Product, b: Product, sortKey: SortKey) {
     return Number(a[sortKey]) - Number(b[sortKey]);
   }
 
+  if (sortKey === "unitCost") {
+    return productUnitCost(a) - productUnitCost(b);
+  }
+
   if (sortKey === "facing") {
     return a.facing - b.facing;
   }
@@ -556,8 +574,8 @@ function compareProducts(a: Product, b: Product, sortKey: SortKey) {
 
   if (sortKey === "margin") {
     return (
-      calculateMarginPercent(a.purchasePrice, a.salePrice) -
-      calculateMarginPercent(b.purchasePrice, b.salePrice)
+      calculateMarginPercent(String(productUnitCost(a)), a.salePrice) -
+      calculateMarginPercent(String(productUnitCost(b)), b.salePrice)
     );
   }
 
@@ -591,6 +609,7 @@ type ExportRow = {
   category: string;
   supplier: string;
   purchasePrice: string;
+  unitCost: string;
   salePrice: string;
   marginPercent: string;
   facing: string;
@@ -604,6 +623,7 @@ const exportHeaders: { key: keyof ExportRow; label: string }[] = [
   { key: "category", label: "Категория" },
   { key: "supplier", label: "Поставщик" },
   { key: "purchasePrice", label: "Входящая цена" },
+  { key: "unitCost", label: "Себестоимость штуки" },
   { key: "salePrice", label: "Цена продажи" },
   { key: "marginPercent", label: "Маржинальность" },
   { key: "facing", label: "Фейсинг" },
@@ -618,9 +638,10 @@ function productToExportRow(product: Product): ExportRow {
     category: product.category?.name ?? "",
     supplier: product.supplier?.name ?? "",
     purchasePrice: product.purchasePrice,
+    unitCost: productUnitCost(product).toFixed(2),
     salePrice: product.salePrice,
     marginPercent: calculateMarginPercent(
-      product.purchasePrice,
+      String(productUnitCost(product)),
       product.salePrice,
     ).toFixed(1),
     facing: String(product.facing),

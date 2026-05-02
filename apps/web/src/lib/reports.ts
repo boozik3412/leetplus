@@ -135,8 +135,10 @@ export type SkuPerformanceRow = {
   soldQuantity: number;
   revenue: number;
   cost: number;
+  unitCost: number | null;
   grossProfit: number;
   marginPercent: number;
+  markupPercent: number;
   revenueSharePercent: number;
   profitSharePercent: number;
   salesPerFacing: number;
@@ -235,6 +237,60 @@ export type ReplenishmentReport = {
   totalDailyNeed: number;
   totalRecommendedOrder: number;
   rows: ReplenishmentRow[];
+};
+
+export type NewProductRow = {
+  productId: string;
+  article: string;
+  name: string;
+  firstSeenDate: string;
+  firstSeenStoreName: string;
+  currentStockQuantity: number;
+  unitCost: number | null;
+  categoryName: string | null;
+  supplierName: string | null;
+};
+
+export type NewProductsReport = {
+  tenantId: string;
+  tenantSlug: string;
+  from: string;
+  to: string;
+  rows: NewProductRow[];
+};
+
+export type LflPeriod = "day" | "week" | "month";
+export type LflGroupLevel = "network" | "store" | "category" | "product";
+
+export type LflReportRow = {
+  id: string;
+  level: LflGroupLevel;
+  parentId: string | null;
+  name: string;
+  currentRevenue: number;
+  previousRevenue: number;
+  revenueDelta: number;
+  revenueLflPercent: number | null;
+  currentGrossProfit: number;
+  previousGrossProfit: number;
+  grossProfitDelta: number;
+  grossProfitLflPercent: number | null;
+  currentQuantity: number;
+  previousQuantity: number;
+  quantityDelta: number;
+  quantityLflPercent: number | null;
+};
+
+export type LflReport = {
+  tenantId: string;
+  tenantSlug: string;
+  period: LflPeriod;
+  currentFrom: string;
+  currentTo: string;
+  previousFrom: string;
+  previousTo: string;
+  summary: LflReportRow;
+  rows: LflReportRow[];
 };
 
 export async function getAssortmentReport(): Promise<AssortmentReport> {
@@ -380,6 +436,35 @@ export async function getReplenishmentReport(
   }
 
   return response.json() as Promise<ReplenishmentReport>;
+}
+
+export async function getNewProductsReport(): Promise<NewProductsReport> {
+  const response = await fetch(`${getApiUrl()}/reports/new-products`, {
+    cache: "no-store",
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch new products report");
+  }
+
+  return response.json() as Promise<NewProductsReport>;
+}
+
+export async function getLflReport(
+  period: LflPeriod,
+): Promise<LflReport> {
+  const params = new URLSearchParams({ period });
+  const response = await fetch(`${getApiUrl()}/reports/lfl?${params}`, {
+    cache: "no-store",
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch LFL report");
+  }
+
+  return response.json() as Promise<LflReport>;
 }
 
 export async function getOosExclusions(): Promise<ProductOosExclusion[]> {

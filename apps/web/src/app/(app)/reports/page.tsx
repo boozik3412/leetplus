@@ -5,11 +5,17 @@ import { OosExclusionActions } from "@/components/oos-exclusion-actions";
 import { ReportEmailForm } from "@/components/report-email-form";
 import {
   getAssortmentReport,
+  getLflReport,
+  getNewProductsReport,
   getOperationalReport,
   getReplenishmentReport,
   getSkuPerformanceReport,
   getSuppliersPerformanceReport,
+  type LflPeriod,
+  type LflReport,
+  type LflReportRow,
   type LowMarginProduct,
+  type NewProductsReport,
   type OutOfStockRiskProduct,
   type ReplenishmentRow,
   type ReportRecommendation,
@@ -40,6 +46,28 @@ type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
 
 function searchParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
+}
+
+function resolveLflPeriod(value: string | string[] | undefined): LflPeriod {
+  const period = searchParam(value);
+
+  return period === "week" || period === "month" ? period : "day";
+}
+
+function buildLflExportHref({
+  format,
+  period,
+}: {
+  format: "csv" | "xlsx";
+  period: LflPeriod;
+}) {
+  const params = new URLSearchParams({
+    format,
+    report: "lfl",
+    lflPeriod: period,
+  });
+
+  return `/api/reports/export?${params.toString()}`;
 }
 
 function buildExportHref({
@@ -106,6 +134,7 @@ export default async function ReportsPage({
     to: searchParam(params.to),
     storeId: searchParam(params.storeId),
   };
+  const lflPeriod = resolveLflPeriod(params.lflPeriod);
   const noSalesFilters = {
     storeId: filters.storeId,
     ...lastFullDaysRange(7),
@@ -127,6 +156,8 @@ export default async function ReportsPage({
     noSalesReport7,
     noSalesReport14,
     noSalesReport21,
+    newProductsReport,
+    lflReport,
     stores,
   ] = await Promise.all([
     getAssortmentReport(),
@@ -137,6 +168,8 @@ export default async function ReportsPage({
     getOperationalReport(noSalesFilters),
     getOperationalReport(noSalesFilters14),
     getOperationalReport(noSalesFilters21),
+    getNewProductsReport(),
+    getLflReport(lflPeriod),
     getStores(),
   ]);
 
@@ -177,6 +210,10 @@ export default async function ReportsPage({
           to={operationalReport.to}
           storeId={operationalReport.storeId}
         />
+
+        <LflReportPanel report={lflReport} period={lflPeriod} />
+
+        <NewProductsPanel report={newProductsReport} />
 
         <RecommendationsPanel rows={operationalReport.recommendations} />
 
@@ -363,6 +400,230 @@ function Metric({ label, value }: { label: string; value: number | string }) {
       </p>
     </div>
   );
+}
+
+function LflReportPanel({
+  report,
+  period,
+}: {
+  report: LflReport;
+  period: LflPeriod;
+}) {
+  const rows = report.rows.filter((row) => row.level !== "product").slice(0, 8);
+  const params = new URLSearchParams({ period });
+
+  return (
+    <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
+      <div className="flex flex-col gap-4 border-b border-zinc-200 px-5 py-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h2 className="text-base font-semibold">LFL год к году</h2>
+          <p className="mt-1 text-sm text-zinc-500">
+            Сравниваем сопоставимые пары “клуб + товар” за текущий период и тот
+            же период прошлого года.
+          </p>
+          <p className="mt-1 text-xs text-zinc-500">
+            {report.currentFrom} - {report.currentTo} против{" "}
+            {report.previousFrom} - {report.previousTo}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <LflPeriodLink period="day" activePeriod={period} label="День" />
+          <LflPeriodLink period="week" activePeriod={period} label="Неделя" />
+          <LflPeriodLink period="month" activePeriod={period} label="Месяц" />
+          <a
+            href={buildLflExportHref({ format: "csv", period })}
+            className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+          >
+            CSV
+          </a>
+          <a
+            href={buildLflExportHref({ format: "xlsx", period })}
+            className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+          >
+            XLSX
+          </a>
+          <a
+            href={`/reports/lfl/table?${params.toString()}`}
+            target="_blank"
+            className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+          >
+            Открыть полный отчет
+          </a>
+        </div>
+      </div>
+
+      <div className="grid gap-4 border-b border-zinc-200 px-5 py-4 md:grid-cols-3">
+        <Metric
+          label="LFL выручка"
+          value={formatNullablePercent(report.summary.revenueLflPercent)}
+        />
+        <Metric
+          label="LFL прибыль"
+          value={formatNullablePercent(report.summary.grossProfitLflPercent)}
+        />
+        <Metric
+          label="LFL штуки"
+          value={formatNullablePercent(report.summary.quantityLflPercent)}
+        />
+      </div>
+
+      {rows.length > 0 ? (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[980px] text-left text-sm">
+            <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
+              <tr>
+                <th className="px-5 py-3 font-medium">Группа</th>
+                <th className="px-5 py-3 font-medium">Название</th>
+                <th className="px-5 py-3 text-right font-medium">Выручка LFL</th>
+                <th className="px-5 py-3 text-right font-medium">Прибыль LFL</th>
+                <th className="px-5 py-3 text-right font-medium">Штуки LFL</th>
+                <th className="px-5 py-3 text-right font-medium">Выручка</th>
+                <th className="px-5 py-3 text-right font-medium">Прибыль</th>
+                <th className="px-5 py-3 text-right font-medium">Штуки</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100">
+              {rows.map((row) => (
+                <tr key={row.id}>
+                  <td className="px-5 py-4 text-zinc-500">
+                    {lflLevelLabel(row.level)}
+                  </td>
+                  <td className="px-5 py-4 font-medium text-zinc-950">
+                    {row.name}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {formatNullablePercent(row.revenueLflPercent)}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {formatNullablePercent(row.grossProfitLflPercent)}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {formatNullablePercent(row.quantityLflPercent)}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {formatMoney(row.currentRevenue)}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {formatMoney(row.currentGrossProfit)}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {formatQuantity(row.currentQuantity)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="px-5 py-6 text-sm text-zinc-500">
+          Сопоставимых продаж за выбранный период пока нет.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function LflPeriodLink({
+  period,
+  activePeriod,
+  label,
+}: {
+  period: LflPeriod;
+  activePeriod: LflPeriod;
+  label: string;
+}) {
+  const params = new URLSearchParams({ lflPeriod: period });
+  const isActive = period === activePeriod;
+
+  return (
+    <a
+      href={`/reports?${params.toString()}`}
+      className={[
+        "rounded-md border px-3 py-2 text-sm font-medium",
+        isActive
+          ? "border-zinc-900 bg-zinc-900 text-white"
+          : "border-zinc-300 text-zinc-700 hover:bg-zinc-50",
+      ].join(" ")}
+    >
+      {label}
+    </a>
+  );
+}
+
+function NewProductsPanel({ report }: { report: NewProductsReport }) {
+  const rows = report.rows.slice(0, 10);
+
+  return (
+    <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
+      <div className="border-b border-zinc-200 px-5 py-4">
+        <h2 className="text-base font-semibold">Новинки</h2>
+        <p className="mt-1 text-sm text-zinc-500">
+          Товары, которые впервые появились на остатках за последний месяц:
+          {` ${report.from} - ${report.to}`}.
+        </p>
+      </div>
+
+      {rows.length > 0 ? (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[900px] text-left text-sm">
+            <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
+              <tr>
+                <th className="px-5 py-3 font-medium">Товар</th>
+                <th className="px-5 py-3 font-medium">Клуб первого остатка</th>
+                <th className="px-5 py-3 font-medium">Категория</th>
+                <th className="px-5 py-3 text-right font-medium">Дата</th>
+                <th className="px-5 py-3 text-right font-medium">Остаток</th>
+                <th className="px-5 py-3 text-right font-medium">Себестоимость</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100">
+              {rows.map((row) => (
+                <tr key={row.productId}>
+                  <td className="px-5 py-4 font-medium text-zinc-950">
+                    {row.name}
+                  </td>
+                  <td className="px-5 py-4 text-zinc-700">
+                    {row.firstSeenStoreName}
+                  </td>
+                  <td className="px-5 py-4 text-zinc-700">
+                    {row.categoryName ?? "—"}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {row.firstSeenDate}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {formatQuantity(row.currentStockQuantity)}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {row.unitCost === null ? "—" : formatMoney(row.unitCost)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="px-5 py-6 text-sm text-zinc-500">
+          За последний месяц новых товаров на остатках не найдено.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function formatNullablePercent(value: number | null) {
+  return value === null ? "нов." : formatPercent(value);
+}
+
+function lflLevelLabel(level: LflReportRow["level"]) {
+  const labels: Record<LflReportRow["level"], string> = {
+    network: "Вся сеть",
+    store: "Клуб",
+    category: "Категория",
+    product: "Товар",
+  };
+
+  return labels[level];
 }
 
 function RecommendationsPanel({ rows }: { rows: ReportRecommendation[] }) {

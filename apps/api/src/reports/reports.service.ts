@@ -3,6 +3,10 @@ import { ProductOosExclusionType, StockMovementType } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import {
+  buildProductCostBasis,
+  type ProductCostBasis,
+} from './stock-cost-basis';
 
 export type ReportGroup = {
   id: string | null;
@@ -142,14 +146,74 @@ export type SkuPerformanceRow = {
   soldQuantity: number;
   revenue: number;
   cost: number;
+  unitCost: number | null;
   grossProfit: number;
   marginPercent: number;
+  markupPercent: number;
   revenueSharePercent: number;
   profitSharePercent: number;
   salesPerFacing: number;
   profitPerFacing: number;
   abcRevenueGroup: AbcGroup;
   abcProfitGroup: AbcGroup;
+};
+
+export type NewProductRow = {
+  productId: string;
+  article: string;
+  name: string;
+  firstSeenDate: string;
+  firstSeenStoreName: string;
+  currentStockQuantity: number;
+  unitCost: number | null;
+  categoryName: string | null;
+  supplierName: string | null;
+};
+
+export type NewProductsReport = {
+  tenantId: string;
+  tenantSlug: string;
+  from: string;
+  to: string;
+  rows: NewProductRow[];
+};
+
+export type LflPeriod = 'day' | 'week' | 'month';
+export type LflGroupLevel = 'network' | 'store' | 'category' | 'product';
+
+export type LflReportQuery = {
+  period?: LflPeriod;
+};
+
+export type LflReportRow = {
+  id: string;
+  level: LflGroupLevel;
+  parentId: string | null;
+  name: string;
+  currentRevenue: number;
+  previousRevenue: number;
+  revenueDelta: number;
+  revenueLflPercent: number | null;
+  currentGrossProfit: number;
+  previousGrossProfit: number;
+  grossProfitDelta: number;
+  grossProfitLflPercent: number | null;
+  currentQuantity: number;
+  previousQuantity: number;
+  quantityDelta: number;
+  quantityLflPercent: number | null;
+};
+
+export type LflReport = {
+  tenantId: string;
+  tenantSlug: string;
+  period: LflPeriod;
+  currentFrom: string;
+  currentTo: string;
+  previousFrom: string;
+  previousTo: string;
+  summary: LflReportRow;
+  rows: LflReportRow[];
 };
 
 export type AbcSummaryRow = {
@@ -279,8 +343,10 @@ type StockSnapshot = {
   store: { name: string };
   productId: string;
   product: {
+    id?: string;
     article: string;
     name: string;
+    purchasePrice?: { toNumber: () => number };
     canonicalProduct: { name: string } | null;
     category: { name: string } | null;
     supplier: { name: string } | null;
@@ -299,6 +365,42 @@ type StockByStoreProductItem = {
   categoryName: string | null;
   supplierName: string | null;
   stockQuantity: number;
+};
+
+type SalesFactWithCost = {
+  productId: string;
+  quantity: { toNumber: () => number };
+  cost: { toNumber: () => number };
+  product?: {
+    purchasePrice?: { toNumber: () => number } | null;
+  } | null;
+};
+
+type LflSaleFact = SalesFactWithCost & {
+  storeId: string;
+  revenue: { toNumber: () => number };
+  store: {
+    id: string;
+    name: string;
+  };
+  product: {
+    id: string;
+    article: string;
+    name: string;
+    purchasePrice?: { toNumber: () => number } | null;
+    categoryId: string | null;
+    category: { name: string } | null;
+  };
+};
+
+type LflAccumulator = {
+  id: string;
+  level: LflGroupLevel;
+  parentId: string | null;
+  name: string;
+  revenue: number;
+  grossProfit: number;
+  quantity: number;
 };
 
 const DEMAND_PERIOD_DAYS = 21;
@@ -458,6 +560,7 @@ export class ReportsService {
               id: true,
               article: true,
               name: true,
+              purchasePrice: true,
               canonicalProduct: {
                 select: {
                   name: true,
@@ -489,6 +592,7 @@ export class ReportsService {
               id: true,
               article: true,
               name: true,
+              purchasePrice: true,
               canonicalProduct: {
                 select: { name: true },
               },
@@ -522,6 +626,7 @@ export class ReportsService {
               id: true,
               article: true,
               name: true,
+              purchasePrice: true,
               canonicalProduct: {
                 select: { name: true },
               },
@@ -566,6 +671,7 @@ export class ReportsService {
     const excludedProductIds = new Set(
       oosExclusions.map((exclusion) => exclusion.productId),
     );
+    const costBasisByProduct = buildProductCostBasis([], inventorySnapshots);
 
     const productSales = new Map<string, ProductSales>();
     let totalRevenue = 0;
@@ -575,7 +681,7 @@ export class ReportsService {
     salesFacts.forEach((fact) => {
       const quantity = fact.quantity.toNumber();
       const revenue = fact.revenue.toNumber();
-      const cost = fact.cost.toNumber();
+      const cost = this.saleCost(fact, costBasisByProduct);
       const current = productSales.get(fact.productId) ?? {
         productId: fact.productId,
         storeId: fact.store.id,
@@ -688,39 +794,64 @@ export class ReportsService {
       }
     }
 
-    const salesFacts = await this.prisma.salesFact.findMany({
-      where: {
-        tenantId,
-        isCanceled: false,
-        ...storeFilter,
-        saleDate: {
-          gte: period.fromDate,
-          lte: period.toDate,
+    const [salesFacts, inventorySnapshots] = await Promise.all([
+      this.prisma.salesFact.findMany({
+        where: {
+          tenantId,
+          isCanceled: false,
+          ...storeFilter,
+          saleDate: {
+            gte: period.fromDate,
+            lte: period.toDate,
+          },
         },
-      },
-      include: {
-        product: {
-          select: {
-            id: true,
-            article: true,
-            name: true,
-            facing: true,
-            canonicalProduct: {
-              select: {
-                id: true,
-                name: true,
+        include: {
+          product: {
+            select: {
+              id: true,
+              article: true,
+              name: true,
+              purchasePrice: true,
+              facing: true,
+              canonicalProduct: {
+                select: {
+                  id: true,
+                  name: true,
+                },
               },
-            },
-            category: {
-              select: { name: true },
-            },
-            supplier: {
-              select: { name: true },
+              category: {
+                select: { name: true },
+              },
+              supplier: {
+                select: { name: true },
+              },
             },
           },
         },
-      },
-    });
+      }),
+      this.prisma.inventorySnapshot.findMany({
+        where: {
+          tenantId,
+          ...storeFilter,
+          snapshotDate: {
+            lte: period.toDate,
+          },
+        },
+        select: {
+          storeId: true,
+          productId: true,
+          snapshotDate: true,
+          quantity: true,
+          product: {
+            select: {
+              purchasePrice: true,
+            },
+          },
+        },
+        orderBy: { snapshotDate: 'asc' },
+      }),
+    ]);
+    const costBasisByProduct = buildProductCostBasis([], inventorySnapshots);
 
     const shouldUseCanonicalGrouping = !query.storeId;
     const buildRows = (useCanonicalGrouping: boolean) => {
@@ -730,8 +861,9 @@ export class ReportsService {
       salesFacts.forEach((fact) => {
         const quantity = fact.quantity.toNumber();
         const revenue = fact.revenue.toNumber();
-        const cost = fact.cost.toNumber();
+        const cost = this.saleCost(fact, costBasisByProduct);
         const grossProfit = revenue - cost;
+        const unitCost = quantity > 0 ? cost / quantity : null;
         const canonicalProduct = fact.product.canonicalProduct;
         const rowKey =
           useCanonicalGrouping && canonicalProduct
@@ -752,8 +884,10 @@ export class ReportsService {
           soldQuantity: 0,
           revenue: 0,
           cost: 0,
+          unitCost: null,
           grossProfit: 0,
           marginPercent: 0,
+          markupPercent: 0,
           revenueSharePercent: 0,
           profitSharePercent: 0,
           salesPerFacing: 0,
@@ -774,6 +908,10 @@ export class ReportsService {
         current.soldQuantity += quantity;
         current.revenue += revenue;
         current.cost += cost;
+        current.unitCost =
+          current.soldQuantity > 0
+            ? current.cost / current.soldQuantity
+            : unitCost;
         current.grossProfit += grossProfit;
         rowsByProduct.set(rowKey, current);
       });
@@ -790,8 +928,10 @@ export class ReportsService {
       row.soldQuantity = this.round(row.soldQuantity);
       row.revenue = this.round(row.revenue);
       row.cost = this.round(row.cost);
+      row.unitCost = row.unitCost === null ? null : this.round(row.unitCost);
       row.grossProfit = this.round(row.grossProfit);
       row.marginPercent = this.marginPercent(row.cost, row.revenue);
+      row.markupPercent = this.markupPercent(row.cost, row.revenue);
       row.revenueSharePercent = this.sharePercent(row.revenue, totalRevenue);
       row.profitSharePercent = this.sharePercent(row.grossProfit, totalProfit);
       row.salesPerFacing =
@@ -803,8 +943,10 @@ export class ReportsService {
       row.soldQuantity = this.round(row.soldQuantity);
       row.revenue = this.round(row.revenue);
       row.cost = this.round(row.cost);
+      row.unitCost = row.unitCost === null ? null : this.round(row.unitCost);
       row.grossProfit = this.round(row.grossProfit);
       row.marginPercent = this.marginPercent(row.cost, row.revenue);
+      row.markupPercent = this.markupPercent(row.cost, row.revenue);
       row.revenueSharePercent = this.sharePercent(row.revenue, totalRevenue);
       row.profitSharePercent = this.sharePercent(row.grossProfit, totalProfit);
       row.salesPerFacing =
@@ -873,7 +1015,7 @@ export class ReportsService {
       }
     }
 
-    const [salesFacts, activeProducts] = await Promise.all([
+    const [salesFacts, activeProducts, inventorySnapshots] = await Promise.all([
       this.prisma.salesFact.findMany({
         where: {
           tenantId,
@@ -887,6 +1029,7 @@ export class ReportsService {
         include: {
           product: {
             select: {
+              purchasePrice: true,
               supplierId: true,
               supplier: {
                 select: {
@@ -907,7 +1050,29 @@ export class ReportsService {
           supplierId: true,
         },
       }),
+      this.prisma.inventorySnapshot.findMany({
+        where: {
+          tenantId,
+          ...storeFilter,
+          snapshotDate: {
+            lte: period.toDate,
+          },
+        },
+        select: {
+          storeId: true,
+          productId: true,
+          snapshotDate: true,
+          quantity: true,
+          product: {
+            select: {
+              purchasePrice: true,
+            },
+          },
+        },
+        orderBy: { snapshotDate: 'asc' },
+      }),
     ]);
+    const costBasisByProduct = buildProductCostBasis([], inventorySnapshots);
 
     const activeSkuBySupplier = new Map<string, number>();
 
@@ -926,7 +1091,7 @@ export class ReportsService {
       const key = supplierId ?? 'without-supplier';
       const quantity = fact.quantity.toNumber();
       const revenue = fact.revenue.toNumber();
-      const cost = fact.cost.toNumber();
+      const cost = this.saleCost(fact, costBasisByProduct);
       const grossProfit = revenue - cost;
       const current = rowsBySupplier.get(key) ?? {
         supplierId,
@@ -1180,6 +1345,230 @@ export class ReportsService {
     };
   }
 
+  async getNewProductsReport(
+    user: AuthenticatedUser,
+  ): Promise<NewProductsReport> {
+    const { tenantId, tenantSlug } =
+      await this.tenantContextService.resolve(user);
+    const period = this.resolveNewProductsPeriod();
+    const [products, inventorySnapshots] = await Promise.all([
+      this.prisma.product.findMany({
+        where: { tenantId, isActive: true },
+        select: {
+          id: true,
+          purchasePrice: true,
+        },
+      }),
+      this.prisma.inventorySnapshot.findMany({
+        where: {
+          tenantId,
+          quantity: { gt: 0 },
+        },
+        select: {
+          storeId: true,
+          productId: true,
+          snapshotDate: true,
+          quantity: true,
+          store: {
+            select: {
+              name: true,
+            },
+          },
+          product: {
+            select: {
+              article: true,
+              name: true,
+              purchasePrice: true,
+              category: {
+                select: { name: true },
+              },
+              supplier: {
+                select: { name: true },
+              },
+            },
+          },
+        },
+        orderBy: { snapshotDate: 'asc' },
+      }),
+    ]);
+    const costBasisByProduct = buildProductCostBasis(
+      products,
+      inventorySnapshots,
+    );
+    const firstSnapshotByProduct = new Map<
+      string,
+      (typeof inventorySnapshots)[number]
+    >();
+
+    inventorySnapshots.forEach((snapshot) => {
+      if (firstSnapshotByProduct.has(snapshot.productId)) {
+        return;
+      }
+
+      firstSnapshotByProduct.set(snapshot.productId, snapshot);
+    });
+
+    const latestStockByProduct = this.latestStockByProduct(inventorySnapshots);
+    const rows = [...firstSnapshotByProduct.values()]
+      .filter(
+        (snapshot) =>
+          snapshot.snapshotDate >= period.fromDate &&
+          snapshot.snapshotDate <= period.toDate,
+      )
+      .map((snapshot) => ({
+        productId: snapshot.productId,
+        article: snapshot.product.article,
+        name: snapshot.product.name,
+        firstSeenDate: this.toDateInputValue(snapshot.snapshotDate),
+        firstSeenStoreName: snapshot.store.name,
+        currentStockQuantity: this.round(
+          latestStockByProduct.get(snapshot.productId) ?? 0,
+        ),
+        unitCost:
+          costBasisByProduct.get(snapshot.productId)?.unitCost === null ||
+          costBasisByProduct.get(snapshot.productId)?.unitCost === undefined
+            ? null
+            : this.round(costBasisByProduct.get(snapshot.productId)!.unitCost!),
+        categoryName: snapshot.product.category?.name ?? null,
+        supplierName: snapshot.product.supplier?.name ?? null,
+      }))
+      .sort(
+        (a, b) =>
+          b.currentStockQuantity - a.currentStockQuantity ||
+          a.name.localeCompare(b.name, 'ru'),
+      );
+
+    return {
+      tenantId,
+      tenantSlug,
+      from: this.toDateInputValue(period.fromDate),
+      to: this.toDateInputValue(period.toDate),
+      rows,
+    };
+  }
+
+  async getLflReport(
+    user: AuthenticatedUser,
+    query: LflReportQuery = {},
+  ): Promise<LflReport> {
+    const { tenantId, tenantSlug } =
+      await this.tenantContextService.resolve(user);
+    const period = this.resolveLflPeriod(query.period);
+    const [
+      currentSalesFacts,
+      previousSalesFacts,
+      currentSnapshots,
+      previousSnapshots,
+    ] = await Promise.all([
+      this.prisma.salesFact.findMany({
+        where: {
+          tenantId,
+          isCanceled: false,
+          saleDate: {
+            gte: period.currentFromDate,
+            lte: period.currentToDate,
+          },
+        },
+        include: {
+          store: { select: { id: true, name: true } },
+          product: {
+            select: {
+              id: true,
+              article: true,
+              name: true,
+              purchasePrice: true,
+              categoryId: true,
+              category: { select: { name: true } },
+            },
+          },
+        },
+      }),
+      this.prisma.salesFact.findMany({
+        where: {
+          tenantId,
+          isCanceled: false,
+          saleDate: {
+            gte: period.previousFromDate,
+            lte: period.previousToDate,
+          },
+        },
+        include: {
+          store: { select: { id: true, name: true } },
+          product: {
+            select: {
+              id: true,
+              article: true,
+              name: true,
+              purchasePrice: true,
+              categoryId: true,
+              category: { select: { name: true } },
+            },
+          },
+        },
+      }),
+      this.prisma.inventorySnapshot.findMany({
+        where: {
+          tenantId,
+          snapshotDate: { lte: period.currentToDate },
+        },
+        select: {
+          storeId: true,
+          productId: true,
+          snapshotDate: true,
+          quantity: true,
+          product: { select: { purchasePrice: true } },
+        },
+        orderBy: { snapshotDate: 'asc' },
+      }),
+      this.prisma.inventorySnapshot.findMany({
+        where: {
+          tenantId,
+          snapshotDate: { lte: period.previousToDate },
+        },
+        select: {
+          storeId: true,
+          productId: true,
+          snapshotDate: true,
+          quantity: true,
+          product: { select: { purchasePrice: true } },
+        },
+        orderBy: { snapshotDate: 'asc' },
+      }),
+    ]);
+    const currentCostBasis = buildProductCostBasis([], currentSnapshots);
+    const previousCostBasis = buildProductCostBasis([], previousSnapshots);
+    const comparableKeys = this.comparableProductStoreKeys(
+      currentSalesFacts,
+      previousSalesFacts,
+    );
+    const currentRows = this.lflAccumulators(
+      currentSalesFacts,
+      currentCostBasis,
+      comparableKeys,
+    );
+    const previousRows = this.lflAccumulators(
+      previousSalesFacts,
+      previousCostBasis,
+      comparableKeys,
+    );
+    const rows = this.mergeLflRows(currentRows, previousRows);
+    const summary =
+      rows.find((row) => row.level === 'network') ??
+      this.emptyLflRow('network', 'network', null, 'Вся сеть');
+
+    return {
+      tenantId,
+      tenantSlug,
+      period: period.period,
+      currentFrom: this.toDateInputValue(period.currentFromDate),
+      currentTo: this.toDateInputValue(period.currentToDate),
+      previousFrom: this.toDateInputValue(period.previousFromDate),
+      previousTo: this.toDateInputValue(period.previousToDate),
+      summary,
+      rows: rows.filter((row) => row.level !== 'network'),
+    };
+  }
+
   async getOosExclusions(
     user: AuthenticatedUser,
   ): Promise<ProductOosExclusionRow[]> {
@@ -1259,6 +1648,224 @@ export class ReportsService {
     return this.prisma.productOosExclusion.delete({ where: { id } });
   }
 
+  private saleCost(
+    fact: SalesFactWithCost,
+    costBasisByProduct: Map<string, ProductCostBasis>,
+  ) {
+    const quantity = fact.quantity.toNumber();
+    const unitCost = costBasisByProduct.get(fact.productId)?.unitCost;
+
+    if (unitCost !== null && unitCost !== undefined && unitCost > 0) {
+      return unitCost * quantity;
+    }
+
+    const storedCost = fact.cost.toNumber();
+
+    if (storedCost > 0) {
+      return storedCost;
+    }
+
+    return (fact.product?.purchasePrice?.toNumber() ?? 0) * quantity;
+  }
+
+  private comparableProductStoreKeys(
+    currentFacts: LflSaleFact[],
+    previousFacts: LflSaleFact[],
+  ) {
+    const currentKeys = new Set(
+      currentFacts.map((fact) => `${fact.storeId}:${fact.productId}`),
+    );
+    const previousKeys = new Set(
+      previousFacts.map((fact) => `${fact.storeId}:${fact.productId}`),
+    );
+
+    return new Set([...currentKeys].filter((key) => previousKeys.has(key)));
+  }
+
+  private lflAccumulators(
+    facts: LflSaleFact[],
+    costBasisByProduct: Map<string, ProductCostBasis>,
+    comparableKeys: Set<string>,
+  ) {
+    const rows = new Map<string, LflAccumulator>();
+    const add = (
+      id: string,
+      level: LflGroupLevel,
+      parentId: string | null,
+      name: string,
+      revenue: number,
+      grossProfit: number,
+      quantity: number,
+    ) => {
+      const current = rows.get(id) ?? {
+        id,
+        level,
+        parentId,
+        name,
+        revenue: 0,
+        grossProfit: 0,
+        quantity: 0,
+      };
+
+      current.revenue += revenue;
+      current.grossProfit += grossProfit;
+      current.quantity += quantity;
+      rows.set(id, current);
+    };
+
+    facts.forEach((fact) => {
+      const productStoreKey = `${fact.storeId}:${fact.productId}`;
+
+      if (!comparableKeys.has(productStoreKey)) {
+        return;
+      }
+
+      const quantity = fact.quantity.toNumber();
+      const revenue = fact.revenue.toNumber();
+      const cost = this.saleCost(fact, costBasisByProduct);
+      const grossProfit = revenue - cost;
+      const categoryId = fact.product.categoryId ?? 'without-category';
+      const categoryName = fact.product.category?.name ?? 'Без категории';
+
+      add(
+        'network',
+        'network',
+        null,
+        'Вся сеть',
+        revenue,
+        grossProfit,
+        quantity,
+      );
+      add(
+        `store:${fact.store.id}`,
+        'store',
+        'network',
+        fact.store.name,
+        revenue,
+        grossProfit,
+        quantity,
+      );
+      add(
+        `category:${categoryId}`,
+        'category',
+        'network',
+        categoryName,
+        revenue,
+        grossProfit,
+        quantity,
+      );
+      add(
+        `product:${fact.product.id}`,
+        'product',
+        `category:${categoryId}`,
+        fact.product.name,
+        revenue,
+        grossProfit,
+        quantity,
+      );
+    });
+
+    return rows;
+  }
+
+  private mergeLflRows(
+    currentRows: Map<string, LflAccumulator>,
+    previousRows: Map<string, LflAccumulator>,
+  ) {
+    const ids = new Set([...currentRows.keys(), ...previousRows.keys()]);
+    const levelRank: Record<LflGroupLevel, number> = {
+      network: 0,
+      store: 1,
+      category: 2,
+      product: 3,
+    };
+
+    return [...ids]
+      .map((id) => {
+        const current = currentRows.get(id);
+        const previous = previousRows.get(id);
+        const source = current ?? previous;
+
+        if (!source) {
+          return this.emptyLflRow(id, 'product', null, id);
+        }
+
+        const currentRevenue = current?.revenue ?? 0;
+        const previousRevenue = previous?.revenue ?? 0;
+        const currentGrossProfit = current?.grossProfit ?? 0;
+        const previousGrossProfit = previous?.grossProfit ?? 0;
+        const currentQuantity = current?.quantity ?? 0;
+        const previousQuantity = previous?.quantity ?? 0;
+
+        return {
+          id,
+          level: source.level,
+          parentId: source.parentId,
+          name: source.name,
+          currentRevenue: this.round(currentRevenue),
+          previousRevenue: this.round(previousRevenue),
+          revenueDelta: this.round(currentRevenue - previousRevenue),
+          revenueLflPercent: this.lflPercent(currentRevenue, previousRevenue),
+          currentGrossProfit: this.round(currentGrossProfit),
+          previousGrossProfit: this.round(previousGrossProfit),
+          grossProfitDelta: this.round(
+            currentGrossProfit - previousGrossProfit,
+          ),
+          grossProfitLflPercent: this.lflPercent(
+            currentGrossProfit,
+            previousGrossProfit,
+          ),
+          currentQuantity: this.round(currentQuantity),
+          previousQuantity: this.round(previousQuantity),
+          quantityDelta: this.round(currentQuantity - previousQuantity),
+          quantityLflPercent: this.lflPercent(
+            currentQuantity,
+            previousQuantity,
+          ),
+        };
+      })
+      .sort(
+        (a, b) =>
+          levelRank[a.level] - levelRank[b.level] ||
+          b.currentRevenue - a.currentRevenue ||
+          a.name.localeCompare(b.name, 'ru'),
+      );
+  }
+
+  private emptyLflRow(
+    id: string,
+    level: LflGroupLevel,
+    parentId: string | null,
+    name: string,
+  ): LflReportRow {
+    return {
+      id,
+      level,
+      parentId,
+      name,
+      currentRevenue: 0,
+      previousRevenue: 0,
+      revenueDelta: 0,
+      revenueLflPercent: 0,
+      currentGrossProfit: 0,
+      previousGrossProfit: 0,
+      grossProfitDelta: 0,
+      grossProfitLflPercent: 0,
+      currentQuantity: 0,
+      previousQuantity: 0,
+      quantityDelta: 0,
+      quantityLflPercent: 0,
+    };
+  }
+
+  private lflPercent(current: number, previous: number) {
+    if (previous === 0) {
+      return current === 0 ? 0 : null;
+    }
+
+    return this.round(((current - previous) / previous) * 100);
+  }
+
   private stockMovementImpact(
     movements: {
       type: StockMovementType;
@@ -1294,26 +1901,32 @@ export class ReportsService {
     snapshots: {
       storeId: string;
       productId: string;
+      snapshotDate?: Date;
       quantity: { toNumber: () => number };
     }[],
   ) {
     const seen = new Set<string>();
     const stockByProduct = new Map<string, number>();
 
-    snapshots.forEach((snapshot) => {
-      const snapshotKey = `${snapshot.storeId}:${snapshot.productId}`;
+    [...snapshots]
+      .sort(
+        (a, b) =>
+          (b.snapshotDate?.getTime() ?? 0) - (a.snapshotDate?.getTime() ?? 0),
+      )
+      .forEach((snapshot) => {
+        const snapshotKey = `${snapshot.storeId}:${snapshot.productId}`;
 
-      if (seen.has(snapshotKey)) {
-        return;
-      }
+        if (seen.has(snapshotKey)) {
+          return;
+        }
 
-      seen.add(snapshotKey);
-      stockByProduct.set(
-        snapshot.productId,
-        (stockByProduct.get(snapshot.productId) ?? 0) +
-          snapshot.quantity.toNumber(),
-      );
-    });
+        seen.add(snapshotKey);
+        stockByProduct.set(
+          snapshot.productId,
+          (stockByProduct.get(snapshot.productId) ?? 0) +
+            snapshot.quantity.toNumber(),
+        );
+      });
 
     return stockByProduct;
   }
@@ -1733,6 +2346,60 @@ export class ReportsService {
     toDate.setUTCHours(23, 59, 59, 999);
 
     return { fromDate, toDate };
+  }
+
+  private resolveNewProductsPeriod() {
+    const now = new Date();
+    const toDate = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+    );
+    const fromDate = new Date(toDate);
+    fromDate.setUTCDate(fromDate.getUTCDate() - 29);
+    fromDate.setUTCHours(0, 0, 0, 0);
+    toDate.setUTCHours(23, 59, 59, 999);
+
+    return { fromDate, toDate };
+  }
+
+  private resolveLflPeriod(period: LflPeriod = 'day') {
+    const validPeriods: LflPeriod[] = ['day', 'week', 'month'];
+
+    if (!validPeriods.includes(period)) {
+      throw new BadRequestException('period must be day, week or month');
+    }
+
+    const now = new Date();
+    const anchorDate = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1),
+    );
+    const currentFromDate = new Date(anchorDate);
+    const currentToDate = new Date(anchorDate);
+
+    if (period === 'week') {
+      const dayOfWeek = anchorDate.getUTCDay();
+      const daysSinceMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+      currentFromDate.setUTCDate(anchorDate.getUTCDate() - daysSinceMonday);
+    }
+
+    if (period === 'month') {
+      currentFromDate.setUTCDate(1);
+    }
+
+    currentFromDate.setUTCHours(0, 0, 0, 0);
+    currentToDate.setUTCHours(23, 59, 59, 999);
+
+    const previousFromDate = new Date(currentFromDate);
+    previousFromDate.setUTCFullYear(previousFromDate.getUTCFullYear() - 1);
+    const previousToDate = new Date(currentToDate);
+    previousToDate.setUTCFullYear(previousToDate.getUTCFullYear() - 1);
+
+    return {
+      period,
+      currentFromDate,
+      currentToDate,
+      previousFromDate,
+      previousToDate,
+    };
   }
 
   private parseDate(value: string, field: string) {

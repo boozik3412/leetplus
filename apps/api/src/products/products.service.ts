@@ -9,6 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { AuthenticatedUser } from '../auth/auth.types';
 import type { CreateProductDto, UpdateProductDto } from './products.dto';
+import { buildProductCostBasis } from '../reports/stock-cost-basis';
 
 const OPERATIONAL_ACTIVE_DAYS = 14;
 
@@ -83,6 +84,7 @@ export class ProductsService {
     const recentlySoldProductIds = new Set(
       recentSalesFacts.map((fact) => fact.productId),
     );
+    const costBasisByProduct = buildProductCostBasis(products, productStores);
 
     productStores.forEach((snapshot) => {
       const snapshotKey = `${snapshot.storeId}:${snapshot.productId}`;
@@ -121,6 +123,7 @@ export class ProductsService {
 
       return {
         ...product,
+        unitCost: costBasisByProduct.get(product.id)?.unitCost ?? null,
         isOperationalActive:
           (stockByProduct.get(product.id) ?? 0) > 0 ||
           recentlySoldProductIds.has(product.id),

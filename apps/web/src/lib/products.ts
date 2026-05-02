@@ -15,6 +15,7 @@ export type Product = {
   article: string;
   name: string;
   purchasePrice: string;
+  unitCost: number | null;
   salePrice: string;
   facing: number;
   shelfLifeDays: number | null;

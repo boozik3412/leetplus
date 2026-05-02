@@ -24,6 +24,9 @@ import type { SendReportEmailDto } from './reports.dto';
 import {
   ReportsService,
   type AssortmentReport,
+  type LflReport,
+  type LflReportQuery,
+  type NewProductsReport,
   type OperationalReport,
   type OperationalReportQuery,
   type ProductOosExclusionDto,
@@ -80,6 +83,21 @@ export class ReportsController {
     @Query() query: OperationalReportQuery,
   ): Promise<ReplenishmentReport> {
     return this.reportsService.getReplenishmentReport(user, query);
+  }
+
+  @Get('new-products')
+  getNewProductsReport(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<NewProductsReport> {
+    return this.reportsService.getNewProductsReport(user);
+  }
+
+  @Get('lfl')
+  getLflReport(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: LflReportQuery,
+  ): Promise<LflReport> {
+    return this.reportsService.getLflReport(user, query);
   }
 
   @Get('oos-exclusions')

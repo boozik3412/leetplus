@@ -4,6 +4,8 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import {
   ReportsService,
   type AssortmentReport,
+  type LflPeriod,
+  type LflReport,
   type OperationalReport,
   type OperationalReportQuery,
   type ReplenishmentReport,
@@ -15,6 +17,8 @@ export type ReportExportFormat = 'csv' | 'xlsx';
 
 export type ReportExportQuery = OperationalReportQuery & {
   format?: string;
+  report?: string;
+  lflPeriod?: LflPeriod;
 };
 
 export type ReportExportFile = {
@@ -37,6 +41,11 @@ export class ReportsExportService {
     query: ReportExportQuery,
   ): Promise<ReportExportFile> {
     const format = this.resolveFormat(query.format);
+
+    if (query.report === 'lfl') {
+      return this.exportLflReport(user, query, format);
+    }
+
     const [
       assortmentReport,
       operationalReport,
@@ -89,6 +98,37 @@ export class ReportsExportService {
     };
   }
 
+  private async exportLflReport(
+    user: AuthenticatedUser,
+    query: ReportExportQuery,
+    format: ReportExportFormat,
+  ): Promise<ReportExportFile> {
+    const period = this.resolveLflPeriod(query.lflPeriod);
+    const report = await this.reportsService.getLflReport(user, { period });
+    const fileName = `leetplus-lfl-${report.period}-${report.currentFrom}-${report.currentTo}.${format}`;
+
+    if (format === 'csv') {
+      return {
+        buffer: Buffer.from(this.buildLflCsv(report), 'utf8'),
+        contentType: 'text/csv; charset=utf-8',
+        fileName,
+        tenantSlug: report.tenantSlug,
+        from: report.currentFrom,
+        to: report.currentTo,
+      };
+    }
+
+    return {
+      buffer: await this.buildLflXlsx(report),
+      contentType:
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      fileName,
+      tenantSlug: report.tenantSlug,
+      from: report.currentFrom,
+      to: report.currentTo,
+    };
+  }
+
   private resolveFormat(format?: string): ReportExportFormat {
     if (!format || format === 'csv') {
       return 'csv';
@@ -99,6 +139,18 @@ export class ReportsExportService {
     }
 
     throw new BadRequestException('format must be csv or xlsx');
+  }
+
+  private resolveLflPeriod(period?: string): LflPeriod {
+    if (!period || period === 'day') {
+      return 'day';
+    }
+
+    if (period === 'week' || period === 'month') {
+      return period;
+    }
+
+    throw new BadRequestException('lflPeriod must be day, week or month');
   }
 
   private buildCsv(
@@ -715,6 +767,82 @@ export class ReportsExportService {
     ];
     sheet.addRows(assortmentReport.lowMarginProducts);
     this.styleHeader(sheet);
+  }
+
+  private buildLflCsv(report: LflReport) {
+    const rows: CsvCell[][] = [
+      ['LeetPlus LFL report'],
+      ['Tenant', report.tenantSlug],
+      ['Period', report.period],
+      ['Current period', `${report.currentFrom} - ${report.currentTo}`],
+      ['Previous period', `${report.previousFrom} - ${report.previousTo}`],
+      [],
+      [
+        'Level',
+        'Parent ID',
+        'Name',
+        'Current revenue',
+        'Previous revenue',
+        'Revenue delta',
+        'Revenue LFL, %',
+        'Current gross profit',
+        'Previous gross profit',
+        'Gross profit delta',
+        'Gross profit LFL, %',
+        'Current quantity',
+        'Previous quantity',
+        'Quantity delta',
+        'Quantity LFL, %',
+      ],
+      ...[report.summary, ...report.rows].map((item) => [
+        item.level,
+        item.parentId,
+        item.name,
+        item.currentRevenue,
+        item.previousRevenue,
+        item.revenueDelta,
+        item.revenueLflPercent,
+        item.currentGrossProfit,
+        item.previousGrossProfit,
+        item.grossProfitDelta,
+        item.grossProfitLflPercent,
+        item.currentQuantity,
+        item.previousQuantity,
+        item.quantityDelta,
+        item.quantityLflPercent,
+      ]),
+    ];
+
+    return `\uFEFF${rows.map((row) => this.csvRow(row)).join('\n')}`;
+  }
+
+  private async buildLflXlsx(report: LflReport) {
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'LeetPlus';
+    workbook.created = new Date();
+    const sheet = workbook.addWorksheet('LFL');
+    sheet.columns = [
+      { header: 'Level', key: 'level', width: 14 },
+      { header: 'Parent ID', key: 'parentId', width: 18 },
+      { header: 'Name', key: 'name', width: 36 },
+      { header: 'Current revenue', key: 'currentRevenue', width: 18 },
+      { header: 'Previous revenue', key: 'previousRevenue', width: 18 },
+      { header: 'Revenue delta', key: 'revenueDelta', width: 18 },
+      { header: 'Revenue LFL, %', key: 'revenueLflPercent', width: 16 },
+      { header: 'Current profit', key: 'currentGrossProfit', width: 18 },
+      { header: 'Previous profit', key: 'previousGrossProfit', width: 18 },
+      { header: 'Profit delta', key: 'grossProfitDelta', width: 16 },
+      { header: 'Profit LFL, %', key: 'grossProfitLflPercent', width: 16 },
+      { header: 'Current quantity', key: 'currentQuantity', width: 18 },
+      { header: 'Previous quantity', key: 'previousQuantity', width: 18 },
+      { header: 'Quantity delta', key: 'quantityDelta', width: 16 },
+      { header: 'Quantity LFL, %', key: 'quantityLflPercent', width: 16 },
+    ];
+    sheet.addRows([report.summary, ...report.rows]);
+    this.styleHeader(sheet);
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    return Buffer.from(buffer);
   }
 
   private styleHeader(sheet: ExcelJS.Worksheet) {

@@ -138,10 +138,6 @@ export default async function DashboardPage({
                   {highlightedPeriod ?? `${summary.periodFrom} — ${summary.periodTo}`}
                 </span>
                 .
-                <span className="block">
-                  В фокусе продажи, прибыльность, потери, риск дефицита и
-                  товары, которые формируют оборот.
-                </span>
               </p>
             </div>
 
@@ -240,6 +236,10 @@ export default async function DashboardPage({
         <TopSkuTable
           rows={summary.topSkuByRevenue}
           grouping={summary.skuGrouping}
+          period={filters.period}
+          dateFrom={summary.periodFrom}
+          dateTo={summary.periodTo}
+          selectedStoreIds={summary.selectedStoreIds}
         />
       </div>
     </main>
@@ -714,9 +714,17 @@ function InsightCard({
 function TopSkuTable({
   rows,
   grouping,
+  period,
+  dateFrom,
+  dateTo,
+  selectedStoreIds,
 }: {
   rows: DashboardTopSku[];
   grouping: "club" | "network";
+  period: string;
+  dateFrom: string;
+  dateTo: string;
+  selectedStoreIds: string[];
 }) {
   const maxRevenue = Math.max(...rows.map((row) => row.revenue), 1);
 
@@ -732,10 +740,36 @@ function TopSkuTable({
                 : "Позиции показаны отдельно по каждому клубу."}
             </p>
           </div>
-          <div className="hidden grid-cols-[120px_96px_120px] gap-4 text-right text-[11px] font-semibold uppercase tracking-wide text-zinc-400 md:grid">
-            <span>Выручка</span>
-            <span>Продано</span>
-            <span>Прибыль</span>
+          <div className="flex flex-col gap-3 md:items-end">
+            <div className="inline-flex w-fit rounded-full border border-zinc-200 bg-zinc-50 p-1 text-xs font-semibold dark:border-zinc-800 dark:bg-zinc-900">
+              <TopSkuGroupingLink
+                label="По сети"
+                isActive={grouping === "network"}
+                href={buildDashboardHref({
+                  period,
+                  dateFrom,
+                  dateTo,
+                  selectedStoreIds,
+                  skuGrouping: "network",
+                })}
+              />
+              <TopSkuGroupingLink
+                label="По клубам"
+                isActive={grouping === "club"}
+                href={buildDashboardHref({
+                  period,
+                  dateFrom,
+                  dateTo,
+                  selectedStoreIds,
+                  skuGrouping: "club",
+                })}
+              />
+            </div>
+            <div className="hidden grid-cols-[120px_96px_120px] gap-4 text-right text-[11px] font-semibold uppercase tracking-wide text-zinc-400 md:grid">
+              <span>Выручка</span>
+              <span>Продано</span>
+              <span>Прибыль</span>
+            </div>
           </div>
         </div>
       </div>
@@ -744,7 +778,7 @@ function TopSkuTable({
         <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
           {rows.map((row, index) => (
             <div
-              key={row.productId}
+              key={`${row.productId}-${row.storeId ?? "network"}-${index}`}
               className="grid gap-3 px-4 py-4 transition-colors hover:bg-zinc-50/80 dark:hover:bg-zinc-900/45 md:grid-cols-[40px_minmax(0,1fr)_120px_96px_120px] md:items-center"
             >
               <div className="flex h-8 w-8 items-center justify-center rounded-2xl bg-zinc-100 text-xs font-semibold text-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
@@ -802,6 +836,61 @@ function TopSkuTable({
         </p>
       )}
     </section>
+  );
+}
+
+function buildDashboardHref({
+  period,
+  dateFrom,
+  dateTo,
+  selectedStoreIds,
+  skuGrouping,
+}: {
+  period: string;
+  dateFrom: string;
+  dateTo: string;
+  selectedStoreIds: string[];
+  skuGrouping: "club" | "network";
+}) {
+  const params = new URLSearchParams();
+
+  params.set("period", period);
+  params.set("skuGrouping", skuGrouping);
+
+  if (period === "custom") {
+    params.set("dateFrom", dateFrom);
+    params.set("dateTo", dateTo);
+  }
+
+  selectedStoreIds.forEach((storeId) => {
+    params.append("storeIds", storeId);
+  });
+
+  return `/dashboard?${params.toString()}`;
+}
+
+function TopSkuGroupingLink({
+  href,
+  label,
+  isActive,
+}: {
+  href: string;
+  label: string;
+  isActive: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      aria-current={isActive ? "page" : undefined}
+      className={[
+        "rounded-full px-3 py-1.5 transition-colors",
+        isActive
+          ? "bg-zinc-950 text-white shadow-sm dark:bg-emerald-400 dark:text-zinc-950"
+          : "text-zinc-500 hover:bg-white hover:text-zinc-950 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100",
+      ].join(" ")}
+    >
+      {label}
+    </Link>
   );
 }
 

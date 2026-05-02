@@ -12,7 +12,7 @@ type DashboardPeriod =
   | "year"
   | "custom";
 type DashboardSkuGrouping = "club" | "network";
-type OpenPanel = "period" | "clubs" | "grouping" | null;
+type OpenPanel = "period" | "clubs" | null;
 
 const periodLabels: Record<DashboardPeriod, string> = {
   month: "Текущий месяц",
@@ -21,11 +21,6 @@ const periodLabels: Record<DashboardPeriod, string> = {
   week: "Текущая неделя",
   day: "Текущие сутки",
   custom: "Произвольный период",
-};
-
-const groupingLabels: Record<DashboardSkuGrouping, string> = {
-  club: "Отдельно по клубам",
-  network: "По всей сети",
 };
 
 export function DashboardFilters({
@@ -53,8 +48,7 @@ export function DashboardFilters({
   const [customFrom, setCustomFrom] = useState(dateFrom);
   const [customTo, setCustomTo] = useState(dateTo);
   const [selectedStores, setSelectedStores] = useState(selectedStoreIds);
-  const [selectedGrouping, setSelectedGrouping] =
-    useState<DashboardSkuGrouping>(skuGrouping);
+  const selectedGrouping = skuGrouping;
   const selectedStoresLabel =
     selectedStores.length === 0
       ? "Вся сеть"
@@ -95,37 +89,54 @@ export function DashboardFilters({
   }, [openPanel]);
 
   function toggleStore(storeId: string) {
-    setSelectedStores((current) =>
-      current.includes(storeId)
-        ? current.filter((id) => id !== storeId)
-        : [...current, storeId],
-    );
+    const nextStores = selectedStores.includes(storeId)
+      ? selectedStores.filter((id) => id !== storeId)
+      : [...selectedStores, storeId];
+
+    setSelectedStores(nextStores);
+    applyFilters({ storeIds: nextStores }, { closePanel: false });
   }
 
   function applyFilters(
     overrides: Partial<{
       period: DashboardPeriod;
       skuGrouping: DashboardSkuGrouping;
+      storeIds: string[];
+      dateFrom: string;
+      dateTo: string;
     }> = {},
+    options: { closePanel?: boolean } = {},
   ) {
     const params = new URLSearchParams();
     const nextPeriod = overrides.period ?? selectedPeriod;
     const nextGrouping = overrides.skuGrouping ?? selectedGrouping;
+    const nextStores = overrides.storeIds ?? selectedStores;
+    const nextDateFrom = overrides.dateFrom ?? customFrom;
+    const nextDateTo = overrides.dateTo ?? customTo;
+    const closePanel = options.closePanel ?? true;
 
     params.set("period", nextPeriod);
     params.set("skuGrouping", nextGrouping);
 
     if (nextPeriod === "custom") {
-      params.set("dateFrom", customFrom);
-      params.set("dateTo", customTo);
+      params.set("dateFrom", nextDateFrom);
+      params.set("dateTo", nextDateTo);
     }
 
-    selectedStores.forEach((storeId) => {
+    nextStores.forEach((storeId) => {
       params.append("storeIds", storeId);
     });
 
     router.push(`${pathname}?${params.toString()}`);
-    setOpenPanel(null);
+
+    if (closePanel) {
+      setOpenPanel(null);
+    }
+  }
+
+  function selectPeriod(value: DashboardPeriod) {
+    setSelectedPeriod(value);
+    applyFilters({ period: value }, { closePanel: value !== "custom" });
   }
 
   return (
@@ -146,21 +157,6 @@ export function DashboardFilters({
           isOpen={openPanel === "clubs"}
           onClick={() => setOpenPanel(openPanel === "clubs" ? null : "clubs")}
         />
-        <FilterButton
-          label="Группировка ТОП SKU"
-          value={groupingLabels[selectedGrouping]}
-          isOpen={openPanel === "grouping"}
-          onClick={() =>
-            setOpenPanel(openPanel === "grouping" ? null : "grouping")
-          }
-        />
-        <button
-          type="button"
-          onClick={() => applyFilters()}
-          className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-500/15 dark:text-emerald-300"
-        >
-          Применить
-        </button>
       </div>
 
       {openPanel === "period" ? (
@@ -170,11 +166,7 @@ export function DashboardFilters({
               <button
                 key={value}
                 type="button"
-                onClick={() => setSelectedPeriod(value)}
-                onDoubleClick={() => {
-                  setSelectedPeriod(value);
-                  applyFilters({ period: value });
-                }}
+                onClick={() => selectPeriod(value)}
                 className={[
                   "rounded-xl border px-3 py-2 text-left text-sm",
                   selectedPeriod === value
@@ -195,8 +187,14 @@ export function DashboardFilters({
                 type="date"
                 value={customFrom}
                 onChange={(event) => {
+                  const nextDate = event.target.value;
+
                   setSelectedPeriod("custom");
-                  setCustomFrom(event.target.value);
+                  setCustomFrom(nextDate);
+                  applyFilters(
+                    { period: "custom", dateFrom: nextDate },
+                    { closePanel: false },
+                  );
                 }}
                 className="mt-2 block w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
               />
@@ -209,21 +207,18 @@ export function DashboardFilters({
                 type="date"
                 value={customTo}
                 onChange={(event) => {
+                  const nextDate = event.target.value;
+
                   setSelectedPeriod("custom");
-                  setCustomTo(event.target.value);
+                  setCustomTo(nextDate);
+                  applyFilters(
+                    { period: "custom", dateTo: nextDate },
+                    { closePanel: false },
+                  );
                 }}
                 className="mt-2 block w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
               />
             </label>
-          </div>
-          <div className="mt-4 flex justify-end border-t border-zinc-100 pt-3 dark:border-zinc-800">
-            <button
-              type="button"
-              onClick={() => applyFilters()}
-              className="rounded-xl bg-zinc-950 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-800 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
-            >
-              Применить
-            </button>
           </div>
         </DropdownPanel>
       ) : null}
@@ -262,62 +257,19 @@ export function DashboardFilters({
             <div className="flex items-center gap-3">
               <button
                 type="button"
-                onClick={() => setSelectedStores([])}
+                onClick={() => {
+                  setSelectedStores([]);
+                  applyFilters({ storeIds: [] }, { closePanel: false });
+                }}
                 className="text-sm font-medium text-zinc-900 underline underline-offset-4 dark:text-zinc-100"
               >
                 Очистить
-              </button>
-              <button
-                type="button"
-                onClick={() => applyFilters()}
-                className="rounded-xl bg-zinc-950 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-800 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
-              >
-                Применить
               </button>
             </div>
           </div>
         </DropdownPanel>
       ) : null}
 
-      {openPanel === "grouping" ? (
-        <DropdownPanel className="left-0 top-full w-[min(520px,calc(100vw-3rem))]">
-          <div className="grid gap-2">
-            {(["club", "network"] as DashboardSkuGrouping[]).map((value) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => setSelectedGrouping(value)}
-                onDoubleClick={() => {
-                  setSelectedGrouping(value);
-                  applyFilters({ skuGrouping: value });
-                }}
-                className={[
-                  "rounded-xl border px-3 py-2 text-left text-sm",
-                  selectedGrouping === value
-                    ? "border-zinc-950 bg-zinc-950 text-white dark:border-emerald-400 dark:bg-emerald-400 dark:text-zinc-950"
-                    : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-900",
-                ].join(" ")}
-              >
-                <span className="font-medium">{groupingLabels[value]}</span>
-                <span className="mt-1 block text-xs opacity-70">
-                  {value === "club"
-                    ? "Товары считаются отдельно по каждому клубу."
-                    : "Одинаковые названия или артикулы суммируются по сети."}
-                </span>
-              </button>
-            ))}
-          </div>
-          <div className="mt-4 flex justify-end border-t border-zinc-100 pt-3 dark:border-zinc-800">
-            <button
-              type="button"
-              onClick={() => applyFilters()}
-              className="rounded-xl bg-zinc-950 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-800 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
-            >
-              Применить
-            </button>
-          </div>
-        </DropdownPanel>
-      ) : null}
     </section>
   );
 }
@@ -350,7 +302,23 @@ function FilterButton({
           {value}
         </span>
       </span>
-      <span className="text-sm leading-none opacity-60">⌄</span>
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 20 20"
+        fill="none"
+        className={[
+          "h-4 w-4 shrink-0 self-center opacity-60 transition-transform",
+          isOpen ? "rotate-180" : "",
+        ].join(" ")}
+      >
+        <path
+          d="M5.75 8.25 10 12.5l4.25-4.25"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
     </button>
   );
 }

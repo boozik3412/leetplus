@@ -14,6 +14,9 @@ type ProductsPrismaMock = {
   inventorySnapshot: {
     findMany: jest.Mock;
   };
+  salesFact: {
+    findMany: jest.Mock;
+  };
   category: {
     findFirst: jest.Mock;
   };
@@ -26,6 +29,30 @@ type TenantContextMock = {
   resolve: jest.Mock;
 };
 
+type ProductInventoryQuery = {
+  where: {
+    tenantId: string;
+    snapshotDate: {
+      lte: Date;
+    };
+  };
+  orderBy: {
+    snapshotDate: 'desc';
+  };
+};
+
+type ProductSalesFactQuery = {
+  where: {
+    tenantId: string;
+    isCanceled: false;
+    saleDate: {
+      gte: Date;
+      lte: Date;
+    };
+  };
+  distinct: ['productId'];
+};
+
 function createPrismaMock(): ProductsPrismaMock {
   return {
     product: {
@@ -35,6 +62,9 @@ function createPrismaMock(): ProductsPrismaMock {
       update: jest.fn(),
     },
     inventorySnapshot: {
+      findMany: jest.fn(),
+    },
+    salesFact: {
       findMany: jest.fn(),
     },
     category: {
@@ -76,6 +106,7 @@ describe('ProductsService', () => {
   it('filters product list by resolved tenant and active status', async () => {
     prisma.product.findMany.mockResolvedValue([]);
     prisma.inventorySnapshot.findMany.mockResolvedValue([]);
+    prisma.salesFact.findMany.mockResolvedValue([]);
 
     await service.findAll();
 
@@ -88,11 +119,65 @@ describe('ProductsService', () => {
         },
       }),
     );
-    expect(prisma.inventorySnapshot.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { tenantId: 'tenant-demo' },
-        distinct: ['productId', 'storeId'],
-      }),
+    const [inventoryQuery] = prisma.inventorySnapshot.findMany.mock
+      .calls[0] as [ProductInventoryQuery];
+    expect(inventoryQuery.where.tenantId).toBe('tenant-demo');
+    expect(inventoryQuery.where.snapshotDate.lte).toBeInstanceOf(Date);
+    expect(inventoryQuery.orderBy).toEqual({ snapshotDate: 'desc' });
+
+    const [salesQuery] = prisma.salesFact.findMany.mock.calls[0] as [
+      ProductSalesFactQuery,
+    ];
+    expect(salesQuery.where.tenantId).toBe('tenant-demo');
+    expect(salesQuery.where.isCanceled).toBe(false);
+    expect(salesQuery.where.saleDate.gte).toBeInstanceOf(Date);
+    expect(salesQuery.where.saleDate.lte).toBeInstanceOf(Date);
+    expect(salesQuery.distinct).toEqual(['productId']);
+  });
+
+  it('marks operational active products by current stock or recent sales', async () => {
+    prisma.product.findMany.mockResolvedValue([
+      { id: 'stocked-product' },
+      { id: 'recently-sold-product' },
+      { id: 'stale-product' },
+    ]);
+    prisma.inventorySnapshot.findMany.mockResolvedValue([
+      {
+        productId: 'stocked-product',
+        storeId: 'store-1',
+        snapshotDate: new Date(),
+        quantity: new Prisma.Decimal(3),
+        store: { name: 'Club A' },
+      },
+      {
+        productId: 'stale-product',
+        storeId: 'store-1',
+        snapshotDate: new Date(),
+        quantity: new Prisma.Decimal(0),
+        store: { name: 'Club A' },
+      },
+    ]);
+    prisma.salesFact.findMany.mockResolvedValue([
+      { productId: 'recently-sold-product' },
+    ]);
+
+    const products = await service.findAll();
+
+    expect(products).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'stocked-product',
+          isOperationalActive: true,
+        }),
+        expect.objectContaining({
+          id: 'recently-sold-product',
+          isOperationalActive: true,
+        }),
+        expect.objectContaining({
+          id: 'stale-product',
+          isOperationalActive: false,
+        }),
+      ]),
     );
   });
 

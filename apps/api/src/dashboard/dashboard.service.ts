@@ -34,10 +34,23 @@ export type DashboardTopSku = {
   soldQuantity: number;
 };
 
+export type DashboardCategoryMetric = {
+  categoryId: string | null;
+  categoryName: string;
+  revenue: number;
+  grossProfit: number;
+  activeSku: number;
+  revenueSharePercent: number;
+  grossProfitSharePercent: number;
+  profitEfficiency: number | null;
+  fillEfficiency: number | null;
+};
+
 type DashboardTrendGranularity = 'day' | 'week' | 'month' | 'quarter' | 'year';
 type DashboardTrendMode = DashboardTrendGranularity | 'custom';
 
 const DEMAND_PERIOD_DAYS = 21;
+const ACTIVE_SKU_SALES_DAYS = 14;
 const NO_SALES_PERIOD_DAYS = [7, 14, 21] as const;
 
 type NoSalesPeriodDays = (typeof NO_SALES_PERIOD_DAYS)[number];
@@ -100,6 +113,7 @@ export type DashboardSummary = {
   outOfStockRiskCount: number;
   recommendedOrderQuantity: number;
   salesTrend: DashboardSalesTrendSegment[];
+  categoryAnalytics: DashboardCategoryMetric[];
   topSkuByRevenue: DashboardTopSku[];
 };
 
@@ -122,6 +136,7 @@ export class DashboardService {
       selectedStoreIds.length > 0 ? { storeId: { in: selectedStoreIds } } : {};
     const skuGrouping = query.skuGrouping === 'club' ? 'club' : 'network';
     const demandPeriod = this.resolveDemandPeriod();
+    const activeSkuPeriod = this.resolveActiveSkuPeriod();
     const fullDayPeriod = this.resolveFullDayRevenuePeriod();
     const previousPeriod = this.resolvePreviousComparablePeriod(
       period.fromDate,
@@ -132,7 +147,6 @@ export class DashboardService {
     const [
       tenant,
       totalSku,
-      activeSku,
       categoriesCount,
       suppliersCount,
       productsForAverages,
@@ -140,7 +154,9 @@ export class DashboardService {
       trendSalesFacts,
       trendClubRevenueFacts,
       demandSalesFacts,
+      activeSkuSalesFacts,
       inventorySnapshots,
+      currentInventorySnapshots,
       stockMovements,
       fullDayRevenueFacts,
       previousSalesFacts,
@@ -151,7 +167,6 @@ export class DashboardService {
         select: { name: true },
       }),
       this.prisma.product.count({ where: { tenantId } }),
-      this.prisma.product.count({ where: { tenantId, isActive: true } }),
       this.prisma.category.count({ where: { tenantId } }),
       this.prisma.supplier.count({ where: { tenantId } }),
       this.prisma.product.findMany({
@@ -163,6 +178,12 @@ export class DashboardService {
           purchasePrice: true,
           salePrice: true,
           facing: true,
+          categoryId: true,
+          category: {
+            select: {
+              name: true,
+            },
+          },
           supplier: {
             select: {
               orderMultiplicity: true,
@@ -186,6 +207,12 @@ export class DashboardService {
               id: true,
               article: true,
               name: true,
+              categoryId: true,
+              category: {
+                select: {
+                  name: true,
+                },
+              },
               canonicalProduct: {
                 select: {
                   id: true,
@@ -249,12 +276,45 @@ export class DashboardService {
           quantity: true,
         },
       }),
+      this.prisma.salesFact.findMany({
+        where: {
+          tenantId,
+          isCanceled: false,
+          ...storeFilter,
+          saleDate: {
+            gte: activeSkuPeriod.fromDate,
+            lte: activeSkuPeriod.toDate,
+          },
+        },
+        select: {
+          productId: true,
+        },
+        distinct: ['productId'],
+      }),
       this.prisma.inventorySnapshot.findMany({
         where: {
           tenantId,
           ...storeFilter,
           snapshotDate: {
             lte: period.toDate,
+          },
+        },
+        select: {
+          storeId: true,
+          productId: true,
+          snapshotDate: true,
+          quantity: true,
+        },
+        orderBy: {
+          snapshotDate: 'desc',
+        },
+      }),
+      this.prisma.inventorySnapshot.findMany({
+        where: {
+          tenantId,
+          ...storeFilter,
+          snapshotDate: {
+            lte: activeSkuPeriod.toDate,
           },
         },
         select: {
@@ -405,6 +465,14 @@ export class DashboardService {
     const adjustedGrossProfit =
       grossProfit - movementImpact.writeOffAmount - movementImpact.returnAmount;
     const stockByProduct = this.latestStockByProduct(inventorySnapshots);
+    const currentStockByProduct = this.latestStockByProduct(
+      currentInventorySnapshots,
+    );
+    const activeProductIds = this.operationalActiveProductIds(
+      productsForAverages,
+      currentStockByProduct,
+      activeSkuSalesFacts,
+    );
     const demandSoldByProduct = this.soldQuantityByProduct(demandSalesFacts);
     const stockQuantity = [...stockByProduct.values()].reduce(
       (sum, quantity) => sum + quantity,
@@ -459,6 +527,13 @@ export class DashboardService {
       previousMovementImpact.writeOffAmount,
       previousRevenue,
     );
+    const categoryAnalytics = this.buildCategoryAnalytics(
+      productsForAverages,
+      activeProductIds,
+      salesFacts,
+      totalRevenue,
+      grossProfit,
+    );
 
     return {
       tenantId,
@@ -470,7 +545,7 @@ export class DashboardService {
       periodFrom: this.toDateInputValue(period.fromDate),
       periodTo: this.toDateInputValue(period.toDate),
       totalSku,
-      activeSku,
+      activeSku: activeProductIds.size,
       categoriesCount,
       suppliersCount,
       averageMarginPercent: this.round(averageMarginPercent),
@@ -515,6 +590,7 @@ export class DashboardService {
         demand.reduce((sum, item) => sum + item.recommendedOrder, 0),
       ),
       salesTrend,
+      categoryAnalytics,
       topSkuByRevenue: [...salesByProduct.values()]
         .sort(
           (a, b) =>
@@ -629,6 +705,19 @@ export class DashboardService {
     );
     const fromDate = new Date(toDate);
     fromDate.setUTCDate(fromDate.getUTCDate() - (DEMAND_PERIOD_DAYS - 1));
+    fromDate.setUTCHours(0, 0, 0, 0);
+    toDate.setUTCHours(23, 59, 59, 999);
+
+    return { fromDate, toDate };
+  }
+
+  private resolveActiveSkuPeriod() {
+    const now = new Date();
+    const toDate = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+    );
+    const fromDate = new Date(toDate);
+    fromDate.setUTCDate(fromDate.getUTCDate() - (ACTIVE_SKU_SALES_DAYS - 1));
     fromDate.setUTCHours(0, 0, 0, 0);
     toDate.setUTCHours(23, 59, 59, 999);
 
@@ -1302,6 +1391,132 @@ export class DashboardService {
     });
 
     return stockByProduct;
+  }
+
+  private operationalActiveProductIds(
+    products: Array<{ id: string }>,
+    stockByProduct: Map<string, number>,
+    salesFacts: Array<{ productId: string }>,
+  ) {
+    const soldProductIds = new Set(salesFacts.map((fact) => fact.productId));
+
+    return new Set(
+      products
+        .filter(
+          (product) =>
+            (stockByProduct.get(product.id) ?? 0) > 0 ||
+            soldProductIds.has(product.id),
+        )
+        .map((product) => product.id),
+    );
+  }
+
+  private buildCategoryAnalytics(
+    products: Array<{
+      id: string;
+      categoryId: string | null;
+      category: { name: string } | null;
+    }>,
+    activeProductIds: Set<string>,
+    salesFacts: Array<{
+      revenue: { toNumber: () => number };
+      cost: { toNumber: () => number };
+      product: {
+        categoryId: string | null;
+        category: { name: string } | null;
+      };
+    }>,
+    totalRevenue: number,
+    grossProfit: number,
+  ): DashboardCategoryMetric[] {
+    const categories = new Map<
+      string,
+      {
+        categoryId: string | null;
+        categoryName: string;
+        revenue: number;
+        grossProfit: number;
+        activeSku: number;
+      }
+    >();
+    const ensureCategory = (
+      categoryId: string | null,
+      categoryName: string | null | undefined,
+    ) => {
+      const key = categoryId ?? 'uncategorized';
+      const current = categories.get(key) ?? {
+        categoryId,
+        categoryName: categoryName ?? 'Без категории',
+        revenue: 0,
+        grossProfit: 0,
+        activeSku: 0,
+      };
+
+      if (categoryName) {
+        current.categoryName = categoryName;
+      }
+
+      categories.set(key, current);
+      return current;
+    };
+
+    products.forEach((product) => {
+      if (!activeProductIds.has(product.id)) {
+        return;
+      }
+
+      ensureCategory(product.categoryId, product.category?.name).activeSku += 1;
+    });
+
+    salesFacts.forEach((fact) => {
+      const revenue = fact.revenue.toNumber();
+      const cost = fact.cost.toNumber();
+      const category = ensureCategory(
+        fact.product.categoryId,
+        fact.product.category?.name,
+      );
+
+      category.revenue += revenue;
+      category.grossProfit += revenue - cost;
+    });
+
+    return [...categories.values()]
+      .filter(
+        (category) =>
+          category.activeSku > 0 ||
+          category.revenue !== 0 ||
+          category.grossProfit !== 0,
+      )
+      .map((category) => {
+        const revenueSharePercent =
+          this.ratioPercent(category.revenue, totalRevenue) ?? 0;
+        const grossProfitSharePercent =
+          this.ratioPercent(category.grossProfit, grossProfit) ?? 0;
+
+        return {
+          categoryId: category.categoryId,
+          categoryName: category.categoryName,
+          revenue: this.round(category.revenue),
+          grossProfit: this.round(category.grossProfit),
+          activeSku: category.activeSku,
+          revenueSharePercent,
+          grossProfitSharePercent,
+          profitEfficiency:
+            revenueSharePercent > 0
+              ? this.round(grossProfitSharePercent / revenueSharePercent)
+              : null,
+          fillEfficiency:
+            category.activeSku > 0
+              ? this.round(category.revenue / category.activeSku)
+              : null,
+        };
+      })
+      .sort(
+        (a, b) =>
+          b.revenue - a.revenue ||
+          b.grossProfit - a.grossProfit ||
+          a.categoryName.localeCompare(b.categoryName, 'ru'),
+      );
   }
 
   private stockMovementImpact(

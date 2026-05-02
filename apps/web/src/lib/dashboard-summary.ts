@@ -37,6 +37,18 @@ export type DashboardSalesTrendSegment = {
   outOfStockSkuDeltaPercent: number | null;
 };
 
+export type DashboardCategoryMetric = {
+  categoryId: string | null;
+  categoryName: string;
+  revenue: number;
+  grossProfit: number;
+  activeSku: number;
+  revenueSharePercent: number;
+  grossProfitSharePercent: number;
+  profitEfficiency: number | null;
+  fillEfficiency: number | null;
+};
+
 export type DashboardSummaryFilters = {
   period?: string;
   dateFrom?: string;
@@ -79,6 +91,7 @@ export type DashboardSummary = {
   outOfStockRiskCount: number;
   recommendedOrderQuantity: number;
   salesTrend: DashboardSalesTrendSegment[];
+  categoryAnalytics: DashboardCategoryMetric[];
   topSkuByRevenue: DashboardTopSku[];
 };
 

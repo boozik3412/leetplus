@@ -10,6 +10,8 @@ import { TenantContextService } from '../tenancy/tenant-context.service';
 import { AuthenticatedUser } from '../auth/auth.types';
 import type { CreateProductDto, UpdateProductDto } from './products.dto';
 
+const OPERATIONAL_ACTIVE_DAYS = 14;
+
 @Injectable()
 export class ProductsService {
   constructor(
@@ -19,8 +21,9 @@ export class ProductsService {
 
   async findAll(user?: AuthenticatedUser) {
     const { tenantId } = await this.tenantContextService.resolve(user);
+    const operationalActivePeriod = this.resolveOperationalActivePeriod();
 
-    const [products, productStores] = await Promise.all([
+    const [products, productStores, recentSalesFacts] = await Promise.all([
       this.prisma.product.findMany({
         where: {
           tenantId,
@@ -37,25 +40,58 @@ export class ProductsService {
       this.prisma.inventorySnapshot.findMany({
         where: {
           tenantId,
+          snapshotDate: {
+            lte: operationalActivePeriod.toDate,
+          },
         },
-        distinct: ['productId', 'storeId'],
         select: {
           productId: true,
           storeId: true,
+          snapshotDate: true,
+          quantity: true,
           store: {
             select: {
               name: true,
             },
           },
         },
+        orderBy: {
+          snapshotDate: 'desc',
+        },
+      }),
+      this.prisma.salesFact.findMany({
+        where: {
+          tenantId,
+          isCanceled: false,
+          saleDate: {
+            gte: operationalActivePeriod.fromDate,
+            lte: operationalActivePeriod.toDate,
+          },
+        },
+        select: {
+          productId: true,
+        },
+        distinct: ['productId'],
       }),
     ]);
     const storesByProduct = new Map<
       string,
       { storeIds: string[]; storeNames: string[] }
     >();
+    const stockByProduct = new Map<string, number>();
+    const seenSnapshots = new Set<string>();
+    const recentlySoldProductIds = new Set(
+      recentSalesFacts.map((fact) => fact.productId),
+    );
 
     productStores.forEach((snapshot) => {
+      const snapshotKey = `${snapshot.storeId}:${snapshot.productId}`;
+
+      if (seenSnapshots.has(snapshotKey)) {
+        return;
+      }
+
+      seenSnapshots.add(snapshotKey);
       const current = storesByProduct.get(snapshot.productId) ?? {
         storeIds: [],
         storeNames: [],
@@ -70,6 +106,11 @@ export class ProductsService {
       }
 
       storesByProduct.set(snapshot.productId, current);
+      stockByProduct.set(
+        snapshot.productId,
+        (stockByProduct.get(snapshot.productId) ?? 0) +
+          snapshot.quantity.toNumber(),
+      );
     });
 
     return products.map((product) => {
@@ -80,10 +121,26 @@ export class ProductsService {
 
       return {
         ...product,
+        isOperationalActive:
+          (stockByProduct.get(product.id) ?? 0) > 0 ||
+          recentlySoldProductIds.has(product.id),
         storeIds: storeInfo.storeIds,
         storeNames: storeInfo.storeNames.sort((a, b) => a.localeCompare(b)),
       };
     });
+  }
+
+  private resolveOperationalActivePeriod() {
+    const now = new Date();
+    const toDate = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+    );
+    const fromDate = new Date(toDate);
+    fromDate.setUTCDate(fromDate.getUTCDate() - (OPERATIONAL_ACTIVE_DAYS - 1));
+    fromDate.setUTCHours(0, 0, 0, 0);
+    toDate.setUTCHours(23, 59, 59, 999);
+
+    return { fromDate, toDate };
   }
 
   async findById(id: string, user?: AuthenticatedUser) {

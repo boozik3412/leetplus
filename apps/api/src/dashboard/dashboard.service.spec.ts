@@ -165,7 +165,7 @@ describe('DashboardService', () => {
   }
 
   it('returns summary calculated for resolved tenant', async () => {
-    prisma.product.count.mockResolvedValueOnce(2).mockResolvedValueOnce(1);
+    prisma.product.count.mockResolvedValueOnce(2);
     prisma.category.count.mockResolvedValue(3);
     prisma.supplier.count.mockResolvedValue(4);
     prisma.product.findMany.mockResolvedValue([
@@ -263,7 +263,7 @@ describe('DashboardService', () => {
       skuGrouping: 'network',
       selectedStoreIds: [],
       totalSku: 2,
-      activeSku: 1,
+      activeSku: 2,
       categoriesCount: 3,
       suppliersCount: 4,
       averageMarginPercent: 50,
@@ -317,9 +317,6 @@ describe('DashboardService', () => {
     expect(prisma.product.count).toHaveBeenNthCalledWith(1, {
       where: { tenantId: 'tenant-demo' },
     });
-    expect(prisma.product.count).toHaveBeenNthCalledWith(2, {
-      where: { tenantId: 'tenant-demo', isActive: true },
-    });
     expect(prisma.category.count).toHaveBeenCalledWith({
       where: { tenantId: 'tenant-demo' },
     });
@@ -372,7 +369,7 @@ describe('DashboardService', () => {
     jest.setSystemTime(new Date('2026-04-29T12:00:00.000Z'));
 
     try {
-      prisma.product.count.mockResolvedValueOnce(1).mockResolvedValueOnce(1);
+      prisma.product.count.mockResolvedValueOnce(1);
       prisma.category.count.mockResolvedValue(0);
       prisma.supplier.count.mockResolvedValue(0);
       prisma.product.findMany.mockResolvedValue([

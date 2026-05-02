@@ -17,6 +17,9 @@ export default async function ProductsPage() {
     getStores(),
   ]);
   const canEditProducts = can(user, "edit_products");
+  const operationalActiveProducts = products.filter(
+    (product) => product.isOperationalActive,
+  );
 
   return (
     <main className="px-6 py-8 text-zinc-950">
@@ -38,13 +41,16 @@ export default async function ProductsPage() {
             <p className="mt-2 text-2xl font-semibold">{products.length}</p>
           </div>
 
-          <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+          <div
+            title="Товары с остатками либо с продажами за последние 14 дней"
+            className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm"
+          >
             <p className="text-sm text-zinc-500">Активные SKU</p>
             <p className="mt-1 text-xs text-zinc-500">
-              Позиции с isActive=true в текущем tenant.
+              Остаток сейчас или продажи за последние 14 дней.
             </p>
             <p className="mt-2 text-2xl font-semibold">
-              {products.filter((product) => product.isActive).length}
+              {operationalActiveProducts.length}
             </p>
           </div>
 

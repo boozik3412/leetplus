@@ -19,6 +19,7 @@ export type Product = {
   facing: number;
   shelfLifeDays: number | null;
   isActive: boolean;
+  isOperationalActive: boolean;
   createdAt: string;
   externalDomain: string | null;
   storeIds: string[];

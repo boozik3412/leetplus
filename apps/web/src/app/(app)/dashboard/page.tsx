@@ -8,6 +8,10 @@ import { DashboardAutoSync } from "@/components/dashboard-auto-sync";
 import { DashboardQuickSyncButton } from "@/components/dashboard-quick-sync-button";
 import { RevenueTrendChart } from "@/components/revenue-trend-chart";
 import { NoSalesTrendChart } from "@/components/no-sales-trend-chart";
+import {
+  CategoryEfficiencyChart,
+  CategoryShareChart,
+} from "@/components/category-analytics";
 import { requireCurrentUser } from "@/lib/auth";
 import { getStores } from "@/lib/stores";
 import Link from "next/link";
@@ -105,6 +109,7 @@ export default async function DashboardPage({
     summary.periodFrom,
     summary.periodTo,
   );
+  const categoryAnalytics = summary.categoryAnalytics ?? [];
 
   return (
     <main className="px-6 py-8 text-zinc-950 dark:text-zinc-100">
@@ -205,6 +210,11 @@ export default async function DashboardPage({
           canShowRevenueShare={summary.selectedStoreIds.length === 0}
         />
 
+        <section className="mt-6 grid gap-6 xl:grid-cols-2">
+          <CategoryShareChart rows={categoryAnalytics} />
+          <CategoryEfficiencyChart rows={categoryAnalytics} />
+        </section>
+
         <section className="mt-6 grid gap-4 lg:grid-cols-3">
           <InsightCard
             href="/reports#replenishment"
@@ -217,7 +227,8 @@ export default async function DashboardPage({
             value={`${formatQuantity(summary.activeSku)} / ${formatQuantity(
               summary.totalSku,
             )}`}
-            description="Количество активных SKU относительно всего импортированного ассортимента."
+            description="SKU с текущим остатком или продажами за последние 14 дней."
+            tooltip="Товары с остатками либо с продажами за последние 14 дней"
           />
           <InsightCard
             label="Возвраты"
@@ -658,11 +669,13 @@ function InsightCard({
   label,
   value,
   description,
+  tooltip,
 }: {
   href?: string;
   label: string;
   value: string;
   description: string;
+  tooltip?: string;
 }) {
   const content = (
     <>
@@ -680,6 +693,7 @@ function InsightCard({
     return (
       <Link
         href={href}
+        title={tooltip}
         className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-md dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-emerald-700"
       >
         {content}
@@ -688,7 +702,10 @@ function InsightCard({
   }
 
   return (
-    <div className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+    <div
+      title={tooltip}
+      className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
+    >
       {content}
     </div>
   );

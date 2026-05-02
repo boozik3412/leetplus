@@ -336,6 +336,7 @@ function FilterButton({
   return (
     <button
       type="button"
+      aria-label={`${label}: ${value}`}
       onClick={onClick}
       className={[
         "inline-flex items-center justify-between gap-2 rounded-full border px-3 py-2 text-left text-sm transition-colors",
@@ -345,9 +346,6 @@ function FilterButton({
       ].join(" ")}
     >
       <span className="min-w-0">
-        <span className="mr-1 text-[10px] font-medium uppercase tracking-wide opacity-60">
-          {label}
-        </span>
         <span className="inline-block max-w-[190px] truncate align-bottom font-semibold">
           {value}
         </span>

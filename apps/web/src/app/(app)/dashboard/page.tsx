@@ -723,12 +723,21 @@ function TopSkuTable({
   return (
     <section className="mt-6 overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
       <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
-        <h2 className="text-base font-semibold">ТОП-10 SKU по выручке</h2>
-        <p className="mt-1 text-sm text-zinc-500">
-          {grouping === "network"
-            ? "По умолчанию показаны данные по всей сети с учетом спарсенных товаров."
-            : "Позиции показаны отдельно по каждому клубу."}
-        </p>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <h2 className="text-base font-semibold">ТОП-10 SKU по выручке</h2>
+            <p className="mt-1 text-sm text-zinc-500">
+              {grouping === "network"
+                ? "По умолчанию показаны данные по всей сети с учетом спарсенных товаров."
+                : "Позиции показаны отдельно по каждому клубу."}
+            </p>
+          </div>
+          <div className="hidden grid-cols-[120px_96px_120px] gap-4 text-right text-[11px] font-semibold uppercase tracking-wide text-zinc-400 md:grid">
+            <span>Выручка</span>
+            <span>Продано</span>
+            <span>Прибыль</span>
+          </div>
+        </div>
       </div>
 
       {rows.length > 0 ? (
@@ -736,7 +745,7 @@ function TopSkuTable({
           {rows.map((row, index) => (
             <div
               key={row.productId}
-              className="grid gap-3 px-4 py-3 md:grid-cols-[40px_minmax(0,1fr)_240px] md:items-center"
+              className="grid gap-3 px-4 py-4 transition-colors hover:bg-zinc-50/80 dark:hover:bg-zinc-900/45 md:grid-cols-[40px_minmax(0,1fr)_120px_96px_120px] md:items-center"
             >
               <div className="flex h-8 w-8 items-center justify-center rounded-2xl bg-zinc-100 text-xs font-semibold text-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
                 {index + 1}
@@ -756,11 +765,14 @@ function TopSkuTable({
                   ) : (
                     <span>По сети</span>
                   )}
-                  <span className="tabular-nums">
+                  <span className="tabular-nums md:hidden">
+                    выручка {formatMoney(row.revenue)}
+                  </span>
+                  <span className="tabular-nums md:hidden">
                     {formatQuantity(row.soldQuantity)} шт
                   </span>
-                  <span className="tabular-nums">
-                    {formatMoney(row.grossProfit)} прибыли
+                  <span className="tabular-nums md:hidden">
+                    прибыль {formatMoney(row.grossProfit)}
                   </span>
                 </div>
                 <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-900">
@@ -772,32 +784,15 @@ function TopSkuTable({
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-3 gap-3 text-xs md:text-right">
-                <div className="rounded-2xl bg-zinc-50 px-3 py-2 dark:bg-zinc-900/80">
-                  <p className="text-[10px] uppercase tracking-wide text-zinc-500">
-                    Выручка
-                  </p>
-                  <p className="mt-1 text-base font-semibold tabular-nums text-zinc-950 dark:text-zinc-50">
-                    {formatMoney(row.revenue)}
-                  </p>
-                </div>
-                <div className="rounded-2xl bg-zinc-50 px-3 py-2 dark:bg-zinc-900/80">
-                  <p className="text-[10px] uppercase tracking-wide text-zinc-500">
-                    Продано
-                  </p>
-                  <p className="mt-1 font-medium tabular-nums text-zinc-950 dark:text-zinc-50">
-                    {formatQuantity(row.soldQuantity)}
-                  </p>
-                </div>
-                <div className="rounded-2xl bg-zinc-50 px-3 py-2 dark:bg-zinc-900/80">
-                  <p className="text-[10px] uppercase tracking-wide text-zinc-500">
-                    Прибыль
-                  </p>
-                  <p className="mt-1 font-medium tabular-nums text-zinc-950 dark:text-zinc-50">
-                    {formatMoney(row.grossProfit)}
-                  </p>
-                </div>
-              </div>
+              <p className="hidden text-right text-sm font-semibold tabular-nums text-zinc-950 dark:text-zinc-50 md:block">
+                {formatMoney(row.revenue)}
+              </p>
+              <p className="hidden text-right text-sm tabular-nums text-zinc-700 dark:text-zinc-300 md:block">
+                {formatQuantity(row.soldQuantity)}
+              </p>
+              <p className="hidden text-right text-sm tabular-nums text-zinc-700 dark:text-zinc-300 md:block">
+                {formatMoney(row.grossProfit)}
+              </p>
             </div>
           ))}
         </div>

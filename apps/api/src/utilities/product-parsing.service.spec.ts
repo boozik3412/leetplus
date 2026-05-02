@@ -192,6 +192,42 @@ describe('ProductParsingService', () => {
     );
   });
 
+  it('skips groups that are already linked to the same canonical product', async () => {
+    prisma.product.findMany.mockResolvedValue([
+      {
+        id: 'product-1',
+        name: 'ADRENALINE Rush 500ml can',
+        article: 'LG-443-10',
+        externalDomain: '443.langame.ru',
+        canonicalProductId: 'canonical-1',
+        canonicalProduct: { name: 'ADRENALINE Rush 500ml can' },
+      },
+      {
+        id: 'product-2',
+        name: 'ADRENALINE Rush 500ml can',
+        article: 'LG-46-99',
+        externalDomain: '46.langamepro.ru',
+        canonicalProductId: 'canonical-1',
+        canonicalProduct: { name: 'ADRENALINE Rush 500ml can' },
+      },
+    ]);
+    prisma.store.findMany.mockResolvedValue([]);
+    prisma.productParsingSuggestion.updateMany.mockResolvedValue({ count: 0 });
+    prisma.productParsingRun.create.mockResolvedValue({ id: 'run-1' });
+    prisma.productParsingRun.update.mockResolvedValue({ id: 'run-1' });
+
+    await service.analyze(user);
+
+    expect(prisma.productParsingSuggestion.create).not.toHaveBeenCalled();
+    expect(prisma.productParsingRun.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          suggestionsCount: 0,
+        }),
+      }),
+    );
+  });
+
   it('applies a reviewed suggestion to the existing canonical product', async () => {
     prisma.productParsingSuggestion.findFirst.mockResolvedValue({
       id: 'suggestion-1',

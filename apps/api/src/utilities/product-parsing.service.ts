@@ -478,6 +478,7 @@ export class ProductParsingService {
     });
 
     return [...groups.entries()]
+      .filter(([, group]) => this.hasActionableParsingChange(group.products))
       .map(([normalizedKey, group]) =>
         this.groupToSuggestion(normalizedKey, group.parsed, group.products),
       )
@@ -491,6 +492,25 @@ export class ProductParsingService {
           b.productIds.length - a.productIds.length ||
           a.suggestedName.localeCompare(b.suggestedName),
       );
+  }
+
+  private hasActionableParsingChange(products: ProductForParsing[]) {
+    const canonicalProductIds = [
+      ...new Set(
+        products
+          .map((product) => product.canonicalProductId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    const hasUnlinkedProduct = products.some(
+      (product) => !product.canonicalProductId,
+    );
+
+    if (hasUnlinkedProduct) {
+      return true;
+    }
+
+    return canonicalProductIds.length !== 1;
   }
 
   private groupToSuggestion(

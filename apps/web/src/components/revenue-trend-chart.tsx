@@ -2,6 +2,10 @@
 
 import { useState } from "react";
 import type { DashboardSalesTrendSegment } from "@/lib/dashboard-summary";
+import {
+  formatTrendPeriodLabel,
+  formatTrendPeriodTitle,
+} from "@/lib/trend-period-labels";
 
 type RevenueMode = "money" | "share";
 
@@ -64,11 +68,13 @@ export function RevenueTrendChart({
         ) : null}
       </div>
 
-      <div className="mt-4 grid h-56 grid-cols-8 items-end gap-2">
+      <div className="mt-4 grid h-56 grid-cols-8 items-end gap-2 pb-2">
         {rows.map((row, index) => {
           const value = values[index] ?? 0;
           const height = Math.max(4, (value / maxValue) * 100);
           const weekday = getDailyWeekday(row.from, period);
+          const periodLabel = formatTrendPeriodLabel(row, period);
+          const periodTitle = formatTrendPeriodTitle(row, period);
           const previous = rows[index - 1];
           const delta =
             activeMode === "money"
@@ -83,7 +89,7 @@ export function RevenueTrendChart({
             <div
               key={`revenue-${row.index}`}
               className="group flex h-full flex-col justify-end gap-2"
-              title={revenueTooltip(row, activeMode, weekday?.fullLabel)}
+              title={revenueTooltip(row, activeMode, periodTitle)}
             >
               <div className="min-h-12 text-center">
                 <p className="text-[11px] font-semibold tabular-nums text-zinc-800 dark:text-zinc-200">
@@ -119,26 +125,16 @@ export function RevenueTrendChart({
                   style={{ height: `${height}%` }}
                 />
               </div>
-              <div className="min-h-8 text-center">
-                {weekday ? (
-                  <p
-                    className={[
-                      "mx-auto mb-1 w-fit rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase opacity-0 transition-opacity group-hover:opacity-100",
-                      weekday.badgeClass,
-                    ].join(" ")}
-                  >
-                    {weekday.shortLabel}
-                  </p>
-                ) : null}
+              <div className="min-h-6 pt-1 text-center">
                 <p
                   className={[
-                    "truncate text-[10px]",
+                    "whitespace-nowrap text-[10px] leading-none",
                     weekday?.isAccent
                       ? weekday.labelClass
                       : "text-zinc-500 dark:text-zinc-400",
                   ].join(" ")}
                 >
-                  {row.label}
+                  {periodLabel}
                 </p>
               </div>
             </div>

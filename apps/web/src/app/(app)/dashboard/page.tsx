@@ -12,6 +12,10 @@ import {
   CategoryEfficiencyChart,
   CategoryShareChart,
 } from "@/components/category-analytics";
+import {
+  formatTrendPeriodLabel,
+  formatTrendPeriodTitle,
+} from "@/lib/trend-period-labels";
 import { requireCurrentUser } from "@/lib/auth";
 import { getStores } from "@/lib/stores";
 import Link from "next/link";
@@ -384,7 +388,7 @@ function SalesTrendPanel({
             period={period}
             canShowShare={canShowRevenueShare}
           />
-          <NoSalesTrendChart rows={rows} />
+          <NoSalesTrendChart rows={rows} period={period} />
         </div>
         <div className="grid gap-6">
           <TrendChart
@@ -454,12 +458,14 @@ function TrendChart({
           {description}
         </p>
       ) : null}
-      <div className="mt-4 grid h-56 grid-cols-8 items-end gap-2">
+      <div className="mt-4 grid h-56 grid-cols-8 items-end gap-2 pb-2">
         {rows.map((row) => {
           const value = getValue(row);
           const height = Math.max(4, (value / maxValue) * 100);
           const delta = getDelta(row);
           const weekday = getDailyWeekday(row.from, period);
+          const periodLabel = formatTrendPeriodLabel(row, period);
+          const periodTitle = formatTrendPeriodTitle(row, period);
           const isGood =
             delta !== null &&
             delta !== 0 &&
@@ -469,7 +475,7 @@ function TrendChart({
             <div
               key={`${title}-${row.index}`}
               className="group flex h-full flex-col justify-end gap-2"
-              title={weekday?.fullLabel}
+              title={periodTitle}
             >
               <div className="min-h-12 text-center">
                 <p className="text-[11px] font-semibold tabular-nums text-zinc-800 dark:text-zinc-200">
@@ -506,26 +512,16 @@ function TrendChart({
                   style={{ height: `${height}%` }}
                 />
               </div>
-              <div className="min-h-8 text-center">
-                {weekday ? (
-                  <p
-                    className={[
-                      "mx-auto mb-1 w-fit rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase opacity-0 transition-opacity group-hover:opacity-100",
-                      weekday.badgeClass,
-                    ].join(" ")}
-                  >
-                    {weekday.shortLabel}
-                  </p>
-                ) : null}
+              <div className="min-h-6 pt-1 text-center">
                 <p
                   className={[
-                    "truncate text-[10px]",
+                    "whitespace-nowrap text-[10px] leading-none",
                     weekday?.isAccent
                       ? weekday.labelClass
                       : "text-zinc-500 dark:text-zinc-400",
                   ].join(" ")}
                 >
-                  {row.label}
+                  {periodLabel}
                 </p>
               </div>
             </div>

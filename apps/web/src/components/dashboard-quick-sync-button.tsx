@@ -9,11 +9,9 @@ const quickSyncTitle =
 export function DashboardQuickSyncButton() {
   const router = useRouter();
   const [isSyncing, setIsSyncing] = useState(false);
-  const [status, setStatus] = useState<"success" | "error" | null>(null);
 
   async function quickSync() {
     setIsSyncing(true);
-    setStatus(null);
 
     try {
       const today = getDateInputValue(0);
@@ -31,14 +29,11 @@ export function DashboardQuickSyncButton() {
       });
 
       if (!response.ok) {
-        setStatus("error");
         return;
       }
 
-      setStatus("success");
       router.refresh();
     } catch {
-      setStatus("error");
     } finally {
       setIsSyncing(false);
     }
@@ -56,18 +51,6 @@ export function DashboardQuickSyncButton() {
       >
         {isSyncing ? "Обновление..." : "Обновить"}
       </button>
-      {status ? (
-        <span
-          className={[
-            "text-xs font-medium",
-            status === "success"
-              ? "text-emerald-700 dark:text-emerald-300"
-              : "text-red-700 dark:text-red-300",
-          ].join(" ")}
-        >
-          {status === "success" ? "готово" : "ошибка"}
-        </span>
-      ) : null}
     </span>
   );
 }

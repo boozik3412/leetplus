@@ -2,6 +2,10 @@
 
 import { useState } from "react";
 import type { DashboardSalesTrendSegment } from "@/lib/dashboard-summary";
+import {
+  formatTrendPeriodLabel,
+  formatTrendPeriodTitle,
+} from "@/lib/trend-period-labels";
 
 type NoSalesWindow = 7 | 14 | 21;
 
@@ -9,8 +13,10 @@ const windows: NoSalesWindow[] = [7, 14, 21];
 
 export function NoSalesTrendChart({
   rows,
+  period,
 }: {
   rows: DashboardSalesTrendSegment[];
+  period: string;
 }) {
   const [windowDays, setWindowDays] = useState<NoSalesWindow>(7);
   const values = rows.map((row) => getNoSalesCount(row, windowDays));
@@ -46,17 +52,19 @@ export function NoSalesTrendChart({
         </div>
       </div>
 
-      <div className="mt-4 grid h-56 grid-cols-8 items-end gap-2">
+      <div className="mt-4 grid h-56 grid-cols-8 items-end gap-2 pb-2">
         {rows.map((row) => {
           const value = getNoSalesCount(row, windowDays);
           const delta = getNoSalesDelta(row, windowDays);
           const height = Math.max(4, (value / maxValue) * 100);
+          const periodLabel = formatTrendPeriodLabel(row, period);
+          const periodTitle = formatTrendPeriodTitle(row, period);
 
           return (
             <div
               key={`no-sales-${row.index}`}
               className="group flex h-full flex-col justify-end gap-2"
-              title={`SKU без движения ${windowDays} дн: ${formatNumber(value)}`}
+              title={`${periodTitle}. SKU без движения ${windowDays} дн: ${formatNumber(value)}`}
             >
               <div className="min-h-12 text-center">
                 <p className="text-[11px] font-semibold tabular-nums text-zinc-800 dark:text-zinc-200">
@@ -81,9 +89,9 @@ export function NoSalesTrendChart({
                   style={{ height: `${height}%` }}
                 />
               </div>
-              <div className="min-h-8 text-center">
-                <p className="truncate text-[10px] text-zinc-500 dark:text-zinc-400">
-                  {row.label}
+              <div className="min-h-6 pt-1 text-center">
+                <p className="whitespace-nowrap text-[10px] leading-none text-zinc-500 dark:text-zinc-400">
+                  {periodLabel}
                 </p>
               </div>
             </div>

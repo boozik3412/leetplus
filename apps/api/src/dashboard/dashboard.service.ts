@@ -655,10 +655,16 @@ export class DashboardService {
         };
       }
 
+      const customPeriodDuration =
+        customToDate.getTime() - fromDate.getTime() + 1;
+      const customTrendFromDate = new Date(
+        fromDate.getTime() - customPeriodDuration * 7,
+      );
+
       return {
         fromDate,
         toDate: customToDate,
-        trendFromDate: fromDate,
+        trendFromDate: customTrendFromDate,
         trendToDate: customToDate,
         mode: period,
         label: 'Произвольный период',

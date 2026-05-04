@@ -414,6 +414,7 @@ type LflAccumulator = {
 };
 
 const DEMAND_PERIOD_DAYS = 21;
+const NEW_PRODUCTS_PERIOD_DAYS = 90;
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
 @Injectable()
@@ -2503,7 +2504,7 @@ export class ReportsService {
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
     );
     const fromDate = new Date(toDate);
-    fromDate.setUTCDate(fromDate.getUTCDate() - 29);
+    fromDate.setUTCDate(fromDate.getUTCDate() - (NEW_PRODUCTS_PERIOD_DAYS - 1));
     fromDate.setUTCHours(0, 0, 0, 0);
     toDate.setUTCHours(23, 59, 59, 999);
 

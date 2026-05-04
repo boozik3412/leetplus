@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { requireCurrentUser } from "@/lib/auth";
 import { AbcReportToggle } from "@/components/abc-report-toggle";
 import { NoSalesPeriodTable } from "@/components/no-sales-period-table";
@@ -212,119 +213,225 @@ export default async function ReportsPage({
           storeId={operationalReport.storeId}
         />
 
-        <LflReportPanel report={lflReport} period={lflPeriod} />
+        <section className="mt-6 grid gap-3">
+          <ReportDisclosure
+            title="LFL год к году"
+            description="День, неделя или месяц год к году по выручке, прибыли и штукам."
+          >
+            <LflReportPanel report={lflReport} period={lflPeriod} />
+          </ReportDisclosure>
 
-        <NewProductsPanel
-          report={newProductsReport}
-          stores={stores}
-          from={operationalReport.from}
-          to={operationalReport.to}
-        />
+          <ReportDisclosure
+            title="Новинки"
+            description="Первый в истории положительный остаток за последние 90 дней."
+          >
+            <NewProductsPanel
+              report={newProductsReport}
+              stores={stores}
+              from={operationalReport.from}
+              to={operationalReport.to}
+            />
+          </ReportDisclosure>
 
-        <RecommendationsPanel
-          rows={operationalReport.recommendations}
-          from={operationalReport.from}
-          to={operationalReport.to}
-          storeId={operationalReport.storeId}
-        />
+          <ReportDisclosure
+            title="Рекомендации"
+            description="Короткий список автоматических действий по рискам и маржинальности."
+          >
+            <RecommendationsPanel
+              rows={operationalReport.recommendations}
+              from={operationalReport.from}
+              to={operationalReport.to}
+              storeId={operationalReport.storeId}
+            />
+          </ReportDisclosure>
 
-        <RiskTable
-          rows={operationalReport.outOfStockRiskProducts}
-          from={operationalReport.from}
-          to={operationalReport.to}
-          storeId={operationalReport.storeId}
-        />
-        <NoSalesPeriodTable
-          rowsByPeriod={{
-            7: noSalesReport7.productsWithoutSales,
-            14: noSalesReport14.productsWithoutSales,
-            21: noSalesReport21.productsWithoutSales,
-          }}
-          networkBadge={<NetworkSkuBadge />}
-        />
+          <ReportDisclosure
+            title="Риск out-of-stock"
+            description="SKU, где текущего остатка хватит на 3 дня или меньше."
+          >
+            <RiskTable
+              rows={operationalReport.outOfStockRiskProducts}
+              from={operationalReport.from}
+              to={operationalReport.to}
+              storeId={operationalReport.storeId}
+            />
+          </ReportDisclosure>
 
-        <ReplenishmentTable
-          rows={replenishmentReport.rows}
-          from={replenishmentReport.from}
-          to={replenishmentReport.to}
-          storeId={replenishmentReport.storeId}
-        />
+          <ReportDisclosure
+            title="Товары без продаж"
+            description="Активные SKU с остатком, но без продаж за 7, 14 или 21 день."
+          >
+            <NoSalesPeriodTable
+              rowsByPeriod={{
+                7: noSalesReport7.productsWithoutSales,
+                14: noSalesReport14.productsWithoutSales,
+                21: noSalesReport21.productsWithoutSales,
+              }}
+              networkBadge={<NetworkSkuBadge />}
+            />
+          </ReportDisclosure>
 
-        <AbcReportToggle
-          revenueRows={skuPerformanceReport.abcByRevenue}
-          profitRows={skuPerformanceReport.abcByProfit}
-          href={abcTableHref({
-            from: operationalReport.from,
-            to: operationalReport.to,
-            storeId: operationalReport.storeId,
-          })}
-        />
+          <ReportDisclosure
+            title="Остатки и потребность"
+            description="Позиции к заказу по клубам, ССР, остаткам в днях и недельной потребности."
+          >
+            <ReplenishmentTable
+              rows={replenishmentReport.rows}
+              from={replenishmentReport.from}
+              to={replenishmentReport.to}
+              storeId={replenishmentReport.storeId}
+            />
+          </ReportDisclosure>
 
-        <TopSkuTable
-          rows={skuPerformanceReport.topByRevenue}
-          stores={stores}
-          storeId={operationalReport.storeId}
-          from={operationalReport.from}
-          to={operationalReport.to}
-        />
+          <ReportDisclosure
+            title="ABC-анализ"
+            description="Группы A/B/C по накопительной доле выручки или прибыли."
+          >
+            <AbcReportToggle
+              revenueRows={skuPerformanceReport.abcByRevenue}
+              profitRows={skuPerformanceReport.abcByProfit}
+              href={abcTableHref({
+                from: operationalReport.from,
+                to: operationalReport.to,
+                storeId: operationalReport.storeId,
+              })}
+            />
+          </ReportDisclosure>
 
-        <TopSuppliersTable rows={suppliersPerformanceReport.rows} />
+          <ReportDisclosure
+            title="ТОП SKU по выручке"
+            description="Рейтинг товаров с выручкой, прибылью, маржой и эффективностью фейса."
+          >
+            <TopSkuTable
+              rows={skuPerformanceReport.topByRevenue}
+              stores={stores}
+              storeId={operationalReport.storeId}
+              from={operationalReport.from}
+              to={operationalReport.to}
+            />
+          </ReportDisclosure>
 
-        <section className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-          <Metric label="Всего SKU" value={assortmentReport.totalSku} />
-          <Metric label="Активные SKU" value={assortmentReport.activeSku} />
-          <Metric label="Архивные SKU" value={assortmentReport.inactiveSku} />
-          <Metric
-            label="Средняя маржа прайса"
-            value={formatPercent(assortmentReport.averageMarginPercent)}
-          />
-          <Metric
-            label="Средняя наценка прайса"
-            value={formatPercent(assortmentReport.averageMarkupPercent)}
-          />
-        </section>
+          <ReportDisclosure
+            title="ТОП поставщиков"
+            description="Выручка, прибыль, доля продаж и условия поставщиков."
+          >
+            <TopSuppliersTable rows={suppliersPerformanceReport.rows} />
+          </ReportDisclosure>
 
-        <section className="mt-6 grid gap-6 xl:grid-cols-2">
-          <GroupTable title="Категории" rows={assortmentReport.categoryBreakdown} />
-          <GroupTable title="Поставщики" rows={assortmentReport.supplierBreakdown} />
-        </section>
+          <ReportDisclosure
+            title="Ассортимент"
+            description="SKU, категории, поставщики и товары с низкой маржинальностью."
+          >
+            <section className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+              <Metric label="Всего SKU" value={assortmentReport.totalSku} />
+              <Metric
+                label="Активные SKU"
+                value={assortmentReport.activeSku}
+              />
+              <Metric
+                label="Архивные SKU"
+                value={assortmentReport.inactiveSku}
+              />
+              <Metric
+                label="Средняя маржа прайса"
+                value={formatPercent(assortmentReport.averageMarginPercent)}
+              />
+              <Metric
+                label="Средняя наценка прайса"
+                value={formatPercent(assortmentReport.averageMarkupPercent)}
+              />
+            </section>
 
-        <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
-          <div className="border-b border-zinc-200 px-5 py-4">
-            <h2 className="text-base font-semibold">SKU с низкой маржой</h2>
-            <p className="mt-1 text-sm text-zinc-500">
-              Товары ниже 20% маржинальности, сначала самые рискованные.
-            </p>
-          </div>
+            <section className="mt-6 grid gap-6 xl:grid-cols-2">
+              <GroupTable
+                title="Категории"
+                rows={assortmentReport.categoryBreakdown}
+              />
+              <GroupTable
+                title="Поставщики"
+                rows={assortmentReport.supplierBreakdown}
+              />
+            </section>
 
-          {assortmentReport.lowMarginProducts.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[920px] text-left text-sm">
-                <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
-                  <tr>
-                    <th className="px-5 py-3 font-medium">Товар</th>
-                    <th className="px-5 py-3 font-medium">Категория</th>
-                    <th className="px-5 py-3 font-medium">Поставщик</th>
-                    <th className="px-5 py-3 text-right font-medium">Вход</th>
-                    <th className="px-5 py-3 text-right font-medium">Цена</th>
-                    <th className="px-5 py-3 text-right font-medium">Маржа</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-zinc-100">
-                  {assortmentReport.lowMarginProducts.map((product) => (
-                    <LowMarginRow key={product.id} product={product} />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <p className="px-5 py-6 text-sm text-zinc-500">
-              Товаров с маржей ниже 20% не найдено.
-            </p>
-          )}
+            <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
+              <div className="border-b border-zinc-200 px-5 py-4">
+                <h2 className="text-base font-semibold">SKU с низкой маржой</h2>
+                <p className="mt-1 text-sm text-zinc-500">
+                  Товары ниже 20% маржинальности, сначала самые рискованные.
+                </p>
+              </div>
+
+              {assortmentReport.lowMarginProducts.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[920px] text-left text-sm">
+                    <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
+                      <tr>
+                        <th className="px-5 py-3 font-medium">Товар</th>
+                        <th className="px-5 py-3 font-medium">Категория</th>
+                        <th className="px-5 py-3 font-medium">Поставщик</th>
+                        <th className="px-5 py-3 text-right font-medium">
+                          Вход
+                        </th>
+                        <th className="px-5 py-3 text-right font-medium">
+                          Цена
+                        </th>
+                        <th className="px-5 py-3 text-right font-medium">
+                          Маржа
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-100">
+                      {assortmentReport.lowMarginProducts.map((product) => (
+                        <LowMarginRow key={product.id} product={product} />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="px-5 py-6 text-sm text-zinc-500">
+                  Товаров с маржей ниже 20% не найдено.
+                </p>
+              )}
+            </section>
+          </ReportDisclosure>
         </section>
       </div>
     </main>
+  );
+}
+
+function ReportDisclosure({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children: ReactNode;
+}) {
+  return (
+    <details className="group overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm transition-shadow open:shadow-md dark:border-zinc-800 dark:bg-zinc-950">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 marker:hidden hover:bg-zinc-50 dark:hover:bg-zinc-900/70">
+        <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
+          <h2 className="shrink-0 truncate text-base font-semibold text-zinc-950 dark:text-zinc-50">
+            {title}
+          </h2>
+          <p className="truncate text-sm text-zinc-500 dark:text-zinc-400">
+            {description}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-3 text-sm font-medium text-zinc-600 dark:text-zinc-300">
+          <span className="group-open:hidden">Развернуть</span>
+          <span className="hidden group-open:inline">Свернуть</span>
+          <span className="flex h-8 w-8 items-center justify-center rounded-full border border-zinc-200 transition-transform group-open:rotate-180 dark:border-zinc-700">
+            ⌄
+          </span>
+        </div>
+      </summary>
+      <div className="report-disclosure-body border-t border-zinc-200 dark:border-zinc-800 [&>div]:mt-0 [&>div]:rounded-none [&>div]:border-0 [&>div]:bg-transparent [&>div]:shadow-none [&>section]:mt-0 [&>section]:rounded-none [&>section]:border-0 [&>section]:bg-transparent [&>section]:shadow-none">
+        {children}
+      </div>
+    </details>
   );
 }
 
@@ -589,7 +696,7 @@ function NewProductsPanel({
         <div>
           <h2 className="text-base font-semibold">Новинки</h2>
           <p className="mt-1 text-sm text-zinc-500">
-            Товары, которые впервые появились на остатках за последний месяц:
+            Товары, которые впервые появились на остатках за последние 90 дней:
             {` ${report.from} - ${report.to}`}.
           </p>
         </div>
@@ -666,7 +773,7 @@ function NewProductsPanel({
         </div>
       ) : (
         <p className="px-5 py-6 text-sm text-zinc-500">
-          За последний месяц новых товаров на остатках не найдено.
+          За последние 90 дней новых товаров на остатках не найдено.
         </p>
       )}
     </section>

@@ -116,7 +116,7 @@ export default async function DashboardPage({
       <DashboardAutoSync />
       <div className="mx-auto max-w-7xl">
         <section className="overflow-visible rounded-[2rem] border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-          <div className="grid gap-6 p-5 min-[800px]:grid-cols-[1.1fr_0.9fr] lg:p-8">
+          <div className="grid gap-6 p-5 min-[1250px]:grid-cols-[1.1fr_0.9fr] lg:p-8">
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <DashboardFilters
@@ -129,7 +129,7 @@ export default async function DashboardPage({
                 />
                 <DashboardQuickSyncButton />
               </div>
-              <h1 className="mt-3 max-w-3xl text-3xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50 min-[800px]:text-4xl">
+              <h1 className="mt-3 max-w-3xl text-3xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50 min-[1250px]:text-4xl">
                 {summary.tenantName}: операционная картина ассортимента
               </h1>
               <p className="mt-4 max-w-2xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
@@ -141,7 +141,7 @@ export default async function DashboardPage({
               </p>
             </div>
 
-            <div className="flex gap-3 overflow-x-auto pb-1 min-[800px]:grid min-[800px]:grid-cols-2 min-[800px]:overflow-visible min-[800px]:pb-0">
+            <div className="flex gap-3 overflow-x-auto pb-1 min-[1250px]:grid min-[1250px]:grid-cols-2 min-[1250px]:overflow-visible min-[1250px]:pb-0">
               <HeroMetric
                 label="Выручка"
                 value={formatMoney(summary.totalRevenue)}
@@ -192,6 +192,7 @@ export default async function DashboardPage({
             />
             <SignalMetric
               label="Риск out-of-stock"
+              compactLabel="OOS"
               value={formatQuantity(summary.outOfStockRiskCount)}
               suffix="SKU"
               tone={summary.outOfStockRiskCount > 0 ? "danger" : "good"}
@@ -262,7 +263,7 @@ function HeroMetric({
   return (
     <div
       className={[
-        "min-w-[220px] flex-1 rounded-3xl border p-5 min-[800px]:min-w-0",
+        "min-w-[220px] flex-1 rounded-3xl border p-5 min-[1250px]:min-w-0",
         tone === "good"
           ? "border-emerald-200 bg-emerald-50 text-emerald-950 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-100"
           : tone === "warning"
@@ -271,7 +272,7 @@ function HeroMetric({
       ].join(" ")}
     >
       <p className="text-sm opacity-70">{label}</p>
-      <p className="mt-3 whitespace-nowrap text-2xl font-semibold tabular-nums min-[800px]:text-3xl">
+      <p className="mt-3 whitespace-nowrap text-2xl font-semibold tabular-nums min-[1250px]:text-3xl">
         {value}
       </p>
       <p className="mt-2 text-sm opacity-70">{caption}</p>
@@ -620,12 +621,14 @@ function formatDelta(value: number | null) {
 
 function SignalMetric({
   label,
+  compactLabel,
   value,
   suffix,
   tone = "neutral",
   href,
 }: {
   label: string;
+  compactLabel?: string;
   value: string;
   suffix?: string;
   tone?: "neutral" | "good" | "danger";
@@ -633,8 +636,18 @@ function SignalMetric({
 }) {
   const content = (
     <div className="border-b border-zinc-200 px-6 py-4 dark:border-zinc-800 md:border-b-0 md:border-r last:md:border-r-0">
-      <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
-        {label}
+      <p
+        className="text-xs font-medium uppercase tracking-wide text-zinc-500"
+        title={compactLabel ? label : undefined}
+      >
+        {compactLabel ? (
+          <>
+            <span className="min-[1250px]:hidden">{compactLabel}</span>
+            <span className="hidden min-[1250px]:inline">{label}</span>
+          </>
+        ) : (
+          label
+        )}
       </p>
       <p
         className={[

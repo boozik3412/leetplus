@@ -10,7 +10,7 @@ type ReportEmailFormProps = {
 };
 
 type ErrorResponse = {
-  message?: string;
+  message?: string | string[];
 };
 
 type SuccessResponse = {
@@ -18,14 +18,34 @@ type SuccessResponse = {
   fileName: string;
 };
 
+const REPORT_EXPORT_DESCRIPTION =
+  "Будет отправлен сводный файл за выбранный период: операционная сводка, рекомендации, OOS, товары без продаж, остатки, ABC, ТОП SKU/поставщиков и ассортимент.";
+
+function normalizeErrorMessage(message: string) {
+  const normalized = message.trim();
+
+  if (!normalized || /internal server error/i.test(normalized)) {
+    return "Не удалось отправить отчёт: почтовый сервер недоступен или не настроен.";
+  }
+
+  return normalized;
+}
+
 function getErrorMessage(data: unknown) {
   if (
     data &&
     typeof data === "object" &&
-    "message" in data &&
-    typeof data.message === "string"
+    "message" in data
   ) {
-    return data.message;
+    const message = (data as ErrorResponse).message;
+
+    if (typeof message === "string") {
+      return normalizeErrorMessage(message);
+    }
+
+    if (Array.isArray(message)) {
+      return normalizeErrorMessage(message.join(", "));
+    }
   }
 
   return "Не удалось отправить отчёт";
@@ -85,10 +105,19 @@ export function ReportEmailForm({
       onSubmit={handleSubmit}
       className="mt-4 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm"
     >
+      <div className="mb-4">
+        <h2 className="text-base font-semibold text-zinc-900">
+          Отправить сводный отчёт на email
+        </h2>
+        <p className="mt-1 max-w-4xl text-sm text-zinc-500">
+          {REPORT_EXPORT_DESCRIPTION}
+        </p>
+      </div>
+
       <div className="grid gap-4 md:grid-cols-[1fr_160px_auto] md:items-end">
         <label className="block">
           <span className="text-sm font-medium text-zinc-700">
-            Отправить отчёт на email
+            Email получателя
           </span>
           <input
             name="recipientEmail"
@@ -120,7 +149,8 @@ export function ReportEmailForm({
 
       {success ? (
         <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-          Отчёт {success.fileName} отправлен на {success.recipientEmail}.
+          Сводный отчёт {success.fileName} отправлен на{" "}
+          {success.recipientEmail}.
         </p>
       ) : null}
 

@@ -463,6 +463,17 @@ function ReportFilters({
 }) {
   return (
     <form className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+      <div className="mb-4">
+        <h2 className="text-base font-semibold text-zinc-950">
+          Сводный экспорт отчётов
+        </h2>
+        <p className="mt-1 max-w-4xl text-sm text-zinc-500">
+          Фильтры ниже применяются к общему файлу: операционная сводка,
+          рекомендации, OOS, товары без продаж, остатки и потребность, ABC,
+          ТОП SKU/поставщиков и ассортимент.
+        </p>
+      </div>
+
       <div className="grid gap-4 md:grid-cols-[1fr_1fr_1.4fr_auto] md:items-end">
         <label className="block">
           <span className="text-sm font-medium text-zinc-700">С даты</span>
@@ -507,7 +518,7 @@ function ReportFilters({
         </button>
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-zinc-100 pt-4">
-        <span className="text-sm text-zinc-500">Выгрузить текущий отчёт:</span>
+        <span className="text-sm text-zinc-500">Скачать сводный отчёт:</span>
         <a
           href={csvHref}
           className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50"

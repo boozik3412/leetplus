@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { TransactionalMailService } from '../mail/transactional-mail.service';
 import type { SendReportEmailDto } from './reports.dto';
@@ -8,6 +13,8 @@ const EMAIL_REGEXP = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 @Injectable()
 export class ReportsEmailService {
+  private readonly logger = new Logger(ReportsEmailService.name);
+
   constructor(
     private readonly reportsExportService: ReportsExportService,
     private readonly transactionalMailService: TransactionalMailService,
@@ -20,16 +27,26 @@ export class ReportsEmailService {
       format: dto.format ?? 'xlsx',
     });
 
-    await this.transactionalMailService.sendReportExport(recipientEmail, {
-      tenantSlug: exportFile.tenantSlug,
-      from: exportFile.from,
-      to: exportFile.to,
-      attachment: {
-        fileName: exportFile.fileName,
-        contentType: exportFile.contentType,
-        buffer: exportFile.buffer,
-      },
-    });
+    try {
+      await this.transactionalMailService.sendReportExport(recipientEmail, {
+        tenantSlug: exportFile.tenantSlug,
+        from: exportFile.from,
+        to: exportFile.to,
+        attachment: {
+          fileName: exportFile.fileName,
+          contentType: exportFile.contentType,
+          buffer: exportFile.buffer,
+        },
+      });
+    } catch (error) {
+      this.logger.error(
+        'Failed to send report export email',
+        error instanceof Error ? error.stack : String(error),
+      );
+      throw new ServiceUnavailableException(
+        'Почтовый сервер недоступен или не настроен',
+      );
+    }
 
     return {
       ok: true,

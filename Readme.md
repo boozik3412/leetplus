@@ -160,9 +160,16 @@ NEXT_PUBLIC_API_URL="http://localhost:4000"
 ```env
 MAIL_HOST="localhost"
 MAIL_PORT="1025"
+MAIL_SECURE="false"
+MAIL_USER=""
+MAIL_PASS=""
 MAIL_FROM="LeetPlus <no-reply@leetplus.ru>"
 SYNC_SERVICE_TOKEN="change_me_for_cron"
 ```
+
+Для production нужно заменить dev-настройки почты на реальные SMTP-параметры.
+Если оставить `MAIL_HOST=localhost` и `MAIL_PORT=1025`, отправка писем будет
+работать только при поднятом локальном Mailpit/SMTP-сервисе.
 
 `APP_ENCRYPTION_KEY` нужно задать до первого сохранения реальных ключей интеграции. Если заменить его без процедуры ротации, сохраненные API-ключи нельзя будет расшифровать.
 

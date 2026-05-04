@@ -42,19 +42,22 @@ export class TransactionalMailService {
   async sendReportExport(to: string, context: ReportEmailContext) {
     await this.mailerService.sendMail({
       to,
-      subject: `Отчёт LeetPlus ${context.from} - ${context.to}`,
+      subject: `Сводный отчёт LeetPlus ${context.from} - ${context.to}`,
       text: [
         'Здравствуйте!',
         '',
-        `Во вложении отчёт LeetPlus по организации ${context.tenantSlug}.`,
+        `Во вложении сводный отчёт LeetPlus по организации ${context.tenantSlug}.`,
         `Период: ${context.from} - ${context.to}.`,
+        '',
+        'Файл включает операционную сводку, рекомендации, OOS, товары без продаж, остатки, ABC, ТОП SKU/поставщиков и ассортимент.',
         '',
         'Письмо сформировано автоматически.',
       ].join('\n'),
       html: [
         '<p>Здравствуйте!</p>',
-        `<p>Во вложении отчёт LeetPlus по организации <b>${context.tenantSlug}</b>.</p>`,
+        `<p>Во вложении сводный отчёт LeetPlus по организации <b>${context.tenantSlug}</b>.</p>`,
         `<p>Период: ${context.from} - ${context.to}.</p>`,
+        '<p>Файл включает операционную сводку, рекомендации, OOS, товары без продаж, остатки, ABC, ТОП SKU/поставщиков и ассортимент.</p>',
         '<p>Письмо сформировано автоматически.</p>',
       ].join(''),
       attachments: [

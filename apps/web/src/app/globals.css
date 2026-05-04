@@ -112,3 +112,17 @@ body::before {
 .dark tr.hover\:bg-zinc-50:hover {
   background-color: rgb(24 29 38 / 0.72) !important;
 }
+
+.dark table .divide-zinc-100 > :not([hidden]) ~ :not([hidden]),
+.dark table .divide-zinc-200 > :not([hidden]) ~ :not([hidden]),
+.dark table .divide-zinc-300 > :not([hidden]) ~ :not([hidden]) {
+  border-color: rgb(39 47 61 / 0.38) !important;
+}
+
+.dark table :is(.border-zinc-100, .border-zinc-200, .border-zinc-300) {
+  border-color: rgb(39 47 61 / 0.38) !important;
+}
+
+.dark table :is(.bg-zinc-50, .bg-zinc-100) {
+  background-color: rgb(18 23 31 / 0.86) !important;
+}

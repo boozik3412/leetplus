@@ -73,6 +73,7 @@ export type OutOfStockRiskProduct = {
   name: string;
   isCanonical: boolean;
   canonicalProductName: string | null;
+  supplierName: string | null;
   stockQuantity: number;
   averageDailySales: number;
   stockDays: number;
@@ -341,6 +342,7 @@ type ProductSales = {
   name: string;
   isCanonical: boolean;
   canonicalProductName: string | null;
+  supplierName: string | null;
   quantity: number;
   revenue: number;
   cost: number;
@@ -576,6 +578,9 @@ export class ReportsService {
                   name: true,
                 },
               },
+              supplier: {
+                select: { name: true },
+              },
             },
           },
           store: {
@@ -718,6 +723,7 @@ export class ReportsService {
         name: fact.product.name,
         isCanonical: Boolean(fact.product.canonicalProduct),
         canonicalProductName: fact.product.canonicalProduct?.name ?? null,
+        supplierName: fact.product.supplier?.name ?? null,
         quantity: 0,
         revenue: 0,
         cost: 0,
@@ -2116,9 +2122,10 @@ export class ReportsService {
       )
       .map((sale) => {
         const averageDailySales = sale.quantity / periodDays;
-        const stockQuantity =
-          stockByStoreProduct.get(`${sale.storeId}:${sale.productId}`)
-            ?.stockQuantity ?? 0;
+        const stockItem = stockByStoreProduct.get(
+          `${sale.storeId}:${sale.productId}`,
+        );
+        const stockQuantity = stockItem?.stockQuantity ?? 0;
         const stockDays =
           averageDailySales > 0 ? stockQuantity / averageDailySales : 0;
 
@@ -2130,6 +2137,7 @@ export class ReportsService {
           name: sale.name,
           isCanonical: sale.isCanonical,
           canonicalProductName: sale.canonicalProductName,
+          supplierName: sale.supplierName ?? stockItem?.supplierName ?? null,
           stockQuantity: this.round(stockQuantity),
           averageDailySales: this.round(averageDailySales),
           stockDays: this.round(stockDays),
@@ -2154,6 +2162,7 @@ export class ReportsService {
         article: string;
         name: string;
         canonicalProduct: { name: string } | null;
+        supplier?: { name: string } | null;
       };
     }[],
   ) {
@@ -2168,6 +2177,7 @@ export class ReportsService {
         name: fact.product.name,
         isCanonical: Boolean(fact.product.canonicalProduct),
         canonicalProductName: fact.product.canonicalProduct?.name ?? null,
+        supplierName: fact.product.supplier?.name ?? null,
         quantity: 0,
         revenue: 0,
         cost: 0,
@@ -2196,6 +2206,7 @@ export class ReportsService {
         article: string;
         name: string;
         canonicalProduct: { name: string } | null;
+        supplier?: { name: string } | null;
       };
     }[],
   ) {
@@ -2211,6 +2222,7 @@ export class ReportsService {
         name: fact.product.name,
         isCanonical: Boolean(fact.product.canonicalProduct),
         canonicalProductName: fact.product.canonicalProduct?.name ?? null,
+        supplierName: fact.product.supplier?.name ?? null,
         quantity: 0,
         revenue: 0,
         cost: 0,

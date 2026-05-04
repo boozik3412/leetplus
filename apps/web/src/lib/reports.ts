@@ -62,6 +62,7 @@ export type OutOfStockRiskProduct = {
   name: string;
   isCanonical: boolean;
   canonicalProductName: string | null;
+  supplierName: string | null;
   stockQuantity: number;
   averageDailySales: number;
   stockDays: number;

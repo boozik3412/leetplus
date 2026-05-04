@@ -187,7 +187,8 @@ export default async function ReportsPage({
           </p>
         </div>
 
-        <ReportFilters
+        <ReportEmailForm
+          defaultEmail={user.email}
           from={operationalReport.from}
           to={operationalReport.to}
           storeId={operationalReport.storeId}
@@ -204,13 +205,6 @@ export default async function ReportsPage({
             to: operationalReport.to,
             storeId: operationalReport.storeId,
           })}
-        />
-
-        <ReportEmailForm
-          defaultEmail={user.email}
-          from={operationalReport.from}
-          to={operationalReport.to}
-          storeId={operationalReport.storeId}
         />
 
         <section className="mt-6 grid gap-3">
@@ -443,96 +437,6 @@ function ReportDisclosure({
         {children}
       </div>
     </details>
-  );
-}
-
-function ReportFilters({
-  from,
-  to,
-  storeId,
-  stores,
-  csvHref,
-  xlsxHref,
-}: {
-  from: string;
-  to: string;
-  storeId: string | null;
-  stores: Store[];
-  csvHref: string;
-  xlsxHref: string;
-}) {
-  return (
-    <form className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
-      <div className="mb-4">
-        <h2 className="text-base font-semibold text-zinc-950">
-          Сводный экспорт отчётов
-        </h2>
-        <p className="mt-1 max-w-4xl text-sm text-zinc-500">
-          Фильтры ниже применяются к общему файлу: операционная сводка,
-          рекомендации, OOS, товары без продаж, остатки и потребность, ABC,
-          ТОП SKU/поставщиков и ассортимент.
-        </p>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-[1fr_1fr_1.4fr_auto] md:items-end">
-        <label className="block">
-          <span className="text-sm font-medium text-zinc-700">С даты</span>
-          <input
-            type="date"
-            name="from"
-            defaultValue={from}
-            className="mt-2 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm"
-          />
-        </label>
-        <label className="block">
-          <span className="text-sm font-medium text-zinc-700">По дату</span>
-          <input
-            type="date"
-            name="to"
-            defaultValue={to}
-            className="mt-2 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm"
-          />
-        </label>
-        <label className="block">
-          <span className="text-sm font-medium text-zinc-700">
-            Торговая точка
-          </span>
-          <select
-            name="storeId"
-            defaultValue={storeId ?? ""}
-            className="mt-2 block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm"
-          >
-            <option value="">Все точки</option>
-            {stores.map((store) => (
-              <option key={store.id} value={store.id}>
-                {store.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button
-          type="submit"
-          className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800"
-        >
-          Применить
-        </button>
-      </div>
-      <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-zinc-100 pt-4">
-        <span className="text-sm text-zinc-500">Скачать сводный отчёт:</span>
-        <a
-          href={csvHref}
-          className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50"
-        >
-          CSV
-        </a>
-        <a
-          href={xlsxHref}
-          className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-50"
-        >
-          XLSX
-        </a>
-      </div>
-    </form>
   );
 }
 

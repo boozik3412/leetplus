@@ -92,6 +92,25 @@ export function ProductParsingUtility({
       <div className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
+            <h2 className="text-lg font-semibold">Ручной парсинг товаров</h2>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-500 dark:text-zinc-400">
+              Для сложных случаев можно вручную создать сетевой SKU, изменить
+              существующую группу и добавить в нее новые товары после повторной
+              синхронизации.
+            </p>
+          </div>
+          <a
+            href="/utilities/product-parsing/manual"
+            className="rounded-2xl border border-zinc-200 px-5 py-3 text-center text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+          >
+            Открыть ручной режим
+          </a>
+        </div>
+      </div>
+
+      <div className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
             <h2 className="text-xl font-semibold">Умный парсинг товаров</h2>
             <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
               Поиск одинаковых товаров по бренду, объёму, вкусу и упаковке.

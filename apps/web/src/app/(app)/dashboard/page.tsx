@@ -263,7 +263,7 @@ function HeroMetric({
   return (
     <div
       className={[
-        "min-w-[220px] flex-1 rounded-3xl border p-5 min-[1250px]:min-w-0",
+        "flex min-w-[220px] flex-1 flex-col rounded-3xl border p-5 min-[1250px]:min-w-0",
         tone === "good"
           ? "border-emerald-200 bg-emerald-50 text-emerald-950 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-100"
           : tone === "warning"
@@ -276,7 +276,7 @@ function HeroMetric({
         {value}
       </p>
       <p className="mt-2 text-sm opacity-70">{caption}</p>
-      {children}
+      <div className="mt-auto">{children}</div>
     </div>
   );
 }

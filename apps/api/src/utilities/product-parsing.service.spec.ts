@@ -19,6 +19,7 @@ type PrismaMock = {
   };
   productParsingSuggestion: {
     updateMany: jest.Mock;
+    findMany: jest.Mock;
     create: jest.Mock;
     count: jest.Mock;
     findFirst: jest.Mock;
@@ -115,6 +116,7 @@ function createPrismaMock(): PrismaMock {
     },
     productParsingSuggestion: {
       updateMany: jest.fn(),
+      findMany: jest.fn(),
       create: jest.fn(),
       count: jest.fn(),
       findFirst: jest.fn(),
@@ -144,6 +146,7 @@ describe('ProductParsingService', () => {
       prisma as unknown as PrismaService,
       tenantContext as unknown as TenantContextService,
     );
+    prisma.productParsingSuggestion.findMany.mockResolvedValue([]);
   });
 
   it('keeps new matching products available for review after a fresh analysis', async () => {
@@ -272,5 +275,26 @@ describe('ProductParsingService', () => {
     expect(suggestionUpdate.data.status).toBe(
       ProductParsingSuggestionStatus.APPLIED,
     );
+  });
+
+  it('marks rejected suggestions as user decisions', async () => {
+    prisma.productParsingSuggestion.findFirst.mockResolvedValue({
+      id: 'suggestion-1',
+      runId: 'run-1',
+    });
+    prisma.productParsingRun.update.mockResolvedValue({ id: 'run-1' });
+    prisma.productParsingSuggestion.update.mockResolvedValue({
+      id: 'suggestion-1',
+    });
+
+    await service.rejectSuggestion(user, 'suggestion-1');
+
+    expect(prisma.productParsingSuggestion.update).toHaveBeenCalledWith({
+      where: { id: 'suggestion-1' },
+      data: {
+        status: ProductParsingSuggestionStatus.REJECTED,
+        isUserRejected: true,
+      },
+    });
   });
 });

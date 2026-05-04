@@ -59,6 +59,11 @@ type ProductParsingRationale = {
   }[];
 };
 
+type ManualProductParsingGroupDto = {
+  name?: string;
+  productIds?: string[];
+};
+
 const knownFlavors: Record<string, string> = {
   манго: 'манго',
   mango: 'манго',
@@ -296,6 +301,24 @@ export class ProductParsingService {
         sourceNamesByDomain.get(product.externalDomain ?? '') ?? [],
       ),
     }));
+    const userRejectedGroups =
+      await this.prisma.productParsingSuggestion.findMany({
+        where: {
+          tenantId,
+          status: ProductParsingSuggestionStatus.REJECTED,
+          isUserRejected: true,
+        },
+        select: {
+          normalizedKey: true,
+          productIds: true,
+        },
+      });
+    const userRejectedSignatures = new Set(
+      userRejectedGroups.map((group) =>
+        this.groupSignature(group.normalizedKey, group.productIds),
+      ),
+    );
+
     await this.prisma.productParsingSuggestion.updateMany({
       where: { tenantId, status: ProductParsingSuggestionStatus.PENDING },
       data: { status: ProductParsingSuggestionStatus.REJECTED },
@@ -307,7 +330,12 @@ export class ProductParsingService {
         totalProducts: productsForParsing.length,
       },
     });
-    const suggestions = this.buildSuggestions(productsForParsing);
+    const suggestions = this.buildSuggestions(productsForParsing).filter(
+      (suggestion) =>
+        !userRejectedSignatures.has(
+          this.groupSignature(suggestion.normalizedKey, suggestion.productIds),
+        ),
+    );
 
     for (const suggestion of suggestions) {
       await this.prisma.productParsingSuggestion.create({
@@ -449,8 +477,176 @@ export class ProductParsingService {
 
     return this.prisma.productParsingSuggestion.update({
       where: { id: suggestion.id },
-      data: { status: ProductParsingSuggestionStatus.REJECTED },
+      data: {
+        status: ProductParsingSuggestionStatus.REJECTED,
+        isUserRejected: true,
+      },
     });
+  }
+
+  async getManualOverview(user: AuthenticatedUser) {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const [groups, products, stores] = await Promise.all([
+      this.prisma.canonicalProduct.findMany({
+        where: { tenantId },
+        orderBy: { name: 'asc' },
+        include: {
+          products: {
+            where: { isActive: true },
+            orderBy: { name: 'asc' },
+            select: {
+              id: true,
+              name: true,
+              article: true,
+              externalDomain: true,
+            },
+          },
+        },
+      }),
+      this.prisma.product.findMany({
+        where: { tenantId, isActive: true },
+        orderBy: { name: 'asc' },
+        select: {
+          id: true,
+          name: true,
+          article: true,
+          externalDomain: true,
+          canonicalProductId: true,
+          canonicalProduct: {
+            select: { name: true },
+          },
+        },
+      }),
+      this.prisma.store.findMany({
+        where: { tenantId, externalProvider: 'LANGAME' },
+        select: {
+          name: true,
+          externalDomain: true,
+        },
+      }),
+    ]);
+    const sourceNamesByDomain = this.sourceNamesByDomain(stores);
+
+    return {
+      groups: groups.map((group) => ({
+        id: group.id,
+        name: group.name,
+        normalizedKey: group.normalizedKey,
+        products: group.products.map((product) => ({
+          id: product.id,
+          name: product.name,
+          article: product.article,
+          externalDomain: product.externalDomain,
+          sourceLabel: this.sourceLabel(
+            product.externalDomain,
+            sourceNamesByDomain.get(product.externalDomain ?? '') ?? [],
+          ),
+        })),
+      })),
+      products: products.map((product) => ({
+        id: product.id,
+        name: product.name,
+        article: product.article,
+        externalDomain: product.externalDomain,
+        canonicalProductId: product.canonicalProductId,
+        canonicalProductName: product.canonicalProduct?.name ?? null,
+        sourceLabel: this.sourceLabel(
+          product.externalDomain,
+          sourceNamesByDomain.get(product.externalDomain ?? '') ?? [],
+        ),
+      })),
+    };
+  }
+
+  async createManualGroup(
+    user: AuthenticatedUser,
+    dto: ManualProductParsingGroupDto,
+  ) {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const name = dto.name?.trim();
+    const productIds = this.uniqueProductIds(dto.productIds ?? []);
+
+    if (!name) {
+      throw new BadRequestException('Group name is required');
+    }
+
+    if (productIds.length === 0) {
+      throw new BadRequestException('At least one product is required');
+    }
+
+    await this.assertProductsBelongToTenant(tenantId, productIds);
+
+    const parsed = this.parseName(name);
+    const canonicalProduct = await this.prisma.canonicalProduct.create({
+      data: {
+        tenantId,
+        name,
+        normalizedKey: await this.manualNormalizedKey(tenantId, name),
+        brand: parsed.brand,
+        volumeValue: parsed.volumeValue,
+        volumeUnit: parsed.volumeUnit,
+        flavor: parsed.flavor,
+        variant: parsed.variant,
+        packageType: parsed.packageType,
+      },
+    });
+
+    await this.prisma.product.updateMany({
+      where: { tenantId, id: { in: productIds } },
+      data: { canonicalProductId: canonicalProduct.id },
+    });
+
+    return this.getManualOverview(user);
+  }
+
+  async updateManualGroup(
+    user: AuthenticatedUser,
+    canonicalProductId: string,
+    dto: ManualProductParsingGroupDto,
+  ) {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const canonicalProduct = await this.prisma.canonicalProduct.findFirst({
+      where: { id: canonicalProductId, tenantId },
+      select: { id: true, name: true },
+    });
+
+    if (!canonicalProduct) {
+      throw new BadRequestException('Canonical product is not available');
+    }
+
+    const name = dto.name?.trim() || canonicalProduct.name;
+    const productIds = this.uniqueProductIds(dto.productIds ?? []);
+    await this.assertProductsBelongToTenant(tenantId, productIds);
+    const parsed = this.parseName(name);
+
+    await this.prisma.$transaction([
+      this.prisma.canonicalProduct.update({
+        where: { id: canonicalProduct.id },
+        data: {
+          name,
+          brand: parsed.brand,
+          volumeValue: parsed.volumeValue,
+          volumeUnit: parsed.volumeUnit,
+          flavor: parsed.flavor,
+          variant: parsed.variant,
+          packageType: parsed.packageType,
+        },
+      }),
+      this.prisma.product.updateMany({
+        where: {
+          tenantId,
+          canonicalProductId: canonicalProduct.id,
+          id: { notIn: productIds },
+        },
+        data: { canonicalProductId: null },
+      }),
+      this.prisma.product.updateMany({
+        where: { tenantId, id: { in: productIds } },
+        data: { canonicalProductId: canonicalProduct.id },
+      }),
+    ]);
+
+    return this.getManualOverview(user);
   }
 
   private buildSuggestions(products: ProductForParsing[]) {
@@ -590,6 +786,90 @@ export class ProductParsingService {
       productIds: products.map((product) => product.id),
       candidateNames,
     };
+  }
+
+  private groupSignature(normalizedKey: string, productIds: string[]) {
+    return `${normalizedKey}::${[...productIds].sort().join('|')}`;
+  }
+
+  private uniqueProductIds(productIds: string[]) {
+    return [
+      ...new Set(
+        productIds
+          .filter((id): id is string => typeof id === 'string')
+          .map((id) => id.trim())
+          .filter(Boolean),
+      ),
+    ];
+  }
+
+  private async assertProductsBelongToTenant(
+    tenantId: string,
+    productIds: string[],
+  ) {
+    if (productIds.length === 0) {
+      return;
+    }
+
+    const productsCount = await this.prisma.product.count({
+      where: {
+        tenantId,
+        isActive: true,
+        id: { in: productIds },
+      },
+    });
+
+    if (productsCount !== productIds.length) {
+      throw new BadRequestException('Some products are not available');
+    }
+  }
+
+  private async manualNormalizedKey(tenantId: string, name: string) {
+    const parsed = this.parseName(name);
+    const fallbackKey =
+      this.normalizeName(name)
+        .replace(/[^a-z0-9а-я]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 80) || 'product';
+    const baseKey = `manual:${parsed.normalizedKey ?? fallbackKey}`;
+    let normalizedKey = baseKey;
+    let index = 2;
+
+    while (
+      await this.prisma.canonicalProduct.findUnique({
+        where: {
+          tenantId_normalizedKey: {
+            tenantId,
+            normalizedKey,
+          },
+        },
+        select: { id: true },
+      })
+    ) {
+      normalizedKey = `${baseKey}:${index}`;
+      index += 1;
+    }
+
+    return normalizedKey;
+  }
+
+  private sourceNamesByDomain(
+    stores: { name: string; externalDomain: string | null }[],
+  ) {
+    const sourceNamesByDomain = new Map<string, string[]>();
+
+    stores.forEach((store) => {
+      if (!store.externalDomain) {
+        return;
+      }
+
+      sourceNamesByDomain.set(store.externalDomain, [
+        ...(sourceNamesByDomain.get(store.externalDomain) ?? []),
+        store.name,
+      ]);
+    });
+
+    return sourceNamesByDomain;
   }
 
   private parseName(name: string): ParsedProductName {

@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -21,6 +29,28 @@ export class ProductParsingController {
   @Post('analyze')
   analyze(@CurrentUser() user: AuthenticatedUser) {
     return this.productParsingService.analyze(user);
+  }
+
+  @Get('manual')
+  getManualOverview(@CurrentUser() user: AuthenticatedUser) {
+    return this.productParsingService.getManualOverview(user);
+  }
+
+  @Post('manual/groups')
+  createManualGroup(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: { name?: string; productIds?: string[] },
+  ) {
+    return this.productParsingService.createManualGroup(user, dto);
+  }
+
+  @Patch('manual/groups/:id')
+  updateManualGroup(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: { name?: string; productIds?: string[] },
+  ) {
+    return this.productParsingService.updateManualGroup(user, id, dto);
   }
 
   @Post('suggestions/:id/apply')

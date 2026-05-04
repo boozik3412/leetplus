@@ -280,6 +280,7 @@ model ProductParsingSuggestion {
   productIds         String[]
   candidateNames     String[]
   status             ProductParsingSuggestionStatus @default(PENDING)
+  isUserRejected     Boolean                        @default(false)
   createdAt          DateTime                       @default(now())
   updatedAt          DateTime                       @updatedAt
 

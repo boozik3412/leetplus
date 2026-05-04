@@ -59,6 +59,28 @@ export type ProductParsingOverview = {
   canonicalProductsCount: number;
 };
 
+export type ManualParsingProduct = {
+  id: string;
+  name: string;
+  article: string;
+  externalDomain: string | null;
+  sourceLabel: string;
+  canonicalProductId?: string | null;
+  canonicalProductName?: string | null;
+};
+
+export type ManualParsingGroup = {
+  id: string;
+  name: string;
+  normalizedKey: string;
+  products: ManualParsingProduct[];
+};
+
+export type ManualParsingOverview = {
+  groups: ManualParsingGroup[];
+  products: ManualParsingProduct[];
+};
+
 export async function getProductParsingOverview(): Promise<ProductParsingOverview> {
   const response = await fetch(`${getApiUrl()}/utilities/product-parsing`, {
     cache: "no-store",
@@ -70,4 +92,17 @@ export async function getProductParsingOverview(): Promise<ProductParsingOvervie
   }
 
   return response.json() as Promise<ProductParsingOverview>;
+}
+
+export async function getManualProductParsing(): Promise<ManualParsingOverview> {
+  const response = await fetch(`${getApiUrl()}/utilities/product-parsing/manual`, {
+    cache: "no-store",
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch manual product parsing overview");
+  }
+
+  return response.json() as Promise<ManualParsingOverview>;
 }

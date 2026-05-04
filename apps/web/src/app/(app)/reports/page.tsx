@@ -420,12 +420,23 @@ function ReportDisclosure({
             {description}
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-3 text-sm font-medium text-zinc-600 dark:text-zinc-300">
+        <div className="inline-flex shrink-0 items-center gap-2 self-center text-sm font-semibold leading-none text-zinc-500 transition-colors group-hover:text-emerald-500 dark:text-zinc-300 dark:group-hover:text-emerald-300">
           <span className="group-open:hidden">Развернуть</span>
           <span className="hidden group-open:inline">Свернуть</span>
-          <span className="flex h-8 w-8 items-center justify-center rounded-full border border-zinc-200 transition-transform group-open:rotate-180 dark:border-zinc-700">
-            ⌄
-          </span>
+          <svg
+            aria-hidden="true"
+            className="h-4 w-4 translate-y-px transition-transform duration-200 group-open:rotate-180"
+            fill="none"
+            viewBox="0 0 24 24"
+          >
+            <path
+              d="m7 10 5 5 5-5"
+              stroke="currentColor"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="2"
+            />
+          </svg>
         </div>
       </summary>
       <div className="report-disclosure-body border-t border-zinc-200 dark:border-zinc-800 [&>div]:mt-0 [&>div]:rounded-none [&>div]:border-0 [&>div]:bg-transparent [&>div]:shadow-none [&>section]:mt-0 [&>section]:rounded-none [&>section]:border-0 [&>section]:bg-transparent [&>section]:shadow-none">

@@ -402,27 +402,34 @@ function ProductPicker({
 
 function useFilteredProducts(products: ManualParsingProduct[], query: string) {
   return useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
+    const queryTokens = normalizeSearchText(query).split(" ").filter(Boolean);
 
     return products
       .filter((product) => {
-        if (!normalizedQuery) {
+        if (queryTokens.length === 0) {
           return true;
         }
 
-        return [
+        const searchableText = normalizeSearchText([
           product.name,
           product.article,
           product.sourceLabel,
           product.externalDomain ?? "",
           product.canonicalProductName ?? "",
-        ]
-          .join(" ")
-          .toLowerCase()
-          .includes(normalizedQuery);
+        ].join(" "));
+
+        return queryTokens.every((token) => searchableText.includes(token));
       })
       .slice(0, 80);
   }, [products, query]);
+}
+
+function normalizeSearchText(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/ё/g, "е")
+    .replace(/[^\p{L}\p{N}]+/gu, " ");
 }
 
 function toggleId(ids: string[], id: string) {

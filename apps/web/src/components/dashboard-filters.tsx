@@ -56,6 +56,10 @@ export function DashboardFilters({
           .filter((store) => selectedStores.includes(store.id))
           .map((store) => store.name)
           .join(", ");
+  const selectedPeriodLabel =
+    selectedPeriod === "custom"
+      ? formatCustomPeriodLabel(customFrom, customTo)
+      : periodLabels[selectedPeriod];
 
   useEffect(() => {
     if (!openPanel) {
@@ -147,7 +151,7 @@ export function DashboardFilters({
       <div className="flex flex-wrap items-center gap-2">
         <FilterButton
           label="Период"
-          value={periodLabels[selectedPeriod]}
+          value={selectedPeriodLabel}
           isOpen={openPanel === "period"}
           onClick={() => setOpenPanel(openPanel === "period" ? null : "period")}
         />
@@ -340,6 +344,27 @@ function DropdownPanel({
       {children}
     </div>
   );
+}
+
+function formatCustomPeriodLabel(from: string, to: string) {
+  const fromLabel = formatDateInputLabel(from);
+  const toLabel = formatDateInputLabel(to);
+
+  if (!fromLabel || !toLabel) {
+    return periodLabels.custom;
+  }
+
+  return fromLabel === toLabel ? fromLabel : `${fromLabel}-${toLabel}`;
+}
+
+function formatDateInputLabel(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+
+  if (!match) {
+    return null;
+  }
+
+  return `${match[3]}.${match[2]}.${match[1]}`;
 }
 
 function isPeriod(value: string): value is DashboardPeriod {

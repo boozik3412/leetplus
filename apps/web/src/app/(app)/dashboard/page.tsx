@@ -116,7 +116,7 @@ export default async function DashboardPage({
       <DashboardAutoSync />
       <div className="mx-auto max-w-7xl">
         <section className="overflow-visible rounded-[2rem] border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-          <div className="grid gap-8 p-6 lg:grid-cols-[1.1fr_0.9fr] lg:p-8">
+          <div className="grid gap-6 p-5 min-[800px]:grid-cols-[1.1fr_0.9fr] lg:p-8">
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <DashboardFilters
@@ -129,7 +129,7 @@ export default async function DashboardPage({
                 />
                 <DashboardQuickSyncButton />
               </div>
-              <h1 className="mt-3 max-w-3xl text-4xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
+              <h1 className="mt-3 max-w-3xl text-3xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50 min-[800px]:text-4xl">
                 {summary.tenantName}: операционная картина ассортимента
               </h1>
               <p className="mt-4 max-w-2xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
@@ -141,7 +141,7 @@ export default async function DashboardPage({
               </p>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="flex gap-3 overflow-x-auto pb-1 min-[800px]:grid min-[800px]:grid-cols-2 min-[800px]:overflow-visible min-[800px]:pb-0">
               <HeroMetric
                 label="Выручка"
                 value={formatMoney(summary.totalRevenue)}
@@ -262,7 +262,7 @@ function HeroMetric({
   return (
     <div
       className={[
-        "rounded-3xl border p-5",
+        "min-w-[220px] flex-1 rounded-3xl border p-5 min-[800px]:min-w-0",
         tone === "good"
           ? "border-emerald-200 bg-emerald-50 text-emerald-950 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-100"
           : tone === "warning"
@@ -271,7 +271,9 @@ function HeroMetric({
       ].join(" ")}
     >
       <p className="text-sm opacity-70">{label}</p>
-      <p className="mt-3 text-3xl font-semibold tabular-nums">{value}</p>
+      <p className="mt-3 whitespace-nowrap text-2xl font-semibold tabular-nums min-[800px]:text-3xl">
+        {value}
+      </p>
       <p className="mt-2 text-sm opacity-70">{caption}</p>
       {children}
     </div>

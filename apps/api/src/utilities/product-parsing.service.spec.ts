@@ -73,6 +73,14 @@ type ProductUpdateManyCall = [
   },
 ];
 
+type ProductParsingRunUpdateCall = [
+  {
+    data: {
+      suggestionsCount: number;
+    };
+  },
+];
+
 type SuggestionUpdateCall = [
   {
     data: {
@@ -219,13 +227,10 @@ describe('ProductParsingService', () => {
     await service.analyze(user);
 
     expect(prisma.productParsingSuggestion.create).not.toHaveBeenCalled();
-    expect(prisma.productParsingRun.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          suggestionsCount: 0,
-        }),
-      }),
-    );
+    const [updateCall] = prisma.productParsingRun.update.mock
+      .calls as ProductParsingRunUpdateCall[];
+
+    expect(updateCall[0].data.suggestionsCount).toBe(0);
   });
 
   it('applies a reviewed suggestion to the existing canonical product', async () => {

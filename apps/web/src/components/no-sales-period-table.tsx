@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { ProductWithoutSales } from "@/lib/reports";
+import { ReportLoadingLink } from "@/components/report-loading-link";
 
 type Period = 7 | 14 | 21;
 
@@ -49,9 +50,8 @@ export function NoSalesPeriodTable({
               </button>
             ))}
           </div>
-          <a
+          <ReportLoadingLink
             href={`/reports/no-sales/table?period=${period}`}
-            target="_blank"
             className={[
               "rounded-md border px-3 py-2 text-sm font-medium hover:bg-zinc-50",
               hasOverflow
@@ -60,7 +60,7 @@ export function NoSalesPeriodTable({
             ].join(" ")}
           >
             Открыть полный отчёт{hasOverflow ? " • есть ещё" : ""}
-          </a>
+          </ReportLoadingLink>
         </div>
       </div>
 

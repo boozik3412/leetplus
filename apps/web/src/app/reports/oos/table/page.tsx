@@ -3,9 +3,24 @@ import { SimpleReportTable } from "@/components/simple-report-table";
 import { requireCurrentUser } from "@/lib/auth";
 import { getOperationalReport } from "@/lib/reports";
 
-export default async function OosTablePage() {
+type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
+
+function searchParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+export default async function OosTablePage({
+  searchParams,
+}: {
+  searchParams: SearchParams;
+}) {
   await requireCurrentUser();
-  const report = await getOperationalReport({});
+  const params = await searchParams;
+  const report = await getOperationalReport({
+    from: searchParam(params.from),
+    to: searchParam(params.to),
+    storeId: searchParam(params.storeId),
+  });
   const rows = report.outOfStockRiskProducts.map((row) => ({
     storeName: row.storeName,
     name: row.name,

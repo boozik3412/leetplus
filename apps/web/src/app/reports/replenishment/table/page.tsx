@@ -78,7 +78,12 @@ export default async function ReplenishmentTablePage({
               <th className="px-3 py-2 text-right font-medium">Продано</th>
               <th className="px-3 py-2 text-right font-medium">ССР</th>
               <th className="px-3 py-2 text-right font-medium">Дней</th>
-              <th className="px-3 py-2 text-right font-medium">Потребность</th>
+              <th
+                className="px-3 py-2 text-right font-medium"
+                title="Потребность рассчитана на неделю продаж: ССР × 7 минус текущий остаток."
+              >
+                Потребность
+              </th>
               <th className="px-3 py-2 text-right font-medium">Заказать</th>
             </tr>
           </thead>

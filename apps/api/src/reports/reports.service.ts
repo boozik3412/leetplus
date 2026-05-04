@@ -87,6 +87,8 @@ export type ProductWithoutSales = {
   isCanonical: boolean;
   canonicalProductName: string | null;
   stockQuantity: number;
+  lastSaleDate: string | null;
+  daysWithoutSales: number | null;
   categoryName: string | null;
   supplierName: string | null;
 };
@@ -168,6 +170,11 @@ export type NewProductRow = {
   unitCost: number | null;
   categoryName: string | null;
   supplierName: string | null;
+  dailySales: {
+    date: string;
+    quantity: number;
+    revenue: number;
+  }[];
 };
 
 export type NewProductsReport = {
@@ -175,6 +182,7 @@ export type NewProductsReport = {
   tenantSlug: string;
   from: string;
   to: string;
+  storeId: string | null;
   rows: NewProductRow[];
 };
 
@@ -404,6 +412,7 @@ type LflAccumulator = {
 };
 
 const DEMAND_PERIOD_DAYS = 21;
+const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
 @Injectable()
 export class ReportsService {
@@ -540,6 +549,7 @@ export class ReportsService {
     const [
       salesFacts,
       demandSalesFacts,
+      lastSalesFacts,
       inventorySnapshots,
       stockMovements,
       oosExclusions,
@@ -610,6 +620,24 @@ export class ReportsService {
               name: true,
             },
           },
+        },
+      }),
+      this.prisma.salesFact.findMany({
+        where: {
+          tenantId,
+          isCanceled: false,
+          ...storeFilter,
+          saleDate: {
+            lte: period.toDate,
+          },
+        },
+        select: {
+          storeId: true,
+          productId: true,
+          saleDate: true,
+        },
+        orderBy: {
+          saleDate: 'desc',
         },
       }),
       this.prisma.inventorySnapshot.findMany({
@@ -717,6 +745,7 @@ export class ReportsService {
       this.productSalesByStoreProduct(demandSalesFacts);
     const periodProductSalesByStoreProduct =
       this.productSalesByStoreProduct(salesFacts);
+    const lastSaleByStoreProduct = this.lastSaleByStoreProduct(lastSalesFacts);
     const stockQuantity = [...stockByProduct.values()].reduce(
       (sum, quantity) => sum + quantity,
       0,
@@ -736,6 +765,8 @@ export class ReportsService {
       stockByStoreProduct,
       periodProductSalesByStoreProduct,
       excludedProductIds,
+      lastSaleByStoreProduct,
+      period.toDate,
     );
 
     return {
@@ -1288,7 +1319,7 @@ export class ReportsService {
             ? this.round(stockQuantity / averageDailySales)
             : null;
         const dailyNeed = this.round(
-          Math.max(0, averageDailySales - stockQuantity),
+          Math.max(0, averageDailySales * 7 - stockQuantity),
         );
         const orderMultiplicity = product?.supplier?.orderMultiplicity ?? null;
         const recommendedOrder = this.recommendedOrder(
@@ -1347,10 +1378,24 @@ export class ReportsService {
 
   async getNewProductsReport(
     user: AuthenticatedUser,
+    query: Pick<OperationalReportQuery, 'storeId'> = {},
   ): Promise<NewProductsReport> {
     const { tenantId, tenantSlug } =
       await this.tenantContextService.resolve(user);
     const period = this.resolveNewProductsPeriod();
+    const storeFilter = query.storeId ? { storeId: query.storeId } : {};
+
+    if (query.storeId) {
+      const store = await this.prisma.store.findFirst({
+        where: { id: query.storeId, tenantId, isActive: true },
+        select: { id: true },
+      });
+
+      if (!store) {
+        throw new BadRequestException('Store not found');
+      }
+    }
+
     const [products, inventorySnapshots] = await Promise.all([
       this.prisma.product.findMany({
         where: { tenantId, isActive: true },
@@ -1362,6 +1407,7 @@ export class ReportsService {
       this.prisma.inventorySnapshot.findMany({
         where: {
           tenantId,
+          ...storeFilter,
           quantity: { gt: 0 },
         },
         select: {
@@ -1409,7 +1455,7 @@ export class ReportsService {
     });
 
     const latestStockByProduct = this.latestStockByProduct(inventorySnapshots);
-    const rows = [...firstSnapshotByProduct.values()]
+    const rowsWithoutDailySales = [...firstSnapshotByProduct.values()]
       .filter(
         (snapshot) =>
           snapshot.snapshotDate >= period.fromDate &&
@@ -1437,12 +1483,62 @@ export class ReportsService {
           b.currentStockQuantity - a.currentStockQuantity ||
           a.name.localeCompare(b.name, 'ru'),
       );
+    const productIds = rowsWithoutDailySales.map((row) => row.productId);
+    const salesFacts =
+      productIds.length > 0
+        ? await this.prisma.salesFact.findMany({
+            where: {
+              tenantId,
+              isCanceled: false,
+              ...storeFilter,
+              productId: { in: productIds },
+              saleDate: {
+                gte: period.fromDate,
+                lte: period.toDate,
+              },
+            },
+            select: {
+              productId: true,
+              saleDate: true,
+              quantity: true,
+              revenue: true,
+            },
+          })
+        : [];
+    const dailySalesByProduct = new Map<
+      string,
+      Map<string, { quantity: number; revenue: number }>
+    >();
+
+    salesFacts.forEach((fact) => {
+      const date = this.toDateInputValue(fact.saleDate);
+      const salesByDate =
+        dailySalesByProduct.get(fact.productId) ??
+        new Map<string, { quantity: number; revenue: number }>();
+      const current = salesByDate.get(date) ?? { quantity: 0, revenue: 0 };
+
+      current.quantity += fact.quantity.toNumber();
+      current.revenue += fact.revenue.toNumber();
+      salesByDate.set(date, current);
+      dailySalesByProduct.set(fact.productId, salesByDate);
+    });
+    const rows = rowsWithoutDailySales.map((row) => ({
+      ...row,
+      dailySales: [
+        ...(dailySalesByProduct.get(row.productId)?.entries() ?? []),
+      ].map(([date, sales]) => ({
+        date,
+        quantity: this.round(sales.quantity),
+        revenue: this.round(sales.revenue),
+      })),
+    }));
 
     return {
       tenantId,
       tenantSlug,
       from: this.toDateInputValue(period.fromDate),
       to: this.toDateInputValue(period.toDate),
+      storeId: query.storeId ?? null,
       rows,
     };
   }
@@ -2045,8 +2141,7 @@ export class ReportsService {
           a.storeName.localeCompare(b.storeName, 'ru') ||
           b.averageDailySales - a.averageDailySales ||
           a.name.localeCompare(b.name, 'ru'),
-      )
-      .slice(0, 10);
+      );
   }
 
   private productSalesByProduct(
@@ -2134,27 +2229,72 @@ export class ReportsService {
     stockByStoreProduct: Map<string, StockByStoreProductItem>,
     productSales: Map<string, ProductSales>,
     excludedProductIds: Set<string>,
+    lastSaleByStoreProduct: Map<string, Date>,
+    periodToDate: Date,
   ): ProductWithoutSales[] {
     return [...stockByStoreProduct.values()]
       .filter((item) => !excludedProductIds.has(item.productId))
       .filter((item) => !productSales.has(`${item.storeId}:${item.productId}`))
-      .map((item) => ({
-        productId: item.productId,
-        storeId: item.storeId,
-        storeName: item.storeName,
-        article: item.article,
-        name: item.name,
-        isCanonical: item.isCanonical,
-        canonicalProductName: item.canonicalProductName,
-        stockQuantity: this.round(item.stockQuantity),
-        categoryName: item.categoryName,
-        supplierName: item.supplierName,
-      }))
+      .map((item) => {
+        const lastSaleDate =
+          lastSaleByStoreProduct.get(`${item.storeId}:${item.productId}`) ??
+          null;
+
+        return {
+          productId: item.productId,
+          storeId: item.storeId,
+          storeName: item.storeName,
+          article: item.article,
+          name: item.name,
+          isCanonical: item.isCanonical,
+          canonicalProductName: item.canonicalProductName,
+          stockQuantity: this.round(item.stockQuantity),
+          lastSaleDate: lastSaleDate
+            ? this.toDateInputValue(lastSaleDate)
+            : null,
+          daysWithoutSales: lastSaleDate
+            ? this.daysBetween(lastSaleDate, periodToDate)
+            : null,
+          categoryName: item.categoryName,
+          supplierName: item.supplierName,
+        };
+      })
       .sort(
         (a, b) =>
           b.stockQuantity - a.stockQuantity || a.name.localeCompare(b.name),
-      )
-      .slice(0, 10);
+      );
+  }
+
+  private lastSaleByStoreProduct(
+    salesFacts: { storeId: string; productId: string; saleDate: Date }[],
+  ) {
+    const lastSaleByStoreProduct = new Map<string, Date>();
+
+    salesFacts.forEach((fact) => {
+      const key = `${fact.storeId}:${fact.productId}`;
+      const currentDate = lastSaleByStoreProduct.get(key);
+
+      if (!currentDate || fact.saleDate > currentDate) {
+        lastSaleByStoreProduct.set(key, fact.saleDate);
+      }
+    });
+
+    return lastSaleByStoreProduct;
+  }
+
+  private daysBetween(from: Date, to: Date) {
+    const fromUtc = Date.UTC(
+      from.getUTCFullYear(),
+      from.getUTCMonth(),
+      from.getUTCDate(),
+    );
+    const toUtc = Date.UTC(
+      to.getUTCFullYear(),
+      to.getUTCMonth(),
+      to.getUTCDate(),
+    );
+
+    return Math.max(0, Math.floor((toUtc - fromUtc) / DAY_IN_MS));
   }
 
   private buildRecommendations(
@@ -2164,7 +2304,7 @@ export class ReportsService {
   ): ReportRecommendation[] {
     const recommendations: ReportRecommendation[] = [
       ...outOfStockRiskProducts.map((product) => ({
-        id: `stock:${product.productId}`,
+        id: `stock:${product.storeId}:${product.productId}`,
         kind: 'REPLENISH_STOCK' as const,
         severity:
           product.stockDays <= 1 ? ('HIGH' as const) : ('MEDIUM' as const),
@@ -2181,9 +2321,8 @@ export class ReportsService {
       })),
       ...productsWithoutSales
         .filter((product) => product.stockQuantity > 0)
-        .slice(0, 5)
         .map((product) => ({
-          id: `no-sales:${product.productId}`,
+          id: `no-sales:${product.storeId}:${product.productId}`,
           kind: 'NO_SALES' as const,
           severity: 'LOW' as const,
           title: `Разобрать товар без продаж: ${product.name}`,
@@ -2224,13 +2363,11 @@ export class ReportsService {
         })),
     ];
 
-    return recommendations
-      .sort(
-        (a, b) =>
-          this.severityRank(a.severity) - this.severityRank(b.severity) ||
-          a.title.localeCompare(b.title),
-      )
-      .slice(0, 12);
+    return recommendations.sort(
+      (a, b) =>
+        this.severityRank(a.severity) - this.severityRank(b.severity) ||
+        a.title.localeCompare(b.title),
+    );
   }
 
   private severityRank(severity: ReportRecommendation['severity']) {

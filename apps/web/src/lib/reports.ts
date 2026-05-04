@@ -76,6 +76,8 @@ export type ProductWithoutSales = {
   isCanonical: boolean;
   canonicalProductName: string | null;
   stockQuantity: number;
+  lastSaleDate: string | null;
+  daysWithoutSales: number | null;
   categoryName: string | null;
   supplierName: string | null;
 };
@@ -249,6 +251,11 @@ export type NewProductRow = {
   unitCost: number | null;
   categoryName: string | null;
   supplierName: string | null;
+  dailySales: {
+    date: string;
+    quantity: number;
+    revenue: number;
+  }[];
 };
 
 export type NewProductsReport = {
@@ -256,6 +263,7 @@ export type NewProductsReport = {
   tenantSlug: string;
   from: string;
   to: string;
+  storeId: string | null;
   rows: NewProductRow[];
 };
 
@@ -438,8 +446,17 @@ export async function getReplenishmentReport(
   return response.json() as Promise<ReplenishmentReport>;
 }
 
-export async function getNewProductsReport(): Promise<NewProductsReport> {
-  const response = await fetch(`${getApiUrl()}/reports/new-products`, {
+export async function getNewProductsReport(
+  filters: Pick<OperationalReportFilters, "storeId"> = {},
+): Promise<NewProductsReport> {
+  const params = new URLSearchParams();
+
+  if (filters.storeId) {
+    params.set("storeId", filters.storeId);
+  }
+
+  const query = params.toString();
+  const response = await fetch(`${getApiUrl()}/reports/new-products${query ? `?${query}` : ""}`, {
     cache: "no-store",
     headers: await getAuthHeaders(),
   });

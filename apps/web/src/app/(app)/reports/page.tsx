@@ -3,6 +3,7 @@ import { AbcReportToggle } from "@/components/abc-report-toggle";
 import { NoSalesPeriodTable } from "@/components/no-sales-period-table";
 import { OosExclusionActions } from "@/components/oos-exclusion-actions";
 import { ReportEmailForm } from "@/components/report-email-form";
+import { ReportLoadingLink } from "@/components/report-loading-link";
 import {
   getAssortmentReport,
   getLflReport,
@@ -168,7 +169,7 @@ export default async function ReportsPage({
     getOperationalReport(noSalesFilters),
     getOperationalReport(noSalesFilters14),
     getOperationalReport(noSalesFilters21),
-    getNewProductsReport(),
+    getNewProductsReport({ storeId: filters.storeId }),
     getLflReport(lflPeriod),
     getStores(),
   ]);
@@ -213,11 +214,26 @@ export default async function ReportsPage({
 
         <LflReportPanel report={lflReport} period={lflPeriod} />
 
-        <NewProductsPanel report={newProductsReport} />
+        <NewProductsPanel
+          report={newProductsReport}
+          stores={stores}
+          from={operationalReport.from}
+          to={operationalReport.to}
+        />
 
-        <RecommendationsPanel rows={operationalReport.recommendations} />
+        <RecommendationsPanel
+          rows={operationalReport.recommendations}
+          from={operationalReport.from}
+          to={operationalReport.to}
+          storeId={operationalReport.storeId}
+        />
 
-        <RiskTable rows={operationalReport.outOfStockRiskProducts} />
+        <RiskTable
+          rows={operationalReport.outOfStockRiskProducts}
+          from={operationalReport.from}
+          to={operationalReport.to}
+          storeId={operationalReport.storeId}
+        />
         <NoSalesPeriodTable
           rowsByPeriod={{
             7: noSalesReport7.productsWithoutSales,
@@ -442,13 +458,12 @@ function LflReportPanel({
           >
             XLSX
           </a>
-          <a
+          <ReportLoadingLink
             href={`/reports/lfl/table?${params.toString()}`}
-            target="_blank"
             className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
           >
             Открыть полный отчет
-          </a>
+          </ReportLoadingLink>
         </div>
       </div>
 
@@ -550,17 +565,64 @@ function LflPeriodLink({
   );
 }
 
-function NewProductsPanel({ report }: { report: NewProductsReport }) {
+function NewProductsPanel({
+  report,
+  stores,
+  from,
+  to,
+}: {
+  report: NewProductsReport;
+  stores: Store[];
+  from: string;
+  to: string;
+}) {
   const rows = report.rows.slice(0, 10);
+  const params = new URLSearchParams();
+
+  if (report.storeId) {
+    params.set("storeId", report.storeId);
+  }
 
   return (
     <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
-      <div className="border-b border-zinc-200 px-5 py-4">
-        <h2 className="text-base font-semibold">Новинки</h2>
-        <p className="mt-1 text-sm text-zinc-500">
-          Товары, которые впервые появились на остатках за последний месяц:
-          {` ${report.from} - ${report.to}`}.
-        </p>
+      <div className="flex flex-col gap-3 border-b border-zinc-200 px-5 py-4 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <h2 className="text-base font-semibold">Новинки</h2>
+          <p className="mt-1 text-sm text-zinc-500">
+            Товары, которые впервые появились на остатках за последний месяц:
+            {` ${report.from} - ${report.to}`}.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <form className="flex flex-wrap items-center gap-2">
+            <input type="hidden" name="from" value={from} />
+            <input type="hidden" name="to" value={to} />
+            <select
+              name="storeId"
+              defaultValue={report.storeId ?? ""}
+              className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm"
+            >
+              <option value="">Вся сеть</option>
+              {stores.map((store) => (
+                <option key={store.id} value={store.id}>
+                  {store.name}
+                </option>
+              ))}
+            </select>
+            <button
+              type="submit"
+              className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium hover:bg-zinc-50"
+            >
+              Применить
+            </button>
+          </form>
+          <ReportLoadingLink
+            href={`/reports/new-products/table${params.toString() ? `?${params.toString()}` : ""}`}
+            className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+          >
+            Открыть полный отчёт
+          </ReportLoadingLink>
+        </div>
       </div>
 
       {rows.length > 0 ? (
@@ -569,7 +631,7 @@ function NewProductsPanel({ report }: { report: NewProductsReport }) {
             <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
               <tr>
                 <th className="px-5 py-3 font-medium">Товар</th>
-                <th className="px-5 py-3 font-medium">Клуб первого остатка</th>
+                <th className="px-5 py-3 font-medium">Клуб</th>
                 <th className="px-5 py-3 font-medium">Категория</th>
                 <th className="px-5 py-3 text-right font-medium">Дата</th>
                 <th className="px-5 py-3 text-right font-medium">Остаток</th>
@@ -626,7 +688,24 @@ function lflLevelLabel(level: LflReportRow["level"]) {
   return labels[level];
 }
 
-function RecommendationsPanel({ rows }: { rows: ReportRecommendation[] }) {
+function RecommendationsPanel({
+  rows,
+  from,
+  to,
+  storeId,
+}: {
+  rows: ReportRecommendation[];
+  from: string;
+  to: string;
+  storeId: string | null;
+}) {
+  const previewRows = rows.slice(0, 5);
+  const params = new URLSearchParams({ from, to });
+
+  if (storeId) {
+    params.set("storeId", storeId);
+  }
+
   return (
     <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
       <div className="border-b border-zinc-200 px-5 py-4">
@@ -637,18 +716,26 @@ function RecommendationsPanel({ rows }: { rows: ReportRecommendation[] }) {
               Автоматические действия на основе продаж, остатков и маржинальности.
             </p>
           </div>
-          <a
-            href="/reports/oos-exclusions"
-            className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
-          >
-            Исключённые позиции
-          </a>
+          <div className="flex flex-wrap gap-2">
+            <ReportLoadingLink
+              href={`/reports/recommendations/table?${params.toString()}`}
+              className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+            >
+              Открыть полный отчёт
+            </ReportLoadingLink>
+            <a
+              href="/reports/oos-exclusions"
+              className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+            >
+              Исключённые позиции
+            </a>
+          </div>
         </div>
       </div>
 
-      {rows.length > 0 ? (
+      {previewRows.length > 0 ? (
         <div className="divide-y divide-zinc-100">
-          {rows.map((row) => (
+          {previewRows.map((row) => (
             <article
               key={row.id}
               className="grid gap-3 px-5 py-4 lg:grid-cols-[160px_1fr_180px]"
@@ -718,8 +805,24 @@ function severityClassName(severity: ReportRecommendation["severity"]) {
   return classNames[severity];
 }
 
-function RiskTable({ rows }: { rows: OutOfStockRiskProduct[] }) {
-  const hasOverflow = hasMoreThanFivePerStore(rows);
+function RiskTable({
+  rows,
+  from,
+  to,
+  storeId,
+}: {
+  rows: OutOfStockRiskProduct[];
+  from: string;
+  to: string;
+  storeId: string | null;
+}) {
+  const compactRows = topOutOfStockRowsByStore(rows);
+  const hasOverflow = rows.length > compactRows.length;
+  const params = new URLSearchParams({ from, to });
+
+  if (storeId) {
+    params.set("storeId", storeId);
+  }
   return (
     <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
       <div className="flex flex-col gap-2 border-b border-zinc-200 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
@@ -729,9 +832,8 @@ function RiskTable({ rows }: { rows: OutOfStockRiskProduct[] }) {
             Товары, где текущего остатка хватит на 3 дня или меньше.
           </p>
         </div>
-        <a
-          href="/reports/oos/table"
-          target="_blank"
+        <ReportLoadingLink
+          href={`/reports/oos/table?${params.toString()}`}
           className={[
             "rounded-md border px-3 py-2 text-sm font-medium hover:bg-zinc-50",
             hasOverflow
@@ -740,10 +842,10 @@ function RiskTable({ rows }: { rows: OutOfStockRiskProduct[] }) {
           ].join(" ")}
         >
           Открыть полный отчёт{hasOverflow ? " • есть ещё" : ""}
-        </a>
+        </ReportLoadingLink>
       </div>
 
-      {rows.length > 0 ? (
+      {compactRows.length > 0 ? (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[640px] text-left text-sm">
             <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
@@ -756,7 +858,7 @@ function RiskTable({ rows }: { rows: OutOfStockRiskProduct[] }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100">
-              {rows.map((row) => (
+              {compactRows.map((row) => (
                 <tr key={`${row.storeId}:${row.productId}`}>
                   <td className="px-5 py-4 text-zinc-700">
                     {row.storeName}
@@ -820,13 +922,12 @@ function ReplenishmentTable({
             TOP-5 позиций к заказу в каждом клубе.
           </p>
         </div>
-        <a
+        <ReportLoadingLink
           href={`/reports/replenishment/table?${params.toString()}`}
-          target="_blank"
           className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
         >
           Открыть полный отчёт
-        </a>
+        </ReportLoadingLink>
       </div>
 
       {compactRows.length > 0 ? (
@@ -839,7 +940,12 @@ function ReplenishmentTable({
                 <th className="px-5 py-3 text-right font-medium">Остаток</th>
                 <th className="px-5 py-3 text-right font-medium">ССР</th>
                 <th className="px-5 py-3 text-right font-medium">Остаток в днях</th>
-                <th className="px-5 py-3 text-right font-medium">Потребность</th>
+                <th
+                  className="px-5 py-3 text-right font-medium"
+                  title="Потребность рассчитана на неделю продаж: ССР × 7 минус текущий остаток."
+                >
+                  Потребность
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100">
@@ -900,14 +1006,22 @@ function topReplenishmentRowsByStore(rows: ReplenishmentRow[]) {
   );
 }
 
-function hasMoreThanFivePerStore(rows: OutOfStockRiskProduct[]) {
-  const counts = new Map<string, number>();
+function topOutOfStockRowsByStore(rows: OutOfStockRiskProduct[]) {
+  const rowsByStore = new Map<string, OutOfStockRiskProduct[]>();
 
   rows.forEach((row) => {
-    counts.set(row.storeId, (counts.get(row.storeId) ?? 0) + 1);
+    rowsByStore.set(row.storeId, [...(rowsByStore.get(row.storeId) ?? []), row]);
   });
 
-  return [...counts.values()].some((count) => count > 5);
+  return [...rowsByStore.values()].flatMap((storeRows) =>
+    storeRows
+      .sort(
+        (a, b) =>
+          b.averageDailySales - a.averageDailySales ||
+          a.name.localeCompare(b.name),
+      )
+      .slice(0, 3),
+  );
 }
 
 function TopSkuTable({
@@ -961,13 +1075,12 @@ function TopSkuTable({
               Применить
             </button>
           </form>
-          <a
+          <ReportLoadingLink
             href={`/reports/top-sku/table?${params.toString()}`}
-            target="_blank"
             className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
           >
             Открыть полный отчёт
-          </a>
+          </ReportLoadingLink>
         </div>
       </div>
 

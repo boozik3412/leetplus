@@ -88,8 +88,9 @@ export class ReportsController {
   @Get('new-products')
   getNewProductsReport(
     @CurrentUser() user: AuthenticatedUser,
+    @Query() query: OperationalReportQuery,
   ): Promise<NewProductsReport> {
-    return this.reportsService.getNewProductsReport(user);
+    return this.reportsService.getNewProductsReport(user, query);
   }
 
   @Get('lfl')

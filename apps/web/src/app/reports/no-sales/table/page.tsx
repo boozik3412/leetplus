@@ -33,6 +33,8 @@ export default async function NoSalesTablePage({
     name: row.name,
     categoryName: row.categoryName ?? "",
     supplierName: row.supplierName ?? "",
+    lastSaleDate: row.lastSaleDate ?? "",
+    daysWithoutSales: row.daysWithoutSales ?? null,
     stockQuantity: row.stockQuantity,
   }));
 
@@ -55,6 +57,12 @@ export default async function NoSalesTablePage({
           { key: "name", label: "Товар" },
           { key: "categoryName", label: "Категория" },
           { key: "supplierName", label: "Поставщик" },
+          { key: "lastSaleDate", label: "Дата последней продажи" },
+          {
+            key: "daysWithoutSales",
+            label: "Дней без продаж",
+            align: "right",
+          },
           { key: "stockQuantity", label: "Остаток", align: "right" },
         ]}
         filters={[

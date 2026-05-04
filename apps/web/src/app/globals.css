@@ -113,14 +113,27 @@ body::before {
   background-color: rgb(24 29 38 / 0.72) !important;
 }
 
-.dark table .divide-zinc-100 > :not([hidden]) ~ :not([hidden]),
-.dark table .divide-zinc-200 > :not([hidden]) ~ :not([hidden]),
-.dark table .divide-zinc-300 > :not([hidden]) ~ :not([hidden]) {
-  border-color: rgb(39 47 61 / 0.38) !important;
+.dark table {
+  --report-table-line: rgb(39 47 61 / 0.22);
+  --report-table-line-muted: rgb(39 47 61 / 0.14);
 }
 
-.dark table :is(.border-zinc-100, .border-zinc-200, .border-zinc-300) {
-  border-color: rgb(39 47 61 / 0.38) !important;
+.dark table .divide-zinc-100 > :not([hidden]) ~ :not([hidden]),
+.dark table .divide-zinc-200 > :not([hidden]) ~ :not([hidden]),
+.dark table .divide-zinc-300 > :not([hidden]) ~ :not([hidden]),
+.dark table [class*="divide-zinc-800"] > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--report-table-line) !important;
+}
+
+.dark table :is(.border-zinc-100, .border-zinc-200, .border-zinc-300, .border-zinc-800),
+.dark table :is(th, td, tr) {
+  border-color: var(--report-table-line) !important;
+}
+
+.dark table tbody > tr:first-child,
+.dark table tbody > tr:nth-child(2) {
+  border-top-color: var(--report-table-line-muted) !important;
+  border-bottom-color: var(--report-table-line-muted) !important;
 }
 
 .dark table :is(.bg-zinc-50, .bg-zinc-100) {

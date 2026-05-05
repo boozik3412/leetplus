@@ -64,6 +64,7 @@ type StoreUpsertCall = [
       externalDomain: string | null;
       externalClubId: string | null;
     };
+    update: Record<string, unknown>;
   },
 ];
 
@@ -317,6 +318,7 @@ describe('LangameSyncService', () => {
     expect(storeUpsert.create.tenantId).toBe('tenant-1');
     expect(storeUpsert.create.externalDomain).toBe('443.langame.ru');
     expect(storeUpsert.create.externalClubId).toBe('1');
+    expect(storeUpsert.update).not.toHaveProperty('name');
     expect(prisma.inventorySnapshot.upsert).toHaveBeenCalled();
     const [salesUpsert] = prisma.salesFact.upsert.mock
       .calls[0] as SalesFactUpsertCall;

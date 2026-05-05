@@ -222,7 +222,6 @@ export class LangameSyncService {
                 integrationSourceId: source.id,
               },
               update: {
-                name: club.name,
                 address:
                   this.knownAddress(source.domain, club.id) ?? club.address,
                 isActive: club.active === 1,

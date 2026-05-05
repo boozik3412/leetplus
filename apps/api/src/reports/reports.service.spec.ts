@@ -208,7 +208,8 @@ describe('ReportsService', () => {
           },
           store: { id: 'store-1', name: 'Club A' },
         },
-      ]);
+      ])
+      .mockResolvedValueOnce([]);
     prisma.inventorySnapshot.findMany.mockResolvedValue([
       {
         storeId: 'store-1',
@@ -313,12 +314,68 @@ describe('ReportsService', () => {
         name: 'Adrenaline Rush',
         isCanonical: false,
         canonicalProductName: null,
+        supplierName: null,
         stockQuantity: 2,
         averageDailySales: 1,
         stockDays: 2,
       },
     ]);
     expect(report.productsWithoutSales).toEqual([]);
+  });
+
+  it('excludes zero stock and period arrivals from products without sales', async () => {
+    prisma.store.findFirst.mockResolvedValue({ id: 'store-1' });
+    prisma.salesFact.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    const stockSnapshot = (
+      productId: string,
+      name: string,
+      quantity: number,
+      snapshotDate: string,
+    ) => ({
+      storeId: 'store-1',
+      store: { name: 'Club A' },
+      productId,
+      product: {
+        article: productId,
+        name,
+        purchasePrice: new Prisma.Decimal(0),
+        canonicalProduct: null,
+        category: null,
+        supplier: null,
+      },
+      quantity: new Prisma.Decimal(quantity),
+      snapshotDate: new Date(snapshotDate),
+    });
+
+    prisma.inventorySnapshot.findMany.mockResolvedValue([
+      stockSnapshot('product-keep', 'Stable stock', 4, '2026-04-10'),
+      stockSnapshot('product-arrival', 'New arrival', 5, '2026-04-10'),
+      stockSnapshot('product-restock', 'Restocked product', 7, '2026-04-10'),
+      stockSnapshot('product-zero', 'Zero stock', 0, '2026-04-10'),
+      stockSnapshot('product-keep', 'Stable stock', 4, '2026-03-31'),
+      stockSnapshot('product-arrival', 'New arrival', 0, '2026-03-31'),
+      stockSnapshot('product-restock', 'Restocked product', 2, '2026-03-31'),
+      stockSnapshot('product-zero', 'Zero stock', 3, '2026-03-31'),
+    ]);
+    prisma.stockMovement.findMany.mockResolvedValue([]);
+    prisma.productOosExclusion.findMany.mockResolvedValue([]);
+
+    const report = await service.getOperationalReport(user, {
+      from: '2026-04-01',
+      to: '2026-04-10',
+      storeId: 'store-1',
+    });
+
+    expect(report.productsWithoutSales).toEqual([
+      expect.objectContaining({
+        productId: 'product-keep',
+        stockQuantity: 4,
+      }),
+    ]);
   });
 
   it('rejects unknown store filter for operational report', async () => {
@@ -626,8 +683,8 @@ describe('ReportsService', () => {
       to: '2026-04-10',
       storeId: 'store-1',
       totalStockQuantity: 6,
-      totalDailyNeed: 2,
-      totalRecommendedOrder: 6,
+      totalDailyNeed: 20,
+      totalRecommendedOrder: 24,
     });
     expect(report.rows).toEqual([
       {
@@ -644,8 +701,8 @@ describe('ReportsService', () => {
         soldQuantity: 63,
         averageDailySales: 3,
         stockDays: 0.3,
-        dailyNeed: 2,
-        recommendedOrder: 6,
+        dailyNeed: 20,
+        recommendedOrder: 24,
         orderMultiplicity: 6,
         risk: 'LOW_STOCK',
       },

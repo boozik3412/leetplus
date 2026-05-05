@@ -352,6 +352,7 @@ type StockSnapshot = {
   storeId: string;
   store: { name: string };
   productId: string;
+  snapshotDate?: Date;
   product: {
     id?: string;
     article: string;
@@ -753,6 +754,11 @@ export class ReportsService {
     const periodProductSalesByStoreProduct =
       this.productSalesByStoreProduct(salesFacts);
     const lastSaleByStoreProduct = this.lastSaleByStoreProduct(lastSalesFacts);
+    const incomingStockByStoreProduct = this.incomingStockByStoreProduct(
+      inventorySnapshots,
+      period.fromDate,
+      period.toDate,
+    );
     const stockQuantity = [...stockByProduct.values()].reduce(
       (sum, quantity) => sum + quantity,
       0,
@@ -773,6 +779,7 @@ export class ReportsService {
       periodProductSalesByStoreProduct,
       excludedProductIds,
       lastSaleByStoreProduct,
+      incomingStockByStoreProduct,
       period.toDate,
     );
 
@@ -2243,11 +2250,17 @@ export class ReportsService {
     productSales: Map<string, ProductSales>,
     excludedProductIds: Set<string>,
     lastSaleByStoreProduct: Map<string, Date>,
+    incomingStockByStoreProduct: Set<string>,
     periodToDate: Date,
   ): ProductWithoutSales[] {
     return [...stockByStoreProduct.values()]
       .filter((item) => !excludedProductIds.has(item.productId))
+      .filter((item) => this.round(item.stockQuantity) > 0)
       .filter((item) => !productSales.has(`${item.storeId}:${item.productId}`))
+      .filter(
+        (item) =>
+          !incomingStockByStoreProduct.has(`${item.storeId}:${item.productId}`),
+      )
       .map((item) => {
         const lastSaleDate =
           lastSaleByStoreProduct.get(`${item.storeId}:${item.productId}`) ??
@@ -2276,6 +2289,49 @@ export class ReportsService {
         (a, b) =>
           b.stockQuantity - a.stockQuantity || a.name.localeCompare(b.name),
       );
+  }
+
+  private incomingStockByStoreProduct(
+    snapshots: StockSnapshot[],
+    periodFromDate: Date,
+    periodToDate: Date,
+  ) {
+    const snapshotsByStoreProduct = new Map<string, StockSnapshot[]>();
+
+    snapshots.forEach((snapshot) => {
+      const key = `${snapshot.storeId}:${snapshot.productId}`;
+      const productSnapshots = snapshotsByStoreProduct.get(key) ?? [];
+      productSnapshots.push(snapshot);
+      snapshotsByStoreProduct.set(key, productSnapshots);
+    });
+
+    const incomingStockByStoreProduct = new Set<string>();
+
+    snapshotsByStoreProduct.forEach((productSnapshots, key) => {
+      const sortedSnapshots = [...productSnapshots].sort(
+        (a, b) =>
+          (a.snapshotDate?.getTime() ?? 0) -
+          (b.snapshotDate?.getTime() ?? 0),
+      );
+      let previousQuantity = 0;
+
+      sortedSnapshots.forEach((snapshot) => {
+        const quantity = Math.max(0, snapshot.quantity.toNumber());
+        const snapshotDate = snapshot.snapshotDate;
+        const isInPeriod =
+          snapshotDate !== undefined &&
+          snapshotDate >= periodFromDate &&
+          snapshotDate <= periodToDate;
+
+        if (isInPeriod && quantity > previousQuantity) {
+          incomingStockByStoreProduct.add(key);
+        }
+
+        previousQuantity = quantity;
+      });
+    });
+
+    return incomingStockByStoreProduct;
   }
 
   private lastSaleByStoreProduct(

@@ -4,11 +4,14 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import {
   ReportsService,
   type AssortmentReport,
+  type LflGroupLevel,
   type LflPeriod,
   type LflReport,
   type OperationalReport,
   type OperationalReportQuery,
+  type ReportRecommendation,
   type ReplenishmentReport,
+  type ReplenishmentRisk,
   type SkuPerformanceReport,
   type SuppliersPerformanceReport,
 } from './reports.service';
@@ -161,42 +164,45 @@ export class ReportsExportService {
     suppliersPerformanceReport: SuppliersPerformanceReport,
   ) {
     const rows: CsvCell[][] = [
-      ['LeetPlus reports'],
-      ['Tenant', operationalReport.tenantSlug],
-      ['Period', `${operationalReport.from} - ${operationalReport.to}`],
-      ['Store ID', operationalReport.storeId ?? 'All stores'],
+      ['Отчеты LeetPlus'],
+      ['Организация', operationalReport.tenantSlug],
+      ['Период', `${operationalReport.from} - ${operationalReport.to}`],
+      ['Торговая точка', operationalReport.storeId ?? 'Все точки'],
       [],
-      ['Operations summary'],
-      ['Metric', 'Value'],
-      ['Revenue', operationalReport.totalRevenue],
-      ['Cost', operationalReport.totalCost],
-      ['Gross profit', operationalReport.grossProfit],
-      ['Adjusted gross profit', operationalReport.adjustedGrossProfit],
-      ['Sales margin, %', operationalReport.marginPercent],
-      ['Adjusted margin, %', operationalReport.adjustedMarginPercent],
-      ['Sold quantity', operationalReport.soldQuantity],
-      ['Write-off quantity', operationalReport.writeOffQuantity],
-      ['Write-off amount', operationalReport.writeOffAmount],
-      ['Return quantity', operationalReport.returnQuantity],
-      ['Return amount', operationalReport.returnAmount],
-      ['Average daily revenue', operationalReport.averageDailyRevenue],
-      ['Stock quantity', operationalReport.stockQuantity],
-      ['Stock days', operationalReport.stockDays],
-      [],
-      ['Recommendations'],
+      ['Операционная сводка'],
+      ['Показатель', 'Значение'],
+      ['Выручка', operationalReport.totalRevenue],
+      ['Себестоимость', operationalReport.totalCost],
+      ['Валовая прибыль', operationalReport.grossProfit],
+      ['Прибыль с учетом потерь', operationalReport.adjustedGrossProfit],
+      ['Маржинальность, %', operationalReport.marginPercent],
       [
-        'Severity',
-        'Kind',
-        'Article',
-        'Product',
-        'Metric',
-        'Value',
-        'Action',
-        'Description',
+        'Маржинальность с учетом потерь, %',
+        operationalReport.adjustedMarginPercent,
+      ],
+      ['Продано, шт', operationalReport.soldQuantity],
+      ['Списания, шт', operationalReport.writeOffQuantity],
+      ['Списания, сумма', operationalReport.writeOffAmount],
+      ['Возвраты, шт', operationalReport.returnQuantity],
+      ['Возвраты, сумма', operationalReport.returnAmount],
+      ['Среднедневная выручка', operationalReport.averageDailyRevenue],
+      ['Остатки, шт', operationalReport.stockQuantity],
+      ['Остаток в днях', operationalReport.stockDays],
+      [],
+      ['Рекомендации'],
+      [
+        'Приоритет',
+        'Тип',
+        'Артикул',
+        'Товар',
+        'Показатель',
+        'Значение',
+        'Действие',
+        'Описание',
       ],
       ...operationalReport.recommendations.map((item) => [
-        item.severity,
-        item.kind,
+        this.recommendationSeverityLabel(item.severity),
+        this.recommendationKindLabel(item.kind),
         item.article,
         item.productName,
         item.metricLabel,
@@ -205,13 +211,13 @@ export class ReportsExportService {
         item.description,
       ]),
       [],
-      ['Out of stock risk'],
+      ['Риск out-of-stock'],
       [
-        'Article',
-        'Product',
-        'Stock quantity',
-        'Average daily sales',
-        'Stock days',
+        'Артикул',
+        'Товар',
+        'Остаток, шт',
+        'Средние продажи в день',
+        'Остаток в днях',
       ],
       ...operationalReport.outOfStockRiskProducts.map((item) => [
         item.article,
@@ -221,8 +227,8 @@ export class ReportsExportService {
         item.stockDays,
       ]),
       [],
-      ['Products without sales'],
-      ['Article', 'Product', 'Category', 'Supplier', 'Stock quantity'],
+      ['Товары без продаж'],
+      ['Артикул', 'Товар', 'Категория', 'Поставщик', 'Остаток, шт'],
       ...operationalReport.productsWithoutSales.map((item) => [
         item.article,
         item.name,
@@ -231,23 +237,23 @@ export class ReportsExportService {
         item.stockQuantity,
       ]),
       [],
-      ['Replenishment'],
+      ['Остатки и потребность'],
       [
-        'Risk',
-        'Article',
-        'Product',
-        'Category',
-        'Supplier',
-        'Stock quantity',
-        'Quantity',
-        'Average daily sales',
-        'Stock days',
-        'Daily need',
-        'Recommended order',
-        'Order multiplicity',
+        'Риск',
+        'Артикул',
+        'Товар',
+        'Категория',
+        'Поставщик',
+        'Остаток, шт',
+        'Продано, шт',
+        'Средние продажи в день',
+        'Остаток в днях',
+        'Потребность в день',
+        'Рекомендованный заказ',
+        'Кратность заказа',
       ],
       ...replenishmentReport.rows.map((item) => [
-        item.risk,
+        this.replenishmentRiskLabel(item.risk),
         item.article,
         item.name,
         item.categoryName,
@@ -261,13 +267,13 @@ export class ReportsExportService {
         item.orderMultiplicity,
       ]),
       [],
-      ['ABC by revenue'],
+      ['ABC по выручке'],
       [
-        'Group',
+        'Группа',
         'SKU',
-        'Assortment share, %',
-        'Revenue share, %',
-        'Profit share, %',
+        'Доля ассортимента, %',
+        'Доля выручки, %',
+        'Доля прибыли, %',
       ],
       ...skuPerformanceReport.abcByRevenue.map((item) => [
         item.group,
@@ -277,13 +283,13 @@ export class ReportsExportService {
         item.profitSharePercent,
       ]),
       [],
-      ['ABC by profit'],
+      ['ABC по прибыли'],
       [
-        'Group',
+        'Группа',
         'SKU',
-        'Assortment share, %',
-        'Revenue share, %',
-        'Profit share, %',
+        'Доля ассортимента, %',
+        'Доля выручки, %',
+        'Доля прибыли, %',
       ],
       ...skuPerformanceReport.abcByProfit.map((item) => [
         item.group,
@@ -293,20 +299,20 @@ export class ReportsExportService {
         item.profitSharePercent,
       ]),
       [],
-      ['Top SKU by revenue'],
+      ['ТОП SKU по выручке'],
       [
-        'Article',
-        'Product',
-        'Category',
-        'Supplier',
-        'Quantity',
-        'Revenue',
-        'Gross profit',
-        'Margin, %',
-        'Sales/facing',
-        'Profit/facing',
-        'ABC revenue',
-        'ABC profit',
+        'Артикул',
+        'Товар',
+        'Категория',
+        'Поставщик',
+        'Продано, шт',
+        'Выручка',
+        'Валовая прибыль',
+        'Маржинальность, %',
+        'Продажи на фейсинг',
+        'Прибыль на фейсинг',
+        'ABC выручка',
+        'ABC прибыль',
       ],
       ...skuPerformanceReport.topByRevenue.map((item) => [
         item.article,
@@ -323,20 +329,20 @@ export class ReportsExportService {
         item.abcProfitGroup,
       ]),
       [],
-      ['Top suppliers'],
+      ['ТОП поставщиков'],
       [
-        'Supplier',
-        'Active SKU',
-        'Quantity',
-        'Revenue',
-        'Gross profit',
-        'Margin, %',
-        'Sales share, %',
-        'Profit share, %',
-        'Average revenue/SKU',
-        'Payment delay days',
-        'Min order amount',
-        'Order multiplicity',
+        'Поставщик',
+        'Активные SKU',
+        'Продано, шт',
+        'Выручка',
+        'Валовая прибыль',
+        'Маржинальность, %',
+        'Доля продаж, %',
+        'Доля прибыли, %',
+        'Средняя выручка на SKU',
+        'Отсрочка платежа, дней',
+        'Минимальная сумма заказа',
+        'Кратность заказа',
       ],
       ...suppliersPerformanceReport.rows.map((item) => [
         item.supplierName,
@@ -353,16 +359,16 @@ export class ReportsExportService {
         item.orderMultiplicity,
       ]),
       [],
-      ['Assortment summary'],
-      ['Metric', 'Value'],
-      ['Total SKU', assortmentReport.totalSku],
-      ['Active SKU', assortmentReport.activeSku],
-      ['Inactive SKU', assortmentReport.inactiveSku],
-      ['Average margin, %', assortmentReport.averageMarginPercent],
-      ['Average markup, %', assortmentReport.averageMarkupPercent],
+      ['Сводка ассортимента'],
+      ['Показатель', 'Значение'],
+      ['Всего SKU', assortmentReport.totalSku],
+      ['Активные SKU', assortmentReport.activeSku],
+      ['Неактивные SKU', assortmentReport.inactiveSku],
+      ['Средняя маржинальность, %', assortmentReport.averageMarginPercent],
+      ['Средняя наценка, %', assortmentReport.averageMarkupPercent],
       [],
-      ['Categories'],
-      ['Name', 'SKU', 'Average margin, %', 'Average sale price', 'Facing'],
+      ['Категории'],
+      ['Название', 'SKU', 'Средняя маржинальность, %', 'Средняя цена продажи', 'Фейсинг'],
       ...assortmentReport.categoryBreakdown.map((item) => [
         item.name,
         item.productsCount,
@@ -371,8 +377,8 @@ export class ReportsExportService {
         item.totalFacing,
       ]),
       [],
-      ['Suppliers'],
-      ['Name', 'SKU', 'Average margin, %', 'Average sale price', 'Facing'],
+      ['Поставщики'],
+      ['Название', 'SKU', 'Средняя маржинальность, %', 'Средняя цена продажи', 'Фейсинг'],
       ...assortmentReport.supplierBreakdown.map((item) => [
         item.name,
         item.productsCount,
@@ -381,15 +387,15 @@ export class ReportsExportService {
         item.totalFacing,
       ]),
       [],
-      ['Low margin SKU'],
+      ['SKU с низкой маржинальностью'],
       [
-        'Article',
-        'Product',
-        'Category',
-        'Supplier',
-        'Purchase price',
-        'Sale price',
-        'Margin, %',
+        'Артикул',
+        'Товар',
+        'Категория',
+        'Поставщик',
+        'Закупочная цена',
+        'Цена продажи',
+        'Маржинальность, %',
       ],
       ...assortmentReport.lowMarginProducts.map((item) => [
         item.article,
@@ -450,121 +456,121 @@ export class ReportsExportService {
     assortmentReport: AssortmentReport,
     operationalReport: OperationalReport,
   ) {
-    const sheet = workbook.addWorksheet('Summary');
+    const sheet = workbook.addWorksheet('Сводка');
     sheet.columns = [
-      { header: 'Section', key: 'section', width: 24 },
-      { header: 'Metric', key: 'metric', width: 32 },
-      { header: 'Value', key: 'value', width: 24 },
+      { header: 'Раздел', key: 'section', width: 24 },
+      { header: 'Показатель', key: 'metric', width: 36 },
+      { header: 'Значение', key: 'value', width: 24 },
     ];
     sheet.addRows([
       {
-        section: 'Context',
-        metric: 'Tenant',
+        section: 'Контекст',
+        metric: 'Организация',
         value: operationalReport.tenantSlug,
       },
       {
-        section: 'Context',
-        metric: 'Period',
+        section: 'Контекст',
+        metric: 'Период',
         value: `${operationalReport.from} - ${operationalReport.to}`,
       },
       {
-        section: 'Context',
-        metric: 'Store ID',
-        value: operationalReport.storeId ?? 'All stores',
+        section: 'Контекст',
+        metric: 'Торговая точка',
+        value: operationalReport.storeId ?? 'Все точки',
       },
       {
-        section: 'Operations',
-        metric: 'Revenue',
+        section: 'Операции',
+        metric: 'Выручка',
         value: operationalReport.totalRevenue,
       },
       {
-        section: 'Operations',
-        metric: 'Cost',
+        section: 'Операции',
+        metric: 'Себестоимость',
         value: operationalReport.totalCost,
       },
       {
-        section: 'Operations',
-        metric: 'Gross profit',
+        section: 'Операции',
+        metric: 'Валовая прибыль',
         value: operationalReport.grossProfit,
       },
       {
-        section: 'Operations',
-        metric: 'Adjusted gross profit',
+        section: 'Операции',
+        metric: 'Прибыль с учетом потерь',
         value: operationalReport.adjustedGrossProfit,
       },
       {
-        section: 'Operations',
-        metric: 'Sales margin, %',
+        section: 'Операции',
+        metric: 'Маржинальность, %',
         value: operationalReport.marginPercent,
       },
       {
-        section: 'Operations',
-        metric: 'Adjusted margin, %',
+        section: 'Операции',
+        metric: 'Маржинальность с учетом потерь, %',
         value: operationalReport.adjustedMarginPercent,
       },
       {
-        section: 'Operations',
-        metric: 'Sold quantity',
+        section: 'Операции',
+        metric: 'Продано, шт',
         value: operationalReport.soldQuantity,
       },
       {
-        section: 'Operations',
-        metric: 'Write-off quantity',
+        section: 'Операции',
+        metric: 'Списания, шт',
         value: operationalReport.writeOffQuantity,
       },
       {
-        section: 'Operations',
-        metric: 'Write-off amount',
+        section: 'Операции',
+        metric: 'Списания, сумма',
         value: operationalReport.writeOffAmount,
       },
       {
-        section: 'Operations',
-        metric: 'Return quantity',
+        section: 'Операции',
+        metric: 'Возвраты, шт',
         value: operationalReport.returnQuantity,
       },
       {
-        section: 'Operations',
-        metric: 'Return amount',
+        section: 'Операции',
+        metric: 'Возвраты, сумма',
         value: operationalReport.returnAmount,
       },
       {
-        section: 'Operations',
-        metric: 'Average daily revenue',
+        section: 'Операции',
+        metric: 'Среднедневная выручка',
         value: operationalReport.averageDailyRevenue,
       },
       {
-        section: 'Operations',
-        metric: 'Stock quantity',
+        section: 'Операции',
+        metric: 'Остатки, шт',
         value: operationalReport.stockQuantity,
       },
       {
-        section: 'Operations',
-        metric: 'Stock days',
+        section: 'Операции',
+        metric: 'Остаток в днях',
         value: operationalReport.stockDays ?? '',
       },
       {
-        section: 'Assortment',
-        metric: 'Total SKU',
+        section: 'Ассортимент',
+        metric: 'Всего SKU',
         value: assortmentReport.totalSku,
       },
       {
-        section: 'Assortment',
-        metric: 'Active SKU',
+        section: 'Ассортимент',
+        metric: 'Активные SKU',
         value: assortmentReport.activeSku,
       },
       {
-        section: 'Assortment',
-        metric: 'Inactive SKU',
+        section: 'Ассортимент',
+        metric: 'Неактивные SKU',
         value: assortmentReport.inactiveSku,
       },
       {
-        section: 'Assortment',
-        metric: 'Average margin, %',
+        section: 'Ассортимент',
+        metric: 'Средняя маржинальность, %',
         value: assortmentReport.averageMarginPercent,
       },
       {
-        section: 'Assortment',
-        metric: 'Average markup, %',
+        section: 'Ассортимент',
+        metric: 'Средняя наценка, %',
         value: assortmentReport.averageMarkupPercent,
       },
     ]);
@@ -575,18 +581,24 @@ export class ReportsExportService {
     workbook: ExcelJS.Workbook,
     operationalReport: OperationalReport,
   ) {
-    const sheet = workbook.addWorksheet('Recommendations');
+    const sheet = workbook.addWorksheet('Рекомендации');
     sheet.columns = [
-      { header: 'Severity', key: 'severity', width: 14 },
-      { header: 'Kind', key: 'kind', width: 20 },
-      { header: 'Article', key: 'article', width: 18 },
-      { header: 'Product', key: 'productName', width: 36 },
-      { header: 'Metric', key: 'metricLabel', width: 18 },
-      { header: 'Value', key: 'metricValue', width: 16 },
-      { header: 'Action', key: 'action', width: 42 },
-      { header: 'Description', key: 'description', width: 56 },
+      { header: 'Приоритет', key: 'severity', width: 14 },
+      { header: 'Тип', key: 'kind', width: 20 },
+      { header: 'Артикул', key: 'article', width: 18 },
+      { header: 'Товар', key: 'productName', width: 36 },
+      { header: 'Показатель', key: 'metricLabel', width: 18 },
+      { header: 'Значение', key: 'metricValue', width: 16 },
+      { header: 'Действие', key: 'action', width: 42 },
+      { header: 'Описание', key: 'description', width: 56 },
     ];
-    sheet.addRows(operationalReport.recommendations);
+    sheet.addRows(
+      operationalReport.recommendations.map((item) => ({
+        ...item,
+        severity: this.recommendationSeverityLabel(item.severity),
+        kind: this.recommendationKindLabel(item.kind),
+      })),
+    );
     this.styleHeader(sheet);
   }
 
@@ -594,13 +606,13 @@ export class ReportsExportService {
     workbook: ExcelJS.Workbook,
     operationalReport: OperationalReport,
   ) {
-    const sheet = workbook.addWorksheet('Stock risk');
+    const sheet = workbook.addWorksheet('Риск OOS');
     sheet.columns = [
-      { header: 'Article', key: 'article', width: 18 },
-      { header: 'Product', key: 'name', width: 36 },
-      { header: 'Stock quantity', key: 'stockQuantity', width: 18 },
-      { header: 'Average daily sales', key: 'averageDailySales', width: 22 },
-      { header: 'Stock days', key: 'stockDays', width: 16 },
+      { header: 'Артикул', key: 'article', width: 18 },
+      { header: 'Товар', key: 'name', width: 36 },
+      { header: 'Остаток, шт', key: 'stockQuantity', width: 18 },
+      { header: 'Средние продажи в день', key: 'averageDailySales', width: 24 },
+      { header: 'Остаток в днях', key: 'stockDays', width: 18 },
     ];
     sheet.addRows(operationalReport.outOfStockRiskProducts);
     this.styleHeader(sheet);
@@ -610,13 +622,13 @@ export class ReportsExportService {
     workbook: ExcelJS.Workbook,
     operationalReport: OperationalReport,
   ) {
-    const sheet = workbook.addWorksheet('No sales');
+    const sheet = workbook.addWorksheet('Без продаж');
     sheet.columns = [
-      { header: 'Article', key: 'article', width: 18 },
-      { header: 'Product', key: 'name', width: 36 },
-      { header: 'Category', key: 'categoryName', width: 24 },
-      { header: 'Supplier', key: 'supplierName', width: 24 },
-      { header: 'Stock quantity', key: 'stockQuantity', width: 18 },
+      { header: 'Артикул', key: 'article', width: 18 },
+      { header: 'Товар', key: 'name', width: 36 },
+      { header: 'Категория', key: 'categoryName', width: 24 },
+      { header: 'Поставщик', key: 'supplierName', width: 24 },
+      { header: 'Остаток, шт', key: 'stockQuantity', width: 18 },
     ];
     sheet.addRows(operationalReport.productsWithoutSales);
     this.styleHeader(sheet);
@@ -626,22 +638,27 @@ export class ReportsExportService {
     workbook: ExcelJS.Workbook,
     replenishmentReport: ReplenishmentReport,
   ) {
-    const sheet = workbook.addWorksheet('Replenishment');
+    const sheet = workbook.addWorksheet('Потребность');
     sheet.columns = [
-      { header: 'Risk', key: 'risk', width: 18 },
-      { header: 'Article', key: 'article', width: 18 },
-      { header: 'Product', key: 'name', width: 36 },
-      { header: 'Category', key: 'categoryName', width: 24 },
-      { header: 'Supplier', key: 'supplierName', width: 24 },
-      { header: 'Stock quantity', key: 'stockQuantity', width: 18 },
-      { header: 'Quantity', key: 'soldQuantity', width: 14 },
-      { header: 'Average daily sales', key: 'averageDailySales', width: 22 },
-      { header: 'Stock days', key: 'stockDays', width: 16 },
-      { header: 'Daily need', key: 'dailyNeed', width: 16 },
-      { header: 'Recommended order', key: 'recommendedOrder', width: 20 },
-      { header: 'Order multiplicity', key: 'orderMultiplicity', width: 20 },
+      { header: 'Риск', key: 'risk', width: 18 },
+      { header: 'Артикул', key: 'article', width: 18 },
+      { header: 'Товар', key: 'name', width: 36 },
+      { header: 'Категория', key: 'categoryName', width: 24 },
+      { header: 'Поставщик', key: 'supplierName', width: 24 },
+      { header: 'Остаток, шт', key: 'stockQuantity', width: 18 },
+      { header: 'Продано, шт', key: 'soldQuantity', width: 14 },
+      { header: 'Средние продажи в день', key: 'averageDailySales', width: 24 },
+      { header: 'Остаток в днях', key: 'stockDays', width: 18 },
+      { header: 'Потребность в день', key: 'dailyNeed', width: 18 },
+      { header: 'Рекомендованный заказ', key: 'recommendedOrder', width: 22 },
+      { header: 'Кратность заказа', key: 'orderMultiplicity', width: 18 },
     ];
-    sheet.addRows(replenishmentReport.rows);
+    sheet.addRows(
+      replenishmentReport.rows.map((item) => ({
+        ...item,
+        risk: this.replenishmentRiskLabel(item.risk),
+      })),
+    );
     this.styleHeader(sheet);
   }
 
@@ -651,24 +668,24 @@ export class ReportsExportService {
   ) {
     const sheet = workbook.addWorksheet('ABC');
     sheet.columns = [
-      { header: 'Basis', key: 'basis', width: 18 },
-      { header: 'Group', key: 'group', width: 10 },
+      { header: 'Основа ABC', key: 'basis', width: 18 },
+      { header: 'Группа', key: 'group', width: 10 },
       { header: 'SKU', key: 'productsCount', width: 12 },
       {
-        header: 'Assortment share, %',
+        header: 'Доля ассортимента, %',
         key: 'assortmentSharePercent',
         width: 22,
       },
-      { header: 'Revenue share, %', key: 'revenueSharePercent', width: 20 },
-      { header: 'Profit share, %', key: 'profitSharePercent', width: 18 },
+      { header: 'Доля выручки, %', key: 'revenueSharePercent', width: 20 },
+      { header: 'Доля прибыли, %', key: 'profitSharePercent', width: 18 },
     ];
     sheet.addRows([
       ...skuPerformanceReport.abcByRevenue.map((item) => ({
-        basis: 'Revenue',
+        basis: 'Выручка',
         ...item,
       })),
       ...skuPerformanceReport.abcByProfit.map((item) => ({
-        basis: 'Profit',
+        basis: 'Прибыль',
         ...item,
       })),
     ]);
@@ -679,20 +696,20 @@ export class ReportsExportService {
     workbook: ExcelJS.Workbook,
     skuPerformanceReport: SkuPerformanceReport,
   ) {
-    const sheet = workbook.addWorksheet('Top SKU');
+    const sheet = workbook.addWorksheet('ТОП SKU');
     sheet.columns = [
-      { header: 'Article', key: 'article', width: 18 },
-      { header: 'Product', key: 'name', width: 36 },
-      { header: 'Category', key: 'categoryName', width: 24 },
-      { header: 'Supplier', key: 'supplierName', width: 24 },
-      { header: 'Quantity', key: 'soldQuantity', width: 14 },
-      { header: 'Revenue', key: 'revenue', width: 16 },
-      { header: 'Gross profit', key: 'grossProfit', width: 18 },
-      { header: 'Margin, %', key: 'marginPercent', width: 14 },
-      { header: 'Sales/facing', key: 'salesPerFacing', width: 16 },
-      { header: 'Profit/facing', key: 'profitPerFacing', width: 16 },
-      { header: 'ABC revenue', key: 'abcRevenueGroup', width: 14 },
-      { header: 'ABC profit', key: 'abcProfitGroup', width: 14 },
+      { header: 'Артикул', key: 'article', width: 18 },
+      { header: 'Товар', key: 'name', width: 36 },
+      { header: 'Категория', key: 'categoryName', width: 24 },
+      { header: 'Поставщик', key: 'supplierName', width: 24 },
+      { header: 'Продано, шт', key: 'soldQuantity', width: 14 },
+      { header: 'Выручка', key: 'revenue', width: 16 },
+      { header: 'Валовая прибыль', key: 'grossProfit', width: 18 },
+      { header: 'Маржинальность, %', key: 'marginPercent', width: 18 },
+      { header: 'Продажи на фейсинг', key: 'salesPerFacing', width: 20 },
+      { header: 'Прибыль на фейсинг', key: 'profitPerFacing', width: 20 },
+      { header: 'ABC выручка', key: 'abcRevenueGroup', width: 14 },
+      { header: 'ABC прибыль', key: 'abcProfitGroup', width: 14 },
     ];
     sheet.addRows(skuPerformanceReport.topByRevenue);
     this.styleHeader(sheet);
@@ -702,24 +719,24 @@ export class ReportsExportService {
     workbook: ExcelJS.Workbook,
     suppliersPerformanceReport: SuppliersPerformanceReport,
   ) {
-    const sheet = workbook.addWorksheet('Top suppliers');
+    const sheet = workbook.addWorksheet('ТОП поставщики');
     sheet.columns = [
-      { header: 'Supplier', key: 'supplierName', width: 32 },
-      { header: 'Active SKU', key: 'activeSku', width: 14 },
-      { header: 'Quantity', key: 'soldQuantity', width: 14 },
-      { header: 'Revenue', key: 'revenue', width: 16 },
-      { header: 'Gross profit', key: 'grossProfit', width: 18 },
-      { header: 'Margin, %', key: 'marginPercent', width: 14 },
-      { header: 'Sales share, %', key: 'salesSharePercent', width: 18 },
-      { header: 'Profit share, %', key: 'profitSharePercent', width: 18 },
+      { header: 'Поставщик', key: 'supplierName', width: 32 },
+      { header: 'Активные SKU', key: 'activeSku', width: 14 },
+      { header: 'Продано, шт', key: 'soldQuantity', width: 14 },
+      { header: 'Выручка', key: 'revenue', width: 16 },
+      { header: 'Валовая прибыль', key: 'grossProfit', width: 18 },
+      { header: 'Маржинальность, %', key: 'marginPercent', width: 18 },
+      { header: 'Доля продаж, %', key: 'salesSharePercent', width: 18 },
+      { header: 'Доля прибыли, %', key: 'profitSharePercent', width: 18 },
       {
-        header: 'Average revenue/SKU',
+        header: 'Средняя выручка на SKU',
         key: 'averageRevenuePerSku',
-        width: 22,
+        width: 24,
       },
-      { header: 'Payment delay days', key: 'paymentDelayDays', width: 20 },
-      { header: 'Min order amount', key: 'minOrderAmount', width: 18 },
-      { header: 'Order multiplicity', key: 'orderMultiplicity', width: 20 },
+      { header: 'Отсрочка платежа, дней', key: 'paymentDelayDays', width: 22 },
+      { header: 'Минимальная сумма заказа', key: 'minOrderAmount', width: 24 },
+      { header: 'Кратность заказа', key: 'orderMultiplicity', width: 18 },
     ];
     sheet.addRows(suppliersPerformanceReport.rows);
     this.styleHeader(sheet);
@@ -729,22 +746,22 @@ export class ReportsExportService {
     workbook: ExcelJS.Workbook,
     assortmentReport: AssortmentReport,
   ) {
-    const sheet = workbook.addWorksheet('Assortment groups');
+    const sheet = workbook.addWorksheet('Группы ассортимента');
     sheet.columns = [
-      { header: 'Group type', key: 'groupType', width: 18 },
-      { header: 'Name', key: 'name', width: 32 },
+      { header: 'Тип группы', key: 'groupType', width: 18 },
+      { header: 'Название', key: 'name', width: 32 },
       { header: 'SKU', key: 'productsCount', width: 12 },
-      { header: 'Average margin, %', key: 'averageMarginPercent', width: 20 },
-      { header: 'Average sale price', key: 'averageSalePrice', width: 20 },
-      { header: 'Facing', key: 'totalFacing', width: 14 },
+      { header: 'Средняя маржинальность, %', key: 'averageMarginPercent', width: 24 },
+      { header: 'Средняя цена продажи', key: 'averageSalePrice', width: 22 },
+      { header: 'Фейсинг', key: 'totalFacing', width: 14 },
     ];
     sheet.addRows([
       ...assortmentReport.categoryBreakdown.map((item) => ({
-        groupType: 'Category',
+        groupType: 'Категория',
         ...item,
       })),
       ...assortmentReport.supplierBreakdown.map((item) => ({
-        groupType: 'Supplier',
+        groupType: 'Поставщик',
         ...item,
       })),
     ]);
@@ -755,15 +772,15 @@ export class ReportsExportService {
     workbook: ExcelJS.Workbook,
     assortmentReport: AssortmentReport,
   ) {
-    const sheet = workbook.addWorksheet('Low margin');
+    const sheet = workbook.addWorksheet('Низкая маржа');
     sheet.columns = [
-      { header: 'Article', key: 'article', width: 18 },
-      { header: 'Product', key: 'name', width: 36 },
-      { header: 'Category', key: 'categoryName', width: 24 },
-      { header: 'Supplier', key: 'supplierName', width: 24 },
-      { header: 'Purchase price', key: 'purchasePrice', width: 18 },
-      { header: 'Sale price', key: 'salePrice', width: 16 },
-      { header: 'Margin, %', key: 'marginPercent', width: 14 },
+      { header: 'Артикул', key: 'article', width: 18 },
+      { header: 'Товар', key: 'name', width: 36 },
+      { header: 'Категория', key: 'categoryName', width: 24 },
+      { header: 'Поставщик', key: 'supplierName', width: 24 },
+      { header: 'Закупочная цена', key: 'purchasePrice', width: 18 },
+      { header: 'Цена продажи', key: 'salePrice', width: 16 },
+      { header: 'Маржинальность, %', key: 'marginPercent', width: 18 },
     ];
     sheet.addRows(assortmentReport.lowMarginProducts);
     this.styleHeader(sheet);
@@ -771,31 +788,31 @@ export class ReportsExportService {
 
   private buildLflCsv(report: LflReport) {
     const rows: CsvCell[][] = [
-      ['LeetPlus LFL report'],
-      ['Tenant', report.tenantSlug],
-      ['Period', report.period],
-      ['Current period', `${report.currentFrom} - ${report.currentTo}`],
-      ['Previous period', `${report.previousFrom} - ${report.previousTo}`],
+      ['Отчет LeetPlus LFL'],
+      ['Организация', report.tenantSlug],
+      ['Период', this.lflPeriodLabel(report.period)],
+      ['Текущий период', `${report.currentFrom} - ${report.currentTo}`],
+      ['Предыдущий период', `${report.previousFrom} - ${report.previousTo}`],
       [],
       [
-        'Level',
-        'Parent ID',
-        'Name',
-        'Current revenue',
-        'Previous revenue',
-        'Revenue delta',
-        'Revenue LFL, %',
-        'Current gross profit',
-        'Previous gross profit',
-        'Gross profit delta',
-        'Gross profit LFL, %',
-        'Current quantity',
-        'Previous quantity',
-        'Quantity delta',
-        'Quantity LFL, %',
+        'Уровень',
+        'Родительская группа',
+        'Название',
+        'Текущая выручка',
+        'Выручка год назад',
+        'Отклонение выручки',
+        'LFL выручки, %',
+        'Текущая валовая прибыль',
+        'Валовая прибыль год назад',
+        'Отклонение валовой прибыли',
+        'LFL валовой прибыли, %',
+        'Текущие продажи, шт',
+        'Продажи год назад, шт',
+        'Отклонение продаж, шт',
+        'LFL продаж, %',
       ],
       ...[report.summary, ...report.rows].map((item) => [
-        item.level,
+        this.lflLevelLabel(item.level),
         item.parentId,
         item.name,
         item.currentRevenue,
@@ -820,25 +837,30 @@ export class ReportsExportService {
     const workbook = new ExcelJS.Workbook();
     workbook.creator = 'LeetPlus';
     workbook.created = new Date();
-    const sheet = workbook.addWorksheet('LFL');
+    const sheet = workbook.addWorksheet('LFL год к году');
     sheet.columns = [
-      { header: 'Level', key: 'level', width: 14 },
-      { header: 'Parent ID', key: 'parentId', width: 18 },
-      { header: 'Name', key: 'name', width: 36 },
-      { header: 'Current revenue', key: 'currentRevenue', width: 18 },
-      { header: 'Previous revenue', key: 'previousRevenue', width: 18 },
-      { header: 'Revenue delta', key: 'revenueDelta', width: 18 },
-      { header: 'Revenue LFL, %', key: 'revenueLflPercent', width: 16 },
-      { header: 'Current profit', key: 'currentGrossProfit', width: 18 },
-      { header: 'Previous profit', key: 'previousGrossProfit', width: 18 },
-      { header: 'Profit delta', key: 'grossProfitDelta', width: 16 },
-      { header: 'Profit LFL, %', key: 'grossProfitLflPercent', width: 16 },
-      { header: 'Current quantity', key: 'currentQuantity', width: 18 },
-      { header: 'Previous quantity', key: 'previousQuantity', width: 18 },
-      { header: 'Quantity delta', key: 'quantityDelta', width: 16 },
-      { header: 'Quantity LFL, %', key: 'quantityLflPercent', width: 16 },
+      { header: 'Уровень', key: 'level', width: 14 },
+      { header: 'Родительская группа', key: 'parentId', width: 22 },
+      { header: 'Название', key: 'name', width: 36 },
+      { header: 'Текущая выручка', key: 'currentRevenue', width: 18 },
+      { header: 'Выручка год назад', key: 'previousRevenue', width: 20 },
+      { header: 'Отклонение выручки', key: 'revenueDelta', width: 20 },
+      { header: 'LFL выручки, %', key: 'revenueLflPercent', width: 16 },
+      { header: 'Текущая валовая прибыль', key: 'currentGrossProfit', width: 24 },
+      { header: 'Валовая прибыль год назад', key: 'previousGrossProfit', width: 26 },
+      { header: 'Отклонение валовой прибыли', key: 'grossProfitDelta', width: 28 },
+      { header: 'LFL валовой прибыли, %', key: 'grossProfitLflPercent', width: 24 },
+      { header: 'Текущие продажи, шт', key: 'currentQuantity', width: 20 },
+      { header: 'Продажи год назад, шт', key: 'previousQuantity', width: 22 },
+      { header: 'Отклонение продаж, шт', key: 'quantityDelta', width: 22 },
+      { header: 'LFL продаж, %', key: 'quantityLflPercent', width: 16 },
     ];
-    sheet.addRows([report.summary, ...report.rows]);
+    sheet.addRows(
+      [report.summary, ...report.rows].map((item) => ({
+        ...item,
+        level: this.lflLevelLabel(item.level),
+      })),
+    );
     this.styleHeader(sheet);
 
     const buffer = await workbook.xlsx.writeBuffer();
@@ -850,5 +872,59 @@ export class ReportsExportService {
     header.font = { bold: true };
     header.alignment = { vertical: 'middle' };
     sheet.views = [{ state: 'frozen', ySplit: 1 }];
+  }
+
+  private recommendationSeverityLabel(
+    severity: ReportRecommendation['severity'],
+  ) {
+    const labels: Record<ReportRecommendation['severity'], string> = {
+      HIGH: 'Высокий',
+      MEDIUM: 'Средний',
+      LOW: 'Низкий',
+    };
+
+    return labels[severity];
+  }
+
+  private recommendationKindLabel(kind: ReportRecommendation['kind']) {
+    const labels: Record<ReportRecommendation['kind'], string> = {
+      REPLENISH_STOCK: 'Пополнить запас',
+      NO_SALES: 'Нет продаж',
+      LOW_MARGIN: 'Низкая маржинальность',
+    };
+
+    return labels[kind];
+  }
+
+  private replenishmentRiskLabel(risk: ReplenishmentRisk) {
+    const labels: Record<ReplenishmentRisk, string> = {
+      OUT_OF_STOCK: 'Нет остатка',
+      LOW_STOCK: 'Низкий остаток',
+      OK: 'В норме',
+      NO_SALES: 'Нет продаж',
+    };
+
+    return labels[risk];
+  }
+
+  private lflPeriodLabel(period: LflPeriod) {
+    const labels: Record<LflPeriod, string> = {
+      day: 'День',
+      week: 'Неделя',
+      month: 'Месяц',
+    };
+
+    return labels[period];
+  }
+
+  private lflLevelLabel(level: LflGroupLevel) {
+    const labels: Record<LflGroupLevel, string> = {
+      network: 'Вся сеть',
+      store: 'Клуб',
+      category: 'Категория',
+      product: 'Товар',
+    };
+
+    return labels[level];
   }
 }

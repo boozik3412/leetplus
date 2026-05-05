@@ -244,14 +244,16 @@ describe('ReportsExportService', () => {
 
     expect(file.fileName).toBe('leetplus-reports-2026-04-01-2026-04-30.csv');
     expect(file.contentType).toBe('text/csv; charset=utf-8');
-    expect(content).toContain('Operations summary');
-    expect(content).toContain('ABC by revenue');
-    expect(content).toContain('Top SKU by revenue');
-    expect(content).toContain('Replenishment');
-    expect(content).toContain('LOW_STOCK;DRK-001;Cola');
-    expect(content).toContain('Top suppliers');
+    expect(content).toContain('Операционная сводка');
+    expect(content).toContain('Рекомендации');
+    expect(content).toContain('Низкий;Низкая маржинальность;DRK-001;Cola');
+    expect(content).toContain('ABC по выручке');
+    expect(content).toContain('ТОП SKU по выручке');
+    expect(content).toContain('Остатки и потребность');
+    expect(content).toContain('Низкий остаток;DRK-001;Cola');
+    expect(content).toContain('ТОП поставщиков');
     expect(content).toContain('Supplier A;2;10;1000');
-    expect(content).toContain('Assortment summary');
+    expect(content).toContain('Сводка ассортимента');
     expect(content).toContain('DRK-001;Cola');
     expect(reportsService.getOperationalReport).toHaveBeenCalledWith(user, {
       from: '2026-04-01',

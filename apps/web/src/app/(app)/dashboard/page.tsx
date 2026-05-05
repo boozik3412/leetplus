@@ -381,8 +381,8 @@ function SalesTrendPanel({
           </div>
         </div>
       </div>
-      <div className="grid gap-6 p-5 xl:grid-cols-2">
-        <div className="grid gap-6">
+      <div className="grid items-stretch gap-6 p-5 xl:grid-cols-2">
+        <div className="grid auto-rows-fr gap-6">
           <RevenueTrendChart
             rows={rows}
             period={period}
@@ -390,7 +390,7 @@ function SalesTrendPanel({
           />
           <NoSalesTrendChart rows={rows} period={period} />
         </div>
-        <div className="grid gap-6">
+        <div className="grid auto-rows-fr gap-6">
           <TrendChart
             title="Продано, шт"
             rows={rows}
@@ -449,7 +449,7 @@ function TrendChart({
           : "bg-sky-500";
 
   return (
-    <div className="rounded-3xl border border-zinc-100 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+    <div className="flex h-full min-h-[28rem] flex-col rounded-3xl border border-zinc-100 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
       <h3 className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
         {title}
       </h3>

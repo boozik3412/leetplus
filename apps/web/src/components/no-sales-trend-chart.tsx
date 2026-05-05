@@ -23,7 +23,7 @@ export function NoSalesTrendChart({
   const maxValue = Math.max(...values, 1);
 
   return (
-    <div className="rounded-3xl border border-zinc-100 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+    <div className="flex h-full min-h-[28rem] flex-col rounded-3xl border border-zinc-100 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h3 className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">

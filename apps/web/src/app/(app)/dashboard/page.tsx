@@ -382,36 +382,32 @@ function SalesTrendPanel({
         </div>
       </div>
       <div className="grid items-stretch gap-6 p-5 xl:grid-cols-2">
-        <div className="grid auto-rows-fr gap-6">
-          <RevenueTrendChart
-            rows={rows}
-            period={period}
-            canShowShare={canShowRevenueShare}
-          />
-          <NoSalesTrendChart rows={rows} period={period} />
-        </div>
-        <div className="grid auto-rows-fr gap-6">
-          <TrendChart
-            title="Продано, шт"
-            rows={rows}
-            getValue={(row) => row.soldQuantity}
-            getDelta={(row) => row.quantityDeltaPercent}
-            formatValue={formatQuantity}
-            tone="quantity"
-            period={period}
-          />
-          <TrendChart
-            title="OOS, SKU"
-            description="SKU с риском out-of-stock"
-            rows={rows}
-            getValue={(row) => row.outOfStockSkuCount}
-            getDelta={(row) => row.outOfStockSkuDeltaPercent}
-            formatValue={formatQuantity}
-            tone="danger"
-            period={period}
-            deltaDirection="lowerGood"
-          />
-        </div>
+        <RevenueTrendChart
+          rows={rows}
+          period={period}
+          canShowShare={canShowRevenueShare}
+        />
+        <TrendChart
+          title="Продано, шт"
+          rows={rows}
+          getValue={(row) => row.soldQuantity}
+          getDelta={(row) => row.quantityDeltaPercent}
+          formatValue={formatQuantity}
+          tone="quantity"
+          period={period}
+        />
+        <NoSalesTrendChart rows={rows} period={period} />
+        <TrendChart
+          title="OOS, SKU"
+          description="SKU с риском out-of-stock"
+          rows={rows}
+          getValue={(row) => row.outOfStockSkuCount}
+          getDelta={(row) => row.outOfStockSkuDeltaPercent}
+          formatValue={formatQuantity}
+          tone="danger"
+          period={period}
+          deltaDirection="lowerGood"
+        />
       </div>
     </section>
   );
@@ -449,7 +445,7 @@ function TrendChart({
           : "bg-sky-500";
 
   return (
-    <div className="flex h-full min-h-[28rem] flex-col rounded-3xl border border-zinc-100 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+    <div className="flex h-full flex-col rounded-3xl border border-zinc-100 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
       <h3 className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
         {title}
       </h3>

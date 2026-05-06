@@ -32,6 +32,7 @@ import {
   type ProductOosExclusionDto,
   type ProductOosExclusionRow,
   type ReplenishmentReport,
+  type SalesDetailReport,
   type SkuPerformanceReport,
   type SuppliersPerformanceReport,
 } from './reports.service';
@@ -59,6 +60,14 @@ export class ReportsController {
     @Query() query: OperationalReportQuery,
   ): Promise<OperationalReport> {
     return this.reportsService.getOperationalReport(user, query);
+  }
+
+  @Get('sales-detail')
+  getSalesDetailReport(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: OperationalReportQuery,
+  ): Promise<SalesDetailReport> {
+    return this.reportsService.getSalesDetailReport(user, query);
   }
 
   @Get('sku-performance')

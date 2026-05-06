@@ -12,6 +12,7 @@ import {
   type ReportRecommendation,
   type ReplenishmentReport,
   type ReplenishmentRisk,
+  type SalesDetailReport,
   type SkuPerformanceReport,
   type SuppliersPerformanceReport,
 } from './reports.service';
@@ -33,7 +34,12 @@ export type ReportExportFile = {
   to: string;
 };
 
-type CsvCell = string | number | null;
+type CsvCell = string | number | boolean | null;
+type SalesDetailColumn = {
+  header: string;
+  key: keyof SalesDetailReport['rows'][number];
+  width: number;
+};
 
 @Injectable()
 export class ReportsExportService {
@@ -52,12 +58,14 @@ export class ReportsExportService {
     const [
       assortmentReport,
       operationalReport,
+      salesDetailReport,
       skuPerformanceReport,
       replenishmentReport,
       suppliersPerformanceReport,
     ] = await Promise.all([
       this.reportsService.getAssortmentReport(user),
       this.reportsService.getOperationalReport(user, query),
+      this.reportsService.getSalesDetailReport(user, query),
       this.reportsService.getSkuPerformanceReport(user, query),
       this.reportsService.getReplenishmentReport(user, query),
       this.reportsService.getSuppliersPerformanceReport(user, query),
@@ -70,6 +78,7 @@ export class ReportsExportService {
           this.buildCsv(
             assortmentReport,
             operationalReport,
+            salesDetailReport,
             skuPerformanceReport,
             replenishmentReport,
             suppliersPerformanceReport,
@@ -88,6 +97,7 @@ export class ReportsExportService {
       buffer: await this.buildXlsx(
         assortmentReport,
         operationalReport,
+        salesDetailReport,
         skuPerformanceReport,
         replenishmentReport,
         suppliersPerformanceReport,
@@ -159,6 +169,7 @@ export class ReportsExportService {
   private buildCsv(
     assortmentReport: AssortmentReport,
     operationalReport: OperationalReport,
+    salesDetailReport: SalesDetailReport,
     skuPerformanceReport: SkuPerformanceReport,
     replenishmentReport: ReplenishmentReport,
     suppliersPerformanceReport: SuppliersPerformanceReport,
@@ -188,6 +199,12 @@ export class ReportsExportService {
       ['Среднедневная выручка', operationalReport.averageDailyRevenue],
       ['Остатки, шт', operationalReport.stockQuantity],
       ['Остаток в днях', operationalReport.stockDays],
+      [],
+      ['Общий отчет по продажам'],
+      this.salesDetailHeaders().map((header) => header.header),
+      ...salesDetailReport.rows.map((item) =>
+        this.salesDetailHeaders().map((header) => item[header.key]),
+      ),
       [],
       ['Рекомендации'],
       [
@@ -368,7 +385,13 @@ export class ReportsExportService {
       ['Средняя наценка, %', assortmentReport.averageMarkupPercent],
       [],
       ['Категории'],
-      ['Название', 'SKU', 'Средняя маржинальность, %', 'Средняя цена продажи', 'Фейсинг'],
+      [
+        'Название',
+        'SKU',
+        'Средняя маржинальность, %',
+        'Средняя цена продажи',
+        'Фейсинг',
+      ],
       ...assortmentReport.categoryBreakdown.map((item) => [
         item.name,
         item.productsCount,
@@ -378,7 +401,13 @@ export class ReportsExportService {
       ]),
       [],
       ['Поставщики'],
-      ['Название', 'SKU', 'Средняя маржинальность, %', 'Средняя цена продажи', 'Фейсинг'],
+      [
+        'Название',
+        'SKU',
+        'Средняя маржинальность, %',
+        'Средняя цена продажи',
+        'Фейсинг',
+      ],
       ...assortmentReport.supplierBreakdown.map((item) => [
         item.name,
         item.productsCount,
@@ -428,6 +457,7 @@ export class ReportsExportService {
   private async buildXlsx(
     assortmentReport: AssortmentReport,
     operationalReport: OperationalReport,
+    salesDetailReport: SalesDetailReport,
     skuPerformanceReport: SkuPerformanceReport,
     replenishmentReport: ReplenishmentReport,
     suppliersPerformanceReport: SuppliersPerformanceReport,
@@ -437,6 +467,7 @@ export class ReportsExportService {
     workbook.created = new Date();
 
     this.addSummarySheet(workbook, assortmentReport, operationalReport);
+    this.addSalesDetailSheet(workbook, salesDetailReport);
     this.addRecommendationsSheet(workbook, operationalReport);
     this.addStockRiskSheet(workbook, operationalReport);
     this.addNoSalesSheet(workbook, operationalReport);
@@ -575,6 +606,54 @@ export class ReportsExportService {
       },
     ]);
     this.styleHeader(sheet);
+  }
+
+  private addSalesDetailSheet(
+    workbook: ExcelJS.Workbook,
+    report: SalesDetailReport,
+  ) {
+    const sheet = workbook.addWorksheet('Общий отчет по продажам');
+    sheet.columns = this.salesDetailHeaders();
+    sheet.addRows(report.rows);
+    this.styleHeader(sheet);
+  }
+
+  private salesDetailHeaders(): SalesDetailColumn[] {
+    return [
+      { header: 'Дата продажи', key: 'saleDate', width: 22 },
+      { header: 'Клуб', key: 'storeName', width: 24 },
+      { header: 'Клуб при продаже', key: 'storeNameAtSale', width: 24 },
+      { header: 'Артикул', key: 'article', width: 18 },
+      { header: 'Товар', key: 'productName', width: 36 },
+      { header: 'Товар при продаже', key: 'productNameAtSale', width: 36 },
+      { header: 'Категория', key: 'categoryName', width: 24 },
+      { header: 'Поставщик', key: 'supplierName', width: 24 },
+      { header: 'Продажи, шт', key: 'quantity', width: 14 },
+      { header: 'Выручка', key: 'revenue', width: 14 },
+      { header: 'Себестоимость', key: 'cost', width: 16 },
+      { header: 'Цена продажи за ед.', key: 'unitSalePrice', width: 18 },
+      { header: 'Себестоимость за ед.', key: 'unitCost', width: 20 },
+      { header: 'Прибыль', key: 'grossProfit', width: 14 },
+      { header: 'Маржа, %', key: 'marginPercent', width: 12 },
+      { header: 'Наценка, %', key: 'markupPercent', width: 12 },
+      { header: 'Прайс закупки', key: 'purchasePrice', width: 14 },
+      { header: 'Прайс продажи', key: 'salePrice', width: 14 },
+      { header: 'Фейсинг', key: 'facing', width: 10 },
+      { header: 'Источник', key: 'source', width: 16 },
+      { header: 'Внешний провайдер', key: 'externalProvider', width: 18 },
+      { header: 'Домен источника', key: 'externalDomain', width: 20 },
+      { header: 'ID продажи источника', key: 'externalSaleId', width: 24 },
+      { header: 'ID товара источника', key: 'externalProductId', width: 22 },
+      { header: 'ID клуба источника', key: 'externalClubId', width: 20 },
+      { header: 'Хеш строки источника', key: 'sourcePayloadHash', width: 28 },
+      { header: 'Отменена', key: 'isCanceled', width: 10 },
+      { header: 'Дата отмены', key: 'canceledAt', width: 22 },
+      { header: 'ID продажи', key: 'id', width: 38 },
+      { header: 'ID товара', key: 'productId', width: 38 },
+      { header: 'ID клуба', key: 'storeId', width: 38 },
+      { header: 'Создано', key: 'createdAt', width: 22 },
+      { header: 'Обновлено', key: 'updatedAt', width: 22 },
+    ];
   }
 
   private addRecommendationsSheet(
@@ -751,7 +830,11 @@ export class ReportsExportService {
       { header: 'Тип группы', key: 'groupType', width: 18 },
       { header: 'Название', key: 'name', width: 32 },
       { header: 'SKU', key: 'productsCount', width: 12 },
-      { header: 'Средняя маржинальность, %', key: 'averageMarginPercent', width: 24 },
+      {
+        header: 'Средняя маржинальность, %',
+        key: 'averageMarginPercent',
+        width: 24,
+      },
       { header: 'Средняя цена продажи', key: 'averageSalePrice', width: 22 },
       { header: 'Фейсинг', key: 'totalFacing', width: 14 },
     ];
@@ -846,10 +929,26 @@ export class ReportsExportService {
       { header: 'Выручка год назад', key: 'previousRevenue', width: 20 },
       { header: 'Отклонение выручки', key: 'revenueDelta', width: 20 },
       { header: 'LFL выручки, %', key: 'revenueLflPercent', width: 16 },
-      { header: 'Текущая валовая прибыль', key: 'currentGrossProfit', width: 24 },
-      { header: 'Валовая прибыль год назад', key: 'previousGrossProfit', width: 26 },
-      { header: 'Отклонение валовой прибыли', key: 'grossProfitDelta', width: 28 },
-      { header: 'LFL валовой прибыли, %', key: 'grossProfitLflPercent', width: 24 },
+      {
+        header: 'Текущая валовая прибыль',
+        key: 'currentGrossProfit',
+        width: 24,
+      },
+      {
+        header: 'Валовая прибыль год назад',
+        key: 'previousGrossProfit',
+        width: 26,
+      },
+      {
+        header: 'Отклонение валовой прибыли',
+        key: 'grossProfitDelta',
+        width: 28,
+      },
+      {
+        header: 'LFL валовой прибыли, %',
+        key: 'grossProfitLflPercent',
+        width: 24,
+      },
       { header: 'Текущие продажи, шт', key: 'currentQuantity', width: 20 },
       { header: 'Продажи год назад, шт', key: 'previousQuantity', width: 22 },
       { header: 'Отклонение продаж, шт', key: 'quantityDelta', width: 22 },

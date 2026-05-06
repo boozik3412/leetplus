@@ -5,12 +5,14 @@ import { NoSalesPeriodTable } from "@/components/no-sales-period-table";
 import { OosExclusionActions } from "@/components/oos-exclusion-actions";
 import { ReportEmailForm } from "@/components/report-email-form";
 import { ReportLoadingLink } from "@/components/report-loading-link";
+import { SimpleReportTable } from "@/components/simple-report-table";
 import {
   getAssortmentReport,
   getLflReport,
   getNewProductsReport,
   getOperationalReport,
   getReplenishmentReport,
+  getSalesDetailReport,
   getSkuPerformanceReport,
   getSuppliersPerformanceReport,
   type LflPeriod,
@@ -22,6 +24,7 @@ import {
   type ReplenishmentRow,
   type ReportRecommendation,
   type ReportGroup,
+  type SalesDetailRow,
   type SkuPerformanceRow,
   type SupplierPerformanceRow,
 } from "@/lib/reports";
@@ -152,6 +155,7 @@ export default async function ReportsPage({
   const [
     assortmentReport,
     operationalReport,
+    salesDetailReport,
     skuPerformanceReport,
     replenishmentReport,
     suppliersPerformanceReport,
@@ -164,6 +168,7 @@ export default async function ReportsPage({
   ] = await Promise.all([
     getAssortmentReport(),
     getOperationalReport(filters),
+    getSalesDetailReport(filters),
     getSkuPerformanceReport(filters),
     getReplenishmentReport(filters),
     getSuppliersPerformanceReport(filters),
@@ -208,6 +213,13 @@ export default async function ReportsPage({
         />
 
         <section className="mt-6 grid gap-3">
+          <ReportDisclosure
+            title="Общий отчет по продажам"
+            description="Строки продаж для сводной таблицы Excel: товар, клуб, дата, цены, себестоимость, прибыль, маржа и источник."
+          >
+            <SalesDetailTable rows={salesDetailReport.rows} />
+          </ReportDisclosure>
+
           <ReportDisclosure
             title="LFL год к году"
             description="День, неделя или месяц год к году по выручке, прибыли и штукам."
@@ -448,6 +460,75 @@ function Metric({ label, value }: { label: string; value: number | string }) {
         {value}
       </p>
     </div>
+  );
+}
+
+function SalesDetailTable({ rows }: { rows: SalesDetailRow[] }) {
+  return (
+    <section className="overflow-hidden bg-white dark:bg-zinc-950">
+      <SimpleReportTable
+        title="Общий отчет по продажам"
+        rows={rows.map((row) => ({
+          saleDate: new Date(row.saleDate).toLocaleString("ru-RU"),
+          storeName: row.storeName,
+          article: row.article,
+          productName: row.productNameAtSale ?? row.productName,
+          categoryName: row.categoryName,
+          supplierName: row.supplierName,
+          quantity: row.quantity,
+          revenue: row.revenue,
+          cost: row.cost,
+          unitSalePrice: row.unitSalePrice,
+          unitCost: row.unitCost,
+          grossProfit: row.grossProfit,
+          marginPercent: `${row.marginPercent.toFixed(1)}%`,
+          markupPercent: `${row.markupPercent.toFixed(1)}%`,
+          purchasePrice: row.purchasePrice,
+          salePrice: row.salePrice,
+          facing: row.facing,
+          source: row.source,
+          externalProvider: row.externalProvider,
+          externalDomain: row.externalDomain,
+          externalSaleId: row.externalSaleId,
+          externalProductId: row.externalProductId,
+          externalClubId: row.externalClubId,
+          isCanceled: row.isCanceled ? "Да" : "Нет",
+        }))}
+        filters={[
+          { key: "storeName", label: "Клуб", type: "multi-select" },
+          { key: "categoryName", label: "Категория", type: "multi-select" },
+          { key: "supplierName", label: "Поставщик", type: "multi-select" },
+          { key: "source", label: "Источник", type: "multi-select" },
+          { key: "productName", label: "Товар", type: "text" },
+        ]}
+        columns={[
+          { key: "saleDate", label: "Дата" },
+          { key: "storeName", label: "Клуб" },
+          { key: "article", label: "Артикул" },
+          { key: "productName", label: "Товар" },
+          { key: "categoryName", label: "Категория" },
+          { key: "supplierName", label: "Поставщик" },
+          { key: "quantity", label: "Продажи", align: "right" },
+          { key: "revenue", label: "Выручка", align: "right" },
+          { key: "cost", label: "Себестоимость", align: "right" },
+          { key: "unitSalePrice", label: "Цена", align: "right" },
+          { key: "unitCost", label: "Себ. ед.", align: "right" },
+          { key: "grossProfit", label: "Прибыль", align: "right" },
+          { key: "marginPercent", label: "Маржа", align: "right" },
+          { key: "markupPercent", label: "Наценка", align: "right" },
+          { key: "purchasePrice", label: "Закупка", align: "right" },
+          { key: "salePrice", label: "Прайс", align: "right" },
+          { key: "facing", label: "Фейсинг", align: "right" },
+          { key: "source", label: "Источник" },
+          { key: "externalProvider", label: "Провайдер" },
+          { key: "externalDomain", label: "Домен" },
+          { key: "externalSaleId", label: "ID продажи" },
+          { key: "externalProductId", label: "ID товара" },
+          { key: "externalClubId", label: "ID клуба" },
+          { key: "isCanceled", label: "Отменена" },
+        ]}
+      />
+    </section>
   );
 }
 

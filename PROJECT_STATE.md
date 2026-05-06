@@ -1,6 +1,6 @@
 # LeetPlus Project State
 
-Last updated: 2026-05-05
+Last updated: 2026-05-06
 
 ## Current Workflow
 
@@ -54,7 +54,7 @@ Connected production LAngame sources:
 ## Current Feature Areas
 
 - Dashboard: compact filters, responsive header, KPI cards, trend charts, category weights/efficiency, active assortment, TOP SKU.
-- Reports: collapsible report list, summary export/email, LFL, new products, recommendations, OOS, no-sales, replenishment, ABC, top SKU/suppliers, assortment.
+- Reports: collapsible report list, row-level sales detail report, summary export/email, LFL, new products, recommendations, OOS, no-sales, replenishment, ABC, top SKU/suppliers, assortment.
 - Product parsing utilities: automatic analysis, safe confirmation/rejection, existing canonical SKU awareness, manual parsing page.
 - Products/stores/directories: inline editing, multi-club filters, exports, manual store name preservation.
 - Mail: Mail.ru/VK WorkSpace domain is configured; SMTP uses `reports@leetplus.ru`.
@@ -68,10 +68,10 @@ Connected production LAngame sources:
 - Combined summary export and email controls.
 - Clarified report export/email UI and error messages.
 - Refined report disclosure controls.
+- Added "Общий отчет по продажам" to reports and summary export/email for Excel pivot-table source rows.
 
 ## Near-Term Backlog
 
-- Add "Общий отчет по продажам" to reports and summary export/email: row-level report with product, club, date, sales, prices, cost, margin, supplier/category/source fields for Excel pivot tables.
 - Continue polishing report table UX, filters, exports, and mobile layout based on live `leetplus.ru` review.
 - Keep README and this file aligned when workflow, data rules, or production setup changes.
 

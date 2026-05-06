@@ -5,6 +5,7 @@ import type {
   AssortmentReport,
   OperationalReport,
   ReplenishmentReport,
+  SalesDetailReport,
   SkuPerformanceReport,
   SuppliersPerformanceReport,
 } from './reports.service';
@@ -12,6 +13,7 @@ import type {
 type ReportsServiceMock = {
   getAssortmentReport: jest.Mock;
   getOperationalReport: jest.Mock;
+  getSalesDetailReport: jest.Mock;
   getSkuPerformanceReport: jest.Mock;
   getReplenishmentReport: jest.Mock;
   getSuppliersPerformanceReport: jest.Mock;
@@ -161,6 +163,51 @@ const skuPerformanceReport: SkuPerformanceReport = {
   topByProfitPerFacing: [],
 };
 
+const salesDetailReport: SalesDetailReport = {
+  tenantId: 'tenant-1',
+  tenantSlug: 'club-a',
+  from: '2026-04-01',
+  to: '2026-04-30',
+  storeId: null,
+  rows: [
+    {
+      id: 'sale-1',
+      saleDate: '2026-04-10T12:00:00.000Z',
+      productId: 'product-1',
+      article: 'DRK-001',
+      productName: 'Cola',
+      productNameAtSale: null,
+      storeId: 'store-1',
+      storeName: 'Club A',
+      storeNameAtSale: null,
+      categoryName: 'Напитки',
+      supplierName: 'Supplier A',
+      quantity: 2,
+      revenue: 200,
+      cost: 140,
+      unitSalePrice: 100,
+      unitCost: 70,
+      grossProfit: 60,
+      marginPercent: 30,
+      markupPercent: 42.9,
+      purchasePrice: 70,
+      salePrice: 100,
+      facing: 2,
+      source: 'LANGAME',
+      externalProvider: 'LANGAME',
+      externalDomain: 'club-a',
+      externalSaleId: 'sale-ext-1',
+      externalProductId: 'product-ext-1',
+      externalClubId: 'club-ext-1',
+      sourcePayloadHash: 'hash-1',
+      isCanceled: false,
+      canceledAt: null,
+      createdAt: '2026-04-10T12:01:00.000Z',
+      updatedAt: '2026-04-10T12:01:00.000Z',
+    },
+  ],
+};
+
 const suppliersPerformanceReport: SuppliersPerformanceReport = {
   tenantId: 'tenant-1',
   tenantSlug: 'club-a',
@@ -225,6 +272,7 @@ describe('ReportsExportService', () => {
     reportsService = {
       getAssortmentReport: jest.fn().mockResolvedValue(assortmentReport),
       getOperationalReport: jest.fn().mockResolvedValue(operationalReport),
+      getSalesDetailReport: jest.fn().mockResolvedValue(salesDetailReport),
       getSkuPerformanceReport: jest
         .fn()
         .mockResolvedValue(skuPerformanceReport),
@@ -245,6 +293,8 @@ describe('ReportsExportService', () => {
     expect(file.fileName).toBe('leetplus-reports-2026-04-01-2026-04-30.csv');
     expect(file.contentType).toBe('text/csv; charset=utf-8');
     expect(content).toContain('Операционная сводка');
+    expect(content).toContain('Общий отчет по продажам');
+    expect(content).toContain('2026-04-10T12:00:00.000Z;Club A;');
     expect(content).toContain('Рекомендации');
     expect(content).toContain('Низкий;Низкая маржинальность;DRK-001;Cola');
     expect(content).toContain('ABC по выручке');

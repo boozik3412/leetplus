@@ -135,6 +135,51 @@ export type OperationalReport = {
   productsWithoutSales: ProductWithoutSales[];
 };
 
+export type SalesDetailRow = {
+  id: string;
+  saleDate: string;
+  productId: string;
+  article: string;
+  productName: string;
+  productNameAtSale: string | null;
+  storeId: string;
+  storeName: string;
+  storeNameAtSale: string | null;
+  categoryName: string | null;
+  supplierName: string | null;
+  quantity: number;
+  revenue: number;
+  cost: number;
+  unitSalePrice: number;
+  unitCost: number;
+  grossProfit: number;
+  marginPercent: number;
+  markupPercent: number;
+  purchasePrice: number;
+  salePrice: number;
+  facing: number;
+  source: string;
+  externalProvider: string | null;
+  externalDomain: string | null;
+  externalSaleId: string | null;
+  externalProductId: string | null;
+  externalClubId: string | null;
+  sourcePayloadHash: string | null;
+  isCanceled: boolean;
+  canceledAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SalesDetailReport = {
+  tenantId: string;
+  tenantSlug: string;
+  from: string;
+  to: string;
+  storeId: string | null;
+  rows: SalesDetailRow[];
+};
+
 export type AbcGroup = 'A' | 'B' | 'C';
 
 export type SkuPerformanceRow = {
@@ -816,6 +861,136 @@ export class ReportsService {
       ),
       outOfStockRiskProducts,
       productsWithoutSales,
+    };
+  }
+
+  async getSalesDetailReport(
+    user: AuthenticatedUser,
+    query: OperationalReportQuery,
+  ): Promise<SalesDetailReport> {
+    const { tenantId, tenantSlug } =
+      await this.tenantContextService.resolve(user);
+    const period = this.resolvePeriod(query);
+    const storeFilter = query.storeId ? { storeId: query.storeId } : {};
+
+    if (query.storeId) {
+      const store = await this.prisma.store.findFirst({
+        where: { id: query.storeId, tenantId, isActive: true },
+        select: { id: true },
+      });
+
+      if (!store) {
+        throw new BadRequestException('Store not found');
+      }
+    }
+
+    const [salesFacts, inventorySnapshots] = await Promise.all([
+      this.prisma.salesFact.findMany({
+        where: {
+          tenantId,
+          ...storeFilter,
+          saleDate: {
+            gte: period.fromDate,
+            lte: period.toDate,
+          },
+        },
+        include: {
+          product: {
+            select: {
+              id: true,
+              article: true,
+              name: true,
+              purchasePrice: true,
+              salePrice: true,
+              facing: true,
+              category: {
+                select: { name: true },
+              },
+              supplier: {
+                select: { name: true },
+              },
+            },
+          },
+          store: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+        orderBy: [{ saleDate: 'asc' }, { createdAt: 'asc' }],
+      }),
+      this.prisma.inventorySnapshot.findMany({
+        where: {
+          tenantId,
+          ...storeFilter,
+          snapshotDate: {
+            lte: period.toDate,
+          },
+        },
+        include: {
+          product: {
+            select: {
+              purchasePrice: true,
+            },
+          },
+        },
+        orderBy: { snapshotDate: 'asc' },
+      }),
+    ]);
+    const costBasisByProduct = buildProductCostBasis([], inventorySnapshots);
+
+    return {
+      tenantId,
+      tenantSlug,
+      from: this.toDateInputValue(period.fromDate),
+      to: this.toDateInputValue(period.toDate),
+      storeId: query.storeId ?? null,
+      rows: salesFacts.map((fact) => {
+        const quantity = fact.quantity.toNumber();
+        const revenue = fact.revenue.toNumber();
+        const cost = this.saleCost(fact, costBasisByProduct);
+        const grossProfit = revenue - cost;
+
+        return {
+          id: fact.id,
+          saleDate: fact.saleDate.toISOString(),
+          productId: fact.productId,
+          article: fact.product.article,
+          productName: fact.product.name,
+          productNameAtSale: fact.productNameAtSale,
+          storeId: fact.storeId,
+          storeName: fact.store.name,
+          storeNameAtSale: fact.storeNameAtSale,
+          categoryName: fact.product.category?.name ?? null,
+          supplierName: fact.product.supplier?.name ?? null,
+          quantity: this.round(quantity),
+          revenue: this.round(revenue),
+          cost: this.round(cost),
+          unitSalePrice: quantity > 0 ? this.round(revenue / quantity) : 0,
+          unitCost: quantity > 0 ? this.round(cost / quantity) : 0,
+          grossProfit: this.round(grossProfit),
+          marginPercent: this.marginPercent(cost, revenue),
+          markupPercent: this.markupPercent(cost, revenue),
+          purchasePrice: fact.product.purchasePrice.toNumber(),
+          salePrice: fact.product.salePrice.toNumber(),
+          facing: fact.product.facing,
+          source:
+            fact.externalProvider ??
+            fact.externalDomain ??
+            (fact.sourcePayloadHash ? 'IMPORT' : 'MANUAL'),
+          externalProvider: fact.externalProvider,
+          externalDomain: fact.externalDomain,
+          externalSaleId: fact.externalSaleId,
+          externalProductId: fact.externalProductId,
+          externalClubId: fact.externalClubId,
+          sourcePayloadHash: fact.sourcePayloadHash,
+          isCanceled: fact.isCanceled,
+          canceledAt: fact.canceledAt?.toISOString() ?? null,
+          createdAt: fact.createdAt.toISOString(),
+          updatedAt: fact.updatedAt.toISOString(),
+        };
+      }),
     };
   }
 
@@ -2310,8 +2485,7 @@ export class ReportsService {
     snapshotsByStoreProduct.forEach((productSnapshots, key) => {
       const sortedSnapshots = [...productSnapshots].sort(
         (a, b) =>
-          (a.snapshotDate?.getTime() ?? 0) -
-          (b.snapshotDate?.getTime() ?? 0),
+          (a.snapshotDate?.getTime() ?? 0) - (b.snapshotDate?.getTime() ?? 0),
       );
       let previousQuantity = 0;
 

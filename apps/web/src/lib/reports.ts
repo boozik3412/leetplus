@@ -124,6 +124,51 @@ export type OperationalReport = {
   productsWithoutSales: ProductWithoutSales[];
 };
 
+export type SalesDetailRow = {
+  id: string;
+  saleDate: string;
+  productId: string;
+  article: string;
+  productName: string;
+  productNameAtSale: string | null;
+  storeId: string;
+  storeName: string;
+  storeNameAtSale: string | null;
+  categoryName: string | null;
+  supplierName: string | null;
+  quantity: number;
+  revenue: number;
+  cost: number;
+  unitSalePrice: number;
+  unitCost: number;
+  grossProfit: number;
+  marginPercent: number;
+  markupPercent: number;
+  purchasePrice: number;
+  salePrice: number;
+  facing: number;
+  source: string;
+  externalProvider: string | null;
+  externalDomain: string | null;
+  externalSaleId: string | null;
+  externalProductId: string | null;
+  externalClubId: string | null;
+  sourcePayloadHash: string | null;
+  isCanceled: boolean;
+  canceledAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SalesDetailReport = {
+  tenantId: string;
+  tenantSlug: string;
+  from: string;
+  to: string;
+  storeId: string | null;
+  rows: SalesDetailRow[];
+};
+
 export type AbcGroup = "A" | "B" | "C";
 
 export type SkuPerformanceRow = {
@@ -346,6 +391,39 @@ export async function getOperationalReport(
   }
 
   return response.json() as Promise<OperationalReport>;
+}
+
+export async function getSalesDetailReport(
+  filters: OperationalReportFilters,
+): Promise<SalesDetailReport> {
+  const params = new URLSearchParams();
+
+  if (filters.from) {
+    params.set("from", filters.from);
+  }
+
+  if (filters.to) {
+    params.set("to", filters.to);
+  }
+
+  if (filters.storeId) {
+    params.set("storeId", filters.storeId);
+  }
+
+  const query = params.toString();
+  const response = await fetch(
+    `${getApiUrl()}/reports/sales-detail${query ? `?${query}` : ""}`,
+    {
+      cache: "no-store",
+      headers: await getAuthHeaders(),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch sales detail report");
+  }
+
+  return response.json() as Promise<SalesDetailReport>;
 }
 
 export async function getSkuPerformanceReport(

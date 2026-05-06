@@ -1,5 +1,6 @@
 import {
   getDashboardSummary,
+  type DashboardCategoryMetric,
   type DashboardSalesTrendSegment,
   type DashboardTopSku,
 } from "@/lib/dashboard-summary";
@@ -90,6 +91,167 @@ function formatDashboardPeriodHighlight(from: string, to: string) {
   return null;
 }
 
+type ManagementInsight = {
+  label: string;
+  value: string;
+  description: string;
+  tone?: "neutral" | "good" | "warning" | "danger";
+  href?: string;
+};
+
+type DashboardAction = {
+  title: string;
+  description: string;
+  href: string;
+  tone?: "neutral" | "warning" | "danger";
+};
+
+function getLatestTrendSegment(rows: DashboardSalesTrendSegment[]) {
+  return rows.at(-1) ?? null;
+}
+
+function findLargestCategory(
+  rows: DashboardCategoryMetric[],
+  key: "revenue" | "grossProfit",
+) {
+  return rows.reduce<DashboardCategoryMetric | null>((best, row) => {
+    if (!best || row[key] > best[key]) {
+      return row;
+    }
+
+    return best;
+  }, null);
+}
+
+function findWeakestProfitCategory(rows: DashboardCategoryMetric[]) {
+  return rows.reduce<DashboardCategoryMetric | null>((weakest, row) => {
+    if (row.grossProfit <= 0) {
+      return !weakest || row.grossProfit < weakest.grossProfit ? row : weakest;
+    }
+
+    if (row.profitEfficiency === null) {
+      return weakest;
+    }
+
+    if (!weakest) {
+      return row;
+    }
+
+    const weakestScore = weakest.profitEfficiency ?? Number.POSITIVE_INFINITY;
+    return row.profitEfficiency < weakestScore ? row : weakest;
+  }, null);
+}
+
+function buildManagementInsights({
+  summary,
+  categoryAnalytics,
+}: {
+  summary: Awaited<ReturnType<typeof getDashboardSummary>>;
+  categoryAnalytics: DashboardCategoryMetric[];
+}) {
+  const topRevenueCategory = findLargestCategory(categoryAnalytics, "revenue");
+  const weakestCategory = findWeakestProfitCategory(categoryAnalytics);
+  const activeSkuShare =
+    summary.totalSku > 0 ? (summary.activeSku / summary.totalSku) * 100 : 0;
+
+  return [
+    {
+      label: "Лидер выручки",
+      value: topRevenueCategory
+        ? `${topRevenueCategory.categoryName} · ${formatMoney(topRevenueCategory.revenue)}`
+        : "Нет данных",
+      description: topRevenueCategory
+        ? `Доля категории в обороте ${formatPercent(topRevenueCategory.revenueSharePercent)}.`
+        : "Продаж за выбранный период пока нет.",
+      href: "/reports/top-sku/table",
+    },
+    {
+      label: "Риск OOS",
+      value: `${formatQuantity(summary.outOfStockRiskCount)} SKU`,
+      description:
+        summary.outOfStockRiskCount > 0
+          ? "Позиции с остатком менее 3 дней продаж требуют пополнения или замены."
+          : "Критических SKU с запасом менее 3 дней сейчас нет.",
+      tone: summary.outOfStockRiskCount > 0 ? "danger" : "good",
+      href: "/reports/oos/table",
+    },
+    {
+      label: "Слабая прибыльность",
+      value: weakestCategory
+        ? `${weakestCategory.categoryName} · ${formatMoney(weakestCategory.grossProfit)}`
+        : "Нет данных",
+      description: weakestCategory?.profitEfficiency
+        ? `Индекс эффективности прибыли ${formatPercent(weakestCategory.profitEfficiency)}.`
+        : "Проверьте категории с низкой или отрицательной прибылью.",
+      tone:
+        weakestCategory && weakestCategory.grossProfit <= 0
+          ? "danger"
+          : "warning",
+    },
+    {
+      label: "Активность матрицы",
+      value: `${formatPercent(activeSkuShare)}`,
+      description: `${formatQuantity(summary.activeSku)} из ${formatQuantity(
+        summary.totalSku,
+      )} SKU имеют остаток или продажи за 14 дней.`,
+      tone: activeSkuShare >= 70 ? "good" : "warning",
+      href: "/products",
+    },
+  ] satisfies ManagementInsight[];
+}
+
+function buildDashboardActions({
+  summary,
+  latestTrend,
+}: {
+  summary: Awaited<ReturnType<typeof getDashboardSummary>>;
+  latestTrend: DashboardSalesTrendSegment | null;
+}) {
+  const actions: DashboardAction[] = [];
+
+  if (summary.outOfStockRiskCount > 0) {
+    actions.push({
+      title: "Закрыть риск OOS",
+      description: `Проверить ${formatQuantity(
+        summary.outOfStockRiskCount,
+      )} SKU с запасом менее 3 дней и сформировать пополнение.`,
+      href: "/reports/oos/table",
+      tone: "danger",
+    });
+  }
+
+  if (latestTrend && latestTrend.noSalesSkuCount14 > 0) {
+    actions.push({
+      title: "Разобрать SKU без продаж",
+      description: `${formatQuantity(
+        latestTrend.noSalesSkuCount14,
+      )} SKU без движения 14 дней: проверить цену, выкладку, остатки и роль в матрице.`,
+      href: "/reports/no-sales/table?period=14",
+      tone: "warning",
+    });
+  }
+
+  if (summary.writeOffAmount > 0) {
+    actions.push({
+      title: "Проверить списания",
+      description: `Списания за период ${formatMoney(
+        summary.writeOffAmount,
+      )}: найти категории и клубы, где они съедают маржу.`,
+      href: "/reports",
+      tone: "warning",
+    });
+  }
+
+  actions.push({
+    title: "Открыть источник для сводной",
+    description:
+      "Скачать общий отчет по продажам по строкам для Excel: товар, клуб, дата, цена, себестоимость, прибыль и маржа.",
+    href: "/reports/sales-detail/table",
+  });
+
+  return actions;
+}
+
 export default async function DashboardPage({
   searchParams,
 }: {
@@ -114,12 +276,18 @@ export default async function DashboardPage({
     summary.periodTo,
   );
   const categoryAnalytics = summary.categoryAnalytics ?? [];
+  const latestTrend = getLatestTrendSegment(summary.salesTrend);
+  const managementInsights = buildManagementInsights({
+    summary,
+    categoryAnalytics,
+  });
+  const dashboardActions = buildDashboardActions({ summary, latestTrend });
 
   return (
     <main className="px-6 py-8 text-zinc-950 dark:text-zinc-100">
       <DashboardAutoSync />
       <div className="mx-auto max-w-7xl">
-        <section className="overflow-visible rounded-[2rem] border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+        <section className="overflow-visible rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
           <div className="grid gap-6 p-5 min-[1250px]:grid-cols-[1.1fr_0.9fr] lg:p-8">
             <div>
               <div className="flex flex-wrap items-center gap-2">
@@ -134,14 +302,15 @@ export default async function DashboardPage({
                 <DashboardQuickSyncButton />
               </div>
               <h1 className="mt-3 max-w-3xl text-3xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50 min-[1250px]:text-4xl">
-                {summary.tenantName}: операционная картина ассортимента
+                {summary.tenantName}: коммерческая картина сети
               </h1>
               <p className="mt-4 max-w-2xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
                 Период -{" "}
                 <span className="font-semibold text-zinc-950 dark:text-zinc-50">
                   {highlightedPeriod ?? `${summary.periodFrom} — ${summary.periodTo}`}
                 </span>
-                .
+                . Первый экран собран вокруг денег, маржи и срочных решений по
+                ассортименту.
               </p>
             </div>
 
@@ -158,7 +327,7 @@ export default async function DashboardPage({
                 />
               </HeroMetric>
               <HeroMetric
-                label="Прибыль с потерями"
+                label="Прибыль после потерь"
                 value={formatMoney(summary.adjustedGrossProfit)}
                 caption={`маржа ${formatPercent(summary.adjustedMarginPercent)}`}
                 tone={
@@ -175,7 +344,20 @@ export default async function DashboardPage({
             </div>
           </div>
 
-          <div className="grid border-t border-zinc-200 bg-zinc-50/70 dark:border-zinc-800 dark:bg-zinc-900/40 md:grid-cols-4">
+          <div className="grid border-t border-zinc-200 bg-zinc-50/70 dark:border-zinc-800 dark:bg-zinc-900/40 md:grid-cols-5">
+            <SignalMetric
+              label="Валовая прибыль"
+              compactLabel="Прибыль"
+              value={formatMoney(summary.grossProfit)}
+              tone={summary.grossProfit > 0 ? "good" : "danger"}
+              href="/reports/sales-detail/table"
+            />
+            <SignalMetric
+              label="Маржа"
+              value={formatPercent(summary.marginPercent)}
+              tone={summary.marginPercent > 0 ? "good" : "danger"}
+              href="/reports/top-sku/table"
+            />
             <SignalMetric
               label="Продано"
               value={formatQuantity(summary.soldQuantity)}
@@ -183,13 +365,7 @@ export default async function DashboardPage({
               href="/reports/top-sku/table"
             />
             <SignalMetric
-              label="Списания"
-              value={formatMoney(summary.writeOffAmount)}
-              tone="danger"
-              href="/reports"
-            />
-            <SignalMetric
-              label="Остатки"
+              label="Остаток"
               value={formatQuantity(summary.stockQuantity)}
               suffix="шт"
               href="/products"
@@ -205,37 +381,29 @@ export default async function DashboardPage({
           </div>
         </section>
 
+        <section className="mt-6 grid gap-6 xl:grid-cols-[1fr_0.9fr]">
+          <ManagementFocusPanel insights={managementInsights} />
+          <TodayActionsPanel actions={dashboardActions} />
+        </section>
+
+        <ChangeSnapshotPanel latestTrend={latestTrend} summary={summary} />
+
         <SalesTrendPanel
           rows={summary.salesTrend}
           period={filters.period}
           canShowRevenueShare={summary.selectedStoreIds.length === 0}
         />
 
+        <section className="mt-6">
+          <SectionHeading
+            title="Категории и SKU"
+            description="Ниже - детализация для поиска причин: доли категорий, эффективность прибыли и товары, которые формируют оборот."
+          />
+        </section>
+
         <section className="mt-6 grid gap-6 xl:grid-cols-2">
           <CategoryShareChart rows={categoryAnalytics} />
           <CategoryEfficiencyChart rows={categoryAnalytics} />
-        </section>
-
-        <section className="mt-6 grid gap-4 lg:grid-cols-3">
-          <InsightCard
-            href="/reports#replenishment"
-            label="Остатки менее 3-х дней продаж"
-            value={`${formatQuantity(summary.outOfStockRiskCount)} SKU`}
-            description="Перейти к полному отчёту по остаткам, дням запаса и рекомендованному заказу по SKU."
-          />
-          <InsightCard
-            label="Активный ассортимент"
-            value={`${formatQuantity(summary.activeSku)} / ${formatQuantity(
-              summary.totalSku,
-            )}`}
-            description="SKU с текущим остатком или продажами за последние 14 дней."
-            tooltip="Товары с остатками либо с продажами за последние 14 дней"
-          />
-          <InsightCard
-            label="Возвраты"
-            value={formatMoney(summary.returnAmount)}
-            description="Сумма возвратов за выбранный период, учтённая в прибыльности."
-          />
         </section>
 
         <TopSkuTable
@@ -248,6 +416,194 @@ export default async function DashboardPage({
         />
       </div>
     </main>
+  );
+}
+
+function ManagementFocusPanel({ insights }: { insights: ManagementInsight[] }) {
+  return (
+    <section className="rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
+        <h2 className="text-base font-semibold">Главное внимание</h2>
+        <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+          Сигналы, которые коммерческий директор должен увидеть до графиков.
+        </p>
+      </div>
+      <div className="grid gap-px bg-zinc-200 dark:bg-zinc-800 md:grid-cols-2">
+        {insights.map((insight) => {
+          const content = (
+            <div className="h-full bg-white p-5 dark:bg-zinc-950">
+              <p className="text-xs font-medium uppercase text-zinc-500">
+                {insight.label}
+              </p>
+              <p
+                className={[
+                  "mt-3 text-xl font-semibold text-zinc-950 dark:text-zinc-50",
+                  insight.tone === "good"
+                    ? "text-emerald-700 dark:text-emerald-300"
+                    : insight.tone === "warning"
+                      ? "text-amber-700 dark:text-amber-300"
+                      : insight.tone === "danger"
+                        ? "text-red-700 dark:text-red-300"
+                        : "",
+                ].join(" ")}
+              >
+                {insight.value}
+              </p>
+              <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+                {insight.description}
+              </p>
+            </div>
+          );
+
+          return insight.href ? (
+            <Link
+              key={insight.label}
+              href={insight.href}
+              className="block transition-colors hover:brightness-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+            >
+              {content}
+            </Link>
+          ) : (
+            <div key={insight.label}>{content}</div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function TodayActionsPanel({ actions }: { actions: DashboardAction[] }) {
+  return (
+    <section className="rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
+        <h2 className="text-base font-semibold">Что сделать сегодня</h2>
+        <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+          Короткий список действий из текущих данных, без погружения в таблицы.
+        </p>
+      </div>
+      <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+        {actions.map((action, index) => (
+          <Link
+            key={action.title}
+            href={action.href}
+            className="grid grid-cols-[32px_minmax(0,1fr)] gap-3 px-5 py-4 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900/50"
+          >
+            <span
+              className={[
+                "mt-0.5 flex h-8 w-8 items-center justify-center rounded-lg text-sm font-semibold",
+                action.tone === "danger"
+                  ? "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300"
+                  : action.tone === "warning"
+                    ? "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
+                    : "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300",
+              ].join(" ")}
+            >
+              {index + 1}
+            </span>
+            <span>
+              <span className="block text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+                {action.title}
+              </span>
+              <span className="mt-1 block text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+                {action.description}
+              </span>
+            </span>
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ChangeSnapshotPanel({
+  latestTrend,
+  summary,
+}: {
+  latestTrend: DashboardSalesTrendSegment | null;
+  summary: Awaited<ReturnType<typeof getDashboardSummary>>;
+}) {
+  return (
+    <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <h2 className="text-base font-semibold">Что изменилось</h2>
+          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+            Последний отрезок динамики сравнивается с предыдущим аналогичным
+            отрезком.
+          </p>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <ChangeMetric
+            label="Выручка"
+            value={latestTrend?.revenueDeltaPercent ?? null}
+            lowerGood={false}
+          />
+          <ChangeMetric
+            label="Продано"
+            value={latestTrend?.quantityDeltaPercent ?? null}
+            lowerGood={false}
+          />
+          <ChangeMetric
+            label="OOS"
+            value={latestTrend?.outOfStockSkuDeltaPercent ?? null}
+            lowerGood
+          />
+          <ChangeMetric
+            label="Списания / выручка"
+            value={summary.writeOffRevenuePercentDelta}
+            lowerGood
+          />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ChangeMetric({
+  label,
+  value,
+  lowerGood,
+}: {
+  label: string;
+  value: number | null;
+  lowerGood: boolean;
+}) {
+  const isGood =
+    value !== null && value !== 0 && (lowerGood ? value < 0 : value > 0);
+
+  return (
+    <div className="rounded-lg border border-zinc-100 bg-zinc-50 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900/60">
+      <p className="text-xs font-medium uppercase text-zinc-500">{label}</p>
+      <p
+        className={[
+          "mt-2 text-lg font-semibold tabular-nums",
+          value === null || value === 0
+            ? "text-zinc-600 dark:text-zinc-300"
+            : isGood
+              ? "text-emerald-700 dark:text-emerald-300"
+              : "text-red-700 dark:text-red-300",
+        ].join(" ")}
+      >
+        {value === null ? "нет базы" : formatSignedPercent(value)}
+      </p>
+    </div>
+  );
+}
+
+function SectionHeading({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
+  return (
+    <div>
+      <h2 className="text-base font-semibold">{title}</h2>
+      <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-500 dark:text-zinc-400">
+        {description}
+      </p>
+    </div>
   );
 }
 
@@ -669,53 +1025,6 @@ function SignalMetric({
   }
 
   return content;
-}
-
-function InsightCard({
-  href,
-  label,
-  value,
-  description,
-  tooltip,
-}: {
-  href?: string;
-  label: string;
-  value: string;
-  description: string;
-  tooltip?: string;
-}) {
-  const content = (
-    <>
-      <p className="text-sm text-zinc-500">{label}</p>
-      <p className="mt-3 text-2xl font-semibold text-zinc-950 dark:text-zinc-50">
-        {value}
-      </p>
-      <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-        {description}
-      </p>
-    </>
-  );
-
-  if (href) {
-    return (
-      <Link
-        href={href}
-        title={tooltip}
-        className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-md dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-emerald-700"
-      >
-        {content}
-      </Link>
-    );
-  }
-
-  return (
-    <div
-      title={tooltip}
-      className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
-    >
-      {content}
-    </div>
-  );
 }
 
 function TopSkuTable({

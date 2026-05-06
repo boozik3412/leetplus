@@ -72,6 +72,46 @@ Connected production LAngame sources:
 
 ## Near-Term Backlog
 
+### Stage 1. Management Dashboard
+
+- Recompose the dashboard first screen around commercial control: revenue, gross profit, margin, sold units, OOS risk, and stock.
+- Add a "what changed" block comparing the latest segment with the previous comparable segment for revenue, units, OOS, and write-offs.
+- Add a "main focus" block for category leaders, weak profitability, deficit risk, and assortment matrix activity.
+- Add a "what to do today" block with direct actions for OOS replenishment, no-sales SKU review, write-off checks, and row-level sales export.
+
+### Stage 2. Commercial Reports
+
+- Plan/fact by network, club, category, and supplier.
+- Lost sales from OOS with estimated missed revenue and gross profit.
+- Turnover, frozen money in stock, and slow SKU control.
+- Supplier scorecard with sales, profit, write-offs, OOS, delivery quality, and problem categories.
+
+### Stage 3. Assortment Matrix
+
+- Add mandatory SKU and assortment role concepts.
+- Build a product x club matrix: sold, in stock, no stock, no sales, missing, needs replenishment.
+- Add an assortment quality index by club, category, and network.
+
+### Stage 4. Recommendations Workflow
+
+- Show financial effect for recommendations: expected revenue, profit, loss reduction, or stock release.
+- Split recommendations by role: commercial director, buyer, club manager.
+- Add recommendation statuses: new, in progress, done, rejected, hidden, reappeared.
+
+### Stage 5. Regular Digests
+
+- Daily email digest for network-level money, margin, OOS, write-offs, no-sales SKU, and required actions.
+- Weekly commercial report for owner/director with dynamics and problem zones.
+- Later add Telegram/WhatsApp alerts for critical events.
+
+### Stage 6. Product Commercialization
+
+- Demo mode with prepared data and clear value story without LAngame setup.
+- Commercial network audit page: losses, growth opportunities, matrix quality, and expected effect.
+- Tariff levels: basic analytics, advanced reports, recommendations, regular digests, and assortment audit.
+
+### Continuous Polish
+
 - Continue polishing report table UX, filters, exports, and mobile layout based on live `leetplus.ru` review.
 - Keep README and this file aligned when workflow, data rules, or production setup changes.
 

@@ -524,7 +524,7 @@ function ChangeSnapshotPanel({
 }) {
   return (
     <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] lg:items-center min-[1140px]:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
         <div>
           <h2 className="text-base font-semibold">Что изменилось</h2>
           <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
@@ -533,7 +533,7 @@ function ChangeSnapshotPanel({
             периодах.
           </p>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 min-[1140px]:grid-cols-4">
           <ChangeMetric
             label="Выручка"
             value={latestTrend?.revenueDeltaPercent ?? null}
@@ -1052,7 +1052,12 @@ function TopSkuTable({
       <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <h2 className="text-base font-semibold">ТОП-10 SKU по выручке</h2>
+            <Link
+              href="/reports#top-sku"
+              className="inline-flex rounded-sm text-base font-semibold transition-colors hover:text-emerald-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70 dark:hover:text-emerald-300"
+            >
+              ТОП-10 SKU по выручке
+            </Link>
             <p className="mt-1 text-sm text-zinc-500">
               {grouping === "network"
                 ? "По умолчанию показаны данные по всей сети с учетом спарсенных товаров."

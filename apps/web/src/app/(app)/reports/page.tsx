@@ -562,7 +562,10 @@ function LflReportPanel({
   const params = new URLSearchParams({ period });
 
   return (
-    <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
+    <section
+      id="top-sku"
+      className="mt-6 scroll-mt-8 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm"
+    >
       <div className="flex flex-col gap-4 border-b border-zinc-200 px-5 py-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h2 className="text-base font-semibold">LFL год к году</h2>

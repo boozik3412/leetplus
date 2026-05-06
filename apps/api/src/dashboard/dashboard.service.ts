@@ -142,7 +142,10 @@ export class DashboardService {
     const skuGrouping = query.skuGrouping === 'club' ? 'club' : 'network';
     const demandPeriod = this.resolveDemandPeriod();
     const activeSkuPeriod = this.resolveActiveSkuPeriod();
-    const fullDayPeriod = this.resolveFullDayRevenuePeriod();
+    const fullDayPeriod = this.resolveFullDayRevenuePeriod(
+      period.fromDate,
+      period.toDate,
+    );
     const previousPeriod = this.resolvePreviousComparablePeriod(
       period.fromDate,
       period.toDate,
@@ -352,7 +355,7 @@ export class DashboardService {
           isCanceled: false,
           ...storeFilter,
           saleDate: {
-            gte: fullDayPeriod.currentFromDate,
+            gte: fullDayPeriod.averageFromDate,
             lte: fullDayPeriod.currentToDate,
           },
         },
@@ -512,11 +515,7 @@ export class DashboardService {
       fullDayRevenueFacts,
       fullDayPeriod,
     );
-    const averageDailyRevenue = this.averageDailyRevenue(
-      totalRevenue,
-      period.fromDate,
-      period.toDate,
-    );
+    const averageDailyRevenue = fullDayRevenue.average;
     const previousRevenue = previousSalesFacts.reduce(
       (sum, fact) => sum + fact.revenue.toNumber(),
       0,
@@ -807,17 +806,37 @@ export class DashboardService {
     return { fromDate, toDate };
   }
 
-  private resolveFullDayRevenuePeriod() {
+  private resolveFullDayRevenuePeriod(
+    periodFromDate: Date,
+    periodToDate: Date,
+  ) {
     const now = new Date();
     const currentFromDate = new Date(
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1),
     );
     const currentToDate = new Date(currentFromDate);
     currentToDate.setUTCHours(23, 59, 59, 999);
+    let averageFromDate = new Date(periodFromDate);
+    averageFromDate.setUTCHours(0, 0, 0, 0);
+    let averageToDate = new Date(
+      Math.min(periodToDate.getTime(), currentToDate.getTime()),
+    );
+    averageToDate.setUTCHours(23, 59, 59, 999);
+
+    if (averageFromDate > averageToDate) {
+      averageToDate = new Date(currentFromDate);
+      averageToDate.setUTCDate(averageToDate.getUTCDate() - 1);
+      averageToDate.setUTCHours(23, 59, 59, 999);
+      averageFromDate = new Date(averageToDate);
+      averageFromDate.setUTCDate(averageFromDate.getUTCDate() - 6);
+      averageFromDate.setUTCHours(0, 0, 0, 0);
+    }
 
     return {
       currentFromDate,
       currentToDate,
+      averageFromDate,
+      averageToDate,
     };
   }
 
@@ -925,6 +944,7 @@ export class DashboardService {
     period: ReturnType<DashboardService['resolveFullDayRevenuePeriod']>,
   ) {
     let current = 0;
+    let averageTotal = 0;
 
     facts.forEach((fact) => {
       const saleTime = fact.saleDate.getTime();
@@ -935,10 +955,26 @@ export class DashboardService {
       ) {
         current += fact.revenue.toNumber();
       }
+
+      if (
+        saleTime >= period.averageFromDate.getTime() &&
+        saleTime <= period.averageToDate.getTime()
+      ) {
+        averageTotal += fact.revenue.toNumber();
+      }
     });
+
+    const averageDays = Math.max(
+      1,
+      Math.floor(
+        (period.averageToDate.getTime() - period.averageFromDate.getTime()) /
+          86400000,
+      ) + 1,
+    );
 
     return {
       current,
+      average: averageTotal / averageDays,
     };
   }
 

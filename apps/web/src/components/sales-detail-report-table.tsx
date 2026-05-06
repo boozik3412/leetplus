@@ -2,6 +2,7 @@
 
 import { SimpleReportTable } from "@/components/simple-report-table";
 import type { SimpleReportRow } from "@/components/simple-report-table";
+import { ReportEmailInlineForm } from "@/components/report-email-inline-form";
 import type { SalesDetailRow } from "@/lib/reports";
 
 function toDisplayRows(rows: SalesDetailRow[]): SimpleReportRow[] {
@@ -73,7 +74,19 @@ const previewColumns = [
   { key: "source", label: "Источник" },
 ];
 
-export function SalesDetailReportTable({ rows }: { rows: SalesDetailRow[] }) {
+export function SalesDetailReportTable({
+  rows,
+  defaultEmail,
+  from,
+  to,
+  storeId,
+}: {
+  rows: SalesDetailRow[];
+  defaultEmail: string;
+  from: string;
+  to: string;
+  storeId: string | null;
+}) {
   return (
     <SimpleReportTable
       title="Общий отчет по продажам"
@@ -86,6 +99,16 @@ export function SalesDetailReportTable({ rows }: { rows: SalesDetailRow[] }) {
         { key: "productName", label: "Товар", type: "text" },
       ]}
       columns={fullColumns}
+      extraActions={
+        <ReportEmailInlineForm
+          defaultEmail={defaultEmail}
+          from={from}
+          to={to}
+          storeId={storeId}
+          report="sales-detail"
+          buttonLabel="Отправить"
+        />
+      }
     />
   );
 }

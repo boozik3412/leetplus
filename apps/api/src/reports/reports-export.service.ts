@@ -55,6 +55,10 @@ export class ReportsExportService {
       return this.exportLflReport(user, query, format);
     }
 
+    if (query.report === 'sales-detail') {
+      return this.exportSalesDetailReport(user, query, format);
+    }
+
     const [
       assortmentReport,
       operationalReport,
@@ -139,6 +143,36 @@ export class ReportsExportService {
       tenantSlug: report.tenantSlug,
       from: report.currentFrom,
       to: report.currentTo,
+    };
+  }
+
+  private async exportSalesDetailReport(
+    user: AuthenticatedUser,
+    query: ReportExportQuery,
+    format: ReportExportFormat,
+  ): Promise<ReportExportFile> {
+    const report = await this.reportsService.getSalesDetailReport(user, query);
+    const fileName = `leetplus-sales-detail-${report.from}-${report.to}.${format}`;
+
+    if (format === 'csv') {
+      return {
+        buffer: Buffer.from(this.buildSalesDetailCsv(report), 'utf8'),
+        contentType: 'text/csv; charset=utf-8',
+        fileName,
+        tenantSlug: report.tenantSlug,
+        from: report.from,
+        to: report.to,
+      };
+    }
+
+    return {
+      buffer: await this.buildSalesDetailXlsx(report),
+      contentType:
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      fileName,
+      tenantSlug: report.tenantSlug,
+      from: report.from,
+      to: report.to,
     };
   }
 
@@ -477,6 +511,32 @@ export class ReportsExportService {
     this.addTopSuppliersSheet(workbook, suppliersPerformanceReport);
     this.addAssortmentGroupsSheet(workbook, assortmentReport);
     this.addLowMarginSheet(workbook, assortmentReport);
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    return Buffer.from(buffer);
+  }
+
+  private buildSalesDetailCsv(report: SalesDetailReport) {
+    const rows: CsvCell[][] = [
+      ['Общий отчет по продажам'],
+      ['Организация', report.tenantSlug],
+      ['Период', `${report.from} - ${report.to}`],
+      ['Торговая точка', report.storeId ?? 'Все точки'],
+      [],
+      this.salesDetailHeaders().map((header) => header.header),
+      ...report.rows.map((item) =>
+        this.salesDetailHeaders().map((header) => item[header.key]),
+      ),
+    ];
+
+    return `\uFEFF${rows.map((row) => this.csvRow(row)).join('\n')}`;
+  }
+
+  private async buildSalesDetailXlsx(report: SalesDetailReport) {
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'LeetPlus';
+    workbook.created = new Date();
+    this.addSalesDetailSheet(workbook, report);
 
     const buffer = await workbook.xlsx.writeBuffer();
     return Buffer.from(buffer);

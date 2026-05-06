@@ -14,7 +14,7 @@ export default async function SalesDetailTablePage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  const user = await requireCurrentUser();
   const params = await searchParams;
   const report = await getSalesDetailReport({
     from: searchParam(params.from),
@@ -49,7 +49,13 @@ export default async function SalesDetailTablePage({
         </div>
       </div>
 
-      <SalesDetailReportTable rows={report.rows} />
+      <SalesDetailReportTable
+        rows={report.rows}
+        defaultEmail={user.email}
+        from={report.from}
+        to={report.to}
+        storeId={report.storeId}
+      />
     </main>
   );
 }

@@ -4,6 +4,7 @@ import { AbcReportToggle } from "@/components/abc-report-toggle";
 import { NoSalesPeriodTable } from "@/components/no-sales-period-table";
 import { OosExclusionActions } from "@/components/oos-exclusion-actions";
 import { ReportEmailForm } from "@/components/report-email-form";
+import { ReportEmailInlineForm } from "@/components/report-email-inline-form";
 import { ReportLoadingLink } from "@/components/report-loading-link";
 import { SalesDetailPreviewTable } from "@/components/sales-detail-report-table";
 import {
@@ -236,6 +237,10 @@ export default async function ReportsPage({
           >
             <SalesDetailCompactPanel
               rowsCount={salesDetailReport.rows.length}
+              defaultEmail={user.email}
+              from={operationalReport.from}
+              to={operationalReport.to}
+              storeId={operationalReport.storeId}
               href={salesDetailTableHref({
                 from: operationalReport.from,
                 to: operationalReport.to,
@@ -491,10 +496,18 @@ function Metric({ label, value }: { label: string; value: number | string }) {
 
 function SalesDetailCompactPanel({
   rowsCount,
+  defaultEmail,
+  from,
+  to,
+  storeId,
   href,
   children,
 }: {
   rowsCount: number;
+  defaultEmail: string;
+  from: string;
+  to: string;
+  storeId: string | null;
   href: string;
   children: ReactNode;
 }) {
@@ -514,6 +527,14 @@ function SalesDetailCompactPanel({
         >
           Открыть полный отчет
         </ReportLoadingLink>
+        <ReportEmailInlineForm
+          defaultEmail={defaultEmail}
+          from={from}
+          to={to}
+          storeId={storeId}
+          report="sales-detail"
+          buttonLabel="Отправить"
+        />
       </div>
       {children}
     </section>

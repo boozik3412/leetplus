@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
 export type SimpleReportRow = Record<string, string | number | null>;
 
@@ -24,11 +24,13 @@ export function SimpleReportTable({
   columns,
   filters = [],
   title,
+  extraActions,
 }: {
   rows: SimpleReportRow[];
   columns: SimpleReportColumn[];
   filters?: SimpleReportFilter[];
   title: string;
+  extraActions?: ReactNode;
 }) {
   const [filterValues, setFilterValues] = useState<Record<string, FilterValue>>({});
   const [sortKey, setSortKey] = useState(columns[0]?.key ?? "");
@@ -225,6 +227,7 @@ export function SimpleReportTable({
           >
             PDF
           </button>
+          {extraActions}
         </div>
       </div>
 

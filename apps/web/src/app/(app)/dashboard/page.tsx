@@ -260,7 +260,7 @@ export default async function DashboardPage({
   const params = await searchParams;
   await requireCurrentUser();
   const filters = {
-    period: searchParam(params.period) ?? "month",
+    period: searchParam(params.period) ?? "day",
     dateFrom: searchParam(params.dateFrom),
     dateTo: searchParam(params.dateTo),
     storeIds: searchParamsArray(params.storeIds),
@@ -529,7 +529,8 @@ function ChangeSnapshotPanel({
           <h2 className="text-base font-semibold">Что изменилось</h2>
           <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
             Последний отрезок динамики сравнивается с предыдущим аналогичным
-            отрезком.
+            отрезком. Корректная оценка период к периоду только в полных
+            периодах.
           </p>
         </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -885,7 +886,9 @@ function TrendChart({
 }
 
 function getDailyWeekday(dateValue: string, period: string) {
-  if (period !== "day") {
+  const basePeriod = period.startsWith("full-") ? period.slice(5) : period;
+
+  if (basePeriod !== "day") {
     return null;
   }
 

@@ -6,22 +6,40 @@ import type { Store } from "@/lib/stores";
 
 type DashboardPeriod =
   | "day"
+  | "full-day"
   | "week"
+  | "full-week"
   | "month"
+  | "full-month"
   | "quarter"
+  | "full-quarter"
   | "year"
+  | "full-year"
   | "custom";
 type DashboardSkuGrouping = "club" | "network";
 type OpenPanel = "period" | "clubs" | null;
 
 const periodLabels: Record<DashboardPeriod, string> = {
-  month: "Текущий месяц",
-  quarter: "Текущий квартал",
-  year: "Текущий год",
-  week: "Текущая неделя",
   day: "Текущие сутки",
+  "full-day": "Полные сутки",
+  week: "Текущая неделя",
+  "full-week": "Полная неделя",
+  month: "Текущий месяц",
+  "full-month": "Полный месяц",
+  quarter: "Текущий квартал",
+  "full-quarter": "Полный квартал",
+  year: "Текущий год",
+  "full-year": "Полный год",
   custom: "Произвольный период",
 };
+
+const periodOptionGroups: { current: DashboardPeriod; full: DashboardPeriod }[] = [
+  { current: "day", full: "full-day" },
+  { current: "week", full: "full-week" },
+  { current: "month", full: "full-month" },
+  { current: "quarter", full: "full-quarter" },
+  { current: "year", full: "full-year" },
+];
 
 export function DashboardFilters({
   period,
@@ -43,7 +61,7 @@ export function DashboardFilters({
   const rootRef = useRef<HTMLElement | null>(null);
   const [openPanel, setOpenPanel] = useState<OpenPanel>(null);
   const [selectedPeriod, setSelectedPeriod] = useState<DashboardPeriod>(
-    isPeriod(period) ? period : "month",
+    isPeriod(period) ? period : "day",
   );
   const [customFrom, setCustomFrom] = useState(dateFrom);
   const [customTo, setCustomTo] = useState(dateTo);
@@ -164,23 +182,27 @@ export function DashboardFilters({
       </div>
 
       {openPanel === "period" ? (
-        <DropdownPanel className="left-0 top-full w-[min(520px,calc(100vw-3rem))]">
+        <DropdownPanel className="left-0 top-full w-[min(760px,calc(100vw-3rem))]">
           <div className="grid gap-2">
-            {(Object.keys(periodLabels) as DashboardPeriod[]).map((value) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => selectPeriod(value)}
-                className={[
-                  "rounded-xl border px-3 py-2 text-left text-sm",
-                  selectedPeriod === value
-                    ? "border-zinc-950 bg-zinc-950 text-white dark:border-emerald-400 dark:bg-emerald-400 dark:text-zinc-950"
-                    : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-900",
-                ].join(" ")}
-              >
-                {periodLabels[value]}
-              </button>
+            {periodOptionGroups.map((group) => (
+              <div key={group.current} className="grid gap-2 sm:grid-cols-2">
+                <PeriodOptionButton
+                  value={group.current}
+                  selectedPeriod={selectedPeriod}
+                  onSelect={selectPeriod}
+                />
+                <PeriodOptionButton
+                  value={group.full}
+                  selectedPeriod={selectedPeriod}
+                  onSelect={selectPeriod}
+                />
+              </div>
             ))}
+            <PeriodOptionButton
+              value="custom"
+              selectedPeriod={selectedPeriod}
+              onSelect={selectPeriod}
+            />
           </div>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <label className="text-sm">
@@ -346,6 +368,31 @@ function DropdownPanel({
   );
 }
 
+function PeriodOptionButton({
+  value,
+  selectedPeriod,
+  onSelect,
+}: {
+  value: DashboardPeriod;
+  selectedPeriod: DashboardPeriod;
+  onSelect: (value: DashboardPeriod) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(value)}
+      className={[
+        "rounded-xl border px-3 py-2 text-left text-sm",
+        selectedPeriod === value
+          ? "border-zinc-950 bg-zinc-950 text-white dark:border-emerald-400 dark:bg-emerald-400 dark:text-zinc-950"
+          : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-900",
+      ].join(" ")}
+    >
+      {periodLabels[value]}
+    </button>
+  );
+}
+
 function formatCustomPeriodLabel(from: string, to: string) {
   const fromLabel = formatDateInputLabel(from);
   const toLabel = formatDateInputLabel(to);
@@ -370,10 +417,15 @@ function formatDateInputLabel(value: string) {
 function isPeriod(value: string): value is DashboardPeriod {
   return (
     value === "month" ||
+    value === "full-month" ||
     value === "quarter" ||
+    value === "full-quarter" ||
     value === "year" ||
+    value === "full-year" ||
     value === "week" ||
+    value === "full-week" ||
     value === "day" ||
+    value === "full-day" ||
     value === "custom"
   );
 }

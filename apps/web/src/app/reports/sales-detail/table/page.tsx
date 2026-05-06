@@ -9,6 +9,16 @@ function searchParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
+function formatDateLabel(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+
+  if (!match) {
+    return value;
+  }
+
+  return `${match[3]}.${match[2]}.${match[1]}`;
+}
+
 export default async function SalesDetailTablePage({
   searchParams,
 }: {
@@ -35,9 +45,10 @@ export default async function SalesDetailTablePage({
               Общий отчет по продажам
             </h1>
             <p className="mt-2 max-w-3xl text-sm text-zinc-600">
-              Все строки продаж за период {report.from} - {report.to}: товар,
-              клуб, цены, себестоимость, прибыль, маржа, наценка, поставщик,
-              категория, источник и внешние ID.
+              Все строки продаж за период {formatDateLabel(report.from)} -{" "}
+              {formatDateLabel(report.to)}: товар, клуб, цены, себестоимость,
+              прибыль, маржа, наценка, поставщик, категория, источник и внешние
+              ID.
             </p>
           </div>
           <a

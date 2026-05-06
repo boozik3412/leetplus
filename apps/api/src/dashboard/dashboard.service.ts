@@ -6,10 +6,15 @@ import { TenantContextService } from '../tenancy/tenant-context.service';
 
 export type DashboardPeriod =
   | 'day'
+  | 'full-day'
   | 'week'
+  | 'full-week'
   | 'month'
+  | 'full-month'
   | 'quarter'
+  | 'full-quarter'
   | 'year'
+  | 'full-year'
   | 'custom';
 export type DashboardSkuGrouping = 'club' | 'network';
 
@@ -614,25 +619,56 @@ export class DashboardService {
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
     );
     let fromDate = new Date(toDate);
-    const period = query.period ?? 'month';
-    let label = 'Текущий месяц';
+    const period = this.isDashboardPeriod(query.period) ? query.period : 'day';
+    let trendPeriod = this.resolveBasePeriod(period);
+    let label = 'Текущие сутки';
 
     if (period === 'day') {
       label = 'Текущие сутки';
+    } else if (period === 'full-day') {
+      toDate.setUTCDate(toDate.getUTCDate() - 1);
+      fromDate = new Date(toDate);
+      label = 'Полные сутки';
     } else if (period === 'week') {
       const dayOfWeek = fromDate.getUTCDay();
       const mondayOffset = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
       fromDate.setUTCDate(fromDate.getUTCDate() - mondayOffset);
       label = 'Текущая неделя';
+    } else if (period === 'full-week') {
+      const dayOfWeek = toDate.getUTCDay();
+      const mondayOffset = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+      toDate.setUTCDate(toDate.getUTCDate() - mondayOffset - 1);
+      fromDate = new Date(toDate);
+      fromDate.setUTCDate(fromDate.getUTCDate() - 6);
+      label = 'Полная неделя';
     } else if (period === 'quarter') {
       const quarterStartMonth = Math.floor(toDate.getUTCMonth() / 3) * 3;
       fromDate = new Date(
         Date.UTC(toDate.getUTCFullYear(), quarterStartMonth, 1),
       );
       label = 'Текущий квартал';
+    } else if (period === 'full-quarter') {
+      const quarterStartMonth = Math.floor(toDate.getUTCMonth() / 3) * 3;
+      fromDate = new Date(
+        Date.UTC(toDate.getUTCFullYear(), quarterStartMonth - 3, 1),
+      );
+      toDate.setUTCFullYear(fromDate.getUTCFullYear());
+      toDate.setUTCMonth(fromDate.getUTCMonth() + 3, 0);
+      label = 'Полный квартал';
     } else if (period === 'year') {
       fromDate = new Date(Date.UTC(toDate.getUTCFullYear(), 0, 1));
       label = 'Текущий год';
+    } else if (period === 'full-year') {
+      fromDate = new Date(Date.UTC(toDate.getUTCFullYear() - 1, 0, 1));
+      toDate.setUTCFullYear(fromDate.getUTCFullYear(), 11, 31);
+      label = 'Полный год';
+    } else if (period === 'full-month') {
+      fromDate = new Date(
+        Date.UTC(toDate.getUTCFullYear(), toDate.getUTCMonth() - 1, 1),
+      );
+      toDate.setUTCFullYear(fromDate.getUTCFullYear());
+      toDate.setUTCMonth(fromDate.getUTCMonth() + 1, 0);
+      label = 'Полный месяц';
     } else if (period === 'custom') {
       fromDate = query.dateFrom
         ? this.parseDate(query.dateFrom, 'dateFrom')
@@ -677,6 +713,7 @@ export class DashboardService {
       fromDate = new Date(
         Date.UTC(toDate.getUTCFullYear(), toDate.getUTCMonth(), 1),
       );
+      trendPeriod = 'month';
     }
 
     toDate.setUTCHours(23, 59, 59, 999);
@@ -685,13 +722,53 @@ export class DashboardService {
     return {
       fromDate,
       toDate,
-      trendFromDate: this.resolveTrendFromDate(period, fromDate),
+      trendFromDate: this.resolveTrendFromDate(trendPeriod, fromDate),
       trendToDate: toDate,
       mode: period,
       label,
-      labelGranularity: this.resolveTrendLabelGranularityByPeriod(period),
-      trendMode: this.resolveTrendModeByPeriod(period),
+      labelGranularity: this.resolveTrendLabelGranularityByPeriod(trendPeriod),
+      trendMode: this.resolveTrendModeByPeriod(trendPeriod),
     };
+  }
+
+  private resolveBasePeriod(period: DashboardPeriod): DashboardPeriod {
+    if (period === 'full-day') {
+      return 'day';
+    }
+
+    if (period === 'full-week') {
+      return 'week';
+    }
+
+    if (period === 'full-month') {
+      return 'month';
+    }
+
+    if (period === 'full-quarter') {
+      return 'quarter';
+    }
+
+    if (period === 'full-year') {
+      return 'year';
+    }
+
+    return period;
+  }
+
+  private isDashboardPeriod(value: unknown): value is DashboardPeriod {
+    return (
+      value === 'day' ||
+      value === 'full-day' ||
+      value === 'week' ||
+      value === 'full-week' ||
+      value === 'month' ||
+      value === 'full-month' ||
+      value === 'quarter' ||
+      value === 'full-quarter' ||
+      value === 'year' ||
+      value === 'full-year' ||
+      value === 'custom'
+    );
   }
 
   private resolveStoreIds(storeIds?: string | string[]) {
@@ -751,10 +828,11 @@ export class DashboardService {
   ) {
     const currentFromDate = new Date(fromDate);
     const currentToDate = new Date(toDate);
+    const basePeriod = this.resolveBasePeriod(period);
     currentFromDate.setUTCHours(0, 0, 0, 0);
     currentToDate.setUTCHours(23, 59, 59, 999);
 
-    if (period === 'month') {
+    if (basePeriod === 'month') {
       const previousFromDate = new Date(
         Date.UTC(
           currentFromDate.getUTCFullYear(),
@@ -772,6 +850,46 @@ export class DashboardService {
           59,
           999,
         ),
+      );
+
+      return {
+        fromDate: previousFromDate,
+        toDate: previousToDate,
+      };
+    }
+
+    if (basePeriod === 'quarter') {
+      const previousFromDate = new Date(
+        Date.UTC(
+          currentFromDate.getUTCFullYear(),
+          currentFromDate.getUTCMonth() - 3,
+          1,
+        ),
+      );
+      const previousToDate = new Date(
+        Date.UTC(
+          currentFromDate.getUTCFullYear(),
+          currentFromDate.getUTCMonth(),
+          0,
+          23,
+          59,
+          59,
+          999,
+        ),
+      );
+
+      return {
+        fromDate: previousFromDate,
+        toDate: previousToDate,
+      };
+    }
+
+    if (basePeriod === 'year') {
+      const previousFromDate = new Date(
+        Date.UTC(currentFromDate.getUTCFullYear() - 1, 0, 1),
+      );
+      const previousToDate = new Date(
+        Date.UTC(currentFromDate.getUTCFullYear() - 1, 11, 31, 23, 59, 59, 999),
       );
 
       return {
@@ -1226,7 +1344,29 @@ export class DashboardService {
   private resolveTrendModeByPeriod(
     period: DashboardPeriod,
   ): DashboardTrendMode {
-    return period === 'custom' ? 'custom' : period;
+    const basePeriod = this.resolveBasePeriod(period);
+
+    if (basePeriod === 'custom') {
+      return 'custom';
+    }
+
+    if (basePeriod === 'year') {
+      return 'year';
+    }
+
+    if (basePeriod === 'quarter') {
+      return 'quarter';
+    }
+
+    if (basePeriod === 'month') {
+      return 'month';
+    }
+
+    if (basePeriod === 'week') {
+      return 'week';
+    }
+
+    return 'day';
   }
 
   private resolveTrendFromDate(period: DashboardPeriod, fromDate: Date) {

@@ -259,7 +259,7 @@ describe('DashboardService', () => {
       tenantId: 'tenant-demo',
       tenantSlug: 'demo',
       tenantName: 'Demo Cyber Club',
-      periodLabel: 'Текущий месяц',
+      periodLabel: 'Текущие сутки',
       skuGrouping: 'network',
       selectedStoreIds: [],
       totalSku: 2,

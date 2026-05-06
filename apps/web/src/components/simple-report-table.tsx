@@ -272,7 +272,7 @@ export function SimpleReportTable({
                       column.align === "right" ? "text-right tabular-nums" : "",
                     ].join(" ")}
                   >
-                    {String(row[column.key] ?? "—")}
+                    {formatCellValue(row[column.key])}
                   </td>
                 ))}
               </tr>
@@ -328,7 +328,7 @@ function toCsv(columns: SimpleReportColumn[], rows: SimpleReportRow[]) {
   return [
     columns.map((column) => escapeCsv(column.label)).join(";"),
     ...rows.map((row) =>
-      columns.map((column) => escapeCsv(String(row[column.key] ?? ""))).join(";"),
+      columns.map((column) => escapeCsv(formatCellValue(row[column.key]))).join(";"),
     ),
   ].join("\r\n");
 }
@@ -344,7 +344,7 @@ function tableHtml(
     .map(
       (row) =>
         `<tr>${columns
-          .map((column) => `<td>${escapeHtml(String(row[column.key] ?? ""))}</td>`)
+          .map((column) => `<td>${escapeHtml(formatCellValue(row[column.key]))}</td>`)
           .join("")}</tr>`,
     )
     .join("")}</tbody></table></body></html>`;
@@ -380,6 +380,34 @@ function escapeHtml(value: string) {
 
 function dateStamp() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function formatCellValue(value: string | number | null) {
+  if (value === null || value === "") {
+    return "—";
+  }
+
+  if (typeof value === "string") {
+    return formatDateLikeValue(value) ?? value;
+  }
+
+  return String(value);
+}
+
+function formatDateLikeValue(value: string) {
+  const dateOnlyMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+
+  if (dateOnlyMatch) {
+    return `${dateOnlyMatch[3]}.${dateOnlyMatch[2]}.${dateOnlyMatch[1]}`;
+  }
+
+  const dateTimeMatch = /^(\d{4})-(\d{2})-(\d{2})T/.exec(value);
+
+  if (dateTimeMatch) {
+    return `${dateTimeMatch[3]}.${dateTimeMatch[2]}.${dateTimeMatch[1]}`;
+  }
+
+  return null;
 }
 
 function slug(value: string) {

@@ -23,6 +23,16 @@ function formatPercent(value: number) {
   return `${value.toFixed(1)}%`;
 }
 
+function formatDateLabel(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+
+  if (!match) {
+    return value;
+  }
+
+  return `${match[3]}.${match[2]}.${match[1]}`;
+}
+
 export default async function AbcTablePage({
   searchParams,
 }: {
@@ -109,7 +119,8 @@ function ReportSection({
       <div className="border-b border-zinc-200 px-5 py-4">
         <h2 className="text-lg font-semibold">{title}</h2>
         <p className="mt-1 text-sm text-zinc-500">
-          Период {report.from} — {report.to}. SKU: {report.rows.length}
+          Период {formatDateLabel(report.from)} — {formatDateLabel(report.to)}.
+          SKU: {report.rows.length}
         </p>
       </div>
       {(["A", "B", "C"] as const).map((group) => (

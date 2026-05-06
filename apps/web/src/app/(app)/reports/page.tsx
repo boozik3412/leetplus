@@ -47,6 +47,16 @@ function formatQuantity(value: number) {
   }).format(value);
 }
 
+function formatDateLabel(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+
+  if (!match) {
+    return value;
+  }
+
+  return `${match[3]}.${match[2]}.${match[1]}`;
+}
+
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
 
 function searchParam(value: string | string[] | undefined) {
@@ -774,7 +784,7 @@ function NewProductsPanel({
                     {row.categoryName ?? "—"}
                   </td>
                   <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                    {row.firstSeenDate}
+                    {formatDateLabel(row.firstSeenDate)}
                   </td>
                   <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
                     {formatQuantity(row.currentStockQuantity)}

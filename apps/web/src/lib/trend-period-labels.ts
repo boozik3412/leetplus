@@ -8,11 +8,13 @@ export function formatTrendPeriodLabel(
   row: TrendPeriodSegment,
   period: string,
 ) {
-  if (period === "day") {
+  const basePeriod = normalizePeriod(period);
+
+  if (basePeriod === "day") {
     return formatShortDate(row.from);
   }
 
-  if (period === "week") {
+  if (basePeriod === "week") {
     const week = getIsoWeek(parseDateInput(row.from));
 
     return week === null ? row.label : `Н${week}`;
@@ -25,14 +27,16 @@ export function formatTrendPeriodTitle(
   row: TrendPeriodSegment,
   period: string,
 ) {
-  if (period === "day") {
+  const basePeriod = normalizePeriod(period);
+
+  if (basePeriod === "day") {
     const weekday = formatWeekday(row.from);
     const date = formatShortDate(row.from);
 
     return weekday ? `${weekday}, ${date}` : date;
   }
 
-  if (period === "week") {
+  if (basePeriod === "week") {
     const week = getIsoWeek(parseDateInput(row.from));
 
     if (week === null) {
@@ -45,6 +49,10 @@ export function formatTrendPeriodTitle(
   }
 
   return row.label;
+}
+
+function normalizePeriod(period: string) {
+  return period.startsWith("full-") ? period.slice(5) : period;
 }
 
 function formatShortDate(value: string) {

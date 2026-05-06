@@ -24,57 +24,79 @@ export class ProductsService {
     const { tenantId } = await this.tenantContextService.resolve(user);
     const operationalActivePeriod = this.resolveOperationalActivePeriod();
 
-    const [products, productStores, recentSalesFacts] = await Promise.all([
-      this.prisma.product.findMany({
-        where: {
-          tenantId,
-          isActive: true,
-        },
-        include: {
-          category: true,
-          supplier: true,
-        },
-        orderBy: {
-          createdAt: 'desc',
-        },
-      }),
-      this.prisma.inventorySnapshot.findMany({
-        where: {
-          tenantId,
-          snapshotDate: {
-            lte: operationalActivePeriod.toDate,
+    const latestSalesPeriod = this.resolveLatestSalesPeriod();
+    const [products, productStores, recentSalesFacts, latestSalesFacts] =
+      await Promise.all([
+        this.prisma.product.findMany({
+          where: {
+            tenantId,
+            isActive: true,
           },
-        },
-        select: {
-          productId: true,
-          storeId: true,
-          snapshotDate: true,
-          quantity: true,
-          store: {
-            select: {
-              name: true,
+          include: {
+            category: true,
+            supplier: true,
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+        }),
+        this.prisma.inventorySnapshot.findMany({
+          where: {
+            tenantId,
+            snapshotDate: {
+              lte: operationalActivePeriod.toDate,
             },
           },
-        },
-        orderBy: {
-          snapshotDate: 'desc',
-        },
-      }),
-      this.prisma.salesFact.findMany({
-        where: {
-          tenantId,
-          isCanceled: false,
-          saleDate: {
-            gte: operationalActivePeriod.fromDate,
-            lte: operationalActivePeriod.toDate,
+          select: {
+            productId: true,
+            storeId: true,
+            snapshotDate: true,
+            quantity: true,
+            store: {
+              select: {
+                name: true,
+              },
+            },
           },
-        },
-        select: {
-          productId: true,
-        },
-        distinct: ['productId'],
-      }),
-    ]);
+          orderBy: {
+            snapshotDate: 'desc',
+          },
+        }),
+        this.prisma.salesFact.findMany({
+          where: {
+            tenantId,
+            isCanceled: false,
+            saleDate: {
+              gte: operationalActivePeriod.fromDate,
+              lte: operationalActivePeriod.toDate,
+            },
+          },
+          select: {
+            productId: true,
+          },
+          distinct: ['productId'],
+        }),
+        this.prisma.salesFact.findMany({
+          where: {
+            tenantId,
+            isCanceled: false,
+            saleDate: {
+              gte: latestSalesPeriod.fromDate,
+              lte: latestSalesPeriod.toDate,
+            },
+          },
+          select: {
+            productId: true,
+            quantity: true,
+            revenue: true,
+            cost: true,
+          },
+          orderBy: {
+            saleDate: 'desc',
+          },
+          distinct: ['productId'],
+        }),
+      ]);
     const storesByProduct = new Map<
       string,
       { storeIds: string[]; storeNames: string[] }
@@ -85,6 +107,16 @@ export class ProductsService {
       recentSalesFacts.map((fact) => fact.productId),
     );
     const costBasisByProduct = buildProductCostBasis(products, productStores);
+    const latestSaleByProduct = new Map(
+      latestSalesFacts.map((fact) => {
+        const quantity = fact.quantity.toNumber();
+        const unitSalePrice =
+          quantity > 0 ? fact.revenue.toNumber() / quantity : 0;
+        const unitCost = quantity > 0 ? fact.cost.toNumber() / quantity : null;
+
+        return [fact.productId, { unitSalePrice, unitCost }] as const;
+      }),
+    );
 
     productStores.forEach((snapshot) => {
       const snapshotKey = `${snapshot.storeId}:${snapshot.productId}`;
@@ -120,10 +152,24 @@ export class ProductsService {
         storeIds: [],
         storeNames: [],
       };
+      const latestSale = latestSaleByProduct.get(product.id);
+      const purchasePrice =
+        product.purchasePrice.toNumber() > 0
+          ? product.purchasePrice
+          : new Prisma.Decimal(latestSale?.unitCost ?? 0);
+      const salePrice =
+        product.salePrice.toNumber() > 0
+          ? product.salePrice
+          : new Prisma.Decimal(latestSale?.unitSalePrice ?? 0);
 
       return {
         ...product,
-        unitCost: costBasisByProduct.get(product.id)?.unitCost ?? null,
+        purchasePrice,
+        salePrice,
+        unitCost:
+          costBasisByProduct.get(product.id)?.unitCost ??
+          latestSale?.unitCost ??
+          null,
         isOperationalActive:
           (stockByProduct.get(product.id) ?? 0) > 0 ||
           recentlySoldProductIds.has(product.id),
@@ -140,6 +186,19 @@ export class ProductsService {
     );
     const fromDate = new Date(toDate);
     fromDate.setUTCDate(fromDate.getUTCDate() - (OPERATIONAL_ACTIVE_DAYS - 1));
+    fromDate.setUTCHours(0, 0, 0, 0);
+    toDate.setUTCHours(23, 59, 59, 999);
+
+    return { fromDate, toDate };
+  }
+
+  private resolveLatestSalesPeriod() {
+    const now = new Date();
+    const toDate = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+    );
+    const fromDate = new Date(toDate);
+    fromDate.setUTCDate(fromDate.getUTCDate() - 364);
     fromDate.setUTCHours(0, 0, 0, 0);
     toDate.setUTCHours(23, 59, 59, 999);
 

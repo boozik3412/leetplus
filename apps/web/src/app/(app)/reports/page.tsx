@@ -214,9 +214,8 @@ export default async function ReportsPage({
         <div className="mb-8">
           <h1 className="text-2xl font-semibold tracking-tight">Отчёты</h1>
           <p className="mt-1 max-w-3xl text-sm text-zinc-600">
-            Операционная аналитика по организации{" "}
-            {operationalReport.tenantSlug}. Показываем только данные текущего
-            tenant.
+            Операционная аналитика по организации {operationalReport.tenantSlug}
+            . Показываем только данные текущего tenant.
           </p>
         </div>
 
@@ -371,10 +370,7 @@ export default async function ReportsPage({
           >
             <section className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
               <Metric label="Всего SKU" value={assortmentReport.totalSku} />
-              <Metric
-                label="Активные SKU"
-                value={assortmentReport.activeSku}
-              />
+              <Metric label="Активные SKU" value={assortmentReport.activeSku} />
               <Metric
                 label="Архивные SKU"
                 value={assortmentReport.inactiveSku}
@@ -527,8 +523,8 @@ function SalesDetailCompactPanel({
         <div>
           <h2 className="text-base font-semibold">Последние строки продаж</h2>
           <p className="mt-1 text-sm text-zinc-500">
-            Показаны первые 20 строк из {rowsCount}. Полный отчет открыт отдельной
-            таблицей с фильтрами и экспортом.
+            Показаны первые 20 строк из {rowsCount}. Полный отчет открыт
+            отдельной таблицей с фильтрами и экспортом.
           </p>
         </div>
         <ReportLoadingLink
@@ -625,8 +621,12 @@ function LflReportPanel({
               <tr>
                 <th className="px-5 py-3 font-medium">Группа</th>
                 <th className="px-5 py-3 font-medium">Название</th>
-                <th className="px-5 py-3 text-right font-medium">Выручка LFL</th>
-                <th className="px-5 py-3 text-right font-medium">Прибыль LFL</th>
+                <th className="px-5 py-3 text-right font-medium">
+                  Выручка LFL
+                </th>
+                <th className="px-5 py-3 text-right font-medium">
+                  Прибыль LFL
+                </th>
                 <th className="px-5 py-3 text-right font-medium">Штуки LFL</th>
                 <th className="px-5 py-3 text-right font-medium">Выручка</th>
                 <th className="px-5 py-3 text-right font-medium">Прибыль</th>
@@ -771,7 +771,9 @@ function NewProductsPanel({
                 <th className="px-5 py-3 font-medium">Категория</th>
                 <th className="px-5 py-3 text-right font-medium">Дата</th>
                 <th className="px-5 py-3 text-right font-medium">Остаток</th>
-                <th className="px-5 py-3 text-right font-medium">Себестоимость</th>
+                <th className="px-5 py-3 text-right font-medium">
+                  Себестоимость
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100">
@@ -849,7 +851,8 @@ function RecommendationsPanel({
           <div>
             <h2 className="text-base font-semibold">Рекомендации</h2>
             <p className="mt-1 text-sm text-zinc-500">
-              Автоматические действия на основе продаж, остатков и маржинальности.
+              Автоматические действия на основе продаж, остатков и
+              маржинальности.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -989,16 +992,16 @@ function RiskTable({
                 <th className="px-5 py-3 font-medium">Клуб</th>
                 <th className="px-5 py-3 font-medium">Товар</th>
                 <th className="px-5 py-3 text-right font-medium">Остаток</th>
-                <th className="px-5 py-3 text-right font-medium">Продажи/день</th>
+                <th className="px-5 py-3 text-right font-medium">
+                  Продажи/день
+                </th>
                 <th className="px-5 py-3 text-right font-medium">Дней</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100">
               {compactRows.map((row) => (
                 <tr key={`${row.storeId}:${row.productId}`}>
-                  <td className="px-5 py-4 text-zinc-700">
-                    {row.storeName}
-                  </td>
+                  <td className="px-5 py-4 text-zinc-700">{row.storeName}</td>
                   <td className="px-5 py-4 font-medium text-zinc-950">
                     <span className="inline-flex items-center gap-2">
                       {row.name}
@@ -1008,7 +1011,10 @@ function RiskTable({
                   <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
                     {formatQuantity(row.stockQuantity)}
                   </td>
-                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                  <td
+                    className="px-5 py-4 text-right tabular-nums text-zinc-700"
+                    title="ССР — среднесуточные продажи за последние 21 полный день."
+                  >
                     {formatQuantity(row.averageDailySales)}
                   </td>
                   <td className="px-5 py-4 text-right tabular-nums text-red-700">
@@ -1074,8 +1080,15 @@ function ReplenishmentTable({
                 <th className="px-5 py-3 font-medium">Товар</th>
                 <th className="px-5 py-3 font-medium">Клуб</th>
                 <th className="px-5 py-3 text-right font-medium">Остаток</th>
-                <th className="px-5 py-3 text-right font-medium">ССР</th>
-                <th className="px-5 py-3 text-right font-medium">Остаток в днях</th>
+                <th
+                  className="px-5 py-3 text-right font-medium"
+                  title="ССР — среднесуточные продажи за последние 21 полный день."
+                >
+                  ССР
+                </th>
+                <th className="px-5 py-3 text-right font-medium">
+                  Остаток в днях
+                </th>
                 <th
                   className="px-5 py-3 text-right font-medium"
                   title="Потребность рассчитана на неделю продаж: ССР × 7 минус текущий остаток."
@@ -1093,17 +1106,20 @@ function ReplenishmentTable({
                       {row.isCanonical ? <NetworkSkuBadge /> : null}
                     </span>
                   </td>
-                  <td className="px-5 py-4 text-zinc-700">
-                    {row.storeName}
-                  </td>
+                  <td className="px-5 py-4 text-zinc-700">{row.storeName}</td>
                   <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
                     {formatQuantity(row.stockQuantity)}
                   </td>
-                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                  <td
+                    className="px-5 py-4 text-right tabular-nums text-zinc-700"
+                    title="ССР — среднесуточные продажи за последние 21 полный день."
+                  >
                     {formatQuantity(row.averageDailySales)}
                   </td>
                   <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                    {row.stockDays === null ? "—" : formatQuantity(row.stockDays)}
+                    {row.stockDays === null
+                      ? "—"
+                      : formatQuantity(row.stockDays)}
                   </td>
                   <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
                     {formatQuantity(row.dailyNeed)}
@@ -1126,7 +1142,10 @@ function topReplenishmentRowsByStore(rows: ReplenishmentRow[]) {
   const rowsByStore = new Map<string, ReplenishmentRow[]>();
 
   rows.forEach((row) => {
-    rowsByStore.set(row.storeId, [...(rowsByStore.get(row.storeId) ?? []), row]);
+    rowsByStore.set(row.storeId, [
+      ...(rowsByStore.get(row.storeId) ?? []),
+      row,
+    ]);
   });
 
   return [...rowsByStore.values()].flatMap((storeRows) =>
@@ -1146,7 +1165,10 @@ function topOutOfStockRowsByStore(rows: OutOfStockRiskProduct[]) {
   const rowsByStore = new Map<string, OutOfStockRiskProduct[]>();
 
   rows.forEach((row) => {
-    rowsByStore.set(row.storeId, [...(rowsByStore.get(row.storeId) ?? []), row]);
+    rowsByStore.set(row.storeId, [
+      ...(rowsByStore.get(row.storeId) ?? []),
+      row,
+    ]);
   });
 
   return [...rowsByStore.values()].flatMap((storeRows) =>
@@ -1304,7 +1326,8 @@ function TopSuppliersTable({ rows }: { rows: SupplierPerformanceRow[] }) {
       <div className="border-b border-zinc-200 px-5 py-4">
         <h2 className="text-base font-semibold">ТОП поставщиков</h2>
         <p className="mt-1 text-sm text-zinc-500">
-          Выручка, прибыль, доля продаж и условия поставщика по текущему фильтру.
+          Выручка, прибыль, доля продаж и условия поставщика по текущему
+          фильтру.
         </p>
       </div>
 
@@ -1319,8 +1342,12 @@ function TopSuppliersTable({ rows }: { rows: SupplierPerformanceRow[] }) {
                 <th className="px-5 py-3 text-right font-medium">Выручка</th>
                 <th className="px-5 py-3 text-right font-medium">Прибыль</th>
                 <th className="px-5 py-3 text-right font-medium">Маржа</th>
-                <th className="px-5 py-3 text-right font-medium">Доля продаж</th>
-                <th className="px-5 py-3 text-right font-medium">Выручка/SKU</th>
+                <th className="px-5 py-3 text-right font-medium">
+                  Доля продаж
+                </th>
+                <th className="px-5 py-3 text-right font-medium">
+                  Выручка/SKU
+                </th>
                 <th className="px-5 py-3 text-right font-medium">Отсрочка</th>
                 <th className="px-5 py-3 text-right font-medium">Мин. заказ</th>
               </tr>
@@ -1391,7 +1418,9 @@ function GroupTable({ title, rows }: { title: string; rows: ReportGroup[] }) {
                 <th className="px-5 py-3 font-medium">Название</th>
                 <th className="px-5 py-3 text-right font-medium">SKU</th>
                 <th className="px-5 py-3 text-right font-medium">Маржа</th>
-                <th className="px-5 py-3 text-right font-medium">Средняя цена</th>
+                <th className="px-5 py-3 text-right font-medium">
+                  Средняя цена
+                </th>
                 <th className="px-5 py-3 text-right font-medium">Фейсинг</th>
               </tr>
             </thead>
@@ -1429,12 +1458,8 @@ function LowMarginRow({ product }: { product: LowMarginProduct }) {
   return (
     <tr>
       <td className="px-5 py-4 font-medium text-zinc-950">{product.name}</td>
-      <td className="px-5 py-4 text-zinc-700">
-        {product.categoryName ?? "—"}
-      </td>
-      <td className="px-5 py-4 text-zinc-700">
-        {product.supplierName ?? "—"}
-      </td>
+      <td className="px-5 py-4 text-zinc-700">{product.categoryName ?? "—"}</td>
+      <td className="px-5 py-4 text-zinc-700">{product.supplierName ?? "—"}</td>
       <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
         {formatMoney(product.purchasePrice)}
       </td>

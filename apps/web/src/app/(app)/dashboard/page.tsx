@@ -307,7 +307,8 @@ export default async function DashboardPage({
               <p className="mt-4 max-w-2xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
                 Период -{" "}
                 <span className="font-semibold text-zinc-950 dark:text-zinc-50">
-                  {highlightedPeriod ?? `${summary.periodFrom} — ${summary.periodTo}`}
+                  {highlightedPeriod ??
+                    `${summary.periodFrom} — ${summary.periodTo}`}
                 </span>
                 . Первый экран собран вокруг денег, маржи и срочных решений по
                 ассортименту.
@@ -524,7 +525,7 @@ function ChangeSnapshotPanel({
 }) {
   return (
     <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] lg:items-center min-[1140px]:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
+      <div className="flex flex-col gap-4 min-[1145px]:flex-row min-[1145px]:items-center min-[1145px]:justify-between max-[1144px]:grid max-[1144px]:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] max-[1144px]:items-center">
         <div>
           <h2 className="text-base font-semibold">Что изменилось</h2>
           <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
@@ -533,7 +534,7 @@ function ChangeSnapshotPanel({
             периодах.
           </p>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2 min-[1140px]:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 min-[1145px]:grid-cols-4">
           <ChangeMetric
             label="Выручка"
             value={latestTrend?.revenueDeltaPercent ?? null}
@@ -672,7 +673,11 @@ function FullDayRevenue({
         <span className="text-xs text-zinc-500 dark:text-zinc-400">
           К среднесуточной
         </span>
-        <span className={["text-sm font-semibold tabular-nums", deltaTone].join(" ")}>
+        <span
+          className={["text-sm font-semibold tabular-nums", deltaTone].join(
+            " ",
+          )}
+        >
           {deltaPercent === null ? "нет базы" : formatPercent(deltaPercent)}
         </span>
       </div>
@@ -708,8 +713,14 @@ function WriteOffRevenueShare({
         <span className="text-xs text-zinc-500 dark:text-zinc-400">
           К предыдущему периоду
         </span>
-        <span className={["text-sm font-semibold tabular-nums", deltaTone].join(" ")}>
-          {deltaPercent === null ? "нет базы" : formatSignedPercent(deltaPercent)}
+        <span
+          className={["text-sm font-semibold tabular-nums", deltaTone].join(
+            " ",
+          )}
+        >
+          {deltaPercent === null
+            ? "нет базы"
+            : formatSignedPercent(deltaPercent)}
         </span>
       </div>
     </div>
@@ -842,8 +853,8 @@ function TrendChart({
                       : delta === 0
                         ? "text-zinc-400"
                         : isGood
-                        ? "text-emerald-600 dark:text-emerald-300"
-                        : "text-red-600 dark:text-red-300",
+                          ? "text-emerald-600 dark:text-emerald-300"
+                          : "text-red-600 dark:text-red-300",
                   ].join(" ")}
                 >
                   {formatDelta(delta)}
@@ -1011,7 +1022,9 @@ function SignalMetric({
         ].join(" ")}
       >
         {value}
-        {suffix ? <span className="ml-1 text-sm text-zinc-500">{suffix}</span> : null}
+        {suffix ? (
+          <span className="ml-1 text-sm text-zinc-500">{suffix}</span>
+        ) : null}
       </p>
     </div>
   );

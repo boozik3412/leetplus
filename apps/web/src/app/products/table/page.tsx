@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { ProductsTable } from "@/components/products-table";
 import { requireCurrentUser } from "@/lib/auth";
 import { getCategories, getSuppliers } from "@/lib/catalog";
@@ -18,6 +20,35 @@ export default async function ProductsTablePage() {
   return (
     <main className="min-h-screen bg-[var(--background)] text-zinc-950">
       <div className="px-4 py-4">
+        <nav aria-label="Навигация" className="mb-3 text-sm text-zinc-500">
+          <ol className="flex flex-wrap items-center gap-2">
+            <li>
+              <Link
+                href="/dashboard"
+                className="font-medium text-zinc-600 transition hover:text-zinc-950"
+              >
+                Дашборд
+              </Link>
+            </li>
+            <li aria-hidden="true" className="text-zinc-300">
+              /
+            </li>
+            <li>
+              <Link
+                href="/products"
+                className="font-medium text-zinc-600 transition hover:text-zinc-950"
+              >
+                Товары
+              </Link>
+            </li>
+            <li aria-hidden="true" className="text-zinc-300">
+              /
+            </li>
+            <li className="font-medium text-zinc-950" aria-current="page">
+              Табличный режим
+            </li>
+          </ol>
+        </nav>
         <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="text-sm font-medium text-emerald-700">
@@ -27,8 +58,8 @@ export default async function ProductsTablePage() {
               Товары
             </h1>
             <p className="mt-2 max-w-3xl text-sm text-zinc-600">
-              Расширенный вид ассортимента с фильтрами, сортировкой,
-              экспортом и горизонтальным скроллом.
+              Расширенный вид ассортимента с фильтрами, сортировкой, экспортом и
+              горизонтальным скроллом.
             </p>
           </div>
           <a

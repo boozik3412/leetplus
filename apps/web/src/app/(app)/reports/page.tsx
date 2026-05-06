@@ -5,7 +5,7 @@ import { NoSalesPeriodTable } from "@/components/no-sales-period-table";
 import { OosExclusionActions } from "@/components/oos-exclusion-actions";
 import { ReportEmailForm } from "@/components/report-email-form";
 import { ReportLoadingLink } from "@/components/report-loading-link";
-import { SimpleReportTable } from "@/components/simple-report-table";
+import { SalesDetailPreviewTable } from "@/components/sales-detail-report-table";
 import {
   getAssortmentReport,
   getLflReport,
@@ -24,7 +24,6 @@ import {
   type ReplenishmentRow,
   type ReportRecommendation,
   type ReportGroup,
-  type SalesDetailRow,
   type SkuPerformanceRow,
   type SupplierPerformanceRow,
 } from "@/lib/reports";
@@ -111,6 +110,24 @@ function abcTableHref({
   }
 
   return `/reports/abc/table?${params.toString()}`;
+}
+
+function salesDetailTableHref({
+  from,
+  to,
+  storeId,
+}: {
+  from: string;
+  to: string;
+  storeId: string | null;
+}) {
+  const params = new URLSearchParams({ from, to });
+
+  if (storeId) {
+    params.set("storeId", storeId);
+  }
+
+  return `/reports/sales-detail/table?${params.toString()}`;
 }
 
 function lastFullDaysRange(days: number) {
@@ -217,7 +234,16 @@ export default async function ReportsPage({
             title="Общий отчет по продажам"
             description="Строки продаж для сводной таблицы Excel: товар, клуб, дата, цены, себестоимость, прибыль, маржа и источник."
           >
-            <SalesDetailTable rows={salesDetailReport.rows} />
+            <SalesDetailCompactPanel
+              rowsCount={salesDetailReport.rows.length}
+              href={salesDetailTableHref({
+                from: operationalReport.from,
+                to: operationalReport.to,
+                storeId: operationalReport.storeId,
+              })}
+            >
+              <SalesDetailPreviewTable rows={salesDetailReport.rows} />
+            </SalesDetailCompactPanel>
           </ReportDisclosure>
 
           <ReportDisclosure
@@ -463,71 +489,33 @@ function Metric({ label, value }: { label: string; value: number | string }) {
   );
 }
 
-function SalesDetailTable({ rows }: { rows: SalesDetailRow[] }) {
+function SalesDetailCompactPanel({
+  rowsCount,
+  href,
+  children,
+}: {
+  rowsCount: number;
+  href: string;
+  children: ReactNode;
+}) {
   return (
     <section className="overflow-hidden bg-white dark:bg-zinc-950">
-      <SimpleReportTable
-        title="Общий отчет по продажам"
-        rows={rows.map((row) => ({
-          saleDate: new Date(row.saleDate).toLocaleString("ru-RU"),
-          storeName: row.storeName,
-          article: row.article,
-          productName: row.productNameAtSale ?? row.productName,
-          categoryName: row.categoryName,
-          supplierName: row.supplierName,
-          quantity: row.quantity,
-          revenue: row.revenue,
-          cost: row.cost,
-          unitSalePrice: row.unitSalePrice,
-          unitCost: row.unitCost,
-          grossProfit: row.grossProfit,
-          marginPercent: `${row.marginPercent.toFixed(1)}%`,
-          markupPercent: `${row.markupPercent.toFixed(1)}%`,
-          purchasePrice: row.purchasePrice,
-          salePrice: row.salePrice,
-          facing: row.facing,
-          source: row.source,
-          externalProvider: row.externalProvider,
-          externalDomain: row.externalDomain,
-          externalSaleId: row.externalSaleId,
-          externalProductId: row.externalProductId,
-          externalClubId: row.externalClubId,
-          isCanceled: row.isCanceled ? "Да" : "Нет",
-        }))}
-        filters={[
-          { key: "storeName", label: "Клуб", type: "multi-select" },
-          { key: "categoryName", label: "Категория", type: "multi-select" },
-          { key: "supplierName", label: "Поставщик", type: "multi-select" },
-          { key: "source", label: "Источник", type: "multi-select" },
-          { key: "productName", label: "Товар", type: "text" },
-        ]}
-        columns={[
-          { key: "saleDate", label: "Дата" },
-          { key: "storeName", label: "Клуб" },
-          { key: "article", label: "Артикул" },
-          { key: "productName", label: "Товар" },
-          { key: "categoryName", label: "Категория" },
-          { key: "supplierName", label: "Поставщик" },
-          { key: "quantity", label: "Продажи", align: "right" },
-          { key: "revenue", label: "Выручка", align: "right" },
-          { key: "cost", label: "Себестоимость", align: "right" },
-          { key: "unitSalePrice", label: "Цена", align: "right" },
-          { key: "unitCost", label: "Себ. ед.", align: "right" },
-          { key: "grossProfit", label: "Прибыль", align: "right" },
-          { key: "marginPercent", label: "Маржа", align: "right" },
-          { key: "markupPercent", label: "Наценка", align: "right" },
-          { key: "purchasePrice", label: "Закупка", align: "right" },
-          { key: "salePrice", label: "Прайс", align: "right" },
-          { key: "facing", label: "Фейсинг", align: "right" },
-          { key: "source", label: "Источник" },
-          { key: "externalProvider", label: "Провайдер" },
-          { key: "externalDomain", label: "Домен" },
-          { key: "externalSaleId", label: "ID продажи" },
-          { key: "externalProductId", label: "ID товара" },
-          { key: "externalClubId", label: "ID клуба" },
-          { key: "isCanceled", label: "Отменена" },
-        ]}
-      />
+      <div className="flex flex-col gap-3 border-b border-zinc-200 px-5 py-4 dark:border-zinc-800 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <h2 className="text-base font-semibold">Последние строки продаж</h2>
+          <p className="mt-1 text-sm text-zinc-500">
+            Показаны первые 20 строк из {rowsCount}. Полный отчет открыт отдельной
+            таблицей с фильтрами и экспортом.
+          </p>
+        </div>
+        <ReportLoadingLink
+          href={href}
+          className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-900"
+        >
+          Открыть полный отчет
+        </ReportLoadingLink>
+      </div>
+      {children}
     </section>
   );
 }

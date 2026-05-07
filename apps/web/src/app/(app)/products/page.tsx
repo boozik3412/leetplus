@@ -4,13 +4,21 @@ import { requireCurrentUser } from "@/lib/auth";
 import { getCategories, getSuppliers } from "@/lib/catalog";
 import { can } from "@/lib/permissions";
 import { getProducts } from "@/lib/products";
-import { getSalesDetailReport, type SalesDetailRow } from "@/lib/reports";
+import {
+  getReplenishmentReport,
+  getSalesDetailReport,
+  type ReplenishmentRow,
+  type SalesDetailRow,
+} from "@/lib/reports";
 import { getStores } from "@/lib/stores";
 
 type ProductsPageProps = {
   searchParams?: Promise<{
     movementStoreId?: string;
     movementCategory?: string;
+    movementName?: string;
+    movementSort?: string;
+    movementDir?: string;
   }>;
 };
 
@@ -19,15 +27,23 @@ export default async function ProductsPage({
 }: ProductsPageProps) {
   const params = await searchParams;
   const movementRange = lastFullDaysRange(7);
-  const [user, products, categories, suppliers, stores, salesMovementReport] =
-    await Promise.all([
-      requireCurrentUser(),
-      getProducts(),
-      getCategories(),
-      getSuppliers(),
-      getStores(),
-      getSalesDetailReport(movementRange),
-    ]);
+  const [
+    user,
+    products,
+    categories,
+    suppliers,
+    stores,
+    salesMovementReport,
+    replenishmentReport,
+  ] = await Promise.all([
+    requireCurrentUser(),
+    getProducts(),
+    getCategories(),
+    getSuppliers(),
+    getStores(),
+    getSalesDetailReport(movementRange),
+    getReplenishmentReport(movementRange),
+  ]);
   const canEditProducts = can(user, "edit_products");
   const operationalActiveProducts = products.filter(
     (product) => product.isOperationalActive,
@@ -39,6 +55,10 @@ export default async function ProductsPage({
     {
       storeId: params?.movementStoreId ?? "",
       categoryName: params?.movementCategory ?? "",
+      name: params?.movementName ?? "",
+      sortKey: params?.movementSort ?? "",
+      sortDirection: params?.movementDir ?? "",
+      stockRows: replenishmentReport.rows,
     },
   );
 
@@ -110,6 +130,9 @@ export default async function ProductsPage({
           categories={categories}
           selectedStoreId={params?.movementStoreId ?? ""}
           selectedCategoryName={params?.movementCategory ?? ""}
+          selectedName={params?.movementName ?? ""}
+          sortKey={movementRows.sortKey}
+          sortDirection={movementRows.sortDirection}
         />
 
         <details className="mt-6 overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm">
@@ -145,9 +168,17 @@ type MovementRow = {
   label: string;
   meta: string;
   totalQuantity: number;
+  stockQuantity: number;
   totalRevenue: number;
   dailyQuantity: Record<string, number>;
 };
+
+type MovementSortKey =
+  | "totalQuantity"
+  | "stockQuantity"
+  | "totalRevenue"
+  | `day:${string}`;
+type MovementSortDirection = "asc" | "desc";
 
 function lastFullDaysRange(days: number) {
   const now = new Date();
@@ -167,9 +198,23 @@ function buildMovementRows(
   rows: SalesDetailRow[],
   from: string,
   to: string,
-  filters: { storeId?: string; categoryName?: string } = {},
+  filters: {
+    storeId?: string;
+    categoryName?: string;
+    name?: string;
+    sortKey?: string;
+    sortDirection?: string;
+    stockRows: ReplenishmentRow[];
+  },
 ) {
   const dates = dateRange(from, to);
+  const stockByStoreProduct = new Map(
+    filters.stockRows.map((row) => [
+      `${row.storeId}:${row.productId}`,
+      row.stockQuantity,
+    ]),
+  );
+  const normalizedName = filters.name?.trim().toLowerCase() ?? "";
   const filteredRows = rows.filter((row) => {
     if (filters.storeId && row.storeId !== filters.storeId) {
       return false;
@@ -182,16 +227,38 @@ function buildMovementRows(
       return false;
     }
 
+    if (
+      normalizedName &&
+      !(row.productNameAtSale ?? row.productName)
+        .toLowerCase()
+        .includes(normalizedName)
+    ) {
+      return false;
+    }
+
     return true;
   });
+  const sortKey = resolveMovementSortKey(filters.sortKey, dates);
+  const sortDirection = resolveMovementSortDirection(filters.sortDirection);
+  const sortedRows = sortMovementRows(
+    aggregateMovementRows(filteredRows, dates, stockByStoreProduct),
+    sortKey,
+    sortDirection,
+  );
 
   return {
     dates,
-    products: aggregateMovementRows(filteredRows, dates).slice(0, 20),
+    products: sortedRows.slice(0, 20),
+    sortKey,
+    sortDirection,
   };
 }
 
-function aggregateMovementRows(rows: SalesDetailRow[], dates: string[]) {
+function aggregateMovementRows(
+  rows: SalesDetailRow[],
+  dates: string[],
+  stockByStoreProduct: Map<string, number>,
+) {
   const result = new Map<string, MovementRow>();
 
   rows.forEach((row) => {
@@ -205,6 +272,7 @@ function aggregateMovementRows(rows: SalesDetailRow[], dates: string[]) {
         label: row.productNameAtSale ?? row.productName,
         meta: `${row.storeName} · ${categoryName}`,
         totalQuantity: 0,
+        stockQuantity: stockByStoreProduct.get(key) ?? 0,
         totalRevenue: 0,
         dailyQuantity: Object.fromEntries(dates.map((day) => [day, 0])),
       } satisfies MovementRow);
@@ -222,6 +290,66 @@ function aggregateMovementRows(rows: SalesDetailRow[], dates: string[]) {
       b.totalQuantity - a.totalQuantity ||
       a.label.localeCompare(b.label, "ru"),
   );
+}
+
+function sortMovementRows(
+  rows: MovementRow[],
+  sortKey: MovementSortKey,
+  sortDirection: MovementSortDirection,
+) {
+  const direction = sortDirection === "asc" ? 1 : -1;
+
+  return [...rows].sort((a, b) => {
+    const aValue = movementSortValue(a, sortKey);
+    const bValue = movementSortValue(b, sortKey);
+
+    if (aValue !== bValue) {
+      return (aValue - bValue) * direction;
+    }
+
+    return a.label.localeCompare(b.label, "ru");
+  });
+}
+
+function movementSortValue(row: MovementRow, sortKey: MovementSortKey) {
+  if (sortKey.startsWith("day:")) {
+    return row.dailyQuantity[sortKey.slice(4)] ?? 0;
+  }
+
+  if (sortKey === "stockQuantity") {
+    return row.stockQuantity;
+  }
+
+  if (sortKey === "totalQuantity") {
+    return row.totalQuantity;
+  }
+
+  return row.totalRevenue;
+}
+
+function resolveMovementSortKey(
+  value: string | undefined,
+  dates: string[],
+): MovementSortKey {
+  if (
+    value === "totalQuantity" ||
+    value === "stockQuantity" ||
+    value === "totalRevenue"
+  ) {
+    return value;
+  }
+
+  if (value?.startsWith("day:") && dates.includes(value.slice(4))) {
+    return value as MovementSortKey;
+  }
+
+  return "totalRevenue";
+}
+
+function resolveMovementSortDirection(
+  value: string | undefined,
+): MovementSortDirection {
+  return value === "asc" ? "asc" : "desc";
 }
 
 function dateRange(from: string, to: string) {
@@ -245,6 +373,9 @@ function ProductMovementSection({
   categories,
   selectedStoreId,
   selectedCategoryName,
+  selectedName,
+  sortKey,
+  sortDirection,
 }: {
   from: string;
   to: string;
@@ -253,6 +384,9 @@ function ProductMovementSection({
   categories: Awaited<ReturnType<typeof getCategories>>;
   selectedStoreId: string;
   selectedCategoryName: string;
+  selectedName: string;
+  sortKey: MovementSortKey;
+  sortDirection: MovementSortDirection;
 }) {
   const fullReportParams = new URLSearchParams();
 
@@ -286,7 +420,9 @@ function ProductMovementSection({
             Открыть полный отчет
           </a>
         </div>
-        <form className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
+        <form className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
+          <input type="hidden" name="movementSort" value={sortKey} />
+          <input type="hidden" name="movementDir" value={sortDirection} />
           <label className="block text-xs font-medium uppercase text-zinc-500">
             Клуб
             <select
@@ -318,6 +454,15 @@ function ProductMovementSection({
               ))}
             </select>
           </label>
+          <label className="block text-xs font-medium uppercase text-zinc-500">
+            Наименование
+            <input
+              name="movementName"
+              defaultValue={selectedName}
+              placeholder="Фильтр"
+              className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-950"
+            />
+          </label>
           <button
             type="submit"
             className="rounded-xl bg-zinc-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
@@ -326,7 +471,15 @@ function ProductMovementSection({
           </button>
         </form>
       </div>
-      <MovementTable rows={rows.products} dates={rows.dates} />
+      <MovementTable
+        rows={rows.products}
+        dates={rows.dates}
+        selectedStoreId={selectedStoreId}
+        selectedCategoryName={selectedCategoryName}
+        selectedName={selectedName}
+        sortKey={sortKey}
+        sortDirection={sortDirection}
+      />
     </section>
   );
 }
@@ -334,9 +487,19 @@ function ProductMovementSection({
 function MovementTable({
   rows,
   dates,
+  selectedStoreId,
+  selectedCategoryName,
+  selectedName,
+  sortKey,
+  sortDirection,
 }: {
   rows: MovementRow[];
   dates: string[];
+  selectedStoreId: string;
+  selectedCategoryName: string;
+  selectedName: string;
+  sortKey: MovementSortKey;
+  sortDirection: MovementSortDirection;
 }) {
   return (
     <div className="overflow-x-auto">
@@ -348,11 +511,50 @@ function MovementTable({
               <th className="px-5 py-3 font-medium">Клуб / категория</th>
               {dates.map((date) => (
                 <th key={date} className="px-3 py-3 text-right font-medium">
-                  {formatShortDate(date)}
+                  <MovementSortLink
+                    label={formatShortDate(date)}
+                    columnKey={`day:${date}`}
+                    selectedStoreId={selectedStoreId}
+                    selectedCategoryName={selectedCategoryName}
+                    selectedName={selectedName}
+                    sortKey={sortKey}
+                    sortDirection={sortDirection}
+                  />
                 </th>
               ))}
-              <th className="px-5 py-3 text-right font-medium">Итого</th>
-              <th className="px-5 py-3 text-right font-medium">Выручка</th>
+              <th className="px-5 py-3 text-right font-medium">
+                <MovementSortLink
+                  label="Итого"
+                  columnKey="totalQuantity"
+                  selectedStoreId={selectedStoreId}
+                  selectedCategoryName={selectedCategoryName}
+                  selectedName={selectedName}
+                  sortKey={sortKey}
+                  sortDirection={sortDirection}
+                />
+              </th>
+              <th className="px-5 py-3 text-right font-medium">
+                <MovementSortLink
+                  label="Остаток"
+                  columnKey="stockQuantity"
+                  selectedStoreId={selectedStoreId}
+                  selectedCategoryName={selectedCategoryName}
+                  selectedName={selectedName}
+                  sortKey={sortKey}
+                  sortDirection={sortDirection}
+                />
+              </th>
+              <th className="px-5 py-3 text-right font-medium">
+                <MovementSortLink
+                  label="Выручка"
+                  columnKey="totalRevenue"
+                  selectedStoreId={selectedStoreId}
+                  selectedCategoryName={selectedCategoryName}
+                  selectedName={selectedName}
+                  sortKey={sortKey}
+                  sortDirection={sortDirection}
+                />
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-100">
@@ -371,6 +573,9 @@ function MovementTable({
                   {formatQuantity(row.totalQuantity)}
                 </td>
                 <td className="px-5 py-3 text-right font-semibold tabular-nums">
+                  {formatQuantity(row.stockQuantity)}
+                </td>
+                <td className="px-5 py-3 text-right font-semibold tabular-nums">
                   {formatCurrency(row.totalRevenue)}
                 </td>
               </tr>
@@ -379,7 +584,7 @@ function MovementTable({
               <tr>
                 <td
                   className="px-5 py-8 text-center text-zinc-500"
-                  colSpan={dates.length + 4}
+                  colSpan={dates.length + 5}
                 >
                   Продаж за период нет.
                 </td>
@@ -389,6 +594,56 @@ function MovementTable({
         </table>
       </div>
     </div>
+  );
+}
+
+function MovementSortLink({
+  label,
+  columnKey,
+  selectedStoreId,
+  selectedCategoryName,
+  selectedName,
+  sortKey,
+  sortDirection,
+}: {
+  label: string;
+  columnKey: MovementSortKey;
+  selectedStoreId: string;
+  selectedCategoryName: string;
+  selectedName: string;
+  sortKey: MovementSortKey;
+  sortDirection: MovementSortDirection;
+}) {
+  const isActive = sortKey === columnKey;
+  const nextDirection: MovementSortDirection =
+    isActive && sortDirection === "desc" ? "asc" : "desc";
+  const params = new URLSearchParams({
+    movementSort: columnKey,
+    movementDir: nextDirection,
+  });
+
+  if (selectedStoreId) {
+    params.set("movementStoreId", selectedStoreId);
+  }
+
+  if (selectedCategoryName) {
+    params.set("movementCategory", selectedCategoryName);
+  }
+
+  if (selectedName) {
+    params.set("movementName", selectedName);
+  }
+
+  return (
+    <a
+      href={`?${params.toString()}`}
+      className="inline-flex items-center justify-end gap-1 text-zinc-500 transition hover:text-zinc-950"
+    >
+      <span>{label}</span>
+      <span aria-hidden="true" className="text-xs">
+        {isActive ? (sortDirection === "desc" ? "↓" : "↑") : "↕"}
+      </span>
+    </a>
   );
 }
 

@@ -324,17 +324,25 @@ export class ReportsExportService {
       [],
       ['Риск out-of-stock'],
       [
+        'Клуб',
         'Артикул',
         'Товар',
+        'Поставщик',
         'Остаток, шт',
         'Средние продажи в день',
+        'Выручка в риске / день',
+        'Прибыль в риске / день',
         'Остаток в днях',
       ],
       ...operationalReport.outOfStockRiskProducts.map((item) => [
+        item.storeName,
         item.article,
         item.name,
+        item.supplierName,
         item.stockQuantity,
         item.averageDailySales,
+        item.revenueAtRiskPerDay,
+        item.grossProfitAtRiskPerDay,
         item.stockDays,
       ]),
       [],
@@ -963,10 +971,22 @@ export class ReportsExportService {
   ) {
     const sheet = workbook.addWorksheet('Риск OOS');
     sheet.columns = [
+      { header: 'Клуб', key: 'storeName', width: 24 },
       { header: 'Артикул', key: 'article', width: 18 },
       { header: 'Товар', key: 'name', width: 36 },
+      { header: 'Поставщик', key: 'supplierName', width: 24 },
       { header: 'Остаток, шт', key: 'stockQuantity', width: 18 },
       { header: 'Средние продажи в день', key: 'averageDailySales', width: 24 },
+      {
+        header: 'Выручка в риске / день',
+        key: 'revenueAtRiskPerDay',
+        width: 24,
+      },
+      {
+        header: 'Прибыль в риске / день',
+        key: 'grossProfitAtRiskPerDay',
+        width: 24,
+      },
       { header: 'Остаток в днях', key: 'stockDays', width: 18 },
     ];
     sheet.addRows(operationalReport.outOfStockRiskProducts);

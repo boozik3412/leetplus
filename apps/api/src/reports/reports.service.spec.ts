@@ -317,6 +317,8 @@ describe('ReportsService', () => {
         supplierName: null,
         stockQuantity: 2,
         averageDailySales: 1,
+        revenueAtRiskPerDay: 100,
+        grossProfitAtRiskPerDay: 19,
         stockDays: 2,
       },
     ]);

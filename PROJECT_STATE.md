@@ -1,6 +1,6 @@
 # LeetPlus Project State
 
-Last updated: 2026-05-06
+Last updated: 2026-05-07
 
 ## Current Workflow
 
@@ -69,22 +69,29 @@ Connected production LAngame sources:
 - Clarified report export/email UI and error messages.
 - Refined report disclosure controls.
 - Added "Общий отчет по продажам" to reports and summary export/email for Excel pivot-table source rows.
+- Reworked the management dashboard around commercial control: first-screen KPI composition, "what changed", "main focus", and "what to do today" blocks.
+- Added full/current period selectors, European date formatting, dashboard report anchors, and responsive fixes from live review.
+- Added product movement analytics: compact product-page preview, full table, 7/14/21 day periods, stock column, sorting/filtering, exports, and email.
+- Started Stage 2 commercial reports with OOS revenue/profit-at-risk estimates in tables and exports.
 
 ## Near-Term Backlog
 
 ### Stage 1. Management Dashboard
 
-- Recompose the dashboard first screen around commercial control: revenue, gross profit, margin, sold units, OOS risk, and stock.
-- Add a "what changed" block comparing the latest segment with the previous comparable segment for revenue, units, OOS, and write-offs.
-- Add a "main focus" block for category leaders, weak profitability, deficit risk, and assortment matrix activity.
-- Add a "what to do today" block with direct actions for OOS replenishment, no-sales SKU review, write-off checks, and row-level sales export.
+Status: mostly implemented; continue polishing UX from live production review.
+
+- Keep the first screen focused on commercial control: revenue, gross profit, margin, sold units, OOS risk, and stock.
+- Refine period-to-period comparison copy and responsive layout after live checks.
+- Continue tightening direct action links from dashboard cards to the relevant reports.
 
 ### Stage 2. Commercial Reports
 
-- Plan/fact by network, club, category, and supplier.
-- Lost sales from OOS with estimated missed revenue and gross profit.
-- Turnover, frozen money in stock, and slow SKU control.
-- Supplier scorecard with sales, profit, write-offs, OOS, delivery quality, and problem categories.
+Status: active stage.
+
+- Add lost sales / revenue-at-risk from OOS with estimated missed revenue and gross profit.
+- Add plan/fact by network, club, category, and supplier.
+- Add turnover, frozen money in stock, and slow SKU control.
+- Add supplier scorecard with sales, profit, write-offs, OOS, delivery quality, and problem categories.
 
 ### Stage 3. Assortment Matrix
 

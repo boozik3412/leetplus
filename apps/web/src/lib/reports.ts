@@ -65,6 +65,8 @@ export type OutOfStockRiskProduct = {
   supplierName: string | null;
   stockQuantity: number;
   averageDailySales: number;
+  revenueAtRiskPerDay: number;
+  grossProfitAtRiskPerDay: number;
   stockDays: number;
 };
 

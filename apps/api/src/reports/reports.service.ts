@@ -76,6 +76,8 @@ export type OutOfStockRiskProduct = {
   supplierName: string | null;
   stockQuantity: number;
   averageDailySales: number;
+  revenueAtRiskPerDay: number;
+  grossProfitAtRiskPerDay: number;
   stockDays: number;
 };
 
@@ -2311,6 +2313,8 @@ export class ReportsService {
         const stockQuantity = stockItem?.stockQuantity ?? 0;
         const stockDays =
           averageDailySales > 0 ? stockQuantity / averageDailySales : 0;
+        const revenueAtRiskPerDay = sale.revenue / periodDays;
+        const grossProfitAtRiskPerDay = (sale.revenue - sale.cost) / periodDays;
 
         return {
           productId: sale.productId,
@@ -2323,6 +2327,8 @@ export class ReportsService {
           supplierName: sale.supplierName ?? stockItem?.supplierName ?? null,
           stockQuantity: this.round(stockQuantity),
           averageDailySales: this.round(averageDailySales),
+          revenueAtRiskPerDay: this.round(revenueAtRiskPerDay),
+          grossProfitAtRiskPerDay: this.round(grossProfitAtRiskPerDay),
           stockDays: this.round(stockDays),
         };
       })

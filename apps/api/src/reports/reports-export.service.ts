@@ -23,6 +23,7 @@ export type ReportExportQuery = OperationalReportQuery & {
   format?: string;
   report?: string;
   lflPeriod?: LflPeriod;
+  category?: string;
 };
 
 export type ReportExportFile = {
@@ -41,6 +42,16 @@ type SalesDetailColumn = {
   width: number;
 };
 
+type ProductMovementRow = {
+  productName: string;
+  storeName: string;
+  categoryName: string;
+  totalQuantity: number;
+  stockQuantity: number;
+  revenue: number;
+  dailyQuantity: Record<string, number>;
+};
+
 @Injectable()
 export class ReportsExportService {
   constructor(private readonly reportsService: ReportsService) {}
@@ -57,6 +68,10 @@ export class ReportsExportService {
 
     if (query.report === 'sales-detail') {
       return this.exportSalesDetailReport(user, query, format);
+    }
+
+    if (query.report === 'product-movement') {
+      return this.exportProductMovementReport(user, query, format);
     }
 
     const [
@@ -173,6 +188,51 @@ export class ReportsExportService {
       tenantSlug: report.tenantSlug,
       from: report.from,
       to: report.to,
+    };
+  }
+
+  private async exportProductMovementReport(
+    user: AuthenticatedUser,
+    query: ReportExportQuery,
+    format: ReportExportFormat,
+  ): Promise<ReportExportFile> {
+    const [salesReport, replenishmentReport] = await Promise.all([
+      this.reportsService.getSalesDetailReport(user, query),
+      this.reportsService.getReplenishmentReport(user, query),
+    ]);
+    const fileName = `leetplus-product-movement-${salesReport.from}-${salesReport.to}.${format}`;
+    const rows = this.buildProductMovementRows(
+      salesReport,
+      replenishmentReport,
+      query.category,
+    );
+
+    if (format === 'csv') {
+      return {
+        buffer: Buffer.from(
+          this.buildProductMovementCsv(salesReport, rows, query.category),
+          'utf8',
+        ),
+        contentType: 'text/csv; charset=utf-8',
+        fileName,
+        tenantSlug: salesReport.tenantSlug,
+        from: salesReport.from,
+        to: salesReport.to,
+      };
+    }
+
+    return {
+      buffer: await this.buildProductMovementXlsx(
+        salesReport,
+        rows,
+        query.category,
+      ),
+      contentType:
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      fileName,
+      tenantSlug: salesReport.tenantSlug,
+      from: salesReport.from,
+      to: salesReport.to,
     };
   }
 
@@ -540,6 +600,162 @@ export class ReportsExportService {
 
     const buffer = await workbook.xlsx.writeBuffer();
     return Buffer.from(buffer);
+  }
+
+  private buildProductMovementRows(
+    salesReport: SalesDetailReport,
+    replenishmentReport: ReplenishmentReport,
+    category?: string,
+  ) {
+    const dates = this.dateRange(salesReport.from, salesReport.to);
+    const stockByStoreProduct = new Map(
+      replenishmentReport.rows.map((row) => [
+        `${row.storeId}:${row.productId}`,
+        row.stockQuantity,
+      ]),
+    );
+    const rowsByKey = new Map<string, ProductMovementRow>();
+
+    salesReport.rows.forEach((row) => {
+      const categoryName = row.categoryName ?? 'Без категории';
+
+      if (category && categoryName !== category) {
+        return;
+      }
+
+      const key = `${row.storeId}:${row.productId}`;
+      const date = row.saleDate.slice(0, 10);
+      const current =
+        rowsByKey.get(key) ??
+        ({
+          productName: row.productNameAtSale ?? row.productName,
+          storeName: row.storeName,
+          categoryName,
+          totalQuantity: 0,
+          stockQuantity: stockByStoreProduct.get(key) ?? 0,
+          revenue: 0,
+          dailyQuantity: Object.fromEntries(dates.map((day) => [day, 0])),
+        } satisfies ProductMovementRow);
+
+      current.totalQuantity += row.quantity;
+      current.revenue += row.revenue;
+      current.dailyQuantity[date] =
+        (current.dailyQuantity[date] ?? 0) + row.quantity;
+      rowsByKey.set(key, current);
+    });
+
+    return [...rowsByKey.values()]
+      .map((row) => ({
+        ...row,
+        totalQuantity: this.round(row.totalQuantity),
+        stockQuantity: this.round(row.stockQuantity),
+        revenue: this.round(row.revenue),
+      }))
+      .sort(
+        (a, b) =>
+          b.revenue - a.revenue ||
+          b.totalQuantity - a.totalQuantity ||
+          a.productName.localeCompare(b.productName),
+      );
+  }
+
+  private buildProductMovementCsv(
+    report: SalesDetailReport,
+    rows: ProductMovementRow[],
+    category?: string,
+  ) {
+    const dates = this.dateRange(report.from, report.to);
+    const csvRows: CsvCell[][] = [
+      ['Движение товара'],
+      ['Организация', report.tenantSlug],
+      ['Период', `${report.from} - ${report.to}`],
+      ['Торговая точка', report.storeId ?? 'Все точки'],
+      ['Категория', category ?? 'Все категории'],
+      [],
+      [
+        'Товар',
+        'Клуб',
+        'Категория',
+        ...dates,
+        'Итого продаж',
+        'Остаток на текущий день',
+        'Выручка',
+      ],
+      ...rows.map((row) => [
+        row.productName,
+        row.storeName,
+        row.categoryName,
+        ...dates.map((date) => row.dailyQuantity[date] ?? 0),
+        row.totalQuantity,
+        row.stockQuantity,
+        row.revenue,
+      ]),
+    ];
+
+    return `\uFEFF${csvRows.map((row) => this.csvRow(row)).join('\n')}`;
+  }
+
+  private async buildProductMovementXlsx(
+    report: SalesDetailReport,
+    rows: ProductMovementRow[],
+    category?: string,
+  ) {
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'LeetPlus';
+    workbook.created = new Date();
+    const sheet = workbook.addWorksheet('Движение товара');
+    const dates = this.dateRange(report.from, report.to);
+
+    sheet.columns = [
+      { header: 'Товар', key: 'productName', width: 36 },
+      { header: 'Клуб', key: 'storeName', width: 24 },
+      { header: 'Категория', key: 'categoryName', width: 24 },
+      ...dates.map((date) => ({ header: date, key: date, width: 12 })),
+      { header: 'Итого продаж', key: 'totalQuantity', width: 16 },
+      {
+        header: 'Остаток на текущий день',
+        key: 'stockQuantity',
+        width: 22,
+      },
+      { header: 'Выручка', key: 'revenue', width: 16 },
+    ];
+    sheet.addRows(
+      rows.map((row) => ({
+        productName: row.productName,
+        storeName: row.storeName,
+        categoryName: row.categoryName,
+        ...row.dailyQuantity,
+        totalQuantity: row.totalQuantity,
+        stockQuantity: row.stockQuantity,
+        revenue: row.revenue,
+      })),
+    );
+    sheet.spliceRows(1, 0, ['Движение товара']);
+    sheet.spliceRows(2, 0, ['Организация', report.tenantSlug]);
+    sheet.spliceRows(3, 0, ['Период', `${report.from} - ${report.to}`]);
+    sheet.spliceRows(4, 0, ['Торговая точка', report.storeId ?? 'Все точки']);
+    sheet.spliceRows(5, 0, ['Категория', category ?? 'Все категории']);
+    this.styleHeader(sheet, 7);
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    return Buffer.from(buffer);
+  }
+
+  private dateRange(from: string, to: string) {
+    const dates: string[] = [];
+    const current = new Date(`${from}T00:00:00.000Z`);
+    const end = new Date(`${to}T00:00:00.000Z`);
+
+    while (current <= end) {
+      dates.push(current.toISOString().slice(0, 10));
+      current.setUTCDate(current.getUTCDate() + 1);
+    }
+
+    return dates;
+  }
+
+  private round(value: number) {
+    return Math.round((value + Number.EPSILON) * 100) / 100;
   }
 
   private addSummarySheet(
@@ -1026,11 +1242,11 @@ export class ReportsExportService {
     return Buffer.from(buffer);
   }
 
-  private styleHeader(sheet: ExcelJS.Worksheet) {
-    const header = sheet.getRow(1);
+  private styleHeader(sheet: ExcelJS.Worksheet, rowNumber = 1) {
+    const header = sheet.getRow(rowNumber);
     header.font = { bold: true };
     header.alignment = { vertical: 'middle' };
-    sheet.views = [{ state: 'frozen', ySplit: 1 }];
+    sheet.views = [{ state: 'frozen', ySplit: rowNumber }];
   }
 
   private recommendationSeverityLabel(

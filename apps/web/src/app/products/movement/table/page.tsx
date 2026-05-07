@@ -1,14 +1,21 @@
 import Link from "next/link";
 
+import { ReportEmailInlineForm } from "@/components/report-email-inline-form";
 import { requireCurrentUser } from "@/lib/auth";
 import { getCategories } from "@/lib/catalog";
-import { getSalesDetailReport, type SalesDetailRow } from "@/lib/reports";
+import {
+  getReplenishmentReport,
+  getSalesDetailReport,
+  type ReplenishmentRow,
+  type SalesDetailRow,
+} from "@/lib/reports";
 import { getStores } from "@/lib/stores";
 
 type MovementTablePageProps = {
   searchParams?: Promise<{
     storeId?: string;
     category?: string;
+    days?: string;
   }>;
 };
 
@@ -18,6 +25,7 @@ type MovementRow = {
   storeName: string;
   categoryName: string;
   totalQuantity: number;
+  stockQuantity: number;
   totalRevenue: number;
   dailyQuantity: Record<string, number>;
 };
@@ -26,16 +34,26 @@ export default async function ProductMovementTablePage({
   searchParams,
 }: MovementTablePageProps) {
   const params = await searchParams;
-  const range = lastFullDaysRange(7);
-  const [, report, stores, categories] = await Promise.all([
-    requireCurrentUser(),
-    getSalesDetailReport(range),
-    getStores(),
-    getCategories(),
-  ]);
+  const days = resolvePeriodDays(params?.days);
+  const range = lastFullDaysRange(days);
+  const [user, report, replenishmentReport, stores, categories] =
+    await Promise.all([
+      requireCurrentUser(),
+      getSalesDetailReport(range),
+      getReplenishmentReport(range),
+      getStores(),
+      getCategories(),
+    ]);
   const rows = buildMovementRows(report.rows, range.from, range.to, {
     storeId: params?.storeId ?? "",
     categoryName: params?.category ?? "",
+    stockRows: replenishmentReport.rows,
+  });
+  const exportParams = buildExportParams({
+    from: range.from,
+    to: range.to,
+    storeId: params?.storeId ?? "",
+    category: params?.category ?? "",
   });
 
   return (
@@ -78,8 +96,9 @@ export default async function ProductMovementTablePage({
               Движение товара
             </h1>
             <p className="mt-2 max-w-3xl text-sm text-zinc-600">
-              Продажи за последние 7 полных дней, {formatDateLabel(range.from)}{" "}
-              - {formatDateLabel(range.to)}, в разрезе SKU, клубов и категорий.
+              Продажи за последние {days} полных дней,{" "}
+              {formatDateLabel(range.from)} - {formatDateLabel(range.to)}, в
+              разрезе SKU, клубов и категорий.
             </p>
           </div>
           <Link
@@ -91,7 +110,7 @@ export default async function ProductMovementTablePage({
         </div>
       </div>
 
-      <form className="grid gap-3 border-y border-zinc-200 bg-white px-4 py-4 md:grid-cols-[minmax(0,320px)_minmax(0,320px)_auto] md:items-end">
+      <form className="grid gap-3 border-y border-zinc-200 bg-white px-4 py-4 md:grid-cols-[minmax(0,260px)_minmax(0,260px)_220px_auto] md:items-end">
         <label className="block text-xs font-medium uppercase text-zinc-500">
           Клуб
           <select
@@ -123,6 +142,18 @@ export default async function ProductMovementTablePage({
             ))}
           </select>
         </label>
+        <label className="block text-xs font-medium uppercase text-zinc-500">
+          Период
+          <select
+            name="days"
+            defaultValue={String(days)}
+            className="mt-2 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-950"
+          >
+            <option value="7">7 дней</option>
+            <option value="14">14 дней</option>
+            <option value="21">21 день</option>
+          </select>
+        </label>
         <button
           type="submit"
           className="rounded-xl bg-zinc-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
@@ -130,6 +161,32 @@ export default async function ProductMovementTablePage({
           Применить
         </button>
       </form>
+
+      <div className="flex flex-col gap-3 border-b border-zinc-200 bg-white px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-wrap gap-2">
+          <a
+            href={`/api/reports/export?${exportParams("xlsx")}`}
+            className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+          >
+            Excel
+          </a>
+          <a
+            href={`/api/reports/export?${exportParams("csv")}`}
+            className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+          >
+            1C
+          </a>
+        </div>
+        <ReportEmailInlineForm
+          defaultEmail={user.email}
+          from={range.from}
+          to={range.to}
+          storeId={params?.storeId ?? null}
+          report="product-movement"
+          extraPayload={{ category: params?.category ?? "" }}
+          buttonLabel="Отправить"
+        />
+      </div>
 
       <div className="overflow-x-auto">
         <table className="w-full min-w-[1080px] text-left text-sm">
@@ -144,6 +201,9 @@ export default async function ProductMovementTablePage({
                 </th>
               ))}
               <th className="px-4 py-3 text-right font-medium">Итого</th>
+              <th className="px-4 py-3 text-right font-medium">
+                Остаток сегодня
+              </th>
               <th className="px-4 py-3 text-right font-medium">Выручка</th>
             </tr>
           </thead>
@@ -164,6 +224,9 @@ export default async function ProductMovementTablePage({
                   {formatQuantity(row.totalQuantity)}
                 </td>
                 <td className="px-4 py-3 text-right font-semibold tabular-nums">
+                  {formatQuantity(row.stockQuantity)}
+                </td>
+                <td className="px-4 py-3 text-right font-semibold tabular-nums">
                   {formatCurrency(row.totalRevenue)}
                 </td>
               </tr>
@@ -172,7 +235,7 @@ export default async function ProductMovementTablePage({
               <tr>
                 <td
                   className="px-4 py-8 text-center text-zinc-500"
-                  colSpan={rows.dates.length + 5}
+                  colSpan={rows.dates.length + 6}
                 >
                   Продаж за период нет.
                 </td>
@@ -203,9 +266,19 @@ function buildMovementRows(
   rows: SalesDetailRow[],
   from: string,
   to: string,
-  filters: { storeId?: string; categoryName?: string },
+  filters: {
+    storeId?: string;
+    categoryName?: string;
+    stockRows: ReplenishmentRow[];
+  },
 ) {
   const dates = dateRange(from, to);
+  const stockByStoreProduct = new Map(
+    filters.stockRows.map((row) => [
+      `${row.storeId}:${row.productId}`,
+      row.stockQuantity,
+    ]),
+  );
   const filteredRows = rows.filter((row) => {
     if (filters.storeId && row.storeId !== filters.storeId) {
       return false;
@@ -223,11 +296,15 @@ function buildMovementRows(
 
   return {
     dates,
-    products: aggregateMovementRows(filteredRows, dates),
+    products: aggregateMovementRows(filteredRows, dates, stockByStoreProduct),
   };
 }
 
-function aggregateMovementRows(rows: SalesDetailRow[], dates: string[]) {
+function aggregateMovementRows(
+  rows: SalesDetailRow[],
+  dates: string[],
+  stockByStoreProduct: Map<string, number>,
+) {
   const result = new Map<string, MovementRow>();
 
   rows.forEach((row) => {
@@ -242,6 +319,7 @@ function aggregateMovementRows(rows: SalesDetailRow[], dates: string[]) {
         storeName: row.storeName,
         categoryName,
         totalQuantity: 0,
+        stockQuantity: stockByStoreProduct.get(key) ?? 0,
         totalRevenue: 0,
         dailyQuantity: Object.fromEntries(dates.map((day) => [day, 0])),
       } satisfies MovementRow);
@@ -259,6 +337,43 @@ function aggregateMovementRows(rows: SalesDetailRow[], dates: string[]) {
       b.totalQuantity - a.totalQuantity ||
       a.label.localeCompare(b.label, "ru"),
   );
+}
+
+function resolvePeriodDays(value?: string) {
+  const days = Number(value);
+
+  return days === 14 || days === 21 ? days : 7;
+}
+
+function buildExportParams({
+  from,
+  to,
+  storeId,
+  category,
+}: {
+  from: string;
+  to: string;
+  storeId: string;
+  category: string;
+}) {
+  return (format: "csv" | "xlsx") => {
+    const params = new URLSearchParams({
+      report: "product-movement",
+      format,
+      from,
+      to,
+    });
+
+    if (storeId) {
+      params.set("storeId", storeId);
+    }
+
+    if (category) {
+      params.set("category", category);
+    }
+
+    return params.toString();
+  };
 }
 
 function dateRange(from: string, to: string) {

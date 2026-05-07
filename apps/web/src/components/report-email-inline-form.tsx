@@ -8,6 +8,7 @@ type ReportEmailInlineFormProps = {
   to: string;
   storeId: string | null;
   report?: string;
+  extraPayload?: Record<string, string | number | null | undefined>;
   buttonLabel?: string;
 };
 
@@ -52,6 +53,7 @@ export function ReportEmailInlineForm({
   to,
   storeId,
   report,
+  extraPayload,
   buttonLabel = "Отправить на email",
 }: ReportEmailInlineFormProps) {
   const [error, setError] = useState<string | null>(null);
@@ -81,6 +83,7 @@ export function ReportEmailInlineForm({
           to,
           ...(storeId ? { storeId } : {}),
           ...(report ? { report } : {}),
+          ...(extraPayload ?? {}),
         }),
       });
       const data = (await response.json()) as unknown;

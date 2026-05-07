@@ -281,8 +281,6 @@ function ProductMovementSection({
           </div>
           <a
             href={fullReportHref}
-            target="_blank"
-            rel="noreferrer"
             className="inline-flex w-fit items-center rounded-xl border border-zinc-200 px-3 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
           >
             Открыть полный отчет

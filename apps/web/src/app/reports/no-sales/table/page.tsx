@@ -36,6 +36,7 @@ export default async function NoSalesTablePage({
     lastSaleDate: row.lastSaleDate ?? "",
     daysWithoutSales: row.daysWithoutSales ?? null,
     stockQuantity: row.stockQuantity,
+    frozenStockAmount: row.frozenStockAmount,
   }));
 
   return (
@@ -64,6 +65,7 @@ export default async function NoSalesTablePage({
             align: "right",
           },
           { key: "stockQuantity", label: "Остаток", align: "right" },
+          { key: "frozenStockAmount", label: "Заморожено", align: "right" },
         ]}
         filters={[
           { key: "storeName", label: "Клуб", type: "select" },

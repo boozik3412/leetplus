@@ -73,6 +73,7 @@ Connected production LAngame sources:
 - Added full/current period selectors, European date formatting, dashboard report anchors, and responsive fixes from live review.
 - Added product movement analytics: compact product-page preview, full table, 7/14/21 day periods, stock column, sorting/filtering, exports, and email.
 - Started Stage 2 commercial reports with OOS revenue/profit-at-risk estimates in tables and exports, including profit at risk for the selected period.
+- Added hybrid "Money at risk" reporting: OOS profit-at-risk plus frozen stock in no-sales products, surfaced on the dashboard and reports.
 
 ## Near-Term Backlog
 
@@ -89,6 +90,7 @@ Status: mostly implemented; continue polishing UX from live production review.
 Status: active stage.
 
 - Add lost sales / revenue-at-risk from OOS with estimated missed revenue and gross profit. Initial implementation uses "profit at risk for period"; stricter historical lost-profit calculation should later use daily stock history.
+- Add a hybrid assortment-loss view that combines OOS profit risk with frozen stock in no-sales SKU.
 - Add plan/fact by network, club, category, and supplier.
 - Add turnover, frozen money in stock, and slow SKU control.
 - Add supplier scorecard with sales, profit, write-offs, OOS, delivery quality, and problem categories.

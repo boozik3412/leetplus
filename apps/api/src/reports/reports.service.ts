@@ -91,6 +91,7 @@ export type ProductWithoutSales = {
   isCanonical: boolean;
   canonicalProductName: string | null;
   stockQuantity: number;
+  frozenStockAmount: number;
   lastSaleDate: string | null;
   daysWithoutSales: number | null;
   categoryName: string | null;
@@ -424,6 +425,7 @@ type StockByStoreProductItem = {
   categoryName: string | null;
   supplierName: string | null;
   stockQuantity: number;
+  unitCost: number;
 };
 
 type SalesFactWithCost = {
@@ -2243,6 +2245,7 @@ export class ReportsService {
         categoryName: snapshot.product.category?.name ?? null,
         supplierName: snapshot.product.supplier?.name ?? null,
         stockQuantity: snapshot.quantity.toNumber(),
+        unitCost: snapshot.product.purchasePrice?.toNumber() ?? 0,
       });
     });
 
@@ -2463,6 +2466,7 @@ export class ReportsService {
           isCanonical: item.isCanonical,
           canonicalProductName: item.canonicalProductName,
           stockQuantity: this.round(item.stockQuantity),
+          frozenStockAmount: this.round(item.stockQuantity * item.unitCost),
           lastSaleDate: lastSaleDate
             ? this.toDateInputValue(lastSaleDate)
             : null,

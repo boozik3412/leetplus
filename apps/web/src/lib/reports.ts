@@ -80,6 +80,7 @@ export type ProductWithoutSales = {
   isCanonical: boolean;
   canonicalProductName: string | null;
   stockQuantity: number;
+  frozenStockAmount: number;
   lastSaleDate: string | null;
   daysWithoutSales: number | null;
   categoryName: string | null;

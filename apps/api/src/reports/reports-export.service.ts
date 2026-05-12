@@ -349,13 +349,21 @@ export class ReportsExportService {
       ]),
       [],
       ['Товары без продаж'],
-      ['Артикул', 'Товар', 'Категория', 'Поставщик', 'Остаток, шт'],
+      [
+        'Артикул',
+        'Товар',
+        'Категория',
+        'Поставщик',
+        'Остаток, шт',
+        'Заморожено денег',
+      ],
       ...operationalReport.productsWithoutSales.map((item) => [
         item.article,
         item.name,
         item.categoryName,
         item.supplierName,
         item.stockQuantity,
+        item.frozenStockAmount,
       ]),
       [],
       ['Остатки и потребность'],
@@ -1011,6 +1019,7 @@ export class ReportsExportService {
       { header: 'Категория', key: 'categoryName', width: 24 },
       { header: 'Поставщик', key: 'supplierName', width: 24 },
       { header: 'Остаток, шт', key: 'stockQuantity', width: 18 },
+      { header: 'Заморожено денег', key: 'frozenStockAmount', width: 20 },
     ];
     sheet.addRows(operationalReport.productsWithoutSales);
     this.styleHeader(sheet);

@@ -4,6 +4,7 @@ import {
   type DashboardSalesTrendSegment,
   type DashboardTopSku,
 } from "@/lib/dashboard-summary";
+import { buildAssortmentRiskSummary } from "@/lib/assortment-risk";
 import { DashboardFilters } from "@/components/dashboard-filters";
 import { DashboardAutoSync } from "@/components/dashboard-auto-sync";
 import { DashboardQuickSyncButton } from "@/components/dashboard-quick-sync-button";
@@ -18,6 +19,7 @@ import {
   formatTrendPeriodTitle,
 } from "@/lib/trend-period-labels";
 import { requireCurrentUser } from "@/lib/auth";
+import { getOperationalReport } from "@/lib/reports";
 import { getStores } from "@/lib/stores";
 import Link from "next/link";
 
@@ -53,6 +55,20 @@ function formatQuantity(value: number) {
   return new Intl.NumberFormat("ru-RU", {
     maximumFractionDigits: 1,
   }).format(value);
+}
+
+function lastFullDaysRange(days: number) {
+  const now = new Date();
+  const toDate = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1),
+  );
+  const fromDate = new Date(toDate);
+  fromDate.setUTCDate(fromDate.getUTCDate() - (days - 1));
+
+  return {
+    from: fromDate.toISOString().slice(0, 10),
+    to: toDate.toISOString().slice(0, 10),
+  };
 }
 
 function formatShortDate(value: string) {
@@ -145,14 +161,16 @@ function findWeakestProfitCategory(rows: DashboardCategoryMetric[]) {
 function buildManagementInsights({
   summary,
   categoryAnalytics,
+  assortmentRiskAmount,
+  assortmentRiskSkuCount,
 }: {
   summary: Awaited<ReturnType<typeof getDashboardSummary>>;
   categoryAnalytics: DashboardCategoryMetric[];
+  assortmentRiskAmount: number;
+  assortmentRiskSkuCount: number;
 }) {
   const topRevenueCategory = findLargestCategory(categoryAnalytics, "revenue");
   const weakestCategory = findWeakestProfitCategory(categoryAnalytics);
-  const activeSkuShare =
-    summary.totalSku > 0 ? (summary.activeSku / summary.totalSku) * 100 : 0;
 
   return [
     {
@@ -189,13 +207,13 @@ function buildManagementInsights({
           : "warning",
     },
     {
-      label: "Активность матрицы",
-      value: `${formatPercent(activeSkuShare)}`,
-      description: `${formatQuantity(summary.activeSku)} из ${formatQuantity(
-        summary.totalSku,
-      )} SKU имеют остаток или продажи за 14 дней.`,
-      tone: activeSkuShare >= 70 ? "good" : "warning",
-      href: "/products",
+      label: "Деньги в риске",
+      value: formatMoney(assortmentRiskAmount),
+      description: `${formatQuantity(
+        assortmentRiskSkuCount,
+      )} SKU: дефицит спроса и товары без движения 21 день.`,
+      tone: assortmentRiskAmount > 0 ? "danger" : "good",
+      href: "/reports/assortment-risk/table",
     },
   ] satisfies ManagementInsight[];
 }
@@ -271,6 +289,23 @@ export default async function DashboardPage({
     getDashboardSummary(filters),
     getStores(),
   ]);
+  const operationalStoreId =
+    summary.selectedStoreIds.length === 1 ? summary.selectedStoreIds[0] : undefined;
+  const [periodOperationalReport, noSalesReport21] = await Promise.all([
+    getOperationalReport({
+      from: summary.periodFrom,
+      to: summary.periodTo,
+      storeId: operationalStoreId,
+    }),
+    getOperationalReport({
+      ...lastFullDaysRange(21),
+      storeId: operationalStoreId,
+    }),
+  ]);
+  const assortmentRisk = buildAssortmentRiskSummary({
+    oosRows: periodOperationalReport.outOfStockRiskProducts,
+    noSalesRows: noSalesReport21.productsWithoutSales,
+  });
   const highlightedPeriod = formatDashboardPeriodHighlight(
     summary.periodFrom,
     summary.periodTo,
@@ -280,6 +315,9 @@ export default async function DashboardPage({
   const managementInsights = buildManagementInsights({
     summary,
     categoryAnalytics,
+    assortmentRiskAmount: assortmentRisk.totalRiskAmount,
+    assortmentRiskSkuCount:
+      assortmentRisk.oosSkuCount + assortmentRisk.noSalesSkuCount,
   });
   const dashboardActions = buildDashboardActions({ summary, latestTrend });
 

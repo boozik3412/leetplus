@@ -12,6 +12,12 @@ function formatQuantity(value: number) {
   }).format(value);
 }
 
+function formatMoney(value: number) {
+  return new Intl.NumberFormat("ru-RU", {
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
 export function NoSalesPeriodTable({
   rowsByPeriod,
   networkBadge,
@@ -74,6 +80,7 @@ export function NoSalesPeriodTable({
                 <th className="px-5 py-3 font-medium">Категория</th>
                 <th className="px-5 py-3 font-medium">Поставщик</th>
                 <th className="px-5 py-3 text-right font-medium">Остаток</th>
+                <th className="px-5 py-3 text-right font-medium">Заморожено</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100">
@@ -90,6 +97,9 @@ export function NoSalesPeriodTable({
                   <td className="px-5 py-4 text-zinc-700">{row.supplierName ?? "—"}</td>
                   <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
                     {formatQuantity(row.stockQuantity)}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {formatMoney(row.frozenStockAmount)}
                   </td>
                 </tr>
               ))}

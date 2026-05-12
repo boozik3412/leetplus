@@ -51,6 +51,10 @@ function formatMoney(value: number) {
   }).format(value);
 }
 
+function formatRubles(value: number) {
+  return `${formatMoney(value)} руб`;
+}
+
 function formatQuantity(value: number) {
   return new Intl.NumberFormat("ru-RU", {
     maximumFractionDigits: 1,
@@ -163,11 +167,15 @@ function buildManagementInsights({
   categoryAnalytics,
   assortmentRiskAmount,
   assortmentRiskSkuCount,
+  oosProfitAtRisk,
+  frozenStockAmount,
 }: {
   summary: Awaited<ReturnType<typeof getDashboardSummary>>;
   categoryAnalytics: DashboardCategoryMetric[];
   assortmentRiskAmount: number;
   assortmentRiskSkuCount: number;
+  oosProfitAtRisk: number;
+  frozenStockAmount: number;
 }) {
   const topRevenueCategory = findLargestCategory(categoryAnalytics, "revenue");
   const weakestCategory = findWeakestProfitCategory(categoryAnalytics);
@@ -176,7 +184,7 @@ function buildManagementInsights({
     {
       label: "Лидер выручки",
       value: topRevenueCategory
-        ? `${topRevenueCategory.categoryName} · ${formatMoney(topRevenueCategory.revenue)}`
+        ? `${topRevenueCategory.categoryName} · ${formatRubles(topRevenueCategory.revenue)}`
         : "Нет данных",
       description: topRevenueCategory
         ? `Доля категории в обороте ${formatPercent(topRevenueCategory.revenueSharePercent)}.`
@@ -196,7 +204,7 @@ function buildManagementInsights({
     {
       label: "Слабая прибыльность",
       value: weakestCategory
-        ? `${weakestCategory.categoryName} · ${formatMoney(weakestCategory.grossProfit)}`
+        ? `${weakestCategory.categoryName} · ${formatRubles(weakestCategory.grossProfit)}`
         : "Нет данных",
       description: weakestCategory?.profitEfficiency
         ? `Индекс эффективности прибыли ${formatPercent(weakestCategory.profitEfficiency)}.`
@@ -208,10 +216,10 @@ function buildManagementInsights({
     },
     {
       label: "Деньги в риске",
-      value: formatMoney(assortmentRiskAmount),
-      description: `${formatQuantity(
-        assortmentRiskSkuCount,
-      )} SKU: дефицит спроса и товары без движения 21 день.`,
+      value: formatRubles(assortmentRiskAmount),
+      description: `${formatQuantity(assortmentRiskSkuCount)} SKU. Формула: OOS ${formatRubles(
+        oosProfitAtRisk,
+      )} + заморожено ${formatRubles(frozenStockAmount)}.`,
       tone: assortmentRiskAmount > 0 ? "danger" : "good",
       href: "/reports/assortment-risk/table",
     },
@@ -318,6 +326,8 @@ export default async function DashboardPage({
     assortmentRiskAmount: assortmentRisk.totalRiskAmount,
     assortmentRiskSkuCount:
       assortmentRisk.oosSkuCount + assortmentRisk.noSalesSkuCount,
+    oosProfitAtRisk: assortmentRisk.oosProfitAtRisk,
+    frozenStockAmount: assortmentRisk.frozenStockAmount,
   });
   const dashboardActions = buildDashboardActions({ summary, latestTrend });
 
@@ -460,17 +470,19 @@ export default async function DashboardPage({
 
 function ManagementFocusPanel({ insights }: { insights: ManagementInsight[] }) {
   return (
-    <section className="rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
-        <h2 className="text-base font-semibold">Главное внимание</h2>
-        <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+    <section className="overflow-hidden rounded-lg border border-amber-200 bg-amber-50/60 shadow-sm ring-1 ring-amber-100 dark:border-amber-500/30 dark:bg-amber-500/10 dark:ring-amber-500/20">
+      <div className="border-b border-amber-200 bg-amber-50 px-5 py-4 dark:border-amber-500/30 dark:bg-amber-500/10">
+        <h2 className="text-base font-semibold text-amber-950 dark:text-amber-100">
+          Главное внимание
+        </h2>
+        <p className="mt-1 text-sm text-amber-900/70 dark:text-amber-100/70">
           Сигналы, которые коммерческий директор должен увидеть до графиков.
         </p>
       </div>
-      <div className="grid gap-px bg-zinc-200 dark:bg-zinc-800 md:grid-cols-2">
+      <div className="grid gap-px bg-amber-200/70 dark:bg-amber-500/20 md:grid-cols-2">
         {insights.map((insight) => {
           const content = (
-            <div className="h-full bg-white p-5 dark:bg-zinc-950">
+            <div className="h-full bg-white/95 p-5 dark:bg-zinc-950/95">
               <p className="text-xs font-medium uppercase text-zinc-500">
                 {insight.label}
               </p>

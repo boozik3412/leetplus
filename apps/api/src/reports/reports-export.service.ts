@@ -70,6 +70,10 @@ export class ReportsExportService {
       return this.exportSalesDetailReport(user, query, format);
     }
 
+    if (query.report === 'replenishment') {
+      return this.exportReplenishmentReport(user, query, format);
+    }
+
     if (query.report === 'product-movement') {
       return this.exportProductMovementReport(user, query, format);
     }
@@ -182,6 +186,36 @@ export class ReportsExportService {
 
     return {
       buffer: await this.buildSalesDetailXlsx(report),
+      contentType:
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      fileName,
+      tenantSlug: report.tenantSlug,
+      from: report.from,
+      to: report.to,
+    };
+  }
+
+  private async exportReplenishmentReport(
+    user: AuthenticatedUser,
+    query: ReportExportQuery,
+    format: ReportExportFormat,
+  ): Promise<ReportExportFile> {
+    const report = await this.reportsService.getReplenishmentReport(user, query);
+    const fileName = `leetplus-replenishment-${report.from}-${report.to}.${format}`;
+
+    if (format === 'csv') {
+      return {
+        buffer: Buffer.from(this.buildReplenishmentCsv(report), 'utf8'),
+        contentType: 'text/csv; charset=utf-8',
+        fileName,
+        tenantSlug: report.tenantSlug,
+        from: report.from,
+        to: report.to,
+      };
+    }
+
+    return {
+      buffer: await this.buildReplenishmentXlsx(report),
       contentType:
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       fileName,
@@ -552,6 +586,46 @@ export class ReportsExportService {
     return `\uFEFF${rows.map((row) => this.csvRow(row)).join('\n')}`;
   }
 
+  private buildReplenishmentCsv(report: ReplenishmentReport) {
+    const rows: CsvCell[][] = [
+      ['Остатки и потребность'],
+      [`Период: ${report.from} - ${report.to}`],
+      [],
+      [
+        'Статус',
+        'Артикул',
+        'Товар',
+        'Клуб',
+        'Категория',
+        'Поставщик',
+        'Остаток, шт',
+        'Продано, шт',
+        'Средние продажи в день',
+        'Остаток в днях',
+        'Потребность в день',
+        'Рекомендованный заказ',
+        'Кратность заказа',
+      ],
+      ...report.rows.map((item) => [
+        this.replenishmentRiskLabel(item.risk),
+        item.article,
+        item.name,
+        item.storeName,
+        item.categoryName,
+        item.supplierName,
+        item.stockQuantity,
+        item.soldQuantity,
+        item.averageDailySales,
+        item.stockDays,
+        item.dailyNeed,
+        item.recommendedOrder,
+        item.orderMultiplicity,
+      ]),
+    ];
+
+    return `\uFEFF${rows.map((row) => this.csvRow(row)).join('\n')}`;
+  }
+
   private csvRow(row: CsvCell[]) {
     return row.map((cell) => this.csvCell(cell)).join(';');
   }
@@ -615,6 +689,16 @@ export class ReportsExportService {
     workbook.creator = 'LeetPlus';
     workbook.created = new Date();
     this.addSalesDetailSheet(workbook, report);
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    return Buffer.from(buffer);
+  }
+
+  private async buildReplenishmentXlsx(report: ReplenishmentReport) {
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'LeetPlus';
+    workbook.created = new Date();
+    this.addReplenishmentSheet(workbook, report);
 
     const buffer = await workbook.xlsx.writeBuffer();
     return Buffer.from(buffer);

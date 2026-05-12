@@ -1,6 +1,8 @@
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
+import { ReportEmailInlineForm } from "@/components/report-email-inline-form";
+import { SimpleReportTable, type SimpleReportRow } from "@/components/simple-report-table";
 import { requireCurrentUser } from "@/lib/auth";
-import { getReplenishmentReport, type ReplenishmentRisk } from "@/lib/reports";
+import { getReplenishmentReport, type ReplenishmentRisk, type ReplenishmentRow } from "@/lib/reports";
 
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
 
@@ -8,21 +10,42 @@ function searchParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function formatQuantity(value: number) {
-  return new Intl.NumberFormat("ru-RU", {
-    maximumFractionDigits: 1,
-  }).format(value);
+function formatDateLabel(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+
+  if (!match) {
+    return value;
+  }
+
+  return `${match[3]}.${match[2]}.${match[1]}`;
 }
 
 function riskLabel(risk: ReplenishmentRisk) {
   const labels: Record<ReplenishmentRisk, string> = {
     OUT_OF_STOCK: "Нет остатка",
-    LOW_STOCK: "Мало",
-    OK: "ОК",
+    LOW_STOCK: "Низкий остаток",
+    OK: "В норме",
     NO_SALES: "Нет продаж",
   };
 
   return labels[risk];
+}
+
+function toRows(rows: ReplenishmentRow[]): SimpleReportRow[] {
+  return rows.map((row) => ({
+    risk: riskLabel(row.risk),
+    article: row.article,
+    name: row.name,
+    storeName: row.storeName,
+    categoryName: row.categoryName ?? "",
+    supplierName: row.supplierName ?? "",
+    stockQuantity: row.stockQuantity,
+    soldQuantity: row.soldQuantity,
+    averageDailySales: row.averageDailySales,
+    stockDays: row.stockDays,
+    dailyNeed: row.dailyNeed,
+    recommendedOrder: row.recommendedOrder,
+  }));
 }
 
 export default async function ReplenishmentTablePage({
@@ -30,7 +53,7 @@ export default async function ReplenishmentTablePage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  const user = await requireCurrentUser();
   const params = await searchParams;
   const report = await getReplenishmentReport({
     from: searchParam(params.from),
@@ -45,84 +68,61 @@ export default async function ReplenishmentTablePage({
         <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="text-sm font-medium text-emerald-700">
-              Полный отчёт
+              Полный отчет
             </p>
             <h1 className="mt-1 text-3xl font-semibold tracking-tight">
               Остатки и потребность
             </h1>
             <p className="mt-2 max-w-3xl text-sm text-zinc-600">
-              Все позиции по клубам: остаток, среднесуточная реализация,
-              потребность и рекомендованный заказ.
+              Все позиции по клубам за период {formatDateLabel(report.from)} -{" "}
+              {formatDateLabel(report.to)}: остаток, среднесуточная
+              реализация, потребность и рекомендованный заказ.
             </p>
           </div>
           <a
             href="/reports#replenishment"
             className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
           >
-            Вернуться к отчётам
+            Вернуться к отчетам
           </a>
         </div>
       </div>
 
-      <div className="overflow-x-auto bg-white">
-        <table className="w-full min-w-[1280px] text-left text-xs">
-          <thead className="bg-zinc-100 uppercase text-zinc-500">
-            <tr>
-              <th className="px-3 py-2 font-medium">Статус</th>
-              <th className="px-3 py-2 font-medium">Артикул</th>
-              <th className="px-3 py-2 font-medium">Товар</th>
-              <th className="px-3 py-2 font-medium">Клуб</th>
-              <th className="px-3 py-2 font-medium">Категория</th>
-              <th className="px-3 py-2 font-medium">Поставщик</th>
-              <th className="px-3 py-2 text-right font-medium">Остаток</th>
-              <th className="px-3 py-2 text-right font-medium">Продано</th>
-              <th className="px-3 py-2 text-right font-medium">ССР</th>
-              <th className="px-3 py-2 text-right font-medium">Дней</th>
-              <th
-                className="px-3 py-2 text-right font-medium"
-                title="Потребность рассчитана на неделю продаж: ССР × 7 минус текущий остаток."
-              >
-                Потребность
-              </th>
-              <th className="px-3 py-2 text-right font-medium">Заказать</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-zinc-100">
-            {report.rows.map((row) => (
-              <tr key={`${row.storeId}:${row.productId}`}>
-                <td className="px-3 py-2">{riskLabel(row.risk)}</td>
-                <td className="px-3 py-2 font-mono text-[11px] text-zinc-600">
-                  {row.article}
-                </td>
-                <td className="px-3 py-2 font-medium">{row.name}</td>
-                <td className="px-3 py-2">{row.storeName}</td>
-                <td className="px-3 py-2">{row.categoryName ?? "—"}</td>
-                <td className="px-3 py-2">{row.supplierName ?? "—"}</td>
-                <td className="px-3 py-2 text-right">
-                  {formatQuantity(row.stockQuantity)}
-                </td>
-                <td className="px-3 py-2 text-right">
-                  {formatQuantity(row.soldQuantity)}
-                </td>
-                <td className="px-3 py-2 text-right">
-                  {formatQuantity(row.averageDailySales)}
-                </td>
-                <td className="px-3 py-2 text-right">
-                  {row.stockDays === null ? "—" : formatQuantity(row.stockDays)}
-                </td>
-                <td className="px-3 py-2 text-right">
-                  {formatQuantity(row.dailyNeed)}
-                </td>
-                <td className="px-3 py-2 text-right font-semibold">
-                  {row.recommendedOrder > 0
-                    ? formatQuantity(row.recommendedOrder)
-                    : "—"}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <SimpleReportTable
+        title="Остатки и потребность"
+        rows={toRows(report.rows)}
+        columns={[
+          { key: "risk", label: "Статус" },
+          { key: "article", label: "Артикул" },
+          { key: "name", label: "Товар" },
+          { key: "storeName", label: "Клуб" },
+          { key: "categoryName", label: "Категория" },
+          { key: "supplierName", label: "Поставщик" },
+          { key: "stockQuantity", label: "Остаток", align: "right" },
+          { key: "soldQuantity", label: "Продано", align: "right" },
+          { key: "averageDailySales", label: "ССР", align: "right" },
+          { key: "stockDays", label: "Дней", align: "right" },
+          { key: "dailyNeed", label: "Потребность", align: "right" },
+          { key: "recommendedOrder", label: "Заказать", align: "right" },
+        ]}
+        filters={[
+          { key: "risk", label: "Статус", type: "multi-select" },
+          { key: "storeName", label: "Клуб", type: "multi-select" },
+          { key: "categoryName", label: "Категория", type: "multi-select" },
+          { key: "supplierName", label: "Поставщик", type: "multi-select" },
+          { key: "name", label: "Товар", type: "text" },
+        ]}
+        extraActions={
+          <ReportEmailInlineForm
+            defaultEmail={user.email}
+            from={report.from}
+            to={report.to}
+            storeId={report.storeId}
+            report="replenishment"
+            buttonLabel="Отправить"
+          />
+        }
+      />
     </main>
   );
 }

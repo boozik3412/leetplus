@@ -1,6 +1,6 @@
 # LeetPlus Project State
 
-Last updated: 2026-05-07
+Last updated: 2026-05-12
 
 ## Current Workflow
 
@@ -79,21 +79,26 @@ Connected production LAngame sources:
 
 ### Stage 1. Management Dashboard
 
-Status: mostly implemented; continue polishing UX from live production review.
+Status: implemented; remains in production UX polish mode.
 
-- Keep the first screen focused on commercial control: revenue, gross profit, margin, sold units, OOS risk, and stock.
-- Refine period-to-period comparison copy and responsive layout after live checks.
-- Continue tightening direct action links from dashboard cards to the relevant reports.
+- Done: first screen is focused on commercial control: revenue, gross profit, margin, sold units, OOS risk, stock, management focus, actions, and "what changed".
+- Done: current/full period selectors, default current-day view, European date formatting, report anchors, responsive fixes, and compact report previews.
+- Done: "What changed" now compares the latest full day against the previous full day for current-day mode; other periods keep analogous-period comparison.
+- Done: "Main focus" includes money units in financial values and links "Money at risk" to the hybrid assortment-loss report.
+- Next polish: continue adjusting color accents, wording, and direct action links from live `leetplus.ru` review.
 
 ### Stage 2. Commercial Reports
 
-Status: active stage.
+Status: active; first commercial-risk layer is implemented, next focus is deeper filters/export coverage and stronger economics.
 
-- Add lost sales / revenue-at-risk from OOS with estimated missed revenue and gross profit. Initial implementation uses "profit at risk for period"; stricter historical lost-profit calculation should later use daily stock history.
-- Add a hybrid assortment-loss view that combines OOS profit risk with frozen stock in no-sales SKU.
-- Add plan/fact by network, club, category, and supplier.
-- Add turnover, frozen money in stock, and slow SKU control.
-- Add supplier scorecard with sales, profit, write-offs, OOS, delivery quality, and problem categories.
+- Done: OOS report has revenue/profit-at-risk estimates per day and profit at risk for the selected period.
+- Done: hybrid "Money at risk" report combines OOS profit risk with frozen stock in no-sales SKU and is visible from dashboard and reports.
+- Done: frozen stock fallback uses available cost/sale price so positions without cost do not collapse to 0 rubles when a sale price is known.
+- In progress: replenishment report needs export/email, filters by status/product/club/supplier/category, and sorting by stock, sales, demand, and recommended order.
+- Next: validate the frozen-stock formula against real production data and explain assumptions in the report UI.
+- Next: add turnover, frozen money in stock, and slow SKU control beyond the current no-sales/OOS hybrid.
+- Planned: add plan/fact by network, club, category, and supplier.
+- Planned: add supplier scorecard with sales, profit, write-offs, OOS, delivery quality, and problem categories.
 
 ### Stage 3. Assortment Matrix
 

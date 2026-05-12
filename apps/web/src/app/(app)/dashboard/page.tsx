@@ -219,7 +219,7 @@ function buildManagementInsights({
       value: formatRubles(assortmentRiskAmount),
       description: `${formatQuantity(assortmentRiskSkuCount)} SKU. Формула: OOS ${formatRubles(
         oosProfitAtRisk,
-      )} + заморожено ${formatRubles(frozenStockAmount)}.`,
+      )} + замороженный остаток ${formatRubles(frozenStockAmount)}.`,
       tone: assortmentRiskAmount > 0 ? "danger" : "good",
       href: "/reports/assortment-risk/table",
     },

@@ -407,6 +407,7 @@ type StockSnapshot = {
     article: string;
     name: string;
     purchasePrice?: { toNumber: () => number };
+    salePrice?: { toNumber: () => number };
     canonicalProduct: { name: string } | null;
     category: { name: string } | null;
     supplier: { name: string } | null;
@@ -660,6 +661,7 @@ export class ReportsService {
               article: true,
               name: true,
               purchasePrice: true,
+              salePrice: true,
               canonicalProduct: {
                 select: { name: true },
               },
@@ -712,6 +714,7 @@ export class ReportsService {
               article: true,
               name: true,
               purchasePrice: true,
+              salePrice: true,
               canonicalProduct: {
                 select: { name: true },
               },
@@ -1440,6 +1443,8 @@ export class ReportsService {
               select: {
                 article: true,
                 name: true,
+                purchasePrice: true,
+                salePrice: true,
                 canonicalProduct: {
                   select: { name: true },
                 },
@@ -2245,11 +2250,24 @@ export class ReportsService {
         categoryName: snapshot.product.category?.name ?? null,
         supplierName: snapshot.product.supplier?.name ?? null,
         stockQuantity: snapshot.quantity.toNumber(),
-        unitCost: snapshot.product.purchasePrice?.toNumber() ?? 0,
+        unitCost: this.stockUnitValue(snapshot.product),
       });
     });
 
     return stockByStoreProduct;
+  }
+
+  private stockUnitValue(product: {
+    purchasePrice?: { toNumber: () => number };
+    salePrice?: { toNumber: () => number };
+  }) {
+    const purchasePrice = product.purchasePrice?.toNumber() ?? 0;
+
+    if (purchasePrice > 0) {
+      return purchasePrice;
+    }
+
+    return product.salePrice?.toNumber() ?? 0;
   }
 
   private recommendedOrder(

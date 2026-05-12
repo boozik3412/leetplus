@@ -332,6 +332,7 @@ export class ReportsExportService {
         'Средние продажи в день',
         'Выручка в риске / день',
         'Прибыль в риске / день',
+        'Прибыль в риске за период',
         'Остаток в днях',
       ],
       ...operationalReport.outOfStockRiskProducts.map((item) => [
@@ -343,6 +344,7 @@ export class ReportsExportService {
         item.averageDailySales,
         item.revenueAtRiskPerDay,
         item.grossProfitAtRiskPerDay,
+        item.grossProfitAtRiskForPeriod,
         item.stockDays,
       ]),
       [],
@@ -986,6 +988,11 @@ export class ReportsExportService {
         header: 'Прибыль в риске / день',
         key: 'grossProfitAtRiskPerDay',
         width: 24,
+      },
+      {
+        header: 'Прибыль в риске за период',
+        key: 'grossProfitAtRiskForPeriod',
+        width: 26,
       },
       { header: 'Остаток в днях', key: 'stockDays', width: 18 },
     ];

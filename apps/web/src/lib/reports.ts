@@ -67,6 +67,7 @@ export type OutOfStockRiskProduct = {
   averageDailySales: number;
   revenueAtRiskPerDay: number;
   grossProfitAtRiskPerDay: number;
+  grossProfitAtRiskForPeriod: number;
   stockDays: number;
 };
 

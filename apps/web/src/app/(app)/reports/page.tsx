@@ -1001,6 +1001,9 @@ function RiskTable({
                 <th className="px-5 py-3 text-right font-medium">
                   Прибыль/день
                 </th>
+                <th className="px-5 py-3 text-right font-medium">
+                  Прибыль за период
+                </th>
                 <th className="px-5 py-3 text-right font-medium">Дней</th>
               </tr>
             </thead>
@@ -1028,6 +1031,9 @@ function RiskTable({
                   </td>
                   <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
                     {formatMoney(row.grossProfitAtRiskPerDay)}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {formatMoney(row.grossProfitAtRiskForPeriod)}
                   </td>
                   <td className="px-5 py-4 text-right tabular-nums text-red-700">
                     {formatQuantity(row.stockDays)}

@@ -72,7 +72,7 @@ Connected production LAngame sources:
 - Reworked the management dashboard around commercial control: first-screen KPI composition, "what changed", "main focus", and "what to do today" blocks.
 - Added full/current period selectors, European date formatting, dashboard report anchors, and responsive fixes from live review.
 - Added product movement analytics: compact product-page preview, full table, 7/14/21 day periods, stock column, sorting/filtering, exports, and email.
-- Started Stage 2 commercial reports with OOS revenue/profit-at-risk estimates in tables and exports.
+- Started Stage 2 commercial reports with OOS revenue/profit-at-risk estimates in tables and exports, including profit at risk for the selected period.
 
 ## Near-Term Backlog
 
@@ -88,7 +88,7 @@ Status: mostly implemented; continue polishing UX from live production review.
 
 Status: active stage.
 
-- Add lost sales / revenue-at-risk from OOS with estimated missed revenue and gross profit.
+- Add lost sales / revenue-at-risk from OOS with estimated missed revenue and gross profit. Initial implementation uses "profit at risk for period"; stricter historical lost-profit calculation should later use daily stock history.
 - Add plan/fact by network, club, category, and supplier.
 - Add turnover, frozen money in stock, and slow SKU control.
 - Add supplier scorecard with sales, profit, write-offs, OOS, delivery quality, and problem categories.

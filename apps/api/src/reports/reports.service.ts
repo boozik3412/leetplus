@@ -78,6 +78,7 @@ export type OutOfStockRiskProduct = {
   averageDailySales: number;
   revenueAtRiskPerDay: number;
   grossProfitAtRiskPerDay: number;
+  grossProfitAtRiskForPeriod: number;
   stockDays: number;
 };
 
@@ -819,6 +820,7 @@ export class ReportsService {
       demandProductSales,
       stockByStoreProduct,
       DEMAND_PERIOD_DAYS,
+      periodDays,
       excludedProductIds,
     );
     const productsWithoutSales = this.productsWithoutSales(
@@ -2296,7 +2298,8 @@ export class ReportsService {
   private outOfStockRiskProducts(
     productSales: Map<string, ProductSales>,
     stockByStoreProduct: Map<string, StockByStoreProductItem>,
-    periodDays: number,
+    demandPeriodDays: number,
+    selectedPeriodDays: number,
     excludedProductIds: Set<string>,
   ): OutOfStockRiskProduct[] {
     return [...productSales.values()]
@@ -2306,15 +2309,16 @@ export class ReportsService {
           Boolean(sale.storeId && sale.storeName),
       )
       .map((sale) => {
-        const averageDailySales = sale.quantity / periodDays;
+        const averageDailySales = sale.quantity / demandPeriodDays;
         const stockItem = stockByStoreProduct.get(
           `${sale.storeId}:${sale.productId}`,
         );
         const stockQuantity = stockItem?.stockQuantity ?? 0;
         const stockDays =
           averageDailySales > 0 ? stockQuantity / averageDailySales : 0;
-        const revenueAtRiskPerDay = sale.revenue / periodDays;
-        const grossProfitAtRiskPerDay = (sale.revenue - sale.cost) / periodDays;
+        const revenueAtRiskPerDay = sale.revenue / demandPeriodDays;
+        const grossProfitAtRiskPerDay =
+          (sale.revenue - sale.cost) / demandPeriodDays;
 
         return {
           productId: sale.productId,
@@ -2329,6 +2333,9 @@ export class ReportsService {
           averageDailySales: this.round(averageDailySales),
           revenueAtRiskPerDay: this.round(revenueAtRiskPerDay),
           grossProfitAtRiskPerDay: this.round(grossProfitAtRiskPerDay),
+          grossProfitAtRiskForPeriod: this.round(
+            grossProfitAtRiskPerDay * selectedPeriodDays,
+          ),
           stockDays: this.round(stockDays),
         };
       })

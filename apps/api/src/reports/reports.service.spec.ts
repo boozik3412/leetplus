@@ -319,6 +319,7 @@ describe('ReportsService', () => {
         averageDailySales: 1,
         revenueAtRiskPerDay: 100,
         grossProfitAtRiskPerDay: 19,
+        grossProfitAtRiskForPeriod: 190.5,
         stockDays: 2,
       },
     ]);

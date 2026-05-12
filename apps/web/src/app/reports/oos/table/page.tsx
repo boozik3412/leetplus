@@ -29,6 +29,7 @@ export default async function OosTablePage({
     averageDailySales: row.averageDailySales,
     revenueAtRiskPerDay: row.revenueAtRiskPerDay,
     grossProfitAtRiskPerDay: row.grossProfitAtRiskPerDay,
+    grossProfitAtRiskForPeriod: row.grossProfitAtRiskForPeriod,
     stockDays: row.stockDays,
   }));
 
@@ -59,6 +60,11 @@ export default async function OosTablePage({
           {
             key: "grossProfitAtRiskPerDay",
             label: "Прибыль в риске / день",
+            align: "right",
+          },
+          {
+            key: "grossProfitAtRiskForPeriod",
+            label: "Прибыль в риске за период",
             align: "right",
           },
           { key: "stockDays", label: "Остаток в днях", align: "right" },

@@ -130,6 +130,17 @@ function getLatestTrendSegment(rows: DashboardSalesTrendSegment[]) {
   return rows.at(-1) ?? null;
 }
 
+function getComparableTrendSegment(
+  rows: DashboardSalesTrendSegment[],
+  period: string,
+) {
+  if (period === "day") {
+    return rows.at(-2) ?? null;
+  }
+
+  return getLatestTrendSegment(rows);
+}
+
 function findLargestCategory(
   rows: DashboardCategoryMetric[],
   key: "revenue" | "grossProfit",
@@ -320,6 +331,10 @@ export default async function DashboardPage({
   );
   const categoryAnalytics = summary.categoryAnalytics ?? [];
   const latestTrend = getLatestTrendSegment(summary.salesTrend);
+  const comparableTrend = getComparableTrendSegment(
+    summary.salesTrend,
+    filters.period,
+  );
   const managementInsights = buildManagementInsights({
     summary,
     categoryAnalytics,
@@ -435,7 +450,11 @@ export default async function DashboardPage({
           <TodayActionsPanel actions={dashboardActions} />
         </section>
 
-        <ChangeSnapshotPanel latestTrend={latestTrend} summary={summary} />
+        <ChangeSnapshotPanel
+          latestTrend={comparableTrend}
+          period={filters.period}
+          summary={summary}
+        />
 
         <SalesTrendPanel
           rows={summary.salesTrend}
@@ -470,16 +489,16 @@ export default async function DashboardPage({
 
 function ManagementFocusPanel({ insights }: { insights: ManagementInsight[] }) {
   return (
-    <section className="overflow-hidden rounded-lg border border-amber-200 bg-amber-50/60 shadow-sm ring-1 ring-amber-100 dark:border-amber-500/30 dark:bg-amber-500/10 dark:ring-amber-500/20">
-      <div className="border-b border-amber-200 bg-amber-50 px-5 py-4 dark:border-amber-500/30 dark:bg-amber-500/10">
-        <h2 className="text-base font-semibold text-amber-950 dark:text-amber-100">
+    <section className="overflow-hidden rounded-lg border border-cyan-200 bg-cyan-50/60 shadow-sm ring-1 ring-cyan-100 dark:border-cyan-500/30 dark:bg-cyan-500/10 dark:ring-cyan-500/20">
+      <div className="border-b border-cyan-200 bg-cyan-50 px-5 py-4 dark:border-cyan-500/30 dark:bg-cyan-500/10">
+        <h2 className="text-base font-semibold text-cyan-950 dark:text-cyan-100">
           Главное внимание
         </h2>
-        <p className="mt-1 text-sm text-amber-900/70 dark:text-amber-100/70">
+        <p className="mt-1 text-sm text-cyan-900/70 dark:text-cyan-100/70">
           Сигналы, которые коммерческий директор должен увидеть до графиков.
         </p>
       </div>
-      <div className="grid gap-px bg-amber-200/70 dark:bg-amber-500/20 md:grid-cols-2">
+      <div className="grid gap-px bg-cyan-200/70 dark:bg-cyan-500/20 md:grid-cols-2">
         {insights.map((insight) => {
           const content = (
             <div className="h-full bg-white/95 p-5 dark:bg-zinc-950/95">
@@ -568,20 +587,25 @@ function TodayActionsPanel({ actions }: { actions: DashboardAction[] }) {
 
 function ChangeSnapshotPanel({
   latestTrend,
+  period,
   summary,
 }: {
   latestTrend: DashboardSalesTrendSegment | null;
+  period: string;
   summary: Awaited<ReturnType<typeof getDashboardSummary>>;
 }) {
+  const description =
+    period === "day"
+      ? "Последние полные сутки сравниваются с предыдущими полными сутками."
+      : "Последний отрезок динамики сравнивается с предыдущим аналогичным отрезком. Корректная оценка период к периоду только в полных периодах.";
+
   return (
     <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
       <div className="flex flex-col gap-4 min-[1145px]:flex-row min-[1145px]:items-center min-[1145px]:justify-between max-[1144px]:grid max-[1144px]:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] max-[1144px]:items-center">
         <div>
           <h2 className="text-base font-semibold">Что изменилось</h2>
           <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-            Последний отрезок динамики сравнивается с предыдущим аналогичным
-            отрезком. Корректная оценка период к периоду только в полных
-            периодах.
+            {description}
           </p>
         </div>
         <div className="grid gap-3 sm:grid-cols-2 min-[1145px]:grid-cols-4">

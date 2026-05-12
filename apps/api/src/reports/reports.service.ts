@@ -694,6 +694,8 @@ export class ReportsService {
           storeId: true,
           productId: true,
           saleDate: true,
+          quantity: true,
+          revenue: true,
         },
         orderBy: {
           saleDate: 'desc',
@@ -807,6 +809,8 @@ export class ReportsService {
     const periodProductSalesByStoreProduct =
       this.productSalesByStoreProduct(salesFacts);
     const lastSaleByStoreProduct = this.lastSaleByStoreProduct(lastSalesFacts);
+    const historicalUnitRevenueByStoreProduct =
+      this.unitRevenueByStoreProduct(lastSalesFacts);
     const incomingStockByStoreProduct = this.incomingStockByStoreProduct(
       inventorySnapshots,
       period.fromDate,
@@ -833,6 +837,7 @@ export class ReportsService {
       periodProductSalesByStoreProduct,
       excludedProductIds,
       lastSaleByStoreProduct,
+      historicalUnitRevenueByStoreProduct,
       incomingStockByStoreProduct,
       period.toDate,
     );
@@ -2459,6 +2464,7 @@ export class ReportsService {
     productSales: Map<string, ProductSales>,
     excludedProductIds: Set<string>,
     lastSaleByStoreProduct: Map<string, Date>,
+    historicalUnitRevenueByStoreProduct: Map<string, number>,
     incomingStockByStoreProduct: Set<string>,
     periodToDate: Date,
   ): ProductWithoutSales[] {
@@ -2474,6 +2480,11 @@ export class ReportsService {
         const lastSaleDate =
           lastSaleByStoreProduct.get(`${item.storeId}:${item.productId}`) ??
           null;
+        const key = `${item.storeId}:${item.productId}`;
+        const unitValue =
+          item.unitCost > 0
+            ? item.unitCost
+            : (historicalUnitRevenueByStoreProduct.get(key) ?? 0);
 
         return {
           productId: item.productId,
@@ -2484,7 +2495,7 @@ export class ReportsService {
           isCanonical: item.isCanonical,
           canonicalProductName: item.canonicalProductName,
           stockQuantity: this.round(item.stockQuantity),
-          frozenStockAmount: this.round(item.stockQuantity * item.unitCost),
+          frozenStockAmount: this.round(item.stockQuantity * unitValue),
           lastSaleDate: lastSaleDate
             ? this.toDateInputValue(lastSaleDate)
             : null,
@@ -2558,6 +2569,38 @@ export class ReportsService {
     });
 
     return lastSaleByStoreProduct;
+  }
+
+  private unitRevenueByStoreProduct(
+    salesFacts: {
+      storeId: string;
+      productId: string;
+      quantity: { toNumber: () => number };
+      revenue: { toNumber: () => number };
+    }[],
+  ) {
+    const revenueByStoreProduct = new Map<
+      string,
+      { quantity: number; revenue: number }
+    >();
+
+    salesFacts.forEach((fact) => {
+      const key = `${fact.storeId}:${fact.productId}`;
+      const current = revenueByStoreProduct.get(key) ?? {
+        quantity: 0,
+        revenue: 0,
+      };
+
+      current.quantity += fact.quantity.toNumber();
+      current.revenue += fact.revenue.toNumber();
+      revenueByStoreProduct.set(key, current);
+    });
+
+    return new Map(
+      [...revenueByStoreProduct.entries()]
+        .filter(([, value]) => value.quantity > 0 && value.revenue > 0)
+        .map(([key, value]) => [key, value.revenue / value.quantity]),
+    );
   }
 
   private daysBetween(from: Date, to: Date) {

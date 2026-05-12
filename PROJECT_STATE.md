@@ -94,7 +94,8 @@ Status: active; first commercial-risk layer is implemented, next focus is deeper
 - Done: OOS report has revenue/profit-at-risk estimates per day and profit at risk for the selected period.
 - Done: hybrid "Money at risk" report combines OOS profit risk with frozen stock in no-sales SKU and is visible from dashboard and reports.
 - Done: frozen stock fallback uses available cost/sale price so positions without cost do not collapse to 0 rubles when a sale price is known.
-- In progress: replenishment report needs export/email, filters by status/product/club/supplier/category, and sorting by stock, sales, demand, and recommended order.
+- Done: replenishment report full table has status/product/club/supplier/category filters, sortable stock/sales/demand/order columns, server XLSX/CSV export, local Excel/1C/PDF export, and email sending.
+- Next: improve server-side export so it can optionally respect the current client-side filters from the table.
 - Next: validate the frozen-stock formula against real production data and explain assumptions in the report UI.
 - Next: add turnover, frozen money in stock, and slow SKU control beyond the current no-sales/OOS hybrid.
 - Planned: add plan/fact by network, club, category, and supplier.

@@ -48,6 +48,31 @@ function toRows(rows: ReplenishmentRow[]): SimpleReportRow[] {
   }));
 }
 
+function exportHref({
+  from,
+  to,
+  storeId,
+  format,
+}: {
+  from: string;
+  to: string;
+  storeId: string | null;
+  format: "xlsx" | "csv";
+}) {
+  const params = new URLSearchParams({
+    report: "replenishment",
+    format,
+    from,
+    to,
+  });
+
+  if (storeId) {
+    params.set("storeId", storeId);
+  }
+
+  return `/api/reports/export?${params.toString()}`;
+}
+
 export default async function ReplenishmentTablePage({
   searchParams,
 }: {
@@ -113,14 +138,38 @@ export default async function ReplenishmentTablePage({
           { key: "name", label: "Товар", type: "text" },
         ]}
         extraActions={
-          <ReportEmailInlineForm
-            defaultEmail={user.email}
-            from={report.from}
-            to={report.to}
-            storeId={report.storeId}
-            report="replenishment"
-            buttonLabel="Отправить"
-          />
+          <>
+            <a
+              href={exportHref({
+                from: report.from,
+                to: report.to,
+                storeId: report.storeId,
+                format: "xlsx",
+              })}
+              className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
+            >
+              XLSX файл
+            </a>
+            <a
+              href={exportHref({
+                from: report.from,
+                to: report.to,
+                storeId: report.storeId,
+                format: "csv",
+              })}
+              className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
+            >
+              CSV файл
+            </a>
+            <ReportEmailInlineForm
+              defaultEmail={user.email}
+              from={report.from}
+              to={report.to}
+              storeId={report.storeId}
+              report="replenishment"
+              buttonLabel="Отправить"
+            />
+          </>
         }
       />
     </main>

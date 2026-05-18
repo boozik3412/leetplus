@@ -82,6 +82,7 @@ Connected production LAngame sources:
 - Started Stage 2 commercial reports with OOS revenue/profit-at-risk estimates in tables and exports, including profit at risk for the selected period.
 - Added hybrid "Money at risk" reporting: OOS profit-at-risk plus frozen stock in no-sales products, surfaced on the dashboard and reports.
 - Prepared `GUEST_MANAGEMENT_MODULE_TZ.md`: a draft specification for a future separate "Guests" module. Development is not started until the scope is approved.
+- Started MVP 1 for the "Guests" module: added guest data foundation schema, LAngame guest endpoint client methods, and a protected manual foundation sync/profiling endpoint.
 
 ## Near-Term Backlog
 
@@ -135,11 +136,12 @@ Status: active; first commercial-risk layer is implemented, next focus is deeper
 
 ### Stage 7. Guest Management Module
 
-Status: specification drafted; development has not started and requires separate approval.
+Status: MVP 1 data foundation is started after approval; no guest UI or automatic rewards are implemented yet.
 
 - Source document: `GUEST_MANAGEMENT_MODULE_TZ.md`.
 - Product navigation: introduce two left-nav blocks, "Ассортимент" and "Гости".
 - First technical step after approval: data profiling for guest-related LAngame endpoints before building UI.
+- Done: initial tenant-scoped guest foundation tables and manual endpoint `POST /integrations/langame/guests/foundation/sync`.
 - Planned data foundation: guests, guest groups, balances, bonus balances, sessions, transactions, all operations log, product expenses by guest, clubs, tariffs, shifts, and PC context.
 - Planned analytics: guest dashboard, guest list, guest card, RFM, retention, churn risk, heatmaps, LTV, bonus load, campaign effect, and guest-flow forecasts.
 - Planned CRM layer: segments, saved audiences, CRM statuses, notes, tasks, communication history, and next-best-action recommendations.

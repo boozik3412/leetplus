@@ -2,9 +2,16 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import type {
   LangameClub,
   LangameGood,
+  LangameGuest,
+  LangameGuestBalance,
+  LangameGuestBonusBalance,
+  LangameGuestGroup,
+  LangameGuestLog,
+  LangameGuestSession,
   LangameOperationLog,
   LangameProduct,
   LangameProductExpense,
+  LangameTransaction,
 } from './langame.types';
 
 type LangameResponse<T> = {
@@ -42,6 +49,94 @@ export class LangameClient {
     return this.getList<LangameProductExpense>(
       baseUrl,
       '/products/expense',
+      apiKey,
+      {
+        page: String(params.page),
+        page_limit: String(params.pageLimit),
+        date_from: params.dateFrom,
+        date_to: params.dateTo,
+      },
+    );
+  }
+
+  async listGuests(baseUrl: string, apiKey: string) {
+    return this.getList<LangameGuest>(baseUrl, '/guests/list', apiKey);
+  }
+
+  async listGuestGroups(baseUrl: string, apiKey: string) {
+    return this.getList<LangameGuestGroup>(baseUrl, '/guests/groups', apiKey);
+  }
+
+  async listGuestBalances(baseUrl: string, apiKey: string) {
+    return this.getList<LangameGuestBalance>(
+      baseUrl,
+      '/guests/balance',
+      apiKey,
+    );
+  }
+
+  async listGuestBonusBalances(baseUrl: string, apiKey: string) {
+    return this.getList<LangameGuestBonusBalance>(
+      baseUrl,
+      '/guests/bonus_balance',
+      apiKey,
+    );
+  }
+
+  async listGuestSessions(
+    baseUrl: string,
+    apiKey: string,
+    params: {
+      page: number;
+      pageLimit: number;
+      dateFrom: string;
+      dateTo: string;
+    },
+  ) {
+    return this.getList<LangameGuestSession>(
+      baseUrl,
+      '/guests/sessions',
+      apiKey,
+      {
+        page: String(params.page),
+        page_limit: String(params.pageLimit),
+        date_from: params.dateFrom,
+        date_to: params.dateTo,
+      },
+    );
+  }
+
+  async listGuestLogs(
+    baseUrl: string,
+    apiKey: string,
+    params: {
+      page: number;
+      pageLimit: number;
+      dateFrom: string;
+      dateTo: string;
+    },
+  ) {
+    return this.getList<LangameGuestLog>(baseUrl, '/guests/logs', apiKey, {
+      page: String(params.page),
+      page_limit: String(params.pageLimit),
+      date_from: params.dateFrom,
+      date_to: params.dateTo,
+    });
+  }
+
+  async listTransactions(
+    baseUrl: string,
+    apiKey: string,
+    params: {
+      page: number;
+      pageLimit: number;
+      dateFrom: string;
+      dateTo: string;
+    },
+  ) {
+    return this.getList<LangameTransaction>(
+      baseUrl,
+      '/transactions/list',
       apiKey,
       {
         page: String(params.page),

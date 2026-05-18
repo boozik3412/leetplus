@@ -1,0 +1,286 @@
+import { IntegrationProvider, UserRole } from '@prisma/client';
+import { GuestDataFoundationService } from './guest-data-foundation.service';
+
+const user = {
+  id: 'user-1',
+  email: 'owner@example.com',
+  fullName: 'Owner',
+  role: UserRole.OWNER,
+  isPlatformAdmin: false,
+  tenantId: 'tenant-1',
+  tenantSlug: 'tenant',
+};
+
+type GuestUpsertCall = {
+  create: {
+    tenantId: string;
+    externalProvider: IntegrationProvider;
+    externalDomain: string;
+    externalGuestId: string;
+    phoneMasked: string | null;
+    emailMasked: string | null;
+    fullNameMasked: string | null;
+    phoneHash: string | null;
+    emailHash: string | null;
+    fullNameHash: string | null;
+    identityDocumentPresent: boolean;
+  };
+};
+
+type ProfileRunUpdateCall = {
+  data: {
+    status: string;
+    guestsCount: number;
+    sessionsCount: number;
+    transactionsCount: number;
+    productSalesLinked: number;
+    profile: {
+      guests: {
+        withIdentityDocument: number;
+      };
+    };
+  };
+};
+
+describe('GuestDataFoundationService', () => {
+  const prisma = {
+    guestDataProfileRun: {
+      create: jest.fn(),
+      update: jest.fn(),
+    },
+    guestGroup: {
+      upsert: jest.fn(),
+    },
+    guest: {
+      upsert: jest.fn(),
+      findMany: jest.fn(),
+    },
+    guestBalanceSnapshot: {
+      upsert: jest.fn(),
+    },
+    guestBonusBalanceSnapshot: {
+      upsert: jest.fn(),
+    },
+    guestSession: {
+      upsert: jest.fn(),
+    },
+    guestLog: {
+      upsert: jest.fn(),
+    },
+    guestTransaction: {
+      upsert: jest.fn(),
+    },
+    guestOperationLog: {
+      upsert: jest.fn(),
+    },
+    salesFact: {
+      updateMany: jest.fn(),
+    },
+    store: {
+      findMany: jest.fn(),
+    },
+  };
+  const tenantContextService = {
+    resolve: jest.fn(),
+  };
+  const langameClient = {
+    listGuestGroups: jest.fn(),
+    listGuests: jest.fn(),
+    listGuestBalances: jest.fn(),
+    listGuestBonusBalances: jest.fn(),
+    listGuestSessions: jest.fn(),
+    listTransactions: jest.fn(),
+    listGuestLogs: jest.fn(),
+    listAllOperationsLog: jest.fn(),
+    listProductExpenses: jest.fn(),
+  };
+  const langameSettingsService = {
+    resolveTenantAccess: jest.fn(),
+  };
+  const configService = {
+    get: jest.fn(),
+  };
+
+  let service: GuestDataFoundationService;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+
+    tenantContextService.resolve.mockResolvedValue({
+      tenantId: 'tenant-1',
+      tenantSlug: 'tenant',
+    });
+    langameSettingsService.resolveTenantAccess.mockResolvedValue({
+      apiKey: 'api-key',
+      sources: [
+        {
+          id: 'source-1',
+          baseUrl: 'https://club.example/public_api',
+          domain: 'club.example',
+        },
+      ],
+    });
+    configService.get.mockImplementation((key: string) =>
+      key === 'APP_ENCRYPTION_KEY' ? 'local-secret' : undefined,
+    );
+
+    prisma.guestDataProfileRun.create.mockResolvedValue({ id: 'run-1' });
+    prisma.guestDataProfileRun.update.mockResolvedValue({});
+    prisma.store.findMany.mockResolvedValue([
+      { id: 'store-1', externalClubId: '10' },
+    ]);
+    prisma.guest.findMany.mockResolvedValue([
+      { id: 'guest-1', externalGuestId: '42' },
+    ]);
+    prisma.salesFact.updateMany.mockResolvedValue({ count: 1 });
+
+    langameClient.listGuestGroups.mockResolvedValue([
+      { id: 7, name: 'VIP', percent: '10' },
+    ]);
+    langameClient.listGuests.mockResolvedValue([
+      {
+        guest_id: 42,
+        guest_type_id: 7,
+        phone: '+7 999 111-22-33',
+        email: 'Guest@Example.com',
+        fio: 'Ivan Petrov',
+        birthday: '1990-05-10',
+        date_insert: '2026-01-01 10:00:00',
+        date_last_activity: '2026-05-01 11:00:00',
+        identity_document: 'passport',
+        identity_document_data: { number: '1234' },
+      },
+    ]);
+    langameClient.listGuestBalances.mockResolvedValue([
+      { guest_id: 42, balance: '1500.50' },
+    ]);
+    langameClient.listGuestBonusBalances.mockResolvedValue([
+      { guest_id: 42, bonus_balance: '250' },
+    ]);
+    langameClient.listGuestSessions.mockResolvedValue([
+      {
+        id: 100,
+        guest_id: 42,
+        list_clubs_id: 10,
+        date_start: '2026-05-01 10:00:00',
+        date_stop: '2026-05-01 12:00:00',
+      },
+    ]);
+    langameClient.listTransactions.mockResolvedValue([
+      {
+        id: 200,
+        real_guest_id: 42,
+        list_clubs_id: 10,
+        type: 'deposit',
+        date: '2026-05-01 09:00:00',
+        sum: '1000',
+        balance: '1500.50',
+      },
+    ]);
+    langameClient.listGuestLogs.mockResolvedValue([
+      { guest_id: 42, type: 'login', date: '2026-05-01 10:00:00' },
+    ]);
+    langameClient.listAllOperationsLog.mockResolvedValue([
+      {
+        club_id: 10,
+        type: 'cash',
+        date_normal: '2026-05-01 09:00:00',
+        sum: '1000',
+      },
+    ]);
+    langameClient.listProductExpenses.mockResolvedValue([
+      {
+        id: 300,
+        date: '2026-05-01 12:10:00',
+        list_goods_id: 5,
+        list_clubs_id: 10,
+        real_guest_id: 42,
+        price_purchase: '50',
+        price_sale: 100,
+        count: 2,
+        cancel: 0,
+      },
+    ]);
+
+    service = new GuestDataFoundationService(
+      prisma as never,
+      tenantContextService as never,
+      langameClient as never,
+      langameSettingsService as never,
+      configService as never,
+    );
+  });
+
+  it('syncs guest foundation data without storing raw personal data', async () => {
+    const result = await service.syncTenant(user, {
+      dateFrom: '2026-05-01',
+      dateTo: '2026-05-01',
+    });
+
+    expect(result.failedSources).toBe(0);
+    expect(prisma.guest.upsert).toHaveBeenCalledTimes(1);
+
+    const guestUpsertCalls = prisma.guest.upsert.mock.calls as Array<
+      [GuestUpsertCall]
+    >;
+    const guestUpsert = guestUpsertCalls[0]?.[0];
+    expect(guestUpsert).toBeDefined();
+    if (!guestUpsert) {
+      throw new Error('Guest upsert was not called');
+    }
+
+    const guestCreate = guestUpsert.create;
+    expect(guestCreate.tenantId).toBe('tenant-1');
+    expect(guestCreate.externalProvider).toBe(IntegrationProvider.LANGAME);
+    expect(guestCreate.externalDomain).toBe('club.example');
+    expect(guestCreate.externalGuestId).toBe('42');
+    expect(guestCreate.phoneMasked).toBe('***2233');
+    expect(guestCreate.emailMasked).toBe('g***@example.com');
+    expect(guestCreate.fullNameMasked).toBe('I. P.');
+    expect(guestCreate.phoneHash).toEqual(expect.any(String));
+    expect(guestCreate.emailHash).toEqual(expect.any(String));
+    expect(guestCreate.fullNameHash).toEqual(expect.any(String));
+    expect(guestCreate.identityDocumentPresent).toBe(true);
+    expect(guestCreate).not.toHaveProperty('phone');
+    expect(guestCreate).not.toHaveProperty('email');
+    expect(guestCreate).not.toHaveProperty('fio');
+    expect(guestCreate).not.toHaveProperty('identity_document_data');
+
+    expect(prisma.salesFact.updateMany).toHaveBeenCalledWith({
+      where: {
+        tenantId: 'tenant-1',
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: 'club.example',
+        externalSaleId: '300',
+      },
+      data: {
+        externalGuestId: '42',
+        guestId: 'guest-1',
+      },
+    });
+
+    const profileRunUpdates = prisma.guestDataProfileRun.update.mock
+      .calls as Array<[ProfileRunUpdateCall]>;
+    const successUpdate = profileRunUpdates.find(
+      ([call]) => call.data.status === 'SUCCESS',
+    )?.[0];
+    expect(successUpdate).toBeDefined();
+    if (!successUpdate) {
+      throw new Error('Successful profile update was not called');
+    }
+    expect(successUpdate.data.guestsCount).toBe(1);
+    expect(successUpdate.data.sessionsCount).toBe(1);
+    expect(successUpdate.data.transactionsCount).toBe(1);
+    expect(successUpdate.data.productSalesLinked).toBe(1);
+    expect(successUpdate.data.profile.guests.withIdentityDocument).toBe(1);
+  });
+
+  it('rejects profiling periods longer than ninety days', async () => {
+    await expect(
+      service.syncTenant(user, {
+        dateFrom: '2026-01-01',
+        dateTo: '2026-05-01',
+      }),
+    ).rejects.toThrow('Guest foundation period must be 90 days or less');
+  });
+});

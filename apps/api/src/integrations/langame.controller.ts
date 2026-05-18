@@ -14,6 +14,10 @@ import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { UserRole } from '@prisma/client';
 import {
+  GuestDataFoundationService,
+  type GuestDataFoundationSyncQuery,
+} from './guest-data-foundation.service';
+import {
   LangameSettingsService,
   type LangameSettingsDto,
 } from './langame-settings.service';
@@ -27,6 +31,7 @@ export class LangameController {
   constructor(
     private readonly langameSettingsService: LangameSettingsService,
     private readonly langameSyncService: LangameSyncService,
+    private readonly guestDataFoundationService: GuestDataFoundationService,
   ) {}
 
   @Get('settings')
@@ -56,5 +61,13 @@ export class LangameController {
     @Body() query: LangameSyncQuery,
   ) {
     return this.langameSyncService.syncTenant(user, query);
+  }
+
+  @Post('guests/foundation/sync')
+  syncGuestDataFoundation(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() query: GuestDataFoundationSyncQuery,
+  ) {
+    return this.guestDataFoundationService.syncTenant(user, query);
   }
 }

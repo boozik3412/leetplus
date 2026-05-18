@@ -60,23 +60,32 @@ model Tenant {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users                     User[]
-  stores                    Store[]
-  suppliers                 Supplier[]
-  products                  Product[]
-  canonicalProducts         CanonicalProduct[]
-  productParsingRuns        ProductParsingRun[]
-  productParsingSuggestions ProductParsingSuggestion[]
-  productOosExclusions      ProductOosExclusion[]
-  categories                Category[]
-  importJobs                ImportJob[]
-  salesFacts                SalesFact[]
-  clubRevenueFacts          ClubRevenueFact[]
-  inventorySnapshots        InventorySnapshot[]
-  stockMovements            StockMovement[]
-  integrationCredentials    IntegrationCredential[]
-  integrationSources        IntegrationSource[]
-  integrationSyncJobs       IntegrationSyncJob[]
+  users                      User[]
+  stores                     Store[]
+  suppliers                  Supplier[]
+  products                   Product[]
+  canonicalProducts          CanonicalProduct[]
+  productParsingRuns         ProductParsingRun[]
+  productParsingSuggestions  ProductParsingSuggestion[]
+  productOosExclusions       ProductOosExclusion[]
+  categories                 Category[]
+  importJobs                 ImportJob[]
+  salesFacts                 SalesFact[]
+  clubRevenueFacts           ClubRevenueFact[]
+  inventorySnapshots         InventorySnapshot[]
+  stockMovements             StockMovement[]
+  integrationCredentials     IntegrationCredential[]
+  integrationSources         IntegrationSource[]
+  integrationSyncJobs        IntegrationSyncJob[]
+  guests                     Guest[]
+  guestGroups                GuestGroup[]
+  guestBalanceSnapshots      GuestBalanceSnapshot[]
+  guestBonusBalanceSnapshots GuestBonusBalanceSnapshot[]
+  guestSessions              GuestSession[]
+  guestLogs                  GuestLog[]
+  guestTransactions          GuestTransaction[]
+  guestOperationLogs         GuestOperationLog[]
+  guestDataProfileRuns       GuestDataProfileRun[]
 }
 
 model User {
@@ -149,6 +158,9 @@ model Store {
   tenant             Tenant              @relation(fields: [tenantId], references: [id])
   integrationSource  IntegrationSource?  @relation(fields: [integrationSourceId], references: [id], onDelete: SetNull)
   salesFacts         SalesFact[]
+  guestSessions      GuestSession[]
+  guestTransactions  GuestTransaction[]
+  guestOperationLogs GuestOperationLog[]
   clubRevenueFacts   ClubRevenueFact[]
   inventorySnapshots InventorySnapshot[]
   stockMovements     StockMovement[]
@@ -323,8 +335,10 @@ model SalesFact {
   externalSaleId    String?
   externalProductId String?
   externalClubId    String?
+  externalGuestId   String?
   productNameAtSale String?
   storeNameAtSale   String?
+  guestId           String?
   sourcePayloadHash String?
   isCanceled        Boolean              @default(false)
   canceledAt        DateTime?
@@ -334,13 +348,16 @@ model SalesFact {
   tenant  Tenant  @relation(fields: [tenantId], references: [id])
   store   Store   @relation(fields: [storeId], references: [id])
   product Product @relation(fields: [productId], references: [id])
+  guest   Guest?  @relation(fields: [guestId], references: [id], onDelete: SetNull)
 
   @@unique([tenantId, externalProvider, externalDomain, externalSaleId])
   @@index([tenantId, saleDate])
   @@index([tenantId, isCanceled, saleDate])
+  @@index([tenantId, externalGuestId])
   @@index([tenantId, storeId, productId, saleDate])
   @@index([storeId])
   @@index([productId])
+  @@index([guestId])
 }
 
 model ClubRevenueFact {
@@ -419,10 +436,11 @@ model IntegrationSource {
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
 
-  tenant     Tenant                @relation(fields: [tenantId], references: [id])
-  credential IntegrationCredential @relation(fields: [credentialId], references: [id])
-  stores     Store[]
-  syncJobs   IntegrationSyncJob[]
+  tenant               Tenant                @relation(fields: [tenantId], references: [id])
+  credential           IntegrationCredential @relation(fields: [credentialId], references: [id])
+  stores               Store[]
+  syncJobs             IntegrationSyncJob[]
+  guestDataProfileRuns GuestDataProfileRun[]
 
   @@unique([tenantId, provider, domain])
   @@index([tenantId])
@@ -479,4 +497,256 @@ model StockMovement {
   @@index([storeId])
   @@index([productId])
   @@index([type])
+}
+
+model Guest {
+  id                      String               @id @default(uuid())
+  tenantId                String
+  externalProvider        IntegrationProvider?
+  externalDomain          String?
+  externalGuestId         String
+  externalGuestTypeId     String?
+  phoneHash               String?
+  phoneMasked             String?
+  emailHash               String?
+  emailMasked             String?
+  fullNameHash            String?
+  fullNameMasked          String?
+  birthYear               Int?
+  birthMonth              Int?
+  birthDay                Int?
+  gender                  String?
+  insertedAt              DateTime?
+  lastActivityAt          DateTime?
+  isVirtual               Boolean              @default(false)
+  isTemporary             Boolean              @default(false)
+  isDisabled              Boolean              @default(false)
+  isSimpleRegistration    Boolean              @default(false)
+  isConfirmed             Boolean              @default(false)
+  currentCountHours       Decimal?
+  isMobileRegistration    Boolean              @default(false)
+  identityDocumentPresent Boolean              @default(false)
+  bonusProgramNumber      String?
+  sourcePayloadHash       String?
+  lastSyncedAt            DateTime?
+  createdAt               DateTime             @default(now())
+  updatedAt               DateTime             @updatedAt
+
+  tenant                Tenant                      @relation(fields: [tenantId], references: [id])
+  salesFacts            SalesFact[]
+  balanceSnapshots      GuestBalanceSnapshot[]
+  bonusBalanceSnapshots GuestBonusBalanceSnapshot[]
+  sessions              GuestSession[]
+  logs                  GuestLog[]
+  transactions          GuestTransaction[]
+
+  @@unique([tenantId, externalProvider, externalDomain, externalGuestId])
+  @@index([tenantId])
+  @@index([tenantId, externalGuestTypeId])
+  @@index([tenantId, lastActivityAt])
+  @@index([tenantId, phoneHash])
+  @@index([tenantId, emailHash])
+}
+
+model GuestGroup {
+  id                String               @id @default(uuid())
+  tenantId          String
+  externalProvider  IntegrationProvider?
+  externalDomain    String?
+  externalGroupId   String
+  name              String
+  percent           Decimal?
+  countHoursFrom    Decimal?
+  countHoursTo      Decimal?
+  bonusBirthday     Decimal?
+  sourcePayloadHash String?
+  lastSyncedAt      DateTime?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, externalProvider, externalDomain, externalGroupId])
+  @@index([tenantId])
+}
+
+model GuestBalanceSnapshot {
+  id                String               @id @default(uuid())
+  tenantId          String
+  guestId           String?
+  externalProvider  IntegrationProvider?
+  externalDomain    String?
+  externalGuestId   String
+  snapshotDate      DateTime
+  balance           Decimal
+  sourcePayloadHash String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  guest  Guest? @relation(fields: [guestId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, externalProvider, externalDomain, externalGuestId, snapshotDate])
+  @@index([tenantId, snapshotDate])
+  @@index([guestId])
+}
+
+model GuestBonusBalanceSnapshot {
+  id                String               @id @default(uuid())
+  tenantId          String
+  guestId           String?
+  externalProvider  IntegrationProvider?
+  externalDomain    String?
+  externalGuestId   String
+  snapshotDate      DateTime
+  bonusBalance      Decimal
+  sourcePayloadHash String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  guest  Guest? @relation(fields: [guestId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, externalProvider, externalDomain, externalGuestId, snapshotDate])
+  @@index([tenantId, snapshotDate])
+  @@index([guestId])
+}
+
+model GuestSession {
+  id                String               @id @default(uuid())
+  tenantId          String
+  guestId           String?
+  storeId           String?
+  externalProvider  IntegrationProvider?
+  externalDomain    String?
+  externalSessionId String
+  externalGuestId   String?
+  externalClubId    String?
+  externalUuid      String?
+  startedAt         DateTime?
+  stoppedAt         DateTime?
+  durationMinutes   Int?
+  normalStop        Boolean?
+  expand            Boolean?
+  createByRezerv    Boolean?
+  packet            Boolean?
+  sourcePayloadHash String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  guest  Guest? @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  store  Store? @relation(fields: [storeId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, externalProvider, externalDomain, externalSessionId])
+  @@index([tenantId, startedAt])
+  @@index([tenantId, externalGuestId])
+  @@index([guestId])
+  @@index([storeId])
+}
+
+model GuestLog {
+  id                String               @id @default(uuid())
+  tenantId          String
+  guestId           String?
+  externalProvider  IntegrationProvider?
+  externalDomain    String?
+  sourceKey         String
+  externalGuestId   String?
+  type              String?
+  happenedAt        DateTime?
+  sourcePayloadHash String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  guest  Guest? @relation(fields: [guestId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, externalProvider, externalDomain, sourceKey])
+  @@index([tenantId, happenedAt])
+  @@index([tenantId, type])
+  @@index([tenantId, externalGuestId])
+  @@index([guestId])
+}
+
+model GuestTransaction {
+  id                    String               @id @default(uuid())
+  tenantId              String
+  guestId               String?
+  storeId               String?
+  externalProvider      IntegrationProvider?
+  externalDomain        String?
+  externalTransactionId String
+  externalGuestId       String?
+  externalClubId        String?
+  type                  String?
+  happenedAt            DateTime?
+  updatedAtExternal     DateTime?
+  amount                Decimal?
+  balance               Decimal?
+  bonusBalance          Decimal?
+  sourcePayloadHash     String?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  guest  Guest? @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  store  Store? @relation(fields: [storeId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, externalProvider, externalDomain, externalTransactionId])
+  @@index([tenantId, happenedAt])
+  @@index([tenantId, type])
+  @@index([tenantId, externalGuestId])
+  @@index([guestId])
+  @@index([storeId])
+}
+
+model GuestOperationLog {
+  id                String               @id @default(uuid())
+  tenantId          String
+  storeId           String?
+  externalProvider  IntegrationProvider?
+  externalDomain    String?
+  sourceKey         String
+  externalClubId    String?
+  type              String?
+  happenedAt        DateTime?
+  amount            Decimal?
+  sourcePayloadHash String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  store  Store? @relation(fields: [storeId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, externalProvider, externalDomain, sourceKey])
+  @@index([tenantId, happenedAt])
+  @@index([tenantId, type])
+  @@index([storeId])
+}
+
+model GuestDataProfileRun {
+  id                  String              @id @default(uuid())
+  tenantId            String
+  integrationSourceId String?
+  provider            IntegrationProvider
+  domain              String
+  status              String              @default("RUNNING")
+  dateFrom            DateTime?
+  dateTo              DateTime?
+  startedAt           DateTime            @default(now())
+  finishedAt          DateTime?
+  guestsCount         Int                 @default(0)
+  sessionsCount       Int                 @default(0)
+  transactionsCount   Int                 @default(0)
+  productSalesLinked  Int                 @default(0)
+  profile             Json?
+  errorMessage        String?
+
+  tenant            Tenant             @relation(fields: [tenantId], references: [id])
+  integrationSource IntegrationSource? @relation(fields: [integrationSourceId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, startedAt])
+  @@index([integrationSourceId])
+  @@index([status])
 }

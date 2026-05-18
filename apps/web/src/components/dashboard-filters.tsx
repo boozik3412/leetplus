@@ -33,6 +33,67 @@ const periodLabels: Record<DashboardPeriod, string> = {
   custom: "Произвольный период",
 };
 
+const periodHints: Record<
+  DashboardPeriod,
+  { period: string; comparison: string }
+> = {
+  day: {
+    period: "С 00:00 текущих суток до текущего момента.",
+    comparison:
+      "В блоке «Что изменилось» сравниваются последние полные сутки с предыдущими полными сутками.",
+  },
+  "full-day": {
+    period: "Последние завершенные сутки: вчера с 00:00 до 23:59.",
+    comparison:
+      "Сравнение период к периоду: вчерашние сутки к позавчерашним.",
+  },
+  week: {
+    period: "Текущая календарная неделя с понедельника до текущего дня.",
+    comparison:
+      "Динамика сравнивает каждый отрезок с предыдущим аналогичным; для строгой оценки используйте полную неделю.",
+  },
+  "full-week": {
+    period: "Последняя завершенная календарная неделя с понедельника по воскресенье.",
+    comparison:
+      "Сравнение период к периоду: полная неделя к предыдущей полной неделе.",
+  },
+  month: {
+    period: "Текущий календарный месяц с 1 числа до текущего дня.",
+    comparison:
+      "Динамика сравнивает каждый отрезок с предыдущим аналогичным; для строгой оценки используйте полный месяц.",
+  },
+  "full-month": {
+    period: "Последний завершенный календарный месяц.",
+    comparison:
+      "Сравнение период к периоду: полный месяц к предыдущему полному месяцу.",
+  },
+  quarter: {
+    period: "Текущий календарный квартал с первого дня квартала до текущего дня.",
+    comparison:
+      "Динамика сравнивает каждый отрезок с предыдущим аналогичным; для строгой оценки используйте полный квартал.",
+  },
+  "full-quarter": {
+    period: "Последний завершенный календарный квартал.",
+    comparison:
+      "Сравнение период к периоду: полный квартал к предыдущему полному кварталу.",
+  },
+  year: {
+    period: "Текущий календарный год с 1 января до текущего дня.",
+    comparison:
+      "Динамика сравнивает каждый отрезок с предыдущим аналогичным; для строгой оценки используйте полный год.",
+  },
+  "full-year": {
+    period: "Последний завершенный календарный год.",
+    comparison:
+      "Сравнение период к периоду: полный год к предыдущему полному году.",
+  },
+  custom: {
+    period: "Произвольный диапазон дат, выбранный вручную.",
+    comparison:
+      "Динамика делит выбранный диапазон на 8 отрезков и сравнивает каждый с предыдущим аналогичным отрезком.",
+  },
+};
+
 const periodOptionGroups: { current: DashboardPeriod; full: DashboardPeriod }[] = [
   { current: "day", full: "full-day" },
   { current: "week", full: "full-week" },
@@ -377,18 +438,41 @@ function PeriodOptionButton({
   selectedPeriod: DashboardPeriod;
   onSelect: (value: DashboardPeriod) => void;
 }) {
+  const hint = periodHints[value];
+  const title = `${periodLabels[value]}. ${hint.period} ${hint.comparison}`;
+
   return (
     <button
       type="button"
+      title={title}
       onClick={() => onSelect(value)}
       className={[
-        "rounded-xl border px-3 py-2 text-left text-sm",
+        "group relative rounded-xl border px-3 py-2 text-left text-sm",
         selectedPeriod === value
           ? "border-zinc-950 bg-zinc-950 text-white dark:border-emerald-400 dark:bg-emerald-400 dark:text-zinc-950"
           : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-900",
       ].join(" ")}
     >
-      {periodLabels[value]}
+      <span className="flex items-center justify-between gap-3">
+        <span>{periodLabels[value]}</span>
+        <span
+          aria-hidden="true"
+          className={[
+            "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold",
+            selectedPeriod === value
+              ? "border-white/50 text-white dark:border-zinc-950/50 dark:text-zinc-950"
+              : "border-zinc-300 text-zinc-500 dark:border-zinc-700 dark:text-zinc-400",
+          ].join(" ")}
+        >
+          ?
+        </span>
+      </span>
+      <span className="pointer-events-none absolute left-3 right-3 top-full z-50 mt-2 hidden rounded-xl border border-zinc-200 bg-white p-3 text-xs leading-5 text-zinc-600 shadow-xl shadow-zinc-950/10 group-hover:block group-focus-visible:block dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:shadow-black/40">
+        <span className="block font-semibold text-zinc-900 dark:text-zinc-100">
+          {hint.period}
+        </span>
+        <span className="mt-1 block">{hint.comparison}</span>
+      </span>
     </button>
   );
 }

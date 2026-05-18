@@ -1,6 +1,6 @@
 # LeetPlus Project State
 
-Last updated: 2026-05-12
+Last updated: 2026-05-18
 
 ## Current Workflow
 
@@ -25,6 +25,8 @@ Last updated: 2026-05-12
 
 LeetPlus is an assortment analytics SaaS for computer clubs and club networks. It imports LAngame data, normalizes goods across clubs into network SKU groups, and provides analytics for sales, stock, OOS risk, margin, recommendations, LFL, new products, and assortment quality.
 
+The next strategic product direction is a separate "Guests" module. It should expand LeetPlus from assortment analytics into guest-base analytics, bonus control, mini CRM, loyalty/gamification, messenger communications, and guest-flow management. The agreed product/navigation direction is to split the left side of the app into two meaningful blocks: "Ассортимент" and "Гости".
+
 Connected production LAngame sources:
 
 - `1337.langame.ru`
@@ -41,6 +43,10 @@ Connected production LAngame sources:
 - A rejected parsing suggestion should not delete existing product links.
 - Already confirmed parsing groups should not be suggested again unless there is a real change/new item to review.
 - Manual store names in LeetPlus should be preserved; sync may update address/activity/source linkage, but not overwrite user-facing names.
+- Guest history should remain stable when a guest profile changes in LAngame.
+- LAngame sync must not overwrite manual guest CRM statuses, notes, segments, communication consents, or LeetPlus-owned loyalty state.
+- Guest personal data must be treated as sensitive data: phone, email, full name, birthday, and document fields require access control and careful storage decisions.
+- Guest communications require explicit channel consent, consent history, and unsubscribe handling.
 
 ## Key Metrics
 
@@ -57,6 +63,7 @@ Connected production LAngame sources:
 - Reports: collapsible report list, row-level sales detail report, summary export/email, LFL, new products, recommendations, OOS, no-sales, replenishment, ABC, top SKU/suppliers, assortment.
 - Product parsing utilities: automatic analysis, safe confirmation/rejection, existing canonical SKU awareness, manual parsing page.
 - Products/stores/directories: inline editing, multi-club filters, exports, manual store name preservation.
+- Guest module planning: `GUEST_MANAGEMENT_MODULE_TZ.md` defines the future "Guests" product area, including data foundation, guest analytics, bonus analytics, mini CRM, gamification, Telegram/MAX communication, and guest-flow management.
 - Mail: Mail.ru/VK WorkSpace domain is configured; SMTP uses `reports@leetplus.ru`.
 
 ## Recent Work
@@ -74,6 +81,7 @@ Connected production LAngame sources:
 - Added product movement analytics: compact product-page preview, full table, 7/14/21 day periods, stock column, sorting/filtering, exports, and email.
 - Started Stage 2 commercial reports with OOS revenue/profit-at-risk estimates in tables and exports, including profit at risk for the selected period.
 - Added hybrid "Money at risk" reporting: OOS profit-at-risk plus frozen stock in no-sales products, surfaced on the dashboard and reports.
+- Prepared `GUEST_MANAGEMENT_MODULE_TZ.md`: a draft specification for a future separate "Guests" module. Development is not started until the scope is approved.
 
 ## Near-Term Backlog
 
@@ -117,13 +125,26 @@ Status: active; first commercial-risk layer is implemented, next focus is deeper
 
 - Daily email digest for network-level money, margin, OOS, write-offs, no-sales SKU, and required actions.
 - Weekly commercial report for owner/director with dynamics and problem zones.
-- Later add Telegram/WhatsApp alerts for critical events.
+- Later add Telegram/MAX alerts for critical events.
 
 ### Stage 6. Product Commercialization
 
 - Demo mode with prepared data and clear value story without LAngame setup.
 - Commercial network audit page: losses, growth opportunities, matrix quality, and expected effect.
 - Tariff levels: basic analytics, advanced reports, recommendations, regular digests, and assortment audit.
+
+### Stage 7. Guest Management Module
+
+Status: specification drafted; development has not started and requires separate approval.
+
+- Source document: `GUEST_MANAGEMENT_MODULE_TZ.md`.
+- Product navigation: introduce two left-nav blocks, "Ассортимент" and "Гости".
+- First technical step after approval: data profiling for guest-related LAngame endpoints before building UI.
+- Planned data foundation: guests, guest groups, balances, bonus balances, sessions, transactions, all operations log, product expenses by guest, clubs, tariffs, shifts, and PC context.
+- Planned analytics: guest dashboard, guest list, guest card, RFM, retention, churn risk, heatmaps, LTV, bonus load, campaign effect, and guest-flow forecasts.
+- Planned CRM layer: segments, saved audiences, CRM statuses, notes, tasks, communication history, and next-best-action recommendations.
+- Planned loyalty/gamification: missions, rewards, budgets, limits, anti-fraud, and manual payout queue until a safe LAngame write API is confirmed.
+- Planned channels: Telegram bot/Mini App first, MAX bot/Mini App later after legal/account setup; all channels require explicit consent and unsubscribe support.
 
 ### Continuous Polish
 

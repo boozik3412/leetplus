@@ -50,6 +50,7 @@ export type GuestDataFoundationSourceResult = {
   guestLogs: number;
   operationLogs: number;
   productSalesLinked: number;
+  endpointErrors: Record<string, string>;
   errorMessage: string | null;
 };
 
@@ -119,6 +120,7 @@ type SourceProfile = {
     total: number;
     sumBonusBalance: string;
   };
+  endpointErrors: Record<string, string>;
 };
 
 @Injectable()
@@ -172,6 +174,7 @@ export class GuestDataFoundationService {
         guestLogs: 0,
         operationLogs: 0,
         productSalesLinked: 0,
+        endpointErrors: {},
         errorMessage: null,
       };
 
@@ -235,7 +238,9 @@ export class GuestDataFoundationService {
     const snapshotDate = this.startOfUtcDay(now);
     const storesByExternalClubId = await this.loadStoreLookup(tenantId, domain);
 
-    const groups = await this.langameClient.listGuestGroups(baseUrl, apiKey);
+    const groups = await this.captureEndpoint(profile, 'guests/groups', () =>
+      this.langameClient.listGuestGroups(baseUrl, apiKey),
+    );
     for (const group of groups) {
       await this.prisma.guestGroup.upsert({
         where: {
@@ -271,13 +276,14 @@ export class GuestDataFoundationService {
       });
     }
 
-    const guests = await this.langameClient.listGuests(baseUrl, apiKey);
+    const guests = await this.captureEndpoint(profile, 'guests/list', () =>
+      this.langameClient.listGuests(baseUrl, apiKey),
+    );
     await this.syncGuests(tenantId, domain, guests, profile, now);
     const guestsByExternalId = await this.loadGuestLookup(tenantId, domain);
 
-    const balances = await this.langameClient.listGuestBalances(
-      baseUrl,
-      apiKey,
+    const balances = await this.captureEndpoint(profile, 'guests/balance', () =>
+      this.langameClient.listGuestBalances(baseUrl, apiKey),
     );
     await this.syncBalances(
       tenantId,
@@ -288,9 +294,10 @@ export class GuestDataFoundationService {
       profile,
     );
 
-    const bonusBalances = await this.langameClient.listGuestBonusBalances(
-      baseUrl,
-      apiKey,
+    const bonusBalances = await this.captureEndpoint(
+      profile,
+      'guests/bonus_balance',
+      () => this.langameClient.listGuestBonusBalances(baseUrl, apiKey),
     );
     await this.syncBonusBalances(
       tenantId,
@@ -301,13 +308,18 @@ export class GuestDataFoundationService {
       profile,
     );
 
-    const sessions = await this.paginate((page) =>
-      this.langameClient.listGuestSessions(baseUrl, apiKey, {
-        page,
-        pageLimit: DEFAULT_PAGE_LIMIT,
-        dateFrom: period.from,
-        dateTo: period.to,
-      }),
+    const sessions = await this.captureEndpoint(
+      profile,
+      'guests/sessions',
+      () =>
+        this.paginate((page) =>
+          this.langameClient.listGuestSessions(baseUrl, apiKey, {
+            page,
+            pageLimit: DEFAULT_PAGE_LIMIT,
+            dateFrom: period.from,
+            dateTo: period.to,
+          }),
+        ),
     );
     await this.syncSessions(
       tenantId,
@@ -318,13 +330,18 @@ export class GuestDataFoundationService {
       profile,
     );
 
-    const transactions = await this.paginate((page) =>
-      this.langameClient.listTransactions(baseUrl, apiKey, {
-        page,
-        pageLimit: DEFAULT_PAGE_LIMIT,
-        dateFrom: period.from,
-        dateTo: period.to,
-      }),
+    const transactions = await this.captureEndpoint(
+      profile,
+      'transactions/list',
+      () =>
+        this.paginate((page) =>
+          this.langameClient.listTransactions(baseUrl, apiKey, {
+            page,
+            pageLimit: DEFAULT_PAGE_LIMIT,
+            dateFrom: period.from,
+            dateTo: period.to,
+          }),
+        ),
     );
     await this.syncTransactions(
       tenantId,
@@ -337,13 +354,15 @@ export class GuestDataFoundationService {
 
     let guestLogs: LangameGuestLog[] = [];
     if (query.includeGuestLogs ?? true) {
-      guestLogs = await this.paginate((page) =>
-        this.langameClient.listGuestLogs(baseUrl, apiKey, {
-          page,
-          pageLimit: DEFAULT_PAGE_LIMIT,
-          dateFrom: period.from,
-          dateTo: period.to,
-        }),
+      guestLogs = await this.captureEndpoint(profile, 'guests/logs', () =>
+        this.paginate((page) =>
+          this.langameClient.listGuestLogs(baseUrl, apiKey, {
+            page,
+            pageLimit: DEFAULT_PAGE_LIMIT,
+            dateFrom: period.from,
+            dateTo: period.to,
+          }),
+        ),
       );
       await this.syncGuestLogs(
         tenantId,
@@ -356,24 +375,34 @@ export class GuestDataFoundationService {
 
     let operationLogs: LangameOperationLog[] = [];
     if (query.includeOperationLog ?? true) {
-      operationLogs = await this.syncOperationLogs(
-        tenantId,
-        baseUrl,
-        domain,
-        apiKey,
-        period,
-        storesByExternalClubId,
+      operationLogs = await this.captureEndpoint(
         profile,
+        'all_operations_log/list',
+        () =>
+          this.syncOperationLogs(
+            tenantId,
+            baseUrl,
+            domain,
+            apiKey,
+            period,
+            storesByExternalClubId,
+            profile,
+          ),
       );
     }
 
-    const productExpenses = await this.paginate((page) =>
-      this.langameClient.listProductExpenses(baseUrl, apiKey, {
-        page,
-        pageLimit: DEFAULT_PAGE_LIMIT,
-        dateFrom: period.from,
-        dateTo: period.to,
-      }),
+    const productExpenses = await this.captureEndpoint(
+      profile,
+      'products/expense',
+      () =>
+        this.paginate((page) =>
+          this.langameClient.listProductExpenses(baseUrl, apiKey, {
+            page,
+            pageLimit: DEFAULT_PAGE_LIMIT,
+            dateFrom: period.from,
+            dateTo: period.to,
+          }),
+        ),
     );
     const productSalesLinked = await this.linkProductSalesToGuests(
       tenantId,
@@ -393,8 +422,23 @@ export class GuestDataFoundationService {
       guestLogs: guestLogs.length,
       operationLogs: operationLogs.length,
       productSalesLinked,
+      endpointErrors: profile.endpointErrors,
       profile,
     };
+  }
+
+  private async captureEndpoint<T>(
+    profile: SourceProfile,
+    endpoint: string,
+    load: () => Promise<T[]>,
+  ) {
+    try {
+      return await load();
+    } catch (error) {
+      profile.endpointErrors[endpoint] =
+        error instanceof Error ? error.message : 'Endpoint failed';
+      return [];
+    }
   }
 
   private async syncGuests(
@@ -1392,6 +1436,7 @@ export class GuestDataFoundationService {
         total: 0,
         sumBonusBalance: '0.00',
       },
+      endpointErrors: {},
     };
   }
 }

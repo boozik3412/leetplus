@@ -798,16 +798,19 @@ function DiagnosticsPanel({ report }: { report: StaffControlReport }) {
                   title="all_operations_log"
                   total={run.operationLogs.total}
                   fields={run.operationLogs.candidateFields}
+                  operatorHints={run.operationLogs.operatorHints}
                 />
                 <DiagnosticSource
                   title="log_cash_transaction"
                   total={run.cashTransactions.total}
                   fields={run.cashTransactions.candidateFields}
+                  operatorHints={run.cashTransactions.operatorHints}
                 />
                 <DiagnosticSource
                   title="working_shifts"
                   total={run.workingShifts.total}
                   fields={run.workingShifts.candidateFields}
+                  operatorHints={run.workingShifts.operatorHints}
                 />
               </div>
             </div>
@@ -826,10 +829,12 @@ function DiagnosticSource({
   title,
   total,
   fields,
+  operatorHints,
 }: {
   title: string;
   total: number;
   fields: Record<string, number>;
+  operatorHints: StaffControlReport["diagnostics"]["latestRuns"][number]["workingShifts"]["operatorHints"];
 }) {
   const entries = Object.entries(fields)
     .sort((first, second) => second[1] - first[1])
@@ -861,6 +866,37 @@ function DiagnosticSource({
           Поля персонала пока не найдены.
         </p>
       )}
+      {operatorHints.length > 0 ? (
+        <div className="mt-4 space-y-3 border-t border-zinc-200 pt-3 dark:border-zinc-800">
+          <p className="text-xs font-semibold uppercase text-zinc-500">
+            Кандидаты операторов
+          </p>
+          {operatorHints.slice(0, 4).map((hint) => (
+            <div key={hint.operatorId} className="text-xs text-zinc-500">
+              <div className="flex items-center justify-between gap-3">
+                <span className="font-medium text-zinc-700 dark:text-zinc-200">
+                  {hint.operatorId}
+                </span>
+                <span className="shrink-0 tabular-nums">
+                  {formatNumber(hint.count)}
+                </span>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-1">
+                {Object.entries(hint.fields)
+                  .slice(0, 6)
+                  .map(([field, values]) => (
+                    <span
+                      key={field}
+                      className="max-w-full break-all rounded-md bg-emerald-50 px-2 py-1 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-200"
+                    >
+                      {field}: {values.join(", ")}
+                    </span>
+                  ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

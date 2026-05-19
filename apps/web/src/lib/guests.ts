@@ -145,16 +145,25 @@ export type StaffControlDiagnostics = {
     operationLogs: {
       total: number;
       candidateFields: Record<string, number>;
+      operatorHints: StaffOperatorHint[];
     };
     cashTransactions: {
       total: number;
       candidateFields: Record<string, number>;
+      operatorHints: StaffOperatorHint[];
     };
     workingShifts: {
       total: number;
       candidateFields: Record<string, number>;
+      operatorHints: StaffOperatorHint[];
     };
   }>;
+};
+
+export type StaffOperatorHint = {
+  operatorId: string;
+  count: number;
+  fields: Record<string, string[]>;
 };
 
 export type StaffUnmatchedOperatorRow = {

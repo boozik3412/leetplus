@@ -52,6 +52,20 @@ type ProfileRunUpdateCall = {
         total: number;
         candidateFields: Record<string, number>;
       };
+      operatorHints: {
+        operationLogs: Record<
+          string,
+          { count: number; fields: Record<string, string[]> }
+        >;
+        cashTransactions: Record<
+          string,
+          { count: number; fields: Record<string, string[]> }
+        >;
+        workingShifts: Record<
+          string,
+          { count: number; fields: Record<string, string[]> }
+        >;
+      };
     };
   };
 };
@@ -370,6 +384,14 @@ describe('GuestDataFoundationService', () => {
     expect(
       successUpdate.data.profile.workingShifts.candidateFields.shift_id,
     ).toBe(1);
+    expect(
+      successUpdate.data.profile.operatorHints.cashTransactions['admin_id=5']
+        ?.fields.user_name,
+    ).toEqual(['Admin']);
+    expect(
+      successUpdate.data.profile.operatorHints.workingShifts['user_id=42']
+        ?.fields.user_id,
+    ).toEqual(['42']);
     const shiftUpsertCalls = prisma.guestWorkingShift.upsert.mock
       .calls as Array<[GuestWorkingShiftUpsertCall]>;
     const shiftUpsert = shiftUpsertCalls[0]?.[0];

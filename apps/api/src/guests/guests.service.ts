@@ -184,16 +184,25 @@ export type StaffControlDiagnostics = {
     operationLogs: {
       total: number;
       candidateFields: Record<string, number>;
+      operatorHints: StaffOperatorHint[];
     };
     cashTransactions: {
       total: number;
       candidateFields: Record<string, number>;
+      operatorHints: StaffOperatorHint[];
     };
     workingShifts: {
       total: number;
       candidateFields: Record<string, number>;
+      operatorHints: StaffOperatorHint[];
     };
   }>;
+};
+
+export type StaffOperatorHint = {
+  operatorId: string;
+  count: number;
+  fields: Record<string, string[]>;
 };
 
 export type StaffUnmatchedOperatorRow = {
@@ -1908,12 +1917,12 @@ export class GuestsService {
 
   private profileSection(value: Prisma.JsonValue, sectionName: string) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      return { total: 0, candidateFields: {} };
+      return { total: 0, candidateFields: {}, operatorHints: [] };
     }
 
     const section = value[sectionName];
     if (!section || typeof section !== 'object' || Array.isArray(section)) {
-      return { total: 0, candidateFields: {} };
+      return { total: 0, candidateFields: {}, operatorHints: [] };
     }
 
     return {
@@ -1922,7 +1931,81 @@ export class GuestsService {
           ? section.total
           : 0,
       candidateFields: this.numericRecord(section.candidateFields),
+      operatorHints: this.operatorHintsFromProfile(value, sectionName),
     };
+  }
+
+  private operatorHintsFromProfile(
+    value: Prisma.JsonValue,
+    sectionName: string,
+  ): StaffOperatorHint[] {
+    if (!this.isRecord(value)) {
+      return [];
+    }
+
+    const operatorHints = value.operatorHints;
+    if (!this.isRecord(operatorHints)) {
+      return [];
+    }
+
+    const section = operatorHints[sectionName];
+    if (!this.isRecord(section)) {
+      return [];
+    }
+
+    return Object.entries(section)
+      .map(([operatorId, hint]) =>
+        this.operatorHintFromProfileEntry(operatorId, hint),
+      )
+      .filter((hint): hint is StaffOperatorHint => Boolean(hint))
+      .sort((first, second) => second.count - first.count)
+      .slice(0, 8);
+  }
+
+  private operatorHintFromProfileEntry(
+    operatorId: string,
+    value: unknown,
+  ): StaffOperatorHint | null {
+    if (!this.isRecord(value)) {
+      return null;
+    }
+
+    const count = value.count;
+    const fields = value.fields;
+
+    return {
+      operatorId,
+      count: typeof count === 'number' && Number.isFinite(count) ? count : 0,
+      fields: this.stringArrayRecord(fields),
+    };
+  }
+
+  private stringArrayRecord(value: unknown): Record<string, string[]> {
+    if (!this.isRecord(value)) {
+      return {};
+    }
+
+    const result: Record<string, string[]> = {};
+
+    for (const [key, values] of Object.entries(value)) {
+      if (!Array.isArray(values)) {
+        continue;
+      }
+
+      const samples = values
+        .filter((item): item is string => typeof item === 'string')
+        .slice(0, 5);
+
+      if (samples.length > 0) {
+        result[key] = samples;
+      }
+    }
+
+    return result;
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
   }
 
   private numericRecord(value: unknown) {

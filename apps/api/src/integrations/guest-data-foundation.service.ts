@@ -86,6 +86,13 @@ type FieldDiagnostics = {
   candidateFields: Record<string, number>;
 };
 
+type StaffOperatorHint = {
+  count: number;
+  fields: Record<string, string[]>;
+};
+
+type StaffOperatorHints = Record<string, StaffOperatorHint>;
+
 type SourceProfile = {
   period: {
     from: string;
@@ -125,6 +132,11 @@ type SourceProfile = {
   } & FieldDiagnostics;
   cashTransactions: FieldDiagnostics;
   workingShifts: FieldDiagnostics;
+  operatorHints: {
+    operationLogs: StaffOperatorHints;
+    cashTransactions: StaffOperatorHints;
+    workingShifts: StaffOperatorHints;
+  };
   productSales: {
     total: number;
     withGuestId: number;
@@ -428,6 +440,9 @@ export class GuestDataFoundationService {
           ),
       );
       this.profileRows(profile.cashTransactions, cashTransactions);
+      cashTransactions.forEach((row) =>
+        this.profileOperatorHints(profile.operatorHints.cashTransactions, row),
+      );
     }
 
     let workingShifts: LangameWorkingShift[] = [];
@@ -446,6 +461,9 @@ export class GuestDataFoundationService {
           ),
       );
       this.profileRows(profile.workingShifts, workingShifts);
+      workingShifts.forEach((row) =>
+        this.profileOperatorHints(profile.operatorHints.workingShifts, row),
+      );
       await this.syncWorkingShifts(
         tenantId,
         domain,
@@ -1005,6 +1023,7 @@ export class GuestDataFoundationService {
           row.date_normal && !happenedAt ? 1 : 0;
         this.increment(profile.operationLogs.typeCounts, type ?? 'unknown');
         this.profileRowFields(profile.operationLogs, row);
+        this.profileOperatorHints(profile.operatorHints.operationLogs, row);
 
         await this.prisma.guestOperationLog.upsert({
           where: {
@@ -1620,6 +1639,101 @@ export class GuestDataFoundationService {
     }
   }
 
+  private profileOperatorHints(
+    hints: StaffOperatorHints,
+    row: Record<string, unknown>,
+  ) {
+    const operatorIds = this.extractOperatorIds(row);
+
+    if (operatorIds.length === 0) {
+      return;
+    }
+
+    for (const operatorId of operatorIds) {
+      if (!hints[operatorId] && Object.keys(hints).length >= 50) {
+        continue;
+      }
+
+      const hint = hints[operatorId] ?? { count: 0, fields: {} };
+      hint.count += 1;
+
+      for (const [field, value] of Object.entries(row)) {
+        if (!this.isPotentialStaffField(field)) {
+          continue;
+        }
+
+        const sample = this.toDiagnosticSample(value);
+        if (!sample) {
+          continue;
+        }
+
+        const current = hint.fields[field] ?? [];
+        if (current.length < 5 && !current.includes(sample)) {
+          current.push(sample);
+        }
+        hint.fields[field] = current;
+      }
+
+      hints[operatorId] = hint;
+    }
+  }
+
+  private extractOperatorIds(row: Record<string, unknown>) {
+    const ids: string[] = [];
+
+    for (const [field, value] of Object.entries(row)) {
+      if (!this.isPotentialOperatorIdField(field)) {
+        continue;
+      }
+
+      const id = this.toDiagnosticSample(value);
+      const key = id ? `${field}=${id}` : null;
+      if (key && !ids.includes(key)) {
+        ids.push(key);
+      }
+    }
+
+    return ids.slice(0, 3);
+  }
+
+  private isPotentialOperatorIdField(field: string) {
+    const normalized = field.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const hasStaffWord =
+      normalized.includes('admin') ||
+      normalized.includes('operator') ||
+      normalized.includes('cashier') ||
+      normalized.includes('employee') ||
+      normalized.includes('staff') ||
+      normalized.includes('manager') ||
+      normalized.includes('user') ||
+      normalized.includes('creator') ||
+      normalized.includes('author') ||
+      normalized.includes('worker');
+
+    return hasStaffWord && normalized.endsWith('id');
+  }
+
+  private toDiagnosticSample(value: unknown) {
+    if (value === null || value === undefined || value === '') {
+      return null;
+    }
+
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      return trimmed ? trimmed.slice(0, 80) : null;
+    }
+
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return String(value);
+    }
+
+    if (typeof value === 'boolean') {
+      return value ? 'true' : 'false';
+    }
+
+    return null;
+  }
+
   private isPotentialStaffField(field: string) {
     const normalized = field.toLowerCase();
 
@@ -1688,6 +1802,11 @@ export class GuestDataFoundationService {
         total: 0,
         fieldCounts: {},
         candidateFields: {},
+      },
+      operatorHints: {
+        operationLogs: {},
+        cashTransactions: {},
+        workingShifts: {},
       },
       productSales: {
         total: 0,

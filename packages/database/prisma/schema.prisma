@@ -52,6 +52,17 @@ enum ProductOosExclusionType {
   OOS_EXCLUDED
 }
 
+enum GuestCrmStatus {
+  NONE
+  WATCH
+  CONTACT
+  INVITED
+  LOYAL
+  VIP
+  PROBLEM
+  DO_NOT_CONTACT
+}
+
 model Tenant {
   id        String   @id @default(uuid())
   name      String
@@ -86,6 +97,7 @@ model Tenant {
   guestTransactions          GuestTransaction[]
   guestOperationLogs         GuestOperationLog[]
   guestDataProfileRuns       GuestDataProfileRun[]
+  guestCrmEvents             GuestCrmEvent[]
 }
 
 model User {
@@ -103,6 +115,7 @@ model User {
   tenant                  Tenant                   @relation(fields: [tenantId], references: [id])
   emailVerificationTokens EmailVerificationToken[]
   importJobs              ImportJob[]
+  guestCrmEvents          GuestCrmEvent[]
 
   @@index([tenantId])
 }
@@ -529,6 +542,12 @@ model Guest {
   isMobileRegistration    Boolean              @default(false)
   identityDocumentPresent Boolean              @default(false)
   bonusProgramNumber      String?
+  crmStatus               GuestCrmStatus       @default(NONE)
+  crmNote                 String?
+  nextAction              String?
+  nextContactAt           DateTime?
+  crmUpdatedByUserId      String?
+  crmUpdatedAt            DateTime?
   sourcePayloadHash       String?
   lastSyncedAt            DateTime?
   createdAt               DateTime             @default(now())
@@ -541,13 +560,36 @@ model Guest {
   sessions              GuestSession[]
   logs                  GuestLog[]
   transactions          GuestTransaction[]
+  crmEvents             GuestCrmEvent[]
 
   @@unique([tenantId, externalProvider, externalDomain, externalGuestId])
   @@index([tenantId])
   @@index([tenantId, externalGuestTypeId])
   @@index([tenantId, lastActivityAt])
+  @@index([tenantId, crmStatus])
+  @@index([tenantId, nextContactAt])
   @@index([tenantId, phoneHash])
   @@index([tenantId, emailHash])
+}
+
+model GuestCrmEvent {
+  id              String         @id @default(uuid())
+  tenantId        String
+  guestId         String
+  createdByUserId String?
+  status          GuestCrmStatus
+  note            String?
+  nextAction      String?
+  nextContactAt   DateTime?
+  createdAt       DateTime       @default(now())
+
+  tenant        Tenant @relation(fields: [tenantId], references: [id])
+  guest         Guest  @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  createdByUser User?  @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@index([guestId, createdAt])
+  @@index([createdByUserId])
 }
 
 model GuestGroup {

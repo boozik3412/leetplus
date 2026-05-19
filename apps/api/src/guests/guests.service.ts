@@ -4,8 +4,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { IntegrationProvider, Prisma } from '@prisma/client';
-import { createDecipheriv, createHash } from 'node:crypto';
+import { GuestCrmStatus, IntegrationProvider, Prisma } from '@prisma/client';
+import { createDecipheriv, createHash, createHmac } from 'node:crypto';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
@@ -42,6 +42,11 @@ export type GuestDashboardRow = {
   transactionAmount: number;
   barRevenue: number;
   segment: 'active' | 'new' | 'repeat' | 'risk' | 'lost' | 'quiet';
+  crmStatus: GuestCrmStatus;
+  crmNote: string | null;
+  nextAction: string | null;
+  nextContactAt: string | null;
+  crmUpdatedAt: string | null;
 };
 
 export type GuestFilterOptions = {
@@ -121,6 +126,15 @@ export type GuestListResponse = {
 };
 
 export type GuestDetail = GuestDashboardRow & {
+  crmEvents: Array<{
+    id: string;
+    status: GuestCrmStatus;
+    note: string | null;
+    nextAction: string | null;
+    nextContactAt: string | null;
+    createdAt: string;
+    createdBy: string | null;
+  }>;
   sessions: Array<{
     id: string;
     startedAt: string | null;
@@ -149,6 +163,13 @@ export type GuestDetail = GuestDashboardRow & {
   }>;
 };
 
+export type GuestCrmUpdateDto = {
+  crmStatus?: GuestCrmStatus;
+  crmNote?: string | null;
+  nextAction?: string | null;
+  nextContactAt?: string | null;
+};
+
 type GuestBase = {
   id: string;
   externalDomain: string | null;
@@ -163,6 +184,11 @@ type GuestBase = {
   lastActivityAt: Date | null;
   isDisabled: boolean;
   currentCountHours: Prisma.Decimal | null;
+  crmStatus: GuestCrmStatus;
+  crmNote: string | null;
+  nextAction: string | null;
+  nextContactAt: Date | null;
+  crmUpdatedAt: Date | null;
 };
 
 type GuestMetrics = {
@@ -370,7 +396,21 @@ export class GuestsService {
       period,
       groupsByKey,
     );
-    const [sessions, transactions, sales] = await Promise.all([
+    const [crmEvents, sessions, transactions, sales] = await Promise.all([
+      this.prisma.guestCrmEvent.findMany({
+        where: { tenantId, guestId: id },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+        select: {
+          id: true,
+          status: true,
+          note: true,
+          nextAction: true,
+          nextContactAt: true,
+          createdAt: true,
+          createdByUser: { select: { fullName: true, email: true } },
+        },
+      }),
       this.prisma.guestSession.findMany({
         where: { tenantId, guestId: id },
         orderBy: { startedAt: 'desc' },
@@ -416,6 +456,16 @@ export class GuestsService {
 
     return {
       ...row,
+      crmEvents: crmEvents.map((event) => ({
+        id: event.id,
+        status: event.status,
+        note: event.note,
+        nextAction: event.nextAction,
+        nextContactAt: this.toIsoDateTime(event.nextContactAt),
+        createdAt: event.createdAt.toISOString(),
+        createdBy:
+          event.createdByUser?.fullName ?? event.createdByUser?.email ?? null,
+      })),
       sessions: sessions.map((session) => ({
         id: session.id,
         startedAt: this.toIsoDateTime(session.startedAt),
@@ -443,6 +493,48 @@ export class GuestsService {
         quantity: this.decimalToNumber(sale.quantity) ?? 0,
       })),
     };
+  }
+
+  async updateGuestCrm(
+    user: AuthenticatedUser,
+    id: string,
+    dto: GuestCrmUpdateDto,
+  ): Promise<GuestDetail> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const guest = await this.prisma.guest.findFirst({
+      where: { id, tenantId },
+      select: { id: true },
+    });
+
+    if (!guest) {
+      throw new NotFoundException('Guest not found');
+    }
+
+    const data = this.normalizeCrmUpdate(dto);
+
+    await this.prisma.$transaction([
+      this.prisma.guest.update({
+        where: { id },
+        data: {
+          ...data,
+          crmUpdatedByUserId: user.id,
+          crmUpdatedAt: new Date(),
+        },
+      }),
+      this.prisma.guestCrmEvent.create({
+        data: {
+          tenantId,
+          guestId: id,
+          createdByUserId: user.id,
+          status: data.crmStatus,
+          note: data.crmNote,
+          nextAction: data.nextAction,
+          nextContactAt: data.nextContactAt,
+        },
+      }),
+    ]);
+
+    return this.getGuest(user, id);
   }
 
   private async buildGuestMetrics(
@@ -568,11 +660,18 @@ export class GuestsService {
     }
 
     if (filters.search) {
+      const searchHashes = this.searchHashes(filters.search);
       where.OR = [
         { externalGuestId: { contains: filters.search, mode: 'insensitive' } },
         { phoneMasked: { contains: filters.search, mode: 'insensitive' } },
         { emailMasked: { contains: filters.search, mode: 'insensitive' } },
         { fullNameMasked: { contains: filters.search, mode: 'insensitive' } },
+        ...(searchHashes.phoneHash
+          ? [{ phoneHash: searchHashes.phoneHash }]
+          : []),
+        ...(searchHashes.fullNameHash
+          ? [{ fullNameHash: searchHashes.fullNameHash }]
+          : []),
         {
           bonusProgramNumber: {
             contains: filters.search,
@@ -845,6 +944,11 @@ export class GuestsService {
       transactionAmount: this.round(metrics?.transactionAmount ?? 0, 2),
       barRevenue: this.round(metrics?.barRevenue ?? 0, 2),
       segment,
+      crmStatus: guest.crmStatus,
+      crmNote: guest.crmNote,
+      nextAction: guest.nextAction,
+      nextContactAt: this.toIsoDateTime(guest.nextContactAt),
+      crmUpdatedAt: this.toIsoDateTime(guest.crmUpdatedAt),
     };
   }
 
@@ -891,6 +995,47 @@ export class GuestsService {
     }
 
     return 'quiet';
+  }
+
+  private normalizeCrmUpdate(dto: GuestCrmUpdateDto) {
+    return {
+      crmStatus: this.resolveCrmStatus(dto.crmStatus),
+      crmNote: this.normalizeText(dto.crmNote, 2000),
+      nextAction: this.normalizeText(dto.nextAction, 160),
+      nextContactAt: this.resolveOptionalDate(dto.nextContactAt),
+    };
+  }
+
+  private resolveCrmStatus(value: GuestCrmUpdateDto['crmStatus']) {
+    if (!value) {
+      return GuestCrmStatus.NONE;
+    }
+
+    if (!Object.values(GuestCrmStatus).includes(value)) {
+      throw new BadRequestException('crmStatus is not supported');
+    }
+
+    return value;
+  }
+
+  private normalizeText(value: string | null | undefined, maxLength: number) {
+    const trimmed = value?.trim();
+
+    if (!trimmed) {
+      return null;
+    }
+
+    return trimmed.slice(0, maxLength);
+  }
+
+  private resolveOptionalDate(value: string | null | undefined) {
+    const trimmed = value?.trim();
+
+    if (!trimmed) {
+      return null;
+    }
+
+    return this.parseDateInput(trimmed, 'nextContactAt');
   }
 
   private resolvePeriod(query: GuestsSummaryQuery): Period {
@@ -984,6 +1129,11 @@ export class GuestsService {
       lastActivityAt: true,
       isDisabled: true,
       currentCountHours: true,
+      crmStatus: true,
+      crmNote: true,
+      nextAction: true,
+      nextContactAt: true,
+      crmUpdatedAt: true,
     } satisfies Prisma.GuestSelect;
   }
 
@@ -1166,6 +1316,20 @@ export class GuestsService {
     return trimmed.slice(0, 80);
   }
 
+  private searchHashes(value: string) {
+    const phone = value.replace(/\D/g, '');
+    const fullName = value.toLowerCase().replace(/\s+/g, ' ').trim();
+
+    return {
+      phoneHash: phone
+        ? createHmac('sha256', this.piiSecret()).update(phone).digest('hex')
+        : null,
+      fullNameHash: fullName.includes(' ')
+        ? createHmac('sha256', this.piiSecret()).update(fullName).digest('hex')
+        : null,
+    };
+  }
+
   private guestGroupKey(domain: string | null, externalGroupId: string) {
     return `${domain ?? 'unknown'}:${externalGroupId}`;
   }
@@ -1199,6 +1363,10 @@ export class GuestsService {
   }
 
   private piiEncryptionKey() {
+    return createHash('sha256').update(this.piiSecret()).digest();
+  }
+
+  private piiSecret() {
     const secret =
       this.configService.get<string>('APP_ENCRYPTION_KEY')?.trim() ||
       this.configService.get<string>('JWT_SECRET')?.trim();
@@ -1207,6 +1375,6 @@ export class GuestsService {
       throw new BadRequestException('APP_ENCRYPTION_KEY is not configured');
     }
 
-    return createHash('sha256').update(secret).digest();
+    return secret;
   }
 }

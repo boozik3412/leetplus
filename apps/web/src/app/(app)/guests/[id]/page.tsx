@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireCurrentUser } from "@/lib/auth";
+import { GuestCrmForm, crmStatusLabel } from "@/components/guest-crm-form";
 import { getGuest, type GuestDetail, type GuestSegment } from "@/lib/guests";
 
 type PageParams = Promise<{ id: string }>;
@@ -138,6 +139,11 @@ export default async function GuestPage({ params }: { params: PageParams }) {
           />
         </section>
 
+        <section className="mt-6 grid gap-6 xl:grid-cols-[1fr_0.9fr]">
+          <GuestCrmForm guest={guest} />
+          <CrmHistoryPanel guest={guest} />
+        </section>
+
         <section className="mt-6 grid gap-6 xl:grid-cols-2">
           <SessionsPanel guest={guest} />
           <TransactionsPanel guest={guest} />
@@ -185,6 +191,57 @@ function Metric({
       </p>
       <p className="mt-2 text-sm text-zinc-500">{caption}</p>
     </div>
+  );
+}
+
+function CrmHistoryPanel({ guest }: { guest: GuestDetail }) {
+  return (
+    <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
+        <h2 className="text-base font-semibold">История CRM</h2>
+        <p className="mt-1 text-sm text-zinc-500">
+          Последние ручные изменения по гостю.
+        </p>
+      </div>
+      {guest.crmEvents.length > 0 ? (
+        <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+          {guest.crmEvents.map((event) => (
+            <div key={event.id} className="px-5 py-4 text-sm">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="font-medium">{crmStatusLabel(event.status)}</p>
+                  {event.nextAction ? (
+                    <p className="mt-1 text-zinc-700 dark:text-zinc-300">
+                      {event.nextAction}
+                    </p>
+                  ) : null}
+                </div>
+                <p className="shrink-0 text-right text-xs text-zinc-500">
+                  {formatDateTime(event.createdAt)}
+                </p>
+              </div>
+              {event.nextContactAt ? (
+                <p className="mt-2 text-xs text-zinc-500">
+                  Контакт: {formatDate(event.nextContactAt)}
+                </p>
+              ) : null}
+              {event.note ? (
+                <p className="mt-2 whitespace-pre-wrap text-sm text-zinc-600 dark:text-zinc-400">
+                  {event.note}
+                </p>
+              ) : null}
+              {event.createdBy ? (
+                <p className="mt-2 text-xs text-zinc-400">
+                  Изменил: {event.createdBy}
+                </p>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="px-5 py-6 text-sm text-zinc-500">CRM-истории пока нет.</p>
+      )}
+    </section>
   );
 }
 

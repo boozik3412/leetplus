@@ -8,6 +8,16 @@ export type GuestSegment =
   | "lost"
   | "quiet";
 
+export type GuestCrmStatus =
+  | "NONE"
+  | "WATCH"
+  | "CONTACT"
+  | "INVITED"
+  | "LOYAL"
+  | "VIP"
+  | "PROBLEM"
+  | "DO_NOT_CONTACT";
+
 export type GuestDashboardRow = {
   id: string;
   externalDomain: string | null;
@@ -24,6 +34,11 @@ export type GuestDashboardRow = {
   transactionAmount: number;
   barRevenue: number;
   segment: GuestSegment;
+  crmStatus: GuestCrmStatus;
+  crmNote: string | null;
+  nextAction: string | null;
+  nextContactAt: string | null;
+  crmUpdatedAt: string | null;
 };
 
 export type GuestFilterOptions = {
@@ -112,6 +127,15 @@ export type GuestListResponse = {
 };
 
 export type GuestDetail = GuestDashboardRow & {
+  crmEvents: Array<{
+    id: string;
+    status: GuestCrmStatus;
+    note: string | null;
+    nextAction: string | null;
+    nextContactAt: string | null;
+    createdAt: string;
+    createdBy: string | null;
+  }>;
   sessions: Array<{
     id: string;
     startedAt: string | null;

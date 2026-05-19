@@ -1,4 +1,12 @@
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -7,6 +15,7 @@ import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import {
   GuestsService,
+  type GuestCrmUpdateDto,
   type GuestFilterOptions,
   type GuestDetail,
   type GuestListQuery,
@@ -50,5 +59,14 @@ export class GuestsController {
     @Param('id') id: string,
   ): Promise<GuestDetail> {
     return this.guestsService.getGuest(user, id);
+  }
+
+  @Patch(':id/crm')
+  updateGuestCrm(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: GuestCrmUpdateDto,
+  ): Promise<GuestDetail> {
+    return this.guestsService.updateGuestCrm(user, id, dto);
   }
 }

@@ -543,7 +543,10 @@ function GuestListTable({
 }) {
   return (
     <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="flex flex-col gap-3 border-b border-zinc-200 px-5 py-4 dark:border-zinc-800 lg:flex-row lg:items-center lg:justify-between">
+      <div
+        id="guest-list"
+        className="flex scroll-mt-6 flex-col gap-3 border-b border-zinc-200 px-5 py-4 dark:border-zinc-800 lg:flex-row lg:items-center lg:justify-between"
+      >
         <div>
           <h2 className="text-base font-semibold">Список гостей</h2>
           <p className="mt-1 text-sm text-zinc-500">

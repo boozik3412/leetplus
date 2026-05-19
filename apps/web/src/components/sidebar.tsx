@@ -21,7 +21,10 @@ type NavGroup = {
 const navGroups: NavGroup[] = [
   {
     title: "Гости",
-    items: [{ href: "/guests", label: "Гости" }],
+    items: [
+      { href: "/guests", label: "Дашборд гостей" },
+      { href: "/guests#guest-list", label: "Гости" },
+    ],
   },
   {
     title: "Ассортимент",
@@ -42,7 +45,8 @@ const navGroups: NavGroup[] = [
 
 function NavLink({ href, label, onNavigate }: NavItem) {
   const pathname = usePathname();
-  const isActive = pathname === href;
+  const hrefPath = href.split("#")[0];
+  const isActive = pathname === hrefPath && !href.includes("#");
 
   return (
     <Link

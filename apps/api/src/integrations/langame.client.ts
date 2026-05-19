@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import type {
+  LangameCashTransaction,
   LangameClub,
   LangameGood,
   LangameGuest,
@@ -12,6 +13,7 @@ import type {
   LangameProduct,
   LangameProductExpense,
   LangameTransaction,
+  LangameWorkingShift,
 } from './langame.types';
 
 type LangameResponse<T> = {
@@ -170,6 +172,52 @@ export class LangameClient {
       '/all_operations_log/list',
       apiKey,
       queryParams,
+    );
+  }
+
+  async listCashTransactions(
+    baseUrl: string,
+    apiKey: string,
+    params: {
+      page: number;
+      pageLimit: number;
+      dateFrom: string;
+      dateTo: string;
+    },
+  ) {
+    return this.getList<LangameCashTransaction>(
+      baseUrl,
+      '/log_cash_transaction/list',
+      apiKey,
+      {
+        page: String(params.page),
+        page_limit: String(params.pageLimit),
+        date_from: params.dateFrom,
+        date_to: params.dateTo,
+      },
+    );
+  }
+
+  async listWorkingShifts(
+    baseUrl: string,
+    apiKey: string,
+    params: {
+      page: number;
+      pageLimit: number;
+      dateFrom: string;
+      dateTo: string;
+    },
+  ) {
+    return this.getList<LangameWorkingShift>(
+      baseUrl,
+      '/working_shifts/list',
+      apiKey,
+      {
+        page: String(params.page),
+        page_limit: String(params.pageLimit),
+        date_from: params.dateFrom,
+        date_to: params.dateTo,
+      },
     );
   }
 

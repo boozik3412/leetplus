@@ -13,6 +13,7 @@ import { TenantContextService } from '../tenancy/tenant-context.service';
 import { LangameClient } from './langame.client';
 import { LangameSettingsService } from './langame-settings.service';
 import type {
+  LangameCashTransaction,
   LangameGuest,
   LangameGuestBalance,
   LangameGuestBonusBalance,
@@ -21,6 +22,7 @@ import type {
   LangameOperationLog,
   LangameProductExpense,
   LangameTransaction,
+  LangameWorkingShift,
 } from './langame.types';
 
 const DEFAULT_PAGE_LIMIT = 200;
@@ -33,6 +35,8 @@ export type GuestDataFoundationSyncQuery = {
   dateTo?: string;
   includeGuestLogs?: boolean;
   includeOperationLog?: boolean;
+  includeCashTransactions?: boolean;
+  includeWorkingShifts?: boolean;
 };
 
 export type GuestDataFoundationSyncResult = {
@@ -54,6 +58,8 @@ export type GuestDataFoundationSourceResult = {
   transactions: number;
   guestLogs: number;
   operationLogs: number;
+  cashTransactions: number;
+  workingShifts: number;
   productSalesLinked: number;
   endpointErrors: Record<string, string>;
   errorMessage: string | null;
@@ -72,6 +78,12 @@ type ResolvedPeriod = {
   toDate: Date;
   from: string;
   to: string;
+};
+
+type FieldDiagnostics = {
+  total: number;
+  fieldCounts: Record<string, number>;
+  candidateFields: Record<string, number>;
 };
 
 type SourceProfile = {
@@ -110,7 +122,9 @@ type SourceProfile = {
     total: number;
     invalidDates: number;
     typeCounts: Record<string, number>;
-  };
+  } & FieldDiagnostics;
+  cashTransactions: FieldDiagnostics;
+  workingShifts: FieldDiagnostics;
   productSales: {
     total: number;
     withGuestId: number;
@@ -178,6 +192,8 @@ export class GuestDataFoundationService {
         transactions: 0,
         guestLogs: 0,
         operationLogs: 0,
+        cashTransactions: 0,
+        workingShifts: 0,
         productSalesLinked: 0,
         endpointErrors: {},
         errorMessage: null,
@@ -396,6 +412,42 @@ export class GuestDataFoundationService {
       );
     }
 
+    let cashTransactions: LangameCashTransaction[] = [];
+    if (query.includeCashTransactions ?? true) {
+      cashTransactions = await this.captureEndpoint(
+        profile,
+        'log_cash_transaction/list',
+        () =>
+          this.paginate((page) =>
+            this.langameClient.listCashTransactions(baseUrl, apiKey, {
+              page,
+              pageLimit: DEFAULT_PAGE_LIMIT,
+              dateFrom: period.from,
+              dateTo: period.to,
+            }),
+          ),
+      );
+      this.profileRows(profile.cashTransactions, cashTransactions);
+    }
+
+    let workingShifts: LangameWorkingShift[] = [];
+    if (query.includeWorkingShifts ?? true) {
+      workingShifts = await this.captureEndpoint(
+        profile,
+        'working_shifts/list',
+        () =>
+          this.paginate((page) =>
+            this.langameClient.listWorkingShifts(baseUrl, apiKey, {
+              page,
+              pageLimit: DEFAULT_PAGE_LIMIT,
+              dateFrom: period.from,
+              dateTo: period.to,
+            }),
+          ),
+      );
+      this.profileRows(profile.workingShifts, workingShifts);
+    }
+
     const productExpenses = await this.captureEndpoint(
       profile,
       'products/expense',
@@ -426,6 +478,8 @@ export class GuestDataFoundationService {
       transactions: transactions.length,
       guestLogs: guestLogs.length,
       operationLogs: operationLogs.length,
+      cashTransactions: cashTransactions.length,
+      workingShifts: workingShifts.length,
       productSalesLinked,
       endpointErrors: profile.endpointErrors,
       profile,
@@ -939,6 +993,7 @@ export class GuestDataFoundationService {
         profile.operationLogs.invalidDates +=
           row.date_normal && !happenedAt ? 1 : 0;
         this.increment(profile.operationLogs.typeCounts, type ?? 'unknown');
+        this.profileRowFields(profile.operationLogs, row);
 
         await this.prisma.guestOperationLog.upsert({
           where: {
@@ -1440,6 +1495,52 @@ export class GuestDataFoundationService {
     counts[key] = (counts[key] ?? 0) + 1;
   }
 
+  private profileRows(
+    diagnostics: FieldDiagnostics,
+    rows: Array<Record<string, unknown>>,
+  ) {
+    for (const row of rows) {
+      diagnostics.total += 1;
+      this.profileRowFields(diagnostics, row);
+    }
+  }
+
+  private profileRowFields(
+    diagnostics: Pick<FieldDiagnostics, 'fieldCounts' | 'candidateFields'>,
+    row: Record<string, unknown>,
+  ) {
+    for (const [field, value] of Object.entries(row)) {
+      if (value === null || value === undefined || value === '') {
+        continue;
+      }
+
+      this.increment(diagnostics.fieldCounts, field);
+
+      if (this.isPotentialStaffField(field)) {
+        this.increment(diagnostics.candidateFields, field);
+      }
+    }
+  }
+
+  private isPotentialStaffField(field: string) {
+    const normalized = field.toLowerCase();
+
+    return (
+      normalized.includes('admin') ||
+      normalized.includes('operator') ||
+      normalized.includes('cashier') ||
+      normalized.includes('employee') ||
+      normalized.includes('staff') ||
+      normalized.includes('manager') ||
+      normalized.includes('user') ||
+      normalized.includes('creator') ||
+      normalized.includes('author') ||
+      normalized.includes('worker') ||
+      normalized.includes('shift') ||
+      normalized.includes('kass')
+    );
+  }
+
   private createEmptyProfile(period: ResolvedPeriod): SourceProfile {
     return {
       period: {
@@ -1477,6 +1578,18 @@ export class GuestDataFoundationService {
         total: 0,
         invalidDates: 0,
         typeCounts: {},
+        fieldCounts: {},
+        candidateFields: {},
+      },
+      cashTransactions: {
+        total: 0,
+        fieldCounts: {},
+        candidateFields: {},
+      },
+      workingShifts: {
+        total: 0,
+        fieldCounts: {},
+        candidateFields: {},
       },
       productSales: {
         total: 0,

@@ -170,6 +170,26 @@ export type StaffControlRow = GuestDashboardRow & {
   controlFlags: string[];
 };
 
+export type StaffControlDiagnostics = {
+  latestRuns: Array<{
+    domain: string;
+    startedAt: string;
+    endpointErrors: Record<string, string>;
+    operationLogs: {
+      total: number;
+      candidateFields: Record<string, number>;
+    };
+    cashTransactions: {
+      total: number;
+      candidateFields: Record<string, number>;
+    };
+    workingShifts: {
+      total: number;
+      candidateFields: Record<string, number>;
+    };
+  }>;
+};
+
 export type StaffControlReport = {
   tenantId: string;
   tenantSlug: string;
@@ -196,6 +216,7 @@ export type StaffControlReport = {
     count: number;
     amount: number;
   }>;
+  diagnostics: StaffControlDiagnostics;
 };
 
 export type GuestCrmUpdateDto = {
@@ -553,7 +574,10 @@ export class GuestsService {
       await this.tenantContextService.resolve(user);
     const period = this.resolvePeriod(query);
     const storeId = await this.resolveStoreId(tenantId, query.storeId);
-    const staffGroups = await this.loadAdminGuestGroups(tenantId);
+    const [staffGroups, diagnostics] = await Promise.all([
+      this.loadAdminGuestGroups(tenantId),
+      this.getStaffControlDiagnostics(tenantId),
+    ]);
     const emptyReport = {
       tenantId,
       tenantSlug,
@@ -571,6 +595,7 @@ export class GuestsService {
       operationAmount: 0,
       rows: [],
       operationTypes: [],
+      diagnostics,
     } satisfies StaffControlReport;
 
     if (staffGroups.length === 0) {
@@ -1139,6 +1164,44 @@ export class GuestsService {
       .slice(0, 12);
   }
 
+  private async getStaffControlDiagnostics(
+    tenantId: string,
+  ): Promise<StaffControlDiagnostics> {
+    const latestRuns = await this.prisma.guestDataProfileRun.findMany({
+      where: {
+        tenantId,
+        provider: IntegrationProvider.LANGAME,
+      },
+      orderBy: { startedAt: 'desc' },
+      take: 3,
+      select: {
+        domain: true,
+        startedAt: true,
+        profile: true,
+      },
+    });
+
+    return {
+      latestRuns: latestRuns.map((run) => {
+        const operationLogs = this.profileSection(run.profile, 'operationLogs');
+        const cashTransactions = this.profileSection(
+          run.profile,
+          'cashTransactions',
+        );
+        const workingShifts = this.profileSection(run.profile, 'workingShifts');
+
+        return {
+          domain: run.domain,
+          startedAt: run.startedAt.toISOString(),
+          endpointErrors: this.endpointErrorsFromProfile(run.profile),
+          operationLogs,
+          cashTransactions,
+          workingShifts,
+        };
+      }),
+    };
+  }
+
   private toStaffControlRow(row: GuestDashboardRow): StaffControlRow {
     const controlFlags: string[] = [];
     const totalMoney = row.transactionAmount + row.barRevenue;
@@ -1573,6 +1636,38 @@ export class GuestsService {
     return Object.fromEntries(
       Object.entries(endpointErrors).filter(
         (entry): entry is [string, string] => typeof entry[1] === 'string',
+      ),
+    );
+  }
+
+  private profileSection(value: Prisma.JsonValue, sectionName: string) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return { total: 0, candidateFields: {} };
+    }
+
+    const section = value[sectionName];
+    if (!section || typeof section !== 'object' || Array.isArray(section)) {
+      return { total: 0, candidateFields: {} };
+    }
+
+    return {
+      total:
+        typeof section.total === 'number' && Number.isFinite(section.total)
+          ? section.total
+          : 0,
+      candidateFields: this.numericRecord(section.candidateFields),
+    };
+  }
+
+  private numericRecord(value: unknown) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return {};
+    }
+
+    return Object.fromEntries(
+      Object.entries(value).filter(
+        (entry): entry is [string, number] =>
+          typeof entry[1] === 'number' && Number.isFinite(entry[1]),
       ),
     );
   }

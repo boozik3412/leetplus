@@ -114,6 +114,10 @@ export type LangameOperationLog = {
   sum: number | string | null;
 };
 
+export type LangameCashTransaction = Record<string, unknown>;
+
+export type LangameWorkingShift = Record<string, unknown>;
+
 export type LangameSyncQuery = {
   dateFrom?: string;
   dateTo?: string;

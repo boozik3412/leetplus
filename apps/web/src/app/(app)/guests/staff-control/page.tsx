@@ -153,6 +153,8 @@ export default async function StaffControlPage({
           <StaffTable report={report} />
           <OperationsPanel report={report} />
         </section>
+
+        <DiagnosticsPanel report={report} />
       </div>
     </main>
   );
@@ -309,5 +311,111 @@ function OperationsPanel({ report }: { report: StaffControlReport }) {
         </p>
       )}
     </section>
+  );
+}
+
+function DiagnosticsPanel({ report }: { report: StaffControlReport }) {
+  const latestRuns = report.diagnostics.latestRuns;
+
+  return (
+    <section className="mt-6 rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
+        <h2 className="text-base font-semibold">
+          Диагностика связки персонала
+        </h2>
+        <p className="mt-1 text-sm text-zinc-500">
+          Сохраняем только имена полей и количество заполненных строк, без
+          значений из LAngame. Это нужно, чтобы понять, где лежат администратор,
+          кассир или смена.
+        </p>
+      </div>
+      {latestRuns.length > 0 ? (
+        <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+          {latestRuns.map((run) => (
+            <div key={`${run.domain}-${run.startedAt}`} className="px-5 py-4">
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="font-medium text-zinc-950 dark:text-zinc-50">
+                    {run.domain}
+                  </p>
+                  <p className="text-xs text-zinc-500">
+                    {formatDate(run.startedAt)}
+                  </p>
+                </div>
+                {Object.keys(run.endpointErrors).length > 0 ? (
+                  <p className="text-xs font-medium text-amber-600 dark:text-amber-300">
+                    Есть недоступные endpoints
+                  </p>
+                ) : null}
+              </div>
+              <div className="mt-4 grid gap-3 lg:grid-cols-3">
+                <DiagnosticSource
+                  title="all_operations_log"
+                  total={run.operationLogs.total}
+                  fields={run.operationLogs.candidateFields}
+                />
+                <DiagnosticSource
+                  title="log_cash_transaction"
+                  total={run.cashTransactions.total}
+                  fields={run.cashTransactions.candidateFields}
+                />
+                <DiagnosticSource
+                  title="working_shifts"
+                  total={run.workingShifts.total}
+                  fields={run.workingShifts.candidateFields}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="px-5 py-6 text-sm text-zinc-500">
+          Диагностика появится после следующей синхронизации гостей.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function DiagnosticSource({
+  title,
+  total,
+  fields,
+}: {
+  title: string;
+  total: number;
+  fields: Record<string, number>;
+}) {
+  const entries = Object.entries(fields)
+    .sort((first, second) => second[1] - first[1])
+    .slice(0, 8);
+
+  return (
+    <div className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
+      <div className="flex items-start justify-between gap-3">
+        <p className="break-all text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+          {title}
+        </p>
+        <span className="shrink-0 text-xs tabular-nums text-zinc-500">
+          {formatNumber(total)}
+        </span>
+      </div>
+      {entries.length > 0 ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {entries.map(([field, count]) => (
+            <span
+              key={field}
+              className="rounded-md bg-zinc-100 px-2 py-1 text-xs text-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+            >
+              {field}: {formatNumber(count)}
+            </span>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-3 text-sm text-zinc-500">
+          Поля персонала пока не найдены.
+        </p>
+      )}
+    </div>
   );
 }

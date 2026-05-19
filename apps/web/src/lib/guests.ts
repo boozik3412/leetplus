@@ -131,6 +131,26 @@ export type StaffControlRow = GuestDashboardRow & {
   controlFlags: string[];
 };
 
+export type StaffControlDiagnostics = {
+  latestRuns: Array<{
+    domain: string;
+    startedAt: string;
+    endpointErrors: Record<string, string>;
+    operationLogs: {
+      total: number;
+      candidateFields: Record<string, number>;
+    };
+    cashTransactions: {
+      total: number;
+      candidateFields: Record<string, number>;
+    };
+    workingShifts: {
+      total: number;
+      candidateFields: Record<string, number>;
+    };
+  }>;
+};
+
 export type StaffControlReport = {
   tenantId: string;
   tenantSlug: string;
@@ -157,6 +177,7 @@ export type StaffControlReport = {
     count: number;
     amount: number;
   }>;
+  diagnostics: StaffControlDiagnostics;
 };
 
 export type GuestDetail = GuestDashboardRow & {

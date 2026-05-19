@@ -40,6 +40,18 @@ type ProfileRunUpdateCall = {
       guests: {
         withIdentityDocument: number;
       };
+      operationLogs: {
+        fieldCounts: Record<string, number>;
+        candidateFields: Record<string, number>;
+      };
+      cashTransactions: {
+        total: number;
+        candidateFields: Record<string, number>;
+      };
+      workingShifts: {
+        total: number;
+        candidateFields: Record<string, number>;
+      };
     };
   };
 };
@@ -94,6 +106,8 @@ describe('GuestDataFoundationService', () => {
     listTransactions: jest.fn(),
     listGuestLogs: jest.fn(),
     listAllOperationsLog: jest.fn(),
+    listCashTransactions: jest.fn(),
+    listWorkingShifts: jest.fn(),
     listProductExpenses: jest.fn(),
   };
   const langameSettingsService = {
@@ -188,6 +202,22 @@ describe('GuestDataFoundationService', () => {
         type: 'cash',
         date_normal: '2026-05-01 09:00:00',
         sum: '1000',
+        admin_id: 5,
+      },
+    ]);
+    langameClient.listCashTransactions.mockResolvedValue([
+      {
+        admin_id: 5,
+        user_name: 'Admin',
+        sum: '1000',
+        date: '2026-05-01 09:00:00',
+      },
+    ]);
+    langameClient.listWorkingShifts.mockResolvedValue([
+      {
+        shift_id: 11,
+        admin_id: 5,
+        date_start: '2026-05-01 08:00:00',
       },
     ]);
     langameClient.listProductExpenses.mockResolvedValue([
@@ -279,6 +309,20 @@ describe('GuestDataFoundationService', () => {
     expect(successUpdate.data.transactionsCount).toBe(1);
     expect(successUpdate.data.productSalesLinked).toBe(1);
     expect(successUpdate.data.profile.guests.withIdentityDocument).toBe(1);
+    expect(successUpdate.data.profile.operationLogs.fieldCounts.club_id).toBe(
+      1,
+    );
+    expect(
+      successUpdate.data.profile.operationLogs.candidateFields.admin_id,
+    ).toBe(1);
+    expect(successUpdate.data.profile.cashTransactions.total).toBe(1);
+    expect(
+      successUpdate.data.profile.cashTransactions.candidateFields.admin_id,
+    ).toBe(1);
+    expect(successUpdate.data.profile.workingShifts.total).toBe(1);
+    expect(
+      successUpdate.data.profile.workingShifts.candidateFields.shift_id,
+    ).toBe(1);
   });
 
   it('rejects profiling periods longer than ninety days', async () => {

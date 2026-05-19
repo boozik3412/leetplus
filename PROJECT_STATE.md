@@ -86,6 +86,7 @@ Connected production LAngame sources:
 - Added the production "Guests" area with collapsible left-nav group, `/guests` dashboard, `/guests/report` full report, `/guests/[id]` guest card, encrypted phone/full-name storage, and LeetPlus-only CRM fields.
 - Added default exclusion of administrator guest groups from client analytics while keeping admin groups selectable in filters for explicit inspection.
 - Added first `/guests/staff-control` report: staff/admin group slice, staff activity KPIs, staff table, and operation-log summary. Current limitation: `all_operations_log` is not yet reliably linked to a specific administrator identity.
+- Added safe staff-control diagnostics: guest foundation sync now probes `log_cash_transaction/list` and `working_shifts/list` and stores only field names/non-empty counts in the profile JSON, not raw payload values.
 
 ## Near-Term Backlog
 
@@ -153,9 +154,10 @@ Status: MVP 1 read-only guest analytics is live in production. Automatic rewards
 - Done: `/guests/report` full report opens separately with dates, club, group, segment, CRM status, search, sort, direction, and page-size filters.
 - Done: client guest analytics excludes administrator groups by default, but administrator groups remain available in the group filter for explicit drilldown.
 - Done: `/guests/staff-control` adds the first staff-control report for administrator groups and operation-log summary.
+- Done: `/guests/staff-control` surfaces safe data-shape diagnostics for `all_operations_log/list`, `log_cash_transaction/list`, and `working_shifts/list` so the next iteration can validate real operator/admin identifiers.
 - Current limitation: `all_operations_log` is stored and summarized, but the current foundation model does not yet link each operation to a specific administrator. Staff-control conclusions must be treated as directional until this link is validated on real LAngame payloads.
 - Planned data foundation: guests, guest groups, balances, bonus balances, sessions, transactions, all operations log, product expenses by guest, clubs, tariffs, shifts, and PC context.
-- Next: inspect real `all_operations_log/list`, `log_cash_transaction/list`, `working_shifts/list`, and guest/session payloads to find stable administrator/operator identifiers.
+- Next: run a production guest foundation sync, inspect the staff-control diagnostics, and then map confirmed administrator/operator identifiers into durable staff-control facts.
 - Next: extend staff-control report with cashier/shift analytics once operator identity is confirmed: cash operations, manual adjustments, refunds/cancellations, discounts/bonuses, shift anomalies, and suspicious guest/self-service activity.
 - Next: add export for `/guests/report` and `/guests/staff-control`, then saved filters/audiences.
 - Planned analytics: RFM, retention, churn risk, heatmaps, LTV, bonus load, campaign effect, and guest-flow forecasts.

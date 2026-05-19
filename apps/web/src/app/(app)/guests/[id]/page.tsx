@@ -90,9 +90,8 @@ export default async function GuestPage({ params }: { params: PageParams }) {
                 <Badge>{guest.externalDomain ?? "источник не определен"}</Badge>
               </div>
               <p className="mt-4 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                Персональные данные отображаются только в маскированном виде:
-                телефон, email и имя не раскрываются. Документы гостя в
-                интерфейсе не показываются.
+                ФИО и телефон показываются полностью для авторизованных
+                пользователей. Документы гостя в интерфейсе не показываются.
               </p>
             </div>
             <div className="rounded-lg border border-zinc-100 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">

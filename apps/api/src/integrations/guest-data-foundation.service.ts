@@ -1,7 +1,12 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { IntegrationProvider, Prisma } from '@prisma/client';
-import { createHash, createHmac } from 'node:crypto';
+import {
+  createCipheriv,
+  createHash,
+  createHmac,
+  randomBytes,
+} from 'node:crypto';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
@@ -500,10 +505,12 @@ export class GuestDataFoundationService {
           externalGuestTypeId: this.toNullableString(row.guest_type_id),
           phoneHash: phone.hash,
           phoneMasked: phone.masked,
+          phoneEncrypted: phone.encrypted,
           emailHash: email.hash,
           emailMasked: email.masked,
           fullNameHash: fullName.hash,
           fullNameMasked: fullName.masked,
+          fullNameEncrypted: fullName.encrypted,
           birthYear: birthday?.year,
           birthMonth: birthday?.month,
           birthDay: birthday?.day,
@@ -528,10 +535,12 @@ export class GuestDataFoundationService {
           externalGuestTypeId: this.toNullableString(row.guest_type_id),
           phoneHash: phone.hash,
           phoneMasked: phone.masked,
+          phoneEncrypted: phone.encrypted,
           emailHash: email.hash,
           emailMasked: email.masked,
           fullNameHash: fullName.hash,
           fullNameMasked: fullName.masked,
+          fullNameEncrypted: fullName.encrypted,
           birthYear: birthday?.year,
           birthMonth: birthday?.month,
           birthDay: birthday?.day,
@@ -1282,7 +1291,7 @@ export class GuestDataFoundationService {
   ) {
     const normalized = this.normalizeSensitiveValue(value, type);
     if (!normalized) {
-      return { hash: null, masked: null };
+      return { hash: null, masked: null, encrypted: null };
     }
 
     return {
@@ -1290,6 +1299,12 @@ export class GuestDataFoundationService {
         .update(normalized)
         .digest('hex'),
       masked: this.maskSensitiveValue(normalized, type),
+      encrypted:
+        type === 'email'
+          ? null
+          : this.encryptSensitiveValue(
+              this.displaySensitiveValue(value, type) ?? normalized,
+            ),
     };
   }
 
@@ -1330,6 +1345,43 @@ export class GuestDataFoundationService {
       .join(' ');
   }
 
+  private displaySensitiveValue(
+    value: string | null | undefined,
+    type: 'phone' | 'email' | 'name',
+  ) {
+    const trimmed = value?.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    if (type === 'name') {
+      return trimmed.replace(/\s+/g, ' ');
+    }
+
+    if (type === 'phone') {
+      return trimmed;
+    }
+
+    return trimmed.toLowerCase();
+  }
+
+  private encryptSensitiveValue(value: string) {
+    const iv = randomBytes(12);
+    const cipher = createCipheriv('aes-256-gcm', this.piiEncryptionKey(), iv);
+    const encrypted = Buffer.concat([
+      cipher.update(value, 'utf8'),
+      cipher.final(),
+    ]);
+    const tag = cipher.getAuthTag();
+
+    return [
+      'v1',
+      iv.toString('base64url'),
+      tag.toString('base64url'),
+      encrypted.toString('base64url'),
+    ].join(':');
+  }
+
   private piiSecret() {
     const secret =
       this.configService.get<string>('APP_ENCRYPTION_KEY')?.trim() ||
@@ -1340,6 +1392,10 @@ export class GuestDataFoundationService {
     }
 
     return secret;
+  }
+
+  private piiEncryptionKey() {
+    return createHash('sha256').update(this.piiSecret()).digest();
   }
 
   private safeGuestPayloadHash(row: LangameGuest) {

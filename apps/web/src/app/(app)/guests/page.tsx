@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { requireCurrentUser } from "@/lib/auth";
+import { GuestFoundationSyncButton } from "@/components/guest-foundation-sync-button";
 import {
   getGuestFilterOptions,
   getGuests,
@@ -127,11 +128,17 @@ export default async function GuestsPage({
               пока LAngame endpoints возвращают ошибки.
             </p>
           </div>
-          <div className="rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-            <p className="text-zinc-500">Гостей в выборке</p>
-            <p className="mt-1 text-2xl font-semibold tabular-nums">
-              {formatNumber(summary.totalGuests)}
-            </p>
+          <div className="flex flex-col gap-3 lg:items-end">
+            <GuestFoundationSyncButton
+              dateFrom={summary.periodFrom}
+              dateTo={summary.periodTo}
+            />
+            <div className="rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+              <p className="text-zinc-500">Гостей в выборке</p>
+              <p className="mt-1 text-2xl font-semibold tabular-nums">
+                {formatNumber(summary.totalGuests)}
+              </p>
+            </div>
           </div>
         </header>
 
@@ -317,7 +324,7 @@ function GuestFilters({
             type="search"
             name="search"
             defaultValue={filters.search ?? ""}
-            placeholder="ID, маска телефона, email"
+            placeholder="ID, телефон, email"
             className="h-10 rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
           />
         </label>

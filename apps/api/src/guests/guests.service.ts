@@ -3,7 +3,9 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { IntegrationProvider, Prisma } from '@prisma/client';
+import { createDecipheriv, createHash } from 'node:crypto';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
@@ -153,8 +155,10 @@ type GuestBase = {
   externalGuestId: string;
   externalGuestTypeId: string | null;
   phoneMasked: string | null;
+  phoneEncrypted: string | null;
   emailMasked: string | null;
   fullNameMasked: string | null;
+  fullNameEncrypted: string | null;
   insertedAt: Date | null;
   lastActivityAt: Date | null;
   isDisabled: boolean;
@@ -195,6 +199,7 @@ export class GuestsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
+    private readonly configService: ConfigService,
   ) {}
 
   async getFilterOptions(user: AuthenticatedUser): Promise<GuestFilterOptions> {
@@ -820,11 +825,17 @@ export class GuestsService {
       externalGuestId: guest.externalGuestId,
       guestGroupName,
       displayName:
+        this.decryptSensitiveValue(guest.fullNameEncrypted) ??
         guest.fullNameMasked ??
         guest.emailMasked ??
+        this.decryptSensitiveValue(guest.phoneEncrypted) ??
         guest.phoneMasked ??
         `Гость #${guest.externalGuestId}`,
-      contact: guest.phoneMasked ?? guest.emailMasked ?? 'нет контакта',
+      contact:
+        this.decryptSensitiveValue(guest.phoneEncrypted) ??
+        guest.phoneMasked ??
+        guest.emailMasked ??
+        'нет контакта',
       insertedAt: this.toIsoDateTime(guest.insertedAt),
       lastActivityAt: this.toIsoDateTime(latestActivityAt),
       sessionsCount: metrics?.sessionsCount ?? 0,
@@ -965,8 +976,10 @@ export class GuestsService {
       externalGuestId: true,
       externalGuestTypeId: true,
       phoneMasked: true,
+      phoneEncrypted: true,
       emailMasked: true,
       fullNameMasked: true,
+      fullNameEncrypted: true,
       insertedAt: true,
       lastActivityAt: true,
       isDisabled: true,
@@ -1155,5 +1168,45 @@ export class GuestsService {
 
   private guestGroupKey(domain: string | null, externalGroupId: string) {
     return `${domain ?? 'unknown'}:${externalGroupId}`;
+  }
+
+  private decryptSensitiveValue(value: string | null) {
+    if (!value) {
+      return null;
+    }
+
+    const parts = value.split(':');
+    if (parts.length !== 4 || parts[0] !== 'v1') {
+      return null;
+    }
+
+    try {
+      const [, iv, tag, encrypted] = parts;
+      const decipher = createDecipheriv(
+        'aes-256-gcm',
+        this.piiEncryptionKey(),
+        Buffer.from(iv, 'base64url'),
+      );
+      decipher.setAuthTag(Buffer.from(tag, 'base64url'));
+
+      return Buffer.concat([
+        decipher.update(Buffer.from(encrypted, 'base64url')),
+        decipher.final(),
+      ]).toString('utf8');
+    } catch {
+      return null;
+    }
+  }
+
+  private piiEncryptionKey() {
+    const secret =
+      this.configService.get<string>('APP_ENCRYPTION_KEY')?.trim() ||
+      this.configService.get<string>('JWT_SECRET')?.trim();
+
+    if (!secret) {
+      throw new BadRequestException('APP_ENCRYPTION_KEY is not configured');
+    }
+
+    return createHash('sha256').update(secret).digest();
   }
 }

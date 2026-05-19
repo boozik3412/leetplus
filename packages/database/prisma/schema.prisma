@@ -508,10 +508,12 @@ model Guest {
   externalGuestTypeId     String?
   phoneHash               String?
   phoneMasked             String?
+  phoneEncrypted          String?
   emailHash               String?
   emailMasked             String?
   fullNameHash            String?
   fullNameMasked          String?
+  fullNameEncrypted       String?
   birthYear               Int?
   birthMonth              Int?
   birthDay                Int?

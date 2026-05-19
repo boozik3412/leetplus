@@ -18,8 +18,10 @@ type GuestUpsertCall = {
     externalDomain: string;
     externalGuestId: string;
     phoneMasked: string | null;
+    phoneEncrypted: string | null;
     emailMasked: string | null;
     fullNameMasked: string | null;
+    fullNameEncrypted: string | null;
     phoneHash: string | null;
     emailHash: string | null;
     fullNameHash: string | null;
@@ -237,6 +239,10 @@ describe('GuestDataFoundationService', () => {
     expect(guestCreate.phoneMasked).toBe('***2233');
     expect(guestCreate.emailMasked).toBe('g***@example.com');
     expect(guestCreate.fullNameMasked).toBe('I. P.');
+    expect(guestCreate.phoneEncrypted).toEqual(expect.any(String));
+    expect(guestCreate.fullNameEncrypted).toEqual(expect.any(String));
+    expect(guestCreate.phoneEncrypted).not.toContain('+7 999 111-22-33');
+    expect(guestCreate.fullNameEncrypted).not.toContain('Ivan Petrov');
     expect(guestCreate.phoneHash).toEqual(expect.any(String));
     expect(guestCreate.emailHash).toEqual(expect.any(String));
     expect(guestCreate.fullNameHash).toEqual(expect.any(String));

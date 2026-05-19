@@ -99,8 +99,13 @@ export type LangameTransaction = {
   list_clubs_id?: number | string | null;
   type?: string | number | null;
   date?: string | null;
+  date_normal?: string | null;
   date_insert?: string | null;
   date_update?: string | null;
+  created_at?: string | null;
+  created?: string | null;
+  time?: string | null;
+  datetime?: string | null;
   sum?: number | string | null;
   amount?: number | string | null;
   balance?: number | string | null;

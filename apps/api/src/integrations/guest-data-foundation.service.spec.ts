@@ -236,7 +236,7 @@ describe('GuestDataFoundationService', () => {
         real_guest_id: 42,
         list_clubs_id: 10,
         type: 'deposit',
-        date: '2026-05-01 09:00:00',
+        date_normal: '01.05.2026 09:00:00',
         sum: '1000',
         balance: '1500.50',
       },

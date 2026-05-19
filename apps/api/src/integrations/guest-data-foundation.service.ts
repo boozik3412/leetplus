@@ -855,17 +855,31 @@ export class GuestDataFoundationService {
         row.club_id ?? row.list_clubs_id,
       );
       const type = this.toNullableString(row.type);
-      const happenedAt = this.parseLangameDate(row.date ?? row.date_insert);
+      const happenedAt = this.parseLangameDate(
+        row.date ??
+          row.date_normal ??
+          row.date_insert ??
+          row.created_at ??
+          row.created ??
+          row.time ??
+          row.datetime,
+      );
       const updatedAtExternal = this.parseLangameDate(row.date_update);
+      const hasTransactionDate = Boolean(
+        row.date ??
+        row.date_normal ??
+        row.date_insert ??
+        row.created_at ??
+        row.created ??
+        row.time ??
+        row.datetime ??
+        row.date_update,
+      );
 
       profile.transactions.total += 1;
       profile.transactions.withoutGuestId += externalGuestId ? 0 : 1;
       profile.transactions.invalidDates +=
-        (row.date || row.date_insert || row.date_update) &&
-        !happenedAt &&
-        !updatedAtExternal
-          ? 1
-          : 0;
+        hasTransactionDate && !happenedAt && !updatedAtExternal ? 1 : 0;
       this.increment(profile.transactions.typeCounts, type ?? 'unknown');
 
       await this.prisma.guestTransaction.upsert({

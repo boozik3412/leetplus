@@ -446,6 +446,13 @@ export class GuestDataFoundationService {
           ),
       );
       this.profileRows(profile.workingShifts, workingShifts);
+      await this.syncWorkingShifts(
+        tenantId,
+        domain,
+        workingShifts,
+        guestsByExternalId,
+        storesByExternalClubId,
+      );
     }
 
     const productExpenses = await this.captureEndpoint(
@@ -743,8 +750,12 @@ export class GuestDataFoundationService {
       const externalClubId = this.toNullableString(
         row.club_id ?? row.list_clubs_id,
       );
-      const startedAt = this.parseLangameDate(row.date_start);
-      const stoppedAt = this.parseLangameDate(row.date_stop);
+      const startedAt = this.parseLangameDate(
+        this.toNullableString(row.date_start),
+      );
+      const stoppedAt = this.parseLangameDate(
+        this.toNullableString(row.date_stop),
+      );
 
       profile.sessions.total += 1;
       profile.sessions.withoutGuestId += externalGuestId ? 0 : 1;
@@ -1033,6 +1044,93 @@ export class GuestDataFoundationService {
     }
 
     return allRows;
+  }
+
+  private async syncWorkingShifts(
+    tenantId: string,
+    domain: string,
+    rows: LangameWorkingShift[],
+    guestsByExternalId: Map<string, GuestRef>,
+    storesByExternalClubId: Map<string, StoreRef>,
+  ) {
+    for (const row of rows) {
+      const externalShiftId = this.toNullableString(row.id);
+      if (!externalShiftId) {
+        continue;
+      }
+
+      const externalUserId = this.toNullableString(row.user_id);
+      const externalClubId = this.toNullableString(row.list_clubs_id);
+      const startedAt = this.parseLangameDate(
+        this.toNullableString(row.date_start),
+      );
+      const stoppedAt = this.parseLangameDate(
+        this.toNullableString(row.date_stop),
+      );
+
+      await this.prisma.guestWorkingShift.upsert({
+        where: {
+          tenantId_externalProvider_externalDomain_externalShiftId: {
+            tenantId,
+            externalProvider: IntegrationProvider.LANGAME,
+            externalDomain: domain,
+            externalShiftId,
+          },
+        },
+        create: {
+          tenantId,
+          guestId: externalUserId
+            ? (guestsByExternalId.get(externalUserId)?.id ?? null)
+            : null,
+          storeId: externalClubId
+            ? (storesByExternalClubId.get(externalClubId)?.id ?? null)
+            : null,
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: domain,
+          externalShiftId,
+          externalUserId,
+          externalClubId,
+          startedAt,
+          stoppedAt,
+          durationMinutes: this.durationMinutes(startedAt, stoppedAt),
+          cashStart: this.toDecimalOrNull(row.start),
+          cashAmount: this.toDecimalOrNull(row.nal),
+          cashlessAmount: this.toDecimalOrNull(row.beznal),
+          refundsCash: this.toDecimalOrNull(row.refunds_nal),
+          refundsCashless: this.toDecimalOrNull(row.refunds_beznal),
+          mobilePay: this.toDecimalOrNull(row.mobile_pay),
+          yandexPay: this.toDecimalOrNull(row.yandex_pay),
+          incassAmount: this.toDecimalOrNull(row.incass),
+          middleCheck: this.toDecimalOrNull(row.middle_check),
+          message: this.toNullableString(row.message),
+          sourcePayloadHash: this.payloadHash(row),
+        },
+        update: {
+          guestId: externalUserId
+            ? (guestsByExternalId.get(externalUserId)?.id ?? null)
+            : null,
+          storeId: externalClubId
+            ? (storesByExternalClubId.get(externalClubId)?.id ?? null)
+            : null,
+          externalUserId,
+          externalClubId,
+          startedAt,
+          stoppedAt,
+          durationMinutes: this.durationMinutes(startedAt, stoppedAt),
+          cashStart: this.toDecimalOrNull(row.start),
+          cashAmount: this.toDecimalOrNull(row.nal),
+          cashlessAmount: this.toDecimalOrNull(row.beznal),
+          refundsCash: this.toDecimalOrNull(row.refunds_nal),
+          refundsCashless: this.toDecimalOrNull(row.refunds_beznal),
+          mobilePay: this.toDecimalOrNull(row.mobile_pay),
+          yandexPay: this.toDecimalOrNull(row.yandex_pay),
+          incassAmount: this.toDecimalOrNull(row.incass),
+          middleCheck: this.toDecimalOrNull(row.middle_check),
+          message: this.toNullableString(row.message),
+          sourcePayloadHash: this.payloadHash(row),
+        },
+      });
+    }
   }
 
   private async linkProductSalesToGuests(

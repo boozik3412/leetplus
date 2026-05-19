@@ -96,6 +96,7 @@ model Tenant {
   guestLogs                  GuestLog[]
   guestTransactions          GuestTransaction[]
   guestOperationLogs         GuestOperationLog[]
+  guestWorkingShifts         GuestWorkingShift[]
   guestDataProfileRuns       GuestDataProfileRun[]
   guestCrmEvents             GuestCrmEvent[]
 }
@@ -174,6 +175,7 @@ model Store {
   guestSessions      GuestSession[]
   guestTransactions  GuestTransaction[]
   guestOperationLogs GuestOperationLog[]
+  guestWorkingShifts GuestWorkingShift[]
   clubRevenueFacts   ClubRevenueFact[]
   inventorySnapshots InventorySnapshot[]
   stockMovements     StockMovement[]
@@ -560,6 +562,7 @@ model Guest {
   sessions              GuestSession[]
   logs                  GuestLog[]
   transactions          GuestTransaction[]
+  workingShifts         GuestWorkingShift[]
   crmEvents             GuestCrmEvent[]
 
   @@unique([tenantId, externalProvider, externalDomain, externalGuestId])
@@ -766,6 +769,44 @@ model GuestOperationLog {
   @@unique([tenantId, externalProvider, externalDomain, sourceKey])
   @@index([tenantId, happenedAt])
   @@index([tenantId, type])
+  @@index([storeId])
+}
+
+model GuestWorkingShift {
+  id                String               @id @default(uuid())
+  tenantId          String
+  guestId           String?
+  storeId           String?
+  externalProvider  IntegrationProvider?
+  externalDomain    String?
+  externalShiftId   String
+  externalUserId    String?
+  externalClubId    String?
+  startedAt         DateTime?
+  stoppedAt         DateTime?
+  durationMinutes   Int?
+  cashStart         Decimal?
+  cashAmount        Decimal?
+  cashlessAmount    Decimal?
+  refundsCash       Decimal?
+  refundsCashless   Decimal?
+  mobilePay         Decimal?
+  yandexPay         Decimal?
+  incassAmount      Decimal?
+  middleCheck       Decimal?
+  message           String?
+  sourcePayloadHash String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  guest  Guest? @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  store  Store? @relation(fields: [storeId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, externalProvider, externalDomain, externalShiftId])
+  @@index([tenantId, startedAt])
+  @@index([tenantId, externalUserId])
+  @@index([guestId])
   @@index([storeId])
 }
 

@@ -129,6 +129,12 @@ export type GuestListResponse = {
 
 export type StaffControlRow = GuestDashboardRow & {
   controlFlags: string[];
+  shiftsCount: number;
+  shiftHours: number;
+  shiftPaymentAmount: number;
+  shiftRefundAmount: number;
+  shiftIncassAmount: number;
+  averageShiftMiddleCheck: number;
 };
 
 export type StaffControlDiagnostics = {
@@ -171,6 +177,13 @@ export type StaffControlReport = {
   barRevenue: number;
   operationLogsCount: number;
   operationAmount: number;
+  shiftsCount: number;
+  shiftsWithStaffLink: number;
+  shiftHours: number;
+  shiftPaymentAmount: number;
+  shiftRefundAmount: number;
+  shiftIncassAmount: number;
+  averageShiftMiddleCheck: number;
   rows: StaffControlRow[];
   operationTypes: Array<{
     type: string;

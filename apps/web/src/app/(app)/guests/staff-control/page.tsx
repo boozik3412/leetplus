@@ -138,9 +138,14 @@ export default async function StaffControlPage({
             caption="сессия, деньги или продажа бара"
           />
           <KpiCard
-            label="Сессии"
-            value={formatNumber(report.sessionsCount)}
-            caption={`${formatNumber(report.playHours, 1)} часов`}
+            label="Смены LAngame"
+            value={formatNumber(report.shiftsCount)}
+            caption={`${formatNumber(report.shiftsWithStaffLink)} связаны с сотрудником`}
+          />
+          <KpiCard
+            label="Касса по сменам"
+            value={formatRubles(report.shiftPaymentAmount)}
+            caption={`возвраты ${formatRubles(report.shiftRefundAmount)}`}
           />
           <KpiCard
             label="Операции LAngame"
@@ -198,7 +203,7 @@ function StaffTable({ report }: { report: StaffControlReport }) {
       </div>
       {report.rows.length > 0 ? (
         <div className="overflow-x-auto">
-          <table className="min-w-[920px] divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
+          <table className="min-w-[1120px] divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
             <thead className="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900/60">
               <tr>
                 <th className="px-4 py-3 text-left font-semibold">
@@ -207,6 +212,10 @@ function StaffTable({ report }: { report: StaffControlReport }) {
                 <th className="px-4 py-3 text-left font-semibold">Группа</th>
                 <th className="px-4 py-3 text-right font-semibold">Сессии</th>
                 <th className="px-4 py-3 text-right font-semibold">Часы</th>
+                <th className="px-4 py-3 text-right font-semibold">Смены</th>
+                <th className="px-4 py-3 text-right font-semibold">
+                  Касса смен
+                </th>
                 <th className="px-4 py-3 text-right font-semibold">Деньги</th>
                 <th className="px-4 py-3 text-left font-semibold">
                   Активность
@@ -237,6 +246,18 @@ function StaffTable({ report }: { report: StaffControlReport }) {
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums">
                     {formatNumber(row.playHours, 1)} ч
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    {formatNumber(row.shiftsCount)}
+                    <p className="mt-1 text-xs text-zinc-500">
+                      {formatNumber(row.shiftHours, 1)} ч
+                    </p>
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    {formatRubles(row.shiftPaymentAmount)}
+                    <p className="mt-1 text-xs text-zinc-500">
+                      ср. чек {formatRubles(row.averageShiftMiddleCheck)}
+                    </p>
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums">
                     {formatRubles(row.transactionAmount + row.barRevenue)}

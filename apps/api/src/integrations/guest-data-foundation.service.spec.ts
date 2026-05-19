@@ -56,6 +56,37 @@ type ProfileRunUpdateCall = {
   };
 };
 
+type GuestWorkingShiftUpsertCall = {
+  where: {
+    tenantId_externalProvider_externalDomain_externalShiftId: {
+      tenantId: string;
+      externalProvider: IntegrationProvider;
+      externalDomain: string;
+      externalShiftId: string;
+    };
+  };
+  create: {
+    tenantId: string;
+    guestId: string | null;
+    storeId: string | null;
+    externalProvider: IntegrationProvider;
+    externalDomain: string;
+    externalShiftId: string;
+    externalUserId: string | null;
+    externalClubId: string | null;
+    durationMinutes: number | null;
+    message: string | null;
+  };
+  update: {
+    guestId: string | null;
+    storeId: string | null;
+    externalUserId: string | null;
+    externalClubId: string | null;
+    durationMinutes: number | null;
+    message: string | null;
+  };
+};
+
 describe('GuestDataFoundationService', () => {
   const prisma = {
     guestDataProfileRun: {
@@ -85,6 +116,9 @@ describe('GuestDataFoundationService', () => {
       upsert: jest.fn(),
     },
     guestOperationLog: {
+      upsert: jest.fn(),
+    },
+    guestWorkingShift: {
       upsert: jest.fn(),
     },
     salesFact: {
@@ -216,8 +250,21 @@ describe('GuestDataFoundationService', () => {
     langameClient.listWorkingShifts.mockResolvedValue([
       {
         shift_id: 11,
+        id: 11,
         admin_id: 5,
+        user_id: 42,
+        list_clubs_id: 10,
         date_start: '2026-05-01 08:00:00',
+        date_stop: '2026-05-01 18:30:00',
+        start: '500',
+        nal: '1000',
+        beznal: '2000',
+        refunds_nal: '50',
+        refunds_beznal: '70',
+        mobile_pay: '300',
+        yandex_pay: '400',
+        incass: '1500',
+        middle_check: '250',
       },
     ]);
     langameClient.listProductExpenses.mockResolvedValue([
@@ -323,6 +370,41 @@ describe('GuestDataFoundationService', () => {
     expect(
       successUpdate.data.profile.workingShifts.candidateFields.shift_id,
     ).toBe(1);
+    const shiftUpsertCalls = prisma.guestWorkingShift.upsert.mock
+      .calls as Array<[GuestWorkingShiftUpsertCall]>;
+    const shiftUpsert = shiftUpsertCalls[0]?.[0];
+    expect(shiftUpsert).toBeDefined();
+    if (!shiftUpsert) {
+      throw new Error('Working shift upsert was not called');
+    }
+
+    expect(
+      shiftUpsert.where
+        .tenantId_externalProvider_externalDomain_externalShiftId,
+    ).toEqual({
+      tenantId: 'tenant-1',
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: 'club.example',
+      externalShiftId: '11',
+    });
+    expect(shiftUpsert.create.tenantId).toBe('tenant-1');
+    expect(shiftUpsert.create.guestId).toBe('guest-1');
+    expect(shiftUpsert.create.storeId).toBe('store-1');
+    expect(shiftUpsert.create.externalProvider).toBe(
+      IntegrationProvider.LANGAME,
+    );
+    expect(shiftUpsert.create.externalDomain).toBe('club.example');
+    expect(shiftUpsert.create.externalShiftId).toBe('11');
+    expect(shiftUpsert.create.externalUserId).toBe('42');
+    expect(shiftUpsert.create.externalClubId).toBe('10');
+    expect(shiftUpsert.create.durationMinutes).toBe(630);
+    expect(shiftUpsert.create.message).toBeNull();
+    expect(shiftUpsert.update.guestId).toBe('guest-1');
+    expect(shiftUpsert.update.storeId).toBe('store-1');
+    expect(shiftUpsert.update.externalUserId).toBe('42');
+    expect(shiftUpsert.update.externalClubId).toBe('10');
+    expect(shiftUpsert.update.durationMinutes).toBe(630);
+    expect(shiftUpsert.update.message).toBeNull();
   });
 
   it('rejects profiling periods longer than ninety days', async () => {

@@ -168,6 +168,12 @@ export type GuestDetail = GuestDashboardRow & {
 
 export type StaffControlRow = GuestDashboardRow & {
   controlFlags: string[];
+  shiftsCount: number;
+  shiftHours: number;
+  shiftPaymentAmount: number;
+  shiftRefundAmount: number;
+  shiftIncassAmount: number;
+  averageShiftMiddleCheck: number;
 };
 
 export type StaffControlDiagnostics = {
@@ -210,6 +216,13 @@ export type StaffControlReport = {
   barRevenue: number;
   operationLogsCount: number;
   operationAmount: number;
+  shiftsCount: number;
+  shiftsWithStaffLink: number;
+  shiftHours: number;
+  shiftPaymentAmount: number;
+  shiftRefundAmount: number;
+  shiftIncassAmount: number;
+  averageShiftMiddleCheck: number;
   rows: StaffControlRow[];
   operationTypes: Array<{
     type: string;
@@ -256,6 +269,17 @@ type GuestMetrics = {
   transactionAmount: number;
   barRevenue: number;
   barSalesCount: number;
+};
+
+type StaffShiftMetrics = {
+  shiftsCount: number;
+  linkedShiftsCount: number;
+  shiftMinutes: number;
+  shiftPaymentAmount: number;
+  shiftRefundAmount: number;
+  shiftIncassAmount: number;
+  middleCheckSum: number;
+  middleCheckCount: number;
 };
 
 type Period = {
@@ -593,6 +617,13 @@ export class GuestsService {
       barRevenue: 0,
       operationLogsCount: 0,
       operationAmount: 0,
+      shiftsCount: 0,
+      shiftsWithStaffLink: 0,
+      shiftHours: 0,
+      shiftPaymentAmount: 0,
+      shiftRefundAmount: 0,
+      shiftIncassAmount: 0,
+      averageShiftMiddleCheck: 0,
       rows: [],
       operationTypes: [],
       diagnostics,
@@ -616,6 +647,11 @@ export class GuestsService {
     };
     const { guests, metricsByGuestId, groupsByKey } =
       await this.buildGuestMetrics(tenantId, period, filters);
+    const shiftSummary = await this.getStaffShiftSummary(
+      tenantId,
+      period,
+      storeId,
+    );
     const rows = guests
       .map((guest) =>
         this.toStaffControlRow(
@@ -625,6 +661,7 @@ export class GuestsService {
             period,
             groupsByKey,
           ),
+          shiftSummary.byGuestId.get(guest.id),
         ),
       )
       .sort(
@@ -662,6 +699,20 @@ export class GuestsService {
         0,
       ),
       operationAmount: this.round(operationAmount, 2),
+      shiftsCount: shiftSummary.total.shiftsCount,
+      shiftsWithStaffLink: shiftSummary.total.linkedShiftsCount,
+      shiftHours: this.round(shiftSummary.total.shiftMinutes / 60, 1),
+      shiftPaymentAmount: this.round(shiftSummary.total.shiftPaymentAmount, 2),
+      shiftRefundAmount: this.round(shiftSummary.total.shiftRefundAmount, 2),
+      shiftIncassAmount: this.round(shiftSummary.total.shiftIncassAmount, 2),
+      averageShiftMiddleCheck:
+        shiftSummary.total.middleCheckCount > 0
+          ? this.round(
+              shiftSummary.total.middleCheckSum /
+                shiftSummary.total.middleCheckCount,
+              2,
+            )
+          : 0,
       rows,
       operationTypes,
     };
@@ -1164,6 +1215,111 @@ export class GuestsService {
       .slice(0, 12);
   }
 
+  private async getStaffShiftSummary(
+    tenantId: string,
+    period: Period,
+    storeId: string | null,
+  ) {
+    const rows = await this.prisma.guestWorkingShift.findMany({
+      where: {
+        tenantId,
+        startedAt: { gte: period.fromDate, lte: period.toDate },
+        ...(storeId ? { storeId } : {}),
+      },
+      select: {
+        guestId: true,
+        durationMinutes: true,
+        cashAmount: true,
+        cashlessAmount: true,
+        refundsCash: true,
+        refundsCashless: true,
+        mobilePay: true,
+        yandexPay: true,
+        incassAmount: true,
+        middleCheck: true,
+      },
+    });
+    const total = this.emptyStaffShiftMetrics();
+    const byGuestId = new Map<string, StaffShiftMetrics>();
+
+    for (const row of rows) {
+      const paymentAmount =
+        (this.decimalToNumber(row.cashAmount) ?? 0) +
+        (this.decimalToNumber(row.cashlessAmount) ?? 0) +
+        (this.decimalToNumber(row.mobilePay) ?? 0) +
+        (this.decimalToNumber(row.yandexPay) ?? 0);
+      const refundAmount =
+        (this.decimalToNumber(row.refundsCash) ?? 0) +
+        (this.decimalToNumber(row.refundsCashless) ?? 0);
+      const incassAmount = this.decimalToNumber(row.incassAmount) ?? 0;
+      const middleCheck = this.decimalToNumber(row.middleCheck);
+
+      this.addShiftMetrics(total, {
+        linked: Boolean(row.guestId),
+        durationMinutes: row.durationMinutes ?? 0,
+        paymentAmount,
+        refundAmount,
+        incassAmount,
+        middleCheck,
+      });
+
+      if (!row.guestId) {
+        continue;
+      }
+
+      const guestMetrics =
+        byGuestId.get(row.guestId) ?? this.emptyStaffShiftMetrics();
+      this.addShiftMetrics(guestMetrics, {
+        linked: true,
+        durationMinutes: row.durationMinutes ?? 0,
+        paymentAmount,
+        refundAmount,
+        incassAmount,
+        middleCheck,
+      });
+      byGuestId.set(row.guestId, guestMetrics);
+    }
+
+    return { total, byGuestId };
+  }
+
+  private emptyStaffShiftMetrics(): StaffShiftMetrics {
+    return {
+      shiftsCount: 0,
+      linkedShiftsCount: 0,
+      shiftMinutes: 0,
+      shiftPaymentAmount: 0,
+      shiftRefundAmount: 0,
+      shiftIncassAmount: 0,
+      middleCheckSum: 0,
+      middleCheckCount: 0,
+    };
+  }
+
+  private addShiftMetrics(
+    metrics: StaffShiftMetrics,
+    values: {
+      linked: boolean;
+      durationMinutes: number;
+      paymentAmount: number;
+      refundAmount: number;
+      incassAmount: number;
+      middleCheck: number | null;
+    },
+  ) {
+    metrics.shiftsCount += 1;
+    metrics.linkedShiftsCount += values.linked ? 1 : 0;
+    metrics.shiftMinutes += values.durationMinutes;
+    metrics.shiftPaymentAmount += values.paymentAmount;
+    metrics.shiftRefundAmount += values.refundAmount;
+    metrics.shiftIncassAmount += values.incassAmount;
+
+    if (values.middleCheck !== null) {
+      metrics.middleCheckSum += values.middleCheck;
+      metrics.middleCheckCount += 1;
+    }
+  }
+
   private async getStaffControlDiagnostics(
     tenantId: string,
   ): Promise<StaffControlDiagnostics> {
@@ -1202,7 +1358,10 @@ export class GuestsService {
     };
   }
 
-  private toStaffControlRow(row: GuestDashboardRow): StaffControlRow {
+  private toStaffControlRow(
+    row: GuestDashboardRow,
+    shiftMetrics?: StaffShiftMetrics,
+  ): StaffControlRow {
     const controlFlags: string[] = [];
     const totalMoney = row.transactionAmount + row.barRevenue;
 
@@ -1218,7 +1377,22 @@ export class GuestsService {
       controlFlags.push('Много часов');
     }
 
-    return { ...row, controlFlags };
+    return {
+      ...row,
+      controlFlags,
+      shiftsCount: shiftMetrics?.shiftsCount ?? 0,
+      shiftHours: this.round((shiftMetrics?.shiftMinutes ?? 0) / 60, 1),
+      shiftPaymentAmount: this.round(shiftMetrics?.shiftPaymentAmount ?? 0, 2),
+      shiftRefundAmount: this.round(shiftMetrics?.shiftRefundAmount ?? 0, 2),
+      shiftIncassAmount: this.round(shiftMetrics?.shiftIncassAmount ?? 0, 2),
+      averageShiftMiddleCheck:
+        shiftMetrics && shiftMetrics.middleCheckCount > 0
+          ? this.round(
+              shiftMetrics.middleCheckSum / shiftMetrics.middleCheckCount,
+              2,
+            )
+          : 0,
+    };
   }
 
   private isAdminGuestGroupName(name: string) {

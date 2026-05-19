@@ -124,8 +124,8 @@ export default async function GuestsPage({
               Аналитика клиентской базы
             </h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-              Read-only слой по гостям: визиты, сессии, покупки бара и денежные
-              операции за период {formatPeriodDate(summary.periodFrom)} -{" "}
+              Read-only слой по гостям: визиты, сессии, пополнения баланса и
+              покупки бара за период {formatPeriodDate(summary.periodFrom)} -{" "}
               {formatPeriodDate(summary.periodTo)}. Бонусы и балансы скрыты,
               пока LAngame endpoints возвращают ошибки. По умолчанию
               администраторы исключены из клиентских отчетов; выберите
@@ -215,7 +215,7 @@ export default async function GuestsPage({
             caption="по завершенным сессиям"
           />
           <KpiCard
-            label="Денежные операции"
+            label="Пополнение баланса"
             value={formatRubles(summary.transactionAmount)}
             caption={`${formatNumber(summary.transactionsCount)} операций`}
           />

@@ -284,7 +284,7 @@ function TransactionsPanel({ guest }: { guest: GuestDetail }) {
   return (
     <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
       <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
-        <h2 className="text-base font-semibold">Денежные операции</h2>
+        <h2 className="text-base font-semibold">Пополнение баланса</h2>
       </div>
       {guest.transactions.length > 0 ? (
         <div className="divide-y divide-zinc-100 dark:divide-zinc-800">

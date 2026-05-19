@@ -159,6 +159,7 @@ export default async function StaffControlPage({
           <OperationsPanel report={report} />
         </section>
 
+        <UnmatchedOperatorsPanel report={report} />
         <DiagnosticsPanel report={report} />
       </div>
     </main>
@@ -329,6 +330,94 @@ function OperationsPanel({ report }: { report: StaffControlReport }) {
       ) : (
         <p className="px-5 py-6 text-sm text-zinc-500">
           Операций за период не найдено.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function UnmatchedOperatorsPanel({ report }: { report: StaffControlReport }) {
+  const rows = report.unmatchedOperators;
+
+  return (
+    <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
+        <h2 className="text-base font-semibold">
+          Операторы LAngame без привязки
+        </h2>
+        <p className="mt-1 text-sm text-zinc-500">
+          Смены уже сохранены по user_id, но эти ID пока не сопоставлены с
+          админ-гостями LeetPlus.
+        </p>
+      </div>
+      {rows.length > 0 ? (
+        <div className="overflow-x-auto">
+          <table className="min-w-[900px] divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
+            <thead className="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900/60">
+              <tr>
+                <th className="px-4 py-3 text-left font-semibold">
+                  Оператор
+                </th>
+                <th className="px-4 py-3 text-left font-semibold">Клубы</th>
+                <th className="px-4 py-3 text-right font-semibold">Смены</th>
+                <th className="px-4 py-3 text-right font-semibold">Часы</th>
+                <th className="px-4 py-3 text-right font-semibold">Касса</th>
+                <th className="px-4 py-3 text-right font-semibold">
+                  Возвраты
+                </th>
+                <th className="px-4 py-3 text-right font-semibold">
+                  Инкассация
+                </th>
+                <th className="px-4 py-3 text-right font-semibold">
+                  Ср. чек
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+              {rows.map((row) => (
+                <tr
+                  key={`${row.externalDomain ?? "source"}-${row.externalUserId}`}
+                  className="hover:bg-zinc-50/80 dark:hover:bg-zinc-900/50"
+                >
+                  <td className="px-4 py-3">
+                    <p className="font-medium text-zinc-950 dark:text-zinc-50">
+                      user_id {row.externalUserId}
+                    </p>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      {row.externalDomain ?? "источник"}
+                    </p>
+                  </td>
+                  <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">
+                    {row.storeNames.length > 0
+                      ? row.storeNames.join(", ")
+                      : "не определены"}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    {formatNumber(row.shiftsCount)}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    {formatNumber(row.shiftHours, 1)} ч
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    {formatRubles(row.shiftPaymentAmount)}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    {formatRubles(row.shiftRefundAmount)}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    {formatRubles(row.shiftIncassAmount)}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    {formatRubles(row.averageShiftMiddleCheck)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="px-5 py-6 text-sm text-zinc-500">
+          Нераспознанных операторов за период нет.
         </p>
       )}
     </section>

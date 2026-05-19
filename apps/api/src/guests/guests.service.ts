@@ -196,6 +196,18 @@ export type StaffControlDiagnostics = {
   }>;
 };
 
+export type StaffUnmatchedOperatorRow = {
+  externalDomain: string | null;
+  externalUserId: string;
+  storeNames: string[];
+  shiftsCount: number;
+  shiftHours: number;
+  shiftPaymentAmount: number;
+  shiftRefundAmount: number;
+  shiftIncassAmount: number;
+  averageShiftMiddleCheck: number;
+};
+
 export type StaffControlReport = {
   tenantId: string;
   tenantSlug: string;
@@ -229,6 +241,7 @@ export type StaffControlReport = {
     count: number;
     amount: number;
   }>;
+  unmatchedOperators: StaffUnmatchedOperatorRow[];
   diagnostics: StaffControlDiagnostics;
 };
 
@@ -280,6 +293,12 @@ type StaffShiftMetrics = {
   shiftIncassAmount: number;
   middleCheckSum: number;
   middleCheckCount: number;
+};
+
+type StaffUnmatchedOperatorMetrics = StaffShiftMetrics & {
+  externalDomain: string | null;
+  externalUserId: string;
+  storeNames: Set<string>;
 };
 
 type Period = {
@@ -626,6 +645,7 @@ export class GuestsService {
       averageShiftMiddleCheck: 0,
       rows: [],
       operationTypes: [],
+      unmatchedOperators: [],
       diagnostics,
     } satisfies StaffControlReport;
 
@@ -715,6 +735,7 @@ export class GuestsService {
           : 0,
       rows,
       operationTypes,
+      unmatchedOperators: shiftSummary.unmatchedOperators,
     };
   }
 
@@ -1228,6 +1249,8 @@ export class GuestsService {
       },
       select: {
         guestId: true,
+        externalDomain: true,
+        externalUserId: true,
         durationMinutes: true,
         cashAmount: true,
         cashlessAmount: true,
@@ -1237,10 +1260,15 @@ export class GuestsService {
         yandexPay: true,
         incassAmount: true,
         middleCheck: true,
+        store: { select: { name: true } },
       },
     });
     const total = this.emptyStaffShiftMetrics();
     const byGuestId = new Map<string, StaffShiftMetrics>();
+    const byUnmatchedOperator = new Map<
+      string,
+      StaffUnmatchedOperatorMetrics
+    >();
 
     for (const row of rows) {
       const paymentAmount =
@@ -1264,6 +1292,30 @@ export class GuestsService {
       });
 
       if (!row.guestId) {
+        if (row.externalUserId) {
+          const key = `${row.externalDomain ?? ''}:${row.externalUserId}`;
+          const operatorMetrics =
+            byUnmatchedOperator.get(key) ??
+            this.emptyStaffUnmatchedOperatorMetrics(
+              row.externalDomain,
+              row.externalUserId,
+            );
+
+          if (row.store?.name) {
+            operatorMetrics.storeNames.add(row.store.name);
+          }
+
+          this.addShiftMetrics(operatorMetrics, {
+            linked: false,
+            durationMinutes: row.durationMinutes ?? 0,
+            paymentAmount,
+            refundAmount,
+            incassAmount,
+            middleCheck,
+          });
+          byUnmatchedOperator.set(key, operatorMetrics);
+        }
+
         continue;
       }
 
@@ -1280,7 +1332,16 @@ export class GuestsService {
       byGuestId.set(row.guestId, guestMetrics);
     }
 
-    return { total, byGuestId };
+    const unmatchedOperators = Array.from(byUnmatchedOperator.values())
+      .map((row) => this.toUnmatchedOperatorRow(row))
+      .sort(
+        (first, second) =>
+          second.shiftPaymentAmount - first.shiftPaymentAmount ||
+          second.shiftsCount - first.shiftsCount,
+      )
+      .slice(0, 20);
+
+    return { total, byGuestId, unmatchedOperators };
   }
 
   private emptyStaffShiftMetrics(): StaffShiftMetrics {
@@ -1318,6 +1379,37 @@ export class GuestsService {
       metrics.middleCheckSum += values.middleCheck;
       metrics.middleCheckCount += 1;
     }
+  }
+
+  private emptyStaffUnmatchedOperatorMetrics(
+    externalDomain: string | null,
+    externalUserId: string,
+  ): StaffUnmatchedOperatorMetrics {
+    return {
+      ...this.emptyStaffShiftMetrics(),
+      externalDomain,
+      externalUserId,
+      storeNames: new Set<string>(),
+    };
+  }
+
+  private toUnmatchedOperatorRow(
+    metrics: StaffUnmatchedOperatorMetrics,
+  ): StaffUnmatchedOperatorRow {
+    return {
+      externalDomain: metrics.externalDomain,
+      externalUserId: metrics.externalUserId,
+      storeNames: Array.from(metrics.storeNames).sort(),
+      shiftsCount: metrics.shiftsCount,
+      shiftHours: this.round(metrics.shiftMinutes / 60, 1),
+      shiftPaymentAmount: this.round(metrics.shiftPaymentAmount, 2),
+      shiftRefundAmount: this.round(metrics.shiftRefundAmount, 2),
+      shiftIncassAmount: this.round(metrics.shiftIncassAmount, 2),
+      averageShiftMiddleCheck:
+        metrics.middleCheckCount > 0
+          ? this.round(metrics.middleCheckSum / metrics.middleCheckCount, 2)
+          : 0,
+    };
   }
 
   private async getStaffControlDiagnostics(

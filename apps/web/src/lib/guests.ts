@@ -157,6 +157,18 @@ export type StaffControlDiagnostics = {
   }>;
 };
 
+export type StaffUnmatchedOperatorRow = {
+  externalDomain: string | null;
+  externalUserId: string;
+  storeNames: string[];
+  shiftsCount: number;
+  shiftHours: number;
+  shiftPaymentAmount: number;
+  shiftRefundAmount: number;
+  shiftIncassAmount: number;
+  averageShiftMiddleCheck: number;
+};
+
 export type StaffControlReport = {
   tenantId: string;
   tenantSlug: string;
@@ -190,6 +202,7 @@ export type StaffControlReport = {
     count: number;
     amount: number;
   }>;
+  unmatchedOperators: StaffUnmatchedOperatorRow[];
   diagnostics: StaffControlDiagnostics;
 };
 

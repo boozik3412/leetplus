@@ -156,9 +156,10 @@ Status: MVP 1 read-only guest analytics is live in production. Automatic rewards
 - Done: `/guests/staff-control` adds the first staff-control report for administrator groups and operation-log summary.
 - Done: `/guests/staff-control` surfaces safe data-shape diagnostics for `all_operations_log/list`, `log_cash_transaction/list`, and `working_shifts/list` so the next iteration can validate real operator/admin identifiers.
 - Done: `working_shifts/list` is persisted as tenant-scoped shift facts and linked to staff guests through `user_id` when it matches a LAngame guest id; `/guests/staff-control` now shows shift counts, linked shifts, shift hours, shift payment amount, refunds, incassation, and middle check.
+- Done: `/guests/staff-control` now exposes unmatched LAngame operators grouped by `externalDomain + user_id` with shift hours, payments, refunds, incassation, middle check, and store list.
 - Current limitation: `all_operations_log` is stored and summarized, but it still does not expose a reliable administrator identifier. `log_cash_transaction/list` currently returns errors on production sources, so cashier analytics starts from working shifts.
 - Planned data foundation: guests, guest groups, balances, bonus balances, sessions, transactions, all operations log, product expenses by guest, clubs, tariffs, shifts, and PC context.
-- Next: after deploy, run production guest foundation sync again to backfill `GuestWorkingShift`, then validate whether `working_shifts.user_id` fully matches administrator guests across all sources.
+- Next: add a staff identity mapping layer so unmatched `working_shifts.user_id` values can be manually or semi-automatically linked to LeetPlus staff guests.
 - Next: extend staff-control report from persisted shifts into shift anomalies, manual corrections, refunds/cancellations, discounts/bonuses, and suspicious guest/self-service activity.
 - Next: add export for `/guests/report` and `/guests/staff-control`, then saved filters/audiences.
 - Planned analytics: RFM, retention, churn risk, heatmaps, LTV, bonus load, campaign effect, and guest-flow forecasts.

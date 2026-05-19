@@ -58,7 +58,7 @@ export default async function StaffControlPage({
   ]);
 
   return (
-    <main className="px-6 py-8 text-zinc-950 dark:text-zinc-100">
+    <main className="px-4 py-6 text-zinc-950 dark:text-zinc-100 sm:px-6 sm:py-8">
       <div className="mx-auto max-w-7xl">
         <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
@@ -77,7 +77,7 @@ export default async function StaffControlPage({
           </div>
           <Link
             href="/guests"
-            className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+            className="inline-flex h-10 w-full items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 sm:w-auto dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
           >
             В дашборд гостей
           </Link>
@@ -124,13 +124,13 @@ export default async function StaffControlPage({
                 ))}
               </select>
             </label>
-            <button className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white hover:bg-zinc-800 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300">
+            <button className="h-10 w-full rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white hover:bg-zinc-800 lg:w-auto dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300">
               Применить
             </button>
           </form>
         </section>
 
-        <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
           <KpiCard label="Сотрудники" value={formatNumber(report.staffCount)} />
           <KpiCard
             label="Активные"
@@ -154,7 +154,7 @@ export default async function StaffControlPage({
           />
         </section>
 
-        <section className="mt-6 grid gap-6 xl:grid-cols-[1fr_0.9fr]">
+        <section className="mt-6 grid min-w-0 gap-6 2xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.45fr)]">
           <StaffTable report={report} />
           <OperationsPanel report={report} />
         </section>
@@ -176,7 +176,7 @@ function KpiCard({
   caption?: string;
 }) {
   return (
-    <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+    <div className="min-w-0 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
       <p className="text-xs font-semibold uppercase text-zinc-500">{label}</p>
       <p className="mt-3 text-2xl font-semibold tabular-nums text-zinc-950 dark:text-zinc-50">
         {value}
@@ -192,7 +192,7 @@ function KpiCard({
 
 function StaffTable({ report }: { report: StaffControlReport }) {
   return (
-    <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+    <section className="min-w-0 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
       <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
         <h2 className="text-base font-semibold">Администраторы</h2>
         <p className="mt-1 text-sm text-zinc-500">
@@ -203,8 +203,8 @@ function StaffTable({ report }: { report: StaffControlReport }) {
         </p>
       </div>
       {report.rows.length > 0 ? (
-        <div className="overflow-x-auto">
-          <table className="min-w-[1120px] divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
+        <div className="w-full overflow-x-auto">
+          <table className="min-w-[1040px] divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
             <thead className="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900/60">
               <tr>
                 <th className="px-4 py-3 text-left font-semibold">
@@ -298,7 +298,7 @@ function StaffTable({ report }: { report: StaffControlReport }) {
 
 function OperationsPanel({ report }: { report: StaffControlReport }) {
   return (
-    <section className="rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+    <section className="min-w-0 rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
       <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
         <h2 className="text-base font-semibold">Операционный журнал</h2>
         <p className="mt-1 text-sm text-zinc-500">
@@ -340,7 +340,7 @@ function UnmatchedOperatorsPanel({ report }: { report: StaffControlReport }) {
   const rows = report.unmatchedOperators;
 
   return (
-    <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+    <section className="mt-6 min-w-0 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
       <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
         <h2 className="text-base font-semibold">
           Операторы LAngame без привязки
@@ -351,8 +351,8 @@ function UnmatchedOperatorsPanel({ report }: { report: StaffControlReport }) {
         </p>
       </div>
       {rows.length > 0 ? (
-        <div className="overflow-x-auto">
-          <table className="min-w-[900px] divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
+        <div className="w-full overflow-x-auto">
+          <table className="min-w-[820px] divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
             <thead className="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900/60">
               <tr>
                 <th className="px-4 py-3 text-left font-semibold">
@@ -428,7 +428,7 @@ function DiagnosticsPanel({ report }: { report: StaffControlReport }) {
   const latestRuns = report.diagnostics.latestRuns;
 
   return (
-    <section className="mt-6 rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+    <section className="mt-6 min-w-0 rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
       <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
         <h2 className="text-base font-semibold">
           Диагностика связки персонала
@@ -458,7 +458,7 @@ function DiagnosticsPanel({ report }: { report: StaffControlReport }) {
                   </p>
                 ) : null}
               </div>
-              <div className="mt-4 grid gap-3 lg:grid-cols-3">
+              <div className="mt-4 grid min-w-0 gap-3 lg:grid-cols-3">
                 <DiagnosticSource
                   title="all_operations_log"
                   total={run.operationLogs.total}
@@ -501,7 +501,7 @@ function DiagnosticSource({
     .slice(0, 8);
 
   return (
-    <div className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
+    <div className="min-w-0 rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
       <div className="flex items-start justify-between gap-3">
         <p className="break-all text-sm font-semibold text-zinc-950 dark:text-zinc-50">
           {title}

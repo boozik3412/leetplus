@@ -66,17 +66,35 @@ function NavLink({ href, label, onNavigate }: NavItem) {
 
 function NavSection({
   title,
+  isOpen,
+  onToggle,
   children,
 }: {
   title: string;
+  isOpen: boolean;
+  onToggle: () => void;
   children: ReactNode;
 }) {
   return (
     <div className="space-y-1">
-      <p className="px-3 pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-400 first:pt-0">
-        {title}
-      </p>
-      {children}
+      <button
+        type="button"
+        aria-expanded={isOpen}
+        onClick={onToggle}
+        className="flex w-full items-center justify-between rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-zinc-700 transition hover:border-zinc-300 hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-200 dark:hover:border-zinc-700 dark:hover:bg-zinc-900"
+      >
+        <span>{title}</span>
+        <span
+          aria-hidden="true"
+          className={[
+            "text-sm leading-none text-zinc-400 transition-transform",
+            isOpen ? "rotate-90" : "",
+          ].join(" ")}
+        >
+          &gt;
+        </span>
+      </button>
+      {isOpen ? <div className="space-y-1 pl-2">{children}</div> : null}
     </div>
   );
 }
@@ -85,6 +103,9 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
   const router = useRouter();
   const pathname = usePathname();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [openNavGroups, setOpenNavGroups] = useState<Record<string, boolean>>(
+    {},
+  );
   const allowedNavGroups = navGroups
     .map((group) => ({
       ...group,
@@ -101,6 +122,13 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
     });
     router.push("/login");
     router.refresh();
+  }
+
+  function toggleNavGroup(title: string) {
+    setOpenNavGroups((current) => ({
+      ...current,
+      [title]: !current[title],
+    }));
   }
 
   return (
@@ -170,7 +198,12 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
             </div>
             <nav className="flex-1 space-y-1 overflow-y-auto p-3">
               {allowedNavGroups.map((group) => (
-                <NavSection key={group.title} title={group.title}>
+                <NavSection
+                  key={group.title}
+                  title={group.title}
+                  isOpen={Boolean(openNavGroups[group.title])}
+                  onToggle={() => toggleNavGroup(group.title)}
+                >
                   {group.items.map((item) => (
                     <NavLink
                       key={item.href}
@@ -207,7 +240,12 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
         </div>
         <nav className="flex-1 space-y-1 overflow-y-auto p-3">
           {allowedNavGroups.map((group) => (
-            <NavSection key={group.title} title={group.title}>
+            <NavSection
+              key={group.title}
+              title={group.title}
+              isOpen={Boolean(openNavGroups[group.title])}
+              onToggle={() => toggleNavGroup(group.title)}
+            >
               {group.items.map((item) => (
                 <NavLink key={item.href} {...item} />
               ))}

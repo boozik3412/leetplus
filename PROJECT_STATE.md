@@ -1,6 +1,6 @@
 # LeetPlus Project State
 
-Last updated: 2026-05-18
+Last updated: 2026-05-19
 
 ## Current Workflow
 
@@ -25,7 +25,7 @@ Last updated: 2026-05-18
 
 LeetPlus is an assortment analytics SaaS for computer clubs and club networks. It imports LAngame data, normalizes goods across clubs into network SKU groups, and provides analytics for sales, stock, OOS risk, margin, recommendations, LFL, new products, and assortment quality.
 
-The next strategic product direction is a separate "Guests" module. It should expand LeetPlus from assortment analytics into guest-base analytics, bonus control, mini CRM, loyalty/gamification, messenger communications, and guest-flow management. The agreed product/navigation direction is to split the left side of the app into two meaningful blocks: "Ассортимент" and "Гости".
+The active strategic product direction is a separate "Guests" module. It expands LeetPlus from assortment analytics into guest-base analytics, staff/control reports, mini CRM, loyalty/gamification, messenger communications, and guest-flow management. The product navigation is split into two meaningful blocks: "Ассортимент" and "Гости".
 
 Connected production LAngame sources:
 
@@ -63,7 +63,7 @@ Connected production LAngame sources:
 - Reports: collapsible report list, row-level sales detail report, summary export/email, LFL, new products, recommendations, OOS, no-sales, replenishment, ABC, top SKU/suppliers, assortment.
 - Product parsing utilities: automatic analysis, safe confirmation/rejection, existing canonical SKU awareness, manual parsing page.
 - Products/stores/directories: inline editing, multi-club filters, exports, manual store name preservation.
-- Guest module planning: `GUEST_MANAGEMENT_MODULE_TZ.md` defines the future "Guests" product area, including data foundation, guest analytics, bonus analytics, mini CRM, gamification, Telegram/MAX communication, and guest-flow management.
+- Guest module: first production read-only layer is live, including data foundation sync, guest analytics dashboard, full guest report, guest card, mini CRM fields, and first staff-control report.
 - Mail: Mail.ru/VK WorkSpace domain is configured; SMTP uses `reports@leetplus.ru`.
 
 ## Recent Work
@@ -83,6 +83,9 @@ Connected production LAngame sources:
 - Added hybrid "Money at risk" reporting: OOS profit-at-risk plus frozen stock in no-sales products, surfaced on the dashboard and reports.
 - Prepared `GUEST_MANAGEMENT_MODULE_TZ.md`: a draft specification for a future separate "Guests" module. Development is not started until the scope is approved.
 - Started MVP 1 for the "Guests" module: added guest data foundation schema, LAngame guest endpoint client methods, and a protected manual foundation sync/profiling endpoint.
+- Added the production "Guests" area with collapsible left-nav group, `/guests` dashboard, `/guests/report` full report, `/guests/[id]` guest card, encrypted phone/full-name storage, and LeetPlus-only CRM fields.
+- Added default exclusion of administrator guest groups from client analytics while keeping admin groups selectable in filters for explicit inspection.
+- Added first `/guests/staff-control` report: staff/admin group slice, staff activity KPIs, staff table, and operation-log summary. Current limitation: `all_operations_log` is not yet reliably linked to a specific administrator identity.
 
 ## Near-Term Backlog
 
@@ -136,19 +139,26 @@ Status: active; first commercial-risk layer is implemented, next focus is deeper
 
 ### Stage 7. Guest Management Module
 
-Status: MVP 1 data foundation and first read-only analytics dashboard are started after approval; automatic rewards are not implemented.
+Status: MVP 1 read-only guest analytics is live in production. Automatic rewards and write-back to LAngame are not implemented.
 
 - Source document: `GUEST_MANAGEMENT_MODULE_TZ.md`.
-- Product navigation: introduce two left-nav blocks, "Ассортимент" and "Гости".
-- First technical step after approval: data profiling for guest-related LAngame endpoints before building UI.
+- Done: product navigation has two left-nav blocks, "Ассортимент" and "Гости"; subsections are collapsed by default and open on click.
+- Done: data profiling and read-only foundation sync for guest-related LAngame endpoints started before reward/bonus write-back.
 - Done: initial tenant-scoped guest foundation tables and manual endpoint `POST /integrations/langame/guests/foundation/sync`.
 - Done: first protected guest analytics API and `/guests` dashboard with active/new/repeat/risk/lost guests, sessions, play hours, transaction revenue, bar revenue, visit trend, top guests, and endpoint data-quality warnings.
 - Done: guest dashboard v1.1 adds period, club, guest group, segment, and search filters; paginated guest list; sort links; and a protected guest card `/guests/[id]` with sessions, transactions, and bar purchases.
 - Done: guest phone and full name are now stored encrypted at application level and shown in full to authorized users; raw documents are still not stored or displayed.
 - Done: `/guests` includes a manual foundation sync button so production users can refresh guest data and populate newly added encrypted contact fields after deploy.
 - Done: guest CRM v1 adds manual LeetPlus-only status, note, next action, next contact date, and CRM event history on the protected guest card; these fields are not touched by LAngame sync.
+- Done: `/guests/report` full report opens separately with dates, club, group, segment, CRM status, search, sort, direction, and page-size filters.
+- Done: client guest analytics excludes administrator groups by default, but administrator groups remain available in the group filter for explicit drilldown.
+- Done: `/guests/staff-control` adds the first staff-control report for administrator groups and operation-log summary.
+- Current limitation: `all_operations_log` is stored and summarized, but the current foundation model does not yet link each operation to a specific administrator. Staff-control conclusions must be treated as directional until this link is validated on real LAngame payloads.
 - Planned data foundation: guests, guest groups, balances, bonus balances, sessions, transactions, all operations log, product expenses by guest, clubs, tariffs, shifts, and PC context.
-- Planned analytics: guest dashboard, guest list, guest card, RFM, retention, churn risk, heatmaps, LTV, bonus load, campaign effect, and guest-flow forecasts.
+- Next: inspect real `all_operations_log/list`, `log_cash_transaction/list`, `working_shifts/list`, and guest/session payloads to find stable administrator/operator identifiers.
+- Next: extend staff-control report with cashier/shift analytics once operator identity is confirmed: cash operations, manual adjustments, refunds/cancellations, discounts/bonuses, shift anomalies, and suspicious guest/self-service activity.
+- Next: add export for `/guests/report` and `/guests/staff-control`, then saved filters/audiences.
+- Planned analytics: RFM, retention, churn risk, heatmaps, LTV, bonus load, campaign effect, and guest-flow forecasts.
 - Planned CRM layer: segments, saved audiences, CRM statuses, notes, tasks, communication history, and next-best-action recommendations.
 - Planned loyalty/gamification: missions, rewards, budgets, limits, anti-fraud, and manual payout queue until a safe LAngame write API is confirmed.
 - Planned channels: Telegram bot/Mini App first, MAX bot/Mini App later after legal/account setup; all channels require explicit consent and unsubscribe support.

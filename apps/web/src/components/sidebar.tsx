@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type { AuthUser } from "@/lib/auth";
 import { canAccessPath } from "@/lib/permissions";
 import { ThemeSwitcher } from "@/components/theme-switcher";
@@ -13,17 +13,31 @@ type NavItem = {
   onNavigate?: () => void;
 };
 
-const navItems: NavItem[] = [
-  { href: "/admin", label: "Админ платформы" },
-  { href: "/dashboard", label: "Дашборд" },
-  { href: "/products", label: "Товары" },
-  { href: "/categories", label: "Категории" },
-  { href: "/suppliers", label: "Поставщики" },
-  { href: "/stores", label: "Торговые точки" },
-  { href: "/reports", label: "Отчёты" },
-  { href: "/import", label: "Импорт" },
-  { href: "/utilities", label: "Утилиты" },
-  { href: "/settings", label: "Настройки" },
+type NavGroup = {
+  title: string;
+  items: NavItem[];
+};
+
+const navGroups: NavGroup[] = [
+  {
+    title: "Ассортимент",
+    items: [
+      { href: "/admin", label: "Админ платформы" },
+      { href: "/dashboard", label: "Дашборд" },
+      { href: "/products", label: "Товары" },
+      { href: "/categories", label: "Категории" },
+      { href: "/suppliers", label: "Поставщики" },
+      { href: "/stores", label: "Торговые точки" },
+      { href: "/reports", label: "Отчёты" },
+      { href: "/import", label: "Импорт" },
+      { href: "/utilities", label: "Утилиты" },
+      { href: "/settings", label: "Настройки" },
+    ],
+  },
+  {
+    title: "Гости",
+    items: [{ href: "/guests", label: "Дашборд гостей" }],
+  },
 ];
 
 function NavLink({ href, label, onNavigate }: NavItem) {
@@ -46,10 +60,36 @@ function NavLink({ href, label, onNavigate }: NavItem) {
   );
 }
 
+function NavSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="space-y-1">
+      <p className="px-3 pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-400 first:pt-0">
+        {title}
+      </p>
+      {children}
+    </div>
+  );
+}
+
 export function Sidebar({ user }: { user: AuthUser | null }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const allowedNavItems = navItems.filter((item) => canAccessPath(user, item.href));
+  const allowedNavGroups = navGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => canAccessPath(user, item.href)),
+    }))
+    .filter((group) => group.items.length > 0);
+  const currentProductArea = pathname.startsWith("/guests")
+    ? "Гости"
+    : "Ассортимент";
 
   async function handleLogout() {
     await fetch("/api/auth/logout", {
@@ -71,7 +111,7 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
               LeetPlus
             </p>
             <p className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-              Ассортимент
+              {currentProductArea}
             </p>
           </div>
         </div>
@@ -110,7 +150,7 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
                       LeetPlus
                     </p>
                     <p className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                      Ассортимент
+                      {currentProductArea}
                     </p>
                   </div>
                 </div>
@@ -125,12 +165,16 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
               </div>
             </div>
             <nav className="flex-1 space-y-1 overflow-y-auto p-3">
-              {allowedNavItems.map((item) => (
-                <NavLink
-                  key={item.href}
-                  {...item}
-                  onNavigate={() => setIsMobileMenuOpen(false)}
-                />
+              {allowedNavGroups.map((group) => (
+                <NavSection key={group.title} title={group.title}>
+                  {group.items.map((item) => (
+                    <NavLink
+                      key={item.href}
+                      {...item}
+                      onNavigate={() => setIsMobileMenuOpen(false)}
+                    />
+                  ))}
+                </NavSection>
               ))}
             </nav>
             <div className="border-t border-zinc-200/80 p-3 dark:border-zinc-800">
@@ -151,15 +195,19 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
                 LeetPlus
               </p>
               <p className="mt-0.5 truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                Ассортимент
+                {currentProductArea}
               </p>
             </div>
             <ThemeSwitcher variant="compact" />
           </div>
         </div>
-        <nav className="flex-1 space-y-1 p-3">
-          {allowedNavItems.map((item) => (
-            <NavLink key={item.href} {...item} />
+        <nav className="flex-1 space-y-1 overflow-y-auto p-3">
+          {allowedNavGroups.map((group) => (
+            <NavSection key={group.title} title={group.title}>
+              {group.items.map((item) => (
+                <NavLink key={item.href} {...item} />
+              ))}
+            </NavSection>
           ))}
         </nav>
         <div className="border-t border-zinc-200/80 p-3 dark:border-zinc-800">

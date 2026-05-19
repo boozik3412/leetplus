@@ -136,12 +136,13 @@ Status: active; first commercial-risk layer is implemented, next focus is deeper
 
 ### Stage 7. Guest Management Module
 
-Status: MVP 1 data foundation is started after approval; no guest UI or automatic rewards are implemented yet.
+Status: MVP 1 data foundation and first read-only analytics dashboard are started after approval; automatic rewards are not implemented.
 
 - Source document: `GUEST_MANAGEMENT_MODULE_TZ.md`.
 - Product navigation: introduce two left-nav blocks, "Ассортимент" and "Гости".
 - First technical step after approval: data profiling for guest-related LAngame endpoints before building UI.
 - Done: initial tenant-scoped guest foundation tables and manual endpoint `POST /integrations/langame/guests/foundation/sync`.
+- Done: first protected guest analytics API and `/guests` dashboard with active/new/repeat/risk/lost guests, sessions, play hours, transaction revenue, bar revenue, visit trend, top guests, and endpoint data-quality warnings.
 - Planned data foundation: guests, guest groups, balances, bonus balances, sessions, transactions, all operations log, product expenses by guest, clubs, tariffs, shifts, and PC context.
 - Planned analytics: guest dashboard, guest list, guest card, RFM, retention, churn risk, heatmaps, LTV, bonus load, campaign effect, and guest-flow forecasts.
 - Planned CRM layer: segments, saved audiences, CRM statuses, notes, tasks, communication history, and next-best-action recommendations.

@@ -6,6 +6,7 @@ import { AdminModule } from './admin/admin.module';
 import { AuthModule } from './auth/auth.module';
 import { CategoriesModule } from './categories/categories.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { GuestsModule } from './guests/guests.module';
 import { ImportsModule } from './imports/imports.module';
 import { IntegrationsModule } from './integrations/integrations.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -33,6 +34,7 @@ import { UtilitiesModule } from './utilities/utilities.module';
     IntegrationsModule,
     ReportsModule,
     DashboardModule,
+    GuestsModule,
     UtilitiesModule,
   ],
   controllers: [AppController],

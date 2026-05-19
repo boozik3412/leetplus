@@ -9,6 +9,31 @@ import {
 
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
 
+type StaffSortKey =
+  | "sessions"
+  | "hours"
+  | "shifts"
+  | "shiftCash"
+  | "revenue";
+
+type StaffSortDirection = "asc" | "desc";
+
+type StaffTableControls = {
+  staffSearch: string;
+  staffGroup: string;
+  staffFlag: string;
+  staffSort: StaffSortKey;
+  staffDirection: StaffSortDirection;
+};
+
+const staffSortLabels: Record<StaffSortKey, string> = {
+  sessions: "Сессии",
+  hours: "Часы",
+  shifts: "Смены",
+  shiftCash: "Касса смен",
+  revenue: "Деньги",
+};
+
 function searchParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
@@ -40,6 +65,68 @@ function formatPeriodDate(value: string) {
   return formatDate(`${value}T00:00:00.000Z`);
 }
 
+function resolveStaffTableControls(params: Awaited<SearchParams>) {
+  const sort = searchParam(params.staffSort);
+  const direction = searchParam(params.staffDirection);
+
+  return {
+    staffSearch: searchParam(params.staffSearch)?.trim() ?? "",
+    staffGroup: searchParam(params.staffGroup)?.trim() ?? "",
+    staffFlag: searchParam(params.staffFlag)?.trim() ?? "",
+    staffSort: isStaffSortKey(sort) ? sort : "revenue",
+    staffDirection: direction === "asc" ? "asc" : "desc",
+  } satisfies StaffTableControls;
+}
+
+function isStaffSortKey(value: string | undefined): value is StaffSortKey {
+  return (
+    value === "sessions" ||
+    value === "hours" ||
+    value === "shifts" ||
+    value === "shiftCash" ||
+    value === "revenue"
+  );
+}
+
+function staffControlHref({
+  filters,
+  controls,
+  period,
+  overrides = {},
+}: {
+  filters: GuestsSummaryFilters;
+  controls: StaffTableControls;
+  period: { from: string; to: string };
+  overrides?: Partial<StaffTableControls>;
+}) {
+  const nextControls = { ...controls, ...overrides };
+  const params = new URLSearchParams();
+
+  params.set("dateFrom", filters.dateFrom ?? period.from);
+  params.set("dateTo", filters.dateTo ?? period.to);
+
+  if (filters.storeId) {
+    params.set("storeId", filters.storeId);
+  }
+
+  if (nextControls.staffSearch) {
+    params.set("staffSearch", nextControls.staffSearch);
+  }
+
+  if (nextControls.staffGroup) {
+    params.set("staffGroup", nextControls.staffGroup);
+  }
+
+  if (nextControls.staffFlag) {
+    params.set("staffFlag", nextControls.staffFlag);
+  }
+
+  params.set("staffSort", nextControls.staffSort);
+  params.set("staffDirection", nextControls.staffDirection);
+
+  return `/guests/staff-control?${params.toString()}`;
+}
+
 export default async function StaffControlPage({
   searchParams,
 }: {
@@ -52,6 +139,7 @@ export default async function StaffControlPage({
     dateTo: searchParam(params.dateTo),
     storeId: searchParam(params.storeId),
   };
+  const staffControls = resolveStaffTableControls(params);
   const [report, options] = await Promise.all([
     getStaffControl(filters),
     getGuestFilterOptions(),
@@ -155,7 +243,11 @@ export default async function StaffControlPage({
         </section>
 
         <section className="mt-6 grid min-w-0 gap-6 2xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.45fr)]">
-          <StaffTable report={report} />
+          <StaffTable
+            report={report}
+            filters={filters}
+            controls={staffControls}
+          />
           <OperationsPanel report={report} />
         </section>
 
@@ -190,17 +282,166 @@ function KpiCard({
   );
 }
 
-function StaffTable({ report }: { report: StaffControlReport }) {
+function StaffTable({
+  report,
+  filters,
+  controls,
+}: {
+  report: StaffControlReport;
+  filters: GuestsSummaryFilters;
+  controls: StaffTableControls;
+}) {
+  const period = { from: report.periodFrom, to: report.periodTo };
+  const groupOptions = Array.from(
+    new Set(
+      report.rows.map(
+        (row) => row.guestGroupName ?? row.externalDomain ?? "источник",
+      ),
+    ),
+  ).sort((first, second) => first.localeCompare(second, "ru"));
+  const flagOptions = Array.from(
+    new Set(report.rows.flatMap((row) => row.controlFlags)),
+  ).sort((first, second) => first.localeCompare(second, "ru"));
+  const search = controls.staffSearch.toLocaleLowerCase("ru-RU");
+  const filteredRows = report.rows.filter((row) => {
+    const groupName = row.guestGroupName ?? row.externalDomain ?? "источник";
+    const searchableText = [
+      row.displayName,
+      row.contact,
+      row.externalGuestId,
+      row.externalDomain,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLocaleLowerCase("ru-RU");
+
+    return (
+      (!search || searchableText.includes(search)) &&
+      (!controls.staffGroup || groupName === controls.staffGroup) &&
+      (!controls.staffFlag || row.controlFlags.includes(controls.staffFlag))
+    );
+  });
+  const rows = [...filteredRows].sort((first, second) => {
+    const firstValue = getStaffSortValue(first, controls.staffSort);
+    const secondValue = getStaffSortValue(second, controls.staffSort);
+    const result = firstValue - secondValue;
+
+    return controls.staffDirection === "asc" ? result : -result;
+  });
+  const resetHref = staffControlHref({
+    filters,
+    controls: {
+      staffSearch: "",
+      staffGroup: "",
+      staffFlag: "",
+      staffSort: "revenue",
+      staffDirection: "desc",
+    },
+    period,
+  });
+
   return (
     <section className="min-w-0 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
       <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
-        <h2 className="text-base font-semibold">Администраторы</h2>
-        <p className="mt-1 text-sm text-zinc-500">
-          Группы:{" "}
-          {report.staffGroups.length > 0
-            ? report.staffGroups.map((group) => group.name).join(", ")
-            : "не найдены"}
-        </p>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h2 className="text-base font-semibold">Администраторы</h2>
+            <p className="mt-1 text-sm text-zinc-500">
+              Группы:{" "}
+              {report.staffGroups.length > 0
+                ? report.staffGroups.map((group) => group.name).join(", ")
+                : "не найдены"}
+            </p>
+          </div>
+          <p className="text-sm text-zinc-500">
+            Показано {formatNumber(rows.length)} из{" "}
+            {formatNumber(report.rows.length)}
+          </p>
+        </div>
+      </div>
+      <form
+        method="get"
+        className="grid gap-3 border-b border-zinc-200 p-4 sm:grid-cols-2 lg:grid-cols-[minmax(180px,1fr)_minmax(160px,0.8fr)_minmax(160px,0.8fr)_auto] lg:items-end dark:border-zinc-800"
+      >
+        <input
+          type="hidden"
+          name="dateFrom"
+          value={filters.dateFrom ?? report.periodFrom}
+        />
+        <input
+          type="hidden"
+          name="dateTo"
+          value={filters.dateTo ?? report.periodTo}
+        />
+        {filters.storeId ? (
+          <input type="hidden" name="storeId" value={filters.storeId} />
+        ) : null}
+        <input type="hidden" name="staffSort" value={controls.staffSort} />
+        <input
+          type="hidden"
+          name="staffDirection"
+          value={controls.staffDirection}
+        />
+        <label className="grid min-w-0 gap-1 text-sm">
+          <span className="text-xs font-medium uppercase text-zinc-500">
+            Сотрудник
+          </span>
+          <input
+            name="staffSearch"
+            defaultValue={controls.staffSearch}
+            placeholder="ФИО, телефон, ID"
+            className="h-10 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+          />
+        </label>
+        <label className="grid min-w-0 gap-1 text-sm">
+          <span className="text-xs font-medium uppercase text-zinc-500">
+            Группа
+          </span>
+          <select
+            name="staffGroup"
+            defaultValue={controls.staffGroup}
+            className="h-10 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+          >
+            <option value="">Все группы</option>
+            {groupOptions.map((groupName) => (
+              <option key={groupName} value={groupName}>
+                {groupName}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="grid min-w-0 gap-1 text-sm">
+          <span className="text-xs font-medium uppercase text-zinc-500">
+            Флаг
+          </span>
+          <select
+            name="staffFlag"
+            defaultValue={controls.staffFlag}
+            className="h-10 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+          >
+            <option value="">Все флаги</option>
+            {flagOptions.map((flag) => (
+              <option key={flag} value={flag}>
+                {flag}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="flex gap-2">
+          <button className="h-10 flex-1 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white hover:bg-zinc-800 lg:flex-none dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300">
+            Применить
+          </button>
+          <Link
+            href={resetHref}
+            className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+          >
+            Сбросить
+          </Link>
+        </div>
+      </form>
+      <div className="border-b border-zinc-200 px-5 py-3 text-sm text-zinc-500 dark:border-zinc-800">
+        Сортировка: {staffSortLabels[controls.staffSort].toLocaleLowerCase("ru-RU")}
+        , {controls.staffDirection === "asc" ? "по возрастанию" : "по убыванию"}
       </div>
       {report.rows.length > 0 ? (
         <div className="w-full overflow-x-auto">
@@ -211,13 +452,36 @@ function StaffTable({ report }: { report: StaffControlReport }) {
                   Сотрудник
                 </th>
                 <th className="px-4 py-3 text-left font-semibold">Группа</th>
-                <th className="px-4 py-3 text-right font-semibold">Сессии</th>
-                <th className="px-4 py-3 text-right font-semibold">Часы</th>
-                <th className="px-4 py-3 text-right font-semibold">Смены</th>
-                <th className="px-4 py-3 text-right font-semibold">
-                  Касса смен
-                </th>
-                <th className="px-4 py-3 text-right font-semibold">Деньги</th>
+                <SortableStaffHeader
+                  controls={controls}
+                  filters={filters}
+                  period={period}
+                  sortKey="sessions"
+                />
+                <SortableStaffHeader
+                  controls={controls}
+                  filters={filters}
+                  period={period}
+                  sortKey="hours"
+                />
+                <SortableStaffHeader
+                  controls={controls}
+                  filters={filters}
+                  period={period}
+                  sortKey="shifts"
+                />
+                <SortableStaffHeader
+                  controls={controls}
+                  filters={filters}
+                  period={period}
+                  sortKey="shiftCash"
+                />
+                <SortableStaffHeader
+                  controls={controls}
+                  filters={filters}
+                  period={period}
+                  sortKey="revenue"
+                />
                 <th className="px-4 py-3 text-left font-semibold">
                   Активность
                 </th>
@@ -225,7 +489,7 @@ function StaffTable({ report }: { report: StaffControlReport }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-              {report.rows.map((row) => (
+              {rows.map((row) => (
                 <tr
                   key={row.id}
                   className="hover:bg-zinc-50/80 dark:hover:bg-zinc-900/50"
@@ -286,6 +550,11 @@ function StaffTable({ report }: { report: StaffControlReport }) {
               ))}
             </tbody>
           </table>
+          {rows.length === 0 ? (
+            <p className="px-5 py-6 text-sm text-zinc-500">
+              По текущим фильтрам сотрудники не найдены.
+            </p>
+          ) : null}
         </div>
       ) : (
         <p className="px-5 py-6 text-sm text-zinc-500">
@@ -293,6 +562,72 @@ function StaffTable({ report }: { report: StaffControlReport }) {
         </p>
       )}
     </section>
+  );
+}
+
+function getStaffSortValue(
+  row: StaffControlReport["rows"][number],
+  sortKey: StaffSortKey,
+) {
+  switch (sortKey) {
+    case "sessions":
+      return row.sessionsCount;
+    case "hours":
+      return row.playHours;
+    case "shifts":
+      return row.shiftsCount;
+    case "shiftCash":
+      return row.shiftPaymentAmount;
+    case "revenue":
+      return row.transactionAmount + row.barRevenue;
+  }
+}
+
+function SortableStaffHeader({
+  controls,
+  filters,
+  period,
+  sortKey,
+}: {
+  controls: StaffTableControls;
+  filters: GuestsSummaryFilters;
+  period: { from: string; to: string };
+  sortKey: StaffSortKey;
+}) {
+  const isActive = controls.staffSort === sortKey;
+  const nextDirection =
+    isActive && controls.staffDirection === "desc" ? "asc" : "desc";
+  const href = staffControlHref({
+    filters,
+    controls,
+    period,
+    overrides: {
+      staffSort: sortKey,
+      staffDirection: nextDirection,
+    },
+  });
+
+  return (
+    <th
+      aria-sort={
+        isActive
+          ? controls.staffDirection === "asc"
+            ? "ascending"
+            : "descending"
+          : "none"
+      }
+      className="px-4 py-3 text-right font-semibold"
+    >
+      <Link
+        href={href}
+        className="inline-flex items-center justify-end gap-1 text-zinc-600 hover:text-emerald-700 dark:text-zinc-400 dark:hover:text-emerald-300"
+      >
+        <span>{staffSortLabels[sortKey]}</span>
+        <span className="text-[10px]">
+          {isActive ? (controls.staffDirection === "asc" ? "↑" : "↓") : "↕"}
+        </span>
+      </Link>
+    </th>
   );
 }
 

@@ -445,13 +445,14 @@ function StaffTable({
       </div>
       {report.rows.length > 0 ? (
         <div className="w-full overflow-x-auto">
-          <table className="min-w-[1040px] divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
+          <table className="min-w-[1160px] divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
             <thead className="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900/60">
               <tr>
                 <th className="px-4 py-3 text-left font-semibold">
                   Сотрудник
                 </th>
                 <th className="px-4 py-3 text-left font-semibold">Группа</th>
+                <th className="px-4 py-3 text-left font-semibold">Клубы</th>
                 <SortableStaffHeader
                   controls={controls}
                   filters={filters}
@@ -505,6 +506,15 @@ function StaffTable({
                   </td>
                   <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">
                     {row.guestGroupName ?? row.externalDomain ?? "источник"}
+                  </td>
+                  <td className="max-w-40 px-4 py-3 text-zinc-600 dark:text-zinc-300">
+                    {row.storeNames.length > 0 ? (
+                      <span className="line-clamp-2">
+                        {row.storeNames.join(", ")}
+                      </span>
+                    ) : (
+                      <span className="text-zinc-400">нет смен</span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums">
                     {formatNumber(row.sessionsCount)}

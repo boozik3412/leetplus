@@ -129,6 +129,7 @@ export type GuestListResponse = {
 
 export type StaffControlRow = GuestDashboardRow & {
   controlFlags: string[];
+  storeNames: string[];
   shiftsCount: number;
   shiftHours: number;
   shiftPaymentAmount: number;

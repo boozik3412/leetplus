@@ -168,6 +168,7 @@ export type GuestDetail = GuestDashboardRow & {
 
 export type StaffControlRow = GuestDashboardRow & {
   controlFlags: string[];
+  storeNames: string[];
   shiftsCount: number;
   shiftHours: number;
   shiftPaymentAmount: number;
@@ -294,6 +295,7 @@ type GuestMetrics = {
 };
 
 type StaffShiftMetrics = {
+  storeNames: Set<string>;
   shiftsCount: number;
   linkedShiftsCount: number;
   shiftMinutes: number;
@@ -1330,6 +1332,9 @@ export class GuestsService {
 
       const guestMetrics =
         byGuestId.get(row.guestId) ?? this.emptyStaffShiftMetrics();
+      if (row.store?.name) {
+        guestMetrics.storeNames.add(row.store.name);
+      }
       this.addShiftMetrics(guestMetrics, {
         linked: true,
         durationMinutes: row.durationMinutes ?? 0,
@@ -1355,6 +1360,7 @@ export class GuestsService {
 
   private emptyStaffShiftMetrics(): StaffShiftMetrics {
     return {
+      storeNames: new Set<string>(),
       shiftsCount: 0,
       linkedShiftsCount: 0,
       shiftMinutes: 0,
@@ -1481,6 +1487,7 @@ export class GuestsService {
     return {
       ...row,
       controlFlags,
+      storeNames: Array.from(shiftMetrics?.storeNames ?? []).sort(),
       shiftsCount: shiftMetrics?.shiftsCount ?? 0,
       shiftHours: this.round((shiftMetrics?.shiftMinutes ?? 0) / 60, 1),
       shiftPaymentAmount: this.round(shiftMetrics?.shiftPaymentAmount ?? 0, 2),

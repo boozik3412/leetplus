@@ -20,6 +20,10 @@ type NavGroup = {
 
 const navGroups: NavGroup[] = [
   {
+    title: "Гости",
+    items: [{ href: "/guests", label: "Гости" }],
+  },
+  {
     title: "Ассортимент",
     items: [
       { href: "/admin", label: "Админ платформы" },
@@ -33,10 +37,6 @@ const navGroups: NavGroup[] = [
       { href: "/utilities", label: "Утилиты" },
       { href: "/settings", label: "Настройки" },
     ],
-  },
-  {
-    title: "Гости",
-    items: [{ href: "/guests", label: "Дашборд гостей" }],
   },
 ];
 

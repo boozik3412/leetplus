@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { requireCurrentUser } from "@/lib/auth";
+import { GuestDashboardFilters } from "@/components/guest-dashboard-filters";
 import { GuestFoundationSyncButton } from "@/components/guest-foundation-sync-button";
 import {
   getGuestFilterOptions,
   getGuests,
   getGuestsSummary,
   type GuestDashboardRow,
-  type GuestFilterOptions,
   type GuestListFilters,
   type GuestsSummary,
 } from "@/lib/guests";
@@ -105,6 +105,7 @@ export default async function GuestsPage({
     sort: searchParam(params.sort) as GuestListFilters["sort"],
     direction: searchParam(params.direction) as GuestListFilters["direction"],
   };
+  const selectedPeriod = searchParam(params.period);
   const [summary, guestList, options] = await Promise.all([
     getGuestsSummary(filters),
     getGuests(filters),
@@ -153,9 +154,19 @@ export default async function GuestsPage({
           </div>
         </header>
 
-        <GuestFilters
+        <GuestDashboardFilters
+          key={[
+            selectedPeriod,
+            filters.dateFrom,
+            filters.dateTo,
+            filters.storeId,
+            filters.guestGroupId,
+            filters.segment,
+            filters.search,
+          ].join("|")}
           filters={filters}
           options={options}
+          period={selectedPeriod}
           periodFrom={summary.periodFrom}
           periodTo={summary.periodTo}
         />
@@ -228,123 +239,6 @@ export default async function GuestsPage({
         <GuestListTable filters={filters} guestList={guestList} />
       </div>
     </main>
-  );
-}
-
-function GuestFilters({
-  filters,
-  options,
-  periodFrom,
-  periodTo,
-}: {
-  filters: GuestListFilters;
-  options: GuestFilterOptions;
-  periodFrom: string;
-  periodTo: string;
-}) {
-  return (
-    <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-      <form className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-[repeat(6,minmax(0,1fr))_auto] 2xl:items-end">
-        <label className="grid min-w-0 gap-1 text-sm">
-          <span className="text-xs font-medium uppercase text-zinc-500">
-            С даты
-          </span>
-          <input
-            type="date"
-            name="dateFrom"
-            defaultValue={filters.dateFrom ?? periodFrom}
-            className="h-10 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-          />
-        </label>
-        <label className="grid min-w-0 gap-1 text-sm">
-          <span className="text-xs font-medium uppercase text-zinc-500">
-            По дату
-          </span>
-          <input
-            type="date"
-            name="dateTo"
-            defaultValue={filters.dateTo ?? periodTo}
-            className="h-10 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-          />
-        </label>
-        <label className="grid min-w-0 gap-1 text-sm">
-          <span className="text-xs font-medium uppercase text-zinc-500">
-            Клуб
-          </span>
-          <select
-            name="storeId"
-            defaultValue={filters.storeId ?? ""}
-            className="h-10 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-          >
-            <option value="">Вся сеть</option>
-            {options.stores.map((store) => (
-              <option key={store.id} value={store.id}>
-                {store.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="grid min-w-0 gap-1 text-sm">
-          <span className="text-xs font-medium uppercase text-zinc-500">
-            Группа
-          </span>
-          <select
-            name="guestGroupId"
-            defaultValue={filters.guestGroupId ?? ""}
-            className="h-10 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-          >
-            <option value="">Все группы</option>
-            {options.groups.map((group) => (
-              <option key={group.id} value={group.id}>
-                {group.name} ({group.externalDomain ?? "источник"})
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="grid min-w-0 gap-1 text-sm">
-          <span className="text-xs font-medium uppercase text-zinc-500">
-            Сегмент
-          </span>
-          <select
-            name="segment"
-            defaultValue={filters.segment ?? "top"}
-            className="h-10 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-          >
-            {(
-              [
-                "top",
-                "active",
-                "new",
-                "repeat",
-                "risk",
-                "lost",
-                "quiet",
-              ] as const
-            ).map((segment) => (
-              <option key={segment} value={segment}>
-                {segmentLabel(segment)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="grid min-w-0 gap-1 text-sm">
-          <span className="text-xs font-medium uppercase text-zinc-500">
-            Поиск
-          </span>
-          <input
-            type="search"
-            name="search"
-            defaultValue={filters.search ?? ""}
-            placeholder="ID, телефон, email"
-            className="h-10 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-          />
-        </label>
-        <input type="hidden" name="pageSize" value={filters.pageSize ?? "50"} />
-        <button className="h-10 w-full rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white hover:bg-zinc-800 sm:w-auto xl:self-end dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300">
-          Применить
-        </button>
-      </form>
-    </section>
   );
 }
 

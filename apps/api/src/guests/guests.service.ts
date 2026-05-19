@@ -217,6 +217,10 @@ type ResolvedGuestFilters = {
   externalDomain: string | null;
   externalGuestTypeId: string | null;
   search: string | null;
+  excludedAdminGuestGroups: Array<{
+    externalDomain: string | null;
+    externalGuestTypeId: string;
+  }>;
 };
 
 type GuestGroupsByKey = Map<string, string>;
@@ -254,7 +258,10 @@ export class GuestsService {
       }),
     ]);
 
-    return { stores, groups };
+    return {
+      stores,
+      groups: groups.filter((group) => !this.isAdminGuestGroupName(group.name)),
+    };
   }
 
   async getSummary(
@@ -389,6 +396,7 @@ export class GuestsService {
       externalDomain: null,
       externalGuestTypeId: null,
       search: null,
+      excludedAdminGuestGroups: [],
     };
     const { metricsByGuestId, groupsByKey } = await this.buildGuestMetrics(
       tenantId,
@@ -551,54 +559,55 @@ export class GuestsService {
   ) {
     const guestWhere = this.buildGuestWhere(tenantId, filters, guestIds);
     const storeWhere = filters.storeId ? { storeId: filters.storeId } : {};
-    const [allGuests, sessions, transactions, sales, groupsByKey] =
-      await Promise.all([
-        this.prisma.guest.findMany({
-          where: guestWhere,
-          select: this.guestSelect(),
-        }),
-        this.prisma.guestSession.findMany({
-          where: {
-            tenantId,
-            guestId: guestIds ? { in: guestIds } : { not: null },
-            startedAt: { gte: period.activityFromDate, lte: period.toDate },
-            ...storeWhere,
-          },
-          select: {
-            guestId: true,
-            startedAt: true,
-            durationMinutes: true,
-          },
-        }),
-        this.prisma.guestTransaction.findMany({
-          where: {
-            tenantId,
-            guestId: guestIds ? { in: guestIds } : { not: null },
-            happenedAt: { gte: period.activityFromDate, lte: period.toDate },
-            ...storeWhere,
-          },
-          select: {
-            guestId: true,
-            happenedAt: true,
-            amount: true,
-          },
-        }),
-        this.prisma.salesFact.findMany({
-          where: {
-            tenantId,
-            guestId: guestIds ? { in: guestIds } : { not: null },
-            saleDate: { gte: period.activityFromDate, lte: period.toDate },
-            isCanceled: false,
-            ...storeWhere,
-          },
-          select: {
-            guestId: true,
-            saleDate: true,
-            revenue: true,
-          },
-        }),
-        this.loadGuestGroups(tenantId),
-      ]);
+    const [allGuests, groupsByKey] = await Promise.all([
+      this.prisma.guest.findMany({
+        where: guestWhere,
+        select: this.guestSelect(),
+      }),
+      this.loadGuestGroups(tenantId),
+    ]);
+    const [sessions, transactions, sales] = await Promise.all([
+      this.prisma.guestSession.findMany({
+        where: {
+          tenantId,
+          guest: { is: guestWhere },
+          startedAt: { gte: period.activityFromDate, lte: period.toDate },
+          ...storeWhere,
+        },
+        select: {
+          guestId: true,
+          startedAt: true,
+          durationMinutes: true,
+        },
+      }),
+      this.prisma.guestTransaction.findMany({
+        where: {
+          tenantId,
+          guest: { is: guestWhere },
+          happenedAt: { gte: period.activityFromDate, lte: period.toDate },
+          ...storeWhere,
+        },
+        select: {
+          guestId: true,
+          happenedAt: true,
+          amount: true,
+        },
+      }),
+      this.prisma.salesFact.findMany({
+        where: {
+          tenantId,
+          guest: { is: guestWhere },
+          saleDate: { gte: period.activityFromDate, lte: period.toDate },
+          isCanceled: false,
+          ...storeWhere,
+        },
+        select: {
+          guestId: true,
+          saleDate: true,
+          revenue: true,
+        },
+      }),
+    ]);
     const metricsByGuestId = new Map<string, GuestMetrics>();
 
     for (const session of sessions) {
@@ -665,6 +674,15 @@ export class GuestsService {
       where.externalDomain = filters.externalDomain;
     }
 
+    if (filters.excludedAdminGuestGroups.length > 0) {
+      where.NOT = {
+        OR: filters.excludedAdminGuestGroups.map((group) => ({
+          externalDomain: group.externalDomain,
+          externalGuestTypeId: group.externalGuestTypeId,
+        })),
+      };
+    }
+
     if (filters.search) {
       const searchHashes = this.searchHashes(filters.search);
       where.OR = [
@@ -696,11 +714,12 @@ export class GuestsService {
     filters: ResolvedGuestFilters,
   ) {
     const storeWhere = filters.storeId ? { storeId: filters.storeId } : {};
+    const guestWhere = this.buildGuestWhere(tenantId, filters);
     const [sessions, sales] = await Promise.all([
       this.prisma.guestSession.findMany({
         where: {
           tenantId,
-          guestId: { not: null },
+          guest: { is: guestWhere },
           startedAt: { gte: period.fromDate, lte: period.toDate },
           ...storeWhere,
         },
@@ -709,7 +728,7 @@ export class GuestsService {
       this.prisma.salesFact.findMany({
         where: {
           tenantId,
-          guestId: { not: null },
+          guest: { is: guestWhere },
           saleDate: { gte: period.fromDate, lte: period.toDate },
           isCanceled: false,
           ...storeWhere,
@@ -852,6 +871,21 @@ export class GuestsService {
     const storeId = this.blankToNull(query.storeId);
     const guestGroupId = this.blankToNull(query.guestGroupId);
     const search = this.normalizeSearch(query.search);
+    const groups = await this.prisma.guestGroup.findMany({
+      where: { tenantId },
+      select: {
+        id: true,
+        externalDomain: true,
+        externalGroupId: true,
+        name: true,
+      },
+    });
+    const excludedAdminGuestGroups = groups
+      .filter((group) => this.isAdminGuestGroupName(group.name))
+      .map((group) => ({
+        externalDomain: group.externalDomain,
+        externalGuestTypeId: group.externalGroupId,
+      }));
     let externalDomain: string | null = null;
     let externalGuestTypeId: string | null = null;
 
@@ -867,10 +901,7 @@ export class GuestsService {
     }
 
     if (guestGroupId) {
-      const group = await this.prisma.guestGroup.findFirst({
-        where: { id: guestGroupId, tenantId },
-        select: { externalDomain: true, externalGroupId: true },
-      });
+      const group = groups.find((candidate) => candidate.id === guestGroupId);
 
       if (!group) {
         throw new BadRequestException('guestGroupId is not available');
@@ -886,7 +917,18 @@ export class GuestsService {
       externalDomain,
       externalGuestTypeId,
       search,
+      excludedAdminGuestGroups,
     };
+  }
+
+  private isAdminGuestGroupName(name: string) {
+    const normalized = name.toLowerCase().replace(/\s+/g, ' ').trim();
+
+    return (
+      normalized.includes('администратор') ||
+      normalized.includes('админ') ||
+      normalized.includes('admin')
+    );
   }
 
   private async loadGuestGroups(tenantId: string): Promise<GuestGroupsByKey> {

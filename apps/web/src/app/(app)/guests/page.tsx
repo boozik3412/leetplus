@@ -126,7 +126,8 @@ export default async function GuestsPage({
               Read-only слой по гостям: визиты, сессии, покупки бара и денежные
               операции за период {formatPeriodDate(summary.periodFrom)} -{" "}
               {formatPeriodDate(summary.periodTo)}. Бонусы и балансы скрыты,
-              пока LAngame endpoints возвращают ошибки.
+              пока LAngame endpoints возвращают ошибки. Администраторы
+              исключены из клиентских отчетов.
             </p>
           </div>
           <div className="flex flex-col gap-3 lg:items-end">

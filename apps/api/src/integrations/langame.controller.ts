@@ -70,4 +70,12 @@ export class LangameController {
   ) {
     return this.guestDataFoundationService.syncTenant(user, query);
   }
+
+  @Post('guests/foundation/sync/start')
+  startGuestDataFoundationSync(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() query: GuestDataFoundationSyncQuery,
+  ) {
+    return this.guestDataFoundationService.startTenantSync(user, query);
+  }
 }

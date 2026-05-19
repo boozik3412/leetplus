@@ -11,16 +11,16 @@ export function GuestFoundationSyncButton({
   dateTo: string;
 }) {
   const router = useRouter();
-  const [status, setStatus] = useState<"idle" | "syncing" | "done" | "error">(
-    "idle",
-  );
+  const [status, setStatus] = useState<
+    "idle" | "starting" | "started" | "error"
+  >("idle");
 
   async function syncGuests() {
-    setStatus("syncing");
+    setStatus("starting");
 
     try {
       const response = await fetch(
-        "/api/integrations/langame/guests/foundation/sync",
+        "/api/integrations/langame/guests/foundation/sync/start",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -33,18 +33,18 @@ export function GuestFoundationSyncButton({
         return;
       }
 
-      setStatus("done");
-      router.refresh();
+      setStatus("started");
+      window.setTimeout(() => router.refresh(), 3000);
     } catch {
       setStatus("error");
     }
   }
 
   const label =
-    status === "syncing"
-      ? "Обновление..."
-      : status === "done"
-        ? "Обновлено"
+    status === "starting"
+      ? "Запуск..."
+      : status === "started"
+        ? "Синхронизация запущена"
         : "Обновить гостей";
 
   return (
@@ -52,7 +52,7 @@ export function GuestFoundationSyncButton({
       <button
         type="button"
         onClick={syncGuests}
-        disabled={status === "syncing"}
+        disabled={status === "starting"}
         className="inline-flex h-10 items-center rounded-full border border-emerald-200 bg-emerald-50 px-4 text-sm font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100 disabled:cursor-wait disabled:opacity-70 dark:border-emerald-900/70 dark:bg-emerald-950/40 dark:text-emerald-300"
       >
         {label}
@@ -63,7 +63,9 @@ export function GuestFoundationSyncButton({
         </p>
       ) : (
         <p className="text-xs text-zinc-500">
-          Заполнит новые зашифрованные ФИО и телефоны из LAngame.
+          {status === "started"
+            ? "Можно продолжать работу: данные обновятся после фоновой синхронизации."
+            : "Запустит фоновую синхронизацию гостей из LAngame."}
         </p>
       )}
     </div>

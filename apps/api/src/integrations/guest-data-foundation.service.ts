@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { IntegrationProvider, Prisma } from '@prisma/client';
 import {
@@ -44,6 +44,14 @@ export type GuestDataFoundationSyncResult = {
   sources: number;
   failedSources: number;
   sourceResults: GuestDataFoundationSourceResult[];
+};
+
+export type GuestDataFoundationStartResult = {
+  status: 'STARTED';
+  tenantId: string;
+  sources: number;
+  dateFrom: string;
+  dateTo: string;
 };
 
 export type GuestDataFoundationSourceResult = {
@@ -156,6 +164,8 @@ type SourceProfile = {
 
 @Injectable()
 export class GuestDataFoundationService {
+  private readonly logger = new Logger(GuestDataFoundationService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
@@ -255,6 +265,34 @@ export class GuestDataFoundationService {
     }
 
     return result;
+  }
+
+  async startTenantSync(
+    user: AuthenticatedUser,
+    query: GuestDataFoundationSyncQuery,
+  ): Promise<GuestDataFoundationStartResult> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { sources } =
+      await this.langameSettingsService.resolveTenantAccess(tenantId);
+    const period = this.resolvePeriod(query);
+
+    setImmediate(() => {
+      void this.syncTenant(user, query).catch((error: unknown) => {
+        const message =
+          error instanceof Error
+            ? error.message
+            : 'Guest background sync failed';
+        this.logger.error(message);
+      });
+    });
+
+    return {
+      status: 'STARTED',
+      tenantId,
+      sources: sources.length,
+      dateFrom: period.from,
+      dateTo: period.to,
+    };
   }
 
   private async syncSource(params: {

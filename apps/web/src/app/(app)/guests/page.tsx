@@ -98,6 +98,7 @@ export default async function GuestsPage({
     storeId: searchParam(params.storeId),
     guestGroupId: searchParam(params.guestGroupId),
     segment: searchParam(params.segment) as GuestListFilters["segment"],
+    crmStatus: searchParam(params.crmStatus) as GuestListFilters["crmStatus"],
     search: searchParam(params.search),
     page: searchParam(params.page),
     pageSize: searchParam(params.pageSize) ?? "50",
@@ -129,6 +130,14 @@ export default async function GuestsPage({
             </p>
           </div>
           <div className="flex flex-col gap-3 lg:items-end">
+            <Link
+              href={guestsReportHref(filters)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex h-10 items-center justify-center rounded-full border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+            >
+              Полный отчет
+            </Link>
             <GuestFoundationSyncButton
               dateFrom={summary.periodFrom}
               dateTo={summary.periodTo}
@@ -708,6 +717,18 @@ function PaginationLink({
 }
 
 function guestsHref(filters: GuestListFilters) {
+  return guestsPathHref("/guests", filters);
+}
+
+function guestsReportHref(filters: GuestListFilters) {
+  return guestsPathHref("/guests/report", {
+    ...filters,
+    page: "1",
+    pageSize: "200",
+  });
+}
+
+function guestsPathHref(pathname: string, filters: GuestListFilters) {
   const params = new URLSearchParams();
 
   Object.entries(filters).forEach(([key, value]) => {
@@ -716,5 +737,6 @@ function guestsHref(filters: GuestListFilters) {
     }
   });
 
-  return `/guests?${params.toString()}`;
+  const query = params.toString();
+  return query ? `${pathname}?${query}` : pathname;
 }

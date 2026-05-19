@@ -19,6 +19,7 @@ export type GuestsSummaryQuery = {
 
 export type GuestListQuery = GuestsSummaryQuery & {
   segment?: 'active' | 'new' | 'repeat' | 'risk' | 'lost' | 'quiet' | 'top';
+  crmStatus?: GuestCrmStatus;
   search?: string;
   page?: string;
   pageSize?: string;
@@ -324,6 +325,7 @@ export class GuestsService {
     const period = this.resolvePeriod(query);
     const filters = await this.resolveGuestFilters(tenantId, query);
     const segment = this.resolveSegment(query.segment);
+    const crmStatus = this.resolveCrmStatusFilter(query.crmStatus);
     const page = this.resolvePositiveInteger(query.page, 1, 1, 10_000);
     const pageSize = this.resolvePositiveInteger(query.pageSize, 50, 10, 200);
     const sort = this.resolveSort(query.sort);
@@ -341,6 +343,10 @@ export class GuestsService {
 
     if (segment !== 'top') {
       rows = rows.filter((row) => row.segment === segment);
+    }
+
+    if (crmStatus) {
+      rows = rows.filter((row) => row.crmStatus === crmStatus);
     }
 
     const sortedRows = this.sortRows(rows, sort, direction);
@@ -1088,6 +1094,14 @@ export class GuestsService {
   private resolveSegment(value: GuestListQuery['segment']) {
     const allowed = ['active', 'new', 'repeat', 'risk', 'lost', 'quiet', 'top'];
     return allowed.includes(value ?? '') ? (value ?? 'top') : 'top';
+  }
+
+  private resolveCrmStatusFilter(value: GuestListQuery['crmStatus']) {
+    if (!value) {
+      return null;
+    }
+
+    return Object.values(GuestCrmStatus).includes(value) ? value : null;
   }
 
   private resolveSort(value: GuestListQuery['sort']) {

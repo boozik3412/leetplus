@@ -104,6 +104,7 @@ export type GuestsSummary = {
 
 export type GuestListFilters = GuestsSummaryFilters & {
   segment?: "top" | GuestSegment;
+  crmStatus?: GuestCrmStatus;
   search?: string;
   page?: string;
   pageSize?: string;

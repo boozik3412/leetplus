@@ -1,9 +1,18 @@
 import { getApiUrl, getAuthHeaders } from "./api";
 
+export type GuestSegment =
+  | "active"
+  | "new"
+  | "repeat"
+  | "risk"
+  | "lost"
+  | "quiet";
+
 export type GuestDashboardRow = {
   id: string;
   externalDomain: string | null;
   externalGuestId: string;
+  guestGroupName: string | null;
   displayName: string;
   contact: string;
   insertedAt: string | null;
@@ -11,9 +20,25 @@ export type GuestDashboardRow = {
   sessionsCount: number;
   visitsDays: number;
   playHours: number;
+  currentCountHours: number | null;
   transactionAmount: number;
   barRevenue: number;
-  segment: "active" | "new" | "repeat" | "risk" | "lost" | "quiet";
+  segment: GuestSegment;
+};
+
+export type GuestFilterOptions = {
+  stores: Array<{
+    id: string;
+    name: string;
+    externalDomain: string | null;
+    externalClubId: string | null;
+  }>;
+  groups: Array<{
+    id: string;
+    name: string;
+    externalDomain: string | null;
+    externalGroupId: string;
+  }>;
 };
 
 export type GuestsSummary = {
@@ -21,6 +46,8 @@ export type GuestsSummary = {
   tenantSlug: string;
   periodFrom: string;
   periodTo: string;
+  storeId: string | null;
+  guestGroupId: string | null;
   totalGuests: number;
   activeGuests: number;
   newGuests: number;
@@ -60,27 +87,84 @@ export type GuestsSummary = {
   riskGuestsRows: GuestDashboardRow[];
 };
 
+export type GuestListFilters = GuestsSummaryFilters & {
+  segment?: "top" | GuestSegment;
+  search?: string;
+  page?: string;
+  pageSize?: string;
+  sort?: "revenue" | "sessions" | "lastActivity" | "registered";
+  direction?: "asc" | "desc";
+};
+
+export type GuestListResponse = {
+  periodFrom: string;
+  periodTo: string;
+  storeId: string | null;
+  guestGroupId: string | null;
+  segment: "top" | GuestSegment;
+  page: number;
+  pageSize: number;
+  totalRows: number;
+  totalPages: number;
+  sort: NonNullable<GuestListFilters["sort"]>;
+  direction: NonNullable<GuestListFilters["direction"]>;
+  rows: GuestDashboardRow[];
+};
+
+export type GuestDetail = GuestDashboardRow & {
+  sessions: Array<{
+    id: string;
+    startedAt: string | null;
+    stoppedAt: string | null;
+    durationMinutes: number | null;
+    storeName: string | null;
+    externalDomain: string | null;
+  }>;
+  transactions: Array<{
+    id: string;
+    happenedAt: string | null;
+    amount: number | null;
+    balance: number | null;
+    bonusBalance: number | null;
+    type: string | null;
+    storeName: string | null;
+    externalDomain: string | null;
+  }>;
+  sales: Array<{
+    id: string;
+    saleDate: string;
+    productName: string;
+    storeName: string;
+    revenue: number;
+    quantity: number;
+  }>;
+};
+
 export type GuestsSummaryFilters = {
   dateFrom?: string;
   dateTo?: string;
+  storeId?: string;
+  guestGroupId?: string;
 };
+
+export async function getGuestFilterOptions(): Promise<GuestFilterOptions> {
+  const response = await fetch(`${getApiUrl()}/guests/filter-options`, {
+    cache: "no-store",
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch guest filter options");
+  }
+
+  return response.json() as Promise<GuestFilterOptions>;
+}
 
 export async function getGuestsSummary(
   filters: GuestsSummaryFilters = {},
 ): Promise<GuestsSummary> {
-  const params = new URLSearchParams();
-
-  if (filters.dateFrom) {
-    params.set("dateFrom", filters.dateFrom);
-  }
-
-  if (filters.dateTo) {
-    params.set("dateTo", filters.dateTo);
-  }
-
-  const query = params.toString();
   const response = await fetch(
-    `${getApiUrl()}/guests/summary${query ? `?${query}` : ""}`,
+    `${getApiUrl()}/guests/summary${query(filters)}`,
     {
       cache: "no-store",
       headers: await getAuthHeaders(),
@@ -92,4 +176,45 @@ export async function getGuestsSummary(
   }
 
   return response.json() as Promise<GuestsSummary>;
+}
+
+export async function getGuests(
+  filters: GuestListFilters = {},
+): Promise<GuestListResponse> {
+  const response = await fetch(`${getApiUrl()}/guests${query(filters)}`, {
+    cache: "no-store",
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch guests");
+  }
+
+  return response.json() as Promise<GuestListResponse>;
+}
+
+export async function getGuest(id: string): Promise<GuestDetail> {
+  const response = await fetch(`${getApiUrl()}/guests/${id}`, {
+    cache: "no-store",
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch guest");
+  }
+
+  return response.json() as Promise<GuestDetail>;
+}
+
+function query(filters: Record<string, string | undefined>) {
+  const params = new URLSearchParams();
+
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value) {
+      params.set(key, value);
+    }
+  });
+
+  const value = params.toString();
+  return value ? `?${value}` : "";
 }

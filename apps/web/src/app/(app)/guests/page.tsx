@@ -1,9 +1,20 @@
+import Link from "next/link";
 import { requireCurrentUser } from "@/lib/auth";
 import {
+  getGuestFilterOptions,
+  getGuests,
   getGuestsSummary,
   type GuestDashboardRow,
+  type GuestFilterOptions,
+  type GuestListFilters,
   type GuestsSummary,
 } from "@/lib/guests";
+
+type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
+
+function searchParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
 
 function formatNumber(value: number, digits = 0) {
   return new Intl.NumberFormat("ru-RU", {
@@ -37,22 +48,66 @@ function formatPeriodDate(value: string) {
   }).format(new Date(`${value}T00:00:00.000Z`));
 }
 
-function segmentLabel(segment: GuestDashboardRow["segment"]) {
-  const labels: Record<GuestDashboardRow["segment"], string> = {
-    active: "Активный",
-    new: "Новый",
-    repeat: "Повторный",
+function segmentLabel(segment: GuestDashboardRow["segment"] | "top") {
+  const labels: Record<GuestDashboardRow["segment"] | "top", string> = {
+    top: "TOP по деньгам",
+    active: "Активные",
+    new: "Новые",
+    repeat: "Повторные",
     risk: "В риске",
-    lost: "Потерянный",
-    quiet: "Тихий",
+    lost: "Потерянные",
+    quiet: "Тихие",
   };
 
   return labels[segment];
 }
 
-export default async function GuestsPage() {
+function segmentBadge(segment: GuestDashboardRow["segment"]) {
+  const tone =
+    segment === "repeat" || segment === "active" || segment === "new"
+      ? "bg-emerald-50 text-emerald-700 ring-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-200 dark:ring-emerald-500/20"
+      : segment === "risk"
+        ? "bg-amber-50 text-amber-700 ring-amber-100 dark:bg-amber-500/10 dark:text-amber-200 dark:ring-amber-500/20"
+        : segment === "lost"
+          ? "bg-red-50 text-red-700 ring-red-100 dark:bg-red-500/10 dark:text-red-200 dark:ring-red-500/20"
+          : "bg-zinc-100 text-zinc-700 ring-zinc-200 dark:bg-zinc-900 dark:text-zinc-300 dark:ring-zinc-800";
+
+  return (
+    <span
+      className={[
+        "inline-flex rounded-full px-2 py-1 text-xs font-medium ring-1",
+        tone,
+      ].join(" ")}
+    >
+      {segmentLabel(segment)}
+    </span>
+  );
+}
+
+export default async function GuestsPage({
+  searchParams,
+}: {
+  searchParams: SearchParams;
+}) {
   await requireCurrentUser();
-  const summary = await getGuestsSummary();
+  const params = await searchParams;
+  const filters: GuestListFilters = {
+    dateFrom: searchParam(params.dateFrom),
+    dateTo: searchParam(params.dateTo),
+    storeId: searchParam(params.storeId),
+    guestGroupId: searchParam(params.guestGroupId),
+    segment: searchParam(params.segment) as GuestListFilters["segment"],
+    search: searchParam(params.search),
+    page: searchParam(params.page),
+    pageSize: searchParam(params.pageSize) ?? "50",
+    sort: searchParam(params.sort) as GuestListFilters["sort"],
+    direction: searchParam(params.direction) as GuestListFilters["direction"],
+  };
+  const [summary, guestList, options] = await Promise.all([
+    getGuestsSummary(filters),
+    getGuests(filters),
+    getGuestFilterOptions(),
+  ]);
 
   return (
     <main className="px-6 py-8 text-zinc-950 dark:text-zinc-100">
@@ -66,19 +121,26 @@ export default async function GuestsPage() {
               Аналитика клиентской базы
             </h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-              Первый read-only слой: визиты, сессии, покупки бара и денежные
+              Read-only слой по гостям: визиты, сессии, покупки бара и денежные
               операции за период {formatPeriodDate(summary.periodFrom)} -{" "}
               {formatPeriodDate(summary.periodTo)}. Бонусы и балансы скрыты,
-              пока LAngame endpoints возвращают ошибку.
+              пока LAngame endpoints возвращают ошибки.
             </p>
           </div>
           <div className="rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-            <p className="text-zinc-500">Гостей в базе</p>
+            <p className="text-zinc-500">Гостей в выборке</p>
             <p className="mt-1 text-2xl font-semibold tabular-nums">
               {formatNumber(summary.totalGuests)}
             </p>
           </div>
         </header>
+
+        <GuestFilters
+          filters={filters}
+          options={options}
+          periodFrom={summary.periodFrom}
+          periodTo={summary.periodTo}
+        />
 
         <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
           <KpiCard
@@ -141,11 +203,130 @@ export default async function GuestsPage() {
         </section>
 
         <section className="mt-6 grid gap-6 xl:grid-cols-2">
-          <GuestTable title="TOP гостей" rows={summary.topGuests} />
-          <GuestTable title="Гости в риске" rows={summary.riskGuestsRows} />
+          <GuestMiniTable title="TOP гостей" rows={summary.topGuests} />
+          <GuestMiniTable title="Гости в риске" rows={summary.riskGuestsRows} />
         </section>
+
+        <GuestListTable filters={filters} guestList={guestList} />
       </div>
     </main>
+  );
+}
+
+function GuestFilters({
+  filters,
+  options,
+  periodFrom,
+  periodTo,
+}: {
+  filters: GuestListFilters;
+  options: GuestFilterOptions;
+  periodFrom: string;
+  periodTo: string;
+}) {
+  return (
+    <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <form className="grid gap-3 lg:grid-cols-[repeat(6,minmax(0,1fr))_auto] lg:items-end">
+        <label className="grid gap-1 text-sm">
+          <span className="text-xs font-medium uppercase text-zinc-500">
+            С даты
+          </span>
+          <input
+            type="date"
+            name="dateFrom"
+            defaultValue={filters.dateFrom ?? periodFrom}
+            className="h-10 rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+          />
+        </label>
+        <label className="grid gap-1 text-sm">
+          <span className="text-xs font-medium uppercase text-zinc-500">
+            По дату
+          </span>
+          <input
+            type="date"
+            name="dateTo"
+            defaultValue={filters.dateTo ?? periodTo}
+            className="h-10 rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+          />
+        </label>
+        <label className="grid gap-1 text-sm">
+          <span className="text-xs font-medium uppercase text-zinc-500">
+            Клуб
+          </span>
+          <select
+            name="storeId"
+            defaultValue={filters.storeId ?? ""}
+            className="h-10 rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+          >
+            <option value="">Вся сеть</option>
+            {options.stores.map((store) => (
+              <option key={store.id} value={store.id}>
+                {store.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="grid gap-1 text-sm">
+          <span className="text-xs font-medium uppercase text-zinc-500">
+            Группа
+          </span>
+          <select
+            name="guestGroupId"
+            defaultValue={filters.guestGroupId ?? ""}
+            className="h-10 rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+          >
+            <option value="">Все группы</option>
+            {options.groups.map((group) => (
+              <option key={group.id} value={group.id}>
+                {group.name} ({group.externalDomain ?? "источник"})
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="grid gap-1 text-sm">
+          <span className="text-xs font-medium uppercase text-zinc-500">
+            Сегмент
+          </span>
+          <select
+            name="segment"
+            defaultValue={filters.segment ?? "top"}
+            className="h-10 rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+          >
+            {(
+              [
+                "top",
+                "active",
+                "new",
+                "repeat",
+                "risk",
+                "lost",
+                "quiet",
+              ] as const
+            ).map((segment) => (
+              <option key={segment} value={segment}>
+                {segmentLabel(segment)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="grid gap-1 text-sm">
+          <span className="text-xs font-medium uppercase text-zinc-500">
+            Поиск
+          </span>
+          <input
+            type="search"
+            name="search"
+            defaultValue={filters.search ?? ""}
+            placeholder="ID, маска телефона, email"
+            className="h-10 rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+          />
+        </label>
+        <input type="hidden" name="pageSize" value={filters.pageSize ?? "50"} />
+        <button className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white hover:bg-zinc-800 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300">
+          Применить
+        </button>
+      </form>
+    </section>
   );
 }
 
@@ -293,7 +474,7 @@ function QualityMetric({ label, value }: { label: string; value: number }) {
   );
 }
 
-function GuestTable({
+function GuestMiniTable({
   title,
   rows,
 }: {
@@ -306,6 +487,72 @@ function GuestTable({
         <h2 className="text-base font-semibold">{title}</h2>
       </div>
       {rows.length > 0 ? (
+        <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+          {rows.map((row) => (
+            <GuestCompactRow key={row.id} row={row} />
+          ))}
+        </div>
+      ) : (
+        <p className="px-5 py-6 text-sm text-zinc-500">Данных пока нет.</p>
+      )}
+    </section>
+  );
+}
+
+function GuestCompactRow({ row }: { row: GuestDashboardRow }) {
+  return (
+    <Link
+      href={`/guests/${row.id}`}
+      className="grid gap-3 px-5 py-4 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900/50 md:grid-cols-[minmax(0,1fr)_120px_140px]"
+    >
+      <div className="min-w-0">
+        <p className="truncate font-medium text-zinc-950 dark:text-zinc-50">
+          {row.displayName}
+        </p>
+        <p className="mt-1 truncate text-xs text-zinc-500">
+          {row.contact} ·{" "}
+          {row.guestGroupName ?? row.externalDomain ?? "источник"}
+        </p>
+      </div>
+      <div>{segmentBadge(row.segment)}</div>
+      <div className="text-right text-sm tabular-nums">
+        <p className="font-medium">
+          {formatRubles(row.transactionAmount + row.barRevenue)}
+        </p>
+        <p className="text-xs text-zinc-500">
+          {formatNumber(row.sessionsCount)} сессий
+        </p>
+      </div>
+    </Link>
+  );
+}
+
+function GuestListTable({
+  filters,
+  guestList,
+}: {
+  filters: GuestListFilters;
+  guestList: Awaited<ReturnType<typeof getGuests>>;
+}) {
+  return (
+    <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-col gap-3 border-b border-zinc-200 px-5 py-4 dark:border-zinc-800 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <h2 className="text-base font-semibold">Список гостей</h2>
+          <p className="mt-1 text-sm text-zinc-500">
+            {formatNumber(guestList.totalRows)} гостей, страница{" "}
+            {formatNumber(guestList.page)} из{" "}
+            {formatNumber(guestList.totalPages)}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs font-medium">
+          <SortLink filters={filters} sort="revenue" label="Деньги" />
+          <SortLink filters={filters} sort="sessions" label="Сессии" />
+          <SortLink filters={filters} sort="lastActivity" label="Активность" />
+          <SortLink filters={filters} sort="registered" label="Регистрация" />
+        </div>
+      </div>
+      {guestList.rows.length > 0 ? (
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
             <thead className="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900/60">
@@ -320,24 +567,24 @@ function GuestTable({
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-              {rows.map((row) => (
+              {guestList.rows.map((row) => (
                 <tr
                   key={row.id}
                   className="hover:bg-zinc-50/80 dark:hover:bg-zinc-900/50"
                 >
                   <td className="px-4 py-3">
-                    <p className="font-medium text-zinc-950 dark:text-zinc-50">
+                    <Link
+                      href={`/guests/${row.id}`}
+                      className="font-medium text-zinc-950 hover:text-emerald-700 dark:text-zinc-50 dark:hover:text-emerald-300"
+                    >
                       {row.displayName}
-                    </p>
+                    </Link>
                     <p className="mt-1 text-xs text-zinc-500">
-                      {row.contact} · {row.externalDomain ?? "источник"}
+                      {row.contact} ·{" "}
+                      {row.guestGroupName ?? row.externalDomain ?? "источник"}
                     </p>
                   </td>
-                  <td className="px-4 py-3">
-                    <span className="rounded-full bg-zinc-100 px-2 py-1 text-xs font-medium text-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
-                      {segmentLabel(row.segment)}
-                    </span>
-                  </td>
+                  <td className="px-4 py-3">{segmentBadge(row.segment)}</td>
                   <td className="px-4 py-3 text-right tabular-nums">
                     {formatNumber(row.sessionsCount)}
                     <p className="text-xs text-zinc-500">
@@ -359,8 +606,105 @@ function GuestTable({
           </table>
         </div>
       ) : (
-        <p className="px-5 py-6 text-sm text-zinc-500">Данных пока нет.</p>
+        <p className="px-5 py-6 text-sm text-zinc-500">
+          По текущему фильтру гостей не найдено.
+        </p>
       )}
+      <div className="flex items-center justify-between gap-3 border-t border-zinc-200 px-5 py-4 text-sm dark:border-zinc-800">
+        <PaginationLink
+          filters={filters}
+          page={guestList.page - 1}
+          disabled={guestList.page <= 1}
+        >
+          Назад
+        </PaginationLink>
+        <span className="text-zinc-500">
+          {formatNumber(guestList.page)} / {formatNumber(guestList.totalPages)}
+        </span>
+        <PaginationLink
+          filters={filters}
+          page={guestList.page + 1}
+          disabled={guestList.page >= guestList.totalPages}
+        >
+          Вперед
+        </PaginationLink>
+      </div>
     </section>
   );
+}
+
+function SortLink({
+  filters,
+  sort,
+  label,
+}: {
+  filters: GuestListFilters;
+  sort: NonNullable<GuestListFilters["sort"]>;
+  label: string;
+}) {
+  const currentSort = filters.sort ?? "revenue";
+  const currentDirection = filters.direction ?? "desc";
+  const nextDirection =
+    currentSort === sort && currentDirection === "desc" ? "asc" : "desc";
+  const isActive = currentSort === sort;
+
+  return (
+    <Link
+      href={guestsHref({
+        ...filters,
+        sort,
+        direction: nextDirection,
+        page: "1",
+      })}
+      className={[
+        "rounded-full border px-3 py-1.5 transition-colors",
+        isActive
+          ? "border-zinc-950 bg-zinc-950 text-white dark:border-emerald-300 dark:bg-emerald-300 dark:text-zinc-950"
+          : "border-zinc-200 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900",
+      ].join(" ")}
+    >
+      {label}
+    </Link>
+  );
+}
+
+function PaginationLink({
+  filters,
+  page,
+  disabled,
+  children,
+}: {
+  filters: GuestListFilters;
+  page: number;
+  disabled: boolean;
+  children: string;
+}) {
+  if (disabled) {
+    return (
+      <span className="rounded-md border border-zinc-200 px-3 py-2 text-zinc-400 dark:border-zinc-800">
+        {children}
+      </span>
+    );
+  }
+
+  return (
+    <Link
+      href={guestsHref({ ...filters, page: String(page) })}
+      className="rounded-md border border-zinc-300 px-3 py-2 font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+    >
+      {children}
+    </Link>
+  );
+}
+
+function guestsHref(filters: GuestListFilters) {
+  const params = new URLSearchParams();
+
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value) {
+      params.set(key, value);
+    }
+  });
+
+  return `/guests?${params.toString()}`;
 }

@@ -7,6 +7,7 @@ import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import {
   GuestsService,
+  type GuestFilterOptions,
   type GuestDetail,
   type GuestListQuery,
   type GuestListResponse,
@@ -19,6 +20,13 @@ import {
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class GuestsController {
   constructor(private readonly guestsService: GuestsService) {}
+
+  @Get('filter-options')
+  getFilterOptions(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<GuestFilterOptions> {
+    return this.guestsService.getFilterOptions(user);
+  }
 
   @Get('summary')
   getSummary(

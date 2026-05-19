@@ -24,6 +24,7 @@ const navGroups: NavGroup[] = [
     items: [
       { href: "/guests", label: "Дашборд гостей" },
       { href: "/guests#guest-list", label: "Гости" },
+      { href: "/guests/staff-control", label: "Контроль персонала" },
     ],
   },
   {

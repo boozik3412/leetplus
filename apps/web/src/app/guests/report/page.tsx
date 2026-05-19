@@ -162,8 +162,9 @@ export default async function GuestFullReportPage({
             <p className="mt-2 text-sm text-zinc-500">
               {formatNumber(guestList.totalRows)} гостей в выборке за период{" "}
               {formatDate(`${guestList.periodFrom}T00:00:00.000Z`)} -{" "}
-              {formatDate(`${guestList.periodTo}T00:00:00.000Z`)}.
-              Администраторы исключены из отчета.
+              {formatDate(`${guestList.periodTo}T00:00:00.000Z`)}. По
+              умолчанию администраторы исключены; выберите админ-группу в
+              фильтре, чтобы посмотреть ее отдельно.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">

@@ -127,6 +127,38 @@ export type GuestListResponse = {
   rows: GuestDashboardRow[];
 };
 
+export type StaffControlRow = GuestDashboardRow & {
+  controlFlags: string[];
+};
+
+export type StaffControlReport = {
+  tenantId: string;
+  tenantSlug: string;
+  periodFrom: string;
+  periodTo: string;
+  storeId: string | null;
+  staffGroups: Array<{
+    id: string;
+    name: string;
+    externalDomain: string | null;
+    externalGroupId: string;
+  }>;
+  staffCount: number;
+  activeStaff: number;
+  sessionsCount: number;
+  playHours: number;
+  transactionAmount: number;
+  barRevenue: number;
+  operationLogsCount: number;
+  operationAmount: number;
+  rows: StaffControlRow[];
+  operationTypes: Array<{
+    type: string;
+    count: number;
+    amount: number;
+  }>;
+};
+
 export type GuestDetail = GuestDashboardRow & {
   crmEvents: Array<{
     id: string;
@@ -216,6 +248,24 @@ export async function getGuests(
   }
 
   return response.json() as Promise<GuestListResponse>;
+}
+
+export async function getStaffControl(
+  filters: GuestsSummaryFilters = {},
+): Promise<StaffControlReport> {
+  const response = await fetch(
+    `${getApiUrl()}/guests/staff-control${query(filters)}`,
+    {
+      cache: "no-store",
+      headers: await getAuthHeaders(),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch staff control report");
+  }
+
+  return response.json() as Promise<StaffControlReport>;
 }
 
 export async function getGuest(id: string): Promise<GuestDetail> {

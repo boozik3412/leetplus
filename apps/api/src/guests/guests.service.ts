@@ -27,6 +27,8 @@ export type GuestListQuery = GuestsSummaryQuery & {
   direction?: 'asc' | 'desc';
 };
 
+export type StaffControlQuery = GuestsSummaryQuery;
+
 export type GuestDashboardRow = {
   id: string;
   externalDomain: string | null;
@@ -164,6 +166,38 @@ export type GuestDetail = GuestDashboardRow & {
   }>;
 };
 
+export type StaffControlRow = GuestDashboardRow & {
+  controlFlags: string[];
+};
+
+export type StaffControlReport = {
+  tenantId: string;
+  tenantSlug: string;
+  periodFrom: string;
+  periodTo: string;
+  storeId: string | null;
+  staffGroups: Array<{
+    id: string;
+    name: string;
+    externalDomain: string | null;
+    externalGroupId: string;
+  }>;
+  staffCount: number;
+  activeStaff: number;
+  sessionsCount: number;
+  playHours: number;
+  transactionAmount: number;
+  barRevenue: number;
+  operationLogsCount: number;
+  operationAmount: number;
+  rows: StaffControlRow[];
+  operationTypes: Array<{
+    type: string;
+    count: number;
+    amount: number;
+  }>;
+};
+
 export type GuestCrmUpdateDto = {
   crmStatus?: GuestCrmStatus;
   crmNote?: string | null;
@@ -221,6 +255,10 @@ type ResolvedGuestFilters = {
     externalDomain: string | null;
     externalGuestTypeId: string;
   }>;
+  onlyGuestGroups?: Array<{
+    externalDomain: string | null;
+    externalGuestTypeId: string;
+  }>;
 };
 
 type GuestGroupsByKey = Map<string, string>;
@@ -258,10 +296,7 @@ export class GuestsService {
       }),
     ]);
 
-    return {
-      stores,
-      groups: groups.filter((group) => !this.isAdminGuestGroupName(group.name)),
-    };
+    return { stores, groups };
   }
 
   async getSummary(
@@ -397,6 +432,7 @@ export class GuestsService {
       externalGuestTypeId: null,
       search: null,
       excludedAdminGuestGroups: [],
+      onlyGuestGroups: undefined,
     };
     const { metricsByGuestId, groupsByKey } = await this.buildGuestMetrics(
       tenantId,
@@ -506,6 +542,103 @@ export class GuestsService {
         revenue: this.decimalToNumber(sale.revenue) ?? 0,
         quantity: this.decimalToNumber(sale.quantity) ?? 0,
       })),
+    };
+  }
+
+  async getStaffControl(
+    user: AuthenticatedUser,
+    query: StaffControlQuery = {},
+  ): Promise<StaffControlReport> {
+    const { tenantId, tenantSlug } =
+      await this.tenantContextService.resolve(user);
+    const period = this.resolvePeriod(query);
+    const storeId = await this.resolveStoreId(tenantId, query.storeId);
+    const staffGroups = await this.loadAdminGuestGroups(tenantId);
+    const emptyReport = {
+      tenantId,
+      tenantSlug,
+      periodFrom: period.from,
+      periodTo: period.to,
+      storeId,
+      staffGroups,
+      staffCount: 0,
+      activeStaff: 0,
+      sessionsCount: 0,
+      playHours: 0,
+      transactionAmount: 0,
+      barRevenue: 0,
+      operationLogsCount: 0,
+      operationAmount: 0,
+      rows: [],
+      operationTypes: [],
+    } satisfies StaffControlReport;
+
+    if (staffGroups.length === 0) {
+      return emptyReport;
+    }
+
+    const filters: ResolvedGuestFilters = {
+      storeId,
+      guestGroupId: null,
+      externalDomain: null,
+      externalGuestTypeId: null,
+      search: null,
+      excludedAdminGuestGroups: [],
+      onlyGuestGroups: staffGroups.map((group) => ({
+        externalDomain: group.externalDomain,
+        externalGuestTypeId: group.externalGroupId,
+      })),
+    };
+    const { guests, metricsByGuestId, groupsByKey } =
+      await this.buildGuestMetrics(tenantId, period, filters);
+    const rows = guests
+      .map((guest) =>
+        this.toStaffControlRow(
+          this.toDashboardRow(
+            guest,
+            metricsByGuestId.get(guest.id),
+            period,
+            groupsByKey,
+          ),
+        ),
+      )
+      .sort(
+        (first, second) =>
+          second.transactionAmount +
+          second.barRevenue -
+          (first.transactionAmount + first.barRevenue),
+      );
+    const periodMetrics = this.sumPeriodMetrics(metricsByGuestId);
+    const operationTypes = await this.getOperationTypeSummary(
+      tenantId,
+      period,
+      storeId,
+    );
+    const operationAmount = operationTypes.reduce(
+      (sum, row) => sum + row.amount,
+      0,
+    );
+
+    return {
+      ...emptyReport,
+      staffCount: guests.length,
+      activeStaff: rows.filter(
+        (row) =>
+          row.sessionsCount > 0 ||
+          row.transactionAmount > 0 ||
+          row.barRevenue > 0,
+      ).length,
+      sessionsCount: periodMetrics.sessionsCount,
+      playHours: this.round(periodMetrics.playMinutes / 60, 1),
+      transactionAmount: this.round(periodMetrics.transactionAmount, 2),
+      barRevenue: this.round(periodMetrics.barRevenue, 2),
+      operationLogsCount: operationTypes.reduce(
+        (sum, row) => sum + row.count,
+        0,
+      ),
+      operationAmount: this.round(operationAmount, 2),
+      rows,
+      operationTypes,
     };
   }
 
@@ -672,6 +805,13 @@ export class GuestsService {
     if (filters.externalGuestTypeId) {
       where.externalGuestTypeId = filters.externalGuestTypeId;
       where.externalDomain = filters.externalDomain;
+    }
+
+    if (filters.onlyGuestGroups?.length) {
+      where.OR = filters.onlyGuestGroups.map((group) => ({
+        externalDomain: group.externalDomain,
+        externalGuestTypeId: group.externalGuestTypeId,
+      }));
     }
 
     if (filters.excludedAdminGuestGroups.length > 0) {
@@ -880,7 +1020,10 @@ export class GuestsService {
         name: true,
       },
     });
-    const excludedAdminGuestGroups = groups
+    const adminGuestGroups = groups.filter((group) =>
+      this.isAdminGuestGroupName(group.name),
+    );
+    let excludedAdminGuestGroups = adminGuestGroups
       .filter((group) => this.isAdminGuestGroupName(group.name))
       .map((group) => ({
         externalDomain: group.externalDomain,
@@ -909,6 +1052,10 @@ export class GuestsService {
 
       externalDomain = group.externalDomain;
       externalGuestTypeId = group.externalGroupId;
+
+      if (this.isAdminGuestGroupName(group.name)) {
+        excludedAdminGuestGroups = [];
+      }
     }
 
     return {
@@ -918,7 +1065,97 @@ export class GuestsService {
       externalGuestTypeId,
       search,
       excludedAdminGuestGroups,
+      onlyGuestGroups: undefined,
     };
+  }
+
+  private async resolveStoreId(tenantId: string, value: string | undefined) {
+    const storeId = this.blankToNull(value);
+
+    if (!storeId) {
+      return null;
+    }
+
+    const store = await this.prisma.store.findFirst({
+      where: { id: storeId, tenantId },
+      select: { id: true },
+    });
+
+    if (!store) {
+      throw new BadRequestException('storeId is not available');
+    }
+
+    return storeId;
+  }
+
+  private async loadAdminGuestGroups(tenantId: string) {
+    const groups = await this.prisma.guestGroup.findMany({
+      where: { tenantId },
+      orderBy: [{ externalDomain: 'asc' }, { name: 'asc' }],
+      select: {
+        id: true,
+        name: true,
+        externalDomain: true,
+        externalGroupId: true,
+      },
+    });
+
+    return groups.filter((group) => this.isAdminGuestGroupName(group.name));
+  }
+
+  private async getOperationTypeSummary(
+    tenantId: string,
+    period: Period,
+    storeId: string | null,
+  ) {
+    const rows = await this.prisma.guestOperationLog.findMany({
+      where: {
+        tenantId,
+        happenedAt: { gte: period.fromDate, lte: period.toDate },
+        ...(storeId ? { storeId } : {}),
+      },
+      select: {
+        type: true,
+        amount: true,
+      },
+    });
+    const byType = new Map<string, { count: number; amount: number }>();
+
+    for (const row of rows) {
+      const type = row.type?.trim() || 'unknown';
+      const current = byType.get(type) ?? { count: 0, amount: 0 };
+      current.count += 1;
+      current.amount += Math.abs(this.decimalToNumber(row.amount) ?? 0);
+      byType.set(type, current);
+    }
+
+    return Array.from(byType.entries())
+      .map(([type, row]) => ({
+        type,
+        count: row.count,
+        amount: this.round(row.amount, 2),
+      }))
+      .sort((first, second) => second.count - first.count)
+      .slice(0, 12);
+  }
+
+  private toStaffControlRow(row: GuestDashboardRow): StaffControlRow {
+    const controlFlags: string[] = [];
+    const totalMoney = row.transactionAmount + row.barRevenue;
+
+    if (row.sessionsCount === 0 && totalMoney === 0) {
+      controlFlags.push('Нет активности за период');
+    }
+
+    if (row.transactionAmount > 0 && row.sessionsCount === 0) {
+      controlFlags.push('Деньги без сессий');
+    }
+
+    if (row.playHours >= 20) {
+      controlFlags.push('Много часов');
+    }
+
+    return { ...row, controlFlags };
   }
 
   private isAdminGuestGroupName(name: string) {

@@ -1,0 +1,313 @@
+import Link from "next/link";
+import { requireCurrentUser } from "@/lib/auth";
+import {
+  getGuestFilterOptions,
+  getStaffControl,
+  type GuestsSummaryFilters,
+  type StaffControlReport,
+} from "@/lib/guests";
+
+type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
+
+function searchParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function formatNumber(value: number, digits = 0) {
+  return new Intl.NumberFormat("ru-RU", {
+    maximumFractionDigits: digits,
+  }).format(value);
+}
+
+function formatRubles(value: number) {
+  return `${formatNumber(value)} руб`;
+}
+
+function formatDate(value: string | null) {
+  if (!value) {
+    return "нет данных";
+  }
+
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(value));
+}
+
+function formatPeriodDate(value: string) {
+  return formatDate(`${value}T00:00:00.000Z`);
+}
+
+export default async function StaffControlPage({
+  searchParams,
+}: {
+  searchParams: SearchParams;
+}) {
+  await requireCurrentUser();
+  const params = await searchParams;
+  const filters: GuestsSummaryFilters = {
+    dateFrom: searchParam(params.dateFrom),
+    dateTo: searchParam(params.dateTo),
+    storeId: searchParam(params.storeId),
+  };
+  const [report, options] = await Promise.all([
+    getStaffControl(filters),
+    getGuestFilterOptions(),
+  ]);
+
+  return (
+    <main className="px-6 py-8 text-zinc-950 dark:text-zinc-100">
+      <div className="mx-auto max-w-7xl">
+        <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-sm font-semibold uppercase text-emerald-700 dark:text-emerald-300">
+              Гости
+            </p>
+            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
+              Контроль персонала
+            </h1>
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+              Первый срез по группам администраторов за период{" "}
+              {formatPeriodDate(report.periodFrom)} -{" "}
+              {formatPeriodDate(report.periodTo)}. Клиентская аналитика считает
+              гостей без этих групп, а здесь они вынесены отдельно.
+            </p>
+          </div>
+          <Link
+            href="/guests"
+            className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+          >
+            В дашборд гостей
+          </Link>
+        </header>
+
+        <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+          <form className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[repeat(3,minmax(0,1fr))_auto] lg:items-end">
+            <label className="grid min-w-0 gap-1 text-sm">
+              <span className="text-xs font-medium uppercase text-zinc-500">
+                С даты
+              </span>
+              <input
+                type="date"
+                name="dateFrom"
+                defaultValue={filters.dateFrom ?? report.periodFrom}
+                className="h-10 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+              />
+            </label>
+            <label className="grid min-w-0 gap-1 text-sm">
+              <span className="text-xs font-medium uppercase text-zinc-500">
+                По дату
+              </span>
+              <input
+                type="date"
+                name="dateTo"
+                defaultValue={filters.dateTo ?? report.periodTo}
+                className="h-10 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+              />
+            </label>
+            <label className="grid min-w-0 gap-1 text-sm">
+              <span className="text-xs font-medium uppercase text-zinc-500">
+                Клуб
+              </span>
+              <select
+                name="storeId"
+                defaultValue={filters.storeId ?? ""}
+                className="h-10 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+              >
+                <option value="">Вся сеть</option>
+                {options.stores.map((store) => (
+                  <option key={store.id} value={store.id}>
+                    {store.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white hover:bg-zinc-800 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300">
+              Применить
+            </button>
+          </form>
+        </section>
+
+        <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <KpiCard label="Сотрудники" value={formatNumber(report.staffCount)} />
+          <KpiCard
+            label="Активные"
+            value={formatNumber(report.activeStaff)}
+            caption="сессия, деньги или продажа бара"
+          />
+          <KpiCard
+            label="Сессии"
+            value={formatNumber(report.sessionsCount)}
+            caption={`${formatNumber(report.playHours, 1)} часов`}
+          />
+          <KpiCard
+            label="Операции LAngame"
+            value={formatNumber(report.operationLogsCount)}
+            caption={formatRubles(report.operationAmount)}
+          />
+        </section>
+
+        <section className="mt-6 grid gap-6 xl:grid-cols-[1fr_0.9fr]">
+          <StaffTable report={report} />
+          <OperationsPanel report={report} />
+        </section>
+      </div>
+    </main>
+  );
+}
+
+function KpiCard({
+  label,
+  value,
+  caption,
+}: {
+  label: string;
+  value: string;
+  caption?: string;
+}) {
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <p className="text-xs font-semibold uppercase text-zinc-500">{label}</p>
+      <p className="mt-3 text-2xl font-semibold tabular-nums text-zinc-950 dark:text-zinc-50">
+        {value}
+      </p>
+      {caption ? (
+        <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+          {caption}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function StaffTable({ report }: { report: StaffControlReport }) {
+  return (
+    <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
+        <h2 className="text-base font-semibold">Администраторы</h2>
+        <p className="mt-1 text-sm text-zinc-500">
+          Группы:{" "}
+          {report.staffGroups.length > 0
+            ? report.staffGroups.map((group) => group.name).join(", ")
+            : "не найдены"}
+        </p>
+      </div>
+      {report.rows.length > 0 ? (
+        <div className="overflow-x-auto">
+          <table className="min-w-[920px] divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
+            <thead className="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900/60">
+              <tr>
+                <th className="px-4 py-3 text-left font-semibold">
+                  Сотрудник
+                </th>
+                <th className="px-4 py-3 text-left font-semibold">Группа</th>
+                <th className="px-4 py-3 text-right font-semibold">Сессии</th>
+                <th className="px-4 py-3 text-right font-semibold">Часы</th>
+                <th className="px-4 py-3 text-right font-semibold">Деньги</th>
+                <th className="px-4 py-3 text-left font-semibold">
+                  Активность
+                </th>
+                <th className="px-4 py-3 text-left font-semibold">Флаги</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+              {report.rows.map((row) => (
+                <tr
+                  key={row.id}
+                  className="hover:bg-zinc-50/80 dark:hover:bg-zinc-900/50"
+                >
+                  <td className="px-4 py-3">
+                    <Link
+                      href={`/guests/${row.id}`}
+                      className="font-medium text-zinc-950 hover:text-emerald-700 dark:text-zinc-50 dark:hover:text-emerald-300"
+                    >
+                      {row.displayName}
+                    </Link>
+                    <p className="mt-1 text-xs text-zinc-500">{row.contact}</p>
+                  </td>
+                  <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">
+                    {row.guestGroupName ?? row.externalDomain ?? "источник"}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    {formatNumber(row.sessionsCount)}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    {formatNumber(row.playHours, 1)} ч
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    {formatRubles(row.transactionAmount + row.barRevenue)}
+                  </td>
+                  <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">
+                    {formatDate(row.lastActivityAt)}
+                  </td>
+                  <td className="px-4 py-3">
+                    {row.controlFlags.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {row.controlFlags.map((flag) => (
+                          <span
+                            key={flag}
+                            className="rounded-full bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700 ring-1 ring-amber-100 dark:bg-amber-500/10 dark:text-amber-200 dark:ring-amber-500/20"
+                          >
+                            {flag}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-zinc-400">нет</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="px-5 py-6 text-sm text-zinc-500">
+          Администраторы по текущему периоду не найдены.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function OperationsPanel({ report }: { report: StaffControlReport }) {
+  return (
+    <section className="rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
+        <h2 className="text-base font-semibold">Операционный журнал</h2>
+        <p className="mt-1 text-sm text-zinc-500">
+          Общий all_operations_log за период. Привязки к конкретному админу в
+          текущей foundation-модели пока нет.
+        </p>
+      </div>
+      {report.operationTypes.length > 0 ? (
+        <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+          {report.operationTypes.map((row) => (
+            <div
+              key={row.type}
+              className="grid grid-cols-[minmax(0,1fr)_90px_120px] gap-3 px-5 py-4 text-sm"
+            >
+              <div className="min-w-0">
+                <p className="truncate font-medium text-zinc-950 dark:text-zinc-50">
+                  {row.type}
+                </p>
+              </div>
+              <p className="text-right tabular-nums text-zinc-600 dark:text-zinc-300">
+                {formatNumber(row.count)}
+              </p>
+              <p className="text-right tabular-nums text-zinc-600 dark:text-zinc-300">
+                {formatRubles(row.amount)}
+              </p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="px-5 py-6 text-sm text-zinc-500">
+          Операций за период не найдено.
+        </p>
+      )}
+    </section>
+  );
+}

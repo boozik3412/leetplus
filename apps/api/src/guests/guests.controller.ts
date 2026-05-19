@@ -20,6 +20,8 @@ import {
   type GuestDetail,
   type GuestListQuery,
   type GuestListResponse,
+  type StaffControlQuery,
+  type StaffControlReport,
   type GuestsSummary,
   type GuestsSummaryQuery,
 } from './guests.service';
@@ -51,6 +53,14 @@ export class GuestsController {
     @Query() query: GuestListQuery,
   ): Promise<GuestListResponse> {
     return this.guestsService.getGuests(user, query);
+  }
+
+  @Get('staff-control')
+  getStaffControl(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: StaffControlQuery,
+  ): Promise<StaffControlReport> {
+    return this.guestsService.getStaffControl(user, query);
   }
 
   @Get(':id')

@@ -384,7 +384,15 @@ function KpiCard({
 }
 
 function VisitTrendPanel({ summary }: { summary: GuestsSummary }) {
-  const maxSessions = Math.max(
+  const maxVisits = niceChartMax(
+    Math.max(
+      ...summary.visitTrend.map((row) => row.sessionsCount),
+      ...summary.visitTrend.map((row) => row.activeGuests),
+      1,
+    ),
+  );
+  const yTicks = [maxVisits, Math.round(maxVisits / 2), 0];
+  const maxBarValue = Math.max(
     ...summary.visitTrend.map((row) => row.sessionsCount),
     1,
   );
@@ -394,32 +402,107 @@ function VisitTrendPanel({ summary }: { summary: GuestsSummary }) {
       <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
         <h2 className="text-base font-semibold">Визиты по дням</h2>
         <p className="mt-1 text-sm text-zinc-500">
-          Сессии и активные гости по загруженным данным LAngame.
+          Общая высота столбца - визиты, залитая часть - уникальные гости за
+          день.
         </p>
       </div>
-      <div className="grid h-72 grid-cols-[repeat(30,minmax(14px,1fr))] items-end gap-1 px-5 py-5">
-        {summary.visitTrend.map((row) => {
-          const height = Math.max(4, (row.sessionsCount / maxSessions) * 100);
-
-          return (
-            <div
-              key={row.date}
-              className="group flex h-full flex-col justify-end gap-2"
-              title={`${formatPeriodDate(row.date)}: ${formatNumber(row.sessionsCount)} сессий, ${formatNumber(row.activeGuests)} гостей`}
-            >
+      <div className="grid h-72 grid-cols-[48px_minmax(0,1fr)] gap-3 px-5 py-5">
+        <div className="grid h-full grid-rows-[1fr_auto]">
+          <div className="relative">
+            {yTicks.map((tick, index) => (
+              <span
+                key={`${tick}-${index}`}
+                className="absolute right-0 translate-y-1/2 text-xs tabular-nums text-zinc-400"
+                style={{ bottom: `${(tick / maxVisits) * 100}%` }}
+              >
+                {formatNumber(tick)}
+              </span>
+            ))}
+          </div>
+          <span className="h-4" />
+        </div>
+        <div className="grid h-full grid-rows-[1fr_auto]">
+          <div className="relative min-h-0 border-l border-zinc-200 dark:border-zinc-800">
+            {yTicks.map((tick, index) => (
               <div
-                className="rounded-t bg-emerald-500 transition-colors group-hover:bg-emerald-600"
-                style={{ height: `${height}%` }}
+                key={`${tick}-${index}`}
+                className="absolute left-0 right-0 border-t border-zinc-100 dark:border-zinc-900"
+                style={{ bottom: `${(tick / maxVisits) * 100}%` }}
               />
-              <span className="hidden text-center text-[10px] text-zinc-400 min-[1200px]:block">
+            ))}
+            <div className="absolute inset-0 grid grid-cols-[repeat(auto-fit,minmax(12px,1fr))] items-end gap-1 pl-2">
+              {summary.visitTrend.map((row) => {
+                const visitsHeight = Math.max(
+                  row.sessionsCount > 0 ? 3 : 0,
+                  (row.sessionsCount / maxVisits) * 100,
+                );
+                const guestsHeight =
+                  row.sessionsCount > 0
+                    ? Math.min(
+                        100,
+                        (Math.min(row.activeGuests, row.sessionsCount) /
+                          row.sessionsCount) *
+                          100,
+                      )
+                    : 0;
+
+                return (
+                  <div
+                    key={row.date}
+                    className="group flex h-full flex-col justify-end"
+                    title={`${formatPeriodDate(row.date)}: ${formatNumber(row.sessionsCount)} визитов, ${formatNumber(row.activeGuests)} гостей`}
+                  >
+                    <div
+                      className="flex min-h-0 w-full items-end overflow-hidden rounded-t bg-emerald-200 transition-colors group-hover:bg-emerald-300 dark:bg-emerald-500/25 dark:group-hover:bg-emerald-500/35"
+                      style={{ height: `${visitsHeight}%` }}
+                    >
+                      <div
+                        className="w-full rounded-t bg-emerald-500 transition-colors group-hover:bg-emerald-600 dark:bg-emerald-400 dark:group-hover:bg-emerald-300"
+                        style={{ height: `${guestsHeight}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <div className="grid h-4 grid-cols-[repeat(auto-fit,minmax(12px,1fr))] gap-1 pl-2">
+            {summary.visitTrend.map((row) => (
+              <span
+                key={row.date}
+                className="hidden text-center text-[10px] text-zinc-400 min-[1200px]:block"
+              >
                 {row.date.slice(8, 10)}
               </span>
-            </div>
-          );
-        })}
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-4 border-t border-zinc-100 px-5 py-3 text-xs text-zinc-500 dark:border-zinc-800">
+        <span className="inline-flex items-center gap-2">
+          <span className="h-2.5 w-2.5 rounded-sm bg-emerald-200 dark:bg-emerald-500/25" />
+          Визиты, максимум {formatNumber(maxBarValue)}
+        </span>
+        <span className="inline-flex items-center gap-2">
+          <span className="h-2.5 w-2.5 rounded-sm bg-emerald-500 dark:bg-emerald-400" />
+          Уникальные гости
+        </span>
       </div>
     </section>
   );
+}
+
+function niceChartMax(value: number) {
+  if (value <= 10) {
+    return 10;
+  }
+
+  const magnitude = 10 ** Math.floor(Math.log10(value));
+  const normalized = value / magnitude;
+  const niceNormalized =
+    normalized <= 2 ? 2 : normalized <= 5 ? 5 : normalized <= 10 ? 10 : 20;
+
+  return niceNormalized * magnitude;
 }
 
 function DataQualityPanel({ summary }: { summary: GuestsSummary }) {

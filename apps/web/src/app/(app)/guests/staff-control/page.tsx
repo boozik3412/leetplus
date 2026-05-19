@@ -26,6 +26,27 @@ type StaffTableControls = {
   staffDirection: StaffSortDirection;
 };
 
+type StaffDisplayRow = {
+  id: string;
+  detailHref: string | null;
+  displayName: string;
+  contact: string;
+  externalGuestId: string;
+  externalDomain: string | null;
+  guestGroupName: string | null;
+  controlFlags: string[];
+  storeNames: string[];
+  sessionsCount: number;
+  playHours: number;
+  shiftsCount: number;
+  shiftHours: number;
+  shiftPaymentAmount: number;
+  averageShiftMiddleCheck: number;
+  transactionAmount: number;
+  barRevenue: number;
+  lastActivityAt: string | null;
+};
+
 const staffSortLabels: Record<StaffSortKey, string> = {
   sessions: "Сессии",
   hours: "Часы",
@@ -292,18 +313,19 @@ function StaffTable({
   controls: StaffTableControls;
 }) {
   const period = { from: report.periodFrom, to: report.periodTo };
+  const displayRows = getStaffDisplayRows(report);
   const groupOptions = Array.from(
     new Set(
-      report.rows.map(
+      displayRows.map(
         (row) => row.guestGroupName ?? row.externalDomain ?? "источник",
       ),
     ),
   ).sort((first, second) => first.localeCompare(second, "ru"));
   const flagOptions = Array.from(
-    new Set(report.rows.flatMap((row) => row.controlFlags)),
+    new Set(displayRows.flatMap((row) => row.controlFlags)),
   ).sort((first, second) => first.localeCompare(second, "ru"));
   const search = controls.staffSearch.toLocaleLowerCase("ru-RU");
-  const filteredRows = report.rows.filter((row) => {
+  const filteredRows = displayRows.filter((row) => {
     const groupName = row.guestGroupName ?? row.externalDomain ?? "источник";
     const searchableText = [
       row.displayName,
@@ -355,9 +377,16 @@ function StaffTable({
           </div>
           <p className="text-sm text-zinc-500">
             Показано {formatNumber(rows.length)} из{" "}
-            {formatNumber(report.rows.length)}
+            {formatNumber(displayRows.length)}
           </p>
         </div>
+        {report.unmatchedOperators.length > 0 ? (
+          <p className="mt-3 text-sm text-amber-600 dark:text-amber-300">
+            В таблицу добавлены операторы LAngame без привязки:{" "}
+            {formatNumber(report.unmatchedOperators.length)}. Их смены видны,
+            но сотрудника нужно сопоставить отдельно.
+          </p>
+        ) : null}
       </div>
       <form
         method="get"
@@ -443,7 +472,7 @@ function StaffTable({
         Сортировка: {staffSortLabels[controls.staffSort].toLocaleLowerCase("ru-RU")}
         , {controls.staffDirection === "asc" ? "по возрастанию" : "по убыванию"}
       </div>
-      {report.rows.length > 0 ? (
+      {displayRows.length > 0 ? (
         <div className="w-full overflow-x-auto">
           <table className="min-w-[1160px] divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
             <thead className="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900/60">
@@ -496,12 +525,18 @@ function StaffTable({
                   className="hover:bg-zinc-50/80 dark:hover:bg-zinc-900/50"
                 >
                   <td className="px-4 py-3">
-                    <Link
-                      href={`/guests/${row.id}`}
-                      className="font-medium text-zinc-950 hover:text-emerald-700 dark:text-zinc-50 dark:hover:text-emerald-300"
-                    >
-                      {row.displayName}
-                    </Link>
+                    {row.detailHref ? (
+                      <Link
+                        href={row.detailHref}
+                        className="font-medium text-zinc-950 hover:text-emerald-700 dark:text-zinc-50 dark:hover:text-emerald-300"
+                      >
+                        {row.displayName}
+                      </Link>
+                    ) : (
+                      <span className="font-medium text-zinc-950 dark:text-zinc-50">
+                        {row.displayName}
+                      </span>
+                    )}
                     <p className="mt-1 text-xs text-zinc-500">{row.contact}</p>
                   </td>
                   <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">
@@ -576,7 +611,7 @@ function StaffTable({
 }
 
 function getStaffSortValue(
-  row: StaffControlReport["rows"][number],
+  row: StaffDisplayRow,
   sortKey: StaffSortKey,
 ) {
   switch (sortKey) {
@@ -591,6 +626,51 @@ function getStaffSortValue(
     case "revenue":
       return row.transactionAmount + row.barRevenue;
   }
+}
+
+function getStaffDisplayRows(report: StaffControlReport): StaffDisplayRow[] {
+  const staffRows = report.rows.map((row) => ({
+    id: row.id,
+    detailHref: `/guests/${row.id}`,
+    displayName: row.displayName,
+    contact: row.contact,
+    externalGuestId: row.externalGuestId,
+    externalDomain: row.externalDomain,
+    guestGroupName: row.guestGroupName,
+    controlFlags: row.controlFlags,
+    storeNames: row.storeNames,
+    sessionsCount: row.sessionsCount,
+    playHours: row.playHours,
+    shiftsCount: row.shiftsCount,
+    shiftHours: row.shiftHours,
+    shiftPaymentAmount: row.shiftPaymentAmount,
+    averageShiftMiddleCheck: row.averageShiftMiddleCheck,
+    transactionAmount: row.transactionAmount,
+    barRevenue: row.barRevenue,
+    lastActivityAt: row.lastActivityAt,
+  }));
+  const unmatchedRows = report.unmatchedOperators.map((row) => ({
+    id: `operator:${row.externalDomain ?? "source"}:${row.externalUserId}`,
+    detailHref: null,
+    displayName: `user_id ${row.externalUserId}`,
+    contact: row.externalDomain ?? "источник",
+    externalGuestId: row.externalUserId,
+    externalDomain: row.externalDomain,
+    guestGroupName: "Оператор LAngame",
+    controlFlags: ["Нужна привязка"],
+    storeNames: row.storeNames,
+    sessionsCount: 0,
+    playHours: 0,
+    shiftsCount: row.shiftsCount,
+    shiftHours: row.shiftHours,
+    shiftPaymentAmount: row.shiftPaymentAmount,
+    averageShiftMiddleCheck: row.averageShiftMiddleCheck,
+    transactionAmount: 0,
+    barRevenue: 0,
+    lastActivityAt: null,
+  }));
+
+  return [...staffRows, ...unmatchedRows];
 }
 
 function SortableStaffHeader({

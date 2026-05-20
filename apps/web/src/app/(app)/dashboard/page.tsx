@@ -116,26 +116,32 @@ function formatShortDate(value: string) {
   }).format(date);
 }
 
-function formatDashboardPeriodHighlight(from: string, to: string) {
+function formatDashboardPeriodLabel(from: string, to: string) {
   const fromDate = parseDateInput(from);
   const toDate = parseDateInput(to);
 
   if (!fromDate || !toDate) {
-    return null;
+    return `${from} - ${to}`;
   }
 
   if (
     fromDate.getUTCFullYear() === toDate.getUTCFullYear() &&
-    fromDate.getUTCMonth() === toDate.getUTCMonth()
+    fromDate.getUTCMonth() === toDate.getUTCMonth() &&
+    fromDate.getUTCDate() === toDate.getUTCDate()
   ) {
-    return new Intl.DateTimeFormat("ru-RU", {
-      month: "long",
-      year: "numeric",
-      timeZone: "UTC",
-    }).format(fromDate);
+    return formatFullDate(fromDate);
   }
 
-  return null;
+  return `${formatFullDate(fromDate)} - ${formatFullDate(toDate)}`;
+}
+
+function formatFullDate(value: Date) {
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(value);
 }
 
 type ManagementInsight = {
@@ -358,7 +364,7 @@ export default async function DashboardPage({
     oosRows: periodOperationalReport.outOfStockRiskProducts,
     noSalesRows: noSalesReport21.productsWithoutSales,
   });
-  const highlightedPeriod = formatDashboardPeriodHighlight(
+  const highlightedPeriod = formatDashboardPeriodLabel(
     summary.periodFrom,
     summary.periodTo,
   );
@@ -408,8 +414,7 @@ export default async function DashboardPage({
               <p className="mt-4 max-w-2xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
                 Период -{" "}
                 <span className="font-semibold text-zinc-950 dark:text-zinc-50">
-                  {highlightedPeriod ??
-                    `${summary.periodFrom} — ${summary.periodTo}`}
+                  {highlightedPeriod}
                 </span>
                 . Первый экран соединяет деньги, гостей, ассортимент и игровую
                 загрузку, чтобы быстро понять, где сеть зарабатывает и где теряет

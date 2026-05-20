@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { LangameSettings } from "@/lib/langame-settings";
 
 type SyncPeriod = "today" | "last7" | "last30" | "custom";
@@ -31,8 +31,21 @@ type GuestSyncStatus = {
     transactionsCount: number;
     productSalesLinked: number;
     errorMessage: string | null;
+    diagnostics: {
+      endpointErrors: Record<string, string>;
+      pcTypesInClubs: FieldDiagnostics;
+      pcTypeLinks: FieldDiagnostics;
+    };
   } | null;
 };
+
+type FieldDiagnostics = {
+  total: number;
+  fieldCounts: Record<string, number>;
+  candidateFields: Record<string, number>;
+};
+
+type SyncStepStatus = "idle" | "running" | "success" | "error";
 
 type CombinedSyncResult = {
   assortment: SyncResult | null;
@@ -89,9 +102,32 @@ export function LangameSyncPanel({
   const [syncDateFrom, setSyncDateFrom] = useState(shiftDateInput(today, -6));
   const [syncDateTo, setSyncDateTo] = useState(today);
   const [syncResult, setSyncResult] = useState<CombinedSyncResult | null>(null);
+  const [latestGuestStatus, setLatestGuestStatus] =
+    useState<GuestSyncStatus | null>(null);
+  const [assortmentStatus, setAssortmentStatus] =
+    useState<SyncStepStatus>("idle");
+  const [guestStatus, setGuestStatus] = useState<SyncStepStatus>("idle");
   const [success, setSuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadGuestStatus() {
+      const status = await fetchGuestSyncStatus();
+
+      if (!ignore) {
+        setLatestGuestStatus(status);
+      }
+    }
+
+    void loadGuestStatus();
+
+    return () => {
+      ignore = true;
+    };
+  }, []);
 
   function selectSyncPeriod(period: SyncPeriod) {
     setSyncPeriod(period);
@@ -112,61 +148,63 @@ export function LangameSyncPanel({
     setError(null);
     setSuccess(null);
     setSyncResult(null);
+    setAssortmentStatus("running");
+    setGuestStatus("running");
     setIsSyncing(true);
 
     try {
-      const [assortmentResponse, guestStartResponse] = await Promise.all([
-        fetch("/api/integrations/langame/sync", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            dateFrom: syncDateFrom,
-            dateTo: syncDateTo,
-            mode: "BACKFILL",
-          }),
-        }),
-        fetch("/api/integrations/langame/guests/foundation/sync/start", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            dateFrom: syncDateFrom,
-            dateTo: syncDateTo,
-          }),
-        }),
+      const [assortmentResult, guestResult] = await Promise.allSettled([
+        syncAssortmentData(syncDateFrom, syncDateTo),
+        syncGuestFoundation(syncDateFrom, syncDateTo),
       ]);
-      const assortmentData = (await assortmentResponse.json()) as unknown;
-      const guestStartData = (await guestStartResponse.json()) as unknown;
-
-      if (!assortmentResponse.ok) {
-        setError(getErrorMessage(assortmentData));
-        return;
-      }
-
-      if (!guestStartResponse.ok) {
-        setError(getErrorMessage(guestStartData));
-        return;
-      }
-
-      const guests = await waitForGuestSyncCompletion();
+      const assortment =
+        assortmentResult.status === "fulfilled" ? assortmentResult.value : null;
+      const guests =
+        guestResult.status === "fulfilled" ? guestResult.value : null;
       const result = {
-        assortment: assortmentData as SyncResult,
+        assortment,
         guests,
       };
       setSyncResult(result);
+      setLatestGuestStatus(guests);
 
-      if (guests?.status === "FAILED") {
-        setError(guests.latestRun?.errorMessage ?? "Гостевая синхронизация завершилась с ошибкой.");
+      if (!assortment) {
+        setAssortmentStatus("error");
+      } else {
+        setAssortmentStatus(
+          assortment.failedSources > 0 ? "error" : "success",
+        );
+      }
+
+      if (guests?.status === "FAILED" || !guests) {
+        setGuestStatus("error");
+      } else {
+        setGuestStatus("success");
+      }
+
+      if (!assortment || !guests) {
+        const failure = [assortmentResult, guestResult].find(
+          (item) => item.status === "rejected",
+        );
+        setError(
+          failure?.status === "rejected" && failure.reason instanceof Error
+            ? failure.reason.message
+            : "Синхронизация завершилась не полностью. Проверьте детали ниже.",
+        );
+      } else if (guests.status === "FAILED") {
+        setError(
+          guests.latestRun?.errorMessage ??
+            "Гостевая синхронизация завершилась с ошибкой.",
+        );
       } else {
         setSuccess("Общая синхронизация LAngame завершена.");
       }
 
       await refreshSettings();
-    } catch {
-      setError("API недоступен");
+    } catch (syncError) {
+      setError(syncError instanceof Error ? syncError.message : "API недоступен");
+      setAssortmentStatus("error");
+      setGuestStatus("error");
     } finally {
       setIsSyncing(false);
     }
@@ -268,19 +306,12 @@ export function LangameSyncPanel({
         </div>
 
         {isSyncing ? (
-          <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
-            <div className="flex items-center gap-3">
-              <span className="h-3 w-3 animate-pulse rounded-full bg-amber-500" />
-              <div>
-                <p className="font-medium">Синхронизация выполняется</p>
-                <p className="mt-1">
-                  Период: {formatDateLabel(syncDateFrom)} -{" "}
-                  {formatDateLabel(syncDateTo)}. Дождитесь результата на этой
-                  странице.
-                </p>
-              </div>
-            </div>
-          </div>
+          <SyncProgress
+            assortmentStatus={assortmentStatus}
+            guestStatus={guestStatus}
+            periodFrom={syncDateFrom}
+            periodTo={syncDateTo}
+          />
         ) : null}
 
         {syncResult ? <SyncResultSummary result={syncResult} /> : null}
@@ -297,13 +328,71 @@ export function LangameSyncPanel({
         ) : null}
       </div>
 
+      <LatestGuestDiagnostics status={latestGuestStatus} />
       <SyncHistory jobs={settings.syncJobs} />
     </section>
   );
 }
 
+function SyncProgress({
+  assortmentStatus,
+  guestStatus,
+  periodFrom,
+  periodTo,
+}: {
+  assortmentStatus: SyncStepStatus;
+  guestStatus: SyncStepStatus;
+  periodFrom: string;
+  periodTo: string;
+}) {
+  return (
+    <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+      <p className="font-medium">Синхронизация выполняется</p>
+      <p className="mt-1">
+        Период: {formatDateLabel(periodFrom)} - {formatDateLabel(periodTo)}.
+        Дождитесь результата на этой странице.
+      </p>
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <SyncStepCard
+          title="Ассортимент"
+          description="Клубы, товары, остатки, продажи и выручка клубов."
+          status={assortmentStatus}
+        />
+        <SyncStepCard
+          title="Гости"
+          description="Гости, сессии, транзакции, покупки бара, смены и ПК."
+          status={guestStatus}
+        />
+      </div>
+    </div>
+  );
+}
+
+function SyncStepCard({
+  title,
+  description,
+  status,
+}: {
+  title: string;
+  description: string;
+  status: SyncStepStatus;
+}) {
+  return (
+    <div className="rounded-md border border-amber-200/80 bg-white/70 p-3 dark:border-amber-900/70 dark:bg-zinc-950/40">
+      <div className="flex items-center justify-between gap-3">
+        <p className="font-medium">{title}</p>
+        <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-amber-800 dark:bg-zinc-900 dark:text-amber-200">
+          {syncStepLabel(status)}
+        </span>
+      </div>
+      <p className="mt-1 text-xs opacity-80">{description}</p>
+    </div>
+  );
+}
+
 function SyncResultSummary({ result }: { result: CombinedSyncResult }) {
   const guestRun = result.guests?.latestRun ?? null;
+  const guestDiagnostics = guestRun?.diagnostics ?? null;
 
   return (
     <div className="mt-5 rounded-lg border border-zinc-100 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
@@ -328,6 +417,115 @@ function SyncResultSummary({ result }: { result: CombinedSyncResult }) {
           <Metric label="Покупок бара" value={guestRun.productSalesLinked} />
         </div>
       ) : null}
+      {guestDiagnostics ? (
+        <PcDiagnostics diagnostics={guestDiagnostics} className="mt-4" />
+      ) : null}
+    </div>
+  );
+}
+
+function LatestGuestDiagnostics({
+  status,
+}: {
+  status: GuestSyncStatus | null;
+}) {
+  const latestRun = status?.latestRun;
+
+  if (!latestRun) {
+    return null;
+  }
+
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-base font-semibold">
+            Диагностика гостевой синхронизации
+          </h2>
+          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+            Последний запуск: {latestRun.domain}, {formatDateTime(latestRun.startedAt)}.
+          </p>
+        </div>
+        <span
+          className={[
+            "rounded-full px-2.5 py-1 text-xs font-medium",
+            latestRun.status === "SUCCESS"
+              ? "bg-emerald-50 text-emerald-700"
+              : latestRun.status === "FAILED"
+                ? "bg-red-50 text-red-700"
+                : "bg-amber-50 text-amber-700",
+          ].join(" ")}
+        >
+          {syncStatusLabel(latestRun.status)}
+        </span>
+      </div>
+      <PcDiagnostics diagnostics={latestRun.diagnostics} className="mt-4" />
+    </div>
+  );
+}
+
+function PcDiagnostics({
+  diagnostics,
+  className = "",
+}: {
+  diagnostics: NonNullable<GuestSyncStatus["latestRun"]>["diagnostics"];
+  className?: string;
+}) {
+  const endpointErrors = Object.entries(diagnostics.endpointErrors);
+  const pcTypeFields = Object.keys(diagnostics.pcTypesInClubs.fieldCounts);
+  const pcLinkFields = Object.keys(diagnostics.pcTypeLinks.fieldCounts);
+
+  return (
+    <div className={["grid gap-3 md:grid-cols-3", className].join(" ")}>
+      <DiagnosticCard
+        title="Типы ПК в клубах"
+        value={diagnostics.pcTypesInClubs.total}
+        details={pcTypeFields.length > 0 ? pcTypeFields.slice(0, 6).join(", ") : "полей нет"}
+      />
+      <DiagnosticCard
+        title="Связи ПК с типами"
+        value={diagnostics.pcTypeLinks.total}
+        details={pcLinkFields.length > 0 ? pcLinkFields.slice(0, 6).join(", ") : "полей нет"}
+      />
+      <DiagnosticCard
+        title="Ошибки endpoints"
+        value={endpointErrors.length}
+        details={
+          endpointErrors.length > 0
+            ? endpointErrors.map(([key]) => key).slice(0, 3).join(", ")
+            : "ошибок нет"
+        }
+        tone={endpointErrors.length > 0 ? "danger" : "neutral"}
+      />
+    </div>
+  );
+}
+
+function DiagnosticCard({
+  title,
+  value,
+  details,
+  tone = "neutral",
+}: {
+  title: string;
+  value: number;
+  details: string;
+  tone?: "neutral" | "danger";
+}) {
+  return (
+    <div
+      className={[
+        "rounded-md border bg-white px-3 py-2 dark:bg-zinc-950",
+        tone === "danger"
+          ? "border-red-200 dark:border-red-900/70"
+          : "border-zinc-200 dark:border-zinc-800",
+      ].join(" ")}
+    >
+      <p className="text-xs text-zinc-500">{title}</p>
+      <p className="mt-1 text-xl font-semibold tabular-nums">{value}</p>
+      <p className="mt-1 truncate text-xs text-zinc-500" title={details}>
+        {details}
+      </p>
     </div>
   );
 }
@@ -415,6 +613,50 @@ async function waitForGuestSyncCompletion() {
   return null;
 }
 
+async function syncAssortmentData(dateFrom: string, dateTo: string) {
+  const response = await fetch("/api/integrations/langame/sync", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      dateFrom,
+      dateTo,
+      mode: "BACKFILL",
+    }),
+  });
+  const data = (await response.json()) as unknown;
+
+  if (!response.ok) {
+    throw new Error(getErrorMessage(data));
+  }
+
+  return data as SyncResult;
+}
+
+async function syncGuestFoundation(dateFrom: string, dateTo: string) {
+  const response = await fetch(
+    "/api/integrations/langame/guests/foundation/sync/start",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        dateFrom,
+        dateTo,
+      }),
+    },
+  );
+  const data = (await response.json()) as unknown;
+
+  if (!response.ok) {
+    throw new Error(getErrorMessage(data));
+  }
+
+  return waitForGuestSyncCompletion();
+}
+
 async function fetchGuestSyncStatus() {
   const response = await fetch(
     "/api/integrations/langame/guests/foundation/sync/status",
@@ -430,6 +672,38 @@ async function fetchGuestSyncStatus() {
 
 function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function syncStepLabel(value: SyncStepStatus) {
+  if (value === "running") {
+    return "идет";
+  }
+
+  if (value === "success") {
+    return "готово";
+  }
+
+  if (value === "error") {
+    return "ошибка";
+  }
+
+  return "ожидает";
+}
+
+function syncStatusLabel(value: string) {
+  if (value === "SUCCESS") {
+    return "Успешно";
+  }
+
+  if (value === "FAILED") {
+    return "Ошибка";
+  }
+
+  if (value === "RUNNING") {
+    return "Выполняется";
+  }
+
+  return value;
 }
 
 function getTodayInputValue() {

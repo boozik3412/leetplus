@@ -76,6 +76,11 @@ export type GuestDataFoundationStatusResult = {
     transactionsCount: number;
     productSalesLinked: number;
     errorMessage: string | null;
+    diagnostics: {
+      endpointErrors: Record<string, string>;
+      pcTypesInClubs: FieldDiagnostics;
+      pcTypeLinks: FieldDiagnostics;
+    };
   } | null;
 };
 
@@ -394,6 +399,7 @@ export class GuestDataFoundationService {
         transactionsCount: run.transactionsCount,
         productSalesLinked: run.productSalesLinked,
         errorMessage: run.errorMessage,
+        diagnostics: this.statusDiagnosticsFromProfile(run.profile),
       },
     };
   }
@@ -443,7 +449,60 @@ export class GuestDataFoundationService {
       transactionsCount: true,
       productSalesLinked: true,
       errorMessage: true,
+      profile: true,
     } satisfies Prisma.GuestDataProfileRunSelect;
+  }
+
+  private statusDiagnosticsFromProfile(profile: Prisma.JsonValue | null) {
+    const profileRecord = this.jsonRecord(profile);
+
+    return {
+      endpointErrors: this.stringRecord(profileRecord.endpointErrors),
+      pcTypesInClubs: this.fieldDiagnosticsFromProfile(
+        profileRecord.pcTypesInClubs,
+      ),
+      pcTypeLinks: this.fieldDiagnosticsFromProfile(profileRecord.pcTypeLinks),
+    };
+  }
+
+  private fieldDiagnosticsFromProfile(value: unknown): FieldDiagnostics {
+    const record = this.jsonRecord(value);
+
+    return {
+      total: this.numberFromProfile(record.total),
+      fieldCounts: this.numberRecord(record.fieldCounts),
+      candidateFields: this.numberRecord(record.candidateFields),
+    };
+  }
+
+  private jsonRecord(value: unknown): Record<string, unknown> {
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  }
+
+  private stringRecord(value: unknown) {
+    const record = this.jsonRecord(value);
+
+    return Object.fromEntries(
+      Object.entries(record).filter(
+        (entry): entry is [string, string] => typeof entry[1] === 'string',
+      ),
+    );
+  }
+
+  private numberRecord(value: unknown) {
+    const record = this.jsonRecord(value);
+
+    return Object.fromEntries(
+      Object.entries(record)
+        .map(([key, item]) => [key, this.numberFromProfile(item)] as const)
+        .filter(([, item]) => item > 0),
+    );
+  }
+
+  private numberFromProfile(value: unknown) {
+    return typeof value === 'number' && Number.isFinite(value) ? value : 0;
   }
 
   private async syncSource(params: {

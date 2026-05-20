@@ -1519,6 +1519,9 @@ export class GuestDataFoundationService {
     guestsByExternalId: Map<string, GuestRef>,
     storesByExternalClubId: Map<string, StoreRef>,
   ) {
+    const staffGuestIdsByExternalUserId =
+      await this.loadStaffGuestIdentityMappings(tenantId, domain);
+
     for (const row of rows) {
       const externalShiftId = this.toNullableString(row.id);
       if (!externalShiftId) {
@@ -1533,6 +1536,11 @@ export class GuestDataFoundationService {
       const stoppedAt = this.parseLangameDate(
         this.toNullableString(row.date_stop),
       );
+      const guestId = externalUserId
+        ? (staffGuestIdsByExternalUserId.get(externalUserId) ??
+          guestsByExternalId.get(externalUserId)?.id ??
+          null)
+        : null;
 
       await this.prisma.guestWorkingShift.upsert({
         where: {
@@ -1545,9 +1553,7 @@ export class GuestDataFoundationService {
         },
         create: {
           tenantId,
-          guestId: externalUserId
-            ? (guestsByExternalId.get(externalUserId)?.id ?? null)
-            : null,
+          guestId,
           storeId: externalClubId
             ? (storesByExternalClubId.get(externalClubId)?.id ?? null)
             : null,
@@ -1572,9 +1578,7 @@ export class GuestDataFoundationService {
           sourcePayloadHash: this.payloadHash(row),
         },
         update: {
-          guestId: externalUserId
-            ? (guestsByExternalId.get(externalUserId)?.id ?? null)
-            : null,
+          guestId,
           storeId: externalClubId
             ? (storesByExternalClubId.get(externalClubId)?.id ?? null)
             : null,
@@ -1597,6 +1601,27 @@ export class GuestDataFoundationService {
         },
       });
     }
+  }
+
+  private async loadStaffGuestIdentityMappings(
+    tenantId: string,
+    domain: string,
+  ) {
+    const mappings = await this.prisma.guestStaffIdentityMapping.findMany({
+      where: {
+        tenantId,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: domain,
+      },
+      select: {
+        externalUserId: true,
+        guestId: true,
+      },
+    });
+
+    return new Map(
+      mappings.map((mapping) => [mapping.externalUserId, mapping.guestId]),
+    );
   }
 
   private async linkProductSalesToGuests(

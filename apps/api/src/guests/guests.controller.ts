@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   Patch,
+  Post,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -20,6 +21,8 @@ import {
   type GuestDetail,
   type GuestListQuery,
   type GuestListResponse,
+  type StaffIdentityMappingDto,
+  type StaffIdentityMappingResult,
   type StaffControlQuery,
   type StaffControlReport,
   type GuestsSummary,
@@ -61,6 +64,14 @@ export class GuestsController {
     @Query() query: StaffControlQuery,
   ): Promise<StaffControlReport> {
     return this.guestsService.getStaffControl(user, query);
+  }
+
+  @Post('staff-control/identity-mappings')
+  mapStaffIdentity(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: StaffIdentityMappingDto,
+  ): Promise<StaffIdentityMappingResult> {
+    return this.guestsService.mapStaffIdentity(user, dto);
   }
 
   @Get(':id')

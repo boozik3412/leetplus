@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { StaffIdentityMappingForm } from "@/components/staff-identity-mapping-form";
 import { requireCurrentUser } from "@/lib/auth";
 import {
   getGuestFilterOptions,
@@ -45,6 +46,14 @@ type StaffDisplayRow = {
   transactionAmount: number;
   barRevenue: number;
   lastActivityAt: string | null;
+};
+
+type StaffIdentityOption = {
+  id: string;
+  displayName: string;
+  externalGuestId: string;
+  externalDomain: string | null;
+  guestGroupName: string | null;
 };
 
 const staffSortLabels: Record<StaffSortKey, string> = {
@@ -763,6 +772,13 @@ function OperationsPanel({ report }: { report: StaffControlReport }) {
 
 function UnmatchedOperatorsPanel({ report }: { report: StaffControlReport }) {
   const rows = report.unmatchedOperators;
+  const staffOptions = report.rows.map((row) => ({
+    id: row.id,
+    displayName: row.displayName,
+    externalGuestId: row.externalGuestId,
+    externalDomain: row.externalDomain,
+    guestGroupName: row.guestGroupName,
+  })) satisfies StaffIdentityOption[];
 
   return (
     <section className="mt-6 min-w-0 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
@@ -777,7 +793,7 @@ function UnmatchedOperatorsPanel({ report }: { report: StaffControlReport }) {
       </div>
       {rows.length > 0 ? (
         <div className="w-full overflow-x-auto">
-          <table className="min-w-[820px] divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
+          <table className="min-w-[1080px] divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
             <thead className="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900/60">
               <tr>
                 <th className="px-4 py-3 text-left font-semibold">
@@ -795,6 +811,9 @@ function UnmatchedOperatorsPanel({ report }: { report: StaffControlReport }) {
                 </th>
                 <th className="px-4 py-3 text-right font-semibold">
                   Ср. чек
+                </th>
+                <th className="px-4 py-3 text-left font-semibold">
+                  Привязка
                 </th>
               </tr>
             </thead>
@@ -834,6 +853,13 @@ function UnmatchedOperatorsPanel({ report }: { report: StaffControlReport }) {
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums">
                     {formatRubles(row.averageShiftMiddleCheck)}
+                  </td>
+                  <td className="px-4 py-3">
+                    <StaffIdentityMappingForm
+                      externalDomain={row.externalDomain}
+                      externalUserId={row.externalUserId}
+                      staffOptions={staffOptions}
+                    />
                   </td>
                 </tr>
               ))}

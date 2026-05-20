@@ -99,6 +99,7 @@ model Tenant {
   guestWorkingShifts         GuestWorkingShift[]
   guestDataProfileRuns       GuestDataProfileRun[]
   guestCrmEvents             GuestCrmEvent[]
+  guestStaffIdentityMappings GuestStaffIdentityMapping[]
 }
 
 model User {
@@ -113,10 +114,11 @@ model User {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  tenant                  Tenant                   @relation(fields: [tenantId], references: [id])
-  emailVerificationTokens EmailVerificationToken[]
-  importJobs              ImportJob[]
-  guestCrmEvents          GuestCrmEvent[]
+  tenant                     Tenant                      @relation(fields: [tenantId], references: [id])
+  emailVerificationTokens    EmailVerificationToken[]
+  importJobs                 ImportJob[]
+  guestCrmEvents             GuestCrmEvent[]
+  guestStaffIdentityMappings GuestStaffIdentityMapping[]
 
   @@index([tenantId])
 }
@@ -566,6 +568,7 @@ model Guest {
   transactions          GuestTransaction[]
   workingShifts         GuestWorkingShift[]
   crmEvents             GuestCrmEvent[]
+  staffIdentityMappings GuestStaffIdentityMapping[]
 
   @@unique([tenantId, externalProvider, externalDomain, externalGuestId])
   @@index([tenantId])
@@ -810,6 +813,28 @@ model GuestWorkingShift {
   @@index([tenantId, externalUserId])
   @@index([guestId])
   @@index([storeId])
+}
+
+model GuestStaffIdentityMapping {
+  id               String               @id @default(uuid())
+  tenantId         String
+  guestId          String
+  externalProvider IntegrationProvider?
+  externalDomain   String
+  externalUserId   String
+  note             String?
+  createdByUserId  String?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  tenant        Tenant @relation(fields: [tenantId], references: [id])
+  guest         Guest  @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  createdByUser User?  @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, externalProvider, externalDomain, externalUserId], map: "guest_staff_identity_mapping_unique")
+  @@index([tenantId], map: "guest_staff_identity_mapping_tenant_idx")
+  @@index([guestId], map: "guest_staff_identity_mapping_guest_idx")
+  @@index([createdByUserId], map: "guest_staff_identity_mapping_user_idx")
 }
 
 model GuestDataProfileRun {

@@ -172,6 +172,9 @@ describe('GuestDataFoundationService', () => {
     guestWorkingShift: {
       upsert: jest.fn(),
     },
+    guestStaffIdentityMapping: {
+      findMany: jest.fn(),
+    },
     salesFact: {
       updateMany: jest.fn(),
     },
@@ -240,6 +243,7 @@ describe('GuestDataFoundationService', () => {
       { id: 'guest-1', externalGuestId: '42' },
     ]);
     prisma.salesFact.updateMany.mockResolvedValue({ count: 1 });
+    prisma.guestStaffIdentityMapping.findMany.mockResolvedValue([]);
 
     langameClient.listGuestGroups.mockResolvedValue([
       { id: 7, name: 'VIP', percent: '10' },

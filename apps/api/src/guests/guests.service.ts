@@ -30,6 +30,13 @@ export type GuestListQuery = GuestsSummaryQuery & {
 
 export type StaffControlQuery = GuestsSummaryQuery;
 
+export type StaffIdentityMappingDto = {
+  externalDomain?: string | null;
+  externalUserId?: string | null;
+  guestId?: string | null;
+  note?: string | null;
+};
+
 export type GuestDashboardRow = {
   id: string;
   externalDomain: string | null;
@@ -257,6 +264,14 @@ export type StaffControlReport = {
   }>;
   unmatchedOperators: StaffUnmatchedOperatorRow[];
   diagnostics: StaffControlDiagnostics;
+};
+
+export type StaffIdentityMappingResult = {
+  id: string;
+  guestId: string;
+  externalDomain: string | null;
+  externalUserId: string;
+  updatedShifts: number;
 };
 
 export type GuestCrmUpdateDto = {
@@ -811,6 +826,91 @@ export class GuestsService {
     ]);
 
     return this.getGuest(user, id);
+  }
+
+  async mapStaffIdentity(
+    user: AuthenticatedUser,
+    dto: StaffIdentityMappingDto,
+  ): Promise<StaffIdentityMappingResult> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const externalUserId = this.normalizeExternalUserId(dto.externalUserId);
+    const externalDomain = this.normalizeText(dto.externalDomain, 255) ?? '';
+    const shiftExternalDomain = externalDomain || null;
+    const guestId = this.normalizeRequiredId(dto.guestId, 'guestId');
+    const note = this.normalizeText(dto.note, 1000);
+    const [guest, staffGroups] = await Promise.all([
+      this.prisma.guest.findFirst({
+        where: { id: guestId, tenantId },
+        select: {
+          id: true,
+          externalDomain: true,
+          externalGuestTypeId: true,
+        },
+      }),
+      this.loadAdminGuestGroups(tenantId),
+    ]);
+
+    if (!guest) {
+      throw new NotFoundException('Guest not found');
+    }
+
+    const isStaffGuest = staffGroups.some(
+      (group) =>
+        group.externalDomain === guest.externalDomain &&
+        group.externalGroupId === guest.externalGuestTypeId,
+    );
+
+    if (!isStaffGuest) {
+      throw new BadRequestException('Selected guest is not a staff guest');
+    }
+
+    const mapping = await this.prisma.guestStaffIdentityMapping.upsert({
+      where: {
+        tenantId_externalProvider_externalDomain_externalUserId: {
+          tenantId,
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain,
+          externalUserId,
+        },
+      },
+      create: {
+        tenantId,
+        guestId,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain,
+        externalUserId,
+        note,
+        createdByUserId: user.id,
+      },
+      update: {
+        guestId,
+        note,
+        createdByUserId: user.id,
+      },
+      select: {
+        id: true,
+        guestId: true,
+        externalDomain: true,
+        externalUserId: true,
+      },
+    });
+    const updatedShifts = await this.prisma.guestWorkingShift.updateMany({
+      where: {
+        tenantId,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: shiftExternalDomain,
+        externalUserId,
+      },
+      data: { guestId },
+    });
+
+    return {
+      id: mapping.id,
+      guestId: mapping.guestId,
+      externalDomain: mapping.externalDomain || null,
+      externalUserId: mapping.externalUserId,
+      updatedShifts: updatedShifts.count,
+    };
   }
 
   private async buildGuestMetrics(
@@ -1677,6 +1777,26 @@ export class GuestsService {
     }
 
     return trimmed.slice(0, maxLength);
+  }
+
+  private normalizeExternalUserId(value: string | null | undefined) {
+    const normalized = this.normalizeText(value, 120);
+
+    if (!normalized) {
+      throw new BadRequestException('externalUserId is required');
+    }
+
+    return normalized;
+  }
+
+  private normalizeRequiredId(value: string | null | undefined, field: string) {
+    const normalized = this.normalizeText(value, 120);
+
+    if (!normalized) {
+      throw new BadRequestException(`${field} is required`);
+    }
+
+    return normalized;
   }
 
   private resolveOptionalDate(value: string | null | undefined) {

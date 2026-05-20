@@ -38,6 +38,7 @@ const navGroups: NavGroup[] = [
       { href: "/stores", label: "Торговые точки" },
       { href: "/reports", label: "Отчёты" },
       { href: "/import", label: "Импорт" },
+      { href: "/sync", label: "Синхронизация" },
       { href: "/utilities", label: "Утилиты" },
       { href: "/settings", label: "Настройки" },
     ],

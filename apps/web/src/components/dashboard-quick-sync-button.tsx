@@ -7,7 +7,7 @@ const guestSyncPollIntervalMs = 4000;
 const guestSyncPollAttempts = 75;
 
 const quickSyncTitle =
-  'Обновить товары, продажи и гостей с даты последней синхронизации. Для ручного периода перейдите в "Настройки"';
+  'Обновить товары, продажи и гостей с даты последней синхронизации. Для ручного периода перейдите в "Синхронизация"';
 
 type GuestSyncStatus = {
   status: "IDLE" | "RUNNING" | "SUCCESS" | "FAILED";

@@ -63,6 +63,10 @@ export function canAccessPath(user: AuthUser | null, href: string) {
     return can(user, "manage_integrations");
   }
 
+  if (href === "/sync") {
+    return can(user, "run_sync");
+  }
+
   if (href === "/import") {
     return can(user, "import_data");
   }

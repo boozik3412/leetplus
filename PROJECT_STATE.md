@@ -1,6 +1,6 @@
 # LeetPlus Project State
 
-Last updated: 2026-05-19
+Last updated: 2026-05-20
 
 ## Current Workflow
 
@@ -25,7 +25,7 @@ Last updated: 2026-05-19
 
 LeetPlus is an assortment analytics SaaS for computer clubs and club networks. It imports LAngame data, normalizes goods across clubs into network SKU groups, and provides analytics for sales, stock, OOS risk, margin, recommendations, LFL, new products, and assortment quality.
 
-The active strategic product direction is a separate "Guests" module. It expands LeetPlus from assortment analytics into guest-base analytics, staff/control reports, mini CRM, loyalty/gamification, messenger communications, and guest-flow management. The product navigation is split into two meaningful blocks: "Ассортимент" and "Гости".
+The active strategic product direction is a separate "Guests" module. It expands LeetPlus from assortment analytics into guest-base analytics, staff/control reports, mini CRM, loyalty/gamification, messenger communications, and guest-flow management. The product navigation is split into meaningful product blocks, and operational setup is separated into `Настройки` and `Синхронизация`.
 
 Connected production LAngame sources:
 
@@ -59,11 +59,12 @@ Connected production LAngame sources:
 
 ## Current Feature Areas
 
-- Dashboard: compact filters, responsive header, KPI cards, trend charts, category weights/efficiency, active assortment, TOP SKU.
+- Dashboard: executive network summary, compact filters, responsive header, KPI cards, trend charts, category weights/efficiency, active assortment, TOP SKU, guests/product/revenue summary, and load percent based on played hours divided by available PC-hours.
 - Reports: collapsible report list, row-level sales detail report, summary export/email, LFL, new products, recommendations, OOS, no-sales, replenishment, ABC, top SKU/suppliers, assortment.
 - Product parsing utilities: automatic analysis, safe confirmation/rejection, existing canonical SKU awareness, manual parsing page.
 - Products/stores/directories: inline editing, multi-club filters, exports, manual store name preservation.
-- Guest module: first production read-only layer is live, including data foundation sync, guest analytics dashboard, full guest report, guest card, mini CRM fields, and first staff-control report.
+- Guest module: first production read-only layer is live, including data foundation sync, guest analytics dashboard, full guest report, guest card, mini CRM fields, first staff-control report, and PC-count based load calculation.
+- Sync/admin UX: `/settings` is for LAngame connection settings only; `/sync` is the dedicated synchronization page with one combined sync action for assortment/sales/revenue plus guests.
 - Mail: Mail.ru/VK WorkSpace domain is configured; SMTP uses `reports@leetplus.ru`.
 
 ## Recent Work
@@ -87,6 +88,9 @@ Connected production LAngame sources:
 - Added default exclusion of administrator guest groups from client analytics while keeping admin groups selectable in filters for explicit inspection.
 - Added first `/guests/staff-control` report: staff/admin group slice, staff activity KPIs, staff table, and operation-log summary. Current limitation: `all_operations_log` is not yet reliably linked to a specific administrator identity.
 - Added safe staff-control diagnostics: guest foundation sync now probes `log_cash_transaction/list` and `working_shifts/list` and stores only field names/non-empty counts in the profile JSON, not raw payload values.
+- Added executive network dashboard on `/dashboard`: combined money, guests, assortment, and load summary with direct navigation to relevant reports.
+- Added PC-count foundation from LAngame `global/types_of_pc_in_clubs/list` and `global/linking_pc_by_type/list`; guest load is calculated as played hours / possible PC-hours.
+- Moved synchronization controls out of `/settings` into `/sync`; settings now contain only LAngame API key/domains/sources, and sync has one combined action for all data.
 
 ## Near-Term Backlog
 
@@ -96,8 +100,10 @@ Status: implemented; remains in production UX polish mode.
 
 - Done: first screen is focused on commercial control: revenue, gross profit, margin, sold units, OOS risk, stock, management focus, actions, and "what changed".
 - Done: current/full period selectors, default current-day view, European date formatting, report anchors, responsive fixes, and compact report previews.
+- Done: executive summary now combines total revenue, guests, assortment and load; the load metric uses PC capacity when PC count is available from LAngame/global endpoints.
 - Done: "What changed" now compares the latest full day against the previous full day for current-day mode; other periods keep analogous-period comparison.
 - Done: "Main focus" includes money units in financial values and links "Money at risk" to the hybrid assortment-loss report.
+- Current risk: production still needs live verification that LAngame returns enough PC context for all clubs; if load remains `нет данных`, inspect latest guest sync profile endpoint errors/field counts or VDS API logs.
 - Next polish: continue adjusting color accents, wording, and direct action links from live `leetplus.ru` review.
 
 ### Stage 2. Commercial Reports
@@ -157,8 +163,12 @@ Status: MVP 1 read-only guest analytics is live in production. Automatic rewards
 - Done: `/guests/staff-control` surfaces safe data-shape diagnostics for `all_operations_log/list`, `log_cash_transaction/list`, and `working_shifts/list` so the next iteration can validate real operator/admin identifiers.
 - Done: `working_shifts/list` is persisted as tenant-scoped shift facts and linked to staff guests through `user_id` when it matches a LAngame guest id; `/guests/staff-control` now shows shift counts, linked shifts, shift hours, shift payment amount, refunds, incassation, and middle check.
 - Done: `/guests/staff-control` now exposes unmatched LAngame operators grouped by `externalDomain + user_id` with shift hours, payments, refunds, incassation, middle check, and store list.
+- Done: PC context is pulled from LAngame `global/types_of_pc_in_clubs/list` + `global/linking_pc_by_type/list`, stored on `Store.computerCount`, and used for network/club load percent.
+- Done: guest summary can backfill missing PC counts on demand when `Store.computerCount` is empty.
 - Current limitation: `all_operations_log` is stored and summarized, but it still does not expose a reliable administrator identifier. `log_cash_transaction/list` currently returns errors on production sources, so cashier analytics starts from working shifts.
+- Current limitation: PC-count parsing is defensive because real `global/*` payload shape may differ by LAngame source; production verification should confirm `computerCount` is filled for each club.
 - Planned data foundation: guests, guest groups, balances, bonus balances, sessions, transactions, all operations log, product expenses by guest, clubs, tariffs, shifts, and PC context.
+- Next: verify production `/dashboard` load percentage after deploy and, if needed, inspect latest guest data profile diagnostics for `pcTypesInClubs`, `pcTypeLinks`, and endpoint errors.
 - Next: add a staff identity mapping layer so unmatched `working_shifts.user_id` values can be manually or semi-automatically linked to LeetPlus staff guests.
 - Next: extend staff-control report from persisted shifts into shift anomalies, manual corrections, refunds/cancellations, discounts/bonuses, and suspicious guest/self-service activity.
 - Next: add export for `/guests/report` and `/guests/staff-control`, then saved filters/audiences.

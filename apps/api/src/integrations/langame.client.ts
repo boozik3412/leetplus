@@ -24,6 +24,10 @@ type LangameResponse<T> = {
   message?: string;
 };
 
+type LangameQueryParams = Record<string, string>;
+
+const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;
+
 @Injectable()
 export class LangameClient {
   async listClubs(baseUrl: string, apiKey: string) {
@@ -50,7 +54,7 @@ export class LangameClient {
       dateTo: string;
     },
   ) {
-    return this.getList<LangameProductExpense>(
+    return this.getListWithDateFallback<LangameProductExpense>(
       baseUrl,
       '/products/expense',
       apiKey,
@@ -97,7 +101,7 @@ export class LangameClient {
       dateTo: string;
     },
   ) {
-    return this.getList<LangameGuestSession>(
+    return this.getListWithDateFallback<LangameGuestSession>(
       baseUrl,
       '/guests/sessions',
       apiKey,
@@ -120,12 +124,17 @@ export class LangameClient {
       dateTo: string;
     },
   ) {
-    return this.getList<LangameGuestLog>(baseUrl, '/guests/logs', apiKey, {
-      page: String(params.page),
-      page_limit: String(params.pageLimit),
-      date_from: params.dateFrom,
-      date_to: params.dateTo,
-    });
+    return this.getListWithDateFallback<LangameGuestLog>(
+      baseUrl,
+      '/guests/logs',
+      apiKey,
+      {
+        page: String(params.page),
+        page_limit: String(params.pageLimit),
+        date_from: params.dateFrom,
+        date_to: params.dateTo,
+      },
+    );
   }
 
   async listTransactions(
@@ -138,7 +147,7 @@ export class LangameClient {
       dateTo: string;
     },
   ) {
-    return this.getList<LangameTransaction>(
+    return this.getListWithDateFallback<LangameTransaction>(
       baseUrl,
       '/transactions/list',
       apiKey,
@@ -160,7 +169,7 @@ export class LangameClient {
       clubId?: string | number;
     },
   ) {
-    const queryParams: Record<string, string> = {
+    const queryParams: LangameQueryParams = {
       date_from: params.dateFrom,
       date_to: params.dateTo,
     };
@@ -169,7 +178,7 @@ export class LangameClient {
       queryParams.club_id = String(params.clubId);
     }
 
-    return this.getList<LangameOperationLog>(
+    return this.getListWithDateFallback<LangameOperationLog>(
       baseUrl,
       '/all_operations_log/list',
       apiKey,
@@ -187,7 +196,7 @@ export class LangameClient {
       dateTo: string;
     },
   ) {
-    return this.getList<LangameCashTransaction>(
+    return this.getListWithDateFallback<LangameCashTransaction>(
       baseUrl,
       '/log_cash_transaction/list',
       apiKey,
@@ -210,7 +219,7 @@ export class LangameClient {
       dateTo: string;
     },
   ) {
-    return this.getList<LangameWorkingShift>(
+    return this.getListWithDateFallback<LangameWorkingShift>(
       baseUrl,
       '/working_shifts/list',
       apiKey,
@@ -243,7 +252,7 @@ export class LangameClient {
     baseUrl: string,
     path: string,
     apiKey: string,
-    params: Record<string, string> = {},
+    params: LangameQueryParams = {},
   ): Promise<T[]> {
     const url = new URL(`${this.normalizeBaseUrl(baseUrl)}${path}`);
 
@@ -259,8 +268,14 @@ export class LangameClient {
     });
 
     if (!response.ok) {
+      const errorDetails = await this.readErrorDetails(response);
       throw new BadRequestException(
-        `LAngame request failed: ${response.status} ${response.statusText}`,
+        [
+          `LAngame ${path} failed: ${response.status} ${response.statusText}`,
+          errorDetails,
+        ]
+          .filter(Boolean)
+          .join(' - '),
       );
     }
 
@@ -268,11 +283,112 @@ export class LangameClient {
 
     if (payload.status === false) {
       throw new BadRequestException(
-        payload.message || 'LAngame request returned an error',
+        payload.message
+          ? `LAngame ${path} returned an error: ${payload.message}`
+          : `LAngame ${path} returned an error`,
       );
     }
 
     return Array.isArray(payload.data) ? payload.data : [];
+  }
+
+  private async getListWithDateFallback<T>(
+    baseUrl: string,
+    path: string,
+    apiKey: string,
+    params: LangameQueryParams = {},
+  ): Promise<T[]> {
+    try {
+      return await this.getList<T>(baseUrl, path, apiKey, params);
+    } catch (error) {
+      if (!this.shouldRetryWithEuropeanDates(error, params)) {
+        throw error;
+      }
+
+      return this.getList<T>(
+        baseUrl,
+        path,
+        apiKey,
+        this.toEuropeanDateParams(params),
+      );
+    }
+  }
+
+  private shouldRetryWithEuropeanDates(
+    error: unknown,
+    params: LangameQueryParams,
+  ) {
+    const message = error instanceof Error ? error.message : '';
+
+    return (
+      message.includes('400') &&
+      (this.isIsoDate(params.date_from) || this.isIsoDate(params.date_to))
+    );
+  }
+
+  private toEuropeanDateParams(params: LangameQueryParams) {
+    return {
+      ...params,
+      date_from: this.toEuropeanDate(params.date_from),
+      date_to: this.toEuropeanDate(params.date_to),
+    };
+  }
+
+  private isIsoDate(value?: string) {
+    return Boolean(value && isoDatePattern.test(value));
+  }
+
+  private toEuropeanDate(value?: string) {
+    if (!value || !isoDatePattern.test(value)) {
+      return value ?? '';
+    }
+
+    const [year, month, day] = value.split('-');
+    return `${day}.${month}.${year}`;
+  }
+
+  private async readErrorDetails(response: Response) {
+    try {
+      const body = (await response.text()).trim();
+
+      if (!body) {
+        return '';
+      }
+
+      return this.compactErrorDetails(body);
+    } catch {
+      return '';
+    }
+  }
+
+  private compactErrorDetails(body: string) {
+    try {
+      const payload = JSON.parse(body) as unknown;
+
+      if (this.hasStringField(payload, 'message')) {
+        return payload.message;
+      }
+
+      if (this.hasStringField(payload, 'error')) {
+        return payload.error;
+      }
+    } catch {
+      // Fall back to the raw text below.
+    }
+
+    return body.length > 500 ? `${body.slice(0, 500)}...` : body;
+  }
+
+  private hasStringField(
+    payload: unknown,
+    field: string,
+  ): payload is Record<string, string> {
+    return (
+      typeof payload === 'object' &&
+      payload !== null &&
+      field in payload &&
+      typeof (payload as Record<string, unknown>)[field] === 'string'
+    );
   }
 
   private normalizeBaseUrl(baseUrl: string) {

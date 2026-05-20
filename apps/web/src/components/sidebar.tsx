@@ -38,8 +38,13 @@ const navGroups: NavGroup[] = [
       { href: "/stores", label: "Торговые точки" },
       { href: "/reports", label: "Отчёты" },
       { href: "/import", label: "Импорт" },
-      { href: "/sync", label: "Синхронизация" },
       { href: "/utilities", label: "Утилиты" },
+    ],
+  },
+  {
+    title: "Управление",
+    items: [
+      { href: "/sync", label: "Синхронизация" },
       { href: "/settings", label: "Настройки" },
     ],
   },
@@ -116,7 +121,9 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
     .filter((group) => group.items.length > 0);
   const currentProductArea = pathname.startsWith("/guests")
     ? "Гости"
-    : "Ассортимент";
+    : pathname.startsWith("/sync") || pathname.startsWith("/settings")
+      ? "Управление"
+      : "Ассортимент";
 
   async function handleLogout() {
     await fetch("/api/auth/logout", {

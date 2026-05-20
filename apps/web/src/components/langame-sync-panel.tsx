@@ -531,6 +531,8 @@ function DiagnosticCard({
 }
 
 function SyncHistory({ jobs }: { jobs: LangameSettings["syncJobs"] }) {
+  const latestJobs = getLatestSyncJobsByDomain(jobs);
+
   return (
     <div className="rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
       <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
@@ -540,9 +542,9 @@ function SyncHistory({ jobs }: { jobs: LangameSettings["syncJobs"] }) {
         </p>
       </div>
 
-      {jobs.length > 0 ? (
+      {latestJobs.length > 0 ? (
         <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
-          {jobs.map((job) => (
+          {latestJobs.map((job) => (
             <div key={job.id} className="px-5 py-4 text-sm">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
@@ -578,6 +580,12 @@ function SyncHistory({ jobs }: { jobs: LangameSettings["syncJobs"] }) {
               ) : null}
             </div>
           ))}
+          {jobs.length > latestJobs.length ? (
+            <p className="px-5 py-3 text-xs text-zinc-500 dark:text-zinc-400">
+              Показан последний запуск по каждому источнику. Повторные ошибки
+              по тем же доменам скрыты, чтобы история не дублировалась.
+            </p>
+          ) : null}
         </div>
       ) : (
         <p className="px-5 py-6 text-sm text-zinc-500">
@@ -586,6 +594,18 @@ function SyncHistory({ jobs }: { jobs: LangameSettings["syncJobs"] }) {
       )}
     </div>
   );
+}
+
+function getLatestSyncJobsByDomain(jobs: LangameSettings["syncJobs"]) {
+  const byDomain = new Map<string, LangameSettings["syncJobs"][number]>();
+
+  jobs.forEach((job) => {
+    if (!byDomain.has(job.domain)) {
+      byDomain.set(job.domain, job);
+    }
+  });
+
+  return Array.from(byDomain.values());
 }
 
 function Metric({ label, value }: { label: string; value: number }) {

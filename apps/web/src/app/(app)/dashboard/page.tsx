@@ -8,7 +8,6 @@ import { buildAssortmentRiskSummary } from "@/lib/assortment-risk";
 import { DashboardFilters } from "@/components/dashboard-filters";
 import { DashboardAutoSync } from "@/components/dashboard-auto-sync";
 import { DashboardQuickSyncButton } from "@/components/dashboard-quick-sync-button";
-import { GuestFoundationSyncButton } from "@/components/guest-foundation-sync-button";
 import { RevenueTrendChart } from "@/components/revenue-trend-chart";
 import { NoSalesTrendChart } from "@/components/no-sales-trend-chart";
 import {
@@ -402,7 +401,6 @@ export default async function DashboardPage({
                   selectedStoreIds={summary.selectedStoreIds}
                 />
                 <DashboardQuickSyncButton />
-                <GuestFoundationSyncButton compact />
               </div>
               <h1 className="mt-3 max-w-3xl text-3xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50 min-[1250px]:text-4xl">
                 {summary.tenantName}: сводный дашборд сети

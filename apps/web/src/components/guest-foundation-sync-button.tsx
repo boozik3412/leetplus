@@ -34,8 +34,10 @@ type GuestSyncStatus = {
 };
 
 export function GuestFoundationSyncButton({
+  compact = false,
   disabled = false,
 }: {
+  compact?: boolean;
   disabled?: boolean;
 }) {
   const router = useRouter();
@@ -146,7 +148,12 @@ export function GuestFoundationSyncButton({
               : "Запустит фоновую синхронизацию гостей из LAngame.";
 
   return (
-    <div className="flex flex-col items-start gap-2 lg:items-end">
+    <div
+      className={[
+        "flex flex-col items-start gap-2",
+        compact ? "" : "lg:items-end",
+      ].join(" ")}
+    >
       <button
         type="button"
         onClick={syncGuests}
@@ -155,13 +162,13 @@ export function GuestFoundationSyncButton({
       >
         {label}
       </button>
-      {status === "error" ? (
+      {!compact && status === "error" ? (
         <p className="text-xs text-red-600 dark:text-red-300">
           {helperText}
         </p>
-      ) : (
+      ) : !compact ? (
         <p className="max-w-xs text-xs text-zinc-500 lg:text-right">{helperText}</p>
-      )}
+      ) : null}
     </div>
   );
 }

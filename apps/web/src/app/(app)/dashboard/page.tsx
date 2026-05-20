@@ -8,6 +8,7 @@ import { buildAssortmentRiskSummary } from "@/lib/assortment-risk";
 import { DashboardFilters } from "@/components/dashboard-filters";
 import { DashboardAutoSync } from "@/components/dashboard-auto-sync";
 import { DashboardQuickSyncButton } from "@/components/dashboard-quick-sync-button";
+import { GuestFoundationSyncButton } from "@/components/guest-foundation-sync-button";
 import { RevenueTrendChart } from "@/components/revenue-trend-chart";
 import { NoSalesTrendChart } from "@/components/no-sales-trend-chart";
 import {
@@ -19,6 +20,7 @@ import {
   formatTrendPeriodTitle,
 } from "@/lib/trend-period-labels";
 import { requireCurrentUser } from "@/lib/auth";
+import { getGuestsSummary, type GuestsSummary } from "@/lib/guests";
 import { getOperationalReport } from "@/lib/reports";
 import { getStores } from "@/lib/stores";
 import Link from "next/link";
@@ -55,10 +57,36 @@ function formatRubles(value: number) {
   return `${formatMoney(value)} руб`;
 }
 
+function formatHours(value: number) {
+  return `${formatQuantity(value)} ч`;
+}
+
 function formatQuantity(value: number) {
   return new Intl.NumberFormat("ru-RU", {
     maximumFractionDigits: 1,
   }).format(value);
+}
+
+function formatRatioPercent(value: number | null) {
+  return value === null ? "нет данных" : formatPercent(value);
+}
+
+function ratioPercent(value: number, total: number) {
+  return total > 0 ? (value / total) * 100 : null;
+}
+
+function daysInRange(from: string, to: string) {
+  const fromDate = parseDateInput(from);
+  const toDate = parseDateInput(to);
+
+  if (!fromDate || !toDate) {
+    return 1;
+  }
+
+  return Math.max(
+    1,
+    Math.floor((toDate.getTime() - fromDate.getTime()) / 86_400_000) + 1,
+  );
 }
 
 function lastFullDaysRange(days: number) {
@@ -310,7 +338,8 @@ export default async function DashboardPage({
   ]);
   const operationalStoreId =
     summary.selectedStoreIds.length === 1 ? summary.selectedStoreIds[0] : undefined;
-  const [periodOperationalReport, noSalesReport21] = await Promise.all([
+  const [periodOperationalReport, noSalesReport21, guestsSummary] =
+    await Promise.all([
     getOperationalReport({
       from: summary.periodFrom,
       to: summary.periodTo,
@@ -318,6 +347,11 @@ export default async function DashboardPage({
     }),
     getOperationalReport({
       ...lastFullDaysRange(21),
+      storeId: operationalStoreId,
+    }),
+    getGuestsSummary({
+      dateFrom: summary.periodFrom,
+      dateTo: summary.periodTo,
       storeId: operationalStoreId,
     }),
   ]);
@@ -345,6 +379,11 @@ export default async function DashboardPage({
     frozenStockAmount: assortmentRisk.frozenStockAmount,
   });
   const dashboardActions = buildDashboardActions({ summary, latestTrend });
+  const totalClubRevenue =
+    latestTrend && latestTrend.clubRevenue > 0
+      ? latestTrend.clubRevenue
+      : summary.fullDayRevenue;
+  const productRevenueShare = ratioPercent(summary.totalRevenue, totalClubRevenue);
 
   return (
     <main className="px-6 py-8 text-zinc-950 dark:text-zinc-100">
@@ -363,9 +402,10 @@ export default async function DashboardPage({
                   selectedStoreIds={summary.selectedStoreIds}
                 />
                 <DashboardQuickSyncButton />
+                <GuestFoundationSyncButton compact />
               </div>
               <h1 className="mt-3 max-w-3xl text-3xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50 min-[1250px]:text-4xl">
-                {summary.tenantName}: коммерческая картина сети
+                {summary.tenantName}: сводный дашборд сети
               </h1>
               <p className="mt-4 max-w-2xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
                 Период -{" "}
@@ -373,8 +413,9 @@ export default async function DashboardPage({
                   {highlightedPeriod ??
                     `${summary.periodFrom} — ${summary.periodTo}`}
                 </span>
-                . Первый экран собран вокруг денег, маржи и срочных решений по
-                ассортименту.
+                . Первый экран соединяет деньги, гостей, ассортимент и игровую
+                загрузку, чтобы быстро понять, где сеть зарабатывает и где теряет
+                потенциал.
               </p>
             </div>
 
@@ -445,6 +486,19 @@ export default async function DashboardPage({
           </div>
         </section>
 
+        <ExecutiveOverviewPanel
+          summary={summary}
+          guestsSummary={guestsSummary}
+          assortmentRiskAmount={assortmentRisk.totalRiskAmount}
+          assortmentRiskSkuCount={
+            assortmentRisk.oosSkuCount + assortmentRisk.noSalesSkuCount
+          }
+          totalClubRevenue={totalClubRevenue}
+          productRevenueShare={productRevenueShare}
+        />
+
+        <ExecutiveNavigationPanel />
+
         <section className="mt-6 grid gap-6 xl:grid-cols-[1fr_0.9fr]">
           <ManagementFocusPanel insights={managementInsights} />
           <TodayActionsPanel actions={dashboardActions} />
@@ -484,6 +538,199 @@ export default async function DashboardPage({
         />
       </div>
     </main>
+  );
+}
+
+function ExecutiveOverviewPanel({
+  summary,
+  guestsSummary,
+  assortmentRiskAmount,
+  assortmentRiskSkuCount,
+  totalClubRevenue,
+  productRevenueShare,
+}: {
+  summary: Awaited<ReturnType<typeof getDashboardSummary>>;
+  guestsSummary: GuestsSummary;
+  assortmentRiskAmount: number;
+  assortmentRiskSkuCount: number;
+  totalClubRevenue: number;
+  productRevenueShare: number | null;
+}) {
+  const periodDays = daysInRange(summary.periodFrom, summary.periodTo);
+  const playHoursPerDay = guestsSummary.playHours / periodDays;
+  const averageVisitsPerActiveGuest =
+    guestsSummary.activeGuests > 0
+      ? guestsSummary.sessionsCount / guestsSummary.activeGuests
+      : 0;
+  const guestMoney =
+    guestsSummary.transactionAmount + guestsSummary.barRevenue;
+  const barShare = ratioPercent(guestsSummary.barRevenue, guestMoney);
+
+  return (
+    <section className="mt-6 grid gap-4 lg:grid-cols-4">
+      <ExecutiveMetricCard
+        label="Общая выручка"
+        value={formatRubles(totalClubRevenue || summary.totalRevenue)}
+        description={`Товары и бар: ${formatRubles(summary.totalRevenue)} (${formatRatioPercent(productRevenueShare)} от общей выручки).`}
+        href="/reports/sales-detail/table"
+        tone={totalClubRevenue > 0 ? "good" : "neutral"}
+      />
+      <ExecutiveMetricCard
+        label="Гости"
+        value={`${formatQuantity(guestsSummary.activeGuests)} гостей`}
+        description={`Новые: ${formatQuantity(guestsSummary.newGuests)}, повторные: ${formatQuantity(guestsSummary.repeatGuests)}, в риске: ${formatQuantity(guestsSummary.riskGuests)}.`}
+        href="/guests"
+        tone={guestsSummary.riskGuests > guestsSummary.newGuests ? "warning" : "good"}
+      />
+      <ExecutiveMetricCard
+        label="Загрузка"
+        value={formatHours(guestsSummary.playHours)}
+        description={`${formatQuantity(guestsSummary.sessionsCount)} визитов, ${formatHours(playHoursPerDay)} в день, средняя сессия ${formatQuantity(guestsSummary.averageSessionMinutes)} мин.`}
+        href="/guests"
+        tone={guestsSummary.playHours > 0 ? "good" : "neutral"}
+      />
+      <ExecutiveMetricCard
+        label="Ассортимент"
+        value={`${formatQuantity(summary.activeSku)} активных SKU`}
+        description={`OOS: ${formatQuantity(summary.outOfStockRiskCount)} SKU. Деньги в риске: ${formatRubles(assortmentRiskAmount)} по ${formatQuantity(assortmentRiskSkuCount)} SKU.`}
+        href="/reports/assortment-risk/table"
+        tone={assortmentRiskAmount > 0 ? "danger" : "good"}
+      />
+
+      <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950 lg:col-span-4">
+        <div className="grid gap-4 lg:grid-cols-3">
+          <ExecutiveConclusion
+            title="Деньги"
+            text={
+              totalClubRevenue > 0
+                ? `Товарная часть занимает ${formatRatioPercent(productRevenueShare)} общей выручки. Если доля падает, стоит проверить бар, OOS и топ-SKU.`
+                : "Нет общей выручки за выбранный период: сначала проверьте синхронизацию и фильтр клубов."
+            }
+            href="/reports"
+          />
+          <ExecutiveConclusion
+            title="Клиентская база"
+            text={
+              guestsSummary.riskGuests > guestsSummary.newGuests
+                ? `Гостей в риске больше, чем новых: ${formatQuantity(guestsSummary.riskGuests)} против ${formatQuantity(guestsSummary.newGuests)}. Фокус - реактивация.`
+                : `Приток гостей перекрывает риск: ${formatQuantity(guestsSummary.newGuests)} новых против ${formatQuantity(guestsSummary.riskGuests)} в риске.`
+            }
+            href="/guests/report"
+          />
+          <ExecutiveConclusion
+            title="Загрузка и чек"
+            text={`На активного гостя приходится ${formatQuantity(averageVisitsPerActiveGuest)} визита. Доля бара в гостевых деньгах: ${formatRatioPercent(barShare)}.`}
+            href="/guests/staff-control"
+          />
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function ExecutiveMetricCard({
+  label,
+  value,
+  description,
+  href,
+  tone = "neutral",
+}: {
+  label: string;
+  value: string;
+  description: string;
+  href: string;
+  tone?: "neutral" | "good" | "warning" | "danger";
+}) {
+  return (
+    <Link
+      href={href}
+      className={[
+        "block rounded-lg border bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:bg-zinc-950",
+        tone === "good"
+          ? "border-emerald-200 dark:border-emerald-900/70"
+          : tone === "warning"
+            ? "border-amber-200 dark:border-amber-900/70"
+            : tone === "danger"
+              ? "border-red-200 dark:border-red-900/70"
+              : "border-zinc-200 dark:border-zinc-800",
+      ].join(" ")}
+    >
+      <p className="text-xs font-semibold uppercase text-zinc-500">{label}</p>
+      <p className="mt-3 text-2xl font-semibold tabular-nums text-zinc-950 dark:text-zinc-50">
+        {value}
+      </p>
+      <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+        {description}
+      </p>
+    </Link>
+  );
+}
+
+function ExecutiveConclusion({
+  title,
+  text,
+  href,
+}: {
+  title: string;
+  text: string;
+  href: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className="rounded-lg border border-zinc-100 bg-zinc-50 p-4 transition hover:border-zinc-300 hover:bg-white dark:border-zinc-800 dark:bg-zinc-900/60 dark:hover:border-zinc-700 dark:hover:bg-zinc-900"
+    >
+      <p className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+        {title}
+      </p>
+      <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+        {text}
+      </p>
+    </Link>
+  );
+}
+
+function ExecutiveNavigationPanel() {
+  const links = [
+    {
+      title: "Гости",
+      description: "Сегменты, ТОП гостей, риск оттока, CRM и карточки.",
+      href: "/guests",
+    },
+    {
+      title: "Товары",
+      description: "SKU, остатки, цены, группировка и карточки товаров.",
+      href: "/products",
+    },
+    {
+      title: "Отчеты",
+      description: "OOS, деньги в риске, продажи, рекомендации и сводные таблицы.",
+      href: "/reports",
+    },
+    {
+      title: "Контроль персонала",
+      description: "Смены, операторы, возвраты, инкассация и средние чеки.",
+      href: "/guests/staff-control",
+    },
+  ];
+
+  return (
+    <section className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      {links.map((link) => (
+        <Link
+          key={link.href}
+          href={link.href}
+          className="rounded-lg border border-zinc-200 bg-white px-4 py-3 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50/50 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-emerald-900 dark:hover:bg-emerald-950/20"
+        >
+          <span className="block text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+            {link.title}
+          </span>
+          <span className="mt-1 block text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+            {link.description}
+          </span>
+        </Link>
+      ))}
+    </section>
   );
 }
 

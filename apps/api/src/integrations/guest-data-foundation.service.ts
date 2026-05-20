@@ -719,11 +719,20 @@ export class GuestDataFoundationService {
         'pc_type_id',
         'type_pc_id',
         'types_of_pc_in_clubs_id',
+        'type_pc_in_club_id',
+        'types_pc_id',
+        'list_type_pc_id',
+        'list_pc_type_id',
+        'list_types_of_pc_in_clubs_id',
       ]);
       const clubId = this.firstStringField(row, [
         'club_id',
+        'clubId',
         'list_clubs_id',
         'list_club_id',
+        'external_club_id',
+        'id_club',
+        'clubs_id',
       ]);
 
       if (typeId && clubId) {
@@ -736,7 +745,12 @@ export class GuestDataFoundationService {
         'pcs_count',
         'computers_count',
         'computer_count',
+        'count_pc',
+        'count_pcs',
+        'pcCount',
+        'computerCount',
         'qty',
+        'quantity',
       ]);
       if (clubId && directCount !== null) {
         countByClub.set(clubId, (countByClub.get(clubId) ?? 0) + directCount);
@@ -754,11 +768,20 @@ export class GuestDataFoundationService {
           'type_pc_id',
           'types_of_pc_in_clubs_id',
           'pc_type_in_club_id',
+          'type_pc_in_club_id',
+          'types_pc_id',
+          'list_type_pc_id',
+          'list_pc_type_id',
+          'list_types_of_pc_in_clubs_id',
         ]);
         const directClubId = this.firstStringField(row, [
           'club_id',
+          'clubId',
           'list_clubs_id',
           'list_club_id',
+          'external_club_id',
+          'id_club',
+          'clubs_id',
         ]);
         const clubId = directClubId ?? (typeId ? typeToClub.get(typeId) : null);
 
@@ -769,11 +792,20 @@ export class GuestDataFoundationService {
         const pcId =
           this.firstStringField(row, [
             'pc_id',
+            'pcId',
+            'id',
+            'list_pc_id',
+            'list_pcs_id',
             'computer_id',
+            'computerId',
             'global_pc_id',
             'host_id',
+            'hostname',
             'uuid',
+            'UUID',
             'name',
+            'pc_name',
+            'computer_name',
           ]) ?? this.payloadHash(row);
         const seen = seenPcByClub.get(clubId) ?? new Set<string>();
         seen.add(pcId);
@@ -1747,6 +1779,8 @@ export class GuestDataFoundationService {
   }
 
   private firstStringField(row: Record<string, unknown>, fields: string[]) {
+    const normalizedFields = this.normalizedFieldNames(fields);
+
     for (const field of fields) {
       const value = this.toNullableString(row[field]);
 
@@ -1755,10 +1789,20 @@ export class GuestDataFoundationService {
       }
     }
 
+    for (const value of this.objectFieldValues(row, normalizedFields)) {
+      const stringValue = this.toNullableString(value);
+
+      if (stringValue) {
+        return stringValue;
+      }
+    }
+
     return null;
   }
 
   private firstNumberField(row: Record<string, unknown>, fields: string[]) {
+    const normalizedFields = this.normalizedFieldNames(fields);
+
     for (const field of fields) {
       const value = row[field];
       if (value === null || value === undefined || value === '') {
@@ -1775,7 +1819,70 @@ export class GuestDataFoundationService {
       }
     }
 
+    for (const value of this.objectFieldValues(row, normalizedFields)) {
+      if (value === null || value === undefined || value === '') {
+        continue;
+      }
+
+      const numberValue =
+        typeof value === 'number'
+          ? value
+          : Number(this.scalarToString(value)?.replace(',', '.'));
+
+      if (Number.isFinite(numberValue)) {
+        return numberValue;
+      }
+    }
+
     return null;
+  }
+
+  private normalizedFieldNames(fields: string[]) {
+    return new Set(fields.map((field) => this.normalizeFieldName(field)));
+  }
+
+  private *objectFieldValues(
+    row: Record<string, unknown>,
+    normalizedFields: Set<string>,
+  ): Generator<unknown> {
+    for (const [field, value] of Object.entries(row)) {
+      yield* this.objectFieldValuesForKey(field, value, normalizedFields, 0);
+    }
+  }
+
+  private *objectFieldValuesForKey(
+    field: string,
+    value: unknown,
+    normalizedFields: Set<string>,
+    depth: number,
+  ): Generator<unknown> {
+    if (normalizedFields.has(this.normalizeFieldName(field))) {
+      yield value;
+    }
+
+    if (
+      depth >= 1 ||
+      value === null ||
+      typeof value !== 'object' ||
+      Array.isArray(value)
+    ) {
+      return;
+    }
+
+    for (const [nestedField, nestedValue] of Object.entries(
+      value as Record<string, unknown>,
+    )) {
+      yield* this.objectFieldValuesForKey(
+        `${field}_${nestedField}`,
+        nestedValue,
+        normalizedFields,
+        depth + 1,
+      );
+    }
+  }
+
+  private normalizeFieldName(field: string) {
+    return field.toLowerCase().replace(/[^a-z0-9]/g, '');
   }
 
   private toBoolean(value: unknown) {

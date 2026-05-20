@@ -3,8 +3,16 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+const guestSyncPollIntervalMs = 4000;
+const guestSyncPollAttempts = 75;
+
 const quickSyncTitle =
   'Обновить товары, продажи и гостей с даты последней синхронизации. Для ручного периода перейдите в "Настройки"';
+
+type GuestSyncStatus = {
+  status: "IDLE" | "RUNNING" | "SUCCESS" | "FAILED";
+  running: boolean;
+};
 
 export function DashboardQuickSyncButton() {
   const router = useRouter();
@@ -35,10 +43,10 @@ export function DashboardQuickSyncButton() {
       }
 
       if (guestsResponse.ok) {
-        window.setTimeout(() => router.refresh(), 4000);
-      } else {
-        router.refresh();
+        await waitForGuestSyncCompletion();
       }
+
+      router.refresh();
     } catch {
     } finally {
       setIsSyncing(false);
@@ -59,4 +67,37 @@ export function DashboardQuickSyncButton() {
       </button>
     </span>
   );
+}
+
+async function waitForGuestSyncCompletion() {
+  await sleep(guestSyncPollIntervalMs);
+
+  for (let attempt = 0; attempt < guestSyncPollAttempts; attempt += 1) {
+    const syncStatus = await fetchGuestSyncStatus();
+
+    if (syncStatus && !syncStatus.running) {
+      return syncStatus;
+    }
+
+    await sleep(guestSyncPollIntervalMs);
+  }
+
+  return null;
+}
+
+async function fetchGuestSyncStatus() {
+  const response = await fetch(
+    "/api/integrations/langame/guests/foundation/sync/status",
+    { cache: "no-store" },
+  );
+
+  if (!response.ok) {
+    return null;
+  }
+
+  return response.json() as Promise<GuestSyncStatus>;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }

@@ -7,6 +7,7 @@ import { ConfigService } from '@nestjs/config';
 import { GuestCrmStatus, IntegrationProvider, Prisma } from '@prisma/client';
 import { createDecipheriv, createHash, createHmac } from 'node:crypto';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { GuestDataFoundationService } from '../integrations/guest-data-foundation.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 
@@ -347,6 +348,7 @@ export class GuestsService {
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
     private readonly configService: ConfigService,
+    private readonly guestDataFoundationService: GuestDataFoundationService,
   ) {}
 
   async getFilterOptions(user: AuthenticatedUser): Promise<GuestFilterOptions> {
@@ -1734,6 +1736,24 @@ export class GuestsService {
   }
 
   private async resolveComputerCount(tenantId: string, storeId: string | null) {
+    const currentCount = await this.loadComputerCount(tenantId, storeId);
+
+    if (currentCount !== null) {
+      return currentCount;
+    }
+
+    try {
+      await this.guestDataFoundationService.syncComputerCountsForTenant(
+        tenantId,
+      );
+    } catch {
+      return null;
+    }
+
+    return this.loadComputerCount(tenantId, storeId);
+  }
+
+  private async loadComputerCount(tenantId: string, storeId: string | null) {
     const stores = await this.prisma.store.findMany({
       where: {
         tenantId,

@@ -398,6 +398,38 @@ export class GuestDataFoundationService {
     };
   }
 
+  async syncComputerCountsForTenant(tenantId: string) {
+    const { apiKey, sources } =
+      await this.langameSettingsService.resolveTenantAccess(tenantId);
+    const syncedAt = new Date();
+    let updatedStores = 0;
+
+    for (const source of sources) {
+      try {
+        const [pcTypesInClubs, pcTypeLinks] = await Promise.all([
+          this.langameClient.listPcTypesInClubs(source.baseUrl, apiKey),
+          this.langameClient.listPcTypeLinks(source.baseUrl, apiKey),
+        ]);
+
+        updatedStores += await this.syncStoreComputerCounts(
+          tenantId,
+          source.domain,
+          pcTypesInClubs,
+          pcTypeLinks,
+          syncedAt,
+        );
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : 'Computer count sync failed';
+        this.logger.warn(
+          `Computer count sync failed for ${source.domain}: ${message}`,
+        );
+      }
+    }
+
+    return updatedStores;
+  }
+
   private profileRunStatusSelect() {
     return {
       domain: true,
@@ -824,7 +856,7 @@ export class GuestDataFoundationService {
       }
     }
 
-    await Promise.all(
+    const updates = await Promise.all(
       Array.from(countByClub.entries()).map(([externalClubId, count]) =>
         this.prisma.store.updateMany({
           where: {
@@ -840,6 +872,8 @@ export class GuestDataFoundationService {
         }),
       ),
     );
+
+    return updates.reduce((sum, update) => sum + update.count, 0);
   }
 
   private async syncGuests(

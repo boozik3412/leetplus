@@ -120,12 +120,29 @@ type StoreUpdateManyCall = {
   };
 };
 
+type GuestDataProfileRunUpdateManyCall = {
+  where: {
+    tenantId: string;
+    provider: IntegrationProvider;
+    status: string;
+    startedAt: {
+      lt: Date;
+    };
+  };
+  data: {
+    status: string;
+    finishedAt: Date;
+    errorMessage: string;
+  };
+};
+
 describe('GuestDataFoundationService', () => {
   const prisma = {
     guestDataProfileRun: {
       create: jest.fn(),
       findFirst: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
     },
     guestGroup: {
       upsert: jest.fn(),
@@ -214,6 +231,7 @@ describe('GuestDataFoundationService', () => {
     prisma.guestDataProfileRun.create.mockResolvedValue({ id: 'run-1' });
     prisma.guestDataProfileRun.findFirst.mockResolvedValue(null);
     prisma.guestDataProfileRun.update.mockResolvedValue({});
+    prisma.guestDataProfileRun.updateMany.mockResolvedValue({ count: 0 });
     prisma.store.findMany.mockResolvedValue([
       { id: 'store-1', externalClubId: '10' },
     ]);
@@ -490,5 +508,53 @@ describe('GuestDataFoundationService', () => {
         dateTo: '2026-05-01',
       }),
     ).rejects.toThrow('Guest foundation period must be 90 days or less');
+  });
+
+  it('marks stale running guest syncs as failed before reporting status', async () => {
+    const staleRun = {
+      domain: 'club.example',
+      status: 'FAILED',
+      startedAt: new Date('2026-05-19T10:44:00.000Z'),
+      finishedAt: new Date('2026-05-19T12:44:00.000Z'),
+      dateFrom: new Date('2026-05-14T00:00:00.000Z'),
+      dateTo: new Date('2026-05-20T23:59:59.999Z'),
+      guestsCount: 0,
+      sessionsCount: 0,
+      transactionsCount: 0,
+      productSalesLinked: 0,
+      errorMessage:
+        'Синхронизация остановлена: не было завершения больше 2 часов. Запустите повторно.',
+      profile: null,
+    };
+
+    prisma.guestDataProfileRun.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(staleRun);
+
+    const status = await service.getTenantSyncStatus(user);
+
+    const updateManyCalls = prisma.guestDataProfileRun.updateMany.mock
+      .calls as Array<[GuestDataProfileRunUpdateManyCall]>;
+    const updateManyCall = updateManyCalls[0]?.[0];
+    expect(updateManyCall).toBeDefined();
+    if (!updateManyCall) {
+      throw new Error('Stale running sync cleanup was not called');
+    }
+    expect(updateManyCall.where).toMatchObject({
+      tenantId: 'tenant-1',
+      provider: IntegrationProvider.LANGAME,
+      status: 'RUNNING',
+    });
+    expect(updateManyCall.where.startedAt.lt).toBeInstanceOf(Date);
+    expect(updateManyCall.data).toMatchObject({
+      status: 'FAILED',
+      errorMessage:
+        'Синхронизация остановлена: не было завершения больше 2 часов. Запустите повторно.',
+    });
+    expect(updateManyCall.data.finishedAt).toBeInstanceOf(Date);
+    expect(status.running).toBe(false);
+    expect(status.status).toBe('FAILED');
+    expect(status.latestRun?.errorMessage).toContain('2 часов');
   });
 });

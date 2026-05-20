@@ -31,6 +31,9 @@ const DEFAULT_PAGE_LIMIT = 200;
 const DEFAULT_PROFILE_DAYS = 90;
 const MAX_PROFILE_DAYS = 90;
 const MAX_OPERATION_LOG_PERIOD_DAYS = 31;
+const STALE_RUNNING_SYNC_MS = 2 * 60 * 60 * 1000;
+const STALE_RUNNING_SYNC_MESSAGE =
+  'Синхронизация остановлена: не было завершения больше 2 часов. Запустите повторно.';
 
 export type GuestDataFoundationSyncQuery = {
   dateFrom?: string;
@@ -305,6 +308,7 @@ export class GuestDataFoundationService {
     query: GuestDataFoundationSyncQuery,
   ): Promise<GuestDataFoundationStartResult> {
     const { tenantId } = await this.tenantContextService.resolve(user);
+    await this.failStaleRunningRuns(tenantId);
     const { sources } =
       await this.langameSettingsService.resolveTenantAccess(tenantId);
     const period = await this.resolvePeriod(tenantId, query);
@@ -337,6 +341,7 @@ export class GuestDataFoundationService {
     user: AuthenticatedUser,
   ): Promise<GuestDataFoundationStatusResult> {
     const { tenantId } = await this.tenantContextService.resolve(user);
+    await this.failStaleRunningRuns(tenantId);
     const nextPeriod = await this.resolvePeriod(tenantId, {});
     const [runningRun, latestRun] = await Promise.all([
       this.prisma.guestDataProfileRun.findFirst({
@@ -451,6 +456,24 @@ export class GuestDataFoundationService {
       errorMessage: true,
       profile: true,
     } satisfies Prisma.GuestDataProfileRunSelect;
+  }
+
+  private async failStaleRunningRuns(tenantId: string) {
+    const staleStartedBefore = new Date(Date.now() - STALE_RUNNING_SYNC_MS);
+
+    await this.prisma.guestDataProfileRun.updateMany({
+      where: {
+        tenantId,
+        provider: IntegrationProvider.LANGAME,
+        status: 'RUNNING',
+        startedAt: { lt: staleStartedBefore },
+      },
+      data: {
+        status: 'FAILED',
+        finishedAt: new Date(),
+        errorMessage: STALE_RUNNING_SYNC_MESSAGE,
+      },
+    });
   }
 
   private statusDiagnosticsFromProfile(profile: Prisma.JsonValue | null) {

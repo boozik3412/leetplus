@@ -78,4 +78,9 @@ export class LangameController {
   ) {
     return this.guestDataFoundationService.startTenantSync(user, query);
   }
+
+  @Get('guests/foundation/sync/status')
+  getGuestDataFoundationSyncStatus(@CurrentUser() user: AuthenticatedUser) {
+    return this.guestDataFoundationService.getTenantSyncStatus(user);
+  }
 }

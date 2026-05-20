@@ -54,6 +54,24 @@ export type GuestDataFoundationStartResult = {
   dateTo: string;
 };
 
+export type GuestDataFoundationStatusResult = {
+  status: 'IDLE' | 'RUNNING' | 'SUCCESS' | 'FAILED';
+  running: boolean;
+  latestRun: {
+    domain: string;
+    status: string;
+    startedAt: string;
+    finishedAt: string | null;
+    dateFrom: string | null;
+    dateTo: string | null;
+    guestsCount: number;
+    sessionsCount: number;
+    transactionsCount: number;
+    productSalesLinked: number;
+    errorMessage: string | null;
+  } | null;
+};
+
 export type GuestDataFoundationSourceResult = {
   domain: string;
   status: 'SUCCESS' | 'FAILED';
@@ -293,6 +311,80 @@ export class GuestDataFoundationService {
       dateFrom: period.from,
       dateTo: period.to,
     };
+  }
+
+  async getTenantSyncStatus(
+    user: AuthenticatedUser,
+  ): Promise<GuestDataFoundationStatusResult> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const [runningRun, latestRun] = await Promise.all([
+      this.prisma.guestDataProfileRun.findFirst({
+        where: {
+          tenantId,
+          provider: IntegrationProvider.LANGAME,
+          status: 'RUNNING',
+        },
+        orderBy: { startedAt: 'desc' },
+        select: this.profileRunStatusSelect(),
+      }),
+      this.prisma.guestDataProfileRun.findFirst({
+        where: {
+          tenantId,
+          provider: IntegrationProvider.LANGAME,
+        },
+        orderBy: { startedAt: 'desc' },
+        select: this.profileRunStatusSelect(),
+      }),
+    ]);
+    const run = runningRun ?? latestRun;
+
+    if (!run) {
+      return {
+        status: 'IDLE',
+        running: false,
+        latestRun: null,
+      };
+    }
+
+    return {
+      status: runningRun
+        ? 'RUNNING'
+        : run.status === 'SUCCESS'
+          ? 'SUCCESS'
+          : run.status === 'FAILED'
+            ? 'FAILED'
+            : 'IDLE',
+      running: Boolean(runningRun),
+      latestRun: {
+        domain: run.domain,
+        status: run.status,
+        startedAt: run.startedAt.toISOString(),
+        finishedAt: run.finishedAt?.toISOString() ?? null,
+        dateFrom: run.dateFrom ? this.toDateInputValue(run.dateFrom) : null,
+        dateTo: run.dateTo ? this.toDateInputValue(run.dateTo) : null,
+        guestsCount: run.guestsCount,
+        sessionsCount: run.sessionsCount,
+        transactionsCount: run.transactionsCount,
+        productSalesLinked: run.productSalesLinked,
+        errorMessage: run.errorMessage,
+      },
+    };
+  }
+
+  private profileRunStatusSelect() {
+    return {
+      domain: true,
+      status: true,
+      startedAt: true,
+      finishedAt: true,
+      dateFrom: true,
+      dateTo: true,
+      guestsCount: true,
+      sessionsCount: true,
+      transactionsCount: true,
+      productSalesLinked: true,
+      errorMessage: true,
+    } satisfies Prisma.GuestDataProfileRunSelect;
   }
 
   private async syncSource(params: {

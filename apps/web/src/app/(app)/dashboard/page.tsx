@@ -410,9 +410,13 @@ export default async function DashboardPage({
 
             <div className="flex gap-3 overflow-x-auto pb-1 min-[1250px]:grid min-[1250px]:grid-cols-2 min-[1250px]:overflow-visible min-[1250px]:pb-0">
               <HeroMetric
-                label="Выручка"
-                value={formatMoney(summary.totalRevenue)}
-                caption="оборот за выбранный период"
+                label="Общая выручка"
+                value={formatMoney(totalClubRevenue)}
+                caption={
+                  totalClubRevenue > 0
+                    ? "оборот сети за выбранный период"
+                    : "нет общей выручки из LAngame за период"
+                }
               >
                 <FullDayRevenue
                   date={summary.fullDayRevenueDate}
@@ -421,9 +425,9 @@ export default async function DashboardPage({
                 />
               </HeroMetric>
               <HeroMetric
-                label="Прибыль после потерь"
+                label="Товарная прибыль после потерь"
                 value={formatMoney(summary.adjustedGrossProfit)}
-                caption={`маржа ${formatPercent(summary.adjustedMarginPercent)}`}
+                caption={`товары и бар · маржа ${formatPercent(summary.adjustedMarginPercent)}`}
                 tone={
                   summary.adjustedGrossProfit < summary.grossProfit
                     ? "warning"
@@ -440,26 +444,26 @@ export default async function DashboardPage({
 
           <div className="grid border-t border-zinc-200 bg-zinc-50/70 dark:border-zinc-800 dark:bg-zinc-900/40 md:grid-cols-5">
             <SignalMetric
-              label="Валовая прибыль"
-              compactLabel="Прибыль"
+              label="Валовая прибыль товаров"
+              compactLabel="Прибыль товаров"
               value={formatMoney(summary.grossProfit)}
               tone={summary.grossProfit > 0 ? "good" : "danger"}
               href="/reports/sales-detail/table"
             />
             <SignalMetric
-              label="Маржа"
+              label="Маржа товаров"
               value={formatPercent(summary.marginPercent)}
               tone={summary.marginPercent > 0 ? "good" : "danger"}
               href="/reports/top-sku/table"
             />
             <SignalMetric
-              label="Продано"
+              label="Продано товаров"
               value={formatQuantity(summary.soldQuantity)}
               suffix="шт"
               href="/reports/top-sku/table"
             />
             <SignalMetric
-              label="Остаток"
+              label="Остаток товаров"
               value={formatQuantity(summary.stockQuantity)}
               suffix="шт"
               href="/products"
@@ -556,11 +560,11 @@ function ExecutiveOverviewPanel({
   return (
     <section className="mt-6 grid gap-4 lg:grid-cols-4">
       <ExecutiveMetricCard
-        label="Общая выручка"
-        value={formatRubles(totalClubRevenue || summary.totalRevenue)}
-        description={`Товары и бар: ${formatRubles(summary.totalRevenue)} (${formatRatioPercent(productRevenueShare)} от общей выручки).`}
+        label="Товары и бар"
+        value={formatRubles(summary.totalRevenue)}
+        description={`Доля в общей выручке: ${formatRatioPercent(productRevenueShare)}. Общая выручка: ${formatRubles(totalClubRevenue)}.`}
         href="/reports/sales-detail/table"
-        tone={totalClubRevenue > 0 ? "good" : "neutral"}
+        tone={summary.totalRevenue > 0 ? "good" : "neutral"}
       />
       <ExecutiveMetricCard
         label="Гости"

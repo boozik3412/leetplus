@@ -91,6 +91,7 @@ Connected production LAngame sources:
 - Added executive network dashboard on `/dashboard`: combined money, guests, assortment, and load summary with direct navigation to relevant reports.
 - Added PC-count foundation from LAngame `global/types_of_pc_in_clubs/list` and `global/linking_pc_by_type/list`; guest load is calculated as played hours / possible PC-hours.
 - Moved synchronization controls out of `/settings` into `/sync`; settings now contain only LAngame API key/domains/sources, and sync has one combined action for all data.
+- Moved `/sync` into a separate left-nav `Управление` block with `/settings`, added LAngame date-format fallback for date endpoints, compacted repeated sync history errors, and made stale guest sync runs older than 2 hours expire automatically instead of showing endless `RUNNING`.
 
 ## Near-Term Backlog
 
@@ -165,12 +166,13 @@ Status: MVP 1 read-only guest analytics is live in production. Automatic rewards
 - Done: `/guests/staff-control` now exposes unmatched LAngame operators grouped by `externalDomain + user_id` with shift hours, payments, refunds, incassation, middle check, and store list.
 - Done: PC context is pulled from LAngame `global/types_of_pc_in_clubs/list` + `global/linking_pc_by_type/list`, stored on `Store.computerCount`, and used for network/club load percent.
 - Done: guest summary can backfill missing PC counts on demand when `Store.computerCount` is empty.
+- Done: `/sync` now lives in a separate `Управление` navigation block, retries LAngame date endpoints with `дд.мм.гггг` after `400`, shows compact latest sync job per source, and automatically marks stale guest `RUNNING` sync runs older than 2 hours as failed.
 - Current limitation: `all_operations_log` is stored and summarized, but it still does not expose a reliable administrator identifier. `log_cash_transaction/list` currently returns errors on production sources, so cashier analytics starts from working shifts.
 - Current limitation: PC-count parsing is defensive because real `global/*` payload shape may differ by LAngame source; production verification should confirm `computerCount` is filled for each club.
 - Planned data foundation: guests, guest groups, balances, bonus balances, sessions, transactions, all operations log, product expenses by guest, clubs, tariffs, shifts, and PC context.
-- Next: verify production `/dashboard` load percentage after deploy and, if needed, inspect latest guest data profile diagnostics for `pcTypesInClubs`, `pcTypeLinks`, and endpoint errors.
 - Next: add a staff identity mapping layer so unmatched `working_shifts.user_id` values can be manually or semi-automatically linked to LeetPlus staff guests.
 - Next: extend staff-control report from persisted shifts into shift anomalies, manual corrections, refunds/cancellations, discounts/bonuses, and suspicious guest/self-service activity.
+- Next: verify production `/dashboard` load percentage and sync diagnostics after the next successful `/sync` run.
 - Next: add export for `/guests/report` and `/guests/staff-control`, then saved filters/audiences.
 - Planned analytics: RFM, retention, churn risk, heatmaps, LTV, bonus load, campaign effect, and guest-flow forecasts.
 - Planned CRM layer: segments, saved audiences, CRM statuses, notes, tasks, communication history, and next-best-action recommendations.

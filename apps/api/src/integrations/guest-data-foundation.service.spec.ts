@@ -52,6 +52,12 @@ type ProfileRunUpdateCall = {
         total: number;
         candidateFields: Record<string, number>;
       };
+      pcTypesInClubs: {
+        total: number;
+      };
+      pcTypeLinks: {
+        total: number;
+      };
       operatorHints: {
         operationLogs: Record<
           string,
@@ -101,6 +107,19 @@ type GuestWorkingShiftUpsertCall = {
   };
 };
 
+type StoreUpdateManyCall = {
+  where: {
+    tenantId: string;
+    externalProvider: IntegrationProvider;
+    externalDomain: string;
+    externalClubId: string;
+  };
+  data: {
+    computerCount: number;
+    computerCountSyncedAt: Date;
+  };
+};
+
 describe('GuestDataFoundationService', () => {
   const prisma = {
     guestDataProfileRun: {
@@ -141,6 +160,7 @@ describe('GuestDataFoundationService', () => {
     },
     store: {
       findMany: jest.fn(),
+      updateMany: jest.fn(),
     },
   };
   const tenantContextService = {
@@ -157,6 +177,8 @@ describe('GuestDataFoundationService', () => {
     listAllOperationsLog: jest.fn(),
     listCashTransactions: jest.fn(),
     listWorkingShifts: jest.fn(),
+    listPcTypesInClubs: jest.fn(),
+    listPcTypeLinks: jest.fn(),
     listProductExpenses: jest.fn(),
   };
   const langameSettingsService = {
@@ -195,6 +217,7 @@ describe('GuestDataFoundationService', () => {
     prisma.store.findMany.mockResolvedValue([
       { id: 'store-1', externalClubId: '10' },
     ]);
+    prisma.store.updateMany.mockResolvedValue({ count: 1 });
     prisma.guest.findMany.mockResolvedValue([
       { id: 'guest-1', externalGuestId: '42' },
     ]);
@@ -282,6 +305,13 @@ describe('GuestDataFoundationService', () => {
         incass: '1500',
         middle_check: '250',
       },
+    ]);
+    langameClient.listPcTypesInClubs.mockResolvedValue([
+      { id: 20, list_clubs_id: 10, name: 'Standart' },
+    ]);
+    langameClient.listPcTypeLinks.mockResolvedValue([
+      { id: 1, pc_type_id: 20, pc_id: 1001 },
+      { id: 2, pc_type_id: 20, pc_id: 1002 },
     ]);
     langameClient.listProductExpenses.mockResolvedValue([
       {
@@ -386,6 +416,28 @@ describe('GuestDataFoundationService', () => {
     expect(
       successUpdate.data.profile.workingShifts.candidateFields.shift_id,
     ).toBe(1);
+    expect(successUpdate.data.profile.pcTypesInClubs.total).toBe(1);
+    expect(successUpdate.data.profile.pcTypeLinks.total).toBe(2);
+    const storeUpdateCalls = prisma.store.updateMany.mock.calls as Array<
+      [StoreUpdateManyCall]
+    >;
+    const storeUpdate = storeUpdateCalls[0]?.[0];
+    expect(storeUpdate).toBeDefined();
+    if (!storeUpdate) {
+      throw new Error('Store computer count update was not called');
+    }
+    expect(storeUpdate).toMatchObject({
+      where: {
+        tenantId: 'tenant-1',
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: 'club.example',
+        externalClubId: '10',
+      },
+      data: {
+        computerCount: 2,
+      },
+    });
+    expect(storeUpdate.data.computerCountSyncedAt).toBeInstanceOf(Date);
     expect(
       successUpdate.data.profile.operatorHints.cashTransactions['admin_id=5']
         ?.fields.user_name,

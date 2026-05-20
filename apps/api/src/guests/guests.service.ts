@@ -82,6 +82,9 @@ export type GuestsSummary = {
   lostGuests: number;
   sessionsCount: number;
   playHours: number;
+  computerCount: number | null;
+  playCapacityHours: number | null;
+  loadPercent: number | null;
   averageSessionMinutes: number;
   transactionsCount: number;
   transactionAmount: number;
@@ -398,6 +401,19 @@ export class GuestsService {
     const riskRows = rows.filter((row) => row.segment === 'risk');
     const lostRows = rows.filter((row) => row.segment === 'lost');
     const periodMetrics = this.sumPeriodMetrics(metricsByGuestId);
+    const playHours = this.round(periodMetrics.playMinutes / 60, 1);
+    const computerCount = await this.resolveComputerCount(
+      tenantId,
+      filters.storeId,
+    );
+    const playCapacityHours =
+      computerCount !== null
+        ? this.round(computerCount * this.periodDays(period) * 24, 1)
+        : null;
+    const loadPercent =
+      playCapacityHours && playCapacityHours > 0
+        ? this.round((playHours / playCapacityHours) * 100, 1)
+        : null;
     const trend = await this.buildVisitTrend(tenantId, period, filters);
     const dataQuality = await this.getDataQuality(tenantId, period, filters);
 
@@ -415,7 +431,10 @@ export class GuestsService {
       riskGuests: riskRows.length,
       lostGuests: lostRows.length,
       sessionsCount: periodMetrics.sessionsCount,
-      playHours: this.round(periodMetrics.playMinutes / 60, 1),
+      playHours,
+      computerCount,
+      playCapacityHours,
+      loadPercent,
       averageSessionMinutes:
         periodMetrics.sessionsCount > 0
           ? this.round(
@@ -1701,6 +1720,37 @@ export class GuestsService {
       from: this.toIsoDate(fromDate),
       to: this.toIsoDate(toDate),
     };
+  }
+
+  private periodDays(period: Period) {
+    return Math.max(
+      1,
+      Math.floor(
+        (this.startOfUtcDay(period.toDate).getTime() -
+          this.startOfUtcDay(period.fromDate).getTime()) /
+          86_400_000,
+      ) + 1,
+    );
+  }
+
+  private async resolveComputerCount(tenantId: string, storeId: string | null) {
+    const stores = await this.prisma.store.findMany({
+      where: {
+        tenantId,
+        isActive: true,
+        ...(storeId ? { id: storeId } : {}),
+        computerCount: { not: null },
+      },
+      select: {
+        computerCount: true,
+      },
+    });
+
+    if (stores.length === 0) {
+      return null;
+    }
+
+    return stores.reduce((sum, store) => sum + (store.computerCount ?? 0), 0);
   }
 
   private parseDateInput(value: string, field: string) {

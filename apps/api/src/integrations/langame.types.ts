@@ -123,6 +123,10 @@ export type LangameCashTransaction = Record<string, unknown>;
 
 export type LangameWorkingShift = Record<string, unknown>;
 
+export type LangamePcTypeInClub = Record<string, unknown>;
+
+export type LangamePcTypeLink = Record<string, unknown>;
+
 export type LangameSyncQuery = {
   dateFrom?: string;
   dateTo?: string;

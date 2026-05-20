@@ -20,6 +20,8 @@ import type {
   LangameGuestLog,
   LangameGuestSession,
   LangameOperationLog,
+  LangamePcTypeInClub,
+  LangamePcTypeLink,
   LangameProductExpense,
   LangameTransaction,
   LangameWorkingShift,
@@ -164,6 +166,8 @@ type SourceProfile = {
   } & FieldDiagnostics;
   cashTransactions: FieldDiagnostics;
   workingShifts: FieldDiagnostics;
+  pcTypesInClubs: FieldDiagnostics;
+  pcTypeLinks: FieldDiagnostics;
   operatorHints: {
     operationLogs: StaffOperatorHints;
     cashTransactions: StaffOperatorHints;
@@ -424,6 +428,26 @@ export class GuestDataFoundationService {
     const snapshotDate = this.startOfUtcDay(now);
     const storesByExternalClubId = await this.loadStoreLookup(tenantId, domain);
 
+    const pcTypesInClubs = await this.captureEndpoint(
+      profile,
+      'global/types_of_pc_in_clubs/list',
+      () => this.langameClient.listPcTypesInClubs(baseUrl, apiKey),
+    );
+    const pcTypeLinks = await this.captureEndpoint(
+      profile,
+      'global/linking_pc_by_type/list',
+      () => this.langameClient.listPcTypeLinks(baseUrl, apiKey),
+    );
+    this.profileRows(profile.pcTypesInClubs, pcTypesInClubs);
+    this.profileRows(profile.pcTypeLinks, pcTypeLinks);
+    await this.syncStoreComputerCounts(
+      tenantId,
+      domain,
+      pcTypesInClubs,
+      pcTypeLinks,
+      now,
+    );
+
     const groups = await this.captureEndpoint(profile, 'guests/groups', () =>
       this.langameClient.listGuestGroups(baseUrl, apiKey),
     );
@@ -676,6 +700,114 @@ export class GuestDataFoundationService {
         error instanceof Error ? error.message : 'Endpoint failed';
       return [];
     }
+  }
+
+  private async syncStoreComputerCounts(
+    tenantId: string,
+    domain: string,
+    pcTypesInClubs: LangamePcTypeInClub[],
+    pcTypeLinks: LangamePcTypeLink[],
+    syncedAt: Date,
+  ) {
+    const typeToClub = new Map<string, string>();
+    const countByClub = new Map<string, number>();
+
+    for (const row of pcTypesInClubs) {
+      const typeId = this.firstStringField(row, [
+        'id',
+        'type_id',
+        'pc_type_id',
+        'type_pc_id',
+        'types_of_pc_in_clubs_id',
+      ]);
+      const clubId = this.firstStringField(row, [
+        'club_id',
+        'list_clubs_id',
+        'list_club_id',
+      ]);
+
+      if (typeId && clubId) {
+        typeToClub.set(typeId, clubId);
+      }
+
+      const directCount = this.firstNumberField(row, [
+        'count',
+        'pc_count',
+        'pcs_count',
+        'computers_count',
+        'computer_count',
+        'qty',
+      ]);
+      if (clubId && directCount !== null) {
+        countByClub.set(clubId, (countByClub.get(clubId) ?? 0) + directCount);
+      }
+    }
+
+    if (pcTypeLinks.length > 0) {
+      const linkedCountByClub = new Map<string, number>();
+      const seenPcByClub = new Map<string, Set<string>>();
+
+      for (const row of pcTypeLinks) {
+        const typeId = this.firstStringField(row, [
+          'type_id',
+          'pc_type_id',
+          'type_pc_id',
+          'types_of_pc_in_clubs_id',
+          'pc_type_in_club_id',
+        ]);
+        const directClubId = this.firstStringField(row, [
+          'club_id',
+          'list_clubs_id',
+          'list_club_id',
+        ]);
+        const clubId = directClubId ?? (typeId ? typeToClub.get(typeId) : null);
+
+        if (!clubId) {
+          continue;
+        }
+
+        const pcId =
+          this.firstStringField(row, [
+            'pc_id',
+            'computer_id',
+            'global_pc_id',
+            'host_id',
+            'uuid',
+            'name',
+          ]) ?? this.payloadHash(row);
+        const seen = seenPcByClub.get(clubId) ?? new Set<string>();
+        seen.add(pcId);
+        seenPcByClub.set(clubId, seen);
+      }
+
+      for (const [clubId, seen] of seenPcByClub.entries()) {
+        linkedCountByClub.set(clubId, seen.size);
+      }
+
+      if (linkedCountByClub.size > 0) {
+        countByClub.clear();
+        for (const [clubId, count] of linkedCountByClub.entries()) {
+          countByClub.set(clubId, count);
+        }
+      }
+    }
+
+    await Promise.all(
+      Array.from(countByClub.entries()).map(([externalClubId, count]) =>
+        this.prisma.store.updateMany({
+          where: {
+            tenantId,
+            externalProvider: IntegrationProvider.LANGAME,
+            externalDomain: domain,
+            externalClubId,
+          },
+          data: {
+            computerCount: count,
+            computerCountSyncedAt: syncedAt,
+          },
+        }),
+      ),
+    );
   }
 
   private async syncGuests(
@@ -1614,6 +1746,38 @@ export class GuestDataFoundationService {
     return stringValue ? stringValue : null;
   }
 
+  private firstStringField(row: Record<string, unknown>, fields: string[]) {
+    for (const field of fields) {
+      const value = this.toNullableString(row[field]);
+
+      if (value) {
+        return value;
+      }
+    }
+
+    return null;
+  }
+
+  private firstNumberField(row: Record<string, unknown>, fields: string[]) {
+    for (const field of fields) {
+      const value = row[field];
+      if (value === null || value === undefined || value === '') {
+        continue;
+      }
+
+      const numberValue =
+        typeof value === 'number'
+          ? value
+          : Number(this.scalarToString(value)?.replace(',', '.'));
+
+      if (Number.isFinite(numberValue)) {
+        return numberValue;
+      }
+    }
+
+    return null;
+  }
+
   private toBoolean(value: unknown) {
     return this.toOptionalBoolean(value) ?? false;
   }
@@ -1989,6 +2153,16 @@ export class GuestDataFoundationService {
         candidateFields: {},
       },
       workingShifts: {
+        total: 0,
+        fieldCounts: {},
+        candidateFields: {},
+      },
+      pcTypesInClubs: {
+        total: 0,
+        fieldCounts: {},
+        candidateFields: {},
+      },
+      pcTypeLinks: {
         total: 0,
         fieldCounts: {},
         candidateFields: {},

@@ -74,20 +74,6 @@ function ratioPercent(value: number, total: number) {
   return total > 0 ? (value / total) * 100 : null;
 }
 
-function daysInRange(from: string, to: string) {
-  const fromDate = parseDateInput(from);
-  const toDate = parseDateInput(to);
-
-  if (!fromDate || !toDate) {
-    return 1;
-  }
-
-  return Math.max(
-    1,
-    Math.floor((toDate.getTime() - fromDate.getTime()) / 86_400_000) + 1,
-  );
-}
-
 function lastFullDaysRange(days: number) {
   const now = new Date();
   const toDate = new Date(
@@ -559,8 +545,6 @@ function ExecutiveOverviewPanel({
   totalClubRevenue: number;
   productRevenueShare: number | null;
 }) {
-  const periodDays = daysInRange(summary.periodFrom, summary.periodTo);
-  const playHoursPerDay = guestsSummary.playHours / periodDays;
   const averageVisitsPerActiveGuest =
     guestsSummary.activeGuests > 0
       ? guestsSummary.sessionsCount / guestsSummary.activeGuests
@@ -587,10 +571,25 @@ function ExecutiveOverviewPanel({
       />
       <ExecutiveMetricCard
         label="Загрузка"
-        value={formatHours(guestsSummary.playHours)}
-        description={`${formatQuantity(guestsSummary.sessionsCount)} визитов, ${formatHours(playHoursPerDay)} в день, средняя сессия ${formatQuantity(guestsSummary.averageSessionMinutes)} мин.`}
+        value={
+          guestsSummary.loadPercent !== null
+            ? formatPercent(guestsSummary.loadPercent)
+            : "нет данных"
+        }
+        description={
+          guestsSummary.playCapacityHours !== null &&
+          guestsSummary.computerCount !== null
+            ? `${formatHours(guestsSummary.playHours)} из ${formatHours(guestsSummary.playCapacityHours)} возможных. ПК: ${formatQuantity(guestsSummary.computerCount)}, визитов: ${formatQuantity(guestsSummary.sessionsCount)}.`
+            : `${formatHours(guestsSummary.playHours)} отыграно. Для процента нужна синхронизация количества ПК.`
+        }
         href="/guests"
-        tone={guestsSummary.playHours > 0 ? "good" : "neutral"}
+        tone={
+          guestsSummary.loadPercent === null
+            ? "neutral"
+            : guestsSummary.loadPercent >= 35
+              ? "good"
+              : "warning"
+        }
       />
       <ExecutiveMetricCard
         label="Ассортимент"

@@ -71,6 +71,9 @@ export type GuestsSummary = {
   lostGuests: number;
   sessionsCount: number;
   playHours: number;
+  computerCount: number | null;
+  playCapacityHours: number | null;
+  loadPercent: number | null;
   averageSessionMinutes: number;
   transactionsCount: number;
   transactionAmount: number;

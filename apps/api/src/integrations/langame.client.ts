@@ -10,6 +10,8 @@ import type {
   LangameGuestLog,
   LangameGuestSession,
   LangameOperationLog,
+  LangamePcTypeInClub,
+  LangamePcTypeLink,
   LangameProduct,
   LangameProductExpense,
   LangameTransaction,
@@ -218,6 +220,22 @@ export class LangameClient {
         date_from: params.dateFrom,
         date_to: params.dateTo,
       },
+    );
+  }
+
+  async listPcTypesInClubs(baseUrl: string, apiKey: string) {
+    return this.getList<LangamePcTypeInClub>(
+      baseUrl,
+      '/global/types_of_pc_in_clubs/list',
+      apiKey,
+    );
+  }
+
+  async listPcTypeLinks(baseUrl: string, apiKey: string) {
+    return this.getList<LangamePcTypeLink>(
+      baseUrl,
+      '/global/linking_pc_by_type/list',
+      apiKey,
     );
   }
 

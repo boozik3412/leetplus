@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { requireCurrentUser } from "@/lib/auth";
 import { GuestDashboardFilters } from "@/components/guest-dashboard-filters";
-import { GuestFoundationSyncButton } from "@/components/guest-foundation-sync-button";
 import {
   getGuestFilterOptions,
   getGuests,
@@ -141,10 +140,6 @@ export default async function GuestsPage({
             >
               Полный отчет
             </Link>
-            <GuestFoundationSyncButton
-              dateFrom={summary.periodFrom}
-              dateTo={summary.periodTo}
-            />
             <div className="rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
               <p className="text-zinc-500">Гостей в выборке</p>
               <p className="mt-1 text-2xl font-semibold tabular-nums">

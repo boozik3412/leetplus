@@ -57,6 +57,11 @@ export type GuestDataFoundationStartResult = {
 export type GuestDataFoundationStatusResult = {
   status: 'IDLE' | 'RUNNING' | 'SUCCESS' | 'FAILED';
   running: boolean;
+  nextRun: {
+    dateFrom: string;
+    dateTo: string;
+    basedOnFinishedAt: string | null;
+  };
   latestRun: {
     domain: string;
     status: string;
@@ -104,6 +109,7 @@ type ResolvedPeriod = {
   toDate: Date;
   from: string;
   to: string;
+  basedOnFinishedAt: Date | null;
 };
 
 type FieldDiagnostics = {
@@ -199,7 +205,7 @@ export class GuestDataFoundationService {
     const { tenantId } = await this.tenantContextService.resolve(user);
     const { apiKey, sources } =
       await this.langameSettingsService.resolveTenantAccess(tenantId);
-    const period = this.resolvePeriod(query);
+    const period = await this.resolvePeriod(tenantId, query);
     const result: GuestDataFoundationSyncResult = {
       tenantId,
       sources: sources.length,
@@ -292,10 +298,15 @@ export class GuestDataFoundationService {
     const { tenantId } = await this.tenantContextService.resolve(user);
     const { sources } =
       await this.langameSettingsService.resolveTenantAccess(tenantId);
-    const period = this.resolvePeriod(query);
+    const period = await this.resolvePeriod(tenantId, query);
+    const syncQuery: GuestDataFoundationSyncQuery = {
+      ...query,
+      dateFrom: period.from,
+      dateTo: period.to,
+    };
 
     setImmediate(() => {
-      void this.syncTenant(user, query).catch((error: unknown) => {
+      void this.syncTenant(user, syncQuery).catch((error: unknown) => {
         const message =
           error instanceof Error
             ? error.message
@@ -317,6 +328,7 @@ export class GuestDataFoundationService {
     user: AuthenticatedUser,
   ): Promise<GuestDataFoundationStatusResult> {
     const { tenantId } = await this.tenantContextService.resolve(user);
+    const nextPeriod = await this.resolvePeriod(tenantId, {});
     const [runningRun, latestRun] = await Promise.all([
       this.prisma.guestDataProfileRun.findFirst({
         where: {
@@ -342,6 +354,12 @@ export class GuestDataFoundationService {
       return {
         status: 'IDLE',
         running: false,
+        nextRun: {
+          dateFrom: nextPeriod.from,
+          dateTo: nextPeriod.to,
+          basedOnFinishedAt:
+            nextPeriod.basedOnFinishedAt?.toISOString() ?? null,
+        },
         latestRun: null,
       };
     }
@@ -355,6 +373,11 @@ export class GuestDataFoundationService {
             ? 'FAILED'
             : 'IDLE',
       running: Boolean(runningRun),
+      nextRun: {
+        dateFrom: nextPeriod.from,
+        dateTo: nextPeriod.to,
+        basedOnFinishedAt: nextPeriod.basedOnFinishedAt?.toISOString() ?? null,
+      },
       latestRun: {
         domain: run.domain,
         status: run.status,
@@ -1396,19 +1419,27 @@ export class GuestDataFoundationService {
     return rows;
   }
 
-  private resolvePeriod(query: GuestDataFoundationSyncQuery): ResolvedPeriod {
+  private async resolvePeriod(
+    tenantId: string,
+    query: GuestDataFoundationSyncQuery,
+  ): Promise<ResolvedPeriod> {
     const now = new Date();
     const defaultTo = new Date(
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
     );
+    const previousRun = query.dateFrom
+      ? null
+      : await this.findLatestSuccessfulRun(tenantId);
     const toDate = query.dateTo
       ? this.parseDateInput(query.dateTo, 'dateTo')
       : defaultTo;
     const fromDate = query.dateFrom
       ? this.parseDateInput(query.dateFrom, 'dateFrom')
-      : new Date(toDate);
+      : previousRun?.finishedAt
+        ? new Date(previousRun.finishedAt)
+        : new Date(toDate);
 
-    if (!query.dateFrom) {
+    if (!query.dateFrom && !previousRun) {
       fromDate.setUTCDate(fromDate.getUTCDate() - (DEFAULT_PROFILE_DAYS - 1));
     }
 
@@ -1432,7 +1463,21 @@ export class GuestDataFoundationService {
       toDate,
       from: this.toDateInputValue(fromDate),
       to: this.toDateInputValue(toDate),
+      basedOnFinishedAt: previousRun?.finishedAt ?? null,
     };
+  }
+
+  private findLatestSuccessfulRun(tenantId: string) {
+    return this.prisma.guestDataProfileRun.findFirst({
+      where: {
+        tenantId,
+        provider: IntegrationProvider.LANGAME,
+        status: 'SUCCESS',
+        finishedAt: { not: null },
+      },
+      orderBy: { finishedAt: 'desc' },
+      select: { finishedAt: true },
+    });
   }
 
   private parseDateInput(value: string, field: string) {
@@ -1465,6 +1510,7 @@ export class GuestDataFoundationService {
         toDate: chunkTo,
         from: this.toDateInputValue(chunkFrom),
         to: this.toDateInputValue(chunkTo),
+        basedOnFinishedAt: period.basedOnFinishedAt,
       });
 
       cursor = new Date(chunkTo);

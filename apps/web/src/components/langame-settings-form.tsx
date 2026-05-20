@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { GuestFoundationSyncButton } from "@/components/guest-foundation-sync-button";
 import type { LangameSettings } from "@/lib/langame-settings";
 
 type SyncPeriod = "today" | "last7" | "last30" | "custom";
@@ -322,6 +323,26 @@ export function LangameSettingsForm({
             {success}
           </p>
         ) : null}
+      </div>
+
+      <div className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300">
+              Гости
+            </p>
+            <h2 className="mt-2 text-2xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
+              Инкрементальная синхронизация клиентской базы
+            </h2>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+              Запуск загружает гостей, сессии, пополнения баланса, покупки бара и
+              служебные логи за период от последней успешной синхронизации до
+              текущего дня. При первом запуске берутся последние 90 дней.
+            </p>
+          </div>
+
+          <GuestFoundationSyncButton disabled={!settings.hasApiKey || isSaving} />
+        </div>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,420px)_1fr]">

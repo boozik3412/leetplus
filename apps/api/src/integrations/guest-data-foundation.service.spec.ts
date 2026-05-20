@@ -105,6 +105,7 @@ describe('GuestDataFoundationService', () => {
   const prisma = {
     guestDataProfileRun: {
       create: jest.fn(),
+      findFirst: jest.fn(),
       update: jest.fn(),
     },
     guestGroup: {
@@ -189,6 +190,7 @@ describe('GuestDataFoundationService', () => {
     );
 
     prisma.guestDataProfileRun.create.mockResolvedValue({ id: 'run-1' });
+    prisma.guestDataProfileRun.findFirst.mockResolvedValue(null);
     prisma.guestDataProfileRun.update.mockResolvedValue({});
     prisma.store.findMany.mockResolvedValue([
       { id: 'store-1', externalClubId: '10' },

@@ -94,7 +94,7 @@ export function StaffIdentityMappingForm({
   }
 
   return (
-    <form action={submit} className="grid min-w-[260px] gap-2">
+    <form action={submit} className="grid w-full min-w-0 gap-2">
       <select
         name="guestId"
         required

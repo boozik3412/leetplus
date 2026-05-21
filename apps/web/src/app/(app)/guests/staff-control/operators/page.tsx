@@ -222,7 +222,17 @@ export default async function StaffOperatorsPage({
             </h2>
           </div>
           {report.rows.length > 0 ? (
-            <div className="w-full overflow-x-auto">
+            <>
+            <div className="grid gap-3 p-4 md:hidden">
+              {report.rows.map((row) => (
+                <OperatorCard
+                  key={`${row.externalDomain ?? "source"}-${row.externalUserId}`}
+                  row={row}
+                  staffOptions={report.staffOptions}
+                />
+              ))}
+            </div>
+            <div className="hidden w-full overflow-x-auto md:block">
               <table className="min-w-[1280px] divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
                 <thead className="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900/60">
                   <tr>
@@ -315,6 +325,7 @@ export default async function StaffOperatorsPage({
                 </tbody>
               </table>
             </div>
+            </>
           ) : (
             <p className="px-5 py-6 text-sm text-zinc-500">
               Операторов по выбранным условиям не найдено.
@@ -323,6 +334,94 @@ export default async function StaffOperatorsPage({
         </section>
       </div>
     </main>
+  );
+}
+
+function OperatorCard({
+  row,
+  staffOptions,
+}: {
+  row: StaffOperatorReport["rows"][number];
+  staffOptions: StaffOperatorReport["staffOptions"];
+}) {
+  return (
+    <article className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40">
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold">
+            user_id {row.externalUserId}
+          </p>
+          <p className="mt-1 truncate text-xs text-zinc-500">
+            {row.externalDomain ?? "источник"}
+          </p>
+        </div>
+        <span
+          className={[
+            "shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold",
+            row.linkedGuest
+              ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
+              : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
+          ].join(" ")}
+        >
+          {row.linkedGuest ? "Привязан" : "Без привязки"}
+        </span>
+      </div>
+
+      <div className="mt-3 rounded-md border border-zinc-200 bg-white p-3 text-sm dark:border-zinc-800 dark:bg-zinc-950">
+        <p className="text-xs font-medium uppercase text-zinc-500">
+          Сотрудник
+        </p>
+        {row.linkedGuest ? (
+          <Link
+            href={`/guests/${row.linkedGuest.id}`}
+            className="mt-1 block truncate font-semibold underline underline-offset-4"
+          >
+            {row.linkedGuest.displayName}
+          </Link>
+        ) : (
+          <p className="mt-1 text-zinc-500">не привязан</p>
+        )}
+        {row.mappingNote ? (
+          <p className="mt-1 text-xs text-zinc-500">{row.mappingNote}</p>
+        ) : null}
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <OperatorMetric label="Смены" value={formatNumber(row.shiftsCount)} />
+        <OperatorMetric label="Часы" value={`${formatNumber(row.shiftHours, 1)} ч`} />
+        <OperatorMetric label="Касса" value={formatRubles(row.shiftPaymentAmount)} />
+        <OperatorMetric label="Возвраты" value={formatRubles(row.shiftRefundAmount)} />
+        <OperatorMetric label="Инкассация" value={formatRubles(row.shiftIncassAmount)} />
+        <OperatorMetric label="Ср. чек" value={formatRubles(row.averageShiftMiddleCheck)} />
+      </div>
+
+      <div className="mt-3">
+        <p className="text-xs font-medium uppercase text-zinc-500">Клубы</p>
+        <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+          {row.storeNames.length > 0 ? row.storeNames.join(", ") : "не определены"}
+        </p>
+      </div>
+
+      <div className="mt-4">
+        <StaffIdentityMappingForm
+          externalDomain={row.externalDomain}
+          externalUserId={row.externalUserId}
+          staffOptions={staffOptions}
+          mappingId={row.mappingId}
+        />
+      </div>
+    </article>
+  );
+}
+
+function OperatorMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 rounded-md border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+      <p className="truncate text-xs text-zinc-500">{label}</p>
+      <p className="mt-1 truncate text-sm font-semibold tabular-nums">
+        {value}
+      </p>
+    </div>
   );
 }
 

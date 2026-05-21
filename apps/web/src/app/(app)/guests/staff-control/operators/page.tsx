@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Fragment } from "react";
+import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffIdentityMappingForm } from "@/components/staff-identity-mapping-form";
 import { requireCurrentUser } from "@/lib/auth";
 import {
@@ -190,6 +191,13 @@ export default async function StaffOperatorsPage({
   return (
     <main className="px-4 py-6 text-zinc-950 dark:text-zinc-100 sm:px-6 sm:py-8">
       <div className="mx-auto max-w-[100rem]">
+        <ReportBreadcrumbs
+          current="Операторы Langame"
+          items={[
+            { href: "/dashboard", label: "Дашборд" },
+            { href: "/guests/staff-control", label: "Контроль персонала" },
+          ]}
+        />
         <header className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div>
             <p className="text-sm font-semibold uppercase text-emerald-700 dark:text-emerald-300">

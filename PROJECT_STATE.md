@@ -47,6 +47,7 @@ Connected production Langame sources:
 - Langame sync must not overwrite manual guest CRM statuses, notes, segments, communication consents, or LeetPlus-owned loyalty state.
 - Guest personal data must be treated as sensitive data: phone, email, full name, birthday, and document fields require access control and careful storage decisions.
 - Guest communications require explicit channel consent, consent history, and unsubscribe handling.
+- Dashboard and report hub pages should show dense tables as compact previews; every full report opened in a separate page/window must include breadcrumbs.
 
 ## Key Metrics
 

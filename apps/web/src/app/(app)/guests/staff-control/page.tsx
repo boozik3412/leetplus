@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { StaffIdentityMappingForm } from "@/components/staff-identity-mapping-form";
 import { requireCurrentUser } from "@/lib/auth";
 import {
   getGuestFilterOptions,
@@ -47,14 +46,6 @@ type StaffDisplayRow = {
   transactionAmount: number;
   barRevenue: number;
   lastActivityAt: string | null;
-};
-
-type StaffIdentityOption = {
-  id: string;
-  displayName: string;
-  externalGuestId: string;
-  externalDomain: string | null;
-  guestGroupName: string | null;
 };
 
 const staffSortLabels: Record<StaffSortKey, string> = {
@@ -156,6 +147,38 @@ function staffControlHref({
   params.set("staffDirection", nextControls.staffDirection);
 
   return `/guests/staff-control?${params.toString()}`;
+}
+
+function staffAdminsHref(
+  report: StaffControlReport,
+  filters: GuestsSummaryFilters,
+  controls: StaffTableControls,
+) {
+  const params = new URLSearchParams();
+
+  params.set("dateFrom", filters.dateFrom ?? report.periodFrom);
+  params.set("dateTo", filters.dateTo ?? report.periodTo);
+
+  if (filters.storeId) {
+    params.set("storeId", filters.storeId);
+  }
+
+  if (controls.staffSearch) {
+    params.set("staffSearch", controls.staffSearch);
+  }
+
+  if (controls.staffGroup) {
+    params.set("staffGroup", controls.staffGroup);
+  }
+
+  if (controls.staffFlag) {
+    params.set("staffFlag", controls.staffFlag);
+  }
+
+  params.set("staffSort", controls.staffSort);
+  params.set("staffDirection", controls.staffDirection);
+
+  return `/guests/staff-control/admins?${params.toString()}`;
 }
 
 export default async function StaffControlPage({
@@ -497,6 +520,8 @@ function StaffTable({
     },
     period,
   });
+  const previewRows = rows.slice(0, 5);
+  const fullHref = staffAdminsHref(report, filters, controls);
 
   return (
     <section className="min-w-0 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
@@ -515,6 +540,14 @@ function StaffTable({
             Показано {formatNumber(rows.length)} из{" "}
             {formatNumber(displayRows.length)}
           </p>
+          <Link
+            href={fullHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+          >
+            Открыть полный отчет
+          </Link>
         </div>
         {report.unmatchedOperators.length > 0 ? (
           <p className="mt-3 text-sm text-amber-600 dark:text-amber-300">
@@ -526,7 +559,7 @@ function StaffTable({
       </div>
       <form
         method="get"
-        className="grid gap-3 border-b border-zinc-200 p-4 sm:grid-cols-2 lg:grid-cols-[minmax(180px,1fr)_minmax(160px,0.8fr)_minmax(160px,0.8fr)_auto] lg:items-end dark:border-zinc-800"
+        className="hidden"
       >
         <input
           type="hidden"
@@ -604,12 +637,60 @@ function StaffTable({
           </Link>
         </div>
       </form>
-      <div className="border-b border-zinc-200 px-5 py-3 text-sm text-zinc-500 dark:border-zinc-800">
+      <div className="hidden">
         Сортировка: {staffSortLabels[controls.staffSort].toLocaleLowerCase("ru-RU")}
         , {controls.staffDirection === "asc" ? "по возрастанию" : "по убыванию"}
       </div>
       {displayRows.length > 0 ? (
-        <div className="w-full overflow-x-auto">
+        <div>
+          <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+            {previewRows.map((row) => (
+              <div
+                key={row.id}
+                className="grid gap-3 px-5 py-4 text-sm md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_120px_120px]"
+              >
+                <div className="min-w-0">
+                  <p className="truncate font-semibold text-zinc-950 dark:text-zinc-50">
+                    {row.displayName}
+                  </p>
+                  <p className="mt-1 truncate text-xs text-zinc-500">
+                    {row.contact}
+                  </p>
+                </div>
+                <div className="min-w-0 text-zinc-600 dark:text-zinc-300">
+                  <p className="truncate">
+                    {row.guestGroupName ?? row.externalDomain ?? "источник"}
+                  </p>
+                  <p className="mt-1 truncate text-xs text-zinc-500">
+                    {row.storeNames.length > 0
+                      ? row.storeNames.join(", ")
+                      : "нет смен"}
+                  </p>
+                </div>
+                <div className="tabular-nums">
+                  <p className="text-xs uppercase text-zinc-500">Смены</p>
+                  <p className="mt-1 font-semibold">
+                    {formatNumber(row.shiftsCount)} /{" "}
+                    {formatNumber(row.shiftHours, 1)} ч
+                  </p>
+                </div>
+                <div className="tabular-nums">
+                  <p className="text-xs uppercase text-zinc-500">Деньги</p>
+                  <p className="mt-1 font-semibold">
+                    {formatRubles(row.transactionAmount + row.barRevenue)}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+          {rows.length > previewRows.length ? (
+            <div className="border-t border-zinc-200 px-5 py-4 text-sm text-zinc-500 dark:border-zinc-800">
+              В предпросмотре показано {formatNumber(previewRows.length)} из{" "}
+              {formatNumber(rows.length)} строк. Полная таблица открывается в
+              отдельном окне.
+            </div>
+          ) : null}
+          <div className="hidden">
           <table className="min-w-[1160px] divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
             <thead className="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900/60">
               <tr>
@@ -731,6 +812,7 @@ function StaffTable({
               ))}
             </tbody>
           </table>
+          </div>
           {rows.length === 0 ? (
             <p className="px-5 py-6 text-sm text-zinc-500">
               По текущим фильтрам сотрудники не найдены.
@@ -858,18 +940,31 @@ function SortableStaffHeader({
 }
 
 function OperationsPanel({ report }: { report: StaffControlReport }) {
+  const rows = report.operationTypes.slice(0, 5);
+
   return (
     <section className="min-w-0 rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
       <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
-        <h2 className="text-base font-semibold">Операционный журнал</h2>
-        <p className="mt-1 text-sm text-zinc-500">
-          Общий all_operations_log за период. Привязки к конкретному админу в
-          текущей foundation-модели пока нет.
-        </p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-base font-semibold">Операционный журнал</h2>
+            <p className="mt-1 text-sm text-zinc-500">
+              Краткий срез all_operations_log по типам операций.
+            </p>
+          </div>
+          <Link
+            href={`/guests/staff-control/operations?dateFrom=${report.periodFrom}&dateTo=${report.periodTo}${report.storeId ? `&storeId=${report.storeId}` : ""}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+          >
+            Открыть полный отчет
+          </Link>
+        </div>
       </div>
       {report.operationTypes.length > 0 ? (
         <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
-          {report.operationTypes.map((row) => (
+          {rows.map((row) => (
             <div
               key={row.type}
               className="grid grid-cols-[minmax(0,1fr)_90px_120px] gap-3 px-5 py-4 text-sm"
@@ -887,6 +982,12 @@ function OperationsPanel({ report }: { report: StaffControlReport }) {
               </p>
             </div>
           ))}
+          {report.operationTypes.length > rows.length ? (
+            <p className="px-5 py-4 text-sm text-zinc-500">
+              Показано {formatNumber(rows.length)} из{" "}
+              {formatNumber(report.operationTypes.length)} типов операций.
+            </p>
+          ) : null}
         </div>
       ) : (
         <p className="px-5 py-6 text-sm text-zinc-500">
@@ -898,14 +999,8 @@ function OperationsPanel({ report }: { report: StaffControlReport }) {
 }
 
 function UnmatchedOperatorsPanel({ report }: { report: StaffControlReport }) {
-  const rows = report.unmatchedOperators;
-  const staffOptions = report.rows.map((row) => ({
-    id: row.id,
-    displayName: row.displayName,
-    externalGuestId: row.externalGuestId,
-    externalDomain: row.externalDomain,
-    guestGroupName: row.guestGroupName,
-  })) satisfies StaffIdentityOption[];
+  const totalRows = report.unmatchedOperators.length;
+  const rows = report.unmatchedOperators.slice(0, 4);
 
   return (
     <section className="mt-6 min-w-0 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
@@ -930,9 +1025,9 @@ function UnmatchedOperatorsPanel({ report }: { report: StaffControlReport }) {
           </Link>
         </div>
       </div>
-      {rows.length > 0 ? (
+      {totalRows > 0 ? (
         <div className="w-full overflow-x-auto">
-          <table className="min-w-[1080px] divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
+          <table className="min-w-[760px] divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
             <thead className="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900/60">
               <tr>
                 <th className="px-4 py-3 text-left font-semibold">
@@ -950,9 +1045,6 @@ function UnmatchedOperatorsPanel({ report }: { report: StaffControlReport }) {
                 </th>
                 <th className="px-4 py-3 text-right font-semibold">
                   Ср. чек
-                </th>
-                <th className="px-4 py-3 text-left font-semibold">
-                  Привязка
                 </th>
               </tr>
             </thead>
@@ -993,17 +1085,17 @@ function UnmatchedOperatorsPanel({ report }: { report: StaffControlReport }) {
                   <td className="px-4 py-3 text-right tabular-nums">
                     {formatRubles(row.averageShiftMiddleCheck)}
                   </td>
-                  <td className="px-4 py-3">
-                    <StaffIdentityMappingForm
-                      externalDomain={row.externalDomain}
-                      externalUserId={row.externalUserId}
-                      staffOptions={staffOptions}
-                    />
-                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          {totalRows > rows.length ? (
+            <div className="border-t border-zinc-200 px-5 py-4 text-sm text-zinc-500 dark:border-zinc-800">
+              В предпросмотре показано {formatNumber(rows.length)} из{" "}
+              {formatNumber(totalRows)} операторов. Привязка доступна в полном
+              отчете.
+            </div>
+          ) : null}
         </div>
       ) : (
         <p className="px-5 py-6 text-sm text-zinc-500">
@@ -1015,21 +1107,31 @@ function UnmatchedOperatorsPanel({ report }: { report: StaffControlReport }) {
 }
 
 function DiagnosticsPanel({ report }: { report: StaffControlReport }) {
-  const latestRuns = report.diagnostics.latestRuns;
+  const latestRuns = report.diagnostics.latestRuns.slice(0, 2);
 
   return (
     <section className="mt-6 min-w-0 rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
       <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
-        <h2 className="text-base font-semibold">
-          Диагностика связки персонала
-        </h2>
-        <p className="mt-1 text-sm text-zinc-500">
-          Сохраняем только имена полей и количество заполненных строк, без
-          значений из Langame. Это нужно, чтобы понять, где лежат администратор,
-          кассир или смена.
-        </p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-base font-semibold">
+              Диагностика связки персонала
+            </h2>
+            <p className="mt-1 text-sm text-zinc-500">
+              Краткий срез источников и найденных полей.
+            </p>
+          </div>
+          <Link
+            href={`/guests/staff-control/diagnostics?dateFrom=${report.periodFrom}&dateTo=${report.periodTo}${report.storeId ? `&storeId=${report.storeId}` : ""}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+          >
+            Открыть полный отчет
+          </Link>
+        </div>
       </div>
-      {latestRuns.length > 0 ? (
+      {report.diagnostics.latestRuns.length > 0 ? (
         <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
           {latestRuns.map((run) => (
             <div key={`${run.domain}-${run.startedAt}`} className="px-5 py-4">
@@ -1070,6 +1172,12 @@ function DiagnosticsPanel({ report }: { report: StaffControlReport }) {
               </div>
             </div>
           ))}
+          {report.diagnostics.latestRuns.length > latestRuns.length ? (
+            <p className="px-5 py-4 text-sm text-zinc-500">
+              Показано {formatNumber(latestRuns.length)} из{" "}
+              {formatNumber(report.diagnostics.latestRuns.length)} источников.
+            </p>
+          ) : null}
         </div>
       ) : (
         <p className="px-5 py-6 text-sm text-zinc-500">

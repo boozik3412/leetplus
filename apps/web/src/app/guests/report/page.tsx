@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
 import {
   getGuestFilterOptions,
@@ -151,6 +152,13 @@ export default async function GuestFullReportPage({
   return (
     <main className="min-h-screen bg-zinc-50 px-5 py-5 text-zinc-950 dark:bg-zinc-950 dark:text-zinc-100">
       <div className="mx-auto max-w-[1760px]">
+        <ReportBreadcrumbs
+          current="Полный отчет по гостям"
+          items={[
+            { href: "/dashboard", label: "Дашборд" },
+            { href: "/guests", label: "Гости" },
+          ]}
+        />
         <header className="flex flex-col gap-4 border-b border-zinc-200 pb-5 dark:border-zinc-800 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="text-sm font-semibold uppercase text-emerald-700 dark:text-emerald-300">

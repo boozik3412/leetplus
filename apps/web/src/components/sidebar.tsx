@@ -100,14 +100,23 @@ function NavSection({
         <span
           aria-hidden="true"
           className={[
-            "text-sm leading-none text-zinc-400 transition-transform",
+            "text-sm leading-none text-zinc-400 transition-transform duration-200 ease-out",
             isOpen ? "rotate-90" : "",
           ].join(" ")}
         >
           &gt;
         </span>
       </button>
-      {isOpen ? <div className="space-y-1 pl-2">{children}</div> : null}
+      <div
+        className={[
+          "grid transition-[grid-template-rows,opacity] duration-200 ease-out",
+          isOpen ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
+        ].join(" ")}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <div className="space-y-1 pl-2 pt-1">{children}</div>
+        </div>
+      </div>
     </div>
   );
 }

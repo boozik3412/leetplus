@@ -107,6 +107,24 @@ function operatorReportHref(report: StaffOperatorReport) {
   return `/guests/staff-control?${params.toString()}`;
 }
 
+function currentOperatorReportHref(report: StaffOperatorReport) {
+  const params = new URLSearchParams();
+
+  params.set("dateFrom", report.periodFrom);
+  params.set("dateTo", report.periodTo);
+  if (report.storeId) {
+    params.set("storeId", report.storeId);
+  }
+  params.set("status", report.status);
+  params.set("sort", report.sort);
+  params.set("direction", report.direction);
+  if (report.search) {
+    params.set("search", report.search);
+  }
+
+  return `/guests/staff-control/operators?${params.toString()}`;
+}
+
 export default async function StaffOperatorsPage({
   searchParams,
 }: {
@@ -138,12 +156,22 @@ export default async function StaffOperatorsPage({
               смены, касса, возвраты и инкассация.
             </p>
           </div>
-          <Link
-            href={operatorReportHref(report)}
-            className="inline-flex h-10 w-full items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 sm:w-auto dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
-          >
-            Назад в контроль персонала
-          </Link>
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row lg:justify-end">
+            <Link
+              href={currentOperatorReportHref(report)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex h-10 w-full items-center justify-center rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 sm:w-auto"
+            >
+              Открыть в новом окне
+            </Link>
+            <Link
+              href={operatorReportHref(report)}
+              className="inline-flex h-10 w-full items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 sm:w-auto dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+            >
+              Назад в контроль персонала
+            </Link>
+          </div>
         </header>
 
         <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">

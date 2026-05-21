@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { AuthUser } from "@/lib/auth";
 import { canAccessPath } from "@/lib/permissions";
 import { ThemeSwitcher } from "@/components/theme-switcher";
@@ -259,6 +259,7 @@ function LogoLink({ onNavigate }: { onNavigate?: () => void }) {
 export function Sidebar({ user }: { user: AuthUser | null }) {
   const router = useRouter();
   const pathname = usePathname();
+  const desktopSidebarRef = useRef<HTMLElement | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [openNavGroups, setOpenNavGroups] = useState<Record<string, boolean>>(
     {},
@@ -276,6 +277,43 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
     : pathname.startsWith("/sync") || pathname.startsWith("/settings")
       ? "Управление"
       : "Ассортимент";
+  const hasOpenNavGroup = Object.values(openNavGroups).some(Boolean);
+
+  useEffect(() => {
+    if (!hasOpenNavGroup) {
+      return;
+    }
+
+    function closeOnOutsideClick(event: MouseEvent | TouchEvent) {
+      const target = event.target;
+
+      if (!(target instanceof Node)) {
+        return;
+      }
+
+      if (desktopSidebarRef.current?.contains(target)) {
+        return;
+      }
+
+      setOpenNavGroups({});
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOpenNavGroups({});
+      }
+    }
+
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    document.addEventListener("touchstart", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutsideClick);
+      document.removeEventListener("touchstart", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [hasOpenNavGroup]);
 
   async function handleLogout() {
     await fetch("/api/auth/logout", {
@@ -377,7 +415,10 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
         </div>
       ) : null}
 
-      <aside className="relative hidden w-20 shrink-0 flex-col border-r border-zinc-200/80 bg-white/80 shadow-[inset_-1px_0_0_rgb(255_255_255_/_0.5)] backdrop-blur-xl dark:border-zinc-800/80 dark:bg-zinc-950/75 md:flex">
+      <aside
+        ref={desktopSidebarRef}
+        className="relative hidden w-20 shrink-0 flex-col border-r border-zinc-200/80 bg-white/80 shadow-[inset_-1px_0_0_rgb(255_255_255_/_0.5)] backdrop-blur-xl dark:border-zinc-800/80 dark:bg-zinc-950/75 md:flex"
+      >
         <div className="flex justify-center border-b border-zinc-200/80 px-3 py-4 dark:border-zinc-800">
           <LogoLink />
         </div>

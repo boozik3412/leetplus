@@ -121,6 +121,19 @@ function NavSection({
   );
 }
 
+function LogoLink({ onNavigate }: { onNavigate?: () => void }) {
+  return (
+    <Link
+      href="/dashboard"
+      aria-label="Перейти на главную"
+      onClick={onNavigate}
+      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-zinc-950 text-sm font-semibold text-white transition hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70 dark:bg-emerald-400 dark:text-zinc-950"
+    >
+      LP
+    </Link>
+  );
+}
+
 export function Sidebar({ user }: { user: AuthUser | null }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -161,9 +174,7 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
     <>
       <div className="sticky top-0 z-40 flex items-center justify-between border-b border-zinc-200/80 bg-white/90 px-4 py-3 shadow-sm backdrop-blur-xl dark:border-zinc-800 dark:bg-zinc-950/90 md:hidden">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-zinc-950 text-sm font-semibold text-white dark:bg-emerald-400 dark:text-zinc-950">
-            LP
-          </div>
+          <LogoLink />
           <div className="min-w-0">
             <p className="truncate text-xs font-medium uppercase tracking-wide text-zinc-500">
               LeetPlus
@@ -200,9 +211,7 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
             <div className="border-b border-zinc-200/80 px-4 py-4 dark:border-zinc-800">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-zinc-950 text-sm font-semibold text-white dark:bg-emerald-400 dark:text-zinc-950">
-                    LP
-                  </div>
+                  <LogoLink onNavigate={() => setIsMobileMenuOpen(false)} />
                   <div className="min-w-0">
                     <p className="truncate text-xs font-medium uppercase tracking-wide text-zinc-500">
                       LeetPlus
@@ -250,9 +259,7 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
       <aside className="hidden w-64 shrink-0 flex-col border-r border-zinc-200/80 bg-white/75 shadow-[inset_-1px_0_0_rgb(255_255_255_/_0.5)] backdrop-blur-xl dark:border-zinc-800/80 dark:bg-zinc-950/70 md:flex">
         <div className="border-b border-zinc-200/80 px-4 py-4 dark:border-zinc-800">
           <div className="flex items-center justify-between gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-zinc-950 text-sm font-semibold text-white dark:bg-emerald-400 dark:text-zinc-950">
-              LP
-            </div>
+            <LogoLink />
             <div className="min-w-0 flex-1">
               <p className="truncate text-xs font-medium uppercase tracking-wide text-zinc-500">
                 LeetPlus

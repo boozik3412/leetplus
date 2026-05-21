@@ -100,6 +100,7 @@ Status: MVP 1 read-only guest analytics is live in production. Automatic rewards
 - Done: administrator top ranking cards are now more visual, with highlighted leaders, rank badges, and comparison bars for each metric.
 - Done: administrator comparison page is compact by default; detailed per-admin comparison and mapping list open in full mode via `view=full`.
 - Done: administrator ranking cards were toned down to a single calm accent, long names now wrap, and the sidebar item is named "Администраторы".
+- Done: desktop sidebar is now a compact icon rail with popover menus for sections, while mobile keeps the slide-out menu.
 - Current limitation: `all_operations_log` is stored and summarized, but it still does not expose a reliable administrator identifier. `log_cash_transaction/list` currently returns errors on production sources, so cashier analytics starts from working shifts.
 - Current limitation: PC-count parsing is defensive because real `global/*` payload shape may differ by Langame source; production verification should confirm `computerCount` is filled for each club.
 - Planned data foundation: guests, guest groups, balances, bonus balances, sessions, transactions, all operations log, product expenses by guest, clubs, tariffs, shifts, and PC context.

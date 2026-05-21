@@ -584,6 +584,7 @@ function BestAdminsPanel({ rows }: { rows: StaffOperatorReport["rows"] }) {
     {
       label: "Выручка общая",
       caption: "оборот закрытых смен",
+      tone: "emerald" as const,
       value: (row: StaffOperatorReport["rows"][number]) =>
         row.shiftPaymentAmount,
       format: formatRubles,
@@ -591,6 +592,7 @@ function BestAdminsPanel({ rows }: { rows: StaffOperatorReport["rows"] }) {
     {
       label: "Выручка/смена",
       caption: "средний оборот на смену",
+      tone: "sky" as const,
       value: (row: StaffOperatorReport["rows"][number]) =>
         safeDivide(row.shiftPaymentAmount, row.shiftsCount),
       format: formatRubles,
@@ -598,12 +600,14 @@ function BestAdminsPanel({ rows }: { rows: StaffOperatorReport["rows"] }) {
     {
       label: "Бар",
       caption: "продажи бара внутри смен",
+      tone: "amber" as const,
       value: (row: StaffOperatorReport["rows"][number]) => row.barRevenue,
       format: formatRubles,
     },
     {
       label: "Бар/смена",
       caption: "барная выручка на смену",
+      tone: "violet" as const,
       value: (row: StaffOperatorReport["rows"][number]) =>
         safeDivide(row.barRevenue, row.shiftsCount),
       format: formatRubles,
@@ -611,6 +615,7 @@ function BestAdminsPanel({ rows }: { rows: StaffOperatorReport["rows"] }) {
     {
       label: "% бара",
       caption: "доля бара в общей выручке",
+      tone: "cyan" as const,
       value: (row: StaffOperatorReport["rows"][number]) =>
         safeDivide(row.barRevenue, row.shiftPaymentAmount) * 100,
       format: formatPercent,
@@ -618,6 +623,7 @@ function BestAdminsPanel({ rows }: { rows: StaffOperatorReport["rows"] }) {
     {
       label: "Кальяны",
       caption: "выручка по кальянам",
+      tone: "rose" as const,
       value: (row: StaffOperatorReport["rows"][number]) => row.hookahRevenue,
       format: formatRubles,
     },
@@ -646,6 +652,7 @@ function BestAdminsPanel({ rows }: { rows: StaffOperatorReport["rows"] }) {
               key={metric.label}
               label={metric.label}
               caption={metric.caption}
+              tone={metric.tone}
               rows={topRows}
               format={metric.format}
             />
@@ -659,49 +666,129 @@ function BestAdminsPanel({ rows }: { rows: StaffOperatorReport["rows"] }) {
 function BestAdminMetricCard({
   label,
   caption,
+  tone,
   rows,
   format,
 }: {
   label: string;
   caption: string;
+  tone: "emerald" | "sky" | "amber" | "violet" | "cyan" | "rose";
   rows: Array<{ row: StaffOperatorReport["rows"][number]; value: number }>;
   format: (value: number) => string;
 }) {
   const leader = rows[0];
+  const maxValue = Math.max(1, leader?.value ?? 0);
+  const toneClasses = {
+    emerald: {
+      border: "border-emerald-500/50",
+      text: "text-emerald-700 dark:text-emerald-300",
+      badge: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-200",
+      bar: "bg-emerald-400",
+      glow: "bg-emerald-500/10",
+    },
+    sky: {
+      border: "border-sky-500/50",
+      text: "text-sky-700 dark:text-sky-300",
+      badge: "bg-sky-100 text-sky-800 dark:bg-sky-950/70 dark:text-sky-200",
+      bar: "bg-sky-400",
+      glow: "bg-sky-500/10",
+    },
+    amber: {
+      border: "border-amber-500/50",
+      text: "text-amber-700 dark:text-amber-300",
+      badge: "bg-amber-100 text-amber-900 dark:bg-amber-950/70 dark:text-amber-200",
+      bar: "bg-amber-400",
+      glow: "bg-amber-500/10",
+    },
+    violet: {
+      border: "border-violet-500/50",
+      text: "text-violet-700 dark:text-violet-300",
+      badge: "bg-violet-100 text-violet-800 dark:bg-violet-950/70 dark:text-violet-200",
+      bar: "bg-violet-400",
+      glow: "bg-violet-500/10",
+    },
+    cyan: {
+      border: "border-cyan-500/50",
+      text: "text-cyan-700 dark:text-cyan-300",
+      badge: "bg-cyan-100 text-cyan-800 dark:bg-cyan-950/70 dark:text-cyan-200",
+      bar: "bg-cyan-400",
+      glow: "bg-cyan-500/10",
+    },
+    rose: {
+      border: "border-rose-500/50",
+      text: "text-rose-700 dark:text-rose-300",
+      badge: "bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-200",
+      bar: "bg-rose-400",
+      glow: "bg-rose-500/10",
+    },
+  }[tone];
 
   return (
-    <article className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40">
-      <p className="text-xs font-semibold uppercase text-zinc-500">{label}</p>
+    <article className={`overflow-hidden rounded-lg border bg-zinc-50 dark:bg-zinc-900/40 ${toneClasses.border}`}>
+      <div className={`px-4 py-3 ${toneClasses.glow}`}>
+        <div className="flex items-center justify-between gap-3">
+          <p className={`text-xs font-semibold uppercase ${toneClasses.text}`}>
+            {label}
+          </p>
+          <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${toneClasses.badge}`}>
+            лидер
+          </span>
+        </div>
+      </div>
       {leader ? (
-        <>
-          <p className="mt-2 truncate text-base font-semibold">
-            {adminDisplayName(leader.row)}
-          </p>
-          <p className="mt-1 text-2xl font-semibold tabular-nums">
-            {format(leader.value)}
-          </p>
-          <p className="mt-1 text-sm text-zinc-500">{caption}</p>
-          <div className="mt-4 space-y-2">
+        <div className="p-4">
+          <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/50">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase text-zinc-500">
+                  #1 в показателе
+                </p>
+                <p className="mt-1 truncate text-lg font-semibold">
+                  {adminDisplayName(leader.row)}
+                </p>
+              </div>
+              <p className={`shrink-0 text-right text-2xl font-semibold tabular-nums ${toneClasses.text}`}>
+                {format(leader.value)}
+              </p>
+            </div>
+            <p className="mt-2 text-sm text-zinc-500">{caption}</p>
+          </div>
+          <div className="mt-4 space-y-3">
             {rows.map((item, index) => (
               <div
                 key={`${label}-${item.row.externalDomain ?? "source"}-${item.row.externalUserId}`}
-                className="flex items-center justify-between gap-3 text-sm"
+                className="space-y-1.5"
               >
-                <span className="min-w-0 truncate text-zinc-600 dark:text-zinc-300">
-                  {index + 1}. {adminDisplayName(item.row)}
-                </span>
-                <span className="shrink-0 font-semibold tabular-nums">
-                  {format(item.value)}
-                </span>
+                <div className="flex items-center justify-between gap-3 text-sm">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${index === 0 ? toneClasses.badge : "bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"}`}>
+                      {index + 1}
+                    </span>
+                    <span className="truncate text-zinc-700 dark:text-zinc-200">
+                      {adminDisplayName(item.row)}
+                    </span>
+                  </span>
+                  <span className="shrink-0 font-semibold tabular-nums">
+                    {format(item.value)}
+                  </span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+                  <div
+                    className={`h-full rounded-full ${toneClasses.bar}`}
+                    style={{
+                      width: `${Math.max(5, Math.min(100, (item.value / maxValue) * 100))}%`,
+                    }}
+                  />
+                </div>
               </div>
             ))}
           </div>
-        </>
+        </div>
       ) : (
-        <>
-          <p className="mt-2 text-2xl font-semibold">нет данных</p>
+        <div className="p-4">
+          <p className="text-2xl font-semibold">нет данных</p>
           <p className="mt-1 text-sm text-zinc-500">{caption}</p>
-        </>
+        </div>
       )}
     </article>
   );

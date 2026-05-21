@@ -126,7 +126,7 @@ export default async function GuestsPage({
               Read-only слой по гостям: визиты, сессии, пополнения баланса и
               покупки бара за период {formatPeriodDate(summary.periodFrom)} -{" "}
               {formatPeriodDate(summary.periodTo)}. Бонусы и балансы скрыты,
-              пока LAngame endpoints возвращают ошибки. По умолчанию
+              пока Langame endpoints возвращают ошибки. По умолчанию
               администраторы исключены из клиентских отчетов; выберите
               админ-группу, чтобы посмотреть ее отдельно.
             </p>
@@ -398,7 +398,7 @@ function DataQualityPanel({ summary }: { summary: GuestsSummary }) {
   return (
     <section className="rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
       <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
-        <h2 className="text-base font-semibold">Качество данных LAngame</h2>
+        <h2 className="text-base font-semibold">Качество данных Langame</h2>
         <p className="mt-1 text-sm text-zinc-500">
           Foundation показывает, что можно считать уже сейчас.
         </p>
@@ -421,7 +421,7 @@ function DataQualityPanel({ summary }: { summary: GuestsSummary }) {
 
         {summary.dataQuality.unavailableEndpoints.length > 0 ? (
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
-            <p className="font-semibold">Недоступно в LAngame сейчас</p>
+            <p className="font-semibold">Недоступно в Langame сейчас</p>
             <p className="mt-2">
               {summary.dataQuality.unavailableEndpoints.join(", ")} возвращают
               ошибку API, поэтому балансы и бонусы не участвуют в KPI.

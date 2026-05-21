@@ -1,5 +1,5 @@
 -- Guest module data foundation.
--- First stage keeps LAngame guest data tenant-scoped and idempotent, while
+-- First stage keeps Langame guest data tenant-scoped and idempotent, while
 -- avoiding raw phone/email/full-name/document storage.
 
 ALTER TABLE "SalesFact"

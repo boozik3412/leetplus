@@ -145,7 +145,7 @@ export function GuestFoundationSyncButton({
             ? `Последняя синхронизация: ${formatDateTime(latestRun.finishedAt ?? latestRun.startedAt)} (${formatSyncStatus(latestRun.status)}). Следующий запуск: ${nextRun ? `${formatDateLabel(nextRun.dateFrom)} - ${formatDateLabel(nextRun.dateTo)}` : "период уточняется"}.`
             : nextRun
               ? `Следующий запуск: ${formatDateLabel(nextRun.dateFrom)} - ${formatDateLabel(nextRun.dateTo)}.`
-              : "Запустит фоновую синхронизацию гостей из LAngame.";
+              : "Запустит фоновую синхронизацию гостей из Langame.";
 
   return (
     <div

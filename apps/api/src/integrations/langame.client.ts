@@ -271,7 +271,7 @@ export class LangameClient {
       const errorDetails = await this.readErrorDetails(response);
       throw new BadRequestException(
         [
-          `LAngame ${path} failed: ${response.status} ${response.statusText}`,
+          `Langame ${path} failed: ${response.status} ${response.statusText}`,
           errorDetails,
         ]
           .filter(Boolean)
@@ -284,8 +284,8 @@ export class LangameClient {
     if (payload.status === false) {
       throw new BadRequestException(
         payload.message
-          ? `LAngame ${path} returned an error: ${payload.message}`
-          : `LAngame ${path} returned an error`,
+          ? `Langame ${path} returned an error: ${payload.message}`
+          : `Langame ${path} returned an error`,
       );
     }
 

@@ -415,7 +415,7 @@ export default async function DashboardPage({
                 caption={
                   totalClubRevenue > 0
                     ? "оборот сети за выбранный период"
-                    : "нет общей выручки из LAngame за период"
+                    : "нет общей выручки из Langame за период"
                 }
               >
                 <FullDayRevenue

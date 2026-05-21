@@ -1,4 +1,4 @@
--- Persist LAngame working shifts for staff-control analytics.
+-- Persist Langame working shifts for staff-control analytics.
 CREATE TABLE "GuestWorkingShift" (
   "id" TEXT NOT NULL,
   "tenantId" TEXT NOT NULL,

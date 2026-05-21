@@ -33,7 +33,7 @@ export default async function SettingsPage() {
             Настройки
           </h1>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-            Подключение LAngame API для текущей организации: ключ, домены
+            Подключение Langame API для текущей организации: ключ, домены
             клубов и список источников. Запуск обновления данных вынесен в
             отдельный раздел «Синхронизация».
           </p>

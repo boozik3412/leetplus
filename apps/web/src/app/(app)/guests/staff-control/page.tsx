@@ -256,7 +256,7 @@ export default async function StaffControlPage({
             caption="сессия, деньги или продажа бара"
           />
           <KpiCard
-            label="Смены LAngame"
+            label="Смены Langame"
             value={formatNumber(report.shiftsCount)}
             caption={`${formatNumber(report.shiftsWithStaffLink)} связаны с сотрудником`}
           />
@@ -266,7 +266,7 @@ export default async function StaffControlPage({
             caption={`возвраты ${formatRubles(report.shiftRefundAmount)}`}
           />
           <KpiCard
-            label="Операции LAngame"
+            label="Операции Langame"
             value={formatNumber(report.operationLogsCount)}
             caption={formatRubles(report.operationAmount)}
           />
@@ -391,7 +391,7 @@ function StaffTable({
         </div>
         {report.unmatchedOperators.length > 0 ? (
           <p className="mt-3 text-sm text-amber-600 dark:text-amber-300">
-            В таблицу добавлены операторы LAngame без привязки:{" "}
+            В таблицу добавлены операторы Langame без привязки:{" "}
             {formatNumber(report.unmatchedOperators.length)}. Их смены видны,
             но сотрудника нужно сопоставить отдельно.
           </p>
@@ -665,7 +665,7 @@ function getStaffDisplayRows(report: StaffControlReport): StaffDisplayRow[] {
     contact: row.externalDomain ?? "источник",
     externalGuestId: row.externalUserId,
     externalDomain: row.externalDomain,
-    guestGroupName: "Оператор LAngame",
+    guestGroupName: "Оператор Langame",
     controlFlags: ["Нужна привязка"],
     storeNames: row.storeNames,
     sessionsCount: 0,
@@ -786,7 +786,7 @@ function UnmatchedOperatorsPanel({ report }: { report: StaffControlReport }) {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h2 className="text-base font-semibold">
-              Операторы LAngame без привязки
+              Операторы Langame без привязки
             </h2>
             <p className="mt-1 text-sm text-zinc-500">
               Смены уже сохранены по user_id, но эти ID пока не сопоставлены с
@@ -898,7 +898,7 @@ function DiagnosticsPanel({ report }: { report: StaffControlReport }) {
         </h2>
         <p className="mt-1 text-sm text-zinc-500">
           Сохраняем только имена полей и количество заполненных строк, без
-          значений из LAngame. Это нужно, чтобы понять, где лежат администратор,
+          значений из Langame. Это нужно, чтобы понять, где лежат администратор,
           кассир или смена.
         </p>
       </div>

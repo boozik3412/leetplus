@@ -35,7 +35,7 @@ export default async function PlatformAdminPage() {
     { label: "Клубов", value: overview.totals.stores },
     { label: "Товаров", value: overview.totals.products },
     { label: "Продаж", value: overview.totals.salesFacts },
-    { label: "Источников LAngame", value: overview.totals.integrationSources },
+    { label: "Источников Langame", value: overview.totals.integrationSources },
   ];
 
   return (
@@ -49,7 +49,7 @@ export default async function PlatformAdminPage() {
             Админ платформы
           </h1>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-            Служебная панель владельца LeetPlus: сети, источники LAngame и
+            Служебная панель владельца LeetPlus: сети, источники Langame и
             последние синхронизации.
           </p>
         </div>
@@ -81,7 +81,7 @@ export default async function PlatformAdminPage() {
                   <th className="px-5 py-3 text-right font-medium">Stores</th>
                   <th className="px-5 py-3 text-right font-medium">Products</th>
                   <th className="px-5 py-3 text-right font-medium">Sales</th>
-                  <th className="px-5 py-3 font-medium">LAngame источники</th>
+                  <th className="px-5 py-3 font-medium">Langame источники</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">

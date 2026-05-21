@@ -6,7 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { SecretEncryptionService } from './secret-encryption.service';
 
-const CREDENTIAL_NAME = 'LAngame API key';
+const CREDENTIAL_NAME = 'Langame API key';
 
 export type LangameSettingsDto = {
   tenantName?: string;
@@ -86,13 +86,13 @@ export class LangameSettingsService {
     const tenantName = dto.tenantName?.trim();
 
     if (domains.length === 0) {
-      throw new BadRequestException('At least one LAngame domain is required');
+      throw new BadRequestException('At least one Langame domain is required');
     }
 
     const existingCredential = await this.findCredential(tenantId);
 
     if (!apiKey && !existingCredential?.apiKeyEncrypted) {
-      throw new BadRequestException('LAngame API key is required');
+      throw new BadRequestException('Langame API key is required');
     }
 
     if (tenantName) {
@@ -171,7 +171,7 @@ export class LangameSettingsService {
     const credential = await this.findCredential(tenantId);
 
     if (!credential) {
-      throw new BadRequestException('LAngame integration is not configured');
+      throw new BadRequestException('Langame integration is not configured');
     }
 
     const apiKey = credential.apiKeyEncrypted
@@ -179,7 +179,7 @@ export class LangameSettingsService {
       : null;
 
     if (!apiKey) {
-      throw new BadRequestException('LAngame API key is not configured');
+      throw new BadRequestException('Langame API key is not configured');
     }
 
     const sources = await this.prisma.integrationSource.findMany({
@@ -193,7 +193,7 @@ export class LangameSettingsService {
     });
 
     if (sources.length === 0) {
-      throw new BadRequestException('LAngame domains are not configured');
+      throw new BadRequestException('Langame domains are not configured');
     }
 
     return { apiKey, sources };
@@ -249,7 +249,7 @@ export class LangameSettingsService {
 
     if (invalidDomain) {
       throw new BadRequestException(
-        `Invalid LAngame domain: ${invalidDomain}. Use domains like 1337.langame.ru without protocol or path.`,
+        `Invalid Langame domain: ${invalidDomain}. Use domains like 1337.langame.ru without protocol or path.`,
       );
     }
 

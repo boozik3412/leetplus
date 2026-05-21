@@ -66,7 +66,7 @@ export function LangameSettingsForm({
 
       setSettings(data as LangameSettings);
       setApiKey("");
-      setSuccess("Настройки LAngame сохранены.");
+      setSuccess("Настройки Langame сохранены.");
     } catch {
       setError("API недоступен");
     } finally {
@@ -77,7 +77,7 @@ export function LangameSettingsForm({
   return (
     <section className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,420px)_1fr]">
       <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-        <h2 className="text-base font-semibold">LAngame API</h2>
+        <h2 className="text-base font-semibold">Langame API</h2>
         <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
           Ключ сохраняется в зашифрованном виде и применяется только внутри
           текущей организации. Назад в интерфейс ключ не выводится.
@@ -215,7 +215,7 @@ export function LangameSettingsForm({
           </div>
         ) : (
           <p className="px-5 py-6 text-sm text-zinc-500">
-            Источники LAngame ещё не настроены.
+            Источники Langame ещё не настроены.
           </p>
         )}
       </div>

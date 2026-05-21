@@ -318,7 +318,7 @@ export class LangameSyncService {
         sourceResult.status = 'SUCCESS';
       } catch (error) {
         const errorMessage =
-          error instanceof Error ? error.message : 'Unknown LAngame sync error';
+          error instanceof Error ? error.message : 'Unknown Langame sync error';
         result.failedSources += 1;
         sourceResult.errorMessage = errorMessage;
         await this.prisma.integrationSyncJob.update({
@@ -791,7 +791,7 @@ export class LangameSyncService {
       return existing;
     }
 
-    const placeholderName = `LAngame product #${externalProductId}`;
+    const placeholderName = `Langame product #${externalProductId}`;
     const product = await this.prisma.product.upsert({
       where: {
         tenantId_externalProvider_externalDomain_externalProductId: {
@@ -843,7 +843,7 @@ export class LangameSyncService {
       return existing;
     }
 
-    const placeholderName = `LAngame club #${externalClubId}`;
+    const placeholderName = `Langame club #${externalClubId}`;
     const store = await this.prisma.store.upsert({
       where: {
         tenantId_externalProvider_externalDomain_externalClubId: {
@@ -1079,7 +1079,7 @@ export class LangameSyncService {
     }
 
     if (!Object.values(IntegrationSyncMode).includes(mode)) {
-      throw new BadRequestException('Invalid LAngame sync mode');
+      throw new BadRequestException('Invalid Langame sync mode');
     }
 
     return mode;
@@ -1091,7 +1091,7 @@ export class LangameSyncService {
     }
 
     if (!Object.values(IntegrationSyncTrigger).includes(trigger)) {
-      throw new BadRequestException('Invalid LAngame sync trigger');
+      throw new BadRequestException('Invalid Langame sync trigger');
     }
 
     return trigger;
@@ -1115,7 +1115,7 @@ export class LangameSyncService {
     );
 
     if (!match) {
-      throw new BadRequestException(`Invalid LAngame date: ${value}`);
+      throw new BadRequestException(`Invalid Langame date: ${value}`);
     }
 
     return new Date(

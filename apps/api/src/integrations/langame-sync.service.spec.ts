@@ -282,7 +282,7 @@ describe('LangameSyncService', () => {
     );
   });
 
-  it('syncs LAngame data into resolved tenant scope', async () => {
+  it('syncs Langame data into resolved tenant scope', async () => {
     await expect(
       service.syncTenant(user, {
         dateFrom: '2026-04-29',
@@ -374,11 +374,11 @@ describe('LangameSyncService', () => {
 
   it('rejects sync without API key', async () => {
     settings.resolveTenantAccess.mockRejectedValue(
-      new Error('LAngame API key is not configured'),
+      new Error('Langame API key is not configured'),
     );
 
     await expect(service.syncTenant(user, {})).rejects.toThrow(
-      'LAngame API key is not configured',
+      'Langame API key is not configured',
     );
   });
 });

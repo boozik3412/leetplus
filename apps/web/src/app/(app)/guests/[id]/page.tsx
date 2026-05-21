@@ -135,7 +135,7 @@ export default async function GuestPage({ params }: { params: PageParams }) {
                 ? "нет данных"
                 : `${formatNumber(guest.currentCountHours, 1)} ч`
             }
-            caption="поле LAngame current_count_hours"
+            caption="поле Langame current_count_hours"
           />
         </section>
 

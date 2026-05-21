@@ -40,7 +40,7 @@ export async function getLangameSettings(): Promise<LangameSettings> {
   });
 
   if (!response.ok) {
-    throw new Error("Failed to fetch LAngame settings");
+    throw new Error("Failed to fetch Langame settings");
   }
 
   return response.json() as Promise<LangameSettings>;

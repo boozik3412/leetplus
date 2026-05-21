@@ -30,7 +30,7 @@ const navGroups: NavGroup[] = [
     title: "Персонал",
     items: [
       { href: "/guests/staff-control", label: "Контроль персонала" },
-      { href: "/guests/staff-control/operators", label: "Операторы LAngame" },
+      { href: "/guests/staff-control/operators", label: "Операторы Langame" },
     ],
   },
   {

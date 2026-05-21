@@ -68,7 +68,7 @@ export function GuestCrmForm({ guest }: { guest: GuestDetail }) {
       <div className="flex flex-col gap-1">
         <h2 className="text-base font-semibold">CRM</h2>
         <p className="text-sm text-zinc-500">
-          Ручные поля LeetPlus не перезаписываются синхронизацией LAngame.
+          Ручные поля LeetPlus не перезаписываются синхронизацией Langame.
         </p>
       </div>
 

@@ -197,7 +197,7 @@ export function LangameSyncPanel({
             "Гостевая синхронизация завершилась с ошибкой.",
         );
       } else {
-        setSuccess("Общая синхронизация LAngame завершена.");
+        setSuccess("Общая синхронизация Langame завершена.");
       }
 
       await refreshSettings();
@@ -227,7 +227,7 @@ export function LangameSyncPanel({
               Общая синхронизация
             </p>
             <h2 className="mt-2 text-2xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
-              Все данные LAngame за выбранный период
+              Все данные Langame за выбранный период
             </h2>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
               Одна кнопка обновляет клубы, товары, остатки, продажи, общую
@@ -538,7 +538,7 @@ function SyncHistory({ jobs }: { jobs: LangameSettings["syncJobs"] }) {
       <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
         <h2 className="text-base font-semibold">История синхронизаций</h2>
         <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-          Последние запуски товарной части LAngame и файлы расхождений.
+          Последние запуски товарной части Langame и файлы расхождений.
         </p>
       </div>
 

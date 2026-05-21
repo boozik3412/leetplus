@@ -23,11 +23,11 @@ Last updated: 2026-05-21
 
 ## Product Context
 
-LeetPlus is an assortment analytics SaaS for computer clubs and club networks. It imports LAngame data, normalizes goods across clubs into network SKU groups, and provides analytics for sales, stock, OOS risk, margin, recommendations, LFL, new products, and assortment quality.
+LeetPlus is an assortment analytics SaaS for computer clubs and club networks. It imports Langame data, normalizes goods across clubs into network SKU groups, and provides analytics for sales, stock, OOS risk, margin, recommendations, LFL, new products, and assortment quality.
 
 The active strategic product direction is a separate "Guests" module. It expands LeetPlus from assortment analytics into guest-base analytics, staff/control reports, mini CRM, loyalty/gamification, messenger communications, and guest-flow management. The product navigation is split into meaningful product blocks, and operational setup is separated into `Настройки` and `Синхронизация`.
 
-Connected production LAngame sources:
+Connected production Langame sources:
 
 - `1337.langame.ru`
 - `443.langame.ru`
@@ -37,14 +37,14 @@ Connected production LAngame sources:
 
 - Sales history must remain stable when product names change.
 - Sales facts keep snapshot fields such as product/store names at the moment of sale.
-- Deleted or missing LAngame nomenclature must not delete historical sales.
-- LAngame sync must not automatically set `canonicalProductId`.
+- Deleted or missing Langame nomenclature must not delete historical sales.
+- Langame sync must not automatically set `canonicalProductId`.
 - Product grouping into a canonical/network SKU happens only through analysis/manual confirmation.
 - A rejected parsing suggestion should not delete existing product links.
 - Already confirmed parsing groups should not be suggested again unless there is a real change/new item to review.
 - Manual store names in LeetPlus should be preserved; sync may update address/activity/source linkage, but not overwrite user-facing names.
-- Guest history should remain stable when a guest profile changes in LAngame.
-- LAngame sync must not overwrite manual guest CRM statuses, notes, segments, communication consents, or LeetPlus-owned loyalty state.
+- Guest history should remain stable when a guest profile changes in Langame.
+- Langame sync must not overwrite manual guest CRM statuses, notes, segments, communication consents, or LeetPlus-owned loyalty state.
 - Guest personal data must be treated as sensitive data: phone, email, full name, birthday, and document fields require access control and careful storage decisions.
 - Guest communications require explicit channel consent, consent history, and unsubscribe handling.
 
@@ -64,7 +64,7 @@ Connected production LAngame sources:
 - Product parsing utilities: automatic analysis, safe confirmation/rejection, existing canonical SKU awareness, manual parsing page.
 - Products/stores/directories: inline editing, multi-club filters, exports, manual store name preservation.
 - Guest module: first production read-only layer is live, including data foundation sync, guest analytics dashboard, full guest report, guest card, mini CRM fields, first staff-control report, and PC-count based load calculation.
-- Sync/admin UX: `/settings` is for LAngame connection settings only; `/sync` is the dedicated synchronization page with one combined sync action for assortment/sales/revenue plus guests.
+- Sync/admin UX: `/settings` is for Langame connection settings only; `/sync` is the dedicated synchronization page with one combined sync action for assortment/sales/revenue plus guests.
 - Mail: Mail.ru/VK WorkSpace domain is configured; SMTP uses `reports@leetplus.ru`.
 
 ## Recent Work
@@ -83,15 +83,15 @@ Connected production LAngame sources:
 - Started Stage 2 commercial reports with OOS revenue/profit-at-risk estimates in tables and exports, including profit at risk for the selected period.
 - Added hybrid "Money at risk" reporting: OOS profit-at-risk plus frozen stock in no-sales products, surfaced on the dashboard and reports.
 - Prepared `GUEST_MANAGEMENT_MODULE_TZ.md`: a draft specification for a future separate "Guests" module. Development is not started until the scope is approved.
-- Started MVP 1 for the "Guests" module: added guest data foundation schema, LAngame guest endpoint client methods, and a protected manual foundation sync/profiling endpoint.
+- Started MVP 1 for the "Guests" module: added guest data foundation schema, Langame guest endpoint client methods, and a protected manual foundation sync/profiling endpoint.
 - Added the production "Guests" area with collapsible left-nav group, `/guests` dashboard, `/guests/report` full report, `/guests/[id]` guest card, encrypted phone/full-name storage, and LeetPlus-only CRM fields.
 - Added default exclusion of administrator guest groups from client analytics while keeping admin groups selectable in filters for explicit inspection.
 - Added first `/guests/staff-control` report: staff/admin group slice, staff activity KPIs, staff table, and operation-log summary. Current limitation: `all_operations_log` is not yet reliably linked to a specific administrator identity.
 - Added safe staff-control diagnostics: guest foundation sync now probes `log_cash_transaction/list` and `working_shifts/list` and stores only field names/non-empty counts in the profile JSON, not raw payload values.
 - Added executive network dashboard on `/dashboard`: combined money, guests, assortment, and load summary with direct navigation to relevant reports.
-- Added PC-count foundation from LAngame `global/types_of_pc_in_clubs/list` and `global/linking_pc_by_type/list`; guest load is calculated as played hours / possible PC-hours.
-- Moved synchronization controls out of `/settings` into `/sync`; settings now contain only LAngame API key/domains/sources, and sync has one combined action for all data.
-- Moved `/sync` into a separate left-nav `Управление` block with `/settings`, added LAngame date-format fallback for date endpoints, compacted repeated sync history errors, and made stale guest sync runs older than 2 hours expire automatically instead of showing endless `RUNNING`.
+- Added PC-count foundation from Langame `global/types_of_pc_in_clubs/list` and `global/linking_pc_by_type/list`; guest load is calculated as played hours / possible PC-hours.
+- Moved synchronization controls out of `/settings` into `/sync`; settings now contain only Langame API key/domains/sources, and sync has one combined action for all data.
+- Moved `/sync` into a separate left-nav `Управление` block with `/settings`, added Langame date-format fallback for date endpoints, compacted repeated sync history errors, and made stale guest sync runs older than 2 hours expire automatically instead of showing endless `RUNNING`.
 
 ## Product Backlog
 

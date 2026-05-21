@@ -780,46 +780,46 @@ function BestAdminMetricCard({
   const maxValue = Math.max(1, leader?.value ?? 0);
   const toneClasses = {
     emerald: {
-      border: "border-emerald-500/50",
+      border: "border-zinc-200 dark:border-zinc-800",
       text: "text-emerald-700 dark:text-emerald-300",
-      badge: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-200",
+      badge: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200",
       bar: "bg-emerald-400",
-      glow: "bg-emerald-500/10",
+      glow: "bg-zinc-50 dark:bg-zinc-900/60",
     },
     sky: {
-      border: "border-sky-500/50",
-      text: "text-sky-700 dark:text-sky-300",
-      badge: "bg-sky-100 text-sky-800 dark:bg-sky-950/70 dark:text-sky-200",
-      bar: "bg-sky-400",
-      glow: "bg-sky-500/10",
+      border: "border-zinc-200 dark:border-zinc-800",
+      text: "text-emerald-700 dark:text-emerald-300",
+      badge: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200",
+      bar: "bg-emerald-400",
+      glow: "bg-zinc-50 dark:bg-zinc-900/60",
     },
     amber: {
-      border: "border-amber-500/50",
-      text: "text-amber-700 dark:text-amber-300",
-      badge: "bg-amber-100 text-amber-900 dark:bg-amber-950/70 dark:text-amber-200",
-      bar: "bg-amber-400",
-      glow: "bg-amber-500/10",
+      border: "border-zinc-200 dark:border-zinc-800",
+      text: "text-emerald-700 dark:text-emerald-300",
+      badge: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200",
+      bar: "bg-emerald-400",
+      glow: "bg-zinc-50 dark:bg-zinc-900/60",
     },
     violet: {
-      border: "border-violet-500/50",
-      text: "text-violet-700 dark:text-violet-300",
-      badge: "bg-violet-100 text-violet-800 dark:bg-violet-950/70 dark:text-violet-200",
-      bar: "bg-violet-400",
-      glow: "bg-violet-500/10",
+      border: "border-zinc-200 dark:border-zinc-800",
+      text: "text-emerald-700 dark:text-emerald-300",
+      badge: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200",
+      bar: "bg-emerald-400",
+      glow: "bg-zinc-50 dark:bg-zinc-900/60",
     },
     cyan: {
-      border: "border-cyan-500/50",
-      text: "text-cyan-700 dark:text-cyan-300",
-      badge: "bg-cyan-100 text-cyan-800 dark:bg-cyan-950/70 dark:text-cyan-200",
-      bar: "bg-cyan-400",
-      glow: "bg-cyan-500/10",
+      border: "border-zinc-200 dark:border-zinc-800",
+      text: "text-emerald-700 dark:text-emerald-300",
+      badge: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200",
+      bar: "bg-emerald-400",
+      glow: "bg-zinc-50 dark:bg-zinc-900/60",
     },
     rose: {
-      border: "border-rose-500/50",
-      text: "text-rose-700 dark:text-rose-300",
-      badge: "bg-rose-100 text-rose-800 dark:bg-rose-950/70 dark:text-rose-200",
-      bar: "bg-rose-400",
-      glow: "bg-rose-500/10",
+      border: "border-zinc-200 dark:border-zinc-800",
+      text: "text-emerald-700 dark:text-emerald-300",
+      badge: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200",
+      bar: "bg-emerald-400",
+      glow: "bg-zinc-50 dark:bg-zinc-900/60",
     },
   }[tone];
 
@@ -838,16 +838,16 @@ function BestAdminMetricCard({
       {leader ? (
         <div className="p-4">
           <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/50">
-            <div className="flex items-start justify-between gap-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
                 <p className="text-xs font-semibold uppercase text-zinc-500">
                   #1 в показателе
                 </p>
-                <p className="mt-1 truncate text-lg font-semibold">
+                <p className="mt-1 text-lg font-semibold leading-tight">
                   {adminDisplayName(leader.row)}
                 </p>
               </div>
-              <p className={`shrink-0 text-right text-2xl font-semibold tabular-nums ${toneClasses.text}`}>
+              <p className={`shrink-0 text-2xl font-semibold tabular-nums sm:text-right ${toneClasses.text}`}>
                 {format(leader.value)}
               </p>
             </div>
@@ -859,16 +859,16 @@ function BestAdminMetricCard({
                 key={`${label}-${item.row.externalDomain ?? "source"}-${item.row.externalUserId}`}
                 className="space-y-1.5"
               >
-                <div className="flex items-center justify-between gap-3 text-sm">
-                  <span className="flex min-w-0 items-center gap-2">
+                <div className="flex items-start justify-between gap-3 text-sm">
+                  <span className="flex min-w-0 flex-1 items-start gap-2">
                     <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${index === 0 ? toneClasses.badge : "bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"}`}>
                       {index + 1}
                     </span>
-                    <span className="truncate text-zinc-700 dark:text-zinc-200">
+                    <span className="min-w-0 leading-5 text-zinc-700 dark:text-zinc-200">
                       {adminDisplayName(item.row)}
                     </span>
                   </span>
-                  <span className="shrink-0 font-semibold tabular-nums">
+                  <span className="shrink-0 text-right font-semibold tabular-nums">
                     {format(item.value)}
                   </span>
                 </div>

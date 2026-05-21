@@ -141,6 +141,8 @@ export type StaffControlRow = GuestDashboardRow & {
   shiftPaymentAmount: number;
   shiftRefundAmount: number;
   shiftIncassAmount: number;
+  barRevenue: number;
+  hookahRevenue: number;
   averageShiftMiddleCheck: number;
 };
 
@@ -185,6 +187,8 @@ export type StaffUnmatchedOperatorRow = {
   shiftPaymentAmount: number;
   shiftRefundAmount: number;
   shiftIncassAmount: number;
+  barRevenue: number;
+  hookahRevenue: number;
   averageShiftMiddleCheck: number;
 };
 
@@ -263,6 +267,8 @@ export type StaffOperatorReportRow = {
   shiftPaymentAmount: number;
   shiftRefundAmount: number;
   shiftIncassAmount: number;
+  barRevenue: number;
+  hookahRevenue: number;
   averageShiftMiddleCheck: number;
 };
 

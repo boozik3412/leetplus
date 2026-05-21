@@ -63,6 +63,14 @@ function formatRubles(value: number) {
   return `${formatNumber(value)} руб`;
 }
 
+function formatPercent(value: number) {
+  return `${formatNumber(value, 1)}%`;
+}
+
+function safeDivide(value: number, divider: number) {
+  return divider > 0 ? value / divider : 0;
+}
+
 function formatPeriodDate(value: string) {
   return new Intl.DateTimeFormat("ru-RU", {
     day: "2-digit",
@@ -487,24 +495,13 @@ export default async function StaffOperatorsPage({
 
 function AdminComparisonPanel({ report }: { report: StaffOperatorReport }) {
   const rows = report.rows;
-  const linkedCount = rows.filter((row) => row.linkedGuest).length;
-  const totalCash = rows.reduce((sum, row) => sum + row.shiftPaymentAmount, 0);
-  const totalRefunds = rows.reduce((sum, row) => sum + row.shiftRefundAmount, 0);
-  const totalIncass = rows.reduce((sum, row) => sum + row.shiftIncassAmount, 0);
-  const totalShifts = rows.reduce((sum, row) => sum + row.shiftsCount, 0);
-  const totalHours = rows.reduce((sum, row) => sum + row.shiftHours, 0);
-  const avgChecks = rows
-    .map((row) => row.averageShiftMiddleCheck)
-    .filter((value) => value > 0);
-  const averageCheck =
-    avgChecks.length > 0
-      ? avgChecks.reduce((sum, value) => sum + value, 0) / avgChecks.length
-      : 0;
   const maxCash = Math.max(1, ...rows.map((row) => row.shiftPaymentAmount));
   const maxShifts = Math.max(1, ...rows.map((row) => row.shiftsCount));
   const maxHours = Math.max(1, ...rows.map((row) => row.shiftHours));
   const maxRefunds = Math.max(1, ...rows.map((row) => row.shiftRefundAmount));
   const maxIncass = Math.max(1, ...rows.map((row) => row.shiftIncassAmount));
+  const maxBarRevenue = Math.max(1, ...rows.map((row) => row.barRevenue));
+  const maxHookahRevenue = Math.max(1, ...rows.map((row) => row.hookahRevenue));
   const maxMiddleCheck = Math.max(
     1,
     ...rows.map((row) => row.averageShiftMiddleCheck),
@@ -537,13 +534,7 @@ function AdminComparisonPanel({ report }: { report: StaffOperatorReport }) {
         </p>
       </div>
 
-      <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-5">
-        <InfographicMetric label="Администраторы" value={formatNumber(rows.length)} caption={`${formatNumber(linkedCount)} привязаны`} />
-        <InfographicMetric label="Касса" value={formatRubles(totalCash)} caption={`${formatNumber(totalShifts)} смен`} />
-        <InfographicMetric label="Часы" value={`${formatNumber(totalHours, 1)} ч`} caption="по закрытым сменам" />
-        <InfographicMetric label="Средний чек" value={formatRubles(averageCheck)} caption="среднее по администраторам" />
-        <InfographicMetric label="Возвраты" value={formatRubles(totalRefunds)} caption={`инкассация ${formatRubles(totalIncass)}`} />
-      </div>
+      <BestAdminsPanel rows={rows} />
 
       {rows.length > 0 ? (
         <div className="grid gap-4 border-t border-zinc-200 p-4 dark:border-zinc-800 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.42fr)]">
@@ -558,6 +549,8 @@ function AdminComparisonPanel({ report }: { report: StaffOperatorReport }) {
                 maxHours={maxHours}
                 maxRefunds={maxRefunds}
                 maxIncass={maxIncass}
+                maxBarRevenue={maxBarRevenue}
+                maxHookahRevenue={maxHookahRevenue}
                 maxMiddleCheck={maxMiddleCheck}
               />
             ))}
@@ -586,21 +579,131 @@ function AdminComparisonPanel({ report }: { report: StaffOperatorReport }) {
   );
 }
 
-function InfographicMetric({
+function BestAdminsPanel({ rows }: { rows: StaffOperatorReport["rows"] }) {
+  const metrics = [
+    {
+      label: "Выручка общая",
+      caption: "оборот закрытых смен",
+      value: (row: StaffOperatorReport["rows"][number]) =>
+        row.shiftPaymentAmount,
+      format: formatRubles,
+    },
+    {
+      label: "Выручка/смена",
+      caption: "средний оборот на смену",
+      value: (row: StaffOperatorReport["rows"][number]) =>
+        safeDivide(row.shiftPaymentAmount, row.shiftsCount),
+      format: formatRubles,
+    },
+    {
+      label: "Бар",
+      caption: "продажи бара внутри смен",
+      value: (row: StaffOperatorReport["rows"][number]) => row.barRevenue,
+      format: formatRubles,
+    },
+    {
+      label: "Бар/смена",
+      caption: "барная выручка на смену",
+      value: (row: StaffOperatorReport["rows"][number]) =>
+        safeDivide(row.barRevenue, row.shiftsCount),
+      format: formatRubles,
+    },
+    {
+      label: "% бара",
+      caption: "доля бара в общей выручке",
+      value: (row: StaffOperatorReport["rows"][number]) =>
+        safeDivide(row.barRevenue, row.shiftPaymentAmount) * 100,
+      format: formatPercent,
+    },
+    {
+      label: "Кальяны",
+      caption: "выручка по кальянам",
+      value: (row: StaffOperatorReport["rows"][number]) => row.hookahRevenue,
+      format: formatRubles,
+    },
+  ];
+
+  return (
+    <section className="border-b border-zinc-200 p-4 dark:border-zinc-800">
+      <div className="mb-4">
+        <p className="text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-300">
+          Топ администраторов
+        </p>
+        <h3 className="mt-1 text-lg font-semibold">
+          Лучшие по ключевым показателям
+        </h3>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {metrics.map((metric) => {
+          const topRows = [...rows]
+            .map((row) => ({ row, value: metric.value(row) }))
+            .filter((item) => item.value > 0)
+            .sort((first, second) => second.value - first.value)
+            .slice(0, 3);
+
+          return (
+            <BestAdminMetricCard
+              key={metric.label}
+              label={metric.label}
+              caption={metric.caption}
+              rows={topRows}
+              format={metric.format}
+            />
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function BestAdminMetricCard({
   label,
-  value,
   caption,
+  rows,
+  format,
 }: {
   label: string;
-  value: string;
   caption: string;
+  rows: Array<{ row: StaffOperatorReport["rows"][number]; value: number }>;
+  format: (value: number) => string;
 }) {
+  const leader = rows[0];
+
   return (
-    <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40">
+    <article className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40">
       <p className="text-xs font-semibold uppercase text-zinc-500">{label}</p>
-      <p className="mt-2 text-2xl font-semibold tabular-nums">{value}</p>
-      <p className="mt-1 text-sm text-zinc-500">{caption}</p>
-    </div>
+      {leader ? (
+        <>
+          <p className="mt-2 truncate text-base font-semibold">
+            {adminDisplayName(leader.row)}
+          </p>
+          <p className="mt-1 text-2xl font-semibold tabular-nums">
+            {format(leader.value)}
+          </p>
+          <p className="mt-1 text-sm text-zinc-500">{caption}</p>
+          <div className="mt-4 space-y-2">
+            {rows.map((item, index) => (
+              <div
+                key={`${label}-${item.row.externalDomain ?? "source"}-${item.row.externalUserId}`}
+                className="flex items-center justify-between gap-3 text-sm"
+              >
+                <span className="min-w-0 truncate text-zinc-600 dark:text-zinc-300">
+                  {index + 1}. {adminDisplayName(item.row)}
+                </span>
+                <span className="shrink-0 font-semibold tabular-nums">
+                  {format(item.value)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="mt-2 text-2xl font-semibold">нет данных</p>
+          <p className="mt-1 text-sm text-zinc-500">{caption}</p>
+        </>
+      )}
+    </article>
   );
 }
 
@@ -612,6 +715,10 @@ function FilterChip({ label }: { label: string }) {
   );
 }
 
+function adminDisplayName(row: StaffOperatorReport["rows"][number]) {
+  return row.linkedGuest?.displayName ?? `user_id ${row.externalUserId}`;
+}
+
 function AdminComparisonRow({
   row,
   rank,
@@ -620,6 +727,8 @@ function AdminComparisonRow({
   maxHours,
   maxRefunds,
   maxIncass,
+  maxBarRevenue,
+  maxHookahRevenue,
   maxMiddleCheck,
 }: {
   row: StaffOperatorReport["rows"][number];
@@ -629,9 +738,11 @@ function AdminComparisonRow({
   maxHours: number;
   maxRefunds: number;
   maxIncass: number;
+  maxBarRevenue: number;
+  maxHookahRevenue: number;
   maxMiddleCheck: number;
 }) {
-  const name = row.linkedGuest?.displayName ?? `user_id ${row.externalUserId}`;
+  const name = adminDisplayName(row);
   const subtitle = row.linkedGuest
     ? `${row.externalDomain ?? "источник"} · привязан`
     : `${row.externalDomain ?? "источник"} · без привязки`;
@@ -646,7 +757,7 @@ function AdminComparisonRow({
           <h3 className="mt-1 truncate text-base font-semibold">{name}</h3>
           <p className="mt-1 truncate text-sm text-zinc-500">{subtitle}</p>
         </div>
-        <div className="grid grid-cols-2 gap-2 text-right text-sm tabular-nums sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-lg bg-white/60 p-3 text-sm tabular-nums dark:bg-zinc-950/30 sm:grid-cols-4 lg:min-w-[460px]">
           <ComparisonPill label="Касса" value={formatRubles(row.shiftPaymentAmount)} />
           <ComparisonPill label="Смены" value={formatNumber(row.shiftsCount)} />
           <ComparisonPill label="Часы" value={`${formatNumber(row.shiftHours, 1)} ч`} />
@@ -657,6 +768,8 @@ function AdminComparisonRow({
         <ComparisonBar label="Касса" value={row.shiftPaymentAmount} max={maxCash} tone="emerald" />
         <ComparisonBar label="Смены" value={row.shiftsCount} max={maxShifts} tone="sky" />
         <ComparisonBar label="Часы" value={row.shiftHours} max={maxHours} tone="violet" />
+        <ComparisonBar label="Бар" value={row.barRevenue} max={maxBarRevenue} tone="emerald" />
+        <ComparisonBar label="Кальяны" value={row.hookahRevenue} max={maxHookahRevenue} tone="amber" />
         <ComparisonBar label="Инкассация" value={row.shiftIncassAmount} max={maxIncass} tone="zinc" />
         <ComparisonBar label="Возвраты" value={row.shiftRefundAmount} max={maxRefunds} tone="red" />
         <ComparisonBar label="Средний чек" value={row.averageShiftMiddleCheck} max={maxMiddleCheck} tone="amber" />
@@ -667,9 +780,13 @@ function AdminComparisonRow({
 
 function ComparisonPill({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md border border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950">
-      <p className="text-[11px] uppercase text-zinc-500">{label}</p>
-      <p className="mt-1 font-semibold">{value}</p>
+    <div className="min-w-0">
+      <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">
+        {label}
+      </p>
+      <p className="mt-1 truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+        {value}
+      </p>
     </div>
   );
 }

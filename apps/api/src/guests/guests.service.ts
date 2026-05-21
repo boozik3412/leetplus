@@ -211,6 +211,8 @@ export type StaffControlRow = GuestDashboardRow & {
   shiftPaymentAmount: number;
   shiftRefundAmount: number;
   shiftIncassAmount: number;
+  barRevenue: number;
+  hookahRevenue: number;
   averageShiftMiddleCheck: number;
 };
 
@@ -255,6 +257,8 @@ export type StaffUnmatchedOperatorRow = {
   shiftPaymentAmount: number;
   shiftRefundAmount: number;
   shiftIncassAmount: number;
+  barRevenue: number;
+  hookahRevenue: number;
   averageShiftMiddleCheck: number;
 };
 
@@ -328,6 +332,8 @@ export type StaffOperatorReportRow = {
   shiftPaymentAmount: number;
   shiftRefundAmount: number;
   shiftIncassAmount: number;
+  barRevenue: number;
+  hookahRevenue: number;
   averageShiftMiddleCheck: number;
 };
 
@@ -394,6 +400,8 @@ type StaffShiftMetrics = {
   shiftPaymentAmount: number;
   shiftRefundAmount: number;
   shiftIncassAmount: number;
+  barRevenue: number;
+  hookahRevenue: number;
   middleCheckSum: number;
   middleCheckCount: number;
 };
@@ -1711,7 +1719,7 @@ export class GuestsService {
     period: Period,
     storeId: string | null,
   ): Promise<StaffOperatorReportRow[]> {
-    const [rows, mappings, groupsByKey] = await Promise.all([
+    const [rows, mappings, groupsByKey, sales] = await Promise.all([
       this.prisma.guestWorkingShift.findMany({
         where: {
           tenantId,
@@ -1721,6 +1729,7 @@ export class GuestsService {
         },
         select: {
           guestId: true,
+          storeId: true,
           externalDomain: true,
           externalShiftId: true,
           externalUserId: true,
@@ -1750,6 +1759,26 @@ export class GuestsService {
         },
       }),
       this.loadGuestGroups(tenantId),
+      this.prisma.salesFact.findMany({
+        where: {
+          tenantId,
+          saleDate: { gte: period.fromDate, lte: period.toDate },
+          isCanceled: false,
+          ...(storeId ? { storeId } : {}),
+        },
+        select: {
+          storeId: true,
+          saleDate: true,
+          revenue: true,
+          productNameAtSale: true,
+          product: {
+            select: {
+              name: true,
+              category: { select: { name: true } },
+            },
+          },
+        },
+      }),
     ]);
     const mappingsByKey = new Map(
       mappings.map((mapping) => [
@@ -1812,6 +1841,61 @@ export class GuestsService {
       byOperator.set(key, metrics);
     }
 
+    const shiftsByStoreId = new Map<string, typeof rows>();
+    for (const row of rows) {
+      if (
+        !row.storeId ||
+        !row.externalUserId ||
+        !row.startedAt ||
+        !row.stoppedAt
+      ) {
+        continue;
+      }
+
+      const storeRows = shiftsByStoreId.get(row.storeId) ?? [];
+      storeRows.push(row);
+      shiftsByStoreId.set(row.storeId, storeRows);
+    }
+
+    for (const sale of sales) {
+      const saleStoreId = sale.storeId;
+      if (!saleStoreId) {
+        continue;
+      }
+
+      const matchingShift = (shiftsByStoreId.get(saleStoreId) ?? []).find(
+        (row) =>
+          row.startedAt &&
+          row.stoppedAt &&
+          sale.saleDate >= row.startedAt &&
+          sale.saleDate <= row.stoppedAt,
+      );
+      if (!matchingShift?.externalUserId) {
+        continue;
+      }
+
+      const key = this.staffOperatorKey(
+        matchingShift.externalDomain,
+        matchingShift.externalUserId,
+      );
+      const metrics = byOperator.get(key);
+      if (!metrics) {
+        continue;
+      }
+
+      const revenue = this.decimalToNumber(sale.revenue) ?? 0;
+      metrics.barRevenue += revenue;
+      if (
+        this.isHookahSale(
+          sale.productNameAtSale,
+          sale.product?.name,
+          sale.product?.category?.name,
+        )
+      ) {
+        metrics.hookahRevenue += revenue;
+      }
+    }
+
     return Array.from(byOperator.values()).map((metrics) =>
       this.toStaffOperatorReportRow(metrics),
     );
@@ -1829,6 +1913,8 @@ export class GuestsService {
       shiftPaymentAmount: 0,
       shiftRefundAmount: 0,
       shiftIncassAmount: 0,
+      barRevenue: 0,
+      hookahRevenue: 0,
       middleCheckSum: 0,
       middleCheckCount: 0,
     };
@@ -1920,6 +2006,8 @@ export class GuestsService {
       shiftPaymentAmount: this.round(metrics.shiftPaymentAmount, 2),
       shiftRefundAmount: this.round(metrics.shiftRefundAmount, 2),
       shiftIncassAmount: this.round(metrics.shiftIncassAmount, 2),
+      barRevenue: this.round(metrics.barRevenue, 2),
+      hookahRevenue: this.round(metrics.hookahRevenue, 2),
       averageShiftMiddleCheck:
         metrics.middleCheckCount > 0
           ? this.round(metrics.middleCheckSum / metrics.middleCheckCount, 2)
@@ -1949,6 +2037,8 @@ export class GuestsService {
       shiftPaymentAmount: this.round(metrics.shiftPaymentAmount, 2),
       shiftRefundAmount: this.round(metrics.shiftRefundAmount, 2),
       shiftIncassAmount: this.round(metrics.shiftIncassAmount, 2),
+      barRevenue: this.round(metrics.barRevenue, 2),
+      hookahRevenue: this.round(metrics.hookahRevenue, 2),
       averageShiftMiddleCheck:
         metrics.middleCheckCount > 0
           ? this.round(metrics.middleCheckSum / metrics.middleCheckCount, 2)
@@ -1978,6 +2068,19 @@ export class GuestsService {
       (this.decimalToNumber(row.refundsCash) ?? 0) +
       (this.decimalToNumber(row.refundsCashless) ?? 0)
     );
+  }
+
+  private isHookahSale(
+    productNameAtSale: string | null,
+    productName: string | null | undefined,
+    categoryName: string | null | undefined,
+  ) {
+    const text = [productNameAtSale, productName, categoryName]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+
+    return text.includes('кальян') || text.includes('hookah');
   }
 
   private async getStaffControlDiagnostics(
@@ -2238,6 +2341,7 @@ export class GuestsService {
       shiftPaymentAmount: this.round(shiftMetrics?.shiftPaymentAmount ?? 0, 2),
       shiftRefundAmount: this.round(shiftMetrics?.shiftRefundAmount ?? 0, 2),
       shiftIncassAmount: this.round(shiftMetrics?.shiftIncassAmount ?? 0, 2),
+      hookahRevenue: this.round(shiftMetrics?.hookahRevenue ?? 0, 2),
       averageShiftMiddleCheck:
         shiftMetrics && shiftMetrics.middleCheckCount > 0
           ? this.round(

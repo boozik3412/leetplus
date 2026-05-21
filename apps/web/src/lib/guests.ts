@@ -133,6 +133,7 @@ export type GuestListResponse = {
 export type StaffControlRow = GuestDashboardRow & {
   controlFlags: string[];
   storeNames: string[];
+  lastClosedShiftExternalShiftId: string | null;
   lastClosedShiftStartedAt: string | null;
   lastClosedShiftStoppedAt: string | null;
   shiftsCount: number;
@@ -176,6 +177,7 @@ export type StaffUnmatchedOperatorRow = {
   externalDomain: string | null;
   externalUserId: string;
   storeNames: string[];
+  lastClosedShiftExternalShiftId: string | null;
   lastClosedShiftStartedAt: string | null;
   lastClosedShiftStoppedAt: string | null;
   shiftsCount: number;
@@ -238,6 +240,7 @@ export type StaffOperatorReportRow = {
   mappingNote: string | null;
   linkedGuest: GuestDashboardRow | null;
   storeNames: string[];
+  lastClosedShiftExternalShiftId: string | null;
   lastClosedShiftStartedAt: string | null;
   lastClosedShiftStoppedAt: string | null;
   shiftsCount: number;

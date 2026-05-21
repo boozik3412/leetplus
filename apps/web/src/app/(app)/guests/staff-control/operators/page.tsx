@@ -66,6 +66,10 @@ function formatLastClosedShift(
   return `${formatShiftDateTime(startedAt)} - ${formatShiftDateTime(stoppedAt)}`;
 }
 
+function formatShiftId(value: string | null) {
+  return value ? `ID смены: ${value}` : "ID смены не определен";
+}
+
 function resolveFilters(params: Awaited<SearchParams>): StaffOperatorFilters {
   const status = searchParam(params.status);
   const sort = searchParam(params.sort);
@@ -358,10 +362,15 @@ export default async function StaffOperatorsPage({
                             : "не определены"}
                         </td>
                         <td className="px-3 py-3 align-top text-zinc-600 dark:text-zinc-300">
-                          {formatLastClosedShift(
-                            row.lastClosedShiftStartedAt,
-                            row.lastClosedShiftStoppedAt,
-                          )}
+                          <p>
+                            {formatLastClosedShift(
+                              row.lastClosedShiftStartedAt,
+                              row.lastClosedShiftStoppedAt,
+                            )}
+                          </p>
+                          <p className="mt-1 text-xs text-zinc-500">
+                            {formatShiftId(row.lastClosedShiftExternalShiftId)}
+                          </p>
                         </td>
                         <td className="px-3 py-3 text-right align-top tabular-nums">
                           {formatNumber(row.shiftsCount)}
@@ -473,6 +482,9 @@ function OperatorCard({
             row.lastClosedShiftStartedAt,
             row.lastClosedShiftStoppedAt,
           )}
+        </p>
+        <p className="mt-1 text-xs text-zinc-500">
+          {formatShiftId(row.lastClosedShiftExternalShiftId)}
         </p>
       </div>
 

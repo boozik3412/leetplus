@@ -195,6 +195,7 @@ export type GuestDetail = GuestDashboardRow & {
 export type StaffControlRow = GuestDashboardRow & {
   controlFlags: string[];
   storeNames: string[];
+  lastClosedShiftExternalShiftId: string | null;
   lastClosedShiftStartedAt: string | null;
   lastClosedShiftStoppedAt: string | null;
   shiftsCount: number;
@@ -238,6 +239,7 @@ export type StaffUnmatchedOperatorRow = {
   externalDomain: string | null;
   externalUserId: string;
   storeNames: string[];
+  lastClosedShiftExternalShiftId: string | null;
   lastClosedShiftStartedAt: string | null;
   lastClosedShiftStoppedAt: string | null;
   shiftsCount: number;
@@ -300,6 +302,7 @@ export type StaffOperatorReportRow = {
   mappingNote: string | null;
   linkedGuest: GuestDashboardRow | null;
   storeNames: string[];
+  lastClosedShiftExternalShiftId: string | null;
   lastClosedShiftStartedAt: string | null;
   lastClosedShiftStoppedAt: string | null;
   shiftsCount: number;
@@ -363,6 +366,7 @@ type GuestMetrics = {
 
 type StaffShiftMetrics = {
   storeNames: Set<string>;
+  lastClosedShiftExternalShiftId: string | null;
   lastClosedShiftStartedAt: Date | null;
   lastClosedShiftStoppedAt: Date | null;
   shiftsCount: number;
@@ -1511,6 +1515,7 @@ export class GuestsService {
       select: {
         guestId: true,
         externalDomain: true,
+        externalShiftId: true,
         externalUserId: true,
         startedAt: true,
         stoppedAt: true,
@@ -1547,6 +1552,7 @@ export class GuestsService {
 
       this.addShiftMetrics(total, {
         linked: Boolean(row.guestId),
+        externalShiftId: row.externalShiftId,
         startedAt: row.startedAt,
         stoppedAt: row.stoppedAt,
         durationMinutes: row.durationMinutes ?? 0,
@@ -1572,6 +1578,7 @@ export class GuestsService {
 
           this.addShiftMetrics(operatorMetrics, {
             linked: false,
+            externalShiftId: row.externalShiftId,
             startedAt: row.startedAt,
             stoppedAt: row.stoppedAt,
             durationMinutes: row.durationMinutes ?? 0,
@@ -1593,6 +1600,7 @@ export class GuestsService {
       }
       this.addShiftMetrics(guestMetrics, {
         linked: true,
+        externalShiftId: row.externalShiftId,
         startedAt: row.startedAt,
         stoppedAt: row.stoppedAt,
         durationMinutes: row.durationMinutes ?? 0,
@@ -1632,6 +1640,7 @@ export class GuestsService {
         select: {
           guestId: true,
           externalDomain: true,
+          externalShiftId: true,
           externalUserId: true,
           startedAt: true,
           stoppedAt: true,
@@ -1709,6 +1718,7 @@ export class GuestsService {
 
       this.addShiftMetrics(metrics, {
         linked: Boolean(metrics.linkedGuest),
+        externalShiftId: row.externalShiftId,
         startedAt: row.startedAt,
         stoppedAt: row.stoppedAt,
         durationMinutes: row.durationMinutes ?? 0,
@@ -1728,6 +1738,7 @@ export class GuestsService {
   private emptyStaffShiftMetrics(): StaffShiftMetrics {
     return {
       storeNames: new Set<string>(),
+      lastClosedShiftExternalShiftId: null,
       lastClosedShiftStartedAt: null,
       lastClosedShiftStoppedAt: null,
       shiftsCount: 0,
@@ -1745,6 +1756,7 @@ export class GuestsService {
     metrics: StaffShiftMetrics,
     values: {
       linked: boolean;
+      externalShiftId: string | null;
       startedAt: Date | null;
       stoppedAt: Date | null;
       durationMinutes: number;
@@ -1767,6 +1779,7 @@ export class GuestsService {
       (!metrics.lastClosedShiftStoppedAt ||
         values.stoppedAt > metrics.lastClosedShiftStoppedAt)
     ) {
+      metrics.lastClosedShiftExternalShiftId = values.externalShiftId;
       metrics.lastClosedShiftStartedAt = values.startedAt;
       metrics.lastClosedShiftStoppedAt = values.stoppedAt;
     }
@@ -1813,6 +1826,7 @@ export class GuestsService {
       externalDomain: metrics.externalDomain,
       externalUserId: metrics.externalUserId,
       storeNames: Array.from(metrics.storeNames).sort(),
+      lastClosedShiftExternalShiftId: metrics.lastClosedShiftExternalShiftId,
       lastClosedShiftStartedAt: this.toIsoDateTime(
         metrics.lastClosedShiftStartedAt,
       ),
@@ -1841,6 +1855,7 @@ export class GuestsService {
       mappingNote: metrics.mappingNote,
       linkedGuest: metrics.linkedGuest,
       storeNames: Array.from(metrics.storeNames).sort(),
+      lastClosedShiftExternalShiftId: metrics.lastClosedShiftExternalShiftId,
       lastClosedShiftStartedAt: this.toIsoDateTime(
         metrics.lastClosedShiftStartedAt,
       ),
@@ -2088,6 +2103,8 @@ export class GuestsService {
       ...row,
       controlFlags,
       storeNames: Array.from(shiftMetrics?.storeNames ?? []).sort(),
+      lastClosedShiftExternalShiftId:
+        shiftMetrics?.lastClosedShiftExternalShiftId ?? null,
       lastClosedShiftStartedAt: this.toIsoDateTime(
         shiftMetrics?.lastClosedShiftStartedAt ?? null,
       ),

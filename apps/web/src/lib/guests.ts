@@ -219,6 +219,41 @@ export type StaffControlReport = {
   diagnostics: StaffControlDiagnostics;
 };
 
+export type StaffOperatorSortKey =
+  | "shifts"
+  | "hours"
+  | "cash"
+  | "refunds"
+  | "incass"
+  | "middleCheck";
+
+export type StaffOperatorReportRow = {
+  externalDomain: string | null;
+  externalUserId: string;
+  mappingId: string | null;
+  mappingNote: string | null;
+  linkedGuest: GuestDashboardRow | null;
+  storeNames: string[];
+  shiftsCount: number;
+  shiftHours: number;
+  shiftPaymentAmount: number;
+  shiftRefundAmount: number;
+  shiftIncassAmount: number;
+  averageShiftMiddleCheck: number;
+};
+
+export type StaffOperatorReport = {
+  periodFrom: string;
+  periodTo: string;
+  storeId: string | null;
+  status: "all" | "linked" | "unlinked";
+  search: string | null;
+  sort: StaffOperatorSortKey;
+  direction: "asc" | "desc";
+  rows: StaffOperatorReportRow[];
+  staffOptions: GuestDashboardRow[];
+};
+
 export type GuestDetail = GuestDashboardRow & {
   crmEvents: Array<{
     id: string;
@@ -262,6 +297,13 @@ export type GuestsSummaryFilters = {
   dateTo?: string;
   storeId?: string;
   guestGroupId?: string;
+};
+
+export type StaffOperatorFilters = GuestsSummaryFilters & {
+  status?: "all" | "linked" | "unlinked";
+  search?: string;
+  sort?: StaffOperatorSortKey;
+  direction?: "asc" | "desc";
 };
 
 export async function getGuestFilterOptions(): Promise<GuestFilterOptions> {
@@ -326,6 +368,24 @@ export async function getStaffControl(
   }
 
   return response.json() as Promise<StaffControlReport>;
+}
+
+export async function getStaffOperators(
+  filters: StaffOperatorFilters = {},
+): Promise<StaffOperatorReport> {
+  const response = await fetch(
+    `${getApiUrl()}/guests/staff-control/operators${query(filters)}`,
+    {
+      cache: "no-store",
+      headers: await getAuthHeaders(),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch staff operator report");
+  }
+
+  return response.json() as Promise<StaffOperatorReport>;
 }
 
 export async function getGuest(id: string): Promise<GuestDetail> {

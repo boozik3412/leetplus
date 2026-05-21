@@ -30,6 +30,21 @@ export type GuestListQuery = GuestsSummaryQuery & {
 
 export type StaffControlQuery = GuestsSummaryQuery;
 
+export type StaffOperatorSortKey =
+  | 'shifts'
+  | 'hours'
+  | 'cash'
+  | 'refunds'
+  | 'incass'
+  | 'middleCheck';
+
+export type StaffOperatorReportQuery = GuestsSummaryQuery & {
+  status?: 'all' | 'linked' | 'unlinked';
+  search?: string;
+  sort?: StaffOperatorSortKey;
+  direction?: 'asc' | 'desc';
+};
+
 export type StaffIdentityMappingDto = {
   externalDomain?: string | null;
   externalUserId?: string | null;
@@ -274,6 +289,33 @@ export type StaffIdentityMappingResult = {
   updatedShifts: number;
 };
 
+export type StaffOperatorReportRow = {
+  externalDomain: string | null;
+  externalUserId: string;
+  mappingId: string | null;
+  mappingNote: string | null;
+  linkedGuest: GuestDashboardRow | null;
+  storeNames: string[];
+  shiftsCount: number;
+  shiftHours: number;
+  shiftPaymentAmount: number;
+  shiftRefundAmount: number;
+  shiftIncassAmount: number;
+  averageShiftMiddleCheck: number;
+};
+
+export type StaffOperatorReport = {
+  periodFrom: string;
+  periodTo: string;
+  storeId: string | null;
+  status: NonNullable<StaffOperatorReportQuery['status']>;
+  search: string | null;
+  sort: StaffOperatorSortKey;
+  direction: 'asc' | 'desc';
+  rows: StaffOperatorReportRow[];
+  staffOptions: GuestDashboardRow[];
+};
+
 export type GuestCrmUpdateDto = {
   crmStatus?: GuestCrmStatus;
   crmNote?: string | null;
@@ -329,6 +371,14 @@ type StaffUnmatchedOperatorMetrics = StaffShiftMetrics & {
   externalDomain: string | null;
   externalUserId: string;
   storeNames: Set<string>;
+};
+
+type StaffOperatorMetrics = StaffShiftMetrics & {
+  externalDomain: string | null;
+  externalUserId: string;
+  linkedGuest: GuestDashboardRow | null;
+  mappingId: string | null;
+  mappingNote: string | null;
 };
 
 type Period = {
@@ -786,6 +836,41 @@ export class GuestsService {
     };
   }
 
+  async getStaffOperators(
+    user: AuthenticatedUser,
+    query: StaffOperatorReportQuery = {},
+  ): Promise<StaffOperatorReport> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const period = this.resolvePeriod(query);
+    const storeId = await this.resolveStoreId(tenantId, query.storeId);
+    const status = this.resolveStaffOperatorStatus(query.status);
+    const search = this.normalizeText(query.search, 120);
+    const sort = this.resolveStaffOperatorSort(query.sort);
+    const direction = query.direction === 'asc' ? 'asc' : 'desc';
+    const [operatorRows, staffOptions] = await Promise.all([
+      this.buildStaffOperatorRows(tenantId, period, storeId),
+      this.loadStaffGuestOptions(tenantId, period),
+    ]);
+    const filteredRows = operatorRows
+      .filter((row) => this.matchesStaffOperatorStatus(row, status))
+      .filter((row) => this.matchesStaffOperatorSearch(row, search))
+      .sort((first, second) =>
+        this.compareStaffOperatorRows(first, second, sort, direction),
+      );
+
+    return {
+      periodFrom: period.from,
+      periodTo: period.to,
+      storeId,
+      status,
+      search,
+      sort,
+      direction,
+      rows: filteredRows,
+      staffOptions,
+    };
+  }
+
   async updateGuestCrm(
     user: AuthenticatedUser,
     id: string,
@@ -911,6 +996,42 @@ export class GuestsService {
       externalUserId: mapping.externalUserId,
       updatedShifts: updatedShifts.count,
     };
+  }
+
+  async unmapStaffIdentity(
+    user: AuthenticatedUser,
+    mappingId: string,
+  ): Promise<{ id: string; updatedShifts: number }> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const mapping = await this.prisma.guestStaffIdentityMapping.findFirst({
+      where: { id: mappingId, tenantId },
+      select: {
+        id: true,
+        guestId: true,
+        externalDomain: true,
+        externalUserId: true,
+      },
+    });
+
+    if (!mapping) {
+      throw new NotFoundException('Staff identity mapping not found');
+    }
+
+    await this.prisma.guestStaffIdentityMapping.delete({
+      where: { id: mapping.id },
+    });
+    const updatedShifts = await this.prisma.guestWorkingShift.updateMany({
+      where: {
+        tenantId,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: mapping.externalDomain || null,
+        externalUserId: mapping.externalUserId,
+        guestId: mapping.guestId,
+      },
+      data: { guestId: null },
+    });
+
+    return { id: mapping.id, updatedShifts: updatedShifts.count };
   }
 
   private async buildGuestMetrics(
@@ -1479,6 +1600,111 @@ export class GuestsService {
     return { total, byGuestId, unmatchedOperators };
   }
 
+  private async buildStaffOperatorRows(
+    tenantId: string,
+    period: Period,
+    storeId: string | null,
+  ): Promise<StaffOperatorReportRow[]> {
+    const [rows, mappings, groupsByKey] = await Promise.all([
+      this.prisma.guestWorkingShift.findMany({
+        where: {
+          tenantId,
+          startedAt: { gte: period.fromDate, lte: period.toDate },
+          ...(storeId ? { storeId } : {}),
+          externalUserId: { not: null },
+        },
+        select: {
+          guestId: true,
+          externalDomain: true,
+          externalUserId: true,
+          durationMinutes: true,
+          cashAmount: true,
+          cashlessAmount: true,
+          refundsCash: true,
+          refundsCashless: true,
+          mobilePay: true,
+          yandexPay: true,
+          incassAmount: true,
+          middleCheck: true,
+          store: { select: { name: true } },
+          guest: { select: this.guestSelect() },
+        },
+      }),
+      this.prisma.guestStaffIdentityMapping.findMany({
+        where: { tenantId, externalProvider: IntegrationProvider.LANGAME },
+        select: {
+          id: true,
+          externalDomain: true,
+          externalUserId: true,
+          note: true,
+          guest: { select: this.guestSelect() },
+        },
+      }),
+      this.loadGuestGroups(tenantId),
+    ]);
+    const mappingsByKey = new Map(
+      mappings.map((mapping) => [
+        this.staffOperatorKey(
+          mapping.externalDomain || null,
+          mapping.externalUserId,
+        ),
+        mapping,
+      ]),
+    );
+    const byOperator = new Map<string, StaffOperatorMetrics>();
+
+    for (const row of rows) {
+      if (!row.externalUserId) {
+        continue;
+      }
+
+      const key = this.staffOperatorKey(row.externalDomain, row.externalUserId);
+      const mapping = mappingsByKey.get(key);
+      const linkedGuest = mapping?.guest ?? row.guest ?? null;
+      const metrics =
+        byOperator.get(key) ??
+        this.emptyStaffOperatorMetrics(
+          row.externalDomain,
+          row.externalUserId,
+          mapping?.id ?? null,
+          mapping?.note ?? null,
+          linkedGuest
+            ? this.toDashboardRow(linkedGuest, undefined, period, groupsByKey)
+            : null,
+        );
+
+      if (!metrics.linkedGuest && linkedGuest) {
+        metrics.linkedGuest = this.toDashboardRow(
+          linkedGuest,
+          undefined,
+          period,
+          groupsByKey,
+        );
+      }
+      if (!metrics.mappingId && mapping?.id) {
+        metrics.mappingId = mapping.id;
+        metrics.mappingNote = mapping.note;
+      }
+      if (row.store?.name) {
+        metrics.storeNames.add(row.store.name);
+      }
+
+      this.addShiftMetrics(metrics, {
+        linked: Boolean(metrics.linkedGuest),
+        durationMinutes: row.durationMinutes ?? 0,
+        paymentAmount: this.shiftPaymentAmount(row),
+        refundAmount: this.shiftRefundAmount(row),
+        incassAmount: this.decimalToNumber(row.incassAmount) ?? 0,
+        middleCheck: this.decimalToNumber(row.middleCheck),
+      });
+      byOperator.set(key, metrics);
+    }
+
+    return Array.from(byOperator.values()).map((metrics) =>
+      this.toStaffOperatorReportRow(metrics),
+    );
+  }
+
   private emptyStaffShiftMetrics(): StaffShiftMetrics {
     return {
       storeNames: new Set<string>(),
@@ -1529,6 +1755,23 @@ export class GuestsService {
     };
   }
 
+  private emptyStaffOperatorMetrics(
+    externalDomain: string | null,
+    externalUserId: string,
+    mappingId: string | null,
+    mappingNote: string | null,
+    linkedGuest: GuestDashboardRow | null,
+  ): StaffOperatorMetrics {
+    return {
+      ...this.emptyStaffShiftMetrics(),
+      externalDomain,
+      externalUserId,
+      linkedGuest,
+      mappingId,
+      mappingNote,
+    };
+  }
+
   private toUnmatchedOperatorRow(
     metrics: StaffUnmatchedOperatorMetrics,
   ): StaffUnmatchedOperatorRow {
@@ -1546,6 +1789,52 @@ export class GuestsService {
           ? this.round(metrics.middleCheckSum / metrics.middleCheckCount, 2)
           : 0,
     };
+  }
+
+  private toStaffOperatorReportRow(
+    metrics: StaffOperatorMetrics,
+  ): StaffOperatorReportRow {
+    return {
+      externalDomain: metrics.externalDomain,
+      externalUserId: metrics.externalUserId,
+      mappingId: metrics.mappingId,
+      mappingNote: metrics.mappingNote,
+      linkedGuest: metrics.linkedGuest,
+      storeNames: Array.from(metrics.storeNames).sort(),
+      shiftsCount: metrics.shiftsCount,
+      shiftHours: this.round(metrics.shiftMinutes / 60, 1),
+      shiftPaymentAmount: this.round(metrics.shiftPaymentAmount, 2),
+      shiftRefundAmount: this.round(metrics.shiftRefundAmount, 2),
+      shiftIncassAmount: this.round(metrics.shiftIncassAmount, 2),
+      averageShiftMiddleCheck:
+        metrics.middleCheckCount > 0
+          ? this.round(metrics.middleCheckSum / metrics.middleCheckCount, 2)
+          : 0,
+    };
+  }
+
+  private shiftPaymentAmount(row: {
+    cashAmount: Prisma.Decimal | null;
+    cashlessAmount: Prisma.Decimal | null;
+    mobilePay: Prisma.Decimal | null;
+    yandexPay: Prisma.Decimal | null;
+  }) {
+    return (
+      (this.decimalToNumber(row.cashAmount) ?? 0) +
+      (this.decimalToNumber(row.cashlessAmount) ?? 0) +
+      (this.decimalToNumber(row.mobilePay) ?? 0) +
+      (this.decimalToNumber(row.yandexPay) ?? 0)
+    );
+  }
+
+  private shiftRefundAmount(row: {
+    refundsCash: Prisma.Decimal | null;
+    refundsCashless: Prisma.Decimal | null;
+  }) {
+    return (
+      (this.decimalToNumber(row.refundsCash) ?? 0) +
+      (this.decimalToNumber(row.refundsCashless) ?? 0)
+    );
   }
 
   private async getStaffControlDiagnostics(
@@ -1584,6 +1873,150 @@ export class GuestsService {
         };
       }),
     };
+  }
+
+  private async loadStaffGuestOptions(
+    tenantId: string,
+    period: Period,
+  ): Promise<GuestDashboardRow[]> {
+    const staffGroups = await this.loadAdminGuestGroups(tenantId);
+
+    if (staffGroups.length === 0) {
+      return [];
+    }
+
+    const [guests, groupsByKey] = await Promise.all([
+      this.prisma.guest.findMany({
+        where: {
+          tenantId,
+          OR: staffGroups.map((group) => ({
+            externalDomain: group.externalDomain,
+            externalGuestTypeId: group.externalGroupId,
+          })),
+        },
+        orderBy: [{ lastActivityAt: 'desc' }, { externalGuestId: 'asc' }],
+        select: this.guestSelect(),
+      }),
+      this.loadGuestGroups(tenantId),
+    ]);
+
+    return guests
+      .map((guest) =>
+        this.toDashboardRow(guest, undefined, period, groupsByKey),
+      )
+      .sort((first, second) =>
+        first.displayName.localeCompare(second.displayName),
+      );
+  }
+
+  private resolveStaffOperatorStatus(
+    value: StaffOperatorReportQuery['status'],
+  ) {
+    if (value === 'linked' || value === 'unlinked') {
+      return value;
+    }
+
+    return 'all';
+  }
+
+  private resolveStaffOperatorSort(value: StaffOperatorReportQuery['sort']) {
+    const allowed: StaffOperatorSortKey[] = [
+      'shifts',
+      'hours',
+      'cash',
+      'refunds',
+      'incass',
+      'middleCheck',
+    ];
+
+    return value && allowed.includes(value) ? value : 'cash';
+  }
+
+  private matchesStaffOperatorStatus(
+    row: StaffOperatorReportRow,
+    status: NonNullable<StaffOperatorReportQuery['status']>,
+  ) {
+    if (status === 'linked') {
+      return Boolean(row.linkedGuest);
+    }
+
+    if (status === 'unlinked') {
+      return !row.linkedGuest;
+    }
+
+    return true;
+  }
+
+  private matchesStaffOperatorSearch(
+    row: StaffOperatorReportRow,
+    search: string | null,
+  ) {
+    if (!search) {
+      return true;
+    }
+
+    const needle = search.toLocaleLowerCase('ru-RU');
+    const haystack = [
+      row.externalDomain,
+      row.externalUserId,
+      row.mappingNote,
+      row.linkedGuest?.displayName,
+      row.linkedGuest?.externalGuestId,
+      row.linkedGuest?.guestGroupName,
+      ...row.storeNames,
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLocaleLowerCase('ru-RU');
+
+    return haystack.includes(needle);
+  }
+
+  private compareStaffOperatorRows(
+    first: StaffOperatorReportRow,
+    second: StaffOperatorReportRow,
+    sort: StaffOperatorSortKey,
+    direction: 'asc' | 'desc',
+  ) {
+    const multiplier = direction === 'asc' ? 1 : -1;
+    const difference =
+      this.staffOperatorSortValue(first, sort) -
+      this.staffOperatorSortValue(second, sort);
+
+    if (difference !== 0) {
+      return difference * multiplier;
+    }
+
+    return (
+      first.externalUserId.localeCompare(second.externalUserId) * multiplier
+    );
+  }
+
+  private staffOperatorSortValue(
+    row: StaffOperatorReportRow,
+    sort: StaffOperatorSortKey,
+  ) {
+    switch (sort) {
+      case 'shifts':
+        return row.shiftsCount;
+      case 'hours':
+        return row.shiftHours;
+      case 'refunds':
+        return row.shiftRefundAmount;
+      case 'incass':
+        return row.shiftIncassAmount;
+      case 'middleCheck':
+        return row.averageShiftMiddleCheck;
+      case 'cash':
+        return row.shiftPaymentAmount;
+    }
+  }
+
+  private staffOperatorKey(
+    externalDomain: string | null,
+    externalUserId: string,
+  ) {
+    return `${externalDomain ?? ''}:${externalUserId}`;
   }
 
   private toStaffControlRow(

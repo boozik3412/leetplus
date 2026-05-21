@@ -165,6 +165,7 @@ Status: MVP 1 read-only guest analytics is live in production. Automatic rewards
 - Done: `working_shifts/list` is persisted as tenant-scoped shift facts and linked to staff guests through `user_id` when it matches a LAngame guest id; `/guests/staff-control` now shows shift counts, linked shifts, shift hours, shift payment amount, refunds, incassation, and middle check.
 - Done: `/guests/staff-control` now exposes unmatched LAngame operators grouped by `externalDomain + user_id` with shift hours, payments, refunds, incassation, middle check, and store list.
 - Done: staff identity mapping v1 adds a tenant-scoped manual link from `working_shifts.user_id` to a staff guest, backfills already loaded shifts, and applies the mapping during future guest foundation sync runs.
+- Done: `/guests/staff-control/operators` opens the full LAngame operator report with period/club/status/search/sort filters plus link/unlink tools for staff identity mappings.
 - Done: PC context is pulled from LAngame `global/types_of_pc_in_clubs/list` + `global/linking_pc_by_type/list`, stored on `Store.computerCount`, and used for network/club load percent.
 - Done: guest summary can backfill missing PC counts on demand when `Store.computerCount` is empty.
 - Done: `/sync` now lives in a separate `Управление` navigation block, retries LAngame date endpoints with `дд.мм.гггг` after `400`, shows compact latest sync job per source, and automatically marks stale guest `RUNNING` sync runs older than 2 hours as failed.

@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -23,6 +24,8 @@ import {
   type GuestListResponse,
   type StaffIdentityMappingDto,
   type StaffIdentityMappingResult,
+  type StaffOperatorReport,
+  type StaffOperatorReportQuery,
   type StaffControlQuery,
   type StaffControlReport,
   type GuestsSummary,
@@ -66,12 +69,28 @@ export class GuestsController {
     return this.guestsService.getStaffControl(user, query);
   }
 
+  @Get('staff-control/operators')
+  getStaffOperators(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: StaffOperatorReportQuery,
+  ): Promise<StaffOperatorReport> {
+    return this.guestsService.getStaffOperators(user, query);
+  }
+
   @Post('staff-control/identity-mappings')
   mapStaffIdentity(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: StaffIdentityMappingDto,
   ): Promise<StaffIdentityMappingResult> {
     return this.guestsService.mapStaffIdentity(user, dto);
+  }
+
+  @Delete('staff-control/identity-mappings/:id')
+  unmapStaffIdentity(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<{ id: string; updatedShifts: number }> {
+    return this.guestsService.unmapStaffIdentity(user, id);
   }
 
   @Get(':id')

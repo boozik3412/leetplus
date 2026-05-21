@@ -15,12 +15,14 @@ type StaffIdentityMappingFormProps = {
   externalDomain: string | null;
   externalUserId: string;
   staffOptions: StaffIdentityOption[];
+  mappingId?: string | null;
 };
 
 export function StaffIdentityMappingForm({
   externalDomain,
   externalUserId,
   staffOptions,
+  mappingId = null,
 }: StaffIdentityMappingFormProps) {
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
@@ -61,6 +63,36 @@ export function StaffIdentityMappingForm({
     }
   }
 
+  async function unlink() {
+    if (!mappingId) {
+      return;
+    }
+
+    setIsSaving(true);
+    setError(null);
+
+    try {
+      const response = await fetch(
+        `/api/guests/staff-control/identity-mappings/${mappingId}`,
+        { method: "DELETE" },
+      );
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as {
+          message?: string;
+        } | null;
+        setError(payload?.message ?? "Не удалось снять привязку");
+        return;
+      }
+
+      router.refresh();
+    } catch {
+      setError("Не удалось снять привязку");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   return (
     <form action={submit} className="grid min-w-[260px] gap-2">
       <select
@@ -92,6 +124,16 @@ export function StaffIdentityMappingForm({
         {isSaving ? "Сохраняю..." : "Привязать"}
       </button>
       {error ? <p className="text-xs text-red-600">{error}</p> : null}
+      {mappingId ? (
+        <button
+          type="button"
+          onClick={unlink}
+          disabled={isSaving}
+          className="h-9 rounded-md border border-red-200 px-3 text-xs font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/70 dark:text-red-300 dark:hover:bg-red-950/40"
+        >
+          Отвязать
+        </button>
+      ) : null}
     </form>
   );
 }

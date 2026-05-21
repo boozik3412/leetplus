@@ -783,13 +783,23 @@ function UnmatchedOperatorsPanel({ report }: { report: StaffControlReport }) {
   return (
     <section className="mt-6 min-w-0 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
       <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
-        <h2 className="text-base font-semibold">
-          Операторы LAngame без привязки
-        </h2>
-        <p className="mt-1 text-sm text-zinc-500">
-          Смены уже сохранены по user_id, но эти ID пока не сопоставлены с
-          админ-гостями LeetPlus.
-        </p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-base font-semibold">
+              Операторы LAngame без привязки
+            </h2>
+            <p className="mt-1 text-sm text-zinc-500">
+              Смены уже сохранены по user_id, но эти ID пока не сопоставлены с
+              админ-гостями LeetPlus.
+            </p>
+          </div>
+          <Link
+            href={`/guests/staff-control/operators?dateFrom=${report.periodFrom}&dateTo=${report.periodTo}${report.storeId ? `&storeId=${report.storeId}` : ""}`}
+            className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+          >
+            Открыть полный отчет
+          </Link>
+        </div>
       </div>
       {rows.length > 0 ? (
         <div className="w-full overflow-x-auto">

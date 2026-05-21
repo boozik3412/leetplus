@@ -1066,12 +1066,17 @@ export class GuestsService {
         where: {
           tenantId,
           guest: { is: guestWhere },
-          startedAt: { gte: period.activityFromDate, lte: period.toDate },
+          startedAt: { lte: period.toDate },
+          OR: [
+            { stoppedAt: null },
+            { stoppedAt: { gte: period.activityFromDate } },
+          ],
           ...storeWhere,
         },
         select: {
           guestId: true,
           startedAt: true,
+          stoppedAt: true,
           durationMinutes: true,
         },
       }),
@@ -1105,17 +1110,51 @@ export class GuestsService {
     ]);
     const metricsByGuestId = new Map<string, GuestMetrics>();
 
+    const now = new Date();
+
     for (const session of sessions) {
       if (!session.guestId || !session.startedAt) {
         continue;
       }
       const metrics = this.ensureMetrics(metricsByGuestId, session.guestId);
-      this.applyLatest(metrics, session.startedAt);
+      this.applyLatest(
+        metrics,
+        this.sessionActivityAt(
+          session.startedAt,
+          session.stoppedAt,
+          session.durationMinutes,
+          now,
+        ),
+      );
 
-      if (session.startedAt >= period.fromDate) {
+      if (
+        this.sessionOverlapsPeriod(
+          session.startedAt,
+          session.stoppedAt,
+          session.durationMinutes,
+          period.fromDate,
+          period.toDate,
+          now,
+        )
+      ) {
         metrics.sessionsCount += 1;
-        metrics.visitsDays.add(this.toIsoDate(session.startedAt));
-        metrics.playMinutes += session.durationMinutes ?? 0;
+        this.addOverlapVisitDays(
+          metrics.visitsDays,
+          session.startedAt,
+          session.stoppedAt,
+          session.durationMinutes,
+          period.fromDate,
+          period.toDate,
+          now,
+        );
+        metrics.playMinutes += this.sessionOverlapMinutes(
+          session.startedAt,
+          session.stoppedAt,
+          session.durationMinutes,
+          period.fromDate,
+          period.toDate,
+          now,
+        );
       }
     }
 
@@ -1222,10 +1261,16 @@ export class GuestsService {
         where: {
           tenantId,
           guest: { is: guestWhere },
-          startedAt: { gte: period.fromDate, lte: period.toDate },
+          startedAt: { lte: period.toDate },
+          OR: [{ stoppedAt: null }, { stoppedAt: { gte: period.fromDate } }],
           ...storeWhere,
         },
-        select: { guestId: true, startedAt: true },
+        select: {
+          guestId: true,
+          startedAt: true,
+          stoppedAt: true,
+          durationMinutes: true,
+        },
       }),
       this.prisma.salesFact.findMany({
         where: {
@@ -1251,17 +1296,27 @@ export class GuestsService {
       });
     }
 
+    const now = new Date();
+
     for (const session of sessions) {
       if (!session.startedAt || !session.guestId) {
         continue;
       }
-      const day = this.toIsoDate(session.startedAt);
-      const row = trend.get(day);
-      if (!row) {
-        continue;
+      for (const day of this.overlapVisitDays(
+        session.startedAt,
+        session.stoppedAt,
+        session.durationMinutes,
+        period.fromDate,
+        period.toDate,
+        now,
+      )) {
+        const row = trend.get(day);
+        if (!row) {
+          continue;
+        }
+        row.sessionsCount += 1;
+        row.activeGuestIds.add(session.guestId);
       }
-      row.sessionsCount += 1;
-      row.activeGuestIds.add(session.guestId);
     }
 
     for (const sale of sales) {
@@ -2554,6 +2609,146 @@ export class GuestsService {
     }
 
     metrics.latestActivityAt = this.maxDate(metrics.latestActivityAt, value);
+  }
+
+  private sessionActivityAt(
+    startedAt: Date,
+    stoppedAt: Date | null,
+    durationMinutes: number | null,
+    now: Date,
+  ) {
+    return this.effectiveSessionStoppedAt(
+      startedAt,
+      stoppedAt,
+      durationMinutes,
+      now,
+    );
+  }
+
+  private sessionOverlapsPeriod(
+    startedAt: Date,
+    stoppedAt: Date | null,
+    durationMinutes: number | null,
+    periodFrom: Date,
+    periodTo: Date,
+    now: Date,
+  ) {
+    const effectiveStoppedAt = this.effectiveSessionStoppedAt(
+      startedAt,
+      stoppedAt,
+      durationMinutes,
+      now,
+    );
+
+    return startedAt <= periodTo && effectiveStoppedAt > periodFrom;
+  }
+
+  private sessionOverlapMinutes(
+    startedAt: Date,
+    stoppedAt: Date | null,
+    durationMinutes: number | null,
+    periodFrom: Date,
+    periodTo: Date,
+    now: Date,
+  ) {
+    const effectiveStoppedAt = this.effectiveSessionStoppedAt(
+      startedAt,
+      stoppedAt,
+      durationMinutes,
+      now,
+    );
+    const overlapFrom = startedAt > periodFrom ? startedAt : periodFrom;
+    const overlapTo =
+      effectiveStoppedAt < periodTo ? effectiveStoppedAt : periodTo;
+    const minutes = Math.floor(
+      (overlapTo.getTime() - overlapFrom.getTime()) / 60000,
+    );
+
+    return Math.max(0, minutes);
+  }
+
+  private addOverlapVisitDays(
+    days: Set<string>,
+    startedAt: Date,
+    stoppedAt: Date | null,
+    durationMinutes: number | null,
+    periodFrom: Date,
+    periodTo: Date,
+    now: Date,
+  ) {
+    for (const day of this.overlapVisitDays(
+      startedAt,
+      stoppedAt,
+      durationMinutes,
+      periodFrom,
+      periodTo,
+      now,
+    )) {
+      days.add(day);
+    }
+  }
+
+  private overlapVisitDays(
+    startedAt: Date,
+    stoppedAt: Date | null,
+    durationMinutes: number | null,
+    periodFrom: Date,
+    periodTo: Date,
+    now: Date,
+  ) {
+    if (
+      !this.sessionOverlapsPeriod(
+        startedAt,
+        stoppedAt,
+        durationMinutes,
+        periodFrom,
+        periodTo,
+        now,
+      )
+    ) {
+      return [];
+    }
+
+    const effectiveStoppedAt = this.effectiveSessionStoppedAt(
+      startedAt,
+      stoppedAt,
+      durationMinutes,
+      now,
+    );
+    const from = this.startOfUtcDay(
+      startedAt > periodFrom ? startedAt : periodFrom,
+    );
+    const to = this.startOfUtcDay(
+      effectiveStoppedAt < periodTo ? effectiveStoppedAt : periodTo,
+    );
+    const days: string[] = [];
+
+    for (
+      const cursor = new Date(from);
+      cursor <= to;
+      cursor.setUTCDate(cursor.getUTCDate() + 1)
+    ) {
+      days.push(this.toIsoDate(cursor));
+    }
+
+    return days;
+  }
+
+  private effectiveSessionStoppedAt(
+    startedAt: Date,
+    stoppedAt: Date | null,
+    durationMinutes: number | null,
+    now: Date,
+  ) {
+    if (stoppedAt && stoppedAt >= startedAt) {
+      return stoppedAt;
+    }
+
+    if (durationMinutes && durationMinutes > 0) {
+      return new Date(startedAt.getTime() + durationMinutes * 60000);
+    }
+
+    return now > startedAt ? now : startedAt;
   }
 
   private maxDate(first: Date | null, second: Date | null) {

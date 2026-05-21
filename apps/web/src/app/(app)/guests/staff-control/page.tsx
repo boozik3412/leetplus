@@ -211,10 +211,11 @@ export default async function StaffControlPage({
               Контроль персонала
             </h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-              Первый срез по группам администраторов за период{" "}
+              Рабочий экран руководителя смен и управляющего: быстро увидеть
+              кассовые риски, длинные смены, неподвязанных операторов и перейти
+              в полный отчет только там, где нужно разбираться. Период{" "}
               {formatPeriodDate(report.periodFrom)} -{" "}
-              {formatPeriodDate(report.periodTo)}. Клиентская аналитика считает
-              гостей без этих групп, а здесь они вынесены отдельно.
+              {formatPeriodDate(report.periodTo)}.
             </p>
           </div>
           <Link
@@ -296,6 +297,8 @@ export default async function StaffControlPage({
           />
         </section>
 
+        <ReportPurposePanel report={report} filters={filters} controls={staffControls} />
+
         <AnomaliesPanel report={report} filters={filters} />
 
         <section className="mt-6 grid min-w-0 gap-6 2xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.45fr)]">
@@ -338,6 +341,110 @@ function KpiCard({
   );
 }
 
+function ReportPurposePanel({
+  report,
+  filters,
+  controls,
+}: {
+  report: StaffControlReport;
+  filters: GuestsSummaryFilters;
+  controls: StaffTableControls;
+}) {
+  const periodQuery = `dateFrom=${report.periodFrom}&dateTo=${report.periodTo}${
+    report.storeId ? `&storeId=${report.storeId}` : ""
+  }`;
+
+  return (
+    <section className="mt-6 grid gap-4 xl:grid-cols-3">
+      <PurposeCard
+        label="1. Что требует внимания"
+        title="Контроль смен"
+        description="Автоматические сигналы по кассе, возвратам, инкассации, длинным сменам и низкому среднему чеку. Это первый блок для ежедневной проверки."
+        href={staffOperatorsHref(report, filters)}
+        action="Разобрать сигналы"
+        meta={`${formatNumber(report.anomalies.length)} типов сигналов`}
+      />
+      <PurposeCard
+        label="2. Кого проверять"
+        title="Сотрудники и операторы"
+        description="Список администраторов и user_id из Langame. Здесь видно, кто работает в сменах, кто приносит кассу и какие операторы еще не сопоставлены с сотрудниками."
+        href={staffAdminsHref(report, filters, controls)}
+        action="Открыть сотрудников"
+        meta={`${formatNumber(report.unmatchedOperators.length)} без привязки`}
+      />
+      <PurposeCard
+        label="3. На чем основаны выводы"
+        title="Первичные источники"
+        description="Операционный журнал и диагностика показывают, какие данные реально пришли из Langame и где пока не хватает надежной связки с администратором."
+        href={`/guests/staff-control/operations?${periodQuery}`}
+        secondaryHref={`/guests/staff-control/diagnostics?${periodQuery}`}
+        action="Открыть операции"
+        secondaryAction="Диагностика"
+        meta={`${formatNumber(report.operationLogsCount)} операций`}
+      />
+    </section>
+  );
+}
+
+function PurposeCard({
+  label,
+  title,
+  description,
+  href,
+  action,
+  meta,
+  secondaryHref,
+  secondaryAction,
+}: {
+  label: string;
+  title: string;
+  description: string;
+  href: string;
+  action: string;
+  meta: string;
+  secondaryHref?: string;
+  secondaryAction?: string;
+}) {
+  return (
+    <article className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <p className="text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-300">
+        {label}
+      </p>
+      <div className="mt-3 flex min-w-0 items-start justify-between gap-3">
+        <h2 className="text-lg font-semibold text-zinc-950 dark:text-zinc-50">
+          {title}
+        </h2>
+        <span className="shrink-0 rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
+          {meta}
+        </span>
+      </div>
+      <p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+        {description}
+      </p>
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Link
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex h-10 items-center justify-center rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
+        >
+          {action}
+        </Link>
+        {secondaryHref && secondaryAction ? (
+          <Link
+            href={secondaryHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+          >
+            {secondaryAction}
+          </Link>
+        ) : null}
+      </div>
+    </article>
+  );
+}
+
 function AnomaliesPanel({
   report,
   filters,
@@ -351,10 +458,14 @@ function AnomaliesPanel({
     <section className="mt-6 rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
       <div className="flex flex-col gap-3 border-b border-zinc-200 px-5 py-4 dark:border-zinc-800 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-base font-semibold">Аномалии смен</h2>
+          <p className="text-xs font-semibold uppercase text-zinc-500">
+            Блок 1
+          </p>
+          <h2 className="mt-1 text-base font-semibold">Сигналы для проверки смен</h2>
           <p className="mt-1 text-sm text-zinc-500">
-            Первый автоматический скрининг возвратов, инкассации, длинных смен
-            и операторов без привязки.
+            Не полный журнал, а список поводов для управленческой проверки:
+            возвраты, касса без инкассации, длинные смены, низкий средний чек и
+            операторы без привязки.
           </p>
         </div>
         <Link
@@ -528,12 +639,19 @@ function StaffTable({
       <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
-            <h2 className="text-base font-semibold">Администраторы</h2>
+            <p className="text-xs font-semibold uppercase text-zinc-500">
+              Блок 2
+            </p>
+            <h2 className="mt-1 text-base font-semibold">
+              Сотрудники и операторы
+            </h2>
             <p className="mt-1 text-sm text-zinc-500">
-              Группы:{" "}
+              Кто попал в контроль персонала: администраторы из групп{" "}
               {report.staffGroups.length > 0
                 ? report.staffGroups.map((group) => group.name).join(", ")
                 : "не найдены"}
+              . Непривязанные user_id Langame добавлены отдельно, чтобы их
+              можно было сопоставить с реальными сотрудниками.
             </p>
           </div>
           <p className="text-sm text-zinc-500">
@@ -551,9 +669,9 @@ function StaffTable({
         </div>
         {report.unmatchedOperators.length > 0 ? (
           <p className="mt-3 text-sm text-amber-600 dark:text-amber-300">
-            В таблицу добавлены операторы Langame без привязки:{" "}
-            {formatNumber(report.unmatchedOperators.length)}. Их смены видны,
-            но сотрудника нужно сопоставить отдельно.
+            Нужно сопоставить операторов Langame без привязки:{" "}
+            {formatNumber(report.unmatchedOperators.length)}. До привязки их
+            смены и касса видны по user_id, но не по имени сотрудника.
           </p>
         ) : null}
       </div>
@@ -947,9 +1065,16 @@ function OperationsPanel({ report }: { report: StaffControlReport }) {
       <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h2 className="text-base font-semibold">Операционный журнал</h2>
+            <p className="text-xs font-semibold uppercase text-zinc-500">
+              Блок 3
+            </p>
+            <h2 className="mt-1 text-base font-semibold">
+              Операционный журнал
+            </h2>
             <p className="mt-1 text-sm text-zinc-500">
-              Краткий срез all_operations_log по типам операций.
+              Агрегат по all_operations_log: какие типы операций происходили и
+              на какую сумму. Сейчас это источник для сверки, а не персональная
+              оценка сотрудника.
             </p>
           </div>
           <Link
@@ -1011,8 +1136,9 @@ function UnmatchedOperatorsPanel({ report }: { report: StaffControlReport }) {
               Операторы Langame без привязки
             </h2>
             <p className="mt-1 text-sm text-zinc-500">
-              Смены уже сохранены по user_id, но эти ID пока не сопоставлены с
-              админ-гостями LeetPlus.
+              Рабочий список для настройки учета персонала. После привязки
+              user_id к сотруднику смены начнут попадать в персональные отчеты
+              администратора.
             </p>
           </div>
           <Link
@@ -1118,7 +1244,9 @@ function DiagnosticsPanel({ report }: { report: StaffControlReport }) {
               Диагностика связки персонала
             </h2>
             <p className="mt-1 text-sm text-zinc-500">
-              Краткий срез источников и найденных полей.
+              Техническая проверка качества данных Langame: какие endpoints
+              отдали строки и какие поля похожи на идентификаторы оператора.
+              Нужна для развития точного контроля персонала.
             </p>
           </div>
           <Link

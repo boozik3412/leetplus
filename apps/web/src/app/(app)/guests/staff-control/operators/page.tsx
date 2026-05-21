@@ -29,7 +29,7 @@ const anomalyLabels: Record<
 > = {
   refunds: {
     title: "Возвраты по сменам",
-    description: "Операторы, у которых за период есть возвраты.",
+    description: "Администраторы, у которых за период есть возвраты.",
   },
   "missing-incassation": {
     title: "Касса без инкассации",
@@ -44,7 +44,7 @@ const anomalyLabels: Record<
     description: "Средний чек ниже 100 руб при кассе от 5 000 руб.",
   },
   "unmapped-operator": {
-    title: "Операторы без привязки",
+    title: "user_id без привязки",
     description: "Не привязанные user_id с кассой от 10 000 руб.",
   },
 };
@@ -192,7 +192,7 @@ export default async function StaffOperatorsPage({
     <main className="px-4 py-6 text-zinc-950 dark:text-zinc-100 sm:px-6 sm:py-8">
       <div className="mx-auto max-w-[100rem]">
         <ReportBreadcrumbs
-          current="Операторы Langame"
+          current="Администраторы"
           items={[
             { href: "/dashboard", label: "Дашборд" },
             { href: "/guests/staff-control", label: "Контроль персонала" },
@@ -204,13 +204,13 @@ export default async function StaffOperatorsPage({
               Персонал
             </p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight">
-              Операторы Langame
+              Сравнение администраторов
             </h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-              Полный отчет по `working_shifts.user_id` за период{" "}
+              Инфографика по администраторам и связанным user_id Langame за период{" "}
               {formatPeriodDate(report.periodFrom)} -{" "}
-              {formatPeriodDate(report.periodTo)}: привязка к сотрудникам,
-              смены, касса, возвраты и инкассация.
+              {formatPeriodDate(report.periodTo)}: смены, часы, касса,
+              возвраты, инкассация и средний чек для сравнения между собой.
             </p>
           </div>
           <div className="grid w-full gap-2 sm:grid-cols-2 xl:w-auto xl:shrink-0 xl:flex xl:justify-end">
@@ -329,7 +329,7 @@ export default async function StaffOperatorsPage({
               <input
                 name="search"
                 defaultValue={filters.search ?? ""}
-                placeholder="user_id, сотрудник, клуб"
+                placeholder="администратор, user_id, клуб"
                 className="h-10 rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
               />
             </div>
@@ -349,10 +349,12 @@ export default async function StaffOperatorsPage({
           ) : null}
         </section>
 
+        <AdminComparisonPanel report={report} />
+
         <section className="mt-6 min-w-0 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
           <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
             <h2 className="text-base font-semibold">
-              Операторы: {formatNumber(report.rows.length)}
+              Администраторы: {formatNumber(report.rows.length)}
             </h2>
           </div>
           {report.rows.length > 0 ? (
@@ -383,7 +385,7 @@ export default async function StaffOperatorsPage({
                 <thead className="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900/60">
                   <tr>
                     <th className="px-3 py-3 text-left font-semibold">
-                      Оператор
+                      Администратор
                     </th>
                     <th className="px-3 py-3 text-left font-semibold">
                       Сотрудник
@@ -494,12 +496,269 @@ export default async function StaffOperatorsPage({
             </>
           ) : (
             <p className="px-5 py-6 text-sm text-zinc-500">
-              Операторов по выбранным условиям не найдено.
+              Администраторов по выбранным условиям не найдено.
             </p>
           )}
         </section>
       </div>
     </main>
+  );
+}
+
+function AdminComparisonPanel({ report }: { report: StaffOperatorReport }) {
+  const rows = report.rows;
+  const linkedCount = rows.filter((row) => row.linkedGuest).length;
+  const totalCash = rows.reduce((sum, row) => sum + row.shiftPaymentAmount, 0);
+  const totalRefunds = rows.reduce((sum, row) => sum + row.shiftRefundAmount, 0);
+  const totalIncass = rows.reduce((sum, row) => sum + row.shiftIncassAmount, 0);
+  const totalShifts = rows.reduce((sum, row) => sum + row.shiftsCount, 0);
+  const totalHours = rows.reduce((sum, row) => sum + row.shiftHours, 0);
+  const avgChecks = rows
+    .map((row) => row.averageShiftMiddleCheck)
+    .filter((value) => value > 0);
+  const averageCheck =
+    avgChecks.length > 0
+      ? avgChecks.reduce((sum, value) => sum + value, 0) / avgChecks.length
+      : 0;
+  const maxCash = Math.max(1, ...rows.map((row) => row.shiftPaymentAmount));
+  const maxShifts = Math.max(1, ...rows.map((row) => row.shiftsCount));
+  const maxHours = Math.max(1, ...rows.map((row) => row.shiftHours));
+  const maxRefunds = Math.max(1, ...rows.map((row) => row.shiftRefundAmount));
+  const maxIncass = Math.max(1, ...rows.map((row) => row.shiftIncassAmount));
+  const maxMiddleCheck = Math.max(
+    1,
+    ...rows.map((row) => row.averageShiftMiddleCheck),
+  );
+  const topCash = [...rows]
+    .sort((first, second) => second.shiftPaymentAmount - first.shiftPaymentAmount)
+    .slice(0, 5);
+  const riskyRows = [...rows]
+    .sort(
+      (first, second) =>
+        second.shiftRefundAmount - first.shiftRefundAmount ||
+        first.averageShiftMiddleCheck - second.averageShiftMiddleCheck,
+    )
+    .slice(0, 5);
+
+  return (
+    <section className="mt-6 rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
+        <p className="text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-300">
+          Инфографика
+        </p>
+        <h2 className="mt-1 text-xl font-semibold">
+          Сравнение администраторов между собой
+        </h2>
+        <p className="mt-2 max-w-4xl text-sm leading-6 text-zinc-500">
+          Полосы показывают долю администратора относительно максимального
+          значения в текущей выборке. Так проще увидеть, кто дает основную
+          кассу, у кого больше смен, где заметны возвраты или низкий средний
+          чек.
+        </p>
+      </div>
+
+      <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-5">
+        <InfographicMetric label="Администраторы" value={formatNumber(rows.length)} caption={`${formatNumber(linkedCount)} привязаны`} />
+        <InfographicMetric label="Касса" value={formatRubles(totalCash)} caption={`${formatNumber(totalShifts)} смен`} />
+        <InfographicMetric label="Часы" value={`${formatNumber(totalHours, 1)} ч`} caption="по закрытым сменам" />
+        <InfographicMetric label="Средний чек" value={formatRubles(averageCheck)} caption="среднее по администраторам" />
+        <InfographicMetric label="Возвраты" value={formatRubles(totalRefunds)} caption={`инкассация ${formatRubles(totalIncass)}`} />
+      </div>
+
+      {rows.length > 0 ? (
+        <div className="grid gap-4 border-t border-zinc-200 p-4 dark:border-zinc-800 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.42fr)]">
+          <div className="min-w-0 space-y-3">
+            {rows.map((row, index) => (
+              <AdminComparisonRow
+                key={`${row.externalDomain ?? "source"}-${row.externalUserId}`}
+                row={row}
+                rank={index + 1}
+                maxCash={maxCash}
+                maxShifts={maxShifts}
+                maxHours={maxHours}
+                maxRefunds={maxRefunds}
+                maxIncass={maxIncass}
+                maxMiddleCheck={maxMiddleCheck}
+              />
+            ))}
+          </div>
+          <aside className="space-y-4">
+            <MiniRanking
+              title="Лидеры по кассе"
+              rows={topCash}
+              value={(row) => formatRubles(row.shiftPaymentAmount)}
+            />
+            <MiniRanking
+              title="Требуют внимания"
+              rows={riskyRows}
+              value={(row) =>
+                `${formatRubles(row.shiftRefundAmount)} возвратов, ср. чек ${formatRubles(row.averageShiftMiddleCheck)}`
+              }
+            />
+          </aside>
+        </div>
+      ) : (
+        <p className="border-t border-zinc-200 px-5 py-6 text-sm text-zinc-500 dark:border-zinc-800">
+          Для инфографики нет строк по выбранным условиям.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function InfographicMetric({
+  label,
+  value,
+  caption,
+}: {
+  label: string;
+  value: string;
+  caption: string;
+}) {
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40">
+      <p className="text-xs font-semibold uppercase text-zinc-500">{label}</p>
+      <p className="mt-2 text-2xl font-semibold tabular-nums">{value}</p>
+      <p className="mt-1 text-sm text-zinc-500">{caption}</p>
+    </div>
+  );
+}
+
+function AdminComparisonRow({
+  row,
+  rank,
+  maxCash,
+  maxShifts,
+  maxHours,
+  maxRefunds,
+  maxIncass,
+  maxMiddleCheck,
+}: {
+  row: StaffOperatorReport["rows"][number];
+  rank: number;
+  maxCash: number;
+  maxShifts: number;
+  maxHours: number;
+  maxRefunds: number;
+  maxIncass: number;
+  maxMiddleCheck: number;
+}) {
+  const name = row.linkedGuest?.displayName ?? `user_id ${row.externalUserId}`;
+  const subtitle = row.linkedGuest
+    ? `${row.externalDomain ?? "источник"} · привязан`
+    : `${row.externalDomain ?? "источник"} · без привязки`;
+
+  return (
+    <article className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase text-zinc-500">
+            #{rank}
+          </p>
+          <h3 className="mt-1 truncate text-base font-semibold">{name}</h3>
+          <p className="mt-1 truncate text-sm text-zinc-500">{subtitle}</p>
+        </div>
+        <div className="grid grid-cols-2 gap-2 text-right text-sm tabular-nums sm:grid-cols-4">
+          <ComparisonPill label="Касса" value={formatRubles(row.shiftPaymentAmount)} />
+          <ComparisonPill label="Смены" value={formatNumber(row.shiftsCount)} />
+          <ComparisonPill label="Часы" value={`${formatNumber(row.shiftHours, 1)} ч`} />
+          <ComparisonPill label="Ср. чек" value={formatRubles(row.averageShiftMiddleCheck)} />
+        </div>
+      </div>
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        <ComparisonBar label="Касса" value={row.shiftPaymentAmount} max={maxCash} tone="emerald" />
+        <ComparisonBar label="Смены" value={row.shiftsCount} max={maxShifts} tone="sky" />
+        <ComparisonBar label="Часы" value={row.shiftHours} max={maxHours} tone="violet" />
+        <ComparisonBar label="Инкассация" value={row.shiftIncassAmount} max={maxIncass} tone="zinc" />
+        <ComparisonBar label="Возвраты" value={row.shiftRefundAmount} max={maxRefunds} tone="red" />
+        <ComparisonBar label="Средний чек" value={row.averageShiftMiddleCheck} max={maxMiddleCheck} tone="amber" />
+      </div>
+    </article>
+  );
+}
+
+function ComparisonPill({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950">
+      <p className="text-[11px] uppercase text-zinc-500">{label}</p>
+      <p className="mt-1 font-semibold">{value}</p>
+    </div>
+  );
+}
+
+function ComparisonBar({
+  label,
+  value,
+  max,
+  tone,
+}: {
+  label: string;
+  value: number;
+  max: number;
+  tone: "emerald" | "sky" | "violet" | "amber" | "red" | "zinc";
+}) {
+  const width = Math.max(3, Math.min(100, (value / max) * 100));
+  const colors = {
+    emerald: "bg-emerald-400",
+    sky: "bg-sky-400",
+    violet: "bg-violet-400",
+    amber: "bg-amber-400",
+    red: "bg-red-400",
+    zinc: "bg-zinc-400",
+  };
+
+  return (
+    <div className="min-w-0">
+      <div className="mb-1 flex items-center justify-between gap-3 text-xs">
+        <span className="text-zinc-500">{label}</span>
+        <span className="font-semibold tabular-nums">
+          {label === "Смены"
+            ? formatNumber(value)
+            : label === "Часы"
+              ? `${formatNumber(value, 1)} ч`
+              : formatRubles(value)}
+        </span>
+      </div>
+      <div className="h-2.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+        <div className={`h-full rounded-full ${colors[tone]}`} style={{ width: `${width}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function MiniRanking({
+  title,
+  rows,
+  value,
+}: {
+  title: string;
+  rows: StaffOperatorReport["rows"];
+  value: (row: StaffOperatorReport["rows"][number]) => string;
+}) {
+  return (
+    <section className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40">
+      <h3 className="text-sm font-semibold">{title}</h3>
+      <div className="mt-3 space-y-3">
+        {rows.map((row, index) => (
+          <div
+            key={`${title}-${row.externalDomain ?? "source"}-${row.externalUserId}`}
+            className="flex items-start justify-between gap-3 text-sm"
+          >
+            <div className="min-w-0">
+              <p className="truncate font-medium">
+                {index + 1}. {row.linkedGuest?.displayName ?? `user_id ${row.externalUserId}`}
+              </p>
+              <p className="mt-0.5 truncate text-xs text-zinc-500">
+                {row.storeNames.join(", ") || row.externalDomain || "источник"}
+              </p>
+            </div>
+            <p className="shrink-0 text-right text-xs font-semibold tabular-nums">
+              {value(row)}
+            </p>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 

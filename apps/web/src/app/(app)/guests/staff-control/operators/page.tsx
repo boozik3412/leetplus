@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Fragment } from "react";
 import { StaffIdentityMappingForm } from "@/components/staff-identity-mapping-form";
 import { requireCurrentUser } from "@/lib/auth";
 import {
@@ -285,17 +286,16 @@ export default async function StaffOperatorsPage({
             <div className="hidden w-full overflow-x-auto xl:block">
               <table className="w-full table-fixed divide-y divide-zinc-100 text-[13px] dark:divide-zinc-800">
                 <colgroup>
-                  <col className="w-[10%]" />
-                  <col className="w-[9%]" />
+                  <col className="w-[13%]" />
                   <col className="w-[10%]" />
                   <col className="w-[12%]" />
-                  <col className="w-[5%]" />
-                  <col className="w-[5%]" />
-                  <col className="w-[8%]" />
+                  <col className="w-[17%]" />
+                  <col className="w-[6%]" />
                   <col className="w-[7%]" />
+                  <col className="w-[10%]" />
                   <col className="w-[8%]" />
-                  <col className="w-[5%]" />
-                  <col className="w-[21%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[7%]" />
                 </colgroup>
                 <thead className="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900/60">
                   <tr>
@@ -321,78 +321,84 @@ export default async function StaffOperatorsPage({
                     <th className="px-3 py-3 text-right font-semibold">
                       Ср. чек
                     </th>
-                    <th className="px-3 py-3 text-left font-semibold">
-                      Привязка
-                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
                   {report.rows.map((row) => (
-                    <tr
+                    <Fragment
                       key={`${row.externalDomain ?? "source"}-${row.externalUserId}`}
-                      className="hover:bg-zinc-50/80 dark:hover:bg-zinc-900/50"
                     >
-                      <td className="px-3 py-3 align-top">
-                        <p className="font-medium">user_id {row.externalUserId}</p>
-                        <p className="mt-1 truncate text-xs text-zinc-500">
-                          {row.externalDomain ?? "источник"}
-                        </p>
-                      </td>
-                      <td className="px-3 py-3 align-top">
-                        {row.linkedGuest ? (
-                          <Link
-                            href={`/guests/${row.linkedGuest.id}`}
-                            className="block truncate font-medium underline underline-offset-4"
-                          >
-                            {row.linkedGuest.displayName}
-                          </Link>
-                        ) : (
-                          <span className="text-zinc-500">не привязан</span>
-                        )}
-                        {row.mappingNote ? (
-                          <p className="mt-1 text-xs text-zinc-500">
-                            {row.mappingNote}
+                      <tr className="hover:bg-zinc-50/80 dark:hover:bg-zinc-900/50">
+                        <td className="px-3 py-3 align-top">
+                          <p className="font-medium">user_id {row.externalUserId}</p>
+                          <p className="mt-1 truncate text-xs text-zinc-500">
+                            {row.externalDomain ?? "источник"}
                           </p>
-                        ) : null}
-                      </td>
-                      <td className="px-3 py-3 align-top text-zinc-600 dark:text-zinc-300">
-                        {row.storeNames.length > 0
-                          ? row.storeNames.join(", ")
-                          : "не определены"}
-                      </td>
-                      <td className="px-3 py-3 align-top text-zinc-600 dark:text-zinc-300">
-                        {formatLastClosedShift(
-                          row.lastClosedShiftStartedAt,
-                          row.lastClosedShiftStoppedAt,
-                        )}
-                      </td>
-                      <td className="px-3 py-3 text-right align-top tabular-nums">
-                        {formatNumber(row.shiftsCount)}
-                      </td>
-                      <td className="px-3 py-3 text-right align-top tabular-nums">
-                        {formatNumber(row.shiftHours, 1)} ч
-                      </td>
-                      <td className="px-3 py-3 text-right align-top tabular-nums">
-                        {formatRubles(row.shiftPaymentAmount)}
-                      </td>
-                      <td className="px-3 py-3 text-right align-top tabular-nums">
-                        {formatRubles(row.shiftRefundAmount)}
-                      </td>
-                      <td className="px-3 py-3 text-right align-top tabular-nums">
-                        {formatRubles(row.shiftIncassAmount)}
-                      </td>
-                      <td className="px-3 py-3 text-right align-top tabular-nums">
-                        {formatRubles(row.averageShiftMiddleCheck)}
-                      </td>
-                      <td className="px-3 py-3 align-top">
-                        <StaffIdentityMappingForm
-                          externalDomain={row.externalDomain}
-                          externalUserId={row.externalUserId}
-                          staffOptions={report.staffOptions}
-                          mappingId={row.mappingId}
-                        />
-                      </td>
-                    </tr>
+                        </td>
+                        <td className="px-3 py-3 align-top">
+                          {row.linkedGuest ? (
+                            <Link
+                              href={`/guests/${row.linkedGuest.id}`}
+                              className="block truncate font-medium underline underline-offset-4"
+                            >
+                              {row.linkedGuest.displayName}
+                            </Link>
+                          ) : (
+                            <span className="text-zinc-500">не привязан</span>
+                          )}
+                          {row.mappingNote ? (
+                            <p className="mt-1 text-xs text-zinc-500">
+                              {row.mappingNote}
+                            </p>
+                          ) : null}
+                        </td>
+                        <td className="px-3 py-3 align-top text-zinc-600 dark:text-zinc-300">
+                          {row.storeNames.length > 0
+                            ? row.storeNames.join(", ")
+                            : "не определены"}
+                        </td>
+                        <td className="px-3 py-3 align-top text-zinc-600 dark:text-zinc-300">
+                          {formatLastClosedShift(
+                            row.lastClosedShiftStartedAt,
+                            row.lastClosedShiftStoppedAt,
+                          )}
+                        </td>
+                        <td className="px-3 py-3 text-right align-top tabular-nums">
+                          {formatNumber(row.shiftsCount)}
+                        </td>
+                        <td className="px-3 py-3 text-right align-top tabular-nums">
+                          {formatNumber(row.shiftHours, 1)} ч
+                        </td>
+                        <td className="px-3 py-3 text-right align-top tabular-nums">
+                          {formatRubles(row.shiftPaymentAmount)}
+                        </td>
+                        <td className="px-3 py-3 text-right align-top tabular-nums">
+                          {formatRubles(row.shiftRefundAmount)}
+                        </td>
+                        <td className="px-3 py-3 text-right align-top tabular-nums">
+                          {formatRubles(row.shiftIncassAmount)}
+                        </td>
+                        <td className="px-3 py-3 text-right align-top tabular-nums">
+                          {formatRubles(row.averageShiftMiddleCheck)}
+                        </td>
+                      </tr>
+                      <tr className="bg-zinc-50/50 dark:bg-zinc-900/20">
+                        <td colSpan={10} className="px-3 pb-4">
+                          <div className="rounded-md border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+                            <p className="mb-2 text-xs font-semibold uppercase text-zinc-500">
+                              Привязка сотрудника
+                            </p>
+                            <StaffIdentityMappingForm
+                              externalDomain={row.externalDomain}
+                              externalUserId={row.externalUserId}
+                              staffOptions={report.staffOptions}
+                              mappingId={row.mappingId}
+                              variant="inline"
+                            />
+                          </div>
+                        </td>
+                      </tr>
+                    </Fragment>
                   ))}
                 </tbody>
               </table>

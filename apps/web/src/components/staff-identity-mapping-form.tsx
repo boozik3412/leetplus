@@ -16,6 +16,7 @@ type StaffIdentityMappingFormProps = {
   externalUserId: string;
   staffOptions: StaffIdentityOption[];
   mappingId?: string | null;
+  variant?: "stacked" | "inline";
 };
 
 export function StaffIdentityMappingForm({
@@ -23,10 +24,12 @@ export function StaffIdentityMappingForm({
   externalUserId,
   staffOptions,
   mappingId = null,
+  variant = "stacked",
 }: StaffIdentityMappingFormProps) {
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isInline = variant === "inline";
 
   async function submit(formData: FormData) {
     setIsSaving(true);
@@ -94,12 +97,20 @@ export function StaffIdentityMappingForm({
   }
 
   return (
-    <form action={submit} className="grid w-full min-w-0 gap-2">
+    <form
+      action={submit}
+      className={[
+        "grid w-full min-w-0 gap-2",
+        isInline
+          ? "lg:grid-cols-[minmax(12rem,1fr)_minmax(10rem,0.9fr)_auto_auto] lg:items-start"
+          : "",
+      ].join(" ")}
+    >
       <select
         name="guestId"
         required
         disabled={isSaving || staffOptions.length === 0}
-        className="h-9 rounded-md border border-zinc-300 bg-white px-2 text-xs text-zinc-950 disabled:cursor-not-allowed disabled:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:disabled:bg-zinc-900"
+        className="h-9 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-2 text-xs text-zinc-950 disabled:cursor-not-allowed disabled:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:disabled:bg-zinc-900"
       >
         <option value="">Выбрать сотрудника</option>
         {staffOptions.map((option) => (
@@ -114,22 +125,24 @@ export function StaffIdentityMappingForm({
         type="text"
         maxLength={1000}
         placeholder="Комментарий"
-        className="h-9 rounded-md border border-zinc-300 bg-white px-2 text-xs text-zinc-950 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+        className="h-9 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-2 text-xs text-zinc-950 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
       />
       <button
         type="submit"
         disabled={isSaving || staffOptions.length === 0}
-        className="h-9 rounded-md bg-zinc-950 px-3 text-xs font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
+        className="h-9 w-full min-w-0 rounded-md bg-zinc-950 px-3 text-xs font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300 lg:w-auto lg:whitespace-nowrap"
       >
         {isSaving ? "Сохраняю..." : "Привязать"}
       </button>
-      {error ? <p className="text-xs text-red-600">{error}</p> : null}
+      {error ? (
+        <p className="text-xs text-red-600 lg:col-span-full">{error}</p>
+      ) : null}
       {mappingId ? (
         <button
           type="button"
           onClick={unlink}
           disabled={isSaving}
-          className="h-9 rounded-md border border-red-200 px-3 text-xs font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/70 dark:text-red-300 dark:hover:bg-red-950/40"
+          className="h-9 w-full min-w-0 rounded-md border border-red-200 px-3 text-xs font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 lg:w-auto lg:whitespace-nowrap dark:border-red-900/70 dark:text-red-300 dark:hover:bg-red-950/40"
         >
           Отвязать
         </button>

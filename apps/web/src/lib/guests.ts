@@ -217,12 +217,7 @@ export type StaffControlReport = {
   averageShiftMiddleCheck: number;
   rows: StaffControlRow[];
   anomalies: Array<{
-    type:
-      | "refunds"
-      | "missing-incassation"
-      | "long-shift"
-      | "low-middle-check"
-      | "unmapped-operator";
+    type: StaffControlAnomalyType;
     severity: "high" | "medium" | "low";
     title: string;
     description: string;
@@ -245,6 +240,13 @@ export type StaffOperatorSortKey =
   | "refunds"
   | "incass"
   | "middleCheck";
+
+export type StaffControlAnomalyType =
+  | "refunds"
+  | "missing-incassation"
+  | "long-shift"
+  | "low-middle-check"
+  | "unmapped-operator";
 
 export type StaffOperatorReportRow = {
   externalDomain: string | null;
@@ -269,6 +271,7 @@ export type StaffOperatorReport = {
   periodTo: string;
   storeId: string | null;
   status: "all" | "linked" | "unlinked";
+  anomaly: StaffControlAnomalyType | null;
   search: string | null;
   sort: StaffOperatorSortKey;
   direction: "asc" | "desc";
@@ -323,6 +326,7 @@ export type GuestsSummaryFilters = {
 
 export type StaffOperatorFilters = GuestsSummaryFilters & {
   status?: "all" | "linked" | "unlinked";
+  anomaly?: StaffControlAnomalyType;
   search?: string;
   sort?: StaffOperatorSortKey;
   direction?: "asc" | "desc";

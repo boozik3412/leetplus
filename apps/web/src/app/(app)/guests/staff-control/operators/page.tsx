@@ -5,6 +5,7 @@ import { requireCurrentUser } from "@/lib/auth";
 import {
   getGuestFilterOptions,
   getStaffOperators,
+  type StaffControlAnomalyType,
   type StaffOperatorFilters,
   type StaffOperatorReport,
   type StaffOperatorSortKey,
@@ -19,6 +20,32 @@ const sortLabels: Record<StaffOperatorSortKey, string> = {
   refunds: "Возвраты",
   incass: "Инкассация",
   middleCheck: "Средний чек",
+};
+
+const anomalyLabels: Record<
+  StaffControlAnomalyType,
+  { title: string; description: string }
+> = {
+  refunds: {
+    title: "Возвраты по сменам",
+    description: "Операторы, у которых за период есть возвраты.",
+  },
+  "missing-incassation": {
+    title: "Касса без инкассации",
+    description: "Касса от 10 000 руб при нулевой инкассации.",
+  },
+  "long-shift": {
+    title: "Длинные смены",
+    description: "Средняя смена от 14 ч или суммарно от 24 ч за период.",
+  },
+  "low-middle-check": {
+    title: "Низкий средний чек",
+    description: "Средний чек ниже 100 руб при кассе от 5 000 руб.",
+  },
+  "unmapped-operator": {
+    title: "Операторы без привязки",
+    description: "Не привязанные user_id с кассой от 10 000 руб.",
+  },
 };
 
 function searchParam(value: string | string[] | undefined) {
@@ -72,6 +99,7 @@ function formatShiftId(value: string | null) {
 
 function resolveFilters(params: Awaited<SearchParams>): StaffOperatorFilters {
   const status = searchParam(params.status);
+  const anomaly = searchParam(params.anomaly);
   const sort = searchParam(params.sort);
   const direction = searchParam(params.direction);
 
@@ -84,6 +112,7 @@ function resolveFilters(params: Awaited<SearchParams>): StaffOperatorFilters {
       status === "linked" || status === "unlinked" || status === "all"
         ? status
         : "all",
+    anomaly: isAnomalyType(anomaly) ? anomaly : undefined,
     sort: isSortKey(sort) ? sort : "cash",
     direction: direction === "asc" ? "asc" : "desc",
   };
@@ -97,6 +126,18 @@ function isSortKey(value: string | undefined): value is StaffOperatorSortKey {
     value === "refunds" ||
     value === "incass" ||
     value === "middleCheck"
+  );
+}
+
+function isAnomalyType(
+  value: string | undefined,
+): value is StaffControlAnomalyType {
+  return (
+    value === "refunds" ||
+    value === "missing-incassation" ||
+    value === "long-shift" ||
+    value === "low-middle-check" ||
+    value === "unmapped-operator"
   );
 }
 
@@ -121,6 +162,9 @@ function currentOperatorReportHref(report: StaffOperatorReport) {
     params.set("storeId", report.storeId);
   }
   params.set("status", report.status);
+  if (report.anomaly) {
+    params.set("anomaly", report.anomaly);
+  }
   params.set("sort", report.sort);
   params.set("direction", report.direction);
   if (report.search) {
@@ -180,7 +224,7 @@ export default async function StaffOperatorsPage({
         </header>
 
         <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-          <form className="grid gap-3 md:grid-cols-2 xl:grid-cols-[repeat(6,minmax(0,1fr))_auto] xl:items-end">
+          <form className="grid gap-3 md:grid-cols-2 xl:grid-cols-[repeat(7,minmax(0,1fr))_auto] xl:items-end">
             <FilterInput
               label="С даты"
               name="dateFrom"
@@ -226,6 +270,23 @@ export default async function StaffOperatorsPage({
             </label>
             <label className="grid min-w-0 gap-1 text-sm">
               <span className="text-xs font-medium uppercase text-zinc-500">
+                Сигнал
+              </span>
+              <select
+                name="anomaly"
+                defaultValue={report.anomaly ?? ""}
+                className="h-10 rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+              >
+                <option value="">Все сигналы</option>
+                {Object.entries(anomalyLabels).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="grid min-w-0 gap-1 text-sm">
+              <span className="text-xs font-medium uppercase text-zinc-500">
                 Сортировка
               </span>
               <select
@@ -253,7 +314,7 @@ export default async function StaffOperatorsPage({
                 <option value="asc">По возрастанию</option>
               </select>
             </label>
-            <div className="grid min-w-0 gap-1 text-sm md:col-span-2 xl:col-span-6">
+            <div className="grid min-w-0 gap-1 text-sm md:col-span-2 xl:col-span-7">
               <span className="text-xs font-medium uppercase text-zinc-500">
                 Поиск
               </span>
@@ -268,6 +329,16 @@ export default async function StaffOperatorsPage({
               Применить
             </button>
           </form>
+          {report.anomaly ? (
+            <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-100">
+              <p className="font-semibold">
+                Фильтр сигнала: {anomalyLabels[report.anomaly].title}
+              </p>
+              <p className="mt-1 text-amber-900 dark:text-amber-100/80">
+                {anomalyLabels[report.anomaly].description}
+              </p>
+            </div>
+          ) : null}
         </section>
 
         <section className="mt-6 min-w-0 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">

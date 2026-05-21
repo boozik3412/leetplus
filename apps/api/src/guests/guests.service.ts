@@ -38,8 +38,16 @@ export type StaffOperatorSortKey =
   | 'incass'
   | 'middleCheck';
 
+export type StaffControlAnomalyType =
+  | 'refunds'
+  | 'missing-incassation'
+  | 'long-shift'
+  | 'low-middle-check'
+  | 'unmapped-operator';
+
 export type StaffOperatorReportQuery = GuestsSummaryQuery & {
   status?: 'all' | 'linked' | 'unlinked';
+  anomaly?: StaffControlAnomalyType;
   search?: string;
   sort?: StaffOperatorSortKey;
   direction?: 'asc' | 'desc';
@@ -251,12 +259,7 @@ export type StaffUnmatchedOperatorRow = {
 };
 
 export type StaffControlAnomaly = {
-  type:
-    | 'refunds'
-    | 'missing-incassation'
-    | 'long-shift'
-    | 'low-middle-check'
-    | 'unmapped-operator';
+  type: StaffControlAnomalyType;
   severity: 'high' | 'medium' | 'low';
   title: string;
   description: string;
@@ -333,6 +336,7 @@ export type StaffOperatorReport = {
   periodTo: string;
   storeId: string | null;
   status: NonNullable<StaffOperatorReportQuery['status']>;
+  anomaly: StaffControlAnomalyType | null;
   search: string | null;
   sort: StaffOperatorSortKey;
   direction: 'asc' | 'desc';
@@ -876,6 +880,7 @@ export class GuestsService {
     const period = this.resolvePeriod(query);
     const storeId = await this.resolveStoreId(tenantId, query.storeId);
     const status = this.resolveStaffOperatorStatus(query.status);
+    const anomaly = this.resolveStaffOperatorAnomaly(query.anomaly);
     const search = this.normalizeText(query.search, 120);
     const sort = this.resolveStaffOperatorSort(query.sort);
     const direction = query.direction === 'asc' ? 'asc' : 'desc';
@@ -885,6 +890,7 @@ export class GuestsService {
     ]);
     const filteredRows = operatorRows
       .filter((row) => this.matchesStaffOperatorStatus(row, status))
+      .filter((row) => this.matchesStaffOperatorAnomaly(row, anomaly))
       .filter((row) => this.matchesStaffOperatorSearch(row, search))
       .sort((first, second) =>
         this.compareStaffOperatorRows(first, second, sort, direction),
@@ -895,6 +901,7 @@ export class GuestsService {
       periodTo: period.to,
       storeId,
       status,
+      anomaly,
       search,
       sort,
       direction,
@@ -2068,6 +2075,20 @@ export class GuestsService {
     return value && allowed.includes(value) ? value : 'cash';
   }
 
+  private resolveStaffOperatorAnomaly(
+    value: StaffOperatorReportQuery['anomaly'],
+  ): StaffControlAnomalyType | null {
+    const allowed: StaffControlAnomalyType[] = [
+      'refunds',
+      'missing-incassation',
+      'long-shift',
+      'low-middle-check',
+      'unmapped-operator',
+    ];
+
+    return value && allowed.includes(value) ? value : null;
+  }
+
   private matchesStaffOperatorStatus(
     row: StaffOperatorReportRow,
     status: NonNullable<StaffOperatorReportQuery['status']>,
@@ -2081,6 +2102,35 @@ export class GuestsService {
     }
 
     return true;
+  }
+
+  private matchesStaffOperatorAnomaly(
+    row: StaffOperatorReportRow,
+    anomaly: StaffControlAnomalyType | null,
+  ) {
+    if (!anomaly) {
+      return true;
+    }
+
+    switch (anomaly) {
+      case 'refunds':
+        return row.shiftRefundAmount > 0;
+      case 'missing-incassation':
+        return row.shiftPaymentAmount >= 10_000 && row.shiftIncassAmount <= 0;
+      case 'long-shift':
+        return (
+          row.shiftsCount > 0 &&
+          (row.shiftHours / row.shiftsCount >= 14 || row.shiftHours >= 24)
+        );
+      case 'low-middle-check':
+        return (
+          row.averageShiftMiddleCheck > 0 &&
+          row.averageShiftMiddleCheck < 100 &&
+          row.shiftPaymentAmount >= 5_000
+        );
+      case 'unmapped-operator':
+        return !row.linkedGuest && row.shiftPaymentAmount >= 10_000;
+    }
   }
 
   private matchesStaffOperatorSearch(

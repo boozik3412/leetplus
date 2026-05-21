@@ -5,6 +5,7 @@ import {
   getGuestFilterOptions,
   getStaffControl,
   type GuestsSummaryFilters,
+  type StaffControlAnomalyType,
   type StaffControlReport,
 } from "@/lib/guests";
 
@@ -343,9 +344,10 @@ function AnomaliesPanel({
       {report.anomalies.length > 0 ? (
         <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
           {report.anomalies.map((anomaly) => (
-            <article
+            <Link
               key={anomaly.type}
-              className={`rounded-lg border p-4 ${anomalyToneClass(anomaly.severity)}`}
+              href={staffOperatorsHref(report, filters, anomaly.type)}
+              className={`rounded-lg border p-4 transition hover:-translate-y-0.5 hover:shadow-md ${anomalyToneClass(anomaly.severity)}`}
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -365,7 +367,10 @@ function AnomaliesPanel({
               <p className="mt-3 text-sm leading-5 text-zinc-600 dark:text-zinc-300">
                 {anomaly.description}
               </p>
-            </article>
+              <p className="mt-4 text-sm font-semibold underline underline-offset-4">
+                Разобрать в отчете операторов
+              </p>
+            </Link>
           ))}
         </div>
       ) : (
@@ -392,6 +397,7 @@ function anomalyToneClass(severity: "high" | "medium" | "low") {
 function staffOperatorsHref(
   report: StaffControlReport,
   filters: GuestsSummaryFilters,
+  anomaly?: StaffControlAnomalyType,
 ) {
   const params = new URLSearchParams();
 
@@ -402,11 +408,35 @@ function staffOperatorsHref(
     params.set("storeId", filters.storeId);
   }
 
-  params.set("status", "all");
-  params.set("sort", "cash");
-  params.set("direction", "desc");
+  const drilldown = anomaly ? staffAnomalyDrilldown(anomaly) : null;
+
+  params.set("status", drilldown?.status ?? "all");
+  if (anomaly) {
+    params.set("anomaly", anomaly);
+  }
+  params.set("sort", drilldown?.sort ?? "cash");
+  params.set("direction", drilldown?.direction ?? "desc");
 
   return `/guests/staff-control/operators?${params.toString()}`;
+}
+
+function staffAnomalyDrilldown(anomaly: StaffControlAnomalyType): {
+  status: "all" | "linked" | "unlinked";
+  sort: "shifts" | "hours" | "cash" | "refunds" | "incass" | "middleCheck";
+  direction: "asc" | "desc";
+} {
+  switch (anomaly) {
+    case "refunds":
+      return { status: "all", sort: "refunds", direction: "desc" };
+    case "missing-incassation":
+      return { status: "all", sort: "cash", direction: "desc" };
+    case "long-shift":
+      return { status: "all", sort: "hours", direction: "desc" };
+    case "low-middle-check":
+      return { status: "all", sort: "middleCheck", direction: "asc" };
+    case "unmapped-operator":
+      return { status: "unlinked", sort: "cash", direction: "desc" };
+  }
 }
 
 function StaffTable({

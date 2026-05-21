@@ -90,10 +90,11 @@ Status: MVP 1 read-only guest analytics is live in production. Automatic rewards
 - Done: `/sync` now lives in a separate `Управление` navigation block, retries Langame date endpoints with `дд.мм.гггг` after `400`, shows compact latest sync job per source, and automatically marks stale guest `RUNNING` sync runs older than 2 hours as failed.
 - Done: guest current-day analytics now counts session overlap across date boundaries, fixing zero guests/load for current day when sessions started before midnight.
 - Done: `/guests/staff-control` now shows first shift anomaly cards for refunds, missing incassation, long shifts, low middle check, and high-cash unmapped operators.
+- Done: shift anomaly cards now drill down into `/guests/staff-control/operators` with an explicit signal filter, matching sort, and linked/unlinked context where needed.
 - Current limitation: `all_operations_log` is stored and summarized, but it still does not expose a reliable administrator identifier. `log_cash_transaction/list` currently returns errors on production sources, so cashier analytics starts from working shifts.
 - Current limitation: PC-count parsing is defensive because real `global/*` payload shape may differ by Langame source; production verification should confirm `computerCount` is filled for each club.
 - Planned data foundation: guests, guest groups, balances, bonus balances, sessions, transactions, all operations log, product expenses by guest, clubs, tariffs, shifts, and PC context.
-- Next: extend staff-control report from persisted shifts into manual corrections, refunds/cancellations detail, discounts/bonuses, and suspicious guest/self-service activity. Current immediate slice: drilldowns and explanation links from anomaly cards to the operator report.
+- Next: extend staff-control report from persisted shifts into manual corrections, refunds/cancellations detail, discounts/bonuses, and suspicious guest/self-service activity. Current immediate slice: add shift-level detail under each operator/anomaly, not only operator aggregates.
 - Next: verify production `/dashboard` current-day load percentage after deploy of the session-overlap calculation.
 - Next: add export for `/guests/report` and `/guests/staff-control`, then saved filters/audiences.
 - Planned analytics: RFM, retention, churn risk, heatmaps, LTV, bonus load, campaign effect, and guest-flow forecasts.

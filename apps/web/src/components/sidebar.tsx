@@ -24,7 +24,13 @@ const navGroups: NavGroup[] = [
     items: [
       { href: "/guests", label: "Дашборд гостей" },
       { href: "/guests#guest-list", label: "Гости" },
+    ],
+  },
+  {
+    title: "Персонал",
+    items: [
       { href: "/guests/staff-control", label: "Контроль персонала" },
+      { href: "/guests/staff-control/operators", label: "Операторы LAngame" },
     ],
   },
   {
@@ -119,7 +125,9 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
       items: group.items.filter((item) => canAccessPath(user, item.href)),
     }))
     .filter((group) => group.items.length > 0);
-  const currentProductArea = pathname.startsWith("/guests")
+  const currentProductArea = pathname.startsWith("/guests/staff-control")
+    ? "Персонал"
+    : pathname.startsWith("/guests")
     ? "Гости"
     : pathname.startsWith("/sync") || pathname.startsWith("/settings")
       ? "Управление"

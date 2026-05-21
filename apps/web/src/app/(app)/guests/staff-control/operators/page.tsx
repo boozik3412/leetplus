@@ -104,7 +104,7 @@ export default async function StaffOperatorsPage({
         <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="text-sm font-semibold uppercase text-emerald-700 dark:text-emerald-300">
-              Контроль персонала
+              Персонал
             </p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight">
               Операторы LAngame

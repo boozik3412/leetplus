@@ -181,7 +181,7 @@ export default async function StaffControlPage({
         <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="text-sm font-semibold uppercase text-emerald-700 dark:text-emerald-300">
-              Гости
+              Персонал
             </p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50">
               Контроль персонала

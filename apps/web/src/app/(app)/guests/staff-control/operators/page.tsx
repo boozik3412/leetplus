@@ -141,7 +141,7 @@ export default async function StaffOperatorsPage({
   return (
     <main className="px-4 py-6 text-zinc-950 dark:text-zinc-100 sm:px-6 sm:py-8">
       <div className="mx-auto max-w-7xl">
-        <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <header className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div>
             <p className="text-sm font-semibold uppercase text-emerald-700 dark:text-emerald-300">
               Персонал
@@ -156,18 +156,18 @@ export default async function StaffOperatorsPage({
               смены, касса, возвраты и инкассация.
             </p>
           </div>
-          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row lg:justify-end">
+          <div className="grid w-full gap-2 sm:grid-cols-2 xl:w-auto xl:shrink-0 xl:flex xl:justify-end">
             <Link
               href={currentOperatorReportHref(report)}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex h-10 w-full items-center justify-center rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 sm:w-auto"
+              className="inline-flex min-h-10 w-full items-center justify-center rounded-md bg-emerald-500 px-4 py-2 text-center text-sm font-semibold leading-5 text-zinc-950 transition hover:bg-emerald-400 xl:w-auto xl:whitespace-nowrap"
             >
               Открыть в новом окне
             </Link>
             <Link
               href={operatorReportHref(report)}
-              className="inline-flex h-10 w-full items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 sm:w-auto dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+              className="inline-flex min-h-10 w-full items-center justify-center rounded-md border border-zinc-300 px-4 py-2 text-center text-sm font-semibold leading-5 text-zinc-700 transition hover:bg-zinc-50 xl:w-auto xl:whitespace-nowrap dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
             >
               Назад в контроль персонала
             </Link>

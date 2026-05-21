@@ -250,6 +250,20 @@ export type StaffUnmatchedOperatorRow = {
   averageShiftMiddleCheck: number;
 };
 
+export type StaffControlAnomaly = {
+  type:
+    | 'refunds'
+    | 'missing-incassation'
+    | 'long-shift'
+    | 'low-middle-check'
+    | 'unmapped-operator';
+  severity: 'high' | 'medium' | 'low';
+  title: string;
+  description: string;
+  amount: number | null;
+  count: number;
+};
+
 export type StaffControlReport = {
   tenantId: string;
   tenantSlug: string;
@@ -278,6 +292,7 @@ export type StaffControlReport = {
   shiftIncassAmount: number;
   averageShiftMiddleCheck: number;
   rows: StaffControlRow[];
+  anomalies: StaffControlAnomaly[];
   operationTypes: Array<{
     type: string;
     count: number;
@@ -753,6 +768,7 @@ export class GuestsService {
       shiftIncassAmount: 0,
       averageShiftMiddleCheck: 0,
       rows: [],
+      anomalies: [],
       operationTypes: [],
       unmatchedOperators: [],
       diagnostics,
@@ -843,6 +859,10 @@ export class GuestsService {
             )
           : 0,
       rows,
+      anomalies: this.buildStaffControlAnomalies(
+        rows,
+        shiftSummary.unmatchedOperators,
+      ),
       operationTypes,
       unmatchedOperators: shiftSummary.unmatchedOperators,
     };
@@ -2179,6 +2199,175 @@ export class GuestsService {
             )
           : 0,
     };
+  }
+
+  private buildStaffControlAnomalies(
+    rows: StaffControlRow[],
+    unmatchedOperators: StaffUnmatchedOperatorRow[],
+  ): StaffControlAnomaly[] {
+    const allRows = [
+      ...rows.map((row) => ({
+        name: row.displayName,
+        shiftsCount: row.shiftsCount,
+        shiftHours: row.shiftHours,
+        shiftPaymentAmount: row.shiftPaymentAmount,
+        shiftRefundAmount: row.shiftRefundAmount,
+        shiftIncassAmount: row.shiftIncassAmount,
+        averageShiftMiddleCheck: row.averageShiftMiddleCheck,
+        isMapped: true,
+      })),
+      ...unmatchedOperators.map((row) => ({
+        name: `user_id ${row.externalUserId}`,
+        shiftsCount: row.shiftsCount,
+        shiftHours: row.shiftHours,
+        shiftPaymentAmount: row.shiftPaymentAmount,
+        shiftRefundAmount: row.shiftRefundAmount,
+        shiftIncassAmount: row.shiftIncassAmount,
+        averageShiftMiddleCheck: row.averageShiftMiddleCheck,
+        isMapped: false,
+      })),
+    ];
+    const anomalies: StaffControlAnomaly[] = [];
+    const refunds = allRows.filter((row) => row.shiftRefundAmount > 0);
+    const missingIncassation = allRows.filter(
+      (row) => row.shiftPaymentAmount >= 10_000 && row.shiftIncassAmount <= 0,
+    );
+    const longShifts = allRows.filter(
+      (row) =>
+        row.shiftsCount > 0 &&
+        (row.shiftHours / row.shiftsCount >= 14 || row.shiftHours >= 24),
+    );
+    const lowMiddleCheck = allRows.filter(
+      (row) =>
+        row.averageShiftMiddleCheck > 0 &&
+        row.averageShiftMiddleCheck < 100 &&
+        row.shiftPaymentAmount >= 5_000,
+    );
+    const unmappedHighCash = allRows.filter(
+      (row) => !row.isMapped && row.shiftPaymentAmount >= 10_000,
+    );
+
+    if (refunds.length > 0) {
+      anomalies.push({
+        type: 'refunds',
+        severity:
+          refunds.reduce((sum, row) => sum + row.shiftRefundAmount, 0) >= 5_000
+            ? 'high'
+            : 'medium',
+        title: 'Возвраты по сменам',
+        description: this.staffAnomalyDescription(
+          refunds,
+          (row) =>
+            `${row.name}: ${this.round(row.shiftRefundAmount, 0).toLocaleString('ru-RU')} руб`,
+        ),
+        amount: this.round(
+          refunds.reduce((sum, row) => sum + row.shiftRefundAmount, 0),
+          2,
+        ),
+        count: refunds.length,
+      });
+    }
+
+    if (missingIncassation.length > 0) {
+      anomalies.push({
+        type: 'missing-incassation',
+        severity: 'high',
+        title: 'Касса без инкассации',
+        description: this.staffAnomalyDescription(
+          missingIncassation,
+          (row) =>
+            `${row.name}: касса ${this.round(row.shiftPaymentAmount, 0).toLocaleString('ru-RU')} руб`,
+        ),
+        amount: this.round(
+          missingIncassation.reduce(
+            (sum, row) => sum + row.shiftPaymentAmount,
+            0,
+          ),
+          2,
+        ),
+        count: missingIncassation.length,
+      });
+    }
+
+    if (unmappedHighCash.length > 0) {
+      anomalies.push({
+        type: 'unmapped-operator',
+        severity: 'high',
+        title: 'Операторы без привязки',
+        description: this.staffAnomalyDescription(
+          unmappedHighCash,
+          (row) =>
+            `${row.name}: касса ${this.round(row.shiftPaymentAmount, 0).toLocaleString('ru-RU')} руб`,
+        ),
+        amount: this.round(
+          unmappedHighCash.reduce(
+            (sum, row) => sum + row.shiftPaymentAmount,
+            0,
+          ),
+          2,
+        ),
+        count: unmappedHighCash.length,
+      });
+    }
+
+    if (longShifts.length > 0) {
+      anomalies.push({
+        type: 'long-shift',
+        severity: 'medium',
+        title: 'Длинные смены',
+        description: this.staffAnomalyDescription(
+          longShifts,
+          (row) =>
+            `${row.name}: ${this.round(row.shiftHours, 1).toLocaleString('ru-RU')} ч`,
+        ),
+        amount: null,
+        count: longShifts.length,
+      });
+    }
+
+    if (lowMiddleCheck.length > 0) {
+      anomalies.push({
+        type: 'low-middle-check',
+        severity: 'medium',
+        title: 'Низкий средний чек',
+        description: this.staffAnomalyDescription(
+          lowMiddleCheck,
+          (row) =>
+            `${row.name}: ${this.round(row.averageShiftMiddleCheck, 0).toLocaleString('ru-RU')} руб`,
+        ),
+        amount: null,
+        count: lowMiddleCheck.length,
+      });
+    }
+
+    return anomalies.sort(
+      (first, second) =>
+        this.staffAnomalySeverityRank(second.severity) -
+          this.staffAnomalySeverityRank(first.severity) ||
+        (second.amount ?? 0) - (first.amount ?? 0) ||
+        second.count - first.count,
+    );
+  }
+
+  private staffAnomalyDescription<T>(rows: T[], format: (row: T) => string) {
+    const shownRows = rows.slice(0, 3).map(format);
+    const hiddenCount = rows.length - shownRows.length;
+
+    return hiddenCount > 0
+      ? `${shownRows.join('; ')}; еще ${hiddenCount}`
+      : shownRows.join('; ');
+  }
+
+  private staffAnomalySeverityRank(severity: StaffControlAnomaly['severity']) {
+    if (severity === 'high') {
+      return 3;
+    }
+
+    if (severity === 'medium') {
+      return 2;
+    }
+
+    return 1;
   }
 
   private isAdminGuestGroupName(name: string) {

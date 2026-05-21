@@ -216,6 +216,19 @@ export type StaffControlReport = {
   shiftIncassAmount: number;
   averageShiftMiddleCheck: number;
   rows: StaffControlRow[];
+  anomalies: Array<{
+    type:
+      | "refunds"
+      | "missing-incassation"
+      | "long-shift"
+      | "low-middle-check"
+      | "unmapped-operator";
+    severity: "high" | "medium" | "low";
+    title: string;
+    description: string;
+    amount: number | null;
+    count: number;
+  }>;
   operationTypes: Array<{
     type: string;
     count: number;

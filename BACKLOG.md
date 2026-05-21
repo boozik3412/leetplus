@@ -21,6 +21,8 @@ Status: implemented; remains in production UX polish mode.
 - Done: executive summary now combines total revenue, guests, assortment and load; the load metric uses PC capacity when PC count is available from Langame/global endpoints.
 - Done: "What changed" now compares the latest full day against the previous full day for current-day mode; other periods keep analogous-period comparison.
 - Done: "Main focus" includes money units in financial values and links "Money at risk" to the hybrid assortment-loss report.
+- Done: dashboard auto-sync now refreshes both assortment/revenue data and guest foundation data, so the executive dashboard is responsible for all first-screen metrics.
+- Done: current-day guest and load metrics count sessions by overlap with the selected period, so overnight sessions contribute to the current day instead of only to the day they started.
 - Current risk: production still needs live verification that Langame returns enough PC context for all clubs; if load remains `нет данных`, inspect latest guest sync profile endpoint errors/field counts or VDS API logs.
 - Next polish: continue adjusting color accents, wording, and direct action links from live `leetplus.ru` review.
 
@@ -86,11 +88,13 @@ Status: MVP 1 read-only guest analytics is live in production. Automatic rewards
 - Done: PC context is pulled from Langame `global/types_of_pc_in_clubs/list` + `global/linking_pc_by_type/list`, stored on `Store.computerCount`, and used for network/club load percent.
 - Done: guest summary can backfill missing PC counts on demand when `Store.computerCount` is empty.
 - Done: `/sync` now lives in a separate `Управление` navigation block, retries Langame date endpoints with `дд.мм.гггг` after `400`, shows compact latest sync job per source, and automatically marks stale guest `RUNNING` sync runs older than 2 hours as failed.
+- Done: guest current-day analytics now counts session overlap across date boundaries, fixing zero guests/load for current day when sessions started before midnight.
+- Done: `/guests/staff-control` now shows first shift anomaly cards for refunds, missing incassation, long shifts, low middle check, and high-cash unmapped operators.
 - Current limitation: `all_operations_log` is stored and summarized, but it still does not expose a reliable administrator identifier. `log_cash_transaction/list` currently returns errors on production sources, so cashier analytics starts from working shifts.
 - Current limitation: PC-count parsing is defensive because real `global/*` payload shape may differ by Langame source; production verification should confirm `computerCount` is filled for each club.
 - Planned data foundation: guests, guest groups, balances, bonus balances, sessions, transactions, all operations log, product expenses by guest, clubs, tariffs, shifts, and PC context.
-- Next: extend staff-control report from persisted shifts into shift anomalies, manual corrections, refunds/cancellations, discounts/bonuses, and suspicious guest/self-service activity.
-- Next: verify production `/dashboard` load percentage and sync diagnostics after the next successful `/sync` run.
+- Next: extend staff-control report from persisted shifts into manual corrections, refunds/cancellations detail, discounts/bonuses, and suspicious guest/self-service activity. Current immediate slice: drilldowns and explanation links from anomaly cards to the operator report.
+- Next: verify production `/dashboard` current-day load percentage after deploy of the session-overlap calculation.
 - Next: add export for `/guests/report` and `/guests/staff-control`, then saved filters/audiences.
 - Planned analytics: RFM, retention, churn risk, heatmaps, LTV, bonus load, campaign effect, and guest-flow forecasts.
 - Planned CRM layer: segments, saved audiences, CRM statuses, notes, tasks, communication history, and next-best-action recommendations.

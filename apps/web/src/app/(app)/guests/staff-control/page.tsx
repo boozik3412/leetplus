@@ -272,6 +272,8 @@ export default async function StaffControlPage({
           />
         </section>
 
+        <AnomaliesPanel report={report} filters={filters} />
+
         <section className="mt-6 grid min-w-0 gap-6 2xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.45fr)]">
           <StaffTable
             report={report}
@@ -310,6 +312,101 @@ function KpiCard({
       ) : null}
     </div>
   );
+}
+
+function AnomaliesPanel({
+  report,
+  filters,
+}: {
+  report: StaffControlReport;
+  filters: GuestsSummaryFilters;
+}) {
+  const operatorsHref = staffOperatorsHref(report, filters);
+
+  return (
+    <section className="mt-6 rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-col gap-3 border-b border-zinc-200 px-5 py-4 dark:border-zinc-800 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-base font-semibold">Аномалии смен</h2>
+          <p className="mt-1 text-sm text-zinc-500">
+            Первый автоматический скрининг возвратов, инкассации, длинных смен
+            и операторов без привязки.
+          </p>
+        </div>
+        <Link
+          href={operatorsHref}
+          className="inline-flex h-10 w-full items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 sm:w-auto dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+        >
+          Операторы Langame
+        </Link>
+      </div>
+      {report.anomalies.length > 0 ? (
+        <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
+          {report.anomalies.map((anomaly) => (
+            <article
+              key={anomaly.type}
+              className={`rounded-lg border p-4 ${anomalyToneClass(anomaly.severity)}`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase text-zinc-500 dark:text-zinc-400">
+                    {formatNumber(anomaly.count)} сигналов
+                  </p>
+                  <h3 className="mt-2 text-base font-semibold">
+                    {anomaly.title}
+                  </h3>
+                </div>
+                {anomaly.amount !== null ? (
+                  <span className="shrink-0 text-right text-sm font-semibold tabular-nums">
+                    {formatRubles(anomaly.amount)}
+                  </span>
+                ) : null}
+              </div>
+              <p className="mt-3 text-sm leading-5 text-zinc-600 dark:text-zinc-300">
+                {anomaly.description}
+              </p>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="px-5 py-6 text-sm text-zinc-500">
+          Критичных сигналов по сменам за выбранный период нет.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function anomalyToneClass(severity: "high" | "medium" | "low") {
+  if (severity === "high") {
+    return "border-red-200 bg-red-50 text-red-950 dark:border-red-900/60 dark:bg-red-950/20 dark:text-red-100";
+  }
+
+  if (severity === "medium") {
+    return "border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-100";
+  }
+
+  return "border-zinc-200 bg-zinc-50 text-zinc-950 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-100";
+}
+
+function staffOperatorsHref(
+  report: StaffControlReport,
+  filters: GuestsSummaryFilters,
+) {
+  const params = new URLSearchParams();
+
+  params.set("dateFrom", filters.dateFrom ?? report.periodFrom);
+  params.set("dateTo", filters.dateTo ?? report.periodTo);
+
+  if (filters.storeId) {
+    params.set("storeId", filters.storeId);
+  }
+
+  params.set("status", "all");
+  params.set("sort", "cash");
+  params.set("direction", "desc");
+
+  return `/guests/staff-control/operators?${params.toString()}`;
 }
 
 function StaffTable({

@@ -43,6 +43,28 @@ function formatPeriodDate(value: string) {
   }).format(new Date(`${value}T00:00:00.000Z`));
 }
 
+function formatShiftDateTime(value: string) {
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "UTC",
+  }).format(new Date(value));
+}
+
+function formatLastClosedShift(
+  startedAt: string | null,
+  stoppedAt: string | null,
+) {
+  if (!startedAt || !stoppedAt) {
+    return "Нет закрытых смен";
+  }
+
+  return `${formatShiftDateTime(startedAt)} - ${formatShiftDateTime(stoppedAt)}`;
+}
+
 function resolveFilters(params: Awaited<SearchParams>): StaffOperatorFilters {
   const status = searchParam(params.status);
   const sort = searchParam(params.sort);
@@ -243,6 +265,9 @@ export default async function StaffOperatorsPage({
                       Сотрудник
                     </th>
                     <th className="px-4 py-3 text-left font-semibold">Клубы</th>
+                    <th className="px-4 py-3 text-left font-semibold">
+                      Последняя смена
+                    </th>
                     <th className="px-4 py-3 text-right font-semibold">Смены</th>
                     <th className="px-4 py-3 text-right font-semibold">Часы</th>
                     <th className="px-4 py-3 text-right font-semibold">Касса</th>
@@ -293,6 +318,12 @@ export default async function StaffOperatorsPage({
                         {row.storeNames.length > 0
                           ? row.storeNames.join(", ")
                           : "не определены"}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-300">
+                        {formatLastClosedShift(
+                          row.lastClosedShiftStartedAt,
+                          row.lastClosedShiftStoppedAt,
+                        )}
                       </td>
                       <td className="px-4 py-3 text-right tabular-nums">
                         {formatNumber(row.shiftsCount)}
@@ -384,6 +415,18 @@ function OperatorCard({
         {row.mappingNote ? (
           <p className="mt-1 text-xs text-zinc-500">{row.mappingNote}</p>
         ) : null}
+      </div>
+
+      <div className="mt-3 rounded-md border border-zinc-200 bg-white p-3 text-sm dark:border-zinc-800 dark:bg-zinc-950">
+        <p className="text-xs font-medium uppercase text-zinc-500">
+          Последняя закрытая смена
+        </p>
+        <p className="mt-1 font-semibold text-zinc-700 dark:text-zinc-200">
+          {formatLastClosedShift(
+            row.lastClosedShiftStartedAt,
+            row.lastClosedShiftStoppedAt,
+          )}
+        </p>
       </div>
 
       <div className="mt-3 grid grid-cols-2 gap-2">

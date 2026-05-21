@@ -195,6 +195,8 @@ export type GuestDetail = GuestDashboardRow & {
 export type StaffControlRow = GuestDashboardRow & {
   controlFlags: string[];
   storeNames: string[];
+  lastClosedShiftStartedAt: string | null;
+  lastClosedShiftStoppedAt: string | null;
   shiftsCount: number;
   shiftHours: number;
   shiftPaymentAmount: number;
@@ -236,6 +238,8 @@ export type StaffUnmatchedOperatorRow = {
   externalDomain: string | null;
   externalUserId: string;
   storeNames: string[];
+  lastClosedShiftStartedAt: string | null;
+  lastClosedShiftStoppedAt: string | null;
   shiftsCount: number;
   shiftHours: number;
   shiftPaymentAmount: number;
@@ -296,6 +300,8 @@ export type StaffOperatorReportRow = {
   mappingNote: string | null;
   linkedGuest: GuestDashboardRow | null;
   storeNames: string[];
+  lastClosedShiftStartedAt: string | null;
+  lastClosedShiftStoppedAt: string | null;
   shiftsCount: number;
   shiftHours: number;
   shiftPaymentAmount: number;
@@ -357,6 +363,8 @@ type GuestMetrics = {
 
 type StaffShiftMetrics = {
   storeNames: Set<string>;
+  lastClosedShiftStartedAt: Date | null;
+  lastClosedShiftStoppedAt: Date | null;
   shiftsCount: number;
   linkedShiftsCount: number;
   shiftMinutes: number;
@@ -1504,6 +1512,8 @@ export class GuestsService {
         guestId: true,
         externalDomain: true,
         externalUserId: true,
+        startedAt: true,
+        stoppedAt: true,
         durationMinutes: true,
         cashAmount: true,
         cashlessAmount: true,
@@ -1537,6 +1547,8 @@ export class GuestsService {
 
       this.addShiftMetrics(total, {
         linked: Boolean(row.guestId),
+        startedAt: row.startedAt,
+        stoppedAt: row.stoppedAt,
         durationMinutes: row.durationMinutes ?? 0,
         paymentAmount,
         refundAmount,
@@ -1560,6 +1572,8 @@ export class GuestsService {
 
           this.addShiftMetrics(operatorMetrics, {
             linked: false,
+            startedAt: row.startedAt,
+            stoppedAt: row.stoppedAt,
             durationMinutes: row.durationMinutes ?? 0,
             paymentAmount,
             refundAmount,
@@ -1579,6 +1593,8 @@ export class GuestsService {
       }
       this.addShiftMetrics(guestMetrics, {
         linked: true,
+        startedAt: row.startedAt,
+        stoppedAt: row.stoppedAt,
         durationMinutes: row.durationMinutes ?? 0,
         paymentAmount,
         refundAmount,
@@ -1617,6 +1633,8 @@ export class GuestsService {
           guestId: true,
           externalDomain: true,
           externalUserId: true,
+          startedAt: true,
+          stoppedAt: true,
           durationMinutes: true,
           cashAmount: true,
           cashlessAmount: true,
@@ -1691,6 +1709,8 @@ export class GuestsService {
 
       this.addShiftMetrics(metrics, {
         linked: Boolean(metrics.linkedGuest),
+        startedAt: row.startedAt,
+        stoppedAt: row.stoppedAt,
         durationMinutes: row.durationMinutes ?? 0,
         paymentAmount: this.shiftPaymentAmount(row),
         refundAmount: this.shiftRefundAmount(row),
@@ -1708,6 +1728,8 @@ export class GuestsService {
   private emptyStaffShiftMetrics(): StaffShiftMetrics {
     return {
       storeNames: new Set<string>(),
+      lastClosedShiftStartedAt: null,
+      lastClosedShiftStoppedAt: null,
       shiftsCount: 0,
       linkedShiftsCount: 0,
       shiftMinutes: 0,
@@ -1723,6 +1745,8 @@ export class GuestsService {
     metrics: StaffShiftMetrics,
     values: {
       linked: boolean;
+      startedAt: Date | null;
+      stoppedAt: Date | null;
       durationMinutes: number;
       paymentAmount: number;
       refundAmount: number;
@@ -1736,6 +1760,16 @@ export class GuestsService {
     metrics.shiftPaymentAmount += values.paymentAmount;
     metrics.shiftRefundAmount += values.refundAmount;
     metrics.shiftIncassAmount += values.incassAmount;
+
+    if (
+      values.startedAt &&
+      values.stoppedAt &&
+      (!metrics.lastClosedShiftStoppedAt ||
+        values.stoppedAt > metrics.lastClosedShiftStoppedAt)
+    ) {
+      metrics.lastClosedShiftStartedAt = values.startedAt;
+      metrics.lastClosedShiftStoppedAt = values.stoppedAt;
+    }
 
     if (values.middleCheck !== null) {
       metrics.middleCheckSum += values.middleCheck;
@@ -1779,6 +1813,12 @@ export class GuestsService {
       externalDomain: metrics.externalDomain,
       externalUserId: metrics.externalUserId,
       storeNames: Array.from(metrics.storeNames).sort(),
+      lastClosedShiftStartedAt: this.toIsoDateTime(
+        metrics.lastClosedShiftStartedAt,
+      ),
+      lastClosedShiftStoppedAt: this.toIsoDateTime(
+        metrics.lastClosedShiftStoppedAt,
+      ),
       shiftsCount: metrics.shiftsCount,
       shiftHours: this.round(metrics.shiftMinutes / 60, 1),
       shiftPaymentAmount: this.round(metrics.shiftPaymentAmount, 2),
@@ -1801,6 +1841,12 @@ export class GuestsService {
       mappingNote: metrics.mappingNote,
       linkedGuest: metrics.linkedGuest,
       storeNames: Array.from(metrics.storeNames).sort(),
+      lastClosedShiftStartedAt: this.toIsoDateTime(
+        metrics.lastClosedShiftStartedAt,
+      ),
+      lastClosedShiftStoppedAt: this.toIsoDateTime(
+        metrics.lastClosedShiftStoppedAt,
+      ),
       shiftsCount: metrics.shiftsCount,
       shiftHours: this.round(metrics.shiftMinutes / 60, 1),
       shiftPaymentAmount: this.round(metrics.shiftPaymentAmount, 2),
@@ -2042,6 +2088,12 @@ export class GuestsService {
       ...row,
       controlFlags,
       storeNames: Array.from(shiftMetrics?.storeNames ?? []).sort(),
+      lastClosedShiftStartedAt: this.toIsoDateTime(
+        shiftMetrics?.lastClosedShiftStartedAt ?? null,
+      ),
+      lastClosedShiftStoppedAt: this.toIsoDateTime(
+        shiftMetrics?.lastClosedShiftStoppedAt ?? null,
+      ),
       shiftsCount: shiftMetrics?.shiftsCount ?? 0,
       shiftHours: this.round((shiftMetrics?.shiftMinutes ?? 0) / 60, 1),
       shiftPaymentAmount: this.round(shiftMetrics?.shiftPaymentAmount ?? 0, 2),

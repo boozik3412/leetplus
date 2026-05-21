@@ -162,7 +162,7 @@ function operatorReportHref(report: StaffOperatorReport) {
   return `/guests/staff-control?${params.toString()}`;
 }
 
-function currentOperatorReportHref(report: StaffOperatorReport) {
+function currentOperatorReportHref(report: StaffOperatorReport, view?: "full") {
   const params = new URLSearchParams();
 
   params.set("dateFrom", report.periodFrom);
@@ -179,6 +179,9 @@ function currentOperatorReportHref(report: StaffOperatorReport) {
   if (report.search) {
     params.set("search", report.search);
   }
+  if (view) {
+    params.set("view", view);
+  }
 
   return `/guests/staff-control/operators?${params.toString()}`;
 }
@@ -191,6 +194,7 @@ export default async function StaffOperatorsPage({
   await requireCurrentUser();
   const params = await searchParams;
   const filters = resolveFilters(params);
+  const isFullView = searchParam(params.view) === "full";
   const [report, options] = await Promise.all([
     getStaffOperators(filters),
     getGuestFilterOptions(),
@@ -236,7 +240,7 @@ export default async function StaffOperatorsPage({
           </div>
           <div className="grid w-full gap-2 sm:grid-cols-2 xl:w-auto xl:shrink-0 xl:flex xl:justify-end">
             <Link
-              href={currentOperatorReportHref(report)}
+              href={currentOperatorReportHref(report, "full")}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex min-h-10 w-full items-center justify-center rounded-md bg-emerald-500 px-4 py-2 text-center text-sm font-semibold leading-5 text-zinc-950 transition hover:bg-emerald-400 xl:w-auto xl:whitespace-nowrap"
@@ -337,15 +341,27 @@ export default async function StaffOperatorsPage({
           </div>
         </details>
 
-        <AdminComparisonPanel report={report} />
+        <AdminComparisonPanel report={report} isFullView={isFullView} />
 
         <section className="mt-6 min-w-0 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-          <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
+          <div className="flex flex-col gap-3 border-b border-zinc-200 px-5 py-4 dark:border-zinc-800 sm:flex-row sm:items-center sm:justify-between">
             <h2 className="text-base font-semibold">
               Администраторы: {formatNumber(report.rows.length)}
             </h2>
+            {!isFullView ? (
+              <Link
+                href={currentOperatorReportHref(report, "full")}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-h-10 items-center justify-center rounded-md border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+              >
+                Открыть полный список
+              </Link>
+            ) : null}
           </div>
-          {report.rows.length > 0 ? (
+          {!isFullView ? (
+            <AdminCompactOverview report={report} />
+          ) : report.rows.length > 0 ? (
             <>
             <div className="grid gap-3 p-4 xl:hidden">
               {report.rows.map((row) => (
@@ -493,7 +509,77 @@ export default async function StaffOperatorsPage({
   );
 }
 
-function AdminComparisonPanel({ report }: { report: StaffOperatorReport }) {
+function AdminCompactOverview({ report }: { report: StaffOperatorReport }) {
+  const rows = report.rows;
+  const linkedCount = rows.filter((row) => row.linkedGuest).length;
+  const totalShifts = rows.reduce((sum, row) => sum + row.shiftsCount, 0);
+  const totalHours = rows.reduce((sum, row) => sum + row.shiftHours, 0);
+  const totalCash = rows.reduce((sum, row) => sum + row.shiftPaymentAmount, 0);
+  const totalBar = rows.reduce((sum, row) => sum + row.barRevenue, 0);
+  const totalRefunds = rows.reduce((sum, row) => sum + row.shiftRefundAmount, 0);
+  const unlinkedCount = rows.length - linkedCount;
+
+  return (
+    <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-6">
+      <CompactOverviewMetric
+        label="Администраторы"
+        value={formatNumber(rows.length)}
+        caption={`${formatNumber(linkedCount)} привязаны`}
+      />
+      <CompactOverviewMetric
+        label="Смены"
+        value={formatNumber(totalShifts)}
+        caption={`${formatNumber(totalHours, 1)} ч`}
+      />
+      <CompactOverviewMetric
+        label="Выручка"
+        value={formatRubles(totalCash)}
+        caption={`${formatRubles(safeDivide(totalCash, totalShifts))} / смена`}
+      />
+      <CompactOverviewMetric
+        label="Бар"
+        value={formatRubles(totalBar)}
+        caption={`${formatPercent(safeDivide(totalBar, totalCash) * 100)} от выручки`}
+      />
+      <CompactOverviewMetric
+        label="Возвраты"
+        value={formatRubles(totalRefunds)}
+        caption="по закрытым сменам"
+      />
+      <CompactOverviewMetric
+        label="Без привязки"
+        value={formatNumber(unlinkedCount)}
+        caption="требуют сопоставления"
+      />
+    </div>
+  );
+}
+
+function CompactOverviewMetric({
+  label,
+  value,
+  caption,
+}: {
+  label: string;
+  value: string;
+  caption: string;
+}) {
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40">
+      <p className="text-xs font-semibold uppercase text-zinc-500">{label}</p>
+      <p className="mt-2 text-xl font-semibold tabular-nums">{value}</p>
+      <p className="mt-1 text-sm text-zinc-500">{caption}</p>
+    </div>
+  );
+}
+
+function AdminComparisonPanel({
+  report,
+  isFullView,
+}: {
+  report: StaffOperatorReport;
+  isFullView: boolean;
+}) {
   const rows = report.rows;
   const maxCash = Math.max(1, ...rows.map((row) => row.shiftPaymentAmount));
   const maxShifts = Math.max(1, ...rows.map((row) => row.shiftsCount));
@@ -536,7 +622,7 @@ function AdminComparisonPanel({ report }: { report: StaffOperatorReport }) {
 
       <BestAdminsPanel rows={rows} />
 
-      {rows.length > 0 ? (
+      {isFullView ? (rows.length > 0 ? (
         <div className="grid gap-4 border-t border-zinc-200 p-4 dark:border-zinc-800 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.42fr)]">
           <div className="min-w-0 space-y-3">
             {rows.map((row, index) => (
@@ -574,6 +660,20 @@ function AdminComparisonPanel({ report }: { report: StaffOperatorReport }) {
         <p className="border-t border-zinc-200 px-5 py-6 text-sm text-zinc-500 dark:border-zinc-800">
           Для инфографики нет строк по выбранным условиям.
         </p>
+      )) : (
+        <div className="flex flex-col gap-3 border-t border-zinc-200 px-5 py-4 dark:border-zinc-800 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-zinc-500">
+            Детальная разбивка по каждому администратору скрыта, чтобы отчет оставался компактным.
+          </p>
+          <Link
+            href={currentOperatorReportHref(report, "full")}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex min-h-10 items-center justify-center rounded-md border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+          >
+            Открыть детальное сравнение
+          </Link>
+        </div>
       )}
     </section>
   );

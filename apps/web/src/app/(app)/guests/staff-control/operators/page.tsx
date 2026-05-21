@@ -140,7 +140,7 @@ export default async function StaffOperatorsPage({
 
   return (
     <main className="px-4 py-6 text-zinc-950 dark:text-zinc-100 sm:px-6 sm:py-8">
-      <div className="mx-auto max-w-7xl">
+      <div className="mx-auto max-w-[100rem]">
         <header className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div>
             <p className="text-sm font-semibold uppercase text-emerald-700 dark:text-emerald-300">
@@ -283,32 +283,45 @@ export default async function StaffOperatorsPage({
               ))}
             </div>
             <div className="hidden w-full overflow-x-auto xl:block">
-              <table className="min-w-[1280px] divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
+              <table className="w-full table-fixed divide-y divide-zinc-100 text-[13px] dark:divide-zinc-800">
+                <colgroup>
+                  <col className="w-[10%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[5%]" />
+                  <col className="w-[5%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[7%]" />
+                  <col className="w-[8%]" />
+                  <col className="w-[5%]" />
+                  <col className="w-[21%]" />
+                </colgroup>
                 <thead className="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900/60">
                   <tr>
-                    <th className="px-4 py-3 text-left font-semibold">
+                    <th className="px-3 py-3 text-left font-semibold">
                       Оператор
                     </th>
-                    <th className="px-4 py-3 text-left font-semibold">
+                    <th className="px-3 py-3 text-left font-semibold">
                       Сотрудник
                     </th>
-                    <th className="px-4 py-3 text-left font-semibold">Клубы</th>
-                    <th className="px-4 py-3 text-left font-semibold">
+                    <th className="px-3 py-3 text-left font-semibold">Клубы</th>
+                    <th className="px-3 py-3 text-left font-semibold">
                       Последняя смена
                     </th>
-                    <th className="px-4 py-3 text-right font-semibold">Смены</th>
-                    <th className="px-4 py-3 text-right font-semibold">Часы</th>
-                    <th className="px-4 py-3 text-right font-semibold">Касса</th>
-                    <th className="px-4 py-3 text-right font-semibold">
+                    <th className="px-3 py-3 text-right font-semibold">Смены</th>
+                    <th className="px-3 py-3 text-right font-semibold">Часы</th>
+                    <th className="px-3 py-3 text-right font-semibold">Касса</th>
+                    <th className="px-3 py-3 text-right font-semibold">
                       Возвраты
                     </th>
-                    <th className="px-4 py-3 text-right font-semibold">
+                    <th className="px-3 py-3 text-right font-semibold">
                       Инкассация
                     </th>
-                    <th className="px-4 py-3 text-right font-semibold">
+                    <th className="px-3 py-3 text-right font-semibold">
                       Ср. чек
                     </th>
-                    <th className="px-4 py-3 text-left font-semibold">
+                    <th className="px-3 py-3 text-left font-semibold">
                       Привязка
                     </th>
                   </tr>
@@ -319,17 +332,17 @@ export default async function StaffOperatorsPage({
                       key={`${row.externalDomain ?? "source"}-${row.externalUserId}`}
                       className="hover:bg-zinc-50/80 dark:hover:bg-zinc-900/50"
                     >
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-3 align-top">
                         <p className="font-medium">user_id {row.externalUserId}</p>
-                        <p className="mt-1 text-xs text-zinc-500">
+                        <p className="mt-1 truncate text-xs text-zinc-500">
                           {row.externalDomain ?? "источник"}
                         </p>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-3 align-top">
                         {row.linkedGuest ? (
                           <Link
                             href={`/guests/${row.linkedGuest.id}`}
-                            className="font-medium underline underline-offset-4"
+                            className="block truncate font-medium underline underline-offset-4"
                           >
                             {row.linkedGuest.displayName}
                           </Link>
@@ -342,36 +355,36 @@ export default async function StaffOperatorsPage({
                           </p>
                         ) : null}
                       </td>
-                      <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">
+                      <td className="px-3 py-3 align-top text-zinc-600 dark:text-zinc-300">
                         {row.storeNames.length > 0
                           ? row.storeNames.join(", ")
                           : "не определены"}
                       </td>
-                      <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-300">
+                      <td className="px-3 py-3 align-top text-zinc-600 dark:text-zinc-300">
                         {formatLastClosedShift(
                           row.lastClosedShiftStartedAt,
                           row.lastClosedShiftStoppedAt,
                         )}
                       </td>
-                      <td className="px-4 py-3 text-right tabular-nums">
+                      <td className="px-3 py-3 text-right align-top tabular-nums">
                         {formatNumber(row.shiftsCount)}
                       </td>
-                      <td className="px-4 py-3 text-right tabular-nums">
+                      <td className="px-3 py-3 text-right align-top tabular-nums">
                         {formatNumber(row.shiftHours, 1)} ч
                       </td>
-                      <td className="px-4 py-3 text-right tabular-nums">
+                      <td className="px-3 py-3 text-right align-top tabular-nums">
                         {formatRubles(row.shiftPaymentAmount)}
                       </td>
-                      <td className="px-4 py-3 text-right tabular-nums">
+                      <td className="px-3 py-3 text-right align-top tabular-nums">
                         {formatRubles(row.shiftRefundAmount)}
                       </td>
-                      <td className="px-4 py-3 text-right tabular-nums">
+                      <td className="px-3 py-3 text-right align-top tabular-nums">
                         {formatRubles(row.shiftIncassAmount)}
                       </td>
-                      <td className="px-4 py-3 text-right tabular-nums">
+                      <td className="px-3 py-3 text-right align-top tabular-nums">
                         {formatRubles(row.averageShiftMiddleCheck)}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-3 align-top">
                         <StaffIdentityMappingForm
                           externalDomain={row.externalDomain}
                           externalUserId={row.externalUserId}

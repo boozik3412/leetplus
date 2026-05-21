@@ -501,6 +501,9 @@ function AnomaliesPanel({
               <p className="mt-3 text-sm leading-5 text-zinc-600 dark:text-zinc-300">
                 {anomaly.description}
               </p>
+              <p className="mt-3 rounded-md bg-white/55 px-3 py-2 text-xs leading-5 text-zinc-700 dark:bg-zinc-950/35 dark:text-zinc-200">
+                {staffAnomalyMeaning(anomaly.type)}
+              </p>
               <p className="mt-4 text-sm font-semibold underline underline-offset-4">
                 Разобрать в отчете операторов
               </p>
@@ -514,6 +517,21 @@ function AnomaliesPanel({
       )}
     </section>
   );
+}
+
+function staffAnomalyMeaning(type: StaffControlAnomalyType) {
+  switch (type) {
+    case "refunds":
+      return "Что значит: в сменах сотрудника были возвраты. Это не обязательно нарушение, но такие смены стоит сверить с кассой и причиной возврата.";
+    case "missing-incassation":
+      return "Что значит: по сменам есть существенная касса, но инкассация равна 0 руб. Нужно проверить, была ли инкассация проведена другим способом или не попала в данные.";
+    case "long-shift":
+      return "Что значит: средняя длительность смены у сотрудника 14 часов или больше. Сигнал ищет необычно длинные смены, а не просто большое количество часов за месяц.";
+    case "low-middle-check":
+      return "Что значит: средний чек по сменам ниже 100 руб при заметной кассе. Это повод проверить структуру операций, скидки, возвраты или особенности тарификации.";
+    case "unmapped-operator":
+      return "Что значит: в Langame есть user_id с кассой, но он еще не привязан к сотруднику LeetPlus. До привязки контроль идет по user_id, а не по имени.";
+  }
 }
 
 function anomalyToneClass(severity: "high" | "medium" | "low") {

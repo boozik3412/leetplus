@@ -37,7 +37,7 @@ const anomalyLabels: Record<
   },
   "long-shift": {
     title: "Длинные смены",
-    description: "Средняя смена от 14 ч или суммарно от 24 ч за период.",
+    description: "Средняя длительность смены от 14 ч за выбранный период.",
   },
   "low-middle-check": {
     title: "Низкий средний чек",

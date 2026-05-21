@@ -2118,10 +2118,7 @@ export class GuestsService {
       case 'missing-incassation':
         return row.shiftPaymentAmount >= 10_000 && row.shiftIncassAmount <= 0;
       case 'long-shift':
-        return (
-          row.shiftsCount > 0 &&
-          (row.shiftHours / row.shiftsCount >= 14 || row.shiftHours >= 24)
-        );
+        return row.shiftsCount > 0 && row.shiftHours / row.shiftsCount >= 14;
       case 'low-middle-check':
         return (
           row.averageShiftMiddleCheck > 0 &&
@@ -2283,9 +2280,7 @@ export class GuestsService {
       (row) => row.shiftPaymentAmount >= 10_000 && row.shiftIncassAmount <= 0,
     );
     const longShifts = allRows.filter(
-      (row) =>
-        row.shiftsCount > 0 &&
-        (row.shiftHours / row.shiftsCount >= 14 || row.shiftHours >= 24),
+      (row) => row.shiftsCount > 0 && row.shiftHours / row.shiftsCount >= 14,
     );
     const lowMiddleCheck = allRows.filter(
       (row) =>
@@ -2368,7 +2363,7 @@ export class GuestsService {
         description: this.staffAnomalyDescription(
           longShifts,
           (row) =>
-            `${row.name}: ${this.round(row.shiftHours, 1).toLocaleString('ru-RU')} ч`,
+            `${row.name}: средняя смена ${this.round(row.shiftHours / row.shiftsCount, 1).toLocaleString('ru-RU')} ч (${row.shiftsCount.toLocaleString('ru-RU')} смен)`,
         ),
         amount: null,
         count: longShifts.length,

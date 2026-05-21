@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import type { Store } from "@/lib/stores";
 
 type DashboardPeriod =
@@ -120,6 +120,7 @@ export function DashboardFilters({
   const router = useRouter();
   const pathname = usePathname();
   const rootRef = useRef<HTMLElement | null>(null);
+  const [isPending, startTransition] = useTransition();
   const [openPanel, setOpenPanel] = useState<OpenPanel>(null);
   const [selectedPeriod, setSelectedPeriod] = useState<DashboardPeriod>(
     isPeriod(period) ? period : "day",
@@ -210,7 +211,9 @@ export function DashboardFilters({
       params.append("storeIds", storeId);
     });
 
-    router.push(`${pathname}?${params.toString()}`);
+    startTransition(() => {
+      router.push(`${pathname}?${params.toString()}`);
+    });
 
     if (closePanel) {
       setOpenPanel(null);
@@ -225,6 +228,7 @@ export function DashboardFilters({
   return (
     <section
       ref={rootRef}
+      aria-busy={isPending}
       className="relative z-30 inline-flex max-w-full"
     >
       <div className="flex flex-wrap items-center gap-2">
@@ -240,6 +244,15 @@ export function DashboardFilters({
           isOpen={openPanel === "clubs"}
           onClick={() => setOpenPanel(openPanel === "clubs" ? null : "clubs")}
         />
+        {isPending ? (
+          <span
+            aria-live="polite"
+            className="inline-flex h-10 items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 text-sm font-semibold text-emerald-700 dark:text-emerald-300"
+          >
+            <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+            Обновляем данные...
+          </span>
+        ) : null}
       </div>
 
       {openPanel === "period" ? (

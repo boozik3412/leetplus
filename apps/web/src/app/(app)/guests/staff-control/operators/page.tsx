@@ -223,7 +223,7 @@ export default async function StaffOperatorsPage({
           </div>
           {report.rows.length > 0 ? (
             <>
-            <div className="grid gap-3 p-4 md:hidden">
+            <div className="grid gap-3 p-4 xl:hidden">
               {report.rows.map((row) => (
                 <OperatorCard
                   key={`${row.externalDomain ?? "source"}-${row.externalUserId}`}
@@ -232,7 +232,7 @@ export default async function StaffOperatorsPage({
                 />
               ))}
             </div>
-            <div className="hidden w-full overflow-x-auto md:block">
+            <div className="hidden w-full overflow-x-auto xl:block">
               <table className="min-w-[1280px] divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
                 <thead className="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900/60">
                   <tr>

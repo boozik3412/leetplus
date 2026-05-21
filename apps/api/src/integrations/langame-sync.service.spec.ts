@@ -381,4 +381,39 @@ describe('LangameSyncService', () => {
       'Langame API key is not configured',
     );
   });
+
+  it('keeps the current day in catch-up sync when a source was already synced today', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-04-29T12:00:00.000Z'));
+    settings.resolveTenantAccess.mockResolvedValueOnce({
+      apiKey: 'test-key',
+      sources: [
+        {
+          id: 'source-1',
+          domain: '443.langame.ru',
+          baseUrl: 'https://443.langame.ru/public_api',
+          lastSyncedDate: new Date('2026-04-29T08:00:00.000Z'),
+        },
+      ],
+    });
+
+    try {
+      await service.syncTenant(user, {
+        mode: 'BACKFILL',
+        catchUp: true,
+      });
+    } finally {
+      jest.useRealTimers();
+    }
+
+    expect(client.listProductExpenses).toHaveBeenCalledWith(
+      'https://443.langame.ru/public_api',
+      'test-key',
+      {
+        page: 1,
+        pageLimit: 200,
+        dateFrom: '2026-04-29',
+        dateTo: '2026-04-29',
+      },
+    );
+  });
 });

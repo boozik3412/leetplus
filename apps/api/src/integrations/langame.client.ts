@@ -299,7 +299,18 @@ export class LangameClient {
     params: LangameQueryParams = {},
   ): Promise<T[]> {
     try {
-      return await this.getList<T>(baseUrl, path, apiKey, params);
+      const rows = await this.getList<T>(baseUrl, path, apiKey, params);
+
+      if (rows.length > 0 || !this.shouldRetryEmptyWithEuropeanDates(params)) {
+        return rows;
+      }
+
+      return this.getList<T>(
+        baseUrl,
+        path,
+        apiKey,
+        this.toEuropeanDateParams(params),
+      );
     } catch (error) {
       if (!this.shouldRetryWithEuropeanDates(error, params)) {
         throw error;
@@ -324,6 +335,10 @@ export class LangameClient {
       message.includes('400') &&
       (this.isIsoDate(params.date_from) || this.isIsoDate(params.date_to))
     );
+  }
+
+  private shouldRetryEmptyWithEuropeanDates(params: LangameQueryParams) {
+    return this.isIsoDate(params.date_from) || this.isIsoDate(params.date_to);
   }
 
   private toEuropeanDateParams(params: LangameQueryParams) {

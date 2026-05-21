@@ -1057,7 +1057,7 @@ export class LangameSyncService {
       ? this.startOfUtcDay(lastSyncedDate)
       : new Date(today);
 
-    if (lastSyncedDate && fromDate >= today) {
+    if (lastSyncedDate && fromDate > today) {
       return null;
     }
 

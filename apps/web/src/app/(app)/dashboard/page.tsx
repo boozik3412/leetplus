@@ -80,6 +80,13 @@ function dashboardRevenueByClubHref(filters: DashboardHrefFilters) {
   return `/dashboard/revenue-by-club${query ? `?${query}` : ""}`;
 }
 
+function dashboardRevenueDiagnosticsHref(filters: DashboardHrefFilters) {
+  const params = dashboardQuery(filters);
+  const query = params.toString();
+
+  return `/dashboard/revenue-diagnostics${query ? `?${query}` : ""}`;
+}
+
 function formatPercent(value: number) {
   return `${value.toFixed(1)}%`;
 }
@@ -407,6 +414,11 @@ export default async function DashboardPage({
     dateFrom: summary.periodFrom,
     dateTo: summary.periodTo,
   });
+  const revenueDiagnosticsHref = dashboardRevenueDiagnosticsHref({
+    ...filters,
+    dateFrom: summary.periodFrom,
+    dateTo: summary.periodTo,
+  });
 
   return (
     <main className="px-6 py-8 text-zinc-950 dark:text-zinc-100">
@@ -425,6 +437,13 @@ export default async function DashboardPage({
                   selectedStoreIds={summary.selectedStoreIds}
                 />
                 <DashboardQuickSyncButton />
+                <Link
+                  href={revenueDiagnosticsHref}
+                  target="_blank"
+                  className="inline-flex items-center rounded-full border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold leading-5 text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                >
+                  Сверка выручки
+                </Link>
               </div>
               <h1 className="mt-3 max-w-3xl text-3xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50 min-[1250px]:text-4xl">
                 {summary.tenantName}: сводный дашборд сети

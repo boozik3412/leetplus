@@ -133,6 +133,64 @@ export type DashboardSummary = {
   topSkuByRevenue: DashboardTopSku[];
 };
 
+export type DashboardRevenueDiagnosticsTypeBreakdown = {
+  type: string;
+  count: number;
+  amount: number;
+};
+
+export type DashboardRevenueDiagnosticsRow = {
+  storeId: string;
+  storeName: string;
+  productRevenue: number;
+  productSalesCount: number;
+  productGuests: number;
+  operationPlusAmount: number;
+  operationMinusAmount: number;
+  operationNetAmount: number;
+  operationPlusCount: number;
+  operationMinusCount: number;
+  operationOtherAmount: number;
+  operationOtherCount: number;
+  transactionPositiveAmount: number;
+  transactionNegativeAmount: number;
+  transactionNetAmount: number;
+  transactionCount: number;
+  transactionGuests: number;
+  sessionsCount: number;
+  activeGuests: number;
+  shiftsCount: number;
+  shiftCashAmount: number;
+  shiftCashlessAmount: number;
+  shiftMobilePayAmount: number;
+  shiftRefundAmount: number;
+  shiftRevenueCandidate: number;
+  balanceSpendRevenueCandidate: number;
+  operationTypes: DashboardRevenueDiagnosticsTypeBreakdown[];
+  transactionTypes: DashboardRevenueDiagnosticsTypeBreakdown[];
+  notes: string[];
+};
+
+export type DashboardRevenueDiagnostics = {
+  tenantId: string;
+  tenantSlug: string;
+  tenantName: string;
+  periodLabel: string;
+  periodFrom: string;
+  periodTo: string;
+  selectedStoreIds: string[];
+  rows: DashboardRevenueDiagnosticsRow[];
+  totals: Omit<
+    DashboardRevenueDiagnosticsRow,
+    'storeId' | 'storeName' | 'notes'
+  >;
+  interpretation: {
+    primaryRecommendation: string;
+    mobileTopupRule: string;
+    limitations: string[];
+  };
+};
+
 @Injectable()
 export class DashboardService {
   constructor(
@@ -721,6 +779,153 @@ export class DashboardService {
     };
   }
 
+  async getRevenueDiagnostics(
+    user?: AuthenticatedUser,
+    query: DashboardQuery = {},
+  ): Promise<DashboardRevenueDiagnostics> {
+    const { tenantId, tenantSlug } =
+      await this.tenantContextService.resolve(user);
+    const period = this.resolvePeriod(query);
+    const selectedStoreIds = this.resolveStoreIds(query.storeIds);
+    const storeFilter =
+      selectedStoreIds.length > 0 ? { storeId: { in: selectedStoreIds } } : {};
+    const [
+      tenant,
+      stores,
+      salesFacts,
+      operationLogs,
+      transactions,
+      sessions,
+      shifts,
+    ] = await Promise.all([
+      this.prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { name: true },
+      }),
+      this.prisma.store.findMany({
+        where: {
+          tenantId,
+          ...(selectedStoreIds.length > 0
+            ? { id: { in: selectedStoreIds } }
+            : {}),
+        },
+        select: {
+          id: true,
+          name: true,
+          externalClubId: true,
+        },
+        orderBy: { name: 'asc' },
+      }),
+      this.prisma.salesFact.findMany({
+        where: {
+          tenantId,
+          isCanceled: false,
+          ...storeFilter,
+          saleDate: { gte: period.fromDate, lte: period.toDate },
+        },
+        select: {
+          storeId: true,
+          revenue: true,
+          guestId: true,
+          externalGuestId: true,
+        },
+      }),
+      this.prisma.guestOperationLog.findMany({
+        where: {
+          tenantId,
+          ...storeFilter,
+          happenedAt: { gte: period.fromDate, lte: period.toDate },
+        },
+        select: {
+          storeId: true,
+          externalClubId: true,
+          type: true,
+          amount: true,
+        },
+      }),
+      this.prisma.guestTransaction.findMany({
+        where: {
+          tenantId,
+          ...storeFilter,
+          happenedAt: { gte: period.fromDate, lte: period.toDate },
+        },
+        select: {
+          storeId: true,
+          externalClubId: true,
+          guestId: true,
+          externalGuestId: true,
+          type: true,
+          amount: true,
+        },
+      }),
+      this.prisma.guestSession.findMany({
+        where: {
+          tenantId,
+          ...storeFilter,
+          startedAt: { lte: period.toDate },
+          OR: [{ stoppedAt: null }, { stoppedAt: { gte: period.fromDate } }],
+        },
+        select: {
+          storeId: true,
+          externalClubId: true,
+          externalSessionId: true,
+          guestId: true,
+          externalGuestId: true,
+        },
+      }),
+      this.prisma.guestWorkingShift.findMany({
+        where: {
+          tenantId,
+          ...storeFilter,
+          startedAt: { lte: period.toDate },
+          OR: [{ stoppedAt: null }, { stoppedAt: { gte: period.fromDate } }],
+        },
+        select: {
+          storeId: true,
+          externalClubId: true,
+          cashAmount: true,
+          cashlessAmount: true,
+          mobilePay: true,
+          refundsCash: true,
+          refundsCashless: true,
+        },
+      }),
+    ]);
+
+    const rows = this.buildRevenueDiagnosticsRows(
+      stores,
+      salesFacts,
+      operationLogs,
+      transactions,
+      sessions,
+      shifts,
+    );
+    const totals = this.buildRevenueDiagnosticsTotals(rows);
+
+    return {
+      tenantId,
+      tenantSlug,
+      tenantName: tenant?.name ?? tenantSlug,
+      periodLabel: period.label,
+      periodFrom: this.toDateInputValue(period.fromDate),
+      periodTo: this.toDateInputValue(period.toDate),
+      selectedStoreIds,
+      rows,
+      totals,
+      interpretation: {
+        primaryRecommendation:
+          'Для выручки клуба использовать подтвержденные списания/расход баланса внутри клуба, а мобильные пополнения держать отдельно как сетевой денежный поток.',
+        mobileTopupRule:
+          'Пополнение баланса в мобильном приложении не должно увеличивать выручку конкретного клуба; клуб получает выручку в момент списания баланса на сессию, услугу или покупку в этом клубе.',
+        limitations: [
+          'В GuestOperationLog сейчас сохранены type, сумма, дата и клуб, но не сохранены source/form/name, поэтому нельзя надежно отделить мобильное приложение, кассу и терминал без расширения модели.',
+          'transactions/list требует подтверждения семантики полей: amount/sum могут быть суммой операции, изменением баланса или остатком.',
+          'log_cash_transaction/list на production ранее возвращал ошибки, поэтому кассовый слой пока можно сверять только через working_shifts и operation log.',
+        ],
+      },
+    };
+  }
+
   private resolvePeriod(query: DashboardQuery) {
     const now = new Date();
     const toDate = new Date(
@@ -1155,6 +1360,435 @@ export class DashboardService {
         sum + Math.max(0, operationLog.amount?.toNumber() ?? 0),
       0,
     );
+  }
+
+  private buildRevenueDiagnosticsRows(
+    stores: {
+      id: string;
+      name: string;
+      externalClubId: string | null;
+    }[],
+    salesFacts: {
+      storeId: string;
+      revenue: { toNumber: () => number };
+      guestId: string | null;
+      externalGuestId: string | null;
+    }[],
+    operationLogs: {
+      storeId: string | null;
+      externalClubId: string | null;
+      type: string | null;
+      amount: { toNumber: () => number } | null;
+    }[],
+    transactions: {
+      storeId: string | null;
+      externalClubId: string | null;
+      guestId: string | null;
+      externalGuestId: string | null;
+      type: string | null;
+      amount: { toNumber: () => number } | null;
+    }[],
+    sessions: {
+      storeId: string | null;
+      externalClubId: string | null;
+      externalSessionId: string;
+      guestId: string | null;
+      externalGuestId: string | null;
+    }[],
+    shifts: {
+      storeId: string | null;
+      externalClubId: string | null;
+      cashAmount: { toNumber: () => number } | null;
+      cashlessAmount: { toNumber: () => number } | null;
+      mobilePay: { toNumber: () => number } | null;
+      refundsCash: { toNumber: () => number } | null;
+      refundsCashless: { toNumber: () => number } | null;
+    }[],
+  ): DashboardRevenueDiagnosticsRow[] {
+    const storeIdByExternalClubId = new Map(
+      stores
+        .filter((store) => store.externalClubId)
+        .map((store) => [store.externalClubId as string, store.id]),
+    );
+    const rowsByStoreId = new Map(
+      stores.map((store) => [
+        store.id,
+        this.emptyRevenueDiagnosticsRow(store.id, store.name),
+      ]),
+    );
+    const productGuestIdsByStore = new Map<string, Set<string>>();
+    const transactionGuestIdsByStore = new Map<string, Set<string>>();
+    const sessionGuestIdsByStore = new Map<string, Set<string>>();
+
+    const resolveStoreId = (
+      storeId?: string | null,
+      externalClubId?: string | null,
+    ) => {
+      if (storeId) {
+        return storeId;
+      }
+
+      if (externalClubId) {
+        return storeIdByExternalClubId.get(externalClubId) ?? null;
+      }
+
+      return null;
+    };
+
+    const addGuestKey = (
+      map: Map<string, Set<string>>,
+      storeId: string,
+      guestKey?: string | null,
+    ) => {
+      if (!guestKey) {
+        return;
+      }
+
+      const values = map.get(storeId) ?? new Set<string>();
+      values.add(guestKey);
+      map.set(storeId, values);
+    };
+
+    salesFacts.forEach((fact) => {
+      const row = rowsByStoreId.get(fact.storeId);
+
+      if (!row) {
+        return;
+      }
+
+      row.productRevenue += fact.revenue.toNumber();
+      row.productSalesCount += 1;
+      addGuestKey(
+        productGuestIdsByStore,
+        fact.storeId,
+        fact.guestId ?? fact.externalGuestId,
+      );
+    });
+
+    operationLogs.forEach((operationLog) => {
+      const storeId = resolveStoreId(
+        operationLog.storeId,
+        operationLog.externalClubId,
+      );
+      const row = storeId ? rowsByStoreId.get(storeId) : null;
+
+      if (!storeId || !row) {
+        return;
+      }
+
+      const type = operationLog.type ?? 'unknown';
+      const normalizedType = type.toLowerCase();
+      const amount = operationLog.amount?.toNumber() ?? 0;
+      const absoluteAmount = Math.abs(amount);
+
+      this.addDiagnosticsType(row.operationTypes, type, amount);
+
+      if (normalizedType === 'plus') {
+        row.operationPlusAmount += absoluteAmount;
+        row.operationPlusCount += 1;
+      } else if (normalizedType === 'minus') {
+        row.operationMinusAmount += absoluteAmount;
+        row.operationMinusCount += 1;
+      } else {
+        row.operationOtherAmount += absoluteAmount;
+        row.operationOtherCount += 1;
+      }
+    });
+
+    transactions.forEach((transaction) => {
+      const storeId = resolveStoreId(
+        transaction.storeId,
+        transaction.externalClubId,
+      );
+      const row = storeId ? rowsByStoreId.get(storeId) : null;
+
+      if (!storeId || !row) {
+        return;
+      }
+
+      const amount = transaction.amount?.toNumber() ?? 0;
+      row.transactionCount += 1;
+      row.transactionNetAmount += amount;
+      this.addDiagnosticsType(
+        row.transactionTypes,
+        transaction.type ?? 'unknown',
+        amount,
+      );
+
+      if (amount >= 0) {
+        row.transactionPositiveAmount += amount;
+      } else {
+        row.transactionNegativeAmount += Math.abs(amount);
+      }
+
+      addGuestKey(
+        transactionGuestIdsByStore,
+        storeId,
+        transaction.guestId ?? transaction.externalGuestId,
+      );
+    });
+
+    sessions.forEach((session) => {
+      const storeId = resolveStoreId(session.storeId, session.externalClubId);
+      const row = storeId ? rowsByStoreId.get(storeId) : null;
+
+      if (!storeId || !row) {
+        return;
+      }
+
+      row.sessionsCount += 1;
+      addGuestKey(
+        sessionGuestIdsByStore,
+        storeId,
+        session.guestId ??
+          session.externalGuestId ??
+          `session:${session.externalSessionId}`,
+      );
+    });
+
+    shifts.forEach((shift) => {
+      const storeId = resolveStoreId(shift.storeId, shift.externalClubId);
+      const row = storeId ? rowsByStoreId.get(storeId) : null;
+
+      if (!row) {
+        return;
+      }
+
+      row.shiftsCount += 1;
+      row.shiftCashAmount += shift.cashAmount?.toNumber() ?? 0;
+      row.shiftCashlessAmount += shift.cashlessAmount?.toNumber() ?? 0;
+      row.shiftMobilePayAmount += shift.mobilePay?.toNumber() ?? 0;
+      row.shiftRefundAmount +=
+        (shift.refundsCash?.toNumber() ?? 0) +
+        (shift.refundsCashless?.toNumber() ?? 0);
+    });
+
+    return [...rowsByStoreId.values()]
+      .map((row) => {
+        row.productGuests = productGuestIdsByStore.get(row.storeId)?.size ?? 0;
+        row.transactionGuests =
+          transactionGuestIdsByStore.get(row.storeId)?.size ?? 0;
+        row.activeGuests = sessionGuestIdsByStore.get(row.storeId)?.size ?? 0;
+        row.operationNetAmount =
+          row.operationPlusAmount - row.operationMinusAmount;
+        row.shiftRevenueCandidate =
+          row.shiftCashAmount +
+          row.shiftCashlessAmount +
+          row.shiftMobilePayAmount -
+          row.shiftRefundAmount;
+        row.balanceSpendRevenueCandidate = Math.max(
+          row.operationMinusAmount,
+          row.transactionNegativeAmount,
+        );
+        row.notes = this.revenueDiagnosticsNotes(row);
+
+        return this.roundRevenueDiagnosticsRow(row);
+      })
+      .sort(
+        (a, b) =>
+          b.balanceSpendRevenueCandidate - a.balanceSpendRevenueCandidate ||
+          b.operationPlusAmount - a.operationPlusAmount ||
+          b.productRevenue - a.productRevenue ||
+          a.storeName.localeCompare(b.storeName),
+      );
+  }
+
+  private emptyRevenueDiagnosticsRow(
+    storeId: string,
+    storeName: string,
+  ): DashboardRevenueDiagnosticsRow {
+    return {
+      storeId,
+      storeName,
+      productRevenue: 0,
+      productSalesCount: 0,
+      productGuests: 0,
+      operationPlusAmount: 0,
+      operationMinusAmount: 0,
+      operationNetAmount: 0,
+      operationPlusCount: 0,
+      operationMinusCount: 0,
+      operationOtherAmount: 0,
+      operationOtherCount: 0,
+      transactionPositiveAmount: 0,
+      transactionNegativeAmount: 0,
+      transactionNetAmount: 0,
+      transactionCount: 0,
+      transactionGuests: 0,
+      sessionsCount: 0,
+      activeGuests: 0,
+      shiftsCount: 0,
+      shiftCashAmount: 0,
+      shiftCashlessAmount: 0,
+      shiftMobilePayAmount: 0,
+      shiftRefundAmount: 0,
+      shiftRevenueCandidate: 0,
+      balanceSpendRevenueCandidate: 0,
+      operationTypes: [],
+      transactionTypes: [],
+      notes: [],
+    };
+  }
+
+  private addDiagnosticsType(
+    items: DashboardRevenueDiagnosticsTypeBreakdown[],
+    type: string,
+    amount: number,
+  ) {
+    const existing = items.find((item) => item.type === type);
+
+    if (existing) {
+      existing.count += 1;
+      existing.amount += amount;
+      return;
+    }
+
+    items.push({ type, count: 1, amount });
+  }
+
+  private revenueDiagnosticsNotes(row: DashboardRevenueDiagnosticsRow) {
+    const notes: string[] = [];
+
+    if (row.operationPlusAmount > 0 && row.operationMinusAmount === 0) {
+      notes.push(
+        'Есть только plus-операции: это может быть пополнение баланса, а не клубная выручка.',
+      );
+    }
+
+    if (row.operationMinusAmount > 0) {
+      notes.push(
+        'Есть minus-операции: кандидат на выручку клуба через списание баланса в клубе.',
+      );
+    }
+
+    if (row.productRevenue > row.balanceSpendRevenueCandidate) {
+      notes.push(
+        'Товары/бар больше списаний баланса: часть продаж могла идти напрямую по кассе или источник списаний неполный.',
+      );
+    }
+
+    if (row.activeGuests === 0 && row.productGuests > 0) {
+      notes.push(
+        'В продажах есть гости, но в сессиях по клубу их нет: нужна проверка связки sessions.club_id.',
+      );
+    }
+
+    if (row.shiftRevenueCandidate > 0) {
+      notes.push(
+        'Смены дают отдельный кассовый кандидат; его нужно сверить с operation log перед использованием в дашборде.',
+      );
+    }
+
+    return notes;
+  }
+
+  private roundRevenueDiagnosticsRow(
+    row: DashboardRevenueDiagnosticsRow,
+  ): DashboardRevenueDiagnosticsRow {
+    const roundType = (item: DashboardRevenueDiagnosticsTypeBreakdown) => ({
+      ...item,
+      amount: this.round(item.amount),
+    });
+
+    return {
+      ...row,
+      productRevenue: this.round(row.productRevenue),
+      operationPlusAmount: this.round(row.operationPlusAmount),
+      operationMinusAmount: this.round(row.operationMinusAmount),
+      operationNetAmount: this.round(row.operationNetAmount),
+      operationOtherAmount: this.round(row.operationOtherAmount),
+      transactionPositiveAmount: this.round(row.transactionPositiveAmount),
+      transactionNegativeAmount: this.round(row.transactionNegativeAmount),
+      transactionNetAmount: this.round(row.transactionNetAmount),
+      shiftCashAmount: this.round(row.shiftCashAmount),
+      shiftCashlessAmount: this.round(row.shiftCashlessAmount),
+      shiftMobilePayAmount: this.round(row.shiftMobilePayAmount),
+      shiftRefundAmount: this.round(row.shiftRefundAmount),
+      shiftRevenueCandidate: this.round(row.shiftRevenueCandidate),
+      balanceSpendRevenueCandidate: this.round(
+        row.balanceSpendRevenueCandidate,
+      ),
+      operationTypes: row.operationTypes
+        .map(roundType)
+        .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount)),
+      transactionTypes: row.transactionTypes
+        .map(roundType)
+        .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount)),
+    };
+  }
+
+  private buildRevenueDiagnosticsTotals(
+    rows: DashboardRevenueDiagnosticsRow[],
+  ): Omit<DashboardRevenueDiagnosticsRow, 'storeId' | 'storeName' | 'notes'> {
+    const totals = this.emptyRevenueDiagnosticsRow('total', 'Итого');
+
+    rows.forEach((row) => {
+      totals.productRevenue += row.productRevenue;
+      totals.productSalesCount += row.productSalesCount;
+      totals.productGuests += row.productGuests;
+      totals.operationPlusAmount += row.operationPlusAmount;
+      totals.operationMinusAmount += row.operationMinusAmount;
+      totals.operationNetAmount += row.operationNetAmount;
+      totals.operationPlusCount += row.operationPlusCount;
+      totals.operationMinusCount += row.operationMinusCount;
+      totals.operationOtherAmount += row.operationOtherAmount;
+      totals.operationOtherCount += row.operationOtherCount;
+      totals.transactionPositiveAmount += row.transactionPositiveAmount;
+      totals.transactionNegativeAmount += row.transactionNegativeAmount;
+      totals.transactionNetAmount += row.transactionNetAmount;
+      totals.transactionCount += row.transactionCount;
+      totals.transactionGuests += row.transactionGuests;
+      totals.sessionsCount += row.sessionsCount;
+      totals.activeGuests += row.activeGuests;
+      totals.shiftsCount += row.shiftsCount;
+      totals.shiftCashAmount += row.shiftCashAmount;
+      totals.shiftCashlessAmount += row.shiftCashlessAmount;
+      totals.shiftMobilePayAmount += row.shiftMobilePayAmount;
+      totals.shiftRefundAmount += row.shiftRefundAmount;
+      totals.shiftRevenueCandidate += row.shiftRevenueCandidate;
+      totals.balanceSpendRevenueCandidate += row.balanceSpendRevenueCandidate;
+      row.operationTypes.forEach((item) =>
+        this.addDiagnosticsType(totals.operationTypes, item.type, item.amount),
+      );
+      row.transactionTypes.forEach((item) =>
+        this.addDiagnosticsType(
+          totals.transactionTypes,
+          item.type,
+          item.amount,
+        ),
+      );
+    });
+
+    const totalRow = this.roundRevenueDiagnosticsRow(totals);
+
+    return {
+      productRevenue: totalRow.productRevenue,
+      productSalesCount: totalRow.productSalesCount,
+      productGuests: totalRow.productGuests,
+      operationPlusAmount: totalRow.operationPlusAmount,
+      operationMinusAmount: totalRow.operationMinusAmount,
+      operationNetAmount: totalRow.operationNetAmount,
+      operationPlusCount: totalRow.operationPlusCount,
+      operationMinusCount: totalRow.operationMinusCount,
+      operationOtherAmount: totalRow.operationOtherAmount,
+      operationOtherCount: totalRow.operationOtherCount,
+      transactionPositiveAmount: totalRow.transactionPositiveAmount,
+      transactionNegativeAmount: totalRow.transactionNegativeAmount,
+      transactionNetAmount: totalRow.transactionNetAmount,
+      transactionCount: totalRow.transactionCount,
+      transactionGuests: totalRow.transactionGuests,
+      sessionsCount: totalRow.sessionsCount,
+      activeGuests: totalRow.activeGuests,
+      shiftsCount: totalRow.shiftsCount,
+      shiftCashAmount: totalRow.shiftCashAmount,
+      shiftCashlessAmount: totalRow.shiftCashlessAmount,
+      shiftMobilePayAmount: totalRow.shiftMobilePayAmount,
+      shiftRefundAmount: totalRow.shiftRefundAmount,
+      shiftRevenueCandidate: totalRow.shiftRevenueCandidate,
+      balanceSpendRevenueCandidate: totalRow.balanceSpendRevenueCandidate,
+      operationTypes: totalRow.operationTypes,
+      transactionTypes: totalRow.transactionTypes,
+    };
   }
 
   private buildStoreRevenueBreakdown(

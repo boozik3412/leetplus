@@ -106,9 +106,82 @@ export type DashboardSummary = {
   topSkuByRevenue: DashboardTopSku[];
 };
 
+export type DashboardRevenueDiagnosticsTypeBreakdown = {
+  type: string;
+  count: number;
+  amount: number;
+};
+
+export type DashboardRevenueDiagnosticsRow = {
+  storeId: string;
+  storeName: string;
+  productRevenue: number;
+  productSalesCount: number;
+  productGuests: number;
+  operationPlusAmount: number;
+  operationMinusAmount: number;
+  operationNetAmount: number;
+  operationPlusCount: number;
+  operationMinusCount: number;
+  operationOtherAmount: number;
+  operationOtherCount: number;
+  transactionPositiveAmount: number;
+  transactionNegativeAmount: number;
+  transactionNetAmount: number;
+  transactionCount: number;
+  transactionGuests: number;
+  sessionsCount: number;
+  activeGuests: number;
+  shiftsCount: number;
+  shiftCashAmount: number;
+  shiftCashlessAmount: number;
+  shiftMobilePayAmount: number;
+  shiftRefundAmount: number;
+  shiftRevenueCandidate: number;
+  balanceSpendRevenueCandidate: number;
+  operationTypes: DashboardRevenueDiagnosticsTypeBreakdown[];
+  transactionTypes: DashboardRevenueDiagnosticsTypeBreakdown[];
+  notes: string[];
+};
+
+export type DashboardRevenueDiagnostics = {
+  tenantId: string;
+  tenantSlug: string;
+  tenantName: string;
+  periodLabel: string;
+  periodFrom: string;
+  periodTo: string;
+  selectedStoreIds: string[];
+  rows: DashboardRevenueDiagnosticsRow[];
+  totals: Omit<DashboardRevenueDiagnosticsRow, "storeId" | "storeName" | "notes">;
+  interpretation: {
+    primaryRecommendation: string;
+    mobileTopupRule: string;
+    limitations: string[];
+  };
+};
+
 export async function getDashboardSummary(
   filters: DashboardSummaryFilters = {},
 ): Promise<DashboardSummary> {
+  return getDashboardResource("summary", filters, "summary");
+}
+
+export async function getDashboardRevenueDiagnostics(
+  filters: DashboardSummaryFilters = {},
+): Promise<DashboardRevenueDiagnostics> {
+  return getDashboardResource(
+    "revenue-diagnostics",
+    filters,
+    "revenue diagnostics",
+  );
+}
+
+async function getDashboardResource<T>(
+  resource: string,
+  filters: DashboardSummaryFilters = {},
+  errorLabel: string,
+): Promise<T> {
   const params = new URLSearchParams();
 
   if (filters.period) {
@@ -132,14 +205,17 @@ export async function getDashboardSummary(
   });
 
   const query = params.toString();
-  const response = await fetch(`${getApiUrl()}/dashboard/summary${query ? `?${query}` : ""}`, {
-    cache: "no-store",
-    headers: await getAuthHeaders(),
-  });
+  const response = await fetch(
+    `${getApiUrl()}/dashboard/${resource}${query ? `?${query}` : ""}`,
+    {
+      cache: "no-store",
+      headers: await getAuthHeaders(),
+    },
+  );
 
   if (!response.ok) {
-    throw new Error("Failed to fetch dashboard summary");
+    throw new Error(`Failed to fetch dashboard ${errorLabel}`);
   }
 
-  return response.json() as Promise<DashboardSummary>;
+  return response.json() as Promise<T>;
 }

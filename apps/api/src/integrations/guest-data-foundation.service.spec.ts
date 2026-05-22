@@ -440,6 +440,7 @@ describe('GuestDataFoundationService', () => {
     ).toBe(1);
     expect(successUpdate.data.profile.pcTypesInClubs.total).toBe(1);
     expect(successUpdate.data.profile.pcTypeLinks.total).toBe(2);
+    expect(langameClient.listGuestLogs).not.toHaveBeenCalled();
     const storeUpdateCalls = prisma.store.updateMany.mock.calls as Array<
       [StoreUpdateManyCall]
     >;
@@ -472,17 +473,26 @@ describe('GuestDataFoundationService', () => {
       'https://club.example/public_api',
       'api-key',
       {
-        dateFrom: '01.05.2026',
-        dateTo: '01.05.2026',
+        dateFrom: '2026-05-01',
+        dateTo: '2026-05-01',
       },
     );
     expect(langameClient.listAllOperationsLog).toHaveBeenCalledWith(
       'https://club.example/public_api',
       'api-key',
       {
-        dateFrom: '01.05.2026',
-        dateTo: '01.05.2026',
+        dateFrom: '2026-05-01',
+        dateTo: '2026-05-01',
         operationType: 'Списание',
+      },
+    );
+    expect(langameClient.listAllOperationsLog).toHaveBeenCalledWith(
+      'https://club.example/public_api',
+      'api-key',
+      {
+        dateFrom: '2026-05-01',
+        dateTo: '2026-05-01',
+        operationType: 'Пополнение',
       },
     );
     const shiftUpsertCalls = prisma.guestWorkingShift.upsert.mock
@@ -520,6 +530,20 @@ describe('GuestDataFoundationService', () => {
     expect(shiftUpsert.update.externalClubId).toBe('10');
     expect(shiftUpsert.update.durationMinutes).toBe(630);
     expect(shiftUpsert.update.message).toBeNull();
+  });
+
+  it('loads guest logs only when explicitly requested', async () => {
+    await service.syncTenant(user, {
+      dateFrom: '2026-05-01',
+      dateTo: '2026-05-01',
+      includeGuestLogs: true,
+      includeOperationLog: false,
+      includeCashTransactions: false,
+      includeWorkingShifts: false,
+    });
+
+    expect(langameClient.listGuestLogs).toHaveBeenCalled();
+    expect(prisma.guestLog.upsert).toHaveBeenCalledTimes(1);
   });
 
   it('rejects profiling periods longer than ninety days', async () => {

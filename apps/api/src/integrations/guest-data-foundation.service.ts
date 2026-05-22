@@ -678,7 +678,7 @@ export class GuestDataFoundationService {
     );
 
     let guestLogs: LangameGuestLog[] = [];
-    if (query.includeGuestLogs ?? true) {
+    if (query.includeGuestLogs ?? false) {
       guestLogs = await this.captureEndpoint(profile, 'guests/logs', () =>
         this.paginate((page) =>
           this.langameClient.listGuestLogs(baseUrl, apiKey, {

@@ -181,6 +181,7 @@ export class DashboardService {
       periodClubRevenueFacts,
       periodGuestSessions,
       periodGuestTransactions,
+      periodGuestOperationLogs,
       fullDayRevenueFacts,
       previousSalesFacts,
       previousStockMovements,
@@ -199,6 +200,7 @@ export class DashboardService {
         select: {
           id: true,
           name: true,
+          externalClubId: true,
         },
         orderBy: {
           name: 'asc',
@@ -404,6 +406,8 @@ export class DashboardService {
         },
         select: {
           storeId: true,
+          externalClubId: true,
+          externalSessionId: true,
           guestId: true,
           externalGuestId: true,
         },
@@ -416,6 +420,22 @@ export class DashboardService {
         },
         select: {
           storeId: true,
+          externalClubId: true,
+          guestId: true,
+          externalGuestId: true,
+          amount: true,
+        },
+      }),
+      this.prisma.guestOperationLog.findMany({
+        where: {
+          tenantId,
+          ...storeFilter,
+          happenedAt: { gte: period.fromDate, lte: period.toDate },
+          type: 'plus',
+        },
+        select: {
+          storeId: true,
+          externalClubId: true,
           amount: true,
         },
       }),
@@ -591,6 +611,7 @@ export class DashboardService {
         periodClubRevenueFacts,
         selectedStoreIds.length > 0,
       ),
+      this.guestOperationRevenueTotal(periodGuestOperationLogs),
       totalRevenue + this.guestTransactionTotal(periodGuestTransactions),
     );
     const storeRevenueBreakdown = this.buildStoreRevenueBreakdown(
@@ -599,6 +620,7 @@ export class DashboardService {
       salesFacts,
       periodGuestSessions,
       periodGuestTransactions,
+      periodGuestOperationLogs,
     );
     const averageDailyRevenue = fullDayRevenue.average;
     const previousRevenue = previousSalesFacts.reduce(
@@ -1123,10 +1145,23 @@ export class DashboardService {
     );
   }
 
+  private guestOperationRevenueTotal(
+    operationLogs: {
+      amount: { toNumber: () => number } | null;
+    }[],
+  ) {
+    return operationLogs.reduce(
+      (sum, operationLog) =>
+        sum + Math.max(0, operationLog.amount?.toNumber() ?? 0),
+      0,
+    );
+  }
+
   private buildStoreRevenueBreakdown(
     stores: {
       id: string;
       name: string;
+      externalClubId: string | null;
     }[],
     clubRevenueFacts: {
       storeId: string | null;
@@ -1134,22 +1169,58 @@ export class DashboardService {
     }[],
     salesFacts: {
       storeId: string;
+      guestId?: string | null;
+      externalGuestId?: string | null;
       revenue: { toNumber: () => number };
     }[],
     guestSessions: {
       storeId: string | null;
+      externalClubId: string | null;
+      externalSessionId: string;
       guestId: string | null;
       externalGuestId: string | null;
     }[],
     guestTransactions: {
       storeId: string | null;
+      externalClubId: string | null;
+      guestId: string | null;
+      externalGuestId: string | null;
+      amount: { toNumber: () => number } | null;
+    }[],
+    guestOperationLogs: {
+      storeId: string | null;
+      externalClubId: string | null;
       amount: { toNumber: () => number } | null;
     }[],
   ): DashboardStoreRevenueMetric[] {
     const totalRevenueByStore = new Map<string, number>();
     const productRevenueByStore = new Map<string, number>();
     const transactionRevenueByStore = new Map<string, number>();
+    const operationRevenueByStore = new Map<string, number>();
     const guestIdsByStore = new Map<string, Set<string>>();
+    const storeIdByExternalClubId = new Map<string, string>();
+    const storeIdByGuestKey = new Map<string, string>();
+
+    stores.forEach((store) => {
+      if (store.externalClubId) {
+        storeIdByExternalClubId.set(store.externalClubId, store.id);
+      }
+    });
+
+    const resolveStoreId = (
+      storeId?: string | null,
+      externalClubId?: string | null,
+    ) => {
+      if (storeId) {
+        return storeId;
+      }
+
+      if (externalClubId) {
+        return storeIdByExternalClubId.get(externalClubId) ?? null;
+      }
+
+      return null;
+    };
 
     clubRevenueFacts.forEach((fact) => {
       if (!fact.storeId) {
@@ -1169,39 +1240,84 @@ export class DashboardService {
         (productRevenueByStore.get(fact.storeId) ?? 0) +
           fact.revenue.toNumber(),
       );
+
+      const guestKey = fact.guestId ?? fact.externalGuestId;
+      if (guestKey) {
+        const guestIds = guestIdsByStore.get(fact.storeId) ?? new Set<string>();
+        guestIds.add(guestKey);
+        guestIdsByStore.set(fact.storeId, guestIds);
+
+        if (!storeIdByGuestKey.has(guestKey)) {
+          storeIdByGuestKey.set(guestKey, fact.storeId);
+        }
+      }
+    });
+
+    guestSessions.forEach((session) => {
+      const storeId = resolveStoreId(session.storeId, session.externalClubId);
+      const guestKey =
+        session.guestId ??
+        session.externalGuestId ??
+        `session:${session.externalSessionId}`;
+
+      if (!storeId || !guestKey) {
+        return;
+      }
+
+      if (session.guestId || session.externalGuestId) {
+        storeIdByGuestKey.set(
+          session.guestId ?? session.externalGuestId!,
+          storeId,
+        );
+      }
+
+      const guestIds = guestIdsByStore.get(storeId) ?? new Set<string>();
+      guestIds.add(guestKey);
+      guestIdsByStore.set(storeId, guestIds);
     });
 
     guestTransactions.forEach((transaction) => {
-      if (!transaction.storeId) {
+      const guestKey = transaction.guestId ?? transaction.externalGuestId;
+      const storeId =
+        resolveStoreId(transaction.storeId, transaction.externalClubId) ??
+        (guestKey ? storeIdByGuestKey.get(guestKey) : null);
+
+      if (!storeId) {
         return;
       }
 
       transactionRevenueByStore.set(
-        transaction.storeId,
-        (transactionRevenueByStore.get(transaction.storeId) ?? 0) +
+        storeId,
+        (transactionRevenueByStore.get(storeId) ?? 0) +
           Math.abs(transaction.amount?.toNumber() ?? 0),
       );
     });
 
-    guestSessions.forEach((session) => {
-      const guestKey = session.guestId ?? session.externalGuestId;
+    guestOperationLogs.forEach((operationLog) => {
+      const storeId = resolveStoreId(
+        operationLog.storeId,
+        operationLog.externalClubId,
+      );
 
-      if (!session.storeId || !guestKey) {
+      if (!storeId) {
         return;
       }
 
-      const guestIds =
-        guestIdsByStore.get(session.storeId) ?? new Set<string>();
-      guestIds.add(guestKey);
-      guestIdsByStore.set(session.storeId, guestIds);
+      operationRevenueByStore.set(
+        storeId,
+        (operationRevenueByStore.get(storeId) ?? 0) +
+          Math.max(0, operationLog.amount?.toNumber() ?? 0),
+      );
     });
 
     return stores
       .map((store) => {
         const productRevenue = productRevenueByStore.get(store.id) ?? 0;
         const transactionRevenue = transactionRevenueByStore.get(store.id) ?? 0;
+        const operationRevenue = operationRevenueByStore.get(store.id) ?? 0;
         const totalRevenue = Math.max(
           totalRevenueByStore.get(store.id) ?? 0,
+          operationRevenue,
           transactionRevenue + productRevenue,
         );
 

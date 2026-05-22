@@ -63,11 +63,48 @@ describe('LangameClient', () => {
     expect(rows).toEqual([{ id: 1 }]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it('retries operation log requests with European dates when ISO dates return 400', async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(responseWithError(400, 'Bad Request'))
+      .mockResolvedValueOnce(responseWithRows([{ id: 1 }]));
+    global.fetch = fetchMock as typeof fetch;
+
+    const rows = await client.listAllOperationsLog(
+      'https://443.langame.ru/public_api',
+      'test-key',
+      {
+        dateFrom: '2026-05-21',
+        dateTo: '2026-05-21',
+      },
+    );
+
+    expect(rows).toEqual([{ id: 1 }]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    const calls = fetchMock.mock.calls as Array<[string, RequestInit?]>;
+    const firstUrl = new URL(calls[0][0]);
+    const secondUrl = new URL(calls[1][0]);
+
+    expect(firstUrl.searchParams.get('date_from')).toBe('2026-05-21');
+    expect(secondUrl.searchParams.get('date_from')).toBe('21.05.2026');
+    expect(secondUrl.searchParams.get('date_to')).toBe('21.05.2026');
+  });
 });
 
 function responseWithRows(rows: unknown[]) {
   return {
     ok: true,
     json: jest.fn().mockResolvedValue({ status: true, data: rows }),
+  };
+}
+
+function responseWithError(status: number, statusText: string) {
+  return {
+    ok: false,
+    status,
+    statusText,
+    text: jest.fn().mockResolvedValue('Validation failed'),
   };
 }

@@ -330,8 +330,8 @@ describe('LangameSyncService', () => {
       'https://443.langame.ru/public_api',
       'test-key',
       {
-        dateFrom: '29.04.2026',
-        dateTo: '29.04.2026',
+        dateFrom: '2026-04-29',
+        dateTo: '2026-04-29',
       },
     );
     const [clubRevenueUpsert] = prisma.clubRevenueFact.upsert.mock

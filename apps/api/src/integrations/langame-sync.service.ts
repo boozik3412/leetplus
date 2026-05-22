@@ -911,8 +911,8 @@ export class LangameSyncService {
     )) {
       operations.push(
         ...(await this.langameClient.listAllOperationsLog(baseUrl, apiKey, {
-          dateFrom: this.toLangameOperationDateValue(chunk.from),
-          dateTo: this.toLangameOperationDateValue(chunk.to),
+          dateFrom: chunk.from,
+          dateTo: chunk.to,
         })),
       );
     }
@@ -1185,12 +1185,6 @@ export class LangameSyncService {
     }
 
     return chunks;
-  }
-
-  private toLangameOperationDateValue(value: string) {
-    const [year, month, day] = value.split('-');
-
-    return `${day}.${month}.${year}`;
   }
 
   private toDateInputValue(date: Date) {

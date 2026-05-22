@@ -164,9 +164,11 @@ function CompactNavSection({
         className={compactGroupButtonClass(isActive || isOpen)}
       >
         <SectionIcon icon={group.icon} />
+        <span className="sr-only">{group.title}</span>
       </button>
       {isOpen ? (
-        <div className="absolute left-full top-0 z-50 ml-3 w-64 rounded-2xl border border-zinc-200 bg-white p-2 shadow-2xl shadow-zinc-950/10 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/40">
+        <div className="absolute left-full top-1/2 z-[80] ml-4 w-72 -translate-y-1/2 rounded-2xl border border-zinc-200 bg-white p-2 shadow-2xl shadow-zinc-950/15 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/50">
+          <span className="absolute -left-2 top-1/2 h-4 w-4 -translate-y-1/2 rotate-45 border-b border-l border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950" />
           <div className="px-3 py-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
               {group.title}
@@ -185,7 +187,7 @@ function CompactNavSection({
 
 function compactGroupButtonClass(isActive: boolean) {
   return [
-    "flex h-12 w-12 items-center justify-center rounded-2xl border text-zinc-500 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70",
+    "group relative flex h-12 w-12 items-center justify-center rounded-2xl border text-zinc-500 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70",
     isActive
       ? "border-emerald-500/50 bg-emerald-500 text-zinc-950 shadow-sm"
       : "border-zinc-200 bg-white hover:border-zinc-300 hover:bg-zinc-100 hover:text-zinc-950 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-zinc-700 dark:hover:bg-zinc-900 dark:hover:text-zinc-100",
@@ -207,8 +209,10 @@ function SectionIcon({ icon }: { icon: NavGroup["icon"] }) {
   if (icon === "guests") {
     return (
       <svg {...common}>
-        <path d="M16 21v-2a4 4 0 0 0-8 0v2" />
-        <circle cx="12" cy="7" r="4" />
+        <path d="M7 19v-1.2a4.2 4.2 0 0 1 8.4 0V19" />
+        <circle cx="11.2" cy="8" r="3.2" />
+        <path d="M16.8 10.5a2.4 2.4 0 1 0-1.5-4.2" />
+        <path d="M18 19v-.6a3.2 3.2 0 0 0-2.3-3.1" />
       </svg>
     );
   }
@@ -216,10 +220,11 @@ function SectionIcon({ icon }: { icon: NavGroup["icon"] }) {
   if (icon === "staff") {
     return (
       <svg {...common}>
-        <path d="M16 21v-2a4 4 0 0 0-8 0v2" />
-        <circle cx="12" cy="7" r="4" />
-        <path d="M20 8v6" />
-        <path d="M23 11h-6" />
+        <rect x="4" y="5" width="16" height="14" rx="3" />
+        <path d="M8 5V3" />
+        <path d="M16 5V3" />
+        <circle cx="12" cy="11" r="2.2" />
+        <path d="M8.8 16a3.4 3.4 0 0 1 6.4 0" />
       </svg>
     );
   }
@@ -227,18 +232,23 @@ function SectionIcon({ icon }: { icon: NavGroup["icon"] }) {
   if (icon === "management") {
     return (
       <svg {...common}>
-        <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
-        <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6V20a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-.6 1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1H4a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 .6-1 1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6V4a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 .6 1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 .6 1H20a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-.6 1Z" />
+        <path d="M5 7h14" />
+        <path d="M5 12h14" />
+        <path d="M5 17h14" />
+        <circle cx="9" cy="7" r="1.8" fill="currentColor" stroke="none" />
+        <circle cx="15" cy="12" r="1.8" fill="currentColor" stroke="none" />
+        <circle cx="11" cy="17" r="1.8" fill="currentColor" stroke="none" />
       </svg>
     );
   }
 
   return (
     <svg {...common}>
-      <path d="M4 19h16" />
-      <path d="M6 17V9" />
-      <path d="M12 17V5" />
-      <path d="M18 17v-6" />
+      <path d="M4 7h16" />
+      <path d="M4 12h16" />
+      <path d="M4 17h10" />
+      <path d="M8 5v14" />
+      <path d="M16 5v9" />
     </svg>
   );
 }
@@ -417,7 +427,7 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
 
       <aside
         ref={desktopSidebarRef}
-        className="relative hidden w-20 shrink-0 flex-col border-r border-zinc-200/80 bg-white/80 shadow-[inset_-1px_0_0_rgb(255_255_255_/_0.5)] backdrop-blur-xl dark:border-zinc-800/80 dark:bg-zinc-950/75 md:flex"
+        className="relative z-[70] hidden w-20 shrink-0 flex-col border-r border-zinc-200/80 bg-white/80 shadow-[inset_-1px_0_0_rgb(255_255_255_/_0.5)] backdrop-blur-xl dark:border-zinc-800/80 dark:bg-zinc-950/75 md:flex"
       >
         <div className="flex justify-center border-b border-zinc-200/80 px-3 py-4 dark:border-zinc-800">
           <LogoLink />

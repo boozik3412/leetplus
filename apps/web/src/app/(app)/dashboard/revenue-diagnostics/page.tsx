@@ -146,7 +146,7 @@ export default async function DashboardRevenueDiagnosticsPage({
           />
         </section>
 
-        <section className="mt-6 grid gap-4 lg:grid-cols-3">
+        <section className="mt-6 grid gap-4 lg:grid-cols-4">
           <DiagnosticSummaryCard
             title="Товары и бар"
             value={formatRubles(report.totals.productRevenue)}
@@ -162,11 +162,40 @@ export default async function DashboardRevenueDiagnosticsPage({
             value={formatRubles(report.totals.shiftRevenueCandidate)}
             caption={`${formatMoney(report.totals.shiftsCount)} смен, возвраты ${formatRubles(report.totals.shiftRefundAmount)}`}
           />
+          <DiagnosticSummaryCard
+            title="Онлайн-пополнения"
+            value={formatRubles(report.unallocatedTopups.amount)}
+            caption={`${formatMoney(report.unallocatedTopups.count)} операций без привязки к клубу`}
+          />
         </section>
 
         <section className="mt-6 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
           <p className="font-semibold">{report.interpretation.mobileTopupRule}</p>
           <p className="mt-2">{report.interpretation.primaryRecommendation}</p>
+        </section>
+
+        <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+                Нераспределенные онлайн-пополнения
+              </p>
+              <p className="mt-1 max-w-3xl text-sm text-zinc-500 dark:text-zinc-400">
+                Это сетевой денежный поток без надежной привязки к клубу. Он
+                входит в общую выручку сети, но не должен попадать в выручку
+                отдельного клуба.
+              </p>
+            </div>
+            <p className="text-2xl font-semibold tabular-nums">
+              {formatRubles(report.unallocatedTopups.amount)}
+            </p>
+          </div>
+          <div className="mt-4">
+            <TypeBreakdown
+              title="Каналы и формы пополнений"
+              items={report.unallocatedTopups.breakdown}
+            />
+          </div>
         </section>
 
         <section className="mt-6 grid gap-4">
@@ -240,8 +269,8 @@ function RevenueDiagnosticsCard({
 
       <div className="grid gap-3 p-5 md:grid-cols-2 xl:grid-cols-4">
         <Metric title="Товары и бар" value={formatRubles(row.productRevenue)} caption={`${formatMoney(row.productSalesCount)} продаж`} />
-        <Metric title="Operation plus" value={formatRubles(row.operationPlusAmount)} caption={`${formatMoney(row.operationPlusCount)} операций`} />
-        <Metric title="Списания" value={formatRubles(row.balanceSpendRevenueCandidate)} caption={`operation ${formatRubles(row.operationMinusAmount)}, transactions ${formatRubles(row.transactionSpendAmount)}`} />
+        <Metric title="Пополнения в клубе" value={formatRubles(row.operationPlusAmount)} caption={`${formatMoney(row.operationPlusCount)} операций`} />
+        <Metric title="Списания баланса" value={formatRubles(row.balanceSpendRevenueCandidate)} caption={`operation ${formatRubles(row.operationMinusAmount)}, transactions ${formatRubles(row.transactionSpendAmount)}`} />
         <Metric title="Смены" value={formatRubles(row.shiftRevenueCandidate)} caption={`возвраты ${formatRubles(row.shiftRefundAmount)}`} />
       </div>
 

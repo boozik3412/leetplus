@@ -380,7 +380,7 @@ describe('DashboardService', () => {
     prisma.guestOperationLog.findMany.mockResolvedValue([
       {
         storeId: null,
-        externalClubId: null,
+        externalClubId: '0',
         type: 'plus',
         operationSource: 'Приложение',
         operationForm: null,

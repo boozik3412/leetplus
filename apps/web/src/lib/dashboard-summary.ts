@@ -113,6 +113,12 @@ export type DashboardRevenueDiagnosticsTypeBreakdown = {
   amount: number;
 };
 
+export type DashboardRevenueDiagnosticsUnallocatedTopups = {
+  amount: number;
+  count: number;
+  breakdown: DashboardRevenueDiagnosticsTypeBreakdown[];
+};
+
 export type DashboardRevenueDiagnosticsRow = {
   storeId: string;
   storeName: string;
@@ -156,6 +162,7 @@ export type DashboardRevenueDiagnostics = {
   selectedStoreIds: string[];
   rows: DashboardRevenueDiagnosticsRow[];
   totals: Omit<DashboardRevenueDiagnosticsRow, "storeId" | "storeName" | "notes">;
+  unallocatedTopups: DashboardRevenueDiagnosticsUnallocatedTopups;
   interpretation: {
     primaryRecommendation: string;
     mobileTopupRule: string;

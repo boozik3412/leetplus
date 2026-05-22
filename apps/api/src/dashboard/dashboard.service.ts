@@ -140,6 +140,12 @@ export type DashboardRevenueDiagnosticsTypeBreakdown = {
   amount: number;
 };
 
+export type DashboardRevenueDiagnosticsUnallocatedTopups = {
+  amount: number;
+  count: number;
+  breakdown: DashboardRevenueDiagnosticsTypeBreakdown[];
+};
+
 export type DashboardRevenueDiagnosticsRow = {
   storeId: string;
   storeName: string;
@@ -186,6 +192,7 @@ export type DashboardRevenueDiagnostics = {
     DashboardRevenueDiagnosticsRow,
     'storeId' | 'storeName' | 'notes'
   >;
+  unallocatedTopups: DashboardRevenueDiagnosticsUnallocatedTopups;
   interpretation: {
     primaryRecommendation: string;
     mobileTopupRule: string;
@@ -813,6 +820,9 @@ export class DashboardService {
           storeId: true,
           externalClubId: true,
           type: true,
+          operationName: true,
+          operationSource: true,
+          operationForm: true,
           amount: true,
         },
       }),
@@ -874,6 +884,8 @@ export class DashboardService {
       shifts,
     );
     const totals = this.buildRevenueDiagnosticsTotals(rows);
+    const unallocatedTopups =
+      this.buildRevenueDiagnosticsUnallocatedTopups(operationLogs);
 
     return {
       tenantId,
@@ -885,13 +897,14 @@ export class DashboardService {
       selectedStoreIds,
       rows,
       totals,
+      unallocatedTopups,
       interpretation: {
         primaryRecommendation:
           'Для выручки клуба использовать подтвержденные списания/расход баланса внутри клуба, а мобильные пополнения держать отдельно как сетевой денежный поток.',
         mobileTopupRule:
           'Пополнение баланса в мобильном приложении не должно увеличивать выручку конкретного клуба; клуб получает выручку в момент списания баланса на сессию, услугу или покупку в этом клубе.',
         limitations: [
-          'В GuestOperationLog сейчас сохранены type, сумма, дата и клуб, но не сохранены source/form/name, поэтому нельзя надежно отделить мобильное приложение, кассу и терминал без расширения модели.',
+          'GuestOperationLog сохраняет type, сумму, дату, клуб, source, form и name; точность разнесения онлайн-пополнений зависит от того, насколько Langame стабильно заполняет эти поля после свежей синхронизации.',
           'transactions/list требует подтверждения семантики полей: amount/sum могут быть суммой операции, изменением баланса или остатком.',
           'log_cash_transaction/list на production ранее возвращал ошибки, поэтому кассовый слой пока можно сверять только через working_shifts и operation log.',
         ],
@@ -1335,6 +1348,9 @@ export class DashboardService {
       storeId: string | null;
       externalClubId: string | null;
       type: string | null;
+      operationName?: string | null;
+      operationSource?: string | null;
+      operationForm?: string | null;
       amount: { toNumber: () => number } | null;
     }[],
   ) {
@@ -1362,7 +1378,9 @@ export class DashboardService {
       return false;
     }
 
-    if (operationLog.storeId || operationLog.externalClubId) {
+    const externalClubId = operationLog.externalClubId?.trim();
+
+    if (operationLog.storeId || (externalClubId && externalClubId !== '0')) {
       return false;
     }
 
@@ -1683,6 +1701,67 @@ export class DashboardService {
       );
   }
 
+  private buildRevenueDiagnosticsUnallocatedTopups(
+    operationLogs: {
+      storeId: string | null;
+      externalClubId: string | null;
+      type: string | null;
+      operationName?: string | null;
+      operationSource?: string | null;
+      operationForm?: string | null;
+      amount: { toNumber: () => number } | null;
+    }[],
+  ): DashboardRevenueDiagnosticsUnallocatedTopups {
+    const result: DashboardRevenueDiagnosticsUnallocatedTopups = {
+      amount: 0,
+      count: 0,
+      breakdown: [],
+    };
+
+    operationLogs.forEach((operationLog) => {
+      const amount = operationLog.amount?.toNumber() ?? 0;
+
+      if (
+        !Number.isFinite(amount) ||
+        amount === 0 ||
+        !this.isUnallocatedNetworkTopup(operationLog)
+      ) {
+        return;
+      }
+
+      const absoluteAmount = Math.abs(amount);
+      result.amount += absoluteAmount;
+      result.count += 1;
+      this.addDiagnosticsType(
+        result.breakdown,
+        this.operationChannelLabel(operationLog),
+        absoluteAmount,
+      );
+    });
+
+    return {
+      amount: this.round(result.amount),
+      count: result.count,
+      breakdown: this.sortDiagnosticsTypes(result.breakdown).map((item) => ({
+        ...item,
+        amount: this.round(item.amount),
+      })),
+    };
+  }
+
+  private operationChannelLabel(operationLog: {
+    operationName?: string | null;
+    operationSource?: string | null;
+    operationForm?: string | null;
+    type?: string | null;
+  }) {
+    const source = operationLog.operationSource?.trim() || 'без source';
+    const form = operationLog.operationForm?.trim() || 'без form';
+    const name = operationLog.operationName?.trim();
+
+    return name ? `${source} / ${form} / ${name}` : `${source} / ${form}`;
+  }
+
   private emptyRevenueDiagnosticsRow(
     storeId: string,
     storeName: string,
@@ -1735,6 +1814,12 @@ export class DashboardService {
     }
 
     items.push({ type, count: 1, amount });
+  }
+
+  private sortDiagnosticsTypes(
+    items: DashboardRevenueDiagnosticsTypeBreakdown[],
+  ) {
+    return [...items].sort((a, b) => b.amount - a.amount || b.count - a.count);
   }
 
   private revenueDiagnosticsNotes(row: DashboardRevenueDiagnosticsRow) {

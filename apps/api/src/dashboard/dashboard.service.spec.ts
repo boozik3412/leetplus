@@ -375,19 +375,23 @@ describe('DashboardService', () => {
     expect(summary.salesTrend).toHaveLength(8);
   });
 
-  it('uses balance spend as store revenue and adds top-ups to network revenue', async () => {
+  it('uses balance spend as store revenue and adds unallocated top-ups to network revenue', async () => {
     mockEmptyDashboardData();
     prisma.guestOperationLog.findMany.mockResolvedValue([
       {
-        storeId: 'store-1',
-        externalClubId: '1',
+        storeId: null,
+        externalClubId: null,
         type: 'plus',
+        operationSource: 'Приложение',
+        operationForm: null,
         amount: new Prisma.Decimal(50_000),
       },
       {
         storeId: 'store-1',
         externalClubId: '1',
         type: 'Списание',
+        operationSource: null,
+        operationForm: null,
         amount: new Prisma.Decimal(2_000),
       },
     ]);
@@ -422,6 +426,7 @@ describe('DashboardService', () => {
 
     expect(summary.totalRevenue).toBe(0);
     expect(summary.clubRevenue).toBe(57200);
+    expect(summary.unallocatedTopupRevenue).toBe(50000);
     expect(summary.storeRevenueBreakdown[0]).toMatchObject({
       storeId: 'store-1',
       totalRevenue: 7200,

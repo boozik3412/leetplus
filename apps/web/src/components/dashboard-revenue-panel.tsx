@@ -10,6 +10,7 @@ type StoreChartMetric = "revenue" | "bar" | "guests";
 type DashboardRevenuePanelProps = {
   initialView: DashboardRevenueView;
   totalClubRevenue: number;
+  unallocatedTopupRevenue: number;
   adjustedGrossProfit: number;
   grossProfit: number;
   adjustedMarginPercent: number;
@@ -43,6 +44,7 @@ function formatShortDate(value: string) {
 export function DashboardRevenuePanel({
   initialView,
   totalClubRevenue,
+  unallocatedTopupRevenue,
   adjustedGrossProfit,
   grossProfit,
   adjustedMarginPercent,
@@ -80,6 +82,7 @@ export function DashboardRevenuePanel({
               revenue={fullDayRevenue}
               deltaPercent={fullDayRevenueToAveragePercent}
             />
+            <UnallocatedTopupRevenue revenue={unallocatedTopupRevenue} />
           </HeroMetric>
           <HeroMetric
             label="Товарная прибыль после потерь"
@@ -420,6 +423,23 @@ function FullDayRevenue({
           {deltaPercent === null ? "нет базы" : formatPercent(deltaPercent)}
         </span>
       </div>
+    </div>
+  );
+}
+
+function UnallocatedTopupRevenue({ revenue }: { revenue: number }) {
+  if (revenue <= 0) {
+    return null;
+  }
+
+  return (
+    <div className="mt-3 flex items-center justify-between gap-3 rounded-2xl border border-zinc-200/70 px-3 py-2 text-xs dark:border-zinc-800/80">
+      <span className="text-zinc-500 dark:text-zinc-400">
+        Онлайн-пополнения без клуба
+      </span>
+      <span className="font-semibold tabular-nums">
+        {formatMoney(revenue)}
+      </span>
     </div>
   );
 }

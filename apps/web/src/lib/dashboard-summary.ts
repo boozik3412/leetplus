@@ -83,6 +83,7 @@ export type DashboardSummary = {
   averageFacing: number;
   totalRevenue: number;
   clubRevenue: number;
+  unallocatedTopupRevenue: number;
   fullDayRevenueDate: string;
   fullDayRevenue: number;
   averageDailyRevenue: number;

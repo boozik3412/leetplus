@@ -762,6 +762,9 @@ model GuestOperationLog {
   sourceKey         String
   externalClubId    String?
   type              String?
+  operationName     String?
+  operationSource   String?
+  operationForm     String?
   happenedAt        DateTime?
   amount            Decimal?
   sourcePayloadHash String?
@@ -774,6 +777,8 @@ model GuestOperationLog {
   @@unique([tenantId, externalProvider, externalDomain, sourceKey])
   @@index([tenantId, happenedAt])
   @@index([tenantId, type])
+  @@index([tenantId, operationSource])
+  @@index([tenantId, operationForm])
   @@index([storeId])
 }
 

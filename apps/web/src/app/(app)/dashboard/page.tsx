@@ -462,6 +462,7 @@ export default async function DashboardPage({
             <DashboardRevenuePanel
               initialView={revenueView}
               totalClubRevenue={totalClubRevenue}
+              unallocatedTopupRevenue={summary.unallocatedTopupRevenue}
               adjustedGrossProfit={summary.adjustedGrossProfit}
               grossProfit={summary.grossProfit}
               adjustedMarginPercent={summary.adjustedMarginPercent}
@@ -597,7 +598,7 @@ function ExecutiveOverviewPanel({
       <ExecutiveMetricCard
         label="Товары и бар"
         value={formatRubles(summary.totalRevenue)}
-        description={`Доля в общей выручке: ${formatRatioPercent(productRevenueShare)}. Общая выручка: ${formatRubles(totalClubRevenue)}.`}
+        description={`Доля в общей выручке: ${formatRatioPercent(productRevenueShare)}. Общая выручка: ${formatRubles(totalClubRevenue)}. Нераспределенные пополнения: ${formatRubles(summary.unallocatedTopupRevenue)}.`}
         href="/reports/sales-detail/table"
         tone={summary.totalRevenue > 0 ? "good" : "neutral"}
       />

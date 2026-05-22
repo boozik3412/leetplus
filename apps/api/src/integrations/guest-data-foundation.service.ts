@@ -1467,6 +1467,9 @@ export class GuestDataFoundationService {
         const row = rows[index];
         const externalClubId = this.toNullableString(row.club_id);
         const type = this.toNullableString(row.type);
+        const operationName = this.toNullableString(row.name);
+        const operationSource = this.toNullableString(row.source);
+        const operationForm = this.toNullableString(row.form);
         const happenedAt = this.parseLangameDate(row.date_normal);
         const sourceKey = this.sourceKey([
           chunk.from,
@@ -1504,6 +1507,9 @@ export class GuestDataFoundationService {
             sourceKey,
             externalClubId,
             type,
+            operationName,
+            operationSource,
+            operationForm,
             happenedAt,
             amount: this.toDecimalOrNull(row.sum),
             sourcePayloadHash: this.payloadHash(row),
@@ -1514,6 +1520,9 @@ export class GuestDataFoundationService {
               : null,
             externalClubId,
             type,
+            operationName,
+            operationSource,
+            operationForm,
             happenedAt,
             amount: this.toDecimalOrNull(row.sum),
             sourcePayloadHash: this.payloadHash(row),

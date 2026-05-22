@@ -110,6 +110,7 @@ export type DashboardSummary = {
   averageFacing: number;
   totalRevenue: number;
   clubRevenue: number;
+  unallocatedTopupRevenue: number;
   fullDayRevenueDate: string;
   fullDayRevenue: number;
   averageDailyRevenue: number;
@@ -464,6 +465,8 @@ export class DashboardService {
           storeId: true,
           externalClubId: true,
           type: true,
+          operationSource: true,
+          operationForm: true,
           amount: true,
         },
       }),
@@ -690,6 +693,7 @@ export class DashboardService {
       averageFacing: this.round(averageFacing),
       totalRevenue: this.round(totalRevenue),
       clubRevenue: this.round(clubRevenue),
+      unallocatedTopupRevenue: this.round(balanceTopupRevenue),
       fullDayRevenueDate: this.toDateInputValue(fullDayPeriod.currentFromDate),
       fullDayRevenue: this.round(fullDayRevenue.current),
       averageDailyRevenue: this.round(averageDailyRevenue),
@@ -1310,6 +1314,8 @@ export class DashboardService {
   private guestOperationRevenueTotal(
     operationLogs: {
       type: string | null;
+      operationSource: string | null;
+      operationForm: string | null;
       amount: { toNumber: () => number } | null;
     }[],
   ) {
@@ -1326,6 +1332,8 @@ export class DashboardService {
 
   private guestOperationTopupTotal(
     operationLogs: {
+      storeId: string | null;
+      externalClubId: string | null;
       type: string | null;
       amount: { toNumber: () => number } | null;
     }[],
@@ -1337,10 +1345,45 @@ export class DashboardService {
         return sum;
       }
 
-      return this.isBalanceTopUpOperationType(operationLog.type)
+      return this.isUnallocatedNetworkTopup(operationLog)
         ? sum + Math.abs(amount)
         : sum;
     }, 0);
+  }
+
+  private isUnallocatedNetworkTopup(operationLog: {
+    storeId?: string | null;
+    externalClubId?: string | null;
+    type: string | null;
+    operationSource?: string | null;
+    operationForm?: string | null;
+  }) {
+    if (!this.isBalanceTopUpOperationType(operationLog.type)) {
+      return false;
+    }
+
+    if (operationLog.storeId || operationLog.externalClubId) {
+      return false;
+    }
+
+    const source = this.normalizeExternalType(
+      operationLog.operationSource ?? null,
+    );
+    const form = this.normalizeExternalType(operationLog.operationForm ?? null);
+
+    if (!source && !form) {
+      return true;
+    }
+
+    return (
+      source.includes('прилож') ||
+      source.includes('app') ||
+      source.includes('mobile') ||
+      source.includes('лк_гост') ||
+      source.includes('lk_guest') ||
+      source.includes('web_интерфейс') ||
+      form === 'qr'
+    );
   }
 
   private confirmedBalanceSpendAmount(type: string | null, amount: number) {

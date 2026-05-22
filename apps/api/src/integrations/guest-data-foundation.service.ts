@@ -541,6 +541,7 @@ export class GuestDataFoundationService {
     const now = new Date();
     const snapshotDate = this.startOfUtcDay(now);
     const storesByExternalClubId = await this.loadStoreLookup(tenantId, domain);
+    const langamePeriod = this.toLangameDatePeriod(period);
 
     const pcTypesInClubs = await this.captureEndpoint(
       profile,
@@ -640,8 +641,8 @@ export class GuestDataFoundationService {
           this.langameClient.listGuestSessions(baseUrl, apiKey, {
             page,
             pageLimit: DEFAULT_PAGE_LIMIT,
-            dateFrom: period.from,
-            dateTo: period.to,
+            dateFrom: langamePeriod.from,
+            dateTo: langamePeriod.to,
           }),
         ),
     );
@@ -662,8 +663,8 @@ export class GuestDataFoundationService {
           this.langameClient.listTransactions(baseUrl, apiKey, {
             page,
             pageLimit: DEFAULT_PAGE_LIMIT,
-            dateFrom: period.from,
-            dateTo: period.to,
+            dateFrom: langamePeriod.from,
+            dateTo: langamePeriod.to,
           }),
         ),
     );
@@ -683,8 +684,8 @@ export class GuestDataFoundationService {
           this.langameClient.listGuestLogs(baseUrl, apiKey, {
             page,
             pageLimit: DEFAULT_PAGE_LIMIT,
-            dateFrom: period.from,
-            dateTo: period.to,
+            dateFrom: langamePeriod.from,
+            dateTo: langamePeriod.to,
           }),
         ),
       );
@@ -725,8 +726,8 @@ export class GuestDataFoundationService {
             this.langameClient.listCashTransactions(baseUrl, apiKey, {
               page,
               pageLimit: DEFAULT_PAGE_LIMIT,
-              dateFrom: period.from,
-              dateTo: period.to,
+              dateFrom: langamePeriod.from,
+              dateTo: langamePeriod.to,
             }),
           ),
       );
@@ -746,8 +747,8 @@ export class GuestDataFoundationService {
             this.langameClient.listWorkingShifts(baseUrl, apiKey, {
               page,
               pageLimit: DEFAULT_PAGE_LIMIT,
-              dateFrom: period.from,
-              dateTo: period.to,
+              dateFrom: langamePeriod.from,
+              dateTo: langamePeriod.to,
             }),
           ),
       );
@@ -1866,6 +1867,13 @@ export class GuestDataFoundationService {
     const month = String(value.getUTCMonth() + 1).padStart(2, '0');
     const day = String(value.getUTCDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
+  }
+
+  private toLangameDatePeriod(period: ResolvedPeriod) {
+    return {
+      from: this.toLangameOperationDateValue(period.fromDate),
+      to: this.toLangameOperationDateValue(period.toDate),
+    };
   }
 
   private toLangameOperationDateValue(value: Date) {

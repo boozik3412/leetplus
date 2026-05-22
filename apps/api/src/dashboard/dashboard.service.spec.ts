@@ -238,8 +238,9 @@ describe('DashboardService', () => {
     ]);
     prisma.clubRevenueFact.findMany.mockResolvedValue([
       {
+        storeId: 'store-1',
         revenueDate: new Date(),
-        totalRevenue: new Prisma.Decimal(2000),
+        totalRevenue: new Prisma.Decimal(1000),
       },
     ]);
     prisma.stockMovement.findMany.mockResolvedValue([
@@ -269,6 +270,7 @@ describe('DashboardService', () => {
       averageMarginPercent: 50,
       averageFacing: 3,
       totalRevenue: 1240,
+      clubRevenue: 1240,
       grossProfit: 620,
       adjustedGrossProfit: 550,
       marginPercent: 50,
@@ -420,6 +422,7 @@ describe('DashboardService', () => {
       prisma.inventorySnapshot.findMany.mockResolvedValue([]);
       prisma.clubRevenueFact.findMany.mockResolvedValue([
         {
+          storeId: 'store-1',
           revenueDate: new Date('2026-04-29T00:00:00.000Z'),
           totalRevenue: new Prisma.Decimal(1000),
         },

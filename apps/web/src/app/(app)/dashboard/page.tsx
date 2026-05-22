@@ -370,10 +370,7 @@ export default async function DashboardPage({
     frozenStockAmount: assortmentRisk.frozenStockAmount,
   });
   const dashboardActions = buildDashboardActions({ summary, latestTrend });
-  const totalClubRevenue =
-    latestTrend && latestTrend.clubRevenue > 0
-      ? latestTrend.clubRevenue
-      : summary.fullDayRevenue;
+  const totalClubRevenue = summary.clubRevenue;
   const productRevenueShare = ratioPercent(summary.totalRevenue, totalClubRevenue);
 
   return (

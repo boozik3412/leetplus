@@ -100,6 +100,7 @@ export type DashboardSummary = {
   averageMarginPercent: number;
   averageFacing: number;
   totalRevenue: number;
+  clubRevenue: number;
   fullDayRevenueDate: string;
   fullDayRevenue: number;
   averageDailyRevenue: number;
@@ -166,6 +167,7 @@ export class DashboardService {
       inventorySnapshots,
       currentInventorySnapshots,
       stockMovements,
+      periodClubRevenueFacts,
       fullDayRevenueFacts,
       previousSalesFacts,
       previousStockMovements,
@@ -265,6 +267,7 @@ export class DashboardService {
           },
         },
         select: {
+          storeId: true,
           revenueDate: true,
           totalRevenue: true,
         },
@@ -347,6 +350,21 @@ export class DashboardService {
         select: {
           type: true,
           amount: true,
+        },
+      }),
+      this.prisma.clubRevenueFact.findMany({
+        where: {
+          tenantId,
+          ...storeFilter,
+          revenueDate: {
+            gte: period.fromDate,
+            lte: period.toDate,
+          },
+        },
+        select: {
+          storeId: true,
+          revenueDate: true,
+          totalRevenue: true,
         },
       }),
       this.prisma.salesFact.findMany({
@@ -515,6 +533,13 @@ export class DashboardService {
       fullDayRevenueFacts,
       fullDayPeriod,
     );
+    const clubRevenue = Math.max(
+      totalRevenue,
+      this.clubRevenueTotal(
+        periodClubRevenueFacts,
+        selectedStoreIds.length > 0,
+      ),
+    );
     const averageDailyRevenue = fullDayRevenue.average;
     const previousRevenue = previousSalesFacts.reduce(
       (sum, fact) => sum + fact.revenue.toNumber(),
@@ -555,6 +580,7 @@ export class DashboardService {
       averageMarginPercent: this.round(averageMarginPercent),
       averageFacing: this.round(averageFacing),
       totalRevenue: this.round(totalRevenue),
+      clubRevenue: this.round(clubRevenue),
       fullDayRevenueDate: this.toDateInputValue(fullDayPeriod.currentFromDate),
       fullDayRevenue: this.round(fullDayRevenue.current),
       averageDailyRevenue: this.round(averageDailyRevenue),
@@ -1007,6 +1033,24 @@ export class DashboardService {
     return this.round((value / total) * 100);
   }
 
+  private clubRevenueTotal(
+    facts: {
+      storeId: string | null;
+      totalRevenue: { toNumber: () => number };
+    }[],
+    hasStoreFilter: boolean,
+  ) {
+    const storeRevenue = facts
+      .filter((fact) => fact.storeId !== null)
+      .reduce((sum, fact) => sum + fact.totalRevenue.toNumber(), 0);
+
+    if (hasStoreFilter || storeRevenue > 0) {
+      return storeRevenue;
+    }
+
+    return facts.reduce((sum, fact) => sum + fact.totalRevenue.toNumber(), 0);
+  }
+
   private soldQuantityByProduct(
     salesFacts: {
       productId: string;
@@ -1034,6 +1078,7 @@ export class DashboardService {
       cost: { toNumber: () => number };
     }[],
     clubRevenueFacts: {
+      storeId: string | null;
       revenueDate: Date;
       totalRevenue: { toNumber: () => number };
     }[],
@@ -1079,7 +1124,14 @@ export class DashboardService {
       );
     });
 
-    clubRevenueFacts.forEach((fact) => {
+    const useSelectedStoresRevenue = clubRevenueFacts.some(
+      (fact) => fact.storeId !== null,
+    );
+    const revenueFactsForTrend = useSelectedStoresRevenue
+      ? clubRevenueFacts.filter((fact) => fact.storeId !== null)
+      : clubRevenueFacts;
+
+    revenueFactsForTrend.forEach((fact) => {
       const revenueTime = fact.revenueDate.getTime();
       const segment = segments.find(
         (item) =>
@@ -1122,6 +1174,7 @@ export class DashboardService {
       segment.noSalesSkuCount14 = noSalesCounts[14];
       segment.noSalesSkuCount21 = noSalesCounts[21];
       segment.outOfStockSkuCount = outOfStockSkuCount;
+      segment.clubRevenue = Math.max(segment.clubRevenue, segment.revenue);
 
       return {
         index: segment.index,

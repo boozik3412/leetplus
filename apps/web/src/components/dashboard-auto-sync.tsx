@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 const guestSyncPollIntervalMs = 4000;
 const guestSyncPollAttempts = 75;
 const guestAutoSyncStorageKey = "leetplus.dashboard.guestAutoSyncStartedAt";
+const loginAutoSyncDateKey = "leetplus.login.autoSyncDate";
 
 type SyncResult = {
   sourceResults?: unknown[];
@@ -30,6 +31,10 @@ export function DashboardAutoSync() {
 
     async function syncStaleSources() {
       try {
+        if (hasLoginAutoSyncStartedToday()) {
+          return;
+        }
+
         const response = await fetch("/api/integrations/langame/sync", {
           method: "POST",
           headers: {
@@ -139,6 +144,13 @@ async function fetchGuestSyncStatus(signal: AbortSignal) {
   }
 
   return response.json() as Promise<GuestSyncStatus>;
+}
+
+function hasLoginAutoSyncStartedToday() {
+  return (
+    window.localStorage.getItem(loginAutoSyncDateKey) ===
+    new Date().toISOString().slice(0, 10)
+  );
 }
 
 function hasStartedGuestAutoSyncRecently() {

@@ -73,6 +73,7 @@ export type DashboardSummary = {
   averageMarginPercent: number;
   averageFacing: number;
   totalRevenue: number;
+  clubRevenue: number;
   fullDayRevenueDate: string;
   fullDayRevenue: number;
   averageDailyRevenue: number;

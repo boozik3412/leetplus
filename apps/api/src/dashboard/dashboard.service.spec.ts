@@ -375,7 +375,7 @@ describe('DashboardService', () => {
     expect(summary.salesTrend).toHaveLength(8);
   });
 
-  it('uses balance spend as club revenue and ignores balance top-ups', async () => {
+  it('uses balance spend as store revenue and adds top-ups to network revenue', async () => {
     mockEmptyDashboardData();
     prisma.guestOperationLog.findMany.mockResolvedValue([
       {
@@ -421,7 +421,7 @@ describe('DashboardService', () => {
     const summary = await service.getSummary();
 
     expect(summary.totalRevenue).toBe(0);
-    expect(summary.clubRevenue).toBe(7200);
+    expect(summary.clubRevenue).toBe(57200);
     expect(summary.storeRevenueBreakdown[0]).toMatchObject({
       storeId: 'store-1',
       totalRevenue: 7200,

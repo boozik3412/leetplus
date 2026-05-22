@@ -27,9 +27,10 @@ Status: implemented; remains in production UX polish mode.
 - Done: guest foundation sync now sends official ISO dates first and lets the Langame client fallback to `dd.mm.yyyy` only when the endpoint returns empty/400; `all_operations_log/list` additionally probes `operation_type=Списание/Пополнение`, so dashboard revenue can use balance spend facts when Langame returns them.
 - Done: `transactions/list.balance` is now persisted as the transaction amount for non-cancelled rows, and dashboard diagnostics separately expose transaction spend candidates; mobile/top-up operations are still excluded from store revenue.
 - Done: `log_cash_transaction/list` is now requested per club with required `club_id`, matching the official Langame API contract.
+- Done: network-level total revenue now includes balance top-ups from Langame operation log as unallocated network revenue, while club/store breakdowns still stay based on store-scoped spend and product/bar facts.
 - Current risk: production still needs live verification that Langame returns enough PC context for all clubs; if load remains `нет данных`, inspect latest guest sync profile endpoint errors/field counts or VDS API logs.
 - Current risk: current-day total revenue remains dependent on Langame returning balance-spend facts from `all_operations_log/list` or store-scoped `transactions/list`; if these sources stay empty after sync, the dashboard intentionally falls back to product/bar revenue and undercounts total club revenue.
-- Current limitation: exact split between gameplay, services, app top-ups, and club-cash sources still needs richer persisted Langame transaction/operation fields before the dashboard can explain every ruble by source.
+- Current limitation: exact split between gameplay, services, app top-ups, and club-cash sources still needs richer persisted Langame transaction/operation fields before the dashboard can explain every ruble by source; until `source/form/name` are persisted, all `Пополнение` operation-log rows are treated as unallocated network top-ups.
 - Next polish: continue adjusting color accents, wording, and direct action links from live `leetplus.ru` review.
 
 ## Stage 2. Commercial Reports

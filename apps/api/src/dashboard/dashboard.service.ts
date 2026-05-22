@@ -636,7 +636,12 @@ export class DashboardService {
       this.guestOperationRevenueTotal(periodGuestOperationLogs),
       this.guestTransactionTotal(periodGuestTransactions),
     );
-    const clubRevenue = Math.max(totalRevenue, confirmedBalanceSpendRevenue);
+    const balanceTopupRevenue = this.guestOperationTopupTotal(
+      periodGuestOperationLogs,
+    );
+    const clubRevenue =
+      Math.max(totalRevenue, confirmedBalanceSpendRevenue) +
+      balanceTopupRevenue;
     const storeRevenueBreakdown = this.buildStoreRevenueBreakdown(
       storesForRevenue,
       salesFacts,
@@ -1317,6 +1322,25 @@ export class DashboardService {
         ),
       0,
     );
+  }
+
+  private guestOperationTopupTotal(
+    operationLogs: {
+      type: string | null;
+      amount: { toNumber: () => number } | null;
+    }[],
+  ) {
+    return operationLogs.reduce((sum, operationLog) => {
+      const amount = operationLog.amount?.toNumber() ?? 0;
+
+      if (!Number.isFinite(amount) || amount === 0) {
+        return sum;
+      }
+
+      return this.isBalanceTopUpOperationType(operationLog.type)
+        ? sum + Math.abs(amount)
+        : sum;
+    }, 0);
   }
 
   private confirmedBalanceSpendAmount(type: string | null, amount: number) {

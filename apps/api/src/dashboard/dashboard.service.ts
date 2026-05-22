@@ -230,13 +230,11 @@ export class DashboardService {
       productsForAverages,
       salesFacts,
       trendSalesFacts,
-      trendClubRevenueFacts,
       demandSalesFacts,
       activeSkuSalesFacts,
       inventorySnapshots,
       currentInventorySnapshots,
       stockMovements,
-      periodClubRevenueFacts,
       periodGuestSessions,
       periodGuestTransactions,
       periodGuestOperationLogs,
@@ -345,21 +343,6 @@ export class DashboardService {
           cost: true,
         },
       }),
-      this.prisma.clubRevenueFact.findMany({
-        where: {
-          tenantId,
-          ...storeFilter,
-          revenueDate: {
-            gte: period.trendFromDate,
-            lte: period.trendToDate,
-          },
-        },
-        select: {
-          storeId: true,
-          revenueDate: true,
-          totalRevenue: true,
-        },
-      }),
       this.prisma.salesFact.findMany({
         where: {
           tenantId,
@@ -440,21 +423,6 @@ export class DashboardService {
           amount: true,
         },
       }),
-      this.prisma.clubRevenueFact.findMany({
-        where: {
-          tenantId,
-          ...storeFilter,
-          revenueDate: {
-            gte: period.fromDate,
-            lte: period.toDate,
-          },
-        },
-        select: {
-          storeId: true,
-          revenueDate: true,
-          totalRevenue: true,
-        },
-      }),
       this.prisma.guestSession.findMany({
         where: {
           tenantId,
@@ -481,6 +449,7 @@ export class DashboardService {
           externalClubId: true,
           guestId: true,
           externalGuestId: true,
+          type: true,
           amount: true,
         },
       }),
@@ -489,11 +458,11 @@ export class DashboardService {
           tenantId,
           ...storeFilter,
           happenedAt: { gte: period.fromDate, lte: period.toDate },
-          type: 'plus',
         },
         select: {
           storeId: true,
           externalClubId: true,
+          type: true,
           amount: true,
         },
       }),
@@ -636,7 +605,6 @@ export class DashboardService {
     );
     const salesTrend = this.buildSalesTrend(
       trendSalesFacts,
-      trendClubRevenueFacts,
       period.trendFromDate,
       period.trendToDate,
       period.labelGranularity,
@@ -663,18 +631,13 @@ export class DashboardService {
       fullDayRevenueFacts,
       fullDayPeriod,
     );
-    const clubRevenue = Math.max(
-      totalRevenue,
-      this.clubRevenueTotal(
-        periodClubRevenueFacts,
-        selectedStoreIds.length > 0,
-      ),
+    const confirmedBalanceSpendRevenue = Math.max(
       this.guestOperationRevenueTotal(periodGuestOperationLogs),
-      totalRevenue + this.guestTransactionTotal(periodGuestTransactions),
+      this.guestTransactionTotal(periodGuestTransactions),
     );
+    const clubRevenue = Math.max(totalRevenue, confirmedBalanceSpendRevenue);
     const storeRevenueBreakdown = this.buildStoreRevenueBreakdown(
       storesForRevenue,
-      periodClubRevenueFacts,
       salesFacts,
       periodGuestSessions,
       periodGuestTransactions,
@@ -1321,45 +1284,71 @@ export class DashboardService {
     return this.round((value / total) * 100);
   }
 
-  private clubRevenueTotal(
-    facts: {
-      storeId: string | null;
-      totalRevenue: { toNumber: () => number };
-    }[],
-    hasStoreFilter: boolean,
-  ) {
-    const storeRevenue = facts
-      .filter((fact) => fact.storeId !== null)
-      .reduce((sum, fact) => sum + fact.totalRevenue.toNumber(), 0);
-
-    if (hasStoreFilter || storeRevenue > 0) {
-      return storeRevenue;
-    }
-
-    return facts.reduce((sum, fact) => sum + fact.totalRevenue.toNumber(), 0);
-  }
-
   private guestTransactionTotal(
     transactions: {
+      type: string | null;
       amount: { toNumber: () => number } | null;
     }[],
   ) {
     return transactions.reduce(
-      (sum, transaction) => sum + Math.abs(transaction.amount?.toNumber() ?? 0),
+      (sum, transaction) =>
+        sum +
+        this.confirmedBalanceSpendAmount(
+          transaction.type,
+          transaction.amount?.toNumber() ?? 0,
+        ),
       0,
     );
   }
 
   private guestOperationRevenueTotal(
     operationLogs: {
+      type: string | null;
       amount: { toNumber: () => number } | null;
     }[],
   ) {
     return operationLogs.reduce(
       (sum, operationLog) =>
-        sum + Math.max(0, operationLog.amount?.toNumber() ?? 0),
+        sum +
+        this.confirmedBalanceSpendAmount(
+          operationLog.type,
+          operationLog.amount?.toNumber() ?? 0,
+        ),
       0,
     );
+  }
+
+  private confirmedBalanceSpendAmount(type: string | null, amount: number) {
+    if (!Number.isFinite(amount) || amount === 0) {
+      return 0;
+    }
+
+    if (amount < 0) {
+      return Math.abs(amount);
+    }
+
+    return this.isBalanceSpendOperationType(type) ? amount : 0;
+  }
+
+  private isBalanceSpendOperationType(type: string | null) {
+    const normalizedType = this.normalizeExternalType(type);
+
+    return (
+      normalizedType === 'minus' ||
+      normalizedType.includes('withdraw') ||
+      normalizedType.includes('spend') ||
+      normalizedType.includes('expense') ||
+      normalizedType.includes('payment') ||
+      normalizedType.includes('write_off') ||
+      normalizedType.includes('debit')
+    );
+  }
+
+  private normalizeExternalType(type: string | null) {
+    return String(type ?? '')
+      .trim()
+      .toLowerCase()
+      .replace(/[\s-]+/g, '_');
   }
 
   private buildRevenueDiagnosticsRows(
@@ -1797,10 +1786,6 @@ export class DashboardService {
       name: string;
       externalClubId: string | null;
     }[],
-    clubRevenueFacts: {
-      storeId: string | null;
-      totalRevenue: { toNumber: () => number };
-    }[],
     salesFacts: {
       storeId: string;
       guestId?: string | null;
@@ -1819,15 +1804,16 @@ export class DashboardService {
       externalClubId: string | null;
       guestId: string | null;
       externalGuestId: string | null;
+      type: string | null;
       amount: { toNumber: () => number } | null;
     }[],
     guestOperationLogs: {
       storeId: string | null;
       externalClubId: string | null;
+      type: string | null;
       amount: { toNumber: () => number } | null;
     }[],
   ): DashboardStoreRevenueMetric[] {
-    const totalRevenueByStore = new Map<string, number>();
     const productRevenueByStore = new Map<string, number>();
     const transactionRevenueByStore = new Map<string, number>();
     const operationRevenueByStore = new Map<string, number>();
@@ -1855,18 +1841,6 @@ export class DashboardService {
 
       return null;
     };
-
-    clubRevenueFacts.forEach((fact) => {
-      if (!fact.storeId) {
-        return;
-      }
-
-      totalRevenueByStore.set(
-        fact.storeId,
-        (totalRevenueByStore.get(fact.storeId) ?? 0) +
-          fact.totalRevenue.toNumber(),
-      );
-    });
 
     salesFacts.forEach((fact) => {
       productRevenueByStore.set(
@@ -1923,7 +1897,10 @@ export class DashboardService {
       transactionRevenueByStore.set(
         storeId,
         (transactionRevenueByStore.get(storeId) ?? 0) +
-          Math.abs(transaction.amount?.toNumber() ?? 0),
+          this.confirmedBalanceSpendAmount(
+            transaction.type,
+            transaction.amount?.toNumber() ?? 0,
+          ),
       );
     });
 
@@ -1940,7 +1917,10 @@ export class DashboardService {
       operationRevenueByStore.set(
         storeId,
         (operationRevenueByStore.get(storeId) ?? 0) +
-          Math.max(0, operationLog.amount?.toNumber() ?? 0),
+          this.confirmedBalanceSpendAmount(
+            operationLog.type,
+            operationLog.amount?.toNumber() ?? 0,
+          ),
       );
     });
 
@@ -1950,9 +1930,9 @@ export class DashboardService {
         const transactionRevenue = transactionRevenueByStore.get(store.id) ?? 0;
         const operationRevenue = operationRevenueByStore.get(store.id) ?? 0;
         const totalRevenue = Math.max(
-          totalRevenueByStore.get(store.id) ?? 0,
           operationRevenue,
-          transactionRevenue + productRevenue,
+          transactionRevenue,
+          productRevenue,
         );
 
         return {
@@ -2001,11 +1981,6 @@ export class DashboardService {
       revenue: { toNumber: () => number };
       cost: { toNumber: () => number };
     }[],
-    clubRevenueFacts: {
-      storeId: string | null;
-      revenueDate: Date;
-      totalRevenue: { toNumber: () => number };
-    }[],
     fromDate: Date,
     toDate: Date,
     labelGranularity: DashboardTrendGranularity,
@@ -2046,28 +2021,6 @@ export class DashboardService {
         (segment.soldByProduct.get(fact.productId) ?? 0) +
           fact.quantity.toNumber(),
       );
-    });
-
-    const useSelectedStoresRevenue = clubRevenueFacts.some(
-      (fact) => fact.storeId !== null,
-    );
-    const revenueFactsForTrend = useSelectedStoresRevenue
-      ? clubRevenueFacts.filter((fact) => fact.storeId !== null)
-      : clubRevenueFacts;
-
-    revenueFactsForTrend.forEach((fact) => {
-      const revenueTime = fact.revenueDate.getTime();
-      const segment = segments.find(
-        (item) =>
-          revenueTime >= item.fromDate.getTime() &&
-          revenueTime <= item.toDate.getTime(),
-      );
-
-      if (!segment) {
-        return;
-      }
-
-      segment.clubRevenue += fact.totalRevenue.toNumber();
     });
 
     return segments.map((segment, index) => {

@@ -17,6 +17,9 @@ type DashboardPrismaMock = {
   supplier: {
     count: jest.Mock;
   };
+  store: {
+    findMany: jest.Mock;
+  };
   salesFact: {
     findMany: jest.Mock;
   };
@@ -27,6 +30,15 @@ type DashboardPrismaMock = {
     findMany: jest.Mock;
   };
   stockMovement: {
+    findMany: jest.Mock;
+  };
+  guestSession: {
+    findMany: jest.Mock;
+  };
+  guestTransaction: {
+    findMany: jest.Mock;
+  };
+  guestOperationLog: {
     findMany: jest.Mock;
   };
 };
@@ -116,6 +128,9 @@ function createPrismaMock(): DashboardPrismaMock {
     supplier: {
       count: jest.fn(),
     },
+    store: {
+      findMany: jest.fn(),
+    },
     salesFact: {
       findMany: jest.fn(),
     },
@@ -126,6 +141,15 @@ function createPrismaMock(): DashboardPrismaMock {
       findMany: jest.fn(),
     },
     stockMovement: {
+      findMany: jest.fn(),
+    },
+    guestSession: {
+      findMany: jest.fn(),
+    },
+    guestTransaction: {
+      findMany: jest.fn(),
+    },
+    guestOperationLog: {
       findMany: jest.fn(),
     },
   };
@@ -147,6 +171,16 @@ describe('DashboardService', () => {
     prisma.tenant.findUnique.mockResolvedValue({
       name: 'Demo Cyber Club',
     });
+    prisma.store.findMany.mockResolvedValue([
+      {
+        id: 'store-1',
+        name: 'Club A',
+        externalClubId: '1',
+      },
+    ]);
+    prisma.guestSession.findMany.mockResolvedValue([]);
+    prisma.guestTransaction.findMany.mockResolvedValue([]);
+    prisma.guestOperationLog.findMany.mockResolvedValue([]);
     service = new DashboardService(
       prisma as unknown as PrismaService,
       tenantContext as unknown as TenantContextService,
@@ -341,6 +375,52 @@ describe('DashboardService', () => {
     expect(summary.salesTrend).toHaveLength(8);
   });
 
+  it('uses balance spend as club revenue and ignores balance top-ups', async () => {
+    mockEmptyDashboardData();
+    prisma.guestOperationLog.findMany.mockResolvedValue([
+      {
+        storeId: 'store-1',
+        externalClubId: '1',
+        type: 'plus',
+        amount: new Prisma.Decimal(50_000),
+      },
+      {
+        storeId: 'store-1',
+        externalClubId: '1',
+        type: 'minus',
+        amount: new Prisma.Decimal(2_000),
+      },
+    ]);
+    prisma.guestTransaction.findMany.mockResolvedValue([
+      {
+        storeId: 'store-1',
+        externalClubId: '1',
+        guestId: null,
+        externalGuestId: null,
+        type: 'plus',
+        amount: new Prisma.Decimal(100_000),
+      },
+      {
+        storeId: 'store-1',
+        externalClubId: '1',
+        guestId: null,
+        externalGuestId: null,
+        type: null,
+        amount: new Prisma.Decimal(-3_000),
+      },
+    ]);
+
+    const summary = await service.getSummary();
+
+    expect(summary.totalRevenue).toBe(0);
+    expect(summary.clubRevenue).toBe(3000);
+    expect(summary.storeRevenueBreakdown[0]).toMatchObject({
+      storeId: 'store-1',
+      totalRevenue: 3000,
+      productRevenue: 0,
+    });
+  });
+
   it.each(calendarTrendCases)(
     'builds one trend bar per selected $period period',
     async ({ period, labels, trendFrom }) => {
@@ -438,8 +518,8 @@ describe('DashboardService', () => {
       expect(summary.salesTrend[7]).toMatchObject({
         label: '29.04',
         revenue: 300,
-        clubRevenue: 1000,
-        revenueSharePercent: 30,
+        clubRevenue: 300,
+        revenueSharePercent: 100,
         soldQuantity: 3,
         noSalesSkuCount: 0,
         outOfStockSkuCount: 1,

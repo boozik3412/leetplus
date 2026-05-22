@@ -1,6 +1,6 @@
 # LeetPlus Backlog
 
-Last updated: 2026-05-21
+Last updated: 2026-05-22
 
 This file is the source of truth for product backlog, near-term roadmap, planned modules, and deferred ideas. `PROJECT_STATE.md` should stay focused on current project state, workflow, production context, and data rules.
 
@@ -23,7 +23,9 @@ Status: implemented; remains in production UX polish mode.
 - Done: "Main focus" includes money units in financial values and links "Money at risk" to the hybrid assortment-loss report.
 - Done: dashboard auto-sync now refreshes both assortment/revenue data and guest foundation data, so the executive dashboard is responsible for all first-screen metrics.
 - Done: current-day guest and load metrics count sessions by overlap with the selected period, so overnight sessions contribute to the current day instead of only to the day they started.
+- Done: dashboard club revenue formula no longer treats Langame balance top-ups (`plus`) as club revenue; club revenue now uses confirmed balance spend/write-off in a concrete club with product/bar revenue as the safe fallback, so mobile app top-ups are not assigned to a store.
 - Current risk: production still needs live verification that Langame returns enough PC context for all clubs; if load remains `нет данных`, inspect latest guest sync profile endpoint errors/field counts or VDS API logs.
+- Current limitation: exact split between gameplay, services, app top-ups, and club-cash sources still needs richer persisted Langame transaction/operation fields before the dashboard can explain every ruble by source.
 - Next polish: continue adjusting color accents, wording, and direct action links from live `leetplus.ru` review.
 
 ## Stage 2. Commercial Reports

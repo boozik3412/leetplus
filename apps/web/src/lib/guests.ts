@@ -252,6 +252,21 @@ export type StaffControlAnomalyType =
   | "low-middle-check"
   | "unmapped-operator";
 
+export type StaffOperatorShiftDetail = {
+  externalShiftId: string | null;
+  storeName: string | null;
+  startedAt: string | null;
+  stoppedAt: string | null;
+  durationHours: number;
+  paymentAmount: number;
+  refundAmount: number;
+  incassAmount: number;
+  middleCheck: number;
+  barRevenue: number;
+  hookahRevenue: number;
+  signals: StaffControlAnomalyType[];
+};
+
 export type StaffOperatorReportRow = {
   externalDomain: string | null;
   externalUserId: string;
@@ -270,6 +285,7 @@ export type StaffOperatorReportRow = {
   barRevenue: number;
   hookahRevenue: number;
   averageShiftMiddleCheck: number;
+  shiftDetails: StaffOperatorShiftDetail[];
 };
 
 export type StaffOperatorReport = {

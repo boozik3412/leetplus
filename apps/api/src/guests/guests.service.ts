@@ -317,6 +317,21 @@ export type StaffIdentityMappingResult = {
   updatedShifts: number;
 };
 
+export type StaffOperatorShiftDetail = {
+  externalShiftId: string | null;
+  storeName: string | null;
+  startedAt: string | null;
+  stoppedAt: string | null;
+  durationHours: number;
+  paymentAmount: number;
+  refundAmount: number;
+  incassAmount: number;
+  middleCheck: number;
+  barRevenue: number;
+  hookahRevenue: number;
+  signals: StaffControlAnomalyType[];
+};
+
 export type StaffOperatorReportRow = {
   externalDomain: string | null;
   externalUserId: string;
@@ -335,6 +350,7 @@ export type StaffOperatorReportRow = {
   barRevenue: number;
   hookahRevenue: number;
   averageShiftMiddleCheck: number;
+  shiftDetails: StaffOperatorShiftDetail[];
 };
 
 export type StaffOperatorReport = {
@@ -418,6 +434,7 @@ type StaffOperatorMetrics = StaffShiftMetrics & {
   linkedGuest: GuestDashboardRow | null;
   mappingId: string | null;
   mappingNote: string | null;
+  shiftDetails: StaffOperatorShiftDetail[];
 };
 
 type Period = {
@@ -1790,6 +1807,7 @@ export class GuestsService {
       ]),
     );
     const byOperator = new Map<string, StaffOperatorMetrics>();
+    const shiftDetailsByKey = new Map<string, StaffOperatorShiftDetail>();
 
     for (const row of rows) {
       if (!row.externalUserId) {
@@ -1827,17 +1845,44 @@ export class GuestsService {
         metrics.storeNames.add(row.store.name);
       }
 
+      const paymentAmount = this.shiftPaymentAmount(row);
+      const refundAmount = this.shiftRefundAmount(row);
+      const incassAmount = this.decimalToNumber(row.incassAmount) ?? 0;
+      const middleCheck = this.decimalToNumber(row.middleCheck);
       this.addShiftMetrics(metrics, {
         linked: Boolean(metrics.linkedGuest),
         externalShiftId: row.externalShiftId,
         startedAt: row.startedAt,
         stoppedAt: row.stoppedAt,
         durationMinutes: row.durationMinutes ?? 0,
-        paymentAmount: this.shiftPaymentAmount(row),
-        refundAmount: this.shiftRefundAmount(row),
-        incassAmount: this.decimalToNumber(row.incassAmount) ?? 0,
-        middleCheck: this.decimalToNumber(row.middleCheck),
+        paymentAmount,
+        refundAmount,
+        incassAmount,
+        middleCheck,
       });
+      const shiftDetail: StaffOperatorShiftDetail = {
+        externalShiftId: row.externalShiftId,
+        storeName: row.store?.name ?? null,
+        startedAt: this.toIsoDateTime(row.startedAt),
+        stoppedAt: this.toIsoDateTime(row.stoppedAt),
+        durationHours: this.round((row.durationMinutes ?? 0) / 60, 1),
+        paymentAmount: this.round(paymentAmount, 2),
+        refundAmount: this.round(refundAmount, 2),
+        incassAmount: this.round(incassAmount, 2),
+        middleCheck: this.round(middleCheck ?? 0, 2),
+        barRevenue: 0,
+        hookahRevenue: 0,
+        signals: [],
+      };
+      const shiftKey = this.staffOperatorShiftKey({
+        externalDomain: row.externalDomain,
+        externalUserId: row.externalUserId,
+        externalShiftId: row.externalShiftId,
+        startedAt: row.startedAt,
+        storeId: row.storeId,
+      });
+      metrics.shiftDetails.push(shiftDetail);
+      shiftDetailsByKey.set(shiftKey, shiftDetail);
       byOperator.set(key, metrics);
     }
 
@@ -1885,6 +1930,21 @@ export class GuestsService {
 
       const revenue = this.decimalToNumber(sale.revenue) ?? 0;
       metrics.barRevenue += revenue;
+      const shiftDetail = shiftDetailsByKey.get(
+        this.staffOperatorShiftKey({
+          externalDomain: matchingShift.externalDomain,
+          externalUserId: matchingShift.externalUserId,
+          externalShiftId: matchingShift.externalShiftId,
+          startedAt: matchingShift.startedAt,
+          storeId: matchingShift.storeId,
+        }),
+      );
+      if (shiftDetail) {
+        shiftDetail.barRevenue = this.round(
+          shiftDetail.barRevenue + revenue,
+          2,
+        );
+      }
       if (
         this.isHookahSale(
           sale.productNameAtSale,
@@ -1893,6 +1953,12 @@ export class GuestsService {
         )
       ) {
         metrics.hookahRevenue += revenue;
+        if (shiftDetail) {
+          shiftDetail.hookahRevenue = this.round(
+            shiftDetail.hookahRevenue + revenue,
+            2,
+          );
+        }
       }
     }
 
@@ -1984,6 +2050,7 @@ export class GuestsService {
       linkedGuest,
       mappingId,
       mappingNote,
+      shiftDetails: [],
     };
   }
 
@@ -2043,7 +2110,74 @@ export class GuestsService {
         metrics.middleCheckCount > 0
           ? this.round(metrics.middleCheckSum / metrics.middleCheckCount, 2)
           : 0,
+      shiftDetails: this.prepareStaffOperatorShiftDetails(metrics),
     };
+  }
+
+  private prepareStaffOperatorShiftDetails(
+    metrics: StaffOperatorMetrics,
+  ): StaffOperatorShiftDetail[] {
+    return metrics.shiftDetails
+      .map((shift) => ({
+        ...shift,
+        signals: this.staffOperatorShiftSignals(shift, metrics),
+      }))
+      .sort((first, second) => {
+        const signalDelta = second.signals.length - first.signals.length;
+        if (signalDelta !== 0) {
+          return signalDelta;
+        }
+
+        return (
+          new Date(second.stoppedAt ?? second.startedAt ?? 0).getTime() -
+          new Date(first.stoppedAt ?? first.startedAt ?? 0).getTime()
+        );
+      })
+      .slice(0, 8);
+  }
+
+  private staffOperatorShiftSignals(
+    shift: StaffOperatorShiftDetail,
+    metrics: StaffOperatorMetrics,
+  ): StaffControlAnomalyType[] {
+    const signals: StaffControlAnomalyType[] = [];
+
+    if (!metrics.linkedGuest && shift.paymentAmount >= 10000) {
+      signals.push('unmapped-operator');
+    }
+    if (shift.refundAmount > 0) {
+      signals.push('refunds');
+    }
+    if (shift.paymentAmount >= 10000 && shift.incassAmount <= 0) {
+      signals.push('missing-incassation');
+    }
+    if (shift.durationHours >= 14) {
+      signals.push('long-shift');
+    }
+    if (
+      shift.middleCheck > 0 &&
+      shift.middleCheck < 100 &&
+      shift.paymentAmount >= 5000
+    ) {
+      signals.push('low-middle-check');
+    }
+
+    return signals;
+  }
+
+  private staffOperatorShiftKey(values: {
+    externalDomain: string | null;
+    externalUserId: string;
+    externalShiftId: string | null;
+    startedAt: Date | null;
+    storeId: string | null;
+  }) {
+    return [
+      this.staffOperatorKey(values.externalDomain, values.externalUserId),
+      values.externalShiftId ?? 'shift',
+      values.startedAt?.toISOString() ?? 'start',
+      values.storeId ?? 'store',
+    ].join('|');
   }
 
   private shiftPaymentAmount(row: {

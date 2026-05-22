@@ -9,6 +9,7 @@ import {
   type StaffControlAnomalyType,
   type StaffOperatorFilters,
   type StaffOperatorReport,
+  type StaffOperatorShiftDetail,
   type StaffOperatorSortKey,
 } from "@/lib/guests";
 
@@ -104,6 +105,18 @@ function formatLastClosedShift(
 
 function formatShiftId(value: string | null) {
   return value ? `ID смены: ${value}` : "ID смены не определен";
+}
+
+function shiftSignalLabel(value: StaffControlAnomalyType) {
+  const labels: Record<StaffControlAnomalyType, string> = {
+    refunds: "Возврат",
+    "missing-incassation": "Нет инкассации",
+    "long-shift": "Длинная смена",
+    "low-middle-check": "Низкий ср. чек",
+    "unmapped-operator": "Без привязки",
+  };
+
+  return labels[value];
 }
 
 function resolveFilters(params: Awaited<SearchParams>): StaffOperatorFilters {
@@ -478,6 +491,7 @@ export default async function StaffOperatorsPage({
                       </tr>
                       <tr className="bg-zinc-50/50 dark:bg-zinc-900/20">
                         <td colSpan={10} className="px-3 pb-4">
+                          <ShiftDetailsPreview shifts={row.shiftDetails} />
                           <div className="rounded-md border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
                             <p className="mb-2 text-xs font-semibold uppercase text-zinc-500">
                               Привязка сотрудника
@@ -1054,6 +1068,91 @@ function MiniRanking({
   );
 }
 
+function ShiftDetailsPreview({
+  shifts,
+}: {
+  shifts: StaffOperatorShiftDetail[];
+}) {
+  const visibleShifts = shifts.slice(0, 4);
+
+  return (
+    <section className="mb-3 mt-3 rounded-md border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase text-zinc-500">
+            Смены для проверки
+          </p>
+          <p className="mt-1 text-xs text-zinc-500">
+            Проблемные и последние закрытые смены с ID для сверки.
+          </p>
+        </div>
+        {shifts.length > visibleShifts.length ? (
+          <p className="text-xs text-zinc-500">
+            показано {formatNumber(visibleShifts.length)} из{" "}
+            {formatNumber(shifts.length)}
+          </p>
+        ) : null}
+      </div>
+
+      {visibleShifts.length > 0 ? (
+        <div className="mt-3 grid gap-2 xl:grid-cols-2">
+          {visibleShifts.map((shift, index) => (
+            <article
+              key={`${shift.externalShiftId ?? "shift"}-${shift.startedAt ?? index}`}
+              className="rounded-md border border-zinc-200 bg-zinc-50 p-3 text-sm dark:border-zinc-800 dark:bg-zinc-900/40"
+            >
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <p className="font-semibold">
+                    {formatLastClosedShift(shift.startedAt, shift.stoppedAt)}
+                  </p>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    {formatShiftId(shift.externalShiftId)}
+                    {shift.storeName ? ` · ${shift.storeName}` : ""}
+                  </p>
+                </div>
+                {shift.signals.length > 0 ? (
+                  <div className="flex flex-wrap gap-1">
+                    {shift.signals.map((signal) => (
+                      <span
+                        key={signal}
+                        className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-900 dark:bg-amber-950/70 dark:text-amber-100"
+                      >
+                        {shiftSignalLabel(signal)}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+              <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-3">
+                <ShiftDetailMetric label="Касса" value={formatRubles(shift.paymentAmount)} />
+                <ShiftDetailMetric label="Возвраты" value={formatRubles(shift.refundAmount)} />
+                <ShiftDetailMetric label="Инкассация" value={formatRubles(shift.incassAmount)} />
+                <ShiftDetailMetric label="Часы" value={`${formatNumber(shift.durationHours, 1)} ч`} />
+                <ShiftDetailMetric label="Ср. чек" value={formatRubles(shift.middleCheck)} />
+                <ShiftDetailMetric label="Бар" value={formatRubles(shift.barRevenue)} />
+              </dl>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-3 text-sm text-zinc-500">
+          Смены по выбранному периоду не найдены.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function ShiftDetailMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <dt className="truncate text-zinc-500">{label}</dt>
+      <dd className="mt-0.5 truncate font-semibold tabular-nums">{value}</dd>
+    </div>
+  );
+}
+
 function OperatorCard({
   row,
   staffOptions,
@@ -1126,6 +1225,8 @@ function OperatorCard({
         <OperatorMetric label="Инкассация" value={formatRubles(row.shiftIncassAmount)} />
         <OperatorMetric label="Ср. чек" value={formatRubles(row.averageShiftMiddleCheck)} />
       </div>
+
+      <ShiftDetailsPreview shifts={row.shiftDetails} />
 
       <div className="mt-3">
         <p className="text-xs font-medium uppercase text-zinc-500">Клубы</p>

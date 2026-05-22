@@ -177,6 +177,12 @@ export default async function GuestFullReportPage({
           </div>
           <div className="flex flex-wrap gap-2">
             <Link
+              href={exportHref(filters)}
+              className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200 dark:hover:bg-emerald-900/50"
+            >
+              CSV
+            </Link>
+            <Link
               href={reportHref({ ...filters, page: "1" })}
               className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
             >
@@ -541,6 +547,14 @@ function dashboardHref(filters: GuestListFilters) {
 
 function reportHref(filters: GuestListFilters) {
   return pathHref("/guests/report", filters);
+}
+
+function exportHref(filters: GuestListFilters) {
+  const exportFilters = { ...filters };
+  delete exportFilters.page;
+  delete exportFilters.pageSize;
+
+  return pathHref("/api/guests/export", exportFilters);
 }
 
 function pathHref(pathname: string, filters: GuestListFilters) {

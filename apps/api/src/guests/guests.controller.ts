@@ -7,6 +7,7 @@ import {
   Patch,
   Post,
   Query,
+  StreamableFile,
   UseGuards,
 } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
@@ -18,6 +19,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import {
   GuestsService,
   type GuestCrmUpdateDto,
+  type GuestExportFile,
   type GuestFilterOptions,
   type GuestDetail,
   type GuestListQuery,
@@ -61,6 +63,23 @@ export class GuestsController {
     @Query() query: GuestListQuery,
   ): Promise<GuestListResponse> {
     return this.guestsService.getGuests(user, query);
+  }
+
+  @Get('export')
+  async exportGuests(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: GuestListQuery,
+  ): Promise<StreamableFile> {
+    const file: GuestExportFile = await this.guestsService.exportGuests(
+      user,
+      query,
+    );
+
+    return new StreamableFile(file.buffer, {
+      type: file.contentType,
+      disposition: `attachment; filename="${file.fileName}"`,
+      length: file.buffer.byteLength,
+    });
   }
 
   @Get('staff-control')

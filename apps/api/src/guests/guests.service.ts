@@ -179,6 +179,12 @@ export type GuestListResponse = {
   rows: GuestDashboardRow[];
 };
 
+export type GuestExportFile = {
+  fileName: string;
+  contentType: string;
+  buffer: Buffer;
+};
+
 export type GuestDetail = GuestDashboardRow & {
   crmEvents: Array<{
     id: string;
@@ -512,6 +518,11 @@ type ResolvedGuestFilters = {
 };
 
 type GuestGroupsByKey = Map<string, string>;
+type CsvCell = string | number | null;
+type BuiltGuestList = Omit<
+  GuestListResponse,
+  'page' | 'pageSize' | 'totalRows' | 'totalPages'
+>;
 
 @Injectable()
 export class GuestsService {
@@ -630,13 +641,88 @@ export class GuestsService {
     user: AuthenticatedUser,
     query: GuestListQuery = {},
   ): Promise<GuestListResponse> {
+    const page = this.resolvePositiveInteger(query.page, 1, 1, 10_000);
+    const pageSize = this.resolvePositiveInteger(query.pageSize, 50, 10, 200);
+    const guestList = await this.buildGuestList(user, query);
+    const totalRows = guestList.rows.length;
+    const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+    const normalizedPage = Math.min(page, totalPages);
+    const offset = (normalizedPage - 1) * pageSize;
+
+    return {
+      periodFrom: guestList.periodFrom,
+      periodTo: guestList.periodTo,
+      storeId: guestList.storeId,
+      guestGroupId: guestList.guestGroupId,
+      segment: guestList.segment,
+      page: normalizedPage,
+      pageSize,
+      totalRows,
+      totalPages,
+      sort: guestList.sort,
+      direction: guestList.direction,
+      rows: guestList.rows.slice(offset, offset + pageSize),
+    };
+  }
+
+  async exportGuests(
+    user: AuthenticatedUser,
+    query: GuestListQuery = {},
+  ): Promise<GuestExportFile> {
+    const guestList = await this.buildGuestList(user, query);
+    const csvRows: CsvCell[][] = [
+      [
+        'Гость',
+        'Внешний ID',
+        'Контакт',
+        'Группа',
+        'Сегмент',
+        'CRM статус',
+        'Сессии',
+        'Дни визитов',
+        'Часы',
+        'Деньги, руб',
+        'Бар, руб',
+        'Дата регистрации',
+        'Последняя активность',
+        'Следующий шаг',
+        'Дата следующего контакта',
+      ],
+      ...guestList.rows.map((row) => [
+        row.displayName,
+        row.externalGuestId,
+        row.contact,
+        row.guestGroupName ?? row.externalDomain,
+        this.segmentExportLabel(row.segment),
+        this.crmStatusExportLabel(row.crmStatus),
+        row.sessionsCount,
+        row.visitsDays,
+        row.playHours,
+        row.transactionAmount + row.barRevenue,
+        row.barRevenue,
+        this.formatExportDate(row.insertedAt),
+        this.formatExportDate(row.lastActivityAt),
+        row.nextAction,
+        this.formatExportDateTime(row.nextContactAt),
+      ]),
+    ];
+
+    return {
+      fileName: `leetplus-guests-${guestList.periodFrom}-${guestList.periodTo}.csv`,
+      contentType: 'text/csv; charset=utf-8',
+      buffer: Buffer.from(this.toCsv(csvRows), 'utf8'),
+    };
+  }
+
+  private async buildGuestList(
+    user: AuthenticatedUser,
+    query: GuestListQuery = {},
+  ): Promise<BuiltGuestList> {
     const { tenantId } = await this.tenantContextService.resolve(user);
     const period = this.resolvePeriod(query);
     const filters = await this.resolveGuestFilters(tenantId, query);
     const segment = this.resolveSegment(query.segment);
     const crmStatus = this.resolveCrmStatusFilter(query.crmStatus);
-    const page = this.resolvePositiveInteger(query.page, 1, 1, 10_000);
-    const pageSize = this.resolvePositiveInteger(query.pageSize, 50, 10, 200);
     const sort = this.resolveSort(query.sort);
     const direction = this.resolveDirection(query.direction);
     const { guests, metricsByGuestId, groupsByKey } =
@@ -658,25 +744,15 @@ export class GuestsService {
       rows = rows.filter((row) => row.crmStatus === crmStatus);
     }
 
-    const sortedRows = this.sortRows(rows, sort, direction);
-    const totalRows = sortedRows.length;
-    const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
-    const normalizedPage = Math.min(page, totalPages);
-    const offset = (normalizedPage - 1) * pageSize;
-
     return {
       periodFrom: period.from,
       periodTo: period.to,
       storeId: filters.storeId,
       guestGroupId: filters.guestGroupId,
       segment,
-      page: normalizedPage,
-      pageSize,
-      totalRows,
-      totalPages,
       sort,
       direction,
-      rows: sortedRows.slice(offset, offset + pageSize),
+      rows: this.sortRows(rows, sort, direction),
     };
   }
 
@@ -3317,6 +3393,76 @@ export class GuestsService {
     }
 
     return Math.min(Math.max(Math.trunc(parsed), min), max);
+  }
+
+  private segmentExportLabel(segment: GuestDashboardRow['segment']) {
+    const labels: Record<GuestDashboardRow['segment'], string> = {
+      active: 'Активный',
+      new: 'Новый',
+      repeat: 'Повторный',
+      risk: 'В риске',
+      lost: 'Потерянный',
+      quiet: 'Тихий',
+    };
+
+    return labels[segment];
+  }
+
+  private crmStatusExportLabel(status: GuestCrmStatus) {
+    const labels: Record<GuestCrmStatus, string> = {
+      NONE: 'Без статуса',
+      WATCH: 'Наблюдать',
+      CONTACT: 'Связаться',
+      INVITED: 'Приглашен',
+      LOYAL: 'Лояльный',
+      VIP: 'VIP',
+      PROBLEM: 'Проблемный',
+      DO_NOT_CONTACT: 'Не контактировать',
+    };
+
+    return labels[status];
+  }
+
+  private formatExportDate(value: string | null) {
+    return this.formatExportDateValue(value, false);
+  }
+
+  private formatExportDateTime(value: string | null) {
+    return this.formatExportDateValue(value, true);
+  }
+
+  private formatExportDateValue(value: string | null, includeTime: boolean) {
+    if (!value) {
+      return null;
+    }
+
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+      return value;
+    }
+
+    return new Intl.DateTimeFormat('ru-RU', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      ...(includeTime ? ({ hour: '2-digit', minute: '2-digit' } as const) : {}),
+      timeZone: 'UTC',
+    }).format(date);
+  }
+
+  private toCsv(rows: CsvCell[][]) {
+    return `\uFEFF${rows.map((row) => this.csvRow(row)).join('\n')}`;
+  }
+
+  private csvRow(row: CsvCell[]) {
+    return row.map((cell) => this.csvCell(cell)).join(';');
+  }
+
+  private csvCell(cell: CsvCell) {
+    const value = cell === null ? '' : String(cell);
+
+    return `"${value.replaceAll('"', '""')}"`;
   }
 
   private guestSelect() {

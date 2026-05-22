@@ -55,6 +55,7 @@ export function AuthForm({ mode }: AuthFormProps) {
   const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isRedirecting, setIsRedirecting] = useState(false);
 
   const isRegister = mode === "register";
 
@@ -79,6 +80,7 @@ export function AuthForm({ mode }: AuthFormProps) {
     event.preventDefault();
     setError(null);
     setIsSubmitting(true);
+    let keepLoading = false;
 
     const endpoint = isRegister ? "/api/auth/register" : "/api/auth/login";
     const payload = isRegister
@@ -120,6 +122,8 @@ export function AuthForm({ mode }: AuthFormProps) {
         void startDailyLoginAutoSync();
       }
 
+      keepLoading = true;
+      setIsRedirecting(true);
       router.push(
         isRegister
           ? `/verify-email?email=${encodeURIComponent(form.email)}`
@@ -129,12 +133,16 @@ export function AuthForm({ mode }: AuthFormProps) {
     } catch {
       setError("Backend недоступен. Проверьте, что API запущен.");
     } finally {
-      setIsSubmitting(false);
+      if (!keepLoading) {
+        setIsSubmitting(false);
+      }
     }
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <>
+      {isRedirecting ? <AuthRedirectOverlay isRegister={isRegister} /> : null}
+      <form onSubmit={handleSubmit} className="space-y-4">
       {isRegister ? (
         <>
           <label className="block">
@@ -261,17 +269,21 @@ export function AuthForm({ mode }: AuthFormProps) {
         </p>
       ) : null}
 
-      <button
-        type="submit"
-        disabled={isSubmitting}
-        className="w-full rounded-md bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400"
-      >
-        {isSubmitting
-          ? "Отправка..."
-          : isRegister
-            ? "Создать организацию"
-            : "Войти"}
-      </button>
+        <button
+          type="submit"
+          disabled={isSubmitting || isRedirecting}
+          className="w-full rounded-md bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400"
+        >
+          {isRedirecting
+            ? isRegister
+              ? "Открываем подтверждение..."
+              : "Загружаем дашборд..."
+            : isSubmitting
+              ? "Отправка..."
+              : isRegister
+                ? "Создать организацию"
+                : "Войти"}
+        </button>
 
       <p className="text-center text-sm text-zinc-500">
         {isRegister ? "Уже есть аккаунт?" : "Еще нет аккаунта?"}{" "}
@@ -282,7 +294,26 @@ export function AuthForm({ mode }: AuthFormProps) {
           {isRegister ? "Войти" : "Зарегистрироваться"}
         </Link>
       </p>
-    </form>
+      </form>
+    </>
+  );
+}
+
+function AuthRedirectOverlay({ isRegister }: { isRegister: boolean }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/70 px-6 backdrop-blur-sm">
+      <div className="w-full max-w-sm rounded-lg border border-zinc-800 bg-zinc-950 px-6 py-6 text-center text-zinc-100 shadow-xl">
+        <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-emerald-900 border-t-emerald-400" />
+        <p className="mt-4 text-base font-semibold">
+          {isRegister ? "Открываем подтверждение" : "Вход выполнен"}
+        </p>
+        <p className="mt-2 text-sm leading-6 text-zinc-400">
+          {isRegister
+            ? "Подготавливаем страницу подтверждения email."
+            : "Загружаем LeetPlus и актуальные данные дашборда."}
+        </p>
+      </div>
+    </div>
   );
 }
 

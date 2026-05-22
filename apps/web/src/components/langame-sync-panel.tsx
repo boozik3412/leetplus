@@ -476,7 +476,8 @@ function PcDiagnostics({
   const pcLinkFields = Object.keys(diagnostics.pcTypeLinks.fieldCounts);
 
   return (
-    <div className={["grid gap-3 md:grid-cols-3", className].join(" ")}>
+    <div className={className}>
+      <div className="grid gap-3 md:grid-cols-3">
       <DiagnosticCard
         title="Типы ПК в клубах"
         value={diagnostics.pcTypesInClubs.total}
@@ -497,8 +498,38 @@ function PcDiagnostics({
         }
         tone={endpointErrors.length > 0 ? "danger" : "neutral"}
       />
+      </div>
+      {endpointErrors.length > 0 ? (
+        <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-3 text-xs text-red-800 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-100">
+          <p className="font-semibold">Детали endpoint-ошибок</p>
+          <div className="mt-2 space-y-2">
+            {endpointErrors.slice(0, 5).map(([endpoint, message]) => (
+              <div
+                key={endpoint}
+                className="grid gap-1 sm:grid-cols-[11rem_minmax(0,1fr)]"
+              >
+                <span className="font-semibold text-red-900 dark:text-red-50">
+                  {endpoint}
+                </span>
+                <span className="break-words text-red-800/90 dark:text-red-100/80">
+                  {compactEndpointError(message)}
+                </span>
+              </div>
+            ))}
+          </div>
+          {endpointErrors.length > 5 ? (
+            <p className="mt-2 text-red-800/80 dark:text-red-100/70">
+              Показаны первые 5 ошибок из {endpointErrors.length}.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
+}
+
+function compactEndpointError(message: string) {
+  return message.length > 360 ? `${message.slice(0, 360)}...` : message;
 }
 
 function DiagnosticCard({

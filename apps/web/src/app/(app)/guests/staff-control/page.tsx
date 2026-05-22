@@ -6,6 +6,7 @@ import {
   type GuestsSummaryFilters,
   type StaffControlAnomalyType,
   type StaffControlReport,
+  type StaffOperationKind,
 } from "@/lib/guests";
 
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
@@ -54,6 +55,15 @@ const staffSortLabels: Record<StaffSortKey, string> = {
   shifts: "Смены",
   shiftCash: "Касса смен",
   revenue: "Деньги",
+};
+
+const operationKindLabels: Record<StaffOperationKind, string> = {
+  refunds: "Возвраты и отмены",
+  discounts: "Скидки и бонусы",
+  cash: "Касса и деньги",
+  guest: "Гости",
+  service: "Смены и услуги",
+  other: "Прочее",
 };
 
 function searchParam(value: string | string[] | undefined) {
@@ -301,6 +311,8 @@ export default async function StaffControlPage({
 
         <AnomaliesPanel report={report} filters={filters} />
 
+        <ShiftOperationBridgePanel report={report} filters={filters} />
+
         <section className="mt-6 grid min-w-0 gap-6 2xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.45fr)]">
           <StaffTable
             report={report}
@@ -519,6 +531,136 @@ function AnomaliesPanel({
   );
 }
 
+function ShiftOperationBridgePanel({
+  report,
+  filters,
+}: {
+  report: StaffControlReport;
+  filters: GuestsSummaryFilters;
+}) {
+  const shiftSignals = report.anomalies.slice(0, 4);
+  const operationRisks = report.operationKindSummary
+    .filter((row) => row.kind === "refunds" || row.kind === "discounts" || row.kind === "cash")
+    .slice(0, 4);
+
+  return (
+    <section className="mt-6 rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
+        <p className="text-xs font-semibold uppercase text-zinc-500">
+          Ежедневная сверка
+        </p>
+        <h2 className="mt-1 text-base font-semibold">
+          Смены и операции рядом
+        </h2>
+        <p className="mt-1 text-sm leading-6 text-zinc-500">
+          Пока Langame не дает надежную привязку all_operations_log к
+          администратору, проверку делаем в два шага: сначала смены с кассовыми
+          сигналами, затем категории операций за тот же период и клуб.
+        </p>
+      </div>
+      <div className="grid gap-4 p-4 lg:grid-cols-2">
+        <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold">1. Проверить смены</h3>
+              <p className="mt-1 text-sm text-zinc-500">
+                Возвраты, касса без инкассации, длинные смены и низкий средний
+                чек уже привязаны к user_id смены.
+              </p>
+            </div>
+            <Link
+              href={staffOperatorsHref(report, filters)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="shrink-0 rounded-md border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-white dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-950"
+            >
+              Администраторы
+            </Link>
+          </div>
+          <div className="mt-4 space-y-2">
+            {shiftSignals.length > 0 ? (
+              shiftSignals.map((signal) => (
+                <Link
+                  key={signal.type}
+                  href={staffOperatorsHref(report, filters, signal.type)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-between gap-3 rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm transition hover:border-emerald-300 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-emerald-800"
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium">
+                      {signal.title}
+                    </span>
+                    <span className="text-xs text-zinc-500">
+                      {formatNumber(signal.count)} сигналов
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-right text-xs font-semibold tabular-nums">
+                    {signal.amount !== null ? formatRubles(signal.amount) : "отчет"}
+                  </span>
+                </Link>
+              ))
+            ) : (
+              <p className="rounded-md border border-zinc-200 bg-white px-3 py-3 text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950">
+                Сменных сигналов за период нет.
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold">2. Сверить операции</h3>
+              <p className="mt-1 text-sm text-zinc-500">
+                Категории all_operations_log показывают, где за тот же период
+                были отмены, скидки, бонусы и денежные движения.
+              </p>
+            </div>
+            <Link
+              href={staffOperationsHref(report, filters)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="shrink-0 rounded-md border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-white dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-950"
+            >
+              Операции
+            </Link>
+          </div>
+          <div className="mt-4 space-y-2">
+            {operationRisks.length > 0 ? (
+              operationRisks.map((row) => (
+                <Link
+                  key={row.kind}
+                  href={staffOperationsHref(report, filters, row.kind)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-between gap-3 rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm transition hover:border-emerald-300 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-emerald-800"
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium">
+                      {operationKindLabels[row.kind]}
+                    </span>
+                    <span className="text-xs text-zinc-500">
+                      {formatNumber(row.count)} операций
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-right text-xs font-semibold tabular-nums">
+                    {formatRubles(row.amount)}
+                  </span>
+                </Link>
+              ))
+            ) : (
+              <p className="rounded-md border border-zinc-200 bg-white px-3 py-3 text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950">
+                Рисковых категорий операций за период нет.
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function staffAnomalyMeaning(type: StaffControlAnomalyType) {
   switch (type) {
     case "refunds":
@@ -570,6 +712,28 @@ function staffOperatorsHref(
   params.set("direction", drilldown?.direction ?? "desc");
 
   return `/guests/staff-control/operators?${params.toString()}`;
+}
+
+function staffOperationsHref(
+  report: StaffControlReport,
+  filters: GuestsSummaryFilters,
+  kind?: StaffOperationKind,
+) {
+  const params = new URLSearchParams();
+
+  params.set("dateFrom", filters.dateFrom ?? report.periodFrom);
+  params.set("dateTo", filters.dateTo ?? report.periodTo);
+
+  if (filters.storeId) {
+    params.set("storeId", filters.storeId);
+  }
+  if (kind) {
+    params.set("kind", kind);
+  }
+  params.set("sort", "amount");
+  params.set("direction", "desc");
+
+  return `/guests/staff-control/operations?${params.toString()}`;
 }
 
 function staffAnomalyDrilldown(anomaly: StaffControlAnomalyType): {

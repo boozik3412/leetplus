@@ -233,6 +233,11 @@ export type StaffControlReport = {
     count: number;
     amount: number;
   }>;
+  operationKindSummary: Array<{
+    kind: StaffOperationKind;
+    count: number;
+    amount: number;
+  }>;
   unmatchedOperators: StaffUnmatchedOperatorRow[];
   diagnostics: StaffControlDiagnostics;
 };

@@ -322,6 +322,11 @@ export type StaffControlReport = {
     count: number;
     amount: number;
   }>;
+  operationKindSummary: Array<{
+    kind: StaffOperationKind;
+    count: number;
+    amount: number;
+  }>;
   unmatchedOperators: StaffUnmatchedOperatorRow[];
   diagnostics: StaffControlDiagnostics;
 };
@@ -844,6 +849,7 @@ export class GuestsService {
       rows: [],
       anomalies: [],
       operationTypes: [],
+      operationKindSummary: [],
       unmatchedOperators: [],
       diagnostics,
     } satisfies StaffControlReport;
@@ -890,12 +896,22 @@ export class GuestsService {
           (first.transactionAmount + first.barRevenue),
       );
     const periodMetrics = this.sumPeriodMetrics(metricsByGuestId);
-    const operationTypes = await this.getOperationTypeSummary(
+    const operationRows = await this.buildStaffOperationRows(
       tenantId,
       period,
       storeId,
     );
-    const operationAmount = operationTypes.reduce(
+    const operationTypes = [...operationRows]
+      .sort((first, second) => second.count - first.count)
+      .slice(0, 12)
+      .map((row) => ({
+        type: row.type,
+        count: row.count,
+        amount: row.amount,
+      }));
+    const operationKindSummary =
+      this.buildStaffOperationKindSummary(operationRows);
+    const operationAmount = operationRows.reduce(
       (sum, row) => sum + row.amount,
       0,
     );
@@ -913,7 +929,7 @@ export class GuestsService {
       playHours: this.round(periodMetrics.playMinutes / 60, 1),
       transactionAmount: this.round(periodMetrics.transactionAmount, 2),
       barRevenue: this.round(periodMetrics.barRevenue, 2),
-      operationLogsCount: operationTypes.reduce(
+      operationLogsCount: operationRows.reduce(
         (sum, row) => sum + row.count,
         0,
       ),
@@ -938,6 +954,7 @@ export class GuestsService {
         shiftSummary.unmatchedOperators,
       ),
       operationTypes,
+      operationKindSummary,
       unmatchedOperators: shiftSummary.unmatchedOperators,
     };
   }

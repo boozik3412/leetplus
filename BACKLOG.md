@@ -118,6 +118,7 @@ Status: MVP 1 read-only guest analytics is live in production. Automatic rewards
 - Done: `/guests/staff-control/operations` now has a dedicated operations report with semantic categories for refunds/cancellations, discounts/bonuses, cash, guests, service operations, filters, sorting, and responsive cards.
 - Done: `/guests/staff-control` now has a daily reconciliation block that places shift signals and operation-log categories side by side with direct drilldowns.
 - Done: `/guests/report` now has a server-side CSV export for the full filtered guest selection, not only the current page.
+- Done: `/guests/staff-control/operators` now has a server-side CSV export for the full filtered administrator comparison report.
 - Current limitation: `all_operations_log` is stored and summarized, but it still does not expose a reliable administrator identifier. `log_cash_transaction/list` currently returns errors on production sources, so cashier analytics starts from working shifts.
 - Current limitation: PC-count parsing is defensive because real `global/*` payload shape may differ by Langame source; production verification should confirm `computerCount` is filled for each club.
 - Planned data foundation: guests, guest groups, balances, bonus balances, sessions, transactions, all operations log, product expenses by guest, clubs, tariffs, shifts, and PC context.

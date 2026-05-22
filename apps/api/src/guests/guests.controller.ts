@@ -98,6 +98,23 @@ export class GuestsController {
     return this.guestsService.getStaffOperators(user, query);
   }
 
+  @Get('staff-control/operators/export')
+  async exportStaffOperators(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: StaffOperatorReportQuery,
+  ): Promise<StreamableFile> {
+    const file: GuestExportFile = await this.guestsService.exportStaffOperators(
+      user,
+      query,
+    );
+
+    return new StreamableFile(file.buffer, {
+      type: file.contentType,
+      disposition: `attachment; filename="${file.fileName}"`,
+      length: file.buffer.byteLength,
+    });
+  }
+
   @Get('staff-control/operations')
   getStaffOperations(
     @CurrentUser() user: AuthenticatedUser,

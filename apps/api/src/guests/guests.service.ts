@@ -1073,6 +1073,63 @@ export class GuestsService {
     };
   }
 
+  async exportStaffOperators(
+    user: AuthenticatedUser,
+    query: StaffOperatorReportQuery = {},
+  ): Promise<GuestExportFile> {
+    const report = await this.getStaffOperators(user, query);
+    const csvRows: CsvCell[][] = [
+      [
+        'Администратор',
+        'user_id',
+        'Домен Langame',
+        'Привязка',
+        'ID привязки',
+        'Клубы',
+        'Последняя смена ID',
+        'Последняя смена начало',
+        'Последняя смена конец',
+        'Смены',
+        'Часы',
+        'Касса, руб',
+        'Возвраты, руб',
+        'Инкассация, руб',
+        'Бар, руб',
+        'Кальяны, руб',
+        'Средний чек, руб',
+        'Сигналы',
+        'Комментарий привязки',
+      ],
+      ...report.rows.map((row) => [
+        row.linkedGuest?.displayName ?? `user_id ${row.externalUserId}`,
+        row.externalUserId,
+        row.externalDomain,
+        row.linkedGuest ? 'Привязан' : 'Без привязки',
+        row.mappingId,
+        row.storeNames.join(', '),
+        row.lastClosedShiftExternalShiftId,
+        this.formatExportDateTime(row.lastClosedShiftStartedAt),
+        this.formatExportDateTime(row.lastClosedShiftStoppedAt),
+        row.shiftsCount,
+        row.shiftHours,
+        row.shiftPaymentAmount,
+        row.shiftRefundAmount,
+        row.shiftIncassAmount,
+        row.barRevenue,
+        row.hookahRevenue,
+        row.averageShiftMiddleCheck,
+        this.staffOperatorSignalLabels(row),
+        row.mappingNote,
+      ]),
+    ];
+
+    return {
+      fileName: `leetplus-staff-operators-${report.periodFrom}-${report.periodTo}.csv`,
+      contentType: 'text/csv; charset=utf-8',
+      buffer: Buffer.from(this.toCsv(csvRows), 'utf8'),
+    };
+  }
+
   async getStaffOperations(
     user: AuthenticatedUser,
     query: StaffOperationsReportQuery = {},
@@ -2789,6 +2846,21 @@ export class GuestsService {
       case 'unmapped-operator':
         return !row.linkedGuest && row.shiftPaymentAmount >= 10_000;
     }
+  }
+
+  private staffOperatorSignalLabels(row: StaffOperatorReportRow) {
+    const signals: Array<[StaffControlAnomalyType, string]> = [
+      ['refunds', 'Возвраты'],
+      ['missing-incassation', 'Касса без инкассации'],
+      ['long-shift', 'Длинные смены'],
+      ['low-middle-check', 'Низкий средний чек'],
+      ['unmapped-operator', 'Без привязки'],
+    ];
+
+    return signals
+      .filter(([type]) => this.matchesStaffOperatorAnomaly(row, type))
+      .map(([, label]) => label)
+      .join(', ');
   }
 
   private matchesStaffOperatorSearch(

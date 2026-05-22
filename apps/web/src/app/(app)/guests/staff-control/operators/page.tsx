@@ -199,6 +199,27 @@ function currentOperatorReportHref(report: StaffOperatorReport, view?: "full") {
   return `/guests/staff-control/operators?${params.toString()}`;
 }
 
+function operatorExportHref(report: StaffOperatorReport) {
+  const params = new URLSearchParams();
+
+  params.set("dateFrom", report.periodFrom);
+  params.set("dateTo", report.periodTo);
+  if (report.storeId) {
+    params.set("storeId", report.storeId);
+  }
+  params.set("status", report.status);
+  if (report.anomaly) {
+    params.set("anomaly", report.anomaly);
+  }
+  params.set("sort", report.sort);
+  params.set("direction", report.direction);
+  if (report.search) {
+    params.set("search", report.search);
+  }
+
+  return `/api/guests/staff-control/operators/export?${params.toString()}`;
+}
+
 export default async function StaffOperatorsPage({
   searchParams,
 }: {
@@ -251,7 +272,7 @@ export default async function StaffOperatorsPage({
               возвраты, инкассация и средний чек для сравнения между собой.
             </p>
           </div>
-          <div className="grid w-full gap-2 sm:grid-cols-2 xl:w-auto xl:shrink-0 xl:flex xl:justify-end">
+          <div className="grid w-full gap-2 sm:grid-cols-3 xl:w-auto xl:shrink-0 xl:flex xl:justify-end">
             <Link
               href={currentOperatorReportHref(report, "full")}
               target="_blank"
@@ -259,6 +280,12 @@ export default async function StaffOperatorsPage({
               className="inline-flex min-h-10 w-full items-center justify-center rounded-md bg-emerald-500 px-4 py-2 text-center text-sm font-semibold leading-5 text-zinc-950 transition hover:bg-emerald-400 xl:w-auto xl:whitespace-nowrap"
             >
               Открыть в новом окне
+            </Link>
+            <Link
+              href={operatorExportHref(report)}
+              className="inline-flex min-h-10 w-full items-center justify-center rounded-md border border-emerald-400/50 px-4 py-2 text-center text-sm font-semibold leading-5 text-emerald-700 transition hover:bg-emerald-50 xl:w-auto xl:whitespace-nowrap dark:text-emerald-300 dark:hover:bg-emerald-950/30"
+            >
+              CSV
             </Link>
             <Link
               href={operatorReportHref(report)}

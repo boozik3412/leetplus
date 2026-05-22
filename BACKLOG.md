@@ -109,6 +109,7 @@ Status: MVP 1 read-only guest analytics is live in production. Automatic rewards
 - Done: administrator comparison page is compact by default; detailed per-admin comparison and mapping list open in full mode via `view=full`.
 - Done: administrator ranking cards were toned down to a single calm accent, long names now wrap, and the sidebar item is named "Администраторы".
 - Done: desktop sidebar is now a compact icon rail with popover menus for sections, while mobile keeps the slide-out menu.
+- Done: compact desktop sidebar popovers now render above dashboard content without text overlap, close cleanly, and use clearer section icons for guests, staff, assortment, and management.
 - Done: dashboard revenue uses the selected-period network revenue explicitly, and successful login can trigger a daily catch-up sync when Langame data is stale.
 - Done: administrator comparison now includes compact shift-level details with shift ID, period, club, cash, refunds, incassation, bar revenue, and anomaly signals.
 - Done: `/guests/staff-control/operations` now has a dedicated operations report with semantic categories for refunds/cancellations, discounts/bonuses, cash, guests, service operations, filters, sorting, and responsive cards.

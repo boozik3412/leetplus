@@ -49,6 +49,14 @@ export type DashboardCategoryMetric = {
   fillEfficiency: number | null;
 };
 
+export type DashboardStoreRevenueMetric = {
+  storeId: string;
+  storeName: string;
+  totalRevenue: number;
+  productRevenue: number;
+  productRevenueSharePercent: number | null;
+};
+
 export type DashboardSummaryFilters = {
   period?: string;
   dateFrom?: string;
@@ -91,6 +99,7 @@ export type DashboardSummary = {
   stockQuantity: number;
   outOfStockRiskCount: number;
   recommendedOrderQuantity: number;
+  storeRevenueBreakdown: DashboardStoreRevenueMetric[];
   salesTrend: DashboardSalesTrendSegment[];
   categoryAnalytics: DashboardCategoryMetric[];
   topSkuByRevenue: DashboardTopSku[];

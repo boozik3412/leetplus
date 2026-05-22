@@ -2,6 +2,7 @@ import {
   getDashboardSummary,
   type DashboardCategoryMetric,
   type DashboardSalesTrendSegment,
+  type DashboardStoreRevenueMetric,
   type DashboardTopSku,
 } from "@/lib/dashboard-summary";
 import { buildAssortmentRiskSummary } from "@/lib/assortment-risk";
@@ -36,6 +37,62 @@ function searchParamsArray(value: string | string[] | undefined) {
   }
 
   return Array.isArray(value) ? value : [value];
+}
+
+type DashboardRevenueView = "summary" | "stores";
+
+type DashboardHrefFilters = {
+  period: string;
+  dateFrom?: string;
+  dateTo?: string;
+  storeIds: readonly string[];
+  skuGrouping: "club" | "network";
+};
+
+function dashboardQuery(filters: DashboardHrefFilters) {
+  const params = new URLSearchParams();
+
+  params.set("period", filters.period);
+
+  if (filters.period === "custom") {
+    if (filters.dateFrom) {
+      params.set("dateFrom", filters.dateFrom);
+    }
+
+    if (filters.dateTo) {
+      params.set("dateTo", filters.dateTo);
+    }
+  }
+
+  params.set("skuGrouping", filters.skuGrouping);
+
+  filters.storeIds.forEach((storeId) => {
+    params.append("storeIds", storeId);
+  });
+
+  return params;
+}
+
+function dashboardRevenueViewHref(
+  filters: DashboardHrefFilters,
+  view: DashboardRevenueView,
+) {
+  const params = dashboardQuery(filters);
+
+  if (view === "stores") {
+    params.set("revenueView", "stores");
+  }
+
+  const query = params.toString();
+
+  return `/dashboard${query ? `?${query}` : ""}`;
+}
+
+function dashboardRevenueByClubHref(filters: DashboardHrefFilters) {
+  const params = dashboardQuery(filters);
+  const query = params.toString();
+
+  return `/dashboard/revenue-by-club${query ? `?${query}` : ""}`;
 }
 
 function formatPercent(value: number) {
@@ -323,6 +380,8 @@ export default async function DashboardPage({
     skuGrouping:
       searchParam(params.skuGrouping) === "club" ? "club" : "network",
   } as const;
+  const revenueView: DashboardRevenueView =
+    searchParam(params.revenueView) === "stores" ? "stores" : "summary";
   const [summary, stores] = await Promise.all([
     getDashboardSummary(filters),
     getStores(),
@@ -372,6 +431,11 @@ export default async function DashboardPage({
   const dashboardActions = buildDashboardActions({ summary, latestTrend });
   const totalClubRevenue = summary.clubRevenue;
   const productRevenueShare = ratioPercent(summary.totalRevenue, totalClubRevenue);
+  const revenueByClubHref = dashboardRevenueByClubHref({
+    ...filters,
+    dateFrom: summary.periodFrom,
+    dateTo: summary.periodTo,
+  });
 
   return (
     <main className="px-6 py-8 text-zinc-950 dark:text-zinc-100">
@@ -405,37 +469,65 @@ export default async function DashboardPage({
               </p>
             </div>
 
-            <div className="flex gap-3 overflow-x-auto pb-1 min-[1250px]:grid min-[1250px]:grid-cols-2 min-[1250px]:overflow-visible min-[1250px]:pb-0">
-              <HeroMetric
-                label="Общая выручка"
-                value={formatMoney(totalClubRevenue)}
-                caption={
-                  totalClubRevenue > 0
-                    ? "оборот сети за выбранный период"
-                    : "нет общей выручки из Langame за период"
-                }
-              >
-                <FullDayRevenue
-                  date={summary.fullDayRevenueDate}
-                  revenue={summary.fullDayRevenue}
-                  deltaPercent={summary.fullDayRevenueToAveragePercent}
+            <div className="space-y-3">
+              <DashboardRevenueViewToggle
+                current={revenueView}
+                summaryHref={dashboardRevenueViewHref(
+                  {
+                    ...filters,
+                    dateFrom: summary.periodFrom,
+                    dateTo: summary.periodTo,
+                  },
+                  "summary",
+                )}
+                storesHref={dashboardRevenueViewHref(
+                  {
+                    ...filters,
+                    dateFrom: summary.periodFrom,
+                    dateTo: summary.periodTo,
+                  },
+                  "stores",
+                )}
+              />
+              {revenueView === "stores" ? (
+                <StoreRevenueHero
+                  rows={summary.storeRevenueBreakdown}
+                  fullReportHref={revenueByClubHref}
                 />
-              </HeroMetric>
-              <HeroMetric
-                label="Товарная прибыль после потерь"
-                value={formatMoney(summary.adjustedGrossProfit)}
-                caption={`товары и бар · маржа ${formatPercent(summary.adjustedMarginPercent)}`}
-                tone={
-                  summary.adjustedGrossProfit < summary.grossProfit
-                    ? "warning"
-                    : "good"
-                }
-              >
-                <WriteOffRevenueShare
-                  percent={summary.writeOffRevenuePercent}
-                  deltaPercent={summary.writeOffRevenuePercentDelta}
-                />
-              </HeroMetric>
+              ) : (
+                <div className="flex gap-3 overflow-x-auto pb-1 min-[1250px]:grid min-[1250px]:grid-cols-2 min-[1250px]:overflow-visible min-[1250px]:pb-0">
+                  <HeroMetric
+                    label="Общая выручка"
+                    value={formatMoney(totalClubRevenue)}
+                    caption={
+                      totalClubRevenue > 0
+                        ? "оборот сети за выбранный период"
+                        : "нет общей выручки из Langame за период"
+                    }
+                  >
+                    <FullDayRevenue
+                      date={summary.fullDayRevenueDate}
+                      revenue={summary.fullDayRevenue}
+                      deltaPercent={summary.fullDayRevenueToAveragePercent}
+                    />
+                  </HeroMetric>
+                  <HeroMetric
+                    label="Товарная прибыль после потерь"
+                    value={formatMoney(summary.adjustedGrossProfit)}
+                    caption={`товары и бар · маржа ${formatPercent(summary.adjustedMarginPercent)}`}
+                    tone={
+                      summary.adjustedGrossProfit < summary.grossProfit
+                        ? "warning"
+                        : "good"
+                    }
+                  >
+                    <WriteOffRevenueShare
+                      percent={summary.writeOffRevenuePercent}
+                      deltaPercent={summary.writeOffRevenuePercentDelta}
+                    />
+                  </HeroMetric>
+                </div>
+              )}
             </div>
           </div>
 
@@ -929,6 +1021,173 @@ function SectionHeading({
       <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-500 dark:text-zinc-400">
         {description}
       </p>
+    </div>
+  );
+}
+
+function DashboardRevenueViewToggle({
+  current,
+  summaryHref,
+  storesHref,
+}: {
+  current: DashboardRevenueView;
+  summaryHref: string;
+  storesHref: string;
+}) {
+  const itemClass = (isActive: boolean) =>
+    [
+      "rounded-full px-3 py-1.5 text-xs font-semibold transition",
+      isActive
+        ? "bg-zinc-950 text-white dark:bg-zinc-100 dark:text-zinc-950"
+        : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100",
+    ].join(" ");
+
+  return (
+    <div className="inline-flex rounded-full border border-zinc-200 bg-zinc-50 p-1 dark:border-zinc-800 dark:bg-zinc-900">
+      <Link href={summaryHref} className={itemClass(current === "summary")}>
+        Сводка
+      </Link>
+      <Link href={storesHref} className={itemClass(current === "stores")}>
+        По клубам
+      </Link>
+    </div>
+  );
+}
+
+function StoreRevenueHero({
+  rows,
+  fullReportHref,
+}: {
+  rows: DashboardStoreRevenueMetric[];
+  fullReportHref: string;
+}) {
+  const visibleRows = rows.slice(0, 4);
+  const maxRevenue = Math.max(
+    1,
+    ...visibleRows.flatMap((row) => [row.totalRevenue, row.productRevenue]),
+  );
+
+  if (visibleRows.length === 0) {
+    return (
+      <div className="rounded-3xl border border-zinc-200 bg-zinc-50 p-5 dark:border-zinc-800 dark:bg-zinc-900">
+        <p className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+          По клубам
+        </p>
+        <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+          За выбранный период нет выручки по клубам.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-3xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+            Выручка по клубам
+          </p>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            Общая выручка и товары/бар в выбранном периоде.
+          </p>
+        </div>
+        {rows.length > 4 ? (
+          <Link
+            href={fullReportHref}
+            target="_blank"
+            rel="noreferrer"
+            className="rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-semibold text-zinc-700 transition hover:bg-white dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+          >
+            Открыть чтобы увидеть все
+          </Link>
+        ) : null}
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        {visibleRows.map((row) => (
+          <StoreRevenueMiniCard
+            key={row.storeId}
+            row={row}
+            maxRevenue={maxRevenue}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StoreRevenueMiniCard({
+  row,
+  maxRevenue,
+}: {
+  row: DashboardStoreRevenueMetric;
+  maxRevenue: number;
+}) {
+  return (
+    <article className="rounded-2xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex items-start justify-between gap-3">
+        <h3 className="min-w-0 truncate text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+          {row.storeName}
+        </h3>
+        <span className="shrink-0 text-sm font-semibold tabular-nums text-zinc-950 dark:text-zinc-50">
+          {formatMoney(row.totalRevenue)}
+        </span>
+      </div>
+      <div className="mt-3 grid gap-2">
+        <StoreRevenueBar
+          label="Общая выручка"
+          value={row.totalRevenue}
+          maxValue={maxRevenue}
+          tone="total"
+        />
+        <StoreRevenueBar
+          label="Товары и бар"
+          value={row.productRevenue}
+          maxValue={maxRevenue}
+          tone="product"
+        />
+      </div>
+      <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
+        Доля товаров и бара:{" "}
+        <span className="font-semibold text-zinc-700 dark:text-zinc-200">
+          {row.productRevenueSharePercent === null
+            ? "нет данных"
+            : formatPercent(row.productRevenueSharePercent)}
+        </span>
+      </p>
+    </article>
+  );
+}
+
+function StoreRevenueBar({
+  label,
+  value,
+  maxValue,
+  tone,
+}: {
+  label: string;
+  value: number;
+  maxValue: number;
+  tone: "total" | "product";
+}) {
+  const width = `${Math.max(2, Math.min(100, (value / maxValue) * 100))}%`;
+
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between gap-2 text-xs">
+        <span className="text-zinc-500 dark:text-zinc-400">{label}</span>
+        <span className="font-semibold tabular-nums text-zinc-700 dark:text-zinc-200">
+          {formatMoney(value)}
+        </span>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+        <div
+          className={[
+            "h-full rounded-full",
+            tone === "total" ? "bg-emerald-400" : "bg-sky-400",
+          ].join(" ")}
+          style={{ width }}
+        />
+      </div>
     </div>
   );
 }

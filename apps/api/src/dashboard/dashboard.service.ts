@@ -51,6 +51,14 @@ export type DashboardCategoryMetric = {
   fillEfficiency: number | null;
 };
 
+export type DashboardStoreRevenueMetric = {
+  storeId: string;
+  storeName: string;
+  totalRevenue: number;
+  productRevenue: number;
+  productRevenueSharePercent: number | null;
+};
+
 type DashboardTrendGranularity = 'day' | 'week' | 'month' | 'quarter' | 'year';
 type DashboardTrendMode = DashboardTrendGranularity | 'custom';
 
@@ -118,6 +126,7 @@ export type DashboardSummary = {
   stockQuantity: number;
   outOfStockRiskCount: number;
   recommendedOrderQuantity: number;
+  storeRevenueBreakdown: DashboardStoreRevenueMetric[];
   salesTrend: DashboardSalesTrendSegment[];
   categoryAnalytics: DashboardCategoryMetric[];
   topSkuByRevenue: DashboardTopSku[];
@@ -155,6 +164,7 @@ export class DashboardService {
 
     const [
       tenant,
+      storesForRevenue,
       totalSku,
       categoriesCount,
       suppliersCount,
@@ -175,6 +185,21 @@ export class DashboardService {
       this.prisma.tenant.findUnique({
         where: { id: tenantId },
         select: { name: true },
+      }),
+      this.prisma.store.findMany({
+        where: {
+          tenantId,
+          ...(selectedStoreIds.length > 0
+            ? { id: { in: selectedStoreIds } }
+            : {}),
+        },
+        select: {
+          id: true,
+          name: true,
+        },
+        orderBy: {
+          name: 'asc',
+        },
       }),
       this.prisma.product.count({ where: { tenantId } }),
       this.prisma.category.count({ where: { tenantId } }),
@@ -540,6 +565,11 @@ export class DashboardService {
         selectedStoreIds.length > 0,
       ),
     );
+    const storeRevenueBreakdown = this.buildStoreRevenueBreakdown(
+      storesForRevenue,
+      periodClubRevenueFacts,
+      salesFacts,
+    );
     const averageDailyRevenue = fullDayRevenue.average;
     const previousRevenue = previousSalesFacts.reduce(
       (sum, fact) => sum + fact.revenue.toNumber(),
@@ -619,6 +649,7 @@ export class DashboardService {
       recommendedOrderQuantity: this.round(
         demand.reduce((sum, item) => sum + item.recommendedOrder, 0),
       ),
+      storeRevenueBreakdown,
       salesTrend,
       categoryAnalytics,
       topSkuByRevenue: [...salesByProduct.values()]
@@ -1049,6 +1080,70 @@ export class DashboardService {
     }
 
     return facts.reduce((sum, fact) => sum + fact.totalRevenue.toNumber(), 0);
+  }
+
+  private buildStoreRevenueBreakdown(
+    stores: {
+      id: string;
+      name: string;
+    }[],
+    clubRevenueFacts: {
+      storeId: string | null;
+      totalRevenue: { toNumber: () => number };
+    }[],
+    salesFacts: {
+      storeId: string;
+      revenue: { toNumber: () => number };
+    }[],
+  ): DashboardStoreRevenueMetric[] {
+    const totalRevenueByStore = new Map<string, number>();
+    const productRevenueByStore = new Map<string, number>();
+
+    clubRevenueFacts.forEach((fact) => {
+      if (!fact.storeId) {
+        return;
+      }
+
+      totalRevenueByStore.set(
+        fact.storeId,
+        (totalRevenueByStore.get(fact.storeId) ?? 0) +
+          fact.totalRevenue.toNumber(),
+      );
+    });
+
+    salesFacts.forEach((fact) => {
+      productRevenueByStore.set(
+        fact.storeId,
+        (productRevenueByStore.get(fact.storeId) ?? 0) +
+          fact.revenue.toNumber(),
+      );
+    });
+
+    return stores
+      .map((store) => {
+        const productRevenue = productRevenueByStore.get(store.id) ?? 0;
+        const totalRevenue = Math.max(
+          totalRevenueByStore.get(store.id) ?? 0,
+          productRevenue,
+        );
+
+        return {
+          storeId: store.id,
+          storeName: store.name,
+          totalRevenue: this.round(totalRevenue),
+          productRevenue: this.round(productRevenue),
+          productRevenueSharePercent: this.ratioPercent(
+            productRevenue,
+            totalRevenue,
+          ),
+        };
+      })
+      .sort(
+        (a, b) =>
+          b.totalRevenue - a.totalRevenue ||
+          b.productRevenue - a.productRevenue ||
+          a.storeName.localeCompare(b.storeName),
+      );
   }
 
   private soldQuantityByProduct(

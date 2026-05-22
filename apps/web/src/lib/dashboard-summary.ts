@@ -127,6 +127,7 @@ export type DashboardRevenueDiagnosticsRow = {
   operationOtherCount: number;
   transactionPositiveAmount: number;
   transactionNegativeAmount: number;
+  transactionSpendAmount: number;
   transactionNetAmount: number;
   transactionCount: number;
   transactionGuests: number;

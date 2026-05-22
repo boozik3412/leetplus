@@ -154,6 +154,7 @@ export type DashboardRevenueDiagnosticsRow = {
   operationOtherCount: number;
   transactionPositiveAmount: number;
   transactionNegativeAmount: number;
+  transactionSpendAmount: number;
   transactionNetAmount: number;
   transactionCount: number;
   transactionGuests: number;
@@ -1293,7 +1294,7 @@ export class DashboardService {
     return transactions.reduce(
       (sum, transaction) =>
         sum +
-        this.confirmedBalanceSpendAmount(
+        this.confirmedTransactionSpendAmount(
           transaction.type,
           transaction.amount?.toNumber() ?? 0,
         ),
@@ -1335,6 +1336,7 @@ export class DashboardService {
 
     return (
       normalizedType === 'minus' ||
+      normalizedType === 'spisanie' ||
       normalizedType.includes('withdraw') ||
       normalizedType.includes('spend') ||
       normalizedType.includes('expense') ||
@@ -1344,6 +1346,31 @@ export class DashboardService {
       normalizedType.includes('спис') ||
       normalizedType.includes('расход') ||
       normalizedType.includes('оплат')
+    );
+  }
+
+  private confirmedTransactionSpendAmount(type: string | null, amount: number) {
+    if (!Number.isFinite(amount) || amount === 0) {
+      return 0;
+    }
+
+    if (this.isBalanceTopUpOperationType(type)) {
+      return 0;
+    }
+
+    return Math.abs(amount);
+  }
+
+  private isBalanceTopUpOperationType(type: string | null) {
+    const normalizedType = this.normalizeExternalType(type);
+
+    return (
+      normalizedType === 'plus' ||
+      normalizedType === 'popolnenie' ||
+      normalizedType.includes('deposit') ||
+      normalizedType.includes('top_up') ||
+      normalizedType.includes('recharge') ||
+      normalizedType.includes('пополн')
     );
   }
 
@@ -1469,16 +1496,15 @@ export class DashboardService {
       }
 
       const type = operationLog.type ?? 'unknown';
-      const normalizedType = type.toLowerCase();
       const amount = operationLog.amount?.toNumber() ?? 0;
       const absoluteAmount = Math.abs(amount);
 
       this.addDiagnosticsType(row.operationTypes, type, amount);
 
-      if (normalizedType === 'plus') {
+      if (this.isBalanceTopUpOperationType(type)) {
         row.operationPlusAmount += absoluteAmount;
         row.operationPlusCount += 1;
-      } else if (normalizedType === 'minus') {
+      } else if (this.isBalanceSpendOperationType(type)) {
         row.operationMinusAmount += absoluteAmount;
         row.operationMinusCount += 1;
       } else {
@@ -1499,6 +1525,10 @@ export class DashboardService {
       }
 
       const amount = transaction.amount?.toNumber() ?? 0;
+      const spendAmount = this.confirmedTransactionSpendAmount(
+        transaction.type,
+        amount,
+      );
       row.transactionCount += 1;
       row.transactionNetAmount += amount;
       this.addDiagnosticsType(
@@ -1512,6 +1542,7 @@ export class DashboardService {
       } else {
         row.transactionNegativeAmount += Math.abs(amount);
       }
+      row.transactionSpendAmount += spendAmount;
 
       addGuestKey(
         transactionGuestIdsByStore,
@@ -1570,7 +1601,7 @@ export class DashboardService {
           row.shiftRefundAmount;
         row.balanceSpendRevenueCandidate = Math.max(
           row.operationMinusAmount,
-          row.transactionNegativeAmount,
+          row.transactionSpendAmount,
         );
         row.notes = this.revenueDiagnosticsNotes(row);
 
@@ -1604,6 +1635,7 @@ export class DashboardService {
       operationOtherCount: 0,
       transactionPositiveAmount: 0,
       transactionNegativeAmount: 0,
+      transactionSpendAmount: 0,
       transactionNetAmount: 0,
       transactionCount: 0,
       transactionGuests: 0,
@@ -1691,6 +1723,7 @@ export class DashboardService {
       operationOtherAmount: this.round(row.operationOtherAmount),
       transactionPositiveAmount: this.round(row.transactionPositiveAmount),
       transactionNegativeAmount: this.round(row.transactionNegativeAmount),
+      transactionSpendAmount: this.round(row.transactionSpendAmount),
       transactionNetAmount: this.round(row.transactionNetAmount),
       shiftCashAmount: this.round(row.shiftCashAmount),
       shiftCashlessAmount: this.round(row.shiftCashlessAmount),
@@ -1727,6 +1760,7 @@ export class DashboardService {
       totals.operationOtherCount += row.operationOtherCount;
       totals.transactionPositiveAmount += row.transactionPositiveAmount;
       totals.transactionNegativeAmount += row.transactionNegativeAmount;
+      totals.transactionSpendAmount += row.transactionSpendAmount;
       totals.transactionNetAmount += row.transactionNetAmount;
       totals.transactionCount += row.transactionCount;
       totals.transactionGuests += row.transactionGuests;
@@ -1766,6 +1800,7 @@ export class DashboardService {
       operationOtherCount: totalRow.operationOtherCount,
       transactionPositiveAmount: totalRow.transactionPositiveAmount,
       transactionNegativeAmount: totalRow.transactionNegativeAmount,
+      transactionSpendAmount: totalRow.transactionSpendAmount,
       transactionNetAmount: totalRow.transactionNetAmount,
       transactionCount: totalRow.transactionCount,
       transactionGuests: totalRow.transactionGuests,
@@ -1900,7 +1935,7 @@ export class DashboardService {
       transactionRevenueByStore.set(
         storeId,
         (transactionRevenueByStore.get(storeId) ?? 0) +
-          this.confirmedBalanceSpendAmount(
+          this.confirmedTransactionSpendAmount(
             transaction.type,
             transaction.amount?.toNumber() ?? 0,
           ),

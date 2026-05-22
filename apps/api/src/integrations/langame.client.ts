@@ -202,8 +202,7 @@ export class LangameClient {
     baseUrl: string,
     apiKey: string,
     params: {
-      page: number;
-      pageLimit: number;
+      clubId: string | number;
       dateFrom: string;
       dateTo: string;
     },
@@ -213,8 +212,7 @@ export class LangameClient {
       '/log_cash_transaction/list',
       apiKey,
       {
-        page: String(params.page),
-        page_limit: String(params.pageLimit),
+        club_id: String(params.clubId),
         date_from: params.dateFrom,
         date_to: params.dateTo,
       },

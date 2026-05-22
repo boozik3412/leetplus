@@ -721,15 +721,25 @@ export class GuestDataFoundationService {
       cashTransactions = await this.captureEndpoint(
         profile,
         'log_cash_transaction/list',
-        () =>
-          this.paginate((page) =>
-            this.langameClient.listCashTransactions(baseUrl, apiKey, {
-              page,
-              pageLimit: DEFAULT_PAGE_LIMIT,
-              dateFrom: langamePeriod.from,
-              dateTo: langamePeriod.to,
-            }),
-          ),
+        async () => {
+          const rows: LangameCashTransaction[] = [];
+
+          for (const externalClubId of storesByExternalClubId.keys()) {
+            rows.push(
+              ...(await this.langameClient.listCashTransactions(
+                baseUrl,
+                apiKey,
+                {
+                  clubId: externalClubId,
+                  dateFrom: langamePeriod.from,
+                  dateTo: langamePeriod.to,
+                },
+              )),
+            );
+          }
+
+          return rows;
+        },
       );
       this.profileRows(profile.cashTransactions, cashTransactions);
       cashTransactions.forEach((row) =>
@@ -1299,6 +1309,9 @@ export class GuestDataFoundationService {
           row.datetime,
       );
       const updatedAtExternal = this.parseLangameDate(row.date_update);
+      const amount = this.toBoolean(row.cancel)
+        ? null
+        : this.toDecimalOrNull(row.amount ?? row.sum ?? row.balance);
       const hasTransactionDate = Boolean(
         row.date ??
         row.date_normal ??
@@ -1341,7 +1354,7 @@ export class GuestDataFoundationService {
           type,
           happenedAt,
           updatedAtExternal,
-          amount: this.toDecimalOrNull(row.amount ?? row.sum),
+          amount,
           balance: this.toDecimalOrNull(row.balance),
           bonusBalance: this.toDecimalOrNull(row.bonus_balance),
           sourcePayloadHash: this.payloadHash(row),
@@ -1358,7 +1371,7 @@ export class GuestDataFoundationService {
           type,
           happenedAt,
           updatedAtExternal,
-          amount: this.toDecimalOrNull(row.amount ?? row.sum),
+          amount,
           balance: this.toDecimalOrNull(row.balance),
           bonusBalance: this.toDecimalOrNull(row.bonus_balance),
           sourcePayloadHash: this.payloadHash(row),
@@ -1519,8 +1532,8 @@ export class GuestDataFoundationService {
     operationTypeFilters: readonly (string | null)[],
   ) {
     const rowsByHash = new Map<string, LangameOperationLog>();
-    const dateFrom = this.toLangameOperationDateValue(chunk.fromDate);
-    const dateTo = this.toLangameOperationDateValue(chunk.toDate);
+    const dateFrom = chunk.from;
+    const dateTo = chunk.to;
 
     for (const operationType of operationTypeFilters) {
       let rows: LangameOperationLog[];
@@ -1871,16 +1884,9 @@ export class GuestDataFoundationService {
 
   private toLangameDatePeriod(period: ResolvedPeriod) {
     return {
-      from: this.toLangameOperationDateValue(period.fromDate),
-      to: this.toLangameOperationDateValue(period.toDate),
+      from: period.from,
+      to: period.to,
     };
-  }
-
-  private toLangameOperationDateValue(value: Date) {
-    const year = value.getUTCFullYear();
-    const month = String(value.getUTCMonth() + 1).padStart(2, '0');
-    const day = String(value.getUTCDate()).padStart(2, '0');
-    return `${day}.${month}.${year}`;
   }
 
   private parseLangameDate(value: string | null | undefined) {

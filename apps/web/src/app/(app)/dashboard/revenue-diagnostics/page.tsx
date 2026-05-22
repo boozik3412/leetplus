@@ -241,7 +241,7 @@ function RevenueDiagnosticsCard({
       <div className="grid gap-3 p-5 md:grid-cols-2 xl:grid-cols-4">
         <Metric title="Товары и бар" value={formatRubles(row.productRevenue)} caption={`${formatMoney(row.productSalesCount)} продаж`} />
         <Metric title="Operation plus" value={formatRubles(row.operationPlusAmount)} caption={`${formatMoney(row.operationPlusCount)} операций`} />
-        <Metric title="Operation minus" value={formatRubles(row.operationMinusAmount)} caption={`${formatMoney(row.operationMinusCount)} операций`} />
+        <Metric title="Списания" value={formatRubles(row.balanceSpendRevenueCandidate)} caption={`operation ${formatRubles(row.operationMinusAmount)}, transactions ${formatRubles(row.transactionSpendAmount)}`} />
         <Metric title="Смены" value={formatRubles(row.shiftRevenueCandidate)} caption={`возвраты ${formatRubles(row.shiftRefundAmount)}`} />
       </div>
 

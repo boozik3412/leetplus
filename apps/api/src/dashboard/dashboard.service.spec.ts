@@ -408,15 +408,23 @@ describe('DashboardService', () => {
         type: null,
         amount: new Prisma.Decimal(-3_000),
       },
+      {
+        storeId: 'store-1',
+        externalClubId: '1',
+        guestId: null,
+        externalGuestId: null,
+        type: '1',
+        amount: new Prisma.Decimal(4_200),
+      },
     ]);
 
     const summary = await service.getSummary();
 
     expect(summary.totalRevenue).toBe(0);
-    expect(summary.clubRevenue).toBe(3000);
+    expect(summary.clubRevenue).toBe(7200);
     expect(summary.storeRevenueBreakdown[0]).toMatchObject({
       storeId: 'store-1',
-      totalRevenue: 3000,
+      totalRevenue: 7200,
       productRevenue: 0,
     });
   });

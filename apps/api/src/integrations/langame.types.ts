@@ -97,6 +97,9 @@ export type LangameTransaction = {
   real_guest_id?: number | string | null;
   club_id?: number | string | null;
   list_clubs_id?: number | string | null;
+  working_shift_id?: number | string | null;
+  session_id?: number | string | null;
+  UUID?: string | null;
   type?: string | number | null;
   date?: string | null;
   date_normal?: string | null;
@@ -110,6 +113,13 @@ export type LangameTransaction = {
   amount?: number | string | null;
   balance?: number | string | null;
   bonus_balance?: number | string | null;
+  payment_1C?: number | boolean | null;
+  admin?: number | boolean | null;
+  cancel?: number | boolean | null;
+  Beznal?: number | boolean | null;
+  mobile?: number | boolean | null;
+  soft?: number | boolean | null;
+  comment?: string | null;
 };
 
 export type LangameOperationLog = {

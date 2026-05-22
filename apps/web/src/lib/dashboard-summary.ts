@@ -54,6 +54,7 @@ export type DashboardStoreRevenueMetric = {
   storeName: string;
   totalRevenue: number;
   productRevenue: number;
+  activeGuests: number;
   productRevenueSharePercent: number | null;
 };
 

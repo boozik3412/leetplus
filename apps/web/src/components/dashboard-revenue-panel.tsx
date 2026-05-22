@@ -5,6 +5,7 @@ import { useState } from "react";
 import type { DashboardStoreRevenueMetric } from "@/lib/dashboard-summary";
 
 type DashboardRevenueView = "summary" | "stores";
+type StoreChartMetric = "revenue" | "bar" | "guests";
 
 type DashboardRevenuePanelProps = {
   initialView: DashboardRevenueView;
@@ -139,11 +140,13 @@ function StoreRevenueHero({
   rows: DashboardStoreRevenueMetric[];
   fullReportHref: string;
 }) {
+  const [metric, setMetric] = useState<StoreChartMetric>("revenue");
   const visibleRows = rows.slice(0, 4);
-  const maxRevenue = Math.max(
+  const maxValue = Math.max(
     1,
-    ...visibleRows.flatMap((row) => [row.totalRevenue, row.productRevenue]),
+    ...visibleRows.map((row) => storeChartValue(row, metric)),
   );
+  const metricConfig = storeChartMetricConfig[metric];
 
   if (visibleRows.length === 0) {
     return (
@@ -160,114 +163,163 @@ function StoreRevenueHero({
 
   return (
     <div className="rounded-3xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
             Выручка по клубам
           </p>
           <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            Общая выручка и товары/бар в выбранном периоде.
+            Вертикальная гистограмма: {metricConfig.caption}.
           </p>
         </div>
-        {rows.length > 4 ? (
-          <Link
-            href={fullReportHref}
-            target="_blank"
-            rel="noreferrer"
-            className="rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-semibold text-zinc-700 transition hover:bg-white dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
-          >
-            Открыть чтобы увидеть все
-          </Link>
-        ) : null}
+        <div className="flex flex-wrap items-center gap-2">
+          <StoreChartMetricToggle current={metric} onChange={setMetric} />
+          {rows.length > 4 ? (
+            <Link
+              href={fullReportHref}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-semibold text-zinc-700 transition hover:bg-white dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            >
+              Открыть чтобы увидеть все
+            </Link>
+          ) : null}
+        </div>
       </div>
-      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+      <div className="mt-4 grid h-56 grid-cols-4 items-end gap-3 border-b border-zinc-200 pb-3 dark:border-zinc-800">
         {visibleRows.map((row) => (
-          <StoreRevenueMiniCard
+          <StoreRevenueColumn
             key={row.storeId}
             row={row}
-            maxRevenue={maxRevenue}
+            metric={metric}
+            maxValue={maxValue}
           />
         ))}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400">
+        <span>
+          Масштаб: лидер выборки ={" "}
+          <span className="font-semibold text-zinc-700 dark:text-zinc-200">
+            {formatStoreChartValue(maxValue, metric)}
+          </span>
+        </span>
+        <span>
+          Показано {visibleRows.length} из {rows.length} клубов
+        </span>
       </div>
     </div>
   );
 }
 
-function StoreRevenueMiniCard({
-  row,
-  maxRevenue,
+const storeChartMetricConfig: Record<
+  StoreChartMetric,
+  {
+    label: string;
+    caption: string;
+    barClassName: string;
+  }
+> = {
+  revenue: {
+    label: "Выручка",
+    caption: "общая выручка клуба",
+    barClassName: "bg-emerald-400",
+  },
+  bar: {
+    label: "Бар",
+    caption: "товары и бар",
+    barClassName: "bg-sky-400",
+  },
+  guests: {
+    label: "Гости",
+    caption: "уникальные гости с сессиями",
+    barClassName: "bg-violet-400",
+  },
+};
+
+function StoreChartMetricToggle({
+  current,
+  onChange,
 }: {
-  row: DashboardStoreRevenueMetric;
-  maxRevenue: number;
+  current: StoreChartMetric;
+  onChange: (metric: StoreChartMetric) => void;
 }) {
   return (
-    <article className="rounded-2xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="flex items-start justify-between gap-3">
-        <h3 className="min-w-0 truncate text-sm font-semibold text-zinc-950 dark:text-zinc-50">
-          {row.storeName}
-        </h3>
-        <span className="shrink-0 text-sm font-semibold tabular-nums text-zinc-950 dark:text-zinc-50">
-          {formatMoney(row.totalRevenue)}
-        </span>
-      </div>
-      <div className="mt-3 grid gap-2">
-        <StoreRevenueBar
-          label="Общая выручка"
-          value={row.totalRevenue}
-          maxValue={maxRevenue}
-          tone="total"
+    <div className="inline-flex rounded-full border border-zinc-200 bg-white p-1 dark:border-zinc-800 dark:bg-zinc-950">
+      {(Object.keys(storeChartMetricConfig) as StoreChartMetric[]).map(
+        (metric) => (
+          <button
+            key={metric}
+            type="button"
+            onClick={() => onChange(metric)}
+            className={[
+              "rounded-full px-3 py-1.5 text-xs font-semibold transition",
+              current === metric
+                ? "bg-zinc-950 text-white dark:bg-zinc-100 dark:text-zinc-950"
+                : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100",
+            ].join(" ")}
+          >
+            {storeChartMetricConfig[metric].label}
+          </button>
+        ),
+      )}
+    </div>
+  );
+}
+
+function StoreRevenueColumn({
+  row,
+  metric,
+  maxValue,
+}: {
+  row: DashboardStoreRevenueMetric;
+  metric: StoreChartMetric;
+  maxValue: number;
+}) {
+  const value = storeChartValue(row, metric);
+  const height = `${Math.max(4, Math.min(100, (value / maxValue) * 100))}%`;
+
+  return (
+    <article className="flex h-full min-w-0 flex-col items-center justify-end gap-2">
+      <p className="max-w-full truncate text-xs font-semibold tabular-nums text-zinc-950 dark:text-zinc-50">
+        {formatStoreChartValue(value, metric)}
+      </p>
+      <div className="flex h-full w-full items-end justify-center rounded-xl bg-white p-2 dark:bg-zinc-950">
+        <div
+          className={[
+            "w-full max-w-16 rounded-t-xl transition-all duration-300",
+            storeChartMetricConfig[metric].barClassName,
+          ].join(" ")}
+          style={{ height }}
         />
-        <StoreRevenueBar
-          label="Товары и бар"
-          value={row.productRevenue}
-          maxValue={maxRevenue}
-          tone="product"
-        />
       </div>
-      <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
-        Доля товаров и бара:{" "}
-        <span className="font-semibold text-zinc-700 dark:text-zinc-200">
-          {row.productRevenueSharePercent === null
-            ? "нет данных"
-            : formatPercent(row.productRevenueSharePercent)}
-        </span>
+      <p className="max-w-full truncate text-center text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+        {row.storeName}
       </p>
     </article>
   );
 }
 
-function StoreRevenueBar({
-  label,
-  value,
-  maxValue,
-  tone,
-}: {
-  label: string;
-  value: number;
-  maxValue: number;
-  tone: "total" | "product";
-}) {
-  const width = `${Math.max(2, Math.min(100, (value / maxValue) * 100))}%`;
+function storeChartValue(
+  row: DashboardStoreRevenueMetric,
+  metric: StoreChartMetric,
+) {
+  if (metric === "bar") {
+    return row.productRevenue;
+  }
 
-  return (
-    <div>
-      <div className="mb-1 flex items-center justify-between gap-2 text-xs">
-        <span className="text-zinc-500 dark:text-zinc-400">{label}</span>
-        <span className="font-semibold tabular-nums text-zinc-700 dark:text-zinc-200">
-          {formatMoney(value)}
-        </span>
-      </div>
-      <div className="h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
-        <div
-          className={[
-            "h-full rounded-full",
-            tone === "total" ? "bg-emerald-400" : "bg-sky-400",
-          ].join(" ")}
-          style={{ width }}
-        />
-      </div>
-    </div>
-  );
+  if (metric === "guests") {
+    return row.activeGuests;
+  }
+
+  return row.totalRevenue;
+}
+
+function formatStoreChartValue(value: number, metric: StoreChartMetric) {
+  if (metric === "guests") {
+    return `${formatMoney(value)} гостей`;
+  }
+
+  return `${formatMoney(value)} руб`;
 }
 
 function HeroMetric({

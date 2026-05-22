@@ -56,6 +56,7 @@ export type DashboardStoreRevenueMetric = {
   storeName: string;
   totalRevenue: number;
   productRevenue: number;
+  activeGuests: number;
   productRevenueSharePercent: number | null;
 };
 
@@ -178,6 +179,7 @@ export class DashboardService {
       currentInventorySnapshots,
       stockMovements,
       periodClubRevenueFacts,
+      periodGuestSessions,
       fullDayRevenueFacts,
       previousSalesFacts,
       previousStockMovements,
@@ -392,6 +394,19 @@ export class DashboardService {
           totalRevenue: true,
         },
       }),
+      this.prisma.guestSession.findMany({
+        where: {
+          tenantId,
+          guestId: { not: null },
+          ...storeFilter,
+          startedAt: { lte: period.toDate },
+          OR: [{ stoppedAt: null }, { stoppedAt: { gte: period.fromDate } }],
+        },
+        select: {
+          storeId: true,
+          guestId: true,
+        },
+      }),
       this.prisma.salesFact.findMany({
         where: {
           tenantId,
@@ -569,6 +584,7 @@ export class DashboardService {
       storesForRevenue,
       periodClubRevenueFacts,
       salesFacts,
+      periodGuestSessions,
     );
     const averageDailyRevenue = fullDayRevenue.average;
     const previousRevenue = previousSalesFacts.reduce(
@@ -1095,9 +1111,14 @@ export class DashboardService {
       storeId: string;
       revenue: { toNumber: () => number };
     }[],
+    guestSessions: {
+      storeId: string | null;
+      guestId: string | null;
+    }[],
   ): DashboardStoreRevenueMetric[] {
     const totalRevenueByStore = new Map<string, number>();
     const productRevenueByStore = new Map<string, number>();
+    const guestIdsByStore = new Map<string, Set<string>>();
 
     clubRevenueFacts.forEach((fact) => {
       if (!fact.storeId) {
@@ -1119,6 +1140,17 @@ export class DashboardService {
       );
     });
 
+    guestSessions.forEach((session) => {
+      if (!session.storeId || !session.guestId) {
+        return;
+      }
+
+      const guestIds =
+        guestIdsByStore.get(session.storeId) ?? new Set<string>();
+      guestIds.add(session.guestId);
+      guestIdsByStore.set(session.storeId, guestIds);
+    });
+
     return stores
       .map((store) => {
         const productRevenue = productRevenueByStore.get(store.id) ?? 0;
@@ -1132,6 +1164,7 @@ export class DashboardService {
           storeName: store.name,
           totalRevenue: this.round(totalRevenue),
           productRevenue: this.round(productRevenue),
+          activeGuests: guestIdsByStore.get(store.id)?.size ?? 0,
           productRevenueSharePercent: this.ratioPercent(
             productRevenue,
             totalRevenue,

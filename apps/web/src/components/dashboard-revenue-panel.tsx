@@ -186,15 +186,29 @@ function StoreRevenueHero({
           ) : null}
         </div>
       </div>
-      <div className="mt-4 grid h-56 grid-cols-4 items-end gap-3 border-b border-zinc-200 pb-3 dark:border-zinc-800">
-        {visibleRows.map((row) => (
-          <StoreRevenueColumn
-            key={row.storeId}
-            row={row}
-            metric={metric}
-            maxValue={maxValue}
-          />
-        ))}
+      <div className="mt-4 rounded-2xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+        <div className="grid grid-cols-[3rem_1fr] gap-3">
+          <div className="flex h-56 flex-col justify-between py-2 text-right text-[11px] tabular-nums text-zinc-400">
+            <span>{formatStoreChartAxisValue(maxValue, metric)}</span>
+            <span>{formatStoreChartAxisValue(maxValue / 2, metric)}</span>
+            <span>0</span>
+          </div>
+          <div className="relative h-56 overflow-hidden border-b border-l border-zinc-200 dark:border-zinc-800">
+            <div className="absolute inset-x-0 top-0 border-t border-dashed border-zinc-200 dark:border-zinc-800" />
+            <div className="absolute inset-x-0 top-1/2 border-t border-dashed border-zinc-200 dark:border-zinc-800" />
+            <div className="absolute inset-x-0 bottom-0 border-t border-zinc-200 dark:border-zinc-800" />
+            <div className="absolute inset-0 grid grid-cols-4 items-end gap-4 px-3 pb-2 pt-4">
+              {visibleRows.map((row) => (
+                <StoreRevenueColumn
+                  key={row.storeId}
+                  row={row}
+                  metric={metric}
+                  maxValue={maxValue}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
       <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400">
         <span>
@@ -283,10 +297,10 @@ function StoreRevenueColumn({
       <p className="max-w-full truncate text-xs font-semibold tabular-nums text-zinc-950 dark:text-zinc-50">
         {formatStoreChartValue(value, metric)}
       </p>
-      <div className="flex h-full w-full items-end justify-center rounded-xl bg-white p-2 dark:bg-zinc-950">
+      <div className="flex h-36 w-full items-end justify-center">
         <div
           className={[
-            "w-full max-w-16 rounded-t-xl transition-all duration-300",
+            "w-full max-w-12 rounded-t-lg transition-all duration-300",
             storeChartMetricConfig[metric].barClassName,
           ].join(" ")}
           style={{ height }}
@@ -320,6 +334,18 @@ function formatStoreChartValue(value: number, metric: StoreChartMetric) {
   }
 
   return `${formatMoney(value)} руб`;
+}
+
+function formatStoreChartAxisValue(value: number, metric: StoreChartMetric) {
+  if (metric === "guests") {
+    return formatMoney(value);
+  }
+
+  if (value >= 1000) {
+    return `${formatMoney(Math.round(value / 1000))}к`;
+  }
+
+  return formatMoney(value);
 }
 
 function HeroMetric({

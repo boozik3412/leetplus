@@ -53,6 +53,23 @@ export type StaffOperatorReportQuery = GuestsSummaryQuery & {
   direction?: 'asc' | 'desc';
 };
 
+export type StaffOperationKind =
+  | 'refunds'
+  | 'discounts'
+  | 'cash'
+  | 'guest'
+  | 'service'
+  | 'other';
+
+export type StaffOperationSortKey = 'count' | 'amount' | 'lastSeen' | 'type';
+
+export type StaffOperationsReportQuery = GuestsSummaryQuery & {
+  kind?: StaffOperationKind | 'all';
+  search?: string;
+  sort?: StaffOperationSortKey;
+  direction?: 'asc' | 'desc';
+};
+
 export type StaffIdentityMappingDto = {
   externalDomain?: string | null;
   externalUserId?: string | null;
@@ -307,6 +324,34 @@ export type StaffControlReport = {
   }>;
   unmatchedOperators: StaffUnmatchedOperatorRow[];
   diagnostics: StaffControlDiagnostics;
+};
+
+export type StaffOperationsReportRow = {
+  type: string;
+  kind: StaffOperationKind;
+  count: number;
+  amount: number;
+  lastSeenAt: string | null;
+  storeNames: string[];
+  externalDomains: string[];
+};
+
+export type StaffOperationsReport = {
+  periodFrom: string;
+  periodTo: string;
+  storeId: string | null;
+  kind: StaffOperationKind | 'all';
+  search: string | null;
+  sort: StaffOperationSortKey;
+  direction: 'asc' | 'desc';
+  totalCount: number;
+  totalAmount: number;
+  kindSummary: Array<{
+    kind: StaffOperationKind;
+    count: number;
+    amount: number;
+  }>;
+  rows: StaffOperationsReportRow[];
 };
 
 export type StaffIdentityMappingResult = {
@@ -932,6 +977,48 @@ export class GuestsService {
       direction,
       rows: filteredRows,
       staffOptions,
+    };
+  }
+
+  async getStaffOperations(
+    user: AuthenticatedUser,
+    query: StaffOperationsReportQuery = {},
+  ): Promise<StaffOperationsReport> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const period = this.resolvePeriod(query);
+    const storeId = await this.resolveStoreId(tenantId, query.storeId);
+    const kind = this.resolveStaffOperationKind(query.kind);
+    const search = this.normalizeText(query.search, 120);
+    const sort = this.resolveStaffOperationSort(query.sort);
+    const direction = query.direction === 'asc' ? 'asc' : 'desc';
+    const allRows = await this.buildStaffOperationRows(
+      tenantId,
+      period,
+      storeId,
+    );
+    const kindSummary = this.buildStaffOperationKindSummary(allRows);
+    const rows = allRows
+      .filter((row) => kind === 'all' || row.kind === kind)
+      .filter((row) => this.matchesStaffOperationSearch(row, search))
+      .sort((first, second) =>
+        this.compareStaffOperationRows(first, second, sort, direction),
+      );
+
+    return {
+      periodFrom: period.from,
+      periodTo: period.to,
+      storeId,
+      kind,
+      search,
+      sort,
+      direction,
+      totalCount: rows.reduce((sum, row) => sum + row.count, 0),
+      totalAmount: this.round(
+        rows.reduce((sum, row) => sum + row.amount, 0),
+        2,
+      ),
+      kindSummary,
+      rows,
     };
   }
 
@@ -1606,6 +1693,161 @@ export class GuestsService {
       }))
       .sort((first, second) => second.count - first.count)
       .slice(0, 12);
+  }
+
+  private async buildStaffOperationRows(
+    tenantId: string,
+    period: Period,
+    storeId: string | null,
+  ): Promise<StaffOperationsReportRow[]> {
+    const rows = await this.prisma.guestOperationLog.findMany({
+      where: {
+        tenantId,
+        happenedAt: { gte: period.fromDate, lte: period.toDate },
+        ...(storeId ? { storeId } : {}),
+      },
+      select: {
+        type: true,
+        amount: true,
+        happenedAt: true,
+        externalDomain: true,
+        store: { select: { name: true } },
+      },
+    });
+    const byType = new Map<
+      string,
+      {
+        type: string;
+        kind: StaffOperationKind;
+        count: number;
+        amount: number;
+        lastSeenAt: Date | null;
+        storeNames: Set<string>;
+        externalDomains: Set<string>;
+      }
+    >();
+
+    for (const row of rows) {
+      const type = row.type?.trim() || 'unknown';
+      const current = byType.get(type) ?? {
+        type,
+        kind: this.staffOperationKind(type),
+        count: 0,
+        amount: 0,
+        lastSeenAt: null,
+        storeNames: new Set<string>(),
+        externalDomains: new Set<string>(),
+      };
+
+      current.count += 1;
+      current.amount += Math.abs(this.decimalToNumber(row.amount) ?? 0);
+      if (
+        row.happenedAt &&
+        (!current.lastSeenAt || row.happenedAt > current.lastSeenAt)
+      ) {
+        current.lastSeenAt = row.happenedAt;
+      }
+      if (row.store?.name) {
+        current.storeNames.add(row.store.name);
+      }
+      if (row.externalDomain) {
+        current.externalDomains.add(row.externalDomain);
+      }
+      byType.set(type, current);
+    }
+
+    return Array.from(byType.values()).map((row) => ({
+      type: row.type,
+      kind: row.kind,
+      count: row.count,
+      amount: this.round(row.amount, 2),
+      lastSeenAt: this.toIsoDateTime(row.lastSeenAt),
+      storeNames: Array.from(row.storeNames).sort(),
+      externalDomains: Array.from(row.externalDomains).sort(),
+    }));
+  }
+
+  private buildStaffOperationKindSummary(rows: StaffOperationsReportRow[]) {
+    const byKind = new Map<
+      StaffOperationKind,
+      { count: number; amount: number }
+    >();
+
+    for (const row of rows) {
+      const current = byKind.get(row.kind) ?? { count: 0, amount: 0 };
+      current.count += row.count;
+      current.amount += row.amount;
+      byKind.set(row.kind, current);
+    }
+
+    return Array.from(byKind.entries())
+      .map(([kind, row]) => ({
+        kind,
+        count: row.count,
+        amount: this.round(row.amount, 2),
+      }))
+      .sort((first, second) => second.amount - first.amount);
+  }
+
+  private staffOperationKind(type: string): StaffOperationKind {
+    const text = type.toLowerCase();
+
+    if (
+      text.includes('refund') ||
+      text.includes('return') ||
+      text.includes('cancel') ||
+      text.includes('void') ||
+      text.includes('возврат') ||
+      text.includes('отмен')
+    ) {
+      return 'refunds';
+    }
+    if (
+      text.includes('discount') ||
+      text.includes('bonus') ||
+      text.includes('promo') ||
+      text.includes('скид') ||
+      text.includes('бонус') ||
+      text.includes('промо')
+    ) {
+      return 'discounts';
+    }
+    if (
+      text.includes('cash') ||
+      text.includes('pay') ||
+      text.includes('deposit') ||
+      text.includes('balance') ||
+      text.includes('касс') ||
+      text.includes('оплат') ||
+      text.includes('пополн') ||
+      text.includes('баланс')
+    ) {
+      return 'cash';
+    }
+    if (
+      text.includes('guest') ||
+      text.includes('client') ||
+      text.includes('user') ||
+      text.includes('гост') ||
+      text.includes('клиент')
+    ) {
+      return 'guest';
+    }
+    if (
+      text.includes('session') ||
+      text.includes('shift') ||
+      text.includes('tariff') ||
+      text.includes('service') ||
+      text.includes('сеанс') ||
+      text.includes('сесс') ||
+      text.includes('смен') ||
+      text.includes('тариф') ||
+      text.includes('услуг')
+    ) {
+      return 'service';
+    }
+
+    return 'other';
   }
 
   private async getStaffShiftSummary(
@@ -2324,6 +2566,95 @@ export class GuestsService {
     ];
 
     return value && allowed.includes(value) ? value : null;
+  }
+
+  private resolveStaffOperationKind(
+    value: StaffOperationsReportQuery['kind'],
+  ): StaffOperationKind | 'all' {
+    const allowed: Array<StaffOperationKind | 'all'> = [
+      'all',
+      'refunds',
+      'discounts',
+      'cash',
+      'guest',
+      'service',
+      'other',
+    ];
+
+    return value && allowed.includes(value) ? value : 'all';
+  }
+
+  private resolveStaffOperationSort(
+    value: StaffOperationsReportQuery['sort'],
+  ): StaffOperationSortKey {
+    const allowed: StaffOperationSortKey[] = [
+      'count',
+      'amount',
+      'lastSeen',
+      'type',
+    ];
+
+    return value && allowed.includes(value) ? value : 'amount';
+  }
+
+  private matchesStaffOperationSearch(
+    row: StaffOperationsReportRow,
+    search: string | null,
+  ) {
+    if (!search) {
+      return true;
+    }
+
+    const needle = search.toLocaleLowerCase('ru-RU');
+    const haystack = [
+      row.type,
+      row.kind,
+      ...row.storeNames,
+      ...row.externalDomains,
+    ]
+      .join(' ')
+      .toLocaleLowerCase('ru-RU');
+
+    return haystack.includes(needle);
+  }
+
+  private compareStaffOperationRows(
+    first: StaffOperationsReportRow,
+    second: StaffOperationsReportRow,
+    sort: StaffOperationSortKey,
+    direction: 'asc' | 'desc',
+  ) {
+    const multiplier = direction === 'asc' ? 1 : -1;
+
+    if (sort === 'type') {
+      return first.type.localeCompare(second.type) * multiplier;
+    }
+
+    const difference =
+      this.staffOperationSortValue(first, sort) -
+      this.staffOperationSortValue(second, sort);
+
+    if (difference !== 0) {
+      return difference * multiplier;
+    }
+
+    return first.type.localeCompare(second.type);
+  }
+
+  private staffOperationSortValue(
+    row: StaffOperationsReportRow,
+    sort: StaffOperationSortKey,
+  ) {
+    switch (sort) {
+      case 'count':
+        return row.count;
+      case 'amount':
+        return row.amount;
+      case 'lastSeen':
+        return new Date(row.lastSeenAt ?? 0).getTime();
+      case 'type':
+        return 0;
+    }
   }
 
   private matchesStaffOperatorStatus(

@@ -1090,9 +1090,9 @@ function OperationsPanel({ report }: { report: StaffControlReport }) {
               Операционный журнал
             </h2>
             <p className="mt-1 text-sm text-zinc-500">
-              Агрегат по all_operations_log: какие типы операций происходили и
-              на какую сумму. Сейчас это источник для сверки, а не персональная
-              оценка сотрудника.
+              Смысловая витрина all_operations_log: возвраты и отмены,
+              скидки и бонусы, касса, гости, смены и прочие сервисные действия.
+              Это источник для сверки, а не персональная оценка сотрудника.
             </p>
           </div>
           <Link
@@ -1101,7 +1101,7 @@ function OperationsPanel({ report }: { report: StaffControlReport }) {
             rel="noopener noreferrer"
             className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
           >
-            Открыть полный отчет
+            Разобрать операции
           </Link>
         </div>
       </div>

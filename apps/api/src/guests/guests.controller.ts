@@ -24,6 +24,8 @@ import {
   type GuestListResponse,
   type StaffIdentityMappingDto,
   type StaffIdentityMappingResult,
+  type StaffOperationsReport,
+  type StaffOperationsReportQuery,
   type StaffOperatorReport,
   type StaffOperatorReportQuery,
   type StaffControlQuery,
@@ -75,6 +77,14 @@ export class GuestsController {
     @Query() query: StaffOperatorReportQuery,
   ): Promise<StaffOperatorReport> {
     return this.guestsService.getStaffOperators(user, query);
+  }
+
+  @Get('staff-control/operations')
+  getStaffOperations(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: StaffOperationsReportQuery,
+  ): Promise<StaffOperationsReport> {
+    return this.guestsService.getStaffOperations(user, query);
   }
 
   @Post('staff-control/identity-mappings')

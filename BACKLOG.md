@@ -103,10 +103,11 @@ Status: MVP 1 read-only guest analytics is live in production. Automatic rewards
 - Done: desktop sidebar is now a compact icon rail with popover menus for sections, while mobile keeps the slide-out menu.
 - Done: dashboard revenue uses the selected-period network revenue explicitly, and successful login can trigger a daily catch-up sync when Langame data is stale.
 - Done: administrator comparison now includes compact shift-level details with shift ID, period, club, cash, refunds, incassation, bar revenue, and anomaly signals.
+- Done: `/guests/staff-control/operations` now has a dedicated operations report with semantic categories for refunds/cancellations, discounts/bonuses, cash, guests, service operations, filters, sorting, and responsive cards.
 - Current limitation: `all_operations_log` is stored and summarized, but it still does not expose a reliable administrator identifier. `log_cash_transaction/list` currently returns errors on production sources, so cashier analytics starts from working shifts.
 - Current limitation: PC-count parsing is defensive because real `global/*` payload shape may differ by Langame source; production verification should confirm `computerCount` is filled for each club.
 - Planned data foundation: guests, guest groups, balances, bonus balances, sessions, transactions, all operations log, product expenses by guest, clubs, tariffs, shifts, and PC context.
-- Next: extend staff-control report from persisted shifts into manual corrections, refunds/cancellations detail, discounts/bonuses, and suspicious guest/self-service activity.
+- Next: connect operation categories to concrete administrator shifts when Langame exposes a reliable operator identifier in operation/cash logs; until then, use shift metrics plus operation-log category totals side by side.
 - Next: verify production `/dashboard` current-day load percentage after deploy of the session-overlap calculation.
 - Next: add export for `/guests/report` and `/guests/staff-control`, then saved filters/audiences.
 - Planned analytics: RFM, retention, churn risk, heatmaps, LTV, bonus load, campaign effect, and guest-flow forecasts.

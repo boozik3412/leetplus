@@ -245,6 +245,16 @@ export type StaffOperatorSortKey =
   | "incass"
   | "middleCheck";
 
+export type StaffOperationKind =
+  | "refunds"
+  | "discounts"
+  | "cash"
+  | "guest"
+  | "service"
+  | "other";
+
+export type StaffOperationSortKey = "count" | "amount" | "lastSeen" | "type";
+
 export type StaffControlAnomalyType =
   | "refunds"
   | "missing-incassation"
@@ -301,6 +311,34 @@ export type StaffOperatorReport = {
   staffOptions: GuestDashboardRow[];
 };
 
+export type StaffOperationsReportRow = {
+  type: string;
+  kind: StaffOperationKind;
+  count: number;
+  amount: number;
+  lastSeenAt: string | null;
+  storeNames: string[];
+  externalDomains: string[];
+};
+
+export type StaffOperationsReport = {
+  periodFrom: string;
+  periodTo: string;
+  storeId: string | null;
+  kind: StaffOperationKind | "all";
+  search: string | null;
+  sort: StaffOperationSortKey;
+  direction: "asc" | "desc";
+  totalCount: number;
+  totalAmount: number;
+  kindSummary: Array<{
+    kind: StaffOperationKind;
+    count: number;
+    amount: number;
+  }>;
+  rows: StaffOperationsReportRow[];
+};
+
 export type GuestDetail = GuestDashboardRow & {
   crmEvents: Array<{
     id: string;
@@ -351,6 +389,13 @@ export type StaffOperatorFilters = GuestsSummaryFilters & {
   anomaly?: StaffControlAnomalyType;
   search?: string;
   sort?: StaffOperatorSortKey;
+  direction?: "asc" | "desc";
+};
+
+export type StaffOperationsFilters = GuestsSummaryFilters & {
+  kind?: StaffOperationKind | "all";
+  search?: string;
+  sort?: StaffOperationSortKey;
   direction?: "asc" | "desc";
 };
 
@@ -434,6 +479,24 @@ export async function getStaffOperators(
   }
 
   return response.json() as Promise<StaffOperatorReport>;
+}
+
+export async function getStaffOperations(
+  filters: StaffOperationsFilters = {},
+): Promise<StaffOperationsReport> {
+  const response = await fetch(
+    `${getApiUrl()}/guests/staff-control/operations${query(filters)}`,
+    {
+      cache: "no-store",
+      headers: await getAuthHeaders(),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch staff operations report");
+  }
+
+  return response.json() as Promise<StaffOperationsReport>;
 }
 
 export async function getGuest(id: string): Promise<GuestDetail> {

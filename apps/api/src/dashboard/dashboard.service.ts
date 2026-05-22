@@ -180,6 +180,7 @@ export class DashboardService {
       stockMovements,
       periodClubRevenueFacts,
       periodGuestSessions,
+      periodGuestTransactions,
       fullDayRevenueFacts,
       previousSalesFacts,
       previousStockMovements,
@@ -397,7 +398,6 @@ export class DashboardService {
       this.prisma.guestSession.findMany({
         where: {
           tenantId,
-          guestId: { not: null },
           ...storeFilter,
           startedAt: { lte: period.toDate },
           OR: [{ stoppedAt: null }, { stoppedAt: { gte: period.fromDate } }],
@@ -405,6 +405,18 @@ export class DashboardService {
         select: {
           storeId: true,
           guestId: true,
+          externalGuestId: true,
+        },
+      }),
+      this.prisma.guestTransaction.findMany({
+        where: {
+          tenantId,
+          ...storeFilter,
+          happenedAt: { gte: period.fromDate, lte: period.toDate },
+        },
+        select: {
+          storeId: true,
+          amount: true,
         },
       }),
       this.prisma.salesFact.findMany({
@@ -579,12 +591,14 @@ export class DashboardService {
         periodClubRevenueFacts,
         selectedStoreIds.length > 0,
       ),
+      totalRevenue + this.guestTransactionTotal(periodGuestTransactions),
     );
     const storeRevenueBreakdown = this.buildStoreRevenueBreakdown(
       storesForRevenue,
       periodClubRevenueFacts,
       salesFacts,
       periodGuestSessions,
+      periodGuestTransactions,
     );
     const averageDailyRevenue = fullDayRevenue.average;
     const previousRevenue = previousSalesFacts.reduce(
@@ -1098,6 +1112,17 @@ export class DashboardService {
     return facts.reduce((sum, fact) => sum + fact.totalRevenue.toNumber(), 0);
   }
 
+  private guestTransactionTotal(
+    transactions: {
+      amount: { toNumber: () => number } | null;
+    }[],
+  ) {
+    return transactions.reduce(
+      (sum, transaction) => sum + Math.abs(transaction.amount?.toNumber() ?? 0),
+      0,
+    );
+  }
+
   private buildStoreRevenueBreakdown(
     stores: {
       id: string;
@@ -1114,10 +1139,16 @@ export class DashboardService {
     guestSessions: {
       storeId: string | null;
       guestId: string | null;
+      externalGuestId: string | null;
+    }[],
+    guestTransactions: {
+      storeId: string | null;
+      amount: { toNumber: () => number } | null;
     }[],
   ): DashboardStoreRevenueMetric[] {
     const totalRevenueByStore = new Map<string, number>();
     const productRevenueByStore = new Map<string, number>();
+    const transactionRevenueByStore = new Map<string, number>();
     const guestIdsByStore = new Map<string, Set<string>>();
 
     clubRevenueFacts.forEach((fact) => {
@@ -1140,23 +1171,38 @@ export class DashboardService {
       );
     });
 
+    guestTransactions.forEach((transaction) => {
+      if (!transaction.storeId) {
+        return;
+      }
+
+      transactionRevenueByStore.set(
+        transaction.storeId,
+        (transactionRevenueByStore.get(transaction.storeId) ?? 0) +
+          Math.abs(transaction.amount?.toNumber() ?? 0),
+      );
+    });
+
     guestSessions.forEach((session) => {
-      if (!session.storeId || !session.guestId) {
+      const guestKey = session.guestId ?? session.externalGuestId;
+
+      if (!session.storeId || !guestKey) {
         return;
       }
 
       const guestIds =
         guestIdsByStore.get(session.storeId) ?? new Set<string>();
-      guestIds.add(session.guestId);
+      guestIds.add(guestKey);
       guestIdsByStore.set(session.storeId, guestIds);
     });
 
     return stores
       .map((store) => {
         const productRevenue = productRevenueByStore.get(store.id) ?? 0;
+        const transactionRevenue = transactionRevenueByStore.get(store.id) ?? 0;
         const totalRevenue = Math.max(
           totalRevenueByStore.get(store.id) ?? 0,
-          productRevenue,
+          transactionRevenue + productRevenue,
         );
 
         return {

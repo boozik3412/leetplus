@@ -167,6 +167,9 @@ export class LangameClient {
       dateFrom: string;
       dateTo: string;
       clubId?: string | number;
+      operationType?: string;
+      operationSource?: string;
+      operationForm?: string;
     },
   ) {
     const queryParams: LangameQueryParams = {
@@ -176,6 +179,15 @@ export class LangameClient {
 
     if (params.clubId !== undefined) {
       queryParams.club_id = String(params.clubId);
+    }
+    if (params.operationType) {
+      queryParams.operation_type = params.operationType;
+    }
+    if (params.operationSource) {
+      queryParams.operation_source = params.operationSource;
+    }
+    if (params.operationForm) {
+      queryParams.operation_form = params.operationForm;
     }
 
     return this.getListWithDateFallback<LangameOperationLog>(

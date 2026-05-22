@@ -468,6 +468,23 @@ describe('GuestDataFoundationService', () => {
       successUpdate.data.profile.operatorHints.workingShifts['user_id=42']
         ?.fields.user_id,
     ).toEqual(['42']);
+    expect(langameClient.listAllOperationsLog).toHaveBeenCalledWith(
+      'https://club.example/public_api',
+      'api-key',
+      {
+        dateFrom: '01.05.2026',
+        dateTo: '01.05.2026',
+      },
+    );
+    expect(langameClient.listAllOperationsLog).toHaveBeenCalledWith(
+      'https://club.example/public_api',
+      'api-key',
+      {
+        dateFrom: '01.05.2026',
+        dateTo: '01.05.2026',
+        operationType: 'Списание',
+      },
+    );
     const shiftUpsertCalls = prisma.guestWorkingShift.upsert.mock
       .calls as Array<[GuestWorkingShiftUpsertCall]>;
     const shiftUpsert = shiftUpsertCalls[0]?.[0];

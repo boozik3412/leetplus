@@ -1435,18 +1435,17 @@ export class GuestDataFoundationService {
     profile: SourceProfile,
   ) {
     const allRows: LangameOperationLog[] = [];
+    const operationTypeFilters = [null, 'Списание', 'Пополнение'] as const;
 
     for (const chunk of this.splitPeriod(
       period,
       MAX_OPERATION_LOG_PERIOD_DAYS,
     )) {
-      const rows = await this.langameClient.listAllOperationsLog(
+      const rows = await this.loadOperationLogChunk(
         baseUrl,
         apiKey,
-        {
-          dateFrom: chunk.from,
-          dateTo: chunk.to,
-        },
+        chunk,
+        operationTypeFilters,
       );
       allRows.push(...rows);
 
@@ -1510,6 +1509,37 @@ export class GuestDataFoundationService {
     }
 
     return allRows;
+  }
+
+  private async loadOperationLogChunk(
+    baseUrl: string,
+    apiKey: string,
+    chunk: ResolvedPeriod,
+    operationTypeFilters: readonly (string | null)[],
+  ) {
+    const rowsByHash = new Map<string, LangameOperationLog>();
+    const dateFrom = this.toLangameOperationDateValue(chunk.fromDate);
+    const dateTo = this.toLangameOperationDateValue(chunk.toDate);
+
+    for (const operationType of operationTypeFilters) {
+      let rows: LangameOperationLog[];
+      try {
+        rows = await this.langameClient.listAllOperationsLog(baseUrl, apiKey, {
+          dateFrom,
+          dateTo,
+          ...(operationType ? { operationType } : {}),
+        });
+      } catch (error) {
+        if (!operationType) {
+          throw error;
+        }
+        continue;
+      }
+
+      rows.forEach((row) => rowsByHash.set(this.payloadHash(row), row));
+    }
+
+    return [...rowsByHash.values()];
   }
 
   private async syncWorkingShifts(
@@ -1836,6 +1866,13 @@ export class GuestDataFoundationService {
     const month = String(value.getUTCMonth() + 1).padStart(2, '0');
     const day = String(value.getUTCDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
+  }
+
+  private toLangameOperationDateValue(value: Date) {
+    const year = value.getUTCFullYear();
+    const month = String(value.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(value.getUTCDate()).padStart(2, '0');
+    return `${day}.${month}.${year}`;
   }
 
   private parseLangameDate(value: string | null | undefined) {

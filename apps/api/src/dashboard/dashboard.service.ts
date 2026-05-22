@@ -1340,7 +1340,10 @@ export class DashboardService {
       normalizedType.includes('expense') ||
       normalizedType.includes('payment') ||
       normalizedType.includes('write_off') ||
-      normalizedType.includes('debit')
+      normalizedType.includes('debit') ||
+      normalizedType.includes('спис') ||
+      normalizedType.includes('расход') ||
+      normalizedType.includes('оплат')
     );
   }
 

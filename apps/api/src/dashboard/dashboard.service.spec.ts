@@ -387,7 +387,7 @@ describe('DashboardService', () => {
       {
         storeId: 'store-1',
         externalClubId: '1',
-        type: 'minus',
+        type: 'Списание',
         amount: new Prisma.Decimal(2_000),
       },
     ]);

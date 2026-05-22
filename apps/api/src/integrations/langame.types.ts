@@ -114,8 +114,14 @@ export type LangameTransaction = {
 
 export type LangameOperationLog = {
   date_normal: string;
+  date?: string | null;
+  time?: string | null;
   club_id: string | number | null;
+  club_name?: string | null;
   type: string;
+  name?: string | null;
+  source?: string | null;
+  form?: string | null;
   sum: number | string | null;
 };
 

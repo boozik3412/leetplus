@@ -62,6 +62,12 @@ export type GuestCrmTaskDto = {
   dueAt?: string | null;
 };
 
+export type GuestCrmTaskStatus = 'OPEN' | 'IN_PROGRESS' | 'DONE' | 'CANCELED';
+
+export type GuestCrmTaskUpdateDto = {
+  status?: GuestCrmTaskStatus | null;
+};
+
 export type StaffControlQuery = GuestsSummaryQuery;
 
 export type StaffOperatorSortKey =
@@ -1013,6 +1019,22 @@ export class GuestsService {
       );
     }
 
+    if (row.nextAction || row.nextContactAt) {
+      await this.prisma.guestCrmTask.create({
+        data: {
+          tenantId,
+          createdByUserId: user.id,
+          leadId: row.id,
+          guestId: matchedGuest?.id ?? null,
+          title:
+            row.nextAction ??
+            `Связаться с CRM-гостем: ${this.toGuestCrmLead(row).displayName}`,
+          description: row.crmNote,
+          dueAt: row.nextContactAt,
+        },
+      });
+    }
+
     return this.toGuestCrmLead(row);
   }
 
@@ -1060,6 +1082,38 @@ export class GuestsService {
           this.normalizeText(dto.description, 2000) ??
           `Аудитория: ${audience.name}. Гостей: ${audience.guestsCount}.`,
         dueAt: this.resolveOptionalDate(dto.dueAt),
+      },
+      include: {
+        audience: { select: { id: true, name: true } },
+        guest: { select: this.guestSelect() },
+        lead: true,
+      },
+    });
+
+    return this.toGuestCrmTask(row);
+  }
+
+  async updateGuestCrmTask(
+    user: AuthenticatedUser,
+    id: string,
+    dto: GuestCrmTaskUpdateDto = {},
+  ): Promise<GuestCrmTask> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const existing = await this.prisma.guestCrmTask.findFirst({
+      where: { id, tenantId },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('CRM task not found');
+    }
+
+    const status = this.resolveCrmTaskStatus(dto.status);
+    const row = await this.prisma.guestCrmTask.update({
+      where: { id },
+      data: {
+        status,
+        completedAt: status === 'DONE' ? new Date() : null,
       },
       include: {
         audience: { select: { id: true, name: true } },
@@ -3915,6 +3969,19 @@ export class GuestsService {
           }
         : null,
     };
+  }
+
+  private resolveCrmTaskStatus(value?: string | null): GuestCrmTaskStatus {
+    if (
+      value === 'OPEN' ||
+      value === 'IN_PROGRESS' ||
+      value === 'DONE' ||
+      value === 'CANCELED'
+    ) {
+      return value;
+    }
+
+    return 'OPEN';
   }
 
   private async copyLeadCrmToMatchedGuestIfEmpty(

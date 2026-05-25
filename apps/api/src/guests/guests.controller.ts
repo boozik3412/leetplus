@@ -24,6 +24,7 @@ import {
   type GuestCrmLeadDto,
   type GuestCrmTask,
   type GuestCrmTaskDto,
+  type GuestCrmTaskUpdateDto,
   type GuestCrmUpdateDto,
   type GuestExportFile,
   type GuestFilterOptions,
@@ -148,6 +149,15 @@ export class GuestsController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<GuestCrmTask[]> {
     return this.guestsService.getGuestCrmTasks(user);
+  }
+
+  @Patch('crm/tasks/:id')
+  updateGuestCrmTask(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: GuestCrmTaskUpdateDto,
+  ): Promise<GuestCrmTask> {
+    return this.guestsService.updateGuestCrmTask(user, id, dto);
   }
 
   @Get('export')

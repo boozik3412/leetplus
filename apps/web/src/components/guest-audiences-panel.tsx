@@ -40,6 +40,7 @@ export function GuestAudiencesPanel({
   const [isSavingLead, setIsSavingLead] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [taskAudienceId, setTaskAudienceId] = useState<string | null>(null);
+  const [updatingTaskId, setUpdatingTaskId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function saveAudience() {
@@ -172,6 +173,33 @@ export function GuestAudiencesPanel({
       setError("Не удалось добавить CRM-гостя");
     } finally {
       setIsSavingLead(false);
+    }
+  }
+
+  async function updateTaskStatus(taskId: string, status: GuestCrmTask["status"]) {
+    setUpdatingTaskId(taskId);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/guests/crm/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as {
+          message?: string;
+        } | null;
+        setError(payload?.message ?? "Не удалось обновить CRM-задачу");
+        return;
+      }
+
+      router.refresh();
+    } catch {
+      setError("Не удалось обновить CRM-задачу");
+    } finally {
+      setUpdatingTaskId(null);
     }
   }
 
@@ -434,6 +462,54 @@ export function GuestAudiencesPanel({
                   {task.audience?.name ?? task.lead?.displayName ?? "CRM"}
                   {task.dueAt ? ` · до ${formatDate(task.dueAt)}` : ""}
                 </p>
+                <div className="mt-3 flex items-center justify-between gap-2">
+                  <span
+                    className={`shrink-0 rounded-full px-2 py-1 text-xs font-semibold ${taskStatusClass(task.status)}`}
+                  >
+                    {taskStatusLabel(task.status)}
+                  </span>
+                  <div className="flex flex-wrap justify-end gap-2">
+                    {task.status !== "IN_PROGRESS" && task.status !== "DONE" ? (
+                      <button
+                        type="button"
+                        onClick={() => updateTaskStatus(task.id, "IN_PROGRESS")}
+                        disabled={updatingTaskId === task.id}
+                        className="rounded-md border border-zinc-300 px-2.5 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                      >
+                        В работу
+                      </button>
+                    ) : null}
+                    {task.status !== "DONE" ? (
+                      <button
+                        type="button"
+                        onClick={() => updateTaskStatus(task.id, "DONE")}
+                        disabled={updatingTaskId === task.id}
+                        className="rounded-md bg-emerald-500 px-2.5 py-1.5 text-xs font-semibold text-zinc-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Закрыть
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => updateTaskStatus(task.id, "OPEN")}
+                        disabled={updatingTaskId === task.id}
+                        className="rounded-md border border-zinc-300 px-2.5 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                      >
+                        Вернуть
+                      </button>
+                    )}
+                    {task.status !== "CANCELED" && task.status !== "DONE" ? (
+                      <button
+                        type="button"
+                        onClick={() => updateTaskStatus(task.id, "CANCELED")}
+                        disabled={updatingTaskId === task.id}
+                        className="rounded-md border border-red-200 px-2.5 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/70 dark:text-red-200 dark:hover:bg-red-950/40"
+                      >
+                        Отменить
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
               </article>
             ))}
             {crmLeads.length === 0 && crmTasks.length === 0 ? (
@@ -492,4 +568,36 @@ function formatDate(value: string) {
     year: "numeric",
     timeZone: "UTC",
   }).format(new Date(value));
+}
+
+function taskStatusLabel(status: string) {
+  if (status === "IN_PROGRESS") {
+    return "в работе";
+  }
+
+  if (status === "DONE") {
+    return "готово";
+  }
+
+  if (status === "CANCELED") {
+    return "отменено";
+  }
+
+  return "новая";
+}
+
+function taskStatusClass(status: string) {
+  if (status === "IN_PROGRESS") {
+    return "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-200";
+  }
+
+  if (status === "DONE") {
+    return "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200";
+  }
+
+  if (status === "CANCELED") {
+    return "bg-zinc-200 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300";
+  }
+
+  return "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200";
 }

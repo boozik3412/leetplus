@@ -99,6 +99,8 @@ model Tenant {
   guestWorkingShifts         GuestWorkingShift[]
   guestDataProfileRuns       GuestDataProfileRun[]
   guestCrmEvents             GuestCrmEvent[]
+  guestCrmLeads              GuestCrmLead[]
+  guestCrmTasks              GuestCrmTask[]
   guestStaffIdentityMappings GuestStaffIdentityMapping[]
   guestSavedFilters          GuestSavedFilter[]
   guestAudiences             GuestAudience[]
@@ -121,6 +123,8 @@ model User {
   emailVerificationTokens    EmailVerificationToken[]
   importJobs                 ImportJob[]
   guestCrmEvents             GuestCrmEvent[]
+  guestCrmLeads              GuestCrmLead[]
+  guestCrmTasks              GuestCrmTask[]
   guestStaffIdentityMappings GuestStaffIdentityMapping[]
   guestSavedFilters          GuestSavedFilter[]
   guestAudiences             GuestAudience[]
@@ -573,6 +577,8 @@ model Guest {
   transactions          GuestTransaction[]
   workingShifts         GuestWorkingShift[]
   crmEvents             GuestCrmEvent[]
+  crmLeads              GuestCrmLead[]
+  crmTasks              GuestCrmTask[]
   staffIdentityMappings GuestStaffIdentityMapping[]
   audienceMembers       GuestAudienceMember[]
 
@@ -604,6 +610,68 @@ model GuestCrmEvent {
   @@index([tenantId, createdAt])
   @@index([guestId, createdAt])
   @@index([createdByUserId])
+}
+
+model GuestCrmLead {
+  id              String         @id @default(uuid())
+  tenantId        String
+  matchedGuestId  String?
+  createdByUserId String?
+  fullNameHash    String?
+  fullNameMasked  String?
+  fullNameEncrypted String?
+  phoneHash       String
+  phoneMasked     String?
+  phoneEncrypted  String?
+  emailHash       String?
+  emailMasked     String?
+  source          String?
+  eventName       String?
+  crmStatus       GuestCrmStatus @default(CONTACT)
+  crmNote         String?
+  nextAction      String?
+  nextContactAt   DateTime?
+  matchedAt       DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  tenant        Tenant @relation(fields: [tenantId], references: [id])
+  matchedGuest  Guest? @relation(fields: [matchedGuestId], references: [id], onDelete: SetNull)
+  createdByUser User?  @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  crmTasks      GuestCrmTask[]
+
+  @@index([tenantId, createdAt], map: "guest_crm_lead_tenant_created_idx")
+  @@index([tenantId, phoneHash], map: "guest_crm_lead_phone_idx")
+  @@index([matchedGuestId], map: "guest_crm_lead_guest_idx")
+  @@index([createdByUserId], map: "guest_crm_lead_user_idx")
+}
+
+model GuestCrmTask {
+  id              String    @id @default(uuid())
+  tenantId        String
+  audienceId      String?
+  guestId         String?
+  leadId          String?
+  createdByUserId String?
+  title           String
+  description     String?
+  status          String    @default("OPEN")
+  dueAt           DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id])
+  audience      GuestAudience? @relation(fields: [audienceId], references: [id], onDelete: SetNull)
+  guest         Guest?         @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  lead          GuestCrmLead?  @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  createdByUser User?          @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status, dueAt], map: "guest_crm_task_status_due_idx")
+  @@index([audienceId], map: "guest_crm_task_audience_idx")
+  @@index([guestId], map: "guest_crm_task_guest_idx")
+  @@index([leadId], map: "guest_crm_task_lead_idx")
+  @@index([createdByUserId], map: "guest_crm_task_user_idx")
 }
 
 model GuestGroup {
@@ -881,6 +949,7 @@ model GuestAudience {
   tenant        Tenant                @relation(fields: [tenantId], references: [id])
   createdByUser User?                 @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
   members       GuestAudienceMember[]
+  crmTasks      GuestCrmTask[]
 
   @@index([tenantId, createdAt], map: "guest_audience_tenant_created_idx")
   @@index([createdByUserId], map: "guest_audience_user_idx")

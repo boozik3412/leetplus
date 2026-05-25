@@ -3,23 +3,43 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import type { GuestAudience, GuestListFilters } from "@/lib/guests";
+import type {
+  GuestAudience,
+  GuestCrmLead,
+  GuestCrmTask,
+  GuestListFilters,
+} from "@/lib/guests";
 
 type GuestAudiencesPanelProps = {
   currentFilters: GuestListFilters;
   totalRows: number;
   audiences: GuestAudience[];
+  crmLeads: GuestCrmLead[];
+  crmTasks: GuestCrmTask[];
 };
 
 export function GuestAudiencesPanel({
   currentFilters,
   totalRows,
   audiences,
+  crmLeads,
+  crmTasks,
 }: GuestAudiencesPanelProps) {
   const router = useRouter();
   const [name, setName] = useState("");
+  const [leadForm, setLeadForm] = useState({
+    fullName: "",
+    phone: "",
+    source: "",
+    eventName: "",
+    crmNote: "",
+    nextAction: "",
+    nextContactAt: "",
+  });
   const [isSaving, setIsSaving] = useState(false);
+  const [isSavingLead, setIsSavingLead] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [taskAudienceId, setTaskAudienceId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function saveAudience() {
@@ -82,6 +102,76 @@ export function GuestAudiencesPanel({
       setError("Не удалось удалить аудиторию");
     } finally {
       setDeletingId(null);
+    }
+  }
+
+  async function createAudienceTask(audience: GuestAudience) {
+    setTaskAudienceId(audience.id);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/guests/audiences/${audience.id}/tasks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: `Связаться с аудиторией: ${audience.name}`,
+        }),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as {
+          message?: string;
+        } | null;
+        setError(payload?.message ?? "Не удалось создать CRM-задачу");
+        return;
+      }
+
+      router.refresh();
+    } catch {
+      setError("Не удалось создать CRM-задачу");
+    } finally {
+      setTaskAudienceId(null);
+    }
+  }
+
+  async function saveLead() {
+    if (!leadForm.phone.trim()) {
+      setError("Введите телефон ручного CRM-гостя");
+      return;
+    }
+
+    setIsSavingLead(true);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/guests/crm/leads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(leadForm),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as {
+          message?: string;
+        } | null;
+        setError(payload?.message ?? "Не удалось добавить CRM-гостя");
+        return;
+      }
+
+      setLeadForm({
+        fullName: "",
+        phone: "",
+        source: "",
+        eventName: "",
+        crmNote: "",
+        nextAction: "",
+        nextContactAt: "",
+      });
+      router.refresh();
+    } catch {
+      setError("Не удалось добавить CRM-гостя");
+    } finally {
+      setIsSavingLead(false);
     }
   }
 
@@ -163,6 +253,16 @@ export function GuestAudiencesPanel({
                 >
                   {deletingId === audience.id ? "Удаляю..." : "Удалить"}
                 </button>
+                <button
+                  type="button"
+                  onClick={() => createAudienceTask(audience)}
+                  disabled={taskAudienceId === audience.id}
+                  className="inline-flex h-9 items-center justify-center rounded-md border border-emerald-300 px-3 text-xs font-semibold text-emerald-800 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-800 dark:text-emerald-200 dark:hover:bg-emerald-950/50 sm:col-span-2"
+                >
+                  {taskAudienceId === audience.id
+                    ? "Создаю задачу..."
+                    : "Создать CRM-задачу"}
+                </button>
               </div>
             </article>
           ))}
@@ -172,6 +272,178 @@ export function GuestAudiencesPanel({
           Сохраненных аудиторий пока нет.
         </p>
       )}
+
+      <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(20rem,0.8fr)]">
+        <section className="rounded-md border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
+          <div className="flex flex-col gap-1">
+            <p className="text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-300">
+              Ручной CRM-гость
+            </p>
+            <h3 className="text-base font-semibold">
+              Контакт без регистрации в Langame
+            </h3>
+            <p className="text-sm text-zinc-500">
+              После следующей синхронизации контакт будет привязан к гостю,
+              если Langame вернет тот же номер телефона.
+            </p>
+          </div>
+          <div className="mt-3 grid gap-2 md:grid-cols-2">
+            <input
+              value={leadForm.fullName}
+              onChange={(event) =>
+                setLeadForm((current) => ({
+                  ...current,
+                  fullName: event.target.value,
+                }))
+              }
+              placeholder="ФИО"
+              className="h-10 rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+            />
+            <input
+              value={leadForm.phone}
+              onChange={(event) =>
+                setLeadForm((current) => ({
+                  ...current,
+                  phone: event.target.value,
+                }))
+              }
+              placeholder="Телефон"
+              className="h-10 rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+            />
+            <input
+              value={leadForm.eventName}
+              onChange={(event) =>
+                setLeadForm((current) => ({
+                  ...current,
+                  eventName: event.target.value,
+                }))
+              }
+              placeholder="Мероприятие или бронь"
+              className="h-10 rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+            />
+            <input
+              value={leadForm.source}
+              onChange={(event) =>
+                setLeadForm((current) => ({
+                  ...current,
+                  source: event.target.value,
+                }))
+              }
+              placeholder="Источник контакта"
+              className="h-10 rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+            />
+            <input
+              value={leadForm.nextAction}
+              onChange={(event) =>
+                setLeadForm((current) => ({
+                  ...current,
+                  nextAction: event.target.value,
+                }))
+              }
+              placeholder="Следующее действие"
+              className="h-10 rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+            />
+            <input
+              type="date"
+              value={leadForm.nextContactAt}
+              onChange={(event) =>
+                setLeadForm((current) => ({
+                  ...current,
+                  nextContactAt: event.target.value,
+                }))
+              }
+              className="h-10 rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+            />
+            <textarea
+              value={leadForm.crmNote}
+              onChange={(event) =>
+                setLeadForm((current) => ({
+                  ...current,
+                  crmNote: event.target.value,
+                }))
+              }
+              placeholder="Заметка"
+              rows={3}
+              className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 md:col-span-2"
+            />
+            <button
+              type="button"
+              onClick={saveLead}
+              disabled={isSavingLead}
+              className="h-10 rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60 md:col-span-2"
+            >
+              {isSavingLead ? "Добавляю..." : "Добавить в CRM"}
+            </button>
+          </div>
+        </section>
+
+        <section className="rounded-md border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase text-zinc-500">
+                CRM
+              </p>
+              <h3 className="text-base font-semibold">Ближайшие действия</h3>
+            </div>
+            <span className="rounded-full bg-zinc-200 px-2 py-1 text-xs font-semibold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
+              {formatNumber(crmTasks.length + crmLeads.length)}
+            </span>
+          </div>
+          <div className="mt-3 space-y-2">
+            {crmLeads.slice(0, 4).map((lead) => (
+              <article
+                key={lead.id}
+                className="rounded-md border border-zinc-200 bg-white p-3 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-semibold">{lead.displayName}</p>
+                    <p className="text-xs text-zinc-500">{lead.phone}</p>
+                  </div>
+                  <span
+                    className={`shrink-0 rounded-full px-2 py-1 text-xs font-semibold ${
+                      lead.matchedGuestId
+                        ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
+                        : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200"
+                    }`}
+                  >
+                    {lead.matchedGuestId ? "связан" : "ожидает"}
+                  </span>
+                </div>
+                <p className="mt-2 text-xs text-zinc-500">
+                  {lead.eventName || lead.source || "ручной контакт"}
+                  {lead.nextAction ? ` · ${lead.nextAction}` : ""}
+                </p>
+                {lead.matchedGuestId ? (
+                  <Link
+                    href={`/guests/${lead.matchedGuestId}`}
+                    className="mt-2 inline-flex text-xs font-semibold text-emerald-700 underline-offset-4 hover:underline dark:text-emerald-300"
+                  >
+                    Открыть гостя
+                  </Link>
+                ) : null}
+              </article>
+            ))}
+            {crmTasks.slice(0, 4).map((task) => (
+              <article
+                key={task.id}
+                className="rounded-md border border-zinc-200 bg-white p-3 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+              >
+                <p className="font-semibold">{task.title}</p>
+                <p className="mt-1 text-xs text-zinc-500">
+                  {task.audience?.name ?? task.lead?.displayName ?? "CRM"}
+                  {task.dueAt ? ` · до ${formatDate(task.dueAt)}` : ""}
+                </p>
+              </article>
+            ))}
+            {crmLeads.length === 0 && crmTasks.length === 0 ? (
+              <p className="rounded-md border border-dashed border-zinc-300 px-3 py-3 text-sm text-zinc-500 dark:border-zinc-800">
+                CRM-действий пока нет.
+              </p>
+            ) : null}
+          </div>
+        </section>
+      </div>
     </section>
   );
 }
@@ -211,4 +483,13 @@ function filterSummary(filters: Omit<GuestListFilters, "page">) {
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat("ru-RU").format(value);
+}
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(value));
 }

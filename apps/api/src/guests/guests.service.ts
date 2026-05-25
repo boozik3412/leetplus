@@ -5,7 +5,13 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GuestCrmStatus, IntegrationProvider, Prisma } from '@prisma/client';
-import { createDecipheriv, createHash, createHmac } from 'node:crypto';
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  createHmac,
+  randomBytes,
+} from 'node:crypto';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { GuestDataFoundationService } from '../integrations/guest-data-foundation.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -37,6 +43,24 @@ export type GuestSavedFilterDto = {
 };
 
 export type GuestAudienceDto = GuestSavedFilterDto;
+
+export type GuestCrmLeadDto = {
+  fullName?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  source?: string | null;
+  eventName?: string | null;
+  crmStatus?: GuestCrmStatus;
+  crmNote?: string | null;
+  nextAction?: string | null;
+  nextContactAt?: string | null;
+};
+
+export type GuestCrmTaskDto = {
+  title?: string | null;
+  description?: string | null;
+  dueAt?: string | null;
+};
 
 export type StaffControlQuery = GuestsSummaryQuery;
 
@@ -213,6 +237,38 @@ export type GuestAudience = {
   guestsCount: number;
   createdAt: string;
   updatedAt: string;
+};
+
+export type GuestCrmLead = {
+  id: string;
+  displayName: string;
+  phone: string;
+  email: string | null;
+  source: string | null;
+  eventName: string | null;
+  crmStatus: GuestCrmStatus;
+  crmNote: string | null;
+  nextAction: string | null;
+  nextContactAt: string | null;
+  matchedGuestId: string | null;
+  matchedGuestDisplayName: string | null;
+  matchedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type GuestCrmTask = {
+  id: string;
+  title: string;
+  description: string | null;
+  status: string;
+  dueAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  audience: { id: string; name: string } | null;
+  guest: { id: string; displayName: string } | null;
+  lead: { id: string; displayName: string } | null;
 };
 
 export type GuestDetail = GuestDashboardRow & {
@@ -886,6 +942,133 @@ export class GuestsService {
     await this.prisma.guestAudience.delete({ where: { id } });
 
     return { id };
+  }
+
+  async getGuestCrmLeads(user: AuthenticatedUser): Promise<GuestCrmLead[]> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const rows = await this.prisma.guestCrmLead.findMany({
+      where: { tenantId },
+      orderBy: [{ matchedAt: 'asc' }, { updatedAt: 'desc' }],
+      take: 50,
+      include: {
+        matchedGuest: { select: this.guestSelect() },
+      },
+    });
+
+    return rows.map((row) => this.toGuestCrmLead(row));
+  }
+
+  async createGuestCrmLead(
+    user: AuthenticatedUser,
+    dto: GuestCrmLeadDto = {},
+  ): Promise<GuestCrmLead> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const phone = this.sensitiveValue(dto.phone, 'phone');
+
+    if (!phone.hash) {
+      throw new BadRequestException('Lead phone is required');
+    }
+
+    const fullName = this.sensitiveValue(dto.fullName, 'name');
+    const email = this.sensitiveValue(dto.email, 'email');
+    const matchedGuest = await this.prisma.guest.findFirst({
+      where: { tenantId, phoneHash: phone.hash },
+      orderBy: [{ lastSyncedAt: 'desc' }, { updatedAt: 'desc' }],
+      select: this.guestSelect(),
+    });
+    const crmStatus = this.resolveCrmStatus(
+      dto.crmStatus ?? GuestCrmStatus.CONTACT,
+    );
+    const row = await this.prisma.guestCrmLead.create({
+      data: {
+        tenantId,
+        createdByUserId: user.id,
+        matchedGuestId: matchedGuest?.id ?? null,
+        fullNameHash: fullName.hash,
+        fullNameMasked: fullName.masked,
+        fullNameEncrypted: fullName.encrypted,
+        phoneHash: phone.hash,
+        phoneMasked: phone.masked,
+        phoneEncrypted: phone.encrypted,
+        emailHash: email.hash,
+        emailMasked: email.masked,
+        source: this.normalizeText(dto.source, 120),
+        eventName: this.normalizeText(dto.eventName, 160),
+        crmStatus,
+        crmNote: this.normalizeText(dto.crmNote, 2000),
+        nextAction: this.normalizeText(dto.nextAction, 160),
+        nextContactAt: this.resolveOptionalDate(dto.nextContactAt),
+        matchedAt: matchedGuest ? new Date() : null,
+      },
+      include: {
+        matchedGuest: { select: this.guestSelect() },
+      },
+    });
+
+    if (matchedGuest) {
+      await this.copyLeadCrmToMatchedGuestIfEmpty(
+        tenantId,
+        matchedGuest.id,
+        row,
+      );
+    }
+
+    return this.toGuestCrmLead(row);
+  }
+
+  async getGuestCrmTasks(user: AuthenticatedUser): Promise<GuestCrmTask[]> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const rows = await this.prisma.guestCrmTask.findMany({
+      where: { tenantId },
+      orderBy: [{ status: 'asc' }, { dueAt: 'asc' }, { createdAt: 'desc' }],
+      take: 50,
+      include: {
+        audience: { select: { id: true, name: true } },
+        guest: { select: this.guestSelect() },
+        lead: true,
+      },
+    });
+
+    return rows.map((row) => this.toGuestCrmTask(row));
+  }
+
+  async createAudienceCrmTask(
+    user: AuthenticatedUser,
+    audienceId: string,
+    dto: GuestCrmTaskDto = {},
+  ): Promise<GuestCrmTask> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const audience = await this.prisma.guestAudience.findFirst({
+      where: { id: audienceId, tenantId },
+      select: { id: true, name: true, guestsCount: true },
+    });
+
+    if (!audience) {
+      throw new NotFoundException('Audience not found');
+    }
+
+    const title =
+      this.normalizeText(dto.title, 160) ??
+      `Связаться с аудиторией: ${audience.name}`;
+    const row = await this.prisma.guestCrmTask.create({
+      data: {
+        tenantId,
+        createdByUserId: user.id,
+        audienceId: audience.id,
+        title,
+        description:
+          this.normalizeText(dto.description, 2000) ??
+          `Аудитория: ${audience.name}. Гостей: ${audience.guestsCount}.`,
+        dueAt: this.resolveOptionalDate(dto.dueAt),
+      },
+      include: {
+        audience: { select: { id: true, name: true } },
+        guest: { select: this.guestSelect() },
+        lead: true,
+      },
+    });
+
+    return this.toGuestCrmTask(row);
   }
 
   private async buildGuestList(
@@ -3622,6 +3805,184 @@ export class GuestsService {
     };
   }
 
+  private toGuestCrmLead(row: {
+    id: string;
+    fullNameMasked: string | null;
+    fullNameEncrypted: string | null;
+    phoneMasked: string | null;
+    phoneEncrypted: string | null;
+    emailMasked: string | null;
+    source: string | null;
+    eventName: string | null;
+    crmStatus: GuestCrmStatus;
+    crmNote: string | null;
+    nextAction: string | null;
+    nextContactAt: Date | null;
+    matchedGuestId: string | null;
+    matchedAt: Date | null;
+    createdAt: Date;
+    updatedAt: Date;
+    matchedGuest?: GuestBase | null;
+  }): GuestCrmLead {
+    const leadName =
+      this.decryptSensitiveValue(row.fullNameEncrypted) ??
+      row.fullNameMasked ??
+      'Ручной CRM-гость';
+    const matchedGuestDisplayName = row.matchedGuest
+      ? this.toDashboardRow(
+          row.matchedGuest,
+          undefined,
+          this.emptyPeriod(),
+          new Map(),
+        ).displayName
+      : null;
+
+    return {
+      id: row.id,
+      displayName: leadName,
+      phone:
+        this.decryptSensitiveValue(row.phoneEncrypted) ??
+        row.phoneMasked ??
+        'телефон скрыт',
+      email: row.emailMasked,
+      source: row.source,
+      eventName: row.eventName,
+      crmStatus: row.crmStatus,
+      crmNote: row.crmNote,
+      nextAction: row.nextAction,
+      nextContactAt: this.toIsoDateTime(row.nextContactAt),
+      matchedGuestId: row.matchedGuestId,
+      matchedGuestDisplayName,
+      matchedAt: this.toIsoDateTime(row.matchedAt),
+      createdAt:
+        this.toIsoDateTime(row.createdAt) ?? row.createdAt.toISOString(),
+      updatedAt:
+        this.toIsoDateTime(row.updatedAt) ?? row.updatedAt.toISOString(),
+    };
+  }
+
+  private toGuestCrmTask(row: {
+    id: string;
+    title: string;
+    description: string | null;
+    status: string;
+    dueAt: Date | null;
+    completedAt: Date | null;
+    createdAt: Date;
+    updatedAt: Date;
+    audience?: { id: string; name: string } | null;
+    guest?: GuestBase | null;
+    lead?: {
+      id: string;
+      fullNameMasked: string | null;
+      fullNameEncrypted: string | null;
+      phoneMasked: string | null;
+      phoneEncrypted: string | null;
+    } | null;
+  }): GuestCrmTask {
+    return {
+      id: row.id,
+      title: row.title,
+      description: row.description,
+      status: row.status,
+      dueAt: this.toIsoDateTime(row.dueAt),
+      completedAt: this.toIsoDateTime(row.completedAt),
+      createdAt:
+        this.toIsoDateTime(row.createdAt) ?? row.createdAt.toISOString(),
+      updatedAt:
+        this.toIsoDateTime(row.updatedAt) ?? row.updatedAt.toISOString(),
+      audience: row.audience ?? null,
+      guest: row.guest
+        ? {
+            id: row.guest.id,
+            displayName: this.toDashboardRow(
+              row.guest,
+              undefined,
+              this.emptyPeriod(),
+              new Map(),
+            ).displayName,
+          }
+        : null,
+      lead: row.lead
+        ? {
+            id: row.lead.id,
+            displayName:
+              this.decryptSensitiveValue(row.lead.fullNameEncrypted) ??
+              row.lead.fullNameMasked ??
+              this.decryptSensitiveValue(row.lead.phoneEncrypted) ??
+              row.lead.phoneMasked ??
+              'Ручной CRM-гость',
+          }
+        : null,
+    };
+  }
+
+  private async copyLeadCrmToMatchedGuestIfEmpty(
+    tenantId: string,
+    guestId: string,
+    lead: {
+      createdByUserId: string | null;
+      crmStatus: GuestCrmStatus;
+      crmNote: string | null;
+      nextAction: string | null;
+      nextContactAt: Date | null;
+    },
+  ) {
+    const guest = await this.prisma.guest.findFirst({
+      where: { id: guestId, tenantId },
+      select: {
+        id: true,
+        crmStatus: true,
+        crmNote: true,
+        nextAction: true,
+        nextContactAt: true,
+      },
+    });
+
+    if (!guest || guest.crmStatus !== GuestCrmStatus.NONE) {
+      return;
+    }
+
+    const update = {
+      crmStatus: lead.crmStatus,
+      crmNote: guest.crmNote ?? lead.crmNote,
+      nextAction: guest.nextAction ?? lead.nextAction,
+      nextContactAt: guest.nextContactAt ?? lead.nextContactAt,
+      crmUpdatedByUserId: lead.createdByUserId,
+      crmUpdatedAt: new Date(),
+    };
+
+    await this.prisma.$transaction([
+      this.prisma.guest.update({
+        where: { id: guest.id },
+        data: update,
+      }),
+      this.prisma.guestCrmEvent.create({
+        data: {
+          tenantId,
+          guestId: guest.id,
+          createdByUserId: lead.createdByUserId,
+          status: update.crmStatus,
+          note: update.crmNote,
+          nextAction: update.nextAction,
+          nextContactAt: update.nextContactAt,
+        },
+      }),
+    ]);
+  }
+
+  private emptyPeriod(): Period {
+    const now = new Date();
+
+    return {
+      fromDate: now,
+      toDate: now,
+      activityFromDate: now,
+      from: this.toIsoDate(now),
+      to: this.toIsoDate(now),
+    };
+  }
+
   private guestSavedFilterPayload(
     value: Prisma.JsonValue,
   ): GuestSavedFilterPayload {
@@ -4358,6 +4719,100 @@ export class GuestsService {
         ? createHmac('sha256', this.piiSecret()).update(fullName).digest('hex')
         : null,
     };
+  }
+
+  private sensitiveValue(
+    value: string | null | undefined,
+    type: 'phone' | 'email' | 'name',
+  ) {
+    const normalized = this.normalizeSensitiveValue(value, type);
+    if (!normalized) {
+      return { hash: null, masked: null, encrypted: null };
+    }
+
+    return {
+      hash: createHmac('sha256', this.piiSecret())
+        .update(normalized)
+        .digest('hex'),
+      masked: this.maskSensitiveValue(normalized, type),
+      encrypted:
+        type === 'email'
+          ? null
+          : this.encryptSensitiveValue(
+              this.displaySensitiveValue(value, type) ?? normalized,
+            ),
+    };
+  }
+
+  private normalizeSensitiveValue(
+    value: string | null | undefined,
+    type: 'phone' | 'email' | 'name',
+  ) {
+    const trimmed = value?.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    if (type === 'phone') {
+      const digits = trimmed.replace(/\D/g, '');
+      return digits || null;
+    }
+
+    return trimmed.toLowerCase().replace(/\s+/g, ' ');
+  }
+
+  private maskSensitiveValue(value: string, type: 'phone' | 'email' | 'name') {
+    if (type === 'phone') {
+      return value.length <= 4 ? '****' : `***${value.slice(-4)}`;
+    }
+
+    if (type === 'email') {
+      const [local, domain] = value.split('@');
+      return domain ? `${local.slice(0, 1)}***@${domain}` : '***';
+    }
+
+    return value
+      .split(' ')
+      .filter(Boolean)
+      .map((part) => `${part.slice(0, 1).toUpperCase()}.`)
+      .join(' ');
+  }
+
+  private displaySensitiveValue(
+    value: string | null | undefined,
+    type: 'phone' | 'email' | 'name',
+  ) {
+    const trimmed = value?.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    if (type === 'name') {
+      return trimmed.replace(/\s+/g, ' ');
+    }
+
+    if (type === 'phone') {
+      return trimmed;
+    }
+
+    return trimmed.toLowerCase();
+  }
+
+  private encryptSensitiveValue(value: string) {
+    const iv = randomBytes(12);
+    const cipher = createCipheriv('aes-256-gcm', this.piiEncryptionKey(), iv);
+    const encrypted = Buffer.concat([
+      cipher.update(value, 'utf8'),
+      cipher.final(),
+    ]);
+    const tag = cipher.getAuthTag();
+
+    return [
+      'v1',
+      iv.toString('base64url'),
+      tag.toString('base64url'),
+      encrypted.toString('base64url'),
+    ].join(':');
   }
 
   private guestGroupKey(domain: string | null, externalGroupId: string) {

@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { IntegrationProvider, Prisma } from '@prisma/client';
+import { GuestCrmStatus, IntegrationProvider, Prisma } from '@prisma/client';
 import {
   createCipheriv,
   createHash,
@@ -1011,7 +1011,7 @@ export class GuestDataFoundationService {
         duplicateEmailHashes,
       );
 
-      await this.prisma.guest.upsert({
+      const guest = await this.prisma.guest.upsert({
         where: {
           tenantId_externalProvider_externalDomain_externalGuestId: {
             tenantId,
@@ -1085,10 +1085,94 @@ export class GuestDataFoundationService {
           lastSyncedAt: syncedAt,
         },
       });
+
+      if (phone.hash) {
+        await this.matchManualCrmLeadsByPhone(
+          tenantId,
+          guest.id,
+          phone.hash,
+          syncedAt,
+        );
+      }
     }
 
     profile.guests.duplicatePhoneHashes = duplicatePhoneHashes.size;
     profile.guests.duplicateEmailHashes = duplicateEmailHashes.size;
+  }
+
+  private async matchManualCrmLeadsByPhone(
+    tenantId: string,
+    guestId: string,
+    phoneHash: string,
+    matchedAt: Date,
+  ) {
+    const leads = await this.prisma.guestCrmLead.findMany({
+      where: {
+        tenantId,
+        phoneHash,
+        OR: [{ matchedGuestId: null }, { matchedGuestId: guestId }],
+      },
+      orderBy: [{ createdAt: 'desc' }],
+    });
+
+    if (leads.length === 0) {
+      return;
+    }
+
+    await this.prisma.guestCrmLead.updateMany({
+      where: {
+        tenantId,
+        phoneHash,
+        matchedGuestId: null,
+      },
+      data: {
+        matchedGuestId: guestId,
+        matchedAt,
+      },
+    });
+
+    const guest = await this.prisma.guest.findFirst({
+      where: { id: guestId, tenantId },
+      select: {
+        id: true,
+        crmStatus: true,
+        crmNote: true,
+        nextAction: true,
+        nextContactAt: true,
+      },
+    });
+    const lead = leads.find((candidate) => candidate.matchedGuestId === null);
+
+    if (!guest || !lead || guest.crmStatus !== GuestCrmStatus.NONE) {
+      return;
+    }
+
+    const update = {
+      crmStatus: lead.crmStatus,
+      crmNote: guest.crmNote ?? lead.crmNote,
+      nextAction: guest.nextAction ?? lead.nextAction,
+      nextContactAt: guest.nextContactAt ?? lead.nextContactAt,
+      crmUpdatedByUserId: lead.createdByUserId,
+      crmUpdatedAt: matchedAt,
+    };
+
+    await this.prisma.$transaction([
+      this.prisma.guest.update({
+        where: { id: guest.id },
+        data: update,
+      }),
+      this.prisma.guestCrmEvent.create({
+        data: {
+          tenantId,
+          guestId: guest.id,
+          createdByUserId: lead.createdByUserId,
+          status: update.crmStatus,
+          note: update.crmNote,
+          nextAction: update.nextAction,
+          nextContactAt: update.nextContactAt,
+        },
+      }),
+    ]);
   }
 
   private async syncBalances(

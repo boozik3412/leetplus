@@ -20,6 +20,10 @@ import {
   GuestsService,
   type GuestAudience,
   type GuestAudienceDto,
+  type GuestCrmLead,
+  type GuestCrmLeadDto,
+  type GuestCrmTask,
+  type GuestCrmTaskDto,
   type GuestCrmUpdateDto,
   type GuestExportFile,
   type GuestFilterOptions,
@@ -113,6 +117,37 @@ export class GuestsController {
     @Param('id') id: string,
   ): Promise<{ id: string }> {
     return this.guestsService.deleteGuestAudience(user, id);
+  }
+
+  @Post('audiences/:id/tasks')
+  createAudienceCrmTask(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: GuestCrmTaskDto,
+  ): Promise<GuestCrmTask> {
+    return this.guestsService.createAudienceCrmTask(user, id, dto);
+  }
+
+  @Get('crm/leads')
+  getGuestCrmLeads(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<GuestCrmLead[]> {
+    return this.guestsService.getGuestCrmLeads(user);
+  }
+
+  @Post('crm/leads')
+  createGuestCrmLead(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: GuestCrmLeadDto,
+  ): Promise<GuestCrmLead> {
+    return this.guestsService.createGuestCrmLead(user, dto);
+  }
+
+  @Get('crm/tasks')
+  getGuestCrmTasks(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<GuestCrmTask[]> {
+    return this.guestsService.getGuestCrmTasks(user);
   }
 
   @Get('export')

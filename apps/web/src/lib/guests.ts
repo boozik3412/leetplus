@@ -135,6 +135,38 @@ export type GuestAudience = {
   updatedAt: string;
 };
 
+export type GuestCrmLead = {
+  id: string;
+  displayName: string;
+  phone: string;
+  email: string | null;
+  source: string | null;
+  eventName: string | null;
+  crmStatus: GuestCrmStatus;
+  crmNote: string | null;
+  nextAction: string | null;
+  nextContactAt: string | null;
+  matchedGuestId: string | null;
+  matchedGuestDisplayName: string | null;
+  matchedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type GuestCrmTask = {
+  id: string;
+  title: string;
+  description: string | null;
+  status: string;
+  dueAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  audience: { id: string; name: string } | null;
+  guest: { id: string; displayName: string } | null;
+  lead: { id: string; displayName: string } | null;
+};
+
 export type GuestListResponse = {
   periodFrom: string;
   periodTo: string;
@@ -494,6 +526,32 @@ export async function getGuestAudiences(): Promise<GuestAudience[]> {
   }
 
   return response.json() as Promise<GuestAudience[]>;
+}
+
+export async function getGuestCrmLeads(): Promise<GuestCrmLead[]> {
+  const response = await fetch(`${getApiUrl()}/guests/crm/leads`, {
+    cache: "no-store",
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch guest CRM leads");
+  }
+
+  return response.json() as Promise<GuestCrmLead[]>;
+}
+
+export async function getGuestCrmTasks(): Promise<GuestCrmTask[]> {
+  const response = await fetch(`${getApiUrl()}/guests/crm/tasks`, {
+    cache: "no-store",
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch guest CRM tasks");
+  }
+
+  return response.json() as Promise<GuestCrmTask[]>;
 }
 
 export async function getStaffControl(

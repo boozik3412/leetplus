@@ -68,6 +68,12 @@ export function GuestAudiencesPanel({
   });
   const [isSavingCampaign, setIsSavingCampaign] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const crmAnalytics = buildCrmAnalytics(
+    crmTasks,
+    crmContactEvents,
+    audiences,
+    crmLeads,
+  );
 
   async function saveAudience() {
     const trimmedName = name.trim();
@@ -445,6 +451,81 @@ export function GuestAudiencesPanel({
           {error}
         </p>
       ) : null}
+
+      <div className="mt-4 rounded-md border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-300">
+              CRM-аналитика
+            </p>
+            <h3 className="mt-1 text-base font-semibold">
+              Кампании, контакты и аудитории
+            </h3>
+            <p className="mt-1 text-sm text-zinc-500">
+              Коротко показывает, что уже запланировано, где есть просрочки и
+              какие каналы реально используются.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4 lg:min-w-[34rem]">
+            <CrmMetric label="Активные задачи" value={crmAnalytics.activeTasks} />
+            <CrmMetric
+              label="Просрочены"
+              value={crmAnalytics.overdueTasks}
+              tone={crmAnalytics.overdueTasks > 0 ? "warning" : "default"}
+            />
+            <CrmMetric label="Контакты" value={crmAnalytics.contactEvents} />
+            <CrmMetric
+              label="Охват аудиторий"
+              value={crmAnalytics.audienceGuests}
+              suffix="гостей"
+            />
+          </div>
+        </div>
+        <div className="mt-3 grid gap-3 lg:grid-cols-3">
+          <CrmSummaryList
+            title="Каналы"
+            emptyText="Каналы пока не использовались."
+            items={crmAnalytics.channels}
+          />
+          <CrmSummaryList
+            title="Итоги контактов"
+            emptyText="Итоги пока не фиксировались."
+            items={crmAnalytics.results}
+          />
+          <div className="rounded-md border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold uppercase text-zinc-500">
+                Ближайшие дедлайны
+              </p>
+              <span className="text-xs text-zinc-500">
+                {formatNumber(crmAnalytics.completedTasks)} закрыто
+              </span>
+            </div>
+            <div className="mt-2 space-y-2">
+              {crmAnalytics.upcomingTasks.length > 0 ? (
+                crmAnalytics.upcomingTasks.map((task) => (
+                  <div
+                    key={task.id}
+                    className="rounded-md border border-zinc-200 px-2.5 py-2 text-sm dark:border-zinc-800"
+                  >
+                    <p className="font-semibold">{task.title}</p>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      {task.dueAt ? `до ${formatDate(task.dueAt)}` : "без даты"}
+                      {task.assignedToUser
+                        ? ` · ${task.assignedToUser.displayName}`
+                        : " · ответственный не назначен"}
+                    </p>
+                  </div>
+                ))
+              ) : (
+                <p className="rounded-md border border-dashed border-zinc-300 px-3 py-3 text-sm text-zinc-500 dark:border-zinc-800">
+                  Активных задач с дедлайном пока нет.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
 
       {audiences.length > 0 ? (
         <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
@@ -1003,6 +1084,161 @@ export function GuestAudiencesPanel({
       </div>
     </section>
   );
+}
+
+function CrmMetric({
+  label,
+  value,
+  suffix,
+  tone = "default",
+}: {
+  label: string;
+  value: number;
+  suffix?: string;
+  tone?: "default" | "warning";
+}) {
+  return (
+    <div
+      className={`rounded-md border bg-white px-3 py-2 dark:bg-zinc-950 ${
+        tone === "warning"
+          ? "border-amber-200 dark:border-amber-900/60"
+          : "border-zinc-200 dark:border-zinc-800"
+      }`}
+    >
+      <p className="text-xs font-semibold uppercase text-zinc-500">{label}</p>
+      <p
+        className={`mt-1 text-xl font-semibold ${
+          tone === "warning"
+            ? "text-amber-600 dark:text-amber-300"
+            : "text-zinc-950 dark:text-zinc-50"
+        }`}
+      >
+        {formatNumber(value)}
+        {suffix ? (
+          <span className="ml-1 text-xs font-semibold text-zinc-500">
+            {suffix}
+          </span>
+        ) : null}
+      </p>
+    </div>
+  );
+}
+
+function CrmSummaryList({
+  title,
+  emptyText,
+  items,
+}: {
+  title: string;
+  emptyText: string;
+  items: Array<{ label: string; count: number }>;
+}) {
+  return (
+    <div className="rounded-md border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+      <p className="text-xs font-semibold uppercase text-zinc-500">{title}</p>
+      <div className="mt-2 space-y-2">
+        {items.length > 0 ? (
+          items.map((item) => (
+            <div key={item.label} className="flex items-center gap-3 text-sm">
+              <span className="min-w-0 flex-1 truncate font-medium">
+                {item.label}
+              </span>
+              <span className="shrink-0 text-xs font-semibold text-zinc-500">
+                {formatNumber(item.count)}
+              </span>
+            </div>
+          ))
+        ) : (
+          <p className="rounded-md border border-dashed border-zinc-300 px-3 py-3 text-sm text-zinc-500 dark:border-zinc-800">
+            {emptyText}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function buildCrmAnalytics(
+  crmTasks: GuestCrmTask[],
+  crmContactEvents: GuestCrmContactEvent[],
+  audiences: GuestAudience[],
+  crmLeads: GuestCrmLead[],
+) {
+  const activeTasks = crmTasks.filter(isActiveTask);
+  const completedTasks = crmTasks.filter((task) => task.status === "DONE");
+  const channelCounts = new Map<string, number>();
+  const resultCounts = new Map<string, number>();
+
+  crmContactEvents.forEach((event) => {
+    incrementCount(channelCounts, event.channel);
+    incrementCount(resultCounts, event.result);
+  });
+
+  crmTasks.forEach((task) => {
+    incrementCount(channelCounts, extractTaskChannel(task));
+  });
+
+  return {
+    activeTasks: activeTasks.length,
+    overdueTasks: activeTasks.filter(isOverdueTask).length,
+    completedTasks: completedTasks.length,
+    contactEvents: crmContactEvents.length,
+    audienceGuests: audiences.reduce(
+      (sum, audience) => sum + audience.guestsCount,
+      0,
+    ),
+    manualLeads: crmLeads.length,
+    matchedLeads: crmLeads.filter((lead) => lead.matchedGuestId).length,
+    channels: mapToSortedList(channelCounts),
+    results: mapToSortedList(resultCounts),
+    upcomingTasks: activeTasks
+      .filter((task) => task.dueAt)
+      .sort((left, right) =>
+        String(left.dueAt).localeCompare(String(right.dueAt)),
+      )
+      .slice(0, 3),
+  };
+}
+
+function isActiveTask(task: GuestCrmTask) {
+  return task.status !== "DONE" && task.status !== "CANCELED";
+}
+
+function isOverdueTask(task: GuestCrmTask) {
+  if (!task.dueAt) {
+    return false;
+  }
+
+  const dueAt = new Date(task.dueAt);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  return dueAt < today;
+}
+
+function extractTaskChannel(task: GuestCrmTask) {
+  const channelLine = task.description
+    ?.split("\n")
+    .find((line) => line.trim().toLowerCase().startsWith("канал:"));
+
+  return channelLine?.replace(/^канал:\s*/i, "").trim() || null;
+}
+
+function incrementCount(map: Map<string, number>, rawValue: string | null) {
+  const value = rawValue?.trim();
+
+  if (!value) {
+    return;
+  }
+
+  map.set(value, (map.get(value) ?? 0) + 1);
+}
+
+function mapToSortedList(map: Map<string, number>) {
+  return Array.from(map.entries())
+    .map(([label, count]) => ({ label, count }))
+    .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label))
+    .slice(0, 4);
 }
 
 function sanitizeFilters(filters: GuestListFilters): Omit<GuestListFilters, "page"> {

@@ -4,7 +4,12 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { GuestCrmStatus, IntegrationProvider, Prisma } from '@prisma/client';
+import {
+  GuestCommunicationConsentStatus,
+  GuestCrmStatus,
+  IntegrationProvider,
+  Prisma,
+} from '@prisma/client';
 import {
   createCipheriv,
   createDecipheriv,
@@ -54,6 +59,8 @@ export type GuestCrmLeadDto = {
   crmNote?: string | null;
   nextAction?: string | null;
   nextContactAt?: string | null;
+  phoneConsentStatus?: GuestCommunicationConsentStatus | null;
+  phoneConsentSource?: string | null;
 };
 
 export type GuestCrmTaskDto = {
@@ -138,6 +145,7 @@ export type GuestDashboardRow = {
   nextAction: string | null;
   nextContactAt: string | null;
   crmUpdatedAt: string | null;
+  phoneConsentStatus: GuestCommunicationConsentStatus;
 };
 
 export type GuestFilterOptions = {
@@ -256,6 +264,10 @@ export type GuestCrmLead = {
   crmNote: string | null;
   nextAction: string | null;
   nextContactAt: string | null;
+  phoneConsentStatus: GuestCommunicationConsentStatus;
+  phoneConsentSource: string | null;
+  phoneConsentAt: string | null;
+  unsubscribedAt: string | null;
   matchedGuestId: string | null;
   matchedGuestDisplayName: string | null;
   matchedAt: string | null;
@@ -540,6 +552,7 @@ type GuestBase = {
   nextAction: string | null;
   nextContactAt: Date | null;
   crmUpdatedAt: Date | null;
+  phoneConsentStatus: GuestCommunicationConsentStatus;
 };
 
 type GuestMetrics = {
@@ -985,6 +998,13 @@ export class GuestsService {
     const crmStatus = this.resolveCrmStatus(
       dto.crmStatus ?? GuestCrmStatus.CONTACT,
     );
+    const phoneConsentStatus = this.resolvePhoneConsentStatus(
+      dto.phoneConsentStatus,
+    );
+    const phoneConsentAt =
+      phoneConsentStatus === GuestCommunicationConsentStatus.GRANTED
+        ? new Date()
+        : null;
     const row = await this.prisma.guestCrmLead.create({
       data: {
         tenantId,
@@ -1004,6 +1024,13 @@ export class GuestsService {
         crmNote: this.normalizeText(dto.crmNote, 2000),
         nextAction: this.normalizeText(dto.nextAction, 160),
         nextContactAt: this.resolveOptionalDate(dto.nextContactAt),
+        phoneConsentStatus,
+        phoneConsentSource: this.normalizeText(dto.phoneConsentSource, 160),
+        phoneConsentAt,
+        unsubscribedAt:
+          phoneConsentStatus === GuestCommunicationConsentStatus.UNSUBSCRIBED
+            ? new Date()
+            : null,
         matchedAt: matchedGuest ? new Date() : null,
       },
       include: {
@@ -3686,6 +3713,7 @@ export class GuestsService {
       nextAction: guest.nextAction,
       nextContactAt: this.toIsoDateTime(guest.nextContactAt),
       crmUpdatedAt: this.toIsoDateTime(guest.crmUpdatedAt),
+      phoneConsentStatus: guest.phoneConsentStatus,
     };
   }
 
@@ -3872,6 +3900,10 @@ export class GuestsService {
     crmNote: string | null;
     nextAction: string | null;
     nextContactAt: Date | null;
+    phoneConsentStatus: GuestCommunicationConsentStatus;
+    phoneConsentSource: string | null;
+    phoneConsentAt: Date | null;
+    unsubscribedAt: Date | null;
     matchedGuestId: string | null;
     matchedAt: Date | null;
     createdAt: Date;
@@ -3905,6 +3937,10 @@ export class GuestsService {
       crmNote: row.crmNote,
       nextAction: row.nextAction,
       nextContactAt: this.toIsoDateTime(row.nextContactAt),
+      phoneConsentStatus: row.phoneConsentStatus,
+      phoneConsentSource: row.phoneConsentSource,
+      phoneConsentAt: this.toIsoDateTime(row.phoneConsentAt),
+      unsubscribedAt: this.toIsoDateTime(row.unsubscribedAt),
       matchedGuestId: row.matchedGuestId,
       matchedGuestDisplayName,
       matchedAt: this.toIsoDateTime(row.matchedAt),
@@ -3984,6 +4020,20 @@ export class GuestsService {
     return 'OPEN';
   }
 
+  private resolvePhoneConsentStatus(
+    value?: string | null,
+  ): GuestCommunicationConsentStatus {
+    if (
+      value === GuestCommunicationConsentStatus.GRANTED ||
+      value === GuestCommunicationConsentStatus.DENIED ||
+      value === GuestCommunicationConsentStatus.UNSUBSCRIBED
+    ) {
+      return value;
+    }
+
+    return GuestCommunicationConsentStatus.UNKNOWN;
+  }
+
   private async copyLeadCrmToMatchedGuestIfEmpty(
     tenantId: string,
     guestId: string,
@@ -3993,6 +4043,7 @@ export class GuestsService {
       crmNote: string | null;
       nextAction: string | null;
       nextContactAt: Date | null;
+      phoneConsentStatus: GuestCommunicationConsentStatus;
     },
   ) {
     const guest = await this.prisma.guest.findFirst({
@@ -4003,6 +4054,7 @@ export class GuestsService {
         crmNote: true,
         nextAction: true,
         nextContactAt: true,
+        phoneConsentStatus: true,
       },
     });
 
@@ -4015,9 +4067,17 @@ export class GuestsService {
       crmNote: guest.crmNote ?? lead.crmNote,
       nextAction: guest.nextAction ?? lead.nextAction,
       nextContactAt: guest.nextContactAt ?? lead.nextContactAt,
+      phoneConsentStatus: guest.phoneConsentStatus,
       crmUpdatedByUserId: lead.createdByUserId,
       crmUpdatedAt: new Date(),
     };
+
+    if (
+      guest.phoneConsentStatus === GuestCommunicationConsentStatus.UNKNOWN &&
+      lead.phoneConsentStatus !== GuestCommunicationConsentStatus.UNKNOWN
+    ) {
+      update.phoneConsentStatus = lead.phoneConsentStatus;
+    }
 
     await this.prisma.$transaction([
       this.prisma.guest.update({
@@ -4346,6 +4406,7 @@ export class GuestsService {
       nextAction: true,
       nextContactAt: true,
       crmUpdatedAt: true,
+      phoneConsentStatus: true,
     } satisfies Prisma.GuestSelect;
   }
 

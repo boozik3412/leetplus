@@ -35,6 +35,7 @@ export function GuestAudiencesPanel({
     crmNote: "",
     nextAction: "",
     nextContactAt: "",
+    phoneConsentGranted: false,
   });
   const [isSaving, setIsSaving] = useState(false);
   const [isSavingLead, setIsSavingLead] = useState(false);
@@ -148,7 +149,13 @@ export function GuestAudiencesPanel({
       const response = await fetch("/api/guests/crm/leads", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(leadForm),
+        body: JSON.stringify({
+          ...leadForm,
+          phoneConsentStatus: leadForm.phoneConsentGranted
+            ? "GRANTED"
+            : "UNKNOWN",
+          phoneConsentSource: leadForm.source,
+        }),
       });
 
       if (!response.ok) {
@@ -167,6 +174,7 @@ export function GuestAudiencesPanel({
         crmNote: "",
         nextAction: "",
         nextContactAt: "",
+        phoneConsentGranted: false,
       });
       router.refresh();
     } catch {
@@ -394,6 +402,23 @@ export function GuestAudiencesPanel({
               rows={3}
               className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950 md:col-span-2"
             />
+            <label className="flex items-start gap-2 rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 md:col-span-2">
+              <input
+                type="checkbox"
+                checked={leadForm.phoneConsentGranted}
+                onChange={(event) =>
+                  setLeadForm((current) => ({
+                    ...current,
+                    phoneConsentGranted: event.target.checked,
+                  }))
+                }
+                className="mt-1 h-4 w-4 rounded border-zinc-300 text-emerald-500"
+              />
+              <span>
+                Гость дал согласие на связь по указанному телефону или в
+                мессенджере
+              </span>
+            </label>
             <button
               type="button"
               onClick={saveLead}
@@ -441,6 +466,9 @@ export function GuestAudiencesPanel({
                 <p className="mt-2 text-xs text-zinc-500">
                   {lead.eventName || lead.source || "ручной контакт"}
                   {lead.nextAction ? ` · ${lead.nextAction}` : ""}
+                </p>
+                <p className="mt-1 text-xs font-semibold text-zinc-500">
+                  {consentLabel(lead.phoneConsentStatus)}
                 </p>
                 {lead.matchedGuestId ? (
                   <Link
@@ -568,6 +596,22 @@ function formatDate(value: string) {
     year: "numeric",
     timeZone: "UTC",
   }).format(new Date(value));
+}
+
+function consentLabel(status: string) {
+  if (status === "GRANTED") {
+    return "согласие на связь есть";
+  }
+
+  if (status === "DENIED") {
+    return "согласия на связь нет";
+  }
+
+  if (status === "UNSUBSCRIBED") {
+    return "отписался от связи";
+  }
+
+  return "согласие на связь не указано";
 }
 
 function taskStatusLabel(status: string) {

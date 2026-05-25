@@ -18,6 +18,12 @@ export type GuestCrmStatus =
   | "PROBLEM"
   | "DO_NOT_CONTACT";
 
+export type GuestCommunicationConsentStatus =
+  | "UNKNOWN"
+  | "GRANTED"
+  | "DENIED"
+  | "UNSUBSCRIBED";
+
 export type GuestDashboardRow = {
   id: string;
   externalDomain: string | null;
@@ -39,6 +45,7 @@ export type GuestDashboardRow = {
   nextAction: string | null;
   nextContactAt: string | null;
   crmUpdatedAt: string | null;
+  phoneConsentStatus: GuestCommunicationConsentStatus;
 };
 
 export type GuestFilterOptions = {
@@ -146,6 +153,10 @@ export type GuestCrmLead = {
   crmNote: string | null;
   nextAction: string | null;
   nextContactAt: string | null;
+  phoneConsentStatus: GuestCommunicationConsentStatus;
+  phoneConsentSource: string | null;
+  phoneConsentAt: string | null;
+  unsubscribedAt: string | null;
   matchedGuestId: string | null;
   matchedGuestDisplayName: string | null;
   matchedAt: string | null;

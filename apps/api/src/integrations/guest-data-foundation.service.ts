@@ -1,6 +1,11 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { GuestCrmStatus, IntegrationProvider, Prisma } from '@prisma/client';
+import {
+  GuestCommunicationConsentStatus,
+  GuestCrmStatus,
+  IntegrationProvider,
+  Prisma,
+} from '@prisma/client';
 import {
   createCipheriv,
   createHash,
@@ -1139,6 +1144,7 @@ export class GuestDataFoundationService {
         crmNote: true,
         nextAction: true,
         nextContactAt: true,
+        phoneConsentStatus: true,
       },
     });
     const lead = leads.find((candidate) => candidate.matchedGuestId === null);
@@ -1152,9 +1158,17 @@ export class GuestDataFoundationService {
       crmNote: guest.crmNote ?? lead.crmNote,
       nextAction: guest.nextAction ?? lead.nextAction,
       nextContactAt: guest.nextContactAt ?? lead.nextContactAt,
+      phoneConsentStatus: guest.phoneConsentStatus,
       crmUpdatedByUserId: lead.createdByUserId,
       crmUpdatedAt: matchedAt,
     };
+
+    if (
+      guest.phoneConsentStatus === GuestCommunicationConsentStatus.UNKNOWN &&
+      lead.phoneConsentStatus !== GuestCommunicationConsentStatus.UNKNOWN
+    ) {
+      update.phoneConsentStatus = lead.phoneConsentStatus;
+    }
 
     await this.prisma.$transaction([
       this.prisma.guest.update({

@@ -28,6 +28,7 @@ const navGroups: NavGroup[] = [
       { href: "/guests#guest-list", label: "Список гостей" },
       { href: "/guests/report", label: "Полный отчет" },
       { href: "/guests/report#audiences", label: "Аудитории" },
+      { href: "/guests/crm", label: "CRM" },
     ],
   },
   {

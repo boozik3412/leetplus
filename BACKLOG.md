@@ -122,6 +122,7 @@ Status: MVP 1 read-only guest analytics is live in production. Automatic rewards
 - Done: `/guests/staff-control/operations` now has a server-side CSV export for the full filtered operation-log type summary.
 - Done: `/guests/report` now has tenant-scoped saved filters for quick guest segments: save current filters, apply them later, and delete obsolete filters.
 - Done: `/guests/report` now has tenant-scoped saved audiences: save the current filtered guest selection as a snapshot with member rows, apply its filters later, and delete obsolete audiences.
+- Done: the `Гости` sidebar section now exposes distinct destinations for guest dashboard, guest list, full report, and saved audiences instead of duplicate links to the same page.
 - Current limitation: `all_operations_log` is stored and summarized, but it still does not expose a reliable administrator identifier. `log_cash_transaction/list` currently returns errors on production sources, so cashier analytics starts from working shifts.
 - Current limitation: PC-count parsing is defensive because real `global/*` payload shape may differ by Langame source; production verification should confirm `computerCount` is filled for each club.
 - Planned data foundation: guests, guest groups, balances, bonus balances, sessions, transactions, all operations log, product expenses by guest, clubs, tariffs, shifts, and PC context.

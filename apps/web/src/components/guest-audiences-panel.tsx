@@ -86,7 +86,10 @@ export function GuestAudiencesPanel({
   }
 
   return (
-    <section className="mt-5 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+    <section
+      id="audiences"
+      className="mt-5 scroll-mt-5 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
+    >
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div className="min-w-0">
           <p className="text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-300">

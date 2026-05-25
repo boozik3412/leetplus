@@ -80,6 +80,16 @@ export type GuestCrmTaskUpdateDto = {
   status?: GuestCrmTaskStatus | null;
 };
 
+export type GuestCrmContactEventDto = {
+  audienceId?: string | null;
+  guestId?: string | null;
+  leadId?: string | null;
+  channel?: string | null;
+  result?: string | null;
+  note?: string | null;
+  contactedAt?: string | null;
+};
+
 export type StaffControlQuery = GuestsSummaryQuery;
 
 export type StaffOperatorSortKey =
@@ -292,6 +302,19 @@ export type GuestCrmTask = {
   audience: { id: string; name: string } | null;
   guest: { id: string; displayName: string } | null;
   lead: { id: string; displayName: string } | null;
+};
+
+export type GuestCrmContactEvent = {
+  id: string;
+  channel: string;
+  result: string | null;
+  note: string | null;
+  contactedAt: string;
+  createdAt: string;
+  audience: { id: string; name: string } | null;
+  guest: { id: string; displayName: string } | null;
+  lead: { id: string; displayName: string } | null;
+  createdBy: string | null;
 };
 
 export type GuestDetail = GuestDashboardRow & {
@@ -1184,6 +1207,25 @@ export class GuestsService {
     return rows.map((row) => this.toGuestCrmTask(row));
   }
 
+  async getGuestCrmContactEvents(
+    user: AuthenticatedUser,
+  ): Promise<GuestCrmContactEvent[]> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const rows = await this.prisma.guestCrmContactEvent.findMany({
+      where: { tenantId },
+      orderBy: [{ contactedAt: 'desc' }, { createdAt: 'desc' }],
+      take: 50,
+      include: {
+        audience: { select: { id: true, name: true } },
+        guest: { select: this.guestSelect() },
+        lead: true,
+        createdByUser: { select: { fullName: true, email: true } },
+      },
+    });
+
+    return rows.map((row) => this.toGuestCrmContactEvent(row));
+  }
+
   async createAudienceCrmTask(
     user: AuthenticatedUser,
     audienceId: string,
@@ -1221,6 +1263,80 @@ export class GuestsService {
     });
 
     return this.toGuestCrmTask(row);
+  }
+
+  async createGuestCrmContactEvent(
+    user: AuthenticatedUser,
+    dto: GuestCrmContactEventDto = {},
+  ): Promise<GuestCrmContactEvent> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const channel = this.normalizeText(dto.channel, 80);
+
+    if (!channel) {
+      throw new BadRequestException('Contact channel is required');
+    }
+
+    const lead = dto.leadId
+      ? await this.prisma.guestCrmLead.findFirst({
+          where: { id: dto.leadId, tenantId },
+          select: { id: true, matchedGuestId: true },
+        })
+      : null;
+
+    if (dto.leadId && !lead) {
+      throw new NotFoundException('CRM lead not found');
+    }
+
+    const audience = dto.audienceId
+      ? await this.prisma.guestAudience.findFirst({
+          where: { id: dto.audienceId, tenantId },
+          select: { id: true },
+        })
+      : null;
+
+    if (dto.audienceId && !audience) {
+      throw new NotFoundException('Audience not found');
+    }
+
+    const guestId = dto.guestId ?? lead?.matchedGuestId ?? null;
+    const guest = guestId
+      ? await this.prisma.guest.findFirst({
+          where: { id: guestId, tenantId },
+          select: { id: true },
+        })
+      : null;
+
+    if (guestId && !guest) {
+      throw new NotFoundException('Guest not found');
+    }
+
+    if (!lead && !audience && !guest) {
+      throw new BadRequestException(
+        'Contact event must be linked to a lead, guest, or audience',
+      );
+    }
+
+    const row = await this.prisma.guestCrmContactEvent.create({
+      data: {
+        tenantId,
+        createdByUserId: user.id,
+        leadId: lead?.id ?? null,
+        audienceId: audience?.id ?? null,
+        guestId: guest?.id ?? null,
+        channel,
+        result: this.normalizeText(dto.result, 120),
+        note: this.normalizeText(dto.note, 2000),
+        contactedAt: this.resolveOptionalDate(dto.contactedAt) ?? new Date(),
+      },
+      include: {
+        audience: { select: { id: true, name: true } },
+        guest: { select: this.guestSelect() },
+        lead: true,
+        createdByUser: { select: { fullName: true, email: true } },
+      },
+    });
+
+    return this.toGuestCrmContactEvent(row);
   }
 
   async updateGuestCrmTask(
@@ -4106,6 +4222,62 @@ export class GuestsService {
               row.lead.phoneMasked ??
               'Ручной CRM-гость',
           }
+        : null,
+    };
+  }
+
+  private toGuestCrmContactEvent(row: {
+    id: string;
+    channel: string;
+    result: string | null;
+    note: string | null;
+    contactedAt: Date;
+    createdAt: Date;
+    audience?: { id: string; name: string } | null;
+    guest?: GuestBase | null;
+    lead?: {
+      id: string;
+      fullNameMasked: string | null;
+      fullNameEncrypted: string | null;
+      phoneMasked: string | null;
+      phoneEncrypted: string | null;
+    } | null;
+    createdByUser?: { fullName: string | null; email: string } | null;
+  }): GuestCrmContactEvent {
+    return {
+      id: row.id,
+      channel: row.channel,
+      result: row.result,
+      note: row.note,
+      contactedAt:
+        this.toIsoDateTime(row.contactedAt) ?? row.contactedAt.toISOString(),
+      createdAt:
+        this.toIsoDateTime(row.createdAt) ?? row.createdAt.toISOString(),
+      audience: row.audience ?? null,
+      guest: row.guest
+        ? {
+            id: row.guest.id,
+            displayName: this.toDashboardRow(
+              row.guest,
+              undefined,
+              this.emptyPeriod(),
+              new Map(),
+            ).displayName,
+          }
+        : null,
+      lead: row.lead
+        ? {
+            id: row.lead.id,
+            displayName:
+              this.decryptSensitiveValue(row.lead.fullNameEncrypted) ??
+              row.lead.fullNameMasked ??
+              this.decryptSensitiveValue(row.lead.phoneEncrypted) ??
+              row.lead.phoneMasked ??
+              'Р СѓС‡РЅРѕР№ CRM-РіРѕСЃС‚СЊ',
+          }
+        : null,
+      createdBy: row.createdByUser
+        ? (row.createdByUser.fullName ?? row.createdByUser.email)
         : null,
     };
   }

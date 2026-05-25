@@ -178,6 +178,19 @@ export type GuestCrmTask = {
   lead: { id: string; displayName: string } | null;
 };
 
+export type GuestCrmContactEvent = {
+  id: string;
+  channel: string;
+  result: string | null;
+  note: string | null;
+  contactedAt: string;
+  createdAt: string;
+  audience: { id: string; name: string } | null;
+  guest: { id: string; displayName: string } | null;
+  lead: { id: string; displayName: string } | null;
+  createdBy: string | null;
+};
+
 export type GuestListResponse = {
   periodFrom: string;
   periodTo: string;
@@ -563,6 +576,21 @@ export async function getGuestCrmTasks(): Promise<GuestCrmTask[]> {
   }
 
   return response.json() as Promise<GuestCrmTask[]>;
+}
+
+export async function getGuestCrmContactEvents(): Promise<
+  GuestCrmContactEvent[]
+> {
+  const response = await fetch(`${getApiUrl()}/guests/crm/contact-events`, {
+    cache: "no-store",
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch guest CRM contact events");
+  }
+
+  return response.json() as Promise<GuestCrmContactEvent[]>;
 }
 
 export async function getStaffControl(

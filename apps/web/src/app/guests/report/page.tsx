@@ -5,6 +5,7 @@ import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
 import {
   getGuestAudiences,
+  getGuestCrmContactEvents,
   getGuestCrmLeads,
   getGuestCrmTasks,
   getGuestFilterOptions,
@@ -150,14 +151,22 @@ export default async function GuestFullReportPage({
     sort: searchParam(params.sort) as GuestListFilters["sort"],
     direction: searchParam(params.direction) as GuestListFilters["direction"],
   };
-  const [guestList, options, savedFilters, audiences, crmLeads, crmTasks] =
-    await Promise.all([
+  const [
+    guestList,
+    options,
+    savedFilters,
+    audiences,
+    crmLeads,
+    crmTasks,
+    crmContactEvents,
+  ] = await Promise.all([
     getGuests(filters),
     getGuestFilterOptions(),
     getGuestSavedFilters(),
     getGuestAudiences(),
     getGuestCrmLeads(),
     getGuestCrmTasks(),
+    getGuestCrmContactEvents(),
   ]);
   const effectiveFilters: GuestListFilters = {
     ...filters,
@@ -235,6 +244,7 @@ export default async function GuestFullReportPage({
           audiences={audiences}
           crmLeads={crmLeads}
           crmTasks={crmTasks}
+          crmContactEvents={crmContactEvents}
         />
 
         <ReportTable filters={filters} guestList={guestList} />

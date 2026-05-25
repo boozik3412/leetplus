@@ -23,6 +23,8 @@ import {
   type GuestCrmLead,
   type GuestCrmLeadDto,
   type GuestCrmLeadUpdateDto,
+  type GuestCrmContactEvent,
+  type GuestCrmContactEventDto,
   type GuestCrmTask,
   type GuestCrmTaskDto,
   type GuestCrmTaskUpdateDto,
@@ -159,6 +161,21 @@ export class GuestsController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<GuestCrmTask[]> {
     return this.guestsService.getGuestCrmTasks(user);
+  }
+
+  @Get('crm/contact-events')
+  getGuestCrmContactEvents(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<GuestCrmContactEvent[]> {
+    return this.guestsService.getGuestCrmContactEvents(user);
+  }
+
+  @Post('crm/contact-events')
+  createGuestCrmContactEvent(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: GuestCrmContactEventDto,
+  ): Promise<GuestCrmContactEvent> {
+    return this.guestsService.createGuestCrmContactEvent(user, dto);
   }
 
   @Patch('crm/tasks/:id')

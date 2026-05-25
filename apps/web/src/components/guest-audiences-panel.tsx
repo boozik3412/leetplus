@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type {
   GuestAudience,
+  GuestCrmContactEvent,
   GuestCrmLead,
   GuestCrmTask,
   GuestListFilters,
@@ -16,6 +17,7 @@ type GuestAudiencesPanelProps = {
   audiences: GuestAudience[];
   crmLeads: GuestCrmLead[];
   crmTasks: GuestCrmTask[];
+  crmContactEvents: GuestCrmContactEvent[];
 };
 
 export function GuestAudiencesPanel({
@@ -24,6 +26,7 @@ export function GuestAudiencesPanel({
   audiences,
   crmLeads,
   crmTasks,
+  crmContactEvents,
 }: GuestAudiencesPanelProps) {
   const router = useRouter();
   const [name, setName] = useState("");
@@ -39,10 +42,18 @@ export function GuestAudiencesPanel({
   });
   const [isSaving, setIsSaving] = useState(false);
   const [isSavingLead, setIsSavingLead] = useState(false);
+  const [isSavingContactEvent, setIsSavingContactEvent] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [taskAudienceId, setTaskAudienceId] = useState<string | null>(null);
   const [updatingTaskId, setUpdatingTaskId] = useState<string | null>(null);
   const [updatingLeadId, setUpdatingLeadId] = useState<string | null>(null);
+  const [contactForm, setContactForm] = useState({
+    leadId: "",
+    channel: "Звонок",
+    result: "",
+    note: "",
+    contactedAt: "",
+  });
   const [error, setError] = useState<string | null>(null);
 
   async function saveAudience() {
@@ -239,6 +250,45 @@ export function GuestAudiencesPanel({
       setError("Не удалось обновить согласие");
     } finally {
       setUpdatingLeadId(null);
+    }
+  }
+
+  async function saveContactEvent() {
+    if (!contactForm.leadId) {
+      setError("Выберите CRM-гостя для записи контакта");
+      return;
+    }
+
+    setIsSavingContactEvent(true);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/guests/crm/contact-events", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(contactForm),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as {
+          message?: string;
+        } | null;
+        setError(payload?.message ?? "Не удалось записать контакт");
+        return;
+      }
+
+      setContactForm({
+        leadId: "",
+        channel: "Звонок",
+        result: "",
+        note: "",
+        contactedAt: "",
+      });
+      router.refresh();
+    } catch {
+      setError("Не удалось записать контакт");
+    } finally {
+      setIsSavingContactEvent(false);
     }
   }
 
@@ -470,10 +520,124 @@ export function GuestAudiencesPanel({
               <h3 className="text-base font-semibold">Ближайшие действия</h3>
             </div>
             <span className="rounded-full bg-zinc-200 px-2 py-1 text-xs font-semibold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
-              {formatNumber(crmTasks.length + crmLeads.length)}
+              {formatNumber(
+                crmTasks.length + crmLeads.length + crmContactEvents.length,
+              )}
             </span>
           </div>
+          <div className="mt-3 rounded-md border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+            <p className="text-xs font-semibold uppercase text-zinc-500">
+              История контактов
+            </p>
+            <div className="mt-2 grid gap-2">
+              <select
+                value={contactForm.leadId}
+                onChange={(event) =>
+                  setContactForm((current) => ({
+                    ...current,
+                    leadId: event.target.value,
+                  }))
+                }
+                className="h-9 rounded-md border border-zinc-300 bg-white px-2 text-xs font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+              >
+                <option value="">Выберите CRM-гостя</option>
+                {crmLeads.map((lead) => (
+                  <option key={lead.id} value={lead.id}>
+                    {lead.displayName} · {lead.phone}
+                  </option>
+                ))}
+              </select>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <select
+                  value={contactForm.channel}
+                  onChange={(event) =>
+                    setContactForm((current) => ({
+                      ...current,
+                      channel: event.target.value,
+                    }))
+                  }
+                  className="h-9 rounded-md border border-zinc-300 bg-white px-2 text-xs font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+                >
+                  <option value="Звонок">Звонок</option>
+                  <option value="Мессенджер">Мессенджер</option>
+                  <option value="Email">Email</option>
+                  <option value="Встреча">Встреча</option>
+                  <option value="Другое">Другое</option>
+                </select>
+                <input
+                  type="date"
+                  value={contactForm.contactedAt}
+                  onChange={(event) =>
+                    setContactForm((current) => ({
+                      ...current,
+                      contactedAt: event.target.value,
+                    }))
+                  }
+                  className="h-9 rounded-md border border-zinc-300 bg-white px-2 text-xs font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+                />
+              </div>
+              <input
+                value={contactForm.result}
+                onChange={(event) =>
+                  setContactForm((current) => ({
+                    ...current,
+                    result: event.target.value,
+                  }))
+                }
+                placeholder="Итог: договорились, не дозвонились, отказ"
+                className="h-9 rounded-md border border-zinc-300 bg-white px-2 text-xs dark:border-zinc-700 dark:bg-zinc-950"
+              />
+              <textarea
+                value={contactForm.note}
+                onChange={(event) =>
+                  setContactForm((current) => ({
+                    ...current,
+                    note: event.target.value,
+                  }))
+                }
+                placeholder="Короткая заметка по контакту"
+                rows={2}
+                className="rounded-md border border-zinc-300 bg-white px-2 py-2 text-xs dark:border-zinc-700 dark:bg-zinc-950"
+              />
+              <button
+                type="button"
+                onClick={saveContactEvent}
+                disabled={isSavingContactEvent || crmLeads.length === 0}
+                className="h-9 rounded-md bg-emerald-500 px-3 text-xs font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isSavingContactEvent ? "Записываю..." : "Записать контакт"}
+              </button>
+            </div>
+          </div>
           <div className="mt-3 space-y-2">
+            {crmContactEvents.slice(0, 4).map((event) => (
+              <article
+                key={event.id}
+                className="rounded-md border border-zinc-200 bg-white p-3 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-semibold">
+                      {event.lead?.displayName ??
+                        event.guest?.displayName ??
+                        event.audience?.name ??
+                        "CRM-контакт"}
+                    </p>
+                    <p className="text-xs text-zinc-500">
+                      {event.channel} · {formatDate(event.contactedAt)}
+                    </p>
+                  </div>
+                  {event.result ? (
+                    <span className="shrink-0 rounded-full bg-zinc-200 px-2 py-1 text-xs font-semibold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
+                      {event.result}
+                    </span>
+                  ) : null}
+                </div>
+                {event.note ? (
+                  <p className="mt-2 text-xs text-zinc-500">{event.note}</p>
+                ) : null}
+              </article>
+            ))}
             {crmLeads.slice(0, 4).map((lead) => (
               <article
                 key={lead.id}

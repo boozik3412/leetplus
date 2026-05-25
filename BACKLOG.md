@@ -12,6 +12,89 @@ This file is the source of truth for product backlog, near-term roadmap, planned
 - Next: near-term implementation candidate.
 - Planned: accepted direction, not necessarily next in development.
 
+## Product UX Architecture
+
+Status: planned product direction. Use this section as a UX decision frame for new dashboards, reports, CRM screens, assortment tools, marketing tools, and staff workflows.
+
+LeetPlus should evolve from a set of reports into a commercial operating system for computer club networks. The main UX principle is:
+
+`Signal -> Work Scenario -> Decision -> Task/Launch -> Control -> Effect`
+
+The first screen should not overload the user with every table, filter, and raw report. It should show the most important business signals, then route the user into the correct working scenario. Full reports, filters, exports, and diagnostics remain available, but they should unfold after the user chooses a scenario.
+
+### Top-Level Business Blocks
+
+1. `Управление гостями / CRM`
+   - Business question: who should we retain, return, develop, or contact manually?
+   - Signals: falling repeat visits, growing risk guests, low new-to-repeat conversion, overdue CRM tasks, VIP/TOP guest inactivity, event/booking leads without follow-up.
+   - Route: signal -> guest group -> CRM task or campaign -> responsible user and deadline -> contact result -> effect in visits, revenue, load, and bar.
+
+2. `Управление ассортиментом`
+   - Business question: what should we buy, remove, redistribute, reprice, or investigate?
+   - Signals: OOS, frozen money in stock, low margin, no sales, category decline, bar decline, write-offs, supplier/category problems.
+   - Route: signal -> category/SKU/store scope -> cause diagnostics -> category-management decision -> task for action -> execution control -> effect in revenue, margin, OOS, turnover, stock, and write-offs.
+
+3. `Маркетинг`
+   - Business question: how do we stimulate demand and communicate value to guests?
+   - Signals: need to raise traffic, low weak-hour load, low bar share, low repeat visits, event promotion needed, need to sell a promo bundle, inactive guest group ready for reactivation.
+   - Route: signal -> marketing goal -> target guest group -> promo mechanic -> channel -> launch/control -> effect in reach, visits, revenue, bar, repeat visits, cost, and ROI.
+
+4. `Персонал`
+   - Business question: who executes commercial and operational actions, and where is execution quality weak?
+   - Signals: overdue tasks, shift anomalies, refunds, cash/incassation mismatch, weak administrator metrics, missed checklists, training gaps.
+   - Route: signal -> employee/shift/club scope -> action or review -> responsible manager -> control -> effect in discipline, service quality, revenue protection, and risk reduction.
+
+### Dashboard UX Rule
+
+The management dashboard should group signals by business logic instead of by database/report origin:
+
+- `Клиентская база`: guests in risk, new guests without second visit, CRM overdue, VIP inactivity.
+- `Ассортимент`: OOS, money in stock, no-sales SKU, low margin, write-offs.
+- `Маркетинг`: weak-hour demand, promo opportunities, bar activation, event promotion, campaign effect.
+- `Персонал`: overdue execution, administrator signals, shift/cash risks, operational discipline.
+
+Each signal card should answer:
+
+- what happened;
+- why it matters commercially;
+- expected business impact where measurable;
+- one clear next action (`Разобрать`, `Создать кампанию`, `Создать задачу`, `Открыть отчет`).
+
+### CRM Decision Route
+
+- Choose problem or opportunity: return guests, develop new guests, protect TOP/VIP, process event/booking lead, recover risk guests.
+- Choose guest group: saved group, segment, manual CRM guests, matched Langame guests.
+- Choose action: CRM task, call, message, campaign, event follow-up, next contact.
+- Assign: responsible user, channel, deadline, note.
+- Record result: contacted, no answer, refused, promised to visit, booked, needs next contact, unsubscribed.
+- Measure effect: returned guests, repeat visits, revenue after contact, bar, load, campaign conversion.
+
+### Assortment Decision Route
+
+- Choose signal: OOS, excess stock, low margin, no sales, category decline, write-off/loss.
+- Diagnose cause: demand, stock, supplier, category role, price, club distribution, replacement SKU, shelf/bar execution.
+- Choose category-management action: reorder, redistribute, reduce purchase, reprice, remove SKU, add replacement/new product, check supplier, create club task.
+- Control execution: who owns action, due date, affected clubs/SKU/categories, completion status.
+- Measure effect: sales, gross profit, margin, OOS reduction, turnover, stock release, write-off reduction.
+
+### Marketing Decision Route
+
+- Choose goal first, not an empty promo builder: attract guests, return guests, increase repeat visits, fill weak hours, grow bar, promote tournament/event, sell promo bundle.
+- Choose target group: saved guest group, CRM leads, new guests, risk guests, TOP/VIP, low-bar guests, weak-hour visitors.
+- Choose mechanic: discount, bonus, promo bundle, mission/challenge, coupon, tournament, personal offer, referral mechanic.
+- Configure rules: period, clubs, products/services, limits, budget, participation rules, anti-fraud constraints.
+- Choose channel: in-club announcement, CRM task to administrator, Telegram/MAX, SMS/call, push/mobile app, social networks.
+- Measure effect: reach, contacts, visits, revenue, bar, repeat visits, cost, ROI.
+
+### UX Acceptance Rules
+
+- Default screens should show compact previews, not full raw tables.
+- Full reports should open separately, have breadcrumbs, filters, sorting, export, and responsive table/card layouts.
+- Filters should be collapsed or compact by default when they are not the primary task.
+- Buttons should be action-specific and named by user intent, not by internal data source.
+- Every major workflow should have a clear `next action` and a visible `effect` layer.
+- New sidebar items must be added when a feature becomes user-facing, otherwise the feature is considered undiscoverable.
+
 ## Stage 1. Management Dashboard
 
 Status: implemented; remains in production UX polish mode.
@@ -322,6 +405,116 @@ Acceptance criteria:
 - Staff personal data must be role-protected; expose only what is needed for operations.
 - Attachments may contain sensitive workplace information and need tenant scoping, access control, and retention rules.
 - Dates in UI should use `дд.мм.гггг`; money should show `руб`; counts and hours should be labeled.
+
+## Stage 9. Marketing Module
+
+Status: planned. This module should cover promo actions, guest mechanics, campaign communication, announcements, and measurable campaign effect. It should be designed around business goals first, not around an empty promo constructor.
+
+### Product Positioning
+
+Marketing in LeetPlus should help a club network stimulate demand and connect guest analytics with concrete offers:
+
+- fill weak hours and weak clubs;
+- increase repeat visits;
+- return inactive guests;
+- grow bar and promo bundle sales;
+- promote tournaments, events, birthdays, and full-club bookings;
+- create understandable mechanics for guests: bonuses, missions, challenges, coupons, bundles, and personal offers;
+- measure commercial effect after launch.
+
+Marketing should be connected to CRM groups and consent rules. At the current stage, public Langame write-back for automatic bonus issuance is not confirmed, so the first implementation should support planning, communication, manual execution, and effect analytics before automatic reward issuance.
+
+### Core Scenarios
+
+- Promo campaign for a saved guest group.
+- Promo bundle constructor: game time + bar + hookah/service/product combinations.
+- Weak-hour activation: offer for low-load hours or specific clubs.
+- Bar growth campaign: target guests with low bar share or promote bundle mechanics.
+- Reactivation campaign: risk/lost guests with controlled contact and return measurement.
+- New guest second-visit campaign.
+- Event/tournament promotion.
+- Manual announcement/campaign task for administrators.
+- Campaign performance review after launch.
+
+### Core Entities
+
+- Marketing campaign: goal, name, period, clubs, status, budget, owner.
+- Target group: saved guest group, CRM leads, segment, manual selection, or rule-based audience.
+- Promo mechanic: discount, bonus, promo bundle, mission/challenge, coupon, tournament, personal offer, referral mechanic.
+- Promo bundle: items/services, base price, promo price, margin estimate, validity rules.
+- Channel: in-club announcement, CRM task, Telegram/MAX, SMS/call, push/mobile app, social networks.
+- Consent snapshot: who can be contacted and by which channel.
+- Launch checklist: copy, channel, responsible user, schedule, approval.
+- Campaign result: contacts, reach, visits, revenue, bar, load, repeat visits, cost, ROI.
+
+### MVP 1. Campaign Planning And Manual Launch
+
+Goal: let a manager create a simple campaign from a business signal and control manual execution.
+
+- Add `/marketing` entry point and sidebar block when implementation starts.
+- Start from goal selection: attract guests, return guests, increase repeat visits, fill weak hours, grow bar, promote event, sell promo bundle.
+- Let the user choose a saved guest group or create one from guest filters.
+- Add campaign fields: goal, period, clubs, target group, channel, responsible user, deadline, note, status.
+- Generate CRM tasks for campaign execution when the channel requires manual contact.
+- Respect communication consent and show exclusions before launch.
+- Show a compact campaign list: planned, running, finished, canceled.
+- Show a campaign detail page with breadcrumbs, tasks, contacts, notes, and effect placeholders.
+
+Acceptance criteria:
+
+- A manager can create a campaign for a saved guest group without opening raw guest tables.
+- The campaign creates clear tasks for responsible users.
+- Guests without required consent are visible as excluded, not silently contacted.
+- Campaign facts remain tenant-scoped and are not overwritten by Langame sync.
+
+### MVP 2. Promo Bundles And Mechanics
+
+Goal: help clubs create commercially sane promo offers.
+
+- Add promo bundle constructor with game time, bar products, hookah/services, discount, and price.
+- Show estimated revenue, margin, and cost where data exists.
+- Add mechanic templates: second visit, weak hours, birthday/event, bar combo, tournament, referral, VIP/TOP guest.
+- Add limits: period, clubs, max uses, one per guest, minimum spend, group eligibility.
+- Add anti-fraud notes and manual approval before any automatic reward workflow.
+
+Acceptance criteria:
+
+- A manager can create a promo bundle with clear price and expected margin.
+- The UI explains the commercial tradeoff before launch.
+- The system can link a promo bundle to a campaign and target group.
+
+### MVP 3. Campaign Effect Analytics
+
+Goal: measure whether marketing actions produced useful commercial effect.
+
+- Add funnel: target group -> planned contacts -> completed contacts -> responded -> visited -> revenue -> bar -> repeat visits.
+- Compare before/after windows for selected campaign.
+- Show effect by club, group, channel, and responsible user.
+- Separate store-scoped revenue from unallocated online top-ups when attributing campaign effect.
+- Add CSV export for campaign results and contact outcomes.
+
+Acceptance criteria:
+
+- Commercial director sees which campaign produced visits and revenue.
+- Campaign effect does not claim precision where attribution is uncertain.
+- Online/unallocated top-ups are shown separately when they cannot be assigned to a club.
+
+### Future Marketing Capabilities
+
+- Automatic Telegram/MAX flows after legal/account/channel setup.
+- Push/mobile app integrations if an approved channel exists.
+- Guest-facing missions and gamification.
+- Bonus budget limits and anti-fraud controls.
+- Manual payout queue until a safe Langame write API is confirmed.
+- AI suggestions for campaign goals, target groups, copy, and mechanics after enough campaign history exists.
+
+### Key Data Rules
+
+- Communication requires consent, consent history, and unsubscribe support.
+- Campaign membership should be snapshotted so history does not change when a guest profile/group changes later.
+- Marketing should not store documents or unnecessary personal data.
+- Campaign results should preserve historical product, club, guest, and price context.
+- Money in campaign reports must show `руб`; dates must use `дд.мм.гггг`; guests, visits, hours, contacts, and units must be labeled.
 
 ## Continuous Polish
 

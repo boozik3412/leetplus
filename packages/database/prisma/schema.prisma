@@ -132,7 +132,8 @@ model User {
   importJobs                 ImportJob[]
   guestCrmEvents             GuestCrmEvent[]
   guestCrmLeads              GuestCrmLead[]
-  guestCrmTasks              GuestCrmTask[]
+  guestCrmTasks              GuestCrmTask[]              @relation("GuestCrmTaskCreatedBy")
+  assignedGuestCrmTasks      GuestCrmTask[]              @relation("GuestCrmTaskAssignedTo")
   guestCrmContactEvents      GuestCrmContactEvent[]
   guestStaffIdentityMappings GuestStaffIdentityMapping[]
   guestSavedFilters          GuestSavedFilter[]
@@ -672,6 +673,7 @@ model GuestCrmTask {
   guestId         String?
   leadId          String?
   createdByUserId String?
+  assignedToUserId String?
   title           String
   description     String?
   status          String    @default("OPEN")
@@ -684,13 +686,15 @@ model GuestCrmTask {
   audience      GuestAudience? @relation(fields: [audienceId], references: [id], onDelete: SetNull)
   guest         Guest?         @relation(fields: [guestId], references: [id], onDelete: SetNull)
   lead          GuestCrmLead?  @relation(fields: [leadId], references: [id], onDelete: SetNull)
-  createdByUser User?          @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdByUser User?          @relation("GuestCrmTaskCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  assignedToUser User?         @relation("GuestCrmTaskAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, status, dueAt], map: "guest_crm_task_status_due_idx")
   @@index([audienceId], map: "guest_crm_task_audience_idx")
   @@index([guestId], map: "guest_crm_task_guest_idx")
   @@index([leadId], map: "guest_crm_task_lead_idx")
   @@index([createdByUserId], map: "guest_crm_task_user_idx")
+  @@index([assignedToUserId], map: "guest_crm_task_assignee_idx")
 }
 
 model GuestCrmContactEvent {

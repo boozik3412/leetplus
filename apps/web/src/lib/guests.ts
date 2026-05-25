@@ -176,6 +176,14 @@ export type GuestCrmTask = {
   audience: { id: string; name: string } | null;
   guest: { id: string; displayName: string } | null;
   lead: { id: string; displayName: string } | null;
+  assignedToUser: { id: string; displayName: string; email: string } | null;
+};
+
+export type GuestCrmUser = {
+  id: string;
+  displayName: string;
+  email: string;
+  role: string;
 };
 
 export type GuestCrmContactEvent = {
@@ -576,6 +584,19 @@ export async function getGuestCrmTasks(): Promise<GuestCrmTask[]> {
   }
 
   return response.json() as Promise<GuestCrmTask[]>;
+}
+
+export async function getGuestCrmUsers(): Promise<GuestCrmUser[]> {
+  const response = await fetch(`${getApiUrl()}/guests/crm/users`, {
+    cache: "no-store",
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch guest CRM users");
+  }
+
+  return response.json() as Promise<GuestCrmUser[]>;
 }
 
 export async function getGuestCrmContactEvents(): Promise<

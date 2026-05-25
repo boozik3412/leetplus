@@ -8,6 +8,7 @@ import type {
   GuestCrmContactEvent,
   GuestCrmLead,
   GuestCrmTask,
+  GuestCrmUser,
   GuestListFilters,
 } from "@/lib/guests";
 
@@ -17,6 +18,7 @@ type GuestAudiencesPanelProps = {
   audiences: GuestAudience[];
   crmLeads: GuestCrmLead[];
   crmTasks: GuestCrmTask[];
+  crmUsers: GuestCrmUser[];
   crmContactEvents: GuestCrmContactEvent[];
 };
 
@@ -26,6 +28,7 @@ export function GuestAudiencesPanel({
   audiences,
   crmLeads,
   crmTasks,
+  crmUsers,
   crmContactEvents,
 }: GuestAudiencesPanelProps) {
   const router = useRouter();
@@ -46,6 +49,7 @@ export function GuestAudiencesPanel({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [taskAudienceId, setTaskAudienceId] = useState<string | null>(null);
   const [updatingTaskId, setUpdatingTaskId] = useState<string | null>(null);
+  const [assigningTaskId, setAssigningTaskId] = useState<string | null>(null);
   const [updatingLeadId, setUpdatingLeadId] = useState<string | null>(null);
   const [contactForm, setContactForm] = useState({
     leadId: "",
@@ -220,6 +224,36 @@ export function GuestAudiencesPanel({
       setError("Не удалось обновить CRM-задачу");
     } finally {
       setUpdatingTaskId(null);
+    }
+  }
+
+  async function updateTaskAssignee(
+    taskId: string,
+    assignedToUserId: string,
+  ) {
+    setAssigningTaskId(taskId);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/guests/crm/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assignedToUserId: assignedToUserId || null }),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as {
+          message?: string;
+        } | null;
+        setError(payload?.message ?? "Не удалось назначить ответственного");
+        return;
+      }
+
+      router.refresh();
+    } catch {
+      setError("Не удалось назначить ответственного");
+    } finally {
+      setAssigningTaskId(null);
     }
   }
 
@@ -701,6 +735,21 @@ export function GuestAudiencesPanel({
                   {task.audience?.name ?? task.lead?.displayName ?? "CRM"}
                   {task.dueAt ? ` · до ${formatDate(task.dueAt)}` : ""}
                 </p>
+                <select
+                  value={task.assignedToUser?.id ?? ""}
+                  onChange={(event) =>
+                    updateTaskAssignee(task.id, event.target.value)
+                  }
+                  disabled={assigningTaskId === task.id}
+                  className="mt-2 h-9 w-full rounded-md border border-zinc-300 bg-white px-2 text-xs font-semibold text-zinc-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+                >
+                  <option value="">Ответственный не назначен</option>
+                  {crmUsers.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.displayName}
+                    </option>
+                  ))}
+                </select>
                 <div className="mt-3 flex items-center justify-between gap-2">
                   <span
                     className={`shrink-0 rounded-full px-2 py-1 text-xs font-semibold ${taskStatusClass(task.status)}`}

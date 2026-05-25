@@ -6,6 +6,7 @@ import {
   getGuestCrmContactEvents,
   getGuestCrmLeads,
   getGuestCrmTasks,
+  getGuestCrmUsers,
   getGuests,
   type GuestListFilters,
 } from "@/lib/guests";
@@ -21,12 +22,13 @@ export default async function GuestCrmPage() {
     direction: "desc",
   };
 
-  const [guestList, audiences, crmLeads, crmTasks, crmContactEvents] =
+  const [guestList, audiences, crmLeads, crmTasks, crmUsers, crmContactEvents] =
     await Promise.all([
       getGuests(baseFilters),
       getGuestAudiences(),
       getGuestCrmLeads(),
       getGuestCrmTasks(),
+      getGuestCrmUsers(),
       getGuestCrmContactEvents(),
     ]);
 
@@ -82,6 +84,7 @@ export default async function GuestCrmPage() {
           audiences={audiences}
           crmLeads={crmLeads}
           crmTasks={crmTasks}
+          crmUsers={crmUsers}
           crmContactEvents={crmContactEvents}
         />
       </div>

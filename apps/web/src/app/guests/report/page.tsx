@@ -8,6 +8,7 @@ import {
   getGuestCrmContactEvents,
   getGuestCrmLeads,
   getGuestCrmTasks,
+  getGuestCrmUsers,
   getGuestFilterOptions,
   getGuestSavedFilters,
   getGuests,
@@ -158,6 +159,7 @@ export default async function GuestFullReportPage({
     audiences,
     crmLeads,
     crmTasks,
+    crmUsers,
     crmContactEvents,
   ] = await Promise.all([
     getGuests(filters),
@@ -166,6 +168,7 @@ export default async function GuestFullReportPage({
     getGuestAudiences(),
     getGuestCrmLeads(),
     getGuestCrmTasks(),
+    getGuestCrmUsers(),
     getGuestCrmContactEvents(),
   ]);
   const effectiveFilters: GuestListFilters = {
@@ -244,6 +247,7 @@ export default async function GuestFullReportPage({
           audiences={audiences}
           crmLeads={crmLeads}
           crmTasks={crmTasks}
+          crmUsers={crmUsers}
           crmContactEvents={crmContactEvents}
         />
 

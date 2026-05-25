@@ -28,6 +28,7 @@ import {
   type GuestCrmTask,
   type GuestCrmTaskDto,
   type GuestCrmTaskUpdateDto,
+  type GuestCrmUser,
   type GuestCrmUpdateDto,
   type GuestExportFile,
   type GuestFilterOptions,
@@ -161,6 +162,13 @@ export class GuestsController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<GuestCrmTask[]> {
     return this.guestsService.getGuestCrmTasks(user);
+  }
+
+  @Get('crm/users')
+  getGuestCrmUsers(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<GuestCrmUser[]> {
+    return this.guestsService.getGuestCrmUsers(user);
   }
 
   @Get('crm/contact-events')

@@ -78,6 +78,7 @@ export type GuestCrmTaskStatus = 'OPEN' | 'IN_PROGRESS' | 'DONE' | 'CANCELED';
 
 export type GuestCrmTaskUpdateDto = {
   status?: GuestCrmTaskStatus | null;
+  assignedToUserId?: string | null;
 };
 
 export type GuestCrmContactEventDto = {
@@ -88,6 +89,13 @@ export type GuestCrmContactEventDto = {
   result?: string | null;
   note?: string | null;
   contactedAt?: string | null;
+};
+
+export type GuestCrmUser = {
+  id: string;
+  displayName: string;
+  email: string;
+  role: string;
 };
 
 export type StaffControlQuery = GuestsSummaryQuery;
@@ -302,6 +310,7 @@ export type GuestCrmTask = {
   audience: { id: string; name: string } | null;
   guest: { id: string; displayName: string } | null;
   lead: { id: string; displayName: string } | null;
+  assignedToUser: { id: string; displayName: string; email: string } | null;
 };
 
 export type GuestCrmContactEvent = {
@@ -1201,10 +1210,27 @@ export class GuestsService {
         audience: { select: { id: true, name: true } },
         guest: { select: this.guestSelect() },
         lead: true,
+        assignedToUser: { select: { id: true, fullName: true, email: true } },
       },
     });
 
     return rows.map((row) => this.toGuestCrmTask(row));
+  }
+
+  async getGuestCrmUsers(user: AuthenticatedUser): Promise<GuestCrmUser[]> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const rows = await this.prisma.user.findMany({
+      where: { tenantId },
+      orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
+      select: { id: true, fullName: true, email: true, role: true },
+    });
+
+    return rows.map((row) => ({
+      id: row.id,
+      displayName: row.fullName ?? row.email,
+      email: row.email,
+      role: row.role,
+    }));
   }
 
   async getGuestCrmContactEvents(
@@ -1259,6 +1285,7 @@ export class GuestsService {
         audience: { select: { id: true, name: true } },
         guest: { select: this.guestSelect() },
         lead: true,
+        assignedToUser: { select: { id: true, fullName: true, email: true } },
       },
     });
 
@@ -1347,24 +1374,35 @@ export class GuestsService {
     const { tenantId } = await this.tenantContextService.resolve(user);
     const existing = await this.prisma.guestCrmTask.findFirst({
       where: { id, tenantId },
-      select: { id: true },
+      select: { id: true, status: true, completedAt: true },
     });
 
     if (!existing) {
       throw new NotFoundException('CRM task not found');
     }
 
-    const status = this.resolveCrmTaskStatus(dto.status);
+    const shouldUpdateStatus = 'status' in dto;
+    const status = shouldUpdateStatus
+      ? this.resolveCrmTaskStatus(dto.status)
+      : existing.status;
+    const shouldUpdateAssignee = 'assignedToUserId' in dto;
+    const assignedToUserId = shouldUpdateAssignee
+      ? await this.resolveCrmTaskAssignee(tenantId, dto.assignedToUserId)
+      : undefined;
     const row = await this.prisma.guestCrmTask.update({
       where: { id },
       data: {
         status,
-        completedAt: status === 'DONE' ? new Date() : null,
+        ...(shouldUpdateAssignee ? { assignedToUserId } : {}),
+        ...(shouldUpdateStatus
+          ? { completedAt: status === 'DONE' ? new Date() : null }
+          : {}),
       },
       include: {
         audience: { select: { id: true, name: true } },
         guest: { select: this.guestSelect() },
         lead: true,
+        assignedToUser: { select: { id: true, fullName: true, email: true } },
       },
     });
 
@@ -4188,7 +4226,20 @@ export class GuestsService {
       phoneMasked: string | null;
       phoneEncrypted: string | null;
     } | null;
+    assignedToUser?: {
+      id: string;
+      fullName: string | null;
+      email: string;
+    } | null;
   }): GuestCrmTask {
+    const assignedToUser = row.assignedToUser
+      ? {
+          id: row.assignedToUser.id,
+          displayName: row.assignedToUser.fullName ?? row.assignedToUser.email,
+          email: row.assignedToUser.email,
+        }
+      : null;
+
     return {
       id: row.id,
       title: row.title,
@@ -4223,6 +4274,7 @@ export class GuestsService {
               'Ручной CRM-гость',
           }
         : null,
+      assignedToUser,
     };
   }
 
@@ -4293,6 +4345,28 @@ export class GuestsService {
     }
 
     return 'OPEN';
+  }
+
+  private async resolveCrmTaskAssignee(
+    tenantId: string,
+    userId?: string | null,
+  ) {
+    const normalized = this.normalizeText(userId, 80);
+
+    if (!normalized) {
+      return null;
+    }
+
+    const assignee = await this.prisma.user.findFirst({
+      where: { id: normalized, tenantId },
+      select: { id: true },
+    });
+
+    if (!assignee) {
+      throw new NotFoundException('CRM task assignee not found');
+    }
+
+    return assignee.id;
   }
 
   private resolvePhoneConsentStatus(

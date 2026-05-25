@@ -130,12 +130,13 @@ Status: MVP 1 read-only guest analytics is live in production. Automatic rewards
 - Done: audience CRM panel now supports consent and unsubscribe handling for existing manual CRM leads; if a matched contact is marked unsubscribed, the linked guest is moved to `DO_NOT_CONTACT` with a CRM event.
 - Done: audience CRM panel now has CRM contact history v1: users can record contact channel, date, result, and note for manual leads; events are tenant-scoped and linked to the matched guest when available.
 - Done: guest CRM now has a dedicated `/guests/crm` entry point and a separate sidebar item under `Гости`, so audiences, manual leads, CRM tasks, consents, and contact history are discoverable without opening the full report anchor.
+- Done: CRM tasks now support tenant-scoped assignees from LeetPlus users; the CRM workspace and audience panel show/select the responsible user for each task.
 - Current limitation: `all_operations_log` is stored and summarized, but it still does not expose a reliable administrator identifier. `log_cash_transaction/list` currently returns errors on production sources, so cashier analytics starts from working shifts.
 - Current limitation: PC-count parsing is defensive because real `global/*` payload shape may differ by Langame source; production verification should confirm `computerCount` is filled for each club.
 - Planned data foundation: guests, guest groups, balances, bonus balances, sessions, transactions, all operations log, product expenses by guest, clubs, tariffs, shifts, and PC context.
 - Next: connect operation categories to concrete administrator shifts when Langame exposes a reliable operator identifier in operation/cash logs.
 - Next: verify production `/dashboard` current-day load percentage after deploy of the session-overlap calculation.
-- Next: add task assignees and campaign-ready workflow for saved audiences and manual CRM guests.
+- Next: add campaign-ready workflow for saved audiences and manual CRM guests.
 - Planned analytics: RFM, retention, churn risk, heatmaps, LTV, bonus load, campaign effect, and guest-flow forecasts.
 - Planned CRM layer: segments, saved audiences, CRM statuses, notes, tasks, communication history, and next-best-action recommendations.
 - Planned loyalty/gamification: missions, rewards, budgets, limits, anti-fraud, and manual payout queue until a safe Langame write API is confirmed.

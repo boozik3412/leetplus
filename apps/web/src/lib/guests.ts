@@ -168,7 +168,7 @@ export type GuestCrmTask = {
   id: string;
   title: string;
   description: string | null;
-  status: string;
+  status: GuestCrmTaskStatus;
   dueAt: string | null;
   completedAt: string | null;
   createdAt: string;
@@ -177,6 +177,57 @@ export type GuestCrmTask = {
   guest: { id: string; displayName: string } | null;
   lead: { id: string; displayName: string } | null;
   assignedToUser: { id: string; displayName: string; email: string } | null;
+};
+
+export type GuestCrmTaskStatus =
+  | "OPEN"
+  | "IN_PROGRESS"
+  | "DONE"
+  | "CANCELED";
+
+export type GuestCrmTaskSortKey =
+  | "dueAt"
+  | "createdAt"
+  | "updatedAt"
+  | "status"
+  | "target"
+  | "assignee";
+
+export type GuestCrmTaskTargetType = "all" | "group" | "guest" | "lead";
+
+export type GuestCrmTaskFilters = {
+  status?: GuestCrmTaskStatus | "all";
+  assignedToUserId?: string;
+  targetType?: GuestCrmTaskTargetType;
+  search?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  sort?: GuestCrmTaskSortKey;
+  direction?: "asc" | "desc";
+  pageSize?: string;
+};
+
+export type GuestCrmTaskReport = {
+  status: GuestCrmTaskStatus | "all";
+  assignedToUserId: string | null;
+  targetType: GuestCrmTaskTargetType;
+  search: string | null;
+  dateFrom: string | null;
+  dateTo: string | null;
+  sort: GuestCrmTaskSortKey;
+  direction: "asc" | "desc";
+  pageSize: number;
+  totalRows: number;
+  summary: {
+    open: number;
+    inProgress: number;
+    done: number;
+    canceled: number;
+    overdue: number;
+    withAssignee: number;
+    withoutAssignee: number;
+  };
+  rows: GuestCrmTask[];
 };
 
 export type GuestCrmUser = {
@@ -584,6 +635,24 @@ export async function getGuestCrmTasks(): Promise<GuestCrmTask[]> {
   }
 
   return response.json() as Promise<GuestCrmTask[]>;
+}
+
+export async function getGuestCrmTaskReport(
+  filters: GuestCrmTaskFilters = {},
+): Promise<GuestCrmTaskReport> {
+  const response = await fetch(
+    `${getApiUrl()}/guests/crm/tasks/report${query(filters)}`,
+    {
+      cache: "no-store",
+      headers: await getAuthHeaders(),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch guest CRM task report");
+  }
+
+  return response.json() as Promise<GuestCrmTaskReport>;
 }
 
 export async function getGuestCrmUsers(): Promise<GuestCrmUser[]> {

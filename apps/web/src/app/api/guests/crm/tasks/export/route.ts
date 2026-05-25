@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { getApiUrl, getAuthHeaders, readApiError } from "@/lib/api";
-import { proxyJsonRequest } from "@/lib/proxy";
 
 export async function GET(request: Request) {
   const headers = await getAuthHeaders();
@@ -13,10 +12,13 @@ export async function GET(request: Request) {
   }
 
   const url = new URL(request.url);
-  const response = await fetch(`${getApiUrl()}/guests/crm/tasks${url.search}`, {
-    headers,
-    cache: "no-store",
-  });
+  const response = await fetch(
+    `${getApiUrl()}/guests/crm/tasks/export${url.search}`,
+    {
+      headers,
+      cache: "no-store",
+    },
+  );
 
   if (!response.ok) {
     return NextResponse.json(
@@ -25,9 +27,14 @@ export async function GET(request: Request) {
     );
   }
 
-  return NextResponse.json(await response.json());
-}
-
-export async function POST(request: Request) {
-  return proxyJsonRequest(request, "/guests/crm/tasks", "POST");
+  return new Response(await response.arrayBuffer(), {
+    status: response.status,
+    headers: {
+      "Content-Type":
+        response.headers.get("content-type") ?? "application/octet-stream",
+      "Content-Disposition":
+        response.headers.get("content-disposition") ??
+        'attachment; filename="leetplus-crm-tasks.csv"',
+    },
+  });
 }

@@ -85,6 +85,28 @@ export type GuestCrmTaskUpdateDto = {
   assignedToUserId?: string | null;
 };
 
+export type GuestCrmTaskSortKey =
+  | 'dueAt'
+  | 'createdAt'
+  | 'updatedAt'
+  | 'status'
+  | 'target'
+  | 'assignee';
+
+export type GuestCrmTaskTargetType = 'all' | 'group' | 'guest' | 'lead';
+
+export type GuestCrmTaskReportQuery = {
+  status?: GuestCrmTaskStatus | 'all';
+  assignedToUserId?: string;
+  targetType?: GuestCrmTaskTargetType;
+  search?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  sort?: GuestCrmTaskSortKey;
+  direction?: 'asc' | 'desc';
+  pageSize?: string;
+};
+
 export type GuestCrmContactEventDto = {
   audienceId?: string | null;
   guestId?: string | null;
@@ -306,7 +328,7 @@ export type GuestCrmTask = {
   id: string;
   title: string;
   description: string | null;
-  status: string;
+  status: GuestCrmTaskStatus;
   dueAt: string | null;
   completedAt: string | null;
   createdAt: string;
@@ -315,6 +337,29 @@ export type GuestCrmTask = {
   guest: { id: string; displayName: string } | null;
   lead: { id: string; displayName: string } | null;
   assignedToUser: { id: string; displayName: string; email: string } | null;
+};
+
+export type GuestCrmTaskReport = {
+  status: GuestCrmTaskStatus | 'all';
+  assignedToUserId: string | null;
+  targetType: GuestCrmTaskTargetType;
+  search: string | null;
+  dateFrom: string | null;
+  dateTo: string | null;
+  sort: GuestCrmTaskSortKey;
+  direction: 'asc' | 'desc';
+  pageSize: number;
+  totalRows: number;
+  summary: {
+    open: number;
+    inProgress: number;
+    done: number;
+    canceled: number;
+    overdue: number;
+    withAssignee: number;
+    withoutAssignee: number;
+  };
+  rows: GuestCrmTask[];
 };
 
 export type GuestCrmContactEvent = {
@@ -1204,12 +1249,45 @@ export class GuestsService {
     return this.toGuestCrmLead(row);
   }
 
-  async getGuestCrmTasks(user: AuthenticatedUser): Promise<GuestCrmTask[]> {
+  async getGuestCrmTaskReport(
+    user: AuthenticatedUser,
+    query: GuestCrmTaskReportQuery = {},
+  ): Promise<GuestCrmTaskReport> {
     const { tenantId } = await this.tenantContextService.resolve(user);
+    const status = this.resolveCrmTaskStatusFilter(query.status);
+    const targetType = this.resolveCrmTaskTargetType(query.targetType);
+    const search = this.normalizeText(query.search, 120);
+    const sort = this.resolveCrmTaskSort(query.sort);
+    const direction = query.direction === 'asc' ? 'asc' : 'desc';
+    const pageSize = this.resolvePositiveInteger(query.pageSize, 200, 10, 1000);
+    const where = this.buildCrmTaskWhere(tenantId, query);
+
+    if (status !== 'all') {
+      where.status = status;
+    }
+
+    if (query.assignedToUserId) {
+      const assignedToUserId = await this.resolveCrmTaskAssignee(
+        tenantId,
+        query.assignedToUserId,
+      );
+      where.assignedToUserId = assignedToUserId;
+    }
+
+    if (targetType === 'group') {
+      where.audienceId = { not: null };
+    } else if (targetType === 'guest') {
+      where.guestId = { not: null };
+    } else if (targetType === 'lead') {
+      where.leadId = { not: null };
+    }
+
+    if (search) {
+      where.OR = this.buildCrmTaskSearch(search);
+    }
+
     const rows = await this.prisma.guestCrmTask.findMany({
-      where: { tenantId },
-      orderBy: [{ status: 'asc' }, { dueAt: 'asc' }, { createdAt: 'desc' }],
-      take: 50,
+      where,
       include: {
         audience: { select: { id: true, name: true } },
         guest: { select: this.guestSelect() },
@@ -1217,8 +1295,80 @@ export class GuestsService {
         assignedToUser: { select: { id: true, fullName: true, email: true } },
       },
     });
+    const taskRows = rows
+      .map((row) => this.toGuestCrmTask(row))
+      .sort((first, second) =>
+        this.compareCrmTaskRows(first, second, sort, direction),
+      );
 
-    return rows.map((row) => this.toGuestCrmTask(row));
+    return {
+      status,
+      assignedToUserId: query.assignedToUserId ?? null,
+      targetType,
+      search,
+      dateFrom: query.dateFrom ?? null,
+      dateTo: query.dateTo ?? null,
+      sort,
+      direction,
+      pageSize,
+      totalRows: taskRows.length,
+      summary: this.buildCrmTaskSummary(taskRows),
+      rows: taskRows.slice(0, pageSize),
+    };
+  }
+
+  async getGuestCrmTasks(user: AuthenticatedUser): Promise<GuestCrmTask[]> {
+    const report = await this.getGuestCrmTaskReport(user, {
+      pageSize: '50',
+      sort: 'dueAt',
+      direction: 'asc',
+    });
+
+    return report.rows;
+  }
+
+  async exportGuestCrmTasks(
+    user: AuthenticatedUser,
+    query: GuestCrmTaskReportQuery = {},
+  ): Promise<GuestExportFile> {
+    const report = await this.getGuestCrmTaskReport(user, {
+      ...query,
+      pageSize: '1000',
+    });
+    const csvRows: CsvCell[][] = [
+      [
+        'Статус',
+        'Задача',
+        'Цель',
+        'Группа',
+        'Гость',
+        'CRM-гость',
+        'Ответственный',
+        'Дедлайн',
+        'Закрыта',
+        'Создана',
+        'Описание',
+      ],
+      ...report.rows.map((row) => [
+        this.crmTaskStatusExportLabel(row.status),
+        row.title,
+        this.crmTaskTargetLabel(row),
+        row.audience?.name ?? null,
+        row.guest?.displayName ?? null,
+        row.lead?.displayName ?? null,
+        row.assignedToUser?.displayName ?? null,
+        this.formatExportDateTime(row.dueAt),
+        this.formatExportDateTime(row.completedAt),
+        this.formatExportDateTime(row.createdAt),
+        row.description,
+      ]),
+    ];
+
+    return {
+      fileName: `leetplus-crm-tasks-${report.dateFrom ?? 'all'}-${report.dateTo ?? 'all'}.csv`,
+      contentType: 'text/csv; charset=utf-8',
+      buffer: Buffer.from(this.toCsv(csvRows), 'utf8'),
+    };
   }
 
   async createGuestCrmTask(
@@ -4337,7 +4487,7 @@ export class GuestsService {
       id: row.id,
       title: row.title,
       description: row.description,
-      status: row.status,
+      status: this.resolveCrmTaskStatus(row.status),
       dueAt: this.toIsoDateTime(row.dueAt),
       completedAt: this.toIsoDateTime(row.completedAt),
       createdAt:
@@ -4440,6 +4590,198 @@ export class GuestsService {
         ? (row.createdByUser.fullName ?? row.createdByUser.email)
         : null,
     };
+  }
+
+  private buildCrmTaskWhere(
+    tenantId: string,
+    query: GuestCrmTaskReportQuery,
+  ): Prisma.GuestCrmTaskWhereInput {
+    const where: Prisma.GuestCrmTaskWhereInput = { tenantId };
+    const dateFrom = this.normalizeText(query.dateFrom, 20);
+    const dateTo = this.normalizeText(query.dateTo, 20);
+
+    if (dateFrom || dateTo) {
+      const dueAt: Prisma.DateTimeNullableFilter = {};
+
+      if (dateFrom) {
+        const from = this.parseDateInput(dateFrom, 'dateFrom');
+        from.setUTCHours(0, 0, 0, 0);
+        dueAt.gte = from;
+      }
+
+      if (dateTo) {
+        const to = this.parseDateInput(dateTo, 'dateTo');
+        to.setUTCHours(23, 59, 59, 999);
+        dueAt.lte = to;
+      }
+
+      where.dueAt = dueAt;
+    }
+
+    return where;
+  }
+
+  private buildCrmTaskSearch(search: string): Prisma.GuestCrmTaskWhereInput[] {
+    const textFilter = { contains: search, mode: 'insensitive' as const };
+
+    return [
+      { title: textFilter },
+      { description: textFilter },
+      { audience: { is: { name: textFilter } } },
+      { assignedToUser: { is: { fullName: textFilter } } },
+      { assignedToUser: { is: { email: textFilter } } },
+      { guest: { is: { externalGuestId: textFilter } } },
+      { guest: { is: { fullNameMasked: textFilter } } },
+      { guest: { is: { phoneMasked: textFilter } } },
+      { lead: { is: { fullNameMasked: textFilter } } },
+      { lead: { is: { phoneMasked: textFilter } } },
+      { lead: { is: { emailMasked: textFilter } } },
+    ];
+  }
+
+  private buildCrmTaskSummary(rows: GuestCrmTask[]) {
+    const now = new Date();
+
+    return rows.reduce(
+      (summary, row) => {
+        if (row.status === 'OPEN') {
+          summary.open += 1;
+        } else if (row.status === 'IN_PROGRESS') {
+          summary.inProgress += 1;
+        } else if (row.status === 'DONE') {
+          summary.done += 1;
+        } else if (row.status === 'CANCELED') {
+          summary.canceled += 1;
+        }
+
+        if (
+          row.dueAt &&
+          row.status !== 'DONE' &&
+          row.status !== 'CANCELED' &&
+          new Date(row.dueAt) < now
+        ) {
+          summary.overdue += 1;
+        }
+
+        if (row.assignedToUser) {
+          summary.withAssignee += 1;
+        } else {
+          summary.withoutAssignee += 1;
+        }
+
+        return summary;
+      },
+      {
+        open: 0,
+        inProgress: 0,
+        done: 0,
+        canceled: 0,
+        overdue: 0,
+        withAssignee: 0,
+        withoutAssignee: 0,
+      },
+    );
+  }
+
+  private compareCrmTaskRows(
+    first: GuestCrmTask,
+    second: GuestCrmTask,
+    sort: GuestCrmTaskSortKey,
+    direction: 'asc' | 'desc',
+  ) {
+    const modifier = direction === 'asc' ? 1 : -1;
+    const firstValue = this.crmTaskSortValue(first, sort);
+    const secondValue = this.crmTaskSortValue(second, sort);
+
+    if (firstValue < secondValue) {
+      return -1 * modifier;
+    }
+
+    if (firstValue > secondValue) {
+      return 1 * modifier;
+    }
+
+    return second.createdAt.localeCompare(first.createdAt);
+  }
+
+  private crmTaskSortValue(row: GuestCrmTask, sort: GuestCrmTaskSortKey) {
+    if (sort === 'status') {
+      const order: Record<GuestCrmTaskStatus, number> = {
+        OPEN: 1,
+        IN_PROGRESS: 2,
+        DONE: 3,
+        CANCELED: 4,
+      };
+      return order[row.status];
+    }
+
+    if (sort === 'target') {
+      return this.crmTaskTargetLabel(row).toLocaleLowerCase('ru-RU');
+    }
+
+    if (sort === 'assignee') {
+      return (
+        row.assignedToUser?.displayName.toLocaleLowerCase('ru-RU') ??
+        'яяя без ответственного'
+      );
+    }
+
+    return row[sort] ?? '9999-12-31T23:59:59.999Z';
+  }
+
+  private crmTaskTargetLabel(row: GuestCrmTask) {
+    return (
+      row.audience?.name ??
+      row.lead?.displayName ??
+      row.guest?.displayName ??
+      'Без цели'
+    );
+  }
+
+  private resolveCrmTaskStatusFilter(
+    value?: string | null,
+  ): GuestCrmTaskStatus | 'all' {
+    if (value === 'all') {
+      return 'all';
+    }
+
+    return this.resolveCrmTaskStatus(value);
+  }
+
+  private resolveCrmTaskSort(value?: string | null): GuestCrmTaskSortKey {
+    const allowed: GuestCrmTaskSortKey[] = [
+      'dueAt',
+      'createdAt',
+      'updatedAt',
+      'status',
+      'target',
+      'assignee',
+    ];
+
+    return allowed.includes(value as GuestCrmTaskSortKey)
+      ? (value as GuestCrmTaskSortKey)
+      : 'dueAt';
+  }
+
+  private resolveCrmTaskTargetType(
+    value?: string | null,
+  ): GuestCrmTaskTargetType {
+    if (value === 'group' || value === 'guest' || value === 'lead') {
+      return value;
+    }
+
+    return 'all';
+  }
+
+  private crmTaskStatusExportLabel(status: GuestCrmTaskStatus) {
+    const labels: Record<GuestCrmTaskStatus, string> = {
+      OPEN: 'Новая',
+      IN_PROGRESS: 'В работе',
+      DONE: 'Готово',
+      CANCELED: 'Отменена',
+    };
+
+    return labels[status];
   }
 
   private resolveCrmTaskStatus(value?: string | null): GuestCrmTaskStatus {

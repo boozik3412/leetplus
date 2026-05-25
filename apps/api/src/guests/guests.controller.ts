@@ -27,6 +27,8 @@ import {
   type GuestCrmContactEventDto,
   type GuestCrmTask,
   type GuestCrmTaskDto,
+  type GuestCrmTaskReport,
+  type GuestCrmTaskReportQuery,
   type GuestCrmTaskUpdateDto,
   type GuestCrmUser,
   type GuestCrmUpdateDto,
@@ -162,6 +164,31 @@ export class GuestsController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<GuestCrmTask[]> {
     return this.guestsService.getGuestCrmTasks(user);
+  }
+
+  @Get('crm/tasks/report')
+  getGuestCrmTaskReport(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: GuestCrmTaskReportQuery,
+  ): Promise<GuestCrmTaskReport> {
+    return this.guestsService.getGuestCrmTaskReport(user, query);
+  }
+
+  @Get('crm/tasks/export')
+  async exportGuestCrmTasks(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: GuestCrmTaskReportQuery,
+  ): Promise<StreamableFile> {
+    const file: GuestExportFile = await this.guestsService.exportGuestCrmTasks(
+      user,
+      query,
+    );
+
+    return new StreamableFile(file.buffer, {
+      type: file.contentType,
+      disposition: `attachment; filename="${file.fileName}"`,
+      length: file.buffer.byteLength,
+    });
   }
 
   @Post('crm/tasks')

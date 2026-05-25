@@ -30,6 +30,7 @@ const navGroups: NavGroup[] = [
       { href: "/guests/report#audiences", label: "Группы" },
       { href: "/guests/crm", label: "CRM" },
       { href: "/guests/crm#campaigns", label: "Кампании" },
+      { href: "/guests/crm/tasks", label: "Задачи CRM" },
     ],
   },
   {

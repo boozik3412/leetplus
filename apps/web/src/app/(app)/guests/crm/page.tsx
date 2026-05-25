@@ -57,6 +57,12 @@ export default async function GuestCrmPage() {
           </div>
           <div className="flex flex-wrap gap-2">
             <Link
+              href="/guests/crm/tasks"
+              className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+            >
+              Задачи CRM
+            </Link>
+            <Link
               href="/guests/report#audiences"
               className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
             >

@@ -18,6 +18,8 @@ import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import {
   GuestsService,
+  type GuestAudience,
+  type GuestAudienceDto,
   type GuestCrmUpdateDto,
   type GuestExportFile,
   type GuestFilterOptions,
@@ -88,6 +90,29 @@ export class GuestsController {
     @Param('id') id: string,
   ): Promise<{ id: string }> {
     return this.guestsService.deleteGuestSavedFilter(user, id);
+  }
+
+  @Get('audiences')
+  getGuestAudiences(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<GuestAudience[]> {
+    return this.guestsService.getGuestAudiences(user);
+  }
+
+  @Post('audiences')
+  createGuestAudience(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: GuestAudienceDto,
+  ): Promise<GuestAudience> {
+    return this.guestsService.createGuestAudience(user, dto);
+  }
+
+  @Delete('audiences/:id')
+  deleteGuestAudience(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<{ id: string }> {
+    return this.guestsService.deleteGuestAudience(user, id);
   }
 
   @Get('export')

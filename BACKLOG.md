@@ -1,6 +1,6 @@
 # LeetPlus Backlog
 
-Last updated: 2026-05-22
+Last updated: 2026-05-25
 
 This file is the source of truth for product backlog, near-term roadmap, planned modules, and deferred ideas. `PROJECT_STATE.md` should stay focused on current project state, workflow, production context, and data rules.
 
@@ -121,12 +121,13 @@ Status: MVP 1 read-only guest analytics is live in production. Automatic rewards
 - Done: `/guests/staff-control/operators` now has a server-side CSV export for the full filtered administrator comparison report.
 - Done: `/guests/staff-control/operations` now has a server-side CSV export for the full filtered operation-log type summary.
 - Done: `/guests/report` now has tenant-scoped saved filters for quick guest segments: save current filters, apply them later, and delete obsolete filters.
+- Done: `/guests/report` now has tenant-scoped saved audiences: save the current filtered guest selection as a snapshot with member rows, apply its filters later, and delete obsolete audiences.
 - Current limitation: `all_operations_log` is stored and summarized, but it still does not expose a reliable administrator identifier. `log_cash_transaction/list` currently returns errors on production sources, so cashier analytics starts from working shifts.
 - Current limitation: PC-count parsing is defensive because real `global/*` payload shape may differ by Langame source; production verification should confirm `computerCount` is filled for each club.
 - Planned data foundation: guests, guest groups, balances, bonus balances, sessions, transactions, all operations log, product expenses by guest, clubs, tariffs, shifts, and PC context.
 - Next: connect operation categories to concrete administrator shifts when Langame exposes a reliable operator identifier in operation/cash logs.
 - Next: verify production `/dashboard` current-day load percentage after deploy of the session-overlap calculation.
-- Next: add export for `/guests/report` and `/guests/staff-control`, then saved filters/audiences.
+- Next: add first CRM actions for saved audiences: task creation, next contact workflow, and campaign-ready consent checks.
 - Planned analytics: RFM, retention, churn risk, heatmaps, LTV, bonus load, campaign effect, and guest-flow forecasts.
 - Planned CRM layer: segments, saved audiences, CRM statuses, notes, tasks, communication history, and next-best-action recommendations.
 - Planned loyalty/gamification: missions, rewards, budgets, limits, anti-fraud, and manual payout queue until a safe Langame write API is confirmed.

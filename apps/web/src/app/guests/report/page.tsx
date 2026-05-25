@@ -1,8 +1,10 @@
 import Link from "next/link";
+import { GuestAudiencesPanel } from "@/components/guest-audiences-panel";
 import { GuestSavedFiltersPanel } from "@/components/guest-saved-filters-panel";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
 import {
+  getGuestAudiences,
   getGuestFilterOptions,
   getGuestSavedFilters,
   getGuests,
@@ -146,10 +148,11 @@ export default async function GuestFullReportPage({
     sort: searchParam(params.sort) as GuestListFilters["sort"],
     direction: searchParam(params.direction) as GuestListFilters["direction"],
   };
-  const [guestList, options, savedFilters] = await Promise.all([
+  const [guestList, options, savedFilters, audiences] = await Promise.all([
     getGuests(filters),
     getGuestFilterOptions(),
     getGuestSavedFilters(),
+    getGuestAudiences(),
   ]);
   const effectiveFilters: GuestListFilters = {
     ...filters,
@@ -219,6 +222,12 @@ export default async function GuestFullReportPage({
         <GuestSavedFiltersPanel
           currentFilters={effectiveFilters}
           savedFilters={savedFilters}
+        />
+
+        <GuestAudiencesPanel
+          currentFilters={effectiveFilters}
+          totalRows={guestList.totalRows}
+          audiences={audiences}
         />
 
         <ReportTable filters={filters} guestList={guestList} />

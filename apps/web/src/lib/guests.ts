@@ -125,6 +125,16 @@ export type GuestSavedFilter = {
   lastUsedAt: string | null;
 };
 
+export type GuestAudience = {
+  id: string;
+  name: string;
+  description: string | null;
+  filters: Omit<GuestListFilters, "page">;
+  guestsCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type GuestListResponse = {
   periodFrom: string;
   periodTo: string;
@@ -471,6 +481,19 @@ export async function getGuestSavedFilters(): Promise<GuestSavedFilter[]> {
   }
 
   return response.json() as Promise<GuestSavedFilter[]>;
+}
+
+export async function getGuestAudiences(): Promise<GuestAudience[]> {
+  const response = await fetch(`${getApiUrl()}/guests/audiences`, {
+    cache: "no-store",
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch guest audiences");
+  }
+
+  return response.json() as Promise<GuestAudience[]>;
 }
 
 export async function getStaffControl(

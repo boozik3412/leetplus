@@ -36,6 +36,8 @@ export type GuestSavedFilterDto = {
   filters?: GuestSavedFilterPayload;
 };
 
+export type GuestAudienceDto = GuestSavedFilterDto;
+
 export type StaffControlQuery = GuestsSummaryQuery;
 
 export type StaffOperatorSortKey =
@@ -201,6 +203,16 @@ export type GuestSavedFilter = {
   createdAt: string;
   updatedAt: string;
   lastUsedAt: string | null;
+};
+
+export type GuestAudience = {
+  id: string;
+  name: string;
+  description: string | null;
+  filters: GuestSavedFilterPayload;
+  guestsCount: number;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type GuestDetail = GuestDashboardRow & {
@@ -788,6 +800,90 @@ export class GuestsService {
     }
 
     await this.prisma.guestSavedFilter.delete({ where: { id } });
+
+    return { id };
+  }
+
+  async getGuestAudiences(user: AuthenticatedUser): Promise<GuestAudience[]> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const rows = await this.prisma.guestAudience.findMany({
+      where: { tenantId },
+      orderBy: [{ updatedAt: 'desc' }],
+      take: 50,
+    });
+
+    return rows.map((row) => this.toGuestAudience(row));
+  }
+
+  async createGuestAudience(
+    user: AuthenticatedUser,
+    dto: GuestAudienceDto = {},
+  ): Promise<GuestAudience> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const name = this.normalizeText(dto.name, 80);
+
+    if (!name) {
+      throw new BadRequestException('Audience name is required');
+    }
+
+    const rawFilters =
+      dto.filters && typeof dto.filters === 'object' ? dto.filters : {};
+    const filters = this.normalizeGuestSavedFilterPayload(rawFilters);
+    const normalizedFilters = this.guestSavedFilterPayload(
+      filters as unknown as Prisma.JsonValue,
+    );
+    const guestList = await this.buildGuestList(user, normalizedFilters);
+    const description = this.normalizeText(dto.description, 200);
+    const memberRows = guestList.rows.map((row) => ({
+      tenantId,
+      guestId: row.id,
+      externalDomain: row.externalDomain ?? '',
+      externalGuestId: row.externalGuestId,
+    }));
+
+    const audience = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.guestAudience.create({
+        data: {
+          tenantId,
+          createdByUserId: user.id,
+          name,
+          description,
+          filters,
+          guestsCount: memberRows.length,
+        },
+      });
+
+      for (let index = 0; index < memberRows.length; index += 1000) {
+        await tx.guestAudienceMember.createMany({
+          data: memberRows.slice(index, index + 1000).map((row) => ({
+            ...row,
+            audienceId: created.id,
+          })),
+          skipDuplicates: true,
+        });
+      }
+
+      return created;
+    });
+
+    return this.toGuestAudience(audience);
+  }
+
+  async deleteGuestAudience(
+    user: AuthenticatedUser,
+    id: string,
+  ): Promise<{ id: string }> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const existing = await this.prisma.guestAudience.findFirst({
+      where: { id, tenantId },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Audience not found');
+    }
+
+    await this.prisma.guestAudience.delete({ where: { id } });
 
     return { id };
   }
@@ -3501,6 +3597,28 @@ export class GuestsService {
       updatedAt:
         this.toIsoDateTime(row.updatedAt) ?? row.updatedAt.toISOString(),
       lastUsedAt: this.toIsoDateTime(row.lastUsedAt),
+    };
+  }
+
+  private toGuestAudience(row: {
+    id: string;
+    name: string;
+    description: string | null;
+    filters: Prisma.JsonValue;
+    guestsCount: number;
+    createdAt: Date;
+    updatedAt: Date;
+  }): GuestAudience {
+    return {
+      id: row.id,
+      name: row.name,
+      description: row.description,
+      filters: this.guestSavedFilterPayload(row.filters),
+      guestsCount: row.guestsCount,
+      createdAt:
+        this.toIsoDateTime(row.createdAt) ?? row.createdAt.toISOString(),
+      updatedAt:
+        this.toIsoDateTime(row.updatedAt) ?? row.updatedAt.toISOString(),
     };
   }
 

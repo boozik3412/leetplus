@@ -554,7 +554,7 @@ export async function getGuestAudiences(): Promise<GuestAudience[]> {
   });
 
   if (!response.ok) {
-    throw new Error("Failed to fetch guest audiences");
+    throw new Error("Failed to fetch guest groups");
   }
 
   return response.json() as Promise<GuestAudience[]>;

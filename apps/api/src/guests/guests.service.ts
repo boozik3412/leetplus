@@ -939,7 +939,7 @@ export class GuestsService {
     const name = this.normalizeText(dto.name, 80);
 
     if (!name) {
-      throw new BadRequestException('Audience name is required');
+      throw new BadRequestException('Group name is required');
     }
 
     const rawFilters =
@@ -996,7 +996,7 @@ export class GuestsService {
     });
 
     if (!existing) {
-      throw new NotFoundException('Audience not found');
+      throw new NotFoundException('Group not found');
     }
 
     await this.prisma.guestAudience.delete({ where: { id } });
@@ -1234,7 +1234,7 @@ export class GuestsService {
       : null;
 
     if (dto.audienceId && !audience) {
-      throw new NotFoundException('Audience not found');
+      throw new NotFoundException('Group not found');
     }
 
     const lead = dto.leadId
@@ -1269,7 +1269,7 @@ export class GuestsService {
 
     if (!audience && !lead && !guest) {
       throw new BadRequestException(
-        'CRM task must be linked to an audience, CRM lead, or guest',
+        'CRM task must be linked to a group, CRM lead, or guest',
       );
     }
 
@@ -1357,12 +1357,12 @@ export class GuestsService {
     });
 
     if (!audience) {
-      throw new NotFoundException('Audience not found');
+      throw new NotFoundException('Group not found');
     }
 
     const title =
       this.normalizeText(dto.title, 160) ??
-      `Связаться с аудиторией: ${audience.name}`;
+      `Связаться с группой: ${audience.name}`;
     const row = await this.prisma.guestCrmTask.create({
       data: {
         tenantId,
@@ -1371,7 +1371,7 @@ export class GuestsService {
         title,
         description:
           this.normalizeText(dto.description, 2000) ??
-          `Аудитория: ${audience.name}. Гостей: ${audience.guestsCount}.`,
+          `Группа: ${audience.name}. Гостей: ${audience.guestsCount}.`,
         dueAt: this.resolveOptionalDate(dto.dueAt),
       },
       include: {
@@ -1415,7 +1415,7 @@ export class GuestsService {
       : null;
 
     if (dto.audienceId && !audience) {
-      throw new NotFoundException('Audience not found');
+      throw new NotFoundException('Group not found');
     }
 
     const guestId = dto.guestId ?? lead?.matchedGuestId ?? null;
@@ -1432,7 +1432,7 @@ export class GuestsService {
 
     if (!lead && !audience && !guest) {
       throw new BadRequestException(
-        'Contact event must be linked to a lead, guest, or audience',
+        'Contact event must be linked to a lead, guest, or group',
       );
     }
 

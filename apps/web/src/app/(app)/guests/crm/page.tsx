@@ -50,7 +50,7 @@ export default async function GuestCrmPage() {
               CRM гостей
             </h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-500">
-              Рабочее место для ручных контактов, аудиторий, задач, согласий и
+              Рабочее место для ручных контактов, групп, задач, согласий и
               истории коммуникаций. Здесь можно вести заявки на мероприятия и
               брони до регистрации гостя в Langame.
             </p>
@@ -72,7 +72,7 @@ export default async function GuestCrmPage() {
         </div>
 
         <section className="mt-6 grid gap-3 md:grid-cols-4">
-          <CrmMetric title="Аудитории" value={audiences.length} />
+          <CrmMetric title="Группы" value={audiences.length} />
           <CrmMetric title="CRM-гости" value={crmLeads.length} />
           <CrmMetric title="Задачи" value={crmTasks.length} />
           <CrmMetric title="Контакты" value={crmContactEvents.length} />

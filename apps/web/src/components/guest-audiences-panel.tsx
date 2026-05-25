@@ -79,7 +79,7 @@ export function GuestAudiencesPanel({
     const trimmedName = name.trim();
 
     if (!trimmedName) {
-      setError("Введите название аудитории");
+      setError("Введите название группы");
       return;
     }
 
@@ -100,14 +100,14 @@ export function GuestAudiencesPanel({
         const payload = (await response.json().catch(() => null)) as {
           message?: string;
         } | null;
-        setError(payload?.message ?? "Не удалось сохранить аудиторию");
+        setError(payload?.message ?? "Не удалось сохранить группу");
         return;
       }
 
       setName("");
       router.refresh();
     } catch {
-      setError("Не удалось сохранить аудиторию");
+      setError("Не удалось сохранить группу");
     } finally {
       setIsSaving(false);
     }
@@ -126,13 +126,13 @@ export function GuestAudiencesPanel({
         const payload = (await response.json().catch(() => null)) as {
           message?: string;
         } | null;
-        setError(payload?.message ?? "Не удалось удалить аудиторию");
+        setError(payload?.message ?? "Не удалось удалить группу");
         return;
       }
 
       router.refresh();
     } catch {
-      setError("Не удалось удалить аудиторию");
+      setError("Не удалось удалить группу");
     } finally {
       setDeletingId(null);
     }
@@ -147,7 +147,7 @@ export function GuestAudiencesPanel({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: `Связаться с аудиторией: ${audience.name}`,
+          title: `Связаться с группой: ${audience.name}`,
         }),
       });
 
@@ -343,7 +343,7 @@ export function GuestAudiencesPanel({
 
   async function saveCampaignTask() {
     if (!campaignForm.target) {
-      setError("Выберите аудиторию или CRM-гостя для кампании");
+      setError("Выберите группу или CRM-гостя для кампании");
       return;
     }
 
@@ -360,7 +360,7 @@ export function GuestAudiencesPanel({
     const descriptionParts = [
       `Канал: ${campaignForm.channel}`,
       selectedAudience
-        ? `Аудитория: ${selectedAudience.name}. Гостей: ${formatNumber(
+        ? `Группа: ${selectedAudience.name}. Гостей: ${formatNumber(
             selectedAudience.guestsCount,
           )}.`
         : null,
@@ -417,14 +417,14 @@ export function GuestAudiencesPanel({
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div className="min-w-0">
           <p className="text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-300">
-            Аудитории
+            Группы
           </p>
           <h2 className="mt-1 text-lg font-semibold">
             Сохраненные выборки гостей
           </h2>
           <p className="mt-1 text-sm text-zinc-500">
             Текущий фильтр содержит {formatNumber(totalRows)} гостей. Снимок
-            сохранит состав аудитории для будущих CRM-действий.
+            сохранит состав группы для будущих CRM-действий.
           </p>
         </div>
         <div className="grid gap-2 sm:grid-cols-[minmax(12rem,1fr)_auto] lg:w-[34rem]">
@@ -441,7 +441,7 @@ export function GuestAudiencesPanel({
             disabled={isSaving}
             className="h-10 rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {isSaving ? "Сохраняю..." : "Сохранить аудиторию"}
+            {isSaving ? "Сохраняю..." : "Сохранить группу"}
           </button>
         </div>
       </div>
@@ -459,7 +459,7 @@ export function GuestAudiencesPanel({
               CRM-аналитика
             </p>
             <h3 className="mt-1 text-base font-semibold">
-              Кампании, контакты и аудитории
+              Кампании, контакты и группы
             </h3>
             <p className="mt-1 text-sm text-zinc-500">
               Коротко показывает, что уже запланировано, где есть просрочки и
@@ -475,7 +475,7 @@ export function GuestAudiencesPanel({
             />
             <CrmMetric label="Контакты" value={crmAnalytics.contactEvents} />
             <CrmMetric
-              label="Охват аудиторий"
+              label="Охват групп"
               value={crmAnalytics.audienceGuests}
               suffix="гостей"
             />
@@ -578,7 +578,7 @@ export function GuestAudiencesPanel({
         </div>
       ) : (
         <p className="mt-4 rounded-md border border-dashed border-zinc-300 px-3 py-3 text-sm text-zinc-500 dark:border-zinc-800">
-          Сохраненных аудиторий пока нет.
+          Сохраненных групп пока нет.
         </p>
       )}
 
@@ -725,7 +725,7 @@ export function GuestAudiencesPanel({
               Кампания
             </p>
             <h3 className="mt-1 text-sm font-semibold">
-              План контакта с аудиторией или CRM-гостем
+              План контакта с группой или CRM-гостем
             </h3>
             <p className="mt-1 text-xs text-zinc-500">
               Создает задачу с каналом, сроком и ответственным. Отправка сообщений
@@ -742,10 +742,10 @@ export function GuestAudiencesPanel({
                 }
                 className="h-9 rounded-md border border-zinc-300 bg-white px-2 text-xs font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
               >
-                <option value="">Выберите аудиторию или CRM-гостя</option>
+                <option value="">Выберите группу или CRM-гостя</option>
                 {audiences.map((audience) => (
                   <option key={audience.id} value={`audience:${audience.id}`}>
-                    Аудитория: {audience.name}
+                    Группа: {audience.name}
                   </option>
                 ))}
                 {crmLeads.map((lead) => (

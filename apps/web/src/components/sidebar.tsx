@@ -27,7 +27,7 @@ const navGroups: NavGroup[] = [
       { href: "/guests", label: "Дашборд гостей" },
       { href: "/guests#guest-list", label: "Список гостей" },
       { href: "/guests/report", label: "Полный отчет" },
-      { href: "/guests/report#audiences", label: "Аудитории" },
+      { href: "/guests/report#audiences", label: "Группы" },
       { href: "/guests/crm", label: "CRM" },
       { href: "/guests/crm#campaigns", label: "Кампании" },
     ],

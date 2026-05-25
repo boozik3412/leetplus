@@ -121,18 +121,18 @@ Status: MVP 1 read-only guest analytics is live in production. Automatic rewards
 - Done: `/guests/staff-control/operators` now has a server-side CSV export for the full filtered administrator comparison report.
 - Done: `/guests/staff-control/operations` now has a server-side CSV export for the full filtered operation-log type summary.
 - Done: `/guests/report` now has tenant-scoped saved filters for quick guest segments: save current filters, apply them later, and delete obsolete filters.
-- Done: `/guests/report` now has tenant-scoped saved audiences: save the current filtered guest selection as a snapshot with member rows, apply its filters later, and delete obsolete audiences.
-- Done: the `Гости` sidebar section now exposes distinct destinations for guest dashboard, guest list, full report, and saved audiences instead of duplicate links to the same page.
-- Done: `/guests/report#audiences` now starts the CRM workflow for audiences: users can create contact tasks for saved audiences and see the latest CRM tasks next to saved audience snapshots.
+- Done: `/guests/report` now has tenant-scoped saved groups: save the current filtered guest selection as a snapshot with member rows, apply its filters later, and delete obsolete groups.
+- Done: the `Гости` sidebar section now exposes distinct destinations for guest dashboard, guest list, full report, and saved groups instead of duplicate links to the same page.
+- Done: `/guests/report#audiences` now starts the CRM workflow for groups: users can create contact tasks for saved groups and see the latest CRM tasks next to saved group snapshots.
 - Done: manual CRM guests/leads can be added before Langame registration, with encrypted full name and phone storage; future guest sync links these leads to Langame guests by normalized phone hash and copies the CRM status/action into the matched guest only when the matched guest has no CRM status yet.
-- Done: manual CRM leads with a next action now automatically create linked CRM tasks, and the audience CRM panel supports task statuses: new, in progress, done, and canceled.
-- Done: manual CRM leads now capture phone/messenger communication consent v1; the consent status is visible in the audience CRM panel and is copied to the matched Langame guest during phone-based sync when the guest has no consent status yet.
-- Done: audience CRM panel now supports consent and unsubscribe handling for existing manual CRM leads; if a matched contact is marked unsubscribed, the linked guest is moved to `DO_NOT_CONTACT` with a CRM event.
-- Done: audience CRM panel now has CRM contact history v1: users can record contact channel, date, result, and note for manual leads; events are tenant-scoped and linked to the matched guest when available.
-- Done: guest CRM now has a dedicated `/guests/crm` entry point and a separate sidebar item under `Гости`, so audiences, manual leads, CRM tasks, consents, and contact history are discoverable without opening the full report anchor.
-- Done: CRM tasks now support tenant-scoped assignees from LeetPlus users; the CRM workspace and audience panel show/select the responsible user for each task.
-- Done: saved audiences and manual CRM guests now have a campaign-ready planning workflow: create a CRM task with target, channel, deadline, responsible user, and contact note before any automated messaging is introduced.
-- Done: audience CRM panel now has compact campaign analytics: active and overdue tasks, completed tasks, contact channels, contact results, saved audience coverage, and nearest deadlines.
+- Done: manual CRM leads with a next action now automatically create linked CRM tasks, and the group CRM panel supports task statuses: new, in progress, done, and canceled.
+- Done: manual CRM leads now capture phone/messenger communication consent v1; the consent status is visible in the group CRM panel and is copied to the matched Langame guest during phone-based sync when the guest has no consent status yet.
+- Done: group CRM panel now supports consent and unsubscribe handling for existing manual CRM leads; if a matched contact is marked unsubscribed, the linked guest is moved to `DO_NOT_CONTACT` with a CRM event.
+- Done: group CRM panel now has CRM contact history v1: users can record contact channel, date, result, and note for manual leads; events are tenant-scoped and linked to the matched guest when available.
+- Done: guest CRM now has a dedicated `/guests/crm` entry point and a separate sidebar item under `Гости`, so groups, manual leads, CRM tasks, consents, and contact history are discoverable without opening the full report anchor.
+- Done: CRM tasks now support tenant-scoped assignees from LeetPlus users; the CRM workspace and group panel show/select the responsible user for each task.
+- Done: saved groups and manual CRM guests now have a campaign-ready planning workflow: create a CRM task with target, channel, deadline, responsible user, and contact note before any automated messaging is introduced.
+- Done: group CRM panel now has compact campaign analytics: active and overdue tasks, completed tasks, contact channels, contact results, saved group coverage, and nearest deadlines.
 - Current limitation: `all_operations_log` is stored and summarized, but it still does not expose a reliable administrator identifier. `log_cash_transaction/list` currently returns errors on production sources, so cashier analytics starts from working shifts.
 - Current limitation: PC-count parsing is defensive because real `global/*` payload shape may differ by Langame source; production verification should confirm `computerCount` is filled for each club.
 - Planned data foundation: guests, guest groups, balances, bonus balances, sessions, transactions, all operations log, product expenses by guest, clubs, tariffs, shifts, and PC context.
@@ -140,7 +140,7 @@ Status: MVP 1 read-only guest analytics is live in production. Automatic rewards
 - Next: verify production `/dashboard` current-day load percentage after deploy of the session-overlap calculation.
 - Next: add CRM task filters, a full CRM work report, and export for campaign control.
 - Planned analytics: RFM, retention, churn risk, heatmaps, LTV, bonus load, campaign effect, and guest-flow forecasts.
-- Planned CRM layer: segments, saved audiences, CRM statuses, notes, tasks, communication history, and next-best-action recommendations.
+- Planned CRM layer: segments, saved groups, CRM statuses, notes, tasks, communication history, and next-best-action recommendations.
 - Planned loyalty/gamification: missions, rewards, budgets, limits, anti-fraud, and manual payout queue until a safe Langame write API is confirmed.
 - Planned channels: Telegram bot/Mini App first, MAX bot/Mini App later after legal/account setup; all channels require explicit consent and unsubscribe support.
 

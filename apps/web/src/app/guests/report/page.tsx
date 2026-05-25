@@ -1,8 +1,10 @@
 import Link from "next/link";
+import { GuestSavedFiltersPanel } from "@/components/guest-saved-filters-panel";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
 import {
   getGuestFilterOptions,
+  getGuestSavedFilters,
   getGuests,
   type GuestCrmStatus,
   type GuestDashboardRow,
@@ -144,10 +146,20 @@ export default async function GuestFullReportPage({
     sort: searchParam(params.sort) as GuestListFilters["sort"],
     direction: searchParam(params.direction) as GuestListFilters["direction"],
   };
-  const [guestList, options] = await Promise.all([
+  const [guestList, options, savedFilters] = await Promise.all([
     getGuests(filters),
     getGuestFilterOptions(),
+    getGuestSavedFilters(),
   ]);
+  const effectiveFilters: GuestListFilters = {
+    ...filters,
+    dateFrom: filters.dateFrom ?? guestList.periodFrom,
+    dateTo: filters.dateTo ?? guestList.periodTo,
+    pageSize: filters.pageSize ?? String(guestList.pageSize),
+    segment: filters.segment ?? guestList.segment,
+    sort: filters.sort ?? guestList.sort,
+    direction: filters.direction ?? guestList.direction,
+  };
 
   return (
     <main className="min-h-screen bg-zinc-50 px-5 py-5 text-zinc-950 dark:bg-zinc-950 dark:text-zinc-100">
@@ -202,6 +214,11 @@ export default async function GuestFullReportPage({
           options={options}
           periodFrom={guestList.periodFrom}
           periodTo={guestList.periodTo}
+        />
+
+        <GuestSavedFiltersPanel
+          currentFilters={effectiveFilters}
+          savedFilters={savedFilters}
         />
 
         <ReportTable filters={filters} guestList={guestList} />

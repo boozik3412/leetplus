@@ -115,6 +115,16 @@ export type GuestListFilters = GuestsSummaryFilters & {
   direction?: "asc" | "desc";
 };
 
+export type GuestSavedFilter = {
+  id: string;
+  name: string;
+  description: string | null;
+  filters: Omit<GuestListFilters, "page">;
+  createdAt: string;
+  updatedAt: string;
+  lastUsedAt: string | null;
+};
+
 export type GuestListResponse = {
   periodFrom: string;
   periodTo: string;
@@ -448,6 +458,19 @@ export async function getGuests(
   }
 
   return response.json() as Promise<GuestListResponse>;
+}
+
+export async function getGuestSavedFilters(): Promise<GuestSavedFilter[]> {
+  const response = await fetch(`${getApiUrl()}/guests/saved-filters`, {
+    cache: "no-store",
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch guest saved filters");
+  }
+
+  return response.json() as Promise<GuestSavedFilter[]>;
 }
 
 export async function getStaffControl(

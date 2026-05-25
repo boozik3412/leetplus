@@ -28,6 +28,14 @@ export type GuestListQuery = GuestsSummaryQuery & {
   direction?: 'asc' | 'desc';
 };
 
+export type GuestSavedFilterPayload = Omit<GuestListQuery, 'page'>;
+
+export type GuestSavedFilterDto = {
+  name?: string;
+  description?: string | null;
+  filters?: GuestSavedFilterPayload;
+};
+
 export type StaffControlQuery = GuestsSummaryQuery;
 
 export type StaffOperatorSortKey =
@@ -183,6 +191,16 @@ export type GuestExportFile = {
   fileName: string;
   contentType: string;
   buffer: Buffer;
+};
+
+export type GuestSavedFilter = {
+  id: string;
+  name: string;
+  description: string | null;
+  filters: GuestSavedFilterPayload;
+  createdAt: string;
+  updatedAt: string;
+  lastUsedAt: string | null;
 };
 
 export type GuestDetail = GuestDashboardRow & {
@@ -712,6 +730,66 @@ export class GuestsService {
       contentType: 'text/csv; charset=utf-8',
       buffer: Buffer.from(this.toCsv(csvRows), 'utf8'),
     };
+  }
+
+  async getGuestSavedFilters(
+    user: AuthenticatedUser,
+  ): Promise<GuestSavedFilter[]> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const rows = await this.prisma.guestSavedFilter.findMany({
+      where: { tenantId, report: 'guest_report' },
+      orderBy: [{ updatedAt: 'desc' }],
+      take: 50,
+    });
+
+    return rows.map((row) => this.toGuestSavedFilter(row));
+  }
+
+  async createGuestSavedFilter(
+    user: AuthenticatedUser,
+    dto: GuestSavedFilterDto = {},
+  ): Promise<GuestSavedFilter> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const name = this.normalizeText(dto.name, 80);
+
+    if (!name) {
+      throw new BadRequestException('Filter name is required');
+    }
+
+    const description = this.normalizeText(dto.description, 200);
+    const row = await this.prisma.guestSavedFilter.create({
+      data: {
+        tenantId,
+        createdByUserId: user.id,
+        report: 'guest_report',
+        name,
+        description,
+        filters: this.normalizeGuestSavedFilterPayload(
+          dto.filters && typeof dto.filters === 'object' ? dto.filters : {},
+        ),
+      },
+    });
+
+    return this.toGuestSavedFilter(row);
+  }
+
+  async deleteGuestSavedFilter(
+    user: AuthenticatedUser,
+    id: string,
+  ): Promise<{ id: string }> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const existing = await this.prisma.guestSavedFilter.findFirst({
+      where: { id, tenantId },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Saved filter not found');
+    }
+
+    await this.prisma.guestSavedFilter.delete({ where: { id } });
+
+    return { id };
   }
 
   private async buildGuestList(
@@ -3352,6 +3430,121 @@ export class GuestsService {
     }
 
     return trimmed.slice(0, maxLength);
+  }
+
+  private normalizeGuestSavedFilterPayload(
+    filters: GuestSavedFilterPayload,
+  ): Prisma.InputJsonObject {
+    const payload: Record<string, string> = {};
+    const dateFrom = this.normalizeText(filters.dateFrom, 20);
+    const dateTo = this.normalizeText(filters.dateTo, 20);
+    const storeId = this.normalizeText(filters.storeId, 120);
+    const guestGroupId = this.normalizeText(filters.guestGroupId, 120);
+    const search = this.normalizeText(filters.search, 120);
+
+    if (dateFrom) {
+      payload.dateFrom = dateFrom;
+    }
+    if (dateTo) {
+      payload.dateTo = dateTo;
+    }
+    if (storeId) {
+      payload.storeId = storeId;
+    }
+    if (guestGroupId) {
+      payload.guestGroupId = guestGroupId;
+    }
+    if (filters.segment) {
+      payload.segment = this.resolveSegment(filters.segment);
+    }
+    if (filters.crmStatus) {
+      const crmStatus = this.resolveCrmStatusFilter(filters.crmStatus);
+
+      if (crmStatus) {
+        payload.crmStatus = crmStatus;
+      }
+    }
+    if (search) {
+      payload.search = search;
+    }
+    if (filters.pageSize) {
+      payload.pageSize = String(
+        this.resolvePositiveInteger(filters.pageSize, 200, 10, 1000),
+      );
+    }
+    if (filters.sort) {
+      payload.sort = this.resolveSort(filters.sort);
+    }
+    if (filters.direction) {
+      payload.direction = this.resolveDirection(filters.direction);
+    }
+
+    return payload;
+  }
+
+  private toGuestSavedFilter(row: {
+    id: string;
+    name: string;
+    description: string | null;
+    filters: Prisma.JsonValue;
+    createdAt: Date;
+    updatedAt: Date;
+    lastUsedAt: Date | null;
+  }): GuestSavedFilter {
+    return {
+      id: row.id,
+      name: row.name,
+      description: row.description,
+      filters: this.guestSavedFilterPayload(row.filters),
+      createdAt:
+        this.toIsoDateTime(row.createdAt) ?? row.createdAt.toISOString(),
+      updatedAt:
+        this.toIsoDateTime(row.updatedAt) ?? row.updatedAt.toISOString(),
+      lastUsedAt: this.toIsoDateTime(row.lastUsedAt),
+    };
+  }
+
+  private guestSavedFilterPayload(
+    value: Prisma.JsonValue,
+  ): GuestSavedFilterPayload {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return {};
+    }
+
+    const raw = value as Record<string, unknown>;
+    const payload: GuestSavedFilterPayload = {};
+    const dateFrom = this.stringJsonField(raw.dateFrom);
+    const dateTo = this.stringJsonField(raw.dateTo);
+    const storeId = this.stringJsonField(raw.storeId);
+    const guestGroupId = this.stringJsonField(raw.guestGroupId);
+    const segment = this.stringJsonField(raw.segment);
+    const crmStatus = this.stringJsonField(raw.crmStatus);
+    const search = this.stringJsonField(raw.search);
+    const pageSize = this.stringJsonField(raw.pageSize);
+    const sort = this.stringJsonField(raw.sort);
+    const direction = this.stringJsonField(raw.direction);
+
+    if (dateFrom) payload.dateFrom = dateFrom;
+    if (dateTo) payload.dateTo = dateTo;
+    if (storeId) payload.storeId = storeId;
+    if (guestGroupId) payload.guestGroupId = guestGroupId;
+    if (segment)
+      payload.segment = segment as GuestSavedFilterPayload['segment'];
+    if (crmStatus) {
+      payload.crmStatus = crmStatus as GuestSavedFilterPayload['crmStatus'];
+    }
+    if (search) payload.search = search;
+    if (pageSize) payload.pageSize = pageSize;
+    if (sort) payload.sort = sort as GuestSavedFilterPayload['sort'];
+    if (direction) {
+      payload.direction = direction as GuestSavedFilterPayload['direction'];
+    }
+
+    return payload;
+  }
+
+  private stringJsonField(value: unknown) {
+    return typeof value === 'string' && value ? value : undefined;
   }
 
   private normalizeExternalUserId(value: string | null | undefined) {

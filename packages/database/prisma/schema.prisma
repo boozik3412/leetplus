@@ -100,6 +100,7 @@ model Tenant {
   guestDataProfileRuns       GuestDataProfileRun[]
   guestCrmEvents             GuestCrmEvent[]
   guestStaffIdentityMappings GuestStaffIdentityMapping[]
+  guestSavedFilters          GuestSavedFilter[]
 }
 
 model User {
@@ -119,6 +120,7 @@ model User {
   importJobs                 ImportJob[]
   guestCrmEvents             GuestCrmEvent[]
   guestStaffIdentityMappings GuestStaffIdentityMapping[]
+  guestSavedFilters          GuestSavedFilter[]
 
   @@index([tenantId])
 }
@@ -840,6 +842,25 @@ model GuestStaffIdentityMapping {
   @@index([tenantId], map: "guest_staff_identity_mapping_tenant_idx")
   @@index([guestId], map: "guest_staff_identity_mapping_guest_idx")
   @@index([createdByUserId], map: "guest_staff_identity_mapping_user_idx")
+}
+
+model GuestSavedFilter {
+  id              String   @id @default(uuid())
+  tenantId        String
+  createdByUserId String?
+  report          String   @default("guest_report")
+  name            String
+  description     String?
+  filters         Json
+  lastUsedAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant        Tenant @relation(fields: [tenantId], references: [id])
+  createdByUser User?  @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, report, createdAt], map: "guest_saved_filter_report_idx")
+  @@index([createdByUserId], map: "guest_saved_filter_user_idx")
 }
 
 model GuestDataProfileRun {

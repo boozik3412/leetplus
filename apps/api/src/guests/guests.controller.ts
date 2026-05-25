@@ -21,6 +21,8 @@ import {
   type GuestCrmUpdateDto,
   type GuestExportFile,
   type GuestFilterOptions,
+  type GuestSavedFilter,
+  type GuestSavedFilterDto,
   type GuestDetail,
   type GuestListQuery,
   type GuestListResponse,
@@ -63,6 +65,29 @@ export class GuestsController {
     @Query() query: GuestListQuery,
   ): Promise<GuestListResponse> {
     return this.guestsService.getGuests(user, query);
+  }
+
+  @Get('saved-filters')
+  getGuestSavedFilters(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<GuestSavedFilter[]> {
+    return this.guestsService.getGuestSavedFilters(user);
+  }
+
+  @Post('saved-filters')
+  createGuestSavedFilter(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: GuestSavedFilterDto,
+  ): Promise<GuestSavedFilter> {
+    return this.guestsService.createGuestSavedFilter(user, dto);
+  }
+
+  @Delete('saved-filters/:id')
+  deleteGuestSavedFilter(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<{ id: string }> {
+    return this.guestsService.deleteGuestSavedFilter(user, id);
   }
 
   @Get('export')

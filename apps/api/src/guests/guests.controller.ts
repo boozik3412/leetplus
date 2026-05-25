@@ -123,6 +123,21 @@ export class GuestsController {
     return this.guestsService.getStaffOperations(user, query);
   }
 
+  @Get('staff-control/operations/export')
+  async exportStaffOperations(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: StaffOperationsReportQuery,
+  ): Promise<StreamableFile> {
+    const file: GuestExportFile =
+      await this.guestsService.exportStaffOperations(user, query);
+
+    return new StreamableFile(file.buffer, {
+      type: file.contentType,
+      disposition: `attachment; filename="${file.fileName}"`,
+      length: file.buffer.byteLength,
+    });
+  }
+
   @Post('staff-control/identity-mappings')
   mapStaffIdentity(
     @CurrentUser() user: AuthenticatedUser,

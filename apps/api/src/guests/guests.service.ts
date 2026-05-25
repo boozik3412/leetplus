@@ -1172,6 +1172,39 @@ export class GuestsService {
     };
   }
 
+  async exportStaffOperations(
+    user: AuthenticatedUser,
+    query: StaffOperationsReportQuery = {},
+  ): Promise<GuestExportFile> {
+    const report = await this.getStaffOperations(user, query);
+    const csvRows: CsvCell[][] = [
+      [
+        'Категория',
+        'Тип операции',
+        'Количество',
+        'Сумма, руб',
+        'Последняя операция',
+        'Клубы',
+        'Источники Langame',
+      ],
+      ...report.rows.map((row) => [
+        this.staffOperationKindExportLabel(row.kind),
+        row.type,
+        row.count,
+        row.amount,
+        this.formatExportDateTime(row.lastSeenAt),
+        row.storeNames.join(', '),
+        row.externalDomains.join(', '),
+      ]),
+    ];
+
+    return {
+      fileName: `leetplus-staff-operations-${report.periodFrom}-${report.periodTo}.csv`,
+      contentType: 'text/csv; charset=utf-8',
+      buffer: Buffer.from(this.toCsv(csvRows), 'utf8'),
+    };
+  }
+
   async updateGuestCrm(
     user: AuthenticatedUser,
     id: string,
@@ -1998,6 +2031,23 @@ export class GuestsService {
     }
 
     return 'other';
+  }
+
+  private staffOperationKindExportLabel(kind: StaffOperationKind) {
+    switch (kind) {
+      case 'refunds':
+        return 'Возвраты и отмены';
+      case 'discounts':
+        return 'Скидки и бонусы';
+      case 'cash':
+        return 'Касса и деньги';
+      case 'guest':
+        return 'Гости';
+      case 'service':
+        return 'Смены и услуги';
+      case 'other':
+        return 'Прочее';
+    }
   }
 
   private async getStaffShiftSummary(

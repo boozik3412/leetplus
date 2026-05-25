@@ -125,6 +125,31 @@ function staffControlHref(report: {
   return `/guests/staff-control?${params.toString()}`;
 }
 
+function operationsExportHref(report: {
+  periodFrom: string;
+  periodTo: string;
+  storeId: string | null;
+  kind: StaffOperationKind | "all";
+  search: string | null;
+  sort: StaffOperationSortKey;
+  direction: "asc" | "desc";
+}) {
+  const params = new URLSearchParams();
+  params.set("dateFrom", report.periodFrom);
+  params.set("dateTo", report.periodTo);
+  if (report.storeId) {
+    params.set("storeId", report.storeId);
+  }
+  params.set("kind", report.kind);
+  params.set("sort", report.sort);
+  params.set("direction", report.direction);
+  if (report.search) {
+    params.set("search", report.search);
+  }
+
+  return `/api/guests/staff-control/operations/export?${params.toString()}`;
+}
+
 function sortHref(
   report: {
     periodFrom: string;
@@ -196,6 +221,12 @@ export default async function StaffOperationsReportPage({
               конкретному администратору здесь пока нет.
             </p>
           </div>
+          <Link
+            href={operationsExportHref(report)}
+            className="inline-flex min-h-10 items-center justify-center rounded-md border border-emerald-400/50 px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/30"
+          >
+            CSV
+          </Link>
           <Link
             href={staffControlHref(report)}
             className="inline-flex min-h-10 items-center justify-center rounded-md border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"

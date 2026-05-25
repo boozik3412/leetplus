@@ -22,6 +22,7 @@ import {
   type GuestAudienceDto,
   type GuestCrmLead,
   type GuestCrmLeadDto,
+  type GuestCrmLeadUpdateDto,
   type GuestCrmTask,
   type GuestCrmTaskDto,
   type GuestCrmTaskUpdateDto,
@@ -142,6 +143,15 @@ export class GuestsController {
     @Body() dto: GuestCrmLeadDto,
   ): Promise<GuestCrmLead> {
     return this.guestsService.createGuestCrmLead(user, dto);
+  }
+
+  @Patch('crm/leads/:id')
+  updateGuestCrmLead(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: GuestCrmLeadUpdateDto,
+  ): Promise<GuestCrmLead> {
+    return this.guestsService.updateGuestCrmLead(user, id, dto);
   }
 
   @Get('crm/tasks')

@@ -42,6 +42,7 @@ export function GuestAudiencesPanel({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [taskAudienceId, setTaskAudienceId] = useState<string | null>(null);
   const [updatingTaskId, setUpdatingTaskId] = useState<string | null>(null);
+  const [updatingLeadId, setUpdatingLeadId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function saveAudience() {
@@ -208,6 +209,36 @@ export function GuestAudiencesPanel({
       setError("Не удалось обновить CRM-задачу");
     } finally {
       setUpdatingTaskId(null);
+    }
+  }
+
+  async function updateLeadConsent(
+    leadId: string,
+    status: GuestCrmLead["phoneConsentStatus"],
+  ) {
+    setUpdatingLeadId(leadId);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/guests/crm/leads/${leadId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phoneConsentStatus: status }),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as {
+          message?: string;
+        } | null;
+        setError(payload?.message ?? "Не удалось обновить согласие");
+        return;
+      }
+
+      router.refresh();
+    } catch {
+      setError("Не удалось обновить согласие");
+    } finally {
+      setUpdatingLeadId(null);
     }
   }
 
@@ -470,6 +501,22 @@ export function GuestAudiencesPanel({
                 <p className="mt-1 text-xs font-semibold text-zinc-500">
                   {consentLabel(lead.phoneConsentStatus)}
                 </p>
+                <select
+                  value={lead.phoneConsentStatus}
+                  onChange={(event) =>
+                    updateLeadConsent(
+                      lead.id,
+                      event.target.value as GuestCrmLead["phoneConsentStatus"],
+                    )
+                  }
+                  disabled={updatingLeadId === lead.id}
+                  className="mt-2 h-9 w-full rounded-md border border-zinc-300 bg-white px-2 text-xs font-semibold text-zinc-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+                >
+                  <option value="UNKNOWN">Согласие не указано</option>
+                  <option value="GRANTED">Согласие есть</option>
+                  <option value="DENIED">Согласия нет</option>
+                  <option value="UNSUBSCRIBED">Отписался</option>
+                </select>
                 {lead.matchedGuestId ? (
                   <Link
                     href={`/guests/${lead.matchedGuestId}`}

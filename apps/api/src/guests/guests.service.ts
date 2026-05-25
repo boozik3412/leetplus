@@ -63,6 +63,11 @@ export type GuestCrmLeadDto = {
   phoneConsentSource?: string | null;
 };
 
+export type GuestCrmLeadUpdateDto = {
+  phoneConsentStatus?: GuestCommunicationConsentStatus | null;
+  phoneConsentSource?: string | null;
+};
+
 export type GuestCrmTaskDto = {
   title?: string | null;
   description?: string | null;
@@ -1060,6 +1065,104 @@ export class GuestsService {
           dueAt: row.nextContactAt,
         },
       });
+    }
+
+    return this.toGuestCrmLead(row);
+  }
+
+  async updateGuestCrmLead(
+    user: AuthenticatedUser,
+    id: string,
+    dto: GuestCrmLeadUpdateDto = {},
+  ): Promise<GuestCrmLead> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const existing = await this.prisma.guestCrmLead.findFirst({
+      where: { id, tenantId },
+      select: { id: true, matchedGuestId: true },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('CRM lead not found');
+    }
+
+    const phoneConsentStatus = this.resolvePhoneConsentStatus(
+      dto.phoneConsentStatus,
+    );
+    const phoneConsentSource = this.normalizeText(dto.phoneConsentSource, 160);
+    const consentAt =
+      phoneConsentStatus === GuestCommunicationConsentStatus.GRANTED
+        ? new Date()
+        : null;
+    const unsubscribedAt =
+      phoneConsentStatus === GuestCommunicationConsentStatus.UNSUBSCRIBED
+        ? new Date()
+        : null;
+    const leadUpdate = {
+      phoneConsentStatus,
+      phoneConsentSource,
+      phoneConsentAt: consentAt,
+      unsubscribedAt,
+    };
+
+    const matchedGuestId = existing.matchedGuestId;
+
+    if (matchedGuestId) {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.guestCrmLead.update({
+          where: { id: existing.id },
+          data: leadUpdate,
+        });
+
+        const guestUpdate = {
+          phoneConsentStatus,
+          phoneConsentSource,
+          phoneConsentAt: consentAt,
+          unsubscribedAt,
+          ...(phoneConsentStatus ===
+          GuestCommunicationConsentStatus.UNSUBSCRIBED
+            ? {
+                crmStatus: GuestCrmStatus.DO_NOT_CONTACT,
+                crmUpdatedByUserId: user.id,
+                crmUpdatedAt: new Date(),
+              }
+            : {}),
+        };
+
+        await tx.guest.update({
+          where: { id: matchedGuestId },
+          data: guestUpdate,
+        });
+
+        if (
+          phoneConsentStatus === GuestCommunicationConsentStatus.UNSUBSCRIBED
+        ) {
+          await tx.guestCrmEvent.create({
+            data: {
+              tenantId,
+              guestId: matchedGuestId,
+              createdByUserId: user.id,
+              status: GuestCrmStatus.DO_NOT_CONTACT,
+              note: 'Гость отписался от коммуникаций',
+            },
+          });
+        }
+      });
+    } else {
+      await this.prisma.guestCrmLead.update({
+        where: { id: existing.id },
+        data: leadUpdate,
+      });
+    }
+
+    const row = await this.prisma.guestCrmLead.findFirst({
+      where: { id: existing.id, tenantId },
+      include: {
+        matchedGuest: { select: this.guestSelect() },
+      },
+    });
+
+    if (!row) {
+      throw new NotFoundException('CRM lead not found');
     }
 
     return this.toGuestCrmLead(row);

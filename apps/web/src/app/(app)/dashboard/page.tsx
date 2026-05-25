@@ -20,7 +20,14 @@ import {
   formatTrendPeriodTitle,
 } from "@/lib/trend-period-labels";
 import { requireCurrentUser } from "@/lib/auth";
-import { getGuestsSummary, type GuestsSummary } from "@/lib/guests";
+import {
+  getGuestCrmTaskReport,
+  getGuestsSummary,
+  getStaffControl,
+  type GuestCrmTaskReport,
+  type GuestsSummary,
+  type StaffControlReport,
+} from "@/lib/guests";
 import { getOperationalReport } from "@/lib/reports";
 import { getStores } from "@/lib/stores";
 import Link from "next/link";
@@ -178,6 +185,25 @@ type DashboardAction = {
   description: string;
   href: string;
   tone?: "neutral" | "warning" | "danger";
+};
+
+type BusinessSignalTone = "neutral" | "good" | "warning" | "danger";
+
+type BusinessSignal = {
+  title: string;
+  value: string;
+  description: string;
+  actionLabel: string;
+  href: string;
+  tone?: BusinessSignalTone;
+};
+
+type BusinessSignalGroup = {
+  title: string;
+  subtitle: string;
+  routeLabel: string;
+  href: string;
+  signals: BusinessSignal[];
 };
 
 function getLatestTrendSegment(rows: DashboardSalesTrendSegment[]) {
@@ -343,6 +369,213 @@ function buildDashboardActions({
   return actions;
 }
 
+function dashboardScopedParams(
+  summary: Awaited<ReturnType<typeof getDashboardSummary>>,
+) {
+  const params = new URLSearchParams({
+    dateFrom: summary.periodFrom,
+    dateTo: summary.periodTo,
+  });
+
+  if (summary.selectedStoreIds.length === 1) {
+    params.set("storeId", summary.selectedStoreIds[0]);
+  }
+
+  return params;
+}
+
+function scopedHref(
+  path: string,
+  summary: Awaited<ReturnType<typeof getDashboardSummary>>,
+  extra: Record<string, string | undefined> = {},
+) {
+  const params = dashboardScopedParams(summary);
+
+  Object.entries(extra).forEach(([key, value]) => {
+    if (value) {
+      params.set(key, value);
+    }
+  });
+
+  const query = params.toString();
+
+  return `${path}${query ? `?${query}` : ""}`;
+}
+
+function buildBusinessSignalGroups({
+  summary,
+  guestsSummary,
+  crmTaskReport,
+  staffControlReport,
+  latestTrend,
+  assortmentRiskAmount,
+  assortmentRiskSkuCount,
+  productRevenueShare,
+}: {
+  summary: Awaited<ReturnType<typeof getDashboardSummary>>;
+  guestsSummary: GuestsSummary;
+  crmTaskReport: GuestCrmTaskReport;
+  staffControlReport: StaffControlReport;
+  latestTrend: DashboardSalesTrendSegment | null;
+  assortmentRiskAmount: number;
+  assortmentRiskSkuCount: number;
+  productRevenueShare: number | null;
+}) {
+  const guestMoney = guestsSummary.transactionAmount + guestsSummary.barRevenue;
+  const barShare = ratioPercent(guestsSummary.barRevenue, guestMoney);
+  const activeCrmTasks =
+    crmTaskReport.summary.open + crmTaskReport.summary.inProgress;
+  const staffAnomalyCount = staffControlReport.anomalies.reduce(
+    (total, anomaly) => total + anomaly.count,
+    0,
+  );
+  const refundSummary = staffControlReport.operationKindSummary.find(
+    (row) => row.kind === "refunds",
+  );
+  const loadPercent = guestsSummary.loadPercent;
+  const noSalesSkuCount = latestTrend?.noSalesSkuCount14 ?? 0;
+
+  return [
+    {
+      title: "Клиентская база",
+      subtitle: "Вернуть, развить и не потерять гостей.",
+      routeLabel: "Открыть CRM",
+      href: "/guests/crm",
+      signals: [
+        {
+          title: "Гости в риске",
+          value: `${formatQuantity(guestsSummary.riskGuests)} гостей`,
+          description:
+            guestsSummary.riskGuests > guestsSummary.newGuests
+              ? `Риск выше притока: новых ${formatQuantity(guestsSummary.newGuests)}. Нужна реактивация.`
+              : `Новых гостей ${formatQuantity(guestsSummary.newGuests)}, риск контролируемый.`,
+          actionLabel: "Разобрать группу",
+          href: scopedHref("/guests/report", summary, {
+            segment: "risk",
+            page: "1",
+            pageSize: "50",
+          }),
+          tone:
+            guestsSummary.riskGuests > guestsSummary.newGuests
+              ? "warning"
+              : "good",
+        },
+        {
+          title: "CRM задачи",
+          value:
+            crmTaskReport.summary.overdue > 0
+              ? `${formatQuantity(crmTaskReport.summary.overdue)} просрочено`
+              : `${formatQuantity(activeCrmTasks)} в работе`,
+          description:
+            crmTaskReport.summary.overdue > 0
+              ? "Есть контакты без своевременного follow-up."
+              : "Просроченных задач нет, можно идти к плановым контактам.",
+          actionLabel: "Открыть задачи",
+          href: "/guests/crm/tasks?status=all&sort=dueAt&direction=asc",
+          tone: crmTaskReport.summary.overdue > 0 ? "danger" : "good",
+        },
+      ],
+    },
+    {
+      title: "Управление ассортиментом",
+      subtitle: "Закупить, вывести, перераспределить или проверить SKU.",
+      routeLabel: "Открыть отчеты",
+      href: "/reports",
+      signals: [
+        {
+          title: "OOS риск",
+          value: `${formatQuantity(summary.outOfStockRiskCount)} SKU`,
+          description:
+            summary.outOfStockRiskCount > 0
+              ? "Позиции могут потерять продажи из-за короткого запаса."
+              : "Критичного OOS риска сейчас не видно.",
+          actionLabel: "Закрыть риск",
+          href: "/reports/oos/table",
+          tone: summary.outOfStockRiskCount > 0 ? "danger" : "good",
+        },
+        {
+          title: "Деньги в риске",
+          value: formatRubles(assortmentRiskAmount),
+          description: `${formatQuantity(assortmentRiskSkuCount)} SKU: OOS плюс замороженный остаток без продаж${
+            noSalesSkuCount > 0
+              ? `; ${formatQuantity(noSalesSkuCount)} SKU без продаж 14 дней.`
+              : "."
+          }`,
+          actionLabel: "Открыть разбор",
+          href: "/reports/assortment-risk/table",
+          tone: assortmentRiskAmount > 0 ? "danger" : "good",
+        },
+      ],
+    },
+    {
+      title: "Маркетинг",
+      subtitle: "Выбрать цель, группу, механику и канал.",
+      routeLabel: "Подготовить кампанию",
+      href: "/guests/crm",
+      signals: [
+        {
+          title: "Игровая загрузка",
+          value:
+            loadPercent === null ? "нет данных" : formatPercent(loadPercent),
+          description:
+            loadPercent === null
+              ? "Для промо по слабым часам нужно обновить данные по ПК и сессиям."
+              : loadPercent < 35
+                ? "Есть свободная емкость для промо, событий или офферов на тихие часы."
+                : "Загрузка заметная, промо лучше привязывать к удержанию и среднему чеку.",
+          actionLabel: "Найти группу",
+          href: scopedHref("/guests/report", summary, {
+            segment: "quiet",
+            page: "1",
+            pageSize: "50",
+          }),
+          tone:
+            loadPercent === null ? "neutral" : loadPercent < 35 ? "warning" : "good",
+        },
+        {
+          title: "Доля бара",
+          value: formatRatioPercent(barShare),
+          description: `Товары и бар занимают ${formatRatioPercent(productRevenueShare)} общей выручки. Можно искать гостей с низким баром.`,
+          actionLabel: "Собрать оффер",
+          href: "/guests/crm",
+          tone: barShare !== null && barShare < 25 ? "warning" : "neutral",
+        },
+      ],
+    },
+    {
+      title: "Персонал",
+      subtitle: "Понять, где исполнение влияет на деньги и сервис.",
+      routeLabel: "Открыть контроль",
+      href: scopedHref("/guests/staff-control", summary),
+      signals: [
+        {
+          title: "Сигналы смен",
+          value: `${formatQuantity(staffAnomalyCount)} сигналов`,
+          description:
+            staffAnomalyCount > 0
+              ? "Есть поводы для проверки смен: возвраты, инкассация, чек или длина смен."
+              : "Критичных сигналов по сменам в периоде нет.",
+          actionLabel: "Разобрать",
+          href: scopedHref("/guests/staff-control", summary),
+          tone: staffAnomalyCount > 0 ? "warning" : "good",
+        },
+        {
+          title: "Возвраты",
+          value: formatRubles(refundSummary?.amount ?? 0),
+          description: `${formatQuantity(refundSummary?.count ?? 0)} операций в журнале. Проверка помогает защитить выручку.`,
+          actionLabel: "Открыть операции",
+          href: scopedHref("/guests/staff-control/operations", summary, {
+            kind: "refunds",
+            sort: "amount",
+            direction: "desc",
+          }),
+          tone: (refundSummary?.amount ?? 0) > 0 ? "warning" : "good",
+        },
+      ],
+    },
+  ] satisfies BusinessSignalGroup[];
+}
+
 export default async function DashboardPage({
   searchParams,
 }: {
@@ -366,7 +599,13 @@ export default async function DashboardPage({
   ]);
   const operationalStoreId =
     summary.selectedStoreIds.length === 1 ? summary.selectedStoreIds[0] : undefined;
-  const [periodOperationalReport, noSalesReport21, guestsSummary] =
+  const [
+    periodOperationalReport,
+    noSalesReport21,
+    guestsSummary,
+    crmTaskReport,
+    staffControlReport,
+  ] =
     await Promise.all([
     getOperationalReport({
       from: summary.periodFrom,
@@ -378,6 +617,17 @@ export default async function DashboardPage({
       storeId: operationalStoreId,
     }),
     getGuestsSummary({
+      dateFrom: summary.periodFrom,
+      dateTo: summary.periodTo,
+      storeId: operationalStoreId,
+    }),
+    getGuestCrmTaskReport({
+      status: "all",
+      sort: "dueAt",
+      direction: "asc",
+      pageSize: "50",
+    }),
+    getStaffControl({
       dateFrom: summary.periodFrom,
       dateTo: summary.periodTo,
       storeId: operationalStoreId,
@@ -409,6 +659,17 @@ export default async function DashboardPage({
   const dashboardActions = buildDashboardActions({ summary, latestTrend });
   const totalClubRevenue = summary.clubRevenue;
   const productRevenueShare = ratioPercent(summary.totalRevenue, totalClubRevenue);
+  const businessSignalGroups = buildBusinessSignalGroups({
+    summary,
+    guestsSummary,
+    crmTaskReport,
+    staffControlReport,
+    latestTrend,
+    assortmentRiskAmount: assortmentRisk.totalRiskAmount,
+    assortmentRiskSkuCount:
+      assortmentRisk.oosSkuCount + assortmentRisk.noSalesSkuCount,
+    productRevenueShare,
+  });
   const revenueByClubHref = dashboardRevenueByClubHref({
     ...filters,
     dateFrom: summary.periodFrom,
@@ -525,6 +786,8 @@ export default async function DashboardPage({
           totalClubRevenue={totalClubRevenue}
           productRevenueShare={productRevenueShare}
         />
+
+        <BusinessSignalPanel groups={businessSignalGroups} />
 
         <ExecutiveNavigationPanel />
 
@@ -728,6 +991,112 @@ function ExecutiveConclusion({
       <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
         {text}
       </p>
+    </Link>
+  );
+}
+
+function BusinessSignalPanel({ groups }: { groups: BusinessSignalGroup[] }) {
+  return (
+    <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
+        <p className="text-xs font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
+          Рабочие сценарии
+        </p>
+        <div className="mt-1 flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <h2 className="text-xl font-semibold text-zinc-950 dark:text-zinc-50">
+              Что требует внимания
+            </h2>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+              Сводный дашборд показывает не сырой набор отчетов, а короткий
+              маршрут: сигнал, бизнес-логика и следующий рабочий шаг.
+            </p>
+          </div>
+          <Link
+            href="/guests/crm/tasks"
+            className="inline-flex items-center justify-center rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:border-emerald-300 hover:bg-emerald-50 dark:border-zinc-800 dark:text-zinc-200 dark:hover:border-emerald-900 dark:hover:bg-emerald-950/20"
+          >
+            Открыть задачи CRM
+          </Link>
+        </div>
+      </div>
+
+      <div className="grid gap-4 p-4 md:grid-cols-2 xl:grid-cols-4">
+        {groups.map((group) => (
+          <article
+            key={group.title}
+            className="flex min-h-full flex-col rounded-lg border border-zinc-200 bg-zinc-50/70 p-4 dark:border-zinc-800 dark:bg-zinc-900/40"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+                  {group.title}
+                </h3>
+                <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                  {group.subtitle}
+                </p>
+              </div>
+              <Link
+                href={group.href}
+                className="shrink-0 rounded-full border border-zinc-200 px-3 py-1 text-xs font-semibold text-zinc-600 transition hover:border-emerald-300 hover:text-emerald-700 dark:border-zinc-800 dark:text-zinc-300 dark:hover:border-emerald-900 dark:hover:text-emerald-300"
+              >
+                {group.routeLabel}
+              </Link>
+            </div>
+
+            <div className="mt-4 flex flex-1 flex-col gap-3">
+              {group.signals.map((signal) => (
+                <BusinessSignalCard key={signal.title} signal={signal} />
+              ))}
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function BusinessSignalCard({ signal }: { signal: BusinessSignal }) {
+  return (
+    <Link
+      href={signal.href}
+      className={[
+        "group flex min-h-[150px] flex-col rounded-lg border bg-white p-4 transition hover:-translate-y-0.5 hover:shadow-sm dark:bg-zinc-950",
+        signal.tone === "danger"
+          ? "border-red-200 dark:border-red-900/70"
+          : signal.tone === "warning"
+            ? "border-amber-200 dark:border-amber-900/70"
+            : signal.tone === "good"
+              ? "border-emerald-200 dark:border-emerald-900/70"
+              : "border-zinc-200 dark:border-zinc-800",
+      ].join(" ")}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs font-semibold uppercase text-zinc-500 dark:text-zinc-400">
+          {signal.title}
+        </p>
+        <span
+          className={[
+            "h-2 w-2 rounded-full",
+            signal.tone === "danger"
+              ? "bg-red-400"
+              : signal.tone === "warning"
+                ? "bg-amber-400"
+                : signal.tone === "good"
+                  ? "bg-emerald-400"
+                  : "bg-zinc-400",
+          ].join(" ")}
+        />
+      </div>
+      <p className="mt-3 text-2xl font-semibold tabular-nums text-zinc-950 dark:text-zinc-50">
+        {signal.value}
+      </p>
+      <p className="mt-2 flex-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+        {signal.description}
+      </p>
+      <span className="mt-3 text-sm font-semibold text-emerald-700 transition group-hover:text-emerald-600 dark:text-emerald-300">
+        {signal.actionLabel}
+      </span>
     </Link>
   );
 }

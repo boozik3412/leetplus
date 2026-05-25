@@ -14,7 +14,7 @@ This file is the source of truth for product backlog, near-term roadmap, planned
 
 ## Product UX Architecture
 
-Status: planned product direction. Use this section as a UX decision frame for new dashboards, reports, CRM screens, assortment tools, marketing tools, and staff workflows.
+Status: active product direction. Use this section as a UX decision frame for new dashboards, reports, CRM screens, assortment tools, marketing tools, and staff workflows.
 
 LeetPlus should evolve from a set of reports into a commercial operating system for computer club networks. The main UX principle is:
 
@@ -100,6 +100,7 @@ Each signal card should answer:
 Status: implemented; remains in production UX polish mode.
 
 - Done: first screen is focused on commercial control: revenue, gross profit, margin, sold units, OOS risk, stock, management focus, actions, and "what changed".
+- Done: dashboard v2 now starts from business-signal groups by work scenario: client base/CRM, assortment management, marketing, and personnel control; each signal has a compact explanation and one next action.
 - Done: current/full period selectors, default current-day view, European date formatting, report anchors, responsive fixes, and compact report previews.
 - Done: executive summary now combines total revenue, guests, assortment and load; the load metric uses PC capacity when PC count is available from Langame/global endpoints.
 - Done: "What changed" now compares the latest full day against the previous full day for current-day mode; other periods keep analogous-period comparison.

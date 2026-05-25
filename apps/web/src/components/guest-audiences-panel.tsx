@@ -58,6 +58,15 @@ export function GuestAudiencesPanel({
     note: "",
     contactedAt: "",
   });
+  const [campaignForm, setCampaignForm] = useState({
+    target: "",
+    channel: "Звонок",
+    title: "",
+    dueAt: "",
+    assignedToUserId: "",
+    note: "",
+  });
+  const [isSavingCampaign, setIsSavingCampaign] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function saveAudience() {
@@ -326,6 +335,74 @@ export function GuestAudiencesPanel({
     }
   }
 
+  async function saveCampaignTask() {
+    if (!campaignForm.target) {
+      setError("Выберите аудиторию или CRM-гостя для кампании");
+      return;
+    }
+
+    const [targetType, targetId] = campaignForm.target.split(":");
+    const selectedAudience = audiences.find(
+      (audience) => audience.id === targetId,
+    );
+    const selectedLead = crmLeads.find((lead) => lead.id === targetId);
+    const targetName =
+      selectedAudience?.name ?? selectedLead?.displayName ?? "CRM";
+    const title =
+      campaignForm.title.trim() ||
+      `Кампания: ${campaignForm.channel} - ${targetName}`;
+    const descriptionParts = [
+      `Канал: ${campaignForm.channel}`,
+      selectedAudience
+        ? `Аудитория: ${selectedAudience.name}. Гостей: ${formatNumber(
+            selectedAudience.guestsCount,
+          )}.`
+        : null,
+      selectedLead ? `CRM-гость: ${selectedLead.displayName}` : null,
+      campaignForm.note.trim() || null,
+    ].filter(Boolean);
+
+    setIsSavingCampaign(true);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/guests/crm/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          audienceId: targetType === "audience" ? targetId : null,
+          leadId: targetType === "lead" ? targetId : null,
+          title,
+          description: descriptionParts.join("\n"),
+          dueAt: campaignForm.dueAt || null,
+          assignedToUserId: campaignForm.assignedToUserId || null,
+        }),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as {
+          message?: string;
+        } | null;
+        setError(payload?.message ?? "Не удалось создать план кампании");
+        return;
+      }
+
+      setCampaignForm({
+        target: "",
+        channel: "Звонок",
+        title: "",
+        dueAt: "",
+        assignedToUserId: "",
+        note: "",
+      });
+      router.refresh();
+    } catch {
+      setError("Не удалось создать план кампании");
+    } finally {
+      setIsSavingCampaign(false);
+    }
+  }
+
   return (
     <section
       id="audiences"
@@ -558,6 +635,122 @@ export function GuestAudiencesPanel({
                 crmTasks.length + crmLeads.length + crmContactEvents.length,
               )}
             </span>
+          </div>
+          <div
+            id="campaigns"
+            className="mt-3 scroll-mt-5 rounded-md border border-emerald-200 bg-white p-3 dark:border-emerald-900/60 dark:bg-zinc-950"
+          >
+            <p className="text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-300">
+              Кампания
+            </p>
+            <h3 className="mt-1 text-sm font-semibold">
+              План контакта с аудиторией или CRM-гостем
+            </h3>
+            <p className="mt-1 text-xs text-zinc-500">
+              Создает задачу с каналом, сроком и ответственным. Отправка сообщений
+              пока остается ручной.
+            </p>
+            <div className="mt-3 grid gap-2">
+              <select
+                value={campaignForm.target}
+                onChange={(event) =>
+                  setCampaignForm((current) => ({
+                    ...current,
+                    target: event.target.value,
+                  }))
+                }
+                className="h-9 rounded-md border border-zinc-300 bg-white px-2 text-xs font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+              >
+                <option value="">Выберите аудиторию или CRM-гостя</option>
+                {audiences.map((audience) => (
+                  <option key={audience.id} value={`audience:${audience.id}`}>
+                    Аудитория: {audience.name}
+                  </option>
+                ))}
+                {crmLeads.map((lead) => (
+                  <option key={lead.id} value={`lead:${lead.id}`}>
+                    CRM-гость: {lead.displayName}
+                  </option>
+                ))}
+              </select>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <select
+                  value={campaignForm.channel}
+                  onChange={(event) =>
+                    setCampaignForm((current) => ({
+                      ...current,
+                      channel: event.target.value,
+                    }))
+                  }
+                  className="h-9 rounded-md border border-zinc-300 bg-white px-2 text-xs font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+                >
+                  <option value="Звонок">Звонок</option>
+                  <option value="Мессенджер">Мессенджер</option>
+                  <option value="Email">Email</option>
+                  <option value="Встреча">Встреча</option>
+                  <option value="Другое">Другое</option>
+                </select>
+                <input
+                  type="date"
+                  value={campaignForm.dueAt}
+                  onChange={(event) =>
+                    setCampaignForm((current) => ({
+                      ...current,
+                      dueAt: event.target.value,
+                    }))
+                  }
+                  className="h-9 rounded-md border border-zinc-300 bg-white px-2 text-xs font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+                />
+              </div>
+              <select
+                value={campaignForm.assignedToUserId}
+                onChange={(event) =>
+                  setCampaignForm((current) => ({
+                    ...current,
+                    assignedToUserId: event.target.value,
+                  }))
+                }
+                className="h-9 rounded-md border border-zinc-300 bg-white px-2 text-xs font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+              >
+                <option value="">Ответственный не назначен</option>
+                {crmUsers.map((user) => (
+                  <option key={user.id} value={user.id}>
+                    {user.displayName}
+                  </option>
+                ))}
+              </select>
+              <input
+                value={campaignForm.title}
+                onChange={(event) =>
+                  setCampaignForm((current) => ({
+                    ...current,
+                    title: event.target.value,
+                  }))
+                }
+                placeholder="Название задачи"
+                className="h-9 rounded-md border border-zinc-300 bg-white px-2 text-xs dark:border-zinc-700 dark:bg-zinc-950"
+              />
+              <textarea
+                value={campaignForm.note}
+                onChange={(event) =>
+                  setCampaignForm((current) => ({
+                    ...current,
+                    note: event.target.value,
+                  }))
+                }
+                placeholder="Скрипт, оффер или заметка для контакта"
+                rows={2}
+                className="rounded-md border border-zinc-300 bg-white px-2 py-2 text-xs dark:border-zinc-700 dark:bg-zinc-950"
+              />
+              <button
+                type="button"
+                onClick={saveCampaignTask}
+                disabled={isSavingCampaign}
+                className="h-9 rounded-md bg-emerald-500 px-3 text-xs font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isSavingCampaign ? "Создаю..." : "Создать план кампании"}
+              </button>
+            </div>
           </div>
           <div className="mt-3 rounded-md border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
             <p className="text-xs font-semibold uppercase text-zinc-500">

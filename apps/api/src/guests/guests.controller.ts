@@ -164,6 +164,14 @@ export class GuestsController {
     return this.guestsService.getGuestCrmTasks(user);
   }
 
+  @Post('crm/tasks')
+  createGuestCrmTask(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: GuestCrmTaskDto,
+  ): Promise<GuestCrmTask> {
+    return this.guestsService.createGuestCrmTask(user, dto);
+  }
+
   @Get('crm/users')
   getGuestCrmUsers(
     @CurrentUser() user: AuthenticatedUser,

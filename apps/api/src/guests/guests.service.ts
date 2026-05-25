@@ -69,6 +69,10 @@ export type GuestCrmLeadUpdateDto = {
 };
 
 export type GuestCrmTaskDto = {
+  audienceId?: string | null;
+  guestId?: string | null;
+  leadId?: string | null;
+  assignedToUserId?: string | null;
   title?: string | null;
   description?: string | null;
   dueAt?: string | null;
@@ -1215,6 +1219,95 @@ export class GuestsService {
     });
 
     return rows.map((row) => this.toGuestCrmTask(row));
+  }
+
+  async createGuestCrmTask(
+    user: AuthenticatedUser,
+    dto: GuestCrmTaskDto = {},
+  ): Promise<GuestCrmTask> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const audience = dto.audienceId
+      ? await this.prisma.guestAudience.findFirst({
+          where: { id: dto.audienceId, tenantId },
+          select: { id: true, name: true, guestsCount: true },
+        })
+      : null;
+
+    if (dto.audienceId && !audience) {
+      throw new NotFoundException('Audience not found');
+    }
+
+    const lead = dto.leadId
+      ? await this.prisma.guestCrmLead.findFirst({
+          where: { id: dto.leadId, tenantId },
+          select: {
+            id: true,
+            matchedGuestId: true,
+            fullNameMasked: true,
+            fullNameEncrypted: true,
+            phoneMasked: true,
+            phoneEncrypted: true,
+          },
+        })
+      : null;
+
+    if (dto.leadId && !lead) {
+      throw new NotFoundException('CRM lead not found');
+    }
+
+    const guestId = dto.guestId ?? lead?.matchedGuestId ?? null;
+    const guest = guestId
+      ? await this.prisma.guest.findFirst({
+          where: { id: guestId, tenantId },
+          select: this.guestSelect(),
+        })
+      : null;
+
+    if (guestId && !guest) {
+      throw new NotFoundException('Guest not found');
+    }
+
+    if (!audience && !lead && !guest) {
+      throw new BadRequestException(
+        'CRM task must be linked to an audience, CRM lead, or guest',
+      );
+    }
+
+    const targetTitle =
+      audience?.name ??
+      (lead ? this.toGuestCrmTaskLeadName(lead) : null) ??
+      (guest
+        ? this.toDashboardRow(guest, undefined, this.emptyPeriod(), new Map())
+            .displayName
+        : null) ??
+      'CRM';
+    const title =
+      this.normalizeText(dto.title, 160) ?? `Связаться: ${targetTitle}`;
+    const assignedToUserId = await this.resolveCrmTaskAssignee(
+      tenantId,
+      dto.assignedToUserId,
+    );
+    const row = await this.prisma.guestCrmTask.create({
+      data: {
+        tenantId,
+        createdByUserId: user.id,
+        audienceId: audience?.id ?? null,
+        leadId: lead?.id ?? null,
+        guestId: guest?.id ?? null,
+        assignedToUserId,
+        title,
+        description: this.normalizeText(dto.description, 2000),
+        dueAt: this.resolveOptionalDate(dto.dueAt),
+      },
+      include: {
+        audience: { select: { id: true, name: true } },
+        guest: { select: this.guestSelect() },
+        lead: true,
+        assignedToUser: { select: { id: true, fullName: true, email: true } },
+      },
+    });
+
+    return this.toGuestCrmTask(row);
   }
 
   async getGuestCrmUsers(user: AuthenticatedUser): Promise<GuestCrmUser[]> {
@@ -4276,6 +4369,21 @@ export class GuestsService {
         : null,
       assignedToUser,
     };
+  }
+
+  private toGuestCrmTaskLeadName(lead: {
+    fullNameMasked: string | null;
+    fullNameEncrypted: string | null;
+    phoneMasked: string | null;
+    phoneEncrypted: string | null;
+  }) {
+    return (
+      this.decryptSensitiveValue(lead.fullNameEncrypted) ??
+      lead.fullNameMasked ??
+      this.decryptSensitiveValue(lead.phoneEncrypted) ??
+      lead.phoneMasked ??
+      'Ручной CRM-гость'
+    );
   }
 
   private toGuestCrmContactEvent(row: {

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getApiUrl, getAuthHeaders, readApiError } from "@/lib/api";
+import { proxyJsonRequest } from "@/lib/proxy";
 
 export async function GET() {
   const headers = await getAuthHeaders();
@@ -24,4 +25,8 @@ export async function GET() {
   }
 
   return NextResponse.json(await response.json());
+}
+
+export async function POST(request: Request) {
+  return proxyJsonRequest(request, "/guests/crm/tasks", "POST");
 }

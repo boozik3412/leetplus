@@ -691,6 +691,7 @@ model GuestCrmTask {
   lead          GuestCrmLead?  @relation(fields: [leadId], references: [id], onDelete: SetNull)
   createdByUser User?          @relation("GuestCrmTaskCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   assignedToUser User?         @relation("GuestCrmTaskAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  marketingCampaigns MarketingCampaign[]
 
   @@index([tenantId, status, dueAt], map: "guest_crm_task_status_due_idx")
   @@index([audienceId], map: "guest_crm_task_audience_idx")
@@ -731,6 +732,7 @@ model MarketingCampaign {
   id              String   @id @default(uuid())
   tenantId        String
   audienceId      String?
+  crmTaskId       String?
   storeIds        Json?
   createdByUserId String?
   ownerUserId     String?
@@ -749,11 +751,13 @@ model MarketingCampaign {
 
   tenant        Tenant         @relation(fields: [tenantId], references: [id])
   audience      GuestAudience? @relation(fields: [audienceId], references: [id], onDelete: SetNull)
+  crmTask       GuestCrmTask?  @relation(fields: [crmTaskId], references: [id], onDelete: SetNull)
   createdByUser User?          @relation("MarketingCampaignCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   ownerUser     User?          @relation("MarketingCampaignOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, status, updatedAt], map: "marketing_campaign_status_idx")
   @@index([audienceId], map: "marketing_campaign_audience_idx")
+  @@index([crmTaskId], map: "marketing_campaign_crm_task_idx")
   @@index([createdByUserId], map: "marketing_campaign_created_by_idx")
   @@index([ownerUserId], map: "marketing_campaign_owner_idx")
 }

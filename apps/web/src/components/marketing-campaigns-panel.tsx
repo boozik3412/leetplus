@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import type { GuestAudience, GuestCrmUser } from "@/lib/guests";
 import type {
@@ -89,6 +90,9 @@ export function MarketingCampaignsPanel({
   const [rows, setRows] = useState(campaigns);
   const [form, setForm] = useState<CampaignFormState>(emptyForm);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [pendingTaskCampaignId, setPendingTaskCampaignId] = useState<
+    string | null
+  >(null);
   const [error, setError] = useState<string | null>(null);
 
   const summary = useMemo(
@@ -151,6 +155,28 @@ export function MarketingCampaignsPanel({
     setRows((current) =>
       current.map((row) => (row.id === updated.id ? updated : row)),
     );
+  }
+
+  async function createCrmTask(campaign: MarketingCampaign) {
+    setPendingTaskCampaignId(campaign.id);
+    setError(null);
+
+    const response = await fetch(
+      `/api/marketing/campaigns/${campaign.id}/crm-task`,
+      { method: "POST" },
+    );
+
+    if (!response.ok) {
+      setError(await readError(response));
+      setPendingTaskCampaignId(null);
+      return;
+    }
+
+    const updated = (await response.json()) as MarketingCampaign;
+    setRows((current) =>
+      current.map((row) => (row.id === updated.id ? updated : row)),
+    );
+    setPendingTaskCampaignId(null);
   }
 
   return (
@@ -419,6 +445,10 @@ export function MarketingCampaignsPanel({
                 <Info label="Механика" value={campaign.mechanic ?? "не выбрана"} />
                 <Info label="Срок" value={formatDate(campaign.dueAt)} />
                 <Info label="Бюджет" value={formatRubles(campaign.budget)} />
+                <Info
+                  label="CRM-задача"
+                  value={campaign.crmTask ? "создана" : "не создана"}
+                />
               </dl>
 
               {campaign.note ? (
@@ -426,6 +456,28 @@ export function MarketingCampaignsPanel({
                   {campaign.note}
                 </p>
               ) : null}
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                {campaign.crmTask ? (
+                  <Link
+                    href="/guests/crm/tasks"
+                    className="inline-flex min-h-10 items-center justify-center rounded-xl border border-emerald-500/40 px-4 text-sm font-semibold text-emerald-500 transition hover:bg-emerald-500/10"
+                  >
+                    Открыть CRM-задачи
+                  </Link>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => createCrmTask(campaign)}
+                    disabled={pendingTaskCampaignId === campaign.id}
+                    className="inline-flex min-h-10 items-center justify-center rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {pendingTaskCampaignId === campaign.id
+                      ? "Создаем..."
+                      : "Создать CRM-задачу"}
+                  </button>
+                )}
+              </div>
             </article>
           ))
         ) : (

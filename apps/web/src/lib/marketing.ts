@@ -31,6 +31,12 @@ export type MarketingCampaign = {
   createdAt: string;
   updatedAt: string;
   audience: { id: string; name: string; guestsCount: number } | null;
+  crmTask: {
+    id: string;
+    title: string;
+    status: string;
+    dueAt: string | null;
+  } | null;
   createdBy: { id: string; displayName: string; email: string } | null;
   owner: { id: string; displayName: string; email: string } | null;
 };

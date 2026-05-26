@@ -49,4 +49,12 @@ export class MarketingController {
   ): Promise<MarketingCampaign> {
     return this.marketingService.updateCampaign(user, id, dto);
   }
+
+  @Post('campaigns/:id/crm-task')
+  createCampaignCrmTask(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<MarketingCampaign> {
+    return this.marketingService.createCampaignCrmTask(user, id);
+  }
 }

@@ -9,6 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 
 const marketingCampaignInclude = {
   audience: { select: { id: true, name: true, guestsCount: true } },
+  crmTask: { select: { id: true, title: true, status: true, dueAt: true } },
   createdByUser: { select: { id: true, fullName: true, email: true } },
   ownerUser: { select: { id: true, fullName: true, email: true } },
 } satisfies Prisma.MarketingCampaignInclude;
@@ -71,6 +72,12 @@ export type MarketingCampaign = {
   createdAt: string;
   updatedAt: string;
   audience: { id: string; name: string; guestsCount: number } | null;
+  crmTask: {
+    id: string;
+    title: string;
+    status: string;
+    dueAt: string | null;
+  } | null;
   createdBy: { id: string; displayName: string; email: string } | null;
   owner: { id: string; displayName: string; email: string } | null;
 };
@@ -208,6 +215,50 @@ export class MarketingService {
     return this.toMarketingCampaign(row);
   }
 
+  async createCampaignCrmTask(
+    user: AuthenticatedUser,
+    id: string,
+  ): Promise<MarketingCampaign> {
+    const campaign = await this.prisma.marketingCampaign.findFirst({
+      where: { id, tenantId: user.tenantId },
+      include: marketingCampaignInclude,
+    });
+
+    if (!campaign) {
+      throw new NotFoundException('Marketing campaign not found');
+    }
+
+    if (campaign.crmTask) {
+      return this.toMarketingCampaign(campaign);
+    }
+
+    const row = await this.prisma.$transaction(async (tx) => {
+      const task = await tx.guestCrmTask.create({
+        data: {
+          tenantId: user.tenantId,
+          audienceId: campaign.audienceId,
+          createdByUserId: user.id,
+          assignedToUserId: campaign.ownerUserId,
+          title: `Маркетинг: ${campaign.name}`,
+          description: campaignTaskDescription(campaign),
+          dueAt: campaign.dueAt,
+        },
+        select: { id: true },
+      });
+
+      return tx.marketingCampaign.update({
+        where: { id: campaign.id },
+        data: {
+          crmTaskId: task.id,
+          status: campaign.status === 'DRAFT' ? 'PLANNED' : campaign.status,
+        },
+        include: marketingCampaignInclude,
+      });
+    });
+
+    return this.toMarketingCampaign(row);
+  }
+
   private async resolveAudienceId(
     user: AuthenticatedUser,
     value?: string | null,
@@ -340,6 +391,14 @@ export class MarketingService {
             guestsCount: row.audience.guestsCount,
           }
         : null,
+      crmTask: row.crmTask
+        ? {
+            id: row.crmTask.id,
+            title: row.crmTask.title,
+            status: row.crmTask.status,
+            dueAt: row.crmTask.dueAt?.toISOString() ?? null,
+          }
+        : null,
       createdBy: row.createdByUser ? toUserSummary(row.createdByUser) : null,
       owner: row.ownerUser ? toUserSummary(row.ownerUser) : null,
     };
@@ -434,6 +493,46 @@ function parseStringArray(value: Prisma.JsonValue | null) {
   }
 
   return value.filter((item): item is string => typeof item === 'string');
+}
+
+function campaignTaskDescription(campaign: {
+  goal: string;
+  audience: { name: string; guestsCount: number } | null;
+  storeIds: Prisma.JsonValue | null;
+  channel: string | null;
+  mechanic: string | null;
+  periodFrom: Date | null;
+  periodTo: Date | null;
+  budget: Prisma.Decimal | null;
+  note: string | null;
+}) {
+  const storeIds = parseStringArray(campaign.storeIds);
+  const lines = [
+    `Цель: ${campaign.goal}`,
+    campaign.audience
+      ? `Группа: ${campaign.audience.name} (${campaign.audience.guestsCount} гостей)`
+      : 'Группа: не выбрана',
+    storeIds.length > 0 ? `Клубов: ${storeIds.length}` : 'Клубы: вся сеть',
+    campaign.channel ? `Канал: ${campaign.channel}` : null,
+    campaign.mechanic ? `Механика: ${campaign.mechanic}` : null,
+    campaign.periodFrom || campaign.periodTo
+      ? `Период: ${formatDateForTask(campaign.periodFrom)} - ${formatDateForTask(
+          campaign.periodTo,
+        )}`
+      : null,
+    campaign.budget ? `Бюджет: ${Number(campaign.budget)} руб` : null,
+    campaign.note ? `Заметка: ${campaign.note}` : null,
+  ];
+
+  return lines.filter((line): line is string => Boolean(line)).join('\n');
+}
+
+function formatDateForTask(value: Date | null) {
+  if (!value) {
+    return 'не задано';
+  }
+
+  return new Intl.DateTimeFormat('ru-RU').format(value);
 }
 
 function hasOwn<T extends object>(obj: T, key: PropertyKey): boolean {

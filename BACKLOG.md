@@ -457,10 +457,11 @@ Goal: let a manager create a simple campaign from a business signal and control 
 - Done: `/marketing` entry point and sidebar block added as a lightweight scenario workspace: goal selection, saved groups/CRM lead/task readiness, and route from business goal to group, mechanic, channel, control, and effect.
 - Done: dashboard marketing scenario now routes to `/marketing` instead of hiding campaign planning inside CRM.
 - Done: persistent campaign drafts added with tenant-scoped storage, API, migration, status changes, goal, saved group, channel, mechanic, responsible user, period, deadline, budget, and note.
-- Next: generate CRM tasks from campaign drafts when the selected channel requires manual contact.
+- Done: campaign drafts can generate one linked CRM task for manual execution and reuse the existing task on repeated clicks instead of creating duplicates.
+- Next: show communication consent coverage and excluded guests before a campaign task is launched.
 - Let the user choose a saved guest group or create one from guest filters.
 - Add campaign fields: goal, period, clubs, target group, channel, responsible user, deadline, note, status.
-- Generate CRM tasks for campaign execution when the channel requires manual contact.
+- Improve generated CRM tasks with per-channel instructions and campaign detail links.
 - Respect communication consent and show exclusions before launch.
 - Show a compact campaign list: planned, running, finished, canceled.
 - Show a campaign detail page with breadcrumbs, tasks, contacts, notes, and effect placeholders.

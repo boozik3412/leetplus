@@ -359,7 +359,7 @@ export default async function GuestCrmTasksPage({
                     <td className="max-w-sm px-4 py-4 align-top">
                       <p className="font-semibold">{task.title}</p>
                       {task.description ? (
-                        <p className="mt-1 line-clamp-2 text-xs leading-5 text-zinc-500">
+                        <p className="mt-1 line-clamp-4 whitespace-pre-line break-words text-xs leading-5 text-zinc-500">
                           {task.description}
                         </p>
                       ) : null}
@@ -401,7 +401,7 @@ export default async function GuestCrmTasksPage({
                   </span>
                 </div>
                 {task.description ? (
-                  <p className="mt-3 text-sm leading-5 text-zinc-500">
+                  <p className="mt-3 whitespace-pre-line break-words text-sm leading-5 text-zinc-500">
                     {task.description}
                   </p>
                 ) : null}

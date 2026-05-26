@@ -2202,6 +2202,7 @@ function parseStringArray(value: Prisma.JsonValue | null) {
 
 function campaignTaskDescription(
   campaign: {
+    id: string;
     goal: string;
     audience: { name: string; guestsCount: number } | null;
     storeIds: Prisma.JsonValue | null;
@@ -2216,7 +2217,8 @@ function campaignTaskDescription(
 ) {
   const storeIds = parseStringArray(campaign.storeIds);
   const lines = [
-    `Цель: ${campaign.goal}`,
+    `Карточка кампании: /marketing/campaigns/${campaign.id}`,
+    `Цель: ${campaignGoalForTask(campaign.goal)}`,
     campaign.audience
       ? `Группа: ${campaign.audience.name} (${campaign.audience.guestsCount} гостей)`
       : 'Группа: не выбрана',
@@ -2230,12 +2232,66 @@ function campaignTaskDescription(
       : null,
     campaign.budget ? `Бюджет: ${Number(campaign.budget)} руб` : null,
     coverage.targetTotal > 0
-      ? `Согласия: доступно ${coverage.contactable} из ${coverage.targetTotal}, исключено ${coverage.excluded}`
+      ? `Согласия: доступно ${coverage.contactable} из ${coverage.targetTotal}, исключено ${coverage.excluded}; отказов ${coverage.phoneDenied}, отписок ${coverage.phoneUnsubscribed}, неизвестных ${coverage.phoneUnknown}`
       : 'Согласия: группа не выбрана или пуста',
+    '',
+    'Инструкция:',
+    campaignChannelInstruction(campaign.channel),
+    '',
+    'Зафиксировать в CRM:',
+    '- кому сделали контакт и по какому каналу;',
+    '- результат: дозвон, ответ, отказ, бронь, интерес, неактуально;',
+    '- следующий шаг, дату следующего контакта и ответственного;',
+    '- факт визита или использования промо, если он появился.',
     campaign.note ? `Заметка: ${campaign.note}` : null,
   ];
 
   return lines.filter((line): line is string => Boolean(line)).join('\n');
+}
+
+function campaignGoalForTask(goal: string) {
+  const labels: Record<string, string> = {
+    RETURN_GUESTS: 'Вернуть гостей',
+    REPEAT_VISIT: 'Повторный визит',
+    WEAK_HOURS: 'Заполнить тихие часы',
+    BAR_GROWTH: 'Вырастить бар',
+    EVENT_PROMO: 'Событие или бронь',
+    PROMO_BUNDLE: 'Промо-набор',
+  };
+
+  return labels[goal] ?? goal;
+}
+
+function campaignChannelInstruction(channel: string | null) {
+  const normalized = (channel ?? '').toLocaleLowerCase('ru-RU');
+
+  if (normalized.includes('звон')) {
+    return 'Позвонить гостям из группы, начать с самых ценных или срочных. Не обещать автоматические бонусы без ручного подтверждения. После звонка сразу записать результат контакта.';
+  }
+
+  if (
+    normalized.includes('месс') ||
+    normalized.includes('sms') ||
+    normalized.includes('telegram') ||
+    normalized.includes('max') ||
+    normalized.includes('рассыл')
+  ) {
+    return 'Перед отправкой проверить согласие на контакт и исключить отписки. Текст должен содержать оффер, срок действия, клубы и понятный следующий шаг для гостя.';
+  }
+
+  if (normalized.includes('объяв')) {
+    return 'Передать администраторам короткий текст объявления, период действия, клубы, лимиты и правила применения. Отдельно объяснить, какие факты нужно отметить в CRM.';
+  }
+
+  if (normalized.includes('соц')) {
+    return 'Опубликовать оффер с датой, клубом, лимитами и ссылкой/контактом для заявки. Входящие обращения заводить как CRM-лиды или контактные события кампании.';
+  }
+
+  if (normalized.includes('crm')) {
+    return 'Идти по CRM-списку, не выгружая персональные данные в сторонние файлы. Работать только с доступными контактами и фиксировать результат по каждому гостю.';
+  }
+
+  return 'Проверить канал, согласия, лимиты и ответственного. Выполнять контакт вручную и фиксировать все факты в CRM, чтобы затем измерить эффект кампании.';
 }
 
 function formatDateForTask(value: Date | null) {

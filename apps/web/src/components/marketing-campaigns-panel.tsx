@@ -65,6 +65,21 @@ type PromoBundleEconomics = {
 
 type CampaignStatusFilter = "ALL" | "ACTIVE" | MarketingCampaignStatus;
 
+type CampaignReadinessItem = {
+  label: string;
+  done: boolean;
+  issue: string;
+};
+
+type CampaignReadiness = {
+  done: number;
+  total: number;
+  percent: number;
+  tone: "ready" | "warning" | "blocked";
+  firstIssue: string | null;
+  items: CampaignReadinessItem[];
+};
+
 const goalOptions: Array<{ value: MarketingCampaignGoal; label: string }> = [
   { value: "RETURN_GUESTS", label: "Вернуть гостей" },
   { value: "REPEAT_VISIT", label: "Повторный визит" },
@@ -709,107 +724,112 @@ export function MarketingCampaignsPanel({
               контролировать эффект.
             </div>
           ) : visibleRows.length > 0 ? (
-            visibleRows.map((campaign) => (
-              <article
-                key={campaign.id}
-                className="grid gap-4 p-4 transition hover:bg-zinc-50 dark:hover:bg-zinc-900/40 xl:grid-cols-[minmax(0,1fr)_320px]"
-              >
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className={campaignStatusClass(campaign.status)}>
-                      {statusLabel(campaign.status)}
-                    </span>
-                    <span className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                      {goalLabel(campaign.goal)}
-                    </span>
-                  </div>
-                  <h4 className="mt-2 text-lg font-semibold text-zinc-950 dark:text-white">
-                    {campaign.name}
-                  </h4>
-                  <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                    {campaignNextAction(campaign)}
-                  </p>
-                  <dl className="mt-4 grid gap-3 text-sm md:grid-cols-2 xl:grid-cols-4">
-                    <CompactInfo
-                      label="Группа"
-                      value={campaign.audience?.name ?? "не выбрана"}
-                    />
-                    <CompactInfo
-                      label="Клуб"
-                      value={storeLabel(campaign.storeIds, stores)}
-                    />
-                    <CompactInfo
-                      label="Ответственный"
-                      value={campaign.owner?.displayName ?? "не назначен"}
-                    />
-                    <CompactInfo
-                      label="Дедлайн"
-                      value={formatDate(campaign.dueAt)}
-                    />
-                    <CompactInfo
-                      label="Канал"
-                      value={campaign.channel ?? "не выбран"}
-                    />
-                    <CompactInfo
-                      label="Механика"
-                      value={campaign.mechanic ?? "не выбрана"}
-                    />
-                    <CompactInfo
-                      label="Бюджет"
-                      value={formatRubles(campaign.budget)}
-                    />
-                    <CompactInfo
-                      label="Контакт"
-                      value={contactCoverageLabel(campaign)}
-                    />
-                  </dl>
-                </div>
+            visibleRows.map((campaign) => {
+              const readiness = buildCampaignReadiness(campaign);
 
-                <div className="flex min-w-0 flex-col gap-2 xl:items-stretch">
-                  <select
-                    value={campaign.status}
-                    onChange={(event) =>
-                      updateStatus(
-                        campaign,
-                        event.target.value as MarketingCampaignStatus,
-                      )
-                    }
-                    className="min-h-10 rounded-xl border border-zinc-200 bg-white px-3 text-sm font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
-                  >
-                    {statusOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                  <Link
-                    href={`/marketing/campaigns/${campaign.id}`}
-                    className="inline-flex min-h-10 items-center justify-center rounded-xl border border-zinc-200 px-4 text-sm font-semibold text-zinc-700 transition hover:border-emerald-400 hover:bg-emerald-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:border-emerald-500/70 dark:hover:bg-emerald-500/10"
-                  >
-                    Открыть кампанию
-                  </Link>
-                  {campaign.crmTask ? (
+              return (
+                <article
+                  key={campaign.id}
+                  className="grid gap-4 p-4 transition hover:bg-zinc-50 dark:hover:bg-zinc-900/40 xl:grid-cols-[minmax(0,1fr)_320px]"
+                >
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={campaignStatusClass(campaign.status)}>
+                        {statusLabel(campaign.status)}
+                      </span>
+                      <span className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                        {goalLabel(campaign.goal)}
+                      </span>
+                    </div>
+                    <h4 className="mt-2 text-lg font-semibold text-zinc-950 dark:text-white">
+                      {campaign.name}
+                    </h4>
+                    <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+                      {campaignNextAction(campaign)}
+                    </p>
+                    <CampaignReadinessBar readiness={readiness} />
+                    <dl className="mt-4 grid gap-3 text-sm md:grid-cols-2 xl:grid-cols-4">
+                      <CompactInfo
+                        label="Группа"
+                        value={campaign.audience?.name ?? "не выбрана"}
+                      />
+                      <CompactInfo
+                        label="Клуб"
+                        value={storeLabel(campaign.storeIds, stores)}
+                      />
+                      <CompactInfo
+                        label="Ответственный"
+                        value={campaign.owner?.displayName ?? "не назначен"}
+                      />
+                      <CompactInfo
+                        label="Дедлайн"
+                        value={formatDate(campaign.dueAt)}
+                      />
+                      <CompactInfo
+                        label="Канал"
+                        value={campaign.channel ?? "не выбран"}
+                      />
+                      <CompactInfo
+                        label="Механика"
+                        value={campaign.mechanic ?? "не выбрана"}
+                      />
+                      <CompactInfo
+                        label="Бюджет"
+                        value={formatRubles(campaign.budget)}
+                      />
+                      <CompactInfo
+                        label="Контакт"
+                        value={contactCoverageLabel(campaign)}
+                      />
+                    </dl>
+                  </div>
+
+                  <div className="flex min-w-0 flex-col gap-2 xl:items-stretch">
+                    <select
+                      value={campaign.status}
+                      onChange={(event) =>
+                        updateStatus(
+                          campaign,
+                          event.target.value as MarketingCampaignStatus,
+                        )
+                      }
+                      className="min-h-10 rounded-xl border border-zinc-200 bg-white px-3 text-sm font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+                    >
+                      {statusOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
                     <Link
-                      href="/guests/crm/tasks"
-                      className="inline-flex min-h-10 items-center justify-center rounded-xl border border-emerald-500/40 px-4 text-sm font-semibold text-emerald-500 transition hover:bg-emerald-500/10"
+                      href={`/marketing/campaigns/${campaign.id}`}
+                      className="inline-flex min-h-10 items-center justify-center rounded-xl border border-zinc-200 px-4 text-sm font-semibold text-zinc-700 transition hover:border-emerald-400 hover:bg-emerald-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:border-emerald-500/70 dark:hover:bg-emerald-500/10"
                     >
-                      Открыть CRM-задачу
+                      Открыть кампанию
                     </Link>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => createCrmTask(campaign)}
-                      disabled={pendingTaskCampaignId === campaign.id}
-                      className="inline-flex min-h-10 items-center justify-center rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {pendingTaskCampaignId === campaign.id
-                        ? "Создаем..."
-                        : "Создать CRM-задачу"}
-                    </button>
-                  )}
-                </div>
-              </article>
-            ))
+                    {campaign.crmTask ? (
+                      <Link
+                        href="/guests/crm/tasks"
+                        className="inline-flex min-h-10 items-center justify-center rounded-xl border border-emerald-500/40 px-4 text-sm font-semibold text-emerald-500 transition hover:bg-emerald-500/10"
+                      >
+                        Открыть CRM-задачу
+                      </Link>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => createCrmTask(campaign)}
+                        disabled={pendingTaskCampaignId === campaign.id}
+                        className="inline-flex min-h-10 items-center justify-center rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {pendingTaskCampaignId === campaign.id
+                          ? "Создаем..."
+                          : "Создать CRM-задачу"}
+                      </button>
+                    )}
+                  </div>
+                </article>
+              );
+            })
           ) : (
             <div className="p-6 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
               В выбранном статусе кампаний нет. Можно переключить фильтр или
@@ -1154,6 +1174,51 @@ function MetricPill({ label, value }: { label: string; value: number }) {
   );
 }
 
+function CampaignReadinessBar({ readiness }: { readiness: CampaignReadiness }) {
+  const barClass =
+    readiness.tone === "ready"
+      ? "bg-emerald-500"
+      : readiness.tone === "blocked"
+        ? "bg-red-400"
+        : "bg-amber-400";
+
+  return (
+    <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+          Готовность: {readiness.done}/{readiness.total}
+        </p>
+        <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
+          {readiness.firstIssue
+            ? `Следующий шаг: ${readiness.firstIssue}`
+            : "можно запускать и контролировать"}
+        </p>
+      </div>
+      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+        <div
+          className={["h-full rounded-full", barClass].join(" ")}
+          style={{ width: `${readiness.percent}%` }}
+        />
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {readiness.items.map((item) => (
+          <span
+            key={item.label}
+            className={[
+              "rounded-full border px-2.5 py-1 text-xs font-semibold",
+              item.done
+                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                : "border-zinc-300 bg-white text-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-400",
+            ].join(" ")}
+          >
+            {item.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function CompactInfo({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0 rounded-lg border border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950">
@@ -1334,6 +1399,64 @@ function campaignNextAction(campaign: MarketingCampaign) {
   }
 
   return "Кампания отменена. При необходимости верните ее в черновик или создайте новый сценарий.";
+}
+
+function buildCampaignReadiness(campaign: MarketingCampaign): CampaignReadiness {
+  const coverage = campaign.consentCoverage;
+  const hasGroup = Boolean(campaign.audience && coverage.targetTotal > 0);
+  const hasChannel = Boolean(campaign.channel);
+  const hasMechanic = Boolean(campaign.mechanic);
+  const hasOwnerAndDue = Boolean(campaign.owner && campaign.dueAt);
+  const hasContactAccess =
+    hasGroup &&
+    (!coverage.requiresPhoneConsent ||
+      (coverage.contactable > 0 && coverage.targetTotal > 0));
+  const items: CampaignReadinessItem[] = [
+    {
+      label: "Группа",
+      done: hasGroup,
+      issue: "выберите группу",
+    },
+    {
+      label: "Канал",
+      done: hasChannel,
+      issue: "выберите канал",
+    },
+    {
+      label: "Механика",
+      done: hasMechanic,
+      issue: "добавьте механику",
+    },
+    {
+      label: "Контакт",
+      done: hasContactAccess,
+      issue:
+        coverage.requiresPhoneConsent && coverage.exclusionReason
+          ? `проверьте согласия: ${coverage.exclusionReason}`
+          : "проверьте доступность контакта",
+    },
+    {
+      label: "Ответственный",
+      done: hasOwnerAndDue,
+      issue: "назначьте ответственного и срок",
+    },
+    {
+      label: "CRM-задача",
+      done: Boolean(campaign.crmTask),
+      issue: "создайте CRM-задачу",
+    },
+  ];
+  const done = items.filter((item) => item.done).length;
+  const firstIssue = items.find((item) => !item.done)?.issue ?? null;
+
+  return {
+    done,
+    total: items.length,
+    percent: Math.round((done / items.length) * 100),
+    tone: !hasGroup || !hasContactAccess ? "blocked" : done === items.length ? "ready" : "warning",
+    firstIssue,
+    items,
+  };
 }
 
 function contactCoverageLabel(campaign: MarketingCampaign) {

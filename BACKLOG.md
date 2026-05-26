@@ -481,8 +481,9 @@ Goal: let a manager create a simple campaign from a business signal and control 
 - Done: generated CRM tasks from marketing campaigns now include a campaign detail link, readable goal label, consent exclusions, channel-specific execution instruction, and a checklist of facts to record for later effect analytics.
 - Done: campaign launch now has channel-specific consent policy: calls, messages, CRM contacts, in-club announcements, and public social posts show different contact rules, required consent, and exclusion reasons before execution.
 - Done: `/marketing` campaign cards now show compact launch readiness: group, channel, mechanic, contact access, responsible user/deadline, CRM task, progress bar, and the next missing step.
+- Done: campaign creation now exposes the group route directly in UI: select a saved group, open CRM groups, or create a new group from guest filters before launch.
 - Next: continue improving campaign execution prompts from real usage and persist promo-bundle/mechanic entities when the first manual workflows are validated.
-- Let the user choose a saved guest group or create one from guest filters.
+- Done: let the user choose a saved guest group or create one from guest filters.
 - Add campaign fields: goal, period, clubs, target group, channel, responsible user, deadline, note, status.
 - Done: improve generated CRM tasks with per-channel instructions and campaign detail links.
 - Done: improve communication consent handling with channel-specific exclusions before launch.

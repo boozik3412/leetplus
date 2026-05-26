@@ -330,6 +330,8 @@ export function MarketingCampaignsPanel({
     () => rows.filter((row) => campaignMatchesFilter(row, statusFilter)),
     [rows, statusFilter],
   );
+  const selectedAudience =
+    audiences.find((audience) => audience.id === form.audienceId) ?? null;
 
   async function createCampaign(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -536,6 +538,11 @@ export function MarketingCampaignsPanel({
             ))}
           </select>
         </Field>
+
+        <CampaignGroupRoute
+          selectedAudience={selectedAudience}
+          audiencesCount={audiences.length}
+        />
 
         <Field label="Канал" className="lg:col-span-3">
           <select
@@ -1160,6 +1167,47 @@ function Field({
       </span>
       {children}
     </label>
+  );
+}
+
+function CampaignGroupRoute({
+  selectedAudience,
+  audiencesCount,
+}: {
+  selectedAudience: GuestAudience | null;
+  audiencesCount: number;
+}) {
+  return (
+    <div className="grid gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60 lg:col-span-12 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+      <div className="min-w-0">
+        <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
+          Группа для кампании
+        </p>
+        <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+          {selectedAudience
+            ? `Выбрана группа "${selectedAudience.name}" на ${formatNumber(
+                selectedAudience.guestsCount,
+              )} гостей. Контакты, согласия и эффект будут считаться по ней.`
+            : audiencesCount > 0
+              ? "Выберите сохраненную группу выше или создайте новую из фильтров гостей, чтобы кампания считала охват и согласия."
+              : "Сохраненных групп пока нет. Сначала соберите группу из фильтров гостей, затем вернитесь к запуску кампании."}
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Link
+          href="/guests/report#audiences"
+          className="inline-flex min-h-10 items-center justify-center rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
+        >
+          Создать из фильтров
+        </Link>
+        <Link
+          href="/guests/crm"
+          className="inline-flex min-h-10 items-center justify-center rounded-xl border border-zinc-200 px-4 text-sm font-semibold text-zinc-700 transition hover:border-emerald-400 hover:bg-white dark:border-zinc-700 dark:text-zinc-200 dark:hover:border-emerald-500/70 dark:hover:bg-zinc-950"
+        >
+          Открыть CRM-группы
+        </Link>
+      </div>
+    </div>
   );
 }
 

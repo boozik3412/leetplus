@@ -467,13 +467,14 @@ Goal: let a manager create a simple campaign from a business signal and control 
 - Done: campaign effect now includes a compact store breakdown: revenue, bar, active guests, play hours, repeat guests, before/after delta, and a separate unallocated row when facts have no store.
 - Done: campaign detail now shows execution by responsible user and channel: contacts, results, linked guests, visits, repeat guests, revenue, and bar revenue.
 - Done: campaign detail now has CSV export for campaign plan, funnel, before/after effect, store breakdown, execution by responsible/channel, and contact outcomes.
-- Next: expand launch checklist and editable campaign notes.
+- Done: campaign detail now has a scenario launch workspace: checklist readiness, direct anchors to contacts/effect, and editable campaign notes stored in the existing campaign note field.
+- Next: improve checklist actions/status transitions, then add XLSX export after CSV column set is validated.
 - Let the user choose a saved guest group or create one from guest filters.
 - Add campaign fields: goal, period, clubs, target group, channel, responsible user, deadline, note, status.
 - Improve generated CRM tasks with per-channel instructions and campaign detail links.
 - Improve communication consent handling with channel-specific exclusions before launch.
 - Show a compact campaign list: planned, running, finished, canceled.
-- Expand campaign detail with editable notes and launch checklist.
+- Improve campaign launch workspace with status transitions and clearer per-channel execution prompts.
 
 Acceptance criteria:
 

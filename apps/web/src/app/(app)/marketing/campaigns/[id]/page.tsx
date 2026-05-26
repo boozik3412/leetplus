@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { MarketingCampaignContactForm } from "@/components/marketing-campaign-contact-form";
+import { MarketingCampaignWorkspace } from "@/components/marketing-campaign-workspace";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
 import {
@@ -149,7 +150,12 @@ export default async function MarketingCampaignPage({
           <ConsentCard campaign={campaign} />
         </section>
 
-        <section className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+        <MarketingCampaignWorkspace campaign={campaign} effect={effect} />
+
+        <section
+          id="contacts"
+          className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]"
+        >
           <CrmTaskCard campaign={campaign} linkedTask={linkedTask} />
           <ContactHistoryCard events={campaignEvents} campaign={campaign} />
         </section>
@@ -214,16 +220,6 @@ function CampaignPlan({ campaign }: { campaign: MarketingCampaign }) {
           </div>
         ))}
       </div>
-      {campaign.note ? (
-        <div className="border-t border-zinc-200 p-4 dark:border-zinc-800">
-          <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-            Заметка
-          </p>
-          <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-            {campaign.note}
-          </p>
-        </div>
-      ) : null}
     </section>
   );
 }
@@ -428,7 +424,10 @@ function EffectAnalytics({
 }) {
   if (!effect) {
     return (
-      <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+      <section
+        id="effect"
+        className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
+      >
         <div className="border-b border-zinc-200 p-5 dark:border-zinc-800">
           <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
             Эффект
@@ -475,7 +474,10 @@ function EffectAnalytics({
   ];
 
   return (
-    <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+    <section
+      id="effect"
+      className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
+    >
       <div className="border-b border-zinc-200 p-5 dark:border-zinc-800">
         <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
           Эффект

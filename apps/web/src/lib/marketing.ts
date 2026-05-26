@@ -24,6 +24,11 @@ export type MarketingCampaignConsentCoverage = {
   contactable: number;
   excluded: number;
   requiresPhoneConsent: boolean;
+  channelKind: "PHONE" | "MESSAGE" | "CRM" | "IN_CLUB" | "PUBLIC" | "UNKNOWN";
+  channelLabel: string;
+  requiredConsent: string;
+  contactRule: string;
+  exclusionReason: string | null;
 };
 
 export type MarketingCampaign = {

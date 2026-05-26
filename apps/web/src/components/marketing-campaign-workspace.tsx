@@ -384,9 +384,14 @@ function buildChecklist(
   campaign: MarketingCampaign,
   effect: MarketingCampaignEffect | null,
 ): ChecklistItem[] {
+  const coverage = campaign.consentCoverage;
   const consentReady =
-    !campaign.consentCoverage.requiresPhoneConsent ||
-    campaign.consentCoverage.contactable > 0;
+    !coverage.requiresPhoneConsent || coverage.contactable > 0;
+  const consentDescription = coverage.requiresPhoneConsent
+    ? consentReady
+      ? `${coverage.contactable} из ${coverage.targetTotal} гостей доступны; исключено ${coverage.excluded}.`
+      : `Нет доступных контактов: ${coverage.exclusionReason ?? "проверьте согласия и канал"}.`
+    : `${coverage.targetTotal} гостей можно обработать без телефонной рассылки: ${coverage.contactRule}`;
   const firstContacts = (effect?.after.contacts ?? 0) > 0;
   const hasEffect =
     (effect?.after.activeGuests ?? 0) > 0 ||
@@ -405,9 +410,7 @@ function buildChecklist(
     },
     {
       title: "Согласия проверены",
-      description: consentReady
-        ? `${campaign.consentCoverage.contactable} гостей доступны для контакта`
-        : "Нет доступных контактов по выбранному каналу.",
+      description: consentDescription,
       done: consentReady,
       action: consentReady ? "Готово" : "Проверить",
       href: "/guests/crm",
@@ -495,9 +498,13 @@ function buildExecutionPrompt(
   const owner = campaign.owner?.displayName ?? "ответственный не назначен";
   const due = formatDate(campaign.dueAt);
   const goal = campaignGoalLabel(campaign.goal);
+  const coverage = campaign.consentCoverage;
+  const consentLine = coverage.requiresPhoneConsent
+    ? `Проверить согласия: доступно ${coverage.contactable} из ${coverage.targetTotal} гостей; исключено ${coverage.excluded}.`
+    : `Проверить канал: ${coverage.contactRule}`;
   const preflight = [
     `Проверить группу: ${audienceName}.`,
-    `Проверить согласия: доступно ${campaign.consentCoverage.contactable} из ${campaign.consentCoverage.targetTotal} гостей.`,
+    consentLine,
     `Ответственный: ${owner}; срок: ${due}.`,
   ];
   const factsToRecord = [
@@ -569,15 +576,6 @@ function normalizeChannel(channel: string | null) {
   const lower = value.toLowerCase();
 
   if (
-    lower.includes("звон") ||
-    lower.includes("call") ||
-    lower.includes("phone") ||
-    lower.includes("тел")
-  ) {
-    return { kind: "phone", label: value || "Звонок" };
-  }
-
-  if (
     lower.includes("telegram") ||
     lower.includes("телег") ||
     lower.includes("max") ||
@@ -586,6 +584,15 @@ function normalizeChannel(channel: string | null) {
     lower.includes("сообщ")
   ) {
     return { kind: "message", label: value || "Сообщение" };
+  }
+
+  if (
+    lower.includes("звон") ||
+    lower.includes("call") ||
+    lower.includes("phone") ||
+    lower.includes("телефон")
+  ) {
+    return { kind: "phone", label: value || "Звонок" };
   }
 
   if (

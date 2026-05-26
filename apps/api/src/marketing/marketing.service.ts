@@ -80,6 +80,11 @@ export type MarketingCampaignConsentCoverage = {
   contactable: number;
   excluded: number;
   requiresPhoneConsent: boolean;
+  channelKind: 'PHONE' | 'MESSAGE' | 'CRM' | 'IN_CLUB' | 'PUBLIC' | 'UNKNOWN';
+  channelLabel: string;
+  requiredConsent: string;
+  contactRule: string;
+  exclusionReason: string | null;
 };
 
 export type MarketingCampaign = {
@@ -1786,7 +1791,8 @@ export class MarketingService {
     audienceId: string | null,
     channel: string | null,
   ): Promise<MarketingCampaignConsentCoverage> {
-    const requiresPhoneConsent = channelRequiresPhoneConsent(channel);
+    const channelPolicy = campaignChannelPolicy(channel);
+    const requiresPhoneConsent = channelPolicy.requiresPhoneConsent;
 
     if (!audienceId) {
       return {
@@ -1798,6 +1804,11 @@ export class MarketingService {
         contactable: 0,
         excluded: 0,
         requiresPhoneConsent,
+        channelKind: channelPolicy.kind,
+        channelLabel: channelPolicy.label,
+        requiredConsent: channelPolicy.requiredConsent,
+        contactRule: channelPolicy.contactRule,
+        exclusionReason: channelPolicy.exclusionReason,
       };
     }
 
@@ -1842,6 +1853,14 @@ export class MarketingService {
       contactable: requiresPhoneConsent ? granted : targetTotal,
       excluded: requiresPhoneConsent ? targetTotal - granted : 0,
       requiresPhoneConsent,
+      channelKind: channelPolicy.kind,
+      channelLabel: channelPolicy.label,
+      requiredConsent: channelPolicy.requiredConsent,
+      contactRule: channelPolicy.contactRule,
+      exclusionReason:
+        requiresPhoneConsent && targetTotal - granted > 0
+          ? channelPolicy.exclusionReason
+          : null,
     };
   }
 
@@ -2234,6 +2253,10 @@ function campaignTaskDescription(
     coverage.targetTotal > 0
       ? `Согласия: доступно ${coverage.contactable} из ${coverage.targetTotal}, исключено ${coverage.excluded}; отказов ${coverage.phoneDenied}, отписок ${coverage.phoneUnsubscribed}, неизвестных ${coverage.phoneUnknown}`
       : 'Согласия: группа не выбрана или пуста',
+    `Правило канала: ${coverage.contactRule}`,
+    coverage.exclusionReason
+      ? `Причина исключения: ${coverage.exclusionReason}`
+      : null,
     '',
     'Инструкция:',
     campaignChannelInstruction(campaign.channel),
@@ -2302,26 +2325,118 @@ function formatDateForTask(value: Date | null) {
   return new Intl.DateTimeFormat('ru-RU').format(value);
 }
 
-function channelRequiresPhoneConsent(channel: string | null) {
-  if (!channel) {
-    return true;
+function campaignChannelPolicy(channel: string | null) {
+  const value = (channel ?? '').trim();
+
+  if (!value) {
+    return {
+      kind: 'UNKNOWN' as const,
+      label: 'канал не выбран',
+      requiresPhoneConsent: true,
+      requiredConsent: 'нужно выбрать канал и проверить согласие',
+      contactRule:
+        'До выбора канала нельзя запускать контакт: сначала задайте способ связи и ответственного.',
+      exclusionReason: 'канал не выбран',
+    };
   }
 
-  const normalized = channel.toLocaleLowerCase('ru-RU');
-  return (
-    normalized.includes('crm') ||
-    normalized.includes('звон') ||
+  const normalized = value.toLocaleLowerCase('ru-RU');
+
+  if (
     normalized.includes('месс') ||
     normalized.includes('sms') ||
+    normalized.includes('смс') ||
     normalized.includes('рассыл') ||
     normalized.includes('telegram') ||
     normalized.includes('max')
-  );
+  ) {
+    return {
+      kind: 'MESSAGE' as const,
+      label: value,
+      requiresPhoneConsent: true,
+      requiredConsent: 'разрешение на сообщение или рассылку',
+      contactRule:
+        'Писать можно только гостям с разрешенным контактом; отписки, отказы и неизвестные согласия исключаются.',
+      exclusionReason:
+        'для сообщения или рассылки нет подтвержденного разрешения на контакт',
+    };
+  }
+
+  if (
+    normalized.includes('звон') ||
+    normalized.includes('call') ||
+    normalized.includes('phone') ||
+    normalized.includes('телефон')
+  ) {
+    return {
+      kind: 'PHONE' as const,
+      label: value,
+      requiresPhoneConsent: true,
+      requiredConsent: 'разрешение на телефонный контакт',
+      contactRule:
+        'Звонить можно только гостям со статусом согласия “разрешено”; отказы, отписки и неизвестные контакты исключаются.',
+      exclusionReason:
+        'для звонка нет подтвержденного разрешения на телефонный контакт',
+    };
+  }
+
+  if (normalized.includes('crm')) {
+    return {
+      kind: 'CRM' as const,
+      label: value,
+      requiresPhoneConsent: true,
+      requiredConsent: 'разрешенный контакт в CRM',
+      contactRule:
+        'CRM-задача может содержать персональный контакт, поэтому работать нужно только с гостями с разрешенным контактом.',
+      exclusionReason: 'для CRM-контакта нет разрешенного статуса связи',
+    };
+  }
+
+  if (
+    normalized.includes('клуб') ||
+    normalized.includes('админ') ||
+    normalized.includes('смен') ||
+    normalized.includes('объяв')
+  ) {
+    return {
+      kind: 'IN_CLUB' as const,
+      label: value,
+      requiresPhoneConsent: false,
+      requiredConsent: 'не требуется для объявления внутри клуба',
+      contactRule:
+        'Канал не рассылает персональные сообщения: можно передать механику администраторам и фиксировать ответы гостей при визите.',
+      exclusionReason: null,
+    };
+  }
+
+  if (normalized.includes('соц')) {
+    return {
+      kind: 'PUBLIC' as const,
+      label: value,
+      requiresPhoneConsent: false,
+      requiredConsent: 'не требуется для публичной публикации',
+      contactRule:
+        'Публичный пост не использует персональные контакты; входящие обращения нужно заводить как CRM-лиды или контактные события.',
+      exclusionReason: null,
+    };
+  }
+
+  return {
+    kind: 'UNKNOWN' as const,
+    label: value,
+    requiresPhoneConsent: true,
+    requiredConsent: 'ручная проверка согласия',
+    contactRule:
+      'Канал не распознан как публичный или клубный, поэтому перед контактом нужен разрешенный статус связи.',
+    exclusionReason: 'канал требует ручной проверки согласия',
+  };
 }
 
 function emptyConsentCoverage(
   channel: string | null,
 ): MarketingCampaignConsentCoverage {
+  const channelPolicy = campaignChannelPolicy(channel);
+
   return {
     targetTotal: 0,
     phoneGranted: 0,
@@ -2330,7 +2445,12 @@ function emptyConsentCoverage(
     phoneUnknown: 0,
     contactable: 0,
     excluded: 0,
-    requiresPhoneConsent: channelRequiresPhoneConsent(channel),
+    requiresPhoneConsent: channelPolicy.requiresPhoneConsent,
+    channelKind: channelPolicy.kind,
+    channelLabel: channelPolicy.label,
+    requiredConsent: channelPolicy.requiredConsent,
+    contactRule: channelPolicy.contactRule,
+    exclusionReason: channelPolicy.exclusionReason,
   };
 }
 

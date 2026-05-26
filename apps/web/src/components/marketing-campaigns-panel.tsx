@@ -1344,6 +1344,14 @@ function contactCoverageLabel(campaign: MarketingCampaign) {
     return "нет группы";
   }
 
+  if (!coverage.requiresPhoneConsent) {
+    return `${targetTotal} гостей, без рассылки`;
+  }
+
+  if (coverage.excluded > 0) {
+    return `${coverage.contactable} из ${targetTotal}, исключено ${coverage.excluded}`;
+  }
+
   return `${coverage.contactable} из ${targetTotal}`;
 }
 

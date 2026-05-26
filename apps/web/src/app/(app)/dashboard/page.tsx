@@ -507,7 +507,7 @@ function ExecutiveOverviewPanel({
   productRevenueShare: number | null;
 }) {
   return (
-    <section className="mt-6 grid gap-4 lg:grid-cols-3">
+    <section className="mt-6 grid auto-rows-fr items-stretch gap-4 lg:grid-cols-3">
       <ExecutiveMetricCard
         label="Клиентская база"
         value={`${formatQuantity(guestsSummary.activeGuests)} гостей`}
@@ -565,7 +565,7 @@ function ExecutiveMetricCard({
     <Link
       href={href}
       className={[
-        "block rounded-lg border bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:bg-zinc-950",
+        "flex h-full flex-col rounded-lg border bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:bg-zinc-950",
         tone === "good"
           ? "border-emerald-200 dark:border-emerald-900/70"
           : tone === "warning"
@@ -576,10 +576,10 @@ function ExecutiveMetricCard({
       ].join(" ")}
     >
       <p className="text-xs font-semibold uppercase text-zinc-500">{label}</p>
-      <p className="mt-3 text-2xl font-semibold tabular-nums text-zinc-950 dark:text-zinc-50">
+      <p className="mt-3 min-h-[64px] text-2xl font-semibold leading-tight tabular-nums text-zinc-950 dark:text-zinc-50">
         {value}
       </p>
-      <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+      <p className="mt-auto pt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
         {description}
       </p>
     </Link>
@@ -602,13 +602,13 @@ function BusinessSignalPanel({ groups }: { groups: BusinessSignalGroup[] }) {
         </p>
       </div>
 
-      <div className="grid gap-4 p-4 lg:grid-cols-3">
+      <div className="grid items-stretch gap-4 p-4 lg:grid-cols-3">
         {groups.map((group) => (
           <article
             key={group.title}
-            className="flex min-h-full flex-col overflow-hidden rounded-lg border border-zinc-200 bg-zinc-50/70 dark:border-zinc-800 dark:bg-zinc-900/40"
+            className="flex h-full min-h-full flex-col overflow-hidden rounded-lg border border-zinc-200 bg-zinc-50/70 dark:border-zinc-800 dark:bg-zinc-900/40"
           >
-            <div className="flex flex-col border-b border-zinc-200 bg-white/70 p-4 dark:border-zinc-800 dark:bg-zinc-950/60 md:h-[152px]">
+            <div className="flex min-h-[174px] flex-col border-b border-zinc-200 bg-white/70 p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
               <h3 className="text-sm font-semibold leading-5 text-zinc-950 dark:text-zinc-50">
                 {group.title}
               </h3>
@@ -617,13 +617,13 @@ function BusinessSignalPanel({ groups }: { groups: BusinessSignalGroup[] }) {
               </p>
               <Link
                 href={group.href}
-                className="mt-3 inline-flex w-fit max-w-full items-center justify-center rounded-full border border-zinc-200 px-3 py-1 text-left text-xs font-semibold leading-4 text-zinc-600 transition hover:border-emerald-300 hover:text-emerald-700 dark:border-zinc-800 dark:text-zinc-300 dark:hover:border-emerald-900 dark:hover:text-emerald-300 md:mt-auto"
+                className="mt-auto inline-flex w-fit max-w-full items-center justify-center rounded-full border border-zinc-200 px-3 py-1 text-left text-xs font-semibold leading-4 text-zinc-600 transition hover:border-emerald-300 hover:text-emerald-700 dark:border-zinc-800 dark:text-zinc-300 dark:hover:border-emerald-900 dark:hover:text-emerald-300"
               >
                 {group.routeLabel}
               </Link>
             </div>
 
-            <div className="flex flex-1 flex-col gap-3 p-4">
+            <div className="grid flex-1 auto-rows-fr gap-3 p-4">
               {group.signals.map((signal) => (
                 <BusinessSignalCard key={signal.title} signal={signal} />
               ))}
@@ -640,7 +640,7 @@ function BusinessSignalCard({ signal }: { signal: BusinessSignal }) {
     <Link
       href={signal.href}
       className={[
-        "group flex min-h-[150px] flex-col rounded-lg border bg-white p-4 transition hover:-translate-y-0.5 hover:shadow-sm dark:bg-zinc-950",
+        "group flex h-full min-h-[210px] flex-col rounded-lg border bg-white p-4 transition hover:-translate-y-0.5 hover:shadow-sm dark:bg-zinc-950",
         signal.tone === "danger"
           ? "border-red-200 dark:border-red-900/70"
           : signal.tone === "warning"

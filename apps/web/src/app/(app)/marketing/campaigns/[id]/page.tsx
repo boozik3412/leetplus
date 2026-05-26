@@ -153,6 +153,12 @@ export default async function MarketingCampaignPage({
           </div>
         </header>
 
+        <CampaignExecutiveSummary
+          campaign={campaign}
+          effect={effect}
+          contactEvents={campaignEvents}
+        />
+
         <section className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
           <CampaignPlan campaign={campaign} />
           <ConsentCard campaign={campaign} />
@@ -175,6 +181,76 @@ export default async function MarketingCampaignPage({
         />
       </div>
     </main>
+  );
+}
+
+function CampaignExecutiveSummary({
+  campaign,
+  effect,
+  contactEvents,
+}: {
+  campaign: MarketingCampaign;
+  effect: MarketingCampaignEffect | null;
+  contactEvents: GuestCrmContactEvent[];
+}) {
+  const summary = buildCampaignDecision(campaign, effect, contactEvents);
+  const metrics = buildCampaignSummaryMetrics(campaign, effect, contactEvents);
+
+  return (
+    <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.42fr)]">
+        <div className="p-5">
+          <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
+            Итог кампании
+          </p>
+          <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="max-w-4xl text-2xl font-semibold">
+                {summary.title}
+              </h2>
+              <p className="mt-2 max-w-4xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+                {summary.description}
+              </p>
+            </div>
+            <span className={summaryBadgeClass(summary.tone)}>
+              {summary.badge}
+            </span>
+          </div>
+        </div>
+
+        <div className="border-t border-zinc-200 bg-zinc-50 p-5 dark:border-zinc-800 dark:bg-zinc-900/60 lg:border-l lg:border-t-0">
+          <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            Следующий шаг
+          </p>
+          <p className="mt-2 text-sm leading-6 text-zinc-700 dark:text-zinc-200">
+            {summary.nextStep}
+          </p>
+          <a
+            href={summary.href}
+            className="mt-4 inline-flex min-h-10 w-full items-center justify-center rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 hover:bg-emerald-400 sm:w-auto"
+          >
+            {summary.action}
+          </a>
+        </div>
+      </div>
+
+      <div className="grid gap-px border-t border-zinc-200 bg-zinc-200 dark:border-zinc-800 dark:bg-zinc-800 sm:grid-cols-2 xl:grid-cols-6">
+        {metrics.map((metric) => (
+          <div
+            key={metric.label}
+            className="min-h-32 bg-white p-4 dark:bg-zinc-950"
+          >
+            <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              {metric.label}
+            </p>
+            <p className="mt-2 text-2xl font-semibold">{metric.value}</p>
+            <p className="mt-2 text-sm leading-5 text-zinc-600 dark:text-zinc-400">
+              {metric.hint}
+            </p>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -1163,4 +1239,253 @@ function normalizeTaskStatus(
   }
 
   return null;
+}
+
+type CampaignDecisionTone = "good" | "warning" | "danger" | "neutral";
+
+type CampaignDecision = {
+  tone: CampaignDecisionTone;
+  badge: string;
+  title: string;
+  description: string;
+  nextStep: string;
+  action: string;
+  href: string;
+};
+
+function buildCampaignDecision(
+  campaign: MarketingCampaign,
+  effect: MarketingCampaignEffect | null,
+  contactEvents: GuestCrmContactEvent[],
+): CampaignDecision {
+  const coverage = campaign.consentCoverage;
+  const funnel = effect?.funnel;
+  const completedContacts = funnel?.completedContacts ?? contactEvents.length;
+  const respondedContacts =
+    funnel?.respondedContacts ??
+    contactEvents.filter((event) => Boolean(event.result)).length;
+  const visitedGuests = funnel?.visitedGuests ?? effect?.after.activeGuests ?? 0;
+  const revenue = funnel?.revenue ?? effect?.after.totalRevenue ?? 0;
+  const barRevenue = funnel?.barRevenue ?? effect?.after.barRevenue ?? 0;
+  const contactCompletionRate =
+    funnel?.contactCompletionRate ??
+    percentOf(completedContacts, coverage.contactable);
+  const visitRate =
+    funnel?.visitRate ?? percentOf(visitedGuests, coverage.targetTotal);
+  const barShare = revenue > 0 ? (barRevenue / revenue) * 100 : null;
+
+  if (campaign.status === "CANCELED") {
+    return {
+      tone: "neutral" as const,
+      badge: "остановлена",
+      title: "Кампания остановлена",
+      description:
+        "Факты контактов и эффект сохранены, но новые действия по кампании сейчас не выполняются.",
+      nextStep:
+        "Если цель снова актуальна, верните кампанию в работу и продолжите фиксировать контакты.",
+      action: "Открыть запуск",
+      href: "#launch",
+    };
+  }
+
+  if (!campaign.audience || coverage.targetTotal === 0) {
+    return {
+      tone: "warning" as const,
+      badge: "нужна группа",
+      title: "Сначала нужна группа гостей",
+      description:
+        "Без группы невозможно оценить охват, согласия, контактный план и эффект кампании.",
+      nextStep:
+        "Выберите сохраненную группу или создайте ее из отчета по гостям, затем вернитесь к запуску.",
+      action: "Выбрать группу",
+      href: "/guests/report#audiences",
+    };
+  }
+
+  if (coverage.requiresPhoneConsent && coverage.contactable === 0) {
+    return {
+      tone: "danger" as const,
+      badge: "нет контактов",
+      title: "Контактировать группу нельзя",
+      description:
+        "В выбранной группе нет гостей с разрешенным контактом по текущему каналу. Массовый ручной запуск приведет к риску по согласиям.",
+      nextStep:
+        "Проверьте согласия, канал или соберите другую группу для кампании.",
+      action: "Открыть CRM",
+      href: "/guests/crm",
+    };
+  }
+
+  if (!campaign.crmTask && campaign.status !== "DRAFT") {
+    return {
+      tone: "warning" as const,
+      badge: "нет задачи",
+      title: "Запуск не закреплен за исполнением",
+      description:
+        "Кампания уже вышла из черновика, но связанной CRM-задачи нет. Есть риск, что ответственный не увидит, что нужно делать.",
+      nextStep:
+        "Создайте CRM-задачу или назначьте ответственного и срок в рабочем запуске кампании.",
+      action: "Открыть запуск",
+      href: "#launch",
+    };
+  }
+
+  if (completedContacts === 0) {
+    return {
+      tone: campaign.status === "DRAFT" ? "neutral" : "warning",
+      badge: campaign.status === "DRAFT" ? "план" : "ждет исполнения",
+      title:
+        campaign.status === "DRAFT"
+          ? "Кампания пока в подготовке"
+          : "Контакты еще не начались",
+      description: `Доступно для контакта ${formatNumber(
+        coverage.contactable,
+      )} из ${formatNumber(
+        coverage.targetTotal,
+      )} гостей. Эффект появится после первых зафиксированных контактов.`,
+      nextStep:
+        "Проверьте инструкцию исполнения, назначьте ответственного и начните фиксировать результаты контактов.",
+      action: "Открыть запуск",
+      href: "#launch",
+    };
+  }
+
+  if (visitedGuests === 0) {
+    return {
+      tone: "warning" as const,
+      badge: "нет визитов",
+      title: "Контакты есть, но гости не пришли",
+      description: `${formatNumber(
+        completedContacts,
+      )} контактов выполнено, результат зафиксирован у ${formatNumber(
+        respondedContacts,
+      )}. Визитов после запуска пока нет.`,
+      nextStep:
+        "Проверьте оффер, скрипт контакта и качество группы. Если ответов мало, сначала дожмите исполнение.",
+      action: "Разобрать контакты",
+      href: "#contacts",
+    };
+  }
+
+  if (revenue <= 0) {
+    return {
+      tone: "warning" as const,
+      badge: "есть визиты",
+      title: "Гости пришли, но выручка не проявилась",
+      description: `${formatNumber(
+        visitedGuests,
+      )} гостей посетили клуб после контакта. Денежный эффект пока не связан с кампанией.`,
+      nextStep:
+        "Проверьте, есть ли у гостей сессии, барные покупки или списания баланса в окне эффекта.",
+      action: "Открыть эффект",
+      href: "#effect",
+    };
+  }
+
+  if (barShare !== null && barShare < 15) {
+    return {
+      tone: "good" as const,
+      badge: "есть эффект",
+      title: "Кампания привела гостей и выручку",
+      description: `${formatRubles(revenue)} выручки и ${formatNumber(
+        visitedGuests,
+      )} гостей после запуска. Доля бара низкая: ${formatPercent(barShare)}.`,
+      nextStep:
+        "Для следующей итерации добавьте барный оффер или промо-набор к этой же группе.",
+      action: "Смотреть эффект",
+      href: "#effect",
+    };
+  }
+
+  return {
+    tone: "good" as const,
+    badge: "работает",
+    title: "Кампания дает измеримый эффект",
+    description: `${formatRubles(revenue)} выручки, ${formatNumber(
+      visitedGuests,
+    )} гостей и ${formatNumber(
+      completedContacts,
+    )} контактов. Конверсия в визит: ${formatPercent(visitRate)}.`,
+    nextStep:
+      contactCompletionRate !== null && contactCompletionRate < 70
+        ? "Дожмите исполнение по оставшейся части группы и сравните прирост."
+        : "Зафиксируйте выводы и повторите механику на похожей группе.",
+    action: "Смотреть эффект",
+    href: "#effect",
+  };
+}
+
+function buildCampaignSummaryMetrics(
+  campaign: MarketingCampaign,
+  effect: MarketingCampaignEffect | null,
+  contactEvents: GuestCrmContactEvent[],
+) {
+  const coverage = campaign.consentCoverage;
+  const funnel = effect?.funnel;
+  const completedContacts = funnel?.completedContacts ?? contactEvents.length;
+  const respondedContacts =
+    funnel?.respondedContacts ??
+    contactEvents.filter((event) => Boolean(event.result)).length;
+  const visitedGuests = funnel?.visitedGuests ?? effect?.after.activeGuests ?? 0;
+  const revenue = funnel?.revenue ?? effect?.after.totalRevenue ?? 0;
+  const barRevenue = funnel?.barRevenue ?? effect?.after.barRevenue ?? 0;
+  const contactCompletionRate =
+    funnel?.contactCompletionRate ??
+    percentOf(completedContacts, coverage.contactable);
+  const visitRate =
+    funnel?.visitRate ?? percentOf(visitedGuests, coverage.targetTotal);
+
+  return [
+    {
+      label: "Группа",
+      value: `${formatNumber(coverage.targetTotal)} гостей`,
+      hint: campaign.audience?.name ?? "группа пока не выбрана",
+    },
+    {
+      label: "Можно контактировать",
+      value: `${formatNumber(coverage.contactable)} гостей`,
+      hint: coverage.requiresPhoneConsent
+        ? `${formatNumber(coverage.excluded)} исключены по согласиям`
+        : "канал не требует телефонного согласия",
+    },
+    {
+      label: "Контакты",
+      value: `${formatNumber(completedContacts)} шт`,
+      hint: `выполнено ${formatPercent(contactCompletionRate)} плана`,
+    },
+    {
+      label: "Результат",
+      value: `${formatNumber(respondedContacts)} шт`,
+      hint: "есть зафиксированный исход контакта",
+    },
+    {
+      label: "Визиты",
+      value: `${formatNumber(visitedGuests)} гостей`,
+      hint: `конверсия в визит ${formatPercent(visitRate)}`,
+    },
+    {
+      label: "Деньги",
+      value: formatRubles(revenue),
+      hint: `бар ${formatRubles(barRevenue)}`,
+    },
+  ];
+}
+
+function summaryBadgeClass(tone: CampaignDecisionTone) {
+  const base =
+    "inline-flex rounded-full px-3 py-1 text-sm font-semibold uppercase";
+
+  if (tone === "good") {
+    return `${base} bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200`;
+  }
+
+  if (tone === "warning") {
+    return `${base} bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200`;
+  }
+
+  if (tone === "danger") {
+    return `${base} bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-200`;
+  }
+
+  return `${base} bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300`;
 }

@@ -163,7 +163,10 @@ export function MarketingCampaignWorkspace({
   }
 
   return (
-    <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+    <section
+      id="launch"
+      className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
+    >
       <div className="border-b border-zinc-200 p-5 dark:border-zinc-800">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>

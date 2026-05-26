@@ -25,6 +25,39 @@ type CampaignFormState = {
   note: string;
 };
 
+type PromoMechanicTemplate = {
+  id: string;
+  title: string;
+  goal: MarketingCampaignGoal;
+  mechanic: string;
+  channel: string;
+  name: string;
+  budget: string;
+  description: string;
+  tradeoff: string;
+  note: string;
+};
+
+type PromoBundleDraft = {
+  gamePrice: string;
+  barPrice: string;
+  servicePrice: string;
+  discount: string;
+  cost: string;
+  expectedUses: string;
+};
+
+type PromoBundleEconomics = {
+  basePrice: number;
+  promoPrice: number;
+  expectedUses: number;
+  revenue: number;
+  cost: number;
+  margin: number;
+  marginPercent: number | null;
+  discountBudget: number;
+};
+
 const goalOptions: Array<{ value: MarketingCampaignGoal; label: string }> = [
   { value: "RETURN_GUESTS", label: "Вернуть гостей" },
   { value: "REPEAT_VISIT", label: "Повторный визит" },
@@ -61,6 +94,65 @@ const mechanicOptions = [
   "Реферальная механика",
 ];
 
+const promoMechanicTemplates: PromoMechanicTemplate[] = [
+  {
+    id: "second-visit",
+    title: "Второй визит",
+    goal: "REPEAT_VISIT",
+    mechanic: "Персональное предложение",
+    channel: "CRM-задача",
+    name: "Вернуть новых гостей на второй визит",
+    budget: "0",
+    description: "Для новых гостей, которые еще не сформировали привычку.",
+    tradeoff:
+      "Поднимает retention, но важно не давать скидку тем, кто и так вернется.",
+    note:
+      "Цель: второй визит. Оффер мягкий: персональный повод вернуться, без автоматического бонуса. Ограничения: один контакт на гостя, фиксировать исход и дату визита.",
+  },
+  {
+    id: "weak-hours",
+    title: "Тихие часы",
+    goal: "WEAK_HOURS",
+    mechanic: "Купон",
+    channel: "Объявление в клубе",
+    name: "Оффер на тихие часы",
+    budget: "0",
+    description: "Для времени, где есть свободная емкость ПК и зала.",
+    tradeoff:
+      "Может дать загрузку, но не должен каннибализировать пиковые часы.",
+    note:
+      "Цель: заполнить тихие часы. Правило: действует только в оговоренный период и клубы. Контроль: не применять в пиковые часы, фиксировать использования в CRM.",
+  },
+  {
+    id: "bar-combo",
+    title: "Бар-комбо",
+    goal: "BAR_GROWTH",
+    mechanic: "Промо-набор",
+    channel: "CRM-задача",
+    name: "Промо-набор для роста бара",
+    budget: "0",
+    description: "Для гостей с низкой долей бара и командных визитов.",
+    tradeoff:
+      "Важно проверить маржу: набор должен растить чек, а не раздавать скидку.",
+    note:
+      "Цель: рост бара. Предложить комбо: игровое время + бар/кальян/сервис. Ограничения: один набор на гостя, ручное подтверждение администратором, отслеживать бар и общую выручку.",
+  },
+  {
+    id: "event",
+    title: "Мероприятие",
+    goal: "EVENT_PROMO",
+    mechanic: "Событие",
+    channel: "Мессенджер",
+    name: "Привлечь гостей на мероприятие",
+    budget: "0",
+    description: "Для турниров, дней рождения, брони клуба и командных событий.",
+    tradeoff:
+      "Нужна ясная вместимость, ответственный и фиксация броней.",
+    note:
+      "Цель: мероприятие или бронь. Проверить дату, клуб, вместимость и канал. Контроль: каждый ответ гостя фиксировать в CRM, брони и отказы отдельно.",
+  },
+];
+
 const emptyForm: CampaignFormState = {
   goal: "RETURN_GUESTS",
   name: "",
@@ -76,6 +168,15 @@ const emptyForm: CampaignFormState = {
   note: "",
 };
 
+const emptyBundleDraft: PromoBundleDraft = {
+  gamePrice: "500",
+  barPrice: "350",
+  servicePrice: "0",
+  discount: "150",
+  cost: "220",
+  expectedUses: "30",
+};
+
 export function MarketingCampaignsPanel({
   campaigns,
   audiences,
@@ -89,11 +190,23 @@ export function MarketingCampaignsPanel({
 }) {
   const [rows, setRows] = useState(campaigns);
   const [form, setForm] = useState<CampaignFormState>(emptyForm);
+  const [selectedTemplateId, setSelectedTemplateId] = useState(
+    promoMechanicTemplates[0]?.id ?? "",
+  );
+  const [bundleDraft, setBundleDraft] =
+    useState<PromoBundleDraft>(emptyBundleDraft);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pendingTaskCampaignId, setPendingTaskCampaignId] = useState<
     string | null
   >(null);
   const [error, setError] = useState<string | null>(null);
+  const selectedTemplate =
+    promoMechanicTemplates.find((template) => template.id === selectedTemplateId) ??
+    promoMechanicTemplates[0];
+  const bundleEconomics = useMemo(
+    () => buildPromoBundleEconomics(bundleDraft),
+    [bundleDraft],
+  );
 
   const summary = useMemo(
     () => ({
@@ -127,6 +240,32 @@ export function MarketingCampaignsPanel({
     setRows((current) => [campaign, ...current]);
     setForm(emptyForm);
     setIsSubmitting(false);
+  }
+
+  function applyTemplate(template: PromoMechanicTemplate) {
+    setForm((current) => ({
+      ...current,
+      goal: template.goal,
+      name: template.name,
+      channel: template.channel,
+      mechanic: template.mechanic,
+      budget: template.budget,
+      note: template.note,
+    }));
+  }
+
+  function applyBundleDraft() {
+    const note = buildPromoBundleNote(bundleDraft, bundleEconomics);
+
+    setForm((current) => ({
+      ...current,
+      goal: "PROMO_BUNDLE",
+      name: "Промо-набор: игра + бар",
+      channel: "CRM-задача",
+      mechanic: "Промо-набор",
+      budget: String(Math.round(bundleEconomics.discountBudget)),
+      note,
+    }));
   }
 
   async function updateStatus(
@@ -200,6 +339,17 @@ export function MarketingCampaignsPanel({
           <MetricPill label="Черновики" value={summary.drafts} />
         </div>
       </div>
+
+      <PromoMechanicsBuilder
+        selectedTemplate={selectedTemplate}
+        selectedTemplateId={selectedTemplateId}
+        bundleDraft={bundleDraft}
+        bundleEconomics={bundleEconomics}
+        onSelectTemplate={setSelectedTemplateId}
+        onApplyTemplate={applyTemplate}
+        onBundleDraftChange={setBundleDraft}
+        onApplyBundle={applyBundleDraft}
+      />
 
       <form
         onSubmit={createCampaign}
@@ -499,6 +649,220 @@ export function MarketingCampaignsPanel({
   );
 }
 
+function PromoMechanicsBuilder({
+  selectedTemplate,
+  selectedTemplateId,
+  bundleDraft,
+  bundleEconomics,
+  onSelectTemplate,
+  onApplyTemplate,
+  onBundleDraftChange,
+  onApplyBundle,
+}: {
+  selectedTemplate: PromoMechanicTemplate;
+  selectedTemplateId: string;
+  bundleDraft: PromoBundleDraft;
+  bundleEconomics: PromoBundleEconomics;
+  onSelectTemplate: (id: string) => void;
+  onApplyTemplate: (template: PromoMechanicTemplate) => void;
+  onBundleDraftChange: (draft: PromoBundleDraft) => void;
+  onApplyBundle: () => void;
+}) {
+  return (
+    <section className="border-b border-zinc-200 p-4 dark:border-zinc-800">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(360px,1.05fr)]">
+        <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
+                Механики
+              </p>
+              <h3 className="mt-2 text-xl font-semibold text-zinc-950 dark:text-white">
+                Быстрый сценарий
+              </h3>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+                Выберите тип промо, чтобы форма кампании заполнилась понятной
+                целью, каналом, механикой и управленческой заметкой.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => onApplyTemplate(selectedTemplate)}
+              className="inline-flex min-h-10 items-center justify-center rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
+            >
+              Применить
+            </button>
+          </div>
+
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+            {promoMechanicTemplates.map((template) => {
+              const isActive = template.id === selectedTemplateId;
+
+              return (
+                <button
+                  key={template.id}
+                  type="button"
+                  onClick={() => onSelectTemplate(template.id)}
+                  className={`min-h-24 rounded-lg border p-3 text-left transition ${
+                    isActive
+                      ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-500/10"
+                      : "border-zinc-200 bg-white hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-950"
+                  }`}
+                >
+                  <span className="text-sm font-semibold text-zinc-950 dark:text-white">
+                    {template.title}
+                  </span>
+                  <span className="mt-2 block text-xs leading-5 text-zinc-600 dark:text-zinc-400">
+                    {template.description}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="mt-4 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+            <p className="text-sm font-semibold text-zinc-950 dark:text-white">
+              {selectedTemplate.title}: {selectedTemplate.mechanic}
+            </p>
+            <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+              {selectedTemplate.tradeoff}
+            </p>
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
+                Промо-набор
+              </p>
+              <h3 className="mt-2 text-xl font-semibold text-zinc-950 dark:text-white">
+                Игра + бар + сервис
+              </h3>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+                Черновой расчет нужен не для бухгалтерии, а чтобы до запуска
+                увидеть цену, скидку, маржу и бюджет механики.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onApplyBundle}
+              className="inline-flex min-h-10 items-center justify-center rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
+            >
+              Собрать кампанию
+            </button>
+          </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            <NumericDraftField
+              label="Игра, руб"
+              value={bundleDraft.gamePrice}
+              onChange={(value) =>
+                onBundleDraftChange({ ...bundleDraft, gamePrice: value })
+              }
+            />
+            <NumericDraftField
+              label="Бар, руб"
+              value={bundleDraft.barPrice}
+              onChange={(value) =>
+                onBundleDraftChange({ ...bundleDraft, barPrice: value })
+              }
+            />
+            <NumericDraftField
+              label="Сервис, руб"
+              value={bundleDraft.servicePrice}
+              onChange={(value) =>
+                onBundleDraftChange({ ...bundleDraft, servicePrice: value })
+              }
+            />
+            <NumericDraftField
+              label="Скидка, руб"
+              value={bundleDraft.discount}
+              onChange={(value) =>
+                onBundleDraftChange({ ...bundleDraft, discount: value })
+              }
+            />
+            <NumericDraftField
+              label="Себестоимость, руб"
+              value={bundleDraft.cost}
+              onChange={(value) =>
+                onBundleDraftChange({ ...bundleDraft, cost: value })
+              }
+            />
+            <NumericDraftField
+              label="Лимит, шт"
+              value={bundleDraft.expectedUses}
+              onChange={(value) =>
+                onBundleDraftChange({ ...bundleDraft, expectedUses: value })
+              }
+            />
+          </div>
+
+          <div className="mt-4 grid gap-2 sm:grid-cols-4">
+            <PromoMetric
+              label="Цена"
+              value={formatRubles(bundleEconomics.promoPrice)}
+            />
+            <PromoMetric
+              label="Выручка"
+              value={formatRubles(bundleEconomics.revenue)}
+            />
+            <PromoMetric
+              label="Маржа"
+              value={
+                bundleEconomics.marginPercent === null
+                  ? "нет данных"
+                  : `${formatPercent(bundleEconomics.marginPercent)}`
+              }
+            />
+            <PromoMetric
+              label="Бюджет"
+              value={formatRubles(bundleEconomics.discountBudget)}
+            />
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function NumericDraftField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="block space-y-1">
+      <span className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+        {label}
+      </span>
+      <input
+        inputMode="decimal"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className={fieldClassName}
+      />
+    </label>
+  );
+}
+
+function PromoMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+      <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+        {label}
+      </p>
+      <p className="mt-1 text-lg font-semibold text-zinc-950 dark:text-white">
+        {value}
+      </p>
+    </div>
+  );
+}
+
 function Field({
   label,
   className,
@@ -582,6 +946,58 @@ function ConsentCoverage({
   );
 }
 
+function buildPromoBundleEconomics(
+  draft: PromoBundleDraft,
+): PromoBundleEconomics {
+  const basePrice =
+    parseMoney(draft.gamePrice) +
+    parseMoney(draft.barPrice) +
+    parseMoney(draft.servicePrice);
+  const discount = parseMoney(draft.discount);
+  const promoPrice = Math.max(0, basePrice - discount);
+  const expectedUses = Math.max(0, Math.round(parseMoney(draft.expectedUses)));
+  const revenue = promoPrice * expectedUses;
+  const cost = parseMoney(draft.cost) * expectedUses;
+  const margin = revenue - cost;
+  const marginPercent = revenue > 0 ? (margin / revenue) * 100 : null;
+  const discountBudget = discount * expectedUses;
+
+  return {
+    basePrice,
+    promoPrice,
+    expectedUses,
+    revenue,
+    cost,
+    margin,
+    marginPercent,
+    discountBudget,
+  };
+}
+
+function buildPromoBundleNote(
+  draft: PromoBundleDraft,
+  economics: PromoBundleEconomics,
+) {
+  return [
+    "Цель: промо-набор для роста бара и среднего чека.",
+    `Состав: игра ${formatRubles(parseMoney(draft.gamePrice))}, бар ${formatRubles(
+      parseMoney(draft.barPrice),
+    )}, сервис ${formatRubles(parseMoney(draft.servicePrice))}.`,
+    `Цена набора: ${formatRubles(economics.promoPrice)} вместо ${formatRubles(
+      economics.basePrice,
+    )}. Скидка: ${formatRubles(parseMoney(draft.discount))}.`,
+    `Лимит: ${formatNumber(economics.expectedUses)} использований. Оценка выручки: ${formatRubles(
+      economics.revenue,
+    )}; маржа: ${formatRubles(economics.margin)}${
+      economics.marginPercent === null
+        ? ""
+        : ` (${formatPercent(economics.marginPercent)})`
+    }.`,
+    "Ограничения: один набор на гостя, только выбранные клубы и период, ручное подтверждение администратором.",
+    "Антифрод: не суммировать с другими скидками, фиксировать контакт и факт использования в CRM.",
+  ].join(" ");
+}
+
 function cleanPayload(form: CampaignFormState) {
   return {
     ...form,
@@ -626,6 +1042,24 @@ function formatRubles(value: number | null) {
   return `${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(
     value,
   )} руб`;
+}
+
+function formatPercent(value: number) {
+  return `${new Intl.NumberFormat("ru-RU", {
+    maximumFractionDigits: 1,
+  }).format(value)}%`;
+}
+
+function formatNumber(value: number) {
+  return new Intl.NumberFormat("ru-RU", {
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function parseMoney(value: string) {
+  const normalized = value.replace(",", ".").replace(/[^\d.-]/g, "");
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
 }
 
 function storeLabel(storeIds: string[], stores: Store[]) {

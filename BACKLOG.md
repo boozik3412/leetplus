@@ -473,7 +473,8 @@ Goal: let a manager create a simple campaign from a business signal and control 
 - Done: campaign detail now supports XLSX export with the same validated result columns as CSV: plan, funnel, before/after effect, club breakdown, responsible/channel execution, and contact outcomes.
 - Done: campaign detail now starts with an executive summary: verdict, next action, target group, contactability, contacts, recorded results, visits, revenue, and bar.
 - Done: campaign detail now unfolds through scenario tabs: plan, launch, contacts, effect, and export; summary and checklist links open the correct scenario instead of exposing every block at once.
-- Next: continue improving campaign execution prompts from real usage and start the promo-bundle/mechanics layer for MVP 2.
+- Done: `/marketing` now starts MVP 2 with a lightweight mechanic builder: templates for second visit, weak hours, bar combo, and events plus a promo-bundle calculator that fills campaign goal, mechanic, budget, and launch notes with limits and anti-fraud rules.
+- Next: continue improving campaign execution prompts from real usage and persist promo-bundle/mechanic entities when the first manual workflows are validated.
 - Let the user choose a saved guest group or create one from guest filters.
 - Add campaign fields: goal, period, clubs, target group, channel, responsible user, deadline, note, status.
 - Improve generated CRM tasks with per-channel instructions and campaign detail links.
@@ -492,9 +493,9 @@ Acceptance criteria:
 
 Goal: help clubs create commercially sane promo offers.
 
-- Add promo bundle constructor with game time, bar products, hookah/services, discount, and price.
+- Started: add promo bundle constructor with game time, bar products, hookah/services, discount, and price.
 - Show estimated revenue, margin, and cost where data exists.
-- Add mechanic templates: second visit, weak hours, birthday/event, bar combo, tournament, referral, VIP/TOP guest.
+- Started: add mechanic templates: second visit, weak hours, birthday/event, bar combo, tournament, referral, VIP/TOP guest.
 - Add limits: period, clubs, max uses, one per guest, minimum spend, group eligibility.
 - Add anti-fraud notes and manual approval before any automatic reward workflow.
 

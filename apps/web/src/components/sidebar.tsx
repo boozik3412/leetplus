@@ -46,7 +46,7 @@ const navGroups: NavGroup[] = [
     icon: "assortment",
     items: [
       { href: "/admin", label: "Админ платформы" },
-      { href: "/dashboard", label: "Дашборд" },
+      { href: "/assortment/dashboard", label: "Дашборд ассортимента" },
       { href: "/products", label: "Товары" },
       { href: "/categories", label: "Категории" },
       { href: "/suppliers", label: "Поставщики" },

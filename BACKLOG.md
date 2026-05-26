@@ -101,6 +101,7 @@ Status: implemented; remains in production UX polish mode.
 
 - Done: first screen is focused on commercial control: revenue, gross profit, margin, sold units, OOS risk, stock, management focus, actions, and "what changed".
 - Done: dashboard v2 now starts from business-signal groups by work scenario: client base/CRM, assortment management, marketing, and personnel control; each signal has a compact explanation and one next action.
+- Done: duplicated assortment focus/actions were removed from the network dashboard and moved into a dedicated `/assortment/dashboard` working screen for category-management decisions.
 - Done: current/full period selectors, default current-day view, European date formatting, report anchors, responsive fixes, and compact report previews.
 - Done: executive summary now combines total revenue, guests, assortment and load; the load metric uses PC capacity when PC count is available from Langame/global endpoints.
 - Done: "What changed" now compares the latest full day against the previous full day for current-day mode; other periods keep analogous-period comparison.

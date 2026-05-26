@@ -506,6 +506,7 @@ function EffectAnalytics({
       </div>
 
       <CampaignFunnelCard campaign={campaign} effect={effect} />
+      <CampaignStoreBreakdownCard effect={effect} />
 
       <div className="grid gap-3 border-t border-zinc-200 p-4 dark:border-zinc-800 lg:grid-cols-2">
         <EffectPeriodTable title="До кампании" period={effect.before} />
@@ -528,6 +529,110 @@ function EffectAnalytics({
         </ul>
       </div>
     </section>
+  );
+}
+
+function CampaignStoreBreakdownCard({
+  effect,
+}: {
+  effect: MarketingCampaignEffect;
+}) {
+  const rows = effect.storeBreakdown.slice(0, 6);
+  const maxRevenue = Math.max(
+    0,
+    ...rows.map((row) => row.after.totalRevenue),
+  );
+  const hiddenCount = Math.max(0, effect.storeBreakdown.length - rows.length);
+
+  return (
+    <div className="border-t border-zinc-200 p-4 dark:border-zinc-800">
+      <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
+              По клубам
+            </p>
+            <h3 className="mt-2 text-xl font-semibold">
+              Где кампания дала эффект
+            </h3>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+              Сравниваем клубы по фактам целевой группы в окне после запуска:
+              выручка, бар, визиты и игровые часы. Нераспределенные факты
+              вынесены отдельно.
+            </p>
+          </div>
+          <p className="rounded-full border border-zinc-200 px-3 py-1 text-sm font-semibold text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+            {formatNumber(effect.storeBreakdown.length)} строк
+          </p>
+        </div>
+
+        {rows.length > 0 ? (
+          <div className="mt-4 space-y-3">
+            {rows.map((row) => (
+              <div
+                key={row.storeId ?? "unallocated"}
+                className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950"
+              >
+                <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.7fr)] lg:items-center">
+                  <div>
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <p className="font-semibold">{row.storeName}</p>
+                      <p className="text-lg font-semibold">
+                        {formatRubles(row.after.totalRevenue)}
+                      </p>
+                    </div>
+                    <div className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+                      <div
+                        className="h-full rounded-full bg-emerald-500"
+                        style={{
+                          width: `${barWidth(
+                            percentOf(row.after.totalRevenue, maxRevenue),
+                          )}%`,
+                        }}
+                      />
+                    </div>
+                    <p className={deltaClassName(row.delta.totalRevenue)}>
+                      {formatSignedRubles(row.delta.totalRevenue)} к окну до
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <StoreBreakdownMetric
+                      label="Гости"
+                      value={`${formatNumber(row.after.activeGuests)} гостей`}
+                    />
+                    <StoreBreakdownMetric
+                      label="Часы"
+                      value={`${formatNumber(row.after.playHours)} ч`}
+                    />
+                    <StoreBreakdownMetric
+                      label="Бар"
+                      value={formatRubles(row.after.barRevenue)}
+                    />
+                    <StoreBreakdownMetric
+                      label="Повторные"
+                      value={`${formatNumber(row.after.repeatGuests)} гостей`}
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-4 rounded-lg border border-dashed border-zinc-300 p-4 text-sm leading-6 text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
+            По клубам пока нет фактов целевой группы в выбранном окне кампании.
+            После контактов и визитов здесь появится сравнение клубов.
+          </p>
+        )}
+
+        {hiddenCount > 0 ? (
+          <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">
+            Показаны первые 6 строк по выручке. Еще {formatNumber(hiddenCount)}{" "}
+            строк можно будет вынести в полный отчет.
+          </p>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
@@ -650,6 +755,23 @@ function CampaignFunnelCard({
   );
 }
 
+function StoreBreakdownMetric({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-md bg-zinc-50 p-2 dark:bg-zinc-900">
+      <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+        {label}
+      </p>
+      <p className="mt-1 font-semibold">{value}</p>
+    </div>
+  );
+}
+
 function EffectPeriodTable({
   title,
   period,
@@ -712,6 +834,16 @@ function formatRubles(value: number | null) {
   }
 
   return `${formatNumber(Math.round(value))} руб`;
+}
+
+function formatSignedRubles(value: number) {
+  if (value === 0) {
+    return "0 руб";
+  }
+
+  const sign = value > 0 ? "+" : "";
+
+  return `${sign}${formatNumber(Math.round(value))} руб`;
 }
 
 function formatDelta(value: number) {

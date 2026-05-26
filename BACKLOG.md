@@ -464,7 +464,8 @@ Goal: let a manager create a simple campaign from a business signal and control 
 - Done: real campaign effect measurement added with before/after windows, direct `marketingCampaignId` contact attribution, group fallback for older contacts, visits, sessions, play hours, balance-spend revenue, bar revenue, and explicit attribution limitations.
 - Done: campaign detail now has a compact contact-result form that saves new CRM contact facts directly to the selected `marketingCampaignId` and refreshes the campaign journal/effect data.
 - Done: campaign detail now shows a compact funnel from target group to contact plan, completed contacts, recorded result, visits, repeat guests, revenue, bar, CRM task, and responsible user.
-- Next: show campaign effect by club, group, channel, and responsible user, then add CSV export for campaign results and contact outcomes.
+- Done: campaign effect now includes a compact store breakdown: revenue, bar, active guests, play hours, repeat guests, before/after delta, and a separate unallocated row when facts have no store.
+- Next: show campaign effect by channel and responsible user, then add CSV export for campaign results and contact outcomes.
 - Let the user choose a saved guest group or create one from guest filters.
 - Add campaign fields: goal, period, clubs, target group, channel, responsible user, deadline, note, status.
 - Improve generated CRM tasks with per-channel instructions and campaign detail links.
@@ -502,7 +503,8 @@ Goal: measure whether marketing actions produced useful commercial effect.
 - Started: campaign detail now compares before/after windows for the selected campaign and shows contacts, visitors, sessions, play hours, balance-spend revenue, bar revenue, total target size, linked guests, and attribution limits.
 - Started: newly recorded campaign contacts are now directly attributed to `marketingCampaignId`; older contacts still use group fallback.
 - Started: campaign detail now has the first funnel view: target group -> planned contacts -> completed contacts -> recorded result -> visited -> revenue -> bar -> repeat guests.
-- Show effect by club, group, channel, and responsible user.
+- Started: effect by club is now visible in campaign detail with store-scoped revenue, bar, guests, hours, repeat guests, and before/after deltas.
+- Show effect by group, channel, and responsible user.
 - Separate store-scoped revenue from unallocated online top-ups when attributing campaign effect.
 - Add CSV export for campaign results and contact outcomes.
 

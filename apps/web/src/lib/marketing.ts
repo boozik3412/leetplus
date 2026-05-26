@@ -99,6 +99,25 @@ export type MarketingCampaignFunnel = {
   } | null;
 };
 
+export type MarketingCampaignStoreEffectMetrics = {
+  activeGuests: number;
+  repeatGuests: number;
+  sessionsCount: number;
+  playHours: number;
+  balanceRevenue: number;
+  barRevenue: number;
+  totalRevenue: number;
+  barSalesCount: number;
+};
+
+export type MarketingCampaignStoreEffect = {
+  storeId: string | null;
+  storeName: string;
+  before: MarketingCampaignStoreEffectMetrics;
+  after: MarketingCampaignStoreEffectMetrics;
+  delta: MarketingCampaignStoreEffectMetrics;
+};
+
 export type MarketingCampaignEffect = {
   campaignId: string;
   attributionMode: "CAMPAIGN_OR_GROUP";
@@ -115,6 +134,7 @@ export type MarketingCampaignEffect = {
   after: MarketingCampaignEffectPeriod;
   delta: Omit<MarketingCampaignEffectPeriod, "from" | "to" | "days">;
   funnel: MarketingCampaignFunnel;
+  storeBreakdown: MarketingCampaignStoreEffect[];
   dataQuality: {
     directContactAttribution: boolean;
     revenueScope: string;

@@ -142,6 +142,25 @@ export type MarketingCampaignFunnel = {
   } | null;
 };
 
+export type MarketingCampaignStoreEffectMetrics = {
+  activeGuests: number;
+  repeatGuests: number;
+  sessionsCount: number;
+  playHours: number;
+  balanceRevenue: number;
+  barRevenue: number;
+  totalRevenue: number;
+  barSalesCount: number;
+};
+
+export type MarketingCampaignStoreEffect = {
+  storeId: string | null;
+  storeName: string;
+  before: MarketingCampaignStoreEffectMetrics;
+  after: MarketingCampaignStoreEffectMetrics;
+  delta: MarketingCampaignStoreEffectMetrics;
+};
+
 export type MarketingCampaignEffect = {
   campaignId: string;
   attributionMode: 'CAMPAIGN_OR_GROUP';
@@ -158,6 +177,7 @@ export type MarketingCampaignEffect = {
   after: MarketingCampaignEffectPeriod;
   delta: Omit<MarketingCampaignEffectPeriod, 'from' | 'to' | 'days'>;
   funnel: MarketingCampaignFunnel;
+  storeBreakdown: MarketingCampaignStoreEffect[];
   dataQuality: {
     directContactAttribution: boolean;
     revenueScope: string;
@@ -243,7 +263,7 @@ export class MarketingService {
       ),
     ];
 
-    const [before, after] = await Promise.all([
+    const [before, after, storeBreakdown] = await Promise.all([
       this.buildCampaignEffectPeriod({
         tenantId: user.tenantId,
         campaignId: campaign.id,
@@ -261,6 +281,15 @@ export class MarketingService {
         storeIds,
         from: afterFrom,
         to: afterTo,
+      }),
+      this.buildCampaignStoreBreakdown({
+        tenantId: user.tenantId,
+        guestIds,
+        storeIds,
+        beforeFrom,
+        beforeTo,
+        afterFrom,
+        afterTo,
       }),
     ]);
 
@@ -357,6 +386,7 @@ export class MarketingService {
             }
           : null,
       },
+      storeBreakdown,
       dataQuality: {
         directContactAttribution,
         revenueScope:
@@ -704,6 +734,257 @@ export class MarketingService {
       barRevenue: this.round(barRevenue, 2),
       totalRevenue: this.round(balanceRevenue + barRevenue, 2),
       barSalesCount: sales.length,
+    };
+  }
+
+  private async buildCampaignStoreBreakdown({
+    tenantId,
+    guestIds,
+    storeIds,
+    beforeFrom,
+    beforeTo,
+    afterFrom,
+    afterTo,
+  }: {
+    tenantId: string;
+    guestIds: string[];
+    storeIds: string[];
+    beforeFrom: Date;
+    beforeTo: Date;
+    afterFrom: Date;
+    afterTo: Date;
+  }): Promise<MarketingCampaignStoreEffect[]> {
+    const [before, after] = await Promise.all([
+      this.buildStoreEffectMetrics({
+        tenantId,
+        guestIds,
+        storeIds,
+        from: beforeFrom,
+        to: beforeTo,
+      }),
+      this.buildStoreEffectMetrics({
+        tenantId,
+        guestIds,
+        storeIds,
+        from: afterFrom,
+        to: afterTo,
+      }),
+    ]);
+    const keys = new Set<string>([
+      ...storeIds,
+      ...before.keys(),
+      ...after.keys(),
+    ]);
+
+    if (keys.size === 0) {
+      return [];
+    }
+
+    const storeIdList = [...keys].filter((key) => key !== 'unallocated');
+    const stores = storeIdList.length
+      ? await this.prisma.store.findMany({
+          where: { tenantId, id: { in: storeIdList } },
+          select: { id: true, name: true },
+        })
+      : [];
+    const storeNames = new Map(stores.map((store) => [store.id, store.name]));
+
+    return [...keys]
+      .map((key) => {
+        const beforeMetrics = before.get(key) ?? this.emptyStoreEffectMetrics();
+        const afterMetrics = after.get(key) ?? this.emptyStoreEffectMetrics();
+
+        return {
+          storeId: key === 'unallocated' ? null : key,
+          storeName:
+            key === 'unallocated'
+              ? 'Нераспределено'
+              : (storeNames.get(key) ?? 'Клуб без названия'),
+          before: beforeMetrics,
+          after: afterMetrics,
+          delta: this.diffStoreEffectMetrics(afterMetrics, beforeMetrics),
+        };
+      })
+      .sort((left, right) => {
+        const revenueDiff = right.after.totalRevenue - left.after.totalRevenue;
+
+        if (revenueDiff !== 0) {
+          return revenueDiff;
+        }
+
+        const guestsDiff = right.after.activeGuests - left.after.activeGuests;
+
+        if (guestsDiff !== 0) {
+          return guestsDiff;
+        }
+
+        return left.storeName.localeCompare(right.storeName, 'ru');
+      });
+  }
+
+  private async buildStoreEffectMetrics({
+    tenantId,
+    guestIds,
+    storeIds,
+    from,
+    to,
+  }: {
+    tenantId: string;
+    guestIds: string[];
+    storeIds: string[];
+    from: Date;
+    to: Date;
+  }): Promise<Map<string, MarketingCampaignStoreEffectMetrics>> {
+    if (guestIds.length === 0) {
+      return new Map();
+    }
+
+    const guestWhere = { guestId: { in: guestIds } };
+    const storeWhere = storeIds.length > 0 ? { storeId: { in: storeIds } } : {};
+    const buckets = new Map<
+      string,
+      MarketingCampaignStoreEffectMetrics & {
+        activeGuestIds: Set<string>;
+        sessionsByGuestId: Map<string, number>;
+      }
+    >();
+    const getBucket = (storeId: string | null) => {
+      const key = storeId ?? 'unallocated';
+      const existing = buckets.get(key);
+
+      if (existing) {
+        return existing;
+      }
+
+      const bucket = {
+        ...this.emptyStoreEffectMetrics(),
+        activeGuestIds: new Set<string>(),
+        sessionsByGuestId: new Map<string, number>(),
+      };
+      buckets.set(key, bucket);
+
+      return bucket;
+    };
+
+    const [sessions, transactions, sales] = await Promise.all([
+      this.prisma.guestSession.findMany({
+        where: {
+          tenantId,
+          ...guestWhere,
+          startedAt: { gte: from, lt: to },
+          ...storeWhere,
+        },
+        select: { storeId: true, guestId: true, durationMinutes: true },
+      }),
+      this.prisma.guestTransaction.findMany({
+        where: {
+          tenantId,
+          ...guestWhere,
+          happenedAt: { gte: from, lt: to },
+          ...storeWhere,
+        },
+        select: { storeId: true, type: true, amount: true },
+      }),
+      this.prisma.salesFact.findMany({
+        where: {
+          tenantId,
+          ...guestWhere,
+          saleDate: { gte: from, lt: to },
+          isCanceled: false,
+          ...storeWhere,
+        },
+        select: { storeId: true, guestId: true, revenue: true },
+      }),
+    ]);
+
+    sessions.forEach((session) => {
+      const bucket = getBucket(session.storeId);
+      bucket.sessionsCount += 1;
+      bucket.playHours += (session.durationMinutes ?? 0) / 60;
+
+      if (session.guestId) {
+        bucket.activeGuestIds.add(session.guestId);
+        bucket.sessionsByGuestId.set(
+          session.guestId,
+          (bucket.sessionsByGuestId.get(session.guestId) ?? 0) + 1,
+        );
+      }
+    });
+
+    transactions.forEach((transaction) => {
+      const bucket = getBucket(transaction.storeId);
+      bucket.balanceRevenue += confirmedTransactionSpendAmount(
+        transaction.type,
+        transaction.amount?.toNumber() ?? 0,
+      );
+    });
+
+    sales.forEach((sale) => {
+      const bucket = getBucket(sale.storeId);
+      bucket.barRevenue += sale.revenue.toNumber();
+      bucket.barSalesCount += 1;
+
+      if (sale.guestId) {
+        bucket.activeGuestIds.add(sale.guestId);
+      }
+    });
+
+    return new Map(
+      [...buckets.entries()].map(([key, bucket]) => {
+        const activeGuests = bucket.activeGuestIds.size;
+        const repeatGuests = [...bucket.sessionsByGuestId.values()].filter(
+          (count) => count > 1,
+        ).length;
+
+        return [
+          key,
+          {
+            activeGuests,
+            repeatGuests,
+            sessionsCount: bucket.sessionsCount,
+            playHours: this.round(bucket.playHours, 2),
+            balanceRevenue: this.round(bucket.balanceRevenue, 2),
+            barRevenue: this.round(bucket.barRevenue, 2),
+            totalRevenue: this.round(
+              bucket.balanceRevenue + bucket.barRevenue,
+              2,
+            ),
+            barSalesCount: bucket.barSalesCount,
+          },
+        ];
+      }),
+    );
+  }
+
+  private emptyStoreEffectMetrics(): MarketingCampaignStoreEffectMetrics {
+    return {
+      activeGuests: 0,
+      repeatGuests: 0,
+      sessionsCount: 0,
+      playHours: 0,
+      balanceRevenue: 0,
+      barRevenue: 0,
+      totalRevenue: 0,
+      barSalesCount: 0,
+    };
+  }
+
+  private diffStoreEffectMetrics(
+    after: MarketingCampaignStoreEffectMetrics,
+    before: MarketingCampaignStoreEffectMetrics,
+  ): MarketingCampaignStoreEffectMetrics {
+    return {
+      activeGuests: this.round(after.activeGuests - before.activeGuests, 2),
+      repeatGuests: this.round(after.repeatGuests - before.repeatGuests, 2),
+      sessionsCount: this.round(after.sessionsCount - before.sessionsCount, 2),
+      playHours: this.round(after.playHours - before.playHours, 2),
+      balanceRevenue: this.round(
+        after.balanceRevenue - before.balanceRevenue,
+        2,
+      ),
+      barRevenue: this.round(after.barRevenue - before.barRevenue, 2),
+      totalRevenue: this.round(after.totalRevenue - before.totalRevenue, 2),
+      barSalesCount: this.round(after.barSalesCount - before.barSalesCount, 2),
     };
   }
 

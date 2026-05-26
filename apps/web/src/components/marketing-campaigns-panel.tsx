@@ -45,6 +45,11 @@ type PromoBundleDraft = {
   discount: string;
   cost: string;
   expectedUses: string;
+  minSpend: string;
+  validityDays: string;
+  onePerGuest: boolean;
+  requiresApproval: boolean;
+  noStacking: boolean;
 };
 
 type PromoBundleEconomics = {
@@ -151,6 +156,62 @@ const promoMechanicTemplates: PromoMechanicTemplate[] = [
     note:
       "Цель: мероприятие или бронь. Проверить дату, клуб, вместимость и канал. Контроль: каждый ответ гостя фиксировать в CRM, брони и отказы отдельно.",
   },
+  {
+    id: "birthday-booking",
+    title: "День рождения / бронь",
+    goal: "EVENT_PROMO",
+    mechanic: "Персональное предложение",
+    channel: "Звонок",
+    name: "Лид на день рождения или бронь клуба",
+    budget: "0",
+    description: "Для ручных заявок, когда гостя еще нет в Langame или нужна бронь.",
+    tradeoff:
+      "Высокий чек, но нужна быстрая фиксация лида, ответственный и следующий контакт.",
+    note:
+      "Цель: день рождения, мероприятие или бронь клуба. Зафиксировать контакт, желаемую дату, клуб, количество гостей и следующий шаг. После регистрации в Langame сопоставить по телефону.",
+  },
+  {
+    id: "tournament",
+    title: "Турнир",
+    goal: "WEAK_HOURS",
+    mechanic: "Турнир",
+    channel: "Соцсети",
+    name: "Турнир для загрузки клуба",
+    budget: "0",
+    description: "Для слабых дней, клубов или часов с низкой загрузкой.",
+    tradeoff:
+      "Дает инфоповод и трафик, но требует лимита мест, правил участия и контроля бара.",
+    note:
+      "Цель: турнир и загрузка слабого периода. Указать клуб, дату, лимит мест, правила участия и ответственного. Контроль: регистрации, явка, игровая выручка, бар и повторные визиты.",
+  },
+  {
+    id: "referral",
+    title: "Приведи друга",
+    goal: "REPEAT_VISIT",
+    mechanic: "Реферальная механика",
+    channel: "CRM-задача",
+    name: "Реферальная механика для повторного визита",
+    budget: "0",
+    description: "Для активных гостей, которые могут привести нового игрока.",
+    tradeoff:
+      "Может привести новых гостей, но нужна ручная проверка, чтобы не раздать выгоду самому себе.",
+    note:
+      "Цель: повторный визит и новый гость через рекомендацию. Правило: выгода только после фактического визита приглашенного гостя. Контроль: телефон приглашенного, дата визита, клуб и ответственный.",
+  },
+  {
+    id: "vip-top",
+    title: "VIP / TOP гости",
+    goal: "BAR_GROWTH",
+    mechanic: "Персональное предложение",
+    channel: "Мессенджер",
+    name: "Персональный оффер для TOP гостей",
+    budget: "0",
+    description: "Для гостей с высоким оборотом, командных визитов и потенциала бара.",
+    tradeoff:
+      "Нужно не снижать маржу без причины: оффер должен развивать чек, бар или бронирование.",
+    note:
+      "Цель: развить TOP гостя. Предложить персональный повод: бронь, бар-комбо, турнир или командный визит. Контроль: контакт, ответ, визит, общий чек и бар.",
+  },
 ];
 
 const emptyForm: CampaignFormState = {
@@ -175,6 +236,11 @@ const emptyBundleDraft: PromoBundleDraft = {
   discount: "150",
   cost: "220",
   expectedUses: "30",
+  minSpend: "0",
+  validityDays: "7",
+  onePerGuest: true,
+  requiresApproval: true,
+  noStacking: true,
 };
 
 export function MarketingCampaignsPanel({
@@ -805,6 +871,58 @@ function PromoMechanicsBuilder({
                 onBundleDraftChange({ ...bundleDraft, expectedUses: value })
               }
             />
+            <NumericDraftField
+              label="Мин. чек, руб"
+              value={bundleDraft.minSpend}
+              onChange={(value) =>
+                onBundleDraftChange({ ...bundleDraft, minSpend: value })
+              }
+            />
+            <NumericDraftField
+              label="Срок, дней"
+              value={bundleDraft.validityDays}
+              onChange={(value) =>
+                onBundleDraftChange({ ...bundleDraft, validityDays: value })
+              }
+            />
+          </div>
+
+          <div className="mt-4 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+            <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              Лимиты и антифрод
+            </p>
+            <div className="mt-3 grid gap-2 md:grid-cols-3">
+              <ToggleDraftField
+                label="Один на гостя"
+                checked={bundleDraft.onePerGuest}
+                onChange={(checked) =>
+                  onBundleDraftChange({
+                    ...bundleDraft,
+                    onePerGuest: checked,
+                  })
+                }
+              />
+              <ToggleDraftField
+                label="Ручное подтверждение"
+                checked={bundleDraft.requiresApproval}
+                onChange={(checked) =>
+                  onBundleDraftChange({
+                    ...bundleDraft,
+                    requiresApproval: checked,
+                  })
+                }
+              />
+              <ToggleDraftField
+                label="Не суммировать скидки"
+                checked={bundleDraft.noStacking}
+                onChange={(checked) =>
+                  onBundleDraftChange({
+                    ...bundleDraft,
+                    noStacking: checked,
+                  })
+                }
+              />
+            </div>
           </div>
 
           <div className="mt-4 grid gap-2 sm:grid-cols-4">
@@ -827,6 +945,14 @@ function PromoMechanicsBuilder({
             <PromoMetric
               label="Бюджет"
               value={formatRubles(bundleEconomics.discountBudget)}
+            />
+            <PromoMetric
+              label="Мин. чек"
+              value={formatRubles(parseMoney(bundleDraft.minSpend))}
+            />
+            <PromoMetric
+              label="Срок"
+              value={`${formatNumber(Math.round(parseMoney(bundleDraft.validityDays)))} дн.`}
             />
           </div>
         </div>
@@ -854,6 +980,28 @@ function NumericDraftField({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         className={fieldClassName}
+      />
+    </label>
+  );
+}
+
+function ToggleDraftField({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="flex min-h-12 cursor-pointer items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 text-sm font-semibold text-zinc-700 transition hover:border-emerald-400/70 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200">
+      <span>{label}</span>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        className="h-4 w-4 accent-emerald-500"
       />
     </label>
   );
@@ -1002,8 +1150,23 @@ function buildPromoBundleNote(
         ? ""
         : ` (${formatPercent(economics.marginPercent)})`
     }.`,
-    "Ограничения: один набор на гостя, только выбранные клубы и период, ручное подтверждение администратором.",
-    "Антифрод: не суммировать с другими скидками, фиксировать контакт и факт использования в CRM.",
+    `Минимальный чек: ${formatRubles(
+      parseMoney(draft.minSpend),
+    )}. Срок действия: ${formatNumber(
+      Math.round(parseMoney(draft.validityDays)),
+    )} дней.`,
+    `Ограничения: ${
+      draft.onePerGuest ? "один набор на гостя" : "повторное использование разрешено"
+    }, только выбранные клубы и период, ${
+      draft.requiresApproval
+        ? "ручное подтверждение администратором обязательно"
+        : "без обязательного ручного подтверждения"
+    }.`,
+    `Антифрод: ${
+      draft.noStacking
+        ? "не суммировать с другими скидками"
+        : "допускается суммирование только по ручному решению"
+    }, фиксировать контакт и факт использования в CRM.`,
   ].join(" ");
 }
 

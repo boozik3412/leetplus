@@ -309,7 +309,7 @@ function buildBusinessSignalGroups({
       subtitle:
         "Выбрать цель кампании: загрузить тихие часы, усилить бар или вернуть гостей.",
       routeLabel: "Подготовить кампанию",
-      href: "/guests/crm",
+      href: "/marketing",
       signals: [
         {
           title: "Игровая загрузка",
@@ -335,7 +335,7 @@ function buildBusinessSignalGroups({
           value: formatRatioPercent(barShare),
           description: `Товары и бар занимают ${formatRatioPercent(productRevenueShare)} общей выручки. Можно искать гостей с низким баром.`,
           actionLabel: "Собрать оффер",
-          href: "/guests/crm",
+          href: "/marketing",
           tone: barShare !== null && barShare < 25 ? "warning" : "neutral",
         },
       ],

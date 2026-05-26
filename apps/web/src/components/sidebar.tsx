@@ -15,7 +15,7 @@ type NavItem = {
 
 type NavGroup = {
   title: string;
-  icon: "guests" | "staff" | "assortment" | "management";
+  icon: "guests" | "staff" | "marketing" | "assortment" | "management";
   items: NavItem[];
 };
 
@@ -29,7 +29,6 @@ const navGroups: NavGroup[] = [
       { href: "/guests/report", label: "Полный отчет" },
       { href: "/guests/report#audiences", label: "Группы" },
       { href: "/guests/crm", label: "CRM" },
-      { href: "/guests/crm#campaigns", label: "Кампании" },
       { href: "/guests/crm/tasks", label: "Задачи CRM" },
     ],
   },
@@ -39,6 +38,15 @@ const navGroups: NavGroup[] = [
     items: [
       { href: "/guests/staff-control", label: "Контроль персонала" },
       { href: "/guests/staff-control/operators", label: "Администраторы" },
+    ],
+  },
+  {
+    title: "Маркетинг",
+    icon: "marketing",
+    items: [
+      { href: "/marketing", label: "План кампании" },
+      { href: "/guests/report#audiences", label: "Группы гостей" },
+      { href: "/guests/crm/tasks", label: "Задачи контакта" },
     ],
   },
   {
@@ -247,6 +255,16 @@ function SectionIcon({ icon }: { icon: NavGroup["icon"] }) {
     );
   }
 
+  if (icon === "marketing") {
+    return (
+      <svg {...common}>
+        <path d="M5 13.5h3.5l7-4.5v10l-7-4.5H5z" />
+        <path d="M8.5 14.5l1.2 4.5" />
+        <path d="M18.5 9.8a4.2 4.2 0 0 1 0 8.4" />
+      </svg>
+    );
+  }
+
   return (
     <svg {...common}>
       <path d="M4 7h16" />
@@ -287,6 +305,8 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
     .filter((group) => group.items.length > 0);
   const currentProductArea = pathname.startsWith("/guests/staff-control")
     ? "Персонал"
+    : pathname.startsWith("/marketing")
+    ? "Маркетинг"
     : pathname.startsWith("/guests")
     ? "Гости"
     : pathname.startsWith("/sync") || pathname.startsWith("/settings")

@@ -411,7 +411,7 @@ Acceptance criteria:
 
 ## Stage 9. Marketing Module
 
-Status: planned. This module should cover promo actions, guest mechanics, campaign communication, announcements, and measurable campaign effect. It should be designed around business goals first, not around an empty promo constructor.
+Status: started. This module should cover promo actions, guest mechanics, campaign communication, announcements, and measurable campaign effect. It should be designed around business goals first, not around an empty promo constructor.
 
 ### Product Positioning
 
@@ -454,8 +454,9 @@ Marketing should be connected to CRM groups and consent rules. At the current st
 
 Goal: let a manager create a simple campaign from a business signal and control manual execution.
 
-- Add `/marketing` entry point and sidebar block when implementation starts.
-- Start from goal selection: attract guests, return guests, increase repeat visits, fill weak hours, grow bar, promote event, sell promo bundle.
+- Done: `/marketing` entry point and sidebar block added as a lightweight scenario workspace: goal selection, saved groups/CRM lead/task readiness, and route from business goal to group, mechanic, channel, control, and effect.
+- Done: dashboard marketing scenario now routes to `/marketing` instead of hiding campaign planning inside CRM.
+- Next: convert the goal-selection workspace into persistent campaign drafts.
 - Let the user choose a saved guest group or create one from guest filters.
 - Add campaign fields: goal, period, clubs, target group, channel, responsible user, deadline, note, status.
 - Generate CRM tasks for campaign execution when the channel requires manual contact.

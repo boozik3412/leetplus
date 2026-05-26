@@ -116,6 +116,28 @@ export class MarketingService {
     );
   }
 
+  async getCampaign(
+    user: AuthenticatedUser,
+    id: string,
+  ): Promise<MarketingCampaign> {
+    const row = await this.prisma.marketingCampaign.findFirst({
+      where: { id, tenantId: user.tenantId },
+      include: marketingCampaignInclude,
+    });
+
+    if (!row) {
+      throw new NotFoundException('Marketing campaign not found');
+    }
+
+    const coverage = await this.getCampaignConsentCoverage(
+      user.tenantId,
+      row.audienceId,
+      row.channel,
+    );
+
+    return this.toMarketingCampaign(row, coverage);
+  }
+
   async createCampaign(
     user: AuthenticatedUser,
     dto: MarketingCampaignDto = {},

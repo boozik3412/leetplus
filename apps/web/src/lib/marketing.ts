@@ -65,3 +65,21 @@ export async function getMarketingCampaigns(): Promise<MarketingCampaign[]> {
 
   return response.json() as Promise<MarketingCampaign[]>;
 }
+
+export async function getMarketingCampaign(
+  id: string,
+): Promise<MarketingCampaign> {
+  const response = await fetch(
+    `${getApiUrl()}/marketing/campaigns/${encodeURIComponent(id)}`,
+    {
+      cache: "no-store",
+      headers: await getAuthHeaders(),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch marketing campaign");
+  }
+
+  return response.json() as Promise<MarketingCampaign>;
+}

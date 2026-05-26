@@ -1,0 +1,569 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
+import { requireCurrentUser } from "@/lib/auth";
+import {
+  getGuestCrmContactEvents,
+  getGuestCrmTasks,
+  type GuestCrmContactEvent,
+  type GuestCrmTask,
+  type GuestCrmTaskStatus,
+} from "@/lib/guests";
+import {
+  getMarketingCampaign,
+  type MarketingCampaign,
+  type MarketingCampaignGoal,
+  type MarketingCampaignStatus,
+} from "@/lib/marketing";
+
+type PageParams = Promise<{ id: string }>;
+
+const goalLabels: Record<MarketingCampaignGoal, string> = {
+  RETURN_GUESTS: "Вернуть гостей",
+  REPEAT_VISIT: "Повторный визит",
+  WEAK_HOURS: "Тихие часы",
+  BAR_GROWTH: "Рост бара",
+  EVENT_PROMO: "Событие или бронь",
+  PROMO_BUNDLE: "Промо-набор",
+};
+
+const statusLabels: Record<MarketingCampaignStatus, string> = {
+  DRAFT: "Черновик",
+  PLANNED: "Запланирована",
+  RUNNING: "В работе",
+  FINISHED: "Завершена",
+  CANCELED: "Отменена",
+};
+
+const taskStatusLabels: Record<GuestCrmTaskStatus, string> = {
+  OPEN: "Новая",
+  IN_PROGRESS: "В работе",
+  DONE: "Готово",
+  CANCELED: "Отменена",
+};
+
+async function safeList<T>(promise: Promise<T[]>): Promise<T[]> {
+  try {
+    return await promise;
+  } catch {
+    return [];
+  }
+}
+
+export default async function MarketingCampaignPage({
+  params,
+}: {
+  params: PageParams;
+}) {
+  await requireCurrentUser();
+  const { id } = await params;
+
+  const [campaignResult, tasks, contactEvents] = await Promise.allSettled([
+    getMarketingCampaign(id),
+    safeList(getGuestCrmTasks()),
+    safeList(getGuestCrmContactEvents()),
+  ]);
+
+  if (campaignResult.status === "rejected") {
+    notFound();
+  }
+
+  const campaign = campaignResult.value;
+  const crmTasks = tasks.status === "fulfilled" ? tasks.value : [];
+  const events = contactEvents.status === "fulfilled" ? contactEvents.value : [];
+  const linkedTask = campaign.crmTask
+    ? crmTasks.find((task) => task.id === campaign.crmTask?.id) ?? null
+    : null;
+  const campaignEvents = events
+    .filter((event) => event.audience?.id === campaign.audience?.id)
+    .sort(
+      (left, right) =>
+        new Date(right.contactedAt).getTime() -
+        new Date(left.contactedAt).getTime(),
+    );
+
+  return (
+    <main className="px-4 py-6 text-zinc-950 dark:text-zinc-100 sm:px-6 sm:py-8">
+      <div className="mx-auto max-w-7xl">
+        <ReportBreadcrumbs
+          current={campaign.name}
+          items={[
+            { href: "/dashboard", label: "Дашборд" },
+            { href: "/marketing", label: "Маркетинг" },
+          ]}
+        />
+
+        <header className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+          <div>
+            <p className="text-sm font-semibold uppercase text-emerald-600 dark:text-emerald-300">
+              Маркетинг
+            </p>
+            <h1 className="mt-2 max-w-4xl text-3xl font-semibold tracking-normal md:text-4xl">
+              {campaign.name}
+            </h1>
+            <p className="mt-3 max-w-4xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+              Карточка кампании соединяет цель, группу гостей, согласия,
+              связанную CRM-задачу и историю контактов. Автоматических бонусов в
+              Langame здесь нет: запуск пока контролируется через ручные задачи.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/marketing"
+              className="inline-flex min-h-10 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+            >
+              Все кампании
+            </Link>
+            <Link
+              href="/guests/crm/tasks"
+              className="inline-flex min-h-10 items-center justify-center rounded-md bg-emerald-500 px-3 text-sm font-semibold text-zinc-950 hover:bg-emerald-400"
+            >
+              CRM-задачи
+            </Link>
+          </div>
+        </header>
+
+        <section className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+          <CampaignPlan campaign={campaign} />
+          <ConsentCard campaign={campaign} />
+        </section>
+
+        <section className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+          <CrmTaskCard campaign={campaign} linkedTask={linkedTask} />
+          <ContactHistoryCard events={campaignEvents} campaign={campaign} />
+        </section>
+
+        <EffectPlaceholder campaign={campaign} events={campaignEvents} />
+      </div>
+    </main>
+  );
+}
+
+function CampaignPlan({ campaign }: { campaign: MarketingCampaign }) {
+  const details = [
+    { label: "Цель", value: goalLabels[campaign.goal] },
+    { label: "Статус", value: statusLabels[campaign.status] },
+    { label: "Группа", value: campaign.audience?.name ?? "не выбрана" },
+    { label: "Канал", value: campaign.channel ?? "не выбран" },
+    { label: "Механика", value: campaign.mechanic ?? "не выбрана" },
+    { label: "Ответственный", value: campaign.owner?.displayName ?? "не назначен" },
+    { label: "Период", value: periodLabel(campaign.periodFrom, campaign.periodTo) },
+    { label: "Срок", value: formatDate(campaign.dueAt) },
+    { label: "Бюджет", value: formatRubles(campaign.budget) },
+    {
+      label: "Клубы",
+      value:
+        campaign.storeIds.length > 0
+          ? `${campaign.storeIds.length} клуб.`
+          : "вся сеть",
+    },
+  ];
+
+  return (
+    <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="border-b border-zinc-200 p-5 dark:border-zinc-800">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
+              План запуска
+            </p>
+            <h2 className="mt-2 text-2xl font-semibold">Что запускаем</h2>
+          </div>
+          <span className={campaignStatusClass(campaign.status)}>
+            {statusLabels[campaign.status]}
+          </span>
+        </div>
+      </div>
+      <div className="grid gap-3 p-4 sm:grid-cols-2">
+        {details.map((item) => (
+          <div
+            key={item.label}
+            className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60"
+          >
+            <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              {item.label}
+            </p>
+            <p className="mt-1 min-h-6 text-sm font-semibold text-zinc-950 dark:text-white">
+              {item.value}
+            </p>
+          </div>
+        ))}
+      </div>
+      {campaign.note ? (
+        <div className="border-t border-zinc-200 p-4 dark:border-zinc-800">
+          <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            Заметка
+          </p>
+          <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+            {campaign.note}
+          </p>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function ConsentCard({ campaign }: { campaign: MarketingCampaign }) {
+  const coverage = campaign.consentCoverage;
+  const targetTotal = coverage.targetTotal;
+  const contactable = coverage.contactable;
+  const percent =
+    targetTotal > 0 ? Math.round((contactable / targetTotal) * 100) : 0;
+
+  return (
+    <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="border-b border-zinc-200 p-5 dark:border-zinc-800">
+        <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
+          Согласия
+        </p>
+        <h2 className="mt-2 text-2xl font-semibold">Кого можно контактировать</h2>
+        <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+          Перед запуском важно видеть, сколько гостей из группы доступны по
+          выбранному каналу и сколько нужно исключить из ручного контакта.
+        </p>
+      </div>
+      <div className="p-5">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="text-4xl font-semibold text-emerald-500">
+              {formatNumber(contactable)}
+            </p>
+            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+              доступно из {formatNumber(targetTotal)} гостей
+            </p>
+          </div>
+          <p className="text-2xl font-semibold">{percent}%</p>
+        </div>
+        <div className="mt-5 h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+          <div
+            className="h-full rounded-full bg-emerald-500"
+            style={{ width: `${percent}%` }}
+          />
+        </div>
+        <div className="mt-5 grid gap-3 sm:grid-cols-2">
+          <SmallMetric label="Отказ" value={coverage.phoneDenied} />
+          <SmallMetric label="Отписка" value={coverage.phoneUnsubscribed} />
+          <SmallMetric label="Неизвестно" value={coverage.phoneUnknown} />
+          <SmallMetric label="Исключено" value={coverage.excluded} />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function CrmTaskCard({
+  campaign,
+  linkedTask,
+}: {
+  campaign: MarketingCampaign;
+  linkedTask: GuestCrmTask | null;
+}) {
+  const task = linkedTask ?? campaign.crmTask;
+  const taskStatus = linkedTask?.status ?? normalizeTaskStatus(campaign.crmTask?.status);
+
+  return (
+    <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="border-b border-zinc-200 p-5 dark:border-zinc-800">
+        <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
+          Исполнение
+        </p>
+        <h2 className="mt-2 text-2xl font-semibold">Связанная CRM-задача</h2>
+      </div>
+      <div className="p-5">
+        {task ? (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold">
+                  {task.title ?? campaign.crmTask?.title}
+                </h3>
+                <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+                  Ответственный:{" "}
+                  {linkedTask?.assignedToUser?.displayName ??
+                    campaign.owner?.displayName ??
+                  "не назначен"}
+                </p>
+              </div>
+              <span className={taskStatusClass(taskStatus)}>
+                {taskStatus ? taskStatusLabels[taskStatus] : campaign.crmTask?.status}
+              </span>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <SmallTextMetric label="Срок" value={formatDate(task.dueAt)} />
+              <SmallTextMetric
+                label="Цель"
+                value={
+                  linkedTask?.audience?.name ??
+                  linkedTask?.lead?.displayName ??
+                  linkedTask?.guest?.displayName ??
+                  campaign.audience?.name ??
+                  "не указана"
+                }
+              />
+            </div>
+            {linkedTask?.description ? (
+              <p className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm leading-6 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
+                {linkedTask.description}
+              </p>
+            ) : null}
+            <Link
+              href="/guests/crm/tasks"
+              className="inline-flex min-h-10 items-center justify-center rounded-md bg-emerald-500 px-3 text-sm font-semibold text-zinc-950 hover:bg-emerald-400"
+            >
+              Открыть CRM-задачи
+            </Link>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed border-zinc-300 p-5 text-sm leading-6 text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
+            CRM-задача еще не создана. Создайте ее из списка кампаний, чтобы
+            закрепить ответственного, срок и рабочее описание для контакта.
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function ContactHistoryCard({
+  events,
+  campaign,
+}: {
+  events: GuestCrmContactEvent[];
+  campaign: MarketingCampaign;
+}) {
+  const latest = events.slice(0, 6);
+
+  return (
+    <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="border-b border-zinc-200 p-5 dark:border-zinc-800">
+        <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
+          Контакты
+        </p>
+        <h2 className="mt-2 text-2xl font-semibold">История по группе</h2>
+        <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+          Сейчас показываем контакты по группе{" "}
+          <span className="font-semibold text-zinc-950 dark:text-white">
+            {campaign.audience?.name ?? "без группы"}
+          </span>
+          . Прямая привязка контакта к кампании запланирована следующим шагом.
+        </p>
+      </div>
+      <div className="divide-y divide-zinc-200 dark:divide-zinc-800">
+        {latest.length > 0 ? (
+          latest.map((event) => (
+            <div key={event.id} className="p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="font-semibold">
+                    {event.guest?.displayName ??
+                      event.lead?.displayName ??
+                      event.audience?.name ??
+                      "Контакт"}
+                  </p>
+                  <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+                    {event.channel}
+                    {event.result ? ` · ${event.result}` : ""}
+                  </p>
+                </div>
+                <p className="text-sm text-zinc-500">
+                  {formatDateTime(event.contactedAt)}
+                </p>
+              </div>
+              {event.note ? (
+                <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+                  {event.note}
+                </p>
+              ) : null}
+            </div>
+          ))
+        ) : (
+          <div className="p-5 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+            По этой группе пока нет сохраненных контактов. После выполнения
+            CRM-задач здесь появится журнал результатов.
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function EffectPlaceholder({
+  campaign,
+  events,
+}: {
+  campaign: MarketingCampaign;
+  events: GuestCrmContactEvent[];
+}) {
+  const effectCards = [
+    {
+      label: "Контакты",
+      value: `${formatNumber(events.length)} шт`,
+      text: "сохранено в истории по группе",
+    },
+    {
+      label: "Возвраты",
+      value: "ожидает замера",
+      text: "нужна атрибуция визита после контакта",
+    },
+    {
+      label: "Выручка",
+      value: "ожидает замера",
+      text: "будет считаться после before/after окна",
+    },
+    {
+      label: "Бар и загрузка",
+      value: "ожидает замера",
+      text: "отдельно по товарам/бару и игровым часам",
+    },
+  ];
+
+  return (
+    <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="border-b border-zinc-200 p-5 dark:border-zinc-800">
+        <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
+          Эффект
+        </p>
+        <h2 className="mt-2 text-2xl font-semibold">Как будем измерять результат</h2>
+        <p className="mt-2 max-w-4xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+          Следующий слой аналитики сравнит гостей из кампании до и после запуска:
+          возвраты, повторные визиты, общую выручку, бар и загрузку. Для кампании{" "}
+          <span className="font-semibold text-zinc-950 dark:text-white">
+            {campaign.name}
+          </span>{" "}
+          пока показываем заготовку, чтобы маршрут был понятен до появления
+          автоматической атрибуции.
+        </p>
+      </div>
+      <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4">
+        {effectCards.map((card) => (
+          <div
+            key={card.label}
+            className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60"
+          >
+            <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              {card.label}
+            </p>
+            <p className="mt-2 min-h-8 text-2xl font-semibold">{card.value}</p>
+            <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+              {card.text}
+            </p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function SmallMetric({ label, value }: { label: string; value: number }) {
+  return <SmallTextMetric label={label} value={`${formatNumber(value)} гостей`} />;
+}
+
+function SmallTextMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
+      <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+        {label}
+      </p>
+      <p className="mt-1 font-semibold">{value}</p>
+    </div>
+  );
+}
+
+function formatNumber(value: number) {
+  return new Intl.NumberFormat("ru-RU").format(value);
+}
+
+function formatRubles(value: number | null) {
+  if (value === null) {
+    return "не задан";
+  }
+
+  return `${formatNumber(Math.round(value))} руб`;
+}
+
+function formatDate(value: string | null) {
+  if (!value) {
+    return "не задана";
+  }
+
+  return new Intl.DateTimeFormat("ru-RU").format(new Date(value));
+}
+
+function formatDateTime(value: string | null) {
+  if (!value) {
+    return "нет даты";
+  }
+
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function periodLabel(from: string | null, to: string | null) {
+  if (!from && !to) {
+    return "не задан";
+  }
+
+  return `${formatDate(from)} - ${formatDate(to)}`;
+}
+
+function campaignStatusClass(status: MarketingCampaignStatus) {
+  const base =
+    "inline-flex rounded-full px-3 py-1 text-sm font-semibold uppercase";
+
+  if (status === "RUNNING") {
+    return `${base} bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200`;
+  }
+
+  if (status === "PLANNED") {
+    return `${base} bg-sky-50 text-sky-700 dark:bg-sky-500/15 dark:text-sky-200`;
+  }
+
+  if (status === "FINISHED") {
+    return `${base} bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300`;
+  }
+
+  if (status === "CANCELED") {
+    return `${base} bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-200`;
+  }
+
+  return `${base} bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200`;
+}
+
+function taskStatusClass(status: string | undefined | null) {
+  const base =
+    "inline-flex rounded-full px-3 py-1 text-sm font-semibold uppercase";
+
+  if (status === "DONE") {
+    return `${base} bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200`;
+  }
+
+  if (status === "IN_PROGRESS") {
+    return `${base} bg-sky-50 text-sky-700 dark:bg-sky-500/15 dark:text-sky-200`;
+  }
+
+  if (status === "CANCELED") {
+    return `${base} bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300`;
+  }
+
+  return `${base} bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200`;
+}
+
+function normalizeTaskStatus(
+  status: string | undefined | null,
+): GuestCrmTaskStatus | null {
+  if (
+    status === "OPEN" ||
+    status === "IN_PROGRESS" ||
+    status === "DONE" ||
+    status === "CANCELED"
+  ) {
+    return status;
+  }
+
+  return null;
+}

@@ -33,6 +33,14 @@ export class MarketingController {
     return this.marketingService.getCampaigns(user);
   }
 
+  @Get('campaigns/:id')
+  getCampaign(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<MarketingCampaign> {
+    return this.marketingService.getCampaign(user, id);
+  }
+
   @Post('campaigns')
   createCampaign(
     @CurrentUser() user: AuthenticatedUser,

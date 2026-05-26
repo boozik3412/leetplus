@@ -460,6 +460,12 @@ export function MarketingCampaignsPanel({
               ) : null}
 
               <div className="mt-4 flex flex-wrap gap-2">
+                <Link
+                  href={`/marketing/campaigns/${campaign.id}`}
+                  className="inline-flex min-h-10 items-center justify-center rounded-xl border border-zinc-200 px-4 text-sm font-semibold text-zinc-700 transition hover:border-emerald-400 hover:bg-emerald-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:border-emerald-500/70 dark:hover:bg-emerald-500/10"
+                >
+                  Открыть кампанию
+                </Link>
                 {campaign.crmTask ? (
                   <Link
                     href="/guests/crm/tasks"

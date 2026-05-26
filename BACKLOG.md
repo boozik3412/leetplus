@@ -459,13 +459,14 @@ Goal: let a manager create a simple campaign from a business signal and control 
 - Done: persistent campaign drafts added with tenant-scoped storage, API, migration, status changes, goal, saved group, channel, mechanic, responsible user, period, deadline, budget, and note.
 - Done: campaign drafts can generate one linked CRM task for manual execution and reuse the existing task on repeated clicks instead of creating duplicates.
 - Done: campaign cards now show contact consent coverage before task launch: target group size, contactable guests, excluded guests, opt-outs, denied and unknown consent statuses.
-- Next: add a campaign detail page with breadcrumbs, linked CRM task, contact history and effect placeholders.
+- Done: campaign detail page added with breadcrumbs, launch plan, linked CRM task, group contact history, consent coverage, and effect placeholders.
+- Next: add real campaign effect measurement with before/after windows and direct campaign-to-contact attribution.
 - Let the user choose a saved guest group or create one from guest filters.
 - Add campaign fields: goal, period, clubs, target group, channel, responsible user, deadline, note, status.
 - Improve generated CRM tasks with per-channel instructions and campaign detail links.
 - Improve communication consent handling with channel-specific exclusions before launch.
 - Show a compact campaign list: planned, running, finished, canceled.
-- Show a campaign detail page with breadcrumbs, tasks, contacts, notes, and effect placeholders.
+- Expand campaign detail with editable notes, direct contact attribution, and launch checklist.
 
 Acceptance criteria:
 

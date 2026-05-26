@@ -477,12 +477,13 @@ Goal: let a manager create a simple campaign from a business signal and control 
 - Done: marketing UI now exposes implemented features as explicit routes: sidebar entries and `/marketing` anchors for goals, mechanics, promo bundle, campaigns, guest groups, and contact tasks so new capabilities are not hidden inside one long screen.
 - Done: promo mechanics now include broader scenarios: second visit, weak hours, bar combo, event, birthday/full-club booking, tournament, referral, and VIP/TOP guest offers.
 - Done: promo-bundle builder now includes launch limits and anti-fraud controls: minimum spend, validity days, max uses, one-per-guest flag, manual approval, and no-stacking rule; these rules are written into the campaign note when the bundle is applied.
+- Done: `/marketing` campaign list is now compact and status-driven: filters for all, active, draft, planned, running, finished, and canceled campaigns plus a clear next action for each row.
 - Next: continue improving campaign execution prompts from real usage and persist promo-bundle/mechanic entities when the first manual workflows are validated.
 - Let the user choose a saved guest group or create one from guest filters.
 - Add campaign fields: goal, period, clubs, target group, channel, responsible user, deadline, note, status.
 - Improve generated CRM tasks with per-channel instructions and campaign detail links.
 - Improve communication consent handling with channel-specific exclusions before launch.
-- Show a compact campaign list: planned, running, finished, canceled.
+- Done: show a compact campaign list: planned, running, finished, canceled.
 - Improve campaign launch workspace prompts from real usage feedback.
 
 Acceptance criteria:

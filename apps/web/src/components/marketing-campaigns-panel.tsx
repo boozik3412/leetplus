@@ -63,6 +63,8 @@ type PromoBundleEconomics = {
   discountBudget: number;
 };
 
+type CampaignStatusFilter = "ALL" | "ACTIVE" | MarketingCampaignStatus;
+
 const goalOptions: Array<{ value: MarketingCampaignGoal; label: string }> = [
   { value: "RETURN_GUESTS", label: "Вернуть гостей" },
   { value: "REPEAT_VISIT", label: "Повторный визит" },
@@ -78,6 +80,19 @@ const statusOptions: Array<{ value: MarketingCampaignStatus; label: string }> = 
   { value: "RUNNING", label: "В работе" },
   { value: "FINISHED", label: "Завершена" },
   { value: "CANCELED", label: "Отменена" },
+];
+
+const campaignStatusFilters: Array<{
+  value: CampaignStatusFilter;
+  label: string;
+}> = [
+  { value: "ALL", label: "Все" },
+  { value: "ACTIVE", label: "Активные" },
+  { value: "DRAFT", label: "Черновики" },
+  { value: "PLANNED", label: "План" },
+  { value: "RUNNING", label: "В работе" },
+  { value: "FINISHED", label: "Завершены" },
+  { value: "CANCELED", label: "Отменены" },
 ];
 
 const channelOptions = [
@@ -266,6 +281,8 @@ export function MarketingCampaignsPanel({
     string | null
   >(null);
   const [error, setError] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] =
+    useState<CampaignStatusFilter>("ACTIVE");
   const selectedTemplate =
     promoMechanicTemplates.find((template) => template.id === selectedTemplateId) ??
     promoMechanicTemplates[0];
@@ -283,6 +300,20 @@ export function MarketingCampaignsPanel({
       drafts: rows.filter((row) => row.status === "DRAFT").length,
     }),
     [rows],
+  );
+  const campaignCounts = useMemo(
+    () =>
+      Object.fromEntries(
+        campaignStatusFilters.map((filter) => [
+          filter.value,
+          rows.filter((row) => campaignMatchesFilter(row, filter.value)).length,
+        ]),
+      ) as Record<CampaignStatusFilter, number>,
+    [rows],
+  );
+  const visibleRows = useMemo(
+    () => rows.filter((row) => campaignMatchesFilter(row, statusFilter)),
+    [rows, statusFilter],
   );
 
   async function createCampaign(event: FormEvent<HTMLFormElement>) {
@@ -622,98 +653,171 @@ export function MarketingCampaignsPanel({
         ) : null}
       </form>
 
-      <div className="grid gap-3 p-4 lg:grid-cols-2">
-        {rows.length > 0 ? (
-          rows.map((campaign) => (
-            <article
-              key={campaign.id}
-              className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60"
-            >
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                    {goalLabel(campaign.goal)}
-                  </p>
-                  <h3 className="mt-1 text-lg font-semibold text-zinc-950 dark:text-white">
-                    {campaign.name}
-                  </h3>
-                </div>
-                <select
-                  value={campaign.status}
-                  onChange={(event) =>
-                    updateStatus(
-                      campaign,
-                      event.target.value as MarketingCampaignStatus,
-                    )
-                  }
-                  className="min-h-10 rounded-xl border border-zinc-200 bg-white px-3 text-sm font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
-                >
-                  {statusOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
-                <Info label="Группа" value={campaign.audience?.name ?? "не выбрана"} />
-                <Info label="Клуб" value={storeLabel(campaign.storeIds, stores)} />
-                <Info label="Ответственный" value={campaign.owner?.displayName ?? "не назначен"} />
-                <Info label="Канал" value={campaign.channel ?? "не выбран"} />
-                <Info label="Механика" value={campaign.mechanic ?? "не выбрана"} />
-                <Info label="Срок" value={formatDate(campaign.dueAt)} />
-                <Info label="Бюджет" value={formatRubles(campaign.budget)} />
-                <Info
-                  label="CRM-задача"
-                  value={campaign.crmTask ? "создана" : "не создана"}
-                />
-              </dl>
-
-              <ConsentCoverage coverage={campaign.consentCoverage} />
-
-              {campaign.note ? (
-                <p className="mt-4 rounded-lg border border-zinc-200 bg-white p-3 text-sm leading-6 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300">
-                  {campaign.note}
-                </p>
-              ) : null}
-
-              <div className="mt-4 flex flex-wrap gap-2">
-                <Link
-                  href={`/marketing/campaigns/${campaign.id}`}
-                  className="inline-flex min-h-10 items-center justify-center rounded-xl border border-zinc-200 px-4 text-sm font-semibold text-zinc-700 transition hover:border-emerald-400 hover:bg-emerald-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:border-emerald-500/70 dark:hover:bg-emerald-500/10"
-                >
-                  Открыть кампанию
-                </Link>
-                {campaign.crmTask ? (
-                  <Link
-                    href="/guests/crm/tasks"
-                    className="inline-flex min-h-10 items-center justify-center rounded-xl border border-emerald-500/40 px-4 text-sm font-semibold text-emerald-500 transition hover:bg-emerald-500/10"
-                  >
-                    Открыть CRM-задачи
-                  </Link>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => createCrmTask(campaign)}
-                    disabled={pendingTaskCampaignId === campaign.id}
-                    className="inline-flex min-h-10 items-center justify-center rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {pendingTaskCampaignId === campaign.id
-                      ? "Создаем..."
-                      : "Создать CRM-задачу"}
-                  </button>
-                )}
-              </div>
-            </article>
-          ))
-        ) : (
-          <div className="rounded-lg border border-dashed border-zinc-300 p-6 text-sm leading-6 text-zinc-600 dark:border-zinc-700 dark:text-zinc-300 lg:col-span-2">
-            Кампаний пока нет. Создайте первый черновик из цели, группы и канала,
-            чтобы команда понимала, что запускать и как потом контролировать эффект.
+      <section className="border-t border-zinc-200 dark:border-zinc-800">
+        <div className="grid gap-4 border-b border-zinc-200 p-4 dark:border-zinc-800 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+          <div>
+            <p className="text-sm font-bold uppercase tracking-wide text-emerald-500">
+              Рабочий список
+            </p>
+            <h3 className="mt-2 text-xl font-semibold text-zinc-950 dark:text-white">
+              Кампании по статусам
+            </h3>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+              На общем экране показываем только контрольные поля и следующий
+              шаг. План, контакты, эффект и экспорт открываются в карточке
+              кампании.
+            </p>
           </div>
-        )}
-      </div>
+          <div className="flex flex-wrap gap-2">
+            {campaignStatusFilters.map((filter) => {
+              const isActive = statusFilter === filter.value;
+
+              return (
+                <button
+                  key={filter.value}
+                  type="button"
+                  onClick={() => setStatusFilter(filter.value)}
+                  className={[
+                    "inline-flex min-h-10 items-center gap-2 rounded-full border px-4 text-sm font-semibold transition",
+                    isActive
+                      ? "border-emerald-500 bg-emerald-500 text-zinc-950"
+                      : "border-zinc-200 bg-white text-zinc-700 hover:border-emerald-400 hover:bg-emerald-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:border-emerald-500/70 dark:hover:bg-emerald-500/10",
+                  ].join(" ")}
+                >
+                  <span>{filter.label}</span>
+                  <span
+                    className={[
+                      "rounded-full px-2 py-0.5 text-xs",
+                      isActive
+                        ? "bg-zinc-950/10"
+                        : "bg-zinc-100 text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400",
+                    ].join(" ")}
+                  >
+                    {campaignCounts[filter.value]}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="divide-y divide-zinc-200 dark:divide-zinc-800">
+          {rows.length === 0 ? (
+            <div className="p-6 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+              Кампаний пока нет. Создайте первый черновик из цели, группы и
+              канала, чтобы команда понимала, что запускать и как потом
+              контролировать эффект.
+            </div>
+          ) : visibleRows.length > 0 ? (
+            visibleRows.map((campaign) => (
+              <article
+                key={campaign.id}
+                className="grid gap-4 p-4 transition hover:bg-zinc-50 dark:hover:bg-zinc-900/40 xl:grid-cols-[minmax(0,1fr)_320px]"
+              >
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={campaignStatusClass(campaign.status)}>
+                      {statusLabel(campaign.status)}
+                    </span>
+                    <span className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                      {goalLabel(campaign.goal)}
+                    </span>
+                  </div>
+                  <h4 className="mt-2 text-lg font-semibold text-zinc-950 dark:text-white">
+                    {campaign.name}
+                  </h4>
+                  <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+                    {campaignNextAction(campaign)}
+                  </p>
+                  <dl className="mt-4 grid gap-3 text-sm md:grid-cols-2 xl:grid-cols-4">
+                    <CompactInfo
+                      label="Группа"
+                      value={campaign.audience?.name ?? "не выбрана"}
+                    />
+                    <CompactInfo
+                      label="Клуб"
+                      value={storeLabel(campaign.storeIds, stores)}
+                    />
+                    <CompactInfo
+                      label="Ответственный"
+                      value={campaign.owner?.displayName ?? "не назначен"}
+                    />
+                    <CompactInfo
+                      label="Дедлайн"
+                      value={formatDate(campaign.dueAt)}
+                    />
+                    <CompactInfo
+                      label="Канал"
+                      value={campaign.channel ?? "не выбран"}
+                    />
+                    <CompactInfo
+                      label="Механика"
+                      value={campaign.mechanic ?? "не выбрана"}
+                    />
+                    <CompactInfo
+                      label="Бюджет"
+                      value={formatRubles(campaign.budget)}
+                    />
+                    <CompactInfo
+                      label="Контакт"
+                      value={contactCoverageLabel(campaign)}
+                    />
+                  </dl>
+                </div>
+
+                <div className="flex min-w-0 flex-col gap-2 xl:items-stretch">
+                  <select
+                    value={campaign.status}
+                    onChange={(event) =>
+                      updateStatus(
+                        campaign,
+                        event.target.value as MarketingCampaignStatus,
+                      )
+                    }
+                    className="min-h-10 rounded-xl border border-zinc-200 bg-white px-3 text-sm font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+                  >
+                    {statusOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <Link
+                    href={`/marketing/campaigns/${campaign.id}`}
+                    className="inline-flex min-h-10 items-center justify-center rounded-xl border border-zinc-200 px-4 text-sm font-semibold text-zinc-700 transition hover:border-emerald-400 hover:bg-emerald-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:border-emerald-500/70 dark:hover:bg-emerald-500/10"
+                  >
+                    Открыть кампанию
+                  </Link>
+                  {campaign.crmTask ? (
+                    <Link
+                      href="/guests/crm/tasks"
+                      className="inline-flex min-h-10 items-center justify-center rounded-xl border border-emerald-500/40 px-4 text-sm font-semibold text-emerald-500 transition hover:bg-emerald-500/10"
+                    >
+                      Открыть CRM-задачу
+                    </Link>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => createCrmTask(campaign)}
+                      disabled={pendingTaskCampaignId === campaign.id}
+                      className="inline-flex min-h-10 items-center justify-center rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {pendingTaskCampaignId === campaign.id
+                        ? "Создаем..."
+                        : "Создать CRM-задачу"}
+                    </button>
+                  )}
+                </div>
+              </article>
+            ))
+          ) : (
+            <div className="p-6 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+              В выбранном статусе кампаний нет. Можно переключить фильтр или
+              создать новый черновик выше.
+            </div>
+          )}
+        </div>
+      </section>
     </section>
   );
 }
@@ -1050,55 +1154,15 @@ function MetricPill({ label, value }: { label: string; value: number }) {
   );
 }
 
-function Info({ label, value }: { label: string; value: string }) {
+function CompactInfo({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+    <div className="min-w-0 rounded-lg border border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950">
       <dt className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
         {label}
       </dt>
-      <dd className="mt-1 font-semibold text-zinc-950 dark:text-white">{value}</dd>
-    </div>
-  );
-}
-
-function ConsentCoverage({
-  coverage,
-}: {
-  coverage: MarketingCampaign["consentCoverage"];
-}) {
-  const targetTotal = coverage?.targetTotal ?? 0;
-  const contactable = coverage?.contactable ?? 0;
-  const excluded = coverage?.excluded ?? 0;
-  const phoneDenied = coverage?.phoneDenied ?? 0;
-  const phoneUnsubscribed = coverage?.phoneUnsubscribed ?? 0;
-  const phoneUnknown = coverage?.phoneUnknown ?? 0;
-  const requiresPhoneConsent = coverage?.requiresPhoneConsent ?? true;
-  const percent =
-    targetTotal > 0 ? Math.round((contactable / targetTotal) * 100) : 0;
-
-  return (
-    <div className="mt-4 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-          Согласия и исключения
-        </p>
-        <p className="text-sm font-semibold text-zinc-950 dark:text-white">
-          {targetTotal > 0
-            ? `${contactable} из ${targetTotal}`
-            : "группа не выбрана"}
-        </p>
-      </div>
-      <div className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
-        <div
-          className="h-full rounded-full bg-emerald-500"
-          style={{ width: `${percent}%` }}
-        />
-      </div>
-      <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-        {requiresPhoneConsent
-          ? `Для телефонного контакта доступно ${contactable}, исключено ${excluded}: отказов ${phoneDenied}, отписок ${phoneUnsubscribed}, неизвестных ${phoneUnknown}.`
-          : "Для выбранного канала телефонное согласие не требуется, но статусы сохранены для контроля."}
-      </p>
+      <dd className="mt-1 truncate font-semibold text-zinc-950 dark:text-white">
+        {value}
+      </dd>
     </div>
   );
 }
@@ -1194,8 +1258,93 @@ async function readError(response: Response) {
   }
 }
 
+function campaignMatchesFilter(
+  campaign: MarketingCampaign,
+  filter: CampaignStatusFilter,
+) {
+  if (filter === "ALL") {
+    return true;
+  }
+
+  if (filter === "ACTIVE") {
+    return campaign.status === "PLANNED" || campaign.status === "RUNNING";
+  }
+
+  return campaign.status === filter;
+}
+
 function goalLabel(goal: MarketingCampaignGoal) {
   return goalOptions.find((option) => option.value === goal)?.label ?? goal;
+}
+
+function statusLabel(status: MarketingCampaignStatus) {
+  return statusOptions.find((option) => option.value === status)?.label ?? status;
+}
+
+function campaignStatusClass(status: MarketingCampaignStatus) {
+  const base =
+    "inline-flex rounded-full px-2.5 py-1 text-xs font-bold uppercase tracking-wide";
+
+  if (status === "RUNNING") {
+    return `${base} bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300`;
+  }
+
+  if (status === "PLANNED") {
+    return `${base} bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300`;
+  }
+
+  if (status === "DRAFT") {
+    return `${base} bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300`;
+  }
+
+  if (status === "FINISHED") {
+    return `${base} bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300`;
+  }
+
+  return `${base} bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300`;
+}
+
+function campaignNextAction(campaign: MarketingCampaign) {
+  if (!campaign.audience) {
+    return "Сначала выберите группу гостей, иначе кампания не сможет посчитать охват и согласия.";
+  }
+
+  if (!campaign.owner) {
+    return "Назначьте ответственного, чтобы контакт и контроль не зависли без владельца.";
+  }
+
+  if (!campaign.crmTask && campaign.status !== "FINISHED") {
+    return "Создайте CRM-задачу, чтобы кампания превратилась из плана в действие.";
+  }
+
+  if (campaign.status === "DRAFT") {
+    return "Проверьте механику, сроки и согласия, затем переведите кампанию в план.";
+  }
+
+  if (campaign.status === "PLANNED") {
+    return "Кампания готова к запуску: проверьте канал, дедлайн и переведите в работу.";
+  }
+
+  if (campaign.status === "RUNNING") {
+    return "Контролируйте контакты и фиксируйте результат, чтобы потом увидеть эффект.";
+  }
+
+  if (campaign.status === "FINISHED") {
+    return "Откройте карточку кампании и проверьте эффект по визитам, выручке и бару.";
+  }
+
+  return "Кампания отменена. При необходимости верните ее в черновик или создайте новый сценарий.";
+}
+
+function contactCoverageLabel(campaign: MarketingCampaign) {
+  const coverage = campaign.consentCoverage;
+  const targetTotal = coverage?.targetTotal ?? 0;
+
+  if (targetTotal <= 0) {
+    return "нет группы";
+  }
+
+  return `${coverage.contactable} из ${targetTotal}`;
 }
 
 function formatDate(value: string | null) {

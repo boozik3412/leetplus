@@ -109,6 +109,7 @@ model Tenant {
   guestCrmLeads              GuestCrmLead[]
   guestCrmTasks              GuestCrmTask[]
   guestCrmContactEvents      GuestCrmContactEvent[]
+  marketingCampaigns         MarketingCampaign[]
   guestStaffIdentityMappings GuestStaffIdentityMapping[]
   guestSavedFilters          GuestSavedFilter[]
   guestAudiences             GuestAudience[]
@@ -135,6 +136,8 @@ model User {
   guestCrmTasks              GuestCrmTask[]              @relation("GuestCrmTaskCreatedBy")
   assignedGuestCrmTasks      GuestCrmTask[]              @relation("GuestCrmTaskAssignedTo")
   guestCrmContactEvents      GuestCrmContactEvent[]
+  createdMarketingCampaigns  MarketingCampaign[]         @relation("MarketingCampaignCreatedBy")
+  ownedMarketingCampaigns    MarketingCampaign[]         @relation("MarketingCampaignOwner")
   guestStaffIdentityMappings GuestStaffIdentityMapping[]
   guestSavedFilters          GuestSavedFilter[]
   guestAudiences             GuestAudience[]
@@ -724,6 +727,37 @@ model GuestCrmContactEvent {
   @@index([createdByUserId], map: "guest_crm_contact_user_idx")
 }
 
+model MarketingCampaign {
+  id              String   @id @default(uuid())
+  tenantId        String
+  audienceId      String?
+  storeIds        Json?
+  createdByUserId String?
+  ownerUserId     String?
+  goal            String
+  name            String
+  status          String   @default("DRAFT")
+  channel         String?
+  mechanic        String?
+  periodFrom      DateTime?
+  periodTo        DateTime?
+  dueAt           DateTime?
+  budget          Decimal? @db.Decimal(12, 2)
+  note            String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id])
+  audience      GuestAudience? @relation(fields: [audienceId], references: [id], onDelete: SetNull)
+  createdByUser User?          @relation("MarketingCampaignCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  ownerUser     User?          @relation("MarketingCampaignOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status, updatedAt], map: "marketing_campaign_status_idx")
+  @@index([audienceId], map: "marketing_campaign_audience_idx")
+  @@index([createdByUserId], map: "marketing_campaign_created_by_idx")
+  @@index([ownerUserId], map: "marketing_campaign_owner_idx")
+}
+
 model GuestGroup {
   id                String               @id @default(uuid())
   tenantId          String
@@ -1001,6 +1035,7 @@ model GuestAudience {
   members       GuestAudienceMember[]
   crmTasks      GuestCrmTask[]
   crmContactEvents GuestCrmContactEvent[]
+  marketingCampaigns MarketingCampaign[]
 
   @@index([tenantId, createdAt], map: "guest_audience_tenant_created_idx")
   @@index([createdByUserId], map: "guest_audience_user_idx")

@@ -9,6 +9,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { GuestsModule } from './guests/guests.module';
 import { ImportsModule } from './imports/imports.module';
 import { IntegrationsModule } from './integrations/integrations.module';
+import { MarketingModule } from './marketing/marketing.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProductsModule } from './products/products.module';
 import { ReportsModule } from './reports/reports.module';
@@ -35,6 +36,7 @@ import { UtilitiesModule } from './utilities/utilities.module';
     ReportsModule,
     DashboardModule,
     GuestsModule,
+    MarketingModule,
     UtilitiesModule,
   ],
   controllers: [AppController],

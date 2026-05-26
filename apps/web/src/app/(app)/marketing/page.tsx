@@ -1,12 +1,16 @@
 import Link from "next/link";
+import { MarketingCampaignsPanel } from "@/components/marketing-campaigns-panel";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
 import {
   getGuestAudiences,
   getGuestCrmLeads,
   getGuestCrmTasks,
+  getGuestCrmUsers,
   type GuestCrmTask,
 } from "@/lib/guests";
+import { getMarketingCampaigns } from "@/lib/marketing";
+import { getStores } from "@/lib/stores";
 
 type GoalCard = {
   title: string;
@@ -85,10 +89,13 @@ function isActiveTask(task: GuestCrmTask) {
 export default async function MarketingPage() {
   await requireCurrentUser();
 
-  const [groups, leads, tasks] = await Promise.all([
+  const [groups, leads, tasks, users, campaigns, stores] = await Promise.all([
     safeList(getGuestAudiences()),
     safeList(getGuestCrmLeads()),
     safeList(getGuestCrmTasks()),
+    safeList(getGuestCrmUsers()),
+    safeList(getMarketingCampaigns()),
+    safeList(getStores()),
   ]);
 
   const now = new Date();
@@ -249,6 +256,13 @@ export default async function MarketingPage() {
             ))}
           </div>
         </section>
+
+        <MarketingCampaignsPanel
+          campaigns={campaigns}
+          audiences={groups}
+          users={users}
+          stores={stores}
+        />
       </div>
     </main>
   );

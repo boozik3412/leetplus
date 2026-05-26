@@ -462,13 +462,14 @@ Goal: let a manager create a simple campaign from a business signal and control 
 - Done: campaign cards now show contact consent coverage before task launch: target group size, contactable guests, excluded guests, opt-outs, denied and unknown consent statuses.
 - Done: campaign detail page added with breadcrumbs, launch plan, linked CRM task, group contact history, consent coverage, and effect analytics.
 - Done: real campaign effect measurement added with before/after windows, direct `marketingCampaignId` contact attribution, group fallback for older contacts, visits, sessions, play hours, balance-spend revenue, bar revenue, and explicit attribution limitations.
-- Next: connect CRM contact creation/actions in the UI to the selected campaign so new contact facts are attributed directly without relying on group fallback.
+- Done: campaign detail now has a compact contact-result form that saves new CRM contact facts directly to the selected `marketingCampaignId` and refreshes the campaign journal/effect data.
+- Next: expand the campaign funnel from target group to planned contacts, completed contacts, response, visits, revenue, bar, repeat visits, and responsible user.
 - Let the user choose a saved guest group or create one from guest filters.
 - Add campaign fields: goal, period, clubs, target group, channel, responsible user, deadline, note, status.
 - Improve generated CRM tasks with per-channel instructions and campaign detail links.
 - Improve communication consent handling with channel-specific exclusions before launch.
 - Show a compact campaign list: planned, running, finished, canceled.
-- Expand campaign detail with editable notes, direct contact attribution, and launch checklist.
+- Expand campaign detail with editable notes and launch checklist.
 
 Acceptance criteria:
 
@@ -498,6 +499,7 @@ Acceptance criteria:
 Goal: measure whether marketing actions produced useful commercial effect.
 
 - Started: campaign detail now compares before/after windows for the selected campaign and shows contacts, visitors, sessions, play hours, balance-spend revenue, bar revenue, total target size, linked guests, and attribution limits.
+- Started: newly recorded campaign contacts are now directly attributed to `marketingCampaignId`; older contacts still use group fallback.
 - Add funnel: target group -> planned contacts -> completed contacts -> responded -> visited -> revenue -> bar -> repeat visits.
 - Show effect by club, group, channel, and responsible user.
 - Separate store-scoped revenue from unallocated online top-ups when attributing campaign effect.

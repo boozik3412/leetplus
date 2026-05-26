@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { MarketingCampaignContactForm } from "@/components/marketing-campaign-contact-form";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
 import {
@@ -354,15 +355,20 @@ function ContactHistoryCard({
         <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
           Контакты
         </p>
-        <h2 className="mt-2 text-2xl font-semibold">История по группе</h2>
+        <h2 className="mt-2 text-2xl font-semibold">История контактов</h2>
         <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-          Сейчас показываем контакты по группе{" "}
+          Показываем контакты, сохраненные прямо в кампанию, и более старые
+          контакты по группе{" "}
           <span className="font-semibold text-zinc-950 dark:text-white">
             {campaign.audience?.name ?? "без группы"}
           </span>
-          . Прямая привязка контакта к кампании запланирована следующим шагом.
+          .
         </p>
       </div>
+      <MarketingCampaignContactForm
+        campaignId={campaign.id}
+        audienceName={campaign.audience?.name ?? null}
+      />
       <div className="divide-y divide-zinc-200 dark:divide-zinc-800">
         {latest.length > 0 ? (
           latest.map((event) => (

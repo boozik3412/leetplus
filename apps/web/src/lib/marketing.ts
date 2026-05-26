@@ -118,6 +118,33 @@ export type MarketingCampaignStoreEffect = {
   delta: MarketingCampaignStoreEffectMetrics;
 };
 
+export type MarketingCampaignExecutionMetrics = {
+  contacts: number;
+  directContacts: number;
+  respondedContacts: number;
+  linkedGuests: number;
+  activeGuests: number;
+  repeatGuests: number;
+  sessionsCount: number;
+  playHours: number;
+  balanceRevenue: number;
+  barRevenue: number;
+  totalRevenue: number;
+  barSalesCount: number;
+};
+
+export type MarketingCampaignExecutionBreakdownRow = {
+  key: string;
+  label: string;
+  hint: string | null;
+  metrics: MarketingCampaignExecutionMetrics;
+};
+
+export type MarketingCampaignExecutionBreakdown = {
+  byResponsible: MarketingCampaignExecutionBreakdownRow[];
+  byChannel: MarketingCampaignExecutionBreakdownRow[];
+};
+
 export type MarketingCampaignEffect = {
   campaignId: string;
   attributionMode: "CAMPAIGN_OR_GROUP";
@@ -135,6 +162,7 @@ export type MarketingCampaignEffect = {
   delta: Omit<MarketingCampaignEffectPeriod, "from" | "to" | "days">;
   funnel: MarketingCampaignFunnel;
   storeBreakdown: MarketingCampaignStoreEffect[];
+  executionBreakdown: MarketingCampaignExecutionBreakdown;
   dataQuality: {
     directContactAttribution: boolean;
     revenueScope: string;

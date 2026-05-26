@@ -465,7 +465,8 @@ Goal: let a manager create a simple campaign from a business signal and control 
 - Done: campaign detail now has a compact contact-result form that saves new CRM contact facts directly to the selected `marketingCampaignId` and refreshes the campaign journal/effect data.
 - Done: campaign detail now shows a compact funnel from target group to contact plan, completed contacts, recorded result, visits, repeat guests, revenue, bar, CRM task, and responsible user.
 - Done: campaign effect now includes a compact store breakdown: revenue, bar, active guests, play hours, repeat guests, before/after delta, and a separate unallocated row when facts have no store.
-- Next: show campaign effect by channel and responsible user, then add CSV export for campaign results and contact outcomes.
+- Done: campaign detail now shows execution by responsible user and channel: contacts, results, linked guests, visits, repeat guests, revenue, and bar revenue.
+- Next: add CSV export for campaign results and contact outcomes, then expand launch checklist and editable campaign notes.
 - Let the user choose a saved guest group or create one from guest filters.
 - Add campaign fields: goal, period, clubs, target group, channel, responsible user, deadline, note, status.
 - Improve generated CRM tasks with per-channel instructions and campaign detail links.
@@ -504,7 +505,8 @@ Goal: measure whether marketing actions produced useful commercial effect.
 - Started: newly recorded campaign contacts are now directly attributed to `marketingCampaignId`; older contacts still use group fallback.
 - Started: campaign detail now has the first funnel view: target group -> planned contacts -> completed contacts -> recorded result -> visited -> revenue -> bar -> repeat guests.
 - Started: effect by club is now visible in campaign detail with store-scoped revenue, bar, guests, hours, repeat guests, and before/after deltas.
-- Show effect by group, channel, and responsible user.
+- Started: effect by responsible user and channel is visible in campaign detail with contacts, linked guests, visits, revenue, and bar.
+- Show effect by saved group/rule source when campaigns start mixing multiple groups.
 - Separate store-scoped revenue from unallocated online top-ups when attributing campaign effect.
 - Add CSV export for campaign results and contact outcomes.
 

@@ -14,6 +14,7 @@ import {
   getMarketingCampaign,
   getMarketingCampaignEffect,
   type MarketingCampaign,
+  type MarketingCampaignExecutionBreakdownRow,
   type MarketingCampaignEffect,
   type MarketingCampaignEffectPeriod,
   type MarketingCampaignGoal,
@@ -507,6 +508,7 @@ function EffectAnalytics({
 
       <CampaignFunnelCard campaign={campaign} effect={effect} />
       <CampaignStoreBreakdownCard effect={effect} />
+      <CampaignExecutionBreakdownCard effect={effect} />
 
       <div className="grid gap-3 border-t border-zinc-200 p-4 dark:border-zinc-800 lg:grid-cols-2">
         <EffectPeriodTable title="До кампании" period={effect.before} />
@@ -632,6 +634,171 @@ function CampaignStoreBreakdownCard({
           </p>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+function CampaignExecutionBreakdownCard({
+  effect,
+}: {
+  effect: MarketingCampaignEffect;
+}) {
+  const execution = effect.executionBreakdown ?? {
+    byResponsible: [],
+    byChannel: [],
+  };
+  const hasRows =
+    execution.byResponsible.length > 0 || execution.byChannel.length > 0;
+
+  return (
+    <div className="border-t border-zinc-200 p-4 dark:border-zinc-800">
+      <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
+              Исполнение
+            </p>
+            <h3 className="mt-2 text-xl font-semibold">
+              Кто и через какие каналы принес результат
+            </h3>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+              Контакты сгруппированы по ответственному и каналу. Визиты и деньги
+              показываем только там, где контакт связан с гостем или CRM-лидом,
+              который уже сопоставлен с гостем Langame.
+            </p>
+          </div>
+          <p className="rounded-full border border-zinc-200 px-3 py-1 text-sm font-semibold text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+            {formatNumber(
+              execution.byResponsible.length + execution.byChannel.length,
+            )}{" "}
+            срезов
+          </p>
+        </div>
+
+        {hasRows ? (
+          <div className="mt-4 grid gap-3 lg:grid-cols-2">
+            <ExecutionBreakdownList
+              title="По ответственным"
+              rows={execution.byResponsible}
+            />
+            <ExecutionBreakdownList title="По каналам" rows={execution.byChannel} />
+          </div>
+        ) : (
+          <p className="mt-4 rounded-lg border border-dashed border-zinc-300 p-4 text-sm leading-6 text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
+            По кампании пока нет контактов в выбранном окне эффекта. Когда
+            менеджеры начнут фиксировать касания, здесь появится сравнение по
+            ответственным и каналам.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ExecutionBreakdownList({
+  title,
+  rows,
+}: {
+  title: string;
+  rows: MarketingCampaignExecutionBreakdownRow[];
+}) {
+  const visibleRows = rows.slice(0, 5);
+  const hiddenCount = Math.max(0, rows.length - visibleRows.length);
+  const maxContacts = Math.max(
+    0,
+    ...visibleRows.map((row) => row.metrics.contacts),
+  );
+
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex items-center justify-between gap-3">
+        <h4 className="font-semibold">{title}</h4>
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          {formatNumber(rows.length)} строк
+        </p>
+      </div>
+
+      {visibleRows.length > 0 ? (
+        <div className="mt-3 space-y-3">
+          {visibleRows.map((row) => (
+            <div
+              key={row.key}
+              className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate font-semibold">{row.label}</p>
+                  {row.hint ? (
+                    <p className="mt-1 truncate text-sm text-zinc-500 dark:text-zinc-400">
+                      {row.hint}
+                    </p>
+                  ) : null}
+                </div>
+                <p className="text-right text-lg font-semibold">
+                  {formatNumber(row.metrics.contacts)} контактов
+                </p>
+              </div>
+
+              <div className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+                <div
+                  className="h-full rounded-full bg-emerald-500"
+                  style={{
+                    width: `${barWidth(
+                      percentOf(row.metrics.contacts, maxContacts),
+                    )}%`,
+                  }}
+                />
+              </div>
+
+              <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+                <div>
+                  <p className="text-zinc-500 dark:text-zinc-400">Результат</p>
+                  <p className="font-semibold">
+                    {formatNumber(row.metrics.respondedContacts)} с результатом
+                  </p>
+                </div>
+                <div>
+                  <p className="text-zinc-500 dark:text-zinc-400">Связано</p>
+                  <p className="font-semibold">
+                    {formatNumber(row.metrics.linkedGuests)} гостей
+                  </p>
+                </div>
+                <div>
+                  <p className="text-zinc-500 dark:text-zinc-400">Визиты</p>
+                  <p className="font-semibold">
+                    {formatNumber(row.metrics.activeGuests)} гостей,{" "}
+                    {formatNumber(row.metrics.sessionsCount)} сессий
+                  </p>
+                </div>
+                <div>
+                  <p className="text-zinc-500 dark:text-zinc-400">Деньги</p>
+                  <p className="font-semibold">
+                    {formatRubles(row.metrics.totalRevenue)}, бар{" "}
+                    {formatRubles(row.metrics.barRevenue)}
+                  </p>
+                </div>
+              </div>
+
+              {row.metrics.linkedGuests === 0 ? (
+                <p className="mt-2 text-sm text-amber-600 dark:text-amber-300">
+                  Визиты и деньги не атрибутированы: контакт пока не связан с
+                  конкретным гостем.
+                </p>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-3 rounded-lg border border-dashed border-zinc-300 p-3 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+          Данных для этого среза пока нет.
+        </p>
+      )}
+
+      {hiddenCount > 0 ? (
+        <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">
+          Еще {formatNumber(hiddenCount)} строк скрыто для компактности.
+        </p>
+      ) : null}
     </div>
   );
 }

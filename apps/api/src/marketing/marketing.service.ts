@@ -161,6 +161,33 @@ export type MarketingCampaignStoreEffect = {
   delta: MarketingCampaignStoreEffectMetrics;
 };
 
+export type MarketingCampaignExecutionMetrics = {
+  contacts: number;
+  directContacts: number;
+  respondedContacts: number;
+  linkedGuests: number;
+  activeGuests: number;
+  repeatGuests: number;
+  sessionsCount: number;
+  playHours: number;
+  balanceRevenue: number;
+  barRevenue: number;
+  totalRevenue: number;
+  barSalesCount: number;
+};
+
+export type MarketingCampaignExecutionBreakdownRow = {
+  key: string;
+  label: string;
+  hint: string | null;
+  metrics: MarketingCampaignExecutionMetrics;
+};
+
+export type MarketingCampaignExecutionBreakdown = {
+  byResponsible: MarketingCampaignExecutionBreakdownRow[];
+  byChannel: MarketingCampaignExecutionBreakdownRow[];
+};
+
 export type MarketingCampaignEffect = {
   campaignId: string;
   attributionMode: 'CAMPAIGN_OR_GROUP';
@@ -178,11 +205,22 @@ export type MarketingCampaignEffect = {
   delta: Omit<MarketingCampaignEffectPeriod, 'from' | 'to' | 'days'>;
   funnel: MarketingCampaignFunnel;
   storeBreakdown: MarketingCampaignStoreEffect[];
+  executionBreakdown: MarketingCampaignExecutionBreakdown;
   dataQuality: {
     directContactAttribution: boolean;
     revenueScope: string;
     limitations: string[];
   };
+};
+
+type MarketingCampaignExecutionBucket = {
+  key: string;
+  label: string;
+  hint: string | null;
+  contacts: number;
+  directContacts: number;
+  respondedContacts: number;
+  linkedGuestIds: Set<string>;
 };
 
 @Injectable()
@@ -263,35 +301,45 @@ export class MarketingService {
       ),
     ];
 
-    const [before, after, storeBreakdown] = await Promise.all([
-      this.buildCampaignEffectPeriod({
-        tenantId: user.tenantId,
-        campaignId: campaign.id,
-        audienceId: campaign.audienceId,
-        guestIds,
-        storeIds,
-        from: beforeFrom,
-        to: beforeTo,
-      }),
-      this.buildCampaignEffectPeriod({
-        tenantId: user.tenantId,
-        campaignId: campaign.id,
-        audienceId: campaign.audienceId,
-        guestIds,
-        storeIds,
-        from: afterFrom,
-        to: afterTo,
-      }),
-      this.buildCampaignStoreBreakdown({
-        tenantId: user.tenantId,
-        guestIds,
-        storeIds,
-        beforeFrom,
-        beforeTo,
-        afterFrom,
-        afterTo,
-      }),
-    ]);
+    const [before, after, storeBreakdown, executionBreakdown] =
+      await Promise.all([
+        this.buildCampaignEffectPeriod({
+          tenantId: user.tenantId,
+          campaignId: campaign.id,
+          audienceId: campaign.audienceId,
+          guestIds,
+          storeIds,
+          from: beforeFrom,
+          to: beforeTo,
+        }),
+        this.buildCampaignEffectPeriod({
+          tenantId: user.tenantId,
+          campaignId: campaign.id,
+          audienceId: campaign.audienceId,
+          guestIds,
+          storeIds,
+          from: afterFrom,
+          to: afterTo,
+        }),
+        this.buildCampaignStoreBreakdown({
+          tenantId: user.tenantId,
+          guestIds,
+          storeIds,
+          beforeFrom,
+          beforeTo,
+          afterFrom,
+          afterTo,
+        }),
+        this.buildCampaignExecutionBreakdown({
+          tenantId: user.tenantId,
+          campaignId: campaign.id,
+          audienceId: campaign.audienceId,
+          guestIds,
+          storeIds,
+          from: afterFrom,
+          to: afterTo,
+        }),
+      ]);
 
     const linkedTargetGuests = guestIds.length;
     const targetTotal = campaign.audience?.guestsCount ?? members.length;
@@ -387,6 +435,7 @@ export class MarketingService {
           : null,
       },
       storeBreakdown,
+      executionBreakdown,
       dataQuality: {
         directContactAttribution,
         revenueScope:
@@ -822,6 +871,272 @@ export class MarketingService {
       });
   }
 
+  private async buildCampaignExecutionBreakdown({
+    tenantId,
+    campaignId,
+    audienceId,
+    guestIds,
+    storeIds,
+    from,
+    to,
+  }: {
+    tenantId: string;
+    campaignId: string;
+    audienceId: string | null;
+    guestIds: string[];
+    storeIds: string[];
+    from: Date;
+    to: Date;
+  }): Promise<MarketingCampaignExecutionBreakdown> {
+    const guestWhere =
+      guestIds.length > 0 ? { guestId: { in: guestIds } } : null;
+    const events = await this.prisma.guestCrmContactEvent.findMany({
+      where: {
+        tenantId,
+        contactedAt: { gte: from, lt: to },
+        OR: [
+          { marketingCampaignId: campaignId },
+          ...(audienceId ? [{ audienceId }] : []),
+          ...(guestWhere ? [guestWhere] : []),
+        ],
+      },
+      select: {
+        id: true,
+        channel: true,
+        result: true,
+        marketingCampaignId: true,
+        guestId: true,
+        createdByUserId: true,
+        createdByUser: { select: { fullName: true, email: true } },
+        lead: { select: { matchedGuestId: true } },
+      },
+    });
+
+    const responsibleBuckets = new Map<
+      string,
+      MarketingCampaignExecutionBucket
+    >();
+    const channelBuckets = new Map<string, MarketingCampaignExecutionBucket>();
+    const getBucket = (
+      buckets: Map<string, MarketingCampaignExecutionBucket>,
+      key: string,
+      label: string,
+      hint: string | null,
+    ) => {
+      const existing = buckets.get(key);
+
+      if (existing) {
+        return existing;
+      }
+
+      const bucket: MarketingCampaignExecutionBucket = {
+        key,
+        label,
+        hint,
+        contacts: 0,
+        directContacts: 0,
+        respondedContacts: 0,
+        linkedGuestIds: new Set<string>(),
+      };
+      buckets.set(key, bucket);
+
+      return bucket;
+    };
+    const addEventToBucket = (
+      bucket: MarketingCampaignExecutionBucket,
+      event: (typeof events)[number],
+    ) => {
+      const linkedGuestId = event.guestId ?? event.lead?.matchedGuestId ?? null;
+      bucket.contacts += 1;
+
+      if (event.marketingCampaignId === campaignId) {
+        bucket.directContacts += 1;
+      }
+
+      if (event.result?.trim()) {
+        bucket.respondedContacts += 1;
+      }
+
+      if (linkedGuestId) {
+        bucket.linkedGuestIds.add(linkedGuestId);
+      }
+    };
+
+    events.forEach((event) => {
+      const responsibleLabel = event.createdByUser
+        ? event.createdByUser.fullName || event.createdByUser.email
+        : 'Без ответственного';
+      const responsibleHint = event.createdByUser?.email ?? null;
+      const responsibleKey = event.createdByUserId ?? 'unassigned';
+      const responsibleBucket = getBucket(
+        responsibleBuckets,
+        responsibleKey,
+        responsibleLabel,
+        responsibleHint,
+      );
+      const channelLabel = event.channel.trim() || 'Канал не указан';
+      const channelBucket = getBucket(
+        channelBuckets,
+        channelLabel.toLocaleLowerCase('ru-RU'),
+        channelLabel,
+        null,
+      );
+
+      addEventToBucket(responsibleBucket, event);
+      addEventToBucket(channelBucket, event);
+    });
+
+    const toRows = async (
+      buckets: Map<string, MarketingCampaignExecutionBucket>,
+    ): Promise<MarketingCampaignExecutionBreakdownRow[]> => {
+      const rows = await Promise.all(
+        [...buckets.values()].map(async (bucket) => {
+          const behavior = await this.buildExecutionBehaviorMetrics({
+            tenantId,
+            guestIds: [...bucket.linkedGuestIds],
+            storeIds,
+            from,
+            to,
+          });
+
+          return {
+            key: bucket.key,
+            label: bucket.label,
+            hint: bucket.hint,
+            metrics: {
+              ...behavior,
+              contacts: bucket.contacts,
+              directContacts: bucket.directContacts,
+              respondedContacts: bucket.respondedContacts,
+              linkedGuests: bucket.linkedGuestIds.size,
+            },
+          };
+        }),
+      );
+
+      return rows.sort((left, right) => {
+        const contactDiff = right.metrics.contacts - left.metrics.contacts;
+
+        if (contactDiff !== 0) {
+          return contactDiff;
+        }
+
+        const revenueDiff =
+          right.metrics.totalRevenue - left.metrics.totalRevenue;
+
+        if (revenueDiff !== 0) {
+          return revenueDiff;
+        }
+
+        return left.label.localeCompare(right.label, 'ru');
+      });
+    };
+
+    return {
+      byResponsible: await toRows(responsibleBuckets),
+      byChannel: await toRows(channelBuckets),
+    };
+  }
+
+  private async buildExecutionBehaviorMetrics({
+    tenantId,
+    guestIds,
+    storeIds,
+    from,
+    to,
+  }: {
+    tenantId: string;
+    guestIds: string[];
+    storeIds: string[];
+    from: Date;
+    to: Date;
+  }): Promise<MarketingCampaignExecutionMetrics> {
+    const empty = this.emptyExecutionMetrics();
+
+    if (guestIds.length === 0) {
+      return empty;
+    }
+
+    const guestWhere = { guestId: { in: guestIds } };
+    const storeWhere = storeIds.length > 0 ? { storeId: { in: storeIds } } : {};
+    const [sessions, transactions, sales] = await Promise.all([
+      this.prisma.guestSession.findMany({
+        where: {
+          tenantId,
+          ...guestWhere,
+          startedAt: { gte: from, lt: to },
+          ...storeWhere,
+        },
+        select: { guestId: true, durationMinutes: true },
+      }),
+      this.prisma.guestTransaction.findMany({
+        where: {
+          tenantId,
+          ...guestWhere,
+          happenedAt: { gte: from, lt: to },
+          ...storeWhere,
+        },
+        select: { type: true, amount: true },
+      }),
+      this.prisma.salesFact.findMany({
+        where: {
+          tenantId,
+          ...guestWhere,
+          saleDate: { gte: from, lt: to },
+          isCanceled: false,
+          ...storeWhere,
+        },
+        select: { guestId: true, revenue: true },
+      }),
+    ]);
+    const activeGuestIds = new Set<string>();
+    const sessionsByGuestId = new Map<string, number>();
+    let playMinutes = 0;
+    let balanceRevenue = 0;
+    let barRevenue = 0;
+
+    sessions.forEach((session) => {
+      if (session.guestId) {
+        activeGuestIds.add(session.guestId);
+        sessionsByGuestId.set(
+          session.guestId,
+          (sessionsByGuestId.get(session.guestId) ?? 0) + 1,
+        );
+      }
+
+      playMinutes += session.durationMinutes ?? 0;
+    });
+
+    transactions.forEach((transaction) => {
+      balanceRevenue += confirmedTransactionSpendAmount(
+        transaction.type,
+        transaction.amount?.toNumber() ?? 0,
+      );
+    });
+
+    sales.forEach((sale) => {
+      if (sale.guestId) {
+        activeGuestIds.add(sale.guestId);
+      }
+
+      barRevenue += sale.revenue.toNumber();
+    });
+
+    return {
+      ...empty,
+      linkedGuests: guestIds.length,
+      activeGuests: activeGuestIds.size,
+      repeatGuests: [...sessionsByGuestId.values()].filter((count) => count > 1)
+        .length,
+      sessionsCount: sessions.length,
+      playHours: this.round(playMinutes / 60, 2),
+      balanceRevenue: this.round(balanceRevenue, 2),
+      barRevenue: this.round(barRevenue, 2),
+      totalRevenue: this.round(balanceRevenue + barRevenue, 2),
+      barSalesCount: sales.length,
+    };
+  }
+
   private async buildStoreEffectMetrics({
     tenantId,
     guestIds,
@@ -958,6 +1273,23 @@ export class MarketingService {
 
   private emptyStoreEffectMetrics(): MarketingCampaignStoreEffectMetrics {
     return {
+      activeGuests: 0,
+      repeatGuests: 0,
+      sessionsCount: 0,
+      playHours: 0,
+      balanceRevenue: 0,
+      barRevenue: 0,
+      totalRevenue: 0,
+      barSalesCount: 0,
+    };
+  }
+
+  private emptyExecutionMetrics(): MarketingCampaignExecutionMetrics {
+    return {
+      contacts: 0,
+      directContacts: 0,
+      respondedContacts: 0,
+      linkedGuests: 0,
       activeGuests: 0,
       repeatGuests: 0,
       sessionsCount: 0,

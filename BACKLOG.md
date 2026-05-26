@@ -1,6 +1,6 @@
 # LeetPlus Backlog
 
-Last updated: 2026-05-25
+Last updated: 2026-05-26
 
 This file is the source of truth for product backlog, near-term roadmap, planned modules, and deferred ideas. `PROJECT_STATE.md` should stay focused on current project state, workflow, production context, and data rules.
 
@@ -99,8 +99,9 @@ Each signal card should answer:
 
 Status: implemented; remains in production UX polish mode.
 
-- Done: first screen is focused on commercial control: revenue, gross profit, margin, sold units, OOS risk, stock, management focus, actions, and "what changed".
-- Done: dashboard v2 now starts from business-signal groups by work scenario: client base/CRM, assortment management, marketing, and personnel control; each signal has a compact explanation and one next action.
+- Done: first screen is focused on commercial control: total network revenue, club drilldown, guest/CRM signal, assortment signal, marketing/load signal, and clear next actions.
+- Done: dashboard v2 now starts from business-signal groups by work scenario: client base/CRM, assortment management, and marketing; personnel control stays in its own dedicated section.
+- Done: network dashboard was simplified into the agreed scenario model: total network revenue with club drilldown plus three primary work routes - guests/CRM, assortment management, and marketing; duplicate assortment tables, trend blocks, generic navigation cards, and staff-control previews were removed from the first screen.
 - Done: duplicated assortment focus/actions were removed from the network dashboard and moved into a dedicated `/assortment/dashboard` working screen for category-management decisions.
 - Done: current/full period selectors, default current-day view, European date formatting, report anchors, responsive fixes, and compact report previews.
 - Done: executive summary now combines total revenue, guests, assortment and load; the load metric uses PC capacity when PC count is available from Langame/global endpoints.

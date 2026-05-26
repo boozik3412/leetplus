@@ -15,6 +15,17 @@ export type MarketingCampaignStatus =
   | "FINISHED"
   | "CANCELED";
 
+export type MarketingCampaignConsentCoverage = {
+  targetTotal: number;
+  phoneGranted: number;
+  phoneDenied: number;
+  phoneUnsubscribed: number;
+  phoneUnknown: number;
+  contactable: number;
+  excluded: number;
+  requiresPhoneConsent: boolean;
+};
+
 export type MarketingCampaign = {
   id: string;
   goal: MarketingCampaignGoal;
@@ -37,6 +48,7 @@ export type MarketingCampaign = {
     status: string;
     dueAt: string | null;
   } | null;
+  consentCoverage: MarketingCampaignConsentCoverage;
   createdBy: { id: string; displayName: string; email: string } | null;
   owner: { id: string; displayName: string; email: string } | null;
 };

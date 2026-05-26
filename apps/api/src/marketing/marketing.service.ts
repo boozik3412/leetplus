@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { GuestCommunicationConsentStatus, Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -56,6 +56,17 @@ export type MarketingCampaignDto = {
 
 export type MarketingCampaignUpdateDto = Partial<MarketingCampaignDto>;
 
+export type MarketingCampaignConsentCoverage = {
+  targetTotal: number;
+  phoneGranted: number;
+  phoneDenied: number;
+  phoneUnsubscribed: number;
+  phoneUnknown: number;
+  contactable: number;
+  excluded: number;
+  requiresPhoneConsent: boolean;
+};
+
 export type MarketingCampaign = {
   id: string;
   goal: MarketingCampaignGoal;
@@ -78,6 +89,7 @@ export type MarketingCampaign = {
     status: string;
     dueAt: string | null;
   } | null;
+  consentCoverage: MarketingCampaignConsentCoverage;
   createdBy: { id: string; displayName: string; email: string } | null;
   owner: { id: string; displayName: string; email: string } | null;
 };
@@ -94,7 +106,14 @@ export class MarketingService {
       include: marketingCampaignInclude,
     });
 
-    return rows.map((row) => this.toMarketingCampaign(row));
+    const coverageByCampaign = await this.getConsentCoverageByCampaign(
+      user.tenantId,
+      rows,
+    );
+
+    return rows.map((row) =>
+      this.toMarketingCampaign(row, coverageByCampaign.get(row.id)),
+    );
   }
 
   async createCampaign(
@@ -131,7 +150,13 @@ export class MarketingService {
       include: marketingCampaignInclude,
     });
 
-    return this.toMarketingCampaign(row);
+    const coverage = await this.getCampaignConsentCoverage(
+      user.tenantId,
+      row.audienceId,
+      row.channel,
+    );
+
+    return this.toMarketingCampaign(row, coverage);
   }
 
   async updateCampaign(
@@ -212,7 +237,13 @@ export class MarketingService {
       include: marketingCampaignInclude,
     });
 
-    return this.toMarketingCampaign(row);
+    const coverage = await this.getCampaignConsentCoverage(
+      user.tenantId,
+      row.audienceId,
+      row.channel,
+    );
+
+    return this.toMarketingCampaign(row, coverage);
   }
 
   async createCampaignCrmTask(
@@ -228,8 +259,14 @@ export class MarketingService {
       throw new NotFoundException('Marketing campaign not found');
     }
 
+    const coverage = await this.getCampaignConsentCoverage(
+      user.tenantId,
+      campaign.audienceId,
+      campaign.channel,
+    );
+
     if (campaign.crmTask) {
-      return this.toMarketingCampaign(campaign);
+      return this.toMarketingCampaign(campaign, coverage);
     }
 
     const row = await this.prisma.$transaction(async (tx) => {
@@ -240,7 +277,7 @@ export class MarketingService {
           createdByUserId: user.id,
           assignedToUserId: campaign.ownerUserId,
           title: `Маркетинг: ${campaign.name}`,
-          description: campaignTaskDescription(campaign),
+          description: campaignTaskDescription(campaign, coverage),
           dueAt: campaign.dueAt,
         },
         select: { id: true },
@@ -256,7 +293,7 @@ export class MarketingService {
       });
     });
 
-    return this.toMarketingCampaign(row);
+    return this.toMarketingCampaign(row, coverage);
   }
 
   private async resolveAudienceId(
@@ -368,7 +405,96 @@ export class MarketingService {
     return scope ? `${labels[goal]} для ${scope}` : labels[goal];
   }
 
-  private toMarketingCampaign(row: MarketingCampaignRow): MarketingCampaign {
+  private async getConsentCoverageByCampaign(
+    tenantId: string,
+    rows: MarketingCampaignRow[],
+  ) {
+    const result = new Map<string, MarketingCampaignConsentCoverage>();
+
+    await Promise.all(
+      rows.map(async (row) => {
+        result.set(
+          row.id,
+          await this.getCampaignConsentCoverage(
+            tenantId,
+            row.audienceId,
+            row.channel,
+          ),
+        );
+      }),
+    );
+
+    return result;
+  }
+
+  private async getCampaignConsentCoverage(
+    tenantId: string,
+    audienceId: string | null,
+    channel: string | null,
+  ): Promise<MarketingCampaignConsentCoverage> {
+    const requiresPhoneConsent = channelRequiresPhoneConsent(channel);
+
+    if (!audienceId) {
+      return {
+        targetTotal: 0,
+        phoneGranted: 0,
+        phoneDenied: 0,
+        phoneUnsubscribed: 0,
+        phoneUnknown: 0,
+        contactable: 0,
+        excluded: 0,
+        requiresPhoneConsent,
+      };
+    }
+
+    const [targetTotal, groupedGuests] = await Promise.all([
+      this.prisma.guestAudienceMember.count({
+        where: { tenantId, audienceId },
+      }),
+      this.prisma.guest.groupBy({
+        by: ['phoneConsentStatus'],
+        where: {
+          tenantId,
+          audienceMembers: { some: { audienceId } },
+        },
+        _count: { _all: true },
+      }),
+    ]);
+
+    const counts = new Map(
+      groupedGuests.map((group) => [
+        group.phoneConsentStatus,
+        group._count._all,
+      ]),
+    );
+    const linkedGuests = [...counts.values()].reduce(
+      (sum, count) => sum + count,
+      0,
+    );
+    const unknown =
+      (counts.get(GuestCommunicationConsentStatus.UNKNOWN) ?? 0) +
+      Math.max(0, targetTotal - linkedGuests);
+    const granted = counts.get(GuestCommunicationConsentStatus.GRANTED) ?? 0;
+    const denied = counts.get(GuestCommunicationConsentStatus.DENIED) ?? 0;
+    const unsubscribed =
+      counts.get(GuestCommunicationConsentStatus.UNSUBSCRIBED) ?? 0;
+
+    return {
+      targetTotal,
+      phoneGranted: granted,
+      phoneDenied: denied,
+      phoneUnsubscribed: unsubscribed,
+      phoneUnknown: unknown,
+      contactable: requiresPhoneConsent ? granted : targetTotal,
+      excluded: requiresPhoneConsent ? targetTotal - granted : 0,
+      requiresPhoneConsent,
+    };
+  }
+
+  private toMarketingCampaign(
+    row: MarketingCampaignRow,
+    coverage?: MarketingCampaignConsentCoverage,
+  ): MarketingCampaign {
     return {
       id: row.id,
       goal: resolveGoal(row.goal),
@@ -399,6 +525,7 @@ export class MarketingService {
             dueAt: row.crmTask.dueAt?.toISOString() ?? null,
           }
         : null,
+      consentCoverage: coverage ?? emptyConsentCoverage(row.channel),
       createdBy: row.createdByUser ? toUserSummary(row.createdByUser) : null,
       owner: row.ownerUser ? toUserSummary(row.ownerUser) : null,
     };
@@ -495,17 +622,20 @@ function parseStringArray(value: Prisma.JsonValue | null) {
   return value.filter((item): item is string => typeof item === 'string');
 }
 
-function campaignTaskDescription(campaign: {
-  goal: string;
-  audience: { name: string; guestsCount: number } | null;
-  storeIds: Prisma.JsonValue | null;
-  channel: string | null;
-  mechanic: string | null;
-  periodFrom: Date | null;
-  periodTo: Date | null;
-  budget: Prisma.Decimal | null;
-  note: string | null;
-}) {
+function campaignTaskDescription(
+  campaign: {
+    goal: string;
+    audience: { name: string; guestsCount: number } | null;
+    storeIds: Prisma.JsonValue | null;
+    channel: string | null;
+    mechanic: string | null;
+    periodFrom: Date | null;
+    periodTo: Date | null;
+    budget: Prisma.Decimal | null;
+    note: string | null;
+  },
+  coverage: MarketingCampaignConsentCoverage,
+) {
   const storeIds = parseStringArray(campaign.storeIds);
   const lines = [
     `Цель: ${campaign.goal}`,
@@ -521,6 +651,9 @@ function campaignTaskDescription(campaign: {
         )}`
       : null,
     campaign.budget ? `Бюджет: ${Number(campaign.budget)} руб` : null,
+    coverage.targetTotal > 0
+      ? `Согласия: доступно ${coverage.contactable} из ${coverage.targetTotal}, исключено ${coverage.excluded}`
+      : 'Согласия: группа не выбрана или пуста',
     campaign.note ? `Заметка: ${campaign.note}` : null,
   ];
 
@@ -533,6 +666,38 @@ function formatDateForTask(value: Date | null) {
   }
 
   return new Intl.DateTimeFormat('ru-RU').format(value);
+}
+
+function channelRequiresPhoneConsent(channel: string | null) {
+  if (!channel) {
+    return true;
+  }
+
+  const normalized = channel.toLocaleLowerCase('ru-RU');
+  return (
+    normalized.includes('crm') ||
+    normalized.includes('звон') ||
+    normalized.includes('месс') ||
+    normalized.includes('sms') ||
+    normalized.includes('рассыл') ||
+    normalized.includes('telegram') ||
+    normalized.includes('max')
+  );
+}
+
+function emptyConsentCoverage(
+  channel: string | null,
+): MarketingCampaignConsentCoverage {
+  return {
+    targetTotal: 0,
+    phoneGranted: 0,
+    phoneDenied: 0,
+    phoneUnsubscribed: 0,
+    phoneUnknown: 0,
+    contactable: 0,
+    excluded: 0,
+    requiresPhoneConsent: channelRequiresPhoneConsent(channel),
+  };
 }
 
 function hasOwn<T extends object>(obj: T, key: PropertyKey): boolean {

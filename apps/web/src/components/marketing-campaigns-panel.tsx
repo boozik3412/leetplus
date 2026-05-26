@@ -451,6 +451,8 @@ export function MarketingCampaignsPanel({
                 />
               </dl>
 
+              <ConsentCoverage coverage={campaign.consentCoverage} />
+
               {campaign.note ? (
                 <p className="mt-4 rounded-lg border border-zinc-200 bg-white p-3 text-sm leading-6 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300">
                   {campaign.note}
@@ -528,6 +530,48 @@ function Info({ label, value }: { label: string; value: string }) {
         {label}
       </dt>
       <dd className="mt-1 font-semibold text-zinc-950 dark:text-white">{value}</dd>
+    </div>
+  );
+}
+
+function ConsentCoverage({
+  coverage,
+}: {
+  coverage: MarketingCampaign["consentCoverage"];
+}) {
+  const targetTotal = coverage?.targetTotal ?? 0;
+  const contactable = coverage?.contactable ?? 0;
+  const excluded = coverage?.excluded ?? 0;
+  const phoneDenied = coverage?.phoneDenied ?? 0;
+  const phoneUnsubscribed = coverage?.phoneUnsubscribed ?? 0;
+  const phoneUnknown = coverage?.phoneUnknown ?? 0;
+  const requiresPhoneConsent = coverage?.requiresPhoneConsent ?? true;
+  const percent =
+    targetTotal > 0 ? Math.round((contactable / targetTotal) * 100) : 0;
+
+  return (
+    <div className="mt-4 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+          Согласия и исключения
+        </p>
+        <p className="text-sm font-semibold text-zinc-950 dark:text-white">
+          {targetTotal > 0
+            ? `${contactable} из ${targetTotal}`
+            : "группа не выбрана"}
+        </p>
+      </div>
+      <div className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+        <div
+          className="h-full rounded-full bg-emerald-500"
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+      <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+        {requiresPhoneConsent
+          ? `Для телефонного контакта доступно ${contactable}, исключено ${excluded}: отказов ${phoneDenied}, отписок ${phoneUnsubscribed}, неизвестных ${phoneUnknown}.`
+          : "Для выбранного канала телефонное согласие не требуется, но статусы сохранены для контроля."}
+      </p>
     </div>
   );
 }

@@ -505,6 +505,8 @@ function EffectAnalytics({
         ))}
       </div>
 
+      <CampaignFunnelCard campaign={campaign} effect={effect} />
+
       <div className="grid gap-3 border-t border-zinc-200 p-4 dark:border-zinc-800 lg:grid-cols-2">
         <EffectPeriodTable title="До кампании" period={effect.before} />
         <EffectPeriodTable title="После кампании" period={effect.after} />
@@ -529,6 +531,125 @@ function EffectAnalytics({
   );
 }
 
+function CampaignFunnelCard({
+  campaign,
+  effect,
+}: {
+  campaign: MarketingCampaign;
+  effect: MarketingCampaignEffect;
+}) {
+  const funnel = effect.funnel;
+  const taskStatus = normalizeTaskStatus(funnel.crmTask?.status);
+  const taskLabel = funnel.crmTask
+    ? `${taskStatus ? taskStatusLabels[taskStatus] : funnel.crmTask.status}, срок ${formatDate(
+        funnel.crmTask.dueAt,
+      )}`
+    : "CRM-задача не создана";
+  const responsible =
+    funnel.responsibleUser?.displayName ??
+    campaign.owner?.displayName ??
+    "не назначен";
+  const steps = [
+    {
+      label: "Группа",
+      value: `${formatNumber(funnel.targetTotal)} гостей`,
+      rate: 100,
+      hint: `${formatNumber(funnel.linkedTargetGuests)} связаны с Langame ID`,
+    },
+    {
+      label: "План контакта",
+      value: `${formatNumber(funnel.contactableGuests)} гостей`,
+      rate: percentOf(funnel.contactableGuests, funnel.targetTotal),
+      hint: `${formatNumber(funnel.excludedGuests)} исключено по согласиям`,
+    },
+    {
+      label: "Контакты",
+      value: `${formatNumber(funnel.completedContacts)} шт`,
+      rate: funnel.contactCompletionRate,
+      hint: `${formatNumber(funnel.directCompletedContacts)} прямо в кампанию`,
+    },
+    {
+      label: "С результатом",
+      value: `${formatNumber(funnel.respondedContacts)} шт`,
+      rate: funnel.responseRate,
+      hint: "есть зафиксированный результат контакта",
+    },
+    {
+      label: "Посетили",
+      value: `${formatNumber(funnel.visitedGuests)} гостей`,
+      rate: funnel.visitRate,
+      hint: `${formatNumber(effect.after.sessionsCount)} сессий после запуска`,
+    },
+    {
+      label: "Повторные",
+      value: `${formatNumber(funnel.repeatGuests)} гостей`,
+      rate: funnel.repeatRate,
+      hint: `${formatRubles(funnel.revenue)}, бар ${formatRubles(
+        funnel.barRevenue,
+      )}`,
+    },
+  ];
+
+  return (
+    <div className="border-t border-zinc-200 p-4 dark:border-zinc-800">
+      <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_260px] lg:items-start">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
+              Воронка
+            </p>
+            <h3 className="mt-2 text-xl font-semibold">
+              От группы до повторного визита
+            </h3>
+            <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+              Смотрим, сколько гостей можно было контактировать, сколько
+              контактов реально выполнено и дошло ли это до визитов, выручки и
+              бара.
+            </p>
+          </div>
+          <div className="rounded-lg border border-zinc-200 bg-white p-3 text-sm dark:border-zinc-800 dark:bg-zinc-950">
+            <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              Ответственный
+            </p>
+            <p className="mt-1 font-semibold">{responsible}</p>
+            <p className="mt-2 text-zinc-500 dark:text-zinc-400">{taskLabel}</p>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {steps.map((step) => (
+            <div
+              key={step.label}
+              className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                    {step.label}
+                  </p>
+                  <p className="mt-1 text-lg font-semibold">{step.value}</p>
+                </div>
+                <p className="text-sm font-semibold text-zinc-500 dark:text-zinc-400">
+                  {formatPercent(step.rate)}
+                </p>
+              </div>
+              <div className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+                <div
+                  className="h-full rounded-full bg-emerald-500"
+                  style={{ width: `${barWidth(step.rate)}%` }}
+                />
+              </div>
+              <p className="mt-2 min-h-10 text-sm leading-5 text-zinc-600 dark:text-zinc-300">
+                {step.hint}
+              </p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function EffectPeriodTable({
   title,
   period,
@@ -539,6 +660,7 @@ function EffectPeriodTable({
   const rows = [
     ["Контакты", `${formatNumber(period.contacts)} шт`],
     ["Посетили", `${formatNumber(period.activeGuests)} гостей`],
+    ["Повторные", `${formatNumber(period.repeatGuests)} гостей`],
     ["Сессии", `${formatNumber(period.sessionsCount)} шт`],
     ["Часы", `${formatNumber(period.playHours)} ч`],
     ["Выручка", formatRubles(period.totalRevenue)],
@@ -599,6 +721,30 @@ function formatDelta(value: number) {
 
   const sign = value > 0 ? "+" : "";
   return `${sign}${formatNumber(value)} к окну до`;
+}
+
+function percentOf(value: number, total: number) {
+  if (total <= 0) {
+    return null;
+  }
+
+  return Math.round((value / total) * 1000) / 10;
+}
+
+function formatPercent(value: number | null) {
+  if (value === null) {
+    return "нет базы";
+  }
+
+  return `${formatNumber(value)}%`;
+}
+
+function barWidth(value: number | null) {
+  if (value === null) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(100, value));
 }
 
 function deltaClassName(value: number) {

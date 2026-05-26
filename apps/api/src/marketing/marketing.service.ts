@@ -104,12 +104,42 @@ export type MarketingCampaignEffectPeriod = {
   directContacts: number;
   respondedContacts: number;
   activeGuests: number;
+  repeatGuests: number;
   sessionsCount: number;
   playHours: number;
   balanceRevenue: number;
   barRevenue: number;
   totalRevenue: number;
   barSalesCount: number;
+};
+
+export type MarketingCampaignFunnel = {
+  targetTotal: number;
+  linkedTargetGuests: number;
+  contactableGuests: number;
+  excludedGuests: number;
+  completedContacts: number;
+  directCompletedContacts: number;
+  respondedContacts: number;
+  visitedGuests: number;
+  repeatGuests: number;
+  revenue: number;
+  barRevenue: number;
+  contactCompletionRate: number | null;
+  responseRate: number | null;
+  visitRate: number | null;
+  repeatRate: number | null;
+  barShare: number | null;
+  crmTask: {
+    id: string;
+    status: string;
+    dueAt: string | null;
+  } | null;
+  responsibleUser: {
+    id: string;
+    displayName: string;
+    email: string;
+  } | null;
 };
 
 export type MarketingCampaignEffect = {
@@ -127,6 +157,7 @@ export type MarketingCampaignEffect = {
   before: MarketingCampaignEffectPeriod;
   after: MarketingCampaignEffectPeriod;
   delta: Omit<MarketingCampaignEffectPeriod, 'from' | 'to' | 'days'>;
+  funnel: MarketingCampaignFunnel;
   dataQuality: {
     directContactAttribution: boolean;
     revenueScope: string;
@@ -184,7 +215,11 @@ export class MarketingService {
   ): Promise<MarketingCampaignEffect> {
     const campaign = await this.prisma.marketingCampaign.findFirst({
       where: { id, tenantId: user.tenantId },
-      include: { audience: { select: { id: true, guestsCount: true } } },
+      include: {
+        audience: { select: { id: true, guestsCount: true } },
+        crmTask: { select: { id: true, status: true, dueAt: true } },
+        ownerUser: { select: { id: true, fullName: true, email: true } },
+      },
     });
 
     if (!campaign) {
@@ -232,6 +267,14 @@ export class MarketingService {
     const linkedTargetGuests = guestIds.length;
     const targetTotal = campaign.audience?.guestsCount ?? members.length;
     const directContactAttribution = after.directContacts > 0;
+    const coverage = await this.getCampaignConsentCoverage(
+      user.tenantId,
+      campaign.audienceId,
+      campaign.channel,
+    );
+    const completedContacts = after.contacts;
+    const respondedContacts = after.respondedContacts;
+    const visitedGuests = after.activeGuests;
 
     return {
       campaignId: campaign.id,
@@ -258,6 +301,7 @@ export class MarketingService {
           2,
         ),
         activeGuests: this.round(after.activeGuests - before.activeGuests, 2),
+        repeatGuests: this.round(after.repeatGuests - before.repeatGuests, 2),
         sessionsCount: this.round(
           after.sessionsCount - before.sessionsCount,
           2,
@@ -273,6 +317,45 @@ export class MarketingService {
           after.barSalesCount - before.barSalesCount,
           2,
         ),
+      },
+      funnel: {
+        targetTotal,
+        linkedTargetGuests,
+        contactableGuests: coverage.contactable,
+        excludedGuests: coverage.excluded,
+        completedContacts,
+        directCompletedContacts: after.directContacts,
+        respondedContacts,
+        visitedGuests,
+        repeatGuests: after.repeatGuests,
+        revenue: after.totalRevenue,
+        barRevenue: after.barRevenue,
+        contactCompletionRate: this.ratio(
+          completedContacts,
+          coverage.contactable,
+        ),
+        responseRate: this.ratio(respondedContacts, completedContacts),
+        visitRate: this.ratio(
+          visitedGuests,
+          respondedContacts || completedContacts,
+        ),
+        repeatRate: this.ratio(after.repeatGuests, visitedGuests),
+        barShare: this.ratio(after.barRevenue, after.totalRevenue),
+        crmTask: campaign.crmTask
+          ? {
+              id: campaign.crmTask.id,
+              status: campaign.crmTask.status,
+              dueAt: campaign.crmTask.dueAt?.toISOString() ?? null,
+            }
+          : null,
+        responsibleUser: campaign.ownerUser
+          ? {
+              id: campaign.ownerUser.id,
+              displayName:
+                campaign.ownerUser.fullName || campaign.ownerUser.email,
+              email: campaign.ownerUser.email,
+            }
+          : null,
       },
       dataQuality: {
         directContactAttribution,
@@ -569,6 +652,7 @@ export class MarketingService {
     ]);
 
     const activeGuestIds = new Set<string>();
+    const sessionsByGuestId = new Map<string, number>();
     let playMinutes = 0;
     let transactionRevenue = 0;
     let barRevenue = 0;
@@ -576,6 +660,10 @@ export class MarketingService {
     sessions.forEach((session) => {
       if (session.guestId) {
         activeGuestIds.add(session.guestId);
+        sessionsByGuestId.set(
+          session.guestId,
+          (sessionsByGuestId.get(session.guestId) ?? 0) + 1,
+        );
       }
       playMinutes += session.durationMinutes ?? 0;
     });
@@ -608,6 +696,8 @@ export class MarketingService {
       directContacts,
       respondedContacts,
       activeGuests: activeGuestIds.size,
+      repeatGuests: [...sessionsByGuestId.values()].filter((count) => count > 1)
+        .length,
       sessionsCount: sessions.length,
       playHours: this.round(playMinutes / 60, 2),
       balanceRevenue: this.round(balanceRevenue, 2),
@@ -672,6 +762,7 @@ export class MarketingService {
       directContacts: 0,
       respondedContacts: 0,
       activeGuests: 0,
+      repeatGuests: 0,
       sessionsCount: 0,
       playHours: 0,
       balanceRevenue: 0,
@@ -684,6 +775,14 @@ export class MarketingService {
   private round(value: number, digits = 2) {
     const multiplier = 10 ** digits;
     return Math.round(value * multiplier) / multiplier;
+  }
+
+  private ratio(numerator: number, denominator: number) {
+    if (denominator <= 0) {
+      return null;
+    }
+
+    return this.round((numerator / denominator) * 100, 1);
   }
 
   private async resolveAudienceId(

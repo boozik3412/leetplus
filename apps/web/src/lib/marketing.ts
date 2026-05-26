@@ -61,12 +61,42 @@ export type MarketingCampaignEffectPeriod = {
   directContacts: number;
   respondedContacts: number;
   activeGuests: number;
+  repeatGuests: number;
   sessionsCount: number;
   playHours: number;
   balanceRevenue: number;
   barRevenue: number;
   totalRevenue: number;
   barSalesCount: number;
+};
+
+export type MarketingCampaignFunnel = {
+  targetTotal: number;
+  linkedTargetGuests: number;
+  contactableGuests: number;
+  excludedGuests: number;
+  completedContacts: number;
+  directCompletedContacts: number;
+  respondedContacts: number;
+  visitedGuests: number;
+  repeatGuests: number;
+  revenue: number;
+  barRevenue: number;
+  contactCompletionRate: number | null;
+  responseRate: number | null;
+  visitRate: number | null;
+  repeatRate: number | null;
+  barShare: number | null;
+  crmTask: {
+    id: string;
+    status: string;
+    dueAt: string | null;
+  } | null;
+  responsibleUser: {
+    id: string;
+    displayName: string;
+    email: string;
+  } | null;
 };
 
 export type MarketingCampaignEffect = {
@@ -84,6 +114,7 @@ export type MarketingCampaignEffect = {
   before: MarketingCampaignEffectPeriod;
   after: MarketingCampaignEffectPeriod;
   delta: Omit<MarketingCampaignEffectPeriod, "from" | "to" | "days">;
+  funnel: MarketingCampaignFunnel;
   dataQuality: {
     directContactAttribution: boolean;
     revenueScope: string;

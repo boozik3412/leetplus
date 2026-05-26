@@ -1025,26 +1025,24 @@ function BusinessSignalPanel({ groups }: { groups: BusinessSignalGroup[] }) {
         {groups.map((group) => (
           <article
             key={group.title}
-            className="flex min-h-full flex-col rounded-lg border border-zinc-200 bg-zinc-50/70 p-4 dark:border-zinc-800 dark:bg-zinc-900/40"
+            className="flex min-h-full flex-col overflow-hidden rounded-lg border border-zinc-200 bg-zinc-50/70 dark:border-zinc-800 dark:bg-zinc-900/40"
           >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
-                  {group.title}
-                </h3>
-                <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-                  {group.subtitle}
-                </p>
-              </div>
+            <div className="flex flex-col border-b border-zinc-200 bg-white/70 p-4 dark:border-zinc-800 dark:bg-zinc-950/60 md:h-[152px]">
+              <h3 className="text-sm font-semibold leading-5 text-zinc-950 dark:text-zinc-50">
+                {group.title}
+              </h3>
+              <p className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                {group.subtitle}
+              </p>
               <Link
                 href={group.href}
-                className="shrink-0 rounded-full border border-zinc-200 px-3 py-1 text-xs font-semibold text-zinc-600 transition hover:border-emerald-300 hover:text-emerald-700 dark:border-zinc-800 dark:text-zinc-300 dark:hover:border-emerald-900 dark:hover:text-emerald-300"
+                className="mt-3 inline-flex w-fit max-w-full items-center justify-center rounded-full border border-zinc-200 px-3 py-1 text-left text-xs font-semibold leading-4 text-zinc-600 transition hover:border-emerald-300 hover:text-emerald-700 dark:border-zinc-800 dark:text-zinc-300 dark:hover:border-emerald-900 dark:hover:text-emerald-300 md:mt-auto"
               >
                 {group.routeLabel}
               </Link>
             </div>
 
-            <div className="mt-4 flex flex-1 flex-col gap-3">
+            <div className="flex flex-1 flex-col gap-3 p-4">
               {group.signals.map((signal) => (
                 <BusinessSignalCard key={signal.title} signal={signal} />
               ))}

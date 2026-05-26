@@ -5,6 +5,7 @@ import { useMemo, useState, useTransition } from "react";
 import type {
   MarketingCampaign,
   MarketingCampaignEffect,
+  MarketingCampaignStatus,
 } from "@/lib/marketing";
 
 type MarketingCampaignWorkspaceProps = {
@@ -20,6 +21,35 @@ type ChecklistItem = {
   href: string;
 };
 
+type StatusTransition = {
+  label: string;
+  status: MarketingCampaignStatus;
+  tone: "primary" | "secondary" | "danger";
+};
+
+const campaignStatusLabels: Record<MarketingCampaignStatus, string> = {
+  DRAFT: "Черновик",
+  PLANNED: "Запланирована",
+  RUNNING: "В работе",
+  FINISHED: "Завершена",
+  CANCELED: "Отменена",
+};
+
+const campaignStatusHints: Record<MarketingCampaignStatus, string> = {
+  DRAFT: "Готовим группу, механику и ответственного.",
+  PLANNED: "Запуск согласован, осталось начать выполнение.",
+  RUNNING: "Контакты и результаты нужно фиксировать в журнале.",
+  FINISHED: "Можно смотреть эффект и выводы.",
+  CANCELED: "Кампания остановлена, факты сохраняются в истории.",
+};
+
+const campaignStatusFlow: MarketingCampaignStatus[] = [
+  "DRAFT",
+  "PLANNED",
+  "RUNNING",
+  "FINISHED",
+];
+
 export function MarketingCampaignWorkspace({
   campaign,
   effect,
@@ -27,6 +57,8 @@ export function MarketingCampaignWorkspace({
   const router = useRouter();
   const [note, setNote] = useState(campaign.note ?? "");
   const [isSaving, setIsSaving] = useState(false);
+  const [updatingStatus, setUpdatingStatus] =
+    useState<MarketingCampaignStatus | null>(null);
   const [isPending, startTransition] = useTransition();
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -37,6 +69,7 @@ export function MarketingCampaignWorkspace({
   const completed = checklist.filter((item) => item.done).length;
   const progress = Math.round((completed / checklist.length) * 100);
   const hasChanges = note.trim() !== (campaign.note ?? "");
+  const transitions = campaignStatusTransitions(campaign.status);
 
   async function saveNote() {
     setError(null);
@@ -64,6 +97,35 @@ export function MarketingCampaignWorkspace({
       setError("Не удалось сохранить заметку");
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function updateStatus(nextStatus: MarketingCampaignStatus) {
+    setError(null);
+    setMessage(null);
+    setUpdatingStatus(nextStatus);
+
+    try {
+      const response = await fetch(`/api/marketing/campaigns/${campaign.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: nextStatus }),
+      });
+
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as {
+          message?: string;
+        } | null;
+        setError(data?.message ?? "Не удалось обновить статус кампании");
+        return;
+      }
+
+      setMessage(`Статус изменен: ${campaignStatusLabels[nextStatus]}.`);
+      startTransition(() => router.refresh());
+    } catch {
+      setError("Не удалось обновить статус кампании");
+    } finally {
+      setUpdatingStatus(null);
     }
   }
 
@@ -98,6 +160,70 @@ export function MarketingCampaignWorkspace({
             className="h-full rounded-full bg-emerald-500"
             style={{ width: `${progress}%` }}
           />
+        </div>
+        <div className="mt-5 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                Этап кампании
+              </p>
+              <p className="mt-1 text-lg font-semibold">
+                {campaignStatusLabels[campaign.status]}
+              </p>
+              <p className="mt-1 text-sm leading-5 text-zinc-600 dark:text-zinc-400">
+                {campaignStatusHints[campaign.status]}
+              </p>
+            </div>
+            <div className="flex flex-wrap justify-start gap-2 sm:justify-end">
+              {transitions.map((transition) => (
+                <button
+                  key={transition.status}
+                  type="button"
+                  disabled={Boolean(updatingStatus) || isPending}
+                  onClick={() => updateStatus(transition.status)}
+                  className={statusButtonClass(transition.tone)}
+                >
+                  {updatingStatus === transition.status
+                    ? "Обновляем..."
+                    : transition.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="mt-4 grid gap-2 md:grid-cols-4">
+            {campaignStatusFlow.map((status, index) => {
+              const activeIndex = campaignStatusFlow.indexOf(campaign.status);
+              const isActive = status === campaign.status;
+              const isDone =
+                activeIndex >= 0 && index < activeIndex && campaign.status !== "CANCELED";
+
+              return (
+                <div
+                  key={status}
+                  className={
+                    isActive
+                      ? "rounded-md border border-emerald-400 bg-emerald-50 p-3 dark:bg-emerald-500/10"
+                      : isDone
+                        ? "rounded-md border border-emerald-200 bg-white p-3 dark:border-emerald-900 dark:bg-zinc-950"
+                        : "rounded-md border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950"
+                  }
+                >
+                  <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                    {index + 1}. {campaignStatusLabels[status]}
+                  </p>
+                  <p className="mt-1 text-sm leading-5 text-zinc-600 dark:text-zinc-400">
+                    {campaignStatusHints[status]}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+          {campaign.status === "CANCELED" ? (
+            <p className="mt-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm leading-5 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+              Кампания отменена. Ее можно вернуть в работу, если запуск снова
+              актуален.
+            </p>
+          ) : null}
         </div>
       </div>
 
@@ -262,6 +388,56 @@ function formatDate(value: string | null) {
   }
 
   return new Intl.DateTimeFormat("ru-RU").format(new Date(value));
+}
+
+function campaignStatusTransitions(
+  status: MarketingCampaignStatus,
+): StatusTransition[] {
+  if (status === "DRAFT") {
+    return [
+      { label: "Запланировать", status: "PLANNED", tone: "primary" },
+      { label: "Отменить", status: "CANCELED", tone: "danger" },
+    ];
+  }
+
+  if (status === "PLANNED") {
+    return [
+      { label: "Начать работу", status: "RUNNING", tone: "primary" },
+      { label: "Отменить", status: "CANCELED", tone: "danger" },
+    ];
+  }
+
+  if (status === "RUNNING") {
+    return [
+      { label: "Завершить", status: "FINISHED", tone: "primary" },
+      { label: "Отменить", status: "CANCELED", tone: "danger" },
+    ];
+  }
+
+  if (status === "FINISHED") {
+    return [
+      { label: "Вернуть в работу", status: "RUNNING", tone: "secondary" },
+    ];
+  }
+
+  return [
+    { label: "Вернуть в работу", status: "RUNNING", tone: "secondary" },
+  ];
+}
+
+function statusButtonClass(tone: StatusTransition["tone"]) {
+  const base =
+    "inline-flex min-h-10 items-center justify-center rounded-md px-4 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60";
+
+  if (tone === "primary") {
+    return `${base} bg-emerald-500 text-zinc-950 hover:bg-emerald-400`;
+  }
+
+  if (tone === "danger") {
+    return `${base} border border-red-300 text-red-700 hover:bg-red-50 dark:border-red-500/50 dark:text-red-200 dark:hover:bg-red-500/10`;
+  }
+
+  return `${base} border border-zinc-300 text-zinc-700 hover:bg-white dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-950`;
 }
 
 function crmTaskStatusLabel(status: string) {

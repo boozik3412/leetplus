@@ -58,6 +58,12 @@ export type MarketingCampaignDto = {
 
 export type MarketingCampaignUpdateDto = Partial<MarketingCampaignDto>;
 
+export type MarketingCampaignExportFile = {
+  fileName: string;
+  contentType: string;
+  buffer: Buffer;
+};
+
 export type MarketingCampaignConsentCoverage = {
   targetTotal: number;
   phoneGranted: number;
@@ -221,6 +227,32 @@ type MarketingCampaignExecutionBucket = {
   directContacts: number;
   respondedContacts: number;
   linkedGuestIds: Set<string>;
+};
+
+type CsvCell = string | number | boolean | null;
+
+type MarketingCampaignExportContactEvent = {
+  id: string;
+  channel: string;
+  result: string | null;
+  note: string | null;
+  contactedAt: Date;
+  marketingCampaignId: string | null;
+  audience: { name: string } | null;
+  guest: {
+    externalDomain: string | null;
+    externalGuestId: string;
+    fullNameMasked: string | null;
+    phoneMasked: string | null;
+    emailMasked: string | null;
+  } | null;
+  lead: {
+    fullNameMasked: string | null;
+    phoneMasked: string | null;
+    emailMasked: string | null;
+    matchedGuestId: string | null;
+  } | null;
+  createdByUser: { fullName: string | null; email: string } | null;
 };
 
 @Injectable()
@@ -448,6 +480,199 @@ export class MarketingService {
           'Guests without linked guestId in the saved group are visible in coverage but excluded from behavioral effect calculations.',
         ],
       },
+    };
+  }
+
+  async exportCampaignResults(
+    user: AuthenticatedUser,
+    id: string,
+  ): Promise<MarketingCampaignExportFile> {
+    const [campaign, effect] = await Promise.all([
+      this.getCampaign(user, id),
+      this.getCampaignEffect(user, id),
+    ]);
+    const events = await this.getCampaignContactEventsForExport(
+      user.tenantId,
+      campaign.id,
+      campaign.audience?.id ?? null,
+    );
+    const csvRows: CsvCell[][] = [
+      ['Раздел', 'Показатель', 'Значение', 'Комментарий'],
+      ['Кампания', 'Название', campaign.name, null],
+      ['Кампания', 'Цель', campaign.goal, null],
+      ['Кампания', 'Статус', campaign.status, null],
+      ['Кампания', 'Группа', campaign.audience?.name ?? null, null],
+      ['Кампания', 'Канал', campaign.channel, null],
+      ['Кампания', 'Механика', campaign.mechanic, null],
+      ['Кампания', 'Ответственный', campaign.owner?.displayName ?? null, null],
+      [
+        'Кампания',
+        'Период с',
+        this.formatExportDate(campaign.periodFrom),
+        null,
+      ],
+      ['Кампания', 'Период по', this.formatExportDate(campaign.periodTo), null],
+      ['Кампания', 'Бюджет, руб', campaign.budget, null],
+      [],
+      ['Воронка', 'Шаг', 'Значение', 'Конверсия'],
+      [
+        'Воронка',
+        'Группа',
+        effect.funnel.targetTotal,
+        this.formatExportPercent(100),
+      ],
+      [
+        'Воронка',
+        'Доступно для контакта',
+        effect.funnel.contactableGuests,
+        this.formatExportPercent(
+          this.ratio(
+            effect.funnel.contactableGuests,
+            effect.funnel.targetTotal,
+          ),
+        ),
+      ],
+      [
+        'Воронка',
+        'Контакты выполнены',
+        effect.funnel.completedContacts,
+        this.formatExportPercent(effect.funnel.contactCompletionRate),
+      ],
+      [
+        'Воронка',
+        'Есть результат',
+        effect.funnel.respondedContacts,
+        this.formatExportPercent(effect.funnel.responseRate),
+      ],
+      [
+        'Воронка',
+        'Посетили',
+        effect.funnel.visitedGuests,
+        this.formatExportPercent(effect.funnel.visitRate),
+      ],
+      [
+        'Воронка',
+        'Повторные',
+        effect.funnel.repeatGuests,
+        this.formatExportPercent(effect.funnel.repeatRate),
+      ],
+      ['Воронка', 'Выручка, руб', effect.funnel.revenue, null],
+      ['Воронка', 'Бар, руб', effect.funnel.barRevenue, null],
+      [],
+      [
+        'Периоды',
+        'Период',
+        'Контакты',
+        'Гости',
+        'Повторные',
+        'Сессии',
+        'Часы',
+        'Выручка, руб',
+        'Бар, руб',
+      ],
+      this.effectPeriodCsvRow('До кампании', effect.before),
+      this.effectPeriodCsvRow('После кампании', effect.after),
+      [
+        'Периоды',
+        'Дельта',
+        effect.delta.contacts,
+        effect.delta.activeGuests,
+        effect.delta.repeatGuests,
+        effect.delta.sessionsCount,
+        effect.delta.playHours,
+        effect.delta.totalRevenue,
+        effect.delta.barRevenue,
+      ],
+      [],
+      [
+        'Клубы',
+        'Клуб',
+        'Выручка после, руб',
+        'Бар после, руб',
+        'Гости после',
+        'Повторные после',
+        'Часы после',
+        'Дельта выручки, руб',
+      ],
+      ...effect.storeBreakdown.map((row) => [
+        'Клубы',
+        row.storeName,
+        row.after.totalRevenue,
+        row.after.barRevenue,
+        row.after.activeGuests,
+        row.after.repeatGuests,
+        row.after.playHours,
+        row.delta.totalRevenue,
+      ]),
+      [],
+      [
+        'Ответственные',
+        'Ответственный',
+        'Контакты',
+        'С результатом',
+        'Связанные гости',
+        'Посетили',
+        'Повторные',
+        'Выручка, руб',
+        'Бар, руб',
+      ],
+      ...effect.executionBreakdown.byResponsible.map((row) =>
+        this.executionCsvRow('Ответственные', row),
+      ),
+      [],
+      [
+        'Каналы',
+        'Канал',
+        'Контакты',
+        'С результатом',
+        'Связанные гости',
+        'Посетили',
+        'Повторные',
+        'Выручка, руб',
+        'Бар, руб',
+      ],
+      ...effect.executionBreakdown.byChannel.map((row) =>
+        this.executionCsvRow('Каналы', row),
+      ),
+      [],
+      [
+        'Контакты',
+        'Дата контакта',
+        'Канал',
+        'Результат',
+        'Ответственный',
+        'Гость',
+        'CRM-лид',
+        'Группа',
+        'Прямо в кампанию',
+        'В окне эффекта',
+        'Заметка',
+      ],
+      ...events.map((event) => [
+        'Контакты',
+        this.formatExportDateTime(event.contactedAt),
+        event.channel,
+        event.result,
+        event.createdByUser?.fullName ?? event.createdByUser?.email ?? null,
+        this.guestExportLabel(event.guest),
+        this.leadExportLabel(event.lead),
+        event.audience?.name ?? null,
+        event.marketingCampaignId === campaign.id ? 'да' : 'нет',
+        this.isWithinEffectWindow(
+          event.contactedAt,
+          effect.window.afterFrom,
+          effect.window.afterTo,
+        )
+          ? 'да'
+          : 'нет',
+        event.note,
+      ]),
+    ];
+
+    return {
+      fileName: `leetplus-campaign-${campaign.id}.csv`,
+      contentType: 'text/csv; charset=utf-8',
+      buffer: Buffer.from(this.toCsv(csvRows), 'utf8'),
     };
   }
 
@@ -1591,6 +1816,169 @@ export class MarketingService {
       excluded: requiresPhoneConsent ? targetTotal - granted : 0,
       requiresPhoneConsent,
     };
+  }
+
+  private async getCampaignContactEventsForExport(
+    tenantId: string,
+    campaignId: string,
+    audienceId: string | null,
+  ): Promise<MarketingCampaignExportContactEvent[]> {
+    return this.prisma.guestCrmContactEvent.findMany({
+      where: {
+        tenantId,
+        OR: [
+          { marketingCampaignId: campaignId },
+          ...(audienceId ? [{ audienceId }] : []),
+        ],
+      },
+      orderBy: [{ contactedAt: 'desc' }, { createdAt: 'desc' }],
+      take: 5000,
+      select: {
+        id: true,
+        channel: true,
+        result: true,
+        note: true,
+        contactedAt: true,
+        marketingCampaignId: true,
+        audience: { select: { name: true } },
+        guest: {
+          select: {
+            externalDomain: true,
+            externalGuestId: true,
+            fullNameMasked: true,
+            phoneMasked: true,
+            emailMasked: true,
+          },
+        },
+        lead: {
+          select: {
+            fullNameMasked: true,
+            phoneMasked: true,
+            emailMasked: true,
+            matchedGuestId: true,
+          },
+        },
+        createdByUser: { select: { fullName: true, email: true } },
+      },
+    });
+  }
+
+  private effectPeriodCsvRow(
+    title: string,
+    period: MarketingCampaignEffectPeriod,
+  ): CsvCell[] {
+    return [
+      'Периоды',
+      `${title}: ${this.formatExportDate(period.from)} - ${this.formatExportDate(
+        period.to,
+      )}`,
+      period.contacts,
+      period.activeGuests,
+      period.repeatGuests,
+      period.sessionsCount,
+      period.playHours,
+      period.totalRevenue,
+      period.barRevenue,
+    ];
+  }
+
+  private executionCsvRow(
+    section: string,
+    row: MarketingCampaignExecutionBreakdownRow,
+  ): CsvCell[] {
+    return [
+      section,
+      row.label,
+      row.metrics.contacts,
+      row.metrics.respondedContacts,
+      row.metrics.linkedGuests,
+      row.metrics.activeGuests,
+      row.metrics.repeatGuests,
+      row.metrics.totalRevenue,
+      row.metrics.barRevenue,
+    ];
+  }
+
+  private guestExportLabel(
+    guest: MarketingCampaignExportContactEvent['guest'],
+  ) {
+    if (!guest) {
+      return null;
+    }
+
+    return (
+      guest.fullNameMasked ??
+      guest.phoneMasked ??
+      guest.emailMasked ??
+      [guest.externalDomain, guest.externalGuestId].filter(Boolean).join(' / ')
+    );
+  }
+
+  private leadExportLabel(lead: MarketingCampaignExportContactEvent['lead']) {
+    if (!lead) {
+      return null;
+    }
+
+    return (
+      lead.fullNameMasked ??
+      lead.phoneMasked ??
+      lead.emailMasked ??
+      lead.matchedGuestId ??
+      'CRM-лид'
+    );
+  }
+
+  private isWithinEffectWindow(value: Date, from: string, to: string) {
+    const timestamp = value.getTime();
+
+    return (
+      timestamp >= new Date(from).getTime() &&
+      timestamp < new Date(to).getTime()
+    );
+  }
+
+  private formatExportDate(value: string | null) {
+    if (!value) {
+      return null;
+    }
+
+    return new Intl.DateTimeFormat('ru-RU').format(new Date(value));
+  }
+
+  private formatExportDateTime(value: Date | string | null) {
+    if (!value) {
+      return null;
+    }
+
+    return new Intl.DateTimeFormat('ru-RU', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(new Date(value));
+  }
+
+  private formatExportPercent(value: number | null) {
+    if (value === null) {
+      return null;
+    }
+
+    return `${this.round(value, 1)}%`;
+  }
+
+  private toCsv(rows: CsvCell[][]) {
+    return `\uFEFF${rows.map((row) => this.csvRow(row)).join('\n')}`;
+  }
+
+  private csvRow(row: CsvCell[]) {
+    return row.map((cell) => this.csvCell(cell)).join(';');
+  }
+
+  private csvCell(cell: CsvCell) {
+    const value = cell === null ? '' : String(cell);
+
+    return `"${value.replaceAll('"', '""')}"`;
   }
 
   private toMarketingCampaign(

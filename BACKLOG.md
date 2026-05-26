@@ -466,7 +466,8 @@ Goal: let a manager create a simple campaign from a business signal and control 
 - Done: campaign detail now shows a compact funnel from target group to contact plan, completed contacts, recorded result, visits, repeat guests, revenue, bar, CRM task, and responsible user.
 - Done: campaign effect now includes a compact store breakdown: revenue, bar, active guests, play hours, repeat guests, before/after delta, and a separate unallocated row when facts have no store.
 - Done: campaign detail now shows execution by responsible user and channel: contacts, results, linked guests, visits, repeat guests, revenue, and bar revenue.
-- Next: add CSV export for campaign results and contact outcomes, then expand launch checklist and editable campaign notes.
+- Done: campaign detail now has CSV export for campaign plan, funnel, before/after effect, store breakdown, execution by responsible/channel, and contact outcomes.
+- Next: expand launch checklist and editable campaign notes.
 - Let the user choose a saved guest group or create one from guest filters.
 - Add campaign fields: goal, period, clubs, target group, channel, responsible user, deadline, note, status.
 - Improve generated CRM tasks with per-channel instructions and campaign detail links.
@@ -506,9 +507,10 @@ Goal: measure whether marketing actions produced useful commercial effect.
 - Started: campaign detail now has the first funnel view: target group -> planned contacts -> completed contacts -> recorded result -> visited -> revenue -> bar -> repeat guests.
 - Started: effect by club is now visible in campaign detail with store-scoped revenue, bar, guests, hours, repeat guests, and before/after deltas.
 - Started: effect by responsible user and channel is visible in campaign detail with contacts, linked guests, visits, revenue, and bar.
+- Started: campaign result and contact outcome CSV export is available from the campaign detail page.
 - Show effect by saved group/rule source when campaigns start mixing multiple groups.
 - Separate store-scoped revenue from unallocated online top-ups when attributing campaign effect.
-- Add CSV export for campaign results and contact outcomes.
+- Add XLSX export after CSV usage proves the needed column set.
 
 Acceptance criteria:
 

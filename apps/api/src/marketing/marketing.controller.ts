@@ -5,6 +5,7 @@ import {
   Param,
   Patch,
   Post,
+  StreamableFile,
   UseGuards,
 } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
@@ -18,6 +19,7 @@ import {
   type MarketingCampaign,
   type MarketingCampaignDto,
   type MarketingCampaignEffect,
+  type MarketingCampaignExportFile,
   type MarketingCampaignUpdateDto,
 } from './marketing.service';
 
@@ -48,6 +50,21 @@ export class MarketingController {
     @Param('id') id: string,
   ): Promise<MarketingCampaignEffect> {
     return this.marketingService.getCampaignEffect(user, id);
+  }
+
+  @Get('campaigns/:id/export')
+  async exportCampaignResults(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<StreamableFile> {
+    const file: MarketingCampaignExportFile =
+      await this.marketingService.exportCampaignResults(user, id);
+
+    return new StreamableFile(file.buffer, {
+      type: file.contentType,
+      disposition: `attachment; filename="${file.fileName}"`,
+      length: file.buffer.byteLength,
+    });
   }
 
   @Post('campaigns')

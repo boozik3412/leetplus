@@ -27,6 +27,15 @@ type StatusTransition = {
   tone: "primary" | "secondary" | "danger";
 };
 
+type ExecutionPrompt = {
+  channel: string;
+  headline: string;
+  primaryAction: string;
+  script: string;
+  factsToRecord: string[];
+  preflight: string[];
+};
+
 const campaignStatusLabels: Record<MarketingCampaignStatus, string> = {
   DRAFT: "Черновик",
   PLANNED: "Запланирована",
@@ -70,6 +79,11 @@ export function MarketingCampaignWorkspace({
   const progress = Math.round((completed / checklist.length) * 100);
   const hasChanges = note.trim() !== (campaign.note ?? "");
   const transitions = campaignStatusTransitions(campaign.status);
+  const executionPrompt = useMemo(
+    () => buildExecutionPrompt(campaign),
+    [campaign],
+  );
+  const [copiedPrompt, setCopiedPrompt] = useState(false);
 
   async function saveNote() {
     setError(null);
@@ -126,6 +140,25 @@ export function MarketingCampaignWorkspace({
       setError("Не удалось обновить статус кампании");
     } finally {
       setUpdatingStatus(null);
+    }
+  }
+
+  async function copyExecutionPrompt() {
+    setCopiedPrompt(false);
+
+    const text = [
+      executionPrompt.headline,
+      `Канал: ${executionPrompt.channel}`,
+      `Действие: ${executionPrompt.primaryAction}`,
+      `Скрипт: ${executionPrompt.script}`,
+      `Зафиксировать: ${executionPrompt.factsToRecord.join("; ")}`,
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedPrompt(true);
+    } catch {
+      setError("Не удалось скопировать инструкцию");
     }
   }
 
@@ -224,6 +257,50 @@ export function MarketingCampaignWorkspace({
               актуален.
             </p>
           ) : null}
+        </div>
+        <div className="mt-5 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
+                Инструкция исполнения
+              </p>
+              <h3 className="mt-1 text-lg font-semibold">
+                {executionPrompt.headline}
+              </h3>
+              <p className="mt-1 text-sm leading-5 text-zinc-600 dark:text-zinc-400">
+                Канал: {executionPrompt.channel}. Действие:{" "}
+                {executionPrompt.primaryAction}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={copyExecutionPrompt}
+              className="inline-flex min-h-10 items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+            >
+              {copiedPrompt ? "Скопировано" : "Скопировать"}
+            </button>
+          </div>
+
+          <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1.15fr)_minmax(280px,0.85fr)]">
+            <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
+              <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                Скрипт контакта
+              </p>
+              <p className="mt-2 text-sm leading-6 text-zinc-700 dark:text-zinc-200">
+                {executionPrompt.script}
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+              <ExecutionPromptList
+                title="Перед запуском"
+                items={executionPrompt.preflight}
+              />
+              <ExecutionPromptList
+                title="Фиксировать результат"
+                items={executionPrompt.factsToRecord}
+              />
+            </div>
+          </div>
         </div>
       </div>
 
@@ -380,6 +457,157 @@ function buildChecklist(
       href: "#effect",
     },
   ];
+}
+
+function ExecutionPromptList({
+  title,
+  items,
+}: {
+  title: string;
+  items: string[];
+}) {
+  return (
+    <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
+      <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+        {title}
+      </p>
+      <ul className="mt-2 space-y-2 text-sm leading-5 text-zinc-700 dark:text-zinc-200">
+        {items.map((item) => (
+          <li key={item} className="flex gap-2">
+            <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
+            <span>{item}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function buildExecutionPrompt(
+  campaign: MarketingCampaign,
+): ExecutionPrompt {
+  const channel = normalizeChannel(campaign.channel);
+  const audienceName = campaign.audience?.name ?? "выбранной группе";
+  const mechanic = campaign.mechanic ?? "согласованному предложению";
+  const owner = campaign.owner?.displayName ?? "ответственный не назначен";
+  const due = formatDate(campaign.dueAt);
+  const goal = campaignGoalLabel(campaign.goal);
+  const preflight = [
+    `Проверить группу: ${audienceName}.`,
+    `Проверить согласия: доступно ${campaign.consentCoverage.contactable} из ${campaign.consentCoverage.targetTotal} гостей.`,
+    `Ответственный: ${owner}; срок: ${due}.`,
+  ];
+  const factsToRecord = [
+    "итог контакта: дозвонились, нет ответа, отказ, обещал прийти, нужна повторная связь",
+    "комментарий администратора или менеджера",
+    "следующий шаг и дата повторного контакта, если он нужен",
+  ];
+
+  if (channel.kind === "phone") {
+    return {
+      channel: channel.label,
+      headline: "Звонок по группе гостей",
+      primaryAction: "позвонить и зафиксировать итог в CRM",
+      script: `Здравствуйте. Мы подготовили для вас предложение по теме "${goal}": ${mechanic}. Хотим пригласить вас в клуб и уточнить, удобно ли прийти в ближайшие дни. Если интересно, зафиксируем для администратора следующий шаг.`,
+      preflight: [
+        ...preflight,
+        "Открыть CRM-задачу и идти по списку гостей без ручного копирования телефонов в сторонние файлы.",
+      ],
+      factsToRecord,
+    };
+  }
+
+  if (channel.kind === "message") {
+    return {
+      channel: channel.label,
+      headline: "Сообщение гостям с согласием",
+      primaryAction: "отправить короткий текст и отметить результат",
+      script: `Здравствуйте. Для вас есть предложение от клуба: ${mechanic}. Оно связано с "${goal}". Если хотите воспользоваться, ответьте на сообщение или сообщите администратору при визите.`,
+      preflight: [
+        ...preflight,
+        "Отправлять только гостям с разрешенным контактом и не писать тем, кто отписался.",
+      ],
+      factsToRecord: [
+        ...factsToRecord,
+        "канал сообщения и факт ответа гостя",
+      ],
+    };
+  }
+
+  if (channel.kind === "club") {
+    return {
+      channel: channel.label,
+      headline: "Инструкция администраторам в клубе",
+      primaryAction: "передать оффер на смену и собрать ответы",
+      script: `Если гость из группы "${audienceName}" пришел в клуб, предложите механику: ${mechanic}. Спросите, интересно ли воспользоваться сейчас или на следующем визите, и зафиксируйте ответ в CRM.`,
+      preflight: [
+        ...preflight,
+        "Проверить, что администраторы понимают условия оффера и где отмечать результат.",
+      ],
+      factsToRecord: [
+        ...factsToRecord,
+        "клуб и смена, где гость получил предложение",
+      ],
+    };
+  }
+
+  return {
+    channel: channel.label,
+    headline: "Ручное исполнение через CRM",
+    primaryAction: "выполнить задачу и записать факт контакта",
+    script: `Работаем с группой "${audienceName}". Цель: ${goal}. Механика: ${mechanic}. После контакта обязательно сохранить результат, чтобы потом увидеть эффект по визитам, выручке, бару и загрузке.`,
+    preflight,
+    factsToRecord,
+  };
+}
+
+function normalizeChannel(channel: string | null) {
+  const value = (channel ?? "").trim();
+  const lower = value.toLowerCase();
+
+  if (
+    lower.includes("звон") ||
+    lower.includes("call") ||
+    lower.includes("phone") ||
+    lower.includes("тел")
+  ) {
+    return { kind: "phone", label: value || "Звонок" };
+  }
+
+  if (
+    lower.includes("telegram") ||
+    lower.includes("телег") ||
+    lower.includes("max") ||
+    lower.includes("sms") ||
+    lower.includes("смс") ||
+    lower.includes("сообщ")
+  ) {
+    return { kind: "message", label: value || "Сообщение" };
+  }
+
+  if (
+    lower.includes("клуб") ||
+    lower.includes("админ") ||
+    lower.includes("смен") ||
+    lower.includes("объяв")
+  ) {
+    return { kind: "club", label: value || "В клубе" };
+  }
+
+  return { kind: "crm", label: value || "CRM-задача" };
+}
+
+function campaignGoalLabel(goal: MarketingCampaign["goal"]) {
+  const labels: Record<MarketingCampaign["goal"], string> = {
+    RETURN_GUESTS: "вернуть гостей",
+    REPEAT_VISIT: "получить повторный визит",
+    WEAK_HOURS: "загрузить тихие часы",
+    BAR_GROWTH: "увеличить бар",
+    EVENT_PROMO: "пригласить на событие или бронь",
+    PROMO_BUNDLE: "продать промо-набор",
+  };
+
+  return labels[goal];
 }
 
 function formatDate(value: string | null) {

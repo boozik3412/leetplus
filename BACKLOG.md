@@ -469,13 +469,14 @@ Goal: let a manager create a simple campaign from a business signal and control 
 - Done: campaign detail now has CSV export for campaign plan, funnel, before/after effect, store breakdown, execution by responsible/channel, and contact outcomes.
 - Done: campaign detail now has a scenario launch workspace: checklist readiness, direct anchors to contacts/effect, and editable campaign notes stored in the existing campaign note field.
 - Done: campaign launch workspace now supports explicit status transitions: draft -> planned -> running -> finished, cancel, and return to running.
-- Next: improve checklist actions with per-channel execution prompts, then add XLSX export after CSV column set is validated.
+- Done: campaign launch workspace now generates per-channel execution prompts: phone/message/in-club/CRM instruction, preflight checks, facts to record, and copy-to-clipboard text for manual execution.
+- Next: add XLSX export after CSV column set is validated and continue improving campaign execution prompts from real usage.
 - Let the user choose a saved guest group or create one from guest filters.
 - Add campaign fields: goal, period, clubs, target group, channel, responsible user, deadline, note, status.
 - Improve generated CRM tasks with per-channel instructions and campaign detail links.
 - Improve communication consent handling with channel-specific exclusions before launch.
 - Show a compact campaign list: planned, running, finished, canceled.
-- Improve campaign launch workspace with clearer per-channel execution prompts.
+- Improve campaign launch workspace prompts from real usage feedback.
 
 Acceptance criteria:
 

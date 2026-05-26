@@ -448,7 +448,7 @@ function buildChecklist(
         : "После контакта запишите исход: дозвонились, обещал прийти, отказ.",
       done: firstContacts,
       action: firstContacts ? "Готово" : "Записать",
-      href: "#contacts",
+      href: "?tab=contacts#contacts",
     },
     {
       title: "Замер эффекта доступен",
@@ -457,7 +457,7 @@ function buildChecklist(
         : "Эффект появится после визитов или связанных покупок гостей.",
       done: hasEffect,
       action: hasEffect ? "Смотреть" : "Ждать факты",
-      href: "#effect",
+      href: "?tab=effect#effect",
     },
   ];
 }

@@ -472,7 +472,8 @@ Goal: let a manager create a simple campaign from a business signal and control 
 - Done: campaign launch workspace now generates per-channel execution prompts: phone/message/in-club/CRM instruction, preflight checks, facts to record, and copy-to-clipboard text for manual execution.
 - Done: campaign detail now supports XLSX export with the same validated result columns as CSV: plan, funnel, before/after effect, club breakdown, responsible/channel execution, and contact outcomes.
 - Done: campaign detail now starts with an executive summary: verdict, next action, target group, contactability, contacts, recorded results, visits, revenue, and bar.
-- Next: continue improving campaign execution prompts from real usage and add scenario tabs so plan, execution, effect, contacts, and export unfold progressively.
+- Done: campaign detail now unfolds through scenario tabs: plan, launch, contacts, effect, and export; summary and checklist links open the correct scenario instead of exposing every block at once.
+- Next: continue improving campaign execution prompts from real usage and start the promo-bundle/mechanics layer for MVP 2.
 - Let the user choose a saved guest group or create one from guest filters.
 - Add campaign fields: goal, period, clubs, target group, channel, responsible user, deadline, note, status.
 - Improve generated CRM tasks with per-channel instructions and campaign detail links.

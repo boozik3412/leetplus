@@ -23,6 +23,40 @@ import {
 } from "@/lib/marketing";
 
 type PageParams = Promise<{ id: string }>;
+type PageSearchParams = Promise<Record<string, string | string[] | undefined>>;
+type CampaignScenarioTab = "plan" | "launch" | "contacts" | "effect" | "export";
+
+const campaignScenarioTabs: Array<{
+  id: CampaignScenarioTab;
+  label: string;
+  description: string;
+}> = [
+  {
+    id: "plan",
+    label: "План",
+    description: "цель, группа, согласия",
+  },
+  {
+    id: "launch",
+    label: "Запуск",
+    description: "статус, чек-лист, инструкция",
+  },
+  {
+    id: "contacts",
+    label: "Контакты",
+    description: "CRM-задача и журнал",
+  },
+  {
+    id: "effect",
+    label: "Эффект",
+    description: "воронка, деньги, клубы",
+  },
+  {
+    id: "export",
+    label: "Экспорт",
+    description: "CSV и XLSX",
+  },
+];
 
 const goalLabels: Record<MarketingCampaignGoal, string> = {
   RETURN_GUESTS: "Вернуть гостей",
@@ -58,11 +92,14 @@ async function safeList<T>(promise: Promise<T[]>): Promise<T[]> {
 
 export default async function MarketingCampaignPage({
   params,
+  searchParams,
 }: {
   params: PageParams;
+  searchParams: PageSearchParams;
 }) {
   await requireCurrentUser();
   const { id } = await params;
+  const activeTab = resolveCampaignScenarioTab((await searchParams).tab);
 
   const [campaignResult, effectResult, tasksResult, contactEventsResult] =
     await Promise.allSettled([
@@ -128,22 +165,6 @@ export default async function MarketingCampaignPage({
             >
               Все кампании
             </Link>
-            <a
-              href={`/api/marketing/campaigns/${encodeURIComponent(
-                campaign.id,
-              )}/export?format=csv`}
-              className="inline-flex min-h-10 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
-            >
-              Скачать CSV
-            </a>
-            <a
-              href={`/api/marketing/campaigns/${encodeURIComponent(
-                campaign.id,
-              )}/export?format=xlsx`}
-              className="inline-flex min-h-10 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
-            >
-              Скачать XLSX
-            </a>
             <Link
               href="/guests/crm/tasks"
               className="inline-flex min-h-10 items-center justify-center rounded-md bg-emerald-500 px-3 text-sm font-semibold text-zinc-950 hover:bg-emerald-400"
@@ -159,28 +180,158 @@ export default async function MarketingCampaignPage({
           contactEvents={campaignEvents}
         />
 
-        <section className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
-          <CampaignPlan campaign={campaign} />
-          <ConsentCard campaign={campaign} />
-        </section>
+        <CampaignScenarioTabs campaignId={campaign.id} activeTab={activeTab} />
 
-        <MarketingCampaignWorkspace campaign={campaign} effect={effect} />
+        {activeTab === "plan" ? (
+          <section
+            id="plan"
+            className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]"
+          >
+            <CampaignPlan campaign={campaign} />
+            <ConsentCard campaign={campaign} />
+          </section>
+        ) : null}
 
-        <section
-          id="contacts"
-          className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]"
-        >
-          <CrmTaskCard campaign={campaign} linkedTask={linkedTask} />
-          <ContactHistoryCard events={campaignEvents} campaign={campaign} />
-        </section>
+        {activeTab === "launch" ? (
+          <MarketingCampaignWorkspace campaign={campaign} effect={effect} />
+        ) : null}
 
-        <EffectAnalytics
-          campaign={campaign}
-          effect={effect}
-          fallbackEvents={campaignEvents}
-        />
+        {activeTab === "contacts" ? (
+          <section
+            id="contacts"
+            className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]"
+          >
+            <CrmTaskCard campaign={campaign} linkedTask={linkedTask} />
+            <ContactHistoryCard events={campaignEvents} campaign={campaign} />
+          </section>
+        ) : null}
+
+        {activeTab === "effect" ? (
+          <EffectAnalytics
+            campaign={campaign}
+            effect={effect}
+            fallbackEvents={campaignEvents}
+          />
+        ) : null}
+
+        {activeTab === "export" ? (
+          <CampaignExportPanel campaign={campaign} />
+        ) : null}
       </div>
     </main>
+  );
+}
+
+function resolveCampaignScenarioTab(
+  value: string | string[] | undefined,
+): CampaignScenarioTab {
+  const tab = Array.isArray(value) ? value[0] : value;
+  return campaignScenarioTabs.some((item) => item.id === tab)
+    ? (tab as CampaignScenarioTab)
+    : "plan";
+}
+
+function CampaignScenarioTabs({
+  campaignId,
+  activeTab,
+}: {
+  campaignId: string;
+  activeTab: CampaignScenarioTab;
+}) {
+  return (
+    <nav
+      aria-label="Сценарии кампании"
+      className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
+    >
+      <div className="border-b border-zinc-200 p-4 dark:border-zinc-800">
+        <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
+          Сценарии работы
+        </p>
+        <h2 className="mt-2 text-xl font-semibold">Откройте нужный шаг</h2>
+        <p className="mt-1 max-w-4xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+          Карточка кампании не показывает все данные сразу: сначала итог, затем
+          один рабочий сценарий, который нужен сейчас.
+        </p>
+      </div>
+      <div className="grid gap-2 p-3 sm:grid-cols-2 lg:grid-cols-5">
+        {campaignScenarioTabs.map((tab) => {
+          const isActive = tab.id === activeTab;
+
+          return (
+            <Link
+              key={tab.id}
+              href={`/marketing/campaigns/${encodeURIComponent(
+                campaignId,
+              )}?tab=${tab.id}#${tab.id}`}
+              className={`rounded-lg border p-3 transition ${
+                isActive
+                  ? "border-emerald-500 bg-emerald-50 text-zinc-950 dark:bg-emerald-500/10 dark:text-white"
+                  : "border-zinc-200 text-zinc-700 hover:border-emerald-400 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900"
+              }`}
+            >
+              <span className="block text-sm font-semibold">{tab.label}</span>
+              <span className="mt-1 block text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                {tab.description}
+              </span>
+            </Link>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}
+
+function CampaignExportPanel({ campaign }: { campaign: MarketingCampaign }) {
+  const campaignId = encodeURIComponent(campaign.id);
+
+  return (
+    <section
+      id="export"
+      className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
+    >
+      <div className="border-b border-zinc-200 p-5 dark:border-zinc-800">
+        <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
+          Экспорт
+        </p>
+        <h2 className="mt-2 text-2xl font-semibold">Выгрузка кампании</h2>
+        <p className="mt-2 max-w-4xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+          Файл собирает план, воронку, before/after эффект, разбивку по клубам,
+          исполнение по ответственным и каналам, а также результаты контактов.
+          Онлайн и нераспределенные факты остаются отдельными строками, если их
+          нельзя надежно привязать к клубу.
+        </p>
+      </div>
+      <div className="grid gap-3 p-5 sm:grid-cols-2">
+        <a
+          href={`/api/marketing/campaigns/${campaignId}/export?format=csv`}
+          className="rounded-lg border border-zinc-200 p-4 transition hover:border-emerald-400 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
+        >
+          <span className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            CSV
+          </span>
+          <span className="mt-2 block text-xl font-semibold">
+            Скачать для таблиц
+          </span>
+          <span className="mt-2 block text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+            Удобно для проверки строк, загрузки в BI и быстрой сверки.
+          </span>
+        </a>
+        <a
+          href={`/api/marketing/campaigns/${campaignId}/export?format=xlsx`}
+          className="rounded-lg border border-zinc-200 p-4 transition hover:border-emerald-400 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
+        >
+          <span className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            XLSX
+          </span>
+          <span className="mt-2 block text-xl font-semibold">
+            Скачать для Excel
+          </span>
+          <span className="mt-2 block text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+            Готовая книга с теми же проверенными колонками, что и CSV.
+          </span>
+        </a>
+      </div>
+    </section>
   );
 }
 
@@ -1284,7 +1435,7 @@ function buildCampaignDecision(
       nextStep:
         "Если цель снова актуальна, верните кампанию в работу и продолжите фиксировать контакты.",
       action: "Открыть запуск",
-      href: "#launch",
+      href: "?tab=launch#launch",
     };
   }
 
@@ -1326,7 +1477,7 @@ function buildCampaignDecision(
       nextStep:
         "Создайте CRM-задачу или назначьте ответственного и срок в рабочем запуске кампании.",
       action: "Открыть запуск",
-      href: "#launch",
+      href: "?tab=launch#launch",
     };
   }
 
@@ -1346,7 +1497,7 @@ function buildCampaignDecision(
       nextStep:
         "Проверьте инструкцию исполнения, назначьте ответственного и начните фиксировать результаты контактов.",
       action: "Открыть запуск",
-      href: "#launch",
+      href: "?tab=launch#launch",
     };
   }
 
@@ -1363,7 +1514,7 @@ function buildCampaignDecision(
       nextStep:
         "Проверьте оффер, скрипт контакта и качество группы. Если ответов мало, сначала дожмите исполнение.",
       action: "Разобрать контакты",
-      href: "#contacts",
+      href: "?tab=contacts#contacts",
     };
   }
 
@@ -1378,7 +1529,7 @@ function buildCampaignDecision(
       nextStep:
         "Проверьте, есть ли у гостей сессии, барные покупки или списания баланса в окне эффекта.",
       action: "Открыть эффект",
-      href: "#effect",
+      href: "?tab=effect#effect",
     };
   }
 
@@ -1393,7 +1544,7 @@ function buildCampaignDecision(
       nextStep:
         "Для следующей итерации добавьте барный оффер или промо-набор к этой же группе.",
       action: "Смотреть эффект",
-      href: "#effect",
+      href: "?tab=effect#effect",
     };
   }
 
@@ -1411,7 +1562,7 @@ function buildCampaignDecision(
         ? "Дожмите исполнение по оставшейся части группы и сравните прирост."
         : "Зафиксируйте выводы и повторите механику на похожей группе.",
     action: "Смотреть эффект",
-    href: "#effect",
+    href: "?tab=effect#effect",
   };
 }
 

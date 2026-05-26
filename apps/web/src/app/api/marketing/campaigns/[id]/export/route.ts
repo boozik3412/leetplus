@@ -2,11 +2,13 @@ import { NextResponse } from "next/server";
 import { getApiUrl, getAuthHeaders, readApiError } from "@/lib/api";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
   const headers = await getAuthHeaders();
+  const format = new URL(request.url).searchParams.get("format");
+  const query = format ? `?format=${encodeURIComponent(format)}` : "";
 
   if (!headers.Authorization) {
     return NextResponse.json(
@@ -16,7 +18,7 @@ export async function GET(
   }
 
   const response = await fetch(
-    `${getApiUrl()}/marketing/campaigns/${encodeURIComponent(id)}/export`,
+    `${getApiUrl()}/marketing/campaigns/${encodeURIComponent(id)}/export${query}`,
     {
       headers,
       cache: "no-store",

@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { GuestCommunicationConsentStatus, Prisma } from '@prisma/client';
+import ExcelJS from 'exceljs';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -57,6 +58,12 @@ export type MarketingCampaignDto = {
 };
 
 export type MarketingCampaignUpdateDto = Partial<MarketingCampaignDto>;
+
+export type MarketingCampaignExportFormat = 'csv' | 'xlsx';
+
+export type MarketingCampaignExportQuery = {
+  format?: string | null;
+};
 
 export type MarketingCampaignExportFile = {
   fileName: string;
@@ -486,7 +493,9 @@ export class MarketingService {
   async exportCampaignResults(
     user: AuthenticatedUser,
     id: string,
+    query: MarketingCampaignExportQuery = {},
   ): Promise<MarketingCampaignExportFile> {
+    const format = this.resolveExportFormat(query.format);
     const [campaign, effect] = await Promise.all([
       this.getCampaign(user, id),
       this.getCampaignEffect(user, id),
@@ -496,7 +505,31 @@ export class MarketingService {
       campaign.id,
       campaign.audience?.id ?? null,
     );
-    const csvRows: CsvCell[][] = [
+    const rows = this.buildCampaignExportRows(campaign, effect, events);
+    const fileName = `leetplus-campaign-${campaign.id}.${format}`;
+
+    if (format === 'xlsx') {
+      return {
+        fileName,
+        contentType:
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        buffer: await this.buildCampaignExportXlsx(rows),
+      };
+    }
+
+    return {
+      fileName,
+      contentType: 'text/csv; charset=utf-8',
+      buffer: Buffer.from(this.toCsv(rows), 'utf8'),
+    };
+  }
+
+  private buildCampaignExportRows(
+    campaign: MarketingCampaign,
+    effect: MarketingCampaignEffect,
+    events: MarketingCampaignExportContactEvent[],
+  ): CsvCell[][] {
+    return [
       ['Раздел', 'Показатель', 'Значение', 'Комментарий'],
       ['Кампания', 'Название', campaign.name, null],
       ['Кампания', 'Цель', campaign.goal, null],
@@ -668,12 +701,6 @@ export class MarketingService {
         event.note,
       ]),
     ];
-
-    return {
-      fileName: `leetplus-campaign-${campaign.id}.csv`,
-      contentType: 'text/csv; charset=utf-8',
-      buffer: Buffer.from(this.toCsv(csvRows), 'utf8'),
-    };
   }
 
   async createCampaign(
@@ -1967,6 +1994,53 @@ export class MarketingService {
     return `${this.round(value, 1)}%`;
   }
 
+  private async buildCampaignExportXlsx(rows: CsvCell[][]) {
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'LeetPlus';
+    workbook.created = new Date();
+
+    const worksheet = workbook.addWorksheet('Campaign');
+    worksheet.columns = [
+      { key: 'section', width: 20 },
+      { key: 'metric', width: 34 },
+      { key: 'value', width: 24 },
+      { key: 'comment', width: 42 },
+      { key: 'extra1', width: 20 },
+      { key: 'extra2', width: 20 },
+      { key: 'extra3', width: 18 },
+      { key: 'extra4', width: 20 },
+      { key: 'extra5', width: 20 },
+      { key: 'extra6', width: 22 },
+      { key: 'extra7', width: 38 },
+    ];
+
+    rows.forEach((row, index) => {
+      const excelRow = worksheet.addRow(row.map((cell) => cell ?? ''));
+      const previousRow = rows[index - 1];
+      const isHeader =
+        row.length > 0 &&
+        (index === 0 || Boolean(previousRow && previousRow.length === 0));
+
+      if (isHeader && typeof row[0] === 'string') {
+        excelRow.font = { bold: true };
+        excelRow.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FFE5E7EB' },
+        };
+      }
+    });
+
+    worksheet.getRow(1).font = { bold: true };
+    worksheet.views = [{ state: 'frozen', ySplit: 1 }];
+    worksheet.eachRow((row) => {
+      row.alignment = { vertical: 'top', wrapText: true };
+    });
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    return Buffer.from(buffer);
+  }
+
   private toCsv(rows: CsvCell[][]) {
     return `\uFEFF${rows.map((row) => this.csvRow(row)).join('\n')}`;
   }
@@ -1979,6 +2053,20 @@ export class MarketingService {
     const value = cell === null ? '' : String(cell);
 
     return `"${value.replaceAll('"', '""')}"`;
+  }
+
+  private resolveExportFormat(
+    format: string | null | undefined,
+  ): MarketingCampaignExportFormat {
+    if (!format || format === 'csv') {
+      return 'csv';
+    }
+
+    if (format === 'xlsx') {
+      return 'xlsx';
+    }
+
+    throw new BadRequestException('format must be csv or xlsx');
   }
 
   private toMarketingCampaign(

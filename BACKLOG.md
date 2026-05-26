@@ -470,7 +470,8 @@ Goal: let a manager create a simple campaign from a business signal and control 
 - Done: campaign detail now has a scenario launch workspace: checklist readiness, direct anchors to contacts/effect, and editable campaign notes stored in the existing campaign note field.
 - Done: campaign launch workspace now supports explicit status transitions: draft -> planned -> running -> finished, cancel, and return to running.
 - Done: campaign launch workspace now generates per-channel execution prompts: phone/message/in-club/CRM instruction, preflight checks, facts to record, and copy-to-clipboard text for manual execution.
-- Next: add XLSX export after CSV column set is validated and continue improving campaign execution prompts from real usage.
+- Done: campaign detail now supports XLSX export with the same validated result columns as CSV: plan, funnel, before/after effect, club breakdown, responsible/channel execution, and contact outcomes.
+- Next: continue improving campaign execution prompts from real usage and decide which campaign result columns should become visible summary cards.
 - Let the user choose a saved guest group or create one from guest filters.
 - Add campaign fields: goal, period, clubs, target group, channel, responsible user, deadline, note, status.
 - Improve generated CRM tasks with per-channel instructions and campaign detail links.
@@ -513,7 +514,7 @@ Goal: measure whether marketing actions produced useful commercial effect.
 - Started: campaign result and contact outcome CSV export is available from the campaign detail page.
 - Show effect by saved group/rule source when campaigns start mixing multiple groups.
 - Separate store-scoped revenue from unallocated online top-ups when attributing campaign effect.
-- Add XLSX export after CSV usage proves the needed column set.
+- Done: XLSX export is available after CSV column validation, using the same campaign result dataset.
 
 Acceptance criteria:
 

@@ -5,6 +5,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   StreamableFile,
   UseGuards,
 } from '@nestjs/common';
@@ -56,9 +57,10 @@ export class MarketingController {
   async exportCampaignResults(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
+    @Query('format') format?: string,
   ): Promise<StreamableFile> {
     const file: MarketingCampaignExportFile =
-      await this.marketingService.exportCampaignResults(user, id);
+      await this.marketingService.exportCampaignResults(user, id, { format });
 
     return new StreamableFile(file.buffer, {
       type: file.contentType,

@@ -131,10 +131,18 @@ export default async function MarketingCampaignPage({
             <a
               href={`/api/marketing/campaigns/${encodeURIComponent(
                 campaign.id,
-              )}/export`}
+              )}/export?format=csv`}
               className="inline-flex min-h-10 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
             >
               Скачать CSV
+            </a>
+            <a
+              href={`/api/marketing/campaigns/${encodeURIComponent(
+                campaign.id,
+              )}/export?format=xlsx`}
+              className="inline-flex min-h-10 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+            >
+              Скачать XLSX
             </a>
             <Link
               href="/guests/crm/tasks"

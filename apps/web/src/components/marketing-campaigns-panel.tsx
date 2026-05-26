@@ -319,7 +319,10 @@ export function MarketingCampaignsPanel({
   }
 
   return (
-    <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+    <section
+      id="campaigns"
+      className="mt-6 scroll-mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
+    >
       <div className="grid gap-4 border-b border-zinc-200 p-6 dark:border-zinc-800 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
         <div>
           <p className="text-sm font-bold uppercase tracking-wide text-emerald-500">
@@ -671,7 +674,10 @@ function PromoMechanicsBuilder({
   return (
     <section className="border-b border-zinc-200 p-4 dark:border-zinc-800">
       <div className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(360px,1.05fr)]">
-        <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+        <div
+          id="mechanics"
+          className="scroll-mt-6 rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60"
+        >
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
@@ -730,7 +736,10 @@ function PromoMechanicsBuilder({
           </div>
         </div>
 
-        <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+        <div
+          id="bundle"
+          className="scroll-mt-6 rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60"
+        >
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">

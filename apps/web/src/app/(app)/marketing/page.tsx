@@ -20,6 +20,12 @@ type GoalCard = {
   action: string;
 };
 
+type MarketingWorkspaceLink = {
+  title: string;
+  description: string;
+  href: string;
+};
+
 const goalCards: GoalCard[] = [
   {
     title: "Вернуть гостей",
@@ -73,6 +79,29 @@ const routeSteps = [
   ["5", "Контроль", "Ответственный, срок, статус контакта и история результата."],
   ["6", "Эффект", "Возврат, визиты, выручка, бар, загрузка и повторный визит."],
 ] as const;
+
+const workspaceLinks: MarketingWorkspaceLink[] = [
+  {
+    title: "Цели",
+    description: "Начать с бизнес-задачи: вернуть гостей, поднять бар или загрузить тихие часы.",
+    href: "#goals",
+  },
+  {
+    title: "Механики",
+    description: "Выбрать готовый сценарий промо и заполнить кампанию без пустого конструктора.",
+    href: "#mechanics",
+  },
+  {
+    title: "Промо-набор",
+    description: "Посчитать игру, бар, сервис, скидку, маржу и лимит использования.",
+    href: "#bundle",
+  },
+  {
+    title: "Кампании",
+    description: "Сохранить черновик, назначить ответственного, создать CRM-задачу и открыть эффект.",
+    href: "#campaigns",
+  },
+];
 
 async function safeList<T>(promise: Promise<T[]>): Promise<T[]> {
   try {
@@ -216,6 +245,40 @@ export default async function MarketingPage() {
         </section>
 
         <section className="mt-6 rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="border-b border-zinc-200 p-6 dark:border-zinc-800">
+            <p className="text-sm font-bold uppercase tracking-wide text-emerald-500">
+              Что уже можно сделать
+            </p>
+            <h2 className="mt-2 text-2xl font-bold text-zinc-950 dark:text-white">
+              Маршрут маркетолога
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+              Функции не спрятаны в одной форме: пользователь проходит путь от
+              цели к механике, набору, кампании и контролю эффекта.
+            </p>
+          </div>
+          <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-4">
+            {workspaceLinks.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 transition hover:border-emerald-400/70 hover:bg-emerald-50 dark:border-zinc-800 dark:bg-zinc-900/60 dark:hover:border-emerald-500/70 dark:hover:bg-emerald-500/10"
+              >
+                <h3 className="text-base font-semibold text-zinc-950 dark:text-white">
+                  {item.title}
+                </h3>
+                <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+                  {item.description}
+                </p>
+              </Link>
+            ))}
+          </div>
+        </section>
+
+        <section
+          id="goals"
+          className="mt-6 scroll-mt-6 rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
+        >
           <div className="border-b border-zinc-200 p-6 dark:border-zinc-800">
             <p className="text-sm font-bold uppercase tracking-wide text-emerald-500">
               Цели кампании

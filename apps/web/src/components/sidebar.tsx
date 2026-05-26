@@ -45,6 +45,10 @@ const navGroups: NavGroup[] = [
     icon: "marketing",
     items: [
       { href: "/marketing", label: "План кампании" },
+      { href: "/marketing#goals", label: "Цели" },
+      { href: "/marketing#mechanics", label: "Механики" },
+      { href: "/marketing#bundle", label: "Промо-набор" },
+      { href: "/marketing#campaigns", label: "Кампании" },
       { href: "/guests/report#audiences", label: "Группы гостей" },
       { href: "/guests/crm/tasks", label: "Задачи контакта" },
     ],

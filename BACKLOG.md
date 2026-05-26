@@ -474,6 +474,7 @@ Goal: let a manager create a simple campaign from a business signal and control 
 - Done: campaign detail now starts with an executive summary: verdict, next action, target group, contactability, contacts, recorded results, visits, revenue, and bar.
 - Done: campaign detail now unfolds through scenario tabs: plan, launch, contacts, effect, and export; summary and checklist links open the correct scenario instead of exposing every block at once.
 - Done: `/marketing` now starts MVP 2 with a lightweight mechanic builder: templates for second visit, weak hours, bar combo, and events plus a promo-bundle calculator that fills campaign goal, mechanic, budget, and launch notes with limits and anti-fraud rules.
+- Done: marketing UI now exposes implemented features as explicit routes: sidebar entries and `/marketing` anchors for goals, mechanics, promo bundle, campaigns, guest groups, and contact tasks so new capabilities are not hidden inside one long screen.
 - Next: continue improving campaign execution prompts from real usage and persist promo-bundle/mechanic entities when the first manual workflows are validated.
 - Let the user choose a saved guest group or create one from guest filters.
 - Add campaign fields: goal, period, clubs, target group, channel, responsible user, deadline, note, status.

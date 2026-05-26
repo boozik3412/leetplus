@@ -35,6 +35,8 @@ const campaignStatuses = [
   'CANCELED',
 ] as const;
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 export type MarketingCampaignGoal = (typeof campaignGoals)[number];
 export type MarketingCampaignStatus = (typeof campaignStatuses)[number];
 
@@ -94,6 +96,44 @@ export type MarketingCampaign = {
   owner: { id: string; displayName: string; email: string } | null;
 };
 
+export type MarketingCampaignEffectPeriod = {
+  from: string;
+  to: string;
+  days: number;
+  contacts: number;
+  directContacts: number;
+  respondedContacts: number;
+  activeGuests: number;
+  sessionsCount: number;
+  playHours: number;
+  balanceRevenue: number;
+  barRevenue: number;
+  totalRevenue: number;
+  barSalesCount: number;
+};
+
+export type MarketingCampaignEffect = {
+  campaignId: string;
+  attributionMode: 'CAMPAIGN_OR_GROUP';
+  targetTotal: number;
+  linkedTargetGuests: number;
+  unlinkedTargetMembers: number;
+  window: {
+    beforeFrom: string;
+    beforeTo: string;
+    afterFrom: string;
+    afterTo: string;
+  };
+  before: MarketingCampaignEffectPeriod;
+  after: MarketingCampaignEffectPeriod;
+  delta: Omit<MarketingCampaignEffectPeriod, 'from' | 'to' | 'days'>;
+  dataQuality: {
+    directContactAttribution: boolean;
+    revenueScope: string;
+    limitations: string[];
+  };
+};
+
 @Injectable()
 export class MarketingService {
   constructor(private readonly prisma: PrismaService) {}
@@ -136,6 +176,117 @@ export class MarketingService {
     );
 
     return this.toMarketingCampaign(row, coverage);
+  }
+
+  async getCampaignEffect(
+    user: AuthenticatedUser,
+    id: string,
+  ): Promise<MarketingCampaignEffect> {
+    const campaign = await this.prisma.marketingCampaign.findFirst({
+      where: { id, tenantId: user.tenantId },
+      include: { audience: { select: { id: true, guestsCount: true } } },
+    });
+
+    if (!campaign) {
+      throw new NotFoundException('Marketing campaign not found');
+    }
+
+    const storeIds = parseStringArray(campaign.storeIds);
+    const { afterFrom, afterTo, beforeFrom, beforeTo } =
+      this.resolveEffectWindow(campaign);
+    const members = campaign.audienceId
+      ? await this.prisma.guestAudienceMember.findMany({
+          where: { tenantId: user.tenantId, audienceId: campaign.audienceId },
+          select: { guestId: true },
+        })
+      : [];
+    const guestIds = [
+      ...new Set(
+        members
+          .map((member) => member.guestId)
+          .filter((guestId): guestId is string => Boolean(guestId)),
+      ),
+    ];
+
+    const [before, after] = await Promise.all([
+      this.buildCampaignEffectPeriod({
+        tenantId: user.tenantId,
+        campaignId: campaign.id,
+        audienceId: campaign.audienceId,
+        guestIds,
+        storeIds,
+        from: beforeFrom,
+        to: beforeTo,
+      }),
+      this.buildCampaignEffectPeriod({
+        tenantId: user.tenantId,
+        campaignId: campaign.id,
+        audienceId: campaign.audienceId,
+        guestIds,
+        storeIds,
+        from: afterFrom,
+        to: afterTo,
+      }),
+    ]);
+
+    const linkedTargetGuests = guestIds.length;
+    const targetTotal = campaign.audience?.guestsCount ?? members.length;
+    const directContactAttribution = after.directContacts > 0;
+
+    return {
+      campaignId: campaign.id,
+      attributionMode: 'CAMPAIGN_OR_GROUP',
+      targetTotal,
+      linkedTargetGuests,
+      unlinkedTargetMembers: Math.max(0, targetTotal - linkedTargetGuests),
+      window: {
+        beforeFrom: beforeFrom.toISOString(),
+        beforeTo: beforeTo.toISOString(),
+        afterFrom: afterFrom.toISOString(),
+        afterTo: afterTo.toISOString(),
+      },
+      before,
+      after,
+      delta: {
+        contacts: this.round(after.contacts - before.contacts, 2),
+        directContacts: this.round(
+          after.directContacts - before.directContacts,
+          2,
+        ),
+        respondedContacts: this.round(
+          after.respondedContacts - before.respondedContacts,
+          2,
+        ),
+        activeGuests: this.round(after.activeGuests - before.activeGuests, 2),
+        sessionsCount: this.round(
+          after.sessionsCount - before.sessionsCount,
+          2,
+        ),
+        playHours: this.round(after.playHours - before.playHours, 2),
+        balanceRevenue: this.round(
+          after.balanceRevenue - before.balanceRevenue,
+          2,
+        ),
+        barRevenue: this.round(after.barRevenue - before.barRevenue, 2),
+        totalRevenue: this.round(after.totalRevenue - before.totalRevenue, 2),
+        barSalesCount: this.round(
+          after.barSalesCount - before.barSalesCount,
+          2,
+        ),
+      },
+      dataQuality: {
+        directContactAttribution,
+        revenueScope:
+          'Target guest facts only: balance spend in clubs plus linked product/bar sales.',
+        limitations: [
+          directContactAttribution
+            ? 'Contacts with campaign id are counted directly; older contacts may still be matched by group.'
+            : 'No direct campaign contact events yet, so contacts are matched by campaign group.',
+          'Unallocated online balance top-ups are not attributed to a campaign until they can be linked to a guest and response.',
+          'Guests without linked guestId in the saved group are visible in coverage but excluded from behavioral effect calculations.',
+        ],
+      },
+    };
   }
 
   async createCampaign(
@@ -316,6 +467,223 @@ export class MarketingService {
     });
 
     return this.toMarketingCampaign(row, coverage);
+  }
+
+  private async buildCampaignEffectPeriod({
+    tenantId,
+    campaignId,
+    audienceId,
+    guestIds,
+    storeIds,
+    from,
+    to,
+  }: {
+    tenantId: string;
+    campaignId: string;
+    audienceId: string | null;
+    guestIds: string[];
+    storeIds: string[];
+    from: Date;
+    to: Date;
+  }): Promise<MarketingCampaignEffectPeriod> {
+    const storeWhere = storeIds.length > 0 ? { storeId: { in: storeIds } } : {};
+    const guestWhere =
+      guestIds.length > 0 ? { guestId: { in: guestIds } } : null;
+    const empty = this.emptyEffectPeriod(from, to);
+
+    if (!guestWhere && !audienceId) {
+      return empty;
+    }
+
+    type EffectSessionRow = {
+      guestId: string | null;
+      durationMinutes: number | null;
+    };
+    type EffectTransactionRow = {
+      type: string | null;
+      amount: Prisma.Decimal | null;
+    };
+    type EffectSaleRow = {
+      guestId: string | null;
+      revenue: Prisma.Decimal;
+    };
+    type EffectContactEventRow = {
+      id: string;
+      result: string | null;
+      marketingCampaignId: string | null;
+    };
+
+    const sessionsPromise: Promise<EffectSessionRow[]> = guestWhere
+      ? this.prisma.guestSession.findMany({
+          where: {
+            tenantId,
+            ...guestWhere,
+            startedAt: { gte: from, lt: to },
+            ...storeWhere,
+          },
+          select: { guestId: true, durationMinutes: true },
+        })
+      : Promise.resolve([]);
+    const transactionsPromise: Promise<EffectTransactionRow[]> = guestWhere
+      ? this.prisma.guestTransaction.findMany({
+          where: {
+            tenantId,
+            ...guestWhere,
+            happenedAt: { gte: from, lt: to },
+            ...storeWhere,
+          },
+          select: { type: true, amount: true },
+        })
+      : Promise.resolve([]);
+    const salesPromise: Promise<EffectSaleRow[]> = guestWhere
+      ? this.prisma.salesFact.findMany({
+          where: {
+            tenantId,
+            ...guestWhere,
+            saleDate: { gte: from, lt: to },
+            isCanceled: false,
+            ...storeWhere,
+          },
+          select: { guestId: true, revenue: true },
+        })
+      : Promise.resolve([]);
+    const contactEventsPromise: Promise<EffectContactEventRow[]> =
+      this.prisma.guestCrmContactEvent.findMany({
+        where: {
+          tenantId,
+          contactedAt: { gte: from, lt: to },
+          OR: [
+            { marketingCampaignId: campaignId },
+            ...(audienceId ? [{ audienceId }] : []),
+            ...(guestWhere ? [guestWhere] : []),
+          ],
+        },
+        select: { id: true, result: true, marketingCampaignId: true },
+      });
+
+    const [sessions, transactions, sales, contactEvents] = await Promise.all([
+      sessionsPromise,
+      transactionsPromise,
+      salesPromise,
+      contactEventsPromise,
+    ]);
+
+    const activeGuestIds = new Set<string>();
+    let playMinutes = 0;
+    let transactionRevenue = 0;
+    let barRevenue = 0;
+
+    sessions.forEach((session) => {
+      if (session.guestId) {
+        activeGuestIds.add(session.guestId);
+      }
+      playMinutes += session.durationMinutes ?? 0;
+    });
+
+    transactions.forEach((transaction) => {
+      transactionRevenue += confirmedTransactionSpendAmount(
+        transaction.type,
+        transaction.amount?.toNumber() ?? 0,
+      );
+    });
+
+    sales.forEach((sale) => {
+      if (sale.guestId) {
+        activeGuestIds.add(sale.guestId);
+      }
+      barRevenue += sale.revenue.toNumber();
+    });
+
+    const balanceRevenue = transactionRevenue;
+    const directContacts = contactEvents.filter(
+      (event) => event.marketingCampaignId === campaignId,
+    ).length;
+    const respondedContacts = contactEvents.filter((event) =>
+      Boolean(event.result?.trim()),
+    ).length;
+
+    return {
+      ...empty,
+      contacts: contactEvents.length,
+      directContacts,
+      respondedContacts,
+      activeGuests: activeGuestIds.size,
+      sessionsCount: sessions.length,
+      playHours: this.round(playMinutes / 60, 2),
+      balanceRevenue: this.round(balanceRevenue, 2),
+      barRevenue: this.round(barRevenue, 2),
+      totalRevenue: this.round(balanceRevenue + barRevenue, 2),
+      barSalesCount: sales.length,
+    };
+  }
+
+  private resolveEffectWindow(campaign: {
+    periodFrom: Date | null;
+    periodTo: Date | null;
+    dueAt: Date | null;
+    createdAt: Date;
+  }) {
+    const afterFrom = new Date(
+      campaign.periodFrom ?? campaign.dueAt ?? campaign.createdAt,
+    );
+    const now = new Date();
+    let afterTo = campaign.periodTo
+      ? this.toExclusiveEffectEnd(campaign.periodTo)
+      : now;
+
+    if (afterTo <= afterFrom) {
+      afterTo = new Date(afterFrom.getTime() + DAY_MS);
+    }
+
+    const durationMs = Math.max(
+      DAY_MS,
+      afterTo.getTime() - afterFrom.getTime(),
+    );
+    const beforeTo = new Date(afterFrom);
+    const beforeFrom = new Date(afterFrom.getTime() - durationMs);
+
+    return { afterFrom, afterTo, beforeFrom, beforeTo };
+  }
+
+  private toExclusiveEffectEnd(value: Date) {
+    const result = new Date(value);
+
+    if (
+      result.getUTCHours() === 0 &&
+      result.getUTCMinutes() === 0 &&
+      result.getUTCSeconds() === 0 &&
+      result.getUTCMilliseconds() === 0
+    ) {
+      result.setUTCDate(result.getUTCDate() + 1);
+    }
+
+    return result;
+  }
+
+  private emptyEffectPeriod(
+    from: Date,
+    to: Date,
+  ): MarketingCampaignEffectPeriod {
+    return {
+      from: from.toISOString(),
+      to: to.toISOString(),
+      days: Math.max(1, Math.ceil((to.getTime() - from.getTime()) / DAY_MS)),
+      contacts: 0,
+      directContacts: 0,
+      respondedContacts: 0,
+      activeGuests: 0,
+      sessionsCount: 0,
+      playHours: 0,
+      balanceRevenue: 0,
+      barRevenue: 0,
+      totalRevenue: 0,
+      barSalesCount: 0,
+    };
+  }
+
+  private round(value: number, digits = 2) {
+    const multiplier = 10 ** digits;
+    return Math.round(value * multiplier) / multiplier;
   }
 
   private async resolveAudienceId(
@@ -720,6 +1088,38 @@ function emptyConsentCoverage(
     excluded: 0,
     requiresPhoneConsent: channelRequiresPhoneConsent(channel),
   };
+}
+
+function confirmedTransactionSpendAmount(type: string | null, amount: number) {
+  if (!Number.isFinite(amount) || amount === 0) {
+    return 0;
+  }
+
+  if (isBalanceTopUpOperationType(type)) {
+    return 0;
+  }
+
+  return Math.abs(amount);
+}
+
+function isBalanceTopUpOperationType(type: string | null) {
+  const normalizedType = normalizeExternalType(type);
+
+  return (
+    normalizedType === 'plus' ||
+    normalizedType === 'popolnenie' ||
+    normalizedType.includes('deposit') ||
+    normalizedType.includes('top_up') ||
+    normalizedType.includes('recharge') ||
+    normalizedType.includes('РїРѕРїРѕР»РЅ')
+  );
+}
+
+function normalizeExternalType(type: string | null) {
+  return String(type ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_');
 }
 
 function hasOwn<T extends object>(obj: T, key: PropertyKey): boolean {

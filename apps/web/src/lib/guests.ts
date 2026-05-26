@@ -247,6 +247,7 @@ export type GuestCrmContactEvent = {
   audience: { id: string; name: string } | null;
   guest: { id: string; displayName: string } | null;
   lead: { id: string; displayName: string } | null;
+  marketingCampaign: { id: string; name: string } | null;
   createdBy: string | null;
 };
 

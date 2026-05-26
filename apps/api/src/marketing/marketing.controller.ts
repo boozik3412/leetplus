@@ -17,6 +17,7 @@ import {
   MarketingService,
   type MarketingCampaign,
   type MarketingCampaignDto,
+  type MarketingCampaignEffect,
   type MarketingCampaignUpdateDto,
 } from './marketing.service';
 
@@ -39,6 +40,14 @@ export class MarketingController {
     @Param('id') id: string,
   ): Promise<MarketingCampaign> {
     return this.marketingService.getCampaign(user, id);
+  }
+
+  @Get('campaigns/:id/effect')
+  getCampaignEffect(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<MarketingCampaignEffect> {
+    return this.marketingService.getCampaignEffect(user, id);
   }
 
   @Post('campaigns')

@@ -53,6 +53,44 @@ export type MarketingCampaign = {
   owner: { id: string; displayName: string; email: string } | null;
 };
 
+export type MarketingCampaignEffectPeriod = {
+  from: string;
+  to: string;
+  days: number;
+  contacts: number;
+  directContacts: number;
+  respondedContacts: number;
+  activeGuests: number;
+  sessionsCount: number;
+  playHours: number;
+  balanceRevenue: number;
+  barRevenue: number;
+  totalRevenue: number;
+  barSalesCount: number;
+};
+
+export type MarketingCampaignEffect = {
+  campaignId: string;
+  attributionMode: "CAMPAIGN_OR_GROUP";
+  targetTotal: number;
+  linkedTargetGuests: number;
+  unlinkedTargetMembers: number;
+  window: {
+    beforeFrom: string;
+    beforeTo: string;
+    afterFrom: string;
+    afterTo: string;
+  };
+  before: MarketingCampaignEffectPeriod;
+  after: MarketingCampaignEffectPeriod;
+  delta: Omit<MarketingCampaignEffectPeriod, "from" | "to" | "days">;
+  dataQuality: {
+    directContactAttribution: boolean;
+    revenueScope: string;
+    limitations: string[];
+  };
+};
+
 export async function getMarketingCampaigns(): Promise<MarketingCampaign[]> {
   const response = await fetch(`${getApiUrl()}/marketing/campaigns`, {
     cache: "no-store",
@@ -82,4 +120,22 @@ export async function getMarketingCampaign(
   }
 
   return response.json() as Promise<MarketingCampaign>;
+}
+
+export async function getMarketingCampaignEffect(
+  id: string,
+): Promise<MarketingCampaignEffect> {
+  const response = await fetch(
+    `${getApiUrl()}/marketing/campaigns/${encodeURIComponent(id)}/effect`,
+    {
+      cache: "no-store",
+      headers: await getAuthHeaders(),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch marketing campaign effect");
+  }
+
+  return response.json() as Promise<MarketingCampaignEffect>;
 }

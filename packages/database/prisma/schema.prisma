@@ -707,6 +707,7 @@ model GuestCrmContactEvent {
   audienceId      String?
   guestId         String?
   leadId          String?
+  marketingCampaignId String?
   createdByUserId String?
   channel         String
   result          String?
@@ -719,12 +720,14 @@ model GuestCrmContactEvent {
   audience      GuestAudience? @relation(fields: [audienceId], references: [id], onDelete: SetNull)
   guest         Guest?         @relation(fields: [guestId], references: [id], onDelete: SetNull)
   lead          GuestCrmLead?  @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  marketingCampaign MarketingCampaign? @relation(fields: [marketingCampaignId], references: [id], onDelete: SetNull)
   createdByUser User?          @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, contactedAt], map: "guest_crm_contact_tenant_contacted_idx")
   @@index([audienceId], map: "guest_crm_contact_audience_idx")
   @@index([guestId], map: "guest_crm_contact_guest_idx")
   @@index([leadId], map: "guest_crm_contact_lead_idx")
+  @@index([marketingCampaignId], map: "guest_crm_contact_campaign_idx")
   @@index([createdByUserId], map: "guest_crm_contact_user_idx")
 }
 
@@ -754,6 +757,7 @@ model MarketingCampaign {
   crmTask       GuestCrmTask?  @relation(fields: [crmTaskId], references: [id], onDelete: SetNull)
   createdByUser User?          @relation("MarketingCampaignCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   ownerUser     User?          @relation("MarketingCampaignOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  contactEvents GuestCrmContactEvent[]
 
   @@index([tenantId, status, updatedAt], map: "marketing_campaign_status_idx")
   @@index([audienceId], map: "marketing_campaign_audience_idx")

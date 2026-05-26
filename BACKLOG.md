@@ -225,7 +225,8 @@ Status: MVP 1 read-only guest analytics is live in production. Automatic rewards
 - Planned data foundation: guests, guest groups, balances, bonus balances, sessions, transactions, all operations log, product expenses by guest, clubs, tariffs, shifts, and PC context.
 - Next: connect operation categories to concrete administrator shifts when Langame exposes a reliable operator identifier in operation/cash logs.
 - Next: verify production `/dashboard` current-day load percentage after deploy of the session-overlap calculation.
-- Next: add campaign/contact outcome analytics by group and CRM task to track conversion from planned contact to completed result.
+- Done: campaign/contact outcome analytics now starts from campaign detail: direct contact attribution, group fallback, before/after windows, visits, sessions, play hours, balance-spend revenue, bar revenue, and attribution limitations.
+- Next: connect campaign contact creation UI to `marketingCampaignId`, then expand conversion from planned contact to completed result by group, CRM task, and responsible user.
 - Planned analytics: RFM, retention, churn risk, heatmaps, LTV, bonus load, campaign effect, and guest-flow forecasts.
 - Planned CRM layer: segments, saved groups, CRM statuses, notes, tasks, communication history, and next-best-action recommendations.
 - Planned loyalty/gamification: missions, rewards, budgets, limits, anti-fraud, and manual payout queue until a safe Langame write API is confirmed.
@@ -459,8 +460,9 @@ Goal: let a manager create a simple campaign from a business signal and control 
 - Done: persistent campaign drafts added with tenant-scoped storage, API, migration, status changes, goal, saved group, channel, mechanic, responsible user, period, deadline, budget, and note.
 - Done: campaign drafts can generate one linked CRM task for manual execution and reuse the existing task on repeated clicks instead of creating duplicates.
 - Done: campaign cards now show contact consent coverage before task launch: target group size, contactable guests, excluded guests, opt-outs, denied and unknown consent statuses.
-- Done: campaign detail page added with breadcrumbs, launch plan, linked CRM task, group contact history, consent coverage, and effect placeholders.
-- Next: add real campaign effect measurement with before/after windows and direct campaign-to-contact attribution.
+- Done: campaign detail page added with breadcrumbs, launch plan, linked CRM task, group contact history, consent coverage, and effect analytics.
+- Done: real campaign effect measurement added with before/after windows, direct `marketingCampaignId` contact attribution, group fallback for older contacts, visits, sessions, play hours, balance-spend revenue, bar revenue, and explicit attribution limitations.
+- Next: connect CRM contact creation/actions in the UI to the selected campaign so new contact facts are attributed directly without relying on group fallback.
 - Let the user choose a saved guest group or create one from guest filters.
 - Add campaign fields: goal, period, clubs, target group, channel, responsible user, deadline, note, status.
 - Improve generated CRM tasks with per-channel instructions and campaign detail links.
@@ -495,8 +497,8 @@ Acceptance criteria:
 
 Goal: measure whether marketing actions produced useful commercial effect.
 
+- Started: campaign detail now compares before/after windows for the selected campaign and shows contacts, visitors, sessions, play hours, balance-spend revenue, bar revenue, total target size, linked guests, and attribution limits.
 - Add funnel: target group -> planned contacts -> completed contacts -> responded -> visited -> revenue -> bar -> repeat visits.
-- Compare before/after windows for selected campaign.
 - Show effect by club, group, channel, and responsible user.
 - Separate store-scoped revenue from unallocated online top-ups when attributing campaign effect.
 - Add CSV export for campaign results and contact outcomes.

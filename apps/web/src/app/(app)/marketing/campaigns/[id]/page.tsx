@@ -11,7 +11,10 @@ import {
 } from "@/lib/guests";
 import {
   getMarketingCampaign,
+  getMarketingCampaignEffect,
   type MarketingCampaign,
+  type MarketingCampaignEffect,
+  type MarketingCampaignEffectPeriod,
   type MarketingCampaignGoal,
   type MarketingCampaignStatus,
 } from "@/lib/marketing";
@@ -58,24 +61,32 @@ export default async function MarketingCampaignPage({
   await requireCurrentUser();
   const { id } = await params;
 
-  const [campaignResult, tasks, contactEvents] = await Promise.allSettled([
-    getMarketingCampaign(id),
-    safeList(getGuestCrmTasks()),
-    safeList(getGuestCrmContactEvents()),
-  ]);
+  const [campaignResult, effectResult, tasksResult, contactEventsResult] =
+    await Promise.allSettled([
+      getMarketingCampaign(id),
+      getMarketingCampaignEffect(id),
+      safeList(getGuestCrmTasks()),
+      safeList(getGuestCrmContactEvents()),
+    ]);
 
   if (campaignResult.status === "rejected") {
     notFound();
   }
 
   const campaign = campaignResult.value;
-  const crmTasks = tasks.status === "fulfilled" ? tasks.value : [];
-  const events = contactEvents.status === "fulfilled" ? contactEvents.value : [];
+  const effect = effectResult.status === "fulfilled" ? effectResult.value : null;
+  const crmTasks = tasksResult.status === "fulfilled" ? tasksResult.value : [];
+  const events =
+    contactEventsResult.status === "fulfilled" ? contactEventsResult.value : [];
   const linkedTask = campaign.crmTask
     ? crmTasks.find((task) => task.id === campaign.crmTask?.id) ?? null
     : null;
   const campaignEvents = events
-    .filter((event) => event.audience?.id === campaign.audience?.id)
+    .filter(
+      (event) =>
+        event.marketingCampaign?.id === campaign.id ||
+        event.audience?.id === campaign.audience?.id,
+    )
     .sort(
       (left, right) =>
         new Date(right.contactedAt).getTime() -
@@ -133,7 +144,11 @@ export default async function MarketingCampaignPage({
           <ContactHistoryCard events={campaignEvents} campaign={campaign} />
         </section>
 
-        <EffectPlaceholder campaign={campaign} events={campaignEvents} />
+        <EffectAnalytics
+          campaign={campaign}
+          effect={effect}
+          fallbackEvents={campaignEvents}
+        />
       </div>
     </main>
   );
@@ -387,33 +402,60 @@ function ContactHistoryCard({
   );
 }
 
-function EffectPlaceholder({
+function EffectAnalytics({
   campaign,
-  events,
+  effect,
+  fallbackEvents,
 }: {
   campaign: MarketingCampaign;
-  events: GuestCrmContactEvent[];
+  effect: MarketingCampaignEffect | null;
+  fallbackEvents: GuestCrmContactEvent[];
 }) {
+  if (!effect) {
+    return (
+      <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+        <div className="border-b border-zinc-200 p-5 dark:border-zinc-800">
+          <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
+            Эффект
+          </p>
+          <h2 className="mt-2 text-2xl font-semibold">
+            Замер эффекта временно недоступен
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+            Кампания видит {formatNumber(fallbackEvents.length)} контактов по
+            группе, но backend-расчет before/after пока не вернул данные.
+          </p>
+        </div>
+      </section>
+    );
+  }
+
   const effectCards = [
     {
       label: "Контакты",
-      value: `${formatNumber(events.length)} шт`,
-      text: "сохранено в истории по группе",
+      value: `${formatNumber(effect.after.contacts)} шт`,
+      delta: effect.delta.contacts,
+      text: `${formatNumber(effect.after.directContacts)} прямо привязано к кампании`,
     },
     {
-      label: "Возвраты",
-      value: "ожидает замера",
-      text: "нужна атрибуция визита после контакта",
+      label: "Посетили",
+      value: `${formatNumber(effect.after.activeGuests)} гостей`,
+      delta: effect.delta.activeGuests,
+      text: `${formatNumber(effect.after.sessionsCount)} сессий в окне после`,
     },
     {
       label: "Выручка",
-      value: "ожидает замера",
-      text: "будет считаться после before/after окна",
+      value: formatRubles(effect.after.totalRevenue),
+      delta: effect.delta.totalRevenue,
+      text: `списания ${formatRubles(effect.after.balanceRevenue)}, бар ${formatRubles(
+        effect.after.barRevenue,
+      )}`,
     },
     {
-      label: "Бар и загрузка",
-      value: "ожидает замера",
-      text: "отдельно по товарам/бару и игровым часам",
+      label: "Игровые часы",
+      value: `${formatNumber(effect.after.playHours)} ч`,
+      delta: effect.delta.playHours,
+      text: `${formatNumber(effect.after.barSalesCount)} покупок бара`,
     },
   ];
 
@@ -423,17 +465,20 @@ function EffectPlaceholder({
         <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
           Эффект
         </p>
-        <h2 className="mt-2 text-2xl font-semibold">Как будем измерять результат</h2>
+        <h2 className="mt-2 text-2xl font-semibold">
+          Before/after по целевой группе
+        </h2>
         <p className="mt-2 max-w-4xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-          Следующий слой аналитики сравнит гостей из кампании до и после запуска:
-          возвраты, повторные визиты, общую выручку, бар и загрузку. Для кампании{" "}
+          Сравниваем одинаковые окна до и после запуска для гостей из группы.
+          Для кампании{" "}
           <span className="font-semibold text-zinc-950 dark:text-white">
             {campaign.name}
           </span>{" "}
-          пока показываем заготовку, чтобы маршрут был понятен до появления
-          автоматической атрибуции.
+          окно после: {formatDate(effect.after.from)} -{" "}
+          {formatDate(effect.after.to)}.
         </p>
       </div>
+
       <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4">
         {effectCards.map((card) => (
           <div
@@ -444,13 +489,73 @@ function EffectPlaceholder({
               {card.label}
             </p>
             <p className="mt-2 min-h-8 text-2xl font-semibold">{card.value}</p>
+            <p className={deltaClassName(card.delta)}>
+              {formatDelta(card.delta)}
+            </p>
             <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
               {card.text}
             </p>
           </div>
         ))}
       </div>
+
+      <div className="grid gap-3 border-t border-zinc-200 p-4 dark:border-zinc-800 lg:grid-cols-2">
+        <EffectPeriodTable title="До кампании" period={effect.before} />
+        <EffectPeriodTable title="После кампании" period={effect.after} />
+      </div>
+
+      <div className="border-t border-zinc-200 p-4 text-sm leading-6 text-zinc-600 dark:border-zinc-800 dark:text-zinc-300">
+        <p className="font-semibold text-zinc-950 dark:text-white">
+          Качество атрибуции
+        </p>
+        <p className="mt-1">
+          Целевая группа: {formatNumber(effect.targetTotal)} гостей, связано с
+          Langame ID: {formatNumber(effect.linkedTargetGuests)}, без связи:{" "}
+          {formatNumber(effect.unlinkedTargetMembers)}.
+        </p>
+        <ul className="mt-2 list-inside list-disc space-y-1">
+          {effect.dataQuality.limitations.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      </div>
     </section>
+  );
+}
+
+function EffectPeriodTable({
+  title,
+  period,
+}: {
+  title: string;
+  period: MarketingCampaignEffectPeriod;
+}) {
+  const rows = [
+    ["Контакты", `${formatNumber(period.contacts)} шт`],
+    ["Посетили", `${formatNumber(period.activeGuests)} гостей`],
+    ["Сессии", `${formatNumber(period.sessionsCount)} шт`],
+    ["Часы", `${formatNumber(period.playHours)} ч`],
+    ["Выручка", formatRubles(period.totalRevenue)],
+    ["Бар", formatRubles(period.barRevenue)],
+  ];
+
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="font-semibold">{title}</h3>
+        <p className="text-sm text-zinc-500">
+          {formatDate(period.from)} - {formatDate(period.to)}
+        </p>
+      </div>
+      <dl className="mt-3 grid gap-2 sm:grid-cols-2">
+        {rows.map(([label, value]) => (
+          <div key={label} className="flex justify-between gap-3 text-sm">
+            <dt className="text-zinc-500 dark:text-zinc-400">{label}</dt>
+            <dd className="font-semibold">{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
   );
 }
 
@@ -479,6 +584,29 @@ function formatRubles(value: number | null) {
   }
 
   return `${formatNumber(Math.round(value))} руб`;
+}
+
+function formatDelta(value: number) {
+  if (value === 0) {
+    return "без изменений";
+  }
+
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${formatNumber(value)} к окну до`;
+}
+
+function deltaClassName(value: number) {
+  const base = "mt-1 text-sm font-semibold";
+
+  if (value > 0) {
+    return `${base} text-emerald-600 dark:text-emerald-300`;
+  }
+
+  if (value < 0) {
+    return `${base} text-red-600 dark:text-red-300`;
+  }
+
+  return `${base} text-zinc-500 dark:text-zinc-400`;
 }
 
 function formatDate(value: string | null) {

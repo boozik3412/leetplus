@@ -111,6 +111,7 @@ export type GuestCrmContactEventDto = {
   audienceId?: string | null;
   guestId?: string | null;
   leadId?: string | null;
+  marketingCampaignId?: string | null;
   channel?: string | null;
   result?: string | null;
   note?: string | null;
@@ -372,6 +373,7 @@ export type GuestCrmContactEvent = {
   audience: { id: string; name: string } | null;
   guest: { id: string; displayName: string } | null;
   lead: { id: string; displayName: string } | null;
+  marketingCampaign: { id: string; name: string } | null;
   createdBy: string | null;
 };
 
@@ -1488,6 +1490,7 @@ export class GuestsService {
         audience: { select: { id: true, name: true } },
         guest: { select: this.guestSelect() },
         lead: true,
+        marketingCampaign: { select: { id: true, name: true } },
         createdByUser: { select: { fullName: true, email: true } },
       },
     });
@@ -1557,15 +1560,35 @@ export class GuestsService {
       throw new NotFoundException('CRM lead not found');
     }
 
+    const marketingCampaign = dto.marketingCampaignId
+      ? await this.prisma.marketingCampaign.findFirst({
+          where: { id: dto.marketingCampaignId, tenantId },
+          select: { id: true, name: true, audienceId: true },
+        })
+      : null;
+
+    if (dto.marketingCampaignId && !marketingCampaign) {
+      throw new NotFoundException('Marketing campaign not found');
+    }
+
     const audience = dto.audienceId
       ? await this.prisma.guestAudience.findFirst({
           where: { id: dto.audienceId, tenantId },
           select: { id: true },
         })
-      : null;
+      : marketingCampaign?.audienceId
+        ? await this.prisma.guestAudience.findFirst({
+            where: { id: marketingCampaign.audienceId, tenantId },
+            select: { id: true },
+          })
+        : null;
 
     if (dto.audienceId && !audience) {
       throw new NotFoundException('Group not found');
+    }
+
+    if (marketingCampaign?.audienceId && !audience) {
+      throw new NotFoundException('Campaign group not found');
     }
 
     const guestId = dto.guestId ?? lead?.matchedGuestId ?? null;
@@ -1580,9 +1603,9 @@ export class GuestsService {
       throw new NotFoundException('Guest not found');
     }
 
-    if (!lead && !audience && !guest) {
+    if (!lead && !audience && !guest && !marketingCampaign) {
       throw new BadRequestException(
-        'Contact event must be linked to a lead, guest, or group',
+        'Contact event must be linked to a lead, guest, group, or campaign',
       );
     }
 
@@ -1593,6 +1616,7 @@ export class GuestsService {
         leadId: lead?.id ?? null,
         audienceId: audience?.id ?? null,
         guestId: guest?.id ?? null,
+        marketingCampaignId: marketingCampaign?.id ?? null,
         channel,
         result: this.normalizeText(dto.result, 120),
         note: this.normalizeText(dto.note, 2000),
@@ -1602,6 +1626,7 @@ export class GuestsService {
         audience: { select: { id: true, name: true } },
         guest: { select: this.guestSelect() },
         lead: true,
+        marketingCampaign: { select: { id: true, name: true } },
         createdByUser: { select: { fullName: true, email: true } },
       },
     });
@@ -4552,6 +4577,7 @@ export class GuestsService {
       phoneMasked: string | null;
       phoneEncrypted: string | null;
     } | null;
+    marketingCampaign?: { id: string; name: string } | null;
     createdByUser?: { fullName: string | null; email: string } | null;
   }): GuestCrmContactEvent {
     return {
@@ -4586,6 +4612,7 @@ export class GuestsService {
               'Р СѓС‡РЅРѕР№ CRM-РіРѕСЃС‚СЊ',
           }
         : null,
+      marketingCampaign: row.marketingCampaign ?? null,
       createdBy: row.createdByUser
         ? (row.createdByUser.fullName ?? row.createdByUser.email)
         : null,

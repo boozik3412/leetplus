@@ -487,6 +487,7 @@ Goal: let a manager create a simple campaign from a business signal and control 
 - Done: marketing campaigns now persist structured mechanic configuration in `mechanicConfig` JSON: applied template metadata or promo-bundle economics/limits/readiness are saved separately from the human-readable note and shown in campaign cards/detail plan.
 - Done: promo-bundle builder now exposes editable combo composition, field tooltips for pricing inputs, and a fixed adaptive campaign status header.
 - Done: promo-bundle tooltips now render above the page shell without sidebar clipping, and the bundle action clearly transfers the configured offer into the campaign form before saving the campaign draft.
+- Done: promo-bundle builder was rebuilt as a step-by-step constructor: choose combo type, edit the first/second part with contextual filters, review economics, then transfer the offer into the campaign draft.
 - Next: validate the manual promo-bundle and mechanic workflows on real use cases, then persist promo-bundle/mechanic entities when repeated scenarios stabilize.
 - Done: let the user choose a saved guest group or create one from guest filters.
 - Add campaign fields: goal, period, clubs, target group, channel, responsible user, deadline, note, status.

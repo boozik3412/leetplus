@@ -494,6 +494,8 @@ export function MarketingCampaignsPanel({
   const [bundleCatalogNotice, setBundleCatalogNotice] = useState<string | null>(
     null,
   );
+  const [lastCreatedCampaign, setLastCreatedCampaign] =
+    useState<MarketingCampaign | null>(null);
   const [isSavingBundle, setIsSavingBundle] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pendingTaskCampaignId, setPendingTaskCampaignId] = useState<
@@ -540,6 +542,24 @@ export function MarketingCampaignsPanel({
   );
   const selectedAudience =
     audiences.find((audience) => audience.id === form.audienceId) ?? null;
+  const selectedFormPromoBundle =
+    savedPromoBundles.find((bundle) => bundle.id === form.promoBundleId) ?? null;
+  const campaignDraftSteps = useMemo(
+    () => buildCampaignDraftSteps(form),
+    [form],
+  );
+
+  useEffect(() => {
+    const normalizedHash = normalizeMarketingHash(window.location.hash);
+
+    if (normalizedHash !== window.location.hash) {
+      window.history.replaceState(
+        null,
+        "",
+        `${window.location.pathname}${window.location.search}${normalizedHash}`,
+      );
+    }
+  }, []);
 
   async function createCampaign(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -560,10 +580,17 @@ export function MarketingCampaignsPanel({
 
     const campaign = (await response.json()) as MarketingCampaign;
     setRows((current) => [campaign, ...current]);
+    setLastCreatedCampaign(campaign);
+    setStatusFilter(campaign.status === "DRAFT" ? "DRAFT" : "ACTIVE");
     setForm(emptyForm);
     setBundleApplyNotice(false);
     setBundleCatalogNotice(null);
     setIsSubmitting(false);
+    window.requestAnimationFrame(() => {
+      document
+        .getElementById("campaign-list")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
   }
 
   function applyTemplate(template: PromoMechanicTemplate) {
@@ -639,9 +666,7 @@ export function MarketingCampaignsPanel({
     );
     setIsSavingBundle(false);
     window.requestAnimationFrame(() => {
-      document
-        .getElementById("campaign-form")
-        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      scrollToMarketingSection("campaign-form");
     });
   }
 
@@ -678,9 +703,7 @@ export function MarketingCampaignsPanel({
       "Существующий комбо-набор связан с формой кампании.",
     );
     window.requestAnimationFrame(() => {
-      document
-        .getElementById("campaign-form")
-        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      scrollToMarketingSection("campaign-form");
     });
   }
 
@@ -785,6 +808,15 @@ export function MarketingCampaignsPanel({
         onSubmit={createCampaign}
         className="grid gap-4 border-b border-zinc-200 p-4 dark:border-zinc-800 lg:grid-cols-12"
       >
+        <CampaignDraftHandoff
+          form={form}
+          selectedAudience={selectedAudience}
+          selectedPromoBundle={selectedFormPromoBundle}
+          steps={campaignDraftSteps}
+          isSubmitting={isSubmitting}
+          onBackToBundle={() => scrollToMarketingSection("bundle")}
+        />
+
         <Field label="Цель" className="lg:col-span-3">
           <select
             value={form.goal}
@@ -991,7 +1023,32 @@ export function MarketingCampaignsPanel({
         ) : null}
       </form>
 
-      <section className="border-t border-zinc-200 dark:border-zinc-800">
+      <section
+        id="campaign-list"
+        className="scroll-mt-6 border-t border-zinc-200 dark:border-zinc-800"
+      >
+        {lastCreatedCampaign ? (
+          <div className="border-b border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-500/30 dark:bg-emerald-500/10">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">
+                  Черновик создан
+                </p>
+                <p className="mt-1 text-sm leading-6 text-emerald-900 dark:text-emerald-100">
+                  {lastCreatedCampaign.name} появился в списке черновиков.
+                  Откройте карточку, чтобы проверить план, создать CRM-задачу и
+                  потом смотреть эффект.
+                </p>
+              </div>
+              <Link
+                href={`/marketing/campaigns/${lastCreatedCampaign.id}`}
+                className="inline-flex min-h-10 items-center justify-center rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
+              >
+                Открыть кампанию
+              </Link>
+            </div>
+          </div>
+        ) : null}
         <div className="space-y-4 border-b border-zinc-200 p-4 dark:border-zinc-800">
           <div className="max-w-4xl">
             <p className="text-sm font-bold uppercase tracking-wide text-emerald-500">
@@ -2288,6 +2345,146 @@ function NextStepItem({ title, text }: { title: string; text: string }) {
   );
 }
 
+function CampaignDraftHandoff({
+  form,
+  selectedAudience,
+  selectedPromoBundle,
+  steps,
+  isSubmitting,
+  onBackToBundle,
+}: {
+  form: CampaignFormState;
+  selectedAudience: GuestAudience | null;
+  selectedPromoBundle: MarketingPromoBundle | null;
+  steps: CampaignReadinessItem[];
+  isSubmitting: boolean;
+  onBackToBundle: () => void;
+}) {
+  const done = steps.filter((step) => step.done).length;
+  const firstIssue = steps.find((step) => !step.done)?.issue ?? null;
+  const isPromoBundleCampaign =
+    form.goal === "PROMO_BUNDLE" || Boolean(selectedPromoBundle);
+  const readinessClass =
+    firstIssue === null
+      ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+      : "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300";
+
+  return (
+    <div className="grid gap-4 rounded-xl border border-emerald-200 bg-emerald-50/80 p-4 dark:border-emerald-500/30 dark:bg-emerald-500/10 lg:col-span-12 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.42fr)]">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-xs font-bold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">
+            Кампания из оффера
+          </p>
+          <span
+            className={[
+              "rounded-full border px-2.5 py-1 text-xs font-bold uppercase tracking-wide",
+              readinessClass,
+            ].join(" ")}
+          >
+            Готовность {done}/{steps.length}
+          </span>
+        </div>
+        <h3 className="mt-2 text-lg font-semibold text-zinc-950 dark:text-white">
+          {selectedPromoBundle
+            ? `Набор "${selectedPromoBundle.name}" готов к черновику`
+            : isPromoBundleCampaign
+              ? "Промо-набор подставлен в кампанию"
+              : "Соберите черновик кампании"}
+        </h3>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-700 dark:text-zinc-200">
+          {isPromoBundleCampaign
+            ? "Осталось выбрать группу, период, ответственного и сохранить черновик. После этого в карточке кампании можно создать CRM-задачу и контролировать эффект."
+            : "Заполните ключевые поля, чтобы кампания стала рабочим планом: группа, канал, механика, срок и ответственный."}
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {steps.map((step) => (
+            <DraftStepBadge key={step.label} step={step} />
+          ))}
+        </div>
+        <dl className="mt-4 grid gap-2 text-sm md:grid-cols-3">
+          <CompactInfo
+            label="Группа"
+            value={
+              selectedAudience
+                ? `${selectedAudience.name} · ${formatNumber(
+                    selectedAudience.guestsCount,
+                  )} гостей`
+                : "не выбрана"
+            }
+          />
+          <CompactInfo
+            label="Период"
+            value={
+              form.periodFrom && form.periodTo
+                ? `${formatDate(form.periodFrom)} - ${formatDate(form.periodTo)}`
+                : "не задан"
+            }
+          />
+          <CompactInfo
+            label="Канал и механика"
+            value={`${form.channel || "канал не выбран"} · ${
+              form.mechanic || "механика не выбрана"
+            }`}
+          />
+        </dl>
+      </div>
+      <div className="flex flex-col justify-between rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            Следующий шаг
+          </p>
+          <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+            {firstIssue
+              ? `Заполните: ${firstIssue}.`
+              : "Все базовые поля заполнены. Сохраните черновик и переходите к запуску."}
+          </p>
+        </div>
+        <div className="mt-3 grid gap-2">
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            className="inline-flex min-h-10 items-center justify-center rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isSubmitting ? "Сохраняем..." : "Сохранить черновик"}
+          </button>
+          <button
+            type="button"
+            onClick={onBackToBundle}
+            className="inline-flex min-h-10 items-center justify-center rounded-xl border border-zinc-200 px-4 text-sm font-semibold text-zinc-700 transition hover:border-emerald-400 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:border-emerald-500/70 dark:hover:bg-zinc-900"
+          >
+            Вернуться к набору
+          </button>
+          {!selectedAudience ? (
+            <Link
+              href="/guests/report#audiences"
+              className="inline-flex min-h-10 items-center justify-center rounded-xl border border-zinc-200 px-4 text-sm font-semibold text-zinc-700 transition hover:border-emerald-400 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:border-emerald-500/70 dark:hover:bg-zinc-900"
+            >
+              Создать группу
+            </Link>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DraftStepBadge({ step }: { step: CampaignReadinessItem }) {
+  return (
+    <span
+      className={[
+        "inline-flex min-h-8 items-center rounded-full border px-3 text-xs font-semibold",
+        step.done
+          ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+          : "border-zinc-200 bg-white text-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-400",
+      ].join(" ")}
+    >
+      {step.done ? "Готово: " : "Нужно: "}
+      {step.label}
+    </span>
+  );
+}
+
 function Field({
   label,
   className,
@@ -2879,6 +3076,42 @@ function campaignNextAction(campaign: MarketingCampaign) {
   return "Кампания отменена. При необходимости верните ее в черновик или создайте новый сценарий.";
 }
 
+function buildCampaignDraftSteps(
+  form: CampaignFormState,
+): CampaignReadinessItem[] {
+  const needsPromoBundle = form.goal === "PROMO_BUNDLE";
+
+  return [
+    {
+      label: "Оффер",
+      done: needsPromoBundle ? Boolean(form.promoBundleId) : Boolean(form.mechanic),
+      issue: needsPromoBundle
+        ? "сохраните или выберите промо-набор"
+        : "выберите механику",
+    },
+    {
+      label: "Группа",
+      done: Boolean(form.audienceId),
+      issue: "выберите группу гостей",
+    },
+    {
+      label: "Период",
+      done: Boolean(form.periodFrom && form.periodTo),
+      issue: "задайте период действия",
+    },
+    {
+      label: "Ответственный",
+      done: Boolean(form.ownerUserId && form.dueAt),
+      issue: "назначьте ответственного и дедлайн",
+    },
+    {
+      label: "Канал",
+      done: Boolean(form.channel),
+      issue: "выберите канал исполнения",
+    },
+  ];
+}
+
 function buildCampaignReadiness(campaign: MarketingCampaign): CampaignReadiness {
   const coverage = campaign.consentCoverage;
   const hasGroup = Boolean(campaign.audience && coverage.targetTotal > 0);
@@ -2954,6 +3187,33 @@ function contactCoverageLabel(campaign: MarketingCampaign) {
   }
 
   return `${coverage.contactable} из ${targetTotal}`;
+}
+
+function scrollToMarketingSection(id: string) {
+  document
+    .getElementById(id)
+    ?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function normalizeMarketingHash(hash: string) {
+  if (!hash.includes("#", 1)) {
+    return hash;
+  }
+
+  const knownSectionIds = new Set([
+    "goals",
+    "mechanics",
+    "bundle",
+    "campaigns",
+    "campaign-form",
+    "campaign-list",
+  ]);
+  const sections = hash.slice(1).split("#").filter(Boolean);
+  const normalizedSection = [...sections]
+    .reverse()
+    .find((section) => knownSectionIds.has(section));
+
+  return normalizedSection ? `#${normalizedSection}` : hash;
 }
 
 function formatDate(value: string | null) {

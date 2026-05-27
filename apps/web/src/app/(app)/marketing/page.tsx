@@ -87,22 +87,22 @@ const workspaceLinks: MarketingWorkspaceLink[] = [
   {
     title: "Цели",
     description: "Начать с бизнес-задачи: вернуть гостей, поднять бар или загрузить тихие часы.",
-    href: "#goals",
+    href: "/marketing#goals",
   },
   {
     title: "Механики",
     description: "Выбрать готовый сценарий промо и заполнить кампанию без пустого конструктора.",
-    href: "#mechanics",
+    href: "/marketing#mechanics",
   },
   {
     title: "Промо-набор",
     description: "Посчитать игру, бар, сервис, скидку, маржу и лимит использования.",
-    href: "#bundle",
+    href: "/marketing#bundle",
   },
   {
     title: "Кампании",
     description: "Сохранить черновик, назначить ответственного, создать CRM-задачу и открыть эффект.",
-    href: "#campaigns",
+    href: "/marketing#campaigns",
   },
 ];
 

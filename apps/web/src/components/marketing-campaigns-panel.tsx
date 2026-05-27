@@ -558,6 +558,9 @@ export function MarketingCampaignsPanel({
         "",
         `${window.location.pathname}${window.location.search}${normalizedHash}`,
       );
+      window.requestAnimationFrame(() => {
+        scrollToMarketingSection(normalizedHash.slice(1));
+      });
     }
   }, []);
 

@@ -77,6 +77,8 @@ type PromoBundleTypeOption = {
   description: string;
   firstLabel: string;
   secondLabel: string;
+  firstDefault: string;
+  secondDefault: string;
   firstPlaceholder: string;
   secondPlaceholder: string;
   firstPriceLabel: string;
@@ -342,6 +344,8 @@ const promoBundleTypeOptions: PromoBundleTypeOption[] = [
     description: "Классическое комбо: гость покупает игру и получает понятную позицию бара.",
     firstLabel: "Игровое время",
     secondLabel: "Товар",
+    firstDefault: "Игровое время или пакет часов",
+    secondDefault: "Напиток + снек",
     firstPlaceholder: "Например: 2 часа игры",
     secondPlaceholder: "Например: напиток + снек",
     firstPriceLabel: "Игра, руб",
@@ -359,6 +363,8 @@ const promoBundleTypeOptions: PromoBundleTypeOption[] = [
     description: "Оффер на повторный визит: игровое время сейчас и бонус на следующий контакт.",
     firstLabel: "Игровое время",
     secondLabel: "Бонус",
+    firstDefault: "Игровое время в будни",
+    secondDefault: "Бонус на следующий визит",
     firstPlaceholder: "Например: 3 часа в будни",
     secondPlaceholder: "Например: +30 минут на следующий визит",
     firstPriceLabel: "Игра, руб",
@@ -376,6 +382,8 @@ const promoBundleTypeOptions: PromoBundleTypeOption[] = [
     description: "Барный набор: первый товар продается, второй усиливает ценность предложения.",
     firstLabel: "Первый товар",
     secondLabel: "Второй товар",
+    firstDefault: "Основной товар",
+    secondDefault: "Дополнительный товар",
     firstPlaceholder: "Например: энергетик",
     secondPlaceholder: "Например: снек со скидкой",
     firstPriceLabel: "Товар 1, руб",
@@ -393,6 +401,8 @@ const promoBundleTypeOptions: PromoBundleTypeOption[] = [
     description: "Гость пополняет баланс, а бонус стимулирует использовать деньги в клубе.",
     firstLabel: "Пополнение баланса",
     secondLabel: "Бонус",
+    firstDefault: "Пополнение баланса от 1000 руб",
+    secondDefault: "Бонус за пополнение",
     firstPlaceholder: "Например: пополнение от 1000 руб",
     secondPlaceholder: "Например: +100 руб бонусами",
     firstPriceLabel: "Пополнение, руб",
@@ -1098,6 +1108,10 @@ function PromoMechanicsBuilder({
       : bundleType.secondFilters;
   const activePartHint =
     activeBundlePart === "first" ? bundleType.firstHint : bundleType.secondHint;
+  const activePriceHint =
+    activeBundlePart === "first"
+      ? `Стоимость части "${bundleType.firstLabel}" без скидки. Нужна только для расчета цены, бюджета и маржи.`
+      : `Стоимость части "${bundleType.secondLabel}" без скидки. Нужна только для расчета цены, бюджета и маржи.`;
 
   function updateActivePartText(value: string) {
     onBundleDraftChange(
@@ -1270,6 +1284,8 @@ function PromoMechanicsBuilder({
                       onBundleDraftChange({
                         ...bundleDraft,
                         bundleType: option.id,
+                        gameItem: option.firstDefault,
+                        barItems: option.secondDefault,
                       });
                     }}
                     className={[
@@ -1327,9 +1343,14 @@ function PromoMechanicsBuilder({
               <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
                 {activePartHint}
               </p>
+              <p className="mt-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
+                Левое поле описывает, что именно получает гость. Правое поле
+                задает стоимость этой части в рублях для расчета цены, скидки и
+                маржи.
+              </p>
               <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px]">
                 <TextDraftField
-                  label={activePartLabel}
+                  label={`Что входит: ${activePartLabel}`}
                   tooltip={
                     activeBundlePart === "first"
                       ? bundleType.firstHint
@@ -1344,16 +1365,8 @@ function PromoMechanicsBuilder({
                   onChange={updateActivePartText}
                 />
                 <NumericDraftField
-                  label={
-                    activeBundlePart === "first"
-                      ? bundleType.firstPriceLabel
-                      : bundleType.secondPriceLabel
-                  }
-                  tooltip={
-                    activeBundlePart === "first"
-                      ? bundleFieldHints.gamePrice
-                      : bundleFieldHints.barPrice
-                  }
+                  label="Стоимость этой части, руб"
+                  tooltip={activePriceHint}
                   value={
                     activeBundlePart === "first"
                       ? bundleDraft.gamePrice
@@ -1561,10 +1574,10 @@ function PromoBundlePartCard({
         {label}
       </span>
       <span className="mt-1 block text-sm font-semibold leading-5 text-zinc-950 dark:text-white">
-        {value.trim() || "не выбрано"}
+        Состав: {value.trim() || "не выбрано"}
       </span>
       <span className="mt-2 block text-sm text-zinc-600 dark:text-zinc-300">
-        {formatRubles(parseMoney(amount))}
+        Стоимость: {formatRubles(parseMoney(amount))}
       </span>
     </button>
   );
@@ -2117,7 +2130,7 @@ function buildPromoBundleNote(
     .join("; ");
 
   return [
-    "Цель: промо-набор для роста бара и среднего чека.",
+    "Цель: промо-набор с понятным составом, экономикой и измеримым эффектом.",
     `Тип комбо: ${bundleType.title}.`,
     `Состав комбо: ${composition}.`,
     `Расчет: ${bundleType.firstPriceLabel.toLowerCase()} ${formatRubles(

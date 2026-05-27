@@ -268,22 +268,27 @@ function CompactNavSection({
         <div
           ref={menuRef}
           style={{ top: popoverPlacement.top }}
-          className="absolute left-full z-[80] ml-4 max-h-[calc(100vh-1rem)] w-72 overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-2 shadow-2xl shadow-zinc-950/15 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/50"
+          className="absolute left-full z-[80] ml-3 w-72 overflow-visible"
         >
-          <span className="absolute -left-4 top-0 h-full w-4" />
+          <span
+            aria-hidden="true"
+            className="absolute -left-3 top-0 h-full w-3"
+          />
           <span
             style={{ top: popoverPlacement.arrowTop }}
-            className="absolute -left-2 h-4 w-4 -translate-y-1/2 rotate-45 border-b border-l border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
+            className="absolute -left-2 z-10 h-4 w-4 -translate-y-1/2 rotate-45 border-b border-l border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
           />
-          <div className="px-3 py-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-              {group.title}
-            </p>
-          </div>
-          <div className="space-y-1">
-            {group.items.map((item) => (
-              <NavLink key={item.href} {...item} onNavigate={onNavigate} />
-            ))}
+          <div className="max-h-[calc(100vh-1rem)] overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-2 shadow-2xl shadow-zinc-950/15 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/50">
+            <div className="px-3 py-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                {group.title}
+              </p>
+            </div>
+            <div className="space-y-1">
+              {group.items.map((item) => (
+                <NavLink key={item.href} {...item} onNavigate={onNavigate} />
+              ))}
+            </div>
           </div>
         </div>
       ) : null}

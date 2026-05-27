@@ -67,10 +67,10 @@ const goalCards: GoalCard[] = [
   },
   {
     title: "Промо-набор",
-    description: "Проверить ассортимент, маржу и товары для будущего набора: игра + бар + сервис.",
+    description: "Собрать оффер, проверить маржу и сохранить набор: игра + бар + сервис.",
     metric: "Оффер",
-    href: "/assortment/dashboard",
-    action: "Проверить товары",
+    href: "/marketing#bundle",
+    action: "Собрать оффер",
   },
 ];
 

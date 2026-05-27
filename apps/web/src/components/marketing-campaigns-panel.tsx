@@ -45,6 +45,9 @@ type PromoMechanicTemplate = {
 };
 
 type PromoBundleDraft = {
+  gameItem: string;
+  barItems: string;
+  serviceItems: string;
   gamePrice: string;
   barPrice: string;
   servicePrice: string;
@@ -306,6 +309,9 @@ const emptyForm: CampaignFormState = {
 };
 
 const emptyBundleDraft: PromoBundleDraft = {
+  gameItem: "Игровое время или пакет часов",
+  barItems: "Напиток + снек",
+  serviceItems: "",
   gamePrice: "500",
   barPrice: "350",
   servicePrice: "0",
@@ -317,6 +323,31 @@ const emptyBundleDraft: PromoBundleDraft = {
   onePerGuest: true,
   requiresApproval: true,
   noStacking: true,
+};
+
+const bundleFieldHints = {
+  gameItem:
+    "Что именно получает гость в игровой части: часы, пакет времени, тариф или бронь места.",
+  barItems:
+    "Какие позиции бара входят в набор: напитки, снеки, комбо или конкретные товары.",
+  serviceItems:
+    "Дополнительная часть оффера: кальян, бронь зоны, сервис или другая услуга. Можно оставить пустым.",
+  gamePrice:
+    "Стоимость игровой части внутри набора: часы, пакет времени или тариф, который входит в оффер.",
+  barPrice:
+    "Плановая стоимость товаров бара в наборе: напитки, снеки или готовый барный комплект.",
+  servicePrice:
+    "Дополнительная услуга в наборе: кальян, бронь, сервисный сбор или другой платный элемент.",
+  discount:
+    "Сумма выгоды для гостя. Она вычитается из полной цены набора и формирует скидочный бюджет.",
+  cost:
+    "Оценочная себестоимость одного использования набора. Нужна для проверки маржи перед запуском.",
+  expectedUses:
+    "Максимальное число использований набора в кампании. По нему считается плановая выручка и бюджет скидки.",
+  minSpend:
+    "Минимальный чек, при котором можно применить набор. Если не нужен, оставьте 0.",
+  validityDays:
+    "Сколько дней действует предложение после запуска или контакта с гостем.",
 };
 
 export function MarketingCampaignsPanel({
@@ -735,8 +766,8 @@ export function MarketingCampaignsPanel({
       </form>
 
       <section className="border-t border-zinc-200 dark:border-zinc-800">
-        <div className="grid gap-4 border-b border-zinc-200 p-4 dark:border-zinc-800 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
-          <div>
+        <div className="space-y-4 border-b border-zinc-200 p-4 dark:border-zinc-800">
+          <div className="max-w-4xl">
             <p className="text-sm font-bold uppercase tracking-wide text-emerald-500">
               Рабочий список
             </p>
@@ -1043,9 +1074,49 @@ function PromoMechanicsBuilder({
             </button>
           </div>
 
+          <div className="mt-4 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+            <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              Состав комбо-набора
+            </p>
+            <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+              Здесь фиксируется, что именно получает гость. Суммы ниже нужны
+              для расчета цены, маржи и бюджета акции.
+            </p>
+            <div className="mt-3 grid gap-3 lg:grid-cols-3">
+              <TextDraftField
+                label="Игровая часть"
+                tooltip={bundleFieldHints.gameItem}
+                value={bundleDraft.gameItem}
+                placeholder="Например: 2 часа игры"
+                onChange={(value) =>
+                  onBundleDraftChange({ ...bundleDraft, gameItem: value })
+                }
+              />
+              <TextDraftField
+                label="Бар"
+                tooltip={bundleFieldHints.barItems}
+                value={bundleDraft.barItems}
+                placeholder="Например: напиток + снек"
+                onChange={(value) =>
+                  onBundleDraftChange({ ...bundleDraft, barItems: value })
+                }
+              />
+              <TextDraftField
+                label="Сервис"
+                tooltip={bundleFieldHints.serviceItems}
+                value={bundleDraft.serviceItems}
+                placeholder="Например: кальян или бронь"
+                onChange={(value) =>
+                  onBundleDraftChange({ ...bundleDraft, serviceItems: value })
+                }
+              />
+            </div>
+          </div>
+
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
             <NumericDraftField
               label="Игра, руб"
+              tooltip={bundleFieldHints.gamePrice}
               value={bundleDraft.gamePrice}
               onChange={(value) =>
                 onBundleDraftChange({ ...bundleDraft, gamePrice: value })
@@ -1053,6 +1124,7 @@ function PromoMechanicsBuilder({
             />
             <NumericDraftField
               label="Бар, руб"
+              tooltip={bundleFieldHints.barPrice}
               value={bundleDraft.barPrice}
               onChange={(value) =>
                 onBundleDraftChange({ ...bundleDraft, barPrice: value })
@@ -1060,6 +1132,7 @@ function PromoMechanicsBuilder({
             />
             <NumericDraftField
               label="Сервис, руб"
+              tooltip={bundleFieldHints.servicePrice}
               value={bundleDraft.servicePrice}
               onChange={(value) =>
                 onBundleDraftChange({ ...bundleDraft, servicePrice: value })
@@ -1067,6 +1140,7 @@ function PromoMechanicsBuilder({
             />
             <NumericDraftField
               label="Скидка, руб"
+              tooltip={bundleFieldHints.discount}
               value={bundleDraft.discount}
               onChange={(value) =>
                 onBundleDraftChange({ ...bundleDraft, discount: value })
@@ -1074,6 +1148,7 @@ function PromoMechanicsBuilder({
             />
             <NumericDraftField
               label="Себестоимость, руб"
+              tooltip={bundleFieldHints.cost}
               value={bundleDraft.cost}
               onChange={(value) =>
                 onBundleDraftChange({ ...bundleDraft, cost: value })
@@ -1081,6 +1156,7 @@ function PromoMechanicsBuilder({
             />
             <NumericDraftField
               label="Лимит, шт"
+              tooltip={bundleFieldHints.expectedUses}
               value={bundleDraft.expectedUses}
               onChange={(value) =>
                 onBundleDraftChange({ ...bundleDraft, expectedUses: value })
@@ -1088,6 +1164,7 @@ function PromoMechanicsBuilder({
             />
             <NumericDraftField
               label="Мин. чек, руб"
+              tooltip={bundleFieldHints.minSpend}
               value={bundleDraft.minSpend}
               onChange={(value) =>
                 onBundleDraftChange({ ...bundleDraft, minSpend: value })
@@ -1095,6 +1172,7 @@ function PromoMechanicsBuilder({
             />
             <NumericDraftField
               label="Срок, дней"
+              tooltip={bundleFieldHints.validityDays}
               value={bundleDraft.validityDays}
               onChange={(value) =>
                 onBundleDraftChange({ ...bundleDraft, validityDays: value })
@@ -1183,17 +1261,20 @@ function PromoMechanicsBuilder({
 
 function NumericDraftField({
   label,
+  tooltip,
   value,
   onChange,
 }: {
   label: string;
+  tooltip?: string;
   value: string;
   onChange: (value: string) => void;
 }) {
   return (
     <label className="block space-y-1">
-      <span className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+      <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
         {label}
+        {tooltip ? <FieldTooltip text={tooltip} /> : null}
       </span>
       <input
         inputMode="decimal"
@@ -1202,6 +1283,53 @@ function NumericDraftField({
         className={fieldClassName}
       />
     </label>
+  );
+}
+
+function TextDraftField({
+  label,
+  tooltip,
+  value,
+  placeholder,
+  onChange,
+}: {
+  label: string;
+  tooltip?: string;
+  value: string;
+  placeholder: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="block space-y-1">
+      <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+        {label}
+        {tooltip ? <FieldTooltip text={tooltip} /> : null}
+      </span>
+      <input
+        value={value}
+        placeholder={placeholder}
+        onChange={(event) => onChange(event.target.value)}
+        className={fieldClassName}
+      />
+    </label>
+  );
+}
+
+function FieldTooltip({ text }: { text: string }) {
+  return (
+    <span className="group relative inline-flex">
+      <span
+        tabIndex={0}
+        title={text}
+        aria-label={text}
+        className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full border border-zinc-300 text-[10px] font-bold leading-none text-zinc-500 outline-none transition hover:border-emerald-400 hover:text-emerald-500 focus:border-emerald-400 focus:text-emerald-500 dark:border-zinc-700 dark:text-zinc-400"
+      >
+        ?
+      </span>
+      <span className="pointer-events-none absolute left-1/2 top-5 z-30 hidden w-64 -translate-x-1/2 rounded-lg border border-zinc-200 bg-white p-3 text-left text-xs font-medium normal-case leading-5 tracking-normal text-zinc-700 shadow-xl group-hover:block group-focus-within:block dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200">
+        {text}
+      </span>
+    </span>
   );
 }
 
@@ -1601,8 +1729,15 @@ function buildPromoBundleNote(
   draft: PromoBundleDraft,
   economics: PromoBundleEconomics,
 ) {
+  const composition = [
+    `игра: ${draft.gameItem.trim() || "не указана"}`,
+    `бар: ${draft.barItems.trim() || "не указан"}`,
+    `сервис: ${draft.serviceItems.trim() || "не указан"}`,
+  ].join("; ");
+
   return [
     "Цель: промо-набор для роста бара и среднего чека.",
+    `Состав комбо: ${composition}.`,
     `Состав: игра ${formatRubles(parseMoney(draft.gamePrice))}, бар ${formatRubles(
       parseMoney(draft.barPrice),
     )}, сервис ${formatRubles(parseMoney(draft.servicePrice))}.`,
@@ -1643,6 +1778,11 @@ function buildPromoBundleConfig(
 ): MarketingMechanicConfig {
   return {
     kind: "promo_bundle",
+    composition: {
+      game: draft.gameItem.trim(),
+      bar: draft.barItems.trim(),
+      service: draft.serviceItems.trim(),
+    },
     bundle: {
       gamePrice: parseMoney(draft.gamePrice),
       barPrice: parseMoney(draft.barPrice),

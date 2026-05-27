@@ -493,6 +493,7 @@ Goal: let a manager create a simple campaign from a business signal and control 
 - Done: promo-bundle commercial check was redesigned as a decision card with status, next-step action, compact checks, and campaign note preview.
 - Done: promo bundles now have the first separate catalog entity (`MarketingPromoBundle`) with tenant-scoped API, campaign linking, migration, and UI selection from existing bundles in Step 1.
 - Done: the promo-bundle constructor can save a bundle into the catalog, use an existing bundle in a new campaign, or load an existing bundle as a basis for a new variant.
+- Done: promo-bundle UX now moves creation into the commercial-check decision card, aligns Step 3 composition/price editing, and explains the catalog -> campaign -> future assortment/accounting path after saving.
 - Next: validate the catalog workflow on real promo cases, then decide which bundle fields must become structured assortment/accounting fields instead of staying inside `mechanicConfig`.
 - Done: let the user choose a saved guest group or create one from guest filters.
 - Add campaign fields: goal, period, clubs, target group, channel, responsible user, deadline, note, status.

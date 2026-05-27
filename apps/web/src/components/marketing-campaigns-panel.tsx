@@ -1377,19 +1377,14 @@ function PromoMechanicsBuilder({
                 проверьте экономику и сохраните набор в каталог.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={onApplyBundle}
-              disabled={bundleVerdict.tone === "blocked" || isSavingBundle}
-              className={[
-                "inline-flex min-h-10 items-center justify-center rounded-xl px-4 text-sm font-semibold transition",
-                bundleVerdict.tone === "blocked" || isSavingBundle
-                  ? "cursor-not-allowed border border-zinc-200 text-zinc-400 dark:border-zinc-800 dark:text-zinc-600"
-                  : "bg-emerald-500 text-zinc-950 hover:bg-emerald-400",
-              ].join(" ")}
-            >
-              {isSavingBundle ? "Сохраняем..." : "Сохранить набор"}
-            </button>
+            <div className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm leading-5 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300">
+              <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                Сохранение
+              </p>
+              <p className="mt-1">
+                Кнопка появится ниже, после коммерческой проверки.
+              </p>
+            </div>
           </div>
           <p className="mt-3 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm leading-6 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300">
             Настройте состав и экономику набора, затем перенесите расчет в
@@ -1504,8 +1499,8 @@ function PromoMechanicsBuilder({
             </div>
           </div>
 
-          <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
-            <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(240px,0.75fr)_minmax(0,1.25fr)] lg:items-stretch">
+            <div className="h-full rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
               <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
                 Шаг 2
               </p>
@@ -1530,22 +1525,25 @@ function PromoMechanicsBuilder({
               </div>
             </div>
 
-            <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
-              <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
-                Шаг 3
-              </p>
-              <h4 className="mt-1 text-base font-semibold text-zinc-950 dark:text-white">
-                Редактируем: {activePartLabel}
-              </h4>
-              <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                {activePartHint}
-              </p>
-              <p className="mt-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
-                Левое поле описывает, что именно получает гость. Правое поле
-                задает стоимость этой части в рублях для расчета цены, скидки и
-                маржи.
-              </p>
-              <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px] lg:items-end">
+            <div className="h-full rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+              <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(220px,0.42fr)] md:items-start">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
+                    Шаг 3
+                  </p>
+                  <h4 className="mt-1 text-base font-semibold text-zinc-950 dark:text-white">
+                    Уточните состав и цену
+                  </h4>
+                  <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+                    Сейчас редактируется: {activePartLabel}. {activePartHint}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
+                  Слева опишите, что получает гость. Справа укажите стоимость
+                  этой части в рублях для расчета цены, скидки и маржи.
+                </div>
+              </div>
+              <div className="mt-3 grid gap-3 md:grid-cols-[minmax(0,1fr)_220px] md:items-start">
                 <TextDraftField
                   label={`Что входит: ${activePartLabel}`}
                   tooltip={
@@ -1987,14 +1985,28 @@ function PromoBundleVerdictCard({
   const canCreateBundle = verdict.tone !== "blocked";
   const statusLabel =
     verdict.tone === "ready"
-      ? "Можно запускать"
+      ? "Проверка пройдена"
       : verdict.tone === "blocked"
-        ? "Нужно исправить"
-        : "Нужно проверить";
+        ? "Есть блокер"
+        : "Нужна ручная проверка";
+  const actionLabel = isSavingBundle
+    ? "Сохраняем..."
+    : verdict.tone === "ready"
+      ? "Создать и сохранить промо-набор"
+      : verdict.tone === "warning"
+        ? "Сохранить после ручной проверки"
+        : "Исправьте расчет";
+  const nextStepText = bundleApplyNotice
+    ? "Набор сохранен в каталог и уже связан с формой кампании."
+    : verdict.tone === "ready"
+      ? "Экономика прошла проверку. Сохраните набор в каталог и привяжите его к черновику кампании."
+      : verdict.tone === "warning"
+        ? "Есть предупреждения. Сохранение доступно, но сначала проверьте условия и лимиты."
+        : "Исправьте блокирующие ошибки, затем сохраните набор.";
 
   return (
     <div className="mt-4 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="grid gap-4 border-b border-zinc-200 p-4 dark:border-zinc-800 lg:grid-cols-[minmax(0,1fr)_300px] lg:items-stretch">
+      <div className="grid gap-4 border-b border-zinc-200 p-4 dark:border-zinc-800 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-stretch">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
@@ -2016,15 +2028,13 @@ function PromoBundleVerdictCard({
             {verdict.description}
           </p>
         </div>
-        <div className="flex flex-col justify-between rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900">
+        <div className="flex flex-col justify-between rounded-lg border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-500/30 dark:bg-emerald-500/10">
           <div>
             <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
-              Следующий шаг
+              Действие после проверки
             </p>
             <p className="mt-1 text-sm leading-5 text-zinc-600 dark:text-zinc-300">
-              {bundleApplyNotice
-                ? "Набор сохранен и уже связан с формой кампании."
-                : "Сохранить как отдельный комбо-набор и связать с черновиком кампании."}
+              {nextStepText}
             </p>
           </div>
           <button
@@ -2038,28 +2048,50 @@ function PromoBundleVerdictCard({
                 : "cursor-not-allowed border border-zinc-200 text-zinc-400 dark:border-zinc-800 dark:text-zinc-600",
             ].join(" ")}
           >
-            {isSavingBundle
-              ? "Сохраняем..."
-              : canCreateBundle
-                ? "Создать промо-набор"
-                : "Исправьте расчет"}
+            {actionLabel}
           </button>
         </div>
       </div>
-      <div className="grid gap-2 p-4 md:grid-cols-2">
-        {verdict.checks.map((check) => (
-          <div
-            key={check}
-            className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm leading-5 text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-300"
-          >
-            {check}
+      <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.72fr)]">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            Что проверили
+          </p>
+          <div className="mt-2 grid gap-2 md:grid-cols-2">
+            {verdict.checks.map((check) => (
+              <div
+                key={check}
+                className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm leading-5 text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-300"
+              >
+                {check}
+              </div>
+            ))}
           </div>
-        ))}
+        </div>
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            Что будет дальше
+          </p>
+          <div className="mt-2 grid gap-2">
+            <NextStepItem
+              title="Каталог"
+              text="Промо-набор сохранится как отдельная сущность и появится в списке готовых наборов."
+            />
+            <NextStepItem
+              title="Кампания"
+              text="Расчет, механика и ссылка на набор перенесутся в форму кампании для выбора группы, периода и ответственного."
+            />
+            <NextStepItem
+              title="Ассортимент и учет"
+              text="Позже этот же набор можно будет использовать в ассортименте, услугах и товарном учете без пересборки с нуля."
+            />
+          </div>
+        </div>
       </div>
       <p className="mx-4 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm leading-6 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-300">
         {bundleApplyNotice
           ? "Промо-набор уже перенесен в форму кампании. Проверьте группу, период, ответственного и сохраните черновик."
-          : "После проверки создайте промо-набор: он сохранится как отдельный элемент каталога, а расчет перенесется в форму кампании."}
+          : "После проверки создайте промо-набор: он сохранится как отдельный элемент каталога, сможет быть привязан к кампании и позднее использоваться в ассортименте, товарах и услугах."}
       </p>
       <details className="m-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/70">
         <summary className="cursor-pointer text-sm font-semibold text-zinc-950 dark:text-white">
@@ -2069,6 +2101,19 @@ function PromoBundleVerdictCard({
           {notePreview}
         </p>
       </details>
+    </div>
+  );
+}
+
+function NextStepItem({ title, text }: { title: string; text: string }) {
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/70">
+      <p className="text-sm font-semibold text-zinc-950 dark:text-white">
+        {title}
+      </p>
+      <p className="mt-1 text-sm leading-5 text-zinc-600 dark:text-zinc-300">
+        {text}
+      </p>
     </div>
   );
 }

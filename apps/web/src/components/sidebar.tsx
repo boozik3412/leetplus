@@ -164,6 +164,57 @@ function CompactNavSection({
   onClose: () => void;
   onNavigate: () => void;
 }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [popoverPlacement, setPopoverPlacement] = useState({
+    top: 0,
+    arrowTop: 24,
+  });
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    function updatePopoverPlacement() {
+      const container = containerRef.current;
+      const menu = menuRef.current;
+
+      if (!container || !menu) {
+        return;
+      }
+
+      const containerRect = container.getBoundingClientRect();
+      const menuHeight = menu.offsetHeight;
+      const viewportMargin = 8;
+      const centeredTop =
+        containerRect.top + containerRect.height / 2 - menuHeight / 2;
+      const maxTop = Math.max(
+        viewportMargin,
+        window.innerHeight - menuHeight - viewportMargin,
+      );
+      const viewportTop = Math.min(
+        Math.max(centeredTop, viewportMargin),
+        maxTop,
+      );
+      const top = viewportTop - containerRect.top;
+      const arrowTop = Math.min(
+        Math.max(containerRect.height / 2 - top, 16),
+        Math.max(16, menuHeight - 16),
+      );
+
+      setPopoverPlacement({ top, arrowTop });
+    }
+
+    const frame = window.requestAnimationFrame(updatePopoverPlacement);
+    window.addEventListener("resize", updatePopoverPlacement);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("resize", updatePopoverPlacement);
+    };
+  }, [group.items.length, isOpen]);
+
   if (group.items.length === 1) {
     return (
       <Link
@@ -190,6 +241,7 @@ function CompactNavSection({
 
   return (
     <div
+      ref={containerRef}
       className="relative"
       onMouseEnter={onOpen}
       onMouseMove={onOpen}
@@ -213,9 +265,16 @@ function CompactNavSection({
         <span className="sr-only">{group.title}</span>
       </button>
       {isOpen ? (
-        <div className="absolute left-full top-1/2 z-[80] ml-4 w-72 -translate-y-1/2 rounded-2xl border border-zinc-200 bg-white p-2 shadow-2xl shadow-zinc-950/15 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/50">
+        <div
+          ref={menuRef}
+          style={{ top: popoverPlacement.top }}
+          className="absolute left-full z-[80] ml-4 max-h-[calc(100vh-1rem)] w-72 overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-2 shadow-2xl shadow-zinc-950/15 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/50"
+        >
           <span className="absolute -left-4 top-0 h-full w-4" />
-          <span className="absolute -left-2 top-1/2 h-4 w-4 -translate-y-1/2 rotate-45 border-b border-l border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950" />
+          <span
+            style={{ top: popoverPlacement.arrowTop }}
+            className="absolute -left-2 h-4 w-4 -translate-y-1/2 rotate-45 border-b border-l border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
+          />
           <div className="px-3 py-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
               {group.title}

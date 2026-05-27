@@ -491,7 +491,9 @@ Goal: let a manager create a simple campaign from a business signal and control 
 - Done: promo-bundle constructor now distinguishes composition fields from price fields, resets part defaults when the combo type changes, and explains that prices are only for economy calculation.
 - Done: promo-bundle commercial check now ends with a clear "Создать промо-набор" action and aligned Step 3 fields for composition plus price.
 - Done: promo-bundle commercial check was redesigned as a decision card with status, next-step action, compact checks, and campaign note preview.
-- Next: validate the manual promo-bundle and mechanic workflows on real use cases, then persist promo-bundle/mechanic entities when repeated scenarios stabilize.
+- Done: promo bundles now have the first separate catalog entity (`MarketingPromoBundle`) with tenant-scoped API, campaign linking, migration, and UI selection from existing bundles in Step 1.
+- Done: the promo-bundle constructor can save a bundle into the catalog, use an existing bundle in a new campaign, or load an existing bundle as a basis for a new variant.
+- Next: validate the catalog workflow on real promo cases, then decide which bundle fields must become structured assortment/accounting fields instead of staying inside `mechanicConfig`.
 - Done: let the user choose a saved guest group or create one from guest filters.
 - Add campaign fields: goal, period, clubs, target group, channel, responsible user, deadline, note, status.
 - Done: improve generated CRM tasks with per-channel instructions and campaign detail links.
@@ -513,6 +515,7 @@ Goal: help clubs create commercially sane promo offers.
 - Started: add promo bundle constructor with game time, bar products, hookah/services, discount, and price.
 - Done: show estimated revenue, margin, cost risk, discount budget, launch readiness, and the note that will be saved into the campaign.
 - Done: add mechanic templates with target group, KPI, control point, and risk: second visit, weak hours, birthday/event, bar combo, tournament, referral, VIP/TOP guest.
+- Done: persist promo bundles as reusable catalog objects independent from one campaign, with a link from campaign to saved bundle and Step 1 selection of existing bundles.
 - Started: add limits: period, clubs, max uses, one per guest, minimum spend, group eligibility.
 - Started: add anti-fraud notes and manual approval before any automatic reward workflow.
 

@@ -1,7 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import {
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import { createPortal } from "react-dom";
 import type { GuestAudience, GuestCrmUser } from "@/lib/guests";
 import type {
@@ -9,6 +15,7 @@ import type {
   MarketingCampaignGoal,
   MarketingCampaignStatus,
   MarketingMechanicConfig,
+  MarketingPromoBundle,
 } from "@/lib/marketing";
 import type { Store } from "@/lib/stores";
 
@@ -21,6 +28,7 @@ type CampaignFormState = {
   channel: string;
   mechanic: string;
   mechanicConfig: MarketingMechanicConfig | null;
+  promoBundleId: string;
   periodFrom: string;
   periodTo: string;
   dueAt: string;
@@ -330,6 +338,7 @@ const emptyForm: CampaignFormState = {
   channel: "CRM-задача",
   mechanic: "Персональное предложение",
   mechanicConfig: null,
+  promoBundleId: "",
   periodFrom: "",
   periodTo: "",
   dueAt: "",
@@ -463,14 +472,17 @@ export function MarketingCampaignsPanel({
   campaigns,
   audiences,
   users,
+  promoBundles,
   stores,
 }: {
   campaigns: MarketingCampaign[];
   audiences: GuestAudience[];
   users: GuestCrmUser[];
+  promoBundles: MarketingPromoBundle[];
   stores: Store[];
 }) {
   const [rows, setRows] = useState(campaigns);
+  const [savedPromoBundles, setSavedPromoBundles] = useState(promoBundles);
   const [form, setForm] = useState<CampaignFormState>(emptyForm);
   const [selectedTemplateId, setSelectedTemplateId] = useState(
     promoMechanicTemplates[0]?.id ?? "",
@@ -478,6 +490,10 @@ export function MarketingCampaignsPanel({
   const [bundleDraft, setBundleDraft] =
     useState<PromoBundleDraft>(emptyBundleDraft);
   const [bundleApplyNotice, setBundleApplyNotice] = useState(false);
+  const [bundleCatalogNotice, setBundleCatalogNotice] = useState<string | null>(
+    null,
+  );
+  const [isSavingBundle, setIsSavingBundle] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pendingTaskCampaignId, setPendingTaskCampaignId] = useState<
     string | null
@@ -545,11 +561,13 @@ export function MarketingCampaignsPanel({
     setRows((current) => [campaign, ...current]);
     setForm(emptyForm);
     setBundleApplyNotice(false);
+    setBundleCatalogNotice(null);
     setIsSubmitting(false);
   }
 
   function applyTemplate(template: PromoMechanicTemplate) {
     setBundleApplyNotice(false);
+    setBundleCatalogNotice(null);
     setForm((current) => ({
       ...current,
       goal: template.goal,
@@ -557,30 +575,107 @@ export function MarketingCampaignsPanel({
       channel: template.channel,
       mechanic: template.mechanic,
       mechanicConfig: buildMechanicTemplateConfig(template),
+      promoBundleId: "",
       budget: template.budget,
       note: buildMechanicTemplateNote(template),
     }));
   }
 
-  function applyBundleDraft() {
+  async function applyBundleDraft() {
+    if (bundleVerdict.tone === "blocked" || isSavingBundle) {
+      return;
+    }
+
+    setIsSavingBundle(true);
+    setError(null);
     const note = buildPromoBundleNote(bundleDraft, bundleEconomics);
     const bundleType = getPromoBundleTypeOption(bundleDraft.bundleType);
+    const mechanicConfig = buildPromoBundleConfig(
+      bundleDraft,
+      bundleEconomics,
+      bundleVerdict,
+    );
+    const response = await fetch("/api/marketing/promo-bundles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: `Комбо: ${bundleType.title}`,
+        bundleType: bundleDraft.bundleType,
+        mechanicConfig,
+        note,
+      }),
+    });
+
+    if (!response.ok) {
+      setError(await readError(response));
+      setIsSavingBundle(false);
+      return;
+    }
+
+    const promoBundle = (await response.json()) as MarketingPromoBundle;
+    setSavedPromoBundles((current) => [
+      promoBundle,
+      ...current.filter((item) => item.id !== promoBundle.id),
+    ]);
 
     setForm((current) => ({
       ...current,
       goal: "PROMO_BUNDLE",
-      name: `Комбо: ${bundleType.title}`,
+      name: promoBundle.name,
       channel: "CRM-задача",
       mechanic: bundleType.title,
-      mechanicConfig: buildPromoBundleConfig(
-        bundleDraft,
-        bundleEconomics,
-        bundleVerdict,
-      ),
+      mechanicConfig: {
+        ...mechanicConfig,
+        promoBundleId: promoBundle.id,
+      },
+      promoBundleId: promoBundle.id,
       budget: String(Math.round(bundleEconomics.discountBudget)),
       note,
     }));
     setBundleApplyNotice(true);
+    setBundleCatalogNotice(
+      "Комбо-набор сохранен в каталоге и перенесен в форму кампании.",
+    );
+    setIsSavingBundle(false);
+    window.requestAnimationFrame(() => {
+      document
+        .getElementById("campaign-form")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
+
+  function applyExistingPromoBundle(promoBundle: MarketingPromoBundle) {
+    const draft = promoBundleToDraft(promoBundle);
+    const economics = buildPromoBundleEconomics(draft);
+    const verdict = buildPromoBundleVerdict(draft, economics);
+    const note = promoBundle.note ?? buildPromoBundleNote(draft, economics);
+    const bundleType = getPromoBundleTypeOption(draft.bundleType);
+    const mechanicConfig = isRecord(promoBundle.mechanicConfig)
+      ? {
+          ...promoBundle.mechanicConfig,
+          promoBundleId: promoBundle.id,
+        }
+      : {
+          ...buildPromoBundleConfig(draft, economics, verdict),
+          promoBundleId: promoBundle.id,
+        };
+
+    setBundleDraft(draft);
+    setForm((current) => ({
+      ...current,
+      goal: "PROMO_BUNDLE",
+      name: promoBundle.name,
+      channel: "CRM-задача",
+      mechanic: bundleType.title,
+      mechanicConfig,
+      promoBundleId: promoBundle.id,
+      budget: String(Math.round(economics.discountBudget)),
+      note,
+    }));
+    setBundleApplyNotice(true);
+    setBundleCatalogNotice(
+      "Существующий комбо-набор связан с формой кампании.",
+    );
     window.requestAnimationFrame(() => {
       document
         .getElementById("campaign-form")
@@ -666,16 +761,21 @@ export function MarketingCampaignsPanel({
       <PromoMechanicsBuilder
         selectedTemplate={selectedTemplate}
         selectedTemplateId={selectedTemplateId}
+        promoBundles={savedPromoBundles}
         bundleDraft={bundleDraft}
         bundleEconomics={bundleEconomics}
         bundleVerdict={bundleVerdict}
+        bundleCatalogNotice={bundleCatalogNotice}
+        isSavingBundle={isSavingBundle}
         onSelectTemplate={setSelectedTemplateId}
         onApplyTemplate={applyTemplate}
         bundleApplyNotice={bundleApplyNotice}
         onBundleDraftChange={(draft) => {
           setBundleApplyNotice(false);
+          setBundleCatalogNotice(null);
           setBundleDraft(draft);
         }}
+        onUsePromoBundle={applyExistingPromoBundle}
         onApplyBundle={applyBundleDraft}
       />
 
@@ -692,6 +792,7 @@ export function MarketingCampaignsPanel({
                 ...current,
                 goal: event.target.value as MarketingCampaignGoal,
                 mechanicConfig: null,
+                promoBundleId: "",
               }))
             }
             className={fieldClassName}
@@ -1000,6 +1101,12 @@ export function MarketingCampaignsPanel({
                           campaign.mechanicConfig,
                         )}
                       />
+                      {campaign.promoBundle ? (
+                        <CompactInfo
+                          label="Комбо-набор"
+                          value={campaign.promoBundle.name}
+                        />
+                      ) : null}
                       <CompactInfo
                         label="Бюджет"
                         value={formatRubles(campaign.budget)}
@@ -1072,30 +1179,45 @@ export function MarketingCampaignsPanel({
 function PromoMechanicsBuilder({
   selectedTemplate,
   selectedTemplateId,
+  promoBundles,
   bundleDraft,
   bundleEconomics,
   bundleVerdict,
+  bundleCatalogNotice,
   bundleApplyNotice,
+  isSavingBundle,
   onSelectTemplate,
   onApplyTemplate,
   onBundleDraftChange,
+  onUsePromoBundle,
   onApplyBundle,
 }: {
   selectedTemplate: PromoMechanicTemplate;
   selectedTemplateId: string;
+  promoBundles: MarketingPromoBundle[];
   bundleDraft: PromoBundleDraft;
   bundleEconomics: PromoBundleEconomics;
   bundleVerdict: PromoBundleVerdict;
+  bundleCatalogNotice: string | null;
   bundleApplyNotice: boolean;
+  isSavingBundle: boolean;
   onSelectTemplate: (id: string) => void;
   onApplyTemplate: (template: PromoMechanicTemplate) => void;
   onBundleDraftChange: (draft: PromoBundleDraft) => void;
-  onApplyBundle: () => void;
+  onUsePromoBundle: (bundle: MarketingPromoBundle) => void;
+  onApplyBundle: () => void | Promise<void>;
 }) {
   const bundleNotePreview = buildPromoBundleNote(bundleDraft, bundleEconomics);
   const [activeBundlePart, setActiveBundlePart] =
     useState<PromoBundlePart>("first");
+  const [selectedPromoBundleId, setSelectedPromoBundleId] = useState(
+    promoBundles[0]?.id ?? "",
+  );
   const bundleType = getPromoBundleTypeOption(bundleDraft.bundleType);
+  const selectedPromoBundle =
+    promoBundles.find((bundle) => bundle.id === selectedPromoBundleId) ??
+    promoBundles[0] ??
+    null;
   const activePartLabel =
     activeBundlePart === "first"
       ? bundleType.firstLabel
@@ -1138,6 +1260,24 @@ function PromoMechanicsBuilder({
         : filter;
 
     updateActivePartText(next);
+  }
+
+  function loadSelectedPromoBundle() {
+    if (!selectedPromoBundle) {
+      return;
+    }
+
+    setActiveBundlePart("first");
+    onBundleDraftChange(promoBundleToDraft(selectedPromoBundle));
+  }
+
+  function useSelectedPromoBundle() {
+    if (!selectedPromoBundle) {
+      return;
+    }
+
+    setActiveBundlePart("first");
+    onUsePromoBundle(selectedPromoBundle);
   }
 
   return (
@@ -1234,25 +1374,32 @@ function PromoMechanicsBuilder({
               </h3>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
                 Соберите оффер по шагам: выберите тип, настройте две части,
-                проверьте экономику и перенесите готовый расчет в кампанию.
+                проверьте экономику и сохраните набор в каталог.
               </p>
             </div>
             <button
               type="button"
               onClick={onApplyBundle}
-              className="inline-flex min-h-10 items-center justify-center rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
+              disabled={bundleVerdict.tone === "blocked" || isSavingBundle}
+              className={[
+                "inline-flex min-h-10 items-center justify-center rounded-xl px-4 text-sm font-semibold transition",
+                bundleVerdict.tone === "blocked" || isSavingBundle
+                  ? "cursor-not-allowed border border-zinc-200 text-zinc-400 dark:border-zinc-800 dark:text-zinc-600"
+                  : "bg-emerald-500 text-zinc-950 hover:bg-emerald-400",
+              ].join(" ")}
             >
-              Перенести в кампанию
+              {isSavingBundle ? "Сохраняем..." : "Сохранить набор"}
             </button>
           </div>
           <p className="mt-3 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm leading-6 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300">
             Настройте состав и экономику набора, затем перенесите расчет в
-            форму кампании. После переноса останется выбрать группу, период и
-            сохранить черновик.
+            каталог комбо-наборов. После сохранения он подставится в форму
+            кампании, а позже сможет использоваться в ассортименте и учете услуг.
           </p>
           {bundleApplyNotice ? (
             <p className="mt-3 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-semibold leading-6 text-emerald-800 dark:border-emerald-500/50 dark:bg-emerald-500/10 dark:text-emerald-200">
-              Промо-набор перенесен в форму кампании выше.
+              {bundleCatalogNotice ??
+                "Промо-набор перенесен в форму кампании выше."}
             </p>
           ) : null}
 
@@ -1272,10 +1419,10 @@ function PromoMechanicsBuilder({
               </p>
             </div>
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              {promoBundleTypeOptions.map((option) => {
-                const isActive = option.id === bundleDraft.bundleType;
+            {promoBundleTypeOptions.map((option) => {
+              const isActive = option.id === bundleDraft.bundleType;
 
-                return (
+              return (
                   <button
                     key={option.id}
                     type="button"
@@ -1304,6 +1451,56 @@ function PromoMechanicsBuilder({
                   </button>
                 );
               })}
+            </div>
+            <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900">
+              <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                    Выбрать из уже существующих
+                  </p>
+                  <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+                    Сохраненные комбо-наборы живут отдельно от кампаний: их
+                    можно переиспользовать в маркетинге, ассортименте и будущем
+                    учете услуг.
+                  </p>
+                </div>
+                {promoBundles.length > 0 ? (
+                  <div className="flex flex-col gap-2 sm:min-w-80 sm:flex-row lg:flex-col xl:flex-row">
+                    <select
+                      value={selectedPromoBundle?.id ?? ""}
+                      onChange={(event) =>
+                        setSelectedPromoBundleId(event.target.value)
+                      }
+                      className={fieldClassName}
+                    >
+                      {promoBundles.map((bundle) => (
+                        <option key={bundle.id} value={bundle.id}>
+                          {bundle.name} · {promoBundleTypeLabel(bundle.bundleType)}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={loadSelectedPromoBundle}
+                      className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl border border-zinc-200 px-4 text-sm font-semibold text-zinc-700 transition hover:border-emerald-400 hover:bg-white dark:border-zinc-700 dark:text-zinc-200 dark:hover:border-emerald-500/70 dark:hover:bg-zinc-950"
+                    >
+                      Редактировать
+                    </button>
+                    <button
+                      type="button"
+                      onClick={useSelectedPromoBundle}
+                      className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
+                    >
+                      Использовать
+                    </button>
+                  </div>
+                ) : (
+                  <p className="rounded-lg border border-dashed border-zinc-300 px-3 py-2 text-sm leading-6 text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+                    Сохраненных наборов пока нет. Создайте первый после
+                    коммерческой проверки ниже.
+                  </p>
+                )}
+              </div>
             </div>
           </div>
 
@@ -1540,6 +1737,7 @@ function PromoMechanicsBuilder({
             verdict={bundleVerdict}
             notePreview={bundleNotePreview}
             bundleApplyNotice={bundleApplyNotice}
+            isSavingBundle={isSavingBundle}
             onApplyBundle={onApplyBundle}
           />
         </div>
@@ -1771,12 +1969,14 @@ function PromoBundleVerdictCard({
   verdict,
   notePreview,
   bundleApplyNotice,
+  isSavingBundle,
   onApplyBundle,
 }: {
   verdict: PromoBundleVerdict;
   notePreview: string;
   bundleApplyNotice: boolean;
-  onApplyBundle: () => void;
+  isSavingBundle: boolean;
+  onApplyBundle: () => void | Promise<void>;
 }) {
   const toneClass =
     verdict.tone === "ready"
@@ -1823,22 +2023,26 @@ function PromoBundleVerdictCard({
             </p>
             <p className="mt-1 text-sm leading-5 text-zinc-600 dark:text-zinc-300">
               {bundleApplyNotice
-                ? "Набор уже перенесен в форму кампании."
-                : "Перенести расчет в кампанию и сохранить черновик."}
+                ? "Набор сохранен и уже связан с формой кампании."
+                : "Сохранить как отдельный комбо-набор и связать с черновиком кампании."}
             </p>
           </div>
           <button
             type="button"
             onClick={onApplyBundle}
-            disabled={!canCreateBundle}
+            disabled={!canCreateBundle || isSavingBundle}
             className={[
               "mt-3 inline-flex min-h-10 w-full items-center justify-center rounded-xl px-4 text-sm font-semibold transition",
-              canCreateBundle
+              canCreateBundle && !isSavingBundle
                 ? "bg-emerald-500 text-zinc-950 hover:bg-emerald-400"
                 : "cursor-not-allowed border border-zinc-200 text-zinc-400 dark:border-zinc-800 dark:text-zinc-600",
             ].join(" ")}
           >
-            {canCreateBundle ? "Создать промо-набор" : "Исправьте расчет"}
+            {isSavingBundle
+              ? "Сохраняем..."
+              : canCreateBundle
+                ? "Создать промо-набор"
+                : "Исправьте расчет"}
           </button>
         </div>
       </div>
@@ -1855,7 +2059,7 @@ function PromoBundleVerdictCard({
       <p className="mx-4 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm leading-6 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-300">
         {bundleApplyNotice
           ? "Промо-набор уже перенесен в форму кампании. Проверьте группу, период, ответственного и сохраните черновик."
-          : "После проверки создайте промо-набор: расчет перенесется в форму кампании, где останется выбрать группу, период и сохранить черновик."}
+          : "После проверки создайте промо-набор: он сохранится как отдельный элемент каталога, а расчет перенесется в форму кампании."}
       </p>
       <details className="m-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/70">
         <summary className="cursor-pointer text-sm font-semibold text-zinc-950 dark:text-white">
@@ -2151,6 +2355,93 @@ function getPromoBundleTypeOption(type: PromoBundleType) {
   );
 }
 
+function promoBundleTypeLabel(type: string) {
+  const option = promoBundleTypeOptions.find((item) => item.id === type);
+  return option?.title ?? "Произвольный набор";
+}
+
+function promoBundleToDraft(bundle: MarketingPromoBundle): PromoBundleDraft {
+  const config = isRecord(bundle.mechanicConfig) ? bundle.mechanicConfig : {};
+  const bundleType = resolvePromoBundleType(
+    optionalText(config.bundleType, bundle.bundleType),
+  );
+  const option = getPromoBundleTypeOption(bundleType);
+  const composition = isRecord(config.composition) ? config.composition : {};
+  const bundleValues = isRecord(config.bundle) ? config.bundle : {};
+
+  return {
+    ...emptyBundleDraft,
+    bundleType,
+    gameItem: optionalText(composition.first, option.firstDefault),
+    barItems: optionalText(composition.second, option.secondDefault),
+    serviceItems: optionalText(composition.extraCondition, ""),
+    gamePrice: optionalNumberString(bundleValues.gamePrice, emptyBundleDraft.gamePrice),
+    barPrice: optionalNumberString(bundleValues.barPrice, emptyBundleDraft.barPrice),
+    servicePrice: optionalNumberString(
+      bundleValues.servicePrice,
+      emptyBundleDraft.servicePrice,
+    ),
+    discount: optionalNumberString(bundleValues.discount, emptyBundleDraft.discount),
+    cost: optionalNumberString(bundleValues.cost, emptyBundleDraft.cost),
+    expectedUses: optionalNumberString(
+      bundleValues.expectedUses,
+      emptyBundleDraft.expectedUses,
+    ),
+    minSpend: optionalNumberString(bundleValues.minSpend, emptyBundleDraft.minSpend),
+    validityDays: optionalNumberString(
+      bundleValues.validityDays,
+      emptyBundleDraft.validityDays,
+    ),
+    onePerGuest: optionalBoolean(
+      bundleValues.onePerGuest,
+      emptyBundleDraft.onePerGuest,
+    ),
+    requiresApproval: optionalBoolean(
+      bundleValues.requiresApproval,
+      emptyBundleDraft.requiresApproval,
+    ),
+    noStacking: optionalBoolean(
+      bundleValues.noStacking,
+      emptyBundleDraft.noStacking,
+    ),
+  };
+}
+
+function resolvePromoBundleType(value: unknown): PromoBundleType {
+  if (
+    typeof value === "string" &&
+    promoBundleTypeOptions.some((option) => option.id === value)
+  ) {
+    return value as PromoBundleType;
+  }
+
+  return "game_product";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function optionalText(value: unknown, fallback: string) {
+  return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+function optionalNumberString(value: unknown, fallback: string) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    return value;
+  }
+
+  return fallback;
+}
+
+function optionalBoolean(value: unknown, fallback: boolean) {
+  return typeof value === "boolean" ? value : fallback;
+}
+
 function buildPromoBundleNote(
   draft: PromoBundleDraft,
   economics: PromoBundleEconomics,
@@ -2250,6 +2541,7 @@ function cleanPayload(form: CampaignFormState) {
     audienceId: form.audienceId || null,
     storeIds: form.storeId ? [form.storeId] : [],
     ownerUserId: form.ownerUserId || null,
+    promoBundleId: form.promoBundleId || null,
     periodFrom: form.periodFrom || null,
     periodTo: form.periodTo || null,
     dueAt: form.dueAt || null,

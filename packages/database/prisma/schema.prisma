@@ -110,6 +110,7 @@ model Tenant {
   guestCrmTasks              GuestCrmTask[]
   guestCrmContactEvents      GuestCrmContactEvent[]
   marketingCampaigns         MarketingCampaign[]
+  marketingPromoBundles      MarketingPromoBundle[]
   guestStaffIdentityMappings GuestStaffIdentityMapping[]
   guestSavedFilters          GuestSavedFilter[]
   guestAudiences             GuestAudience[]
@@ -138,6 +139,7 @@ model User {
   guestCrmContactEvents      GuestCrmContactEvent[]
   createdMarketingCampaigns  MarketingCampaign[]         @relation("MarketingCampaignCreatedBy")
   ownedMarketingCampaigns    MarketingCampaign[]         @relation("MarketingCampaignOwner")
+  createdMarketingPromoBundles MarketingPromoBundle[]     @relation("MarketingPromoBundleCreatedBy")
   guestStaffIdentityMappings GuestStaffIdentityMapping[]
   guestSavedFilters          GuestSavedFilter[]
   guestAudiences             GuestAudience[]
@@ -736,6 +738,7 @@ model MarketingCampaign {
   tenantId        String
   audienceId      String?
   crmTaskId       String?
+  promoBundleId   String?
   storeIds        Json?
   createdByUserId String?
   ownerUserId     String?
@@ -756,6 +759,7 @@ model MarketingCampaign {
   tenant        Tenant         @relation(fields: [tenantId], references: [id])
   audience      GuestAudience? @relation(fields: [audienceId], references: [id], onDelete: SetNull)
   crmTask       GuestCrmTask?  @relation(fields: [crmTaskId], references: [id], onDelete: SetNull)
+  promoBundle   MarketingPromoBundle? @relation(fields: [promoBundleId], references: [id], onDelete: SetNull)
   createdByUser User?          @relation("MarketingCampaignCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   ownerUser     User?          @relation("MarketingCampaignOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
   contactEvents GuestCrmContactEvent[]
@@ -763,8 +767,30 @@ model MarketingCampaign {
   @@index([tenantId, status, updatedAt], map: "marketing_campaign_status_idx")
   @@index([audienceId], map: "marketing_campaign_audience_idx")
   @@index([crmTaskId], map: "marketing_campaign_crm_task_idx")
+  @@index([promoBundleId], map: "marketing_campaign_promo_bundle_idx")
   @@index([createdByUserId], map: "marketing_campaign_created_by_idx")
   @@index([ownerUserId], map: "marketing_campaign_owner_idx")
+}
+
+model MarketingPromoBundle {
+  id              String   @id @default(uuid())
+  tenantId        String
+  createdByUserId String?
+  name            String
+  status          String   @default("ACTIVE")
+  bundleType      String
+  mechanicConfig  Json
+  note            String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant        Tenant              @relation(fields: [tenantId], references: [id])
+  createdByUser User?               @relation("MarketingPromoBundleCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  campaigns     MarketingCampaign[]
+
+  @@index([tenantId, status, updatedAt], map: "marketing_promo_bundle_status_idx")
+  @@index([tenantId, bundleType], map: "marketing_promo_bundle_type_idx")
+  @@index([createdByUserId], map: "marketing_promo_bundle_created_by_idx")
 }
 
 model GuestGroup {

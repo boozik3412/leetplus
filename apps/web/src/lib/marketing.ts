@@ -17,6 +17,8 @@ export type MarketingCampaignStatus =
 
 export type MarketingMechanicConfig = Record<string, unknown>;
 
+export type MarketingPromoBundleStatus = "ACTIVE" | "ARCHIVED";
+
 export type MarketingCampaignConsentCoverage = {
   targetTotal: number;
   phoneGranted: number;
@@ -49,7 +51,14 @@ export type MarketingCampaign = {
   storeIds: string[];
   createdAt: string;
   updatedAt: string;
+  promoBundleId: string | null;
   audience: { id: string; name: string; guestsCount: number } | null;
+  promoBundle: {
+    id: string;
+    name: string;
+    status: string;
+    bundleType: string;
+  } | null;
   crmTask: {
     id: string;
     title: string;
@@ -59,6 +68,18 @@ export type MarketingCampaign = {
   consentCoverage: MarketingCampaignConsentCoverage;
   createdBy: { id: string; displayName: string; email: string } | null;
   owner: { id: string; displayName: string; email: string } | null;
+};
+
+export type MarketingPromoBundle = {
+  id: string;
+  name: string;
+  status: MarketingPromoBundleStatus;
+  bundleType: string;
+  mechanicConfig: MarketingMechanicConfig;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: { id: string; displayName: string; email: string } | null;
 };
 
 export type MarketingCampaignEffectPeriod = {
@@ -189,6 +210,21 @@ export async function getMarketingCampaigns(): Promise<MarketingCampaign[]> {
   }
 
   return response.json() as Promise<MarketingCampaign[]>;
+}
+
+export async function getMarketingPromoBundles(): Promise<
+  MarketingPromoBundle[]
+> {
+  const response = await fetch(`${getApiUrl()}/marketing/promo-bundles`, {
+    cache: "no-store",
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch marketing promo bundles");
+  }
+
+  return response.json() as Promise<MarketingPromoBundle[]>;
 }
 
 export async function getMarketingCampaign(

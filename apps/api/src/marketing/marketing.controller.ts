@@ -22,6 +22,8 @@ import {
   type MarketingCampaignEffect,
   type MarketingCampaignExportFile,
   type MarketingCampaignUpdateDto,
+  type MarketingPromoBundle,
+  type MarketingPromoBundleDto,
 } from './marketing.service';
 
 @Controller('marketing')
@@ -35,6 +37,21 @@ export class MarketingController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<MarketingCampaign[]> {
     return this.marketingService.getCampaigns(user);
+  }
+
+  @Get('promo-bundles')
+  getPromoBundles(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<MarketingPromoBundle[]> {
+    return this.marketingService.getPromoBundles(user);
+  }
+
+  @Post('promo-bundles')
+  createPromoBundle(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: MarketingPromoBundleDto,
+  ): Promise<MarketingPromoBundle> {
+    return this.marketingService.createPromoBundle(user, dto);
   }
 
   @Get('campaigns/:id')

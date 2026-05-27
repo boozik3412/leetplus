@@ -11,12 +11,23 @@ import { PrismaService } from '../prisma/prisma.service';
 const marketingCampaignInclude = {
   audience: { select: { id: true, name: true, guestsCount: true } },
   crmTask: { select: { id: true, title: true, status: true, dueAt: true } },
+  promoBundle: {
+    select: { id: true, name: true, status: true, bundleType: true },
+  },
   createdByUser: { select: { id: true, fullName: true, email: true } },
   ownerUser: { select: { id: true, fullName: true, email: true } },
 } satisfies Prisma.MarketingCampaignInclude;
 
 type MarketingCampaignRow = Prisma.MarketingCampaignGetPayload<{
   include: typeof marketingCampaignInclude;
+}>;
+
+const marketingPromoBundleInclude = {
+  createdByUser: { select: { id: true, fullName: true, email: true } },
+} satisfies Prisma.MarketingPromoBundleInclude;
+
+type MarketingPromoBundleRow = Prisma.MarketingPromoBundleGetPayload<{
+  include: typeof marketingPromoBundleInclude;
 }>;
 
 const campaignGoals = [
@@ -36,15 +47,19 @@ const campaignStatuses = [
   'CANCELED',
 ] as const;
 
+const promoBundleStatuses = ['ACTIVE', 'ARCHIVED'] as const;
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export type MarketingCampaignGoal = (typeof campaignGoals)[number];
 export type MarketingCampaignStatus = (typeof campaignStatuses)[number];
+export type MarketingPromoBundleStatus = (typeof promoBundleStatuses)[number];
 
 export type MarketingCampaignDto = {
   goal?: string | null;
   name?: string | null;
   audienceId?: string | null;
+  promoBundleId?: string | null;
   storeIds?: string[] | null;
   ownerUserId?: string | null;
   status?: string | null;
@@ -59,6 +74,14 @@ export type MarketingCampaignDto = {
 };
 
 export type MarketingCampaignUpdateDto = Partial<MarketingCampaignDto>;
+
+export type MarketingPromoBundleDto = {
+  name?: string | null;
+  status?: string | null;
+  bundleType?: string | null;
+  mechanicConfig?: unknown;
+  note?: string | null;
+};
 
 export type MarketingCampaignExportFormat = 'csv' | 'xlsx';
 
@@ -104,7 +127,14 @@ export type MarketingCampaign = {
   storeIds: string[];
   createdAt: string;
   updatedAt: string;
+  promoBundleId: string | null;
   audience: { id: string; name: string; guestsCount: number } | null;
+  promoBundle: {
+    id: string;
+    name: string;
+    status: string;
+    bundleType: string;
+  } | null;
   crmTask: {
     id: string;
     title: string;
@@ -114,6 +144,18 @@ export type MarketingCampaign = {
   consentCoverage: MarketingCampaignConsentCoverage;
   createdBy: { id: string; displayName: string; email: string } | null;
   owner: { id: string; displayName: string; email: string } | null;
+};
+
+export type MarketingPromoBundle = {
+  id: string;
+  name: string;
+  status: MarketingPromoBundleStatus;
+  bundleType: string;
+  mechanicConfig: Prisma.JsonValue;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: { id: string; displayName: string; email: string } | null;
 };
 
 export type MarketingCampaignEffectPeriod = {
@@ -289,6 +331,19 @@ export class MarketingService {
     return rows.map((row) =>
       this.toMarketingCampaign(row, coverageByCampaign.get(row.id)),
     );
+  }
+
+  async getPromoBundles(
+    user: AuthenticatedUser,
+  ): Promise<MarketingPromoBundle[]> {
+    const rows = await this.prisma.marketingPromoBundle.findMany({
+      where: { tenantId: user.tenantId },
+      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+      take: 100,
+      include: marketingPromoBundleInclude,
+    });
+
+    return rows.map((row) => this.toMarketingPromoBundle(row));
   }
 
   async getCampaign(
@@ -716,6 +771,10 @@ export class MarketingService {
   ): Promise<MarketingCampaign> {
     const goal = resolveGoal(dto.goal);
     const audienceId = await this.resolveAudienceId(user, dto.audienceId);
+    const promoBundleId = await this.resolvePromoBundleId(
+      user,
+      dto.promoBundleId,
+    );
     const storeIds = await this.resolveStoreIds(user, dto.storeIds);
     const ownerUserId = await this.resolveOwnerUserId(user, dto.ownerUserId);
     const status = resolveStatus(dto.status ?? 'DRAFT');
@@ -728,6 +787,7 @@ export class MarketingService {
         tenantId: user.tenantId,
         createdByUserId: user.id,
         audienceId,
+        promoBundleId,
         storeIds: storeIds.length > 0 ? storeIds : Prisma.JsonNull,
         ownerUserId,
         goal,
@@ -752,6 +812,35 @@ export class MarketingService {
     );
 
     return this.toMarketingCampaign(row, coverage);
+  }
+
+  async createPromoBundle(
+    user: AuthenticatedUser,
+    dto: MarketingPromoBundleDto = {},
+  ): Promise<MarketingPromoBundle> {
+    const mechanicConfig = normalizePromoBundleConfig(dto.mechanicConfig);
+    const bundleType =
+      normalizeText(dto.bundleType, 80) ??
+      getStringField(mechanicConfig, 'bundleType') ??
+      'custom';
+    const name =
+      normalizeText(dto.name, 140) ??
+      `Комбо-набор: ${promoBundleTypeLabel(bundleType)}`;
+
+    const row = await this.prisma.marketingPromoBundle.create({
+      data: {
+        tenantId: user.tenantId,
+        createdByUserId: user.id,
+        name,
+        status: resolvePromoBundleStatus(dto.status ?? 'ACTIVE'),
+        bundleType,
+        mechanicConfig,
+        note: normalizeText(dto.note, 2000),
+      },
+      include: marketingPromoBundleInclude,
+    });
+
+    return this.toMarketingPromoBundle(row);
   }
 
   async updateCampaign(
@@ -784,6 +873,13 @@ export class MarketingService {
 
     if (hasOwn(dto, 'audienceId')) {
       data.audience = await this.resolveAudienceRelation(user, dto.audienceId);
+    }
+
+    if (hasOwn(dto, 'promoBundleId')) {
+      data.promoBundle = await this.resolvePromoBundleRelation(
+        user,
+        dto.promoBundleId,
+      );
     }
 
     if (hasOwn(dto, 'storeIds')) {
@@ -1692,6 +1788,38 @@ export class MarketingService {
     return audienceId ? { connect: { id: audienceId } } : { disconnect: true };
   }
 
+  private async resolvePromoBundleId(
+    user: AuthenticatedUser,
+    value?: string | null,
+  ) {
+    const promoBundleId = normalizeText(value, 80);
+
+    if (!promoBundleId) {
+      return null;
+    }
+
+    const bundle = await this.prisma.marketingPromoBundle.findFirst({
+      where: { id: promoBundleId, tenantId: user.tenantId },
+      select: { id: true },
+    });
+
+    if (!bundle) {
+      throw new BadRequestException('Promo bundle not found');
+    }
+
+    return bundle.id;
+  }
+
+  private async resolvePromoBundleRelation(
+    user: AuthenticatedUser,
+    value?: string | null,
+  ): Promise<Prisma.MarketingPromoBundleUpdateOneWithoutCampaignsNestedInput> {
+    const promoBundleId = await this.resolvePromoBundleId(user, value);
+    return promoBundleId
+      ? { connect: { id: promoBundleId } }
+      : { disconnect: true };
+  }
+
   private async resolveOwnerUserId(
     user: AuthenticatedUser,
     value?: string | null,
@@ -2115,11 +2243,20 @@ export class MarketingService {
       storeIds: parseStringArray(row.storeIds),
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
+      promoBundleId: row.promoBundleId,
       audience: row.audience
         ? {
             id: row.audience.id,
             name: row.audience.name,
             guestsCount: row.audience.guestsCount,
+          }
+        : null,
+      promoBundle: row.promoBundle
+        ? {
+            id: row.promoBundle.id,
+            name: row.promoBundle.name,
+            status: row.promoBundle.status,
+            bundleType: row.promoBundle.bundleType,
           }
         : null,
       crmTask: row.crmTask
@@ -2133,6 +2270,22 @@ export class MarketingService {
       consentCoverage: coverage ?? emptyConsentCoverage(row.channel),
       createdBy: row.createdByUser ? toUserSummary(row.createdByUser) : null,
       owner: row.ownerUser ? toUserSummary(row.ownerUser) : null,
+    };
+  }
+
+  private toMarketingPromoBundle(
+    row: MarketingPromoBundleRow,
+  ): MarketingPromoBundle {
+    return {
+      id: row.id,
+      name: row.name,
+      status: resolvePromoBundleStatus(row.status),
+      bundleType: row.bundleType,
+      mechanicConfig: row.mechanicConfig,
+      note: row.note,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+      createdBy: row.createdByUser ? toUserSummary(row.createdByUser) : null,
     };
   }
 }
@@ -2185,6 +2338,22 @@ function normalizeMechanicConfig(
   }
 }
 
+function normalizePromoBundleConfig(value: unknown): Prisma.InputJsonValue {
+  const config = normalizeMechanicConfig(value);
+
+  if (config === Prisma.JsonNull) {
+    throw new BadRequestException('Promo bundle config is required');
+  }
+
+  const normalizedConfig = config as Prisma.InputJsonValue;
+
+  if (getStringField(normalizedConfig, 'kind') !== 'promo_bundle') {
+    throw new BadRequestException('Promo bundle config must be a promo bundle');
+  }
+
+  return normalizedConfig;
+}
+
 function resolveGoal(value: unknown): MarketingCampaignGoal {
   if (campaignGoals.includes(value as MarketingCampaignGoal)) {
     return value as MarketingCampaignGoal;
@@ -2199,6 +2368,34 @@ function resolveStatus(value: unknown): MarketingCampaignStatus {
   }
 
   return 'DRAFT';
+}
+
+function resolvePromoBundleStatus(value: unknown): MarketingPromoBundleStatus {
+  if (promoBundleStatuses.includes(value as MarketingPromoBundleStatus)) {
+    return value as MarketingPromoBundleStatus;
+  }
+
+  return 'ACTIVE';
+}
+
+function getStringField(value: unknown, field: string) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const fieldValue = (value as Record<string, unknown>)[field];
+  return typeof fieldValue === 'string' ? fieldValue : null;
+}
+
+function promoBundleTypeLabel(type: string) {
+  const labels: Record<string, string> = {
+    game_product: 'игра + товар',
+    game_bonus: 'игра + бонусы',
+    product_product: 'товар + товар',
+    balance_bonus: 'пополнение + бонусы',
+  };
+
+  return labels[type] ?? type;
 }
 
 function parseOptionalDate(value: unknown) {

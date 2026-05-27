@@ -192,7 +192,11 @@ function CompactNavSection({
     <div
       className="relative"
       onMouseEnter={onOpen}
+      onMouseMove={onOpen}
       onMouseLeave={onClose}
+      onPointerEnter={onOpen}
+      onPointerMove={onOpen}
+      onPointerLeave={onClose}
       onFocus={onOpen}
       onBlur={handleBlur}
     >

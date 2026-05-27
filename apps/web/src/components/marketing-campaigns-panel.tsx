@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import {
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -1210,14 +1211,34 @@ function PromoMechanicsBuilder({
   const bundleNotePreview = buildPromoBundleNote(bundleDraft, bundleEconomics);
   const [activeBundlePart, setActiveBundlePart] =
     useState<PromoBundlePart>("first");
+  const [isBundleCatalogOpen, setIsBundleCatalogOpen] = useState(false);
+  const [bundleCatalogSearch, setBundleCatalogSearch] = useState("");
   const [selectedPromoBundleId, setSelectedPromoBundleId] = useState(
     promoBundles[0]?.id ?? "",
   );
+  const bundleCatalogRef = useRef<HTMLDivElement>(null);
   const bundleType = getPromoBundleTypeOption(bundleDraft.bundleType);
   const selectedPromoBundle =
     promoBundles.find((bundle) => bundle.id === selectedPromoBundleId) ??
     promoBundles[0] ??
     null;
+  const bundleCatalogQuery = bundleCatalogSearch.trim().toLocaleLowerCase("ru-RU");
+  const filteredPromoBundles = useMemo(() => {
+    if (!bundleCatalogQuery) {
+      return promoBundles;
+    }
+
+    return promoBundles.filter((bundle) =>
+      [
+        bundle.name,
+        promoBundleTypeLabel(bundle.bundleType),
+        bundle.note ?? "",
+      ]
+        .join(" ")
+        .toLocaleLowerCase("ru-RU")
+        .includes(bundleCatalogQuery),
+    );
+  }, [bundleCatalogQuery, promoBundles]);
   const activePartLabel =
     activeBundlePart === "first"
       ? bundleType.firstLabel
@@ -1234,6 +1255,35 @@ function PromoMechanicsBuilder({
     activeBundlePart === "first"
       ? `Стоимость части "${bundleType.firstLabel}" без скидки. Нужна только для расчета цены, бюджета и маржи.`
       : `Стоимость части "${bundleType.secondLabel}" без скидки. Нужна только для расчета цены, бюджета и маржи.`;
+
+  useEffect(() => {
+    if (!isBundleCatalogOpen) {
+      return;
+    }
+
+    function closeOnOutsideClick(event: PointerEvent) {
+      if (
+        bundleCatalogRef.current &&
+        !bundleCatalogRef.current.contains(event.target as Node)
+      ) {
+        setIsBundleCatalogOpen(false);
+      }
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsBundleCatalogOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [isBundleCatalogOpen]);
 
   function updateActivePartText(value: string) {
     onBundleDraftChange(
@@ -1262,22 +1312,18 @@ function PromoMechanicsBuilder({
     updateActivePartText(next);
   }
 
-  function loadSelectedPromoBundle() {
-    if (!selectedPromoBundle) {
-      return;
-    }
-
+  function loadPromoBundleAsBasis(promoBundle: MarketingPromoBundle) {
+    setSelectedPromoBundleId(promoBundle.id);
+    setIsBundleCatalogOpen(false);
     setActiveBundlePart("first");
-    onBundleDraftChange(promoBundleToDraft(selectedPromoBundle));
+    onBundleDraftChange(promoBundleToDraft(promoBundle));
   }
 
-  function useSelectedPromoBundle() {
-    if (!selectedPromoBundle) {
-      return;
-    }
-
+  function selectPromoBundleFromCatalog(promoBundle: MarketingPromoBundle) {
+    setSelectedPromoBundleId(promoBundle.id);
+    setIsBundleCatalogOpen(false);
     setActiveBundlePart("first");
-    onUsePromoBundle(selectedPromoBundle);
+    onUsePromoBundle(promoBundle);
   }
 
   return (
@@ -1447,55 +1493,90 @@ function PromoMechanicsBuilder({
                 );
               })}
             </div>
-            <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900">
-              <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                    Выбрать из уже существующих
-                  </p>
-                  <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                    Сохраненные комбо-наборы живут отдельно от кампаний: их
-                    можно переиспользовать в маркетинге, ассортименте и будущем
-                    учете услуг.
+            <div ref={bundleCatalogRef} className="relative mt-3">
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                      Каталог промо-наборов
+                    </p>
+                    <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs font-semibold text-zinc-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300">
+                      {formatBundleCount(promoBundles.length)}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-sm leading-5 text-zinc-600 dark:text-zinc-300">
+                    {selectedPromoBundle
+                      ? `Выбран: ${selectedPromoBundle.name}`
+                      : "Готовые наборы можно быстро подставить в кампанию или взять как основу."}
                   </p>
                 </div>
-                {promoBundles.length > 0 ? (
-                  <div className="flex flex-col gap-2 sm:min-w-80 sm:flex-row lg:flex-col xl:flex-row">
-                    <select
-                      value={selectedPromoBundle?.id ?? ""}
-                      onChange={(event) =>
-                        setSelectedPromoBundleId(event.target.value)
-                      }
-                      className={fieldClassName}
-                    >
-                      {promoBundles.map((bundle) => (
-                        <option key={bundle.id} value={bundle.id}>
-                          {bundle.name} · {promoBundleTypeLabel(bundle.bundleType)}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={loadSelectedPromoBundle}
-                      className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl border border-zinc-200 px-4 text-sm font-semibold text-zinc-700 transition hover:border-emerald-400 hover:bg-white dark:border-zinc-700 dark:text-zinc-200 dark:hover:border-emerald-500/70 dark:hover:bg-zinc-950"
-                    >
-                      Редактировать
-                    </button>
-                    <button
-                      type="button"
-                      onClick={useSelectedPromoBundle}
-                      className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
-                    >
-                      Использовать
-                    </button>
-                  </div>
-                ) : (
-                  <p className="rounded-lg border border-dashed border-zinc-300 px-3 py-2 text-sm leading-6 text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-                    Сохраненных наборов пока нет. Создайте первый после
-                    коммерческой проверки ниже.
-                  </p>
-                )}
+                <button
+                  type="button"
+                  aria-expanded={isBundleCatalogOpen}
+                  onClick={() => setIsBundleCatalogOpen((isOpen) => !isOpen)}
+                  className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-4 text-sm font-semibold text-zinc-800 transition hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:border-emerald-500 dark:hover:text-emerald-300"
+                >
+                  Открыть каталог
+                  <span aria-hidden="true" className="text-xs">
+                    {isBundleCatalogOpen ? "▲" : "▼"}
+                  </span>
+                </button>
               </div>
+
+              {isBundleCatalogOpen ? (
+                <div className="absolute right-0 top-full z-50 mt-2 w-full overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl shadow-zinc-950/15 dark:border-zinc-700 dark:bg-zinc-950 dark:shadow-black/40 sm:w-[560px] sm:max-w-[calc(100vw-8rem)]">
+                  <div className="border-b border-zinc-200 p-3 dark:border-zinc-800">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-semibold text-zinc-950 dark:text-white">
+                          Сохраненные промо-наборы
+                        </p>
+                        <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                          Каталог живет отдельно от кампаний и позже подойдет
+                          для ассортимента и учета услуг.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsBundleCatalogOpen(false)}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-200 text-sm font-semibold text-zinc-500 transition hover:border-zinc-300 hover:text-zinc-900 dark:border-zinc-700 dark:text-zinc-400 dark:hover:text-white"
+                        aria-label="Закрыть каталог промо-наборов"
+                      >
+                        ×
+                      </button>
+                    </div>
+                    <input
+                      value={bundleCatalogSearch}
+                      onChange={(event) =>
+                        setBundleCatalogSearch(event.target.value)
+                      }
+                      placeholder="Поиск по названию, типу или заметке"
+                      className="mt-3 h-10 w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-950 outline-none transition placeholder:text-zinc-400 focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white"
+                    />
+                  </div>
+                  <div className="max-h-96 overflow-y-auto p-2">
+                    {filteredPromoBundles.length > 0 ? (
+                      <div className="grid gap-2">
+                        {filteredPromoBundles.map((bundle) => (
+                          <PromoBundleCatalogItem
+                            key={bundle.id}
+                            bundle={bundle}
+                            isActive={bundle.id === selectedPromoBundle?.id}
+                            onLoadAsBasis={() => loadPromoBundleAsBasis(bundle)}
+                            onUse={() => selectPromoBundleFromCatalog(bundle)}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="rounded-lg border border-dashed border-zinc-300 px-3 py-4 text-sm leading-6 text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+                        {promoBundles.length === 0
+                          ? "Сохраненных наборов пока нет. Создайте первый после коммерческой проверки ниже."
+                          : "По этому запросу наборов не найдено."}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
 
@@ -1778,6 +1859,75 @@ function PromoBundlePartCard({
         Стоимость: {formatRubles(parseMoney(amount))}
       </span>
     </button>
+  );
+}
+
+function PromoBundleCatalogItem({
+  bundle,
+  isActive,
+  onLoadAsBasis,
+  onUse,
+}: {
+  bundle: MarketingPromoBundle;
+  isActive: boolean;
+  onLoadAsBasis: () => void;
+  onUse: () => void;
+}) {
+  const draft = promoBundleToDraft(bundle);
+  const economics = buildPromoBundleEconomics(draft);
+  const composition = [draft.gameItem, draft.barItems]
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .join(" + ");
+  const margin =
+    economics.marginPercent === null
+      ? "маржа не рассчитана"
+      : `маржа ${formatPercent(economics.marginPercent)}`;
+
+  return (
+    <div
+      className={[
+        "grid gap-3 rounded-lg border p-3 transition md:grid-cols-[minmax(0,1fr)_auto] md:items-center",
+        isActive
+          ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-500/10"
+          : "border-zinc-200 bg-zinc-50 hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-900",
+      ].join(" ")}
+    >
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="truncate text-sm font-semibold text-zinc-950 dark:text-white">
+            {bundle.name}
+          </p>
+          <span className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-xs font-semibold text-zinc-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300">
+            {promoBundleTypeLabel(draft.bundleType)}
+          </span>
+        </div>
+        <p className="mt-1 line-clamp-2 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+          {composition || "Состав набора не заполнен"}
+        </p>
+        <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+          <span>{formatRubles(economics.promoPrice)}</span>
+          <span>{margin}</span>
+          <span>{formatNumber(economics.expectedUses)} исп.</span>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-2 md:justify-end">
+        <button
+          type="button"
+          onClick={onLoadAsBasis}
+          className="inline-flex min-h-9 items-center justify-center rounded-lg border border-zinc-200 bg-white px-3 text-xs font-semibold text-zinc-700 transition hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:border-emerald-500 dark:hover:text-emerald-300"
+        >
+          Как основу
+        </button>
+        <button
+          type="button"
+          onClick={onUse}
+          className="inline-flex min-h-9 items-center justify-center rounded-lg bg-emerald-500 px-3 text-xs font-semibold text-zinc-950 transition hover:bg-emerald-400"
+        >
+          Выбрать
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -2814,6 +2964,21 @@ function formatNumber(value: number) {
   return new Intl.NumberFormat("ru-RU", {
     maximumFractionDigits: 0,
   }).format(value);
+}
+
+function formatBundleCount(count: number) {
+  const lastTwo = count % 100;
+  const last = count % 10;
+  const suffix =
+    lastTwo >= 11 && lastTwo <= 14
+      ? "наборов"
+      : last === 1
+        ? "набор"
+        : last >= 2 && last <= 4
+          ? "набора"
+          : "наборов";
+
+  return `${formatNumber(count)} ${suffix}`;
 }
 
 function parseMoney(value: string) {

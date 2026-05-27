@@ -2,7 +2,13 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FocusEvent,
+  type ReactNode,
+} from "react";
 import type { AuthUser } from "@/lib/auth";
 import { canAccessPath } from "@/lib/permissions";
 import { ThemeSwitcher } from "@/components/theme-switcher";
@@ -147,13 +153,15 @@ function CompactNavSection({
   group,
   isActive,
   isOpen,
-  onToggle,
+  onOpen,
+  onClose,
   onNavigate,
 }: {
   group: NavGroup;
   isActive: boolean;
   isOpen: boolean;
-  onToggle: () => void;
+  onOpen: () => void;
+  onClose: () => void;
   onNavigate: () => void;
 }) {
   if (group.items.length === 1) {
@@ -170,14 +178,31 @@ function CompactNavSection({
     );
   }
 
+  function handleBlur(event: FocusEvent<HTMLDivElement>) {
+    const nextTarget = event.relatedTarget;
+
+    if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+      return;
+    }
+
+    onClose();
+  }
+
   return (
-    <div className="relative">
+    <div
+      className="relative"
+      onMouseEnter={onOpen}
+      onMouseLeave={onClose}
+      onFocus={onOpen}
+      onBlur={handleBlur}
+    >
       <button
         type="button"
         title={group.title}
         aria-label={group.title}
         aria-expanded={isOpen}
-        onClick={onToggle}
+        aria-haspopup="menu"
+        onClick={onOpen}
         className={compactGroupButtonClass(isActive || isOpen)}
       >
         <SectionIcon icon={group.icon} />
@@ -185,6 +210,7 @@ function CompactNavSection({
       </button>
       {isOpen ? (
         <div className="absolute left-full top-1/2 z-[80] ml-4 w-72 -translate-y-1/2 rounded-2xl border border-zinc-200 bg-white p-2 shadow-2xl shadow-zinc-950/15 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/50">
+          <span className="absolute -left-4 top-0 h-full w-4" />
           <span className="absolute -left-2 top-1/2 h-4 w-4 -translate-y-1/2 rotate-45 border-b border-l border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950" />
           <div className="px-3 py-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
@@ -368,6 +394,14 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
     }));
   }
 
+  function openNavGroup(title: string) {
+    setOpenNavGroups({ [title]: true });
+  }
+
+  function closeNavGroups() {
+    setOpenNavGroups({});
+  }
+
   return (
     <>
       <div className="sticky top-0 z-40 flex items-center justify-between border-b border-zinc-200/80 bg-white/90 px-4 py-3 shadow-sm backdrop-blur-xl dark:border-zinc-800 dark:bg-zinc-950/90 md:hidden">
@@ -468,8 +502,9 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
               group={group}
               isActive={currentProductArea === group.title}
               isOpen={Boolean(openNavGroups[group.title])}
-              onToggle={() => toggleNavGroup(group.title)}
-              onNavigate={() => setOpenNavGroups({})}
+              onOpen={() => openNavGroup(group.title)}
+              onClose={closeNavGroups}
+              onNavigate={closeNavGroups}
             />
           ))}
         </nav>

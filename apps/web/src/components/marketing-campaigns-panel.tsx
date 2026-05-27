@@ -35,6 +35,10 @@ type PromoMechanicTemplate = {
   budget: string;
   description: string;
   tradeoff: string;
+  audienceHint: string;
+  primaryKpi: string;
+  controlPoint: string;
+  risk: string;
   note: string;
 };
 
@@ -148,6 +152,10 @@ const promoMechanicTemplates: PromoMechanicTemplate[] = [
     description: "Для новых гостей, которые еще не сформировали привычку.",
     tradeoff:
       "Поднимает retention, но важно не давать скидку тем, кто и так вернется.",
+    audienceHint: "Новые гости без второго визита или с одной короткой сессией.",
+    primaryKpi: "повторный визит, визиты, выручка после контакта",
+    controlPoint: "зафиксировать контакт, дату ответа и факт повторного визита",
+    risk: "скидка может уйти гостям, которые вернулись бы без оффера",
     note:
       "Цель: второй визит. Оффер мягкий: персональный повод вернуться, без автоматического бонуса. Ограничения: один контакт на гостя, фиксировать исход и дату визита.",
   },
@@ -162,6 +170,10 @@ const promoMechanicTemplates: PromoMechanicTemplate[] = [
     description: "Для времени, где есть свободная емкость ПК и зала.",
     tradeoff:
       "Может дать загрузку, но не должен каннибализировать пиковые часы.",
+    audienceHint: "Гости с гибким временем визита и клубы/часы с низкой загрузкой.",
+    primaryKpi: "загрузка, игровые часы, визиты в слабый период",
+    controlPoint: "проверить клуб, день недели, время действия и прирост часов",
+    risk: "оффер может перенести обычный спрос из пика в скидочный период",
     note:
       "Цель: заполнить тихие часы. Правило: действует только в оговоренный период и клубы. Контроль: не применять в пиковые часы, фиксировать использования в CRM.",
   },
@@ -176,6 +188,10 @@ const promoMechanicTemplates: PromoMechanicTemplate[] = [
     description: "Для гостей с низкой долей бара и командных визитов.",
     tradeoff:
       "Важно проверить маржу: набор должен растить чек, а не раздавать скидку.",
+    audienceHint: "Активные гости с низкой долей бара, компании и TOP-гости.",
+    primaryKpi: "бар, средний чек, общая выручка, маржа набора",
+    controlPoint: "сверить состав, себестоимость, цену и барную выручку после запуска",
+    risk: "слабая маржа или скидка без роста общего чека",
     note:
       "Цель: рост бара. Предложить комбо: игровое время + бар/кальян/сервис. Ограничения: один набор на гостя, ручное подтверждение администратором, отслеживать бар и общую выручку.",
   },
@@ -190,6 +206,10 @@ const promoMechanicTemplates: PromoMechanicTemplate[] = [
     description: "Для турниров, дней рождения, брони клуба и командных событий.",
     tradeoff:
       "Нужна ясная вместимость, ответственный и фиксация броней.",
+    audienceHint: "Командные гости, лиды на бронь, участники событий и активные группы.",
+    primaryKpi: "брони, явка, выручка события, бар",
+    controlPoint: "назначить ответственного, лимит мест и журнал ответов",
+    risk: "переполнение, неявка или отсутствие фиксации брони в CRM",
     note:
       "Цель: мероприятие или бронь. Проверить дату, клуб, вместимость и канал. Контроль: каждый ответ гостя фиксировать в CRM, брони и отказы отдельно.",
   },
@@ -204,6 +224,10 @@ const promoMechanicTemplates: PromoMechanicTemplate[] = [
     description: "Для ручных заявок, когда гостя еще нет в Langame или нужна бронь.",
     tradeoff:
       "Высокий чек, но нужна быстрая фиксация лида, ответственный и следующий контакт.",
+    audienceHint: "Ручные CRM-лиды, родители, компании и гости без регистрации в Langame.",
+    primaryKpi: "лид -> бронь, сумма брони, следующий контакт",
+    controlPoint: "сохранить телефон, дату, клуб, количество гостей и дедлайн звонка",
+    risk: "лид потеряется до регистрации или не сопоставится с гостем по телефону",
     note:
       "Цель: день рождения, мероприятие или бронь клуба. Зафиксировать контакт, желаемую дату, клуб, количество гостей и следующий шаг. После регистрации в Langame сопоставить по телефону.",
   },
@@ -218,6 +242,10 @@ const promoMechanicTemplates: PromoMechanicTemplate[] = [
     description: "Для слабых дней, клубов или часов с низкой загрузкой.",
     tradeoff:
       "Дает инфоповод и трафик, но требует лимита мест, правил участия и контроля бара.",
+    audienceHint: "Активные гости, команды, соцсети и клубы со свободной емкостью.",
+    primaryKpi: "регистрации, явка, игровые часы, бар, повторный визит",
+    controlPoint: "зафиксировать правила, лимит мест, ответственного и фактическую явку",
+    risk: "инфоповод без явки или без роста бара и повторных визитов",
     note:
       "Цель: турнир и загрузка слабого периода. Указать клуб, дату, лимит мест, правила участия и ответственного. Контроль: регистрации, явка, игровая выручка, бар и повторные визиты.",
   },
@@ -232,6 +260,10 @@ const promoMechanicTemplates: PromoMechanicTemplate[] = [
     description: "Для активных гостей, которые могут привести нового игрока.",
     tradeoff:
       "Может привести новых гостей, но нужна ручная проверка, чтобы не раздать выгоду самому себе.",
+    audienceHint: "Лояльные гости, команды и гости с частыми визитами.",
+    primaryKpi: "новые гости, повторные визиты, подтвержденные рекомендации",
+    controlPoint: "проверить телефон приглашенного, первый визит и связь с рекомендателем",
+    risk: "саморефералы, дубли телефонов и выгода без нового гостя",
     note:
       "Цель: повторный визит и новый гость через рекомендацию. Правило: выгода только после фактического визита приглашенного гостя. Контроль: телефон приглашенного, дата визита, клуб и ответственный.",
   },
@@ -246,6 +278,10 @@ const promoMechanicTemplates: PromoMechanicTemplate[] = [
     description: "Для гостей с высоким оборотом, командных визитов и потенциала бара.",
     tradeoff:
       "Нужно не снижать маржу без причины: оффер должен развивать чек, бар или бронирование.",
+    audienceHint: "TOP-гости по деньгам, частоте визитов, командам и броням.",
+    primaryKpi: "выручка на гостя, бар, бронь, повторный визит",
+    controlPoint: "зафиксировать персональный повод, ответ и изменение чека",
+    risk: "персональная скидка без роста поведения или маржи",
     note:
       "Цель: развить TOP гостя. Предложить персональный повод: бронь, бар-комбо, турнир или командный визит. Контроль: контакт, ответ, визит, общий чек и бар.",
   },
@@ -375,7 +411,7 @@ export function MarketingCampaignsPanel({
       channel: template.channel,
       mechanic: template.mechanic,
       budget: template.budget,
-      note: template.note,
+      note: buildMechanicTemplateNote(template),
     }));
   }
 
@@ -946,6 +982,21 @@ function PromoMechanicsBuilder({
             <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
               {selectedTemplate.tradeoff}
             </p>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              <MechanicDecisionItem
+                label="Кому"
+                value={selectedTemplate.audienceHint}
+              />
+              <MechanicDecisionItem
+                label="KPI"
+                value={selectedTemplate.primaryKpi}
+              />
+              <MechanicDecisionItem
+                label="Контроль"
+                value={selectedTemplate.controlPoint}
+              />
+              <MechanicDecisionItem label="Риск" value={selectedTemplate.risk} />
+            </div>
           </div>
         </div>
 
@@ -1156,6 +1207,25 @@ function ToggleDraftField({
         className="h-4 w-4 accent-emerald-500"
       />
     </label>
+  );
+}
+
+function MechanicDecisionItem({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900">
+      <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+        {label}
+      </p>
+      <p className="mt-1 text-sm leading-5 text-zinc-700 dark:text-zinc-300">
+        {value}
+      </p>
+    </div>
   );
 }
 
@@ -1481,6 +1551,16 @@ function buildPromoBundleVerdict(
       "Цена, лимит, срок, маржа и антифрод выглядят достаточно понятно для ручного запуска через CRM-задачу.",
     checks,
   };
+}
+
+function buildMechanicTemplateNote(template: PromoMechanicTemplate) {
+  return [
+    template.note,
+    `Кому: ${template.audienceHint}.`,
+    `KPI: ${template.primaryKpi}.`,
+    `Контроль: ${template.controlPoint}.`,
+    `Риск: ${template.risk}.`,
+  ].join(" ");
 }
 
 function buildPromoBundleNote(

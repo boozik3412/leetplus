@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import type { GuestAudience, GuestCrmUser } from "@/lib/guests";
 import type {
   MarketingCampaign,
@@ -368,6 +369,7 @@ export function MarketingCampaignsPanel({
   );
   const [bundleDraft, setBundleDraft] =
     useState<PromoBundleDraft>(emptyBundleDraft);
+  const [bundleApplyNotice, setBundleApplyNotice] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pendingTaskCampaignId, setPendingTaskCampaignId] = useState<
     string | null
@@ -434,10 +436,12 @@ export function MarketingCampaignsPanel({
     const campaign = (await response.json()) as MarketingCampaign;
     setRows((current) => [campaign, ...current]);
     setForm(emptyForm);
+    setBundleApplyNotice(false);
     setIsSubmitting(false);
   }
 
   function applyTemplate(template: PromoMechanicTemplate) {
+    setBundleApplyNotice(false);
     setForm((current) => ({
       ...current,
       goal: template.goal,
@@ -467,6 +471,12 @@ export function MarketingCampaignsPanel({
       budget: String(Math.round(bundleEconomics.discountBudget)),
       note,
     }));
+    setBundleApplyNotice(true);
+    window.requestAnimationFrame(() => {
+      document
+        .getElementById("campaign-form")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
   }
 
   async function updateStatus(
@@ -552,11 +562,16 @@ export function MarketingCampaignsPanel({
         bundleVerdict={bundleVerdict}
         onSelectTemplate={setSelectedTemplateId}
         onApplyTemplate={applyTemplate}
-        onBundleDraftChange={setBundleDraft}
+        bundleApplyNotice={bundleApplyNotice}
+        onBundleDraftChange={(draft) => {
+          setBundleApplyNotice(false);
+          setBundleDraft(draft);
+        }}
         onApplyBundle={applyBundleDraft}
       />
 
       <form
+        id="campaign-form"
         onSubmit={createCampaign}
         className="grid gap-4 border-b border-zinc-200 p-4 dark:border-zinc-800 lg:grid-cols-12"
       >
@@ -951,6 +966,7 @@ function PromoMechanicsBuilder({
   bundleDraft,
   bundleEconomics,
   bundleVerdict,
+  bundleApplyNotice,
   onSelectTemplate,
   onApplyTemplate,
   onBundleDraftChange,
@@ -961,6 +977,7 @@ function PromoMechanicsBuilder({
   bundleDraft: PromoBundleDraft;
   bundleEconomics: PromoBundleEconomics;
   bundleVerdict: PromoBundleVerdict;
+  bundleApplyNotice: boolean;
   onSelectTemplate: (id: string) => void;
   onApplyTemplate: (template: PromoMechanicTemplate) => void;
   onBundleDraftChange: (draft: PromoBundleDraft) => void;
@@ -1070,9 +1087,19 @@ function PromoMechanicsBuilder({
               onClick={onApplyBundle}
               className="inline-flex min-h-10 items-center justify-center rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
             >
-              Собрать кампанию
+              Перенести в кампанию
             </button>
           </div>
+          <p className="mt-3 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm leading-6 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300">
+            Настройте состав и экономику набора, затем перенесите расчет в
+            форму кампании. После переноса останется выбрать группу, период и
+            сохранить черновик.
+          </p>
+          {bundleApplyNotice ? (
+            <p className="mt-3 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-semibold leading-6 text-emerald-800 dark:border-emerald-500/50 dark:bg-emerald-500/10 dark:text-emerald-200">
+              Промо-набор перенесен в форму кампании выше.
+            </p>
+          ) : null}
 
           <div className="mt-4 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
             <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
@@ -1316,19 +1343,73 @@ function TextDraftField({
 }
 
 function FieldTooltip({ text }: { text: string }) {
+  const triggerRef = useRef<HTMLSpanElement | null>(null);
+  const [position, setPosition] = useState<{
+    left: number;
+    top: number;
+    placement: "top" | "bottom";
+  } | null>(null);
+
+  function showTooltip() {
+    const trigger = triggerRef.current;
+
+    if (!trigger) {
+      return;
+    }
+
+    const rect = trigger.getBoundingClientRect();
+    const width = Math.min(280, window.innerWidth - 24);
+    const margin = 12;
+    const estimatedHeight = 128;
+    const left = Math.min(
+      Math.max(rect.left + rect.width / 2 - width / 2, margin),
+      window.innerWidth - width - margin,
+    );
+    const hasSpaceBelow =
+      rect.bottom + estimatedHeight + margin <= window.innerHeight;
+
+    setPosition({
+      left,
+      top: hasSpaceBelow ? rect.bottom + 8 : Math.max(margin, rect.top - 8),
+      placement: hasSpaceBelow ? "bottom" : "top",
+    });
+  }
+
   return (
-    <span className="group relative inline-flex">
+    <span className="inline-flex">
       <span
+        ref={triggerRef}
         tabIndex={0}
         title={text}
         aria-label={text}
+        onFocus={showTooltip}
+        onBlur={() => setPosition(null)}
+        onMouseEnter={showTooltip}
+        onMouseLeave={() => setPosition(null)}
         className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full border border-zinc-300 text-[10px] font-bold leading-none text-zinc-500 outline-none transition hover:border-emerald-400 hover:text-emerald-500 focus:border-emerald-400 focus:text-emerald-500 dark:border-zinc-700 dark:text-zinc-400"
       >
         ?
       </span>
-      <span className="pointer-events-none absolute left-1/2 top-5 z-30 hidden w-64 -translate-x-1/2 rounded-lg border border-zinc-200 bg-white p-3 text-left text-xs font-medium normal-case leading-5 tracking-normal text-zinc-700 shadow-xl group-hover:block group-focus-within:block dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200">
-        {text}
-      </span>
+      {position
+        ? createPortal(
+            <span
+              role="tooltip"
+              style={{
+                left: position.left,
+                top: position.top,
+                width: Math.min(280, window.innerWidth - 24),
+                transform:
+                  position.placement === "top"
+                    ? "translateY(-100%)"
+                    : undefined,
+              }}
+              className="pointer-events-none fixed z-[1000] rounded-lg border border-zinc-200 bg-white p-3 text-left text-xs font-medium normal-case leading-5 tracking-normal text-zinc-700 shadow-xl dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+            >
+              {text}
+            </span>,
+            document.body,
+          )
+        : null}
     </span>
   );
 }
@@ -1627,7 +1708,7 @@ function buildPromoBundleVerdict(
       checks: [
         "Добавьте стоимость игры, бара или сервиса.",
         "Промо-цена должна быть больше 0 руб.",
-        "После правки нажмите «Собрать кампанию».",
+        "После правки нажмите «Перенести в кампанию».",
       ],
     };
   }

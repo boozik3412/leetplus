@@ -7,6 +7,7 @@ import type {
   MarketingCampaign,
   MarketingCampaignGoal,
   MarketingCampaignStatus,
+  MarketingMechanicConfig,
 } from "@/lib/marketing";
 import type { Store } from "@/lib/stores";
 
@@ -18,6 +19,7 @@ type CampaignFormState = {
   ownerUserId: string;
   channel: string;
   mechanic: string;
+  mechanicConfig: MarketingMechanicConfig | null;
   periodFrom: string;
   periodTo: string;
   dueAt: string;
@@ -295,6 +297,7 @@ const emptyForm: CampaignFormState = {
   ownerUserId: "",
   channel: "CRM-задача",
   mechanic: "Персональное предложение",
+  mechanicConfig: null,
   periodFrom: "",
   periodTo: "",
   dueAt: "",
@@ -410,6 +413,7 @@ export function MarketingCampaignsPanel({
       name: template.name,
       channel: template.channel,
       mechanic: template.mechanic,
+      mechanicConfig: buildMechanicTemplateConfig(template),
       budget: template.budget,
       note: buildMechanicTemplateNote(template),
     }));
@@ -424,6 +428,11 @@ export function MarketingCampaignsPanel({
       name: "Промо-набор: игра + бар",
       channel: "CRM-задача",
       mechanic: "Промо-набор",
+      mechanicConfig: buildPromoBundleConfig(
+        bundleDraft,
+        bundleEconomics,
+        bundleVerdict,
+      ),
       budget: String(Math.round(bundleEconomics.discountBudget)),
       note,
     }));
@@ -527,6 +536,7 @@ export function MarketingCampaignsPanel({
               setForm((current) => ({
                 ...current,
                 goal: event.target.value as MarketingCampaignGoal,
+                mechanicConfig: null,
               }))
             }
             className={fieldClassName}
@@ -615,6 +625,7 @@ export function MarketingCampaignsPanel({
               setForm((current) => ({
                 ...current,
                 mechanic: event.target.value,
+                mechanicConfig: null,
               }))
             }
             className={fieldClassName}
@@ -827,6 +838,12 @@ export function MarketingCampaignsPanel({
                       <CompactInfo
                         label="Механика"
                         value={campaign.mechanic ?? "не выбрана"}
+                      />
+                      <CompactInfo
+                        label="Сценарий"
+                        value={campaignMechanicConfigLabel(
+                          campaign.mechanicConfig,
+                        )}
                       />
                       <CompactInfo
                         label="Бюджет"
@@ -1563,6 +1580,23 @@ function buildMechanicTemplateNote(template: PromoMechanicTemplate) {
   ].join(" ");
 }
 
+function buildMechanicTemplateConfig(
+  template: PromoMechanicTemplate,
+): MarketingMechanicConfig {
+  return {
+    kind: "template",
+    templateId: template.id,
+    title: template.title,
+    goal: template.goal,
+    channel: template.channel,
+    mechanic: template.mechanic,
+    audienceHint: template.audienceHint,
+    primaryKpi: template.primaryKpi,
+    controlPoint: template.controlPoint,
+    risk: template.risk,
+  };
+}
+
 function buildPromoBundleNote(
   draft: PromoBundleDraft,
   economics: PromoBundleEconomics,
@@ -1602,6 +1636,35 @@ function buildPromoBundleNote(
   ].join(" ");
 }
 
+function buildPromoBundleConfig(
+  draft: PromoBundleDraft,
+  economics: PromoBundleEconomics,
+  verdict: PromoBundleVerdict,
+): MarketingMechanicConfig {
+  return {
+    kind: "promo_bundle",
+    bundle: {
+      gamePrice: parseMoney(draft.gamePrice),
+      barPrice: parseMoney(draft.barPrice),
+      servicePrice: parseMoney(draft.servicePrice),
+      discount: parseMoney(draft.discount),
+      cost: parseMoney(draft.cost),
+      expectedUses: Math.round(parseMoney(draft.expectedUses)),
+      minSpend: parseMoney(draft.minSpend),
+      validityDays: Math.round(parseMoney(draft.validityDays)),
+      onePerGuest: draft.onePerGuest,
+      requiresApproval: draft.requiresApproval,
+      noStacking: draft.noStacking,
+    },
+    economics,
+    verdict: {
+      tone: verdict.tone,
+      title: verdict.title,
+      checks: verdict.checks,
+    },
+  };
+}
+
 function cleanPayload(form: CampaignFormState) {
   return {
     ...form,
@@ -1613,6 +1676,7 @@ function cleanPayload(form: CampaignFormState) {
     dueAt: form.dueAt || null,
     budget: form.budget || null,
     name: form.name || null,
+    mechanicConfig: form.mechanicConfig,
     note: form.note || null,
   };
 }
@@ -1639,6 +1703,22 @@ function campaignMatchesFilter(
   }
 
   return campaign.status === filter;
+}
+
+function campaignMechanicConfigLabel(config: MarketingMechanicConfig | null) {
+  if (!config) {
+    return "заметка";
+  }
+
+  if (config.kind === "promo_bundle") {
+    return "промо-набор";
+  }
+
+  if (config.kind === "template" && typeof config.title === "string") {
+    return config.title;
+  }
+
+  return "структурная механика";
 }
 
 function goalLabel(goal: MarketingCampaignGoal) {

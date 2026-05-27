@@ -412,6 +412,7 @@ function CampaignPlan({ campaign }: { campaign: MarketingCampaign }) {
     { label: "Группа", value: campaign.audience?.name ?? "не выбрана" },
     { label: "Канал", value: campaign.channel ?? "не выбран" },
     { label: "Механика", value: campaign.mechanic ?? "не выбрана" },
+    { label: "Сценарий", value: campaignMechanicConfigLabel(campaign) },
     { label: "Ответственный", value: campaign.owner?.displayName ?? "не назначен" },
     { label: "Период", value: periodLabel(campaign.periodFrom, campaign.periodTo) },
     { label: "Срок", value: formatDate(campaign.dueAt) },
@@ -457,6 +458,24 @@ function CampaignPlan({ campaign }: { campaign: MarketingCampaign }) {
       </div>
     </section>
   );
+}
+
+function campaignMechanicConfigLabel(campaign: MarketingCampaign) {
+  const config = campaign.mechanicConfig;
+
+  if (!config) {
+    return "текстовая заметка";
+  }
+
+  if (config.kind === "promo_bundle") {
+    return "структурный промо-набор";
+  }
+
+  if (config.kind === "template" && typeof config.title === "string") {
+    return config.title;
+  }
+
+  return "структурная механика";
 }
 
 function ConsentCard({ campaign }: { campaign: MarketingCampaign }) {

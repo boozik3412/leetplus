@@ -484,6 +484,7 @@ Goal: let a manager create a simple campaign from a business signal and control 
 - Done: campaign creation now exposes the group route directly in UI: select a saved group, open CRM groups, or create a new group from guest filters before launch.
 - Done: promo-bundle builder now has a commercial readiness check before launch: blocking issues, warning checks, revenue/margin/discount budget, minimum check, validity, and preview of the campaign note.
 - Done: mechanic templates now explain business fit before launch: target group, KPI, control point, and risk; applying a template writes this logic into the campaign note.
+- Done: marketing campaigns now persist structured mechanic configuration in `mechanicConfig` JSON: applied template metadata or promo-bundle economics/limits/readiness are saved separately from the human-readable note and shown in campaign cards/detail plan.
 - Next: validate the manual promo-bundle and mechanic workflows on real use cases, then persist promo-bundle/mechanic entities when repeated scenarios stabilize.
 - Done: let the user choose a saved guest group or create one from guest filters.
 - Add campaign fields: goal, period, clubs, target group, channel, responsible user, deadline, note, status.

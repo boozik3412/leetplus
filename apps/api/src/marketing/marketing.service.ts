@@ -50,6 +50,7 @@ export type MarketingCampaignDto = {
   status?: string | null;
   channel?: string | null;
   mechanic?: string | null;
+  mechanicConfig?: unknown;
   periodFrom?: string | null;
   periodTo?: string | null;
   dueAt?: string | null;
@@ -94,6 +95,7 @@ export type MarketingCampaign = {
   status: MarketingCampaignStatus;
   channel: string | null;
   mechanic: string | null;
+  mechanicConfig: Prisma.JsonValue | null;
   periodFrom: string | null;
   periodTo: string | null;
   dueAt: string | null;
@@ -733,6 +735,7 @@ export class MarketingService {
         status,
         channel: normalizeText(dto.channel, 80),
         mechanic: normalizeText(dto.mechanic, 80),
+        mechanicConfig: normalizeMechanicConfig(dto.mechanicConfig),
         periodFrom: parseOptionalDate(dto.periodFrom),
         periodTo: parseOptionalDate(dto.periodTo),
         dueAt: parseOptionalDate(dto.dueAt),
@@ -801,6 +804,10 @@ export class MarketingService {
 
     if (hasOwn(dto, 'mechanic')) {
       data.mechanic = normalizeText(dto.mechanic, 80);
+    }
+
+    if (hasOwn(dto, 'mechanicConfig')) {
+      data.mechanicConfig = normalizeMechanicConfig(dto.mechanicConfig);
     }
 
     if (hasOwn(dto, 'periodFrom')) {
@@ -2099,6 +2106,7 @@ export class MarketingService {
       status: resolveStatus(row.status),
       channel: row.channel,
       mechanic: row.mechanic,
+      mechanicConfig: row.mechanicConfig ?? null,
       periodFrom: row.periodFrom?.toISOString() ?? null,
       periodTo: row.periodTo?.toISOString() ?? null,
       dueAt: row.dueAt?.toISOString() ?? null,
@@ -2146,6 +2154,35 @@ function requireText(value: unknown, label: string, maxLength: number) {
   }
 
   return text;
+}
+
+function normalizeMechanicConfig(
+  value: unknown,
+): Prisma.InputJsonValue | typeof Prisma.JsonNull {
+  if (value === null || value === undefined) {
+    return Prisma.JsonNull;
+  }
+
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new BadRequestException('Mechanic config must be an object');
+  }
+
+  try {
+    const json = JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+    const serialized = JSON.stringify(json);
+
+    if (serialized.length > 8000) {
+      throw new BadRequestException('Mechanic config is too large');
+    }
+
+    return json;
+  } catch (error) {
+    if (error instanceof BadRequestException) {
+      throw error;
+    }
+
+    throw new BadRequestException('Mechanic config must be valid JSON');
+  }
 }
 
 function resolveGoal(value: unknown): MarketingCampaignGoal {

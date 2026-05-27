@@ -744,6 +744,7 @@ model MarketingCampaign {
   status          String   @default("DRAFT")
   channel         String?
   mechanic        String?
+  mechanicConfig  Json?
   periodFrom      DateTime?
   periodTo        DateTime?
   dueAt           DateTime?

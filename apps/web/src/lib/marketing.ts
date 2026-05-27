@@ -15,6 +15,8 @@ export type MarketingCampaignStatus =
   | "FINISHED"
   | "CANCELED";
 
+export type MarketingMechanicConfig = Record<string, unknown>;
+
 export type MarketingCampaignConsentCoverage = {
   targetTotal: number;
   phoneGranted: number;
@@ -38,6 +40,7 @@ export type MarketingCampaign = {
   status: MarketingCampaignStatus;
   channel: string | null;
   mechanic: string | null;
+  mechanicConfig: MarketingMechanicConfig | null;
   periodFrom: string | null;
   periodTo: string | null;
   dueAt: string | null;

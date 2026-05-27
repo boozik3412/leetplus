@@ -1477,10 +1477,10 @@ function PromoMechanicsBuilder({
                       });
                     }}
                     className={[
-                      "min-h-24 rounded-lg border p-3 text-left transition",
+                      "min-h-24 rounded-lg border p-3 text-left transition duration-200 hover:-translate-y-0.5 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/30",
                       isActive
-                        ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-500/10"
-                        : "border-zinc-200 bg-zinc-50 hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-900",
+                        ? "border-emerald-500 bg-emerald-50 shadow-sm dark:bg-emerald-500/10"
+                        : "border-zinc-200 bg-zinc-50 hover:border-emerald-400 hover:bg-white dark:border-zinc-800 dark:bg-zinc-900 dark:hover:bg-zinc-900/80",
                     ].join(" ")}
                   >
                     <span className="text-sm font-semibold text-zinc-950 dark:text-white">
@@ -1494,7 +1494,7 @@ function PromoMechanicsBuilder({
               })}
             </div>
             <div ref={bundleCatalogRef} className="relative mt-3">
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900">
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 transition duration-200 hover:border-emerald-400/60 hover:bg-white hover:shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-emerald-500/50 dark:hover:bg-zinc-900/80">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
@@ -1514,12 +1514,10 @@ function PromoMechanicsBuilder({
                   type="button"
                   aria-expanded={isBundleCatalogOpen}
                   onClick={() => setIsBundleCatalogOpen((isOpen) => !isOpen)}
-                  className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-4 text-sm font-semibold text-zinc-800 transition hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:border-emerald-500 dark:hover:text-emerald-300"
+                  className="group inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-4 text-sm font-semibold text-zinc-800 transition duration-200 hover:-translate-y-0.5 hover:border-emerald-400 hover:text-emerald-600 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/30 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:border-emerald-500 dark:hover:text-emerald-300"
                 >
                   Открыть каталог
-                  <span aria-hidden="true" className="text-xs">
-                    {isBundleCatalogOpen ? "▲" : "▼"}
-                  </span>
+                  <DisclosureChevron isOpen={isBundleCatalogOpen} />
                 </button>
               </div>
 
@@ -1539,7 +1537,7 @@ function PromoMechanicsBuilder({
                       <button
                         type="button"
                         onClick={() => setIsBundleCatalogOpen(false)}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-200 text-sm font-semibold text-zinc-500 transition hover:border-zinc-300 hover:text-zinc-900 dark:border-zinc-700 dark:text-zinc-400 dark:hover:text-white"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-200 text-sm font-semibold text-zinc-500 transition hover:border-emerald-400 hover:bg-zinc-50 hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/30 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-white"
                         aria-label="Закрыть каталог промо-наборов"
                       >
                         ×
@@ -1551,7 +1549,7 @@ function PromoMechanicsBuilder({
                         setBundleCatalogSearch(event.target.value)
                       }
                       placeholder="Поиск по названию, типу или заметке"
-                      className="mt-3 h-10 w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-950 outline-none transition placeholder:text-zinc-400 focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white"
+                      className="mt-3 h-10 w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-950 outline-none transition placeholder:text-zinc-400 hover:border-zinc-300 hover:bg-white focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white dark:hover:border-zinc-600 dark:hover:bg-zinc-950"
                     />
                   </div>
                   <div className="max-h-96 overflow-y-auto p-2">
@@ -1843,10 +1841,10 @@ function PromoBundlePartCard({
       type="button"
       onClick={onClick}
       className={[
-        "rounded-lg border p-3 text-left transition",
+        "rounded-lg border p-3 text-left transition duration-200 hover:-translate-y-0.5 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/30",
         isActive
-          ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-500/10"
-          : "border-zinc-200 bg-zinc-50 hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-900",
+          ? "border-emerald-500 bg-emerald-50 shadow-sm dark:bg-emerald-500/10"
+          : "border-zinc-200 bg-zinc-50 hover:border-emerald-400 hover:bg-white dark:border-zinc-800 dark:bg-zinc-900 dark:hover:bg-zinc-900/80",
       ].join(" ")}
     >
       <span className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
@@ -1887,10 +1885,10 @@ function PromoBundleCatalogItem({
   return (
     <div
       className={[
-        "grid gap-3 rounded-lg border p-3 transition md:grid-cols-[minmax(0,1fr)_auto] md:items-center",
+        "grid gap-3 rounded-lg border p-3 transition duration-200 hover:-translate-y-0.5 hover:shadow-sm md:grid-cols-[minmax(0,1fr)_auto] md:items-center",
         isActive
-          ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-500/10"
-          : "border-zinc-200 bg-zinc-50 hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-900",
+          ? "border-emerald-500 bg-emerald-50 shadow-sm dark:bg-emerald-500/10"
+          : "border-zinc-200 bg-zinc-50 hover:border-emerald-400 hover:bg-white dark:border-zinc-800 dark:bg-zinc-900 dark:hover:bg-zinc-900/80",
       ].join(" ")}
     >
       <div className="min-w-0">
@@ -1915,14 +1913,14 @@ function PromoBundleCatalogItem({
         <button
           type="button"
           onClick={onLoadAsBasis}
-          className="inline-flex min-h-9 items-center justify-center rounded-lg border border-zinc-200 bg-white px-3 text-xs font-semibold text-zinc-700 transition hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:border-emerald-500 dark:hover:text-emerald-300"
+          className="inline-flex min-h-9 items-center justify-center rounded-lg border border-zinc-200 bg-white px-3 text-xs font-semibold text-zinc-700 transition duration-200 hover:-translate-y-0.5 hover:border-emerald-400 hover:text-emerald-600 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/30 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:border-emerald-500 dark:hover:text-emerald-300"
         >
           Как основу
         </button>
         <button
           type="button"
           onClick={onUse}
-          className="inline-flex min-h-9 items-center justify-center rounded-lg bg-emerald-500 px-3 text-xs font-semibold text-zinc-950 transition hover:bg-emerald-400"
+          className="inline-flex min-h-9 items-center justify-center rounded-lg bg-emerald-500 px-3 text-xs font-semibold text-zinc-950 transition duration-200 hover:-translate-y-0.5 hover:bg-emerald-400 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/30"
         >
           Выбрать
         </button>
@@ -1955,6 +1953,28 @@ function NumericDraftField({
         className={fieldClassName}
       />
     </label>
+  );
+}
+
+function DisclosureChevron({ isOpen }: { isOpen: boolean }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={[
+        "h-4 w-4 translate-y-px transition-transform duration-200",
+        isOpen ? "rotate-180" : "",
+      ].join(" ")}
+      fill="none"
+      viewBox="0 0 24 24"
+    >
+      <path
+        d="m7 10 5 5 5-5"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="2"
+      />
+    </svg>
   );
 }
 
@@ -3000,4 +3020,4 @@ function storeLabel(storeIds: string[], stores: Store[]) {
 }
 
 const fieldClassName =
-  "min-h-11 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm text-zinc-950 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-800 dark:bg-zinc-950 dark:text-white";
+  "min-h-11 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm text-zinc-950 outline-none transition duration-200 hover:border-zinc-300 hover:bg-zinc-50 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-800 dark:bg-zinc-950 dark:text-white dark:hover:border-zinc-700 dark:hover:bg-zinc-900";

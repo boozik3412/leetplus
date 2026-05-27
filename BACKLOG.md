@@ -482,7 +482,8 @@ Goal: let a manager create a simple campaign from a business signal and control 
 - Done: campaign launch now has channel-specific consent policy: calls, messages, CRM contacts, in-club announcements, and public social posts show different contact rules, required consent, and exclusion reasons before execution.
 - Done: `/marketing` campaign cards now show compact launch readiness: group, channel, mechanic, contact access, responsible user/deadline, CRM task, progress bar, and the next missing step.
 - Done: campaign creation now exposes the group route directly in UI: select a saved group, open CRM groups, or create a new group from guest filters before launch.
-- Next: continue improving campaign execution prompts from real usage and persist promo-bundle/mechanic entities when the first manual workflows are validated.
+- Done: promo-bundle builder now has a commercial readiness check before launch: blocking issues, warning checks, revenue/margin/discount budget, minimum check, validity, and preview of the campaign note.
+- Next: validate the manual promo-bundle workflow on real use cases, then persist promo-bundle/mechanic entities when repeated scenarios stabilize.
 - Done: let the user choose a saved guest group or create one from guest filters.
 - Add campaign fields: goal, period, clubs, target group, channel, responsible user, deadline, note, status.
 - Done: improve generated CRM tasks with per-channel instructions and campaign detail links.
@@ -502,7 +503,7 @@ Acceptance criteria:
 Goal: help clubs create commercially sane promo offers.
 
 - Started: add promo bundle constructor with game time, bar products, hookah/services, discount, and price.
-- Show estimated revenue, margin, and cost where data exists.
+- Done: show estimated revenue, margin, cost risk, discount budget, launch readiness, and the note that will be saved into the campaign.
 - Started: add mechanic templates: second visit, weak hours, birthday/event, bar combo, tournament, referral, VIP/TOP guest.
 - Started: add limits: period, clubs, max uses, one per guest, minimum spend, group eligibility.
 - Started: add anti-fraud notes and manual approval before any automatic reward workflow.

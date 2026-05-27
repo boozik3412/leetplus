@@ -63,6 +63,13 @@ type PromoBundleEconomics = {
   discountBudget: number;
 };
 
+type PromoBundleVerdict = {
+  tone: "ready" | "warning" | "blocked";
+  title: string;
+  description: string;
+  checks: string[];
+};
+
 type CampaignStatusFilter = "ALL" | "ACTIVE" | MarketingCampaignStatus;
 
 type CampaignReadinessItem = {
@@ -305,6 +312,10 @@ export function MarketingCampaignsPanel({
     () => buildPromoBundleEconomics(bundleDraft),
     [bundleDraft],
   );
+  const bundleVerdict = useMemo(
+    () => buildPromoBundleVerdict(bundleDraft, bundleEconomics),
+    [bundleDraft, bundleEconomics],
+  );
 
   const summary = useMemo(
     () => ({
@@ -462,6 +473,7 @@ export function MarketingCampaignsPanel({
         selectedTemplateId={selectedTemplateId}
         bundleDraft={bundleDraft}
         bundleEconomics={bundleEconomics}
+        bundleVerdict={bundleVerdict}
         onSelectTemplate={setSelectedTemplateId}
         onApplyTemplate={applyTemplate}
         onBundleDraftChange={setBundleDraft}
@@ -854,6 +866,7 @@ function PromoMechanicsBuilder({
   selectedTemplateId,
   bundleDraft,
   bundleEconomics,
+  bundleVerdict,
   onSelectTemplate,
   onApplyTemplate,
   onBundleDraftChange,
@@ -863,11 +876,14 @@ function PromoMechanicsBuilder({
   selectedTemplateId: string;
   bundleDraft: PromoBundleDraft;
   bundleEconomics: PromoBundleEconomics;
+  bundleVerdict: PromoBundleVerdict;
   onSelectTemplate: (id: string) => void;
   onApplyTemplate: (template: PromoMechanicTemplate) => void;
   onBundleDraftChange: (draft: PromoBundleDraft) => void;
   onApplyBundle: () => void;
 }) {
+  const bundleNotePreview = buildPromoBundleNote(bundleDraft, bundleEconomics);
+
   return (
     <section className="border-b border-zinc-200 p-4 dark:border-zinc-800">
       <div className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(360px,1.05fr)]">
@@ -1086,6 +1102,11 @@ function PromoMechanicsBuilder({
               value={`${formatNumber(Math.round(parseMoney(bundleDraft.validityDays)))} дн.`}
             />
           </div>
+
+          <PromoBundleVerdictCard
+            verdict={bundleVerdict}
+            notePreview={bundleNotePreview}
+          />
         </div>
       </div>
     </section>
@@ -1147,6 +1168,69 @@ function PromoMetric({ label, value }: { label: string; value: string }) {
       <p className="mt-1 text-lg font-semibold text-zinc-950 dark:text-white">
         {value}
       </p>
+    </div>
+  );
+}
+
+function PromoBundleVerdictCard({
+  verdict,
+  notePreview,
+}: {
+  verdict: PromoBundleVerdict;
+  notePreview: string;
+}) {
+  const toneClass =
+    verdict.tone === "ready"
+      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+      : verdict.tone === "blocked"
+        ? "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300"
+        : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300";
+
+  return (
+    <div className="mt-4 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            Коммерческая проверка
+          </p>
+          <h4 className="mt-1 text-base font-semibold text-zinc-950 dark:text-white">
+            {verdict.title}
+          </h4>
+          <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+            {verdict.description}
+          </p>
+        </div>
+        <span
+          className={[
+            "rounded-full border px-3 py-1 text-xs font-bold uppercase tracking-wide",
+            toneClass,
+          ].join(" ")}
+        >
+          {verdict.tone === "ready"
+            ? "можно запускать"
+            : verdict.tone === "blocked"
+              ? "нужно исправить"
+              : "проверить"}
+        </span>
+      </div>
+      <div className="mt-3 grid gap-2 md:grid-cols-2">
+        {verdict.checks.map((check) => (
+          <div
+            key={check}
+            className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm leading-5 text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
+          >
+            {check}
+          </div>
+        ))}
+      </div>
+      <details className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900">
+        <summary className="cursor-pointer text-sm font-semibold text-zinc-950 dark:text-white">
+          Что попадет в заметку кампании
+        </summary>
+        <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+          {notePreview}
+        </p>
+      </details>
     </div>
   );
 }
@@ -1305,6 +1389,97 @@ function buildPromoBundleEconomics(
     margin,
     marginPercent,
     discountBudget,
+  };
+}
+
+function buildPromoBundleVerdict(
+  draft: PromoBundleDraft,
+  economics: PromoBundleEconomics,
+): PromoBundleVerdict {
+  const discount = parseMoney(draft.discount);
+  const costPerUse = parseMoney(draft.cost);
+  const minSpend = parseMoney(draft.minSpend);
+  const validityDays = Math.round(parseMoney(draft.validityDays));
+  const discountShare =
+    economics.basePrice > 0 ? (discount / economics.basePrice) * 100 : 0;
+
+  if (economics.basePrice <= 0 || economics.promoPrice <= 0) {
+    return {
+      tone: "blocked",
+      title: "Набор пока нельзя запускать",
+      description:
+        "Заполните состав и цену набора, чтобы кампания не ушла в CRM с нулевой ценой.",
+      checks: [
+        "Добавьте стоимость игры, бара или сервиса.",
+        "Промо-цена должна быть больше 0 руб.",
+        "После правки нажмите «Собрать кампанию».",
+      ],
+    };
+  }
+
+  if (economics.expectedUses <= 0) {
+    return {
+      tone: "blocked",
+      title: "Нужен лимит использований",
+      description:
+        "Без лимита нельзя оценить бюджет скидки и контролировать расход механики.",
+      checks: [
+        "Укажите лимит в штуках.",
+        "Оставьте «один на гостя», если акция персональная.",
+        "Для дорогих наборов включите ручное подтверждение.",
+      ],
+    };
+  }
+
+  if (economics.margin < 0) {
+    return {
+      tone: "blocked",
+      title: "Риск убыточной акции",
+      description:
+        "Оценочная маржа отрицательная. Перед запуском нужно поднять цену, снизить скидку или пересмотреть состав.",
+      checks: [
+        `Маржа: ${formatRubles(economics.margin)}.`,
+        `Скидочный бюджет: ${formatRubles(economics.discountBudget)}.`,
+        "Запускать только после ручного согласования.",
+      ],
+    };
+  }
+
+  const checks = [
+    `Оценочная выручка: ${formatRubles(economics.revenue)} при лимите ${formatNumber(
+      economics.expectedUses,
+    )} шт.`,
+    costPerUse > 0
+      ? `Маржа: ${formatRubles(economics.margin)}${
+          economics.marginPercent === null
+            ? ""
+            : ` (${formatPercent(economics.marginPercent)})`
+        }.`
+      : "Себестоимость не задана: маржа выглядит завышенной.",
+    minSpend > 0
+      ? `Минимальный чек: ${formatRubles(minSpend)}.`
+      : "Минимальный чек не задан: проверьте, не размоет ли акция средний чек.",
+    validityDays > 0
+      ? `Срок действия: ${formatNumber(validityDays)} дн.`
+      : "Срок действия не задан: ограничьте период вручную.",
+  ];
+
+  if (costPerUse <= 0 || minSpend <= 0 || discountShare > 35) {
+    return {
+      tone: "warning",
+      title: "Можно запускать после проверки условий",
+      description:
+        "Экономика не блокирует кампанию, но перед задачей в CRM нужно проверить себестоимость, минимальный чек и размер скидки.",
+      checks,
+    };
+  }
+
+  return {
+    tone: "ready",
+    title: "Набор готов к кампании",
+    description:
+      "Цена, лимит, срок, маржа и антифрод выглядят достаточно понятно для ручного запуска через CRM-задачу.",
+    checks,
   };
 }
 

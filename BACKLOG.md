@@ -499,7 +499,8 @@ Goal: let a manager create a simple campaign from a business signal and control 
 - Done: promo bundles now have a dedicated `/marketing/promo-bundles` workspace for catalog creation without loading campaign, CRM group, lead, or user context.
 - Done: `/marketing/promo-bundles` was simplified into a focused constructor/catalog: standalone launch block removed, existing bundles are visible in a compact list and can be loaded back into the constructor for correction.
 - Done: promo bundles now expose a compact structured passport for catalog rows and the constructor: composition, price, margin, limits, anti-fraud flags, and accounting readiness are available separately from the human-readable note.
-- Next: validate the catalog workflow on real promo cases, then connect bundle parts to actual assortment/service IDs and accounting write-off rules instead of relying only on text fields inside `mechanicConfig`.
+- Done: promo-bundle constructor now saves accounting links for both bundle parts: product/service/bonus/manual reference, product IDs when selected, write-off rule, and accounting note.
+- Next: validate real promo cases and turn saved product/service references into operational launch and write-off reports.
 - Done: let the user choose a saved guest group or create one from guest filters.
 - Add campaign fields: goal, period, clubs, target group, channel, responsible user, deadline, note, status.
 - Done: improve generated CRM tasks with per-channel instructions and campaign detail links.

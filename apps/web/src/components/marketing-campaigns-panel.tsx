@@ -21,6 +21,7 @@ import type {
   MarketingPromoBundleLaunch,
   MarketingPromoBundleLaunchStatus,
 } from "@/lib/marketing";
+import type { Product } from "@/lib/products";
 import type { Store } from "@/lib/stores";
 
 type CampaignFormState = {
@@ -75,6 +76,10 @@ type PromoBundleType =
 
 type PromoBundlePart = "first" | "second";
 
+type PromoBundleAccountingKind = "PRODUCT" | "SERVICE" | "BONUS" | "MANUAL";
+
+type PromoBundleWriteOffRule = "ON_REDEEM" | "ON_SALE" | "MANUAL";
+
 type PromoBundleDraft = {
   bundleType: PromoBundleType;
   gameItem: string;
@@ -91,6 +96,14 @@ type PromoBundleDraft = {
   onePerGuest: boolean;
   requiresApproval: boolean;
   noStacking: boolean;
+  firstAccountingKind: PromoBundleAccountingKind;
+  firstAccountingProductId: string;
+  firstAccountingReference: string;
+  secondAccountingKind: PromoBundleAccountingKind;
+  secondAccountingProductId: string;
+  secondAccountingReference: string;
+  writeOffRule: PromoBundleWriteOffRule;
+  accountingNote: string;
 };
 
 type PromoBundleTypeOption = {
@@ -475,6 +488,14 @@ const emptyBundleDraft: PromoBundleDraft = {
   onePerGuest: true,
   requiresApproval: true,
   noStacking: true,
+  firstAccountingKind: "SERVICE",
+  firstAccountingProductId: "",
+  firstAccountingReference: "",
+  secondAccountingKind: "PRODUCT",
+  secondAccountingProductId: "",
+  secondAccountingReference: "",
+  writeOffRule: "ON_REDEEM",
+  accountingNote: "",
 };
 
 const bundleFieldHints = {
@@ -500,7 +521,43 @@ const bundleFieldHints = {
     "Минимальный чек, при котором можно применить набор. Если не нужен, оставьте 0.",
   validityDays:
     "Сколько дней действует предложение после запуска или контакта с гостем.",
+  accountingReference:
+    "Внутренний код услуги, бонусной операции или ручная подсказка для администратора, если это не товар из ассортимента.",
+  writeOffRule:
+    "Когда учитывать расход по набору: при фактическом использовании, при продаже или только после ручной сверки.",
 };
+
+const accountingKindOptions: Array<{
+  value: PromoBundleAccountingKind;
+  label: string;
+}> = [
+  { value: "PRODUCT", label: "Товар из ассортимента" },
+  { value: "SERVICE", label: "Услуга / игровое время" },
+  { value: "BONUS", label: "Бонусная операция" },
+  { value: "MANUAL", label: "Ручной учет" },
+];
+
+const writeOffRuleOptions: Array<{
+  value: PromoBundleWriteOffRule;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "ON_REDEEM",
+    label: "При использовании",
+    description: "Расход фиксируется, когда гость реально использовал набор.",
+  },
+  {
+    value: "ON_SALE",
+    label: "При продаже",
+    description: "Расход относится на момент продажи набора.",
+  },
+  {
+    value: "MANUAL",
+    label: "Ручная сверка",
+    description: "Администратор сверяет выдачу и списание отдельно.",
+  },
+];
 
 export function MarketingCampaignsPanel({
   campaigns,
@@ -1403,8 +1460,10 @@ export function MarketingCampaignsPanel({
 
 export function MarketingPromoBundlesWorkspace({
   promoBundles,
+  productOptions = [],
 }: {
   promoBundles: MarketingPromoBundle[];
+  productOptions?: Product[];
 }) {
   const [savedPromoBundles, setSavedPromoBundles] = useState(promoBundles);
   const [selectedBundleId, setSelectedBundleId] = useState<string | null>(
@@ -1438,12 +1497,17 @@ export function MarketingPromoBundlesWorkspace({
 
     setIsSavingBundle(true);
     setError(null);
-    const note = buildPromoBundleNote(bundleDraft, bundleEconomics);
+    const note = buildPromoBundleNote(
+      bundleDraft,
+      bundleEconomics,
+      productOptions,
+    );
     const bundleType = getPromoBundleTypeOption(bundleDraft.bundleType);
     const mechanicConfig = buildPromoBundleConfig(
       bundleDraft,
       bundleEconomics,
       bundleVerdict,
+      productOptions,
     );
     const endpoint = selectedBundle
       ? `/api/marketing/promo-bundles/${selectedBundle.id}`
@@ -1539,6 +1603,7 @@ export function MarketingPromoBundlesWorkspace({
       <PromoMechanicsBuilder
         mode="catalog"
         showCatalogChooser={false}
+        productOptions={productOptions}
         bundleActionLabel={
           isEditingBundle ? "Сохранить изменения" : "Создать промо-набор"
         }
@@ -1708,6 +1773,7 @@ function PromoMechanicsBuilder({
   mode = "campaign",
   showCatalogChooser = true,
   bundleActionLabel,
+  productOptions = [],
   selectedTemplate,
   selectedTemplateId,
   promoBundles,
@@ -1726,6 +1792,7 @@ function PromoMechanicsBuilder({
   mode?: "campaign" | "catalog";
   showCatalogChooser?: boolean;
   bundleActionLabel?: string;
+  productOptions?: Product[];
   selectedTemplate: PromoMechanicTemplate;
   selectedTemplateId: string;
   promoBundles: MarketingPromoBundle[];
@@ -1742,10 +1809,15 @@ function PromoMechanicsBuilder({
   onApplyBundle: () => void | Promise<void>;
 }) {
   const isCatalogMode = mode === "catalog";
-  const bundleNotePreview = buildPromoBundleNote(bundleDraft, bundleEconomics);
+  const bundleNotePreview = buildPromoBundleNote(
+    bundleDraft,
+    bundleEconomics,
+    productOptions,
+  );
   const bundleStructure = promoBundleStructureFromDraft(
     bundleDraft,
     bundleEconomics,
+    productOptions,
   );
   const [activeBundlePart, setActiveBundlePart] =
     useState<PromoBundlePart>("first");
@@ -2025,6 +2097,7 @@ function PromoMechanicsBuilder({
                         bundleType: option.id,
                         gameItem: option.firstDefault,
                         barItems: option.secondDefault,
+                        ...defaultAccountingForBundleType(option.id),
                       });
                     }}
                     className={[
@@ -2337,6 +2410,13 @@ function PromoMechanicsBuilder({
             </div>
           </div>
 
+          <PromoBundleAccountingPanel
+            bundleType={bundleType}
+            draft={bundleDraft}
+            productOptions={productOptions}
+            onChange={onBundleDraftChange}
+          />
+
           <div className="mt-4 grid gap-2 sm:grid-cols-4">
             <PromoMetric
               label="Цена"
@@ -2382,6 +2462,209 @@ function PromoMechanicsBuilder({
         </div>
       </div>
     </section>
+  );
+}
+
+function PromoBundleAccountingPanel({
+  bundleType,
+  draft,
+  productOptions,
+  onChange,
+}: {
+  bundleType: PromoBundleTypeOption;
+  draft: PromoBundleDraft;
+  productOptions: Product[];
+  onChange: (draft: PromoBundleDraft) => void;
+}) {
+  const sortedProducts = useMemo(
+    () =>
+      [...productOptions].sort((left, right) => {
+        if (left.isOperationalActive !== right.isOperationalActive) {
+          return left.isOperationalActive ? -1 : 1;
+        }
+
+        return left.name.localeCompare(right.name, "ru-RU");
+      }),
+    [productOptions],
+  );
+  const selectedWriteOffRule =
+    writeOffRuleOptions.find((option) => option.value === draft.writeOffRule) ??
+    writeOffRuleOptions[0];
+
+  return (
+    <div className="mt-4 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            Учетные привязки
+          </p>
+          <h4 className="mt-1 text-base font-semibold text-zinc-950 dark:text-white">
+            Свяжите части набора с товаром, услугой или бонусом
+          </h4>
+        </div>
+        <p className="max-w-xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+          Эти поля не запускают автоматическое списание в Langame, но сохраняют
+          понятную основу для будущего учета товаров и услуг.
+        </p>
+      </div>
+
+      <div className="mt-3 grid gap-3 lg:grid-cols-2">
+        <PromoBundleAccountingPart
+          title={bundleType.firstLabel}
+          kind={draft.firstAccountingKind}
+          productId={draft.firstAccountingProductId}
+          reference={draft.firstAccountingReference}
+          productOptions={sortedProducts}
+          onKindChange={(kind) =>
+            onChange({
+              ...draft,
+              firstAccountingKind: kind,
+              firstAccountingProductId: "",
+              firstAccountingReference: "",
+            })
+          }
+          onProductIdChange={(productId) =>
+            onChange({ ...draft, firstAccountingProductId: productId })
+          }
+          onReferenceChange={(reference) =>
+            onChange({ ...draft, firstAccountingReference: reference })
+          }
+        />
+        <PromoBundleAccountingPart
+          title={bundleType.secondLabel}
+          kind={draft.secondAccountingKind}
+          productId={draft.secondAccountingProductId}
+          reference={draft.secondAccountingReference}
+          productOptions={sortedProducts}
+          onKindChange={(kind) =>
+            onChange({
+              ...draft,
+              secondAccountingKind: kind,
+              secondAccountingProductId: "",
+              secondAccountingReference: "",
+            })
+          }
+          onProductIdChange={(productId) =>
+            onChange({ ...draft, secondAccountingProductId: productId })
+          }
+          onReferenceChange={(reference) =>
+            onChange({ ...draft, secondAccountingReference: reference })
+          }
+        />
+      </div>
+
+      <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(240px,0.45fr)_minmax(0,1fr)]">
+        <label className="block space-y-1">
+          <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            Правило списания
+            <FieldTooltip text={bundleFieldHints.writeOffRule} />
+          </span>
+          <select
+            value={draft.writeOffRule}
+            onChange={(event) =>
+              onChange({
+                ...draft,
+                writeOffRule: event.target.value as PromoBundleWriteOffRule,
+              })
+            }
+            className={fieldClassName}
+          >
+            {writeOffRuleOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <span className="block text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+            {selectedWriteOffRule.description}
+          </span>
+        </label>
+        <TextDraftField
+          label="Комментарий для учета"
+          value={draft.accountingNote}
+          placeholder="Например: списать напиток по факту выдачи, игровое время сверить по смене"
+          onChange={(accountingNote) => onChange({ ...draft, accountingNote })}
+        />
+      </div>
+    </div>
+  );
+}
+
+function PromoBundleAccountingPart({
+  title,
+  kind,
+  productId,
+  reference,
+  productOptions,
+  onKindChange,
+  onProductIdChange,
+  onReferenceChange,
+}: {
+  title: string;
+  kind: PromoBundleAccountingKind;
+  productId: string;
+  reference: string;
+  productOptions: Product[];
+  onKindChange: (kind: PromoBundleAccountingKind) => void;
+  onProductIdChange: (productId: string) => void;
+  onReferenceChange: (reference: string) => void;
+}) {
+  const isProduct = kind === "PRODUCT";
+
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/70">
+      <p className="text-sm font-semibold text-zinc-950 dark:text-white">
+        {title}
+      </p>
+      <div className="mt-3 grid gap-2">
+        <label className="block space-y-1">
+          <span className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            Тип привязки
+          </span>
+          <select
+            value={kind}
+            onChange={(event) =>
+              onKindChange(event.target.value as PromoBundleAccountingKind)
+            }
+            className={fieldClassName}
+          >
+            {accountingKindOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {isProduct ? (
+          <label className="block space-y-1">
+            <span className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              Товар
+            </span>
+            <select
+              value={productId}
+              onChange={(event) => onProductIdChange(event.target.value)}
+              className={fieldClassName}
+            >
+              <option value="">Выберите товар</option>
+              {productOptions.map((product) => (
+                <option key={product.id} value={product.id}>
+                  {productAccountingLabel(product)}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <TextDraftField
+            label={accountingReferenceLabel(kind)}
+            tooltip={bundleFieldHints.accountingReference}
+            value={reference}
+            placeholder={accountingReferencePlaceholder(kind)}
+            onChange={onReferenceChange}
+          />
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -3061,7 +3344,13 @@ function PromoBundleStructureStrip({
   const missing =
     structure.accounting.missingFields.length > 0
       ? `Уточнить: ${structure.accounting.missingFields.join(", ")}`
-      : "Данных достаточно для ручного учета";
+      : structure.accounting.writeOffLabel;
+  const accountingDetails = [
+    structure.accounting.firstRef.label,
+    structure.accounting.secondRef.label,
+  ]
+    .filter(Boolean)
+    .join(" / ");
 
   return (
     <div className="mt-4 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
@@ -3097,7 +3386,10 @@ function PromoBundleStructureStrip({
             structure.limits.validityDays,
           )} дн.`}
         />
-        <PromoBundlePassportItem label="Учет" value={missing} />
+        <PromoBundlePassportItem
+          label="Учет"
+          value={accountingDetails ? `${missing} · ${accountingDetails}` : missing}
+        />
       </div>
     </div>
   );
@@ -3729,6 +4021,105 @@ function promoBundleTypeLabel(type: string) {
   return option?.title ?? "Произвольный набор";
 }
 
+function defaultAccountingForBundleType(
+  type: PromoBundleType,
+): Pick<
+  PromoBundleDraft,
+  | "firstAccountingKind"
+  | "firstAccountingProductId"
+  | "firstAccountingReference"
+  | "secondAccountingKind"
+  | "secondAccountingProductId"
+  | "secondAccountingReference"
+> {
+  if (type === "product_product") {
+    return {
+      firstAccountingKind: "PRODUCT",
+      firstAccountingProductId: "",
+      firstAccountingReference: "",
+      secondAccountingKind: "PRODUCT",
+      secondAccountingProductId: "",
+      secondAccountingReference: "",
+    };
+  }
+
+  if (type === "game_bonus" || type === "balance_bonus") {
+    return {
+      firstAccountingKind: "SERVICE",
+      firstAccountingProductId: "",
+      firstAccountingReference: "",
+      secondAccountingKind: "BONUS",
+      secondAccountingProductId: "",
+      secondAccountingReference: "",
+    };
+  }
+
+  return {
+    firstAccountingKind: "SERVICE",
+    firstAccountingProductId: "",
+    firstAccountingReference: "",
+    secondAccountingKind: "PRODUCT",
+    secondAccountingProductId: "",
+    secondAccountingReference: "",
+  };
+}
+
+function productAccountingLabel(product: Product) {
+  return [
+    product.name,
+    product.article ? `арт. ${product.article}` : null,
+    product.category?.name ?? null,
+    product.storeNames.length > 0 ? product.storeNames.slice(0, 2).join(", ") : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function accountingReferenceLabel(kind: PromoBundleAccountingKind) {
+  if (kind === "SERVICE") {
+    return "Код услуги";
+  }
+
+  if (kind === "BONUS") {
+    return "Код бонуса";
+  }
+
+  return "Ручная ссылка";
+}
+
+function accountingReferencePlaceholder(kind: PromoBundleAccountingKind) {
+  if (kind === "SERVICE") {
+    return "Например: пакет 5 часов, бронь, кальян";
+  }
+
+  if (kind === "BONUS") {
+    return "Например: +100 бонусов или +60 минут";
+  }
+
+  return "Например: выдать администратором и сверить в конце смены";
+}
+
+function accountingKindLabel(kind: PromoBundleAccountingKind) {
+  const labels: Record<PromoBundleAccountingKind, string> = {
+    PRODUCT: "товар из ассортимента",
+    SERVICE: "услуга / игровое время",
+    BONUS: "бонусная операция",
+    MANUAL: "ручной учет",
+  };
+
+  return labels[kind];
+}
+
+function writeOffRuleLabel(rule: PromoBundleWriteOffRule) {
+  const labels: Record<PromoBundleWriteOffRule, string> = {
+    ON_REDEEM: "списать при использовании",
+    ON_SALE: "списать при продаже",
+    MANUAL: "ручная сверка",
+  };
+
+  return labels[rule];
+}
+
 function promoBundleToDraft(bundle: MarketingPromoBundle): PromoBundleDraft {
   const config = isRecord(bundle.mechanicConfig) ? bundle.mechanicConfig : {};
   const bundleType = resolvePromoBundleType(
@@ -3737,9 +4128,14 @@ function promoBundleToDraft(bundle: MarketingPromoBundle): PromoBundleDraft {
   const option = getPromoBundleTypeOption(bundleType);
   const composition = isRecord(config.composition) ? config.composition : {};
   const bundleValues = isRecord(config.bundle) ? config.bundle : {};
+  const accounting = isRecord(config.accounting) ? config.accounting : {};
+  const firstAccounting = isRecord(accounting.first) ? accounting.first : {};
+  const secondAccounting = isRecord(accounting.second) ? accounting.second : {};
+  const accountingDefaults = defaultAccountingForBundleType(bundleType);
 
   return {
     ...emptyBundleDraft,
+    ...accountingDefaults,
     bundleType,
     gameItem: optionalText(composition.first, option.firstDefault),
     barItems: optionalText(composition.second, option.secondDefault),
@@ -3773,6 +4169,23 @@ function promoBundleToDraft(bundle: MarketingPromoBundle): PromoBundleDraft {
       bundleValues.noStacking,
       emptyBundleDraft.noStacking,
     ),
+    firstAccountingKind: optionalAccountingKind(
+      firstAccounting.kind,
+      accountingDefaults.firstAccountingKind,
+    ),
+    firstAccountingProductId: optionalText(firstAccounting.productId, ""),
+    firstAccountingReference: optionalText(firstAccounting.reference, ""),
+    secondAccountingKind: optionalAccountingKind(
+      secondAccounting.kind,
+      accountingDefaults.secondAccountingKind,
+    ),
+    secondAccountingProductId: optionalText(secondAccounting.productId, ""),
+    secondAccountingReference: optionalText(secondAccounting.reference, ""),
+    writeOffRule: optionalWriteOffRule(
+      accounting.writeOffRule,
+      emptyBundleDraft.writeOffRule,
+    ),
+    accountingNote: optionalText(accounting.note, ""),
   };
 }
 
@@ -3790,6 +4203,7 @@ function promoBundleStructureFromBundle(
 function promoBundleStructureFromDraft(
   draft: PromoBundleDraft,
   economics: PromoBundleEconomics,
+  productOptions: Product[] = [],
 ): MarketingPromoBundleStructure {
   const option = getPromoBundleTypeOption(draft.bundleType);
   const firstItem = draft.gameItem.trim() || null;
@@ -3799,12 +4213,16 @@ function promoBundleStructureFromDraft(
   const expectedUses = Math.max(0, Math.round(parseMoney(draft.expectedUses)));
   const minSpend = parseMoney(draft.minSpend);
   const validityDays = Math.max(0, Math.round(parseMoney(draft.validityDays)));
+  const firstRef = buildAccountingRefFromDraft("first", draft, productOptions);
+  const secondRef = buildAccountingRefFromDraft("second", draft, productOptions);
   const missingFields = [
     firstItem ? null : option.firstLabel,
     secondItem ? null : option.secondLabel,
     economics.basePrice > 0 && economics.promoPrice > 0 ? null : "цена набора",
     expectedUses > 0 ? null : "лимит использований",
     costPerUse > 0 ? null : "себестоимость",
+    accountingRefReady(firstRef) ? null : `${option.firstLabel} в учете`,
+    accountingRefReady(secondRef) ? null : `${option.secondLabel} в учете`,
   ].filter((item): item is string => Boolean(item));
   const readiness: MarketingPromoBundleStructure["accounting"]["readiness"] =
     !firstItem || !secondItem
@@ -3814,13 +4232,17 @@ function promoBundleStructureFromDraft(
           expectedUses <= 0 ||
           costPerUse <= 0
         ? "NEEDS_ECONOMICS"
-        : "READY";
+        : !accountingRefReady(firstRef) || !accountingRefReady(secondRef)
+          ? "NEEDS_ACCOUNTING"
+          : "READY";
   const label =
     readiness === "READY"
       ? "готов к ручному учету"
       : readiness === "NEEDS_COMPOSITION"
         ? "нужно уточнить состав"
-        : "нужно уточнить экономику";
+        : readiness === "NEEDS_ECONOMICS"
+          ? "нужно уточнить экономику"
+          : "нужно уточнить учет";
 
   return {
     composition: {
@@ -3859,8 +4281,57 @@ function promoBundleStructureFromDraft(
         "ID товара, услуги или бонусной операции для второй части",
         "правило списания себестоимости при использовании набора",
       ],
+      firstRef,
+      secondRef,
+      writeOffRule: draft.writeOffRule,
+      writeOffLabel: writeOffRuleLabel(draft.writeOffRule),
+      note: draft.accountingNote.trim() || null,
     },
   };
+}
+
+function buildAccountingRefFromDraft(
+  part: PromoBundlePart,
+  draft: PromoBundleDraft,
+  productOptions: Product[],
+): MarketingPromoBundleStructure["accounting"]["firstRef"] {
+  const kind =
+    part === "first" ? draft.firstAccountingKind : draft.secondAccountingKind;
+  const productId =
+    part === "first"
+      ? draft.firstAccountingProductId.trim()
+      : draft.secondAccountingProductId.trim();
+  const reference =
+    part === "first"
+      ? draft.firstAccountingReference.trim()
+      : draft.secondAccountingReference.trim();
+  const product = productOptions.find((item) => item.id === productId);
+
+  if (kind === "PRODUCT") {
+    return {
+      kind,
+      productId: productId || null,
+      reference: null,
+      label: product
+        ? productAccountingLabel(product)
+        : productId
+          ? `товар ${productId}`
+          : "товар не выбран",
+    };
+  }
+
+  return {
+    kind,
+    productId: null,
+    reference: reference || null,
+    label: reference || accountingKindLabel(kind),
+  };
+}
+
+function accountingRefReady(
+  ref: MarketingPromoBundleStructure["accounting"]["firstRef"],
+) {
+  return ref.kind === "PRODUCT" ? Boolean(ref.productId) : Boolean(ref.reference);
 }
 
 function resolvePromoBundleType(value: unknown): PromoBundleType {
@@ -3898,11 +4369,32 @@ function optionalBoolean(value: unknown, fallback: boolean) {
   return typeof value === "boolean" ? value : fallback;
 }
 
+function optionalAccountingKind(
+  value: unknown,
+  fallback: PromoBundleAccountingKind,
+) {
+  return accountingKindOptions.some((option) => option.value === value)
+    ? (value as PromoBundleAccountingKind)
+    : fallback;
+}
+
+function optionalWriteOffRule(value: unknown, fallback: PromoBundleWriteOffRule) {
+  return writeOffRuleOptions.some((option) => option.value === value)
+    ? (value as PromoBundleWriteOffRule)
+    : fallback;
+}
+
 function buildPromoBundleNote(
   draft: PromoBundleDraft,
   economics: PromoBundleEconomics,
+  productOptions: Product[] = [],
 ) {
   const bundleType = getPromoBundleTypeOption(draft.bundleType);
+  const structure = promoBundleStructureFromDraft(
+    draft,
+    economics,
+    productOptions,
+  );
   const composition = [
     `${bundleType.firstLabel.toLowerCase()}: ${
       draft.gameItem.trim() || "не указано"
@@ -3953,6 +4445,13 @@ function buildPromoBundleNote(
         ? "не суммировать с другими скидками"
         : "допускается суммирование только по ручному решению"
     }, фиксировать факт использования в журнале запуска или CRM, если набор привязан к кампании.`,
+    `Учет: ${structure.composition.firstLabel.toLowerCase()} - ${
+      structure.accounting.firstRef.label
+    }; ${structure.composition.secondLabel.toLowerCase()} - ${
+      structure.accounting.secondRef.label
+    }; ${structure.accounting.writeOffLabel}${
+      structure.accounting.note ? `. ${structure.accounting.note}` : ""
+    }.`,
   ].join(" ");
 }
 
@@ -3960,7 +4459,14 @@ function buildPromoBundleConfig(
   draft: PromoBundleDraft,
   economics: PromoBundleEconomics,
   verdict: PromoBundleVerdict,
+  productOptions: Product[] = [],
 ): MarketingMechanicConfig {
+  const structure = promoBundleStructureFromDraft(
+    draft,
+    economics,
+    productOptions,
+  );
+
   return {
     kind: "promo_bundle",
     bundleType: draft.bundleType,
@@ -3981,6 +4487,13 @@ function buildPromoBundleConfig(
       onePerGuest: draft.onePerGuest,
       requiresApproval: draft.requiresApproval,
       noStacking: draft.noStacking,
+    },
+    accounting: {
+      first: structure.accounting.firstRef,
+      second: structure.accounting.secondRef,
+      writeOffRule: structure.accounting.writeOffRule,
+      writeOffLabel: structure.accounting.writeOffLabel,
+      note: structure.accounting.note,
     },
     economics,
     verdict: {

@@ -183,10 +183,29 @@ export type MarketingPromoBundleStructure = {
     noStacking: boolean;
   };
   accounting: {
-    readiness: 'READY' | 'NEEDS_COMPOSITION' | 'NEEDS_ECONOMICS';
+    readiness:
+      | 'READY'
+      | 'NEEDS_COMPOSITION'
+      | 'NEEDS_ECONOMICS'
+      | 'NEEDS_ACCOUNTING';
     label: string;
     missingFields: string[];
     nextFields: string[];
+    firstRef: {
+      kind: 'PRODUCT' | 'SERVICE' | 'BONUS' | 'MANUAL';
+      productId: string | null;
+      reference: string | null;
+      label: string;
+    };
+    secondRef: {
+      kind: 'PRODUCT' | 'SERVICE' | 'BONUS' | 'MANUAL';
+      productId: string | null;
+      reference: string | null;
+      label: string;
+    };
+    writeOffRule: 'ON_REDEEM' | 'ON_SALE' | 'MANUAL';
+    writeOffLabel: string;
+    note: string | null;
   };
 };
 
@@ -2758,6 +2777,81 @@ function getBooleanField(value: unknown, field: string, fallback: boolean) {
   return typeof fieldValue === 'boolean' ? fieldValue : fallback;
 }
 
+type PromoBundleAccountingKind = 'PRODUCT' | 'SERVICE' | 'BONUS' | 'MANUAL';
+type PromoBundleWriteOffRule = 'ON_REDEEM' | 'ON_SALE' | 'MANUAL';
+
+function normalizeAccountingKind(
+  value: unknown,
+  fallback: PromoBundleAccountingKind,
+): PromoBundleAccountingKind {
+  return value === 'PRODUCT' ||
+    value === 'SERVICE' ||
+    value === 'BONUS' ||
+    value === 'MANUAL'
+    ? value
+    : fallback;
+}
+
+function normalizeAccountingRef(
+  value: Record<string, unknown> | null,
+  fallbackKind: PromoBundleAccountingKind,
+) {
+  const kind = normalizeAccountingKind(value?.kind, fallbackKind);
+  const productId = normalizeText(value?.productId, 80);
+  const reference = normalizeText(value?.reference, 160);
+  const label = normalizeText(value?.label, 220);
+
+  return {
+    kind,
+    productId,
+    reference,
+    label:
+      label ??
+      (kind === 'PRODUCT'
+        ? productId
+          ? `товар ${productId}`
+          : 'товар не выбран'
+        : (reference ?? accountingKindLabel(kind))),
+  };
+}
+
+function normalizeWriteOffRule(value: unknown): PromoBundleWriteOffRule {
+  return value === 'ON_SALE' || value === 'MANUAL' || value === 'ON_REDEEM'
+    ? value
+    : 'ON_REDEEM';
+}
+
+function accountingRefReady(ref: {
+  kind: PromoBundleAccountingKind;
+  productId: string | null;
+  reference: string | null;
+}) {
+  return ref.kind === 'PRODUCT'
+    ? Boolean(ref.productId)
+    : Boolean(ref.reference);
+}
+
+function accountingKindLabel(kind: PromoBundleAccountingKind) {
+  const labels: Record<PromoBundleAccountingKind, string> = {
+    PRODUCT: 'товар из ассортимента',
+    SERVICE: 'услуга / игровое время',
+    BONUS: 'бонусная операция',
+    MANUAL: 'ручной учет',
+  };
+
+  return labels[kind];
+}
+
+function writeOffRuleLabel(rule: PromoBundleWriteOffRule) {
+  const labels: Record<PromoBundleWriteOffRule, string> = {
+    ON_REDEEM: 'списать при использовании',
+    ON_SALE: 'списать при продаже',
+    MANUAL: 'ручная сверка',
+  };
+
+  return labels[rule];
+}
+
 function promoBundleTypeLabel(type: string) {
   const labels: Record<string, string> = {
     game_product: 'игра + товар',
@@ -2820,6 +2914,21 @@ function buildPromoBundleStructure(
   const composition = getRecordField(config, 'composition');
   const bundle = getRecordField(config, 'bundle');
   const economics = getRecordField(config, 'economics');
+  const accounting = getRecordField(config, 'accounting');
+  const firstRef = normalizeAccountingRef(
+    getRecordField(accounting, 'first'),
+    bundleType === 'product_product' ? 'PRODUCT' : 'SERVICE',
+  );
+  const secondRef = normalizeAccountingRef(
+    getRecordField(accounting, 'second'),
+    bundleType === 'game_product' || bundleType === 'product_product'
+      ? 'PRODUCT'
+      : 'BONUS',
+  );
+  const writeOffRule = normalizeWriteOffRule(
+    getStringField(accounting, 'writeOffRule'),
+  );
+  const accountingNote = normalizeText(accounting?.note, 300);
   const firstItem = normalizeText(composition?.first, 160);
   const secondItem = normalizeText(composition?.second, 160);
   const extraCondition = normalizeText(composition?.extraCondition, 180);
@@ -2858,6 +2967,8 @@ function buildPromoBundleStructure(
     basePrice > 0 && promoPrice > 0 ? null : 'цена набора',
     expectedUses > 0 ? null : 'лимит использований',
     costPerUse > 0 ? null : 'себестоимость',
+    accountingRefReady(firstRef) ? null : `${labels.firstLabel} в учете`,
+    accountingRefReady(secondRef) ? null : `${labels.secondLabel} в учете`,
   ].filter((item): item is string => Boolean(item));
   const readiness =
     !firstItem || !secondItem
@@ -2867,13 +2978,17 @@ function buildPromoBundleStructure(
           expectedUses <= 0 ||
           costPerUse <= 0
         ? 'NEEDS_ECONOMICS'
-        : 'READY';
+        : !accountingRefReady(firstRef) || !accountingRefReady(secondRef)
+          ? 'NEEDS_ACCOUNTING'
+          : 'READY';
   const readinessLabel =
     readiness === 'READY'
       ? 'готов к ручному учету'
       : readiness === 'NEEDS_COMPOSITION'
         ? 'нужно уточнить состав'
-        : 'нужно уточнить экономику';
+        : readiness === 'NEEDS_ECONOMICS'
+          ? 'нужно уточнить экономику'
+          : 'нужно уточнить учет';
 
   return {
     composition: {
@@ -2914,6 +3029,11 @@ function buildPromoBundleStructure(
         'ID товара, услуги или бонусной операции для второй части',
         'правило списания себестоимости при использовании набора',
       ],
+      firstRef,
+      secondRef,
+      writeOffRule,
+      writeOffLabel: writeOffRuleLabel(writeOffRule),
+      note: accountingNote,
     },
   };
 }

@@ -54,10 +54,29 @@ export type MarketingPromoBundleStructure = {
     noStacking: boolean;
   };
   accounting: {
-    readiness: "READY" | "NEEDS_COMPOSITION" | "NEEDS_ECONOMICS";
+    readiness:
+      | "READY"
+      | "NEEDS_COMPOSITION"
+      | "NEEDS_ECONOMICS"
+      | "NEEDS_ACCOUNTING";
     label: string;
     missingFields: string[];
     nextFields: string[];
+    firstRef: {
+      kind: "PRODUCT" | "SERVICE" | "BONUS" | "MANUAL";
+      productId: string | null;
+      reference: string | null;
+      label: string;
+    };
+    secondRef: {
+      kind: "PRODUCT" | "SERVICE" | "BONUS" | "MANUAL";
+      productId: string | null;
+      reference: string | null;
+      label: string;
+    };
+    writeOffRule: "ON_REDEEM" | "ON_SALE" | "MANUAL";
+    writeOffLabel: string;
+    note: string | null;
   };
 };
 

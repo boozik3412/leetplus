@@ -2,6 +2,7 @@ import { MarketingPromoBundlesWorkspace } from "@/components/marketing-campaigns
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
 import { getMarketingPromoBundles } from "@/lib/marketing";
+import { getProducts } from "@/lib/products";
 
 async function safeList<T>(promise: Promise<T[]>): Promise<T[]> {
   try {
@@ -14,7 +15,10 @@ async function safeList<T>(promise: Promise<T[]>): Promise<T[]> {
 export default async function MarketingPromoBundlesPage() {
   await requireCurrentUser();
 
-  const promoBundles = await safeList(getMarketingPromoBundles());
+  const [promoBundles, products] = await Promise.all([
+    safeList(getMarketingPromoBundles()),
+    safeList(getProducts()),
+  ]);
 
   return (
     <main className="px-4 py-6 sm:px-6 lg:px-8">
@@ -27,7 +31,10 @@ export default async function MarketingPromoBundlesPage() {
           ]}
         />
 
-        <MarketingPromoBundlesWorkspace promoBundles={promoBundles} />
+        <MarketingPromoBundlesWorkspace
+          promoBundles={promoBundles}
+          productOptions={products}
+        />
       </div>
     </main>
   );

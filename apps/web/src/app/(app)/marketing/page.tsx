@@ -68,7 +68,7 @@ const goalCards: GoalCard[] = [
   },
   {
     title: "Промо-набор",
-    description: "Собрать и запустить оффер без кампании: игра + бар + сервис.",
+    description: "Собрать или поправить оффер без кампании: игра + бар + сервис.",
     metric: "Оффер",
     href: "/marketing/promo-bundles",
     action: "Собрать оффер",
@@ -97,7 +97,7 @@ const workspaceLinks: MarketingWorkspaceLink[] = [
   },
   {
     title: "Промо-наборы",
-    description: "Создать каталожный оффер и запустить его для сети или выбранных клубов.",
+    description: "Создать каталожный оффер, открыть существующий набор и сохранить правки.",
     href: "/marketing/promo-bundles",
   },
   {

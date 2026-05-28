@@ -24,6 +24,7 @@ import {
   type MarketingCampaignUpdateDto,
   type MarketingPromoBundle,
   type MarketingPromoBundleDto,
+  type MarketingPromoBundleUpdateDto,
   type MarketingPromoBundleLaunch,
   type MarketingPromoBundleLaunchDto,
   type MarketingPromoBundleLaunchUpdateDto,
@@ -62,6 +63,15 @@ export class MarketingController {
     @Body() dto: MarketingPromoBundleDto,
   ): Promise<MarketingPromoBundle> {
     return this.marketingService.createPromoBundle(user, dto);
+  }
+
+  @Patch('promo-bundles/:id')
+  updatePromoBundle(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: MarketingPromoBundleUpdateDto,
+  ): Promise<MarketingPromoBundle> {
+    return this.marketingService.updatePromoBundle(user, id, dto);
   }
 
   @Post('promo-bundle-launches')

@@ -111,6 +111,8 @@ export type MarketingPromoBundleDto = {
   note?: string | null;
 };
 
+export type MarketingPromoBundleUpdateDto = Partial<MarketingPromoBundleDto>;
+
 export type MarketingPromoBundleLaunchDto = {
   promoBundleId?: string | null;
   status?: string | null;
@@ -912,6 +914,66 @@ export class MarketingService {
         mechanicConfig,
         note: normalizeText(dto.note, 2000),
       },
+      include: marketingPromoBundleInclude,
+    });
+
+    return this.toMarketingPromoBundle(row);
+  }
+
+  async updatePromoBundle(
+    user: AuthenticatedUser,
+    id: string,
+    dto: MarketingPromoBundleUpdateDto = {},
+  ): Promise<MarketingPromoBundle> {
+    const existing = await this.prisma.marketingPromoBundle.findFirst({
+      where: { id, tenantId: user.tenantId },
+      select: {
+        id: true,
+        name: true,
+        bundleType: true,
+      },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Promo bundle not found');
+    }
+
+    const data: Prisma.MarketingPromoBundleUpdateInput = {};
+    const mechanicConfig = hasOwn(dto, 'mechanicConfig')
+      ? normalizePromoBundleConfig(dto.mechanicConfig)
+      : null;
+
+    if (hasOwn(dto, 'name')) {
+      data.name = normalizeText(dto.name, 140) ?? existing.name;
+    }
+
+    if (hasOwn(dto, 'status')) {
+      data.status = resolvePromoBundleStatus(dto.status);
+    }
+
+    if (hasOwn(dto, 'bundleType')) {
+      data.bundleType =
+        normalizeText(dto.bundleType, 80) ??
+        (mechanicConfig
+          ? getStringField(mechanicConfig, 'bundleType')
+          : null) ??
+        existing.bundleType;
+    } else if (mechanicConfig) {
+      data.bundleType =
+        getStringField(mechanicConfig, 'bundleType') ?? existing.bundleType;
+    }
+
+    if (mechanicConfig) {
+      data.mechanicConfig = mechanicConfig;
+    }
+
+    if (hasOwn(dto, 'note')) {
+      data.note = normalizeText(dto.note, 2000);
+    }
+
+    const row = await this.prisma.marketingPromoBundle.update({
+      where: { id },
+      data,
       include: marketingPromoBundleInclude,
     });
 

@@ -1460,10 +1460,14 @@ export function MarketingCampaignsPanel({
 
 export function MarketingPromoBundlesWorkspace({
   promoBundles,
+  promoBundleLaunches = [],
   productOptions = [],
+  stores = [],
 }: {
   promoBundles: MarketingPromoBundle[];
+  promoBundleLaunches?: MarketingPromoBundleLaunch[];
   productOptions?: Product[];
+  stores?: Store[];
 }) {
   const [savedPromoBundles, setSavedPromoBundles] = useState(promoBundles);
   const [selectedBundleId, setSelectedBundleId] = useState<string | null>(
@@ -1595,6 +1599,8 @@ export function MarketingPromoBundlesWorkspace({
 
       <PromoBundlesCatalogPanel
         promoBundles={savedPromoBundles}
+        promoBundleLaunches={promoBundleLaunches}
+        stores={stores}
         selectedBundleId={selectedBundleId}
         onEditBundle={selectExistingPromoBundle}
         onCreateNew={createNewBundleDraft}
@@ -1631,11 +1637,15 @@ export function MarketingPromoBundlesWorkspace({
 
 function PromoBundlesCatalogPanel({
   promoBundles,
+  promoBundleLaunches,
+  stores,
   selectedBundleId,
   onEditBundle,
   onCreateNew,
 }: {
   promoBundles: MarketingPromoBundle[];
+  promoBundleLaunches: MarketingPromoBundleLaunch[];
+  stores: Store[];
   selectedBundleId: string | null;
   onEditBundle: (bundle: MarketingPromoBundle) => void;
   onCreateNew: () => void;
@@ -1709,8 +1719,187 @@ function PromoBundlesCatalogPanel({
             </div>
           )}
         </div>
+
+        <PromoBundlesAccountingReport
+          promoBundles={filteredBundles}
+          promoBundleLaunches={promoBundleLaunches}
+          stores={stores}
+          onEditBundle={onEditBundle}
+        />
       </div>
     </section>
+  );
+}
+
+function PromoBundlesAccountingReport({
+  promoBundles,
+  promoBundleLaunches,
+  stores,
+  onEditBundle,
+}: {
+  promoBundles: MarketingPromoBundle[];
+  promoBundleLaunches: MarketingPromoBundleLaunch[];
+  stores: Store[];
+  onEditBundle: (bundle: MarketingPromoBundle) => void;
+}) {
+  const activeLaunches = promoBundleLaunches.filter(
+    (launch) => launch.status === "ACTIVE",
+  );
+  const rows = promoBundles.map((bundle) => {
+    const structure = promoBundleStructureFromBundle(bundle);
+    const launches = activeLaunches.filter(
+      (launch) => launch.promoBundle.id === bundle.id,
+    );
+
+    return { bundle, structure, launches };
+  });
+  const readyCount = rows.filter(
+    (row) => row.structure.accounting.readiness === "READY",
+  ).length;
+  const needsAccountingCount = rows.filter(
+    (row) => row.structure.accounting.readiness === "NEEDS_ACCOUNTING",
+  ).length;
+  const productLinkCount = rows.reduce((sum, row) => {
+    const refs = [
+      row.structure.accounting.firstRef,
+      row.structure.accounting.secondRef,
+    ];
+
+    return (
+      sum +
+      refs.filter((ref) => ref.kind === "PRODUCT" && Boolean(ref.productId))
+        .length
+    );
+  }, 0);
+  const manualWriteOffCount = rows.filter(
+    (row) => row.structure.accounting.writeOffRule === "MANUAL",
+  ).length;
+
+  if (promoBundles.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mt-4 border-t border-zinc-200 pt-4 dark:border-zinc-800">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
+            Учет и списание
+          </p>
+          <h3 className="mt-1 text-lg font-semibold text-zinc-950 dark:text-white">
+            Операционная сводка по наборам
+          </h3>
+        </div>
+        <p className="max-w-2xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+          Здесь видно, какие наборы готовы к ручному учету, какие товары или
+          услуги нужно списывать и где остались незаполненные привязки.
+        </p>
+      </div>
+
+      <div className="mt-3 grid gap-2 sm:grid-cols-4">
+        <PromoBundleAccountingMetric label="Готовы" value={readyCount} />
+        <PromoBundleAccountingMetric
+          label="Нужен учет"
+          value={needsAccountingCount}
+        />
+        <PromoBundleAccountingMetric label="Товарных связей" value={productLinkCount} />
+        <PromoBundleAccountingMetric
+          label="Ручная сверка"
+          value={manualWriteOffCount}
+        />
+      </div>
+
+      <div className="mt-3 grid gap-2">
+        {rows.map((row) => (
+          <PromoBundleAccountingRow
+            key={row.bundle.id}
+            bundle={row.bundle}
+            structure={row.structure}
+            launches={row.launches}
+            stores={stores}
+            onEdit={() => onEditBundle(row.bundle)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PromoBundleAccountingMetric({
+  label,
+  value,
+}: {
+  label: string;
+  value: number;
+}) {
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950">
+      <p className="text-lg font-semibold text-zinc-950 dark:text-white">
+        {formatNumber(value)}
+      </p>
+      <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+        {label}
+      </p>
+    </div>
+  );
+}
+
+function PromoBundleAccountingRow({
+  bundle,
+  structure,
+  launches,
+  stores,
+  onEdit,
+}: {
+  bundle: MarketingPromoBundle;
+  structure: MarketingPromoBundleStructure;
+  launches: MarketingPromoBundleLaunch[];
+  stores: Store[];
+  onEdit: () => void;
+}) {
+  const isReady = structure.accounting.readiness === "READY";
+  const refs = [
+    `${structure.composition.firstLabel}: ${structure.accounting.firstRef.label}`,
+    `${structure.composition.secondLabel}: ${structure.accounting.secondRef.label}`,
+  ];
+  const launchLabel = promoBundleOperationalLaunchLabel(launches, stores);
+
+  return (
+    <article className="grid gap-3 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950 lg:grid-cols-[minmax(0,1fr)_minmax(220px,0.38fr)_auto] lg:items-center">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <h4 className="truncate text-sm font-semibold text-zinc-950 dark:text-white">
+            {bundle.name}
+          </h4>
+          <span
+            className={[
+              "rounded-full border px-2 py-0.5 text-xs font-semibold",
+              isReady
+                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                : "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+            ].join(" ")}
+          >
+            {structure.accounting.label}
+          </span>
+        </div>
+        <p className="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+          {refs.join(" · ")}
+        </p>
+      </div>
+      <div className="grid gap-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+        <span className="font-semibold text-zinc-700 dark:text-zinc-200">
+          {structure.accounting.writeOffLabel}
+        </span>
+        <span>{launchLabel}</span>
+      </div>
+      <button
+        type="button"
+        onClick={onEdit}
+        className="inline-flex min-h-10 items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 text-sm font-semibold text-zinc-700 transition hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:border-emerald-500 dark:hover:text-emerald-300"
+      >
+        Открыть
+      </button>
+    </article>
   );
 }
 
@@ -4646,6 +4835,23 @@ function launchPeriodLabel(launch: MarketingPromoBundleLaunch) {
   }
 
   return `${formatDate(launch.periodFrom)} - ${formatDate(launch.periodTo)}`;
+}
+
+function promoBundleOperationalLaunchLabel(
+  launches: MarketingPromoBundleLaunch[],
+  stores: Store[],
+) {
+  if (launches.length === 0) {
+    return "активных запусков нет";
+  }
+
+  const [firstLaunch] = launches;
+  const moreLaunches =
+    launches.length > 1 ? `, еще ${formatNumber(launches.length - 1)}` : "";
+
+  return `${storeLabel(firstLaunch.storeIds, stores)}, ${launchPeriodLabel(
+    firstLaunch,
+  )}${moreLaunches}`;
 }
 
 function campaignNextAction(campaign: MarketingCampaign) {

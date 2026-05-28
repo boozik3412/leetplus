@@ -550,18 +550,27 @@ export function MarketingCampaignsPanel({
   );
 
   useEffect(() => {
-    const normalizedHash = normalizeMarketingHash(window.location.hash);
+    function normalizeCurrentHash() {
+      const normalizedHash = normalizeMarketingHash(window.location.hash);
 
-    if (normalizedHash !== window.location.hash) {
-      window.history.replaceState(
-        null,
-        "",
-        `${window.location.pathname}${window.location.search}${normalizedHash}`,
-      );
-      window.requestAnimationFrame(() => {
-        scrollToMarketingSection(normalizedHash.slice(1));
-      });
+      if (normalizedHash !== window.location.hash) {
+        window.history.replaceState(
+          null,
+          "",
+          `${window.location.pathname}${window.location.search}${normalizedHash}`,
+        );
+        window.requestAnimationFrame(() => {
+          scrollToMarketingSection(normalizedHash.slice(1));
+        });
+      }
     }
+
+    normalizeCurrentHash();
+    window.addEventListener("hashchange", normalizeCurrentHash);
+
+    return () => {
+      window.removeEventListener("hashchange", normalizeCurrentHash);
+    };
   }, []);
 
   async function createCampaign(event: FormEvent<HTMLFormElement>) {

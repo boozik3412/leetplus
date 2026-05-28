@@ -25,6 +25,42 @@ export type MarketingPromoBundleLaunchStatus =
   | "FINISHED"
   | "CANCELED";
 
+export type MarketingPromoBundleStructure = {
+  composition: {
+    typeLabel: string;
+    firstLabel: string;
+    firstItem: string | null;
+    secondLabel: string;
+    secondItem: string | null;
+    extraCondition: string | null;
+    summary: string;
+  };
+  pricing: {
+    basePrice: number;
+    promoPrice: number;
+    discount: number;
+    costPerUse: number;
+    expectedRevenue: number;
+    expectedCost: number;
+    margin: number;
+    marginPercent: number | null;
+  };
+  limits: {
+    expectedUses: number;
+    minSpend: number;
+    validityDays: number;
+    onePerGuest: boolean;
+    requiresApproval: boolean;
+    noStacking: boolean;
+  };
+  accounting: {
+    readiness: "READY" | "NEEDS_COMPOSITION" | "NEEDS_ECONOMICS";
+    label: string;
+    missingFields: string[];
+    nextFields: string[];
+  };
+};
+
 export type MarketingCampaignConsentCoverage = {
   targetTotal: number;
   phoneGranted: number;
@@ -81,6 +117,7 @@ export type MarketingPromoBundle = {
   name: string;
   status: MarketingPromoBundleStatus;
   bundleType: string;
+  structure?: MarketingPromoBundleStructure;
   mechanicConfig: MarketingMechanicConfig;
   note: string | null;
   createdAt: string;
@@ -103,6 +140,7 @@ export type MarketingPromoBundleLaunch = {
     name: string;
     status: MarketingPromoBundleStatus;
     bundleType: string;
+    structure?: MarketingPromoBundleStructure;
     mechanicConfig: MarketingMechanicConfig;
     note: string | null;
   };

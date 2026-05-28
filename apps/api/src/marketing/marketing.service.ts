@@ -154,6 +154,42 @@ export type MarketingCampaignConsentCoverage = {
   exclusionReason: string | null;
 };
 
+export type MarketingPromoBundleStructure = {
+  composition: {
+    typeLabel: string;
+    firstLabel: string;
+    firstItem: string | null;
+    secondLabel: string;
+    secondItem: string | null;
+    extraCondition: string | null;
+    summary: string;
+  };
+  pricing: {
+    basePrice: number;
+    promoPrice: number;
+    discount: number;
+    costPerUse: number;
+    expectedRevenue: number;
+    expectedCost: number;
+    margin: number;
+    marginPercent: number | null;
+  };
+  limits: {
+    expectedUses: number;
+    minSpend: number;
+    validityDays: number;
+    onePerGuest: boolean;
+    requiresApproval: boolean;
+    noStacking: boolean;
+  };
+  accounting: {
+    readiness: 'READY' | 'NEEDS_COMPOSITION' | 'NEEDS_ECONOMICS';
+    label: string;
+    missingFields: string[];
+    nextFields: string[];
+  };
+};
+
 export type MarketingCampaign = {
   id: string;
   goal: MarketingCampaignGoal;
@@ -194,6 +230,7 @@ export type MarketingPromoBundle = {
   name: string;
   status: MarketingPromoBundleStatus;
   bundleType: string;
+  structure: MarketingPromoBundleStructure;
   mechanicConfig: Prisma.JsonValue;
   note: string | null;
   createdAt: string;
@@ -216,6 +253,7 @@ export type MarketingPromoBundleLaunch = {
     name: string;
     status: MarketingPromoBundleStatus;
     bundleType: string;
+    structure: MarketingPromoBundleStructure;
     mechanicConfig: Prisma.JsonValue;
     note: string | null;
   };
@@ -2527,6 +2565,7 @@ export class MarketingService {
       name: row.name,
       status: resolvePromoBundleStatus(row.status),
       bundleType: row.bundleType,
+      structure: buildPromoBundleStructure(row.bundleType, row.mechanicConfig),
       mechanicConfig: row.mechanicConfig,
       note: row.note,
       createdAt: row.createdAt.toISOString(),
@@ -2553,6 +2592,10 @@ export class MarketingService {
         name: row.promoBundle.name,
         status: resolvePromoBundleStatus(row.promoBundle.status),
         bundleType: row.promoBundle.bundleType,
+        structure: buildPromoBundleStructure(
+          row.promoBundle.bundleType,
+          row.promoBundle.mechanicConfig,
+        ),
         mechanicConfig: row.promoBundle.mechanicConfig,
         note: row.promoBundle.note,
       },
@@ -2672,6 +2715,49 @@ function getStringField(value: unknown, field: string) {
   return typeof fieldValue === 'string' ? fieldValue : null;
 }
 
+function getRecordField(value: unknown, field: string) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const fieldValue = (value as Record<string, unknown>)[field];
+
+  if (
+    !fieldValue ||
+    typeof fieldValue !== 'object' ||
+    Array.isArray(fieldValue)
+  ) {
+    return null;
+  }
+
+  return fieldValue as Record<string, unknown>;
+}
+
+function getNumberField(value: unknown, field: string) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const fieldValue = (value as Record<string, unknown>)[field];
+  const number =
+    typeof fieldValue === 'number'
+      ? fieldValue
+      : typeof fieldValue === 'string'
+        ? Number(fieldValue.replace(',', '.').trim())
+        : Number.NaN;
+
+  return Number.isFinite(number) ? number : null;
+}
+
+function getBooleanField(value: unknown, field: string, fallback: boolean) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return fallback;
+  }
+
+  const fieldValue = (value as Record<string, unknown>)[field];
+  return typeof fieldValue === 'boolean' ? fieldValue : fallback;
+}
+
 function promoBundleTypeLabel(type: string) {
   const labels: Record<string, string> = {
     game_product: 'игра + товар',
@@ -2681,6 +2767,155 @@ function promoBundleTypeLabel(type: string) {
   };
 
   return labels[type] ?? type;
+}
+
+function promoBundlePartLabels(type: string) {
+  const labels: Record<
+    string,
+    { firstLabel: string; secondLabel: string; typeLabel: string }
+  > = {
+    game_product: {
+      typeLabel: 'Игровое время + товар',
+      firstLabel: 'Игровое время',
+      secondLabel: 'Товар',
+    },
+    game_bonus: {
+      typeLabel: 'Игровое время + бонусы',
+      firstLabel: 'Игровое время',
+      secondLabel: 'Бонусы',
+    },
+    product_product: {
+      typeLabel: 'Товар + товар',
+      firstLabel: 'Первый товар',
+      secondLabel: 'Второй товар',
+    },
+    balance_bonus: {
+      typeLabel: 'Пополнение баланса + бонусы',
+      firstLabel: 'Пополнение',
+      secondLabel: 'Бонусы',
+    },
+  };
+
+  return (
+    labels[type] ?? {
+      typeLabel: promoBundleTypeLabel(type),
+      firstLabel: 'Первая часть',
+      secondLabel: 'Вторая часть',
+    }
+  );
+}
+
+function buildPromoBundleStructure(
+  bundleTypeValue: string,
+  mechanicConfig: Prisma.JsonValue,
+): MarketingPromoBundleStructure {
+  const config =
+    mechanicConfig &&
+    typeof mechanicConfig === 'object' &&
+    !Array.isArray(mechanicConfig)
+      ? (mechanicConfig as Record<string, unknown>)
+      : {};
+  const bundleType = getStringField(config, 'bundleType') ?? bundleTypeValue;
+  const labels = promoBundlePartLabels(bundleType);
+  const composition = getRecordField(config, 'composition');
+  const bundle = getRecordField(config, 'bundle');
+  const economics = getRecordField(config, 'economics');
+  const firstItem = normalizeText(composition?.first, 160);
+  const secondItem = normalizeText(composition?.second, 160);
+  const extraCondition = normalizeText(composition?.extraCondition, 180);
+  const gamePrice = Math.max(0, getNumberField(bundle, 'gamePrice') ?? 0);
+  const barPrice = Math.max(0, getNumberField(bundle, 'barPrice') ?? 0);
+  const servicePrice = Math.max(0, getNumberField(bundle, 'servicePrice') ?? 0);
+  const discount = Math.max(0, getNumberField(bundle, 'discount') ?? 0);
+  const costPerUse = Math.max(0, getNumberField(bundle, 'cost') ?? 0);
+  const expectedUses = Math.max(
+    0,
+    Math.round(getNumberField(bundle, 'expectedUses') ?? 0),
+  );
+  const minSpend = Math.max(0, getNumberField(bundle, 'minSpend') ?? 0);
+  const validityDays = Math.max(
+    0,
+    Math.round(getNumberField(bundle, 'validityDays') ?? 0),
+  );
+  const basePrice =
+    getNumberField(economics, 'basePrice') ??
+    gamePrice + barPrice + servicePrice;
+  const promoPrice =
+    getNumberField(economics, 'promoPrice') ??
+    Math.max(0, basePrice - discount);
+  const expectedRevenue =
+    getNumberField(economics, 'revenue') ?? promoPrice * expectedUses;
+  const expectedCost =
+    getNumberField(economics, 'cost') ?? costPerUse * expectedUses;
+  const margin =
+    getNumberField(economics, 'margin') ?? expectedRevenue - expectedCost;
+  const marginPercent =
+    getNumberField(economics, 'marginPercent') ??
+    (expectedRevenue > 0 ? (margin / expectedRevenue) * 100 : null);
+  const missingFields = [
+    firstItem ? null : labels.firstLabel,
+    secondItem ? null : labels.secondLabel,
+    basePrice > 0 && promoPrice > 0 ? null : 'цена набора',
+    expectedUses > 0 ? null : 'лимит использований',
+    costPerUse > 0 ? null : 'себестоимость',
+  ].filter((item): item is string => Boolean(item));
+  const readiness =
+    !firstItem || !secondItem
+      ? 'NEEDS_COMPOSITION'
+      : basePrice <= 0 ||
+          promoPrice <= 0 ||
+          expectedUses <= 0 ||
+          costPerUse <= 0
+        ? 'NEEDS_ECONOMICS'
+        : 'READY';
+  const readinessLabel =
+    readiness === 'READY'
+      ? 'готов к ручному учету'
+      : readiness === 'NEEDS_COMPOSITION'
+        ? 'нужно уточнить состав'
+        : 'нужно уточнить экономику';
+
+  return {
+    composition: {
+      typeLabel: labels.typeLabel,
+      firstLabel: labels.firstLabel,
+      firstItem,
+      secondLabel: labels.secondLabel,
+      secondItem,
+      extraCondition,
+      summary:
+        [firstItem, secondItem].filter(Boolean).join(' + ') ||
+        'состав не задан',
+    },
+    pricing: {
+      basePrice,
+      promoPrice,
+      discount,
+      costPerUse,
+      expectedRevenue,
+      expectedCost,
+      margin,
+      marginPercent,
+    },
+    limits: {
+      expectedUses,
+      minSpend,
+      validityDays,
+      onePerGuest: getBooleanField(bundle, 'onePerGuest', true),
+      requiresApproval: getBooleanField(bundle, 'requiresApproval', true),
+      noStacking: getBooleanField(bundle, 'noStacking', true),
+    },
+    accounting: {
+      readiness,
+      label: readinessLabel,
+      missingFields,
+      nextFields: [
+        'ID товара или услуги для первой части',
+        'ID товара, услуги или бонусной операции для второй части',
+        'правило списания себестоимости при использовании набора',
+      ],
+    },
+  };
 }
 
 function parseOptionalDate(value: unknown) {

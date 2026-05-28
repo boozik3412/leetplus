@@ -17,6 +17,7 @@ import type {
   MarketingCampaignStatus,
   MarketingMechanicConfig,
   MarketingPromoBundle,
+  MarketingPromoBundleStructure,
   MarketingPromoBundleLaunch,
   MarketingPromoBundleLaunchStatus,
 } from "@/lib/marketing";
@@ -1657,16 +1658,11 @@ function PromoBundleCatalogRow({
   isActive: boolean;
   onEdit: () => void;
 }) {
-  const draft = promoBundleToDraft(bundle);
-  const economics = buildPromoBundleEconomics(draft);
-  const composition = [draft.gameItem, draft.barItems]
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .join(" + ");
+  const structure = promoBundleStructureFromBundle(bundle);
   const margin =
-    economics.marginPercent === null
+    structure.pricing.marginPercent === null
       ? "маржа не рассчитана"
-      : `маржа ${formatPercent(economics.marginPercent)}`;
+      : `маржа ${formatPercent(structure.pricing.marginPercent)}`;
 
   return (
     <article
@@ -1687,12 +1683,13 @@ function PromoBundleCatalogRow({
           </span>
         </div>
         <p className="mt-1 line-clamp-2 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
-          {composition || "Состав набора не заполнен"}
+          {structure.composition.summary}
         </p>
         <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold text-zinc-500 dark:text-zinc-400">
-          <span>{formatRubles(economics.promoPrice)}</span>
+          <span>{formatRubles(structure.pricing.promoPrice)}</span>
           <span>{margin}</span>
-          <span>{formatNumber(economics.expectedUses)} исп.</span>
+          <span>{formatNumber(structure.limits.expectedUses)} исп.</span>
+          <span>{structure.accounting.label}</span>
           <span>обновлен {formatDate(bundle.updatedAt)}</span>
         </div>
       </div>
@@ -1746,6 +1743,10 @@ function PromoMechanicsBuilder({
 }) {
   const isCatalogMode = mode === "catalog";
   const bundleNotePreview = buildPromoBundleNote(bundleDraft, bundleEconomics);
+  const bundleStructure = promoBundleStructureFromDraft(
+    bundleDraft,
+    bundleEconomics,
+  );
   const [activeBundlePart, setActiveBundlePart] =
     useState<PromoBundlePart>("first");
   const [isBundleCatalogOpen, setIsBundleCatalogOpen] = useState(false);
@@ -2366,6 +2367,8 @@ function PromoMechanicsBuilder({
               value={`${formatNumber(Math.round(parseMoney(bundleDraft.validityDays)))} дн.`}
             />
           </div>
+
+          <PromoBundleStructureStrip structure={bundleStructure} />
 
           <PromoBundleVerdictCard
             verdict={bundleVerdict}
@@ -3050,6 +3053,75 @@ function PromoMetric({ label, value }: { label: string; value: string }) {
   );
 }
 
+function PromoBundleStructureStrip({
+  structure,
+}: {
+  structure: MarketingPromoBundleStructure;
+}) {
+  const missing =
+    structure.accounting.missingFields.length > 0
+      ? `Уточнить: ${structure.accounting.missingFields.join(", ")}`
+      : "Данных достаточно для ручного учета";
+
+  return (
+    <div className="mt-4 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+          Паспорт набора
+        </p>
+        <span
+          className={[
+            "rounded-full border px-2.5 py-1 text-xs font-semibold",
+            structure.accounting.readiness === "READY"
+              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+              : "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+          ].join(" ")}
+        >
+          {structure.accounting.label}
+        </span>
+      </div>
+      <div className="mt-3 grid gap-2 md:grid-cols-4">
+        <PromoBundlePassportItem
+          label="Состав"
+          value={structure.composition.summary}
+        />
+        <PromoBundlePassportItem
+          label="Цена"
+          value={`${formatRubles(structure.pricing.promoPrice)} из ${formatRubles(
+            structure.pricing.basePrice,
+          )}`}
+        />
+        <PromoBundlePassportItem
+          label="Лимит"
+          value={`${formatNumber(structure.limits.expectedUses)} исп. · ${formatNumber(
+            structure.limits.validityDays,
+          )} дн.`}
+        />
+        <PromoBundlePassportItem label="Учет" value={missing} />
+      </div>
+    </div>
+  );
+}
+
+function PromoBundlePassportItem({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="min-w-0 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/70">
+      <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+        {label}
+      </p>
+      <p className="mt-1 truncate text-sm font-semibold text-zinc-950 dark:text-white">
+        {value}
+      </p>
+    </div>
+  );
+}
+
 function PromoBundleVerdictCard({
   verdict,
   notePreview,
@@ -3701,6 +3773,93 @@ function promoBundleToDraft(bundle: MarketingPromoBundle): PromoBundleDraft {
       bundleValues.noStacking,
       emptyBundleDraft.noStacking,
     ),
+  };
+}
+
+function promoBundleStructureFromBundle(
+  bundle: MarketingPromoBundle,
+): MarketingPromoBundleStructure {
+  if (bundle.structure) {
+    return bundle.structure;
+  }
+
+  const draft = promoBundleToDraft(bundle);
+  return promoBundleStructureFromDraft(draft, buildPromoBundleEconomics(draft));
+}
+
+function promoBundleStructureFromDraft(
+  draft: PromoBundleDraft,
+  economics: PromoBundleEconomics,
+): MarketingPromoBundleStructure {
+  const option = getPromoBundleTypeOption(draft.bundleType);
+  const firstItem = draft.gameItem.trim() || null;
+  const secondItem = draft.barItems.trim() || null;
+  const extraCondition = draft.serviceItems.trim() || null;
+  const costPerUse = parseMoney(draft.cost);
+  const expectedUses = Math.max(0, Math.round(parseMoney(draft.expectedUses)));
+  const minSpend = parseMoney(draft.minSpend);
+  const validityDays = Math.max(0, Math.round(parseMoney(draft.validityDays)));
+  const missingFields = [
+    firstItem ? null : option.firstLabel,
+    secondItem ? null : option.secondLabel,
+    economics.basePrice > 0 && economics.promoPrice > 0 ? null : "цена набора",
+    expectedUses > 0 ? null : "лимит использований",
+    costPerUse > 0 ? null : "себестоимость",
+  ].filter((item): item is string => Boolean(item));
+  const readiness: MarketingPromoBundleStructure["accounting"]["readiness"] =
+    !firstItem || !secondItem
+      ? "NEEDS_COMPOSITION"
+      : economics.basePrice <= 0 ||
+          economics.promoPrice <= 0 ||
+          expectedUses <= 0 ||
+          costPerUse <= 0
+        ? "NEEDS_ECONOMICS"
+        : "READY";
+  const label =
+    readiness === "READY"
+      ? "готов к ручному учету"
+      : readiness === "NEEDS_COMPOSITION"
+        ? "нужно уточнить состав"
+        : "нужно уточнить экономику";
+
+  return {
+    composition: {
+      typeLabel: option.title,
+      firstLabel: option.firstLabel,
+      firstItem,
+      secondLabel: option.secondLabel,
+      secondItem,
+      extraCondition,
+      summary: [firstItem, secondItem].filter(Boolean).join(" + ") || "состав не задан",
+    },
+    pricing: {
+      basePrice: economics.basePrice,
+      promoPrice: economics.promoPrice,
+      discount: parseMoney(draft.discount),
+      costPerUse,
+      expectedRevenue: economics.revenue,
+      expectedCost: economics.cost,
+      margin: economics.margin,
+      marginPercent: economics.marginPercent,
+    },
+    limits: {
+      expectedUses,
+      minSpend,
+      validityDays,
+      onePerGuest: draft.onePerGuest,
+      requiresApproval: draft.requiresApproval,
+      noStacking: draft.noStacking,
+    },
+    accounting: {
+      readiness,
+      label,
+      missingFields,
+      nextFields: [
+        "ID товара или услуги для первой части",
+        "ID товара, услуги или бонусной операции для второй части",
+        "правило списания себестоимости при использовании набора",
+      ],
+    },
   };
 }
 

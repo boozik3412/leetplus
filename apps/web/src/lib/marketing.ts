@@ -166,6 +166,66 @@ export type MarketingPromoBundleLaunch = {
   createdBy: { id: string; displayName: string; email: string } | null;
 };
 
+export type MarketingPromoBundleReconciliationStatus =
+  | "NO_LAUNCH"
+  | "NO_PRODUCT_LINK"
+  | "NO_SALES"
+  | "HAS_FACTS"
+  | "MANUAL_REVIEW";
+
+export type MarketingPromoBundleReconciliationProductRef = {
+  part: "first" | "second";
+  label: string;
+  productId: string;
+  productName: string | null;
+  productArticle: string | null;
+};
+
+export type MarketingPromoBundleReconciliationTotals = {
+  salesQuantity: number;
+  salesCount: number;
+  salesRevenue: number;
+  salesCost: number;
+  grossProfit: number;
+  storeCount: number;
+  lastSaleDate: string | null;
+  expectedUses: number;
+  maxUses: number | null;
+  usageProgressPercent: number | null;
+};
+
+export type MarketingPromoBundleReconciliationLaunch = {
+  launchId: string;
+  status: MarketingPromoBundleLaunchStatus;
+  storeIds: string[];
+  periodFrom: string | null;
+  periodTo: string | null;
+  maxUses: number | null;
+  salesQuantity: number;
+  salesCount: number;
+  salesRevenue: number;
+  salesCost: number;
+  grossProfit: number;
+  storeCount: number;
+  lastSaleDate: string | null;
+  usageProgressPercent: number | null;
+};
+
+export type MarketingPromoBundleReconciliation = {
+  promoBundleId: string;
+  status: MarketingPromoBundleReconciliationStatus;
+  label: string;
+  activeLaunches: number;
+  productRefs: MarketingPromoBundleReconciliationProductRef[];
+  launches: MarketingPromoBundleReconciliationLaunch[];
+  totals: MarketingPromoBundleReconciliationTotals;
+  warnings: string[];
+  dataQuality: {
+    factSource: string;
+    limitation: string;
+  };
+};
+
 export type MarketingCampaignEffectPeriod = {
   from: string;
   to: string;
@@ -324,6 +384,24 @@ export async function getMarketingPromoBundleLaunches(): Promise<
   }
 
   return response.json() as Promise<MarketingPromoBundleLaunch[]>;
+}
+
+export async function getMarketingPromoBundleReconciliation(): Promise<
+  MarketingPromoBundleReconciliation[]
+> {
+  const response = await fetch(
+    `${getApiUrl()}/marketing/promo-bundle-reconciliation`,
+    {
+      cache: "no-store",
+      headers: await getAuthHeaders(),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch marketing promo bundle reconciliation");
+  }
+
+  return response.json() as Promise<MarketingPromoBundleReconciliation[]>;
 }
 
 export async function getMarketingCampaign(

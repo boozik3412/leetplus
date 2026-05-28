@@ -3,6 +3,7 @@ import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
 import {
   getMarketingPromoBundleLaunches,
+  getMarketingPromoBundleReconciliation,
   getMarketingPromoBundles,
 } from "@/lib/marketing";
 import { getProducts } from "@/lib/products";
@@ -19,10 +20,17 @@ async function safeList<T>(promise: Promise<T[]>): Promise<T[]> {
 export default async function MarketingPromoBundlesPage() {
   await requireCurrentUser();
 
-  const [promoBundles, products, promoBundleLaunches, stores] = await Promise.all([
+  const [
+    promoBundles,
+    products,
+    promoBundleLaunches,
+    promoBundleReconciliation,
+    stores,
+  ] = await Promise.all([
     safeList(getMarketingPromoBundles()),
     safeList(getProducts()),
     safeList(getMarketingPromoBundleLaunches()),
+    safeList(getMarketingPromoBundleReconciliation()),
     safeList(getStores()),
   ]);
 
@@ -41,6 +49,7 @@ export default async function MarketingPromoBundlesPage() {
           promoBundles={promoBundles}
           productOptions={products}
           promoBundleLaunches={promoBundleLaunches}
+          promoBundleReconciliation={promoBundleReconciliation}
           stores={stores}
         />
       </div>

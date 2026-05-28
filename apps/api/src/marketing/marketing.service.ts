@@ -49,6 +49,31 @@ type MarketingPromoBundleLaunchRow =
     include: typeof marketingPromoBundleLaunchInclude;
   }>;
 
+const marketingPromoBundleReconciliationInclude = {
+  launches: {
+    orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+    take: 20,
+    select: {
+      id: true,
+      status: true,
+      storeIds: true,
+      periodFrom: true,
+      periodTo: true,
+      maxUses: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  },
+} satisfies Prisma.MarketingPromoBundleInclude;
+
+type MarketingPromoBundleReconciliationRow =
+  Prisma.MarketingPromoBundleGetPayload<{
+    include: typeof marketingPromoBundleReconciliationInclude;
+  }>;
+
+type MarketingPromoBundleReconciliationLaunchRow =
+  MarketingPromoBundleReconciliationRow['launches'][number];
+
 const campaignGoals = [
   'RETURN_GUESTS',
   'REPEAT_VISIT',
@@ -279,6 +304,66 @@ export type MarketingPromoBundleLaunch = {
   createdBy: { id: string; displayName: string; email: string } | null;
 };
 
+export type MarketingPromoBundleReconciliationStatus =
+  | 'NO_LAUNCH'
+  | 'NO_PRODUCT_LINK'
+  | 'NO_SALES'
+  | 'HAS_FACTS'
+  | 'MANUAL_REVIEW';
+
+export type MarketingPromoBundleReconciliationProductRef = {
+  part: 'first' | 'second';
+  label: string;
+  productId: string;
+  productName: string | null;
+  productArticle: string | null;
+};
+
+export type MarketingPromoBundleReconciliationTotals = {
+  salesQuantity: number;
+  salesCount: number;
+  salesRevenue: number;
+  salesCost: number;
+  grossProfit: number;
+  storeCount: number;
+  lastSaleDate: string | null;
+  expectedUses: number;
+  maxUses: number | null;
+  usageProgressPercent: number | null;
+};
+
+export type MarketingPromoBundleReconciliationLaunch = {
+  launchId: string;
+  status: MarketingPromoBundleLaunchStatus;
+  storeIds: string[];
+  periodFrom: string | null;
+  periodTo: string | null;
+  maxUses: number | null;
+  salesQuantity: number;
+  salesCount: number;
+  salesRevenue: number;
+  salesCost: number;
+  grossProfit: number;
+  storeCount: number;
+  lastSaleDate: string | null;
+  usageProgressPercent: number | null;
+};
+
+export type MarketingPromoBundleReconciliation = {
+  promoBundleId: string;
+  status: MarketingPromoBundleReconciliationStatus;
+  label: string;
+  activeLaunches: number;
+  productRefs: MarketingPromoBundleReconciliationProductRef[];
+  launches: MarketingPromoBundleReconciliationLaunch[];
+  totals: MarketingPromoBundleReconciliationTotals;
+  warnings: string[];
+  dataQuality: {
+    factSource: string;
+    limitation: string;
+  };
+};
+
 export type MarketingCampaignEffectPeriod = {
   from: string;
   to: string;
@@ -478,6 +563,56 @@ export class MarketingService {
     });
 
     return rows.map((row) => this.toMarketingPromoBundleLaunch(row));
+  }
+
+  async getPromoBundleReconciliation(
+    user: AuthenticatedUser,
+  ): Promise<MarketingPromoBundleReconciliation[]> {
+    const rows = await this.prisma.marketingPromoBundle.findMany({
+      where: { tenantId: user.tenantId },
+      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+      take: 100,
+      include: marketingPromoBundleReconciliationInclude,
+    });
+    const structuresByBundleId = new Map(
+      rows.map((row) => [
+        row.id,
+        buildPromoBundleStructure(row.bundleType, row.mechanicConfig),
+      ]),
+    );
+    const productIds = [
+      ...new Set(
+        rows.flatMap((row) =>
+          this.promoBundleProductRefs(
+            structuresByBundleId.get(row.id) ??
+              buildPromoBundleStructure(row.bundleType, row.mechanicConfig),
+          ).map((ref) => ref.productId),
+        ),
+      ),
+    ];
+    const products =
+      productIds.length > 0
+        ? await this.prisma.product.findMany({
+            where: { tenantId: user.tenantId, id: { in: productIds } },
+            select: { id: true, name: true, article: true },
+          })
+        : [];
+    const productsById = new Map(
+      products.map((product) => [product.id, product]),
+    );
+
+    return Promise.all(
+      rows.map((row) =>
+        this.buildPromoBundleReconciliationRow({
+          tenantId: user.tenantId,
+          row,
+          structure:
+            structuresByBundleId.get(row.id) ??
+            buildPromoBundleStructure(row.bundleType, row.mechanicConfig),
+          productsById,
+        }),
+      ),
+    );
   }
 
   async getCampaign(
@@ -2053,6 +2188,315 @@ export class MarketingService {
     return Math.round(value * multiplier) / multiplier;
   }
 
+  private promoBundleProductRefs(
+    structure: MarketingPromoBundleStructure,
+  ): Array<{ part: 'first' | 'second'; label: string; productId: string }> {
+    return [
+      {
+        part: 'first' as const,
+        label: structure.composition.firstLabel,
+        ref: structure.accounting.firstRef,
+      },
+      {
+        part: 'second' as const,
+        label: structure.composition.secondLabel,
+        ref: structure.accounting.secondRef,
+      },
+    ].flatMap((item) => {
+      if (item.ref.kind !== 'PRODUCT' || !item.ref.productId) {
+        return [];
+      }
+
+      return [
+        {
+          part: item.part,
+          label: item.label,
+          productId: item.ref.productId,
+        },
+      ];
+    });
+  }
+
+  private async buildPromoBundleReconciliationRow({
+    tenantId,
+    row,
+    structure,
+    productsById,
+  }: {
+    tenantId: string;
+    row: MarketingPromoBundleReconciliationRow;
+    structure: MarketingPromoBundleStructure;
+    productsById: Map<string, { id: string; name: string; article: string }>;
+  }): Promise<MarketingPromoBundleReconciliation> {
+    const productRefs = this.promoBundleProductRefs(structure).map((ref) => {
+      const product = productsById.get(ref.productId);
+
+      return {
+        ...ref,
+        productName: product?.name ?? null,
+        productArticle: product?.article ?? null,
+      };
+    });
+    const launches = row.launches.filter(
+      (launch) => launch.status !== 'CANCELED',
+    );
+    const launchFacts =
+      productRefs.length > 0
+        ? await Promise.all(
+            launches.map((launch) =>
+              this.buildPromoBundleLaunchReconciliation({
+                tenantId,
+                launch,
+                productIds: productRefs.map((ref) => ref.productId),
+                expectedUses: structure.limits.expectedUses,
+              }),
+            ),
+          )
+        : [];
+    const totals = this.totalPromoBundleLaunchFacts(
+      launchFacts,
+      structure.limits.expectedUses,
+    );
+    const warnings = this.promoBundleReconciliationWarnings({
+      structure,
+      productRefs,
+      launches,
+      totals,
+    });
+    const status = this.resolvePromoBundleReconciliationStatus({
+      structure,
+      productRefs,
+      launches,
+      totals,
+    });
+
+    return {
+      promoBundleId: row.id,
+      status,
+      label: promoBundleReconciliationLabel(status),
+      activeLaunches: row.launches.filter(
+        (launch) => launch.status === 'ACTIVE',
+      ).length,
+      productRefs,
+      launches: launchFacts,
+      totals,
+      warnings,
+      dataQuality: {
+        factSource:
+          'SalesFact по привязанным товарам в периоде и клубах запуска.',
+        limitation:
+          'Это прокси-факт продаж, а не точное погашение промо-набора; точное списание появится после отдельного учета использований.',
+      },
+    };
+  }
+
+  private async buildPromoBundleLaunchReconciliation({
+    tenantId,
+    launch,
+    productIds,
+    expectedUses,
+  }: {
+    tenantId: string;
+    launch: MarketingPromoBundleReconciliationLaunchRow;
+    productIds: string[];
+    expectedUses: number;
+  }): Promise<MarketingPromoBundleReconciliationLaunch> {
+    const storeIds = parseStringArray(launch.storeIds);
+    const { from, to } = promoBundleLaunchFactWindow(launch);
+    const facts = await this.prisma.salesFact.findMany({
+      where: {
+        tenantId,
+        productId: { in: productIds },
+        saleDate: { gte: from, lt: to },
+        isCanceled: false,
+        ...(storeIds.length > 0 ? { storeId: { in: storeIds } } : {}),
+      },
+      select: {
+        storeId: true,
+        saleDate: true,
+        quantity: true,
+        revenue: true,
+        cost: true,
+      },
+    });
+    const storeSet = new Set<string>();
+    let salesQuantity = 0;
+    let salesRevenue = 0;
+    let salesCost = 0;
+    let lastSaleAtMs = 0;
+    let lastSaleDateIso: string | null = null;
+
+    facts.forEach((fact) => {
+      storeSet.add(fact.storeId);
+      salesQuantity += fact.quantity.toNumber();
+      salesRevenue += fact.revenue.toNumber();
+      salesCost += fact.cost.toNumber();
+
+      if (fact.saleDate.getTime() > lastSaleAtMs) {
+        lastSaleAtMs = fact.saleDate.getTime();
+        lastSaleDateIso = fact.saleDate.toISOString();
+      }
+    });
+
+    const progressLimit = launch.maxUses ?? expectedUses;
+
+    return {
+      launchId: launch.id,
+      status: resolvePromoBundleLaunchStatus(launch.status),
+      storeIds,
+      periodFrom: launch.periodFrom?.toISOString() ?? null,
+      periodTo: launch.periodTo?.toISOString() ?? null,
+      maxUses: launch.maxUses,
+      salesQuantity: this.round(salesQuantity, 2),
+      salesCount: facts.length,
+      salesRevenue: this.round(salesRevenue, 2),
+      salesCost: this.round(salesCost, 2),
+      grossProfit: this.round(salesRevenue - salesCost, 2),
+      storeCount: storeSet.size,
+      lastSaleDate: lastSaleDateIso,
+      usageProgressPercent:
+        progressLimit > 0 ? this.ratio(salesQuantity, progressLimit) : null,
+    };
+  }
+
+  private totalPromoBundleLaunchFacts(
+    launches: MarketingPromoBundleReconciliationLaunch[],
+    expectedUses: number,
+  ): MarketingPromoBundleReconciliationTotals {
+    let storeCount = 0;
+    let lastSaleDate: string | null = null;
+    let maxUses = 0;
+    const totals = launches.reduce(
+      (sum, launch) => {
+        storeCount = Math.max(storeCount, launch.storeCount);
+
+        if (
+          launch.lastSaleDate &&
+          (!lastSaleDate ||
+            new Date(launch.lastSaleDate).getTime() >
+              new Date(lastSaleDate).getTime())
+        ) {
+          lastSaleDate = launch.lastSaleDate;
+        }
+
+        maxUses += launch.maxUses ?? 0;
+
+        return {
+          salesQuantity: sum.salesQuantity + launch.salesQuantity,
+          salesCount: sum.salesCount + launch.salesCount,
+          salesRevenue: sum.salesRevenue + launch.salesRevenue,
+          salesCost: sum.salesCost + launch.salesCost,
+          grossProfit: sum.grossProfit + launch.grossProfit,
+        };
+      },
+      {
+        salesQuantity: 0,
+        salesCount: 0,
+        salesRevenue: 0,
+        salesCost: 0,
+        grossProfit: 0,
+      },
+    );
+    const progressLimit = maxUses > 0 ? maxUses : expectedUses;
+
+    return {
+      salesQuantity: this.round(totals.salesQuantity, 2),
+      salesCount: totals.salesCount,
+      salesRevenue: this.round(totals.salesRevenue, 2),
+      salesCost: this.round(totals.salesCost, 2),
+      grossProfit: this.round(totals.grossProfit, 2),
+      storeCount,
+      lastSaleDate,
+      expectedUses,
+      maxUses: maxUses > 0 ? maxUses : null,
+      usageProgressPercent:
+        progressLimit > 0
+          ? this.ratio(totals.salesQuantity, progressLimit)
+          : null,
+    };
+  }
+
+  private resolvePromoBundleReconciliationStatus({
+    structure,
+    productRefs,
+    launches,
+    totals,
+  }: {
+    structure: MarketingPromoBundleStructure;
+    productRefs: MarketingPromoBundleReconciliationProductRef[];
+    launches: MarketingPromoBundleReconciliationLaunchRow[];
+    totals: MarketingPromoBundleReconciliationTotals;
+  }): MarketingPromoBundleReconciliationStatus {
+    if (productRefs.length === 0) {
+      return 'NO_PRODUCT_LINK';
+    }
+
+    if (launches.length === 0) {
+      return 'NO_LAUNCH';
+    }
+
+    if (totals.salesCount === 0) {
+      return 'NO_SALES';
+    }
+
+    if (structure.accounting.writeOffRule === 'MANUAL') {
+      return 'MANUAL_REVIEW';
+    }
+
+    return 'HAS_FACTS';
+  }
+
+  private promoBundleReconciliationWarnings({
+    structure,
+    productRefs,
+    launches,
+    totals,
+  }: {
+    structure: MarketingPromoBundleStructure;
+    productRefs: MarketingPromoBundleReconciliationProductRef[];
+    launches: MarketingPromoBundleReconciliationLaunchRow[];
+    totals: MarketingPromoBundleReconciliationTotals;
+  }) {
+    const warnings: string[] = [];
+
+    if (productRefs.length === 0) {
+      warnings.push('Нет товарной привязки для автоматической сверки продаж.');
+    }
+
+    if (launches.length === 0) {
+      warnings.push(
+        'Нет активного или завершенного запуска для сверки периода.',
+      );
+    }
+
+    if (productRefs.some((ref) => !ref.productName) && productRefs.length > 0) {
+      warnings.push('Часть товарных ID не найдена в текущем ассортименте.');
+    }
+
+    if (
+      totals.salesCount === 0 &&
+      productRefs.length > 0 &&
+      launches.length > 0
+    ) {
+      warnings.push('За период запуска продаж привязанных товаров не найдено.');
+    }
+
+    if (
+      totals.usageProgressPercent !== null &&
+      totals.usageProgressPercent > 100
+    ) {
+      warnings.push(
+        'Факт продаж выше лимита использований, нужна ручная проверка.',
+      );
+    }
+
+    if (structure.accounting.writeOffRule === 'MANUAL') {
+      warnings.push('Для набора выбран ручной режим списания.');
+    }
+
+    return warnings;
+  }
+
   private ratio(numerator: number, denominator: number) {
     if (denominator <= 0) {
       return null;
@@ -2723,6 +3167,43 @@ function resolvePromoBundleLaunchStatus(
   }
 
   return 'ACTIVE';
+}
+
+function promoBundleReconciliationLabel(
+  status: MarketingPromoBundleReconciliationStatus,
+) {
+  const labels: Record<MarketingPromoBundleReconciliationStatus, string> = {
+    NO_LAUNCH: 'нет запуска',
+    NO_PRODUCT_LINK: 'нет товарной привязки',
+    NO_SALES: 'фактов продаж нет',
+    HAS_FACTS: 'есть факты продаж',
+    MANUAL_REVIEW: 'ручная сверка',
+  };
+
+  return labels[status];
+}
+
+function promoBundleLaunchFactWindow(
+  launch: Pick<
+    MarketingPromoBundleReconciliationLaunchRow,
+    'createdAt' | 'periodFrom' | 'periodTo'
+  >,
+) {
+  const from = launch.periodFrom ?? launch.createdAt;
+  const to = launch.periodTo
+    ? endOfDay(launch.periodTo)
+    : new Date(Math.max(Date.now(), from.getTime() + DAY_MS));
+
+  return {
+    from,
+    to: to.getTime() > from.getTime() ? to : new Date(from.getTime() + DAY_MS),
+  };
+}
+
+function endOfDay(value: Date) {
+  const date = new Date(value);
+  date.setHours(23, 59, 59, 999);
+  return date;
 }
 
 function getStringField(value: unknown, field: string) {

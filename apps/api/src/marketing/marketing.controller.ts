@@ -28,6 +28,7 @@ import {
   type MarketingPromoBundleLaunch,
   type MarketingPromoBundleLaunchDto,
   type MarketingPromoBundleLaunchUpdateDto,
+  type MarketingPromoBundleReconciliation,
 } from './marketing.service';
 
 @Controller('marketing')
@@ -55,6 +56,13 @@ export class MarketingController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<MarketingPromoBundleLaunch[]> {
     return this.marketingService.getPromoBundleLaunches(user);
+  }
+
+  @Get('promo-bundle-reconciliation')
+  getPromoBundleReconciliation(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<MarketingPromoBundleReconciliation[]> {
+    return this.marketingService.getPromoBundleReconciliation(user);
   }
 
   @Post('promo-bundles')

@@ -20,6 +20,7 @@ import type {
   MarketingPromoBundleStructure,
   MarketingPromoBundleLaunch,
   MarketingPromoBundleLaunchStatus,
+  MarketingPromoBundleReconciliation,
 } from "@/lib/marketing";
 import type { Product } from "@/lib/products";
 import type { Store } from "@/lib/stores";
@@ -1461,11 +1462,13 @@ export function MarketingCampaignsPanel({
 export function MarketingPromoBundlesWorkspace({
   promoBundles,
   promoBundleLaunches = [],
+  promoBundleReconciliation = [],
   productOptions = [],
   stores = [],
 }: {
   promoBundles: MarketingPromoBundle[];
   promoBundleLaunches?: MarketingPromoBundleLaunch[];
+  promoBundleReconciliation?: MarketingPromoBundleReconciliation[];
   productOptions?: Product[];
   stores?: Store[];
 }) {
@@ -1600,6 +1603,7 @@ export function MarketingPromoBundlesWorkspace({
       <PromoBundlesCatalogPanel
         promoBundles={savedPromoBundles}
         promoBundleLaunches={promoBundleLaunches}
+        promoBundleReconciliation={promoBundleReconciliation}
         stores={stores}
         selectedBundleId={selectedBundleId}
         onEditBundle={selectExistingPromoBundle}
@@ -1638,6 +1642,7 @@ export function MarketingPromoBundlesWorkspace({
 function PromoBundlesCatalogPanel({
   promoBundles,
   promoBundleLaunches,
+  promoBundleReconciliation,
   stores,
   selectedBundleId,
   onEditBundle,
@@ -1645,6 +1650,7 @@ function PromoBundlesCatalogPanel({
 }: {
   promoBundles: MarketingPromoBundle[];
   promoBundleLaunches: MarketingPromoBundleLaunch[];
+  promoBundleReconciliation: MarketingPromoBundleReconciliation[];
   stores: Store[];
   selectedBundleId: string | null;
   onEditBundle: (bundle: MarketingPromoBundle) => void;
@@ -1723,6 +1729,7 @@ function PromoBundlesCatalogPanel({
         <PromoBundlesAccountingReport
           promoBundles={filteredBundles}
           promoBundleLaunches={promoBundleLaunches}
+          promoBundleReconciliation={promoBundleReconciliation}
           stores={stores}
           onEditBundle={onEditBundle}
         />
@@ -1734,24 +1741,34 @@ function PromoBundlesCatalogPanel({
 function PromoBundlesAccountingReport({
   promoBundles,
   promoBundleLaunches,
+  promoBundleReconciliation,
   stores,
   onEditBundle,
 }: {
   promoBundles: MarketingPromoBundle[];
   promoBundleLaunches: MarketingPromoBundleLaunch[];
+  promoBundleReconciliation: MarketingPromoBundleReconciliation[];
   stores: Store[];
   onEditBundle: (bundle: MarketingPromoBundle) => void;
 }) {
   const activeLaunches = promoBundleLaunches.filter(
     (launch) => launch.status === "ACTIVE",
   );
+  const reconciliationByBundleId = useMemo(
+    () =>
+      new Map(
+        promoBundleReconciliation.map((row) => [row.promoBundleId, row]),
+      ),
+    [promoBundleReconciliation],
+  );
   const rows = promoBundles.map((bundle) => {
     const structure = promoBundleStructureFromBundle(bundle);
     const launches = activeLaunches.filter(
       (launch) => launch.promoBundle.id === bundle.id,
     );
+    const reconciliation = reconciliationByBundleId.get(bundle.id) ?? null;
 
-    return { bundle, structure, launches };
+    return { bundle, structure, launches, reconciliation };
   });
   const readyCount = rows.filter(
     (row) => row.structure.accounting.readiness === "READY",
@@ -1774,6 +1791,11 @@ function PromoBundlesAccountingReport({
   const manualWriteOffCount = rows.filter(
     (row) => row.structure.accounting.writeOffRule === "MANUAL",
   ).length;
+  const factsCount = rows.filter(
+    (row) =>
+      row.reconciliation?.status === "HAS_FACTS" ||
+      row.reconciliation?.status === "MANUAL_REVIEW",
+  ).length;
 
   if (promoBundles.length === 0) {
     return null;
@@ -1791,8 +1813,9 @@ function PromoBundlesAccountingReport({
           </h3>
         </div>
         <p className="max-w-2xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-          Здесь видно, какие наборы готовы к ручному учету, какие товары или
-          услуги нужно списывать и где остались незаполненные привязки.
+          Привязки, режим списания и факт продаж по товарам в периодах запусков.
+          Точное погашение промо-набора остается ручным, пока нет факта
+          использования.
         </p>
       </div>
 
@@ -1804,8 +1827,8 @@ function PromoBundlesAccountingReport({
         />
         <PromoBundleAccountingMetric label="Товарных связей" value={productLinkCount} />
         <PromoBundleAccountingMetric
-          label="Ручная сверка"
-          value={manualWriteOffCount}
+          label={manualWriteOffCount > 0 ? "Факты / ручной учет" : "Есть факты"}
+          value={factsCount}
         />
       </div>
 
@@ -1816,6 +1839,7 @@ function PromoBundlesAccountingReport({
             bundle={row.bundle}
             structure={row.structure}
             launches={row.launches}
+            reconciliation={row.reconciliation}
             stores={stores}
             onEdit={() => onEditBundle(row.bundle)}
           />
@@ -1848,12 +1872,14 @@ function PromoBundleAccountingRow({
   bundle,
   structure,
   launches,
+  reconciliation,
   stores,
   onEdit,
 }: {
   bundle: MarketingPromoBundle;
   structure: MarketingPromoBundleStructure;
   launches: MarketingPromoBundleLaunch[];
+  reconciliation: MarketingPromoBundleReconciliation | null;
   stores: Store[];
   onEdit: () => void;
 }) {
@@ -1863,9 +1889,13 @@ function PromoBundleAccountingRow({
     `${structure.composition.secondLabel}: ${structure.accounting.secondRef.label}`,
   ];
   const launchLabel = promoBundleOperationalLaunchLabel(launches, stores);
+  const factLabel = promoBundleReconciliationDisplayLabel(reconciliation);
+  const factTone = promoBundleReconciliationTone(reconciliation);
+  const factSummary = promoBundleReconciliationSummary(reconciliation);
+  const firstWarning = reconciliation?.warnings[0] ?? null;
 
   return (
-    <article className="grid gap-3 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950 lg:grid-cols-[minmax(0,1fr)_minmax(220px,0.38fr)_auto] lg:items-center">
+    <article className="grid gap-3 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.48fr)_auto] lg:items-center">
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <h4 className="truncate text-sm font-semibold text-zinc-950 dark:text-white">
@@ -1887,10 +1917,22 @@ function PromoBundleAccountingRow({
         </p>
       </div>
       <div className="grid gap-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-        <span className="font-semibold text-zinc-700 dark:text-zinc-200">
-          {structure.accounting.writeOffLabel}
-        </span>
+        <div className="flex flex-wrap gap-1.5">
+          <span className="font-semibold text-zinc-700 dark:text-zinc-200">
+            {structure.accounting.writeOffLabel}
+          </span>
+          <span
+            className={[
+              "rounded-full border px-2 py-0.5 font-semibold",
+              factTone,
+            ].join(" ")}
+          >
+            {factLabel}
+          </span>
+        </div>
         <span>{launchLabel}</span>
+        <span className="text-zinc-700 dark:text-zinc-200">{factSummary}</span>
+        {firstWarning ? <span>{firstWarning}</span> : null}
       </div>
       <button
         type="button"
@@ -1901,6 +1943,57 @@ function PromoBundleAccountingRow({
       </button>
     </article>
   );
+}
+
+function promoBundleReconciliationDisplayLabel(
+  reconciliation: MarketingPromoBundleReconciliation | null,
+) {
+  return reconciliation?.label ?? "сверка не загружена";
+}
+
+function promoBundleReconciliationTone(
+  reconciliation: MarketingPromoBundleReconciliation | null,
+) {
+  if (
+    reconciliation?.status === "HAS_FACTS" ||
+    reconciliation?.status === "MANUAL_REVIEW"
+  ) {
+    return "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
+  }
+
+  if (
+    reconciliation?.status === "NO_SALES" ||
+    reconciliation?.status === "NO_LAUNCH"
+  ) {
+    return "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300";
+  }
+
+  return "border-zinc-300 bg-zinc-100 text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300";
+}
+
+function promoBundleReconciliationSummary(
+  reconciliation: MarketingPromoBundleReconciliation | null,
+) {
+  if (!reconciliation) {
+    return "Обновите страницу, чтобы подтянуть факты продаж по запускам.";
+  }
+
+  const { totals } = reconciliation;
+
+  if (totals.salesCount === 0) {
+    return reconciliation.productRefs.length > 0
+      ? "Продаж привязанных товаров в периодах запусков пока нет."
+      : "Сначала привяжите товар из ассортимента к части набора.";
+  }
+
+  const progress =
+    totals.usageProgressPercent === null
+      ? null
+      : ` · ${formatPercent(totals.usageProgressPercent)} лимита`;
+
+  return `${formatQuantity(totals.salesQuantity)} шт · ${formatRubles(
+    totals.salesRevenue,
+  )} · прибыль ${formatRubles(totals.grossProfit)}${progress ?? ""}`;
 }
 
 function PromoBundleCatalogRow({
@@ -5054,6 +5147,12 @@ function formatPercent(value: number) {
 function formatNumber(value: number) {
   return new Intl.NumberFormat("ru-RU", {
     maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function formatQuantity(value: number) {
+  return new Intl.NumberFormat("ru-RU", {
+    maximumFractionDigits: value % 1 === 0 ? 0 : 1,
   }).format(value);
 }
 

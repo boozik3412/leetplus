@@ -1400,7 +1400,265 @@ export function MarketingCampaignsPanel({
   );
 }
 
+export function MarketingPromoBundlesWorkspace({
+  promoBundles,
+  promoBundleLaunches,
+  stores,
+}: {
+  promoBundles: MarketingPromoBundle[];
+  promoBundleLaunches: MarketingPromoBundleLaunch[];
+  stores: Store[];
+}) {
+  const [savedPromoBundles, setSavedPromoBundles] = useState(promoBundles);
+  const [promoLaunchRows, setPromoLaunchRows] = useState(promoBundleLaunches);
+  const [launchForm, setLaunchForm] = useState<PromoBundleLaunchFormState>({
+    ...emptyPromoBundleLaunchForm,
+    promoBundleId: promoBundles[0]?.id ?? "",
+  });
+  const [bundleDraft, setBundleDraft] =
+    useState<PromoBundleDraft>(emptyBundleDraft);
+  const [bundleCatalogNotice, setBundleCatalogNotice] = useState<string | null>(
+    null,
+  );
+  const [isSavingBundle, setIsSavingBundle] = useState(false);
+  const [isCreatingLaunch, setIsCreatingLaunch] = useState(false);
+  const [pendingLaunchId, setPendingLaunchId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const bundleEconomics = useMemo(
+    () => buildPromoBundleEconomics(bundleDraft),
+    [bundleDraft],
+  );
+  const bundleVerdict = useMemo(
+    () => buildPromoBundleVerdict(bundleDraft, bundleEconomics),
+    [bundleDraft, bundleEconomics],
+  );
+  const selectedLaunchPromoBundle =
+    savedPromoBundles.find((bundle) => bundle.id === launchForm.promoBundleId) ??
+    null;
+  const activeLaunches = promoLaunchRows.filter(
+    (launch) => launch.status === "ACTIVE",
+  );
+
+  async function saveBundleDraft() {
+    if (bundleVerdict.tone === "blocked" || isSavingBundle) {
+      return;
+    }
+
+    setIsSavingBundle(true);
+    setError(null);
+    const note = buildPromoBundleNote(bundleDraft, bundleEconomics);
+    const bundleType = getPromoBundleTypeOption(bundleDraft.bundleType);
+    const mechanicConfig = buildPromoBundleConfig(
+      bundleDraft,
+      bundleEconomics,
+      bundleVerdict,
+    );
+    const response = await fetch("/api/marketing/promo-bundles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: `Комбо: ${bundleType.title}`,
+        bundleType: bundleDraft.bundleType,
+        mechanicConfig,
+        note,
+      }),
+    });
+
+    if (!response.ok) {
+      setError(await readError(response));
+      setIsSavingBundle(false);
+      return;
+    }
+
+    const promoBundle = (await response.json()) as MarketingPromoBundle;
+    setSavedPromoBundles((current) => [
+      promoBundle,
+      ...current.filter((item) => item.id !== promoBundle.id),
+    ]);
+    setLaunchForm((current) => ({
+      ...current,
+      promoBundleId: promoBundle.id,
+      maxUses: current.maxUses || bundleDraft.expectedUses,
+    }));
+    setBundleCatalogNotice(
+      "Промо-набор сохранен в каталоге. Теперь его можно запустить для всей сети или выбранных клубов ниже.",
+    );
+    setIsSavingBundle(false);
+    window.requestAnimationFrame(() => {
+      scrollToMarketingSection("bundle-launches");
+    });
+  }
+
+  function selectExistingPromoBundle(promoBundle: MarketingPromoBundle) {
+    const draft = promoBundleToDraft(promoBundle);
+
+    setBundleDraft(draft);
+    setLaunchForm((current) => ({
+      ...current,
+      promoBundleId: promoBundle.id,
+      maxUses: current.maxUses || draft.expectedUses,
+    }));
+    setBundleCatalogNotice(
+      "Набор выбран из каталога. Его можно запустить ниже или изменить как основу нового промо-набора.",
+    );
+    window.requestAnimationFrame(() => {
+      scrollToMarketingSection("bundle-launches");
+    });
+  }
+
+  async function createPromoBundleLaunch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!launchForm.promoBundleId) {
+      setError("Сначала выберите сохраненный промо-набор");
+      return;
+    }
+
+    if (launchForm.scope === "STORES" && launchForm.storeIds.length === 0) {
+      setError("Выберите клубы или оставьте запуск на всю сеть");
+      return;
+    }
+
+    setIsCreatingLaunch(true);
+    setError(null);
+
+    const response = await fetch("/api/marketing/promo-bundle-launches", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        promoBundleId: launchForm.promoBundleId,
+        storeIds: launchForm.scope === "NETWORK" ? [] : launchForm.storeIds,
+        periodFrom: launchForm.periodFrom || null,
+        periodTo: launchForm.periodTo || null,
+        maxUses: launchForm.maxUses || null,
+        note: launchForm.note || null,
+      }),
+    });
+
+    if (!response.ok) {
+      setError(await readError(response));
+      setIsCreatingLaunch(false);
+      return;
+    }
+
+    const launch = (await response.json()) as MarketingPromoBundleLaunch;
+    setPromoLaunchRows((current) => [
+      launch,
+      ...current.filter((item) => item.id !== launch.id),
+    ]);
+    setLaunchForm((current) => ({
+      ...emptyPromoBundleLaunchForm,
+      promoBundleId: launch.promoBundle.id,
+      maxUses: current.maxUses,
+    }));
+    setIsCreatingLaunch(false);
+    window.requestAnimationFrame(() => {
+      scrollToMarketingSection("bundle-launches");
+    });
+  }
+
+  async function updatePromoBundleLaunchStatus(
+    launch: MarketingPromoBundleLaunch,
+    status: MarketingPromoBundleLaunchStatus,
+  ) {
+    const previousRows = promoLaunchRows;
+    setPendingLaunchId(launch.id);
+    setPromoLaunchRows((current) =>
+      current.map((row) => (row.id === launch.id ? { ...row, status } : row)),
+    );
+    setError(null);
+
+    const response = await fetch(
+      `/api/marketing/promo-bundle-launches/${launch.id}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      },
+    );
+
+    if (!response.ok) {
+      setPromoLaunchRows(previousRows);
+      setError(await readError(response));
+      setPendingLaunchId(null);
+      return;
+    }
+
+    const updated = (await response.json()) as MarketingPromoBundleLaunch;
+    setPromoLaunchRows((current) =>
+      current.map((row) => (row.id === updated.id ? updated : row)),
+    );
+    setPendingLaunchId(null);
+  }
+
+  return (
+    <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="grid gap-4 border-b border-zinc-200 p-6 dark:border-zinc-800 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+        <div>
+          <p className="text-sm font-bold uppercase tracking-wide text-emerald-500">
+            Промо-наборы
+          </p>
+          <h1 className="mt-2 text-3xl font-bold tracking-normal text-zinc-950 dark:text-white md:text-4xl">
+            Каталог офферов без кампании
+          </h1>
+          <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+            Здесь создаются и запускаются промо-наборы без группы гостей,
+            CRM-лидов и формы кампании. Настройте состав, цену, лимиты и
+            область действия: вся сеть или конкретные клубы.
+          </p>
+        </div>
+        <div className="grid grid-cols-3 gap-2 text-center">
+          <MetricPill label="Наборов" value={savedPromoBundles.length} />
+          <MetricPill label="Запусков" value={promoLaunchRows.length} />
+          <MetricPill label="Активные" value={activeLaunches.length} />
+        </div>
+      </div>
+
+      {error ? (
+        <p className="m-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-200">
+          {error}
+        </p>
+      ) : null}
+
+      <PromoMechanicsBuilder
+        mode="catalog"
+        selectedTemplate={promoMechanicTemplates[0]}
+        selectedTemplateId={promoMechanicTemplates[0]?.id ?? ""}
+        promoBundles={savedPromoBundles}
+        bundleDraft={bundleDraft}
+        bundleEconomics={bundleEconomics}
+        bundleVerdict={bundleVerdict}
+        bundleCatalogNotice={bundleCatalogNotice}
+        isSavingBundle={isSavingBundle}
+        onSelectTemplate={() => undefined}
+        onApplyTemplate={() => undefined}
+        bundleApplyNotice={Boolean(bundleCatalogNotice)}
+        onBundleDraftChange={(draft) => {
+          setBundleCatalogNotice(null);
+          setBundleDraft(draft);
+        }}
+        onUsePromoBundle={selectExistingPromoBundle}
+        onApplyBundle={saveBundleDraft}
+      />
+
+      <PromoBundleStandaloneLaunchPanel
+        launches={promoLaunchRows}
+        launchForm={launchForm}
+        selectedPromoBundle={selectedLaunchPromoBundle}
+        promoBundles={savedPromoBundles}
+        stores={stores}
+        isCreatingLaunch={isCreatingLaunch}
+        pendingLaunchId={pendingLaunchId}
+        onLaunchFormChange={setLaunchForm}
+        onCreateLaunch={createPromoBundleLaunch}
+        onUpdateLaunchStatus={updatePromoBundleLaunchStatus}
+      />
+    </section>
+  );
+}
+
 function PromoMechanicsBuilder({
+  mode = "campaign",
   selectedTemplate,
   selectedTemplateId,
   promoBundles,
@@ -1416,6 +1674,7 @@ function PromoMechanicsBuilder({
   onUsePromoBundle,
   onApplyBundle,
 }: {
+  mode?: "campaign" | "catalog";
   selectedTemplate: PromoMechanicTemplate;
   selectedTemplateId: string;
   promoBundles: MarketingPromoBundle[];
@@ -1431,6 +1690,7 @@ function PromoMechanicsBuilder({
   onUsePromoBundle: (bundle: MarketingPromoBundle) => void;
   onApplyBundle: () => void | Promise<void>;
 }) {
+  const isCatalogMode = mode === "catalog";
   const bundleNotePreview = buildPromoBundleNote(bundleDraft, bundleEconomics);
   const [activeBundlePart, setActiveBundlePart] =
     useState<PromoBundlePart>("first");
@@ -1551,8 +1811,15 @@ function PromoMechanicsBuilder({
 
   return (
     <section className="border-b border-zinc-200 p-4 dark:border-zinc-800">
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(360px,1.05fr)]">
-        <div
+      <div
+        className={
+          isCatalogMode
+            ? "grid gap-4"
+            : "grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(360px,1.05fr)]"
+        }
+      >
+        {isCatalogMode ? null : (
+          <div
           id="mechanics"
           className="scroll-mt-6 rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60"
         >
@@ -1628,9 +1895,10 @@ function PromoMechanicsBuilder({
             </div>
           </div>
         </div>
+        )}
 
         <div
-          id="bundle"
+          id={isCatalogMode ? "promo-bundle-builder" : "bundle"}
           className="scroll-mt-6 rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60"
         >
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1639,11 +1907,14 @@ function PromoMechanicsBuilder({
                 Промо-набор
               </p>
               <h3 className="mt-2 text-xl font-semibold text-zinc-950 dark:text-white">
-                Конструктор комбо-набора
+                {isCatalogMode
+                  ? "Создание промо-набора"
+                  : "Конструктор комбо-набора"}
               </h3>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                Соберите оффер по шагам: выберите тип, настройте две части,
-                проверьте экономику и сохраните набор в каталог.
+                {isCatalogMode
+                  ? "Соберите оффер как самостоятельный каталожный набор: тип, две части, экономика, лимиты и условия запуска."
+                  : "Соберите оффер по шагам: выберите тип, настройте две части, проверьте экономику и сохраните набор в каталог."}
               </p>
             </div>
             <div className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm leading-5 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300">
@@ -1651,14 +1922,16 @@ function PromoMechanicsBuilder({
                 Сохранение
               </p>
               <p className="mt-1">
-                Кнопка появится ниже, после коммерческой проверки.
+                {isCatalogMode
+                  ? "Сохранение доступно после коммерческой проверки."
+                  : "Кнопка появится ниже, после коммерческой проверки."}
               </p>
             </div>
           </div>
           <p className="mt-3 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm leading-6 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300">
-            Настройте состав и экономику набора, затем перенесите расчет в
-            каталог комбо-наборов. После сохранения он подставится в форму
-            кампании, а позже сможет использоваться в ассортименте и учете услуг.
+            {isCatalogMode
+              ? "Настройте состав и экономику без выбора группы гостей. После сохранения набор появится в каталоге, его можно будет запустить для сети или клубов, а позже использовать в кампании, ассортименте и учете услуг."
+              : "Настройте состав и экономику набора, затем перенесите расчет в каталог комбо-наборов. После сохранения он подставится в форму кампании, а позже сможет использоваться в ассортименте и учете услуг."}
           </p>
           {bundleApplyNotice ? (
             <p className="mt-3 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-semibold leading-6 text-emerald-800 dark:border-emerald-500/50 dark:bg-emerald-500/10 dark:text-emerald-200">
@@ -1730,7 +2003,9 @@ function PromoMechanicsBuilder({
                   <p className="mt-1 text-sm leading-5 text-zinc-600 dark:text-zinc-300">
                     {selectedPromoBundle
                       ? `Выбран: ${selectedPromoBundle.name}`
-                      : "Готовые наборы можно быстро подставить в кампанию или взять как основу."}
+                      : isCatalogMode
+                        ? "Готовые наборы можно выбрать для запуска или взять как основу нового набора."
+                        : "Готовые наборы можно быстро подставить в кампанию или взять как основу."}
                   </p>
                 </div>
                 <button
@@ -1785,6 +2060,9 @@ function PromoMechanicsBuilder({
                             isActive={bundle.id === selectedPromoBundle?.id}
                             onLoadAsBasis={() => loadPromoBundleAsBasis(bundle)}
                             onUse={() => selectPromoBundleFromCatalog(bundle)}
+                            useLabel={
+                              isCatalogMode ? "Выбрать для запуска" : undefined
+                            }
                           />
                         ))}
                       </div>
@@ -2039,6 +2317,7 @@ function PromoMechanicsBuilder({
             bundleApplyNotice={bundleApplyNotice}
             isSavingBundle={isSavingBundle}
             onApplyBundle={onApplyBundle}
+            mode={mode}
           />
         </div>
       </div>
@@ -2444,11 +2723,13 @@ function PromoBundleCatalogItem({
   isActive,
   onLoadAsBasis,
   onUse,
+  useLabel = "Выбрать",
 }: {
   bundle: MarketingPromoBundle;
   isActive: boolean;
   onLoadAsBasis: () => void;
   onUse: () => void;
+  useLabel?: string;
 }) {
   const draft = promoBundleToDraft(bundle);
   const economics = buildPromoBundleEconomics(draft);
@@ -2501,7 +2782,7 @@ function PromoBundleCatalogItem({
           onClick={onUse}
           className="inline-flex min-h-9 items-center justify-center rounded-lg bg-emerald-500 px-3 text-xs font-semibold text-zinc-950 transition duration-200 hover:-translate-y-0.5 hover:bg-emerald-400 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/30"
         >
-          Выбрать
+          {useLabel}
         </button>
       </div>
     </div>
@@ -2718,13 +2999,16 @@ function PromoBundleVerdictCard({
   bundleApplyNotice,
   isSavingBundle,
   onApplyBundle,
+  mode = "campaign",
 }: {
   verdict: PromoBundleVerdict;
   notePreview: string;
   bundleApplyNotice: boolean;
   isSavingBundle: boolean;
   onApplyBundle: () => void | Promise<void>;
+  mode?: "campaign" | "catalog";
 }) {
+  const isCatalogMode = mode === "catalog";
   const toneClass =
     verdict.tone === "ready"
       ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
@@ -2741,14 +3025,20 @@ function PromoBundleVerdictCard({
   const actionLabel = isSavingBundle
     ? "Сохраняем..."
     : verdict.tone === "ready"
-      ? "Создать и сохранить промо-набор"
+      ? isCatalogMode
+        ? "Создать промо-набор"
+        : "Создать и сохранить промо-набор"
       : verdict.tone === "warning"
         ? "Сохранить после ручной проверки"
         : "Исправьте расчет";
   const nextStepText = bundleApplyNotice
-    ? "Набор сохранен в каталог и уже связан с формой кампании."
+    ? isCatalogMode
+      ? "Набор сохранен в каталог и выбран для отдельного запуска."
+      : "Набор сохранен в каталог и уже связан с формой кампании."
     : verdict.tone === "ready"
-      ? "Экономика прошла проверку. Сохраните набор в каталог и привяжите его к черновику кампании."
+      ? isCatalogMode
+        ? "Экономика прошла проверку. Сохраните набор в каталог и запустите его для сети или клубов."
+        : "Экономика прошла проверку. Сохраните набор в каталог и привяжите его к черновику кампании."
       : verdict.tone === "warning"
         ? "Есть предупреждения. Сохранение доступно, но сначала проверьте условия и лимиты."
         : "Исправьте блокирующие ошибки, затем сохраните набор.";
@@ -2828,23 +3118,35 @@ function PromoBundleVerdictCard({
             />
             <NextStepItem
               title="Кампания"
-              text="Расчет, механика и ссылка на набор перенесутся в форму кампании для выбора группы, периода и ответственного."
+              text={
+                isCatalogMode
+                  ? "Если понадобится CRM-сценарий, этот же набор можно будет привязать к кампании без пересборки."
+                  : "Расчет, механика и ссылка на набор перенесутся в форму кампании для выбора группы, периода и ответственного."
+              }
             />
             <NextStepItem
-              title="Ассортимент и учет"
-              text="Позже этот же набор можно будет использовать в ассортименте, услугах и товарном учете без пересборки с нуля."
+              title={isCatalogMode ? "Запуск" : "Ассортимент и учет"}
+              text={
+                isCatalogMode
+                  ? "Ниже выберите всю сеть или конкретные клубы, период, лимит и инструкцию для администраторов."
+                  : "Позже этот же набор можно будет использовать в ассортименте, услугах и товарном учете без пересборки с нуля."
+              }
             />
           </div>
         </div>
       </div>
       <p className="mx-4 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm leading-6 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-300">
         {bundleApplyNotice
-          ? "Промо-набор уже перенесен в форму кампании. Проверьте группу, период, ответственного и сохраните черновик."
+          ? isCatalogMode
+            ? "Промо-набор сохранен в каталог. Теперь настройте область действия и запустите его без кампании."
+            : "Промо-набор уже перенесен в форму кампании. Проверьте группу, период, ответственного и сохраните черновик."
           : "После проверки создайте промо-набор: он сохранится как отдельный элемент каталога, сможет быть привязан к кампании и позднее использоваться в ассортименте, товарах и услугах."}
       </p>
       <details className="m-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/70">
         <summary className="cursor-pointer text-sm font-semibold text-zinc-950 dark:text-white">
-          Что попадет в заметку кампании
+          {isCatalogMode
+            ? "Что сохранится в заметке набора"
+            : "Что попадет в заметку кампании"}
         </summary>
         <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
           {notePreview}
@@ -3180,11 +3482,11 @@ function buildPromoBundleVerdict(
       tone: "blocked",
       title: "Набор пока нельзя запускать",
       description:
-        "Заполните состав и цену набора, чтобы кампания не ушла в CRM с нулевой ценой.",
+        "Заполните состав и цену набора, чтобы оффер не ушел в запуск с нулевой ценой.",
       checks: [
         "Добавьте стоимость игры, бара или сервиса.",
         "Промо-цена должна быть больше 0 руб.",
-        "После правки нажмите «Перенести в кампанию».",
+        "После правки сохраните набор в каталог.",
       ],
     };
   }
@@ -3241,16 +3543,16 @@ function buildPromoBundleVerdict(
       tone: "warning",
       title: "Можно запускать после проверки условий",
       description:
-        "Экономика не блокирует кампанию, но перед задачей в CRM нужно проверить себестоимость, минимальный чек и размер скидки.",
+        "Экономика не блокирует запуск, но перед использованием нужно проверить себестоимость, минимальный чек и размер скидки.",
       checks,
     };
   }
 
   return {
     tone: "ready",
-    title: "Набор готов к кампании",
+    title: "Набор готов к сохранению",
     description:
-      "Цена, лимит, срок, маржа и антифрод выглядят достаточно понятно для ручного запуска через CRM-задачу.",
+      "Цена, лимит, срок, маржа и антифрод выглядят достаточно понятно для ручного запуска.",
     checks,
   };
 }
@@ -3430,7 +3732,7 @@ function buildPromoBundleNote(
       draft.noStacking
         ? "не суммировать с другими скидками"
         : "допускается суммирование только по ручному решению"
-    }, фиксировать контакт и факт использования в CRM.`,
+    }, фиксировать факт использования в журнале запуска или CRM, если набор привязан к кампании.`,
   ].join(" ");
 }
 

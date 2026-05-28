@@ -505,7 +505,8 @@ Goal: let a manager create a simple campaign from a business signal and control 
 - Done: promo-bundle reconciliation now also shows linked product stock write-off facts from `StockMovement` by launch period and club, so sales proxy and stock movement proxy are visible together.
 - Done: promo bundles now have exact usage facts through `MarketingPromoBundleUsage`: manual redemption journal, optional launch/club/guest/check references, revenue/cost amount, cancel status, and source/external fields for future Langame or API import.
 - Done: `/marketing/promo-bundles` operational summary now combines launch limits, manual usage facts, linked product sales, stock write-offs, margin, and remaining usage limit in one compact workspace.
-- Next: connect automatic promo redemption import from Langame or another confirmed operational source into `MarketingPromoBundleUsage` without changing the UI contract.
+- Done: promo-bundle usage facts now have a bulk import endpoint with idempotency by `source/externalProvider/externalDomain/externalId`, automatic active launch matching by bundle, club, and usage date, a compact usage analytics block, and a per-bundle "fix usage" UX action.
+- Next: connect a confirmed Langame or cashier-system source to the promo-bundle usage import endpoint after the external fact format is approved.
 - Done: let the user choose a saved guest group or create one from guest filters.
 - Add campaign fields: goal, period, clubs, target group, channel, responsible user, deadline, note, status.
 - Done: improve generated CRM tasks with per-channel instructions and campaign detail links.

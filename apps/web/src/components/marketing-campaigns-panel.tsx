@@ -1622,6 +1622,30 @@ export function MarketingPromoBundlesWorkspace({
     });
   }
 
+  function prefillUsageFromBundle(promoBundle: MarketingPromoBundle) {
+    const launch = pickPromoBundleLaunchForUsage(
+      promoBundleLaunches,
+      promoBundle.id,
+    );
+    const structure = promoBundleStructureFromBundle(promoBundle);
+
+    setUsageForm((current) => ({
+      ...current,
+      promoBundleId: promoBundle.id,
+      launchId: launch?.id ?? "",
+      storeId: launch?.storeIds.length === 1 ? launch.storeIds[0] : "",
+      quantity: current.promoBundleId === promoBundle.id ? current.quantity : "1",
+      amount: moneyInputValue(structure.pricing.promoPrice),
+      costAmount: moneyInputValue(structure.pricing.expectedCost),
+    }));
+    setBundleCatalogNotice(
+      "Набор выбран для фиксации использования. Проверьте клуб, дату и чек в журнале ниже.",
+    );
+    window.requestAnimationFrame(() => {
+      scrollToMarketingSection("promo-bundle-usage-journal");
+    });
+  }
+
   async function createPromoBundleUsage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -1752,6 +1776,7 @@ export function MarketingPromoBundlesWorkspace({
         onCreateUsage={createPromoBundleUsage}
         onUpdateUsageStatus={updatePromoBundleUsageStatus}
         onEditBundle={selectExistingPromoBundle}
+        onRecordUsage={prefillUsageFromBundle}
         onCreateNew={createNewBundleDraft}
       />
 
@@ -1798,6 +1823,7 @@ function PromoBundlesCatalogPanel({
   onCreateUsage,
   onUpdateUsageStatus,
   onEditBundle,
+  onRecordUsage,
   onCreateNew,
 }: {
   promoBundles: MarketingPromoBundle[];
@@ -1816,6 +1842,7 @@ function PromoBundlesCatalogPanel({
     status: MarketingPromoBundleUsageStatus,
   ) => void;
   onEditBundle: (bundle: MarketingPromoBundle) => void;
+  onRecordUsage: (bundle: MarketingPromoBundle) => void;
   onCreateNew: () => void;
 }) {
   const [query, setQuery] = useState("");
@@ -1901,6 +1928,7 @@ function PromoBundlesCatalogPanel({
           onCreateUsage={onCreateUsage}
           onUpdateUsageStatus={onUpdateUsageStatus}
           onEditBundle={onEditBundle}
+          onRecordUsage={onRecordUsage}
         />
       </div>
     </section>
@@ -1920,6 +1948,7 @@ function PromoBundlesAccountingReport({
   onCreateUsage,
   onUpdateUsageStatus,
   onEditBundle,
+  onRecordUsage,
 }: {
   promoBundles: MarketingPromoBundle[];
   promoBundleLaunches: MarketingPromoBundleLaunch[];
@@ -1936,6 +1965,7 @@ function PromoBundlesAccountingReport({
     status: MarketingPromoBundleUsageStatus,
   ) => void;
   onEditBundle: (bundle: MarketingPromoBundle) => void;
+  onRecordUsage: (bundle: MarketingPromoBundle) => void;
 }) {
   const activeLaunches = promoBundleLaunches.filter(
     (launch) => launch.status === "ACTIVE",
@@ -2043,6 +2073,8 @@ function PromoBundlesAccountingReport({
         />
       </div>
 
+      <PromoBundleUsageAnalytics rows={rows} />
+
       <div className="mt-3 grid gap-2">
         {rows.map((row) => (
           <PromoBundleAccountingRow
@@ -2054,6 +2086,7 @@ function PromoBundlesAccountingReport({
             reconciliation={row.reconciliation}
             stores={stores}
             onEdit={() => onEditBundle(row.bundle)}
+            onRecordUsage={() => onRecordUsage(row.bundle)}
           />
         ))}
       </div>
@@ -2093,6 +2126,125 @@ function PromoBundleAccountingMetric({
   );
 }
 
+function PromoBundleUsageAnalytics({
+  rows,
+}: {
+  rows: Array<{
+    bundle: MarketingPromoBundle;
+    structure: MarketingPromoBundleStructure;
+    launches: MarketingPromoBundleLaunch[];
+    reconciliation: MarketingPromoBundleReconciliation | null;
+    usages: MarketingPromoBundleUsage[];
+  }>;
+}) {
+  const summaries = rows.map((row) => ({
+    row,
+    summary: buildPromoBundleUsageSummary(row.usages),
+  }));
+  const usedBundles = summaries.filter(({ summary }) => summary.count > 0);
+  const noUsageActiveLaunches = summaries.filter(
+    ({ row, summary }) => row.launches.length > 0 && summary.count === 0,
+  ).length;
+  const totalAmount = summaries.reduce(
+    (sum, { summary }) => sum + summary.amount,
+    0,
+  );
+  const totalGrossProfit = summaries.reduce(
+    (sum, { summary }) => sum + summary.grossProfit,
+    0,
+  );
+  const topRows = [...usedBundles]
+    .sort((left, right) => right.summary.quantity - left.summary.quantity)
+    .slice(0, 3);
+
+  return (
+    <div className="mt-3 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
+            Аналитика использований
+          </p>
+          <h4 className="mt-1 text-sm font-semibold text-zinc-950 dark:text-white">
+            Факт по промо-наборам
+          </h4>
+        </div>
+        <p className="max-w-xl text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+          Берем подтвержденные использования из журнала и импорта. Наборы с
+          активным запуском без фактов сразу видно отдельно.
+        </p>
+      </div>
+
+      <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <PromoBundleUsageAnalyticsMetric
+          label="С фактами"
+          value={formatNumber(usedBundles.length)}
+        />
+        <PromoBundleUsageAnalyticsMetric
+          label="Запущены без фактов"
+          value={formatNumber(noUsageActiveLaunches)}
+        />
+        <PromoBundleUsageAnalyticsMetric
+          label="Выручка"
+          value={formatRubles(totalAmount)}
+        />
+        <PromoBundleUsageAnalyticsMetric
+          label="Маржа"
+          value={formatRubles(totalGrossProfit)}
+        />
+      </div>
+
+      <div className="mt-3 grid gap-2">
+        {topRows.length > 0 ? (
+          topRows.map(({ row, summary }) => (
+            <div
+              key={row.bundle.id}
+              className="grid gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-xs dark:border-zinc-800 md:grid-cols-[minmax(0,1fr)_auto] md:items-center"
+            >
+              <div className="min-w-0">
+                <p className="truncate font-semibold text-zinc-950 dark:text-white">
+                  {row.bundle.name}
+                </p>
+                <p className="mt-1 text-zinc-500 dark:text-zinc-400">
+                  {row.structure.composition.summary}
+                </p>
+              </div>
+              <p className="font-semibold text-zinc-700 dark:text-zinc-200">
+                {formatQuantity(summary.quantity)} исп. ·{" "}
+                {formatRubles(summary.amount)} · маржа{" "}
+                {formatRubles(summary.grossProfit)}
+              </p>
+            </div>
+          ))
+        ) : (
+          <div className="rounded-lg border border-dashed border-zinc-300 px-3 py-3 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+            Использований пока нет. После первой фиксации здесь появятся
+            лидирующие наборы, выручка и маржа.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PromoBundleUsageAnalyticsMetric({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/60">
+      <p className="text-base font-semibold text-zinc-950 dark:text-white">
+        {value}
+      </p>
+      <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+        {label}
+      </p>
+    </div>
+  );
+}
+
 function PromoBundleAccountingRow({
   bundle,
   structure,
@@ -2101,6 +2253,7 @@ function PromoBundleAccountingRow({
   reconciliation,
   stores,
   onEdit,
+  onRecordUsage,
 }: {
   bundle: MarketingPromoBundle;
   structure: MarketingPromoBundleStructure;
@@ -2109,6 +2262,7 @@ function PromoBundleAccountingRow({
   reconciliation: MarketingPromoBundleReconciliation | null;
   stores: Store[];
   onEdit: () => void;
+  onRecordUsage: () => void;
 }) {
   const isReady = structure.accounting.readiness === "READY";
   const refs = [
@@ -2168,13 +2322,22 @@ function PromoBundleAccountingRow({
         <span className="text-zinc-700 dark:text-zinc-200">{factSummary}</span>
         {firstWarning ? <span>{firstWarning}</span> : null}
       </div>
-      <button
-        type="button"
-        onClick={onEdit}
-        className="inline-flex min-h-10 items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 text-sm font-semibold text-zinc-700 transition hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:border-emerald-500 dark:hover:text-emerald-300"
-      >
-        Открыть
-      </button>
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
+        <button
+          type="button"
+          onClick={onRecordUsage}
+          className="inline-flex min-h-10 items-center justify-center rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
+        >
+          Зафиксировать
+        </button>
+        <button
+          type="button"
+          onClick={onEdit}
+          className="inline-flex min-h-10 items-center justify-center rounded-xl border border-zinc-200 bg-white px-4 text-sm font-semibold text-zinc-700 transition hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:border-emerald-500 dark:hover:text-emerald-300"
+        >
+          Открыть
+        </button>
+      </div>
     </article>
   );
 }
@@ -2361,7 +2524,10 @@ function PromoBundleUsageJournal({
   }
 
   return (
-    <div className="mt-3 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+    <div
+      id="promo-bundle-usage-journal"
+      className="mt-3 scroll-mt-6 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950"
+    >
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div>
           <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
@@ -2376,17 +2542,37 @@ function PromoBundleUsageJournal({
         </span>
       </div>
 
+      <p className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+        Если запуск не выбран вручную, LeetPlus подберет активный запуск по
+        набору, клубу и дате использования. Внешний импорт пишет сюда же и не
+        создает дубли по externalId.
+      </p>
+
       <form onSubmit={onSubmit} className="mt-3 grid gap-2 lg:grid-cols-12">
         <Field label="Набор" className="lg:col-span-3">
           <select
             value={form.promoBundleId}
-            onChange={(event) =>
+            onChange={(event) => {
+              const promoBundleId = event.target.value;
+              const bundle = promoBundles.find(
+                (item) => item.id === promoBundleId,
+              );
+              const structure = bundle
+                ? promoBundleStructureFromBundle(bundle)
+                : null;
+
               onFormChange({
                 ...form,
-                promoBundleId: event.target.value,
+                promoBundleId,
                 launchId: "",
-              })
-            }
+                amount: structure
+                  ? moneyInputValue(structure.pricing.promoPrice)
+                  : form.amount,
+                costAmount: structure
+                  ? moneyInputValue(structure.pricing.expectedCost)
+                  : form.costAmount,
+              });
+            }}
             className={fieldClassName}
           >
             <option value="">Выберите набор</option>
@@ -2406,7 +2592,7 @@ function PromoBundleUsageJournal({
             }
             className={fieldClassName}
           >
-            <option value="">Без привязки</option>
+            <option value="">Авто по дате и клубу</option>
             {launchOptions.map((launch) => (
               <option key={launch.id} value={launch.id}>
                 {promoBundleLaunchStatusLabel(launch.status)} ·{" "}
@@ -5740,6 +5926,14 @@ function formatQuantity(value: number) {
   }).format(value);
 }
 
+function moneyInputValue(value: number | null | undefined) {
+  if (!value || !Number.isFinite(value) || value <= 0) {
+    return "";
+  }
+
+  return String(Math.round(value * 100) / 100);
+}
+
 function formatBundleCount(count: number) {
   const lastTwo = count % 100;
   const last = count % 10;
@@ -5771,6 +5965,24 @@ function storeLabel(storeIds: string[], stores: Store[]) {
     .filter((name): name is string => Boolean(name));
 
   return names.length > 0 ? names.join(", ") : `${storeIds.length} клуб`;
+}
+
+function pickPromoBundleLaunchForUsage(
+  launches: MarketingPromoBundleLaunch[],
+  promoBundleId: string,
+) {
+  const bundleLaunches = launches
+    .filter((launch) => launch.promoBundle.id === promoBundleId)
+    .sort(
+      (left, right) =>
+        new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
+    );
+
+  return (
+    bundleLaunches.find((launch) => launch.status === "ACTIVE") ??
+    bundleLaunches[0] ??
+    null
+  );
 }
 
 const fieldClassName =

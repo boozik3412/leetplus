@@ -208,6 +208,14 @@ export type MarketingPromoBundleUsage = {
   createdBy: { id: string; displayName: string; email: string } | null;
 };
 
+export type MarketingPromoBundleUsageImportResult = {
+  imported: number;
+  updated: number;
+  skipped: number;
+  errors: Array<{ index: number; message: string }>;
+  usages: MarketingPromoBundleUsage[];
+};
+
 export type MarketingPromoBundleReconciliationStatus =
   | "NO_LAUNCH"
   | "NO_PRODUCT_LINK"

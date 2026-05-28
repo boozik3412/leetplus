@@ -31,6 +31,8 @@ import {
   type MarketingPromoBundleReconciliation,
   type MarketingPromoBundleUsage,
   type MarketingPromoBundleUsageDto,
+  type MarketingPromoBundleUsageImportDto,
+  type MarketingPromoBundleUsageImportResult,
   type MarketingPromoBundleUsageUpdateDto,
 } from './marketing.service';
 
@@ -115,6 +117,14 @@ export class MarketingController {
     @Body() dto: MarketingPromoBundleUsageDto,
   ): Promise<MarketingPromoBundleUsage> {
     return this.marketingService.createPromoBundleUsage(user, dto);
+  }
+
+  @Post('promo-bundle-usages/import')
+  importPromoBundleUsages(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: MarketingPromoBundleUsageImportDto,
+  ): Promise<MarketingPromoBundleUsageImportResult> {
+    return this.marketingService.importPromoBundleUsages(user, dto);
   }
 
   @Patch('promo-bundle-usages/:id')

@@ -5,6 +5,7 @@ import {
   getMarketingPromoBundleLaunches,
   getMarketingPromoBundleReconciliation,
   getMarketingPromoBundles,
+  getMarketingPromoBundleUsages,
 } from "@/lib/marketing";
 import { getProducts } from "@/lib/products";
 import { getStores } from "@/lib/stores";
@@ -24,12 +25,14 @@ export default async function MarketingPromoBundlesPage() {
     promoBundles,
     products,
     promoBundleLaunches,
+    promoBundleUsages,
     promoBundleReconciliation,
     stores,
   ] = await Promise.all([
     safeList(getMarketingPromoBundles()),
     safeList(getProducts()),
     safeList(getMarketingPromoBundleLaunches()),
+    safeList(getMarketingPromoBundleUsages()),
     safeList(getMarketingPromoBundleReconciliation()),
     safeList(getStores()),
   ]);
@@ -49,6 +52,7 @@ export default async function MarketingPromoBundlesPage() {
           promoBundles={promoBundles}
           productOptions={products}
           promoBundleLaunches={promoBundleLaunches}
+          promoBundleUsages={promoBundleUsages}
           promoBundleReconciliation={promoBundleReconciliation}
           stores={stores}
         />

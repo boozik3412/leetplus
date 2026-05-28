@@ -503,7 +503,9 @@ Goal: let a manager create a simple campaign from a business signal and control 
 - Done: dedicated promo-bundle catalog now has a compact operational accounting report: readiness, product/service references, write-off rule, and active launch scope without reintroducing the removed standalone launch form.
 - Done: promo-bundle catalog now has first read-only launch reconciliation: linked product sales are matched to promo-bundle launch periods and clubs, with revenue, cost, gross profit, usage progress, and explicit accuracy limits.
 - Done: promo-bundle reconciliation now also shows linked product stock write-off facts from `StockMovement` by launch period and club, so sales proxy and stock movement proxy are visible together.
-- Next: connect exact promo redemption/usage facts when the operational source for bundle usage is confirmed.
+- Done: promo bundles now have exact usage facts through `MarketingPromoBundleUsage`: manual redemption journal, optional launch/club/guest/check references, revenue/cost amount, cancel status, and source/external fields for future Langame or API import.
+- Done: `/marketing/promo-bundles` operational summary now combines launch limits, manual usage facts, linked product sales, stock write-offs, margin, and remaining usage limit in one compact workspace.
+- Next: connect automatic promo redemption import from Langame or another confirmed operational source into `MarketingPromoBundleUsage` without changing the UI contract.
 - Done: let the user choose a saved guest group or create one from guest filters.
 - Add campaign fields: goal, period, clubs, target group, channel, responsible user, deadline, note, status.
 - Done: improve generated CRM tasks with per-channel instructions and campaign detail links.

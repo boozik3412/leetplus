@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import {
   GuestCommunicationConsentStatus,
+  IntegrationProvider,
   Prisma,
   StockMovementType,
 } from '@prisma/client';
@@ -52,6 +53,33 @@ type MarketingPromoBundleLaunchRow =
   Prisma.MarketingPromoBundleLaunchGetPayload<{
     include: typeof marketingPromoBundleLaunchInclude;
   }>;
+
+const marketingPromoBundleUsageInclude = {
+  promoBundle: {
+    select: {
+      id: true,
+      name: true,
+      status: true,
+      bundleType: true,
+    },
+  },
+  launch: {
+    select: {
+      id: true,
+      status: true,
+      storeIds: true,
+      periodFrom: true,
+      periodTo: true,
+      maxUses: true,
+    },
+  },
+  store: { select: { id: true, name: true } },
+  createdByUser: { select: { id: true, fullName: true, email: true } },
+} satisfies Prisma.MarketingPromoBundleUsageInclude;
+
+type MarketingPromoBundleUsageRow = Prisma.MarketingPromoBundleUsageGetPayload<{
+  include: typeof marketingPromoBundleUsageInclude;
+}>;
 
 const marketingPromoBundleReconciliationInclude = {
   launches: {
@@ -104,6 +132,10 @@ const promoBundleLaunchStatuses = [
   'CANCELED',
 ] as const;
 
+const promoBundleUsageStatuses = ['CONFIRMED', 'CANCELED'] as const;
+
+const promoBundleUsageSources = ['MANUAL', 'LANGAME', 'API_IMPORT'] as const;
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export type MarketingCampaignGoal = (typeof campaignGoals)[number];
@@ -111,6 +143,10 @@ export type MarketingCampaignStatus = (typeof campaignStatuses)[number];
 export type MarketingPromoBundleStatus = (typeof promoBundleStatuses)[number];
 export type MarketingPromoBundleLaunchStatus =
   (typeof promoBundleLaunchStatuses)[number];
+export type MarketingPromoBundleUsageStatus =
+  (typeof promoBundleUsageStatuses)[number];
+export type MarketingPromoBundleUsageSource =
+  (typeof promoBundleUsageSources)[number];
 
 export type MarketingCampaignDto = {
   goal?: string | null;
@@ -154,6 +190,28 @@ export type MarketingPromoBundleLaunchDto = {
 
 export type MarketingPromoBundleLaunchUpdateDto =
   Partial<MarketingPromoBundleLaunchDto>;
+
+export type MarketingPromoBundleUsageDto = {
+  promoBundleId?: string | null;
+  launchId?: string | null;
+  storeId?: string | null;
+  status?: string | null;
+  source?: string | null;
+  externalProvider?: string | null;
+  externalDomain?: string | null;
+  externalId?: string | null;
+  guestExternalId?: string | null;
+  receiptExternalId?: string | null;
+  usedAt?: string | null;
+  quantity?: string | number | null;
+  amount?: string | number | null;
+  costAmount?: string | number | null;
+  note?: string | null;
+  sourcePayload?: unknown;
+};
+
+export type MarketingPromoBundleUsageUpdateDto =
+  Partial<MarketingPromoBundleUsageDto>;
 
 export type MarketingCampaignExportFormat = 'csv' | 'xlsx';
 
@@ -305,6 +363,41 @@ export type MarketingPromoBundleLaunch = {
     mechanicConfig: Prisma.JsonValue;
     note: string | null;
   };
+  createdBy: { id: string; displayName: string; email: string } | null;
+};
+
+export type MarketingPromoBundleUsage = {
+  id: string;
+  status: MarketingPromoBundleUsageStatus;
+  source: MarketingPromoBundleUsageSource;
+  externalProvider: string | null;
+  externalDomain: string | null;
+  externalId: string | null;
+  guestExternalId: string | null;
+  receiptExternalId: string | null;
+  usedAt: string;
+  quantity: number;
+  amount: number;
+  costAmount: number | null;
+  grossProfit: number | null;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+  promoBundle: {
+    id: string;
+    name: string;
+    status: MarketingPromoBundleStatus;
+    bundleType: string;
+  };
+  launch: {
+    id: string;
+    status: MarketingPromoBundleLaunchStatus;
+    storeIds: string[];
+    periodFrom: string | null;
+    periodTo: string | null;
+    maxUses: number | null;
+  } | null;
+  store: { id: string; name: string } | null;
   createdBy: { id: string; displayName: string; email: string } | null;
 };
 
@@ -577,6 +670,19 @@ export class MarketingService {
     });
 
     return rows.map((row) => this.toMarketingPromoBundleLaunch(row));
+  }
+
+  async getPromoBundleUsages(
+    user: AuthenticatedUser,
+  ): Promise<MarketingPromoBundleUsage[]> {
+    const rows = await this.prisma.marketingPromoBundleUsage.findMany({
+      where: { tenantId: user.tenantId },
+      orderBy: [{ usedAt: 'desc' }, { createdAt: 'desc' }],
+      take: 200,
+      include: marketingPromoBundleUsageInclude,
+    });
+
+    return rows.map((row) => this.toMarketingPromoBundleUsage(row));
   }
 
   async getPromoBundleReconciliation(
@@ -1293,6 +1399,91 @@ export class MarketingService {
     });
 
     return this.toMarketingPromoBundleLaunch(row);
+  }
+
+  async createPromoBundleUsage(
+    user: AuthenticatedUser,
+    dto: MarketingPromoBundleUsageDto = {},
+  ): Promise<MarketingPromoBundleUsage> {
+    const promoBundleId = await this.resolvePromoBundleId(
+      user,
+      dto.promoBundleId,
+    );
+
+    if (!promoBundleId) {
+      throw new BadRequestException('Promo bundle is required');
+    }
+
+    const launch = await this.resolvePromoBundleUsageLaunch(
+      user,
+      promoBundleId,
+      dto.launchId,
+    );
+    const storeId = await this.resolveStoreId(user, dto.storeId);
+    this.validatePromoBundleUsageStoreScope(launch?.storeIds, storeId);
+
+    const quantity = parseOptionalPositiveInt(dto.quantity, 'Quantity') ?? 1;
+    const amount = parseOptionalBudget(dto.amount) ?? 0;
+    const costAmount = parseOptionalBudget(dto.costAmount);
+
+    const row = await this.prisma.marketingPromoBundleUsage.create({
+      data: {
+        tenantId: user.tenantId,
+        createdByUserId: user.id,
+        promoBundleId,
+        launchId: launch?.id ?? null,
+        storeId,
+        status: resolvePromoBundleUsageStatus(dto.status ?? 'CONFIRMED'),
+        source: resolvePromoBundleUsageSource(dto.source ?? 'MANUAL'),
+        externalProvider: resolveIntegrationProvider(dto.externalProvider),
+        externalDomain: normalizeText(dto.externalDomain, 160),
+        externalId: normalizeText(dto.externalId, 160),
+        guestExternalId: normalizeText(dto.guestExternalId, 160),
+        receiptExternalId: normalizeText(dto.receiptExternalId, 160),
+        usedAt: parseOptionalDate(dto.usedAt) ?? new Date(),
+        quantity,
+        amount,
+        costAmount,
+        note: normalizeText(dto.note, 2000),
+        sourcePayload: normalizeOptionalJsonValue(dto.sourcePayload),
+      },
+      include: marketingPromoBundleUsageInclude,
+    });
+
+    return this.toMarketingPromoBundleUsage(row);
+  }
+
+  async updatePromoBundleUsage(
+    user: AuthenticatedUser,
+    id: string,
+    dto: MarketingPromoBundleUsageUpdateDto = {},
+  ): Promise<MarketingPromoBundleUsage> {
+    const existing = await this.prisma.marketingPromoBundleUsage.findFirst({
+      where: { id, tenantId: user.tenantId },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Promo bundle usage not found');
+    }
+
+    const data: Prisma.MarketingPromoBundleUsageUpdateInput = {};
+
+    if (hasOwn(dto, 'status')) {
+      data.status = resolvePromoBundleUsageStatus(dto.status);
+    }
+
+    if (hasOwn(dto, 'note')) {
+      data.note = normalizeText(dto.note, 2000);
+    }
+
+    const row = await this.prisma.marketingPromoBundleUsage.update({
+      where: { id },
+      data,
+      include: marketingPromoBundleUsageInclude,
+    });
+
+    return this.toMarketingPromoBundleUsage(row);
   }
 
   async updateCampaign(
@@ -2714,6 +2905,73 @@ export class MarketingService {
     return storeIds;
   }
 
+  private async resolveStoreId(user: AuthenticatedUser, value?: string | null) {
+    const storeId = normalizeText(value, 80);
+
+    if (!storeId) {
+      return null;
+    }
+
+    const store = await this.prisma.store.findFirst({
+      where: { id: storeId, tenantId: user.tenantId, isActive: true },
+      select: { id: true },
+    });
+
+    if (!store) {
+      throw new BadRequestException('Store not found');
+    }
+
+    return store.id;
+  }
+
+  private async resolvePromoBundleUsageLaunch(
+    user: AuthenticatedUser,
+    promoBundleId: string,
+    value?: string | null,
+  ) {
+    const launchId = normalizeText(value, 80);
+
+    if (!launchId) {
+      return null;
+    }
+
+    const launch = await this.prisma.marketingPromoBundleLaunch.findFirst({
+      where: { id: launchId, tenantId: user.tenantId },
+      select: { id: true, promoBundleId: true, storeIds: true },
+    });
+
+    if (!launch) {
+      throw new BadRequestException('Promo bundle launch not found');
+    }
+
+    if (launch.promoBundleId !== promoBundleId) {
+      throw new BadRequestException(
+        'Promo bundle launch belongs to another bundle',
+      );
+    }
+
+    return {
+      id: launch.id,
+      storeIds: parseStringArray(launch.storeIds),
+    };
+  }
+
+  private validatePromoBundleUsageStoreScope(
+    launchStoreIds: string[] | undefined,
+    storeId: string | null,
+  ) {
+    if (
+      storeId &&
+      launchStoreIds &&
+      launchStoreIds.length > 0 &&
+      !launchStoreIds.includes(storeId)
+    ) {
+      throw new BadRequestException(
+        'Store is outside selected promo bundle launch scope',
+      );
+    }
+  }
+
   private async resolveOwnerUserRelation(
     user: AuthenticatedUser,
     value?: string | null,
@@ -3159,6 +3417,51 @@ export class MarketingService {
       createdBy: row.createdByUser ? toUserSummary(row.createdByUser) : null,
     };
   }
+
+  private toMarketingPromoBundleUsage(
+    row: MarketingPromoBundleUsageRow,
+  ): MarketingPromoBundleUsage {
+    const amount = row.amount.toNumber();
+    const costAmount = row.costAmount?.toNumber() ?? null;
+
+    return {
+      id: row.id,
+      status: resolvePromoBundleUsageStatus(row.status),
+      source: resolvePromoBundleUsageSource(row.source),
+      externalProvider: row.externalProvider ?? null,
+      externalDomain: row.externalDomain,
+      externalId: row.externalId,
+      guestExternalId: row.guestExternalId,
+      receiptExternalId: row.receiptExternalId,
+      usedAt: row.usedAt.toISOString(),
+      quantity: row.quantity,
+      amount,
+      costAmount,
+      grossProfit:
+        costAmount === null ? null : this.round(amount - costAmount, 2),
+      note: row.note,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+      promoBundle: {
+        id: row.promoBundle.id,
+        name: row.promoBundle.name,
+        status: resolvePromoBundleStatus(row.promoBundle.status),
+        bundleType: row.promoBundle.bundleType,
+      },
+      launch: row.launch
+        ? {
+            id: row.launch.id,
+            status: resolvePromoBundleLaunchStatus(row.launch.status),
+            storeIds: parseStringArray(row.launch.storeIds),
+            periodFrom: row.launch.periodFrom?.toISOString() ?? null,
+            periodTo: row.launch.periodTo?.toISOString() ?? null,
+            maxUses: row.launch.maxUses,
+          }
+        : null,
+      store: row.store ? { id: row.store.id, name: row.store.name } : null,
+      createdBy: row.createdByUser ? toUserSummary(row.createdByUser) : null,
+    };
+  }
 }
 
 function normalizeText(value: unknown, maxLength: number) {
@@ -3225,6 +3528,20 @@ function normalizePromoBundleConfig(value: unknown): Prisma.InputJsonValue {
   return normalizedConfig;
 }
 
+function normalizeOptionalJsonValue(
+  value: unknown,
+): Prisma.InputJsonValue | typeof Prisma.JsonNull {
+  if (value === null || value === undefined) {
+    return Prisma.JsonNull;
+  }
+
+  try {
+    return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+  } catch {
+    throw new BadRequestException('Source payload must be JSON serializable');
+  }
+}
+
 function resolveGoal(value: unknown): MarketingCampaignGoal {
   if (campaignGoals.includes(value as MarketingCampaignGoal)) {
     return value as MarketingCampaignGoal;
@@ -3261,6 +3578,38 @@ function resolvePromoBundleLaunchStatus(
   }
 
   return 'ACTIVE';
+}
+
+function resolvePromoBundleUsageStatus(
+  value: unknown,
+): MarketingPromoBundleUsageStatus {
+  if (
+    promoBundleUsageStatuses.includes(value as MarketingPromoBundleUsageStatus)
+  ) {
+    return value as MarketingPromoBundleUsageStatus;
+  }
+
+  return 'CONFIRMED';
+}
+
+function resolvePromoBundleUsageSource(
+  value: unknown,
+): MarketingPromoBundleUsageSource {
+  if (
+    promoBundleUsageSources.includes(value as MarketingPromoBundleUsageSource)
+  ) {
+    return value as MarketingPromoBundleUsageSource;
+  }
+
+  return 'MANUAL';
+}
+
+function resolveIntegrationProvider(value: unknown) {
+  if (value === IntegrationProvider.LANGAME) {
+    return IntegrationProvider.LANGAME;
+  }
+
+  return null;
 }
 
 function promoBundleReconciliationLabel(

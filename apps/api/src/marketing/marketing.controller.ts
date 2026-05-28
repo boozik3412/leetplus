@@ -29,6 +29,9 @@ import {
   type MarketingPromoBundleLaunchDto,
   type MarketingPromoBundleLaunchUpdateDto,
   type MarketingPromoBundleReconciliation,
+  type MarketingPromoBundleUsage,
+  type MarketingPromoBundleUsageDto,
+  type MarketingPromoBundleUsageUpdateDto,
 } from './marketing.service';
 
 @Controller('marketing')
@@ -56,6 +59,13 @@ export class MarketingController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<MarketingPromoBundleLaunch[]> {
     return this.marketingService.getPromoBundleLaunches(user);
+  }
+
+  @Get('promo-bundle-usages')
+  getPromoBundleUsages(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<MarketingPromoBundleUsage[]> {
+    return this.marketingService.getPromoBundleUsages(user);
   }
 
   @Get('promo-bundle-reconciliation')
@@ -97,6 +107,23 @@ export class MarketingController {
     @Body() dto: MarketingPromoBundleLaunchUpdateDto,
   ): Promise<MarketingPromoBundleLaunch> {
     return this.marketingService.updatePromoBundleLaunch(user, id, dto);
+  }
+
+  @Post('promo-bundle-usages')
+  createPromoBundleUsage(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: MarketingPromoBundleUsageDto,
+  ): Promise<MarketingPromoBundleUsage> {
+    return this.marketingService.createPromoBundleUsage(user, dto);
+  }
+
+  @Patch('promo-bundle-usages/:id')
+  updatePromoBundleUsage(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: MarketingPromoBundleUsageUpdateDto,
+  ): Promise<MarketingPromoBundleUsage> {
+    return this.marketingService.updatePromoBundleUsage(user, id, dto);
   }
 
   @Get('campaigns/:id')

@@ -25,6 +25,13 @@ export type MarketingPromoBundleLaunchStatus =
   | "FINISHED"
   | "CANCELED";
 
+export type MarketingPromoBundleUsageStatus = "CONFIRMED" | "CANCELED";
+
+export type MarketingPromoBundleUsageSource =
+  | "MANUAL"
+  | "LANGAME"
+  | "API_IMPORT";
+
 export type MarketingPromoBundleStructure = {
   composition: {
     typeLabel: string;
@@ -163,6 +170,41 @@ export type MarketingPromoBundleLaunch = {
     mechanicConfig: MarketingMechanicConfig;
     note: string | null;
   };
+  createdBy: { id: string; displayName: string; email: string } | null;
+};
+
+export type MarketingPromoBundleUsage = {
+  id: string;
+  status: MarketingPromoBundleUsageStatus;
+  source: MarketingPromoBundleUsageSource;
+  externalProvider: string | null;
+  externalDomain: string | null;
+  externalId: string | null;
+  guestExternalId: string | null;
+  receiptExternalId: string | null;
+  usedAt: string;
+  quantity: number;
+  amount: number;
+  costAmount: number | null;
+  grossProfit: number | null;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+  promoBundle: {
+    id: string;
+    name: string;
+    status: MarketingPromoBundleStatus;
+    bundleType: string;
+  };
+  launch: {
+    id: string;
+    status: MarketingPromoBundleLaunchStatus;
+    storeIds: string[];
+    periodFrom: string | null;
+    periodTo: string | null;
+    maxUses: number | null;
+  } | null;
+  store: { id: string; name: string } | null;
   createdBy: { id: string; displayName: string; email: string } | null;
 };
 
@@ -394,6 +436,21 @@ export async function getMarketingPromoBundleLaunches(): Promise<
   }
 
   return response.json() as Promise<MarketingPromoBundleLaunch[]>;
+}
+
+export async function getMarketingPromoBundleUsages(): Promise<
+  MarketingPromoBundleUsage[]
+> {
+  const response = await fetch(`${getApiUrl()}/marketing/promo-bundle-usages`, {
+    cache: "no-store",
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch marketing promo bundle usages");
+  }
+
+  return response.json() as Promise<MarketingPromoBundleUsage[]>;
 }
 
 export async function getMarketingPromoBundleReconciliation(): Promise<

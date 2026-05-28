@@ -21,6 +21,8 @@ import type {
   MarketingPromoBundleLaunch,
   MarketingPromoBundleLaunchStatus,
   MarketingPromoBundleReconciliation,
+  MarketingPromoBundleUsage,
+  MarketingPromoBundleUsageStatus,
 } from "@/lib/marketing";
 import type { Product } from "@/lib/products";
 import type { Store } from "@/lib/stores";
@@ -49,6 +51,19 @@ type PromoBundleLaunchFormState = {
   periodFrom: string;
   periodTo: string;
   maxUses: string;
+  note: string;
+};
+
+type PromoBundleUsageFormState = {
+  promoBundleId: string;
+  launchId: string;
+  storeId: string;
+  usedAt: string;
+  quantity: string;
+  amount: string;
+  costAmount: string;
+  guestExternalId: string;
+  receiptExternalId: string;
   note: string;
 };
 
@@ -391,6 +406,19 @@ const emptyPromoBundleLaunchForm: PromoBundleLaunchFormState = {
   periodFrom: "",
   periodTo: "",
   maxUses: "",
+  note: "",
+};
+
+const emptyPromoBundleUsageForm: PromoBundleUsageFormState = {
+  promoBundleId: "",
+  launchId: "",
+  storeId: "",
+  usedAt: "",
+  quantity: "1",
+  amount: "",
+  costAmount: "",
+  guestExternalId: "",
+  receiptExternalId: "",
   note: "",
 };
 
@@ -1462,20 +1490,27 @@ export function MarketingCampaignsPanel({
 export function MarketingPromoBundlesWorkspace({
   promoBundles,
   promoBundleLaunches = [],
+  promoBundleUsages = [],
   promoBundleReconciliation = [],
   productOptions = [],
   stores = [],
 }: {
   promoBundles: MarketingPromoBundle[];
   promoBundleLaunches?: MarketingPromoBundleLaunch[];
+  promoBundleUsages?: MarketingPromoBundleUsage[];
   promoBundleReconciliation?: MarketingPromoBundleReconciliation[];
   productOptions?: Product[];
   stores?: Store[];
 }) {
   const [savedPromoBundles, setSavedPromoBundles] = useState(promoBundles);
+  const [usageRows, setUsageRows] = useState(promoBundleUsages);
   const [selectedBundleId, setSelectedBundleId] = useState<string | null>(
     promoBundles[0]?.id ?? null,
   );
+  const [usageForm, setUsageForm] = useState<PromoBundleUsageFormState>({
+    ...emptyPromoBundleUsageForm,
+    promoBundleId: promoBundles[0]?.id ?? "",
+  });
   const [bundleDraft, setBundleDraft] =
     useState<PromoBundleDraft>(
       promoBundles[0] ? promoBundleToDraft(promoBundles[0]) : emptyBundleDraft,
@@ -1484,6 +1519,8 @@ export function MarketingPromoBundlesWorkspace({
     null,
   );
   const [isSavingBundle, setIsSavingBundle] = useState(false);
+  const [isSavingUsage, setIsSavingUsage] = useState(false);
+  const [pendingUsageId, setPendingUsageId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const selectedBundle =
     savedPromoBundles.find((bundle) => bundle.id === selectedBundleId) ?? null;
@@ -1542,6 +1579,17 @@ export function MarketingPromoBundlesWorkspace({
       ...current.filter((item) => item.id !== promoBundle.id),
     ]);
     setSelectedBundleId(promoBundle.id);
+    setUsageForm((current) => ({
+      ...current,
+      promoBundleId: promoBundle.id,
+      launchId: promoBundleLaunches.some(
+        (launch) =>
+          launch.id === current.launchId &&
+          launch.promoBundle.id === promoBundle.id,
+      )
+        ? current.launchId
+        : "",
+    }));
     setBundleCatalogNotice(
       selectedBundle
         ? "Изменения сохранены в существующем промо-наборе."
@@ -1555,12 +1603,102 @@ export function MarketingPromoBundlesWorkspace({
 
     setBundleDraft(draft);
     setSelectedBundleId(promoBundle.id);
+    setUsageForm((current) => ({
+      ...current,
+      promoBundleId: promoBundle.id,
+      launchId: promoBundleLaunches.some(
+        (launch) =>
+          launch.id === current.launchId &&
+          launch.promoBundle.id === promoBundle.id,
+      )
+        ? current.launchId
+        : "",
+    }));
     setBundleCatalogNotice(
       "Набор загружен в конструктор. Внесите правки и сохраните изменения.",
     );
     window.requestAnimationFrame(() => {
       scrollToMarketingSection("promo-bundle-builder");
     });
+  }
+
+  async function createPromoBundleUsage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!usageForm.promoBundleId) {
+      setError("Сначала выберите промо-набор для фиксации использования.");
+      return;
+    }
+
+    setIsSavingUsage(true);
+    setError(null);
+
+    const response = await fetch("/api/marketing/promo-bundle-usages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        promoBundleId: usageForm.promoBundleId,
+        launchId: usageForm.launchId || null,
+        storeId: usageForm.storeId || null,
+        usedAt: usageForm.usedAt || null,
+        quantity: usageForm.quantity || 1,
+        amount: usageForm.amount || 0,
+        costAmount: usageForm.costAmount || null,
+        guestExternalId: usageForm.guestExternalId || null,
+        receiptExternalId: usageForm.receiptExternalId || null,
+        note: usageForm.note || null,
+      }),
+    });
+
+    if (!response.ok) {
+      setError(await readError(response));
+      setIsSavingUsage(false);
+      return;
+    }
+
+    const usage = (await response.json()) as MarketingPromoBundleUsage;
+    setUsageRows((current) => [
+      usage,
+      ...current.filter((item) => item.id !== usage.id),
+    ]);
+    setUsageForm((current) => ({
+      ...emptyPromoBundleUsageForm,
+      promoBundleId: current.promoBundleId,
+      launchId: current.launchId,
+      storeId: current.storeId,
+    }));
+    setIsSavingUsage(false);
+  }
+
+  async function updatePromoBundleUsageStatus(
+    usage: MarketingPromoBundleUsage,
+    status: MarketingPromoBundleUsageStatus,
+  ) {
+    const previousRows = usageRows;
+    setPendingUsageId(usage.id);
+    setUsageRows((current) =>
+      current.map((row) => (row.id === usage.id ? { ...row, status } : row)),
+    );
+    setError(null);
+
+    const response = await fetch(`/api/marketing/promo-bundle-usages/${usage.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
+
+    if (!response.ok) {
+      setUsageRows(previousRows);
+      setError(await readError(response));
+      setPendingUsageId(null);
+      return;
+    }
+
+    const updated = (await response.json()) as MarketingPromoBundleUsage;
+    setUsageRows((current) =>
+      current.map((row) => (row.id === updated.id ? updated : row)),
+    );
+    setPendingUsageId(null);
   }
 
   function createNewBundleDraft() {
@@ -1603,9 +1741,16 @@ export function MarketingPromoBundlesWorkspace({
       <PromoBundlesCatalogPanel
         promoBundles={savedPromoBundles}
         promoBundleLaunches={promoBundleLaunches}
+        promoBundleUsages={usageRows}
         promoBundleReconciliation={promoBundleReconciliation}
         stores={stores}
+        usageForm={usageForm}
+        isSavingUsage={isSavingUsage}
+        pendingUsageId={pendingUsageId}
         selectedBundleId={selectedBundleId}
+        onUsageFormChange={setUsageForm}
+        onCreateUsage={createPromoBundleUsage}
+        onUpdateUsageStatus={updatePromoBundleUsageStatus}
         onEditBundle={selectExistingPromoBundle}
         onCreateNew={createNewBundleDraft}
       />
@@ -1642,17 +1787,34 @@ export function MarketingPromoBundlesWorkspace({
 function PromoBundlesCatalogPanel({
   promoBundles,
   promoBundleLaunches,
+  promoBundleUsages,
   promoBundleReconciliation,
   stores,
+  usageForm,
+  isSavingUsage,
+  pendingUsageId,
   selectedBundleId,
+  onUsageFormChange,
+  onCreateUsage,
+  onUpdateUsageStatus,
   onEditBundle,
   onCreateNew,
 }: {
   promoBundles: MarketingPromoBundle[];
   promoBundleLaunches: MarketingPromoBundleLaunch[];
+  promoBundleUsages: MarketingPromoBundleUsage[];
   promoBundleReconciliation: MarketingPromoBundleReconciliation[];
   stores: Store[];
+  usageForm: PromoBundleUsageFormState;
+  isSavingUsage: boolean;
+  pendingUsageId: string | null;
   selectedBundleId: string | null;
+  onUsageFormChange: (next: PromoBundleUsageFormState) => void;
+  onCreateUsage: (event: FormEvent<HTMLFormElement>) => void;
+  onUpdateUsageStatus: (
+    usage: MarketingPromoBundleUsage,
+    status: MarketingPromoBundleUsageStatus,
+  ) => void;
   onEditBundle: (bundle: MarketingPromoBundle) => void;
   onCreateNew: () => void;
 }) {
@@ -1729,8 +1891,15 @@ function PromoBundlesCatalogPanel({
         <PromoBundlesAccountingReport
           promoBundles={filteredBundles}
           promoBundleLaunches={promoBundleLaunches}
+          promoBundleUsages={promoBundleUsages}
           promoBundleReconciliation={promoBundleReconciliation}
           stores={stores}
+          usageForm={usageForm}
+          isSavingUsage={isSavingUsage}
+          pendingUsageId={pendingUsageId}
+          onUsageFormChange={onUsageFormChange}
+          onCreateUsage={onCreateUsage}
+          onUpdateUsageStatus={onUpdateUsageStatus}
           onEditBundle={onEditBundle}
         />
       </div>
@@ -1741,18 +1910,39 @@ function PromoBundlesCatalogPanel({
 function PromoBundlesAccountingReport({
   promoBundles,
   promoBundleLaunches,
+  promoBundleUsages,
   promoBundleReconciliation,
   stores,
+  usageForm,
+  isSavingUsage,
+  pendingUsageId,
+  onUsageFormChange,
+  onCreateUsage,
+  onUpdateUsageStatus,
   onEditBundle,
 }: {
   promoBundles: MarketingPromoBundle[];
   promoBundleLaunches: MarketingPromoBundleLaunch[];
+  promoBundleUsages: MarketingPromoBundleUsage[];
   promoBundleReconciliation: MarketingPromoBundleReconciliation[];
   stores: Store[];
+  usageForm: PromoBundleUsageFormState;
+  isSavingUsage: boolean;
+  pendingUsageId: string | null;
+  onUsageFormChange: (next: PromoBundleUsageFormState) => void;
+  onCreateUsage: (event: FormEvent<HTMLFormElement>) => void;
+  onUpdateUsageStatus: (
+    usage: MarketingPromoBundleUsage,
+    status: MarketingPromoBundleUsageStatus,
+  ) => void;
   onEditBundle: (bundle: MarketingPromoBundle) => void;
 }) {
   const activeLaunches = promoBundleLaunches.filter(
     (launch) => launch.status === "ACTIVE",
+  );
+  const confirmedUsages = useMemo(
+    () => promoBundleUsages.filter((usage) => usage.status === "CONFIRMED"),
+    [promoBundleUsages],
   );
   const reconciliationByBundleId = useMemo(
     () =>
@@ -1761,14 +1951,26 @@ function PromoBundlesAccountingReport({
       ),
     [promoBundleReconciliation],
   );
+  const usagesByBundleId = useMemo(() => {
+    const map = new Map<string, MarketingPromoBundleUsage[]>();
+
+    confirmedUsages.forEach((usage) => {
+      const current = map.get(usage.promoBundle.id) ?? [];
+      current.push(usage);
+      map.set(usage.promoBundle.id, current);
+    });
+
+    return map;
+  }, [confirmedUsages]);
   const rows = promoBundles.map((bundle) => {
     const structure = promoBundleStructureFromBundle(bundle);
     const launches = activeLaunches.filter(
       (launch) => launch.promoBundle.id === bundle.id,
     );
     const reconciliation = reconciliationByBundleId.get(bundle.id) ?? null;
+    const usages = usagesByBundleId.get(bundle.id) ?? [];
 
-    return { bundle, structure, launches, reconciliation };
+    return { bundle, structure, launches, reconciliation, usages };
   });
   const readyCount = rows.filter(
     (row) => row.structure.accounting.readiness === "READY",
@@ -1794,8 +1996,13 @@ function PromoBundlesAccountingReport({
   const factsCount = rows.filter(
     (row) =>
       (row.reconciliation?.totals.salesCount ?? 0) > 0 ||
-      (row.reconciliation?.totals.writeOffCount ?? 0) > 0,
+      (row.reconciliation?.totals.writeOffCount ?? 0) > 0 ||
+      row.usages.length > 0,
   ).length;
+  const usedQuantity = confirmedUsages.reduce(
+    (sum, usage) => sum + usage.quantity,
+    0,
+  );
 
   if (promoBundles.length === 0) {
     return null;
@@ -1819,13 +2026,17 @@ function PromoBundlesAccountingReport({
         </p>
       </div>
 
-      <div className="mt-3 grid gap-2 sm:grid-cols-4">
+      <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
         <PromoBundleAccountingMetric label="Готовы" value={readyCount} />
         <PromoBundleAccountingMetric
           label="Нужен учет"
           value={needsAccountingCount}
         />
         <PromoBundleAccountingMetric label="Товарных связей" value={productLinkCount} />
+        <PromoBundleAccountingMetric
+          label="Использовано"
+          value={usedQuantity}
+        />
         <PromoBundleAccountingMetric
           label={manualWriteOffCount > 0 ? "Факты / ручной учет" : "Есть факты"}
           value={factsCount}
@@ -1839,12 +2050,26 @@ function PromoBundlesAccountingReport({
             bundle={row.bundle}
             structure={row.structure}
             launches={row.launches}
+            usages={row.usages}
             reconciliation={row.reconciliation}
             stores={stores}
             onEdit={() => onEditBundle(row.bundle)}
           />
         ))}
       </div>
+
+      <PromoBundleUsageJournal
+        promoBundles={promoBundles}
+        promoBundleLaunches={promoBundleLaunches}
+        promoBundleUsages={promoBundleUsages}
+        stores={stores}
+        form={usageForm}
+        isSaving={isSavingUsage}
+        pendingUsageId={pendingUsageId}
+        onFormChange={onUsageFormChange}
+        onSubmit={onCreateUsage}
+        onUpdateUsageStatus={onUpdateUsageStatus}
+      />
     </div>
   );
 }
@@ -1872,6 +2097,7 @@ function PromoBundleAccountingRow({
   bundle,
   structure,
   launches,
+  usages,
   reconciliation,
   stores,
   onEdit,
@@ -1879,6 +2105,7 @@ function PromoBundleAccountingRow({
   bundle: MarketingPromoBundle;
   structure: MarketingPromoBundleStructure;
   launches: MarketingPromoBundleLaunch[];
+  usages: MarketingPromoBundleUsage[];
   reconciliation: MarketingPromoBundleReconciliation | null;
   stores: Store[];
   onEdit: () => void;
@@ -1892,6 +2119,12 @@ function PromoBundleAccountingRow({
   const factLabel = promoBundleReconciliationDisplayLabel(reconciliation);
   const factTone = promoBundleReconciliationTone(reconciliation);
   const factSummary = promoBundleReconciliationSummary(reconciliation);
+  const usageSummary = buildPromoBundleUsageSummary(usages);
+  const usageLabel = promoBundleUsageSummaryLabel({
+    summary: usageSummary,
+    launches,
+    reconciliation,
+  });
   const firstWarning = reconciliation?.warnings[0] ?? null;
 
   return (
@@ -1931,6 +2164,7 @@ function PromoBundleAccountingRow({
           </span>
         </div>
         <span>{launchLabel}</span>
+        <span className="text-zinc-700 dark:text-zinc-200">{usageLabel}</span>
         <span className="text-zinc-700 dark:text-zinc-200">{factSummary}</span>
         {firstWarning ? <span>{firstWarning}</span> : null}
       </div>
@@ -2009,6 +2243,327 @@ function promoBundleReconciliationSummary(
   )} · прибыль ${formatRubles(totals.grossProfit)}${writeOffSummary}${
     progress ?? ""
   }`;
+}
+
+type PromoBundleUsageSummary = {
+  count: number;
+  quantity: number;
+  amount: number;
+  costAmount: number;
+  grossProfit: number;
+  lastUsedAt: string | null;
+};
+
+function buildPromoBundleUsageSummary(
+  usages: MarketingPromoBundleUsage[],
+): PromoBundleUsageSummary {
+  return usages.reduce<PromoBundleUsageSummary>(
+    (summary, usage) => {
+      const costAmount = usage.costAmount ?? 0;
+      const usedAtMs = usage.usedAt ? new Date(usage.usedAt).getTime() : 0;
+      const currentLastMs = summary.lastUsedAt
+        ? new Date(summary.lastUsedAt).getTime()
+        : 0;
+
+      return {
+        count: summary.count + 1,
+        quantity: summary.quantity + usage.quantity,
+        amount: summary.amount + usage.amount,
+        costAmount: summary.costAmount + costAmount,
+        grossProfit:
+          summary.grossProfit +
+          (usage.grossProfit ?? usage.amount - costAmount),
+        lastUsedAt: usedAtMs > currentLastMs ? usage.usedAt : summary.lastUsedAt,
+      };
+    },
+    {
+      count: 0,
+      quantity: 0,
+      amount: 0,
+      costAmount: 0,
+      grossProfit: 0,
+      lastUsedAt: null,
+    },
+  );
+}
+
+function promoBundleUsageSummaryLabel({
+  summary,
+  launches,
+  reconciliation,
+}: {
+  summary: PromoBundleUsageSummary;
+  launches: MarketingPromoBundleLaunch[];
+  reconciliation: MarketingPromoBundleReconciliation | null;
+}) {
+  if (summary.count === 0) {
+    return "точных использований пока нет";
+  }
+
+  const launchLimit = launches.reduce(
+    (sum, launch) => sum + (launch.maxUses ?? 0),
+    0,
+  );
+  const usageLimit = launchLimit || reconciliation?.totals.maxUses || null;
+  const remaining =
+    usageLimit === null ? null : Math.max(usageLimit - summary.quantity, 0);
+  const remainingLabel =
+    remaining === null ? "" : ` · осталось ${formatQuantity(remaining)}`;
+
+  return `использовано ${formatQuantity(summary.quantity)} · выручка ${formatRubles(
+    summary.amount,
+  )} · маржа ${formatRubles(summary.grossProfit)}${remainingLabel}`;
+}
+
+function PromoBundleUsageJournal({
+  promoBundles,
+  promoBundleLaunches,
+  promoBundleUsages,
+  stores,
+  form,
+  isSaving,
+  pendingUsageId,
+  onFormChange,
+  onSubmit,
+  onUpdateUsageStatus,
+}: {
+  promoBundles: MarketingPromoBundle[];
+  promoBundleLaunches: MarketingPromoBundleLaunch[];
+  promoBundleUsages: MarketingPromoBundleUsage[];
+  stores: Store[];
+  form: PromoBundleUsageFormState;
+  isSaving: boolean;
+  pendingUsageId: string | null;
+  onFormChange: (next: PromoBundleUsageFormState) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onUpdateUsageStatus: (
+    usage: MarketingPromoBundleUsage,
+    status: MarketingPromoBundleUsageStatus,
+  ) => void;
+}) {
+  const bundleIds = new Set(promoBundles.map((bundle) => bundle.id));
+  const launchOptions = promoBundleLaunches.filter(
+    (launch) => launch.promoBundle.id === form.promoBundleId,
+  );
+  const selectedLaunch =
+    launchOptions.find((launch) => launch.id === form.launchId) ?? null;
+  const scopedStoreIds = selectedLaunch?.storeIds ?? [];
+  const storeOptions =
+    scopedStoreIds.length > 0
+      ? stores.filter((store) => scopedStoreIds.includes(store.id))
+      : stores;
+  const latestUsages = promoBundleUsages
+    .filter((usage) => bundleIds.has(usage.promoBundle.id))
+    .slice(0, 6);
+
+  function updateForm(next: Partial<PromoBundleUsageFormState>) {
+    onFormChange({ ...form, ...next });
+  }
+
+  return (
+    <div className="mt-3 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
+            Журнал использований
+          </p>
+          <h4 className="mt-1 text-sm font-semibold text-zinc-950 dark:text-white">
+            Точные погашения промо-наборов
+          </h4>
+        </div>
+        <span className="rounded-full border border-zinc-200 px-2 py-1 text-xs font-semibold text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+          источник: ручной журнал
+        </span>
+      </div>
+
+      <form onSubmit={onSubmit} className="mt-3 grid gap-2 lg:grid-cols-12">
+        <Field label="Набор" className="lg:col-span-3">
+          <select
+            value={form.promoBundleId}
+            onChange={(event) =>
+              onFormChange({
+                ...form,
+                promoBundleId: event.target.value,
+                launchId: "",
+              })
+            }
+            className={fieldClassName}
+          >
+            <option value="">Выберите набор</option>
+            {promoBundles.map((bundle) => (
+              <option key={bundle.id} value={bundle.id}>
+                {bundle.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        <Field label="Запуск" className="lg:col-span-2">
+          <select
+            value={form.launchId}
+            onChange={(event) =>
+              updateForm({ launchId: event.target.value, storeId: "" })
+            }
+            className={fieldClassName}
+          >
+            <option value="">Без привязки</option>
+            {launchOptions.map((launch) => (
+              <option key={launch.id} value={launch.id}>
+                {promoBundleLaunchStatusLabel(launch.status)} ·{" "}
+                {launchPeriodLabel(launch)}
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        <Field label="Клуб" className="lg:col-span-2">
+          <select
+            value={form.storeId}
+            onChange={(event) => updateForm({ storeId: event.target.value })}
+            className={fieldClassName}
+          >
+            <option value="">Вся сеть</option>
+            {storeOptions.map((store) => (
+              <option key={store.id} value={store.id}>
+                {store.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        <Field label="Кол-во" className="lg:col-span-1">
+          <input
+            type="number"
+            min="1"
+            value={form.quantity}
+            onChange={(event) => updateForm({ quantity: event.target.value })}
+            className={fieldClassName}
+          />
+        </Field>
+
+        <Field label="Сумма, руб" className="lg:col-span-2">
+          <input
+            inputMode="decimal"
+            value={form.amount}
+            onChange={(event) => updateForm({ amount: event.target.value })}
+            placeholder="0"
+            className={fieldClassName}
+          />
+        </Field>
+
+        <Field label="Себест., руб" className="lg:col-span-2">
+          <input
+            inputMode="decimal"
+            value={form.costAmount}
+            onChange={(event) => updateForm({ costAmount: event.target.value })}
+            placeholder="не задана"
+            className={fieldClassName}
+          />
+        </Field>
+
+        <Field label="Дата" className="lg:col-span-3">
+          <input
+            type="datetime-local"
+            value={form.usedAt}
+            onChange={(event) => updateForm({ usedAt: event.target.value })}
+            className={fieldClassName}
+          />
+        </Field>
+
+        <Field label="Гость / чек" className="lg:col-span-3">
+          <div className="grid gap-2 sm:grid-cols-2">
+            <input
+              value={form.guestExternalId}
+              onChange={(event) =>
+                updateForm({ guestExternalId: event.target.value })
+              }
+              placeholder="ID гостя"
+              className={fieldClassName}
+            />
+            <input
+              value={form.receiptExternalId}
+              onChange={(event) =>
+                updateForm({ receiptExternalId: event.target.value })
+              }
+              placeholder="чек / операция"
+              className={fieldClassName}
+            />
+          </div>
+        </Field>
+
+        <Field label="Заметка" className="lg:col-span-4">
+          <input
+            value={form.note}
+            onChange={(event) => updateForm({ note: event.target.value })}
+            placeholder="например: выдано администратором"
+            className={fieldClassName}
+          />
+        </Field>
+
+        <div className="flex items-end lg:col-span-2">
+          <button
+            type="submit"
+            disabled={isSaving || !form.promoBundleId}
+            className="inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isSaving ? "Сохраняем..." : "Зафиксировать"}
+          </button>
+        </div>
+      </form>
+
+      <div className="mt-3 grid gap-2">
+        {latestUsages.length > 0 ? (
+          latestUsages.map((usage) => (
+            <div
+              key={usage.id}
+              className="grid gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-xs text-zinc-600 dark:border-zinc-800 dark:text-zinc-300 md:grid-cols-[minmax(0,1fr)_auto] md:items-center"
+            >
+              <div className="min-w-0">
+                <p className="truncate font-semibold text-zinc-950 dark:text-white">
+                  {usage.promoBundle.name}
+                </p>
+                <p className="mt-1">
+                  {formatDateTime(usage.usedAt)} · {usage.store?.name ?? "Вся сеть"} ·{" "}
+                  {formatQuantity(usage.quantity)} исп. · {formatRubles(usage.amount)}
+                  {usage.grossProfit !== null
+                    ? ` · маржа ${formatRubles(usage.grossProfit)}`
+                    : ""}
+                </p>
+                {usage.note ? <p className="mt-1">{usage.note}</p> : null}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span
+                  className={[
+                    "rounded-full border px-2 py-1 font-semibold",
+                    usage.status === "CONFIRMED"
+                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                      : "border-zinc-300 bg-zinc-100 text-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400",
+                  ].join(" ")}
+                >
+                  {usage.status === "CONFIRMED" ? "учтено" : "отменено"}
+                </span>
+                {usage.status === "CONFIRMED" ? (
+                  <button
+                    type="button"
+                    disabled={pendingUsageId === usage.id}
+                    onClick={() => onUpdateUsageStatus(usage, "CANCELED")}
+                    className="inline-flex min-h-9 items-center justify-center rounded-lg border border-zinc-200 px-3 font-semibold text-zinc-600 transition hover:border-red-400 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-red-400 dark:hover:text-red-300"
+                  >
+                    Отменить
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ))
+        ) : (
+          <div className="rounded-lg border border-dashed border-zinc-300 px-3 py-4 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+            Точных использований пока нет. После первой фиксации они начнут
+            дополнять продажи и складские списания в сводке.
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function PromoBundleCatalogRow({
@@ -5141,6 +5696,20 @@ function formatDate(value: string | null) {
   }
 
   return new Intl.DateTimeFormat("ru-RU").format(new Date(value));
+}
+
+function formatDateTime(value: string | null) {
+  if (!value) {
+    return "не задано";
+  }
+
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
 }
 
 function formatRubles(value: number | null) {

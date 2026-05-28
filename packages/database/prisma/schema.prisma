@@ -112,6 +112,7 @@ model Tenant {
   marketingCampaigns         MarketingCampaign[]
   marketingPromoBundles      MarketingPromoBundle[]
   marketingPromoBundleLaunches MarketingPromoBundleLaunch[]
+  marketingPromoBundleUsages MarketingPromoBundleUsage[]
   guestStaffIdentityMappings GuestStaffIdentityMapping[]
   guestSavedFilters          GuestSavedFilter[]
   guestAudiences             GuestAudience[]
@@ -142,6 +143,7 @@ model User {
   ownedMarketingCampaigns    MarketingCampaign[]         @relation("MarketingCampaignOwner")
   createdMarketingPromoBundles MarketingPromoBundle[]     @relation("MarketingPromoBundleCreatedBy")
   createdMarketingPromoBundleLaunches MarketingPromoBundleLaunch[] @relation("MarketingPromoBundleLaunchCreatedBy")
+  createdMarketingPromoBundleUsages MarketingPromoBundleUsage[] @relation("MarketingPromoBundleUsageCreatedBy")
   guestStaffIdentityMappings GuestStaffIdentityMapping[]
   guestSavedFilters          GuestSavedFilter[]
   guestAudiences             GuestAudience[]
@@ -209,6 +211,7 @@ model Store {
   clubRevenueFacts   ClubRevenueFact[]
   inventorySnapshots InventorySnapshot[]
   stockMovements     StockMovement[]
+  marketingPromoBundleUsages MarketingPromoBundleUsage[]
 
   @@unique([tenantId, externalProvider, externalDomain, externalClubId])
   @@index([tenantId])
@@ -790,6 +793,7 @@ model MarketingPromoBundle {
   createdByUser User?               @relation("MarketingPromoBundleCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   campaigns     MarketingCampaign[]
   launches      MarketingPromoBundleLaunch[]
+  usages        MarketingPromoBundleUsage[]
 
   @@index([tenantId, status, updatedAt], map: "marketing_promo_bundle_status_idx")
   @@index([tenantId, bundleType], map: "marketing_promo_bundle_type_idx")
@@ -813,10 +817,48 @@ model MarketingPromoBundleLaunch {
   tenant        Tenant               @relation(fields: [tenantId], references: [id])
   promoBundle   MarketingPromoBundle @relation(fields: [promoBundleId], references: [id], onDelete: Cascade)
   createdByUser User?                @relation("MarketingPromoBundleLaunchCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  usages        MarketingPromoBundleUsage[]
 
   @@index([tenantId, status, updatedAt], map: "marketing_promo_bundle_launch_status_idx")
   @@index([promoBundleId], map: "marketing_promo_bundle_launch_bundle_idx")
   @@index([createdByUserId], map: "marketing_promo_bundle_launch_created_by_idx")
+}
+
+model MarketingPromoBundleUsage {
+  id              String   @id @default(uuid())
+  tenantId        String
+  promoBundleId   String
+  launchId        String?
+  storeId         String?
+  createdByUserId String?
+  status          String   @default("CONFIRMED")
+  source          String   @default("MANUAL")
+  externalProvider IntegrationProvider?
+  externalDomain  String?
+  externalId      String?
+  guestExternalId String?
+  receiptExternalId String?
+  usedAt          DateTime @default(now())
+  quantity        Int      @default(1)
+  amount          Decimal  @default(0) @db.Decimal(12, 2)
+  costAmount      Decimal? @db.Decimal(12, 2)
+  note            String?
+  sourcePayload   Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant        Tenant                      @relation(fields: [tenantId], references: [id])
+  promoBundle   MarketingPromoBundle        @relation(fields: [promoBundleId], references: [id], onDelete: Cascade)
+  launch        MarketingPromoBundleLaunch? @relation(fields: [launchId], references: [id], onDelete: SetNull)
+  store         Store?                       @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  createdByUser User?                        @relation("MarketingPromoBundleUsageCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, source, externalProvider, externalDomain, externalId], map: "marketing_promo_bundle_usage_external_uidx")
+  @@index([tenantId, usedAt], map: "marketing_promo_bundle_usage_used_at_idx")
+  @@index([promoBundleId], map: "marketing_promo_bundle_usage_bundle_idx")
+  @@index([launchId], map: "marketing_promo_bundle_usage_launch_idx")
+  @@index([storeId], map: "marketing_promo_bundle_usage_store_idx")
+  @@index([createdByUserId], map: "marketing_promo_bundle_usage_user_idx")
 }
 
 model GuestGroup {

@@ -3,7 +3,11 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { GuestCommunicationConsentStatus, Prisma } from '@prisma/client';
+import {
+  GuestCommunicationConsentStatus,
+  Prisma,
+  StockMovementType,
+} from '@prisma/client';
 import ExcelJS from 'exceljs';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
@@ -325,6 +329,11 @@ export type MarketingPromoBundleReconciliationTotals = {
   salesRevenue: number;
   salesCost: number;
   grossProfit: number;
+  writeOffQuantity: number;
+  writeOffAmount: number;
+  writeOffCount: number;
+  writeOffStoreCount: number;
+  lastWriteOffDate: string | null;
   storeCount: number;
   lastSaleDate: string | null;
   expectedUses: number;
@@ -344,6 +353,11 @@ export type MarketingPromoBundleReconciliationLaunch = {
   salesRevenue: number;
   salesCost: number;
   grossProfit: number;
+  writeOffQuantity: number;
+  writeOffAmount: number;
+  writeOffCount: number;
+  writeOffStoreCount: number;
+  lastWriteOffDate: string | null;
   storeCount: number;
   lastSaleDate: string | null;
   usageProgressPercent: number | null;
@@ -2283,9 +2297,9 @@ export class MarketingService {
       warnings,
       dataQuality: {
         factSource:
-          'SalesFact по привязанным товарам в периоде и клубах запуска.',
+          'SalesFact и StockMovement по привязанным товарам в периоде и клубах запуска.',
         limitation:
-          'Это прокси-факт продаж, а не точное погашение промо-набора; точное списание появится после отдельного учета использований.',
+          'Это прокси-факт продаж и складских списаний, а не точное погашение промо-набора; точный учет использований появится после подтверждения операционного источника.',
       },
     };
   }
@@ -2303,28 +2317,50 @@ export class MarketingService {
   }): Promise<MarketingPromoBundleReconciliationLaunch> {
     const storeIds = parseStringArray(launch.storeIds);
     const { from, to } = promoBundleLaunchFactWindow(launch);
-    const facts = await this.prisma.salesFact.findMany({
-      where: {
-        tenantId,
-        productId: { in: productIds },
-        saleDate: { gte: from, lt: to },
-        isCanceled: false,
-        ...(storeIds.length > 0 ? { storeId: { in: storeIds } } : {}),
-      },
-      select: {
-        storeId: true,
-        saleDate: true,
-        quantity: true,
-        revenue: true,
-        cost: true,
-      },
-    });
+    const [facts, writeOffMovements] = await Promise.all([
+      this.prisma.salesFact.findMany({
+        where: {
+          tenantId,
+          productId: { in: productIds },
+          saleDate: { gte: from, lt: to },
+          isCanceled: false,
+          ...(storeIds.length > 0 ? { storeId: { in: storeIds } } : {}),
+        },
+        select: {
+          storeId: true,
+          saleDate: true,
+          quantity: true,
+          revenue: true,
+          cost: true,
+        },
+      }),
+      this.prisma.stockMovement.findMany({
+        where: {
+          tenantId,
+          productId: { in: productIds },
+          movementDate: { gte: from, lt: to },
+          type: StockMovementType.WRITEOFF,
+          ...(storeIds.length > 0 ? { storeId: { in: storeIds } } : {}),
+        },
+        select: {
+          storeId: true,
+          movementDate: true,
+          quantity: true,
+          amount: true,
+        },
+      }),
+    ]);
     const storeSet = new Set<string>();
+    const writeOffStoreSet = new Set<string>();
     let salesQuantity = 0;
     let salesRevenue = 0;
     let salesCost = 0;
+    let writeOffQuantity = 0;
+    let writeOffAmount = 0;
     let lastSaleAtMs = 0;
+    let lastWriteOffAtMs = 0;
     let lastSaleDateIso: string | null = null;
+    let lastWriteOffDateIso: string | null = null;
 
     facts.forEach((fact) => {
       storeSet.add(fact.storeId);
@@ -2335,6 +2371,17 @@ export class MarketingService {
       if (fact.saleDate.getTime() > lastSaleAtMs) {
         lastSaleAtMs = fact.saleDate.getTime();
         lastSaleDateIso = fact.saleDate.toISOString();
+      }
+    });
+
+    writeOffMovements.forEach((movement) => {
+      writeOffStoreSet.add(movement.storeId);
+      writeOffQuantity += movement.quantity.toNumber();
+      writeOffAmount += movement.amount.toNumber();
+
+      if (movement.movementDate.getTime() > lastWriteOffAtMs) {
+        lastWriteOffAtMs = movement.movementDate.getTime();
+        lastWriteOffDateIso = movement.movementDate.toISOString();
       }
     });
 
@@ -2352,6 +2399,11 @@ export class MarketingService {
       salesRevenue: this.round(salesRevenue, 2),
       salesCost: this.round(salesCost, 2),
       grossProfit: this.round(salesRevenue - salesCost, 2),
+      writeOffQuantity: this.round(writeOffQuantity, 2),
+      writeOffAmount: this.round(writeOffAmount, 2),
+      writeOffCount: writeOffMovements.length,
+      writeOffStoreCount: writeOffStoreSet.size,
+      lastWriteOffDate: lastWriteOffDateIso,
       storeCount: storeSet.size,
       lastSaleDate: lastSaleDateIso,
       usageProgressPercent:
@@ -2364,11 +2416,17 @@ export class MarketingService {
     expectedUses: number,
   ): MarketingPromoBundleReconciliationTotals {
     let storeCount = 0;
+    let writeOffStoreCount = 0;
     let lastSaleDate: string | null = null;
+    let lastWriteOffDate: string | null = null;
     let maxUses = 0;
     const totals = launches.reduce(
       (sum, launch) => {
         storeCount = Math.max(storeCount, launch.storeCount);
+        writeOffStoreCount = Math.max(
+          writeOffStoreCount,
+          launch.writeOffStoreCount,
+        );
 
         if (
           launch.lastSaleDate &&
@@ -2379,6 +2437,15 @@ export class MarketingService {
           lastSaleDate = launch.lastSaleDate;
         }
 
+        if (
+          launch.lastWriteOffDate &&
+          (!lastWriteOffDate ||
+            new Date(launch.lastWriteOffDate).getTime() >
+              new Date(lastWriteOffDate).getTime())
+        ) {
+          lastWriteOffDate = launch.lastWriteOffDate;
+        }
+
         maxUses += launch.maxUses ?? 0;
 
         return {
@@ -2387,6 +2454,9 @@ export class MarketingService {
           salesRevenue: sum.salesRevenue + launch.salesRevenue,
           salesCost: sum.salesCost + launch.salesCost,
           grossProfit: sum.grossProfit + launch.grossProfit,
+          writeOffQuantity: sum.writeOffQuantity + launch.writeOffQuantity,
+          writeOffAmount: sum.writeOffAmount + launch.writeOffAmount,
+          writeOffCount: sum.writeOffCount + launch.writeOffCount,
         };
       },
       {
@@ -2395,6 +2465,9 @@ export class MarketingService {
         salesRevenue: 0,
         salesCost: 0,
         grossProfit: 0,
+        writeOffQuantity: 0,
+        writeOffAmount: 0,
+        writeOffCount: 0,
       },
     );
     const progressLimit = maxUses > 0 ? maxUses : expectedUses;
@@ -2405,6 +2478,11 @@ export class MarketingService {
       salesRevenue: this.round(totals.salesRevenue, 2),
       salesCost: this.round(totals.salesCost, 2),
       grossProfit: this.round(totals.grossProfit, 2),
+      writeOffQuantity: this.round(totals.writeOffQuantity, 2),
+      writeOffAmount: this.round(totals.writeOffAmount, 2),
+      writeOffCount: totals.writeOffCount,
+      writeOffStoreCount,
+      lastWriteOffDate,
       storeCount,
       lastSaleDate,
       expectedUses,
@@ -2435,7 +2513,7 @@ export class MarketingService {
       return 'NO_LAUNCH';
     }
 
-    if (totals.salesCount === 0) {
+    if (totals.salesCount === 0 && totals.writeOffCount === 0) {
       return 'NO_SALES';
     }
 
@@ -2479,6 +2557,22 @@ export class MarketingService {
       launches.length > 0
     ) {
       warnings.push('За период запуска продаж привязанных товаров не найдено.');
+    }
+
+    if (
+      totals.salesCount > 0 &&
+      totals.writeOffCount === 0 &&
+      structure.accounting.writeOffRule !== 'MANUAL'
+    ) {
+      warnings.push(
+        'Есть продажи привязанных товаров, но складских списаний за период запуска не найдено.',
+      );
+    }
+
+    if (totals.writeOffCount > 0 && totals.salesCount === 0) {
+      warnings.push(
+        'Есть складские списания без продаж привязанных товаров, проверьте период запуска и привязки.',
+      );
     }
 
     if (
@@ -3175,8 +3269,8 @@ function promoBundleReconciliationLabel(
   const labels: Record<MarketingPromoBundleReconciliationStatus, string> = {
     NO_LAUNCH: 'нет запуска',
     NO_PRODUCT_LINK: 'нет товарной привязки',
-    NO_SALES: 'фактов продаж нет',
-    HAS_FACTS: 'есть факты продаж',
+    NO_SALES: 'фактов нет',
+    HAS_FACTS: 'есть факты',
     MANUAL_REVIEW: 'ручная сверка',
   };
 

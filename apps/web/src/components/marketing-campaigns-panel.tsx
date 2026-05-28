@@ -1793,8 +1793,8 @@ function PromoBundlesAccountingReport({
   ).length;
   const factsCount = rows.filter(
     (row) =>
-      row.reconciliation?.status === "HAS_FACTS" ||
-      row.reconciliation?.status === "MANUAL_REVIEW",
+      (row.reconciliation?.totals.salesCount ?? 0) > 0 ||
+      (row.reconciliation?.totals.writeOffCount ?? 0) > 0,
   ).length;
 
   if (promoBundles.length === 0) {
@@ -1813,9 +1813,9 @@ function PromoBundlesAccountingReport({
           </h3>
         </div>
         <p className="max-w-2xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-          Привязки, режим списания и факт продаж по товарам в периодах запусков.
-          Точное погашение промо-набора остается ручным, пока нет факта
-          использования.
+          Привязки, режим списания, факт продаж и складских списаний по товарам
+          в периодах запусков. Точное погашение промо-набора остается ручным,
+          пока нет факта использования.
         </p>
       </div>
 
@@ -1975,12 +1975,25 @@ function promoBundleReconciliationSummary(
   reconciliation: MarketingPromoBundleReconciliation | null,
 ) {
   if (!reconciliation) {
-    return "Обновите страницу, чтобы подтянуть факты продаж по запускам.";
+    return "Обновите страницу, чтобы подтянуть факты продаж и списаний по запускам.";
   }
 
   const { totals } = reconciliation;
+  const writeOffSummary =
+    totals.writeOffCount > 0
+      ? ` · списано ${formatQuantity(totals.writeOffQuantity)} шт / ${formatRubles(
+          totals.writeOffAmount,
+        )}`
+      : "";
 
   if (totals.salesCount === 0) {
+    if (totals.writeOffCount > 0) {
+      return `Продаж нет, складские списания есть:${writeOffSummary.replace(
+        " ·",
+        "",
+      )}`;
+    }
+
     return reconciliation.productRefs.length > 0
       ? "Продаж привязанных товаров в периодах запусков пока нет."
       : "Сначала привяжите товар из ассортимента к части набора.";
@@ -1993,7 +2006,9 @@ function promoBundleReconciliationSummary(
 
   return `${formatQuantity(totals.salesQuantity)} шт · ${formatRubles(
     totals.salesRevenue,
-  )} · прибыль ${formatRubles(totals.grossProfit)}${progress ?? ""}`;
+  )} · прибыль ${formatRubles(totals.grossProfit)}${writeOffSummary}${
+    progress ?? ""
+  }`;
 }
 
 function PromoBundleCatalogRow({

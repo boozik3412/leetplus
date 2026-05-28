@@ -187,6 +187,11 @@ export type MarketingPromoBundleReconciliationTotals = {
   salesRevenue: number;
   salesCost: number;
   grossProfit: number;
+  writeOffQuantity: number;
+  writeOffAmount: number;
+  writeOffCount: number;
+  writeOffStoreCount: number;
+  lastWriteOffDate: string | null;
   storeCount: number;
   lastSaleDate: string | null;
   expectedUses: number;
@@ -206,6 +211,11 @@ export type MarketingPromoBundleReconciliationLaunch = {
   salesRevenue: number;
   salesCost: number;
   grossProfit: number;
+  writeOffQuantity: number;
+  writeOffAmount: number;
+  writeOffCount: number;
+  writeOffStoreCount: number;
+  lastWriteOffDate: string | null;
   storeCount: number;
   lastSaleDate: string | null;
   usageProgressPercent: number | null;

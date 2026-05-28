@@ -502,7 +502,8 @@ Goal: let a manager create a simple campaign from a business signal and control 
 - Done: promo-bundle constructor now saves accounting links for both bundle parts: product/service/bonus/manual reference, product IDs when selected, write-off rule, and accounting note.
 - Done: dedicated promo-bundle catalog now has a compact operational accounting report: readiness, product/service references, write-off rule, and active launch scope without reintroducing the removed standalone launch form.
 - Done: promo-bundle catalog now has first read-only launch reconciliation: linked product sales are matched to promo-bundle launch periods and clubs, with revenue, cost, gross profit, usage progress, and explicit accuracy limits.
-- Next: connect exact promo redemption/usage facts and stock write-off facts when the operational source for bundle usage is confirmed.
+- Done: promo-bundle reconciliation now also shows linked product stock write-off facts from `StockMovement` by launch period and club, so sales proxy and stock movement proxy are visible together.
+- Next: connect exact promo redemption/usage facts when the operational source for bundle usage is confirmed.
 - Done: let the user choose a saved guest group or create one from guest filters.
 - Add campaign fields: goal, period, clubs, target group, channel, responsible user, deadline, note, status.
 - Done: improve generated CRM tasks with per-channel instructions and campaign detail links.

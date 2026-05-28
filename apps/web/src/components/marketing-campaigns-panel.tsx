@@ -17,6 +17,8 @@ import type {
   MarketingCampaignStatus,
   MarketingMechanicConfig,
   MarketingPromoBundle,
+  MarketingPromoBundleLaunch,
+  MarketingPromoBundleLaunchStatus,
 } from "@/lib/marketing";
 import type { Store } from "@/lib/stores";
 
@@ -34,6 +36,16 @@ type CampaignFormState = {
   periodTo: string;
   dueAt: string;
   budget: string;
+  note: string;
+};
+
+type PromoBundleLaunchFormState = {
+  promoBundleId: string;
+  scope: "NETWORK" | "STORES";
+  storeIds: string[];
+  periodFrom: string;
+  periodTo: string;
+  maxUses: string;
   note: string;
 };
 
@@ -149,6 +161,16 @@ const statusOptions: Array<{ value: MarketingCampaignStatus; label: string }> = 
   { value: "RUNNING", label: "В работе" },
   { value: "FINISHED", label: "Завершена" },
   { value: "CANCELED", label: "Отменена" },
+];
+
+const promoBundleLaunchStatusOptions: Array<{
+  value: MarketingPromoBundleLaunchStatus;
+  label: string;
+}> = [
+  { value: "ACTIVE", label: "Активен" },
+  { value: "PAUSED", label: "Пауза" },
+  { value: "FINISHED", label: "Завершен" },
+  { value: "CANCELED", label: "Отменен" },
 ];
 
 const campaignStatusFilters: Array<{
@@ -347,6 +369,16 @@ const emptyForm: CampaignFormState = {
   note: "",
 };
 
+const emptyPromoBundleLaunchForm: PromoBundleLaunchFormState = {
+  promoBundleId: "",
+  scope: "NETWORK",
+  storeIds: [],
+  periodFrom: "",
+  periodTo: "",
+  maxUses: "",
+  note: "",
+};
+
 const promoBundleTypeOptions: PromoBundleTypeOption[] = [
   {
     id: "game_product",
@@ -474,17 +506,24 @@ export function MarketingCampaignsPanel({
   audiences,
   users,
   promoBundles,
+  promoBundleLaunches,
   stores,
 }: {
   campaigns: MarketingCampaign[];
   audiences: GuestAudience[];
   users: GuestCrmUser[];
   promoBundles: MarketingPromoBundle[];
+  promoBundleLaunches: MarketingPromoBundleLaunch[];
   stores: Store[];
 }) {
   const [rows, setRows] = useState(campaigns);
   const [savedPromoBundles, setSavedPromoBundles] = useState(promoBundles);
+  const [promoLaunchRows, setPromoLaunchRows] = useState(promoBundleLaunches);
   const [form, setForm] = useState<CampaignFormState>(emptyForm);
+  const [launchForm, setLaunchForm] = useState<PromoBundleLaunchFormState>({
+    ...emptyPromoBundleLaunchForm,
+    promoBundleId: promoBundles[0]?.id ?? "",
+  });
   const [selectedTemplateId, setSelectedTemplateId] = useState(
     promoMechanicTemplates[0]?.id ?? "",
   );
@@ -497,6 +536,8 @@ export function MarketingCampaignsPanel({
   const [lastCreatedCampaign, setLastCreatedCampaign] =
     useState<MarketingCampaign | null>(null);
   const [isSavingBundle, setIsSavingBundle] = useState(false);
+  const [isCreatingLaunch, setIsCreatingLaunch] = useState(false);
+  const [pendingLaunchId, setPendingLaunchId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pendingTaskCampaignId, setPendingTaskCampaignId] = useState<
     string | null
@@ -544,6 +585,9 @@ export function MarketingCampaignsPanel({
     audiences.find((audience) => audience.id === form.audienceId) ?? null;
   const selectedFormPromoBundle =
     savedPromoBundles.find((bundle) => bundle.id === form.promoBundleId) ?? null;
+  const selectedLaunchPromoBundle =
+    savedPromoBundles.find((bundle) => bundle.id === launchForm.promoBundleId) ??
+    null;
   const campaignDraftSteps = useMemo(
     () => buildCampaignDraftSteps(form),
     [form],
@@ -672,6 +716,11 @@ export function MarketingCampaignsPanel({
       budget: String(Math.round(bundleEconomics.discountBudget)),
       note,
     }));
+    setLaunchForm((current) => ({
+      ...current,
+      promoBundleId: promoBundle.id,
+      maxUses: current.maxUses || bundleDraft.expectedUses,
+    }));
     setBundleApplyNotice(true);
     setBundleCatalogNotice(
       "Комбо-набор сохранен в каталоге и перенесен в форму кампании.",
@@ -710,6 +759,11 @@ export function MarketingCampaignsPanel({
       budget: String(Math.round(economics.discountBudget)),
       note,
     }));
+    setLaunchForm((current) => ({
+      ...current,
+      promoBundleId: promoBundle.id,
+      maxUses: current.maxUses || draft.expectedUses,
+    }));
     setBundleApplyNotice(true);
     setBundleCatalogNotice(
       "Существующий комбо-набор связан с формой кампании.",
@@ -745,6 +799,93 @@ export function MarketingCampaignsPanel({
     setRows((current) =>
       current.map((row) => (row.id === updated.id ? updated : row)),
     );
+  }
+
+  async function createPromoBundleLaunch(
+    event: FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault();
+
+    if (!launchForm.promoBundleId) {
+      setError("Сначала выберите сохраненный промо-набор");
+      return;
+    }
+
+    if (launchForm.scope === "STORES" && launchForm.storeIds.length === 0) {
+      setError("Выберите клубы или оставьте запуск на всю сеть");
+      return;
+    }
+
+    setIsCreatingLaunch(true);
+    setError(null);
+
+    const response = await fetch("/api/marketing/promo-bundle-launches", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        promoBundleId: launchForm.promoBundleId,
+        storeIds: launchForm.scope === "NETWORK" ? [] : launchForm.storeIds,
+        periodFrom: launchForm.periodFrom || null,
+        periodTo: launchForm.periodTo || null,
+        maxUses: launchForm.maxUses || null,
+        note: launchForm.note || null,
+      }),
+    });
+
+    if (!response.ok) {
+      setError(await readError(response));
+      setIsCreatingLaunch(false);
+      return;
+    }
+
+    const launch = (await response.json()) as MarketingPromoBundleLaunch;
+    setPromoLaunchRows((current) => [
+      launch,
+      ...current.filter((item) => item.id !== launch.id),
+    ]);
+    setLaunchForm((current) => ({
+      ...emptyPromoBundleLaunchForm,
+      promoBundleId: launch.promoBundle.id,
+      maxUses: current.maxUses,
+    }));
+    setIsCreatingLaunch(false);
+    window.requestAnimationFrame(() => {
+      scrollToMarketingSection("bundle-launches");
+    });
+  }
+
+  async function updatePromoBundleLaunchStatus(
+    launch: MarketingPromoBundleLaunch,
+    status: MarketingPromoBundleLaunchStatus,
+  ) {
+    const previousRows = promoLaunchRows;
+    setPendingLaunchId(launch.id);
+    setPromoLaunchRows((current) =>
+      current.map((row) => (row.id === launch.id ? { ...row, status } : row)),
+    );
+    setError(null);
+
+    const response = await fetch(
+      `/api/marketing/promo-bundle-launches/${launch.id}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      },
+    );
+
+    if (!response.ok) {
+      setPromoLaunchRows(previousRows);
+      setError(await readError(response));
+      setPendingLaunchId(null);
+      return;
+    }
+
+    const updated = (await response.json()) as MarketingPromoBundleLaunch;
+    setPromoLaunchRows((current) =>
+      current.map((row) => (row.id === updated.id ? updated : row)),
+    );
+    setPendingLaunchId(null);
   }
 
   async function createCrmTask(campaign: MarketingCampaign) {
@@ -813,6 +954,19 @@ export function MarketingCampaignsPanel({
         }}
         onUsePromoBundle={applyExistingPromoBundle}
         onApplyBundle={applyBundleDraft}
+      />
+
+      <PromoBundleStandaloneLaunchPanel
+        launches={promoLaunchRows}
+        launchForm={launchForm}
+        selectedPromoBundle={selectedLaunchPromoBundle}
+        promoBundles={savedPromoBundles}
+        stores={stores}
+        isCreatingLaunch={isCreatingLaunch}
+        pendingLaunchId={pendingLaunchId}
+        onLaunchFormChange={setLaunchForm}
+        onCreateLaunch={createPromoBundleLaunch}
+        onUpdateLaunchStatus={updatePromoBundleLaunchStatus}
       />
 
       <form
@@ -1886,6 +2040,362 @@ function PromoMechanicsBuilder({
             isSavingBundle={isSavingBundle}
             onApplyBundle={onApplyBundle}
           />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function PromoBundleStandaloneLaunchPanel({
+  launches,
+  launchForm,
+  selectedPromoBundle,
+  promoBundles,
+  stores,
+  isCreatingLaunch,
+  pendingLaunchId,
+  onLaunchFormChange,
+  onCreateLaunch,
+  onUpdateLaunchStatus,
+}: {
+  launches: MarketingPromoBundleLaunch[];
+  launchForm: PromoBundleLaunchFormState;
+  selectedPromoBundle: MarketingPromoBundle | null;
+  promoBundles: MarketingPromoBundle[];
+  stores: Store[];
+  isCreatingLaunch: boolean;
+  pendingLaunchId: string | null;
+  onLaunchFormChange: (next: PromoBundleLaunchFormState) => void;
+  onCreateLaunch: (event: FormEvent<HTMLFormElement>) => void | Promise<void>;
+  onUpdateLaunchStatus: (
+    launch: MarketingPromoBundleLaunch,
+    status: MarketingPromoBundleLaunchStatus,
+  ) => void | Promise<void>;
+}) {
+  const activeLaunches = launches.filter((launch) => launch.status === "ACTIVE");
+  const selectedDraft = selectedPromoBundle
+    ? promoBundleToDraft(selectedPromoBundle)
+    : null;
+  const selectedEconomics = selectedDraft
+    ? buildPromoBundleEconomics(selectedDraft)
+    : null;
+  const canCreate =
+    Boolean(launchForm.promoBundleId) &&
+    (launchForm.scope === "NETWORK" || launchForm.storeIds.length > 0);
+
+  function selectPromoBundle(id: string) {
+    const bundle = promoBundles.find((item) => item.id === id);
+    const draft = bundle ? promoBundleToDraft(bundle) : null;
+
+    onLaunchFormChange({
+      ...launchForm,
+      promoBundleId: id,
+      maxUses: launchForm.maxUses || draft?.expectedUses || "",
+    });
+  }
+
+  function setScope(scope: PromoBundleLaunchFormState["scope"]) {
+    onLaunchFormChange({
+      ...launchForm,
+      scope,
+      storeIds: scope === "NETWORK" ? [] : launchForm.storeIds,
+    });
+  }
+
+  function toggleStore(storeId: string) {
+    const isSelected = launchForm.storeIds.includes(storeId);
+    const storeIds = isSelected
+      ? launchForm.storeIds.filter((id) => id !== storeId)
+      : [...launchForm.storeIds, storeId];
+
+    onLaunchFormChange({
+      ...launchForm,
+      scope: "STORES",
+      storeIds,
+    });
+  }
+
+  return (
+    <section
+      id="bundle-launches"
+      className="scroll-mt-6 border-b border-zinc-200 p-4 dark:border-zinc-800"
+    >
+      <div className="grid gap-4 rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60 xl:grid-cols-[minmax(0,0.95fr)_minmax(360px,1.05fr)]">
+        <div>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
+                Запуск без кампании
+              </p>
+              <h3 className="mt-2 text-xl font-semibold text-zinc-950 dark:text-white">
+                Отдельный промо-набор для сети или клубов
+              </h3>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+                Используйте сохраненный набор как клубный оффер без группы гостей,
+                CRM-задачи и карточки кампании. Он остается в каталоге, а запуск
+                фиксирует область действия, период, лимит и инструкцию для
+                администраторов.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-center">
+              <MetricPill label="Запусков" value={launches.length} />
+              <MetricPill label="Активные" value={activeLaunches.length} />
+            </div>
+          </div>
+
+          <form onSubmit={onCreateLaunch} className="mt-4 grid gap-3">
+            <Field label="Промо-набор">
+              <select
+                value={launchForm.promoBundleId}
+                onChange={(event) => selectPromoBundle(event.target.value)}
+                className={fieldClassName}
+              >
+                <option value="">Выберите набор из каталога</option>
+                {promoBundles.map((bundle) => (
+                  <option key={bundle.id} value={bundle.id}>
+                    {bundle.name} · {promoBundleTypeLabel(bundle.bundleType)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(220px,0.52fr)]">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                  Область действия
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setScope("NETWORK")}
+                    className={launchScopeButtonClass(
+                      launchForm.scope === "NETWORK",
+                    )}
+                  >
+                    Вся сеть
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setScope("STORES")}
+                    className={launchScopeButtonClass(
+                      launchForm.scope === "STORES",
+                    )}
+                  >
+                    Выбрать клубы
+                  </button>
+                </div>
+                {launchForm.scope === "STORES" ? (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {stores.map((store) => {
+                      const isSelected = launchForm.storeIds.includes(store.id);
+
+                      return (
+                        <button
+                          key={store.id}
+                          type="button"
+                          onClick={() => toggleStore(store.id)}
+                          className={[
+                            "rounded-full border px-3 py-1.5 text-xs font-semibold transition hover:-translate-y-0.5 hover:shadow-sm",
+                            isSelected
+                              ? "border-emerald-500 bg-emerald-500 text-zinc-950"
+                              : "border-zinc-200 bg-white text-zinc-700 hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:border-emerald-500 dark:hover:text-emerald-300",
+                          ].join(" ")}
+                        >
+                          {store.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="mt-3 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm leading-6 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300">
+                    Набор будет считаться доступным для всей сети. Если нужны
+                    исключения, переключите на выбор клубов.
+                  </p>
+                )}
+              </div>
+
+              <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+                <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                  Быстрая проверка
+                </p>
+                <dl className="mt-2 grid gap-2 text-sm">
+                  <CompactInfo
+                    label="Набор"
+                    value={selectedPromoBundle?.name ?? "не выбран"}
+                  />
+                  <CompactInfo
+                    label="Клубы"
+                    value={
+                      launchForm.scope === "NETWORK"
+                        ? "Вся сеть"
+                        : storeLabel(launchForm.storeIds, stores)
+                    }
+                  />
+                  <CompactInfo
+                    label="Цена"
+                    value={
+                      selectedEconomics
+                        ? formatRubles(selectedEconomics.promoPrice)
+                        : "не задан"
+                    }
+                  />
+                </dl>
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <Field label="Период с">
+                <input
+                  type="date"
+                  value={launchForm.periodFrom}
+                  onChange={(event) =>
+                    onLaunchFormChange({
+                      ...launchForm,
+                      periodFrom: event.target.value,
+                    })
+                  }
+                  className={fieldClassName}
+                />
+              </Field>
+              <Field label="Период по">
+                <input
+                  type="date"
+                  value={launchForm.periodTo}
+                  onChange={(event) =>
+                    onLaunchFormChange({
+                      ...launchForm,
+                      periodTo: event.target.value,
+                    })
+                  }
+                  className={fieldClassName}
+                />
+              </Field>
+              <Field label="Лимит, шт">
+                <input
+                  inputMode="numeric"
+                  value={launchForm.maxUses}
+                  onChange={(event) =>
+                    onLaunchFormChange({
+                      ...launchForm,
+                      maxUses: event.target.value,
+                    })
+                  }
+                  placeholder="Без лимита"
+                  className={fieldClassName}
+                />
+              </Field>
+              <div className="flex items-end">
+                <button
+                  type="submit"
+                  disabled={!canCreate || isCreatingLaunch}
+                  className={[
+                    "min-h-11 w-full rounded-xl px-4 text-sm font-semibold transition",
+                    canCreate && !isCreatingLaunch
+                      ? "bg-emerald-500 text-zinc-950 hover:bg-emerald-400"
+                      : "cursor-not-allowed border border-zinc-200 text-zinc-400 dark:border-zinc-800 dark:text-zinc-600",
+                  ].join(" ")}
+                >
+                  {isCreatingLaunch ? "Запускаем..." : "Запустить набор"}
+                </button>
+              </div>
+            </div>
+
+            <Field label="Инструкция для запуска">
+              <input
+                value={launchForm.note}
+                onChange={(event) =>
+                  onLaunchFormChange({
+                    ...launchForm,
+                    note: event.target.value,
+                  })
+                }
+                placeholder="Например: объявить на кассе, применять вручную, отмечать факт использования"
+                className={fieldClassName}
+              />
+            </Field>
+          </form>
+        </div>
+
+        <div className="min-w-0 rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="border-b border-zinc-200 p-4 dark:border-zinc-800">
+            <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              Текущие отдельные запуски
+            </p>
+            <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+              Это не кампании: здесь нет группы гостей и CRM-задачи. Запуск
+              показывает, где набор можно применять и в каком статусе он сейчас.
+            </p>
+          </div>
+          <div className="max-h-[520px] divide-y divide-zinc-200 overflow-y-auto dark:divide-zinc-800">
+            {launches.length > 0 ? (
+              launches.map((launch) => (
+                <article key={launch.id} className="grid gap-3 p-4">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={promoBundleLaunchStatusClass(launch.status)}>
+                        {promoBundleLaunchStatusLabel(launch.status)}
+                      </span>
+                      <span className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                        {promoBundleTypeLabel(launch.promoBundle.bundleType)}
+                      </span>
+                    </div>
+                    <h4 className="mt-2 truncate text-base font-semibold text-zinc-950 dark:text-white">
+                      {launch.promoBundle.name}
+                    </h4>
+                    <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+                      <CompactInfo
+                        label="Клубы"
+                        value={storeLabel(launch.storeIds, stores)}
+                      />
+                      <CompactInfo
+                        label="Период"
+                        value={launchPeriodLabel(launch)}
+                      />
+                      <CompactInfo
+                        label="Лимит"
+                        value={
+                          launch.maxUses
+                            ? `${formatNumber(launch.maxUses)} шт`
+                            : "без лимита"
+                        }
+                      />
+                      <CompactInfo
+                        label="Создан"
+                        value={formatDate(launch.createdAt)}
+                      />
+                    </dl>
+                    {launch.note ? (
+                      <p className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm leading-6 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-300">
+                        {launch.note}
+                      </p>
+                    ) : null}
+                  </div>
+                  <select
+                    value={launch.status}
+                    disabled={pendingLaunchId === launch.id}
+                    onChange={(event) =>
+                      onUpdateLaunchStatus(
+                        launch,
+                        event.target.value as MarketingPromoBundleLaunchStatus,
+                      )
+                    }
+                    className="min-h-10 rounded-xl border border-zinc-200 bg-white px-3 text-sm font-semibold text-zinc-700 transition hover:border-emerald-400 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+                  >
+                    {promoBundleLaunchStatusOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </article>
+              ))
+            ) : (
+              <div className="p-4 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+                Самостоятельных запусков пока нет. Сохраните промо-набор в
+                каталоге, выберите сеть или клубы и запустите его без кампании.
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </section>
@@ -2979,9 +3489,9 @@ function cleanPayload(form: CampaignFormState) {
 async function readError(response: Response) {
   try {
     const data = (await response.json()) as { message?: string };
-    return data.message ?? "Не удалось сохранить кампанию";
+    return data.message ?? "Не удалось сохранить изменения";
   } catch {
-    return "Не удалось сохранить кампанию";
+    return "Не удалось сохранить изменения";
   }
 }
 
@@ -3033,6 +3543,15 @@ function statusLabel(status: MarketingCampaignStatus) {
   return statusOptions.find((option) => option.value === status)?.label ?? status;
 }
 
+function promoBundleLaunchStatusLabel(
+  status: MarketingPromoBundleLaunchStatus,
+) {
+  return (
+    promoBundleLaunchStatusOptions.find((option) => option.value === status)
+      ?.label ?? status
+  );
+}
+
 function campaignStatusClass(status: MarketingCampaignStatus) {
   const base =
     "inline-flex rounded-full px-2.5 py-1 text-xs font-bold uppercase tracking-wide";
@@ -3054,6 +3573,44 @@ function campaignStatusClass(status: MarketingCampaignStatus) {
   }
 
   return `${base} bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300`;
+}
+
+function promoBundleLaunchStatusClass(
+  status: MarketingPromoBundleLaunchStatus,
+) {
+  const base =
+    "inline-flex rounded-full px-2.5 py-1 text-xs font-bold uppercase tracking-wide";
+
+  if (status === "ACTIVE") {
+    return `${base} bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300`;
+  }
+
+  if (status === "PAUSED") {
+    return `${base} bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300`;
+  }
+
+  if (status === "FINISHED") {
+    return `${base} bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300`;
+  }
+
+  return `${base} bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300`;
+}
+
+function launchScopeButtonClass(isActive: boolean) {
+  return [
+    "inline-flex min-h-10 items-center justify-center rounded-full border px-4 text-sm font-semibold transition duration-200 hover:-translate-y-0.5 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/30",
+    isActive
+      ? "border-emerald-500 bg-emerald-500 text-zinc-950"
+      : "border-zinc-200 bg-white text-zinc-700 hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:border-emerald-500 dark:hover:text-emerald-300",
+  ].join(" ");
+}
+
+function launchPeriodLabel(launch: MarketingPromoBundleLaunch) {
+  if (!launch.periodFrom && !launch.periodTo) {
+    return "без срока";
+  }
+
+  return `${formatDate(launch.periodFrom)} - ${formatDate(launch.periodTo)}`;
 }
 
 function campaignNextAction(campaign: MarketingCampaign) {
@@ -3216,6 +3773,7 @@ function normalizeMarketingHash(hash: string) {
     "goals",
     "mechanics",
     "bundle",
+    "bundle-launches",
     "campaigns",
     "campaign-form",
     "campaign-list",

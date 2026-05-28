@@ -12,6 +12,7 @@ import {
 import {
   getMarketingCampaigns,
   getMarketingPromoBundles,
+  getMarketingPromoBundleLaunches,
 } from "@/lib/marketing";
 import { getStores } from "@/lib/stores";
 
@@ -121,16 +122,26 @@ function isActiveTask(task: GuestCrmTask) {
 export default async function MarketingPage() {
   await requireCurrentUser();
 
-  const [groups, leads, tasks, users, campaigns, promoBundles, stores] =
+  const [
+    groups,
+    leads,
+    tasks,
+    users,
+    campaigns,
+    promoBundles,
+    promoBundleLaunches,
+    stores,
+  ] =
     await Promise.all([
-    safeList(getGuestAudiences()),
-    safeList(getGuestCrmLeads()),
-    safeList(getGuestCrmTasks()),
-    safeList(getGuestCrmUsers()),
-    safeList(getMarketingCampaigns()),
-    safeList(getMarketingPromoBundles()),
-    safeList(getStores()),
-  ]);
+      safeList(getGuestAudiences()),
+      safeList(getGuestCrmLeads()),
+      safeList(getGuestCrmTasks()),
+      safeList(getGuestCrmUsers()),
+      safeList(getMarketingCampaigns()),
+      safeList(getMarketingPromoBundles()),
+      safeList(getMarketingPromoBundleLaunches()),
+      safeList(getStores()),
+    ]);
 
   const now = new Date();
   const activeTasks = tasks.filter(isActiveTask);
@@ -330,6 +341,7 @@ export default async function MarketingPage() {
           audiences={groups}
           users={users}
           promoBundles={promoBundles}
+          promoBundleLaunches={promoBundleLaunches}
           stores={stores}
         />
       </div>

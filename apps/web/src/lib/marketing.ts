@@ -19,6 +19,12 @@ export type MarketingMechanicConfig = Record<string, unknown>;
 
 export type MarketingPromoBundleStatus = "ACTIVE" | "ARCHIVED";
 
+export type MarketingPromoBundleLaunchStatus =
+  | "ACTIVE"
+  | "PAUSED"
+  | "FINISHED"
+  | "CANCELED";
+
 export type MarketingCampaignConsentCoverage = {
   targetTotal: number;
   phoneGranted: number;
@@ -79,6 +85,27 @@ export type MarketingPromoBundle = {
   note: string | null;
   createdAt: string;
   updatedAt: string;
+  createdBy: { id: string; displayName: string; email: string } | null;
+};
+
+export type MarketingPromoBundleLaunch = {
+  id: string;
+  status: MarketingPromoBundleLaunchStatus;
+  storeIds: string[];
+  periodFrom: string | null;
+  periodTo: string | null;
+  maxUses: number | null;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+  promoBundle: {
+    id: string;
+    name: string;
+    status: MarketingPromoBundleStatus;
+    bundleType: string;
+    mechanicConfig: MarketingMechanicConfig;
+    note: string | null;
+  };
   createdBy: { id: string; displayName: string; email: string } | null;
 };
 
@@ -225,6 +252,21 @@ export async function getMarketingPromoBundles(): Promise<
   }
 
   return response.json() as Promise<MarketingPromoBundle[]>;
+}
+
+export async function getMarketingPromoBundleLaunches(): Promise<
+  MarketingPromoBundleLaunch[]
+> {
+  const response = await fetch(`${getApiUrl()}/marketing/promo-bundle-launches`, {
+    cache: "no-store",
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch marketing promo bundle launches");
+  }
+
+  return response.json() as Promise<MarketingPromoBundleLaunch[]>;
 }
 
 export async function getMarketingCampaign(

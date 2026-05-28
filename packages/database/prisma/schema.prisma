@@ -111,6 +111,7 @@ model Tenant {
   guestCrmContactEvents      GuestCrmContactEvent[]
   marketingCampaigns         MarketingCampaign[]
   marketingPromoBundles      MarketingPromoBundle[]
+  marketingPromoBundleLaunches MarketingPromoBundleLaunch[]
   guestStaffIdentityMappings GuestStaffIdentityMapping[]
   guestSavedFilters          GuestSavedFilter[]
   guestAudiences             GuestAudience[]
@@ -140,6 +141,7 @@ model User {
   createdMarketingCampaigns  MarketingCampaign[]         @relation("MarketingCampaignCreatedBy")
   ownedMarketingCampaigns    MarketingCampaign[]         @relation("MarketingCampaignOwner")
   createdMarketingPromoBundles MarketingPromoBundle[]     @relation("MarketingPromoBundleCreatedBy")
+  createdMarketingPromoBundleLaunches MarketingPromoBundleLaunch[] @relation("MarketingPromoBundleLaunchCreatedBy")
   guestStaffIdentityMappings GuestStaffIdentityMapping[]
   guestSavedFilters          GuestSavedFilter[]
   guestAudiences             GuestAudience[]
@@ -787,10 +789,34 @@ model MarketingPromoBundle {
   tenant        Tenant              @relation(fields: [tenantId], references: [id])
   createdByUser User?               @relation("MarketingPromoBundleCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   campaigns     MarketingCampaign[]
+  launches      MarketingPromoBundleLaunch[]
 
   @@index([tenantId, status, updatedAt], map: "marketing_promo_bundle_status_idx")
   @@index([tenantId, bundleType], map: "marketing_promo_bundle_type_idx")
   @@index([createdByUserId], map: "marketing_promo_bundle_created_by_idx")
+}
+
+model MarketingPromoBundleLaunch {
+  id              String   @id @default(uuid())
+  tenantId        String
+  promoBundleId   String
+  createdByUserId String?
+  status          String   @default("ACTIVE")
+  storeIds        Json?
+  periodFrom      DateTime?
+  periodTo        DateTime?
+  maxUses         Int?
+  note            String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant        Tenant               @relation(fields: [tenantId], references: [id])
+  promoBundle   MarketingPromoBundle @relation(fields: [promoBundleId], references: [id], onDelete: Cascade)
+  createdByUser User?                @relation("MarketingPromoBundleLaunchCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status, updatedAt], map: "marketing_promo_bundle_launch_status_idx")
+  @@index([promoBundleId], map: "marketing_promo_bundle_launch_bundle_idx")
+  @@index([createdByUserId], map: "marketing_promo_bundle_launch_created_by_idx")
 }
 
 model GuestGroup {

@@ -24,6 +24,9 @@ import {
   type MarketingCampaignUpdateDto,
   type MarketingPromoBundle,
   type MarketingPromoBundleDto,
+  type MarketingPromoBundleLaunch,
+  type MarketingPromoBundleLaunchDto,
+  type MarketingPromoBundleLaunchUpdateDto,
 } from './marketing.service';
 
 @Controller('marketing')
@@ -46,12 +49,36 @@ export class MarketingController {
     return this.marketingService.getPromoBundles(user);
   }
 
+  @Get('promo-bundle-launches')
+  getPromoBundleLaunches(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<MarketingPromoBundleLaunch[]> {
+    return this.marketingService.getPromoBundleLaunches(user);
+  }
+
   @Post('promo-bundles')
   createPromoBundle(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: MarketingPromoBundleDto,
   ): Promise<MarketingPromoBundle> {
     return this.marketingService.createPromoBundle(user, dto);
+  }
+
+  @Post('promo-bundle-launches')
+  createPromoBundleLaunch(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: MarketingPromoBundleLaunchDto,
+  ): Promise<MarketingPromoBundleLaunch> {
+    return this.marketingService.createPromoBundleLaunch(user, dto);
+  }
+
+  @Patch('promo-bundle-launches/:id')
+  updatePromoBundleLaunch(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: MarketingPromoBundleLaunchUpdateDto,
+  ): Promise<MarketingPromoBundleLaunch> {
+    return this.marketingService.updatePromoBundleLaunch(user, id, dto);
   }
 
   @Get('campaigns/:id')

@@ -30,6 +30,25 @@ type MarketingPromoBundleRow = Prisma.MarketingPromoBundleGetPayload<{
   include: typeof marketingPromoBundleInclude;
 }>;
 
+const marketingPromoBundleLaunchInclude = {
+  promoBundle: {
+    select: {
+      id: true,
+      name: true,
+      status: true,
+      bundleType: true,
+      mechanicConfig: true,
+      note: true,
+    },
+  },
+  createdByUser: { select: { id: true, fullName: true, email: true } },
+} satisfies Prisma.MarketingPromoBundleLaunchInclude;
+
+type MarketingPromoBundleLaunchRow =
+  Prisma.MarketingPromoBundleLaunchGetPayload<{
+    include: typeof marketingPromoBundleLaunchInclude;
+  }>;
+
 const campaignGoals = [
   'RETURN_GUESTS',
   'REPEAT_VISIT',
@@ -49,11 +68,20 @@ const campaignStatuses = [
 
 const promoBundleStatuses = ['ACTIVE', 'ARCHIVED'] as const;
 
+const promoBundleLaunchStatuses = [
+  'ACTIVE',
+  'PAUSED',
+  'FINISHED',
+  'CANCELED',
+] as const;
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export type MarketingCampaignGoal = (typeof campaignGoals)[number];
 export type MarketingCampaignStatus = (typeof campaignStatuses)[number];
 export type MarketingPromoBundleStatus = (typeof promoBundleStatuses)[number];
+export type MarketingPromoBundleLaunchStatus =
+  (typeof promoBundleLaunchStatuses)[number];
 
 export type MarketingCampaignDto = {
   goal?: string | null;
@@ -82,6 +110,19 @@ export type MarketingPromoBundleDto = {
   mechanicConfig?: unknown;
   note?: string | null;
 };
+
+export type MarketingPromoBundleLaunchDto = {
+  promoBundleId?: string | null;
+  status?: string | null;
+  storeIds?: string[] | null;
+  periodFrom?: string | null;
+  periodTo?: string | null;
+  maxUses?: string | number | null;
+  note?: string | null;
+};
+
+export type MarketingPromoBundleLaunchUpdateDto =
+  Partial<MarketingPromoBundleLaunchDto>;
 
 export type MarketingCampaignExportFormat = 'csv' | 'xlsx';
 
@@ -155,6 +196,27 @@ export type MarketingPromoBundle = {
   note: string | null;
   createdAt: string;
   updatedAt: string;
+  createdBy: { id: string; displayName: string; email: string } | null;
+};
+
+export type MarketingPromoBundleLaunch = {
+  id: string;
+  status: MarketingPromoBundleLaunchStatus;
+  storeIds: string[];
+  periodFrom: string | null;
+  periodTo: string | null;
+  maxUses: number | null;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+  promoBundle: {
+    id: string;
+    name: string;
+    status: MarketingPromoBundleStatus;
+    bundleType: string;
+    mechanicConfig: Prisma.JsonValue;
+    note: string | null;
+  };
   createdBy: { id: string; displayName: string; email: string } | null;
 };
 
@@ -344,6 +406,19 @@ export class MarketingService {
     });
 
     return rows.map((row) => this.toMarketingPromoBundle(row));
+  }
+
+  async getPromoBundleLaunches(
+    user: AuthenticatedUser,
+  ): Promise<MarketingPromoBundleLaunch[]> {
+    const rows = await this.prisma.marketingPromoBundleLaunch.findMany({
+      where: { tenantId: user.tenantId },
+      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+      take: 100,
+      include: marketingPromoBundleLaunchInclude,
+    });
+
+    return rows.map((row) => this.toMarketingPromoBundleLaunch(row));
   }
 
   async getCampaign(
@@ -841,6 +916,115 @@ export class MarketingService {
     });
 
     return this.toMarketingPromoBundle(row);
+  }
+
+  async createPromoBundleLaunch(
+    user: AuthenticatedUser,
+    dto: MarketingPromoBundleLaunchDto = {},
+  ): Promise<MarketingPromoBundleLaunch> {
+    const promoBundleId = await this.resolvePromoBundleId(
+      user,
+      dto.promoBundleId,
+    );
+
+    if (!promoBundleId) {
+      throw new BadRequestException('Promo bundle is required');
+    }
+
+    const storeIds = await this.resolveStoreIds(user, dto.storeIds);
+    const periodFrom = parseOptionalDate(dto.periodFrom);
+    const periodTo = parseOptionalDate(dto.periodTo);
+    validateDateRange(periodFrom, periodTo);
+
+    const row = await this.prisma.marketingPromoBundleLaunch.create({
+      data: {
+        tenantId: user.tenantId,
+        createdByUserId: user.id,
+        promoBundleId,
+        status: resolvePromoBundleLaunchStatus(dto.status ?? 'ACTIVE'),
+        storeIds: storeIds.length > 0 ? storeIds : Prisma.JsonNull,
+        periodFrom,
+        periodTo,
+        maxUses: parseOptionalPositiveInt(dto.maxUses, 'Max uses'),
+        note: normalizeText(dto.note, 2000),
+      },
+      include: marketingPromoBundleLaunchInclude,
+    });
+
+    return this.toMarketingPromoBundleLaunch(row);
+  }
+
+  async updatePromoBundleLaunch(
+    user: AuthenticatedUser,
+    id: string,
+    dto: MarketingPromoBundleLaunchUpdateDto = {},
+  ): Promise<MarketingPromoBundleLaunch> {
+    const existing = await this.prisma.marketingPromoBundleLaunch.findFirst({
+      where: { id, tenantId: user.tenantId },
+      select: {
+        id: true,
+        periodFrom: true,
+        periodTo: true,
+      },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Promo bundle launch not found');
+    }
+
+    const data: Prisma.MarketingPromoBundleLaunchUpdateInput = {};
+    let periodFrom = existing.periodFrom;
+    let periodTo = existing.periodTo;
+
+    if (hasOwn(dto, 'promoBundleId')) {
+      const promoBundleId = await this.resolvePromoBundleId(
+        user,
+        dto.promoBundleId,
+      );
+
+      if (!promoBundleId) {
+        throw new BadRequestException('Promo bundle is required');
+      }
+
+      data.promoBundle = { connect: { id: promoBundleId } };
+    }
+
+    if (hasOwn(dto, 'status')) {
+      data.status = resolvePromoBundleLaunchStatus(dto.status);
+    }
+
+    if (hasOwn(dto, 'storeIds')) {
+      const storeIds = await this.resolveStoreIds(user, dto.storeIds);
+      data.storeIds = storeIds.length > 0 ? storeIds : Prisma.JsonNull;
+    }
+
+    if (hasOwn(dto, 'periodFrom')) {
+      periodFrom = parseOptionalDate(dto.periodFrom);
+      data.periodFrom = periodFrom;
+    }
+
+    if (hasOwn(dto, 'periodTo')) {
+      periodTo = parseOptionalDate(dto.periodTo);
+      data.periodTo = periodTo;
+    }
+
+    validateDateRange(periodFrom, periodTo);
+
+    if (hasOwn(dto, 'maxUses')) {
+      data.maxUses = parseOptionalPositiveInt(dto.maxUses, 'Max uses');
+    }
+
+    if (hasOwn(dto, 'note')) {
+      data.note = normalizeText(dto.note, 2000);
+    }
+
+    const row = await this.prisma.marketingPromoBundleLaunch.update({
+      where: { id },
+      data,
+      include: marketingPromoBundleLaunchInclude,
+    });
+
+    return this.toMarketingPromoBundleLaunch(row);
   }
 
   async updateCampaign(
@@ -2288,6 +2472,31 @@ export class MarketingService {
       createdBy: row.createdByUser ? toUserSummary(row.createdByUser) : null,
     };
   }
+
+  private toMarketingPromoBundleLaunch(
+    row: MarketingPromoBundleLaunchRow,
+  ): MarketingPromoBundleLaunch {
+    return {
+      id: row.id,
+      status: resolvePromoBundleLaunchStatus(row.status),
+      storeIds: parseStringArray(row.storeIds),
+      periodFrom: row.periodFrom?.toISOString() ?? null,
+      periodTo: row.periodTo?.toISOString() ?? null,
+      maxUses: row.maxUses,
+      note: row.note,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+      promoBundle: {
+        id: row.promoBundle.id,
+        name: row.promoBundle.name,
+        status: resolvePromoBundleStatus(row.promoBundle.status),
+        bundleType: row.promoBundle.bundleType,
+        mechanicConfig: row.promoBundle.mechanicConfig,
+        note: row.promoBundle.note,
+      },
+      createdBy: row.createdByUser ? toUserSummary(row.createdByUser) : null,
+    };
+  }
 }
 
 function normalizeText(value: unknown, maxLength: number) {
@@ -2378,6 +2587,20 @@ function resolvePromoBundleStatus(value: unknown): MarketingPromoBundleStatus {
   return 'ACTIVE';
 }
 
+function resolvePromoBundleLaunchStatus(
+  value: unknown,
+): MarketingPromoBundleLaunchStatus {
+  if (
+    promoBundleLaunchStatuses.includes(
+      value as MarketingPromoBundleLaunchStatus,
+    )
+  ) {
+    return value as MarketingPromoBundleLaunchStatus;
+  }
+
+  return 'ACTIVE';
+}
+
 function getStringField(value: unknown, field: string) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return null;
@@ -2431,6 +2654,31 @@ function parseOptionalBudget(value: unknown) {
   }
 
   return amount;
+}
+
+function parseOptionalPositiveInt(value: unknown, label: string) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  const number =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string'
+        ? Number(value.replace(',', '.').trim())
+        : Number.NaN;
+
+  if (!Number.isFinite(number) || number < 1) {
+    throw new BadRequestException(`${label} must be a positive number`);
+  }
+
+  return Math.round(number);
+}
+
+function validateDateRange(from: Date | null, to: Date | null) {
+  if (from && to && from.getTime() > to.getTime()) {
+    throw new BadRequestException('Period start must be before period end');
+  }
 }
 
 function toUserSummary(user: {

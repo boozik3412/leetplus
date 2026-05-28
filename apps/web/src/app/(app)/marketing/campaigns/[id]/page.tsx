@@ -19,6 +19,7 @@ import {
   type MarketingCampaignEffect,
   type MarketingCampaignEffectPeriod,
   type MarketingCampaignGoal,
+  type MarketingCampaignRevenueAttribution,
   type MarketingCampaignStatus,
 } from "@/lib/marketing";
 
@@ -745,6 +746,7 @@ function EffectAnalytics({
     );
   }
 
+  const revenueAttribution = campaignRevenueAttribution(effect);
   const effectCards = [
     {
       label: "Контакты",
@@ -760,11 +762,11 @@ function EffectAnalytics({
     },
     {
       label: "Выручка",
-      value: formatRubles(effect.after.totalRevenue),
-      delta: effect.delta.totalRevenue,
-      text: `списания ${formatRubles(effect.after.balanceRevenue)}, бар ${formatRubles(
-        effect.after.barRevenue,
-      )}`,
+      value: formatRubles(revenueAttribution.after.attributedRevenue),
+      delta: revenueAttribution.delta.attributedRevenue,
+      text: `по клубам ${formatRubles(
+        revenueAttribution.after.storeScopedRevenue,
+      )}, онлайн-пополнения вне эффекта`,
     },
     {
       label: "Игровые часы",
@@ -817,8 +819,12 @@ function EffectAnalytics({
         ))}
       </div>
 
+      <CampaignRevenueAttributionCard attribution={revenueAttribution} />
       <CampaignFunnelCard campaign={campaign} effect={effect} />
-      <CampaignStoreBreakdownCard effect={effect} />
+      <CampaignStoreBreakdownCard
+        effect={effect}
+        attribution={revenueAttribution}
+      />
       <CampaignExecutionBreakdownCard effect={effect} />
 
       <div className="grid gap-3 border-t border-zinc-200 p-4 dark:border-zinc-800 lg:grid-cols-2">
@@ -845,10 +851,89 @@ function EffectAnalytics({
   );
 }
 
+function CampaignRevenueAttributionCard({
+  attribution,
+}: {
+  attribution: MarketingCampaignRevenueAttribution;
+}) {
+  const rows = [
+    {
+      label: "В эффекте кампании",
+      value: attribution.after.attributedRevenue,
+      delta: attribution.delta.attributedRevenue,
+      text: "целевые гости, игровые списания и бар",
+    },
+    {
+      label: "По клубам",
+      value: attribution.after.storeScopedRevenue,
+      delta: attribution.delta.storeScopedRevenue,
+      text: "факты с понятным клубом",
+    },
+    {
+      label: "Факты без клуба",
+      value: attribution.after.unallocatedFactRevenue,
+      delta: attribution.delta.unallocatedFactRevenue,
+      text: "учтены в эффекте, но не в клубной строке",
+    },
+    {
+      label: "Онлайн-пополнения",
+      value: attribution.after.excludedOnlineTopupRevenue,
+      delta: attribution.delta.excludedOnlineTopupRevenue,
+      text: "показаны отдельно, не засчитываются кампании",
+    },
+  ];
+
+  return (
+    <div className="border-t border-zinc-200 p-4 dark:border-zinc-800">
+      <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
+              Атрибуция выручки
+            </p>
+            <h3 className="mt-2 text-xl font-semibold">
+              Что попадает в эффект кампании
+            </h3>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+              Выручка кампании считается только по фактам целевых гостей.
+              Онлайн-пополнения без клуба и связанного гостя вынесены отдельно,
+              чтобы не смешивать сетевую кассу с эффектом конкретной кампании.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {rows.map((row) => (
+            <div
+              key={row.label}
+              className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950"
+            >
+              <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                {row.label}
+              </p>
+              <p className="mt-2 text-xl font-semibold">
+                {formatRubles(row.value)}
+              </p>
+              <p className={deltaClassName(row.delta)}>
+                {formatSignedRubles(row.delta)}
+              </p>
+              <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+                {row.text}
+              </p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CampaignStoreBreakdownCard({
   effect,
+  attribution,
 }: {
   effect: MarketingCampaignEffect;
+  attribution: MarketingCampaignRevenueAttribution;
 }) {
   const rows = effect.storeBreakdown.slice(0, 6);
   const maxRevenue = Math.max(
@@ -871,12 +956,18 @@ function CampaignStoreBreakdownCard({
             <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
               Сравниваем клубы по фактам целевой группы в окне после запуска:
               выручка, бар, визиты и игровые часы. Нераспределенные факты
-              вынесены отдельно.
+              вынесены отдельно, онлайн-пополнения без клуба в эти строки не
+              попадают.
             </p>
           </div>
-          <p className="rounded-full border border-zinc-200 px-3 py-1 text-sm font-semibold text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
-            {formatNumber(effect.storeBreakdown.length)} строк
-          </p>
+          <div className="text-right">
+            <p className="rounded-full border border-zinc-200 px-3 py-1 text-sm font-semibold text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+              {formatNumber(effect.storeBreakdown.length)} строк
+            </p>
+            <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              по клубам {formatRubles(attribution.after.storeScopedRevenue)}
+            </p>
+          </div>
         </div>
 
         {rows.length > 0 ? (
@@ -1248,6 +1339,69 @@ function StoreBreakdownMetric({
       <p className="mt-1 font-semibold">{value}</p>
     </div>
   );
+}
+
+function campaignRevenueAttribution(
+  effect: MarketingCampaignEffect,
+): MarketingCampaignRevenueAttribution {
+  if (effect.revenueAttribution) {
+    return effect.revenueAttribution;
+  }
+
+  const before = fallbackRevenueAttributionPeriod(
+    effect.before,
+    effect.storeBreakdown,
+    "before",
+  );
+  const after = fallbackRevenueAttributionPeriod(
+    effect.after,
+    effect.storeBreakdown,
+    "after",
+  );
+
+  return {
+    before,
+    after,
+    delta: {
+      attributedRevenue: roundCurrency(
+        after.attributedRevenue - before.attributedRevenue,
+      ),
+      storeScopedRevenue: roundCurrency(
+        after.storeScopedRevenue - before.storeScopedRevenue,
+      ),
+      unallocatedFactRevenue: roundCurrency(
+        after.unallocatedFactRevenue - before.unallocatedFactRevenue,
+      ),
+      excludedOnlineTopupRevenue: 0,
+    },
+  };
+}
+
+function fallbackRevenueAttributionPeriod(
+  period: MarketingCampaignEffectPeriod,
+  storeBreakdown: MarketingCampaignEffect["storeBreakdown"],
+  key: "before" | "after",
+) {
+  const storeScopedRevenue = storeBreakdown.reduce((sum, row) => {
+    if (!row.storeId) {
+      return sum;
+    }
+
+    return sum + row[key].totalRevenue;
+  }, 0);
+
+  return {
+    attributedRevenue: period.totalRevenue,
+    storeScopedRevenue: roundCurrency(storeScopedRevenue),
+    unallocatedFactRevenue: roundCurrency(
+      Math.max(0, period.totalRevenue - storeScopedRevenue),
+    ),
+    excludedOnlineTopupRevenue: 0,
+  };
+}
+
+function roundCurrency(value: number) {
+  return Math.round(value * 100) / 100;
 }
 
 function EffectPeriodTable({

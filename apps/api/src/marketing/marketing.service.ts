@@ -513,6 +513,19 @@ export type MarketingCampaignEffectPeriod = {
   barSalesCount: number;
 };
 
+export type MarketingCampaignRevenueAttributionPeriod = {
+  attributedRevenue: number;
+  storeScopedRevenue: number;
+  unallocatedFactRevenue: number;
+  excludedOnlineTopupRevenue: number;
+};
+
+export type MarketingCampaignRevenueAttribution = {
+  before: MarketingCampaignRevenueAttributionPeriod;
+  after: MarketingCampaignRevenueAttributionPeriod;
+  delta: MarketingCampaignRevenueAttributionPeriod;
+};
+
 export type MarketingCampaignFunnel = {
   targetTotal: number;
   linkedTargetGuests: number;
@@ -604,6 +617,7 @@ export type MarketingCampaignEffect = {
   after: MarketingCampaignEffectPeriod;
   delta: Omit<MarketingCampaignEffectPeriod, 'from' | 'to' | 'days'>;
   funnel: MarketingCampaignFunnel;
+  revenueAttribution: MarketingCampaignRevenueAttribution;
   storeBreakdown: MarketingCampaignStoreEffect[];
   executionBreakdown: MarketingCampaignExecutionBreakdown;
   dataQuality: {
@@ -816,45 +830,61 @@ export class MarketingService {
       ),
     ];
 
-    const [before, after, storeBreakdown, executionBreakdown] =
-      await Promise.all([
-        this.buildCampaignEffectPeriod({
-          tenantId: user.tenantId,
-          campaignId: campaign.id,
-          audienceId: campaign.audienceId,
-          guestIds,
-          storeIds,
-          from: beforeFrom,
-          to: beforeTo,
-        }),
-        this.buildCampaignEffectPeriod({
-          tenantId: user.tenantId,
-          campaignId: campaign.id,
-          audienceId: campaign.audienceId,
-          guestIds,
-          storeIds,
-          from: afterFrom,
-          to: afterTo,
-        }),
-        this.buildCampaignStoreBreakdown({
-          tenantId: user.tenantId,
-          guestIds,
-          storeIds,
-          beforeFrom,
-          beforeTo,
-          afterFrom,
-          afterTo,
-        }),
-        this.buildCampaignExecutionBreakdown({
-          tenantId: user.tenantId,
-          campaignId: campaign.id,
-          audienceId: campaign.audienceId,
-          guestIds,
-          storeIds,
-          from: afterFrom,
-          to: afterTo,
-        }),
-      ]);
+    const [
+      before,
+      after,
+      storeBreakdown,
+      executionBreakdown,
+      beforeExcludedOnlineTopupRevenue,
+      afterExcludedOnlineTopupRevenue,
+    ] = await Promise.all([
+      this.buildCampaignEffectPeriod({
+        tenantId: user.tenantId,
+        campaignId: campaign.id,
+        audienceId: campaign.audienceId,
+        guestIds,
+        storeIds,
+        from: beforeFrom,
+        to: beforeTo,
+      }),
+      this.buildCampaignEffectPeriod({
+        tenantId: user.tenantId,
+        campaignId: campaign.id,
+        audienceId: campaign.audienceId,
+        guestIds,
+        storeIds,
+        from: afterFrom,
+        to: afterTo,
+      }),
+      this.buildCampaignStoreBreakdown({
+        tenantId: user.tenantId,
+        guestIds,
+        storeIds,
+        beforeFrom,
+        beforeTo,
+        afterFrom,
+        afterTo,
+      }),
+      this.buildCampaignExecutionBreakdown({
+        tenantId: user.tenantId,
+        campaignId: campaign.id,
+        audienceId: campaign.audienceId,
+        guestIds,
+        storeIds,
+        from: afterFrom,
+        to: afterTo,
+      }),
+      this.buildUnallocatedOnlineTopupRevenue({
+        tenantId: user.tenantId,
+        from: beforeFrom,
+        to: beforeTo,
+      }),
+      this.buildUnallocatedOnlineTopupRevenue({
+        tenantId: user.tenantId,
+        from: afterFrom,
+        to: afterTo,
+      }),
+    ]);
 
     const linkedTargetGuests = guestIds.length;
     const targetTotal = campaign.audience?.guestsCount ?? members.length;
@@ -867,6 +897,13 @@ export class MarketingService {
     const completedContacts = after.contacts;
     const respondedContacts = after.respondedContacts;
     const visitedGuests = after.activeGuests;
+    const revenueAttribution = this.buildCampaignRevenueAttribution({
+      before,
+      after,
+      storeBreakdown,
+      beforeExcludedOnlineTopupRevenue,
+      afterExcludedOnlineTopupRevenue,
+    });
 
     return {
       campaignId: campaign.id,
@@ -949,17 +986,18 @@ export class MarketingService {
             }
           : null,
       },
+      revenueAttribution,
       storeBreakdown,
       executionBreakdown,
       dataQuality: {
         directContactAttribution,
         revenueScope:
-          'Target guest facts only: balance spend in clubs plus linked product/bar sales.',
+          'Target guest facts only: store-scoped balance spend and linked product/bar sales are separated from unallocated facts and online top-ups.',
         limitations: [
           directContactAttribution
             ? 'Contacts with campaign id are counted directly; older contacts may still be matched by group.'
             : 'No direct campaign contact events yet, so contacts are matched by campaign group.',
-          'Unallocated online balance top-ups are not attributed to a campaign until they can be linked to a guest and response.',
+          `Unallocated online balance top-ups are excluded from campaign revenue: before ${beforeExcludedOnlineTopupRevenue} руб, after ${afterExcludedOnlineTopupRevenue} руб.`,
           'Guests without linked guestId in the saved group are visible in coverage but excluded from behavioral effect calculations.',
         ],
       },
@@ -1067,6 +1105,36 @@ export class MarketingService {
       ],
       ['Воронка', 'Выручка, руб', effect.funnel.revenue, null],
       ['Воронка', 'Бар, руб', effect.funnel.barRevenue, null],
+      [],
+      ['Атрибуция выручки', 'Показатель', 'До', 'После', 'Дельта'],
+      [
+        'Атрибуция выручки',
+        'В эффекте кампании, руб',
+        effect.revenueAttribution.before.attributedRevenue,
+        effect.revenueAttribution.after.attributedRevenue,
+        effect.revenueAttribution.delta.attributedRevenue,
+      ],
+      [
+        'Атрибуция выручки',
+        'По клубам, руб',
+        effect.revenueAttribution.before.storeScopedRevenue,
+        effect.revenueAttribution.after.storeScopedRevenue,
+        effect.revenueAttribution.delta.storeScopedRevenue,
+      ],
+      [
+        'Атрибуция выручки',
+        'Факты без клуба, руб',
+        effect.revenueAttribution.before.unallocatedFactRevenue,
+        effect.revenueAttribution.after.unallocatedFactRevenue,
+        effect.revenueAttribution.delta.unallocatedFactRevenue,
+      ],
+      [
+        'Атрибуция выручки',
+        'Исключенные онлайн-пополнения, руб',
+        effect.revenueAttribution.before.excludedOnlineTopupRevenue,
+        effect.revenueAttribution.after.excludedOnlineTopupRevenue,
+        effect.revenueAttribution.delta.excludedOnlineTopupRevenue,
+      ],
       [],
       [
         'Периоды',
@@ -2411,6 +2479,127 @@ export class MarketingService {
           },
         ];
       }),
+    );
+  }
+
+  private buildCampaignRevenueAttribution({
+    before,
+    after,
+    storeBreakdown,
+    beforeExcludedOnlineTopupRevenue,
+    afterExcludedOnlineTopupRevenue,
+  }: {
+    before: MarketingCampaignEffectPeriod;
+    after: MarketingCampaignEffectPeriod;
+    storeBreakdown: MarketingCampaignStoreEffect[];
+    beforeExcludedOnlineTopupRevenue: number;
+    afterExcludedOnlineTopupRevenue: number;
+  }): MarketingCampaignRevenueAttribution {
+    const beforePeriod = this.buildCampaignRevenueAttributionPeriod({
+      period: before,
+      storeBreakdown,
+      key: 'before',
+      excludedOnlineTopupRevenue: beforeExcludedOnlineTopupRevenue,
+    });
+    const afterPeriod = this.buildCampaignRevenueAttributionPeriod({
+      period: after,
+      storeBreakdown,
+      key: 'after',
+      excludedOnlineTopupRevenue: afterExcludedOnlineTopupRevenue,
+    });
+
+    return {
+      before: beforePeriod,
+      after: afterPeriod,
+      delta: {
+        attributedRevenue: this.round(
+          afterPeriod.attributedRevenue - beforePeriod.attributedRevenue,
+          2,
+        ),
+        storeScopedRevenue: this.round(
+          afterPeriod.storeScopedRevenue - beforePeriod.storeScopedRevenue,
+          2,
+        ),
+        unallocatedFactRevenue: this.round(
+          afterPeriod.unallocatedFactRevenue -
+            beforePeriod.unallocatedFactRevenue,
+          2,
+        ),
+        excludedOnlineTopupRevenue: this.round(
+          afterPeriod.excludedOnlineTopupRevenue -
+            beforePeriod.excludedOnlineTopupRevenue,
+          2,
+        ),
+      },
+    };
+  }
+
+  private buildCampaignRevenueAttributionPeriod({
+    period,
+    storeBreakdown,
+    key,
+    excludedOnlineTopupRevenue,
+  }: {
+    period: MarketingCampaignEffectPeriod;
+    storeBreakdown: MarketingCampaignStoreEffect[];
+    key: 'before' | 'after';
+    excludedOnlineTopupRevenue: number;
+  }): MarketingCampaignRevenueAttributionPeriod {
+    const storeScopedRevenue = storeBreakdown.reduce((sum, row) => {
+      if (!row.storeId) {
+        return sum;
+      }
+
+      return sum + row[key].totalRevenue;
+    }, 0);
+
+    return {
+      attributedRevenue: period.totalRevenue,
+      storeScopedRevenue: this.round(storeScopedRevenue, 2),
+      unallocatedFactRevenue: this.round(
+        Math.max(0, period.totalRevenue - storeScopedRevenue),
+        2,
+      ),
+      excludedOnlineTopupRevenue: this.round(excludedOnlineTopupRevenue, 2),
+    };
+  }
+
+  private async buildUnallocatedOnlineTopupRevenue({
+    tenantId,
+    from,
+    to,
+  }: {
+    tenantId: string;
+    from: Date;
+    to: Date;
+  }): Promise<number> {
+    const operationLogs = await this.prisma.guestOperationLog.findMany({
+      where: {
+        tenantId,
+        happenedAt: { gte: from, lt: to },
+        OR: [
+          { storeId: null },
+          { externalClubId: null },
+          { externalClubId: '0' },
+        ],
+      },
+      select: {
+        storeId: true,
+        externalClubId: true,
+        type: true,
+        operationSource: true,
+        operationForm: true,
+        amount: true,
+      },
+    });
+
+    return this.round(
+      operationLogs.reduce(
+        (sum, operationLog) =>
+          sum + unallocatedNetworkTopupAmount(operationLog),
+        0,
+      ),
+      2,
     );
   }
 
@@ -4486,6 +4675,62 @@ function confirmedTransactionSpendAmount(type: string | null, amount: number) {
   }
 
   return Math.abs(amount);
+}
+
+function unallocatedNetworkTopupAmount(operationLog: {
+  storeId?: string | null;
+  externalClubId?: string | null;
+  type: string | null;
+  operationSource?: string | null;
+  operationForm?: string | null;
+  amount: { toNumber: () => number } | null;
+}) {
+  const amount = operationLog.amount?.toNumber() ?? 0;
+
+  if (
+    !Number.isFinite(amount) ||
+    amount === 0 ||
+    !isUnallocatedNetworkTopupOperation(operationLog)
+  ) {
+    return 0;
+  }
+
+  return Math.abs(amount);
+}
+
+function isUnallocatedNetworkTopupOperation(operationLog: {
+  storeId?: string | null;
+  externalClubId?: string | null;
+  type: string | null;
+  operationSource?: string | null;
+  operationForm?: string | null;
+}) {
+  if (!isBalanceTopUpOperationType(operationLog.type)) {
+    return false;
+  }
+
+  const externalClubId = operationLog.externalClubId?.trim();
+
+  if (operationLog.storeId || (externalClubId && externalClubId !== '0')) {
+    return false;
+  }
+
+  const source = normalizeExternalType(operationLog.operationSource ?? null);
+  const form = normalizeExternalType(operationLog.operationForm ?? null);
+
+  if (!source && !form) {
+    return true;
+  }
+
+  return (
+    source.includes('прилож') ||
+    source.includes('app') ||
+    source.includes('mobile') ||
+    source.includes('лк_гост') ||
+    source.includes('lk_guest') ||
+    source.includes('web_интерфейс') ||
+    form === 'qr'
+  );
 }
 
 function isBalanceTopUpOperationType(type: string | null) {

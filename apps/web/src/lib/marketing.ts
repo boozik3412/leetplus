@@ -303,6 +303,19 @@ export type MarketingCampaignEffectPeriod = {
   barSalesCount: number;
 };
 
+export type MarketingCampaignRevenueAttributionPeriod = {
+  attributedRevenue: number;
+  storeScopedRevenue: number;
+  unallocatedFactRevenue: number;
+  excludedOnlineTopupRevenue: number;
+};
+
+export type MarketingCampaignRevenueAttribution = {
+  before: MarketingCampaignRevenueAttributionPeriod;
+  after: MarketingCampaignRevenueAttributionPeriod;
+  delta: MarketingCampaignRevenueAttributionPeriod;
+};
+
 export type MarketingCampaignFunnel = {
   targetTotal: number;
   linkedTargetGuests: number;
@@ -394,6 +407,7 @@ export type MarketingCampaignEffect = {
   after: MarketingCampaignEffectPeriod;
   delta: Omit<MarketingCampaignEffectPeriod, "from" | "to" | "days">;
   funnel: MarketingCampaignFunnel;
+  revenueAttribution?: MarketingCampaignRevenueAttribution;
   storeBreakdown: MarketingCampaignStoreEffect[];
   executionBreakdown: MarketingCampaignExecutionBreakdown;
   dataQuality: {

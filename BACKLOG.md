@@ -549,7 +549,7 @@ Goal: measure whether marketing actions produced useful commercial effect.
 - Started: effect by responsible user and channel is visible in campaign detail with contacts, linked guests, visits, revenue, and bar.
 - Started: campaign result and contact outcome CSV export is available from the campaign detail page.
 - Show effect by saved group/rule source when campaigns start mixing multiple groups.
-- Separate store-scoped revenue from unallocated online top-ups when attributing campaign effect.
+- Done: campaign effect attribution now separates attributed revenue, store-scoped revenue, facts without club, and excluded unallocated online top-ups in API, UI, and export.
 - Done: XLSX export is available after CSV column validation, using the same campaign result dataset.
 
 Acceptance criteria:

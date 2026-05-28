@@ -1971,16 +1971,16 @@ function PromoMechanicsBuilder({
                   : "Соберите оффер по шагам: выберите тип, настройте две части, проверьте экономику и сохраните набор в каталог."}
               </p>
             </div>
-            <div className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm leading-5 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300">
-              <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-                Сохранение
-              </p>
-              <p className="mt-1">
-                {isCatalogMode
-                  ? "Сохранение доступно после коммерческой проверки."
-                  : "Кнопка появится ниже, после коммерческой проверки."}
-              </p>
-            </div>
+            {isCatalogMode ? null : (
+              <div className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm leading-5 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300">
+                <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                  Сохранение
+                </p>
+                <p className="mt-1">
+                  Кнопка появится ниже, после коммерческой проверки.
+                </p>
+              </div>
+            )}
           </div>
           <p className="mt-3 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm leading-6 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300">
             {isCatalogMode

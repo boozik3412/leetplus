@@ -52,6 +52,18 @@ enum ProductOosExclusionType {
   OOS_EXCLUDED
 }
 
+enum ProductAssortmentRole {
+  CORE
+  TRAFFIC_DRIVER
+  MARGIN_DRIVER
+  IMPULSE
+  SEASONAL
+  TEST
+  SERVICE
+  OPTIONAL
+  EXCLUDED
+}
+
 enum GuestCrmStatus {
   NONE
   WATCH
@@ -262,6 +274,8 @@ model Product {
   facing               Int                  @default(1)
   shelfLifeDays        Int?
   isActive             Boolean              @default(true)
+  assortmentRole       ProductAssortmentRole @default(OPTIONAL)
+  isMandatory          Boolean              @default(false)
   externalProvider     IntegrationProvider?
   externalDomain       String?
   externalProductId    String?
@@ -286,6 +300,8 @@ model Product {
   @@index([supplierId])
   @@index([canonicalProductId])
   @@index([tenantId, externalMissingSince])
+  @@index([tenantId, assortmentRole])
+  @@index([tenantId, isMandatory])
 }
 
 model CanonicalProduct {

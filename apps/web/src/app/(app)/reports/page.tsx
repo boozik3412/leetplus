@@ -283,6 +283,24 @@ export default async function ReportsPage({
           </ReportDisclosure>
 
           <ReportDisclosure
+            title="Матрица ассортимента"
+            description="Роли SKU, обязательность по клубам, наличие, продажи и индекс качества матрицы."
+          >
+            <ReportRoutePanel
+              title="Матрица ассортимента"
+              description="Полная таблица показывает товар x клуб: заведен ли SKU, есть ли остаток, были ли продажи, нужно ли пополнить запас и как это влияет на индекс качества."
+              href={`/reports/assortment-matrix/table?${reportTableParams(
+                operationalReport,
+              )}`}
+              metrics={[
+                { label: "Роли SKU", value: "ядро / маржа / сезон / тест" },
+                { label: "Качество", value: "индекс по обязательным SKU" },
+                { label: "Уровень", value: "сеть / клуб / категория" },
+              ]}
+            />
+          </ReportDisclosure>
+
+          <ReportDisclosure
             title="План-факт"
             description="Факт выбранного периода против предыдущего сопоставимого периода по сети, клубам, категориям и поставщикам."
           >

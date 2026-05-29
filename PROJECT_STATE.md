@@ -84,6 +84,7 @@ Connected production Langame sources:
 - Started Stage 2 commercial reports with OOS revenue/profit-at-risk estimates in tables and exports, including profit at risk for the selected period.
 - Added hybrid "Money at risk" reporting: OOS profit-at-risk plus frozen stock in no-sales products, surfaced on the dashboard and reports.
 - Completed the Stage 2 commercial reports layer: turnover/slow-SKU control with money in stock, plan/fact by network/club/category/supplier, and supplier scorecard with write-offs, OOS, slow/frozen SKU, problem categories, and delivery-data limitation labels.
+- Completed Stage 3 assortment matrix: product assortment roles, mandatory SKU flag, product x club matrix API/table, and quality index by network, club, and category.
 - Prepared `GUEST_MANAGEMENT_MODULE_TZ.md`: a draft specification for a future separate "Guests" module. Development is not started until the scope is approved.
 - Started MVP 1 for the "Guests" module: added guest data foundation schema, Langame guest endpoint client methods, and a protected manual foundation sync/profiling endpoint.
 - Added the production "Guests" area with collapsible left-nav group, `/guests` dashboard, `/guests/report` full report, `/guests/[id]` guest card, encrypted phone/full-name storage, and LeetPlus-only CRM fields.

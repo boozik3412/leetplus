@@ -1,4 +1,5 @@
 import { getApiUrl, getAuthHeaders } from "./api";
+import type { ProductAssortmentRole } from "./products";
 
 export type ReportGroup = {
   id: string | null;
@@ -386,6 +387,85 @@ export type InventoryTurnoverReport = {
   rows: InventoryTurnoverRow[];
 };
 
+export type AssortmentMatrixStatus =
+  | "SOLD"
+  | "IN_STOCK"
+  | "NO_STOCK"
+  | "NO_SALES"
+  | "MISSING"
+  | "NEEDS_REPLENISHMENT"
+  | "EXCLUDED";
+
+export type AssortmentQualityLevel = "network" | "store" | "category";
+
+export type AssortmentQualityRow = {
+  id: string;
+  level: AssortmentQualityLevel;
+  name: string;
+  mandatoryCells: number;
+  healthyCells: number;
+  missingCells: number;
+  noStockCells: number;
+  noSalesCells: number;
+  replenishmentCells: number;
+  optionalCells: number;
+  qualityIndex: number | null;
+};
+
+export type AssortmentMatrixRow = {
+  id: string;
+  productId: string;
+  canonicalProductId: string | null;
+  storeId: string;
+  storeName: string;
+  article: string;
+  name: string;
+  categoryId: string | null;
+  categoryName: string | null;
+  supplierId: string | null;
+  supplierName: string | null;
+  assortmentRole: ProductAssortmentRole;
+  isMandatory: boolean;
+  existsInStore: boolean;
+  isSold: boolean;
+  inStock: boolean;
+  noSales: boolean;
+  needsReplenishment: boolean;
+  status: AssortmentMatrixStatus;
+  stockQuantity: number;
+  soldQuantity: number;
+  revenue: number;
+  grossProfit: number;
+  averageDailySales: number;
+  stockDays: number | null;
+  qualityPoints: number;
+  qualityMaxPoints: number;
+};
+
+export type AssortmentMatrixSummary = {
+  mandatoryCells: number;
+  healthyCells: number;
+  missingCells: number;
+  noStockCells: number;
+  noSalesCells: number;
+  replenishmentCells: number;
+  optionalCells: number;
+  qualityIndex: number | null;
+};
+
+export type AssortmentMatrixReport = {
+  tenantId: string;
+  tenantSlug: string;
+  from: string;
+  to: string;
+  storeId: string | null;
+  periodDays: number;
+  summary: AssortmentMatrixSummary;
+  byStore: AssortmentQualityRow[];
+  byCategory: AssortmentQualityRow[];
+  rows: AssortmentMatrixRow[];
+};
+
 export type LflReportRow = {
   id: string;
   level: LflGroupLevel;
@@ -525,6 +605,39 @@ export async function getInventoryTurnoverReport(
   }
 
   return response.json() as Promise<InventoryTurnoverReport>;
+}
+
+export async function getAssortmentMatrixReport(
+  filters: OperationalReportFilters,
+): Promise<AssortmentMatrixReport> {
+  const params = new URLSearchParams();
+
+  if (filters.from) {
+    params.set("from", filters.from);
+  }
+
+  if (filters.to) {
+    params.set("to", filters.to);
+  }
+
+  if (filters.storeId) {
+    params.set("storeId", filters.storeId);
+  }
+
+  const query = params.toString();
+  const response = await fetch(
+    `${getApiUrl()}/reports/assortment-matrix${query ? `?${query}` : ""}`,
+    {
+      cache: "no-store",
+      headers: await getAuthHeaders(),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch assortment matrix report");
+  }
+
+  return response.json() as Promise<AssortmentMatrixReport>;
 }
 
 export async function getPlanFactReport(

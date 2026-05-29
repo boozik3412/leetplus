@@ -137,9 +137,11 @@ Status: implemented; remains in production verification and UX polish mode.
 
 ## Stage 3. Assortment Matrix
 
-- Add mandatory SKU and assortment role concepts.
-- Build a product x club matrix: sold, in stock, no stock, no sales, missing, needs replenishment.
-- Add an assortment quality index by club, category, and network.
+Status: implemented; remains in production verification and UX polish mode.
+
+- Done: added mandatory SKU and assortment role concepts to products.
+- Done: added the product x club matrix API and `/reports/assortment-matrix/table` with sold/in-stock/no-stock/no-sales/missing/replenishment statuses.
+- Done: added assortment quality index by network, club, and category, plus links from reports and the assortment dashboard.
 
 ## Stage 4. Recommendations Workflow
 

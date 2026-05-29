@@ -1,3 +1,5 @@
+import type { ProductAssortmentRole } from '@prisma/client';
+
 export type CreateProductDto = {
   article: string;
   name: string;
@@ -7,6 +9,8 @@ export type CreateProductDto = {
   shelfLifeDays?: number | null;
   categoryId?: string | null;
   supplierId?: string | null;
+  assortmentRole?: ProductAssortmentRole;
+  isMandatory?: boolean;
 };
 
 export type UpdateProductDto = Partial<CreateProductDto> & {

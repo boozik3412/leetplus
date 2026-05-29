@@ -6,6 +6,10 @@ import {
   ProductInlineEditable,
   ProductInlineSelectEditable,
 } from "@/components/product-actions";
+import {
+  productAssortmentRoleLabel,
+  productAssortmentRoleOptions,
+} from "@/lib/assortment-matrix";
 import type { Category, Product, Supplier } from "@/lib/products";
 import type { Store } from "@/lib/stores";
 
@@ -16,6 +20,8 @@ type SortKey =
   | "source"
   | "category"
   | "supplier"
+  | "assortmentRole"
+  | "isMandatory"
   | "purchasePrice"
   | "unitCost"
   | "salePrice"
@@ -117,11 +123,11 @@ export function ProductsTable({
   const hasMoreRows = !tableMode && visibleProducts.length < sortedProducts.length;
   const columnCount = tableMode
     ? canEditProducts
-      ? 12
-      : 11
+      ? 14
+      : 13
     : canEditProducts
-      ? 11
-      : 10;
+      ? 13
+      : 12;
 
   function setSort(nextKey: SortKey) {
     setVisibleCount(COMPACT_PAGE_SIZE);
@@ -326,7 +332,7 @@ export function ProductsTable({
         onScroll={() => syncHorizontalScroll(topScrollRef, tableScrollRef)}
         className="overflow-x-auto border-b border-zinc-100 bg-zinc-50"
       >
-        <div ref={topSpacerRef} className="h-2 min-w-[1240px]" />
+        <div ref={topSpacerRef} className="h-2 min-w-[1480px]" />
       </div>
 
       <div
@@ -336,7 +342,7 @@ export function ProductsTable({
       >
     <table
       ref={tableElementRef}
-      className="w-full min-w-[1240px] border-collapse text-left text-[11px]"
+      className="w-full min-w-[1480px] border-collapse text-left text-[11px]"
     >
       <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
         <tr>
@@ -347,6 +353,8 @@ export function ProductsTable({
           <SortableTh label="Наименование" sortKey="name" activeKey={sortKey} direction={sortDirection} onSort={setSort} />
           <SortableTh label="Категория" sortKey="category" activeKey={sortKey} direction={sortDirection} onSort={setSort} />
           <SortableTh label="Поставщик" sortKey="supplier" activeKey={sortKey} direction={sortDirection} onSort={setSort} />
+          <SortableTh label="Роль" sortKey="assortmentRole" activeKey={sortKey} direction={sortDirection} onSort={setSort} />
+          <SortableTh label="Обяз." sortKey="isMandatory" activeKey={sortKey} direction={sortDirection} onSort={setSort} />
           <SortableTh label="Входящая цена" sortKey="purchasePrice" activeKey={sortKey} direction={sortDirection} onSort={setSort} align="right" />
           <SortableTh label="Себестоимость шт." sortKey="unitCost" activeKey={sortKey} direction={sortDirection} onSort={setSort} align="right" />
           <SortableTh label="Цена продажи" sortKey="salePrice" activeKey={sortKey} direction={sortDirection} onSort={setSort} align="right" />
@@ -432,6 +440,33 @@ export function ProductsTable({
                       value: supplier.id,
                       label: supplier.name,
                     })),
+                  ]}
+                  canEdit={canEditProducts}
+                />
+              </td>
+
+              <td className="w-[95px] px-2 py-2 text-zinc-700">
+                <ProductInlineSelectEditable
+                  product={product}
+                  field="assortmentRole"
+                  value={product.assortmentRole}
+                  displayValue={productAssortmentRoleLabel(
+                    product.assortmentRole,
+                  )}
+                  options={productAssortmentRoleOptions}
+                  canEdit={canEditProducts}
+                />
+              </td>
+
+              <td className="w-[75px] px-2 py-2 text-zinc-700">
+                <ProductInlineSelectEditable
+                  product={product}
+                  field="isMandatory"
+                  value={product.isMandatory ? "true" : "false"}
+                  displayValue={product.isMandatory ? "Да" : "Нет"}
+                  options={[
+                    { value: "false", label: "Нет" },
+                    { value: "true", label: "Да" },
                   ]}
                   canEdit={canEditProducts}
                 />
@@ -587,6 +622,17 @@ function compareProducts(a: Product, b: Product, sortKey: SortKey) {
     return (a.supplier?.name ?? "").localeCompare(b.supplier?.name ?? "", "ru");
   }
 
+  if (sortKey === "assortmentRole") {
+    return productAssortmentRoleLabel(a.assortmentRole).localeCompare(
+      productAssortmentRoleLabel(b.assortmentRole),
+      "ru",
+    );
+  }
+
+  if (sortKey === "isMandatory") {
+    return Number(a.isMandatory) - Number(b.isMandatory);
+  }
+
   if (sortKey === "source") {
     return productStoreLabel(a).localeCompare(productStoreLabel(b), "ru");
   }
@@ -608,6 +654,8 @@ type ExportRow = {
   name: string;
   category: string;
   supplier: string;
+  assortmentRole: string;
+  isMandatory: string;
   purchasePrice: string;
   unitCost: string;
   salePrice: string;
@@ -622,6 +670,8 @@ const exportHeaders: { key: keyof ExportRow; label: string }[] = [
   { key: "name", label: "Наименование" },
   { key: "category", label: "Категория" },
   { key: "supplier", label: "Поставщик" },
+  { key: "assortmentRole", label: "Роль" },
+  { key: "isMandatory", label: "Обязательный" },
   { key: "purchasePrice", label: "Входящая цена" },
   { key: "unitCost", label: "Себестоимость штуки" },
   { key: "salePrice", label: "Цена продажи" },
@@ -637,6 +687,8 @@ function productToExportRow(product: Product): ExportRow {
     name: product.name,
     category: product.category?.name ?? "",
     supplier: product.supplier?.name ?? "",
+    assortmentRole: productAssortmentRoleLabel(product.assortmentRole),
+    isMandatory: product.isMandatory ? "Да" : "Нет",
     purchasePrice: product.purchasePrice,
     unitCost: productUnitCost(product).toFixed(2),
     salePrice: product.salePrice,

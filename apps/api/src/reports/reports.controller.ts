@@ -23,6 +23,7 @@ import {
 import type { SendReportEmailDto } from './reports.dto';
 import {
   ReportsService,
+  type AssortmentMatrixReport,
   type AssortmentReport,
   type InventoryTurnoverReport,
   type LflReport,
@@ -70,6 +71,14 @@ export class ReportsController {
     @Query() query: OperationalReportQuery,
   ): Promise<InventoryTurnoverReport> {
     return this.reportsService.getInventoryTurnoverReport(user, query);
+  }
+
+  @Get('assortment-matrix')
+  getAssortmentMatrixReport(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: OperationalReportQuery,
+  ): Promise<AssortmentMatrixReport> {
+    return this.reportsService.getAssortmentMatrixReport(user, query);
   }
 
   @Get('plan-fact')

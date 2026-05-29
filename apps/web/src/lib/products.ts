@@ -10,6 +10,17 @@ export type Supplier = {
   name: string;
 };
 
+export type ProductAssortmentRole =
+  | "CORE"
+  | "TRAFFIC_DRIVER"
+  | "MARGIN_DRIVER"
+  | "IMPULSE"
+  | "SEASONAL"
+  | "TEST"
+  | "SERVICE"
+  | "OPTIONAL"
+  | "EXCLUDED";
+
 export type Product = {
   id: string;
   article: string;
@@ -21,6 +32,8 @@ export type Product = {
   shelfLifeDays: number | null;
   isActive: boolean;
   isOperationalActive: boolean;
+  assortmentRole: ProductAssortmentRole;
+  isMandatory: boolean;
   createdAt: string;
   externalDomain: string | null;
   storeIds: string[];

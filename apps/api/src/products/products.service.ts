@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, ProductAssortmentRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { AuthenticatedUser } from '../auth/auth.types';
@@ -309,6 +309,10 @@ export class ProductsService {
       purchasePrice: new Prisma.Decimal(dto.purchasePrice),
       salePrice: new Prisma.Decimal(dto.salePrice),
       facing: facing ?? 1,
+      assortmentRole:
+        this.normalizeAssortmentRole(dto.assortmentRole) ??
+        ProductAssortmentRole.OPTIONAL,
+      isMandatory: Boolean(dto.isMandatory),
       ...(shelfLifeDays !== undefined ? { shelfLifeDays } : {}),
       ...(categoryId !== undefined ? { categoryId } : {}),
       ...(supplierId !== undefined ? { supplierId } : {}),
@@ -350,6 +354,14 @@ export class ProductsService {
       ...(shelfLifeDays !== undefined ? { shelfLifeDays } : {}),
       ...(categoryId !== undefined ? { categoryId } : {}),
       ...(supplierId !== undefined ? { supplierId } : {}),
+      ...(dto.assortmentRole !== undefined
+        ? {
+            assortmentRole: this.normalizeAssortmentRole(dto.assortmentRole),
+          }
+        : {}),
+      ...(dto.isMandatory !== undefined
+        ? { isMandatory: Boolean(dto.isMandatory) }
+        : {}),
       ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
     };
   }
@@ -374,6 +386,18 @@ export class ProductsService {
 
     if (!Number.isInteger(value) || value < 0) {
       throw new BadRequestException(`${fieldName} must be a positive integer`);
+    }
+
+    return value;
+  }
+
+  private normalizeAssortmentRole(value?: ProductAssortmentRole | null) {
+    if (value === undefined || value === null) {
+      return undefined;
+    }
+
+    if (!Object.values(ProductAssortmentRole).includes(value)) {
+      throw new BadRequestException('Invalid assortment role');
     }
 
     return value;

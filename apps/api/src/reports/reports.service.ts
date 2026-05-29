@@ -1,5 +1,9 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { ProductOosExclusionType, StockMovementType } from '@prisma/client';
+import {
+  ProductAssortmentRole,
+  ProductOosExclusionType,
+  StockMovementType,
+} from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
@@ -459,6 +463,85 @@ export type InventoryTurnoverReport = {
   rows: InventoryTurnoverRow[];
 };
 
+export type AssortmentMatrixStatus =
+  | 'SOLD'
+  | 'IN_STOCK'
+  | 'NO_STOCK'
+  | 'NO_SALES'
+  | 'MISSING'
+  | 'NEEDS_REPLENISHMENT'
+  | 'EXCLUDED';
+
+export type AssortmentQualityLevel = 'network' | 'store' | 'category';
+
+export type AssortmentQualityRow = {
+  id: string;
+  level: AssortmentQualityLevel;
+  name: string;
+  mandatoryCells: number;
+  healthyCells: number;
+  missingCells: number;
+  noStockCells: number;
+  noSalesCells: number;
+  replenishmentCells: number;
+  optionalCells: number;
+  qualityIndex: number | null;
+};
+
+export type AssortmentMatrixRow = {
+  id: string;
+  productId: string;
+  canonicalProductId: string | null;
+  storeId: string;
+  storeName: string;
+  article: string;
+  name: string;
+  categoryId: string | null;
+  categoryName: string | null;
+  supplierId: string | null;
+  supplierName: string | null;
+  assortmentRole: ProductAssortmentRole;
+  isMandatory: boolean;
+  existsInStore: boolean;
+  isSold: boolean;
+  inStock: boolean;
+  noSales: boolean;
+  needsReplenishment: boolean;
+  status: AssortmentMatrixStatus;
+  stockQuantity: number;
+  soldQuantity: number;
+  revenue: number;
+  grossProfit: number;
+  averageDailySales: number;
+  stockDays: number | null;
+  qualityPoints: number;
+  qualityMaxPoints: number;
+};
+
+export type AssortmentMatrixSummary = {
+  mandatoryCells: number;
+  healthyCells: number;
+  missingCells: number;
+  noStockCells: number;
+  noSalesCells: number;
+  replenishmentCells: number;
+  optionalCells: number;
+  qualityIndex: number | null;
+};
+
+export type AssortmentMatrixReport = {
+  tenantId: string;
+  tenantSlug: string;
+  from: string;
+  to: string;
+  storeId: string | null;
+  periodDays: number;
+  summary: AssortmentMatrixSummary;
+  byStore: AssortmentQualityRow[];
+  byCategory: AssortmentQualityRow[];
+  rows: AssortmentMatrixRow[];
+};
+
 type GroupAccumulator = {
   id: string | null;
   name: string;
@@ -488,6 +571,26 @@ type ProductSales = {
   supplierId: string | null;
   supplierName: string | null;
   quantity: number;
+  revenue: number;
+  cost: number;
+};
+
+type MatrixProduct = {
+  id: string;
+  canonicalProductId: string | null;
+  article: string;
+  name: string;
+  categoryId: string | null;
+  categoryName: string | null;
+  supplierId: string | null;
+  supplierName: string | null;
+  assortmentRole: ProductAssortmentRole;
+  isMandatory: boolean;
+  externalDomain: string | null;
+};
+
+type MatrixSales = {
+  soldQuantity: number;
   revenue: number;
   cost: number;
 };
@@ -1139,6 +1242,232 @@ export class ReportsService {
           : null,
       slowSkuCount: rows.filter((row) => row.status === 'SLOW').length,
       frozenSkuCount: rows.filter((row) => row.status === 'FROZEN').length,
+      rows,
+    };
+  }
+
+  async getAssortmentMatrixReport(
+    user: AuthenticatedUser,
+    query: OperationalReportQuery,
+  ): Promise<AssortmentMatrixReport> {
+    const { tenantId, tenantSlug } =
+      await this.tenantContextService.resolve(user);
+    const period = this.resolvePeriod(query);
+    const storeWhere = query.storeId
+      ? { id: query.storeId, tenantId, isActive: true }
+      : { tenantId, isActive: true };
+    const storeFilter = query.storeId ? { storeId: query.storeId } : {};
+
+    const [stores, products, inventorySnapshots, salesFacts] =
+      await Promise.all([
+        this.prisma.store.findMany({
+          where: storeWhere,
+          select: {
+            id: true,
+            name: true,
+            externalDomain: true,
+          },
+          orderBy: { name: 'asc' },
+        }),
+        this.prisma.product.findMany({
+          where: { tenantId, isActive: true },
+          select: {
+            id: true,
+            canonicalProductId: true,
+            article: true,
+            name: true,
+            assortmentRole: true,
+            isMandatory: true,
+            externalDomain: true,
+            categoryId: true,
+            category: { select: { name: true } },
+            supplierId: true,
+            supplier: { select: { name: true } },
+            canonicalProduct: { select: { name: true } },
+          },
+          orderBy: { name: 'asc' },
+        }),
+        this.prisma.inventorySnapshot.findMany({
+          where: {
+            tenantId,
+            ...storeFilter,
+            snapshotDate: {
+              lte: period.toDate,
+            },
+          },
+          select: {
+            storeId: true,
+            productId: true,
+            snapshotDate: true,
+            quantity: true,
+          },
+          orderBy: { snapshotDate: 'desc' },
+        }),
+        this.prisma.salesFact.findMany({
+          where: {
+            tenantId,
+            isCanceled: false,
+            ...storeFilter,
+            saleDate: {
+              gte: period.fromDate,
+              lte: period.toDate,
+            },
+          },
+          select: {
+            storeId: true,
+            productId: true,
+            quantity: true,
+            revenue: true,
+            cost: true,
+          },
+        }),
+      ]);
+
+    if (query.storeId && stores.length === 0) {
+      throw new BadRequestException('Store not found');
+    }
+
+    const periodDays = this.periodDays(period.fromDate, period.toDate);
+    const matrixProducts = products.map((product) => ({
+      id: product.id,
+      canonicalProductId: product.canonicalProductId,
+      article: product.article,
+      name: product.canonicalProduct?.name ?? product.name,
+      categoryId: product.categoryId,
+      categoryName: product.category?.name ?? null,
+      supplierId: product.supplierId,
+      supplierName: product.supplier?.name ?? null,
+      assortmentRole: product.assortmentRole,
+      isMandatory: product.isMandatory,
+      externalDomain: product.externalDomain,
+    }));
+    const productGroups = this.groupAssortmentMatrixProducts(matrixProducts);
+    const stockByStoreProduct =
+      this.latestMatrixStockByStoreProduct(inventorySnapshots);
+    const salesByStoreProduct = this.matrixSalesByStoreProduct(salesFacts);
+    const rows: AssortmentMatrixRow[] = [];
+
+    stores.forEach((store) => {
+      productGroups.forEach((product) => {
+        const aggregate = product.productIds.reduce(
+          (current, productId) => {
+            const key = `${store.id}:${productId}`;
+            const sale = salesByStoreProduct.get(key);
+
+            current.stockQuantity += stockByStoreProduct.get(key) ?? 0;
+            current.soldQuantity += sale?.soldQuantity ?? 0;
+            current.revenue += sale?.revenue ?? 0;
+            current.cost += sale?.cost ?? 0;
+
+            if (stockByStoreProduct.has(key) || salesByStoreProduct.has(key)) {
+              current.hasStoreActivity = true;
+            }
+
+            return current;
+          },
+          {
+            stockQuantity: 0,
+            soldQuantity: 0,
+            revenue: 0,
+            cost: 0,
+            hasStoreActivity: false,
+          },
+        );
+        const existsInStore =
+          aggregate.hasStoreActivity ||
+          Boolean(
+            store.externalDomain &&
+            product.externalDomains.has(store.externalDomain),
+          );
+        const averageDailySales = aggregate.soldQuantity / periodDays;
+        const stockDays =
+          averageDailySales > 0
+            ? aggregate.stockQuantity / averageDailySales
+            : null;
+        const inStock = aggregate.stockQuantity > 0;
+        const isSold = aggregate.soldQuantity > 0;
+        const noSales = existsInStore && inStock && !isSold;
+        const needsReplenishment =
+          existsInStore &&
+          isSold &&
+          (aggregate.stockQuantity <= 0 ||
+            (stockDays !== null && stockDays <= 3));
+        const status = this.assortmentMatrixStatus({
+          assortmentRole: product.assortmentRole,
+          existsInStore,
+          inStock,
+          isSold,
+          noSales,
+          needsReplenishment,
+        });
+        const quality = this.assortmentMatrixQuality({
+          assortmentRole: product.assortmentRole,
+          isMandatory: product.isMandatory,
+          status,
+        });
+
+        rows.push({
+          id: `${store.id}:${product.id}`,
+          productId: product.id,
+          canonicalProductId: product.canonicalProductId,
+          storeId: store.id,
+          storeName: store.name,
+          article: product.article,
+          name: product.name,
+          categoryId: product.categoryId,
+          categoryName: product.categoryName,
+          supplierId: product.supplierId,
+          supplierName: product.supplierName,
+          assortmentRole: product.assortmentRole,
+          isMandatory: product.isMandatory,
+          existsInStore,
+          isSold,
+          inStock,
+          noSales,
+          needsReplenishment,
+          status,
+          stockQuantity: this.round(aggregate.stockQuantity),
+          soldQuantity: this.round(aggregate.soldQuantity),
+          revenue: this.round(aggregate.revenue),
+          grossProfit: this.round(aggregate.revenue - aggregate.cost),
+          averageDailySales: this.round(averageDailySales),
+          stockDays: stockDays === null ? null : this.round(stockDays),
+          qualityPoints: quality.points,
+          qualityMaxPoints: quality.maxPoints,
+        });
+      });
+    });
+
+    rows.sort(
+      (a, b) =>
+        this.assortmentMatrixStatusRank(a.status) -
+          this.assortmentMatrixStatusRank(b.status) ||
+        Number(b.isMandatory) - Number(a.isMandatory) ||
+        a.storeName.localeCompare(b.storeName, 'ru') ||
+        (a.categoryName ?? '').localeCompare(b.categoryName ?? '', 'ru') ||
+        a.name.localeCompare(b.name, 'ru'),
+    );
+
+    return {
+      tenantId,
+      tenantSlug,
+      from: this.toDateInputValue(period.fromDate),
+      to: this.toDateInputValue(period.toDate),
+      storeId: query.storeId ?? null,
+      periodDays,
+      summary: this.assortmentMatrixSummary(rows),
+      byStore: this.assortmentMatrixQualityRows(
+        rows,
+        'store',
+        (row) => row.storeId,
+        (row) => row.storeName,
+      ),
+      byCategory: this.assortmentMatrixQualityRows(
+        rows,
+        'category',
+        (row) => row.categoryId ?? 'uncategorized',
+        (row) => row.categoryName ?? 'Без категории',
+      ),
       rows,
     };
   }
@@ -3678,6 +4007,261 @@ export class ReportsService {
           a.name.localeCompare(b.name),
       )
       .slice(0, 10);
+  }
+
+  private groupAssortmentMatrixProducts(products: MatrixProduct[]) {
+    const groups = new Map<
+      string,
+      MatrixProduct & {
+        productIds: string[];
+        externalDomains: Set<string>;
+      }
+    >();
+
+    products.forEach((product) => {
+      const key = product.canonicalProductId ?? product.id;
+      const current = groups.get(key);
+
+      if (!current) {
+        groups.set(key, {
+          ...product,
+          productIds: [product.id],
+          externalDomains: product.externalDomain
+            ? new Set([product.externalDomain])
+            : new Set<string>(),
+        });
+        return;
+      }
+
+      current.productIds.push(product.id);
+
+      if (product.externalDomain) {
+        current.externalDomains.add(product.externalDomain);
+      }
+
+      if (
+        this.assortmentRolePriority(product.assortmentRole) <
+        this.assortmentRolePriority(current.assortmentRole)
+      ) {
+        current.assortmentRole = product.assortmentRole;
+      }
+
+      current.isMandatory = current.isMandatory || product.isMandatory;
+      current.article = current.article || product.article;
+      current.categoryId = current.categoryId ?? product.categoryId;
+      current.categoryName = current.categoryName ?? product.categoryName;
+      current.supplierId = current.supplierId ?? product.supplierId;
+      current.supplierName = current.supplierName ?? product.supplierName;
+    });
+
+    return groups;
+  }
+
+  private latestMatrixStockByStoreProduct(
+    snapshots: {
+      storeId: string;
+      productId: string;
+      snapshotDate: Date;
+      quantity: { toNumber: () => number };
+    }[],
+  ) {
+    const seen = new Set<string>();
+    const stockByStoreProduct = new Map<string, number>();
+
+    snapshots.forEach((snapshot) => {
+      const key = `${snapshot.storeId}:${snapshot.productId}`;
+
+      if (seen.has(key)) {
+        return;
+      }
+
+      seen.add(key);
+      stockByStoreProduct.set(key, snapshot.quantity.toNumber());
+    });
+
+    return stockByStoreProduct;
+  }
+
+  private matrixSalesByStoreProduct(
+    salesFacts: {
+      storeId: string;
+      productId: string;
+      quantity: { toNumber: () => number };
+      revenue: { toNumber: () => number };
+      cost: { toNumber: () => number };
+    }[],
+  ) {
+    const salesByStoreProduct = new Map<string, MatrixSales>();
+
+    salesFacts.forEach((fact) => {
+      const key = `${fact.storeId}:${fact.productId}`;
+      const current = salesByStoreProduct.get(key) ?? {
+        soldQuantity: 0,
+        revenue: 0,
+        cost: 0,
+      };
+
+      current.soldQuantity += fact.quantity.toNumber();
+      current.revenue += fact.revenue.toNumber();
+      current.cost += fact.cost.toNumber();
+      salesByStoreProduct.set(key, current);
+    });
+
+    return salesByStoreProduct;
+  }
+
+  private assortmentMatrixStatus(input: {
+    assortmentRole: ProductAssortmentRole;
+    existsInStore: boolean;
+    inStock: boolean;
+    isSold: boolean;
+    noSales: boolean;
+    needsReplenishment: boolean;
+  }): AssortmentMatrixStatus {
+    if (input.assortmentRole === ProductAssortmentRole.EXCLUDED) {
+      return 'EXCLUDED';
+    }
+
+    if (!input.existsInStore) {
+      return 'MISSING';
+    }
+
+    if (input.needsReplenishment) {
+      return 'NEEDS_REPLENISHMENT';
+    }
+
+    if (input.inStock && input.isSold) {
+      return 'SOLD';
+    }
+
+    if (input.noSales) {
+      return 'NO_SALES';
+    }
+
+    if (input.inStock) {
+      return 'IN_STOCK';
+    }
+
+    return 'NO_STOCK';
+  }
+
+  private assortmentMatrixQuality(input: {
+    assortmentRole: ProductAssortmentRole;
+    isMandatory: boolean;
+    status: AssortmentMatrixStatus;
+  }) {
+    const maxPoints =
+      input.isMandatory &&
+      input.assortmentRole !== ProductAssortmentRole.EXCLUDED
+        ? 1
+        : 0;
+
+    if (maxPoints === 0) {
+      return { points: 0, maxPoints };
+    }
+
+    if (input.status === 'SOLD' || input.status === 'IN_STOCK') {
+      return { points: 1, maxPoints };
+    }
+
+    if (input.status === 'NO_SALES') {
+      return { points: 0.6, maxPoints };
+    }
+
+    if (input.status === 'NEEDS_REPLENISHMENT') {
+      return { points: 0.5, maxPoints };
+    }
+
+    return { points: 0, maxPoints };
+  }
+
+  private assortmentMatrixSummary(
+    rows: AssortmentMatrixRow[],
+  ): AssortmentMatrixSummary {
+    const mandatoryRows = rows.filter((row) => row.qualityMaxPoints > 0);
+    const points = mandatoryRows.reduce(
+      (sum, row) => sum + row.qualityPoints,
+      0,
+    );
+
+    return {
+      mandatoryCells: mandatoryRows.length,
+      healthyCells: mandatoryRows.filter((row) => row.qualityPoints >= 1)
+        .length,
+      missingCells: mandatoryRows.filter((row) => row.status === 'MISSING')
+        .length,
+      noStockCells: mandatoryRows.filter((row) => row.status === 'NO_STOCK')
+        .length,
+      noSalesCells: mandatoryRows.filter((row) => row.status === 'NO_SALES')
+        .length,
+      replenishmentCells: mandatoryRows.filter(
+        (row) => row.status === 'NEEDS_REPLENISHMENT',
+      ).length,
+      optionalCells: rows.length - mandatoryRows.length,
+      qualityIndex:
+        mandatoryRows.length > 0
+          ? this.round((points / mandatoryRows.length) * 100)
+          : null,
+    };
+  }
+
+  private assortmentMatrixQualityRows(
+    rows: AssortmentMatrixRow[],
+    level: AssortmentQualityLevel,
+    getId: (row: AssortmentMatrixRow) => string,
+    getName: (row: AssortmentMatrixRow) => string,
+  ): AssortmentQualityRow[] {
+    const groups = new Map<string, AssortmentMatrixRow[]>();
+
+    rows.forEach((row) => {
+      const key = getId(row);
+      const groupRows = groups.get(key) ?? [];
+      groupRows.push(row);
+      groups.set(key, groupRows);
+    });
+
+    return [...groups.entries()]
+      .map(([id, groupRows]) => ({
+        id,
+        level,
+        name: getName(groupRows[0]),
+        ...this.assortmentMatrixSummary(groupRows),
+      }))
+      .sort(
+        (a, b) =>
+          (a.qualityIndex ?? -1) - (b.qualityIndex ?? -1) ||
+          a.name.localeCompare(b.name, 'ru'),
+      );
+  }
+
+  private assortmentMatrixStatusRank(status: AssortmentMatrixStatus) {
+    const rank: Record<AssortmentMatrixStatus, number> = {
+      MISSING: 0,
+      NO_STOCK: 1,
+      NEEDS_REPLENISHMENT: 2,
+      NO_SALES: 3,
+      IN_STOCK: 4,
+      SOLD: 5,
+      EXCLUDED: 6,
+    };
+
+    return rank[status];
+  }
+
+  private assortmentRolePriority(role: ProductAssortmentRole) {
+    const rank: Record<ProductAssortmentRole, number> = {
+      CORE: 0,
+      TRAFFIC_DRIVER: 1,
+      MARGIN_DRIVER: 2,
+      IMPULSE: 3,
+      SEASONAL: 4,
+      TEST: 5,
+      SERVICE: 6,
+      OPTIONAL: 7,
+      EXCLUDED: 8,
+    };
+
+    return rank[role];
   }
 
   private resolvePeriod(query: OperationalReportQuery) {

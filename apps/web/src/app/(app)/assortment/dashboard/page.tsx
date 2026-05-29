@@ -237,6 +237,13 @@ function buildAssortmentActions({
   }
 
   actions.push({
+    title: "Проверить матрицу ассортимента",
+    description:
+      "Посмотреть обязательные SKU, роли товаров, наличие по клубам, продажи и индекс качества матрицы.",
+    href: "/reports/assortment-matrix/table",
+  });
+
+  actions.push({
     title: "Открыть источник для сводной",
     description:
       "Скачать общий отчет по продажам по строкам для Excel: товар, клуб, дата, цена, себестоимость, прибыль и маржа.",

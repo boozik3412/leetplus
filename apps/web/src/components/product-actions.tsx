@@ -4,6 +4,7 @@ import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import type { InputHTMLAttributes } from "react";
 import { useRouter } from "next/navigation";
 import type { Category, Supplier } from "@/lib/catalog";
+import { productAssortmentRoleOptions } from "@/lib/assortment-matrix";
 import type { Product } from "@/lib/products";
 
 type ProductFormOptions = {
@@ -23,7 +24,9 @@ type InlineProductField =
   | "facing"
   | "shelfLifeDays"
   | "categoryId"
-  | "supplierId";
+  | "supplierId"
+  | "assortmentRole"
+  | "isMandatory";
 
 function getErrorMessage(data: unknown) {
   if (
@@ -125,7 +128,7 @@ export function ProductEditRow({
 
   return (
     <tr className="bg-zinc-50/70">
-      <td colSpan={10} className="px-5 py-4">
+      <td colSpan={12} className="px-5 py-4">
         <form onSubmit={handleSubmit} className="grid gap-3">
           <ProductFields
             product={product}
@@ -317,7 +320,7 @@ export function ProductInlineSelectEditable({
   canEdit,
 }: {
   product: Product;
-  field: "categoryId" | "supplierId";
+  field: "categoryId" | "supplierId" | "assortmentRole" | "isMandatory";
   value: string;
   displayValue: string;
   options: Array<{ value: string; label: string }>;
@@ -428,8 +431,8 @@ function ProductFields({
     <div
       className={
         dense
-          ? "grid gap-3 lg:grid-cols-8"
-          : "mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
+          ? "grid gap-3 lg:grid-cols-10"
+          : "mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5"
       }
     >
       <Input
@@ -500,6 +503,25 @@ function ProductFields({
           </option>
         ))}
       </select>
+      <select
+        name="assortmentRole"
+        defaultValue={product?.assortmentRole ?? "OPTIONAL"}
+        className="rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+      >
+        {productAssortmentRoleOptions.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <select
+        name="isMandatory"
+        defaultValue={product?.isMandatory ? "true" : "false"}
+        className="rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+      >
+        <option value="false">Не обязательный</option>
+        <option value="true">Обязательный</option>
+      </select>
     </div>
   );
 }
@@ -538,6 +560,8 @@ async function submitProductForm(
       shelfLifeDays: parseNullableNumber(formData.get("shelfLifeDays")),
       categoryId: optionalString(formData.get("categoryId")) ?? null,
       supplierId: optionalString(formData.get("supplierId")) ?? null,
+      assortmentRole: optionalString(formData.get("assortmentRole")) ?? "OPTIONAL",
+      isMandatory: parseBoolean(formData.get("isMandatory")),
     }),
   });
 }
@@ -556,6 +580,8 @@ function buildInlinePayload(
     shelfLifeDays: product.shelfLifeDays,
     categoryId: product.categoryId,
     supplierId: product.supplierId,
+    assortmentRole: product.assortmentRole,
+    isMandatory: product.isMandatory,
   };
 
   if (field === "facing") {
@@ -568,6 +594,10 @@ function buildInlinePayload(
 
   if (field === "categoryId" || field === "supplierId") {
     return { ...base, [field]: value || null };
+  }
+
+  if (field === "isMandatory") {
+    return { ...base, isMandatory: value === "true" };
   }
 
   return { ...base, [field]: value };
@@ -589,4 +619,8 @@ function parseOptionalNumber(value: FormDataEntryValue | null) {
 
 function parseNullableNumber(value: FormDataEntryValue | null) {
   return parseOptionalNumber(value) ?? null;
+}
+
+function parseBoolean(value: FormDataEntryValue | null) {
+  return String(value ?? "") === "true";
 }

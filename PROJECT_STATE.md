@@ -61,7 +61,7 @@ Connected production Langame sources:
 ## Current Feature Areas
 
 - Dashboard: executive network summary, compact filters, responsive header, KPI cards, trend charts, category weights/efficiency, active assortment, TOP SKU, guests/product/revenue summary, and load percent based on played hours divided by available PC-hours.
-- Reports: collapsible report list, row-level sales detail report, summary export/email, automatic daily/weekly email digests, LFL, new products, recommendation workflow, OOS, no-sales, replenishment, ABC, top SKU/suppliers, assortment.
+- Reports: collapsible report list, row-level sales detail report, summary export/email, daily/weekly email digests, LFL, new products, recommendation workflow, OOS, no-sales, replenishment, ABC, top SKU/suppliers, assortment.
 - Product parsing utilities: automatic analysis, safe confirmation/rejection, existing canonical SKU awareness, manual parsing page.
 - Products/stores/directories: inline editing, multi-club filters, exports, manual store name preservation.
 - Guest module: first production read-only layer is live, including data foundation sync, guest analytics dashboard, full guest report, guest card, mini CRM fields, first staff-control report, and PC-count based load calculation.
@@ -71,8 +71,7 @@ Connected production Langame sources:
 ## Recent Work
 
 - Made `/reports` lighter by removing the full sales-detail preload from the first screen; the full table remains available through its dedicated report page and email action.
-- Added API-side regular report digests: daily email digest, weekly commercial email report with XLSX attachment, `/reports` send UI, protected scheduled endpoint, automatic scheduler, and duplicate-protected run journal.
-- Started Stage 6 commercialization with `/commercial/audit`: losses, growth opportunities, matrix quality, expected effect, and direct drilldowns into reports.
+- Added regular report digests: daily email digest, weekly commercial email report with XLSX attachment, `/reports` send UI, and a protected scheduled endpoint for future VDS timer setup.
 - Added recommendation workflow state: persisted statuses, responsible roles, financial effect, and an interactive recommendations queue.
 - Fixed dashboard trend card sizing behavior.
 - Preserved manual store names during sync.

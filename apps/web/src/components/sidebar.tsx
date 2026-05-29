@@ -78,7 +78,6 @@ const navGroups: NavGroup[] = [
     title: "Управление",
     icon: "management",
     items: [
-      { href: "/commercial/audit", label: "Коммерческий аудит" },
       { href: "/sync", label: "Синхронизация" },
       { href: "/settings", label: "Настройки" },
     ],
@@ -408,9 +407,7 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
     ? "Маркетинг"
     : pathname.startsWith("/guests")
     ? "Гости"
-    : pathname.startsWith("/commercial") ||
-        pathname.startsWith("/sync") ||
-        pathname.startsWith("/settings")
+    : pathname.startsWith("/sync") || pathname.startsWith("/settings")
       ? "Управление"
       : "Ассортимент";
   const hasOpenNavGroup = Object.values(openNavGroups).some(Boolean);

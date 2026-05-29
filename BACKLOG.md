@@ -161,6 +161,7 @@ Status: started; manual email sending and service endpoint are implemented, VDS 
 - Done: added `/reports` UI block for sending the daily digest or weekly report to an email recipient.
 - Done: added protected service endpoint `POST /reports/digests/scheduled` for future VDS timer calls through `SYNC_SERVICE_TOKEN`.
 - Done: `/reports` no longer preloads the full sales-detail dataset into the first screen, so the digest block and report hub can render without the multi-megabyte preview.
+- Done: `/reports` has a compact fallback state: if one of the report data requests fails, users still see regular digest sending and direct links to full report pages instead of a broken page.
 - Next: agree and configure VDS schedule for daily and weekly automatic delivery.
 - Later add Telegram/MAX alerts for critical events after channel/legal setup.
 

@@ -187,6 +187,24 @@ export default async function ReportsPage({
     storeId: filters.storeId,
     ...lastFullDaysRange(21),
   };
+  const reportsData = await Promise.all([
+    getAssortmentReport(),
+    getOperationalReport(filters),
+    getSkuPerformanceReport(filters),
+    getReplenishmentReport(filters),
+    getSuppliersPerformanceReport(filters),
+    getOperationalReport(noSalesFilters),
+    getOperationalReport(noSalesFilters14),
+    getOperationalReport(noSalesFilters21),
+    getNewProductsReport({ storeId: filters.storeId }),
+    getLflReport(lflPeriod),
+    getStores(),
+  ]).catch(() => null);
+
+  if (!reportsData) {
+    return <ReportsFallbackPage defaultEmail={user.email} />;
+  }
+
   const [
     assortmentReport,
     operationalReport,
@@ -199,19 +217,7 @@ export default async function ReportsPage({
     newProductsReport,
     lflReport,
     stores,
-  ] = await Promise.all([
-    getAssortmentReport(),
-    getOperationalReport(filters),
-    getSkuPerformanceReport(filters),
-    getReplenishmentReport(filters),
-    getSuppliersPerformanceReport(filters),
-    getOperationalReport(noSalesFilters),
-    getOperationalReport(noSalesFilters14),
-    getOperationalReport(noSalesFilters21),
-    getNewProductsReport({ storeId: filters.storeId }),
-    getLflReport(lflPeriod),
-    getStores(),
-  ]);
+  ] = reportsData;
   const assortmentRisk = buildAssortmentRiskSummary({
     oosRows: operationalReport.outOfStockRiskProducts,
     noSalesRows: noSalesReport21.productsWithoutSales,
@@ -516,6 +522,57 @@ export default async function ReportsPage({
               )}
             </section>
           </ReportDisclosure>
+        </section>
+      </div>
+    </main>
+  );
+}
+
+function ReportsFallbackPage({ defaultEmail }: { defaultEmail: string }) {
+  const links = [
+    { href: "/reports/recommendations/table", label: "Рекомендации" },
+    { href: "/reports/assortment-risk/table", label: "Деньги в риске" },
+    { href: "/reports/sales-detail/table", label: "Продажи" },
+    { href: "/reports/inventory-turnover/table", label: "Оборачиваемость" },
+    { href: "/reports/replenishment/table", label: "Пополнение" },
+    { href: "/reports/supplier-scorecard/table", label: "Поставщики" },
+  ];
+
+  return (
+    <main className="px-6 py-8 text-zinc-950 dark:text-zinc-100">
+      <div className="mx-auto max-w-7xl">
+        <div className="mb-8">
+          <h1 className="text-2xl font-semibold tracking-tight">Отчеты</h1>
+          <p className="mt-1 max-w-3xl text-sm text-zinc-600 dark:text-zinc-400">
+            Часть отчетных данных сейчас не загрузилась. Дайджесты и отдельные
+            полные отчеты остаются доступными.
+          </p>
+        </div>
+
+        <ReportDigestForm defaultEmail={defaultEmail} />
+
+        <section className="mt-6 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="max-w-3xl">
+            <h2 className="text-base font-semibold">
+              Хаб отчетов временно открылся в компактном режиме
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+              Обновите страницу чуть позже или откройте нужный отчет напрямую.
+              Это не влияет на сохраненные данные и регулярные email-дайджесты.
+            </p>
+          </div>
+
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {links.map((link) => (
+              <ReportLoadingLink
+                key={link.href}
+                href={link.href}
+                className="rounded-lg border border-zinc-200 px-4 py-3 text-sm font-semibold text-zinc-800 transition hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-800 dark:border-zinc-800 dark:text-zinc-100 dark:hover:border-emerald-500/50 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-200"
+              >
+                {link.label}
+              </ReportLoadingLink>
+            ))}
+          </div>
         </section>
       </div>
     </main>

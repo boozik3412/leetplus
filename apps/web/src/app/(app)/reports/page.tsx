@@ -15,14 +15,12 @@ import { ReportDigestForm } from "@/components/report-digest-form";
 import { ReportEmailForm } from "@/components/report-email-form";
 import { ReportEmailInlineForm } from "@/components/report-email-inline-form";
 import { ReportLoadingLink } from "@/components/report-loading-link";
-import { SalesDetailPreviewTable } from "@/components/sales-detail-report-table";
 import {
   getAssortmentReport,
   getLflReport,
   getNewProductsReport,
   getOperationalReport,
   getReplenishmentReport,
-  getSalesDetailReport,
   getSkuPerformanceReport,
   getSuppliersPerformanceReport,
   type LflPeriod,
@@ -192,7 +190,6 @@ export default async function ReportsPage({
   const [
     assortmentReport,
     operationalReport,
-    salesDetailReport,
     skuPerformanceReport,
     replenishmentReport,
     suppliersPerformanceReport,
@@ -205,7 +202,6 @@ export default async function ReportsPage({
   ] = await Promise.all([
     getAssortmentReport(),
     getOperationalReport(filters),
-    getSalesDetailReport(filters),
     getSkuPerformanceReport(filters),
     getReplenishmentReport(filters),
     getSuppliersPerformanceReport(filters),
@@ -326,7 +322,6 @@ export default async function ReportsPage({
             description="Строки продаж для сводной таблицы Excel: товар, клуб, дата, цены, себестоимость, прибыль, маржа и источник."
           >
             <SalesDetailCompactPanel
-              rowsCount={salesDetailReport.rows.length}
               defaultEmail={user.email}
               from={operationalReport.from}
               to={operationalReport.to}
@@ -336,9 +331,7 @@ export default async function ReportsPage({
                 to: operationalReport.to,
                 storeId: operationalReport.storeId,
               })}
-            >
-              <SalesDetailPreviewTable rows={salesDetailReport.rows} />
-            </SalesDetailCompactPanel>
+            />
           </ReportDisclosure>
 
           <ReportDisclosure
@@ -700,21 +693,17 @@ function ReportRoutePanel({
 }
 
 function SalesDetailCompactPanel({
-  rowsCount,
   defaultEmail,
   from,
   to,
   storeId,
   href,
-  children,
 }: {
-  rowsCount: number;
   defaultEmail: string;
   from: string;
   to: string;
   storeId: string | null;
   href: string;
-  children: ReactNode;
 }) {
   return (
     <section className="overflow-hidden bg-white dark:bg-zinc-950">
@@ -722,8 +711,8 @@ function SalesDetailCompactPanel({
         <div>
           <h2 className="text-base font-semibold">Последние строки продаж</h2>
           <p className="mt-1 text-sm text-zinc-500">
-            Показаны первые 20 строк из {rowsCount}. Полный отчет открыт
-            отдельной таблицей с фильтрами и экспортом.
+            Полный отчет открывается отдельной таблицей с фильтрами и экспортом,
+            чтобы основная страница отчетов открывалась быстрее.
           </p>
         </div>
         <ReportLoadingLink
@@ -741,7 +730,6 @@ function SalesDetailCompactPanel({
           buttonLabel="Отправить"
         />
       </div>
-      {children}
     </section>
   );
 }

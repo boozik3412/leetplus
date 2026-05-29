@@ -1,6 +1,6 @@
 # LeetPlus Project State
 
-Last updated: 2026-05-21
+Last updated: 2026-05-29
 
 ## Current Workflow
 
@@ -70,6 +70,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Made `/reports` lighter by removing the full sales-detail preload from the first screen; the full table remains available through its dedicated report page and email action.
 - Added regular report digests: daily email digest, weekly commercial email report with XLSX attachment, `/reports` send UI, and a protected scheduled endpoint for future VDS timer setup.
 - Added recommendation workflow state: persisted statuses, responsible roles, financial effect, and an interactive recommendations queue.
 - Fixed dashboard trend card sizing behavior.

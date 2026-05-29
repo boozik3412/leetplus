@@ -166,11 +166,12 @@ Status: implemented; automatic delivery runs inside the API process, while the s
 
 ## Stage 6. Product Commercialization
 
-Status: started.
+Status: implemented; remains in production verification and packaging polish mode.
 
 - Done: added `/commercial/audit` as a management-side commercial audit page: losses, growth opportunities, matrix quality, expected effect, and links to the detailed reports.
-- Next: demo mode with prepared data and clear value story without Langame setup.
-- Next: tariff levels: basic analytics, advanced reports, recommendations, regular digests, and assortment audit.
+- Done: added `/commercial/demo` with prepared demo data and a clear value story that does not require Langame setup or synchronization.
+- Done: added `/commercial/tariffs` with tariff levels for basic analytics, advanced reports, recommendations, regular digests, and assortment audit.
+- Next polish: verify the new commercial pages on production, then tune wording and package boundaries from live sales feedback.
 
 ## Stage 7. Guest Management Module
 

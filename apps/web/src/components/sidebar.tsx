@@ -79,6 +79,8 @@ const navGroups: NavGroup[] = [
     icon: "management",
     items: [
       { href: "/commercial/audit", label: "Коммерческий аудит" },
+      { href: "/commercial/demo", label: "Демо-режим" },
+      { href: "/commercial/tariffs", label: "Тарифы" },
       { href: "/sync", label: "Синхронизация" },
       { href: "/settings", label: "Настройки" },
     ],

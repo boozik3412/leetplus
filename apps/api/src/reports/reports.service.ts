@@ -91,12 +91,19 @@ export type ProductWithoutSales = {
   isCanonical: boolean;
   canonicalProductName: string | null;
   stockQuantity: number;
+  frozenStockUnitValue: number;
+  frozenStockValuation: FrozenStockValuation;
   frozenStockAmount: number;
   lastSaleDate: string | null;
   daysWithoutSales: number | null;
   categoryName: string | null;
   supplierName: string | null;
 };
+export type FrozenStockValuation =
+  | 'PURCHASE_PRICE'
+  | 'SALE_PRICE'
+  | 'HISTORICAL_REVENUE'
+  | 'UNKNOWN';
 
 export type ReportRecommendation = {
   id: string;
@@ -427,6 +434,7 @@ type StockByStoreProductItem = {
   supplierName: string | null;
   stockQuantity: number;
   unitCost: number;
+  unitValueSource: FrozenStockValuation;
 };
 
 type SalesFactWithCost = {
@@ -2243,6 +2251,8 @@ export class ReportsService {
         return;
       }
 
+      const unitValue = this.stockUnitValue(snapshot.product);
+
       seen.add(snapshotKey);
       stockByStoreProduct.set(snapshotKey, {
         productId: snapshot.productId,
@@ -2255,7 +2265,8 @@ export class ReportsService {
         categoryName: snapshot.product.category?.name ?? null,
         supplierName: snapshot.product.supplier?.name ?? null,
         stockQuantity: snapshot.quantity.toNumber(),
-        unitCost: this.stockUnitValue(snapshot.product),
+        unitCost: unitValue.amount,
+        unitValueSource: unitValue.source,
       });
     });
 
@@ -2269,10 +2280,16 @@ export class ReportsService {
     const purchasePrice = product.purchasePrice?.toNumber() ?? 0;
 
     if (purchasePrice > 0) {
-      return purchasePrice;
+      return { amount: purchasePrice, source: 'PURCHASE_PRICE' as const };
     }
 
-    return product.salePrice?.toNumber() ?? 0;
+    const salePrice = product.salePrice?.toNumber() ?? 0;
+
+    if (salePrice > 0) {
+      return { amount: salePrice, source: 'SALE_PRICE' as const };
+    }
+
+    return { amount: 0, source: 'UNKNOWN' as const };
   }
 
   private recommendedOrder(
@@ -2481,10 +2498,16 @@ export class ReportsService {
           lastSaleByStoreProduct.get(`${item.storeId}:${item.productId}`) ??
           null;
         const key = `${item.storeId}:${item.productId}`;
+        const historicalUnitRevenue =
+          historicalUnitRevenueByStoreProduct.get(key) ?? 0;
         const unitValue =
+          item.unitCost > 0 ? item.unitCost : historicalUnitRevenue;
+        const frozenStockValuation =
           item.unitCost > 0
-            ? item.unitCost
-            : (historicalUnitRevenueByStoreProduct.get(key) ?? 0);
+            ? item.unitValueSource
+            : historicalUnitRevenue > 0
+              ? 'HISTORICAL_REVENUE'
+              : 'UNKNOWN';
 
         return {
           productId: item.productId,
@@ -2495,6 +2518,8 @@ export class ReportsService {
           isCanonical: item.isCanonical,
           canonicalProductName: item.canonicalProductName,
           stockQuantity: this.round(item.stockQuantity),
+          frozenStockUnitValue: this.round(unitValue),
+          frozenStockValuation,
           frozenStockAmount: this.round(item.stockQuantity * unitValue),
           lastSaleDate: lastSaleDate
             ? this.toDateInputValue(lastSaleDate)

@@ -2,6 +2,11 @@ import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { SimpleReportTable } from "@/components/simple-report-table";
 import { requireCurrentUser } from "@/lib/auth";
 import { buildAssortmentRiskSummary } from "@/lib/assortment-risk";
+import {
+  frozenStockFormulaText,
+  frozenStockScopeText,
+  frozenStockValuationLabel,
+} from "@/lib/frozen-stock";
 import { getOperationalReport } from "@/lib/reports";
 
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
@@ -55,6 +60,8 @@ export default async function AssortmentRiskTablePage({
     averageDailySales: row.averageDailySales,
     stockDays: row.stockDays,
     profitAtRiskForPeriod: row.profitAtRiskForPeriod,
+    frozenStockUnitValue: row.frozenStockUnitValue,
+    frozenStockValuation: frozenStockValuationLabel(row.frozenStockValuation),
     frozenStockAmount: row.frozenStockAmount,
     totalRiskAmount: row.totalRiskAmount,
   }));
@@ -69,7 +76,8 @@ export default async function AssortmentRiskTablePage({
         </h1>
         <p className="mt-2 max-w-3xl text-sm text-zinc-600">
           Гибридный отчет: прибыль в риске из-за OOS за выбранный период и
-          деньги, замороженные в товарах без движения 21 день.
+          деньги, замороженные в товарах без движения 21 день.{" "}
+          {frozenStockFormulaText} {frozenStockScopeText}
         </p>
       </div>
       <SimpleReportTable
@@ -89,6 +97,12 @@ export default async function AssortmentRiskTablePage({
             label: "Прибыль OOS за период",
             align: "right",
           },
+          {
+            key: "frozenStockUnitValue",
+            label: "Оценка, руб/шт",
+            align: "right",
+          },
+          { key: "frozenStockValuation", label: "Источник оценки" },
           {
             key: "frozenStockAmount",
             label: "Заморожено",

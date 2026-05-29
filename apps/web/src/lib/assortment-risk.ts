@@ -1,4 +1,8 @@
-import type { OutOfStockRiskProduct, ProductWithoutSales } from "@/lib/reports";
+import type {
+  FrozenStockValuation,
+  OutOfStockRiskProduct,
+  ProductWithoutSales,
+} from "@/lib/reports";
 
 export type AssortmentRiskRow = {
   riskType: "OOS" | "NO_SALES";
@@ -11,6 +15,8 @@ export type AssortmentRiskRow = {
   stockDays: number | null;
   averageDailySales: number | null;
   profitAtRiskForPeriod: number;
+  frozenStockUnitValue: number | null;
+  frozenStockValuation: FrozenStockValuation | null;
   frozenStockAmount: number;
   totalRiskAmount: number;
 };
@@ -42,6 +48,8 @@ export function buildAssortmentRiskSummary({
     stockDays: row.stockDays,
     averageDailySales: row.averageDailySales,
     profitAtRiskForPeriod: row.grossProfitAtRiskForPeriod,
+    frozenStockUnitValue: null,
+    frozenStockValuation: null,
     frozenStockAmount: 0,
     totalRiskAmount: row.grossProfitAtRiskForPeriod,
   }));
@@ -57,6 +65,8 @@ export function buildAssortmentRiskSummary({
     stockDays: null,
     averageDailySales: null,
     profitAtRiskForPeriod: 0,
+    frozenStockUnitValue: row.frozenStockUnitValue,
+    frozenStockValuation: row.frozenStockValuation,
     frozenStockAmount: row.frozenStockAmount,
     totalRiskAmount: row.frozenStockAmount,
   }));

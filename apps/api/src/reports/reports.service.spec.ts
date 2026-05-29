@@ -338,6 +338,7 @@ describe('ReportsService', () => {
       name: string,
       quantity: number,
       snapshotDate: string,
+      salePrice = 0,
     ) => ({
       storeId: 'store-1',
       store: { name: 'Club A' },
@@ -346,6 +347,7 @@ describe('ReportsService', () => {
         article: productId,
         name,
         purchasePrice: new Prisma.Decimal(0),
+        salePrice: new Prisma.Decimal(salePrice),
         canonicalProduct: null,
         category: null,
         supplier: null,
@@ -355,7 +357,7 @@ describe('ReportsService', () => {
     });
 
     prisma.inventorySnapshot.findMany.mockResolvedValue([
-      stockSnapshot('product-keep', 'Stable stock', 4, '2026-04-10'),
+      stockSnapshot('product-keep', 'Stable stock', 4, '2026-04-10', 120),
       stockSnapshot('product-arrival', 'New arrival', 5, '2026-04-10'),
       stockSnapshot('product-restock', 'Restocked product', 7, '2026-04-10'),
       stockSnapshot('product-zero', 'Zero stock', 0, '2026-04-10'),
@@ -377,6 +379,9 @@ describe('ReportsService', () => {
       expect.objectContaining({
         productId: 'product-keep',
         stockQuantity: 4,
+        frozenStockUnitValue: 120,
+        frozenStockValuation: 'SALE_PRICE',
+        frozenStockAmount: 480,
       }),
     ]);
   });

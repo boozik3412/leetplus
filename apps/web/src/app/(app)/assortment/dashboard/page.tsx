@@ -12,6 +12,7 @@ import {
 } from "@/components/category-analytics";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
+import { frozenStockShortText } from "@/lib/frozen-stock";
 import { getOperationalReport } from "@/lib/reports";
 import { getStores } from "@/lib/stores";
 
@@ -186,7 +187,7 @@ function buildAssortmentInsights({
       value: formatRubles(assortmentRiskAmount),
       description: `${formatQuantity(assortmentRiskSkuCount)} SKU. Формула: OOS ${formatRubles(
         oosProfitAtRisk,
-      )} + замороженный остаток ${formatRubles(frozenStockAmount)}.`,
+      )} + замороженный остаток ${formatRubles(frozenStockAmount)}. ${frozenStockShortText}`,
       tone: assortmentRiskAmount > 0 ? "danger" : "good",
       href: "/reports/assortment-risk/table",
     },

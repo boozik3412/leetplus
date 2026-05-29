@@ -548,6 +548,8 @@ export class ReportsExportService {
         'Категория',
         'Поставщик',
         'Остаток, шт',
+        'Оценка, руб/шт',
+        'Источник оценки',
         'Заморожено денег',
       ],
       ...operationalReport.productsWithoutSales.map((item) => [
@@ -556,6 +558,8 @@ export class ReportsExportService {
         item.categoryName,
         item.supplierName,
         item.stockQuantity,
+        item.frozenStockUnitValue,
+        this.frozenStockValuationLabel(item.frozenStockValuation),
         item.frozenStockAmount,
       ]),
       [],
@@ -1262,9 +1266,18 @@ export class ReportsExportService {
       { header: 'Категория', key: 'categoryName', width: 24 },
       { header: 'Поставщик', key: 'supplierName', width: 24 },
       { header: 'Остаток, шт', key: 'stockQuantity', width: 18 },
+      { header: 'Оценка, руб/шт', key: 'frozenStockUnitValue', width: 18 },
+      { header: 'Источник оценки', key: 'frozenStockValuation', width: 28 },
       { header: 'Заморожено денег', key: 'frozenStockAmount', width: 20 },
     ];
-    sheet.addRows(operationalReport.productsWithoutSales);
+    sheet.addRows(
+      operationalReport.productsWithoutSales.map((item) => ({
+        ...item,
+        frozenStockValuation: this.frozenStockValuationLabel(
+          item.frozenStockValuation,
+        ),
+      })),
+    );
     this.styleHeader(sheet);
   }
 
@@ -1559,6 +1572,22 @@ export class ReportsExportService {
     };
 
     return labels[risk];
+  }
+
+  private frozenStockValuationLabel(
+    valuation: OperationalReport['productsWithoutSales'][number]['frozenStockValuation'],
+  ) {
+    const labels: Record<
+      OperationalReport['productsWithoutSales'][number]['frozenStockValuation'],
+      string
+    > = {
+      PURCHASE_PRICE: 'Закупочная цена',
+      SALE_PRICE: 'Цена продажи',
+      HISTORICAL_REVENUE: 'Историческая цена продажи',
+      UNKNOWN: 'Нет оценки',
+    };
+
+    return labels[valuation];
   }
 
   private lflPeriodLabel(period: LflPeriod) {

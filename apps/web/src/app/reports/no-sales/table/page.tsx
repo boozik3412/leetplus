@@ -1,6 +1,11 @@
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { SimpleReportTable } from "@/components/simple-report-table";
 import { requireCurrentUser } from "@/lib/auth";
+import {
+  frozenStockFormulaText,
+  frozenStockScopeText,
+  frozenStockValuationLabel,
+} from "@/lib/frozen-stock";
 import { getOperationalReport } from "@/lib/reports";
 
 type SearchParams = Promise<{ period?: string }>;
@@ -36,6 +41,8 @@ export default async function NoSalesTablePage({
     lastSaleDate: row.lastSaleDate ?? "",
     daysWithoutSales: row.daysWithoutSales ?? null,
     stockQuantity: row.stockQuantity,
+    frozenStockUnitValue: row.frozenStockUnitValue,
+    frozenStockValuation: frozenStockValuationLabel(row.frozenStockValuation),
     frozenStockAmount: row.frozenStockAmount,
   }));
 
@@ -46,8 +53,9 @@ export default async function NoSalesTablePage({
         <h1 className="text-3xl font-semibold tracking-tight">
           Товары без продаж
         </h1>
-        <p className="mt-2 text-sm text-zinc-600">
-          Полный отчёт без ограничения строк.
+        <p className="mt-2 max-w-3xl text-sm text-zinc-600">
+          Полный отчёт без ограничения строк. {frozenStockFormulaText}{" "}
+          {frozenStockScopeText}
         </p>
       </div>
       <SimpleReportTable
@@ -65,6 +73,12 @@ export default async function NoSalesTablePage({
             align: "right",
           },
           { key: "stockQuantity", label: "Остаток", align: "right" },
+          {
+            key: "frozenStockUnitValue",
+            label: "Оценка, руб/шт",
+            align: "right",
+          },
+          { key: "frozenStockValuation", label: "Источник оценки" },
           { key: "frozenStockAmount", label: "Заморожено", align: "right" },
         ]}
         filters={[

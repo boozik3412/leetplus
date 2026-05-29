@@ -80,12 +80,19 @@ export type ProductWithoutSales = {
   isCanonical: boolean;
   canonicalProductName: string | null;
   stockQuantity: number;
+  frozenStockUnitValue: number;
+  frozenStockValuation: FrozenStockValuation;
   frozenStockAmount: number;
   lastSaleDate: string | null;
   daysWithoutSales: number | null;
   categoryName: string | null;
   supplierName: string | null;
 };
+export type FrozenStockValuation =
+  | "PURCHASE_PRICE"
+  | "SALE_PRICE"
+  | "HISTORICAL_REVENUE"
+  | "UNKNOWN";
 
 export type ReportRecommendation = {
   id: string;

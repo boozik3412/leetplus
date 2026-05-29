@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { ProductWithoutSales } from "@/lib/reports";
 import { ReportLoadingLink } from "@/components/report-loading-link";
+import { frozenStockShortText } from "@/lib/frozen-stock";
 
 type Period = 7 | 14 | 21;
 
@@ -37,7 +38,7 @@ export function NoSalesPeriodTable({
           <h2 className="text-base font-semibold">Товары без продаж</h2>
           <p className="mt-1 text-sm text-zinc-500">
             Активные SKU с остатком, но без продаж в выбранном периоде.
-            Высокие риски невыставленного товара.
+            Высокие риски невыставленного товара. {frozenStockShortText}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">

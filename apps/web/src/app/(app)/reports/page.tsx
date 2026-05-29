@@ -4,6 +4,10 @@ import {
   buildAssortmentRiskSummary,
   type AssortmentRiskRow,
 } from "@/lib/assortment-risk";
+import {
+  frozenStockFormulaText,
+  frozenStockValuationLabel,
+} from "@/lib/frozen-stock";
 import { AbcReportToggle } from "@/components/abc-report-toggle";
 import { NoSalesPeriodTable } from "@/components/no-sales-period-table";
 import { OosExclusionActions } from "@/components/oos-exclusion-actions";
@@ -538,7 +542,7 @@ function AssortmentRiskPanel({
           <h2 className="text-base font-semibold">Деньги в риске</h2>
           <p className="mt-1 text-sm text-zinc-500">
             OOS показывает недополучаемую прибыль, товары без движения -
-            замороженные деньги в остатках.
+            замороженные деньги в остатках. {frozenStockFormulaText}
           </p>
         </div>
         <ReportLoadingLink
@@ -554,13 +558,15 @@ function AssortmentRiskPanel({
         <Metric label="Заморожено" value={formatMoney(frozenStockAmount)} />
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[860px] text-left text-sm">
+        <table className="w-full min-w-[1040px] text-left text-sm">
           <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
             <tr>
               <th className="px-5 py-3 font-medium">Риск</th>
               <th className="px-5 py-3 font-medium">Клуб</th>
               <th className="px-5 py-3 font-medium">Товар</th>
               <th className="px-5 py-3 text-right font-medium">Прибыль OOS</th>
+              <th className="px-5 py-3 text-right font-medium">Оценка</th>
+              <th className="px-5 py-3 font-medium">Источник</th>
               <th className="px-5 py-3 text-right font-medium">Заморожено</th>
               <th className="px-5 py-3 text-right font-medium">Всего</th>
             </tr>
@@ -573,6 +579,14 @@ function AssortmentRiskPanel({
                 <td className="px-5 py-4 font-medium text-zinc-950">{row.name}</td>
                 <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
                   {formatMoney(row.profitAtRiskForPeriod)}
+                </td>
+                <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                  {row.frozenStockUnitValue === null
+                    ? "—"
+                    : formatMoney(row.frozenStockUnitValue)}
+                </td>
+                <td className="px-5 py-4 text-zinc-700">
+                  {frozenStockValuationLabel(row.frozenStockValuation)}
                 </td>
                 <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
                   {formatMoney(row.frozenStockAmount)}

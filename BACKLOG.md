@@ -130,7 +130,7 @@ Status: active; first commercial-risk layer is implemented, next focus is deeper
 - Done: frozen stock fallback uses available cost/sale price so positions without cost do not collapse to 0 rubles when a sale price is known.
 - Done: replenishment report full table has status/product/club/supplier/category filters, sortable stock/sales/demand/order columns, server XLSX/CSV export, local Excel/1C/PDF export, and email sending.
 - Done: replenishment server XLSX/CSV export can optionally receive the table filter/sort state and export the same visible rows as the current filtered table.
-- Next: validate the frozen-stock formula against real production data and explain assumptions in the report UI.
+- Done: frozen-stock reports now expose the unit valuation source, explain the calculation assumptions in UI, and can be validated on production by comparing stock quantity x unit value to frozen amount.
 - Next: add turnover, frozen money in stock, and slow SKU control beyond the current no-sales/OOS hybrid.
 - Planned: add plan/fact by network, club, category, and supplier.
 - Planned: add supplier scorecard with sales, profit, write-offs, OOS, delivery quality, and problem categories.

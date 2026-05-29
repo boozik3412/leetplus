@@ -141,6 +141,7 @@ describe('GuestDataFoundationService', () => {
     guestDataProfileRun: {
       create: jest.fn(),
       findFirst: jest.fn(),
+      findMany: jest.fn(),
       update: jest.fn(),
       updateMany: jest.fn(),
     },
@@ -150,6 +151,15 @@ describe('GuestDataFoundationService', () => {
     guest: {
       upsert: jest.fn(),
       findMany: jest.fn(),
+      findFirst: jest.fn(),
+      update: jest.fn(),
+    },
+    guestCrmLead: {
+      findMany: jest.fn(),
+      updateMany: jest.fn(),
+    },
+    guestCrmEvent: {
+      create: jest.fn(),
     },
     guestBalanceSnapshot: {
       upsert: jest.fn(),
@@ -182,6 +192,7 @@ describe('GuestDataFoundationService', () => {
       findMany: jest.fn(),
       updateMany: jest.fn(),
     },
+    $transaction: jest.fn(),
   };
   const tenantContextService = {
     resolve: jest.fn(),
@@ -233,15 +244,23 @@ describe('GuestDataFoundationService', () => {
 
     prisma.guestDataProfileRun.create.mockResolvedValue({ id: 'run-1' });
     prisma.guestDataProfileRun.findFirst.mockResolvedValue(null);
+    prisma.guestDataProfileRun.findMany.mockResolvedValue([]);
     prisma.guestDataProfileRun.update.mockResolvedValue({});
     prisma.guestDataProfileRun.updateMany.mockResolvedValue({ count: 0 });
     prisma.store.findMany.mockResolvedValue([
       { id: 'store-1', externalClubId: '10' },
     ]);
     prisma.store.updateMany.mockResolvedValue({ count: 1 });
+    prisma.guest.upsert.mockResolvedValue({ id: 'guest-1' });
+    prisma.guest.findFirst.mockResolvedValue(null);
     prisma.guest.findMany.mockResolvedValue([
       { id: 'guest-1', externalGuestId: '42' },
     ]);
+    prisma.guestCrmLead.findMany.mockResolvedValue([]);
+    prisma.guestCrmLead.updateMany.mockResolvedValue({ count: 0 });
+    prisma.guest.update.mockResolvedValue({});
+    prisma.guestCrmEvent.create.mockResolvedValue({});
+    prisma.$transaction.mockResolvedValue([]);
     prisma.salesFact.updateMany.mockResolvedValue({ count: 1 });
     prisma.guestStaffIdentityMapping.findMany.mockResolvedValue([]);
 

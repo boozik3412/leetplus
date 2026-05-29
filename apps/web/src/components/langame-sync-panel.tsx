@@ -19,24 +19,27 @@ type SyncResult = {
 type GuestSyncStatus = {
   status: "IDLE" | "RUNNING" | "SUCCESS" | "FAILED";
   running: boolean;
-  latestRun: {
-    domain: string;
-    status: string;
-    startedAt: string;
-    finishedAt: string | null;
-    dateFrom: string | null;
-    dateTo: string | null;
-    guestsCount: number;
-    sessionsCount: number;
-    transactionsCount: number;
-    productSalesLinked: number;
-    errorMessage: string | null;
-    diagnostics: {
-      endpointErrors: Record<string, string>;
-      pcTypesInClubs: FieldDiagnostics;
-      pcTypeLinks: FieldDiagnostics;
-    };
-  } | null;
+  latestRun: GuestSyncRun | null;
+  recentRuns: GuestSyncRun[];
+};
+
+type GuestSyncRun = {
+  domain: string;
+  status: string;
+  startedAt: string;
+  finishedAt: string | null;
+  dateFrom: string | null;
+  dateTo: string | null;
+  guestsCount: number;
+  sessionsCount: number;
+  transactionsCount: number;
+  productSalesLinked: number;
+  errorMessage: string | null;
+  diagnostics: {
+    endpointErrors: Record<string, string>;
+    pcTypesInClubs: FieldDiagnostics;
+    pcTypeLinks: FieldDiagnostics;
+  };
 };
 
 type FieldDiagnostics = {
@@ -345,7 +348,10 @@ export function LangameSyncPanel({
         settings={settings}
       />
       <LatestGuestDiagnostics status={latestGuestStatus} />
-      <SyncHistory jobs={settings.syncJobs} />
+      <div className="grid gap-6 xl:grid-cols-2">
+        <SyncHistory jobs={settings.syncJobs} />
+        <GuestSyncHistory status={latestGuestStatus} />
+      </div>
     </section>
   );
 }
@@ -841,6 +847,89 @@ function SyncHistory({ jobs }: { jobs: LangameSettings["syncJobs"] }) {
   );
 }
 
+function GuestSyncHistory({ status }: { status: GuestSyncStatus | null }) {
+  const runs = status?.recentRuns ?? [];
+
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
+        <h2 className="text-base font-semibold">
+          История гостевой синхронизации
+        </h2>
+        <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+          Последние foundation-runs по источникам: гости, сессии, транзакции и
+          ошибки endpoints.
+        </p>
+      </div>
+
+      {runs.length > 0 ? (
+        <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+          {runs.map((run) => {
+            const endpointErrorCount = Object.keys(
+              run.diagnostics.endpointErrors,
+            ).length;
+
+            return (
+              <div
+                key={`${run.domain}-${run.startedAt}`}
+                className="px-5 py-4 text-sm"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="font-medium text-zinc-950 dark:text-zinc-50">
+                      {run.domain}
+                    </p>
+                    <p className="mt-1 text-zinc-500 dark:text-zinc-400">
+                      {formatDateTime(run.startedAt)}
+                      {run.dateFrom && run.dateTo
+                        ? ` · период ${formatDateLabel(run.dateFrom)} - ${formatDateLabel(run.dateTo)}`
+                        : ""}
+                    </p>
+                  </div>
+                  <span className={statusBadgeClass(run.status)}>
+                    {syncStatusLabel(run.status)}
+                  </span>
+                </div>
+
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <CompactRunMetric label="Гостей" value={run.guestsCount} />
+                  <CompactRunMetric label="Сессий" value={run.sessionsCount} />
+                  <CompactRunMetric
+                    label="Транзакций"
+                    value={run.transactionsCount}
+                  />
+                  <CompactRunMetric
+                    label="Ошибок endpoints"
+                    tone={endpointErrorCount > 0 ? "danger" : "neutral"}
+                    value={endpointErrorCount}
+                  />
+                </div>
+
+                {run.errorMessage ? (
+                  <p className="mt-3 break-words rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-200">
+                    {compactEndpointError(run.errorMessage)}
+                  </p>
+                ) : endpointErrorCount > 0 ? (
+                  <p className="mt-3 truncate text-xs text-amber-700 dark:text-amber-300">
+                    Endpoint-ошибки:{" "}
+                    {Object.keys(run.diagnostics.endpointErrors)
+                      .slice(0, 3)
+                      .join(", ")}
+                  </p>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="px-5 py-6 text-sm text-zinc-500">
+          История гостевой синхронизации пока не загружена.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function getLatestSyncJobsByDomain(jobs: LangameSettings["syncJobs"]) {
   const byDomain = new Map<string, LangameSettings["syncJobs"][number]>();
 
@@ -947,6 +1036,39 @@ function SyncHealthMetric({
       </p>
       <p className="mt-1 truncate text-xs text-zinc-500 dark:text-zinc-400" title={detail}>
         {detail}
+      </p>
+    </div>
+  );
+}
+
+function CompactRunMetric({
+  label,
+  value,
+  tone = "neutral",
+}: {
+  label: string;
+  value: number;
+  tone?: "neutral" | "danger";
+}) {
+  return (
+    <div
+      className={[
+        "rounded-md border bg-zinc-50 px-3 py-2 dark:bg-zinc-900/50",
+        tone === "danger"
+          ? "border-red-200 dark:border-red-900/70"
+          : "border-zinc-200 dark:border-zinc-800",
+      ].join(" ")}
+    >
+      <p className="text-xs text-zinc-500 dark:text-zinc-400">{label}</p>
+      <p
+        className={[
+          "mt-1 font-semibold tabular-nums",
+          tone === "danger"
+            ? "text-red-700 dark:text-red-300"
+            : "text-zinc-950 dark:text-zinc-50",
+        ].join(" ")}
+      >
+        {value}
       </p>
     </div>
   );

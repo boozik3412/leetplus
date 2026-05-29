@@ -90,6 +90,26 @@ export type GuestDataFoundationStatusResult = {
       pcTypeLinks: FieldDiagnostics;
     };
   } | null;
+  recentRuns: GuestDataFoundationRunStatus[];
+};
+
+type GuestDataFoundationRunStatus = {
+  domain: string;
+  status: string;
+  startedAt: string;
+  finishedAt: string | null;
+  dateFrom: string | null;
+  dateTo: string | null;
+  guestsCount: number;
+  sessionsCount: number;
+  transactionsCount: number;
+  productSalesLinked: number;
+  errorMessage: string | null;
+  diagnostics: {
+    endpointErrors: Record<string, string>;
+    pcTypesInClubs: FieldDiagnostics;
+    pcTypeLinks: FieldDiagnostics;
+  };
 };
 
 export type GuestDataFoundationSourceResult = {
@@ -348,7 +368,7 @@ export class GuestDataFoundationService {
     const { tenantId } = await this.tenantContextService.resolve(user);
     await this.failStaleRunningRuns(tenantId);
     const nextPeriod = await this.resolvePeriod(tenantId, {});
-    const [runningRun, latestRun] = await Promise.all([
+    const [runningRun, latestRun, recentRuns] = await Promise.all([
       this.prisma.guestDataProfileRun.findFirst({
         where: {
           tenantId,
@@ -366,6 +386,15 @@ export class GuestDataFoundationService {
         orderBy: { startedAt: 'desc' },
         select: this.profileRunStatusSelect(),
       }),
+      this.prisma.guestDataProfileRun.findMany({
+        where: {
+          tenantId,
+          provider: IntegrationProvider.LANGAME,
+        },
+        orderBy: { startedAt: 'desc' },
+        take: 10,
+        select: this.profileRunStatusSelect(),
+      }),
     ]);
     const run = runningRun ?? latestRun;
 
@@ -380,6 +409,7 @@ export class GuestDataFoundationService {
             nextPeriod.basedOnFinishedAt?.toISOString() ?? null,
         },
         latestRun: null,
+        recentRuns: [],
       };
     }
 
@@ -397,20 +427,10 @@ export class GuestDataFoundationService {
         dateTo: nextPeriod.to,
         basedOnFinishedAt: nextPeriod.basedOnFinishedAt?.toISOString() ?? null,
       },
-      latestRun: {
-        domain: run.domain,
-        status: run.status,
-        startedAt: run.startedAt.toISOString(),
-        finishedAt: run.finishedAt?.toISOString() ?? null,
-        dateFrom: run.dateFrom ? this.toDateInputValue(run.dateFrom) : null,
-        dateTo: run.dateTo ? this.toDateInputValue(run.dateTo) : null,
-        guestsCount: run.guestsCount,
-        sessionsCount: run.sessionsCount,
-        transactionsCount: run.transactionsCount,
-        productSalesLinked: run.productSalesLinked,
-        errorMessage: run.errorMessage,
-        diagnostics: this.statusDiagnosticsFromProfile(run.profile),
-      },
+      latestRun: this.toProfileRunStatus(run),
+      recentRuns: recentRuns.map((recentRun) =>
+        this.toProfileRunStatus(recentRun),
+      ),
     };
   }
 
@@ -461,6 +481,27 @@ export class GuestDataFoundationService {
       errorMessage: true,
       profile: true,
     } satisfies Prisma.GuestDataProfileRunSelect;
+  }
+
+  private toProfileRunStatus(
+    run: Prisma.GuestDataProfileRunGetPayload<{
+      select: ReturnType<GuestDataFoundationService['profileRunStatusSelect']>;
+    }>,
+  ): GuestDataFoundationRunStatus {
+    return {
+      domain: run.domain,
+      status: run.status,
+      startedAt: run.startedAt.toISOString(),
+      finishedAt: run.finishedAt?.toISOString() ?? null,
+      dateFrom: run.dateFrom ? this.toDateInputValue(run.dateFrom) : null,
+      dateTo: run.dateTo ? this.toDateInputValue(run.dateTo) : null,
+      guestsCount: run.guestsCount,
+      sessionsCount: run.sessionsCount,
+      transactionsCount: run.transactionsCount,
+      productSalesLinked: run.productSalesLinked,
+      errorMessage: run.errorMessage,
+      diagnostics: this.statusDiagnosticsFromProfile(run.profile),
+    };
   }
 
   private async failStaleRunningRuns(tenantId: string) {

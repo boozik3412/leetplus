@@ -184,6 +184,7 @@ Status: MVP 1 read-only guest analytics is live in production. Automatic rewards
 - Done: guest summary can backfill missing PC counts on demand when `Store.computerCount` is empty.
 - Done: `/sync` now lives in a separate `Управление` navigation block, retries Langame date endpoints with `дд.мм.гггг` after `400`, shows compact latest sync job per source, and automatically marks stale guest `RUNNING` sync runs older than 2 hours as failed.
 - Done: `/sync` now has a compact data-status block with the latest successful товарный sync, active Langame sources, source-level errors, and guest foundation status in one place.
+- Done: `/sync` now shows a compact guest foundation run history next to товарные `syncJobs`: recent runs by source, period, counts, endpoint errors, and failure reason.
 - Done: `/sync` guest diagnostics now expose endpoint error details, not only counts and endpoint names, so unavailable or parameter-sensitive Langame endpoints such as `guests/logs` can be triaged from the UI.
 - Done: `guests/logs` is now treated as an optional extended endpoint and is not called by the standard guest foundation sync unless explicitly requested, because the public docs do not confirm period/pagination filters for it.
 - Done: guest current-day analytics now counts session overlap across date boundaries, fixing zero guests/load for current day when sessions started before midnight.
@@ -225,7 +226,7 @@ Status: MVP 1 read-only guest analytics is live in production. Automatic rewards
 - Current limitation: PC-count parsing is defensive because real `global/*` payload shape may differ by Langame source; production verification should confirm `computerCount` is filled for each club.
 - Planned data foundation: guests, guest groups, balances, bonus balances, sessions, transactions, all operations log, product expenses by guest, clubs, tariffs, shifts, and PC context.
 - Next: connect operation categories to concrete administrator shifts when Langame exposes a reliable operator identifier in operation/cash logs.
-- Next: verify production `/dashboard` current-day load percentage after deploy of the session-overlap calculation.
+- Done: production `/dashboard` current-day load percentage was verified on 2026-05-29: guest summary returned 122.4 play hours, 185 PCs, 4440 possible PC-hours, and 2.8% load instead of `нет данных`.
 - Done: campaign/contact outcome analytics now starts from campaign detail: direct contact attribution, group fallback, before/after windows, visits, sessions, play hours, balance-spend revenue, bar revenue, and attribution limitations.
 - Next: connect campaign contact creation UI to `marketingCampaignId`, then expand conversion from planned contact to completed result by group, CRM task, and responsible user.
 - Planned analytics: RFM, retention, churn risk, heatmaps, LTV, bonus load, campaign effect, and guest-flow forecasts.

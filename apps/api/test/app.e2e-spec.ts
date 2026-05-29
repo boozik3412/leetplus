@@ -20,6 +20,7 @@ import { ProductCsvImportService } from '../src/imports/product-csv-import.servi
 import { PrismaService } from '../src/prisma/prisma.service';
 import { ProductsModule } from '../src/products/products.module';
 import { ProductsService } from '../src/products/products.service';
+import { ReportsDigestService } from '../src/reports/reports-digest.service';
 import { ReportsEmailService } from '../src/reports/reports-email.service';
 import { ReportsExportService } from '../src/reports/reports-export.service';
 import { ReportsModule } from '../src/reports/reports.module';
@@ -58,6 +59,11 @@ describe('API routes (e2e)', () => {
 
   const reportsEmailService = {
     sendReport: jest.fn(),
+  };
+
+  const reportsDigestService = {
+    sendDigest: jest.fn(),
+    sendScheduledDigests: jest.fn(),
   };
 
   const productCsvImportService = {
@@ -125,6 +131,8 @@ describe('API routes (e2e)', () => {
       .useValue(reportsExportService)
       .overrideProvider(ReportsEmailService)
       .useValue(reportsEmailService)
+      .overrideProvider(ReportsDigestService)
+      .useValue(reportsDigestService)
       .overrideProvider(ProductCsvImportService)
       .useValue(productCsvImportService)
       .overrideProvider(FactCsvImportService)
@@ -606,6 +614,51 @@ describe('API routes (e2e)', () => {
         ok: true,
         recipientEmail: 'owner@club-a.leetplus.ru',
         fileName: 'leetplus-reports-2026-04-01-2026-04-30.xlsx',
+      });
+  });
+
+  it('/reports/digests/email (POST)', () => {
+    reportsDigestService.sendDigest.mockResolvedValue({
+      ok: true,
+      type: 'DAILY',
+      recipientEmail: 'owner@club-a.leetplus.ru',
+      from: '2026-05-28',
+      to: '2026-05-28',
+      attachmentFileName: null,
+    });
+
+    return request(app.getHttpServer())
+      .post('/reports/digests/email')
+      .send({ type: 'DAILY' })
+      .expect(201)
+      .expect({
+        ok: true,
+        type: 'DAILY',
+        recipientEmail: 'owner@club-a.leetplus.ru',
+        from: '2026-05-28',
+        to: '2026-05-28',
+        attachmentFileName: null,
+      });
+  });
+
+  it('/reports/digests/scheduled (POST)', () => {
+    reportsDigestService.sendScheduledDigests.mockResolvedValue({
+      ok: true,
+      type: 'WEEKLY',
+      dryRun: true,
+      recipients: 1,
+    });
+
+    return request(app.getHttpServer())
+      .post('/reports/digests/scheduled')
+      .set('x-sync-service-token', 'test-sync-token')
+      .send({ type: 'WEEKLY', dryRun: true })
+      .expect(201)
+      .expect({
+        ok: true,
+        type: 'WEEKLY',
+        dryRun: true,
+        recipients: 1,
       });
   });
 

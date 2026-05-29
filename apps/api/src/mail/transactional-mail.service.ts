@@ -14,6 +14,21 @@ export type ReportEmailContext = {
   attachment: MailAttachment;
 };
 
+export type ReportDigestContext = {
+  type: 'DAILY' | 'WEEKLY';
+  tenantSlug: string;
+  from: string;
+  to: string;
+  headline: string;
+  metrics: {
+    label: string;
+    value: string;
+    delta?: string | null;
+  }[];
+  actions: string[];
+  attachment?: MailAttachment;
+};
+
 @Injectable()
 export class TransactionalMailService {
   constructor(private readonly mailerService: MailerService) {}
@@ -69,4 +84,83 @@ export class TransactionalMailService {
       ],
     });
   }
+
+  async sendReportDigest(to: string, context: ReportDigestContext) {
+    const subjectPrefix =
+      context.type === 'DAILY'
+        ? 'Ежедневный дайджест'
+        : 'Еженедельный коммерческий отчет';
+    const lines = [
+      'Здравствуйте!',
+      '',
+      `${subjectPrefix} LeetPlus по организации ${context.tenantSlug}.`,
+      `Период: ${context.from} - ${context.to}.`,
+      '',
+      context.headline,
+      '',
+      'Ключевые показатели:',
+      ...context.metrics.map((metric) =>
+        [
+          `- ${metric.label}: ${metric.value}`,
+          metric.delta ? ` (${metric.delta})` : '',
+        ].join(''),
+      ),
+      '',
+      'Что сделать:',
+      ...(context.actions.length > 0
+        ? context.actions.map((action) => `- ${action}`)
+        : ['- Критичных действий по текущему периоду нет.']),
+      '',
+      'Письмо сформировано автоматически.',
+    ];
+    const htmlMetrics = context.metrics
+      .map(
+        (metric) =>
+          `<li><b>${escapeHtml(metric.label)}:</b> ${escapeHtml(metric.value)}${
+            metric.delta ? ` <span>${escapeHtml(metric.delta)}</span>` : ''
+          }</li>`,
+      )
+      .join('');
+    const htmlActions = (
+      context.actions.length > 0
+        ? context.actions
+        : ['Критичных действий по текущему периоду нет.']
+    )
+      .map((action) => `<li>${escapeHtml(action)}</li>`)
+      .join('');
+
+    await this.mailerService.sendMail({
+      to,
+      subject: `${subjectPrefix} LeetPlus ${context.from} - ${context.to}`,
+      text: lines.join('\n'),
+      html: [
+        '<p>Здравствуйте!</p>',
+        `<p><b>${escapeHtml(subjectPrefix)} LeetPlus</b> по организации <b>${escapeHtml(context.tenantSlug)}</b>.</p>`,
+        `<p>Период: ${escapeHtml(context.from)} - ${escapeHtml(context.to)}.</p>`,
+        `<p>${escapeHtml(context.headline)}</p>`,
+        '<p><b>Ключевые показатели</b></p>',
+        `<ul>${htmlMetrics}</ul>`,
+        '<p><b>Что сделать</b></p>',
+        `<ul>${htmlActions}</ul>`,
+        '<p>Письмо сформировано автоматически.</p>',
+      ].join(''),
+      attachments: context.attachment
+        ? [
+            {
+              filename: context.attachment.fileName,
+              content: context.attachment.buffer,
+              contentType: context.attachment.contentType,
+            },
+          ]
+        : undefined,
+    });
+  }
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }

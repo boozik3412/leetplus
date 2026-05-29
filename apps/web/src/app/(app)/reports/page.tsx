@@ -11,6 +11,7 @@ import {
 import { AbcReportToggle } from "@/components/abc-report-toggle";
 import { NoSalesPeriodTable } from "@/components/no-sales-period-table";
 import { OosExclusionActions } from "@/components/oos-exclusion-actions";
+import { ReportDigestForm } from "@/components/report-digest-form";
 import { ReportEmailForm } from "@/components/report-email-form";
 import { ReportEmailInlineForm } from "@/components/report-email-inline-form";
 import { ReportLoadingLink } from "@/components/report-loading-link";
@@ -250,6 +251,8 @@ export default async function ReportsPage({
             storeId: operationalReport.storeId,
           })}
         />
+
+        <ReportDigestForm defaultEmail={user.email} />
 
         <section className="mt-6 grid gap-3">
           <ReportDisclosure

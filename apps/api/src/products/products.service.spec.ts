@@ -137,9 +137,21 @@ describe('ProductsService', () => {
 
   it('marks operational active products by current stock or recent sales', async () => {
     prisma.product.findMany.mockResolvedValue([
-      { id: 'stocked-product' },
-      { id: 'recently-sold-product' },
-      { id: 'stale-product' },
+      {
+        id: 'stocked-product',
+        purchasePrice: new Prisma.Decimal(100),
+        salePrice: new Prisma.Decimal(150),
+      },
+      {
+        id: 'recently-sold-product',
+        purchasePrice: new Prisma.Decimal(0),
+        salePrice: new Prisma.Decimal(0),
+      },
+      {
+        id: 'stale-product',
+        purchasePrice: new Prisma.Decimal(80),
+        salePrice: new Prisma.Decimal(120),
+      },
     ]);
     prisma.inventorySnapshot.findMany.mockResolvedValue([
       {
@@ -158,7 +170,12 @@ describe('ProductsService', () => {
       },
     ]);
     prisma.salesFact.findMany.mockResolvedValue([
-      { productId: 'recently-sold-product' },
+      {
+        productId: 'recently-sold-product',
+        quantity: new Prisma.Decimal(2),
+        revenue: new Prisma.Decimal(200),
+        cost: new Prisma.Decimal(120),
+      },
     ]);
 
     const products = await service.findAll();
@@ -233,6 +250,8 @@ describe('ProductsService', () => {
           facing: 2,
           categoryId: 'category-1',
           supplierId: 'supplier-1',
+          assortmentRole: 'OPTIONAL',
+          isMandatory: false,
         },
       }),
     );

@@ -17,12 +17,14 @@ import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { UserRole } from '@prisma/client';
 import { ReportsEmailService } from './reports-email.service';
+import { ReportsDigestService } from './reports-digest.service';
 import {
   ReportsExportService,
   type ReportExportQuery,
 } from './reports-export.service';
 import type {
   SendReportEmailDto,
+  SendReportDigestEmailDto,
   UpdateRecommendationStateDto,
 } from './reports.dto';
 import {
@@ -52,6 +54,7 @@ export class ReportsController {
     private readonly reportsService: ReportsService,
     private readonly reportsExportService: ReportsExportService,
     private readonly reportsEmailService: ReportsEmailService,
+    private readonly reportsDigestService: ReportsDigestService,
   ) {}
 
   @Get('assortment')
@@ -193,5 +196,13 @@ export class ReportsController {
     @Body() dto: SendReportEmailDto,
   ) {
     return this.reportsEmailService.sendReport(user, dto);
+  }
+
+  @Post('digests/email')
+  sendReportDigestEmail(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: SendReportDigestEmailDto,
+  ) {
+    return this.reportsDigestService.sendDigest(user, dto);
   }
 }

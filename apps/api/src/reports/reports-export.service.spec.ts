@@ -328,7 +328,9 @@ describe('ReportsExportService', () => {
     expect(content).toContain('Общий отчет по продажам');
     expect(content).toContain('2026-04-10T12:00:00.000Z;Club A;');
     expect(content).toContain('Рекомендации');
-    expect(content).toContain('Низкий;Низкая маржинальность;DRK-001;Cola');
+    expect(content).toContain(
+      'Низкий;Новая;Коммерческий директор;Низкая маржинальность;DRK-001;Cola',
+    );
     expect(content).toContain('ABC по выручке');
     expect(content).toContain('ТОП SKU по выручке');
     expect(content).toContain('Остатки и потребность');

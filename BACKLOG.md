@@ -154,9 +154,14 @@ Status: implemented; remains in production verification and workflow UX polish m
 
 ## Stage 5. Regular Digests
 
-- Daily email digest for network-level money, margin, OOS, write-offs, no-sales SKU, and required actions.
-- Weekly commercial report for owner/director with dynamics and problem zones.
-- Later add Telegram/MAX alerts for critical events.
+Status: started; manual email sending and service endpoint are implemented, VDS schedule setup remains separate.
+
+- Done: added daily email digest for network-level money, margin, OOS, write-offs, no-sales SKU, and required actions from recommendations.
+- Done: added weekly commercial email report with comparison to the previous 7-day period and XLSX report attachment.
+- Done: added `/reports` UI block for sending the daily digest or weekly report to an email recipient.
+- Done: added protected service endpoint `POST /reports/digests/scheduled` for future VDS timer calls through `SYNC_SERVICE_TOKEN`.
+- Next: agree and configure VDS schedule for daily and weekly automatic delivery.
+- Later add Telegram/MAX alerts for critical events after channel/legal setup.
 
 ## Stage 6. Product Commercialization
 

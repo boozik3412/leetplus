@@ -42,6 +42,7 @@ const navGroups: NavGroup[] = [
     title: "Персонал",
     icon: "staff",
     items: [
+      { href: "/staff/tasks", label: "Задачи персонала" },
       { href: "/guests/staff-control", label: "Контроль персонала" },
       { href: "/guests/staff-control/operators", label: "Администраторы" },
     ],
@@ -404,7 +405,9 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
       items: group.items.filter((item) => canAccessPath(user, item.href)),
     }))
     .filter((group) => group.items.length > 0);
-  const currentProductArea = pathname.startsWith("/guests/staff-control")
+  const isStaffArea =
+    pathname.startsWith("/staff") || pathname.startsWith("/guests/staff-control");
+  const currentProductArea = isStaffArea
     ? "Персонал"
     : pathname.startsWith("/marketing")
     ? "Маркетинг"

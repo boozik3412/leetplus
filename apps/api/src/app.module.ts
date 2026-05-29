@@ -13,6 +13,7 @@ import { MarketingModule } from './marketing/marketing.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProductsModule } from './products/products.module';
 import { ReportsModule } from './reports/reports.module';
+import { StaffModule } from './staff/staff.module';
 import { StoresModule } from './stores/stores.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 import { TenancyModule } from './tenancy/tenancy.module';
@@ -37,6 +38,7 @@ import { UtilitiesModule } from './utilities/utilities.module';
     DashboardModule,
     GuestsModule,
     MarketingModule,
+    StaffModule,
     UtilitiesModule,
   ],
   controllers: [AppController],

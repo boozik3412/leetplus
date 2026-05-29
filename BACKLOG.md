@@ -250,7 +250,7 @@ Status: MVP 1 read-only guest analytics is live in production. Automatic rewards
 
 ## Stage 8. Staff Operations Module
 
-Status: planned. This is a new operational module for employees of computer club networks: regulations, shift checklists, training, knowledge base, and task control.
+Status: started. This is a new operational module for employees of computer club networks: regulations, shift checklists, training, knowledge base, and task control. MVP 1 starts from an operational task queue for clubs, shifts, and responsible employees.
 
 ### Product Positioning
 
@@ -302,6 +302,8 @@ Conclusion for LeetPlus: combine Service Inspector-style operational proof with 
 
 Goal: let managers create short-term and long-term tasks for shifts, periods, clubs, roles, or specific employees.
 
+- Done: created `STAFF_OPERATIONS_MODULE_TZ.md` with roles, scenarios, data model, permissions, MVP scope, acceptance criteria, and data rules.
+- Done: first staff-task foundation added: tenant-scoped `StaffTask` model, migration, API for list/create/status update, `/staff/tasks` workspace, and `Персонал -> Задачи персонала` navigation entry.
 - Create staff directory and role model independent from guest analytics, while reusing current staff identity mapping where useful.
 - Support employee-to-Langame mapping from `working_shifts.user_id` and future operator identifiers.
 - Add task types: one-time, shift, recurring, long-term, personal, club, role.
@@ -311,6 +313,7 @@ Goal: let managers create short-term and long-term tasks for shifts, periods, cl
 - Add templates for common club operations.
 - Add basic task list views: today, overdue, my tasks, by club, by employee, by shift, by status.
 - Add audit history for every task.
+- Next: add task comments, attachments/evidence, audit events, and task templates before moving into full checklist runs.
 
 Acceptance criteria:
 
@@ -406,11 +409,11 @@ Acceptance criteria:
 
 ### Recommended Technical Sequence
 
-1. Create `STAFF_OPERATIONS_MODULE_TZ.md` with roles, scenarios, data model, permissions, MVP scope, and acceptance criteria.
+1. Done: create `STAFF_OPERATIONS_MODULE_TZ.md` with roles, scenarios, data model, permissions, MVP scope, and acceptance criteria.
 2. Extract staff identity into a reusable staff domain that can serve both `/guests/staff-control` and the new operations module.
-3. Add database schema for tasks, task templates, task comments, attachments, audit events, and staff assignments.
-4. Implement backend CRUD and list APIs for tasks with tenant/store/staff access control.
-5. Implement `/staff/tasks` or `/operations/tasks` UI for manager and administrator workflows.
+3. Started: add database schema for tasks, task templates, task comments, attachments, audit events, and staff assignments. First `StaffTask` model is in place; templates/comments/attachments/audit events remain next.
+4. Started: implement backend CRUD and list APIs for tasks with tenant/store/staff access control. First list/create/status update API is in place.
+5. Started: implement `/staff/tasks` or `/operations/tasks` UI for manager and administrator workflows. First `/staff/tasks` workspace is in place.
 6. Add checklist templates and checklist runs.
 7. Add regulation documents, versions, acknowledgements, and role/club targeting.
 8. Add training materials, courses, tests, and attestation reports.

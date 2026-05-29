@@ -1,0 +1,635 @@
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import type { AuthenticatedUser } from '../auth/auth.types';
+import { PrismaService } from '../prisma/prisma.service';
+import { TenantContextService } from '../tenancy/tenant-context.service';
+
+const taskStatuses = [
+  'OPEN',
+  'IN_PROGRESS',
+  'ON_REVIEW',
+  'DONE',
+  'CANCELED',
+] as const;
+
+const taskFilterStatuses = ['all', 'OVERDUE', ...taskStatuses] as const;
+const taskTypes = [
+  'ONE_TIME',
+  'SHIFT',
+  'RECURRING',
+  'LONG_TERM',
+  'PERSONAL',
+  'CLUB',
+  'ROLE',
+] as const;
+const taskPriorities = ['LOW', 'NORMAL', 'HIGH', 'URGENT'] as const;
+const taskSortKeys = [
+  'dueAt',
+  'createdAt',
+  'updatedAt',
+  'status',
+  'priority',
+] as const;
+
+export type StaffTaskStatus = (typeof taskStatuses)[number];
+export type StaffTaskFilterStatus = (typeof taskFilterStatuses)[number];
+export type StaffTaskType = (typeof taskTypes)[number];
+export type StaffTaskPriority = (typeof taskPriorities)[number];
+export type StaffTaskSortKey = (typeof taskSortKeys)[number];
+
+export type StaffTasksQuery = {
+  status?: StaffTaskFilterStatus;
+  type?: StaffTaskType | 'all';
+  priority?: StaffTaskPriority | 'all';
+  storeId?: string;
+  assignedToUserId?: string;
+  search?: string;
+  dueFrom?: string;
+  dueTo?: string;
+  sort?: StaffTaskSortKey;
+  direction?: 'asc' | 'desc';
+  pageSize?: string;
+};
+
+export type StaffTaskDto = {
+  title?: string;
+  description?: string | null;
+  type?: StaffTaskType;
+  status?: StaffTaskStatus;
+  priority?: StaffTaskPriority;
+  dueAt?: string | null;
+  storeId?: string | null;
+  shiftId?: string | null;
+  assignedToUserId?: string | null;
+  labels?: unknown;
+  checklist?: unknown;
+};
+
+export type StaffTaskReport = {
+  filters: {
+    status: StaffTaskFilterStatus;
+    type: StaffTaskType | 'all';
+    priority: StaffTaskPriority | 'all';
+    storeId: string | null;
+    assignedToUserId: string | null;
+    search: string | null;
+    dueFrom: string | null;
+    dueTo: string | null;
+    sort: StaffTaskSortKey;
+    direction: 'asc' | 'desc';
+    pageSize: number;
+  };
+  summary: {
+    total: number;
+    open: number;
+    inProgress: number;
+    onReview: number;
+    done: number;
+    overdue: number;
+    canceled: number;
+  };
+  rows: StaffTaskResponse[];
+  users: Array<{ id: string; email: string; fullName: string | null }>;
+  stores: Array<{ id: string; name: string; isActive: boolean }>;
+};
+
+export type StaffTaskResponse = {
+  id: string;
+  title: string;
+  description: string | null;
+  type: StaffTaskType;
+  status: StaffTaskStatus;
+  priority: StaffTaskPriority;
+  dueAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  isOverdue: boolean;
+  store: { id: string; name: string; isActive: boolean } | null;
+  shift: {
+    id: string;
+    externalShiftId: string;
+    startedAt: string | null;
+    stoppedAt: string | null;
+    store: { id: string; name: string } | null;
+  } | null;
+  createdByUser: { id: string; email: string; fullName: string | null } | null;
+  assignedToUser: { id: string; email: string; fullName: string | null } | null;
+  labels: Prisma.JsonValue | null;
+  checklist: Prisma.JsonValue | null;
+};
+
+const taskInclude = {
+  store: { select: { id: true, name: true, isActive: true } },
+  shift: {
+    select: {
+      id: true,
+      externalShiftId: true,
+      startedAt: true,
+      stoppedAt: true,
+      store: { select: { id: true, name: true } },
+    },
+  },
+  createdByUser: { select: { id: true, email: true, fullName: true } },
+  assignedToUser: { select: { id: true, email: true, fullName: true } },
+} satisfies Prisma.StaffTaskInclude;
+
+type StaffTaskRow = Prisma.StaffTaskGetPayload<{ include: typeof taskInclude }>;
+
+@Injectable()
+export class StaffTasksService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly tenantContextService: TenantContextService,
+  ) {}
+
+  async getTasks(
+    user: AuthenticatedUser,
+    query: StaffTasksQuery = {},
+  ): Promise<StaffTaskReport> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const filters = this.resolveFilters(query);
+    const baseWhere = this.buildWhere(tenantId, filters, false);
+    const rowsWhere = this.buildWhere(tenantId, filters, true);
+
+    const [rows, summaryRows, users, stores] = await Promise.all([
+      this.prisma.staffTask.findMany({
+        where: rowsWhere,
+        include: taskInclude,
+        orderBy: this.buildOrderBy(filters),
+        take: filters.pageSize,
+      }),
+      this.prisma.staffTask.findMany({
+        where: baseWhere,
+        select: { status: true, dueAt: true },
+        take: 2000,
+      }),
+      this.prisma.user.findMany({
+        where: { tenantId },
+        select: { id: true, email: true, fullName: true },
+        orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
+      }),
+      this.prisma.store.findMany({
+        where: { tenantId },
+        select: { id: true, name: true, isActive: true },
+        orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+      }),
+    ]);
+
+    return {
+      filters,
+      summary: this.buildSummary(summaryRows),
+      rows: rows.map((task) => this.toTaskResponse(task)),
+      users,
+      stores,
+    };
+  }
+
+  async createTask(user: AuthenticatedUser, dto: StaffTaskDto) {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const data = await this.normalizeTaskData(tenantId, dto, {
+      requireTitle: true,
+    });
+    const status = (data.status as StaffTaskStatus | undefined) ?? 'OPEN';
+
+    const task = await this.prisma.staffTask.create({
+      data: {
+        ...(data as Prisma.StaffTaskUncheckedCreateInput),
+        tenantId,
+        status,
+        createdByUserId: user.id,
+        completedAt: status === 'DONE' ? new Date() : null,
+      },
+      include: taskInclude,
+    });
+
+    return this.toTaskResponse(task);
+  }
+
+  async updateTask(user: AuthenticatedUser, id: string, dto: StaffTaskDto) {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const current = await this.prisma.staffTask.findFirst({
+      where: { id, tenantId },
+      select: { id: true, status: true },
+    });
+
+    if (!current) {
+      throw new NotFoundException('Staff task not found');
+    }
+
+    const data = await this.normalizeTaskData(tenantId, dto, {
+      requireTitle: false,
+    });
+    const nextStatus = data.status ?? current.status;
+
+    const task = await this.prisma.staffTask.update({
+      where: { id: current.id },
+      data: {
+        ...data,
+        completedAt:
+          data.status === undefined
+            ? undefined
+            : nextStatus === 'DONE'
+              ? new Date()
+              : null,
+      },
+      include: taskInclude,
+    });
+
+    return this.toTaskResponse(task);
+  }
+
+  private resolveFilters(query: StaffTasksQuery): StaffTaskReport['filters'] {
+    const status = this.resolveOne(query.status, taskFilterStatuses, 'all');
+    const type = this.resolveOne(
+      query.type,
+      ['all', ...taskTypes] as const,
+      'all',
+    );
+    const priority = this.resolveOne(
+      query.priority,
+      ['all', ...taskPriorities] as const,
+      'all',
+    );
+    const sort = this.resolveOne(query.sort, taskSortKeys, 'dueAt');
+    const direction = query.direction === 'desc' ? 'desc' : 'asc';
+    const pageSize = Math.min(
+      Math.max(Number.parseInt(query.pageSize ?? '200', 10) || 200, 20),
+      500,
+    );
+
+    return {
+      status,
+      type,
+      priority,
+      storeId: this.normalizeOptionalString(query.storeId),
+      assignedToUserId: this.normalizeOptionalString(query.assignedToUserId),
+      search: this.normalizeOptionalString(query.search),
+      dueFrom: this.normalizeDateString(query.dueFrom),
+      dueTo: this.normalizeDateString(query.dueTo),
+      sort,
+      direction,
+      pageSize,
+    };
+  }
+
+  private buildWhere(
+    tenantId: string,
+    filters: StaffTaskReport['filters'],
+    includeStatus: boolean,
+  ): Prisma.StaffTaskWhereInput {
+    const where: Prisma.StaffTaskWhereInput = { tenantId };
+
+    if (includeStatus && filters.status !== 'all') {
+      if (filters.status === 'OVERDUE') {
+        where.status = { notIn: ['DONE', 'CANCELED'] };
+        where.dueAt = { lt: new Date() };
+      } else {
+        where.status = filters.status;
+      }
+    }
+
+    if (filters.type !== 'all') {
+      where.type = filters.type;
+    }
+
+    if (filters.priority !== 'all') {
+      where.priority = filters.priority;
+    }
+
+    if (filters.storeId) {
+      where.storeId = filters.storeId;
+    }
+
+    if (filters.assignedToUserId) {
+      where.assignedToUserId = filters.assignedToUserId;
+    }
+
+    if (filters.search) {
+      where.OR = [
+        { title: { contains: filters.search, mode: 'insensitive' } },
+        { description: { contains: filters.search, mode: 'insensitive' } },
+      ];
+    }
+
+    if (filters.dueFrom || filters.dueTo) {
+      where.dueAt = {
+        ...(filters.dueFrom
+          ? { gte: new Date(`${filters.dueFrom}T00:00:00.000Z`) }
+          : {}),
+        ...(filters.dueTo
+          ? { lte: new Date(`${filters.dueTo}T23:59:59.999Z`) }
+          : {}),
+      };
+    }
+
+    return where;
+  }
+
+  private buildOrderBy(
+    filters: StaffTaskReport['filters'],
+  ): Prisma.StaffTaskOrderByWithRelationInput[] {
+    const direction = filters.direction;
+
+    if (filters.sort === 'status') {
+      return [{ status: direction }, { dueAt: 'asc' }, { createdAt: 'desc' }];
+    }
+
+    if (filters.sort === 'priority') {
+      return [{ priority: direction }, { dueAt: 'asc' }, { createdAt: 'desc' }];
+    }
+
+    if (filters.sort === 'createdAt') {
+      return [{ createdAt: direction }];
+    }
+
+    if (filters.sort === 'updatedAt') {
+      return [{ updatedAt: direction }];
+    }
+
+    return [{ dueAt: direction }, { createdAt: 'desc' }];
+  }
+
+  private buildSummary(
+    rows: Array<{ status: string; dueAt: Date | null }>,
+  ): StaffTaskReport['summary'] {
+    const now = new Date();
+    const summary = {
+      total: rows.length,
+      open: 0,
+      inProgress: 0,
+      onReview: 0,
+      done: 0,
+      overdue: 0,
+      canceled: 0,
+    };
+
+    rows.forEach((row) => {
+      if (row.status === 'OPEN') {
+        summary.open += 1;
+      } else if (row.status === 'IN_PROGRESS') {
+        summary.inProgress += 1;
+      } else if (row.status === 'ON_REVIEW') {
+        summary.onReview += 1;
+      } else if (row.status === 'DONE') {
+        summary.done += 1;
+      } else if (row.status === 'CANCELED') {
+        summary.canceled += 1;
+      }
+
+      if (
+        row.dueAt &&
+        row.dueAt < now &&
+        row.status !== 'DONE' &&
+        row.status !== 'CANCELED'
+      ) {
+        summary.overdue += 1;
+      }
+    });
+
+    return summary;
+  }
+
+  private async normalizeTaskData(
+    tenantId: string,
+    dto: StaffTaskDto,
+    options: { requireTitle: boolean },
+  ): Promise<Prisma.StaffTaskUncheckedUpdateInput> {
+    const data: Prisma.StaffTaskUncheckedUpdateInput = {};
+
+    if (dto.title !== undefined || options.requireTitle) {
+      data.title = this.normalizeRequiredString(
+        dto.title,
+        'Task title is required',
+      );
+    }
+
+    if (dto.description !== undefined) {
+      data.description = this.normalizeOptionalString(dto.description);
+    }
+
+    if (dto.type !== undefined) {
+      data.type = this.resolveOne(dto.type, taskTypes, 'ONE_TIME');
+    }
+
+    if (dto.status !== undefined) {
+      data.status = this.resolveOne(dto.status, taskStatuses, 'OPEN');
+    }
+
+    if (dto.priority !== undefined) {
+      data.priority = this.resolveOne(dto.priority, taskPriorities, 'NORMAL');
+    }
+
+    if (dto.dueAt !== undefined) {
+      data.dueAt = this.normalizeDateTime(dto.dueAt);
+    }
+
+    if (dto.storeId !== undefined) {
+      data.storeId = await this.resolveStoreId(tenantId, dto.storeId);
+    }
+
+    if (dto.shiftId !== undefined) {
+      data.shiftId = await this.resolveShiftId(tenantId, dto.shiftId);
+    }
+
+    if (dto.assignedToUserId !== undefined) {
+      data.assignedToUserId = await this.resolveUserId(
+        tenantId,
+        dto.assignedToUserId,
+      );
+    }
+
+    if (dto.labels !== undefined) {
+      data.labels = this.normalizeJson(dto.labels);
+    }
+
+    if (dto.checklist !== undefined) {
+      data.checklist = this.normalizeJson(dto.checklist);
+    }
+
+    return data;
+  }
+
+  private toTaskResponse(task: StaffTaskRow): StaffTaskResponse {
+    const now = new Date();
+    const isOverdue =
+      Boolean(task.dueAt) &&
+      task.dueAt! < now &&
+      task.status !== 'DONE' &&
+      task.status !== 'CANCELED';
+
+    return {
+      id: task.id,
+      title: task.title,
+      description: task.description,
+      type: task.type as StaffTaskType,
+      status: task.status as StaffTaskStatus,
+      priority: task.priority as StaffTaskPriority,
+      dueAt: task.dueAt?.toISOString() ?? null,
+      completedAt: task.completedAt?.toISOString() ?? null,
+      createdAt: task.createdAt.toISOString(),
+      updatedAt: task.updatedAt.toISOString(),
+      isOverdue,
+      store: task.store,
+      shift: task.shift
+        ? {
+            id: task.shift.id,
+            externalShiftId: task.shift.externalShiftId,
+            startedAt: task.shift.startedAt?.toISOString() ?? null,
+            stoppedAt: task.shift.stoppedAt?.toISOString() ?? null,
+            store: task.shift.store,
+          }
+        : null,
+      createdByUser: task.createdByUser,
+      assignedToUser: task.assignedToUser,
+      labels: task.labels,
+      checklist: task.checklist,
+    };
+  }
+
+  private resolveOne<T extends readonly string[]>(
+    value: string | null | undefined,
+    allowed: T,
+    fallback: T[number],
+  ): T[number] {
+    if (!value) {
+      return fallback;
+    }
+
+    if (allowed.includes(value)) {
+      return value;
+    }
+
+    throw new BadRequestException(`Unsupported value: ${value}`);
+  }
+
+  private normalizeRequiredString(value: string | undefined, message: string) {
+    const normalized = value?.trim();
+
+    if (!normalized) {
+      throw new BadRequestException(message);
+    }
+
+    return normalized;
+  }
+
+  private normalizeOptionalString(value: unknown) {
+    if (value === null || value === undefined) {
+      return null;
+    }
+
+    if (typeof value !== 'string') {
+      return null;
+    }
+
+    return value.trim() || null;
+  }
+
+  private normalizeDateString(value: string | undefined) {
+    const normalized = this.normalizeOptionalString(value);
+
+    if (!normalized) {
+      return null;
+    }
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+      throw new BadRequestException('Date must use YYYY-MM-DD format');
+    }
+
+    return normalized;
+  }
+
+  private normalizeDateTime(value: string | null | undefined) {
+    const normalized = this.normalizeOptionalString(value);
+
+    if (!normalized) {
+      return null;
+    }
+
+    const date = new Date(normalized);
+
+    if (Number.isNaN(date.getTime())) {
+      throw new BadRequestException('Invalid due date');
+    }
+
+    return date;
+  }
+
+  private normalizeJson(value: unknown) {
+    if (value === null || value === undefined || value === '') {
+      return Prisma.DbNull;
+    }
+
+    return value as Prisma.InputJsonValue;
+  }
+
+  private async resolveStoreId(
+    tenantId: string,
+    value: string | null | undefined,
+  ) {
+    const id = this.normalizeOptionalString(value);
+
+    if (!id) {
+      return null;
+    }
+
+    const store = await this.prisma.store.findFirst({
+      where: { id, tenantId },
+      select: { id: true },
+    });
+
+    if (!store) {
+      throw new BadRequestException('Store not found');
+    }
+
+    return store.id;
+  }
+
+  private async resolveShiftId(
+    tenantId: string,
+    value: string | null | undefined,
+  ) {
+    const id = this.normalizeOptionalString(value);
+
+    if (!id) {
+      return null;
+    }
+
+    const shift = await this.prisma.guestWorkingShift.findFirst({
+      where: { id, tenantId },
+      select: { id: true },
+    });
+
+    if (!shift) {
+      throw new BadRequestException('Shift not found');
+    }
+
+    return shift.id;
+  }
+
+  private async resolveUserId(
+    tenantId: string,
+    value: string | null | undefined,
+  ) {
+    const id = this.normalizeOptionalString(value);
+
+    if (!id) {
+      return null;
+    }
+
+    const user = await this.prisma.user.findFirst({
+      where: { id, tenantId },
+      select: { id: true },
+    });
+
+    if (!user) {
+      throw new BadRequestException('Assigned user not found');
+    }
+
+    return user.id;
+  }
+}

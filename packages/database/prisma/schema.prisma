@@ -143,6 +143,7 @@ model Tenant {
   recommendationStates       RecommendationState[]
   reportDigestScheduleRuns   ReportDigestScheduleRun[]
   guestStaffIdentityMappings GuestStaffIdentityMapping[]
+  staffTasks                 StaffTask[]
   guestSavedFilters          GuestSavedFilter[]
   guestAudiences             GuestAudience[]
   guestAudienceMembers       GuestAudienceMember[]
@@ -174,6 +175,8 @@ model User {
   createdMarketingPromoBundleLaunches MarketingPromoBundleLaunch[] @relation("MarketingPromoBundleLaunchCreatedBy")
   createdMarketingPromoBundleUsages MarketingPromoBundleUsage[] @relation("MarketingPromoBundleUsageCreatedBy")
   guestStaffIdentityMappings GuestStaffIdentityMapping[]
+  createdStaffTasks       StaffTask[] @relation("StaffTaskCreatedBy")
+  assignedStaffTasks      StaffTask[] @relation("StaffTaskAssignedTo")
   guestSavedFilters          GuestSavedFilter[]
   guestAudiences             GuestAudience[]
 
@@ -241,6 +244,7 @@ model Store {
   inventorySnapshots InventorySnapshot[]
   stockMovements     StockMovement[]
   marketingPromoBundleUsages MarketingPromoBundleUsage[]
+  staffTasks         StaffTask[]
 
   @@unique([tenantId, externalProvider, externalDomain, externalClubId])
   @@index([tenantId])
@@ -1147,6 +1151,7 @@ model GuestWorkingShift {
   tenant Tenant @relation(fields: [tenantId], references: [id])
   guest  Guest? @relation(fields: [guestId], references: [id], onDelete: SetNull)
   store  Store? @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  staffTasks StaffTask[]
 
   @@unique([tenantId, externalProvider, externalDomain, externalShiftId])
   @@index([tenantId, startedAt])
@@ -1175,6 +1180,39 @@ model GuestStaffIdentityMapping {
   @@index([tenantId], map: "guest_staff_identity_mapping_tenant_idx")
   @@index([guestId], map: "guest_staff_identity_mapping_guest_idx")
   @@index([createdByUserId], map: "guest_staff_identity_mapping_user_idx")
+}
+
+model StaffTask {
+  id               String    @id @default(uuid())
+  tenantId         String
+  storeId          String?
+  shiftId          String?
+  createdByUserId  String?
+  assignedToUserId String?
+  title            String
+  description      String?
+  type             String    @default("ONE_TIME")
+  status           String    @default("OPEN")
+  priority         String    @default("NORMAL")
+  dueAt            DateTime?
+  completedAt      DateTime?
+  labels           Json?
+  checklist        Json?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  tenant         Tenant             @relation(fields: [tenantId], references: [id])
+  store          Store?             @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  shift          GuestWorkingShift? @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  createdByUser  User?              @relation("StaffTaskCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  assignedToUser User?              @relation("StaffTaskAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status, dueAt], map: "staff_task_status_due_idx")
+  @@index([tenantId, createdAt], map: "staff_task_created_idx")
+  @@index([storeId], map: "staff_task_store_idx")
+  @@index([shiftId], map: "staff_task_shift_idx")
+  @@index([createdByUserId], map: "staff_task_created_by_idx")
+  @@index([assignedToUserId], map: "staff_task_assigned_to_idx")
 }
 
 model GuestSavedFilter {

@@ -1,0 +1,225 @@
+"use client";
+
+import { useRouter } from "next/navigation";
+import { useState, type FormEvent } from "react";
+import type {
+  StaffTaskPriority,
+  StaffTaskStore,
+  StaffTaskType,
+  StaffTaskUser,
+} from "@/lib/staff-tasks";
+
+const taskTypes: Array<{ value: StaffTaskType; label: string }> = [
+  { value: "ONE_TIME", label: "Разовая" },
+  { value: "SHIFT", label: "На смену" },
+  { value: "RECURRING", label: "Повторяемая" },
+  { value: "LONG_TERM", label: "Долгосрочная" },
+  { value: "PERSONAL", label: "Личная" },
+  { value: "CLUB", label: "Для клуба" },
+  { value: "ROLE", label: "Для роли" },
+];
+
+const priorities: Array<{ value: StaffTaskPriority; label: string }> = [
+  { value: "LOW", label: "Низкий" },
+  { value: "NORMAL", label: "Обычный" },
+  { value: "HIGH", label: "Высокий" },
+  { value: "URGENT", label: "Срочно" },
+];
+
+type StaffTaskCreateFormProps = {
+  users: StaffTaskUser[];
+  stores: StaffTaskStore[];
+};
+
+export function StaffTaskCreateForm({
+  users,
+  stores,
+}: StaffTaskCreateFormProps) {
+  const router = useRouter();
+  const [isPending, setIsPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const title = String(form.get("title") ?? "").trim();
+
+    if (!title) {
+      setError("Укажите название задачи.");
+      return;
+    }
+
+    setIsPending(true);
+    setError(null);
+
+    const dueAt = String(form.get("dueAt") ?? "").trim();
+    const payload = {
+      title,
+      description: String(form.get("description") ?? "").trim() || null,
+      type: form.get("type"),
+      priority: form.get("priority"),
+      dueAt: dueAt ? new Date(dueAt).toISOString() : null,
+      storeId: String(form.get("storeId") ?? "").trim() || null,
+      assignedToUserId:
+        String(form.get("assignedToUserId") ?? "").trim() || null,
+    };
+
+    try {
+      const response = await fetch("/api/staff/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as {
+          message?: string;
+        } | null;
+        throw new Error(data?.message ?? "Не удалось создать задачу");
+      }
+
+      event.currentTarget.reset();
+      router.refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Ошибка запроса");
+    } finally {
+      setIsPending(false);
+    }
+  }
+
+  return (
+    <form
+      onSubmit={submit}
+      className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
+    >
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+            Быстрое создание
+          </p>
+          <h2 className="mt-1 text-lg font-semibold">Новая задача персоналу</h2>
+        </div>
+        <button
+          type="submit"
+          disabled={isPending}
+          className="inline-flex h-10 items-center justify-center rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isPending ? "Сохраняем..." : "Создать задачу"}
+        </button>
+      </div>
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-[1.4fr_1fr_1fr]">
+        <label className="space-y-1">
+          <span className="text-xs font-bold uppercase text-zinc-500">
+            Что сделать
+          </span>
+          <input
+            name="title"
+            required
+            placeholder="Например: проверить кассу вечерней смены"
+            className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+          />
+        </label>
+
+        <label className="space-y-1">
+          <span className="text-xs font-bold uppercase text-zinc-500">
+            Ответственный
+          </span>
+          <select
+            name="assignedToUserId"
+            className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+          >
+            <option value="">Не назначен</option>
+            {users.map((user) => (
+              <option key={user.id} value={user.id}>
+                {user.fullName ?? user.email}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="space-y-1">
+          <span className="text-xs font-bold uppercase text-zinc-500">
+            Дедлайн
+          </span>
+          <input
+            name="dueAt"
+            type="datetime-local"
+            className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+          />
+        </label>
+      </div>
+
+      <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_1fr_1fr]">
+        <label className="space-y-1">
+          <span className="text-xs font-bold uppercase text-zinc-500">
+            Клуб
+          </span>
+          <select
+            name="storeId"
+            className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+          >
+            <option value="">Вся сеть</option>
+            {stores.map((store) => (
+              <option key={store.id} value={store.id}>
+                {store.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="space-y-1">
+          <span className="text-xs font-bold uppercase text-zinc-500">
+            Тип
+          </span>
+          <select
+            name="type"
+            defaultValue="SHIFT"
+            className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+          >
+            {taskTypes.map((type) => (
+              <option key={type.value} value={type.value}>
+                {type.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="space-y-1">
+          <span className="text-xs font-bold uppercase text-zinc-500">
+            Приоритет
+          </span>
+          <select
+            name="priority"
+            defaultValue="NORMAL"
+            className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+          >
+            {priorities.map((priority) => (
+              <option key={priority.value} value={priority.value}>
+                {priority.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <label className="mt-3 block space-y-1">
+        <span className="text-xs font-bold uppercase text-zinc-500">
+          Комментарий
+        </span>
+        <textarea
+          name="description"
+          rows={3}
+          placeholder="Что нужно проверить, какой результат приложить, на что обратить внимание."
+          className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+        />
+      </label>
+
+      {error ? (
+        <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
+          {error}
+        </p>
+      ) : null}
+    </form>
+  );
+}

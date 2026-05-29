@@ -1,0 +1,132 @@
+import { getApiUrl, getAuthHeaders } from "./api";
+
+export type StaffTaskStatus =
+  | "OPEN"
+  | "IN_PROGRESS"
+  | "ON_REVIEW"
+  | "DONE"
+  | "CANCELED";
+
+export type StaffTaskFilterStatus = StaffTaskStatus | "OVERDUE" | "all";
+
+export type StaffTaskType =
+  | "ONE_TIME"
+  | "SHIFT"
+  | "RECURRING"
+  | "LONG_TERM"
+  | "PERSONAL"
+  | "CLUB"
+  | "ROLE";
+
+export type StaffTaskPriority = "LOW" | "NORMAL" | "HIGH" | "URGENT";
+export type StaffTaskSortKey =
+  | "dueAt"
+  | "createdAt"
+  | "updatedAt"
+  | "status"
+  | "priority";
+
+export type StaffTaskUser = {
+  id: string;
+  email: string;
+  fullName: string | null;
+};
+
+export type StaffTaskStore = {
+  id: string;
+  name: string;
+  isActive: boolean;
+};
+
+export type StaffTask = {
+  id: string;
+  title: string;
+  description: string | null;
+  type: StaffTaskType;
+  status: StaffTaskStatus;
+  priority: StaffTaskPriority;
+  dueAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  isOverdue: boolean;
+  store: StaffTaskStore | null;
+  shift: {
+    id: string;
+    externalShiftId: string;
+    startedAt: string | null;
+    stoppedAt: string | null;
+    store: { id: string; name: string } | null;
+  } | null;
+  createdByUser: StaffTaskUser | null;
+  assignedToUser: StaffTaskUser | null;
+  labels: unknown;
+  checklist: unknown;
+};
+
+export type StaffTaskFilters = {
+  status?: StaffTaskFilterStatus;
+  type?: StaffTaskType | "all";
+  priority?: StaffTaskPriority | "all";
+  storeId?: string;
+  assignedToUserId?: string;
+  search?: string;
+  dueFrom?: string;
+  dueTo?: string;
+  sort?: StaffTaskSortKey;
+  direction?: "asc" | "desc";
+  pageSize?: string;
+};
+
+export type StaffTaskReport = {
+  filters: Required<
+    Pick<StaffTaskFilters, "status" | "type" | "priority" | "sort" | "direction">
+  > & {
+    storeId: string | null;
+    assignedToUserId: string | null;
+    search: string | null;
+    dueFrom: string | null;
+    dueTo: string | null;
+    pageSize: number;
+  };
+  summary: {
+    total: number;
+    open: number;
+    inProgress: number;
+    onReview: number;
+    done: number;
+    overdue: number;
+    canceled: number;
+  };
+  rows: StaffTask[];
+  users: StaffTaskUser[];
+  stores: StaffTaskStore[];
+};
+
+export async function getStaffTaskReport(
+  filters: StaffTaskFilters = {},
+): Promise<StaffTaskReport> {
+  const response = await fetch(`${getApiUrl()}/staff/tasks${query(filters)}`, {
+    cache: "no-store",
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch staff tasks");
+  }
+
+  return response.json() as Promise<StaffTaskReport>;
+}
+
+function query(filters: Record<string, string | undefined>) {
+  const params = new URLSearchParams();
+
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value) {
+      params.set(key, value);
+    }
+  });
+
+  const value = params.toString();
+  return value ? `?${value}` : "";
+}

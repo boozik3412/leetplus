@@ -136,9 +136,13 @@ Priorities:
 - `HIGH`;
 - `URGENT`.
 
+### Shift Regulation
+
+Versioned operating standard for opening shift, closing shift, cash desk, bar, PC zone, cleanliness, incidents, and inventory handover. The first implementation stores sections and checklist-like items in `StaffShiftRegulation.sections`, with status `DRAFT`, `PUBLISHED`, or `ARCHIVED`.
+
 ### Checklist Template
 
-Reusable standard for opening shift, closing shift, cash desk, bar, PC zone, cleanliness, incidents, and inventory handover.
+Reusable execution template generated from a published shift regulation or created separately later.
 
 ### Checklist Run
 
@@ -180,6 +184,12 @@ Acceptance criteria:
 ## 6. MVP 2: Shift Checklists And Regulations
 
 Goal: turn daily standards into controlled execution.
+
+Implemented first:
+
+- `StaffShiftRegulation` model with tenant, club, author, status, shift kind, role scope, effective date, version, and JSON sections.
+- `/staff/shift-regulations` API and UI constructor.
+- Sections and items support required flag, evidence-required flag, value type, instruction, and score.
 
 Acceptance criteria:
 

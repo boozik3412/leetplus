@@ -325,9 +325,10 @@ Acceptance criteria:
 
 ### MVP 2. Shift Checklists And Regulations
 
-Goal: turn daily operating standards into controlled execution.
+Status: started. Goal: turn daily operating standards into controlled execution.
 
-- Add versioned regulation editor: draft, published, archived.
+- Done: first shift-regulation constructor added: tenant-scoped `StaffShiftRegulation`, migration, API `/staff/shift-regulations`, `/staff/shift-regulations` UI, sidebar entry, statuses draft/published/archived, sections, items, required/evidence flags, value type, score, role, club, and effective date.
+- Add versioned regulation history beyond the current version number.
 - Add required employee acknowledgement for selected roles or clubs.
 - Add checklist template builder with sections, required fields, evidence requirements, and scoring.
 - Add checklist runs tied to club, shift, employee, role, and scheduled time.
@@ -415,8 +416,8 @@ Acceptance criteria:
 3. Started: add database schema for tasks, task templates, task comments, attachments, audit events, and staff assignments. `StaffTask`, `StaffTaskComment`, and `StaffTaskAuditEvent` are in place; task templates and binary attachment storage remain next.
 4. Started: implement backend CRUD and list APIs for tasks with tenant/store/staff access control. List/create/status update plus comment/evidence endpoint are in place.
 5. Started: implement `/staff/tasks` or `/operations/tasks` UI for manager and administrator workflows. `/staff/tasks` now includes creation, filters, status actions, execution comments, evidence links, and audit history preview.
-6. Add checklist templates and checklist runs.
-7. Add regulation documents, versions, acknowledgements, and role/club targeting.
+6. Started: add checklist templates and checklist runs. First shift-regulation constructor already defines sections/items/evidence rules that checklist runs can reuse.
+7. Started: add regulation documents, versions, acknowledgements, and role/club targeting. First draft/published/archived shift-regulation entity is in place; acknowledgements and full version history remain next.
 8. Add training materials, courses, tests, and attestation reports.
 9. Add analytics, exports, and connections to current staff-control signals.
 10. Add AI assistance only after real workflows produce enough structured data.

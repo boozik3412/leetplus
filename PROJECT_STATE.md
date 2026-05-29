@@ -66,7 +66,7 @@ Connected production Langame sources:
 - Product parsing utilities: automatic analysis, safe confirmation/rejection, existing canonical SKU awareness, manual parsing page.
 - Products/stores/directories: inline editing, multi-club filters, exports, manual store name preservation.
 - Guest module: first production read-only layer is live, including data foundation sync, guest analytics dashboard, full guest report, guest card, mini CRM fields, first staff-control report, and PC-count based load calculation.
-- Staff operations: Stage 8 has started with `STAFF_OPERATIONS_MODULE_TZ.md` and `/staff/tasks` for tenant-scoped operational tasks by club, shift, responsible user, status, priority, deadline, execution comments, evidence links, and audit events.
+- Staff operations: Stage 8 has started with `STAFF_OPERATIONS_MODULE_TZ.md`, `/staff/tasks` for tenant-scoped operational tasks, and `/staff/shift-regulations` for constructing shift regulations with sections, items, evidence requirements, scoring, role/club scope, and draft/published/archive states.
 - Sync/admin UX: `/settings` is for Langame connection settings only; `/sync` is the dedicated synchronization page with one combined sync action for assortment/sales/revenue plus guests.
 - Mail: Mail.ru/VK WorkSpace domain is configured; SMTP uses `reports@leetplus.ru`.
 
@@ -77,6 +77,7 @@ Connected production Langame sources:
 - Expanded Stage 6 commercialization: `/commercial/audit` shows live audit signals, `/commercial/demo` shows prepared demo data without Langame setup, and `/commercial/tariffs` packages the product into tariff levels.
 - Tightened marketing campaign contact workflow: campaign detail can create the linked CRM task from the contacts tab, contact results save to `marketingCampaignId`, and campaign effect tracks group/task/responsible/channel outcomes.
 - Expanded Stage 8 Staff Operations: staff tasks now have execution comments, evidence links, and an audit journal for create/update/status/comment/evidence events.
+- Added the first shift-regulation constructor for Stage 8 MVP 2: draft/published/archived standards for opening/closing/cash/bar/PC-zone shift work.
 - Added recommendation workflow state: persisted statuses, responsible roles, financial effect, and an interactive recommendations queue.
 - Fixed dashboard trend card sizing behavior.
 - Preserved manual store names during sync.

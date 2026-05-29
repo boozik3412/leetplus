@@ -105,50 +105,51 @@ model Tenant {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users                      User[]
-  stores                     Store[]
-  suppliers                  Supplier[]
-  products                   Product[]
-  canonicalProducts          CanonicalProduct[]
-  productParsingRuns         ProductParsingRun[]
-  productParsingSuggestions  ProductParsingSuggestion[]
-  productOosExclusions       ProductOosExclusion[]
-  categories                 Category[]
-  importJobs                 ImportJob[]
-  salesFacts                 SalesFact[]
-  clubRevenueFacts           ClubRevenueFact[]
-  inventorySnapshots         InventorySnapshot[]
-  stockMovements             StockMovement[]
-  integrationCredentials     IntegrationCredential[]
-  integrationSources         IntegrationSource[]
-  integrationSyncJobs        IntegrationSyncJob[]
-  guests                     Guest[]
-  guestGroups                GuestGroup[]
-  guestBalanceSnapshots      GuestBalanceSnapshot[]
-  guestBonusBalanceSnapshots GuestBonusBalanceSnapshot[]
-  guestSessions              GuestSession[]
-  guestLogs                  GuestLog[]
-  guestTransactions          GuestTransaction[]
-  guestOperationLogs         GuestOperationLog[]
-  guestWorkingShifts         GuestWorkingShift[]
-  guestDataProfileRuns       GuestDataProfileRun[]
-  guestCrmEvents             GuestCrmEvent[]
-  guestCrmLeads              GuestCrmLead[]
-  guestCrmTasks              GuestCrmTask[]
-  guestCrmContactEvents      GuestCrmContactEvent[]
-  marketingCampaigns         MarketingCampaign[]
-  marketingPromoBundles      MarketingPromoBundle[]
+  users                        User[]
+  stores                       Store[]
+  suppliers                    Supplier[]
+  products                     Product[]
+  canonicalProducts            CanonicalProduct[]
+  productParsingRuns           ProductParsingRun[]
+  productParsingSuggestions    ProductParsingSuggestion[]
+  productOosExclusions         ProductOosExclusion[]
+  categories                   Category[]
+  importJobs                   ImportJob[]
+  salesFacts                   SalesFact[]
+  clubRevenueFacts             ClubRevenueFact[]
+  inventorySnapshots           InventorySnapshot[]
+  stockMovements               StockMovement[]
+  integrationCredentials       IntegrationCredential[]
+  integrationSources           IntegrationSource[]
+  integrationSyncJobs          IntegrationSyncJob[]
+  guests                       Guest[]
+  guestGroups                  GuestGroup[]
+  guestBalanceSnapshots        GuestBalanceSnapshot[]
+  guestBonusBalanceSnapshots   GuestBonusBalanceSnapshot[]
+  guestSessions                GuestSession[]
+  guestLogs                    GuestLog[]
+  guestTransactions            GuestTransaction[]
+  guestOperationLogs           GuestOperationLog[]
+  guestWorkingShifts           GuestWorkingShift[]
+  guestDataProfileRuns         GuestDataProfileRun[]
+  guestCrmEvents               GuestCrmEvent[]
+  guestCrmLeads                GuestCrmLead[]
+  guestCrmTasks                GuestCrmTask[]
+  guestCrmContactEvents        GuestCrmContactEvent[]
+  marketingCampaigns           MarketingCampaign[]
+  marketingPromoBundles        MarketingPromoBundle[]
   marketingPromoBundleLaunches MarketingPromoBundleLaunch[]
-  marketingPromoBundleUsages MarketingPromoBundleUsage[]
-  recommendationStates       RecommendationState[]
-  reportDigestScheduleRuns   ReportDigestScheduleRun[]
-  guestStaffIdentityMappings GuestStaffIdentityMapping[]
-  staffTasks                 StaffTask[]
-  staffTaskComments          StaffTaskComment[]
-  staffTaskAuditEvents       StaffTaskAuditEvent[]
-  guestSavedFilters          GuestSavedFilter[]
-  guestAudiences             GuestAudience[]
-  guestAudienceMembers       GuestAudienceMember[]
+  marketingPromoBundleUsages   MarketingPromoBundleUsage[]
+  recommendationStates         RecommendationState[]
+  reportDigestScheduleRuns     ReportDigestScheduleRun[]
+  guestStaffIdentityMappings   GuestStaffIdentityMapping[]
+  staffTasks                   StaffTask[]
+  staffTaskComments            StaffTaskComment[]
+  staffTaskAuditEvents         StaffTaskAuditEvent[]
+  staffShiftRegulations        StaffShiftRegulation[]
+  guestSavedFilters            GuestSavedFilter[]
+  guestAudiences               GuestAudience[]
+  guestAudienceMembers         GuestAudienceMember[]
 }
 
 model User {
@@ -163,26 +164,27 @@ model User {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  tenant                     Tenant                      @relation(fields: [tenantId], references: [id])
-  emailVerificationTokens    EmailVerificationToken[]
-  importJobs                 ImportJob[]
-  guestCrmEvents             GuestCrmEvent[]
-  guestCrmLeads              GuestCrmLead[]
-  guestCrmTasks              GuestCrmTask[]              @relation("GuestCrmTaskCreatedBy")
-  assignedGuestCrmTasks      GuestCrmTask[]              @relation("GuestCrmTaskAssignedTo")
-  guestCrmContactEvents      GuestCrmContactEvent[]
-  createdMarketingCampaigns  MarketingCampaign[]         @relation("MarketingCampaignCreatedBy")
-  ownedMarketingCampaigns    MarketingCampaign[]         @relation("MarketingCampaignOwner")
-  createdMarketingPromoBundles MarketingPromoBundle[]     @relation("MarketingPromoBundleCreatedBy")
+  tenant                              Tenant                       @relation(fields: [tenantId], references: [id])
+  emailVerificationTokens             EmailVerificationToken[]
+  importJobs                          ImportJob[]
+  guestCrmEvents                      GuestCrmEvent[]
+  guestCrmLeads                       GuestCrmLead[]
+  guestCrmTasks                       GuestCrmTask[]               @relation("GuestCrmTaskCreatedBy")
+  assignedGuestCrmTasks               GuestCrmTask[]               @relation("GuestCrmTaskAssignedTo")
+  guestCrmContactEvents               GuestCrmContactEvent[]
+  createdMarketingCampaigns           MarketingCampaign[]          @relation("MarketingCampaignCreatedBy")
+  ownedMarketingCampaigns             MarketingCampaign[]          @relation("MarketingCampaignOwner")
+  createdMarketingPromoBundles        MarketingPromoBundle[]       @relation("MarketingPromoBundleCreatedBy")
   createdMarketingPromoBundleLaunches MarketingPromoBundleLaunch[] @relation("MarketingPromoBundleLaunchCreatedBy")
-  createdMarketingPromoBundleUsages MarketingPromoBundleUsage[] @relation("MarketingPromoBundleUsageCreatedBy")
-    guestStaffIdentityMappings GuestStaffIdentityMapping[]
-    createdStaffTasks          StaffTask[]                @relation("StaffTaskCreatedBy")
-    assignedStaffTasks         StaffTask[]                @relation("StaffTaskAssignedTo")
-    staffTaskComments          StaffTaskComment[]         @relation("StaffTaskCommentAuthor")
-    staffTaskAuditEvents       StaffTaskAuditEvent[]      @relation("StaffTaskAuditActor")
-    guestSavedFilters          GuestSavedFilter[]
-    guestAudiences             GuestAudience[]
+  createdMarketingPromoBundleUsages   MarketingPromoBundleUsage[]  @relation("MarketingPromoBundleUsageCreatedBy")
+  guestStaffIdentityMappings          GuestStaffIdentityMapping[]
+  createdStaffTasks                   StaffTask[]                  @relation("StaffTaskCreatedBy")
+  assignedStaffTasks                  StaffTask[]                  @relation("StaffTaskAssignedTo")
+  staffTaskComments                   StaffTaskComment[]           @relation("StaffTaskCommentAuthor")
+  staffTaskAuditEvents                StaffTaskAuditEvent[]        @relation("StaffTaskAuditActor")
+  createdStaffShiftRegulations        StaffShiftRegulation[]       @relation("StaffShiftRegulationCreatedBy")
+  guestSavedFilters                   GuestSavedFilter[]
+  guestAudiences                      GuestAudience[]
 
   @@index([tenantId])
 }
@@ -223,32 +225,33 @@ model EmailVerificationToken {
 }
 
 model Store {
-  id                  String               @id @default(uuid())
-  tenantId            String
-  name                String
-  address             String?
-  isActive            Boolean              @default(true)
-  externalProvider    IntegrationProvider?
-  externalDomain      String?
-  externalClubId      String?
-  integrationSourceId String?
-  computerCount       Int?
+  id                    String               @id @default(uuid())
+  tenantId              String
+  name                  String
+  address               String?
+  isActive              Boolean              @default(true)
+  externalProvider      IntegrationProvider?
+  externalDomain        String?
+  externalClubId        String?
+  integrationSourceId   String?
+  computerCount         Int?
   computerCountSyncedAt DateTime?
-  createdAt           DateTime             @default(now())
-  updatedAt           DateTime             @updatedAt
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
 
-  tenant             Tenant              @relation(fields: [tenantId], references: [id])
-  integrationSource  IntegrationSource?  @relation(fields: [integrationSourceId], references: [id], onDelete: SetNull)
-  salesFacts         SalesFact[]
-  guestSessions      GuestSession[]
-  guestTransactions  GuestTransaction[]
-  guestOperationLogs GuestOperationLog[]
-  guestWorkingShifts GuestWorkingShift[]
-  clubRevenueFacts   ClubRevenueFact[]
-  inventorySnapshots InventorySnapshot[]
-  stockMovements     StockMovement[]
+  tenant                     Tenant                      @relation(fields: [tenantId], references: [id])
+  integrationSource          IntegrationSource?          @relation(fields: [integrationSourceId], references: [id], onDelete: SetNull)
+  salesFacts                 SalesFact[]
+  guestSessions              GuestSession[]
+  guestTransactions          GuestTransaction[]
+  guestOperationLogs         GuestOperationLog[]
+  guestWorkingShifts         GuestWorkingShift[]
+  clubRevenueFacts           ClubRevenueFact[]
+  inventorySnapshots         InventorySnapshot[]
+  stockMovements             StockMovement[]
   marketingPromoBundleUsages MarketingPromoBundleUsage[]
-  staffTasks         StaffTask[]
+  staffTasks                 StaffTask[]
+  staffShiftRegulations      StaffShiftRegulation[]
 
   @@unique([tenantId, externalProvider, externalDomain, externalClubId])
   @@index([tenantId])
@@ -288,7 +291,7 @@ model Supplier {
 }
 
 model Product {
-  id                   String               @id @default(uuid())
+  id                   String                @id @default(uuid())
   tenantId             String
   categoryId           String?
   supplierId           String?
@@ -296,18 +299,18 @@ model Product {
   name                 String
   purchasePrice        Decimal
   salePrice            Decimal
-  facing               Int                  @default(1)
+  facing               Int                   @default(1)
   shelfLifeDays        Int?
-  isActive             Boolean              @default(true)
+  isActive             Boolean               @default(true)
   assortmentRole       ProductAssortmentRole @default(OPTIONAL)
-  isMandatory          Boolean              @default(false)
+  isMandatory          Boolean               @default(false)
   externalProvider     IntegrationProvider?
   externalDomain       String?
   externalProductId    String?
   externalMissingSince DateTime?
   canonicalProductId   String?
-  createdAt            DateTime             @default(now())
-  updatedAt            DateTime             @updatedAt
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
 
   tenant             Tenant                @relation(fields: [tenantId], references: [id])
   category           Category?             @relation(fields: [categoryId], references: [id])
@@ -630,7 +633,7 @@ model StockMovement {
 }
 
 model Guest {
-  id                      String               @id @default(uuid())
+  id                      String                          @id @default(uuid())
   tenantId                String
   externalProvider        IntegrationProvider?
   externalDomain          String?
@@ -650,16 +653,16 @@ model Guest {
   gender                  String?
   insertedAt              DateTime?
   lastActivityAt          DateTime?
-  isVirtual               Boolean              @default(false)
-  isTemporary             Boolean              @default(false)
-  isDisabled              Boolean              @default(false)
-  isSimpleRegistration    Boolean              @default(false)
-  isConfirmed             Boolean              @default(false)
+  isVirtual               Boolean                         @default(false)
+  isTemporary             Boolean                         @default(false)
+  isDisabled              Boolean                         @default(false)
+  isSimpleRegistration    Boolean                         @default(false)
+  isConfirmed             Boolean                         @default(false)
   currentCountHours       Decimal?
-  isMobileRegistration    Boolean              @default(false)
-  identityDocumentPresent Boolean              @default(false)
+  isMobileRegistration    Boolean                         @default(false)
+  identityDocumentPresent Boolean                         @default(false)
   bonusProgramNumber      String?
-  crmStatus               GuestCrmStatus       @default(NONE)
+  crmStatus               GuestCrmStatus                  @default(NONE)
   crmNote                 String?
   nextAction              String?
   nextContactAt           DateTime?
@@ -671,8 +674,8 @@ model Guest {
   unsubscribedAt          DateTime?
   sourcePayloadHash       String?
   lastSyncedAt            DateTime?
-  createdAt               DateTime             @default(now())
-  updatedAt               DateTime             @updatedAt
+  createdAt               DateTime                        @default(now())
+  updatedAt               DateTime                        @updatedAt
 
   tenant                Tenant                      @relation(fields: [tenantId], references: [id])
   salesFacts            SalesFact[]
@@ -720,36 +723,36 @@ model GuestCrmEvent {
 }
 
 model GuestCrmLead {
-  id              String         @id @default(uuid())
-  tenantId        String
-  matchedGuestId  String?
-  createdByUserId String?
-  fullNameHash    String?
-  fullNameMasked  String?
-  fullNameEncrypted String?
-  phoneHash       String
-  phoneMasked     String?
-  phoneEncrypted  String?
-  emailHash       String?
-  emailMasked     String?
-  source          String?
-  eventName       String?
-  crmStatus       GuestCrmStatus @default(CONTACT)
-  crmNote         String?
-  nextAction      String?
-  nextContactAt   DateTime?
+  id                 String                          @id @default(uuid())
+  tenantId           String
+  matchedGuestId     String?
+  createdByUserId    String?
+  fullNameHash       String?
+  fullNameMasked     String?
+  fullNameEncrypted  String?
+  phoneHash          String
+  phoneMasked        String?
+  phoneEncrypted     String?
+  emailHash          String?
+  emailMasked        String?
+  source             String?
+  eventName          String?
+  crmStatus          GuestCrmStatus                  @default(CONTACT)
+  crmNote            String?
+  nextAction         String?
+  nextContactAt      DateTime?
   phoneConsentStatus GuestCommunicationConsentStatus @default(UNKNOWN)
   phoneConsentSource String?
-  phoneConsentAt DateTime?
-  unsubscribedAt DateTime?
-  matchedAt       DateTime?
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
+  phoneConsentAt     DateTime?
+  unsubscribedAt     DateTime?
+  matchedAt          DateTime?
+  createdAt          DateTime                        @default(now())
+  updatedAt          DateTime                        @updatedAt
 
-  tenant        Tenant @relation(fields: [tenantId], references: [id])
-  matchedGuest  Guest? @relation(fields: [matchedGuestId], references: [id], onDelete: SetNull)
-  createdByUser User?  @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
-  crmTasks      GuestCrmTask[]
+  tenant           Tenant                 @relation(fields: [tenantId], references: [id])
+  matchedGuest     Guest?                 @relation(fields: [matchedGuestId], references: [id], onDelete: SetNull)
+  createdByUser    User?                  @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  crmTasks         GuestCrmTask[]
   crmContactEvents GuestCrmContactEvent[]
 
   @@index([tenantId, createdAt], map: "guest_crm_lead_tenant_created_idx")
@@ -759,27 +762,27 @@ model GuestCrmLead {
 }
 
 model GuestCrmTask {
-  id              String    @id @default(uuid())
-  tenantId        String
-  audienceId      String?
-  guestId         String?
-  leadId          String?
-  createdByUserId String?
+  id               String    @id @default(uuid())
+  tenantId         String
+  audienceId       String?
+  guestId          String?
+  leadId           String?
+  createdByUserId  String?
   assignedToUserId String?
-  title           String
-  description     String?
-  status          String    @default("OPEN")
-  dueAt           DateTime?
-  completedAt     DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  title            String
+  description      String?
+  status           String    @default("OPEN")
+  dueAt            DateTime?
+  completedAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  tenant        Tenant         @relation(fields: [tenantId], references: [id])
-  audience      GuestAudience? @relation(fields: [audienceId], references: [id], onDelete: SetNull)
-  guest         Guest?         @relation(fields: [guestId], references: [id], onDelete: SetNull)
-  lead          GuestCrmLead?  @relation(fields: [leadId], references: [id], onDelete: SetNull)
-  createdByUser User?          @relation("GuestCrmTaskCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  assignedToUser User?         @relation("GuestCrmTaskAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  tenant             Tenant              @relation(fields: [tenantId], references: [id])
+  audience           GuestAudience?      @relation(fields: [audienceId], references: [id], onDelete: SetNull)
+  guest              Guest?              @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  lead               GuestCrmLead?       @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  createdByUser      User?               @relation("GuestCrmTaskCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  assignedToUser     User?               @relation("GuestCrmTaskAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
   marketingCampaigns MarketingCampaign[]
 
   @@index([tenantId, status, dueAt], map: "guest_crm_task_status_due_idx")
@@ -791,26 +794,26 @@ model GuestCrmTask {
 }
 
 model GuestCrmContactEvent {
-  id              String   @id @default(uuid())
-  tenantId        String
-  audienceId      String?
-  guestId         String?
-  leadId          String?
+  id                  String   @id @default(uuid())
+  tenantId            String
+  audienceId          String?
+  guestId             String?
+  leadId              String?
   marketingCampaignId String?
-  createdByUserId String?
-  channel         String
-  result          String?
-  note            String?
-  contactedAt     DateTime @default(now())
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdByUserId     String?
+  channel             String
+  result              String?
+  note                String?
+  contactedAt         DateTime @default(now())
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
-  tenant        Tenant         @relation(fields: [tenantId], references: [id])
-  audience      GuestAudience? @relation(fields: [audienceId], references: [id], onDelete: SetNull)
-  guest         Guest?         @relation(fields: [guestId], references: [id], onDelete: SetNull)
-  lead          GuestCrmLead?  @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  tenant            Tenant             @relation(fields: [tenantId], references: [id])
+  audience          GuestAudience?     @relation(fields: [audienceId], references: [id], onDelete: SetNull)
+  guest             Guest?             @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  lead              GuestCrmLead?      @relation(fields: [leadId], references: [id], onDelete: SetNull)
   marketingCampaign MarketingCampaign? @relation(fields: [marketingCampaignId], references: [id], onDelete: SetNull)
-  createdByUser User?          @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdByUser     User?              @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, contactedAt], map: "guest_crm_contact_tenant_contacted_idx")
   @@index([audienceId], map: "guest_crm_contact_audience_idx")
@@ -821,7 +824,7 @@ model GuestCrmContactEvent {
 }
 
 model MarketingCampaign {
-  id              String   @id @default(uuid())
+  id              String    @id @default(uuid())
   tenantId        String
   audienceId      String?
   crmTaskId       String?
@@ -831,24 +834,24 @@ model MarketingCampaign {
   ownerUserId     String?
   goal            String
   name            String
-  status          String   @default("DRAFT")
+  status          String    @default("DRAFT")
   channel         String?
   mechanic        String?
   mechanicConfig  Json?
   periodFrom      DateTime?
   periodTo        DateTime?
   dueAt           DateTime?
-  budget          Decimal? @db.Decimal(12, 2)
+  budget          Decimal?  @db.Decimal(12, 2)
   note            String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  tenant        Tenant         @relation(fields: [tenantId], references: [id])
-  audience      GuestAudience? @relation(fields: [audienceId], references: [id], onDelete: SetNull)
-  crmTask       GuestCrmTask?  @relation(fields: [crmTaskId], references: [id], onDelete: SetNull)
-  promoBundle   MarketingPromoBundle? @relation(fields: [promoBundleId], references: [id], onDelete: SetNull)
-  createdByUser User?          @relation("MarketingCampaignCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  ownerUser     User?          @relation("MarketingCampaignOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  tenant        Tenant                 @relation(fields: [tenantId], references: [id])
+  audience      GuestAudience?         @relation(fields: [audienceId], references: [id], onDelete: SetNull)
+  crmTask       GuestCrmTask?          @relation(fields: [crmTaskId], references: [id], onDelete: SetNull)
+  promoBundle   MarketingPromoBundle?  @relation(fields: [promoBundleId], references: [id], onDelete: SetNull)
+  createdByUser User?                  @relation("MarketingCampaignCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  ownerUser     User?                  @relation("MarketingCampaignOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
   contactEvents GuestCrmContactEvent[]
 
   @@index([tenantId, status, updatedAt], map: "marketing_campaign_status_idx")
@@ -871,8 +874,8 @@ model MarketingPromoBundle {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  tenant        Tenant              @relation(fields: [tenantId], references: [id])
-  createdByUser User?               @relation("MarketingPromoBundleCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  tenant        Tenant                       @relation(fields: [tenantId], references: [id])
+  createdByUser User?                        @relation("MarketingPromoBundleCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   campaigns     MarketingCampaign[]
   launches      MarketingPromoBundleLaunch[]
   usages        MarketingPromoBundleUsage[]
@@ -883,22 +886,22 @@ model MarketingPromoBundle {
 }
 
 model MarketingPromoBundleLaunch {
-  id              String   @id @default(uuid())
+  id              String    @id @default(uuid())
   tenantId        String
   promoBundleId   String
   createdByUserId String?
-  status          String   @default("ACTIVE")
+  status          String    @default("ACTIVE")
   storeIds        Json?
   periodFrom      DateTime?
   periodTo        DateTime?
   maxUses         Int?
   note            String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  tenant        Tenant               @relation(fields: [tenantId], references: [id])
-  promoBundle   MarketingPromoBundle @relation(fields: [promoBundleId], references: [id], onDelete: Cascade)
-  createdByUser User?                @relation("MarketingPromoBundleLaunchCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  tenant        Tenant                      @relation(fields: [tenantId], references: [id])
+  promoBundle   MarketingPromoBundle        @relation(fields: [promoBundleId], references: [id], onDelete: Cascade)
+  createdByUser User?                       @relation("MarketingPromoBundleLaunchCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   usages        MarketingPromoBundleUsage[]
 
   @@index([tenantId, status, updatedAt], map: "marketing_promo_bundle_launch_status_idx")
@@ -907,33 +910,33 @@ model MarketingPromoBundleLaunch {
 }
 
 model MarketingPromoBundleUsage {
-  id              String   @id @default(uuid())
-  tenantId        String
-  promoBundleId   String
-  launchId        String?
-  storeId         String?
-  createdByUserId String?
-  status          String   @default("CONFIRMED")
-  source          String   @default("MANUAL")
-  externalProvider IntegrationProvider?
-  externalDomain  String?
-  externalId      String?
-  guestExternalId String?
+  id                String               @id @default(uuid())
+  tenantId          String
+  promoBundleId     String
+  launchId          String?
+  storeId           String?
+  createdByUserId   String?
+  status            String               @default("CONFIRMED")
+  source            String               @default("MANUAL")
+  externalProvider  IntegrationProvider?
+  externalDomain    String?
+  externalId        String?
+  guestExternalId   String?
   receiptExternalId String?
-  usedAt          DateTime @default(now())
-  quantity        Int      @default(1)
-  amount          Decimal  @default(0) @db.Decimal(12, 2)
-  costAmount      Decimal? @db.Decimal(12, 2)
-  note            String?
-  sourcePayload   Json?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  usedAt            DateTime             @default(now())
+  quantity          Int                  @default(1)
+  amount            Decimal              @default(0) @db.Decimal(12, 2)
+  costAmount        Decimal?             @db.Decimal(12, 2)
+  note              String?
+  sourcePayload     Json?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
 
   tenant        Tenant                      @relation(fields: [tenantId], references: [id])
   promoBundle   MarketingPromoBundle        @relation(fields: [promoBundleId], references: [id], onDelete: Cascade)
   launch        MarketingPromoBundleLaunch? @relation(fields: [launchId], references: [id], onDelete: SetNull)
-  store         Store?                       @relation(fields: [storeId], references: [id], onDelete: SetNull)
-  createdByUser User?                        @relation("MarketingPromoBundleUsageCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  store         Store?                      @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  createdByUser User?                       @relation("MarketingPromoBundleUsageCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
 
   @@unique([tenantId, source, externalProvider, externalDomain, externalId], map: "marketing_promo_bundle_usage_external_uidx")
   @@index([tenantId, usedAt], map: "marketing_promo_bundle_usage_used_at_idx")
@@ -1152,9 +1155,9 @@ model GuestWorkingShift {
   createdAt         DateTime             @default(now())
   updatedAt         DateTime             @updatedAt
 
-  tenant Tenant @relation(fields: [tenantId], references: [id])
-  guest  Guest? @relation(fields: [guestId], references: [id], onDelete: SetNull)
-  store  Store? @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  tenant     Tenant      @relation(fields: [tenantId], references: [id])
+  guest      Guest?      @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  store      Store?      @relation(fields: [storeId], references: [id], onDelete: SetNull)
   staffTasks StaffTask[]
 
   @@unique([tenantId, externalProvider, externalDomain, externalShiftId])
@@ -1205,72 +1208,100 @@ model StaffTask {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
-  tenant         Tenant             @relation(fields: [tenantId], references: [id])
-  store          Store?             @relation(fields: [storeId], references: [id], onDelete: SetNull)
-  shift          GuestWorkingShift? @relation(fields: [shiftId], references: [id], onDelete: SetNull)
-    createdByUser  User?              @relation("StaffTaskCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-    assignedToUser User?              @relation("StaffTaskAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
-    comments       StaffTaskComment[]
-    auditEvents    StaffTaskAuditEvent[]
+  tenant         Tenant                @relation(fields: [tenantId], references: [id])
+  store          Store?                @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  shift          GuestWorkingShift?    @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  createdByUser  User?                 @relation("StaffTaskCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  assignedToUser User?                 @relation("StaffTaskAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  comments       StaffTaskComment[]
+  auditEvents    StaffTaskAuditEvent[]
 
-    @@index([tenantId, status, dueAt], map: "staff_task_status_due_idx")
+  @@index([tenantId, status, dueAt], map: "staff_task_status_due_idx")
   @@index([tenantId, createdAt], map: "staff_task_created_idx")
   @@index([storeId], map: "staff_task_store_idx")
   @@index([shiftId], map: "staff_task_shift_idx")
   @@index([createdByUserId], map: "staff_task_created_by_idx")
-    @@index([assignedToUserId], map: "staff_task_assigned_to_idx")
-  }
+  @@index([assignedToUserId], map: "staff_task_assigned_to_idx")
+}
 
-  model StaffTaskComment {
-    id             String   @id @default(uuid())
-    tenantId       String
-    taskId         String
-    authorUserId   String?
-    body           String?
-    evidenceType   String?
-    evidenceLabel  String?
-    evidenceUrl    String?
-    createdAt      DateTime @default(now())
+model StaffTaskComment {
+  id            String   @id @default(uuid())
+  tenantId      String
+  taskId        String
+  authorUserId  String?
+  body          String?
+  evidenceType  String?
+  evidenceLabel String?
+  evidenceUrl   String?
+  createdAt     DateTime @default(now())
 
-    tenant     Tenant    @relation(fields: [tenantId], references: [id])
-    task       StaffTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
-    authorUser User?     @relation("StaffTaskCommentAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
+  tenant     Tenant    @relation(fields: [tenantId], references: [id])
+  task       StaffTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  authorUser User?     @relation("StaffTaskCommentAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
 
-    @@index([tenantId, createdAt], map: "staff_task_comment_tenant_created_idx")
-    @@index([taskId, createdAt], map: "staff_task_comment_task_created_idx")
-    @@index([authorUserId], map: "staff_task_comment_author_idx")
-  }
+  @@index([tenantId, createdAt], map: "staff_task_comment_tenant_created_idx")
+  @@index([taskId, createdAt], map: "staff_task_comment_task_created_idx")
+  @@index([authorUserId], map: "staff_task_comment_author_idx")
+}
 
-  model StaffTaskAuditEvent {
-    id          String   @id @default(uuid())
-    tenantId    String
-    taskId      String
-    actorUserId String?
-    action      String
-    message     String?
-    metadata    Json?
-    createdAt   DateTime @default(now())
+model StaffTaskAuditEvent {
+  id          String   @id @default(uuid())
+  tenantId    String
+  taskId      String
+  actorUserId String?
+  action      String
+  message     String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
 
-    tenant    Tenant    @relation(fields: [tenantId], references: [id])
-    task      StaffTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
-    actorUser User?     @relation("StaffTaskAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  tenant    Tenant    @relation(fields: [tenantId], references: [id])
+  task      StaffTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  actorUser User?     @relation("StaffTaskAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
 
-    @@index([tenantId, createdAt], map: "staff_task_audit_tenant_created_idx")
-    @@index([taskId, createdAt], map: "staff_task_audit_task_created_idx")
-    @@index([actorUserId], map: "staff_task_audit_actor_idx")
-  }
+  @@index([tenantId, createdAt], map: "staff_task_audit_tenant_created_idx")
+  @@index([taskId, createdAt], map: "staff_task_audit_task_created_idx")
+  @@index([actorUserId], map: "staff_task_audit_actor_idx")
+}
+
+model StaffShiftRegulation {
+  id              String    @id @default(uuid())
+  tenantId        String
+  storeId         String?
+  createdByUserId String?
+  title           String
+  description     String?
+  shiftKind       String    @default("OPENING")
+  status          String    @default("DRAFT")
+  roleScope       String    @default("ADMINISTRATOR")
+  version         Int       @default(1)
+  sections        Json
+  effectiveFrom   DateTime?
+  publishedAt     DateTime?
+  archivedAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  tenant        Tenant @relation(fields: [tenantId], references: [id])
+  store         Store? @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  createdByUser User?  @relation("StaffShiftRegulationCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status, shiftKind], map: "staff_shift_regulation_status_kind_idx")
+  @@index([tenantId, createdAt], map: "staff_shift_regulation_created_idx")
+  @@index([storeId], map: "staff_shift_regulation_store_idx")
+  @@index([createdByUserId], map: "staff_shift_regulation_created_by_idx")
+}
 
 model GuestSavedFilter {
-  id              String   @id @default(uuid())
+  id              String    @id @default(uuid())
   tenantId        String
   createdByUserId String?
-  report          String   @default("guest_report")
+  report          String    @default("guest_report")
   name            String
   description     String?
   filters         Json
   lastUsedAt      DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   tenant        Tenant @relation(fields: [tenantId], references: [id])
   createdByUser User?  @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
@@ -1290,11 +1321,11 @@ model GuestAudience {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  tenant        Tenant                @relation(fields: [tenantId], references: [id])
-  createdByUser User?                 @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
-  members       GuestAudienceMember[]
-  crmTasks      GuestCrmTask[]
-  crmContactEvents GuestCrmContactEvent[]
+  tenant             Tenant                 @relation(fields: [tenantId], references: [id])
+  createdByUser      User?                  @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  members            GuestAudienceMember[]
+  crmTasks           GuestCrmTask[]
+  crmContactEvents   GuestCrmContactEvent[]
   marketingCampaigns MarketingCampaign[]
 
   @@index([tenantId, createdAt], map: "guest_audience_tenant_created_idx")

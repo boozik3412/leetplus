@@ -43,6 +43,7 @@ const navGroups: NavGroup[] = [
     icon: "staff",
     items: [
       { href: "/staff/tasks", label: "Задачи персонала" },
+      { href: "/staff/shift-regulations", label: "Регламенты смены" },
       { href: "/guests/staff-control", label: "Контроль персонала" },
       { href: "/guests/staff-control/operators", label: "Администраторы" },
     ],

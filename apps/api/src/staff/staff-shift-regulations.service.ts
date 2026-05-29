@@ -1,0 +1,596 @@
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import type { AuthenticatedUser } from '../auth/auth.types';
+import { PrismaService } from '../prisma/prisma.service';
+import { TenantContextService } from '../tenancy/tenant-context.service';
+
+const regulationStatuses = ['DRAFT', 'PUBLISHED', 'ARCHIVED'] as const;
+const shiftKinds = [
+  'OPENING',
+  'CLOSING',
+  'CASH',
+  'BAR',
+  'PC_ZONE',
+  'CLEANLINESS',
+  'INCIDENT',
+  'INVENTORY',
+  'CUSTOM',
+] as const;
+const roleScopes = [
+  'ADMINISTRATOR',
+  'SENIOR_ADMINISTRATOR',
+  'MANAGER',
+  'ALL_STAFF',
+] as const;
+const itemValueTypes = [
+  'CHECKBOX',
+  'TEXT',
+  'NUMBER',
+  'PHOTO_LINK',
+  'FILE_LINK',
+  'SELECT',
+  'TIMESTAMP',
+] as const;
+
+export type StaffShiftRegulationStatus = (typeof regulationStatuses)[number];
+export type StaffShiftKind = (typeof shiftKinds)[number];
+export type StaffShiftRoleScope = (typeof roleScopes)[number];
+export type StaffShiftItemValueType = (typeof itemValueTypes)[number];
+
+export type StaffShiftRegulationsQuery = {
+  status?: StaffShiftRegulationStatus | 'all';
+  shiftKind?: StaffShiftKind | 'all';
+  storeId?: string;
+  search?: string;
+};
+
+export type StaffShiftRegulationDto = {
+  title?: string;
+  description?: string | null;
+  shiftKind?: StaffShiftKind;
+  status?: StaffShiftRegulationStatus;
+  roleScope?: StaffShiftRoleScope;
+  storeId?: string | null;
+  effectiveFrom?: string | null;
+  sections?: unknown;
+};
+
+export type StaffShiftRegulationSection = {
+  id: string;
+  title: string;
+  description: string | null;
+  items: StaffShiftRegulationItem[];
+};
+
+export type StaffShiftRegulationItem = {
+  id: string;
+  title: string;
+  instruction: string | null;
+  valueType: StaffShiftItemValueType;
+  required: boolean;
+  evidenceRequired: boolean;
+  score: number;
+};
+
+export type StaffShiftRegulationReport = {
+  filters: {
+    status: StaffShiftRegulationStatus | 'all';
+    shiftKind: StaffShiftKind | 'all';
+    storeId: string | null;
+    search: string | null;
+  };
+  summary: {
+    total: number;
+    draft: number;
+    published: number;
+    archived: number;
+    requiredEvidenceItems: number;
+  };
+  rows: StaffShiftRegulationResponse[];
+  stores: Array<{ id: string; name: string; isActive: boolean }>;
+};
+
+export type StaffShiftRegulationResponse = {
+  id: string;
+  title: string;
+  description: string | null;
+  shiftKind: StaffShiftKind;
+  status: StaffShiftRegulationStatus;
+  roleScope: StaffShiftRoleScope;
+  version: number;
+  sections: StaffShiftRegulationSection[];
+  sectionsCount: number;
+  itemsCount: number;
+  requiredEvidenceItems: number;
+  effectiveFrom: string | null;
+  publishedAt: string | null;
+  archivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  store: { id: string; name: string; isActive: boolean } | null;
+  createdByUser: { id: string; email: string; fullName: string | null } | null;
+};
+
+const regulationInclude = {
+  store: { select: { id: true, name: true, isActive: true } },
+  createdByUser: { select: { id: true, email: true, fullName: true } },
+} satisfies Prisma.StaffShiftRegulationInclude;
+
+type StaffShiftRegulationRow = Prisma.StaffShiftRegulationGetPayload<{
+  include: typeof regulationInclude;
+}>;
+
+@Injectable()
+export class StaffShiftRegulationsService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly tenantContextService: TenantContextService,
+  ) {}
+
+  async getRegulations(
+    user: AuthenticatedUser,
+    query: StaffShiftRegulationsQuery = {},
+  ): Promise<StaffShiftRegulationReport> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const filters = this.resolveFilters(query);
+    const where = this.buildWhere(tenantId, filters);
+
+    const [rows, stores] = await Promise.all([
+      this.prisma.staffShiftRegulation.findMany({
+        where,
+        include: regulationInclude,
+        orderBy: [{ status: 'asc' }, { updatedAt: 'desc' }],
+        take: 200,
+      }),
+      this.prisma.store.findMany({
+        where: { tenantId },
+        select: { id: true, name: true, isActive: true },
+        orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+      }),
+    ]);
+    const responseRows = rows.map((row) => this.toRegulationResponse(row));
+
+    return {
+      filters,
+      summary: this.buildSummary(responseRows),
+      rows: responseRows,
+      stores,
+    };
+  }
+
+  async createRegulation(
+    user: AuthenticatedUser,
+    dto: StaffShiftRegulationDto,
+  ) {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const data = await this.normalizeRegulationData(tenantId, dto, {
+      requireTitle: true,
+    });
+    const status = data.status ?? 'DRAFT';
+
+    const regulation = await this.prisma.staffShiftRegulation.create({
+      data: {
+        ...data,
+        tenantId,
+        status,
+        createdByUserId: user.id,
+        publishedAt: status === 'PUBLISHED' ? new Date() : null,
+        archivedAt: status === 'ARCHIVED' ? new Date() : null,
+      },
+      include: regulationInclude,
+    });
+
+    return this.toRegulationResponse(regulation);
+  }
+
+  async updateRegulation(
+    user: AuthenticatedUser,
+    id: string,
+    dto: StaffShiftRegulationDto,
+  ) {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const current = await this.prisma.staffShiftRegulation.findFirst({
+      where: { id, tenantId },
+      select: { id: true, status: true, version: true },
+    });
+
+    if (!current) {
+      throw new NotFoundException('Shift regulation not found');
+    }
+
+    const data = await this.normalizeRegulationData(tenantId, dto, {
+      requireTitle: false,
+    });
+    const status = data.status ?? current.status;
+    const shouldPublish = data.status === 'PUBLISHED';
+    const shouldArchive = data.status === 'ARCHIVED';
+
+    const regulation = await this.prisma.staffShiftRegulation.update({
+      where: { id: current.id },
+      data: {
+        ...data,
+        version:
+          shouldPublish && current.status === 'ARCHIVED'
+            ? current.version + 1
+            : undefined,
+        publishedAt: shouldPublish ? new Date() : undefined,
+        archivedAt: shouldArchive ? new Date() : undefined,
+        status,
+      },
+      include: regulationInclude,
+    });
+
+    return this.toRegulationResponse(regulation);
+  }
+
+  private resolveFilters(
+    query: StaffShiftRegulationsQuery,
+  ): StaffShiftRegulationReport['filters'] {
+    return {
+      status: this.resolveOne(
+        query.status,
+        ['all', ...regulationStatuses] as const,
+        'all',
+      ),
+      shiftKind: this.resolveOne(
+        query.shiftKind,
+        ['all', ...shiftKinds] as const,
+        'all',
+      ),
+      storeId: this.normalizeOptionalString(query.storeId),
+      search: this.normalizeOptionalString(query.search),
+    };
+  }
+
+  private buildWhere(
+    tenantId: string,
+    filters: StaffShiftRegulationReport['filters'],
+  ): Prisma.StaffShiftRegulationWhereInput {
+    const where: Prisma.StaffShiftRegulationWhereInput = { tenantId };
+
+    if (filters.status !== 'all') {
+      where.status = filters.status;
+    }
+
+    if (filters.shiftKind !== 'all') {
+      where.shiftKind = filters.shiftKind;
+    }
+
+    if (filters.storeId) {
+      where.storeId = filters.storeId;
+    }
+
+    if (filters.search) {
+      where.OR = [
+        { title: { contains: filters.search, mode: 'insensitive' } },
+        { description: { contains: filters.search, mode: 'insensitive' } },
+      ];
+    }
+
+    return where;
+  }
+
+  private buildSummary(rows: StaffShiftRegulationResponse[]) {
+    return rows.reduce(
+      (summary, row) => {
+        summary.total += 1;
+        summary.requiredEvidenceItems += row.requiredEvidenceItems;
+
+        if (row.status === 'DRAFT') {
+          summary.draft += 1;
+        } else if (row.status === 'PUBLISHED') {
+          summary.published += 1;
+        } else if (row.status === 'ARCHIVED') {
+          summary.archived += 1;
+        }
+
+        return summary;
+      },
+      {
+        total: 0,
+        draft: 0,
+        published: 0,
+        archived: 0,
+        requiredEvidenceItems: 0,
+      },
+    );
+  }
+
+  private async normalizeRegulationData(
+    tenantId: string,
+    dto: StaffShiftRegulationDto,
+    options: { requireTitle: boolean },
+  ) {
+    const data: Prisma.StaffShiftRegulationUncheckedCreateInput = {
+      tenantId,
+      title: '',
+      sections: this.defaultSections(),
+    };
+
+    if (!options.requireTitle) {
+      delete (data as Partial<typeof data>).tenantId;
+      delete (data as Partial<typeof data>).title;
+      delete (data as Partial<typeof data>).sections;
+    }
+
+    if (dto.title !== undefined || options.requireTitle) {
+      data.title = this.normalizeRequiredString(
+        dto.title,
+        'Regulation title is required',
+      );
+    }
+
+    if (dto.description !== undefined) {
+      data.description = this.normalizeOptionalString(dto.description);
+    }
+
+    if (dto.shiftKind !== undefined) {
+      data.shiftKind = this.resolveOne(dto.shiftKind, shiftKinds, 'OPENING');
+    }
+
+    if (dto.status !== undefined) {
+      data.status = this.resolveOne(dto.status, regulationStatuses, 'DRAFT');
+    }
+
+    if (dto.roleScope !== undefined) {
+      data.roleScope = this.resolveOne(
+        dto.roleScope,
+        roleScopes,
+        'ADMINISTRATOR',
+      );
+    }
+
+    if (dto.storeId !== undefined) {
+      data.storeId = await this.resolveStoreId(tenantId, dto.storeId);
+    }
+
+    if (dto.effectiveFrom !== undefined) {
+      data.effectiveFrom = this.normalizeDateTime(dto.effectiveFrom);
+    }
+
+    if (dto.sections !== undefined || options.requireTitle) {
+      data.sections = this.normalizeSections(dto.sections);
+    }
+
+    return data;
+  }
+
+  private toRegulationResponse(
+    row: StaffShiftRegulationRow,
+  ): StaffShiftRegulationResponse {
+    const sections = this.normalizeSections(row.sections);
+    const items = sections.flatMap((section) => section.items);
+
+    return {
+      id: row.id,
+      title: row.title,
+      description: row.description,
+      shiftKind: row.shiftKind as StaffShiftKind,
+      status: row.status as StaffShiftRegulationStatus,
+      roleScope: row.roleScope as StaffShiftRoleScope,
+      version: row.version,
+      sections,
+      sectionsCount: sections.length,
+      itemsCount: items.length,
+      requiredEvidenceItems: items.filter((item) => item.evidenceRequired)
+        .length,
+      effectiveFrom: row.effectiveFrom?.toISOString() ?? null,
+      publishedAt: row.publishedAt?.toISOString() ?? null,
+      archivedAt: row.archivedAt?.toISOString() ?? null,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+      store: row.store,
+      createdByUser: row.createdByUser,
+    };
+  }
+
+  private normalizeSections(value: unknown): StaffShiftRegulationSection[] {
+    const rawSections = Array.isArray(value) ? value : this.defaultSections();
+    const sections = rawSections.slice(0, 20).map((section, sectionIndex) => {
+      const sectionRecord = this.asRecord(section);
+      const title =
+        this.normalizeOptionalString(sectionRecord.title) ??
+        `Раздел ${sectionIndex + 1}`;
+      const rawItems = Array.isArray(sectionRecord.items)
+        ? sectionRecord.items
+        : [];
+      const items = rawItems
+        .slice(0, 80)
+        .map((item, itemIndex) => this.normalizeItem(item, itemIndex))
+        .filter((item) => item.title.length > 0);
+
+      return {
+        id:
+          this.normalizeOptionalString(sectionRecord.id) ??
+          `section-${sectionIndex + 1}`,
+        title,
+        description: this.normalizeOptionalString(sectionRecord.description),
+        items,
+      };
+    });
+
+    if (sections.length === 0) {
+      throw new BadRequestException('At least one section is required');
+    }
+
+    if (sections.every((section) => section.items.length === 0)) {
+      throw new BadRequestException('At least one regulation item is required');
+    }
+
+    return sections;
+  }
+
+  private normalizeItem(
+    value: unknown,
+    index: number,
+  ): StaffShiftRegulationItem {
+    const item = this.asRecord(value);
+    const title = this.normalizeOptionalString(item.title) ?? '';
+
+    return {
+      id: this.normalizeOptionalString(item.id) ?? `item-${index + 1}`,
+      title,
+      instruction: this.normalizeOptionalString(item.instruction),
+      valueType: this.resolveOne(
+        this.normalizeOptionalString(item.valueType),
+        itemValueTypes,
+        'CHECKBOX',
+      ),
+      required: this.normalizeBoolean(item.required, true),
+      evidenceRequired: this.normalizeBoolean(item.evidenceRequired, false),
+      score: this.normalizeScore(item.score),
+    };
+  }
+
+  private defaultSections(): StaffShiftRegulationSection[] {
+    return [
+      {
+        id: 'opening-readiness',
+        title: 'Подготовка смены',
+        description: 'Базовые действия администратора перед началом смены.',
+        items: [
+          {
+            id: 'check-cash',
+            title: 'Проверить кассу и стартовый остаток',
+            instruction:
+              'Сверить наличные, терминал и состояние кассовой зоны.',
+            valueType: 'CHECKBOX',
+            required: true,
+            evidenceRequired: false,
+            score: 2,
+          },
+          {
+            id: 'check-hall',
+            title: 'Проверить зал и рабочие места',
+            instruction: 'Осмотреть ПК, периферию, чистоту столов и проходов.',
+            valueType: 'CHECKBOX',
+            required: true,
+            evidenceRequired: false,
+            score: 2,
+          },
+        ],
+      },
+    ];
+  }
+
+  private asRecord(value: unknown): Record<string, unknown> {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return {};
+    }
+
+    return value as Record<string, unknown>;
+  }
+
+  private resolveOne<T extends readonly string[]>(
+    value: string | null | undefined,
+    allowed: T,
+    fallback: T[number],
+  ): T[number] {
+    if (!value) {
+      return fallback;
+    }
+
+    if (allowed.includes(value)) {
+      return value;
+    }
+
+    throw new BadRequestException(`Unsupported value: ${value}`);
+  }
+
+  private normalizeRequiredString(value: string | undefined, message: string) {
+    const normalized = value?.trim();
+
+    if (!normalized) {
+      throw new BadRequestException(message);
+    }
+
+    return normalized;
+  }
+
+  private normalizeOptionalString(value: unknown) {
+    if (value === null || value === undefined) {
+      return null;
+    }
+
+    if (typeof value !== 'string') {
+      return null;
+    }
+
+    return value.trim() || null;
+  }
+
+  private normalizeBoolean(value: unknown, fallback: boolean) {
+    if (typeof value === 'boolean') {
+      return value;
+    }
+
+    if (typeof value === 'string') {
+      if (value === 'true') {
+        return true;
+      }
+
+      if (value === 'false') {
+        return false;
+      }
+    }
+
+    return fallback;
+  }
+
+  private normalizeScore(value: unknown) {
+    const score =
+      typeof value === 'number'
+        ? value
+        : typeof value === 'string'
+          ? Number.parseInt(value, 10)
+          : 1;
+
+    if (!Number.isFinite(score)) {
+      return 1;
+    }
+
+    return Math.min(Math.max(Math.trunc(score), 0), 100);
+  }
+
+  private normalizeDateTime(value: string | null | undefined) {
+    const normalized = this.normalizeOptionalString(value);
+
+    if (!normalized) {
+      return null;
+    }
+
+    const date = new Date(normalized);
+
+    if (Number.isNaN(date.getTime())) {
+      throw new BadRequestException('Invalid effective date');
+    }
+
+    return date;
+  }
+
+  private async resolveStoreId(
+    tenantId: string,
+    value: string | null | undefined,
+  ) {
+    const id = this.normalizeOptionalString(value);
+
+    if (!id) {
+      return null;
+    }
+
+    const store = await this.prisma.store.findFirst({
+      where: { id, tenantId },
+      select: { id: true },
+    });
+
+    if (!store) {
+      throw new BadRequestException('Store not found');
+    }
+
+    return store.id;
+  }
+}

@@ -16,6 +16,16 @@ export type SimpleReportFilter = {
   type: "text" | "select" | "multi-select";
 };
 
+export type SimpleReportServerExport = {
+  label: string;
+  href: string;
+  tableStateParams?: {
+    filters?: Record<string, string>;
+    sortKey?: string;
+    sortDirection?: string;
+  };
+};
+
 type SortDirection = "asc" | "desc";
 type FilterValue = string | string[];
 
@@ -25,12 +35,14 @@ export function SimpleReportTable({
   filters = [],
   title,
   extraActions,
+  serverExports = [],
 }: {
   rows: SimpleReportRow[];
   columns: SimpleReportColumn[];
   filters?: SimpleReportFilter[];
   title: string;
   extraActions?: ReactNode;
+  serverExports?: SimpleReportServerExport[];
 }) {
   const [filterValues, setFilterValues] = useState<Record<string, FilterValue>>({});
   const [sortKey, setSortKey] = useState(columns[0]?.key ?? "");
@@ -227,6 +239,20 @@ export function SimpleReportTable({
           >
             PDF
           </button>
+          {serverExports.map((action) => (
+            <a
+              key={`${action.label}:${action.href}`}
+              href={tableStateHref(
+                action,
+                filterValues,
+                sortKey,
+                sortDirection,
+              )}
+              className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
+            >
+              {action.label}
+            </a>
+          ))}
           {extraActions}
         </div>
       </div>
@@ -292,6 +318,46 @@ function uniqueValues(rows: SimpleReportRow[], key: string) {
 
 function selectedFilterValues(value: FilterValue | undefined) {
   return Array.isArray(value) ? value : [];
+}
+
+function tableStateHref(
+  action: SimpleReportServerExport,
+  filterValues: Record<string, FilterValue>,
+  sortKey: string,
+  sortDirection: SortDirection,
+) {
+  const url = new URL(action.href, "https://leetplus.local");
+  const stateParams = action.tableStateParams;
+
+  if (!stateParams) {
+    return `${url.pathname}${url.search}${url.hash}`;
+  }
+
+  Object.entries(stateParams.filters ?? {}).forEach(([filterKey, paramName]) => {
+    url.searchParams.delete(paramName);
+    const value = filterValues[filterKey];
+
+    if (Array.isArray(value)) {
+      value
+        .filter((item) => item.trim())
+        .forEach((item) => url.searchParams.append(paramName, item));
+      return;
+    }
+
+    if (value && value !== "all") {
+      url.searchParams.set(paramName, value.trim());
+    }
+  });
+
+  if (stateParams.sortKey && sortKey) {
+    url.searchParams.set(stateParams.sortKey, sortKey);
+  }
+
+  if (stateParams.sortDirection) {
+    url.searchParams.set(stateParams.sortDirection, sortDirection);
+  }
+
+  return `${url.pathname}${url.search}${url.hash}`;
 }
 
 function multiSelectLabel(values: string[]) {

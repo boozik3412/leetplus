@@ -248,8 +248,12 @@ const replenishmentReport: ReplenishmentReport = {
   rows: [
     {
       productId: 'product-1',
+      storeId: 'store-1',
+      storeName: 'Club A',
       article: 'DRK-001',
       name: 'Cola',
+      isCanonical: false,
+      canonicalProductName: null,
       categoryName: 'Напитки',
       supplierName: 'Supplier A',
       stockQuantity: 1,
@@ -260,6 +264,25 @@ const replenishmentReport: ReplenishmentReport = {
       recommendedOrder: 6,
       orderMultiplicity: 6,
       risk: 'LOW_STOCK',
+    },
+    {
+      productId: 'product-2',
+      storeId: 'store-2',
+      storeName: 'Club B',
+      article: 'SNK-002',
+      name: 'Chips',
+      isCanonical: false,
+      canonicalProductName: null,
+      categoryName: 'Снеки',
+      supplierName: 'Supplier B',
+      stockQuantity: 24,
+      soldQuantity: 3,
+      averageDailySales: 0.1,
+      stockDays: 240,
+      dailyNeed: 0,
+      recommendedOrder: 0,
+      orderMultiplicity: 12,
+      risk: 'OK',
     },
   ],
 };
@@ -324,5 +347,20 @@ describe('ReportsExportService', () => {
     await expect(
       service.exportReports(user, { format: 'pdf' }),
     ).rejects.toThrow('format must be csv or xlsx');
+  });
+
+  it('exports replenishment report with current table filters', async () => {
+    const file = await service.exportReports(user, {
+      report: 'replenishment',
+      replenishmentRisk: 'Низкий остаток',
+      replenishmentStoreName: 'Club A',
+      replenishmentProductName: 'co',
+      replenishmentSort: 'recommendedOrder',
+      replenishmentSortDirection: 'desc',
+    });
+    const content = file.buffer.toString('utf8');
+
+    expect(content).toContain('Низкий остаток;DRK-001;Cola;Club A;');
+    expect(content).not.toContain('SNK-002');
   });
 });

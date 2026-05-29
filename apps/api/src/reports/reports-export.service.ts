@@ -11,6 +11,7 @@ import {
   type OperationalReportQuery,
   type ReportRecommendation,
   type ReplenishmentReport,
+  type ReplenishmentRow,
   type ReplenishmentRisk,
   type SalesDetailReport,
   type SkuPerformanceReport,
@@ -24,6 +25,13 @@ export type ReportExportQuery = OperationalReportQuery & {
   report?: string;
   lflPeriod?: LflPeriod;
   category?: string;
+  replenishmentRisk?: string | string[];
+  replenishmentStoreName?: string | string[];
+  replenishmentCategoryName?: string | string[];
+  replenishmentSupplierName?: string | string[];
+  replenishmentProductName?: string | string[];
+  replenishmentSort?: string;
+  replenishmentSortDirection?: string;
 };
 
 export type ReportExportFile = {
@@ -51,6 +59,35 @@ type ProductMovementRow = {
   revenue: number;
   dailyQuantity: Record<string, number>;
 };
+
+type ReplenishmentExportSortKey =
+  | 'risk'
+  | 'article'
+  | 'name'
+  | 'storeName'
+  | 'categoryName'
+  | 'supplierName'
+  | 'stockQuantity'
+  | 'soldQuantity'
+  | 'averageDailySales'
+  | 'stockDays'
+  | 'dailyNeed'
+  | 'recommendedOrder';
+
+const REPLENISHMENT_EXPORT_SORT_KEYS: readonly ReplenishmentExportSortKey[] = [
+  'risk',
+  'article',
+  'name',
+  'storeName',
+  'categoryName',
+  'supplierName',
+  'stockQuantity',
+  'soldQuantity',
+  'averageDailySales',
+  'stockDays',
+  'dailyNeed',
+  'recommendedOrder',
+];
 
 @Injectable()
 export class ReportsExportService {
@@ -200,12 +237,16 @@ export class ReportsExportService {
     query: ReportExportQuery,
     format: ReportExportFormat,
   ): Promise<ReportExportFile> {
-    const report = await this.reportsService.getReplenishmentReport(user, query);
+    const report = await this.reportsService.getReplenishmentReport(
+      user,
+      query,
+    );
+    const exportReport = this.applyReplenishmentTableState(report, query);
     const fileName = `leetplus-replenishment-${report.from}-${report.to}.${format}`;
 
     if (format === 'csv') {
       return {
-        buffer: Buffer.from(this.buildReplenishmentCsv(report), 'utf8'),
+        buffer: Buffer.from(this.buildReplenishmentCsv(exportReport), 'utf8'),
         contentType: 'text/csv; charset=utf-8',
         fileName,
         tenantSlug: report.tenantSlug,
@@ -215,7 +256,7 @@ export class ReportsExportService {
     }
 
     return {
-      buffer: await this.buildReplenishmentXlsx(report),
+      buffer: await this.buildReplenishmentXlsx(exportReport),
       contentType:
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       fileName,
@@ -223,6 +264,124 @@ export class ReportsExportService {
       from: report.from,
       to: report.to,
     };
+  }
+
+  private applyReplenishmentTableState(
+    report: ReplenishmentReport,
+    query: ReportExportQuery,
+  ): ReplenishmentReport {
+    const rows = report.rows.filter((row) =>
+      this.matchesReplenishmentTableFilters(row, query),
+    );
+    const sortKey = this.resolveReplenishmentSortKey(query.replenishmentSort);
+
+    if (!sortKey) {
+      return { ...report, rows };
+    }
+
+    const sortDirection =
+      query.replenishmentSortDirection === 'desc' ? 'desc' : 'asc';
+    const sortedRows = [...rows].sort((a, b) => {
+      const result = this.compareExportValues(
+        this.replenishmentSortValue(a, sortKey),
+        this.replenishmentSortValue(b, sortKey),
+      );
+
+      return sortDirection === 'asc' ? result : -result;
+    });
+
+    return { ...report, rows: sortedRows };
+  }
+
+  private matchesReplenishmentTableFilters(
+    row: ReplenishmentRow,
+    query: ReportExportQuery,
+  ) {
+    return (
+      this.matchesExactQueryValues(
+        this.replenishmentRiskLabel(row.risk),
+        query.replenishmentRisk,
+      ) &&
+      this.matchesExactQueryValues(
+        row.storeName,
+        query.replenishmentStoreName,
+      ) &&
+      this.matchesExactQueryValues(
+        row.categoryName,
+        query.replenishmentCategoryName,
+      ) &&
+      this.matchesExactQueryValues(
+        row.supplierName,
+        query.replenishmentSupplierName,
+      ) &&
+      this.matchesTextQuery(row.name, query.replenishmentProductName)
+    );
+  }
+
+  private resolveReplenishmentSortKey(
+    value?: string,
+  ): ReplenishmentExportSortKey | null {
+    if (
+      value &&
+      (REPLENISHMENT_EXPORT_SORT_KEYS as readonly string[]).includes(value)
+    ) {
+      return value as ReplenishmentExportSortKey;
+    }
+
+    return null;
+  }
+
+  private replenishmentSortValue(
+    row: ReplenishmentRow,
+    key: ReplenishmentExportSortKey,
+  ) {
+    if (key === 'risk') {
+      return this.replenishmentRiskLabel(row.risk);
+    }
+
+    return row[key];
+  }
+
+  private matchesExactQueryValues(
+    value: string | null,
+    queryValue?: string | string[],
+  ) {
+    const allowedValues = this.queryValues(queryValue);
+
+    if (allowedValues.length === 0) {
+      return true;
+    }
+
+    return allowedValues.includes(value ?? '');
+  }
+
+  private matchesTextQuery(value: string, queryValue?: string | string[]) {
+    const search = this.queryValues(queryValue)[0]?.toLocaleLowerCase('ru');
+
+    if (!search) {
+      return true;
+    }
+
+    return value.toLocaleLowerCase('ru').includes(search);
+  }
+
+  private queryValues(value?: string | string[]) {
+    const values = Array.isArray(value) ? value : [value];
+
+    return values
+      .map((item) => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean);
+  }
+
+  private compareExportValues(
+    a: string | number | null,
+    b: string | number | null,
+  ) {
+    if (typeof a === 'number' && typeof b === 'number') {
+      return a - b;
+    }
+
+    return String(a ?? '').localeCompare(String(b ?? ''), 'ru');
   }
 
   private async exportProductMovementReport(

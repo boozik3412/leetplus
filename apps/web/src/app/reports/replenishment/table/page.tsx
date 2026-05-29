@@ -73,6 +73,18 @@ function exportHref({
   return `/api/reports/export?${params.toString()}`;
 }
 
+const replenishmentExportTableState = {
+  filters: {
+    risk: "replenishmentRisk",
+    storeName: "replenishmentStoreName",
+    categoryName: "replenishmentCategoryName",
+    supplierName: "replenishmentSupplierName",
+    name: "replenishmentProductName",
+  },
+  sortKey: "replenishmentSort",
+  sortDirection: "replenishmentSortDirection",
+};
+
 export default async function ReplenishmentTablePage({
   searchParams,
 }: {
@@ -137,30 +149,30 @@ export default async function ReplenishmentTablePage({
           { key: "supplierName", label: "Поставщик", type: "multi-select" },
           { key: "name", label: "Товар", type: "text" },
         ]}
+        serverExports={[
+          {
+            label: "XLSX файл",
+            href: exportHref({
+              from: report.from,
+              to: report.to,
+              storeId: report.storeId,
+              format: "xlsx",
+            }),
+            tableStateParams: replenishmentExportTableState,
+          },
+          {
+            label: "CSV файл",
+            href: exportHref({
+              from: report.from,
+              to: report.to,
+              storeId: report.storeId,
+              format: "csv",
+            }),
+            tableStateParams: replenishmentExportTableState,
+          },
+        ]}
         extraActions={
           <>
-            <a
-              href={exportHref({
-                from: report.from,
-                to: report.to,
-                storeId: report.storeId,
-                format: "xlsx",
-              })}
-              className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
-            >
-              XLSX файл
-            </a>
-            <a
-              href={exportHref({
-                from: report.from,
-                to: report.to,
-                storeId: report.storeId,
-                format: "csv",
-              })}
-              className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
-            >
-              CSV файл
-            </a>
             <ReportEmailInlineForm
               defaultEmail={user.email}
               from={report.from}

@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  Patch,
   Post,
   Query,
   StreamableFile,
@@ -20,7 +21,10 @@ import {
   ReportsExportService,
   type ReportExportQuery,
 } from './reports-export.service';
-import type { SendReportEmailDto } from './reports.dto';
+import type {
+  SendReportEmailDto,
+  UpdateRecommendationStateDto,
+} from './reports.dto';
 import {
   ReportsService,
   type AssortmentMatrixReport,
@@ -158,6 +162,15 @@ export class ReportsController {
     @Param('id') id: string,
   ) {
     return this.reportsService.deleteOosExclusion(user, id);
+  }
+
+  @Patch('recommendations/:key/state')
+  updateRecommendationState(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('key') key: string,
+    @Body() dto: UpdateRecommendationStateDto,
+  ) {
+    return this.reportsService.updateRecommendationState(user, key, dto);
   }
 
   @Get('export')

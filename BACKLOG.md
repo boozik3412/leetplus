@@ -145,9 +145,12 @@ Status: implemented; remains in production verification and UX polish mode.
 
 ## Stage 4. Recommendations Workflow
 
-- Show financial effect for recommendations: expected revenue, profit, loss reduction, or stock release.
-- Split recommendations by role: commercial director, buyer, club manager.
-- Add recommendation statuses: new, in progress, done, rejected, hidden, reappeared.
+Status: implemented; remains in production verification and workflow UX polish mode.
+
+- Done: recommendations now show financial effect for profit protection, stock release, and margin uplift.
+- Done: recommendations are split by responsible role: commercial director, buyer, club manager.
+- Done: recommendation workflow state is persisted with statuses: new, in progress, done, rejected, hidden, reappeared.
+- Done: `/reports/recommendations/table` became a working queue with filters by status/role and inline status update.
 
 ## Stage 5. Regular Digests
 

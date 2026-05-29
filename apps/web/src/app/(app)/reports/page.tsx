@@ -1101,6 +1101,12 @@ function RecommendationsPanel({
                 <p className="mt-1 text-xs text-zinc-500">
                   {row.storeName ?? "—"}
                 </p>
+                <p className="mt-2 text-xs font-medium text-zinc-600">
+                  {recommendationRoleLabel(row.role)}
+                </p>
+                <p className="mt-1 text-xs text-zinc-500">
+                  {recommendationStatusLabel(row.status)}
+                </p>
               </div>
               <div>
                 <h3 className="text-sm font-semibold text-zinc-950">
@@ -1120,6 +1126,10 @@ function RecommendationsPanel({
                 <p className="text-xs text-zinc-500">{row.metricLabel}</p>
                 <p className="mt-1 text-xl font-semibold tabular-nums text-zinc-900">
                   {row.metricValue}
+                </p>
+                <p className="mt-3 text-xs text-zinc-500">{row.effectLabel}</p>
+                <p className="mt-1 text-lg font-semibold tabular-nums text-emerald-600">
+                  {formatMoney(row.effectAmount)}
                 </p>
               </div>
             </article>
@@ -1152,6 +1162,29 @@ function severityClassName(severity: ReportRecommendation["severity"]) {
   };
 
   return classNames[severity];
+}
+
+function recommendationRoleLabel(role: ReportRecommendation["role"]) {
+  const labels: Record<ReportRecommendation["role"], string> = {
+    COMMERCIAL_DIRECTOR: "Коммерческий директор",
+    BUYER: "Закупщик",
+    CLUB_MANAGER: "Управляющий клуба",
+  };
+
+  return labels[role];
+}
+
+function recommendationStatusLabel(status: ReportRecommendation["status"]) {
+  const labels: Record<ReportRecommendation["status"], string> = {
+    NEW: "Новая",
+    IN_PROGRESS: "В работе",
+    DONE: "Выполнена",
+    REJECTED: "Отклонена",
+    HIDDEN: "Скрыта",
+    REAPPEARED: "Появилась повторно",
+  };
+
+  return labels[status];
 }
 
 function RiskTable({

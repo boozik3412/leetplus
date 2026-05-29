@@ -24,10 +24,30 @@ type ReportsPrismaMock = {
   productOosExclusion: {
     findMany: jest.Mock;
   };
+  recommendationState: {
+    findMany: jest.Mock;
+    create: jest.Mock;
+    update: jest.Mock;
+    upsert: jest.Mock;
+  };
 };
 
 type TenantContextMock = {
   resolve: jest.Mock;
+};
+
+type RecommendationStateCreateArgs = {
+  data: {
+    tenantId: string;
+    recommendationKey: string;
+    role: string;
+    status: string;
+    note?: string | null;
+    firstSeenAt?: Date;
+    lastSeenAt?: Date;
+    statusChangedAt?: Date;
+    resolvedAt?: Date | null;
+  };
 };
 
 const user = {
@@ -37,6 +57,8 @@ const user = {
 } as AuthenticatedUser;
 
 function createPrismaMock(): ReportsPrismaMock {
+  const now = new Date('2026-04-10T00:00:00.000Z');
+
   return {
     product: {
       count: jest.fn(),
@@ -56,6 +78,27 @@ function createPrismaMock(): ReportsPrismaMock {
     },
     productOosExclusion: {
       findMany: jest.fn(),
+    },
+    recommendationState: {
+      findMany: jest.fn().mockResolvedValue([]),
+      create: jest.fn((args: RecommendationStateCreateArgs) =>
+        Promise.resolve({
+          id: 'state-1',
+          tenantId: args.data.tenantId,
+          recommendationKey: args.data.recommendationKey,
+          role: args.data.role,
+          status: args.data.status,
+          note: args.data.note ?? null,
+          firstSeenAt: args.data.firstSeenAt ?? now,
+          lastSeenAt: args.data.lastSeenAt ?? now,
+          statusChangedAt: args.data.statusChangedAt ?? now,
+          resolvedAt: args.data.resolvedAt ?? null,
+          createdAt: now,
+          updatedAt: now,
+        }),
+      ),
+      update: jest.fn(),
+      upsert: jest.fn(),
     },
   };
 }

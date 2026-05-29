@@ -496,9 +496,13 @@ export class ReportsExportService {
       ['Рекомендации'],
       [
         'Приоритет',
+        'Статус',
+        'Ответственный',
         'Тип',
         'Артикул',
         'Товар',
+        'Эффект, руб',
+        'Тип эффекта',
         'Показатель',
         'Значение',
         'Действие',
@@ -506,9 +510,13 @@ export class ReportsExportService {
       ],
       ...operationalReport.recommendations.map((item) => [
         this.recommendationSeverityLabel(item.severity),
+        this.recommendationStatusLabel(item.status),
+        this.recommendationRoleLabel(item.role),
         this.recommendationKindLabel(item.kind),
         item.article,
         item.productName,
+        item.effectAmount,
+        item.effectLabel,
         item.metricLabel,
         item.metricValue,
         item.action,
@@ -1220,9 +1228,13 @@ export class ReportsExportService {
     const sheet = workbook.addWorksheet('Рекомендации');
     sheet.columns = [
       { header: 'Приоритет', key: 'severity', width: 14 },
+      { header: 'Статус', key: 'status', width: 18 },
+      { header: 'Ответственный', key: 'role', width: 24 },
       { header: 'Тип', key: 'kind', width: 20 },
       { header: 'Артикул', key: 'article', width: 18 },
       { header: 'Товар', key: 'productName', width: 36 },
+      { header: 'Эффект, руб', key: 'effectAmount', width: 16 },
+      { header: 'Тип эффекта', key: 'effectLabel', width: 24 },
       { header: 'Показатель', key: 'metricLabel', width: 18 },
       { header: 'Значение', key: 'metricValue', width: 16 },
       { header: 'Действие', key: 'action', width: 42 },
@@ -1232,6 +1244,8 @@ export class ReportsExportService {
       operationalReport.recommendations.map((item) => ({
         ...item,
         severity: this.recommendationSeverityLabel(item.severity),
+        status: this.recommendationStatusLabel(item.status),
+        role: this.recommendationRoleLabel(item.role),
         kind: this.recommendationKindLabel(item.kind),
       })),
     );
@@ -1585,6 +1599,29 @@ export class ReportsExportService {
     };
 
     return labels[kind];
+  }
+
+  private recommendationStatusLabel(status: ReportRecommendation['status']) {
+    const labels: Record<ReportRecommendation['status'], string> = {
+      NEW: 'Новая',
+      IN_PROGRESS: 'В работе',
+      DONE: 'Выполнена',
+      REJECTED: 'Отклонена',
+      HIDDEN: 'Скрыта',
+      REAPPEARED: 'Появилась повторно',
+    };
+
+    return labels[status];
+  }
+
+  private recommendationRoleLabel(role: ReportRecommendation['role']) {
+    const labels: Record<ReportRecommendation['role'], string> = {
+      COMMERCIAL_DIRECTOR: 'Коммерческий директор',
+      BUYER: 'Закупщик',
+      CLUB_MANAGER: 'Управляющий клуба',
+    };
+
+    return labels[role];
   }
 
   private replenishmentRiskLabel(risk: ReplenishmentRisk) {

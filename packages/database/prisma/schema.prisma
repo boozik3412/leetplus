@@ -64,6 +64,21 @@ enum ProductAssortmentRole {
   EXCLUDED
 }
 
+enum RecommendationStatus {
+  NEW
+  IN_PROGRESS
+  DONE
+  REJECTED
+  HIDDEN
+  REAPPEARED
+}
+
+enum RecommendationRole {
+  COMMERCIAL_DIRECTOR
+  BUYER
+  CLUB_MANAGER
+}
+
 enum GuestCrmStatus {
   NONE
   WATCH
@@ -125,6 +140,7 @@ model Tenant {
   marketingPromoBundles      MarketingPromoBundle[]
   marketingPromoBundleLaunches MarketingPromoBundleLaunch[]
   marketingPromoBundleUsages MarketingPromoBundleUsage[]
+  recommendationStates       RecommendationState[]
   guestStaffIdentityMappings GuestStaffIdentityMapping[]
   guestSavedFilters          GuestSavedFilter[]
   guestAudiences             GuestAudience[]
@@ -383,6 +399,28 @@ model ProductOosExclusion {
   @@unique([tenantId, productId])
   @@index([tenantId, type])
   @@index([productId])
+}
+
+model RecommendationState {
+  id                String               @id @default(uuid())
+  tenantId          String
+  recommendationKey String
+  role              RecommendationRole
+  status            RecommendationStatus @default(NEW)
+  note              String?
+  firstSeenAt       DateTime             @default(now())
+  lastSeenAt        DateTime             @default(now())
+  statusChangedAt   DateTime             @default(now())
+  resolvedAt        DateTime?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, recommendationKey], map: "recommendation_state_tenant_key_uidx")
+  @@index([tenantId, status], map: "recommendation_state_status_idx")
+  @@index([tenantId, role], map: "recommendation_state_role_idx")
+  @@index([tenantId, lastSeenAt], map: "recommendation_state_last_seen_idx")
 }
 
 model SalesFact {

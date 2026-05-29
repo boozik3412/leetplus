@@ -97,10 +97,32 @@ export type FrozenStockValuation =
   | "HISTORICAL_REVENUE"
   | "UNKNOWN";
 
+export type RecommendationStatus =
+  | "NEW"
+  | "IN_PROGRESS"
+  | "DONE"
+  | "REJECTED"
+  | "HIDDEN"
+  | "REAPPEARED";
+
+export type RecommendationRole =
+  | "COMMERCIAL_DIRECTOR"
+  | "BUYER"
+  | "CLUB_MANAGER";
+
 export type ReportRecommendation = {
   id: string;
   kind: "REPLENISH_STOCK" | "NO_SALES" | "LOW_MARGIN";
   severity: "HIGH" | "MEDIUM" | "LOW";
+  role: RecommendationRole;
+  status: RecommendationStatus;
+  statusNote: string | null;
+  statusChangedAt: string | null;
+  effectType: "PROFIT_PROTECTION" | "STOCK_RELEASE" | "MARGIN_UPLIFT";
+  effectLabel: string;
+  effectAmount: number;
+  effectUnit: "RUB";
+  effectDescription: string;
   title: string;
   description: string;
   action: string;

@@ -2,6 +2,8 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import {
   ProductAssortmentRole,
   ProductOosExclusionType,
+  RecommendationRole,
+  RecommendationStatus,
   StockMovementType,
 } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
@@ -11,6 +13,7 @@ import {
   buildProductCostBasis,
   type ProductCostBasis,
 } from './stock-cost-basis';
+import type { UpdateRecommendationStateDto } from './reports.dto';
 
 export type ReportGroup = {
   id: string | null;
@@ -115,6 +118,15 @@ export type ReportRecommendation = {
   id: string;
   kind: 'REPLENISH_STOCK' | 'NO_SALES' | 'LOW_MARGIN';
   severity: 'HIGH' | 'MEDIUM' | 'LOW';
+  role: RecommendationRole;
+  status: RecommendationStatus;
+  statusNote: string | null;
+  statusChangedAt: string | null;
+  effectType: 'PROFIT_PROTECTION' | 'STOCK_RELEASE' | 'MARGIN_UPLIFT';
+  effectLabel: string;
+  effectAmount: number;
+  effectUnit: 'RUB';
+  effectDescription: string;
   title: string;
   description: string;
   action: string;
@@ -699,6 +711,7 @@ type PlanFactAccumulator = {
 const DEMAND_PERIOD_DAYS = 21;
 const NEW_PRODUCTS_PERIOD_DAYS = 90;
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
+const REAPPEARED_AFTER_MS = 12 * 60 * 60 * 1000;
 
 @Injectable()
 export class ReportsService {
@@ -1074,6 +1087,14 @@ export class ReportsService {
       incomingStockByStoreProduct,
       period.toDate,
     );
+    const recommendations = await this.applyRecommendationWorkflowState(
+      tenantId,
+      this.buildRecommendations(
+        productSales,
+        outOfStockRiskProducts,
+        productsWithoutSales,
+      ),
+    );
 
     return {
       tenantId,
@@ -1101,11 +1122,7 @@ export class ReportsService {
         soldQuantity > 0
           ? this.round(stockQuantity / (soldQuantity / periodDays))
           : null,
-      recommendations: this.buildRecommendations(
-        productSales,
-        outOfStockRiskProducts,
-        productsWithoutSales,
-      ),
+      recommendations,
       outOfStockRiskProducts,
       productsWithoutSales,
     };
@@ -2877,6 +2894,53 @@ export class ReportsService {
     return this.prisma.productOosExclusion.delete({ where: { id } });
   }
 
+  async updateRecommendationState(
+    user: AuthenticatedUser,
+    recommendationKey: string,
+    dto: UpdateRecommendationStateDto,
+  ) {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const status = this.parseRecommendationStatus(dto.status);
+    const role = dto.role ? this.parseRecommendationRole(dto.role) : undefined;
+    const note =
+      typeof dto.note === 'string'
+        ? dto.note.trim() || null
+        : dto.note === null
+          ? null
+          : undefined;
+    const now = new Date();
+    const isTerminal = this.isTerminalRecommendationStatus(status);
+
+    const state = await this.prisma.recommendationState.upsert({
+      where: {
+        tenantId_recommendationKey: {
+          tenantId,
+          recommendationKey,
+        },
+      },
+      create: {
+        tenantId,
+        recommendationKey,
+        role: role ?? RecommendationRole.COMMERCIAL_DIRECTOR,
+        status,
+        note: note ?? null,
+        firstSeenAt: now,
+        lastSeenAt: now,
+        statusChangedAt: now,
+        resolvedAt: isTerminal ? now : null,
+      },
+      update: {
+        status,
+        ...(role ? { role } : {}),
+        ...(note !== undefined ? { note } : {}),
+        statusChangedAt: now,
+        resolvedAt: isTerminal ? now : null,
+      },
+    });
+
+    return this.serializeRecommendationState(state);
+  }
+
   private saleCost(
     fact: SalesFactWithCost,
     costBasisByProduct: Map<string, ProductCostBasis>,
@@ -3855,6 +3919,157 @@ export class ReportsService {
     return Math.max(0, Math.floor((toUtc - fromUtc) / DAY_IN_MS));
   }
 
+  private async applyRecommendationWorkflowState(
+    tenantId: string,
+    recommendations: ReportRecommendation[],
+  ): Promise<ReportRecommendation[]> {
+    if (recommendations.length === 0) {
+      return recommendations;
+    }
+
+    const now = new Date();
+    const recommendationKeys = recommendations.map((item) => item.id);
+    const existingStates = await this.prisma.recommendationState.findMany({
+      where: {
+        tenantId,
+        recommendationKey: { in: recommendationKeys },
+      },
+    });
+    const existingByKey = new Map(
+      existingStates.map((state) => [state.recommendationKey, state]),
+    );
+    const states = await Promise.all(
+      recommendations.map((recommendation) => {
+        const existing = existingByKey.get(recommendation.id);
+
+        if (!existing) {
+          return this.prisma.recommendationState.create({
+            data: {
+              tenantId,
+              recommendationKey: recommendation.id,
+              role: recommendation.role,
+              status: RecommendationStatus.NEW,
+              firstSeenAt: now,
+              lastSeenAt: now,
+              statusChangedAt: now,
+            },
+          });
+        }
+
+        const shouldReappear = this.shouldMarkRecommendationReappeared(
+          existing,
+          now,
+        );
+
+        return this.prisma.recommendationState.update({
+          where: {
+            tenantId_recommendationKey: {
+              tenantId,
+              recommendationKey: recommendation.id,
+            },
+          },
+          data: {
+            lastSeenAt: now,
+            ...(shouldReappear
+              ? {
+                  status: RecommendationStatus.REAPPEARED,
+                  statusChangedAt: now,
+                  resolvedAt: null,
+                }
+              : {}),
+          },
+        });
+      }),
+    );
+    const statesByKey = new Map(
+      states.map((state) => [state.recommendationKey, state]),
+    );
+
+    return recommendations.map((recommendation) => {
+      const state = statesByKey.get(recommendation.id);
+
+      if (!state) {
+        return recommendation;
+      }
+
+      return {
+        ...recommendation,
+        role: state.role,
+        status: state.status,
+        statusNote: state.note,
+        statusChangedAt: state.statusChangedAt.toISOString(),
+      };
+    });
+  }
+
+  private shouldMarkRecommendationReappeared(
+    state: {
+      status: RecommendationStatus;
+      resolvedAt: Date | null;
+      lastSeenAt: Date;
+    },
+    now: Date,
+  ) {
+    return (
+      this.isTerminalRecommendationStatus(state.status) &&
+      state.resolvedAt !== null &&
+      state.lastSeenAt.getTime() < state.resolvedAt.getTime() &&
+      now.getTime() - state.resolvedAt.getTime() >= REAPPEARED_AFTER_MS
+    );
+  }
+
+  private parseRecommendationStatus(value: RecommendationStatus | undefined) {
+    if (!value || !Object.values(RecommendationStatus).includes(value)) {
+      throw new BadRequestException('Invalid recommendation status');
+    }
+
+    return value;
+  }
+
+  private parseRecommendationRole(value: RecommendationRole) {
+    if (!Object.values(RecommendationRole).includes(value)) {
+      throw new BadRequestException('Invalid recommendation role');
+    }
+
+    return value;
+  }
+
+  private isTerminalRecommendationStatus(status: RecommendationStatus) {
+    return (
+      status === RecommendationStatus.DONE ||
+      status === RecommendationStatus.REJECTED ||
+      status === RecommendationStatus.HIDDEN
+    );
+  }
+
+  private serializeRecommendationState(state: {
+    recommendationKey: string;
+    role: RecommendationRole;
+    status: RecommendationStatus;
+    note: string | null;
+    firstSeenAt: Date;
+    lastSeenAt: Date;
+    statusChangedAt: Date;
+    resolvedAt: Date | null;
+  }) {
+    return {
+      recommendationKey: state.recommendationKey,
+      role: state.role,
+      status: state.status,
+      note: state.note,
+      firstSeenAt: state.firstSeenAt.toISOString(),
+      lastSeenAt: state.lastSeenAt.toISOString(),
+      statusChangedAt: state.statusChangedAt.toISOString(),
+      resolvedAt: state.resolvedAt?.toISOString() ?? null,
+    };
+  }
+
+  private marginUpliftAmount(sale: ProductSales) {
+    return this.round(
+      Math.max(0, sale.revenue * 0.2 - (sale.revenue - sale.cost)),
+    );
+  }
+
   private buildRecommendations(
     productSales: Map<string, ProductSales>,
     outOfStockRiskProducts: OutOfStockRiskProduct[],
@@ -3866,6 +4081,15 @@ export class ReportsService {
         kind: 'REPLENISH_STOCK' as const,
         severity:
           product.stockDays <= 1 ? ('HIGH' as const) : ('MEDIUM' as const),
+        role: RecommendationRole.BUYER,
+        status: RecommendationStatus.NEW,
+        statusNote: null,
+        statusChangedAt: null,
+        effectType: 'PROFIT_PROTECTION' as const,
+        effectLabel: 'Прибыль в риске',
+        effectAmount: this.round(product.grossProfitAtRiskForPeriod),
+        effectUnit: 'RUB' as const,
+        effectDescription: `Если не пополнить запас, валовая прибыль в риске за период составит ${this.round(product.grossProfitAtRiskForPeriod)} руб.`,
         title: `Пополнить запас: ${product.name}`,
         description: `Текущего остатка хватит примерно на ${product.stockDays} дн. при среднем спросе ${product.averageDailySales} шт/день.`,
         action: 'Проверить поставщика и ближайший заказ.',
@@ -3883,6 +4107,15 @@ export class ReportsService {
           id: `no-sales:${product.storeId}:${product.productId}`,
           kind: 'NO_SALES' as const,
           severity: 'LOW' as const,
+          role: RecommendationRole.CLUB_MANAGER,
+          status: RecommendationStatus.NEW,
+          statusNote: null,
+          statusChangedAt: null,
+          effectType: 'STOCK_RELEASE' as const,
+          effectLabel: 'Деньги в остатке',
+          effectAmount: this.round(product.frozenStockAmount),
+          effectUnit: 'RUB' as const,
+          effectDescription: `В товаре без продаж заморожено ${this.round(product.frozenStockAmount)} руб.`,
           title: `Разобрать товар без продаж: ${product.name}`,
           description: `В выбранном периоде продаж нет, но на остатке ${product.stockQuantity} шт.`,
           action: 'Проверить цену, выкладку или необходимость архивации.',
@@ -3908,6 +4141,15 @@ export class ReportsService {
           kind: 'LOW_MARGIN' as const,
           severity:
             item.marginPercent < 10 ? ('MEDIUM' as const) : ('LOW' as const),
+          role: RecommendationRole.COMMERCIAL_DIRECTOR,
+          status: RecommendationStatus.NEW,
+          statusNote: null,
+          statusChangedAt: null,
+          effectType: 'MARGIN_UPLIFT' as const,
+          effectLabel: 'Потенциал маржи',
+          effectAmount: this.marginUpliftAmount(item.sale),
+          effectUnit: 'RUB' as const,
+          effectDescription: `Потенциал до 20% маржи: ${this.marginUpliftAmount(item.sale)} руб.`,
           title: `Пересмотреть маржу: ${item.sale.name}`,
           description: `Маржа продаж ${this.round(item.marginPercent)}% при выручке ${this.round(item.sale.revenue)}.`,
           action: 'Проверить закупочную цену, розничную цену и промо-условия.',

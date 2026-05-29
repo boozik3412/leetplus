@@ -38,6 +38,25 @@ export type StaffTaskStore = {
   isActive: boolean;
 };
 
+export type StaffTaskComment = {
+  id: string;
+  body: string | null;
+  evidenceType: string | null;
+  evidenceLabel: string | null;
+  evidenceUrl: string | null;
+  createdAt: string;
+  authorUser: StaffTaskUser | null;
+};
+
+export type StaffTaskAuditEvent = {
+  id: string;
+  action: string;
+  message: string | null;
+  metadata: unknown;
+  createdAt: string;
+  actorUser: StaffTaskUser | null;
+};
+
 export type StaffTask = {
   id: string;
   title: string;
@@ -62,6 +81,8 @@ export type StaffTask = {
   assignedToUser: StaffTaskUser | null;
   labels: unknown;
   checklist: unknown;
+  comments: StaffTaskComment[];
+  auditEvents: StaffTaskAuditEvent[];
 };
 
 export type StaffTaskFilters = {

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffTaskCreateForm } from "@/components/staff-task-create-form";
+import { StaffTaskHistory } from "@/components/staff-task-history";
 import { StaffTaskStatusActions } from "@/components/staff-task-status-actions";
 import { requireCurrentUser } from "@/lib/auth";
 import {
@@ -423,6 +424,7 @@ export default async function StaffTasksPage({
                     status={task.status}
                   />
                 </div>
+                <StaffTaskHistory task={task} />
               </article>
             ))
           )}

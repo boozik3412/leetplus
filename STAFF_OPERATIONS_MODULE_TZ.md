@@ -24,7 +24,7 @@ The module must not become a generic task manager. Every screen should answer a 
 - Staff directory and role model for operational work.
 - Staff identity links to existing Langame `working_shifts.user_id` mapping where available.
 - Tasks for a club, shift, role, employee, period, or the whole network.
-- Task statuses, priorities, deadlines, comments, attachments, and audit history.
+- Task statuses, priorities, deadlines, comments, evidence links, future attachments, and audit history.
 - Checklist templates and concrete checklist runs.
 - Versioned regulations and required acknowledgements.
 - Training materials, courses, tests, attestations, and employee progress.
@@ -105,7 +105,8 @@ Optional fields:
 - deadline;
 - labels;
 - checklist JSON for the first MVP;
-- attachments and comments in later MVP;
+- comments;
+- evidence links;
 - audit events.
 
 Statuses:
@@ -162,7 +163,8 @@ Implementation sequence:
 3. Add API for task list, create, and status update.
 4. Add `/staff/tasks` manager workspace.
 5. Add sidebar entry under `Персонал`.
-6. Keep task data LeetPlus-owned and independent from Langame sync.
+6. Add comments, evidence links, and audit events.
+7. Keep task data LeetPlus-owned and independent from Langame sync.
 
 Acceptance criteria:
 
@@ -170,6 +172,8 @@ Acceptance criteria:
 - A task can have type, priority, deadline, responsible user, and description.
 - The task list shows total, overdue, in progress, on review, and done counts.
 - A task can move through `OPEN -> IN_PROGRESS -> ON_REVIEW -> DONE`.
+- A task can be completed with a comment or evidence link.
+- Managers can see a compact task audit journal.
 - Active tasks past deadline are visibly overdue.
 - Langame sync does not overwrite staff tasks.
 

@@ -16,6 +16,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import {
   StaffTasksService,
+  type StaffTaskCommentDto,
   type StaffTaskDto,
   type StaffTaskReport,
   type StaffTasksQuery,
@@ -50,5 +51,14 @@ export class StaffTasksController {
     @Body() dto: StaffTaskDto,
   ) {
     return this.staffTasksService.updateTask(user, id, dto);
+  }
+
+  @Post(':id/comments')
+  createTaskComment(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: StaffTaskCommentDto,
+  ) {
+    return this.staffTasksService.createTaskComment(user, id, dto);
   }
 }

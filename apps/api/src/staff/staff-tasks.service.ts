@@ -69,6 +69,14 @@ export type StaffTaskDto = {
   checklist?: unknown;
 };
 
+export type StaffTaskCommentDto = {
+  body?: string | null;
+  evidenceType?: string | null;
+  evidenceLabel?: string | null;
+  evidenceUrl?: string | null;
+  status?: StaffTaskStatus;
+};
+
 export type StaffTaskReport = {
   filters: {
     status: StaffTaskFilterStatus;
@@ -121,6 +129,27 @@ export type StaffTaskResponse = {
   assignedToUser: { id: string; email: string; fullName: string | null } | null;
   labels: Prisma.JsonValue | null;
   checklist: Prisma.JsonValue | null;
+  comments: StaffTaskCommentResponse[];
+  auditEvents: StaffTaskAuditEventResponse[];
+};
+
+export type StaffTaskCommentResponse = {
+  id: string;
+  body: string | null;
+  evidenceType: string | null;
+  evidenceLabel: string | null;
+  evidenceUrl: string | null;
+  createdAt: string;
+  authorUser: { id: string; email: string; fullName: string | null } | null;
+};
+
+export type StaffTaskAuditEventResponse = {
+  id: string;
+  action: string;
+  message: string | null;
+  metadata: Prisma.JsonValue | null;
+  createdAt: string;
+  actorUser: { id: string; email: string; fullName: string | null } | null;
 };
 
 const taskInclude = {
@@ -136,6 +165,20 @@ const taskInclude = {
   },
   createdByUser: { select: { id: true, email: true, fullName: true } },
   assignedToUser: { select: { id: true, email: true, fullName: true } },
+  comments: {
+    orderBy: { createdAt: 'desc' },
+    take: 3,
+    include: {
+      authorUser: { select: { id: true, email: true, fullName: true } },
+    },
+  },
+  auditEvents: {
+    orderBy: { createdAt: 'desc' },
+    take: 5,
+    include: {
+      actorUser: { select: { id: true, email: true, fullName: true } },
+    },
+  },
 } satisfies Prisma.StaffTaskInclude;
 
 type StaffTaskRow = Prisma.StaffTaskGetPayload<{ include: typeof taskInclude }>;
@@ -196,15 +239,34 @@ export class StaffTasksService {
     });
     const status = (data.status as StaffTaskStatus | undefined) ?? 'OPEN';
 
-    const task = await this.prisma.staffTask.create({
-      data: {
-        ...(data as Prisma.StaffTaskUncheckedCreateInput),
-        tenantId,
-        status,
-        createdByUserId: user.id,
-        completedAt: status === 'DONE' ? new Date() : null,
-      },
-      include: taskInclude,
+    const task = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.staffTask.create({
+        data: {
+          ...(data as Prisma.StaffTaskUncheckedCreateInput),
+          tenantId,
+          status,
+          createdByUserId: user.id,
+          completedAt: status === 'DONE' ? new Date() : null,
+        },
+        select: { id: true },
+      });
+
+      await tx.staffTaskAuditEvent.create({
+        data: {
+          tenantId,
+          taskId: created.id,
+          actorUserId: user.id,
+          action: 'CREATED',
+          message: 'Task created',
+          metadata: {
+            status,
+            priority: data.priority ?? 'NORMAL',
+            type: data.type ?? 'ONE_TIME',
+          },
+        },
+      });
+
+      return this.fetchTaskOrThrow(tx, tenantId, created.id);
     });
 
     return this.toTaskResponse(task);
@@ -224,20 +286,130 @@ export class StaffTasksService {
     const data = await this.normalizeTaskData(tenantId, dto, {
       requireTitle: false,
     });
-    const nextStatus = data.status ?? current.status;
+    const normalizedStatus = data.status as StaffTaskStatus | undefined;
+    const currentStatus = current.status as StaffTaskStatus;
+    const nextStatus = normalizedStatus ?? currentStatus;
 
-    const task = await this.prisma.staffTask.update({
-      where: { id: current.id },
-      data: {
-        ...data,
-        completedAt:
-          data.status === undefined
-            ? undefined
-            : nextStatus === 'DONE'
-              ? new Date()
-              : null,
-      },
-      include: taskInclude,
+    const task = await this.prisma.$transaction(async (tx) => {
+      await tx.staffTask.update({
+        where: { id: current.id },
+        data: {
+          ...data,
+          completedAt:
+            data.status === undefined
+              ? undefined
+              : nextStatus === 'DONE'
+                ? new Date()
+                : null,
+        },
+        select: { id: true },
+      });
+
+      await tx.staffTaskAuditEvent.create({
+        data: {
+          tenantId,
+          taskId: current.id,
+          actorUserId: user.id,
+          action: normalizedStatus ? 'STATUS_CHANGED' : 'UPDATED',
+          message: normalizedStatus
+            ? `Status changed from ${currentStatus} to ${nextStatus}`
+            : 'Task updated',
+          metadata: normalizedStatus
+            ? { fromStatus: currentStatus, toStatus: nextStatus }
+            : { fields: Object.keys(data) },
+        },
+      });
+
+      return this.fetchTaskOrThrow(tx, tenantId, current.id);
+    });
+
+    return this.toTaskResponse(task);
+  }
+
+  async createTaskComment(
+    user: AuthenticatedUser,
+    id: string,
+    dto: StaffTaskCommentDto,
+  ) {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const current = await this.prisma.staffTask.findFirst({
+      where: { id, tenantId },
+      select: { id: true, status: true },
+    });
+
+    if (!current) {
+      throw new NotFoundException('Staff task not found');
+    }
+
+    const body = this.normalizeOptionalString(dto.body);
+    const evidenceUrl = this.normalizeEvidenceUrl(dto.evidenceUrl);
+    const evidenceType = this.normalizeOptionalString(dto.evidenceType);
+    const evidenceLabel = this.normalizeOptionalString(dto.evidenceLabel);
+
+    if (!body && !evidenceUrl) {
+      throw new BadRequestException('Comment or evidence link is required');
+    }
+
+    const nextStatus =
+      dto.status === undefined
+        ? undefined
+        : this.resolveOne(
+            dto.status,
+            taskStatuses,
+            current.status as StaffTaskStatus,
+          );
+
+    const task = await this.prisma.$transaction(async (tx) => {
+      await tx.staffTaskComment.create({
+        data: {
+          tenantId,
+          taskId: current.id,
+          authorUserId: user.id,
+          body,
+          evidenceType,
+          evidenceLabel,
+          evidenceUrl,
+        },
+      });
+
+      await tx.staffTaskAuditEvent.create({
+        data: {
+          tenantId,
+          taskId: current.id,
+          actorUserId: user.id,
+          action: evidenceUrl ? 'EVIDENCE_ADDED' : 'COMMENT_ADDED',
+          message: evidenceUrl ? 'Evidence added' : 'Comment added',
+          metadata: {
+            hasBody: Boolean(body),
+            hasEvidence: Boolean(evidenceUrl),
+            evidenceType,
+          },
+        },
+      });
+
+      if (nextStatus && nextStatus !== current.status) {
+        await tx.staffTask.update({
+          where: { id: current.id },
+          data: {
+            status: nextStatus,
+            completedAt: nextStatus === 'DONE' ? new Date() : null,
+          },
+          select: { id: true },
+        });
+
+        await tx.staffTaskAuditEvent.create({
+          data: {
+            tenantId,
+            taskId: current.id,
+            actorUserId: user.id,
+            action: 'STATUS_CHANGED',
+            message: `Status changed from ${current.status} to ${nextStatus}`,
+            metadata: { fromStatus: current.status, toStatus: nextStatus },
+          },
+        });
+      }
+
+      return this.fetchTaskOrThrow(tx, tenantId, current.id);
     });
 
     return this.toTaskResponse(task);
@@ -488,7 +660,41 @@ export class StaffTasksService {
       assignedToUser: task.assignedToUser,
       labels: task.labels,
       checklist: task.checklist,
+      comments: task.comments.map((comment) => ({
+        id: comment.id,
+        body: comment.body,
+        evidenceType: comment.evidenceType,
+        evidenceLabel: comment.evidenceLabel,
+        evidenceUrl: comment.evidenceUrl,
+        createdAt: comment.createdAt.toISOString(),
+        authorUser: comment.authorUser,
+      })),
+      auditEvents: task.auditEvents.map((event) => ({
+        id: event.id,
+        action: event.action,
+        message: event.message,
+        metadata: event.metadata,
+        createdAt: event.createdAt.toISOString(),
+        actorUser: event.actorUser,
+      })),
     };
+  }
+
+  private async fetchTaskOrThrow(
+    prisma: Pick<PrismaService, 'staffTask'>,
+    tenantId: string,
+    id: string,
+  ) {
+    const task = await prisma.staffTask.findFirst({
+      where: { id, tenantId },
+      include: taskInclude,
+    });
+
+    if (!task) {
+      throw new NotFoundException('Staff task not found');
+    }
+
+    return task;
   }
 
   private resolveOne<T extends readonly string[]>(
@@ -557,6 +763,28 @@ export class StaffTasksService {
     }
 
     return date;
+  }
+
+  private normalizeEvidenceUrl(value: string | null | undefined) {
+    const normalized = this.normalizeOptionalString(value);
+
+    if (!normalized) {
+      return null;
+    }
+
+    let url: URL;
+
+    try {
+      url = new URL(normalized);
+    } catch {
+      throw new BadRequestException('Evidence link must be a valid URL');
+    }
+
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+      throw new BadRequestException('Evidence link must use http or https');
+    }
+
+    return url.toString();
   }
 
   private normalizeJson(value: unknown) {

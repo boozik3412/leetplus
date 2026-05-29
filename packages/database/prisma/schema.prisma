@@ -144,6 +144,8 @@ model Tenant {
   reportDigestScheduleRuns   ReportDigestScheduleRun[]
   guestStaffIdentityMappings GuestStaffIdentityMapping[]
   staffTasks                 StaffTask[]
+  staffTaskComments          StaffTaskComment[]
+  staffTaskAuditEvents       StaffTaskAuditEvent[]
   guestSavedFilters          GuestSavedFilter[]
   guestAudiences             GuestAudience[]
   guestAudienceMembers       GuestAudienceMember[]
@@ -174,11 +176,13 @@ model User {
   createdMarketingPromoBundles MarketingPromoBundle[]     @relation("MarketingPromoBundleCreatedBy")
   createdMarketingPromoBundleLaunches MarketingPromoBundleLaunch[] @relation("MarketingPromoBundleLaunchCreatedBy")
   createdMarketingPromoBundleUsages MarketingPromoBundleUsage[] @relation("MarketingPromoBundleUsageCreatedBy")
-  guestStaffIdentityMappings GuestStaffIdentityMapping[]
-  createdStaffTasks       StaffTask[] @relation("StaffTaskCreatedBy")
-  assignedStaffTasks      StaffTask[] @relation("StaffTaskAssignedTo")
-  guestSavedFilters          GuestSavedFilter[]
-  guestAudiences             GuestAudience[]
+    guestStaffIdentityMappings GuestStaffIdentityMapping[]
+    createdStaffTasks          StaffTask[]                @relation("StaffTaskCreatedBy")
+    assignedStaffTasks         StaffTask[]                @relation("StaffTaskAssignedTo")
+    staffTaskComments          StaffTaskComment[]         @relation("StaffTaskCommentAuthor")
+    staffTaskAuditEvents       StaffTaskAuditEvent[]      @relation("StaffTaskAuditActor")
+    guestSavedFilters          GuestSavedFilter[]
+    guestAudiences             GuestAudience[]
 
   @@index([tenantId])
 }
@@ -1204,16 +1208,57 @@ model StaffTask {
   tenant         Tenant             @relation(fields: [tenantId], references: [id])
   store          Store?             @relation(fields: [storeId], references: [id], onDelete: SetNull)
   shift          GuestWorkingShift? @relation(fields: [shiftId], references: [id], onDelete: SetNull)
-  createdByUser  User?              @relation("StaffTaskCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  assignedToUser User?              @relation("StaffTaskAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+    createdByUser  User?              @relation("StaffTaskCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+    assignedToUser User?              @relation("StaffTaskAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+    comments       StaffTaskComment[]
+    auditEvents    StaffTaskAuditEvent[]
 
-  @@index([tenantId, status, dueAt], map: "staff_task_status_due_idx")
+    @@index([tenantId, status, dueAt], map: "staff_task_status_due_idx")
   @@index([tenantId, createdAt], map: "staff_task_created_idx")
   @@index([storeId], map: "staff_task_store_idx")
   @@index([shiftId], map: "staff_task_shift_idx")
   @@index([createdByUserId], map: "staff_task_created_by_idx")
-  @@index([assignedToUserId], map: "staff_task_assigned_to_idx")
-}
+    @@index([assignedToUserId], map: "staff_task_assigned_to_idx")
+  }
+
+  model StaffTaskComment {
+    id             String   @id @default(uuid())
+    tenantId       String
+    taskId         String
+    authorUserId   String?
+    body           String?
+    evidenceType   String?
+    evidenceLabel  String?
+    evidenceUrl    String?
+    createdAt      DateTime @default(now())
+
+    tenant     Tenant    @relation(fields: [tenantId], references: [id])
+    task       StaffTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+    authorUser User?     @relation("StaffTaskCommentAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
+
+    @@index([tenantId, createdAt], map: "staff_task_comment_tenant_created_idx")
+    @@index([taskId, createdAt], map: "staff_task_comment_task_created_idx")
+    @@index([authorUserId], map: "staff_task_comment_author_idx")
+  }
+
+  model StaffTaskAuditEvent {
+    id          String   @id @default(uuid())
+    tenantId    String
+    taskId      String
+    actorUserId String?
+    action      String
+    message     String?
+    metadata    Json?
+    createdAt   DateTime @default(now())
+
+    tenant    Tenant    @relation(fields: [tenantId], references: [id])
+    task      StaffTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+    actorUser User?     @relation("StaffTaskAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+    @@index([tenantId, createdAt], map: "staff_task_audit_tenant_created_idx")
+    @@index([taskId, createdAt], map: "staff_task_audit_task_created_idx")
+    @@index([actorUserId], map: "staff_task_audit_actor_idx")
+  }
 
 model GuestSavedFilter {
   id              String   @id @default(uuid())

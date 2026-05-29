@@ -66,7 +66,7 @@ Connected production Langame sources:
 - Product parsing utilities: automatic analysis, safe confirmation/rejection, existing canonical SKU awareness, manual parsing page.
 - Products/stores/directories: inline editing, multi-club filters, exports, manual store name preservation.
 - Guest module: first production read-only layer is live, including data foundation sync, guest analytics dashboard, full guest report, guest card, mini CRM fields, first staff-control report, and PC-count based load calculation.
-- Staff operations: Stage 8 has started with `STAFF_OPERATIONS_MODULE_TZ.md` and the first `/staff/tasks` workspace for tenant-scoped operational tasks by club, shift, responsible user, status, priority, and deadline.
+- Staff operations: Stage 8 has started with `STAFF_OPERATIONS_MODULE_TZ.md` and `/staff/tasks` for tenant-scoped operational tasks by club, shift, responsible user, status, priority, deadline, execution comments, evidence links, and audit events.
 - Sync/admin UX: `/settings` is for Langame connection settings only; `/sync` is the dedicated synchronization page with one combined sync action for assortment/sales/revenue plus guests.
 - Mail: Mail.ru/VK WorkSpace domain is configured; SMTP uses `reports@leetplus.ru`.
 
@@ -76,7 +76,7 @@ Connected production Langame sources:
 - Added API-side regular report digests: daily email digest, weekly commercial email report with XLSX attachment, `/reports` send UI, protected scheduled endpoint, automatic scheduler, and duplicate-protected run journal.
 - Expanded Stage 6 commercialization: `/commercial/audit` shows live audit signals, `/commercial/demo` shows prepared demo data without Langame setup, and `/commercial/tariffs` packages the product into tariff levels.
 - Tightened marketing campaign contact workflow: campaign detail can create the linked CRM task from the contacts tab, contact results save to `marketingCampaignId`, and campaign effect tracks group/task/responsible/channel outcomes.
-- Started Stage 8 Staff Operations: added the specification and first task queue foundation for club/shift/responsible staff work.
+- Expanded Stage 8 Staff Operations: staff tasks now have execution comments, evidence links, and an audit journal for create/update/status/comment/evidence events.
 - Added recommendation workflow state: persisted statuses, responsible roles, financial effect, and an interactive recommendations queue.
 - Fixed dashboard trend card sizing behavior.
 - Preserved manual store names during sync.

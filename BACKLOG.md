@@ -123,7 +123,7 @@ Status: implemented; remains in production UX polish mode.
 
 ## Stage 2. Commercial Reports
 
-Status: active; first commercial-risk layer is implemented, next focus is deeper filters/export coverage and stronger economics.
+Status: implemented; remains in production verification and UX polish mode.
 
 - Done: OOS report has revenue/profit-at-risk estimates per day and profit at risk for the selected period.
 - Done: hybrid "Money at risk" report combines OOS profit risk with frozen stock in no-sales SKU and is visible from dashboard and reports.
@@ -131,9 +131,9 @@ Status: active; first commercial-risk layer is implemented, next focus is deeper
 - Done: replenishment report full table has status/product/club/supplier/category filters, sortable stock/sales/demand/order columns, server XLSX/CSV export, local Excel/1C/PDF export, and email sending.
 - Done: replenishment server XLSX/CSV export can optionally receive the table filter/sort state and export the same visible rows as the current filtered table.
 - Done: frozen-stock reports now expose the unit valuation source, explain the calculation assumptions in UI, and can be validated on production by comparing stock quantity x unit value to frozen amount.
-- Next: add turnover, frozen money in stock, and slow SKU control beyond the current no-sales/OOS hybrid.
-- Planned: add plan/fact by network, club, category, and supplier.
-- Planned: add supplier scorecard with sales, profit, write-offs, OOS, delivery quality, and problem categories.
+- Done: added turnover and slow-SKU control beyond the no-sales/OOS hybrid: `/reports/inventory-turnover/table` shows current stock, period sales, days of stock, turnover rate, money in stock, valuation source, slow SKU and frozen stock statuses.
+- Done: added plan/fact v1 by network, club, category, and supplier: `/reports/plan-fact/table` compares the selected period against the previous comparable period of the same length until manual commercial plans are introduced.
+- Done: added supplier scorecard: the reports page and `/reports/supplier-scorecard/table` now combine sales, profit, write-offs, OOS, slow/frozen SKU, money in stock, problem category, supplier terms, and the current limitation that factual delivery SLA is not imported yet.
 
 ## Stage 3. Assortment Matrix
 

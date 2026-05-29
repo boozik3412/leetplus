@@ -314,6 +314,8 @@ describe('ReportsService', () => {
         name: 'Adrenaline Rush',
         isCanonical: false,
         canonicalProductName: null,
+        categoryName: null,
+        supplierId: null,
         supplierName: null,
         stockQuantity: 2,
         averageDailySales: 1,
@@ -398,12 +400,181 @@ describe('ReportsService', () => {
     ).rejects.toThrow('Store not found');
   });
 
+  it('builds inventory turnover report for slow and frozen stock', async () => {
+    prisma.store.findFirst.mockResolvedValue({ id: 'store-1' });
+    prisma.salesFact.findMany
+      .mockResolvedValueOnce([
+        {
+          tenantId: 'tenant-1',
+          storeId: 'store-1',
+          store: { id: 'store-1', name: 'Club A' },
+          productId: 'product-slow',
+          quantity: new Prisma.Decimal(2),
+          revenue: new Prisma.Decimal(200),
+          cost: new Prisma.Decimal(120),
+          product: {
+            article: 'DRK-001',
+            name: 'Energy Drink',
+            supplierId: 'supplier-1',
+            canonicalProduct: null,
+            supplier: { name: 'Supplier A' },
+          },
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          storeId: 'store-1',
+          productId: 'product-slow',
+          saleDate: new Date('2026-04-08T00:00:00.000Z'),
+          quantity: new Prisma.Decimal(2),
+          revenue: new Prisma.Decimal(200),
+        },
+      ]);
+    prisma.inventorySnapshot.findMany.mockResolvedValue([
+      {
+        storeId: 'store-1',
+        store: { name: 'Club A' },
+        productId: 'product-slow',
+        product: {
+          id: 'product-slow',
+          article: 'DRK-001',
+          name: 'Energy Drink',
+          purchasePrice: new Prisma.Decimal(10),
+          salePrice: new Prisma.Decimal(100),
+          canonicalProduct: null,
+          categoryId: 'category-1',
+          category: { name: 'Напитки' },
+          supplierId: 'supplier-1',
+          supplier: { id: 'supplier-1', name: 'Supplier A' },
+        },
+        quantity: new Prisma.Decimal(100),
+        snapshotDate: new Date('2026-04-10T00:00:00.000Z'),
+      },
+      {
+        storeId: 'store-1',
+        store: { name: 'Club A' },
+        productId: 'product-frozen',
+        product: {
+          id: 'product-frozen',
+          article: 'SNK-001',
+          name: 'Chips',
+          purchasePrice: new Prisma.Decimal(0),
+          salePrice: new Prisma.Decimal(50),
+          canonicalProduct: null,
+          categoryId: 'category-2',
+          category: { name: 'Снеки' },
+          supplierId: null,
+          supplier: null,
+        },
+        quantity: new Prisma.Decimal(5),
+        snapshotDate: new Date('2026-04-10T00:00:00.000Z'),
+      },
+    ]);
+
+    const report = await service.getInventoryTurnoverReport(user, {
+      from: '2026-04-01',
+      to: '2026-04-10',
+      storeId: 'store-1',
+    });
+
+    expect(report).toMatchObject({
+      totalStockQuantity: 105,
+      totalFrozenStockAmount: 1250,
+      slowSkuCount: 1,
+      frozenSkuCount: 1,
+    });
+    expect(report.rows.map((row) => row.status)).toEqual(['FROZEN', 'SLOW']);
+    expect(report.rows[0]).toMatchObject({
+      productId: 'product-frozen',
+      frozenStockUnitValue: 50,
+      frozenStockValuation: 'SALE_PRICE',
+      frozenStockAmount: 250,
+    });
+    expect(report.rows[1]).toMatchObject({
+      productId: 'product-slow',
+      stockDays: 500,
+      turnoverRate: 0,
+      frozenStockAmount: 1000,
+    });
+  });
+
+  it('builds plan fact report by network, store, category and supplier', async () => {
+    prisma.store.findFirst.mockResolvedValue({ id: 'store-1' });
+    prisma.salesFact.findMany
+      .mockResolvedValueOnce([
+        {
+          tenantId: 'tenant-1',
+          storeId: 'store-1',
+          store: { id: 'store-1', name: 'Club A' },
+          productId: 'product-1',
+          quantity: new Prisma.Decimal(10),
+          revenue: new Prisma.Decimal(1000),
+          cost: new Prisma.Decimal(700),
+          product: {
+            id: 'product-1',
+            name: 'Energy Drink',
+            purchasePrice: new Prisma.Decimal(70),
+            categoryId: 'category-1',
+            category: { name: 'Напитки' },
+            supplierId: 'supplier-1',
+            supplier: { name: 'Supplier A' },
+          },
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          tenantId: 'tenant-1',
+          storeId: 'store-1',
+          store: { id: 'store-1', name: 'Club A' },
+          productId: 'product-1',
+          quantity: new Prisma.Decimal(8),
+          revenue: new Prisma.Decimal(800),
+          cost: new Prisma.Decimal(560),
+          product: {
+            id: 'product-1',
+            name: 'Energy Drink',
+            purchasePrice: new Prisma.Decimal(70),
+            categoryId: 'category-1',
+            category: { name: 'Напитки' },
+            supplierId: 'supplier-1',
+            supplier: { name: 'Supplier A' },
+          },
+        },
+      ]);
+    prisma.inventorySnapshot.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    const report = await service.getPlanFactReport(user, {
+      from: '2026-04-11',
+      to: '2026-04-20',
+      storeId: 'store-1',
+    });
+
+    expect(report).toMatchObject({
+      planFrom: '2026-04-01',
+      planTo: '2026-04-10',
+      summary: {
+        currentRevenue: 1000,
+        planRevenue: 800,
+        revenueDelta: 200,
+        revenueCompletionPercent: 125,
+      },
+    });
+    expect(report.rows.map((row) => row.level)).toEqual([
+      'store',
+      'category',
+      'supplier',
+    ]);
+  });
+
   it('builds SKU performance report with ABC groups', async () => {
     prisma.store.findFirst.mockResolvedValue({ id: 'store-1' });
     prisma.salesFact.findMany.mockResolvedValue([
       {
         tenantId: 'tenant-1',
         storeId: 'store-1',
+        store: { id: 'store-1', name: 'Club A' },
         productId: 'product-1',
         quantity: new Prisma.Decimal(10),
         revenue: new Prisma.Decimal(800),
@@ -420,6 +591,7 @@ describe('ReportsService', () => {
       {
         tenantId: 'tenant-1',
         storeId: 'store-1',
+        store: { id: 'store-1', name: 'Club A' },
         productId: 'product-2',
         quantity: new Prisma.Decimal(5),
         revenue: new Prisma.Decimal(150),
@@ -517,19 +689,43 @@ describe('ReportsService', () => {
   it('builds suppliers performance report', async () => {
     prisma.store.findFirst.mockResolvedValue({ id: 'store-1' });
     prisma.product.findMany.mockResolvedValue([
-      { supplierId: 'supplier-1' },
-      { supplierId: 'supplier-1' },
-      { supplierId: null },
+      {
+        supplierId: 'supplier-1',
+        supplier: {
+          id: 'supplier-1',
+          name: 'Supplier A',
+          paymentDelayDays: 14,
+          minOrderAmount: new Prisma.Decimal(5000),
+          orderMultiplicity: 6,
+        },
+      },
+      {
+        supplierId: 'supplier-1',
+        supplier: {
+          id: 'supplier-1',
+          name: 'Supplier A',
+          paymentDelayDays: 14,
+          minOrderAmount: new Prisma.Decimal(5000),
+          orderMultiplicity: 6,
+        },
+      },
+      { supplierId: null, supplier: null },
     ]);
     prisma.salesFact.findMany.mockResolvedValue([
       {
         tenantId: 'tenant-1',
         storeId: 'store-1',
+        store: { id: 'store-1', name: 'Club A' },
         productId: 'product-1',
         quantity: new Prisma.Decimal(10),
         revenue: new Prisma.Decimal(1000),
         cost: new Prisma.Decimal(700),
         product: {
+          article: 'DRK-001',
+          name: 'Energy Drink',
+          categoryId: 'category-1',
+          category: { name: 'Напитки' },
+          canonicalProduct: null,
           supplierId: 'supplier-1',
           supplier: {
             id: 'supplier-1',
@@ -543,16 +739,24 @@ describe('ReportsService', () => {
       {
         tenantId: 'tenant-1',
         storeId: 'store-1',
+        store: { id: 'store-1', name: 'Club A' },
         productId: 'product-2',
         quantity: new Prisma.Decimal(2),
         revenue: new Prisma.Decimal(200),
         cost: new Prisma.Decimal(100),
         product: {
+          article: 'SNK-001',
+          name: 'Chips',
+          categoryId: null,
+          category: null,
+          canonicalProduct: null,
           supplierId: null,
           supplier: null,
         },
       },
     ]);
+    prisma.inventorySnapshot.findMany.mockResolvedValue([]);
+    prisma.stockMovement.findMany.mockResolvedValue([]);
 
     const report = await service.getSuppliersPerformanceReport(user, {
       from: '2026-04-01',
@@ -585,6 +789,16 @@ describe('ReportsService', () => {
         paymentDelayDays: 14,
         minOrderAmount: '5000',
         orderMultiplicity: 6,
+        writeOffQuantity: 0,
+        writeOffAmount: 0,
+        oosSkuCount: 1,
+        slowSkuCount: 0,
+        frozenSkuCount: 0,
+        frozenStockAmount: 0,
+        problemCategoryName: 'Напитки',
+        deliveryQualityStatus: 'TERMS_CONFIGURED',
+        deliveryQualityNote:
+          'Условия поставки заполнены; фактические сроки и SLA поставок пока не импортируются.',
       },
       {
         supplierId: null,
@@ -601,6 +815,16 @@ describe('ReportsService', () => {
         paymentDelayDays: null,
         minOrderAmount: null,
         orderMultiplicity: null,
+        writeOffQuantity: 0,
+        writeOffAmount: 0,
+        oosSkuCount: 1,
+        slowSkuCount: 0,
+        frozenSkuCount: 0,
+        frozenStockAmount: 0,
+        problemCategoryName: 'Без категории',
+        deliveryQualityStatus: 'NO_DELIVERY_FACTS',
+        deliveryQualityNote:
+          'Фактические сроки и качество поставок пока не импортируются.',
       },
     ]);
   });

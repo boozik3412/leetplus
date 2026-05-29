@@ -73,6 +73,8 @@ export type OutOfStockRiskProduct = {
   name: string;
   isCanonical: boolean;
   canonicalProductName: string | null;
+  categoryName: string | null;
+  supplierId: string | null;
   supplierName: string | null;
   stockQuantity: number;
   averageDailySales: number;
@@ -245,6 +247,7 @@ export type NewProductsReport = {
 
 export type LflPeriod = 'day' | 'week' | 'month';
 export type LflGroupLevel = 'network' | 'store' | 'category' | 'product';
+export type PlanFactGroupLevel = 'network' | 'store' | 'category' | 'supplier';
 
 export type LflReportQuery = {
   period?: LflPeriod;
@@ -279,6 +282,37 @@ export type LflReport = {
   previousTo: string;
   summary: LflReportRow;
   rows: LflReportRow[];
+};
+
+export type PlanFactReportRow = {
+  id: string;
+  level: PlanFactGroupLevel;
+  parentId: string | null;
+  name: string;
+  currentRevenue: number;
+  planRevenue: number;
+  revenueDelta: number;
+  revenueCompletionPercent: number | null;
+  currentGrossProfit: number;
+  planGrossProfit: number;
+  grossProfitDelta: number;
+  grossProfitCompletionPercent: number | null;
+  currentQuantity: number;
+  planQuantity: number;
+  quantityDelta: number;
+  quantityCompletionPercent: number | null;
+};
+
+export type PlanFactReport = {
+  tenantId: string;
+  tenantSlug: string;
+  from: string;
+  to: string;
+  storeId: string | null;
+  planFrom: string;
+  planTo: string;
+  summary: PlanFactReportRow;
+  rows: PlanFactReportRow[];
 };
 
 export type AbcSummaryRow = {
@@ -322,6 +356,15 @@ export type SupplierPerformanceRow = {
   paymentDelayDays: number | null;
   minOrderAmount: string | null;
   orderMultiplicity: number | null;
+  writeOffQuantity: number;
+  writeOffAmount: number;
+  oosSkuCount: number;
+  slowSkuCount: number;
+  frozenSkuCount: number;
+  frozenStockAmount: number;
+  problemCategoryName: string | null;
+  deliveryQualityStatus: 'TERMS_CONFIGURED' | 'NO_DELIVERY_FACTS';
+  deliveryQualityNote: string;
 };
 
 export type SuppliersPerformanceReport = {
@@ -373,6 +416,49 @@ export type ReplenishmentReport = {
   rows: ReplenishmentRow[];
 };
 
+export type InventoryTurnoverStatus = 'OK' | 'SLOW' | 'FROZEN';
+
+export type InventoryTurnoverRow = {
+  productId: string;
+  storeId: string;
+  storeName: string;
+  article: string;
+  name: string;
+  isCanonical: boolean;
+  canonicalProductName: string | null;
+  categoryName: string | null;
+  supplierId: string | null;
+  supplierName: string | null;
+  stockQuantity: number;
+  soldQuantity: number;
+  revenue: number;
+  grossProfit: number;
+  averageDailySales: number;
+  stockDays: number | null;
+  turnoverRate: number;
+  frozenStockUnitValue: number;
+  frozenStockValuation: FrozenStockValuation;
+  frozenStockAmount: number;
+  lastSaleDate: string | null;
+  daysWithoutSales: number | null;
+  status: InventoryTurnoverStatus;
+};
+
+export type InventoryTurnoverReport = {
+  tenantId: string;
+  tenantSlug: string;
+  from: string;
+  to: string;
+  storeId: string | null;
+  periodDays: number;
+  totalStockQuantity: number;
+  totalFrozenStockAmount: number;
+  averageStockDays: number | null;
+  slowSkuCount: number;
+  frozenSkuCount: number;
+  rows: InventoryTurnoverRow[];
+};
+
 type GroupAccumulator = {
   id: string | null;
   name: string;
@@ -398,6 +484,8 @@ type ProductSales = {
   name: string;
   isCanonical: boolean;
   canonicalProductName: string | null;
+  categoryName: string | null;
+  supplierId: string | null;
   supplierName: string | null;
   quantity: number;
   revenue: number;
@@ -416,8 +504,10 @@ type StockSnapshot = {
     purchasePrice?: { toNumber: () => number };
     salePrice?: { toNumber: () => number };
     canonicalProduct: { name: string } | null;
+    categoryId?: string | null;
     category: { name: string } | null;
-    supplier: { name: string } | null;
+    supplierId?: string | null;
+    supplier: { id?: string; name: string } | null;
   };
   quantity: { toNumber: () => number };
 };
@@ -431,6 +521,8 @@ type StockByStoreProductItem = {
   isCanonical: boolean;
   canonicalProductName: string | null;
   categoryName: string | null;
+  categoryId: string | null;
+  supplierId: string | null;
   supplierName: string | null;
   stockQuantity: number;
   unitCost: number;
@@ -463,9 +555,37 @@ type LflSaleFact = SalesFactWithCost & {
   };
 };
 
+type PlanFactSaleFact = SalesFactWithCost & {
+  storeId: string;
+  revenue: { toNumber: () => number };
+  store: {
+    id: string;
+    name: string;
+  };
+  product: {
+    id: string;
+    name: string;
+    purchasePrice?: { toNumber: () => number } | null;
+    categoryId: string | null;
+    category: { name: string } | null;
+    supplierId: string | null;
+    supplier: { name: string } | null;
+  };
+};
+
 type LflAccumulator = {
   id: string;
   level: LflGroupLevel;
+  parentId: string | null;
+  name: string;
+  revenue: number;
+  grossProfit: number;
+  quantity: number;
+};
+
+type PlanFactAccumulator = {
+  id: string;
+  level: PlanFactGroupLevel;
   parentId: string | null;
   name: string;
   revenue: number;
@@ -788,6 +908,8 @@ export class ReportsService {
         name: fact.product.name,
         isCanonical: Boolean(fact.product.canonicalProduct),
         canonicalProductName: fact.product.canonicalProduct?.name ?? null,
+        categoryName: null,
+        supplierId: null,
         supplierName: fact.product.supplier?.name ?? null,
         quantity: 0,
         revenue: 0,
@@ -883,6 +1005,270 @@ export class ReportsService {
       ),
       outOfStockRiskProducts,
       productsWithoutSales,
+    };
+  }
+
+  async getInventoryTurnoverReport(
+    user: AuthenticatedUser,
+    query: OperationalReportQuery,
+  ): Promise<InventoryTurnoverReport> {
+    const { tenantId, tenantSlug } =
+      await this.tenantContextService.resolve(user);
+    const period = this.resolvePeriod(query);
+    const storeFilter = query.storeId ? { storeId: query.storeId } : {};
+
+    if (query.storeId) {
+      const store = await this.prisma.store.findFirst({
+        where: { id: query.storeId, tenantId, isActive: true },
+        select: { id: true },
+      });
+
+      if (!store) {
+        throw new BadRequestException('Store not found');
+      }
+    }
+
+    const [salesFacts, inventorySnapshots, lastSalesFacts] = await Promise.all([
+      this.prisma.salesFact.findMany({
+        where: {
+          tenantId,
+          isCanceled: false,
+          ...storeFilter,
+          saleDate: {
+            gte: period.fromDate,
+            lte: period.toDate,
+          },
+        },
+        include: {
+          store: { select: { id: true, name: true } },
+          product: {
+            select: {
+              article: true,
+              name: true,
+              supplierId: true,
+              canonicalProduct: { select: { name: true } },
+              supplier: { select: { name: true } },
+            },
+          },
+        },
+      }),
+      this.prisma.inventorySnapshot.findMany({
+        where: {
+          tenantId,
+          ...storeFilter,
+          snapshotDate: {
+            lte: period.toDate,
+          },
+        },
+        include: {
+          product: {
+            select: {
+              id: true,
+              article: true,
+              name: true,
+              purchasePrice: true,
+              salePrice: true,
+              canonicalProduct: { select: { name: true } },
+              categoryId: true,
+              category: { select: { name: true } },
+              supplierId: true,
+              supplier: { select: { id: true, name: true } },
+            },
+          },
+          store: { select: { name: true } },
+        },
+        orderBy: { snapshotDate: 'desc' },
+      }),
+      this.prisma.salesFact.findMany({
+        where: {
+          tenantId,
+          isCanceled: false,
+          ...storeFilter,
+          saleDate: {
+            lte: period.toDate,
+          },
+        },
+        select: {
+          storeId: true,
+          productId: true,
+          saleDate: true,
+          quantity: true,
+          revenue: true,
+        },
+        orderBy: { saleDate: 'desc' },
+      }),
+    ]);
+    const periodDays = this.periodDays(period.fromDate, period.toDate);
+    const stockByStoreProduct =
+      this.latestStockByStoreProduct(inventorySnapshots);
+    const productSalesByStoreProduct =
+      this.productSalesByStoreProduct(salesFacts);
+    const lastSaleByStoreProduct = this.lastSaleByStoreProduct(lastSalesFacts);
+    const historicalUnitRevenueByStoreProduct =
+      this.unitRevenueByStoreProduct(lastSalesFacts);
+    const rows = this.inventoryTurnoverRows(
+      stockByStoreProduct,
+      productSalesByStoreProduct,
+      lastSaleByStoreProduct,
+      historicalUnitRevenueByStoreProduct,
+      periodDays,
+      period.toDate,
+    );
+    const stockDayRows = rows.filter((row) => row.stockDays !== null);
+    const stockDaysSum = stockDayRows.reduce(
+      (sum, row) => sum + (row.stockDays ?? 0),
+      0,
+    );
+
+    return {
+      tenantId,
+      tenantSlug,
+      from: this.toDateInputValue(period.fromDate),
+      to: this.toDateInputValue(period.toDate),
+      storeId: query.storeId ?? null,
+      periodDays,
+      totalStockQuantity: this.round(
+        rows.reduce((sum, row) => sum + row.stockQuantity, 0),
+      ),
+      totalFrozenStockAmount: this.round(
+        rows.reduce((sum, row) => sum + row.frozenStockAmount, 0),
+      ),
+      averageStockDays:
+        stockDayRows.length > 0
+          ? this.round(stockDaysSum / stockDayRows.length)
+          : null,
+      slowSkuCount: rows.filter((row) => row.status === 'SLOW').length,
+      frozenSkuCount: rows.filter((row) => row.status === 'FROZEN').length,
+      rows,
+    };
+  }
+
+  async getPlanFactReport(
+    user: AuthenticatedUser,
+    query: OperationalReportQuery,
+  ): Promise<PlanFactReport> {
+    const { tenantId, tenantSlug } =
+      await this.tenantContextService.resolve(user);
+    const period = this.resolvePeriod(query);
+    const planPeriod = this.resolvePreviousPlanPeriod(period);
+    const storeFilter = query.storeId ? { storeId: query.storeId } : {};
+
+    if (query.storeId) {
+      const store = await this.prisma.store.findFirst({
+        where: { id: query.storeId, tenantId, isActive: true },
+        select: { id: true },
+      });
+
+      if (!store) {
+        throw new BadRequestException('Store not found');
+      }
+    }
+
+    const [currentSalesFacts, planSalesFacts, currentSnapshots, planSnapshots] =
+      await Promise.all([
+        this.prisma.salesFact.findMany({
+          where: {
+            tenantId,
+            isCanceled: false,
+            ...storeFilter,
+            saleDate: {
+              gte: period.fromDate,
+              lte: period.toDate,
+            },
+          },
+          include: {
+            store: { select: { id: true, name: true } },
+            product: {
+              select: {
+                id: true,
+                name: true,
+                purchasePrice: true,
+                categoryId: true,
+                category: { select: { name: true } },
+                supplierId: true,
+                supplier: { select: { name: true } },
+              },
+            },
+          },
+        }),
+        this.prisma.salesFact.findMany({
+          where: {
+            tenantId,
+            isCanceled: false,
+            ...storeFilter,
+            saleDate: {
+              gte: planPeriod.fromDate,
+              lte: planPeriod.toDate,
+            },
+          },
+          include: {
+            store: { select: { id: true, name: true } },
+            product: {
+              select: {
+                id: true,
+                name: true,
+                purchasePrice: true,
+                categoryId: true,
+                category: { select: { name: true } },
+                supplierId: true,
+                supplier: { select: { name: true } },
+              },
+            },
+          },
+        }),
+        this.prisma.inventorySnapshot.findMany({
+          where: {
+            tenantId,
+            ...storeFilter,
+            snapshotDate: { lte: period.toDate },
+          },
+          select: {
+            storeId: true,
+            productId: true,
+            snapshotDate: true,
+            quantity: true,
+            product: { select: { purchasePrice: true } },
+          },
+          orderBy: { snapshotDate: 'asc' },
+        }),
+        this.prisma.inventorySnapshot.findMany({
+          where: {
+            tenantId,
+            ...storeFilter,
+            snapshotDate: { lte: planPeriod.toDate },
+          },
+          select: {
+            storeId: true,
+            productId: true,
+            snapshotDate: true,
+            quantity: true,
+            product: { select: { purchasePrice: true } },
+          },
+          orderBy: { snapshotDate: 'asc' },
+        }),
+      ]);
+    const currentCostBasis = buildProductCostBasis([], currentSnapshots);
+    const planCostBasis = buildProductCostBasis([], planSnapshots);
+    const currentRows = this.planFactAccumulators(
+      currentSalesFacts,
+      currentCostBasis,
+    );
+    const planRows = this.planFactAccumulators(planSalesFacts, planCostBasis);
+    const rows = this.mergePlanFactRows(currentRows, planRows);
+    const summary =
+      rows.find((row) => row.level === 'network') ??
+      this.emptyPlanFactRow('network', 'network', null, 'Вся сеть');
+
+    return {
+      tenantId,
+      tenantSlug,
+      from: this.toDateInputValue(period.fromDate),
+      to: this.toDateInputValue(period.toDate),
+      storeId: query.storeId ?? null,
+      planFrom: this.toDateInputValue(planPeriod.fromDate),
+      planTo: this.toDateInputValue(planPeriod.toDate),
+      summary,
+      rows: rows.filter((row) => row.level !== 'network'),
     };
   }
 
@@ -1257,75 +1643,221 @@ export class ReportsService {
       }
     }
 
-    const [salesFacts, activeProducts, inventorySnapshots] = await Promise.all([
-      this.prisma.salesFact.findMany({
-        where: {
-          tenantId,
-          isCanceled: false,
-          ...storeFilter,
-          saleDate: {
-            gte: period.fromDate,
-            lte: period.toDate,
+    const [salesFacts, activeProducts, inventorySnapshots, stockMovements] =
+      await Promise.all([
+        this.prisma.salesFact.findMany({
+          where: {
+            tenantId,
+            isCanceled: false,
+            ...storeFilter,
+            saleDate: {
+              gte: period.fromDate,
+              lte: period.toDate,
+            },
           },
-        },
-        include: {
-          product: {
-            select: {
-              purchasePrice: true,
-              supplierId: true,
-              supplier: {
-                select: {
-                  id: true,
-                  name: true,
-                  paymentDelayDays: true,
-                  minOrderAmount: true,
-                  orderMultiplicity: true,
+          include: {
+            store: { select: { id: true, name: true } },
+            product: {
+              select: {
+                article: true,
+                name: true,
+                purchasePrice: true,
+                categoryId: true,
+                category: { select: { name: true } },
+                supplierId: true,
+                canonicalProduct: { select: { name: true } },
+                supplier: {
+                  select: {
+                    id: true,
+                    name: true,
+                    paymentDelayDays: true,
+                    minOrderAmount: true,
+                    orderMultiplicity: true,
+                  },
                 },
               },
             },
           },
-        },
-      }),
-      this.prisma.product.findMany({
-        where: { tenantId, isActive: true },
-        select: {
-          supplierId: true,
-        },
-      }),
-      this.prisma.inventorySnapshot.findMany({
-        where: {
-          tenantId,
-          ...storeFilter,
-          snapshotDate: {
-            lte: period.toDate,
-          },
-        },
-        select: {
-          storeId: true,
-          productId: true,
-          snapshotDate: true,
-          quantity: true,
-          product: {
-            select: {
-              purchasePrice: true,
+        }),
+        this.prisma.product.findMany({
+          where: { tenantId, isActive: true },
+          select: {
+            supplierId: true,
+            supplier: {
+              select: {
+                id: true,
+                name: true,
+                paymentDelayDays: true,
+                minOrderAmount: true,
+                orderMultiplicity: true,
+              },
             },
           },
-        },
-        orderBy: { snapshotDate: 'asc' },
-      }),
-    ]);
+        }),
+        this.prisma.inventorySnapshot.findMany({
+          where: {
+            tenantId,
+            ...storeFilter,
+            snapshotDate: {
+              lte: period.toDate,
+            },
+          },
+          include: {
+            store: { select: { id: true, name: true } },
+            product: {
+              select: {
+                id: true,
+                article: true,
+                name: true,
+                purchasePrice: true,
+                salePrice: true,
+                canonicalProduct: { select: { name: true } },
+                categoryId: true,
+                category: { select: { name: true } },
+                supplierId: true,
+                supplier: { select: { id: true, name: true } },
+              },
+            },
+          },
+          orderBy: { snapshotDate: 'desc' },
+        }),
+        this.prisma.stockMovement.findMany({
+          where: {
+            tenantId,
+            ...storeFilter,
+            movementDate: {
+              gte: period.fromDate,
+              lte: period.toDate,
+            },
+            type: StockMovementType.WRITEOFF,
+          },
+          include: {
+            store: { select: { id: true, name: true } },
+            product: {
+              select: {
+                supplierId: true,
+                supplier: { select: { id: true, name: true } },
+                category: { select: { name: true } },
+              },
+            },
+          },
+        }),
+      ]);
     const costBasisByProduct = buildProductCostBasis([], inventorySnapshots);
-
-    const activeSkuBySupplier = new Map<string, number>();
+    const stockByStoreProduct =
+      this.latestStockByStoreProduct(inventorySnapshots);
+    const periodDays = this.periodDays(period.fromDate, period.toDate);
+    const periodSalesByStoreProduct =
+      this.productSalesByStoreProduct(salesFacts);
+    const turnoverRows = this.inventoryTurnoverRows(
+      stockByStoreProduct,
+      periodSalesByStoreProduct,
+      new Map(),
+      new Map(),
+      periodDays,
+      period.toDate,
+    );
+    const oosRows = this.outOfStockRiskProducts(
+      periodSalesByStoreProduct,
+      stockByStoreProduct,
+      periodDays,
+      periodDays,
+      new Set(),
+    );
+    const supplierMetaByKey = new Map<
+      string,
+      {
+        supplierId: string | null;
+        supplierName: string;
+        activeSku: number;
+        paymentDelayDays: number | null;
+        minOrderAmount: string | null;
+        orderMultiplicity: number | null;
+      }
+    >();
 
     activeProducts.forEach((product) => {
       const key = product.supplierId ?? 'without-supplier';
-      activeSkuBySupplier.set(key, (activeSkuBySupplier.get(key) ?? 0) + 1);
+      const current = supplierMetaByKey.get(key) ?? {
+        supplierId: product.supplierId,
+        supplierName: product.supplier?.name ?? 'Без поставщика',
+        activeSku: 0,
+        paymentDelayDays: product.supplier?.paymentDelayDays ?? null,
+        minOrderAmount: product.supplier?.minOrderAmount?.toString() ?? null,
+        orderMultiplicity: product.supplier?.orderMultiplicity ?? null,
+      };
+      current.activeSku += 1;
+      supplierMetaByKey.set(key, current);
     });
 
     const rowsBySupplier = new Map<string, SupplierPerformanceRow>();
+    const problemCategoryBySupplier = new Map<string, Map<string, number>>();
     let totalRevenue = 0;
     let totalGrossProfit = 0;
+    const ensureSupplierRow = (
+      key: string,
+      meta?: {
+        supplierId: string | null;
+        supplierName: string;
+        activeSku?: number;
+        paymentDelayDays?: number | null;
+        minOrderAmount?: string | null;
+        orderMultiplicity?: number | null;
+      },
+    ) => {
+      const savedMeta = supplierMetaByKey.get(key);
+      const supplierId = meta?.supplierId ?? savedMeta?.supplierId ?? null;
+      const supplierName =
+        meta?.supplierName ?? savedMeta?.supplierName ?? 'Без поставщика';
+      const current = rowsBySupplier.get(key) ?? {
+        supplierId,
+        supplierName,
+        activeSku: meta?.activeSku ?? savedMeta?.activeSku ?? 0,
+        soldQuantity: 0,
+        revenue: 0,
+        cost: 0,
+        grossProfit: 0,
+        marginPercent: 0,
+        salesSharePercent: 0,
+        profitSharePercent: 0,
+        averageRevenuePerSku: 0,
+        paymentDelayDays:
+          meta?.paymentDelayDays ?? savedMeta?.paymentDelayDays ?? null,
+        minOrderAmount:
+          meta?.minOrderAmount ?? savedMeta?.minOrderAmount ?? null,
+        orderMultiplicity:
+          meta?.orderMultiplicity ?? savedMeta?.orderMultiplicity ?? null,
+        writeOffQuantity: 0,
+        writeOffAmount: 0,
+        oosSkuCount: 0,
+        slowSkuCount: 0,
+        frozenSkuCount: 0,
+        frozenStockAmount: 0,
+        problemCategoryName: null,
+        deliveryQualityStatus: 'NO_DELIVERY_FACTS' as const,
+        deliveryQualityNote: '',
+      };
+
+      rowsBySupplier.set(key, current);
+      return current;
+    };
+    const addProblemCategory = (
+      supplierKey: string,
+      categoryName: string | null,
+      amount: number,
+    ) => {
+      if (amount <= 0) {
+        return;
+      }
+
+      const category = categoryName ?? 'Без категории';
+      const categories =
+        problemCategoryBySupplier.get(supplierKey) ?? new Map<string, number>();
+      categories.set(category, (categories.get(category) ?? 0) + amount);
+      problemCategoryBySupplier.set(supplierKey, categories);
+    };
+
+    supplierMetaByKey.forEach((meta, key) => ensureSupplierRow(key, meta));
 
     salesFacts.forEach((fact) => {
       const supplier = fact.product.supplier;
@@ -1335,31 +1867,69 @@ export class ReportsService {
       const revenue = fact.revenue.toNumber();
       const cost = this.saleCost(fact, costBasisByProduct);
       const grossProfit = revenue - cost;
-      const current = rowsBySupplier.get(key) ?? {
+      const current = ensureSupplierRow(key, {
         supplierId,
         supplierName: supplier?.name ?? 'Без поставщика',
-        activeSku: activeSkuBySupplier.get(key) ?? 0,
-        soldQuantity: 0,
-        revenue: 0,
-        cost: 0,
-        grossProfit: 0,
-        marginPercent: 0,
-        salesSharePercent: 0,
-        profitSharePercent: 0,
-        averageRevenuePerSku: 0,
         paymentDelayDays: supplier?.paymentDelayDays ?? null,
         minOrderAmount: supplier?.minOrderAmount?.toString() ?? null,
         orderMultiplicity: supplier?.orderMultiplicity ?? null,
-      };
+      });
 
       current.soldQuantity += quantity;
       current.revenue += revenue;
       current.cost += cost;
       current.grossProfit += grossProfit;
-      rowsBySupplier.set(key, current);
 
       totalRevenue += revenue;
       totalGrossProfit += grossProfit;
+    });
+
+    stockMovements.forEach((movement) => {
+      const supplier = movement.product.supplier;
+      const supplierId = movement.product.supplierId;
+      const key = supplierId ?? 'without-supplier';
+      const current = ensureSupplierRow(key, {
+        supplierId,
+        supplierName: supplier?.name ?? 'Без поставщика',
+      });
+      const quantity = movement.quantity.toNumber();
+      const amount = movement.amount.toNumber();
+
+      current.writeOffQuantity += quantity;
+      current.writeOffAmount += amount;
+      addProblemCategory(key, movement.product.category?.name ?? null, amount);
+    });
+
+    oosRows.forEach((row) => {
+      const key = row.supplierId ?? 'without-supplier';
+      const current = ensureSupplierRow(key, {
+        supplierId: row.supplierId,
+        supplierName: row.supplierName ?? 'Без поставщика',
+      });
+
+      current.oosSkuCount += 1;
+      addProblemCategory(key, row.categoryName, row.grossProfitAtRiskForPeriod);
+    });
+
+    turnoverRows.forEach((row) => {
+      if (row.status === 'OK') {
+        return;
+      }
+
+      const key = row.supplierId ?? 'without-supplier';
+      const current = ensureSupplierRow(key, {
+        supplierId: row.supplierId,
+        supplierName: row.supplierName ?? 'Без поставщика',
+      });
+
+      if (row.status === 'SLOW') {
+        current.slowSkuCount += 1;
+      } else {
+        current.frozenSkuCount += 1;
+      }
+
+      current.frozenStockAmount += row.frozenStockAmount;
+      addProblemCategory(key, row.categoryName, row.frozenStockAmount);
     });
 
     const rows = [...rowsBySupplier.values()]
@@ -1377,12 +1947,33 @@ export class ReportsService {
         ),
         averageRevenuePerSku:
           row.activeSku > 0 ? this.round(row.revenue / row.activeSku) : 0,
+        writeOffQuantity: this.round(row.writeOffQuantity),
+        writeOffAmount: this.round(row.writeOffAmount),
+        frozenStockAmount: this.round(row.frozenStockAmount),
+        problemCategoryName: this.topProblemCategory(
+          problemCategoryBySupplier.get(row.supplierId ?? 'without-supplier') ??
+            new Map<string, number>(),
+        ),
+        deliveryQualityStatus:
+          row.paymentDelayDays !== null ||
+          row.minOrderAmount !== null ||
+          row.orderMultiplicity !== null
+            ? ('TERMS_CONFIGURED' as const)
+            : ('NO_DELIVERY_FACTS' as const),
+        deliveryQualityNote:
+          row.paymentDelayDays !== null ||
+          row.minOrderAmount !== null ||
+          row.orderMultiplicity !== null
+            ? 'Условия поставки заполнены; фактические сроки и SLA поставок пока не импортируются.'
+            : 'Фактические сроки и качество поставок пока не импортируются.',
       }))
       .sort(
         (a, b) =>
-          b.revenue - a.revenue || a.supplierName.localeCompare(b.supplierName),
-      )
-      .slice(0, 20);
+          b.revenue - a.revenue ||
+          b.frozenStockAmount - a.frozenStockAmount ||
+          b.writeOffAmount - a.writeOffAmount ||
+          a.supplierName.localeCompare(b.supplierName),
+      );
 
     return {
       tenantId,
@@ -2167,12 +2758,200 @@ export class ReportsService {
     };
   }
 
+  private planFactAccumulators(
+    facts: PlanFactSaleFact[],
+    costBasisByProduct: Map<string, ProductCostBasis>,
+  ) {
+    const rows = new Map<string, PlanFactAccumulator>();
+    const add = (
+      id: string,
+      level: PlanFactGroupLevel,
+      parentId: string | null,
+      name: string,
+      revenue: number,
+      grossProfit: number,
+      quantity: number,
+    ) => {
+      const current = rows.get(id) ?? {
+        id,
+        level,
+        parentId,
+        name,
+        revenue: 0,
+        grossProfit: 0,
+        quantity: 0,
+      };
+
+      current.revenue += revenue;
+      current.grossProfit += grossProfit;
+      current.quantity += quantity;
+      rows.set(id, current);
+    };
+
+    facts.forEach((fact) => {
+      const quantity = fact.quantity.toNumber();
+      const revenue = fact.revenue.toNumber();
+      const cost = this.saleCost(fact, costBasisByProduct);
+      const grossProfit = revenue - cost;
+      const categoryId = fact.product.categoryId ?? 'without-category';
+      const categoryName = fact.product.category?.name ?? 'Без категории';
+      const supplierId = fact.product.supplierId ?? 'without-supplier';
+      const supplierName = fact.product.supplier?.name ?? 'Без поставщика';
+
+      add(
+        'network',
+        'network',
+        null,
+        'Вся сеть',
+        revenue,
+        grossProfit,
+        quantity,
+      );
+      add(
+        `store:${fact.store.id}`,
+        'store',
+        'network',
+        fact.store.name,
+        revenue,
+        grossProfit,
+        quantity,
+      );
+      add(
+        `category:${categoryId}`,
+        'category',
+        'network',
+        categoryName,
+        revenue,
+        grossProfit,
+        quantity,
+      );
+      add(
+        `supplier:${supplierId}`,
+        'supplier',
+        'network',
+        supplierName,
+        revenue,
+        grossProfit,
+        quantity,
+      );
+    });
+
+    return rows;
+  }
+
+  private mergePlanFactRows(
+    currentRows: Map<string, PlanFactAccumulator>,
+    planRows: Map<string, PlanFactAccumulator>,
+  ) {
+    const ids = new Set([...currentRows.keys(), ...planRows.keys()]);
+    const levelRank: Record<PlanFactGroupLevel, number> = {
+      network: 0,
+      store: 1,
+      category: 2,
+      supplier: 3,
+    };
+
+    return [...ids]
+      .map((id) => {
+        const current = currentRows.get(id);
+        const plan = planRows.get(id);
+        const source = current ?? plan;
+
+        if (!source) {
+          return this.emptyPlanFactRow(id, 'supplier', null, id);
+        }
+
+        const currentRevenue = current?.revenue ?? 0;
+        const planRevenue = plan?.revenue ?? 0;
+        const currentGrossProfit = current?.grossProfit ?? 0;
+        const planGrossProfit = plan?.grossProfit ?? 0;
+        const currentQuantity = current?.quantity ?? 0;
+        const planQuantity = plan?.quantity ?? 0;
+
+        return {
+          id,
+          level: source.level,
+          parentId: source.parentId,
+          name: source.name,
+          currentRevenue: this.round(currentRevenue),
+          planRevenue: this.round(planRevenue),
+          revenueDelta: this.round(currentRevenue - planRevenue),
+          revenueCompletionPercent: this.completionPercent(
+            currentRevenue,
+            planRevenue,
+          ),
+          currentGrossProfit: this.round(currentGrossProfit),
+          planGrossProfit: this.round(planGrossProfit),
+          grossProfitDelta: this.round(currentGrossProfit - planGrossProfit),
+          grossProfitCompletionPercent: this.completionPercent(
+            currentGrossProfit,
+            planGrossProfit,
+          ),
+          currentQuantity: this.round(currentQuantity),
+          planQuantity: this.round(planQuantity),
+          quantityDelta: this.round(currentQuantity - planQuantity),
+          quantityCompletionPercent: this.completionPercent(
+            currentQuantity,
+            planQuantity,
+          ),
+        };
+      })
+      .sort(
+        (a, b) =>
+          levelRank[a.level] - levelRank[b.level] ||
+          b.currentRevenue - a.currentRevenue ||
+          a.name.localeCompare(b.name, 'ru'),
+      );
+  }
+
+  private emptyPlanFactRow(
+    id: string,
+    level: PlanFactGroupLevel,
+    parentId: string | null,
+    name: string,
+  ): PlanFactReportRow {
+    return {
+      id,
+      level,
+      parentId,
+      name,
+      currentRevenue: 0,
+      planRevenue: 0,
+      revenueDelta: 0,
+      revenueCompletionPercent: 0,
+      currentGrossProfit: 0,
+      planGrossProfit: 0,
+      grossProfitDelta: 0,
+      grossProfitCompletionPercent: 0,
+      currentQuantity: 0,
+      planQuantity: 0,
+      quantityDelta: 0,
+      quantityCompletionPercent: 0,
+    };
+  }
+
   private lflPercent(current: number, previous: number) {
     if (previous === 0) {
       return current === 0 ? 0 : null;
     }
 
     return this.round(((current - previous) / previous) * 100);
+  }
+
+  private completionPercent(current: number, plan: number) {
+    if (plan === 0) {
+      return current === 0 ? 0 : null;
+    }
+
+    return this.round((current / plan) * 100);
+  }
+
+  private topProblemCategory(categories: Map<string, number>) {
+    const [top] = [...categories.entries()].sort(
+      (a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'ru'),
+    );
+
+    return top?.[0] ?? null;
   }
 
   private stockMovementImpact(
@@ -2262,7 +3041,9 @@ export class ReportsService {
         name: snapshot.product.name,
         isCanonical: Boolean(snapshot.product.canonicalProduct),
         canonicalProductName: snapshot.product.canonicalProduct?.name ?? null,
+        categoryId: snapshot.product.categoryId ?? null,
         categoryName: snapshot.product.category?.name ?? null,
+        supplierId: snapshot.product.supplierId ?? null,
         supplierName: snapshot.product.supplier?.name ?? null,
         stockQuantity: snapshot.quantity.toNumber(),
         unitCost: unitValue.amount,
@@ -2371,6 +3152,8 @@ export class ReportsService {
           name: sale.name,
           isCanonical: sale.isCanonical,
           canonicalProductName: sale.canonicalProductName,
+          categoryName: sale.categoryName ?? stockItem?.categoryName ?? null,
+          supplierId: sale.supplierId ?? stockItem?.supplierId ?? null,
           supplierName: sale.supplierName ?? stockItem?.supplierName ?? null,
           stockQuantity: this.round(stockQuantity),
           averageDailySales: this.round(averageDailySales),
@@ -2401,6 +3184,8 @@ export class ReportsService {
         article: string;
         name: string;
         canonicalProduct: { name: string } | null;
+        category?: { name: string } | null;
+        supplierId?: string | null;
         supplier?: { name: string } | null;
       };
     }[],
@@ -2416,6 +3201,8 @@ export class ReportsService {
         name: fact.product.name,
         isCanonical: Boolean(fact.product.canonicalProduct),
         canonicalProductName: fact.product.canonicalProduct?.name ?? null,
+        categoryName: fact.product.category?.name ?? null,
+        supplierId: fact.product.supplierId ?? null,
         supplierName: fact.product.supplier?.name ?? null,
         quantity: 0,
         revenue: 0,
@@ -2445,6 +3232,8 @@ export class ReportsService {
         article: string;
         name: string;
         canonicalProduct: { name: string } | null;
+        category?: { name: string } | null;
+        supplierId?: string | null;
         supplier?: { name: string } | null;
       };
     }[],
@@ -2461,6 +3250,8 @@ export class ReportsService {
         name: fact.product.name,
         isCanonical: Boolean(fact.product.canonicalProduct),
         canonicalProductName: fact.product.canonicalProduct?.name ?? null,
+        categoryName: fact.product.category?.name ?? null,
+        supplierId: fact.product.supplierId ?? null,
         supplierName: fact.product.supplier?.name ?? null,
         quantity: 0,
         revenue: 0,
@@ -2536,6 +3327,96 @@ export class ReportsService {
       .sort(
         (a, b) =>
           b.stockQuantity - a.stockQuantity || a.name.localeCompare(b.name),
+      );
+  }
+
+  private inventoryTurnoverRows(
+    stockByStoreProduct: Map<string, StockByStoreProductItem>,
+    productSales: Map<string, ProductSales>,
+    lastSaleByStoreProduct: Map<string, Date>,
+    historicalUnitRevenueByStoreProduct: Map<string, number>,
+    periodDays: number,
+    periodToDate: Date,
+  ): InventoryTurnoverRow[] {
+    const statusRank: Record<InventoryTurnoverStatus, number> = {
+      FROZEN: 0,
+      SLOW: 1,
+      OK: 2,
+    };
+
+    return [...stockByStoreProduct.values()]
+      .filter((item) => this.round(item.stockQuantity) > 0)
+      .map((item) => {
+        const key = `${item.storeId}:${item.productId}`;
+        const sale = productSales.get(key);
+        const soldQuantity = this.round(sale?.quantity ?? 0);
+        const revenue = this.round(sale?.revenue ?? 0);
+        const grossProfit = this.round(
+          (sale?.revenue ?? 0) - (sale?.cost ?? 0),
+        );
+        const stockQuantity = this.round(item.stockQuantity);
+        const averageDailySales = this.round(soldQuantity / periodDays);
+        const stockDays =
+          averageDailySales > 0
+            ? this.round(stockQuantity / averageDailySales)
+            : null;
+        const turnoverRate =
+          stockQuantity > 0 ? this.round(soldQuantity / stockQuantity) : 0;
+        const historicalUnitRevenue =
+          historicalUnitRevenueByStoreProduct.get(key) ?? 0;
+        const unitValue =
+          item.unitCost > 0 ? item.unitCost : historicalUnitRevenue;
+        const frozenStockValuation =
+          item.unitCost > 0
+            ? item.unitValueSource
+            : historicalUnitRevenue > 0
+              ? 'HISTORICAL_REVENUE'
+              : 'UNKNOWN';
+        const frozenStockUnitValue = this.round(unitValue);
+        const lastSaleDate = lastSaleByStoreProduct.get(key) ?? null;
+        const status: InventoryTurnoverStatus =
+          soldQuantity <= 0
+            ? 'FROZEN'
+            : stockDays !== null && stockDays >= 30
+              ? 'SLOW'
+              : 'OK';
+
+        return {
+          productId: item.productId,
+          storeId: item.storeId,
+          storeName: item.storeName,
+          article: item.article,
+          name: item.name,
+          isCanonical: item.isCanonical,
+          canonicalProductName: item.canonicalProductName,
+          categoryName: item.categoryName,
+          supplierId: item.supplierId,
+          supplierName: item.supplierName,
+          stockQuantity,
+          soldQuantity,
+          revenue,
+          grossProfit,
+          averageDailySales,
+          stockDays,
+          turnoverRate,
+          frozenStockUnitValue,
+          frozenStockValuation,
+          frozenStockAmount: this.round(stockQuantity * frozenStockUnitValue),
+          lastSaleDate: lastSaleDate
+            ? this.toDateInputValue(lastSaleDate)
+            : null,
+          daysWithoutSales: lastSaleDate
+            ? this.daysBetween(lastSaleDate, periodToDate)
+            : null,
+          status,
+        };
+      })
+      .sort(
+        (a, b) =>
+          statusRank[a.status] - statusRank[b.status] ||
+          b.frozenStockAmount - a.frozenStockAmount ||
+          a.storeName.localeCompare(b.storeName, 'ru') ||
+          a.name.localeCompare(b.name, 'ru'),
       );
   }
 
@@ -2816,6 +3697,18 @@ export class ReportsService {
     if (fromDate > toDate) {
       throw new BadRequestException('From date must be before to date');
     }
+
+    return { fromDate, toDate };
+  }
+
+  private resolvePreviousPlanPeriod(period: { fromDate: Date; toDate: Date }) {
+    const periodDays = this.periodDays(period.fromDate, period.toDate);
+    const toDate = new Date(period.fromDate);
+    toDate.setUTCDate(toDate.getUTCDate() - 1);
+    toDate.setUTCHours(23, 59, 59, 999);
+    const fromDate = new Date(toDate);
+    fromDate.setUTCDate(fromDate.getUTCDate() - (periodDays - 1));
+    fromDate.setUTCHours(0, 0, 0, 0);
 
     return { fromDate, toDate };
   }

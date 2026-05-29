@@ -17,9 +17,11 @@ import { ReportLoadingLink } from "@/components/report-loading-link";
 import { SalesDetailPreviewTable } from "@/components/sales-detail-report-table";
 import {
   getAssortmentReport,
+  getInventoryTurnoverReport,
   getLflReport,
   getNewProductsReport,
   getOperationalReport,
+  getPlanFactReport,
   getReplenishmentReport,
   getSalesDetailReport,
   getSkuPerformanceReport,
@@ -27,9 +29,13 @@ import {
   type LflPeriod,
   type LflReport,
   type LflReportRow,
+  type InventoryTurnoverReport,
+  type InventoryTurnoverRow,
   type LowMarginProduct,
   type NewProductsReport,
   type OutOfStockRiskProduct,
+  type PlanFactReport,
+  type PlanFactReportRow,
   type ReplenishmentRow,
   type ReportRecommendation,
   type ReportGroup,
@@ -191,6 +197,8 @@ export default async function ReportsPage({
   const [
     assortmentReport,
     operationalReport,
+    inventoryTurnoverReport,
+    planFactReport,
     salesDetailReport,
     skuPerformanceReport,
     replenishmentReport,
@@ -204,6 +212,8 @@ export default async function ReportsPage({
   ] = await Promise.all([
     getAssortmentReport(),
     getOperationalReport(filters),
+    getInventoryTurnoverReport(filters),
+    getPlanFactReport(filters),
     getSalesDetailReport(filters),
     getSkuPerformanceReport(filters),
     getReplenishmentReport(filters),
@@ -262,6 +272,20 @@ export default async function ReportsPage({
               frozenStockAmount={assortmentRisk.frozenStockAmount}
               rows={assortmentRisk.rows.slice(0, 20)}
             />
+          </ReportDisclosure>
+
+          <ReportDisclosure
+            title="Оборачиваемость и медленные SKU"
+            description="Текущий остаток, продажи за период, дни запаса и деньги в остатках."
+          >
+            <InventoryTurnoverPanel report={inventoryTurnoverReport} />
+          </ReportDisclosure>
+
+          <ReportDisclosure
+            title="План-факт"
+            description="Факт выбранного периода против предыдущего сопоставимого периода по сети, клубам, категориям и поставщикам."
+          >
+            <PlanFactPanel report={planFactReport} />
           </ReportDisclosure>
 
           <ReportDisclosure
@@ -382,10 +406,15 @@ export default async function ReportsPage({
           </ReportDisclosure>
 
           <ReportDisclosure
-            title="ТОП поставщиков"
-            description="Выручка, прибыль, доля продаж и условия поставщиков."
+            title="Карточка поставщика"
+            description="Продажи, прибыль, списания, OOS, медленные SKU, деньги в остатках и проблемные категории."
           >
-            <TopSuppliersTable rows={suppliersPerformanceReport.rows} />
+            <TopSuppliersTable
+              rows={suppliersPerformanceReport.rows}
+              from={suppliersPerformanceReport.from}
+              to={suppliersPerformanceReport.to}
+              storeId={suppliersPerformanceReport.storeId}
+            />
           </ReportDisclosure>
 
           <ReportDisclosure
@@ -599,6 +628,189 @@ function AssortmentRiskPanel({
           </tbody>
         </table>
       </div>
+    </section>
+  );
+}
+
+function InventoryTurnoverPanel({
+  report,
+}: {
+  report: InventoryTurnoverReport;
+}) {
+  const rows = report.rows.slice(0, 20);
+
+  return (
+    <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
+      <div className="flex flex-col gap-3 border-b border-zinc-200 px-5 py-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h2 className="text-base font-semibold">
+            Оборачиваемость и медленные SKU
+          </h2>
+          <p className="mt-1 text-sm text-zinc-500">
+            Расчет v1: продажи за {report.periodDays} дн. против текущего
+            остатка. Медленные SKU - запас от 30 дней, замороженные - остаток
+            без продаж за период.
+          </p>
+        </div>
+        <ReportLoadingLink
+          href={`/reports/inventory-turnover/table?${reportTableParams(report)}`}
+          className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+        >
+          Открыть полный отчет
+        </ReportLoadingLink>
+      </div>
+      <div className="grid gap-px bg-zinc-200 sm:grid-cols-4">
+        <Metric
+          label="Деньги в остатках"
+          value={formatMoney(report.totalFrozenStockAmount)}
+        />
+        <Metric label="Остаток, шт" value={formatQuantity(report.totalStockQuantity)} />
+        <Metric label="Медленные SKU" value={report.slowSkuCount} />
+        <Metric label="SKU без продаж" value={report.frozenSkuCount} />
+      </div>
+      <InventoryTurnoverRows rows={rows} />
+    </section>
+  );
+}
+
+function InventoryTurnoverRows({ rows }: { rows: InventoryTurnoverRow[] }) {
+  return rows.length > 0 ? (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[1160px] text-left text-sm">
+        <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
+          <tr>
+            <th className="px-5 py-3 font-medium">Статус</th>
+            <th className="px-5 py-3 font-medium">Клуб</th>
+            <th className="px-5 py-3 font-medium">Товар</th>
+            <th className="px-5 py-3 font-medium">Категория</th>
+            <th className="px-5 py-3 font-medium">Поставщик</th>
+            <th className="px-5 py-3 text-right font-medium">Остаток</th>
+            <th className="px-5 py-3 text-right font-medium">Продано</th>
+            <th className="px-5 py-3 text-right font-medium">Дней запаса</th>
+            <th className="px-5 py-3 text-right font-medium">Заморожено</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-zinc-100">
+          {rows.map((row) => (
+            <tr key={`${row.storeId}:${row.productId}`}>
+              <td className="px-5 py-4 text-zinc-700">
+                {inventoryStatusLabel(row.status)}
+              </td>
+              <td className="px-5 py-4 text-zinc-700">{row.storeName}</td>
+              <td className="px-5 py-4 font-medium text-zinc-950">{row.name}</td>
+              <td className="px-5 py-4 text-zinc-700">
+                {row.categoryName ?? "Без категории"}
+              </td>
+              <td className="px-5 py-4 text-zinc-700">
+                {row.supplierName ?? "Без поставщика"}
+              </td>
+              <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                {formatQuantity(row.stockQuantity)}
+              </td>
+              <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                {formatQuantity(row.soldQuantity)}
+              </td>
+              <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                {row.stockDays === null ? "—" : formatQuantity(row.stockDays)}
+              </td>
+              <td className="px-5 py-4 text-right tabular-nums font-semibold text-zinc-950">
+                {formatMoney(row.frozenStockAmount)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  ) : (
+    <p className="px-5 py-6 text-sm text-zinc-500">
+      Товаров с текущим остатком в выбранном фильтре нет.
+    </p>
+  );
+}
+
+function PlanFactPanel({ report }: { report: PlanFactReport }) {
+  const rows = report.rows.slice(0, 16);
+
+  return (
+    <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
+      <div className="flex flex-col gap-3 border-b border-zinc-200 px-5 py-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h2 className="text-base font-semibold">План-факт</h2>
+          <p className="mt-1 text-sm text-zinc-500">
+            План v1 берется из предыдущего сопоставимого периода:{" "}
+            {formatDateLabel(report.planFrom)} - {formatDateLabel(report.planTo)}
+            . Ручные планы можно подключить позже без смены интерфейса.
+          </p>
+        </div>
+        <ReportLoadingLink
+          href={`/reports/plan-fact/table?${reportTableParams(report)}`}
+          className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+        >
+          Открыть полный отчет
+        </ReportLoadingLink>
+      </div>
+      <div className="grid gap-px bg-zinc-200 sm:grid-cols-3">
+        <Metric
+          label="Выполнение выручки"
+          value={formatNullablePercent(report.summary.revenueCompletionPercent)}
+        />
+        <Metric
+          label="Факт выручки"
+          value={formatMoney(report.summary.currentRevenue)}
+        />
+        <Metric
+          label="Отклонение"
+          value={formatMoney(report.summary.revenueDelta)}
+        />
+      </div>
+      {rows.length > 0 ? (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[1080px] text-left text-sm">
+            <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
+              <tr>
+                <th className="px-5 py-3 font-medium">Уровень</th>
+                <th className="px-5 py-3 font-medium">Название</th>
+                <th className="px-5 py-3 text-right font-medium">Факт</th>
+                <th className="px-5 py-3 text-right font-medium">План</th>
+                <th className="px-5 py-3 text-right font-medium">%</th>
+                <th className="px-5 py-3 text-right font-medium">Прибыль</th>
+                <th className="px-5 py-3 text-right font-medium">Штуки</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100">
+              {rows.map((row) => (
+                <tr key={row.id}>
+                  <td className="px-5 py-4 text-zinc-500">
+                    {planFactLevelLabel(row.level)}
+                  </td>
+                  <td className="px-5 py-4 font-medium text-zinc-950">
+                    {row.name}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {formatMoney(row.currentRevenue)}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {formatMoney(row.planRevenue)}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {formatNullablePercent(row.revenueCompletionPercent)}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {formatMoney(row.currentGrossProfit)}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {formatQuantity(row.currentQuantity)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="px-5 py-6 text-sm text-zinc-500">
+          В выбранном периоде нет строк для план-факта.
+        </p>
+      )}
     </section>
   );
 }
@@ -916,6 +1128,41 @@ function NewProductsPanel({
 
 function formatNullablePercent(value: number | null) {
   return value === null ? "нов." : formatPercent(value);
+}
+
+function reportTableParams(report: {
+  from: string;
+  to: string;
+  storeId: string | null;
+}) {
+  const params = new URLSearchParams({ from: report.from, to: report.to });
+
+  if (report.storeId) {
+    params.set("storeId", report.storeId);
+  }
+
+  return params.toString();
+}
+
+function inventoryStatusLabel(status: InventoryTurnoverRow["status"]) {
+  const labels: Record<InventoryTurnoverRow["status"], string> = {
+    OK: "Норма",
+    SLOW: "Медленный SKU",
+    FROZEN: "Без продаж",
+  };
+
+  return labels[status];
+}
+
+function planFactLevelLabel(level: PlanFactReportRow["level"]) {
+  const labels: Record<PlanFactReportRow["level"], string> = {
+    network: "Вся сеть",
+    store: "Клуб",
+    category: "Категория",
+    supplier: "Поставщик",
+  };
+
+  return labels[level];
 }
 
 function lflLevelLabel(level: LflReportRow["level"]) {
@@ -1441,20 +1688,40 @@ function NetworkSkuBadge() {
   );
 }
 
-function TopSuppliersTable({ rows }: { rows: SupplierPerformanceRow[] }) {
+function TopSuppliersTable({
+  rows,
+  from,
+  to,
+  storeId,
+}: {
+  rows: SupplierPerformanceRow[];
+  from: string;
+  to: string;
+  storeId: string | null;
+}) {
+  const params = reportTableParams({ from, to, storeId });
+
   return (
     <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
-      <div className="border-b border-zinc-200 px-5 py-4">
-        <h2 className="text-base font-semibold">ТОП поставщиков</h2>
-        <p className="mt-1 text-sm text-zinc-500">
-          Выручка, прибыль, доля продаж и условия поставщика по текущему
-          фильтру.
-        </p>
+      <div className="flex flex-col gap-3 border-b border-zinc-200 px-5 py-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h2 className="text-base font-semibold">Карточка поставщика</h2>
+          <p className="mt-1 text-sm text-zinc-500">
+            Продажи, прибыль, списания, OOS, медленные SKU и проблемная
+            категория по текущему фильтру.
+          </p>
+        </div>
+        <ReportLoadingLink
+          href={`/reports/supplier-scorecard/table?${params}`}
+          className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+        >
+          Открыть полный отчет
+        </ReportLoadingLink>
       </div>
 
       {rows.length > 0 ? (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1120px] text-left text-sm">
+          <table className="w-full min-w-[1380px] text-left text-sm">
             <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
               <tr>
                 <th className="px-5 py-3 font-medium">Поставщик</th>
@@ -1469,8 +1736,13 @@ function TopSuppliersTable({ rows }: { rows: SupplierPerformanceRow[] }) {
                 <th className="px-5 py-3 text-right font-medium">
                   Выручка/SKU
                 </th>
-                <th className="px-5 py-3 text-right font-medium">Отсрочка</th>
-                <th className="px-5 py-3 text-right font-medium">Мин. заказ</th>
+                <th className="px-5 py-3 text-right font-medium">Списания</th>
+                <th className="px-5 py-3 text-right font-medium">OOS</th>
+                <th className="px-5 py-3 text-right font-medium">Медл.</th>
+                <th className="px-5 py-3 text-right font-medium">Без продаж</th>
+                <th className="px-5 py-3 text-right font-medium">Остатки</th>
+                <th className="px-5 py-3 font-medium">Проблема</th>
+                <th className="px-5 py-3 font-medium">Поставки</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100">
@@ -1501,14 +1773,27 @@ function TopSuppliersTable({ rows }: { rows: SupplierPerformanceRow[] }) {
                     {formatMoney(row.averageRevenuePerSku)}
                   </td>
                   <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                    {row.paymentDelayDays === null
-                      ? "—"
-                      : `${row.paymentDelayDays} дн.`}
+                    {formatMoney(row.writeOffAmount)}
                   </td>
                   <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                    {row.minOrderAmount === null
-                      ? "—"
-                      : formatMoney(row.minOrderAmount)}
+                    {row.oosSkuCount}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {row.slowSkuCount}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {row.frozenSkuCount}
+                  </td>
+                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
+                    {formatMoney(row.frozenStockAmount)}
+                  </td>
+                  <td className="px-5 py-4 text-zinc-700">
+                    {row.problemCategoryName ?? "—"}
+                  </td>
+                  <td className="px-5 py-4 text-zinc-700">
+                    {row.deliveryQualityStatus === "TERMS_CONFIGURED"
+                      ? "условия есть"
+                      : "нет фактов"}
                   </td>
                 </tr>
               ))}

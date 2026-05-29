@@ -62,6 +62,8 @@ export type OutOfStockRiskProduct = {
   name: string;
   isCanonical: boolean;
   canonicalProductName: string | null;
+  categoryName: string | null;
+  supplierId: string | null;
   supplierName: string | null;
   stockQuantity: number;
   averageDailySales: number;
@@ -247,6 +249,15 @@ export type SupplierPerformanceRow = {
   paymentDelayDays: number | null;
   minOrderAmount: string | null;
   orderMultiplicity: number | null;
+  writeOffQuantity: number;
+  writeOffAmount: number;
+  oosSkuCount: number;
+  slowSkuCount: number;
+  frozenSkuCount: number;
+  frozenStockAmount: number;
+  problemCategoryName: string | null;
+  deliveryQualityStatus: "TERMS_CONFIGURED" | "NO_DELIVERY_FACTS";
+  deliveryQualityNote: string;
 };
 
 export type SuppliersPerformanceReport = {
@@ -326,6 +337,54 @@ export type NewProductsReport = {
 
 export type LflPeriod = "day" | "week" | "month";
 export type LflGroupLevel = "network" | "store" | "category" | "product";
+export type PlanFactGroupLevel =
+  | "network"
+  | "store"
+  | "category"
+  | "supplier";
+
+export type InventoryTurnoverStatus = "OK" | "SLOW" | "FROZEN";
+
+export type InventoryTurnoverRow = {
+  productId: string;
+  storeId: string;
+  storeName: string;
+  article: string;
+  name: string;
+  isCanonical: boolean;
+  canonicalProductName: string | null;
+  categoryName: string | null;
+  supplierId: string | null;
+  supplierName: string | null;
+  stockQuantity: number;
+  soldQuantity: number;
+  revenue: number;
+  grossProfit: number;
+  averageDailySales: number;
+  stockDays: number | null;
+  turnoverRate: number;
+  frozenStockUnitValue: number;
+  frozenStockValuation: FrozenStockValuation;
+  frozenStockAmount: number;
+  lastSaleDate: string | null;
+  daysWithoutSales: number | null;
+  status: InventoryTurnoverStatus;
+};
+
+export type InventoryTurnoverReport = {
+  tenantId: string;
+  tenantSlug: string;
+  from: string;
+  to: string;
+  storeId: string | null;
+  periodDays: number;
+  totalStockQuantity: number;
+  totalFrozenStockAmount: number;
+  averageStockDays: number | null;
+  slowSkuCount: number;
+  frozenSkuCount: number;
+  rows: InventoryTurnoverRow[];
+};
 
 export type LflReportRow = {
   id: string;
@@ -356,6 +415,37 @@ export type LflReport = {
   previousTo: string;
   summary: LflReportRow;
   rows: LflReportRow[];
+};
+
+export type PlanFactReportRow = {
+  id: string;
+  level: PlanFactGroupLevel;
+  parentId: string | null;
+  name: string;
+  currentRevenue: number;
+  planRevenue: number;
+  revenueDelta: number;
+  revenueCompletionPercent: number | null;
+  currentGrossProfit: number;
+  planGrossProfit: number;
+  grossProfitDelta: number;
+  grossProfitCompletionPercent: number | null;
+  currentQuantity: number;
+  planQuantity: number;
+  quantityDelta: number;
+  quantityCompletionPercent: number | null;
+};
+
+export type PlanFactReport = {
+  tenantId: string;
+  tenantSlug: string;
+  from: string;
+  to: string;
+  storeId: string | null;
+  planFrom: string;
+  planTo: string;
+  summary: PlanFactReportRow;
+  rows: PlanFactReportRow[];
 };
 
 export async function getAssortmentReport(): Promise<AssortmentReport> {
@@ -402,6 +492,72 @@ export async function getOperationalReport(
   }
 
   return response.json() as Promise<OperationalReport>;
+}
+
+export async function getInventoryTurnoverReport(
+  filters: OperationalReportFilters,
+): Promise<InventoryTurnoverReport> {
+  const params = new URLSearchParams();
+
+  if (filters.from) {
+    params.set("from", filters.from);
+  }
+
+  if (filters.to) {
+    params.set("to", filters.to);
+  }
+
+  if (filters.storeId) {
+    params.set("storeId", filters.storeId);
+  }
+
+  const query = params.toString();
+  const response = await fetch(
+    `${getApiUrl()}/reports/inventory-turnover${query ? `?${query}` : ""}`,
+    {
+      cache: "no-store",
+      headers: await getAuthHeaders(),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch inventory turnover report");
+  }
+
+  return response.json() as Promise<InventoryTurnoverReport>;
+}
+
+export async function getPlanFactReport(
+  filters: OperationalReportFilters,
+): Promise<PlanFactReport> {
+  const params = new URLSearchParams();
+
+  if (filters.from) {
+    params.set("from", filters.from);
+  }
+
+  if (filters.to) {
+    params.set("to", filters.to);
+  }
+
+  if (filters.storeId) {
+    params.set("storeId", filters.storeId);
+  }
+
+  const query = params.toString();
+  const response = await fetch(
+    `${getApiUrl()}/reports/plan-fact${query ? `?${query}` : ""}`,
+    {
+      cache: "no-store",
+      headers: await getAuthHeaders(),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch plan/fact report");
+  }
+
+  return response.json() as Promise<PlanFactReport>;
 }
 
 export async function getSalesDetailReport(

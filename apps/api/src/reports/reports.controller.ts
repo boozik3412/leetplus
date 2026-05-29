@@ -24,11 +24,13 @@ import type { SendReportEmailDto } from './reports.dto';
 import {
   ReportsService,
   type AssortmentReport,
+  type InventoryTurnoverReport,
   type LflReport,
   type LflReportQuery,
   type NewProductsReport,
   type OperationalReport,
   type OperationalReportQuery,
+  type PlanFactReport,
   type ProductOosExclusionDto,
   type ProductOosExclusionRow,
   type ReplenishmentReport,
@@ -60,6 +62,22 @@ export class ReportsController {
     @Query() query: OperationalReportQuery,
   ): Promise<OperationalReport> {
     return this.reportsService.getOperationalReport(user, query);
+  }
+
+  @Get('inventory-turnover')
+  getInventoryTurnoverReport(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: OperationalReportQuery,
+  ): Promise<InventoryTurnoverReport> {
+    return this.reportsService.getInventoryTurnoverReport(user, query);
+  }
+
+  @Get('plan-fact')
+  getPlanFactReport(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: OperationalReportQuery,
+  ): Promise<PlanFactReport> {
+    return this.reportsService.getPlanFactReport(user, query);
   }
 
   @Get('sales-detail')

@@ -14,7 +14,15 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 
 const marketingCampaignInclude = {
-  audience: { select: { id: true, name: true, guestsCount: true } },
+  audience: {
+    select: {
+      id: true,
+      name: true,
+      description: true,
+      filters: true,
+      guestsCount: true,
+    },
+  },
   crmTask: { select: { id: true, title: true, status: true, dueAt: true } },
   promoBundle: {
     select: { id: true, name: true, status: true, bundleType: true },
@@ -144,7 +152,12 @@ const promoBundleLaunchStatuses = [
 
 const promoBundleUsageStatuses = ['CONFIRMED', 'CANCELED'] as const;
 
-const promoBundleUsageSources = ['MANUAL', 'LANGAME', 'API_IMPORT'] as const;
+const promoBundleUsageSources = [
+  'MANUAL',
+  'LANGAME',
+  'API_IMPORT',
+  'CASHIER',
+] as const;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -601,6 +614,23 @@ export type MarketingCampaignExecutionBreakdown = {
   byChannel: MarketingCampaignExecutionBreakdownRow[];
 };
 
+export type MarketingCampaignAudienceSourceType =
+  | 'SAVED_GROUP'
+  | 'CAMPAIGN_SCOPE';
+
+export type MarketingCampaignAudienceBreakdownRow = {
+  key: string;
+  sourceType: MarketingCampaignAudienceSourceType;
+  audienceId: string | null;
+  label: string;
+  hint: string | null;
+  ruleLabel: string | null;
+  targetTotal: number;
+  linkedTargetGuests: number;
+  unlinkedTargetMembers: number;
+  metrics: MarketingCampaignExecutionMetrics;
+};
+
 export type MarketingCampaignEffect = {
   campaignId: string;
   attributionMode: 'CAMPAIGN_OR_GROUP';
@@ -618,6 +648,7 @@ export type MarketingCampaignEffect = {
   delta: Omit<MarketingCampaignEffectPeriod, 'from' | 'to' | 'days'>;
   funnel: MarketingCampaignFunnel;
   revenueAttribution: MarketingCampaignRevenueAttribution;
+  audienceBreakdown: MarketingCampaignAudienceBreakdownRow[];
   storeBreakdown: MarketingCampaignStoreEffect[];
   executionBreakdown: MarketingCampaignExecutionBreakdown;
   dataQuality: {
@@ -803,7 +834,15 @@ export class MarketingService {
     const campaign = await this.prisma.marketingCampaign.findFirst({
       where: { id, tenantId: user.tenantId },
       include: {
-        audience: { select: { id: true, guestsCount: true } },
+        audience: {
+          select: {
+            id: true,
+            name: true,
+            description: true,
+            filters: true,
+            guestsCount: true,
+          },
+        },
         crmTask: { select: { id: true, status: true, dueAt: true } },
         ownerUser: { select: { id: true, fullName: true, email: true } },
       },
@@ -904,6 +943,12 @@ export class MarketingService {
       beforeExcludedOnlineTopupRevenue,
       afterExcludedOnlineTopupRevenue,
     });
+    const audienceBreakdown = this.buildCampaignAudienceBreakdown({
+      campaign,
+      targetTotal,
+      guestIds,
+      after,
+    });
 
     return {
       campaignId: campaign.id,
@@ -987,6 +1032,7 @@ export class MarketingService {
           : null,
       },
       revenueAttribution,
+      audienceBreakdown,
       storeBreakdown,
       executionBreakdown,
       dataQuality: {
@@ -1135,6 +1181,33 @@ export class MarketingService {
         effect.revenueAttribution.after.excludedOnlineTopupRevenue,
         effect.revenueAttribution.delta.excludedOnlineTopupRevenue,
       ],
+      [],
+      [
+        'Источники группы',
+        'Источник',
+        'Правило',
+        'Гостей в группе',
+        'Связано',
+        'Без связки',
+        'Контакты',
+        'Посетили',
+        'Повторные',
+        'Выручка, руб',
+        'Бар, руб',
+      ],
+      ...effect.audienceBreakdown.map((row) => [
+        'Источники группы',
+        row.label,
+        row.ruleLabel ?? row.hint,
+        row.targetTotal,
+        row.linkedTargetGuests,
+        row.unlinkedTargetMembers,
+        row.metrics.contacts,
+        row.metrics.activeGuests,
+        row.metrics.repeatGuests,
+        row.metrics.totalRevenue,
+        row.metrics.barRevenue,
+      ]),
       [],
       [
         'Периоды',
@@ -2080,6 +2153,63 @@ export class MarketingService {
 
         return left.storeName.localeCompare(right.storeName, 'ru');
       });
+  }
+
+  private buildCampaignAudienceBreakdown({
+    campaign,
+    targetTotal,
+    guestIds,
+    after,
+  }: {
+    campaign: {
+      audience: {
+        id: string;
+        name: string;
+        description: string | null;
+        filters: Prisma.JsonValue;
+      } | null;
+    };
+    targetTotal: number;
+    guestIds: string[];
+    after: MarketingCampaignEffectPeriod;
+  }): MarketingCampaignAudienceBreakdownRow[] {
+    if (!campaign.audience && targetTotal === 0) {
+      return [];
+    }
+
+    const linkedTargetGuests = guestIds.length;
+
+    return [
+      {
+        key: campaign.audience?.id ?? 'campaign-scope',
+        sourceType: campaign.audience ? 'SAVED_GROUP' : 'CAMPAIGN_SCOPE',
+        audienceId: campaign.audience?.id ?? null,
+        label: campaign.audience?.name ?? 'Без сохраненной группы',
+        hint:
+          campaign.audience?.description ??
+          'Кампания пока не привязана к сохраненной группе гостей.',
+        ruleLabel: campaignAudienceRuleLabel(
+          campaign.audience?.filters ?? null,
+        ),
+        targetTotal,
+        linkedTargetGuests,
+        unlinkedTargetMembers: Math.max(0, targetTotal - linkedTargetGuests),
+        metrics: {
+          contacts: after.contacts,
+          directContacts: after.directContacts,
+          respondedContacts: after.respondedContacts,
+          linkedGuests: linkedTargetGuests,
+          activeGuests: after.activeGuests,
+          repeatGuests: after.repeatGuests,
+          sessionsCount: after.sessionsCount,
+          playHours: after.playHours,
+          balanceRevenue: after.balanceRevenue,
+          barRevenue: after.barRevenue,
+          totalRevenue: after.totalRevenue,
+          barSalesCount: after.barSalesCount,
+        },
+      },
+    ];
   }
 
   private async buildCampaignExecutionBreakdown({
@@ -4428,6 +4558,47 @@ function parseStringArray(value: Prisma.JsonValue | null) {
   }
 
   return value.filter((item): item is string => typeof item === 'string');
+}
+
+function campaignAudienceRuleLabel(filters: Prisma.JsonValue | null) {
+  if (!filters || typeof filters !== 'object' || Array.isArray(filters)) {
+    return null;
+  }
+
+  const dateFrom = getStringField(filters, 'dateFrom');
+  const dateTo = getStringField(filters, 'dateTo');
+  const parts = [
+    dateFrom && dateTo ? `${dateFrom} - ${dateTo}` : null,
+    getStringField(filters, 'segment')
+      ? `сегмент: ${campaignAudienceSegmentLabel(
+          getStringField(filters, 'segment'),
+        )}`
+      : null,
+    getStringField(filters, 'crmStatus')
+      ? `CRM: ${getStringField(filters, 'crmStatus')}`
+      : null,
+    getStringField(filters, 'storeId') ? 'клуб выбран' : null,
+    getStringField(filters, 'guestGroupId') ? 'группа Langame выбрана' : null,
+    getStringField(filters, 'search')
+      ? `поиск: ${getStringField(filters, 'search')}`
+      : null,
+  ].filter((part): part is string => Boolean(part));
+
+  return parts.length > 0 ? parts.join(' · ') : 'Базовая выборка';
+}
+
+function campaignAudienceSegmentLabel(segment: string | null) {
+  const labels: Record<string, string> = {
+    top: 'TOP',
+    active: 'активные',
+    new: 'новые',
+    repeat: 'повторные',
+    risk: 'в риске',
+    lost: 'потерянные',
+    quiet: 'тихие часы',
+  };
+
+  return segment ? (labels[segment] ?? segment) : 'не указан';
 }
 
 function campaignTaskDescription(

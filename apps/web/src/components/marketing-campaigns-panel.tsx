@@ -22,6 +22,7 @@ import type {
   MarketingPromoBundleLaunchStatus,
   MarketingPromoBundleReconciliation,
   MarketingPromoBundleUsage,
+  MarketingPromoBundleUsageSource,
   MarketingPromoBundleUsageStatus,
 } from "@/lib/marketing";
 import type { Product } from "@/lib/products";
@@ -2153,6 +2154,9 @@ function PromoBundleUsageAnalytics({
     (sum, { summary }) => sum + summary.grossProfit,
     0,
   );
+  const usageSourceSummaries = buildPromoBundleUsageSourceSummaries(
+    rows.flatMap((row) => row.usages),
+  );
   const topRows = [...usedBundles]
     .sort((left, right) => right.summary.quantity - left.summary.quantity)
     .slice(0, 3);
@@ -2192,6 +2196,38 @@ function PromoBundleUsageAnalytics({
           value={formatRubles(totalGrossProfit)}
         />
       </div>
+
+      {usageSourceSummaries.length > 0 ? (
+        <div className="mt-3 grid gap-2 md:grid-cols-2">
+          {usageSourceSummaries.slice(0, 4).map((summary) => (
+            <div
+              key={summary.key}
+              className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs dark:border-zinc-800 dark:bg-zinc-900/60"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="font-semibold text-zinc-950 dark:text-white">
+                  {summary.label}
+                </p>
+                <span className="rounded-full border border-zinc-200 px-2 py-0.5 font-semibold text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+                  {formatNumber(summary.count)} строк
+                </span>
+              </div>
+              <p className="mt-1 text-zinc-600 dark:text-zinc-300">
+                {formatQuantity(summary.quantity)} исп. ·{" "}
+                {formatRubles(summary.amount)} · маржа{" "}
+                {formatRubles(summary.grossProfit)}
+              </p>
+              <p className="mt-1 text-zinc-500 dark:text-zinc-400">
+                externalId: {formatNumber(summary.withExternalId)} из{" "}
+                {formatNumber(summary.count)}
+                {summary.lastUsedAt
+                  ? ` · последнее ${formatDateTime(summary.lastUsedAt)}`
+                  : ""}
+              </p>
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       <div className="mt-3 grid gap-2">
         {topRows.length > 0 ? (
@@ -2417,6 +2453,13 @@ type PromoBundleUsageSummary = {
   lastUsedAt: string | null;
 };
 
+type PromoBundleUsageSourceSummary = PromoBundleUsageSummary & {
+  key: string;
+  source: MarketingPromoBundleUsageSource;
+  label: string;
+  withExternalId: number;
+};
+
 function buildPromoBundleUsageSummary(
   usages: MarketingPromoBundleUsage[],
 ): PromoBundleUsageSummary {
@@ -2448,6 +2491,83 @@ function buildPromoBundleUsageSummary(
       lastUsedAt: null,
     },
   );
+}
+
+function buildPromoBundleUsageSourceSummaries(
+  usages: MarketingPromoBundleUsage[],
+): PromoBundleUsageSourceSummary[] {
+  const summaries = new Map<string, PromoBundleUsageSourceSummary>();
+
+  usages.forEach((usage) => {
+    const source = usage.source;
+    const key = [
+      source,
+      usage.externalProvider ?? "",
+      usage.externalDomain ?? "",
+    ].join(":");
+    const existing = summaries.get(key) ?? {
+      key,
+      source,
+      label: promoBundleUsageSourceScopeLabel(usage),
+      count: 0,
+      quantity: 0,
+      amount: 0,
+      costAmount: 0,
+      grossProfit: 0,
+      lastUsedAt: null,
+      withExternalId: 0,
+    };
+    const costAmount = usage.costAmount ?? 0;
+    const usedAtMs = usage.usedAt ? new Date(usage.usedAt).getTime() : 0;
+    const currentLastMs = existing.lastUsedAt
+      ? new Date(existing.lastUsedAt).getTime()
+      : 0;
+
+    summaries.set(key, {
+      ...existing,
+      count: existing.count + 1,
+      quantity: existing.quantity + usage.quantity,
+      amount: existing.amount + usage.amount,
+      costAmount: existing.costAmount + costAmount,
+      grossProfit:
+        existing.grossProfit + (usage.grossProfit ?? usage.amount - costAmount),
+      lastUsedAt:
+        usedAtMs > currentLastMs ? usage.usedAt : existing.lastUsedAt,
+      withExternalId: existing.withExternalId + (usage.externalId ? 1 : 0),
+    });
+  });
+
+  return [...summaries.values()].sort((left, right) => {
+    const quantityDiff = right.quantity - left.quantity;
+
+    if (quantityDiff !== 0) {
+      return quantityDiff;
+    }
+
+    return left.label.localeCompare(right.label, "ru");
+  });
+}
+
+function promoBundleUsageSourceScopeLabel(usage: MarketingPromoBundleUsage) {
+  const base = promoBundleUsageSourceLabel(usage.source);
+  const provider =
+    usage.externalProvider && usage.externalProvider !== usage.source
+      ? usage.externalProvider
+      : null;
+  const details = [provider, usage.externalDomain].filter(Boolean);
+
+  return details.length > 0 ? `${base}: ${details.join(" · ")}` : base;
+}
+
+function promoBundleUsageSourceLabel(source: MarketingPromoBundleUsageSource) {
+  const labels: Record<MarketingPromoBundleUsageSource, string> = {
+    MANUAL: "Ручной журнал",
+    LANGAME: "Langame",
+    API_IMPORT: "API-импорт",
+    CASHIER: "Касса",
+  };
+
+  return labels[source] ?? source;
 }
 
 function promoBundleUsageSummaryLabel({
@@ -2538,14 +2658,14 @@ function PromoBundleUsageJournal({
           </h4>
         </div>
         <span className="rounded-full border border-zinc-200 px-2 py-1 text-xs font-semibold text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-          источник: ручной журнал
+          ручной журнал + импорт
         </span>
       </div>
 
       <p className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
         Если запуск не выбран вручную, LeetPlus подберет активный запуск по
-        набору, клубу и дате использования. Внешний импорт пишет сюда же и не
-        создает дубли по externalId.
+        набору, клубу и дате использования. Внешний импорт Langame/API/кассы
+        пишет сюда же и не создает дубли по externalId.
       </p>
 
       <form onSubmit={onSubmit} className="mt-3 grid gap-2 lg:grid-cols-12">
@@ -2714,6 +2834,15 @@ function PromoBundleUsageJournal({
                   {usage.grossProfit !== null
                     ? ` · маржа ${formatRubles(usage.grossProfit)}`
                     : ""}
+                </p>
+                <p className="mt-1 text-zinc-500 dark:text-zinc-400">
+                  {promoBundleUsageSourceLabel(usage.source)}
+                  {usage.externalDomain ? ` · ${usage.externalDomain}` : ""}
+                  {usage.externalId
+                    ? ` · externalId ${usage.externalId}`
+                    : usage.receiptExternalId
+                      ? ` · чек ${usage.receiptExternalId}`
+                      : ""}
                 </p>
                 {usage.note ? <p className="mt-1">{usage.note}</p> : null}
               </div>

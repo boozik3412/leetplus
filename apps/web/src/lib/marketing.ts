@@ -30,7 +30,8 @@ export type MarketingPromoBundleUsageStatus = "CONFIRMED" | "CANCELED";
 export type MarketingPromoBundleUsageSource =
   | "MANUAL"
   | "LANGAME"
-  | "API_IMPORT";
+  | "API_IMPORT"
+  | "CASHIER";
 
 export type MarketingPromoBundleStructure = {
   composition: {
@@ -391,6 +392,19 @@ export type MarketingCampaignExecutionBreakdown = {
   byChannel: MarketingCampaignExecutionBreakdownRow[];
 };
 
+export type MarketingCampaignAudienceBreakdownRow = {
+  key: string;
+  sourceType: "SAVED_GROUP" | "CAMPAIGN_SCOPE";
+  audienceId: string | null;
+  label: string;
+  hint: string | null;
+  ruleLabel: string | null;
+  targetTotal: number;
+  linkedTargetGuests: number;
+  unlinkedTargetMembers: number;
+  metrics: MarketingCampaignExecutionMetrics;
+};
+
 export type MarketingCampaignEffect = {
   campaignId: string;
   attributionMode: "CAMPAIGN_OR_GROUP";
@@ -408,6 +422,7 @@ export type MarketingCampaignEffect = {
   delta: Omit<MarketingCampaignEffectPeriod, "from" | "to" | "days">;
   funnel: MarketingCampaignFunnel;
   revenueAttribution?: MarketingCampaignRevenueAttribution;
+  audienceBreakdown?: MarketingCampaignAudienceBreakdownRow[];
   storeBreakdown: MarketingCampaignStoreEffect[];
   executionBreakdown: MarketingCampaignExecutionBreakdown;
   dataQuality: {

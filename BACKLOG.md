@@ -1,6 +1,6 @@
 # LeetPlus Backlog
 
-Last updated: 2026-05-26
+Last updated: 2026-05-29
 
 This file is the source of truth for product backlog, near-term roadmap, planned modules, and deferred ideas. `PROJECT_STATE.md` should stay focused on current project state, workflow, production context, and data rules.
 
@@ -506,6 +506,7 @@ Goal: let a manager create a simple campaign from a business signal and control 
 - Done: promo bundles now have exact usage facts through `MarketingPromoBundleUsage`: manual redemption journal, optional launch/club/guest/check references, revenue/cost amount, cancel status, and source/external fields for future Langame or API import.
 - Done: `/marketing/promo-bundles` operational summary now combines launch limits, manual usage facts, linked product sales, stock write-offs, margin, and remaining usage limit in one compact workspace.
 - Done: promo-bundle usage facts now have a bulk import endpoint with idempotency by `source/externalProvider/externalDomain/externalId`, automatic active launch matching by bundle, club, and usage date, a compact usage analytics block, and a per-bundle "fix usage" UX action.
+- Done: promo-bundle usage analytics now separates facts by source (`MANUAL`, `API_IMPORT`, `LANGAME`, `CASHIER`), shows source/domain coverage and externalId completeness, so confirmed Langame or cashier imports can be validated without mixing them with the manual journal.
 - Next: connect a confirmed Langame or cashier-system source to the promo-bundle usage import endpoint after the external fact format is approved.
 - Done: let the user choose a saved guest group or create one from guest filters.
 - Add campaign fields: goal, period, clubs, target group, channel, responsible user, deadline, note, status.
@@ -548,7 +549,7 @@ Goal: measure whether marketing actions produced useful commercial effect.
 - Started: effect by club is now visible in campaign detail with store-scoped revenue, bar, guests, hours, repeat guests, and before/after deltas.
 - Started: effect by responsible user and channel is visible in campaign detail with contacts, linked guests, visits, revenue, and bar.
 - Started: campaign result and contact outcome CSV export is available from the campaign detail page.
-- Show effect by saved group/rule source when campaigns start mixing multiple groups.
+- Done: campaign effect now exposes saved group/rule source breakdown with target size, linked guests, contacts, visits, repeat visits, revenue, and bar revenue; it is ready to grow from one saved group to multiple campaign sources.
 - Done: campaign effect attribution now separates attributed revenue, store-scoped revenue, facts without club, and excluded unallocated online top-ups in API, UI, and export.
 - Done: XLSX export is available after CSV column validation, using the same campaign result dataset.
 

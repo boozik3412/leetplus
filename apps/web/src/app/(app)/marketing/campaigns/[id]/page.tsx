@@ -15,6 +15,7 @@ import {
   getMarketingCampaign,
   getMarketingCampaignEffect,
   type MarketingCampaign,
+  type MarketingCampaignAudienceBreakdownRow,
   type MarketingCampaignExecutionBreakdownRow,
   type MarketingCampaignEffect,
   type MarketingCampaignEffectPeriod,
@@ -821,6 +822,7 @@ function EffectAnalytics({
 
       <CampaignRevenueAttributionCard attribution={revenueAttribution} />
       <CampaignFunnelCard campaign={campaign} effect={effect} />
+      <CampaignAudienceBreakdownCard effect={effect} />
       <CampaignStoreBreakdownCard
         effect={effect}
         attribution={revenueAttribution}
@@ -924,6 +926,150 @@ function CampaignRevenueAttributionCard({
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+function CampaignAudienceBreakdownCard({
+  effect,
+}: {
+  effect: MarketingCampaignEffect;
+}) {
+  const rows = effect.audienceBreakdown ?? [];
+  const visibleRows = rows.slice(0, 5);
+  const hiddenCount = Math.max(0, rows.length - visibleRows.length);
+  const maxRevenue = Math.max(
+    0,
+    ...visibleRows.map((row) => row.metrics.totalRevenue),
+  );
+
+  return (
+    <div className="border-t border-zinc-200 p-4 dark:border-zinc-800">
+      <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
+              Источники группы
+            </p>
+            <h3 className="mt-2 text-xl font-semibold">
+              Какая выборка дала эффект
+            </h3>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+              Разделяем результат по сохраненной группе и правилу отбора: размер
+              выборки, связь с Langame ID, контакты, визиты и выручка в окне
+              после запуска.
+            </p>
+          </div>
+          <p className="rounded-full border border-zinc-200 px-3 py-1 text-sm font-semibold text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+            {formatNumber(rows.length)} источников
+          </p>
+        </div>
+
+        {visibleRows.length > 0 ? (
+          <div className="mt-4 space-y-3">
+            {visibleRows.map((row) => (
+              <CampaignAudienceBreakdownRowView
+                key={row.key}
+                row={row}
+                maxRevenue={maxRevenue}
+              />
+            ))}
+          </div>
+        ) : (
+          <p className="mt-4 rounded-lg border border-dashed border-zinc-300 p-4 text-sm leading-6 text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
+            Для этой кампании пока нет сохраненной группы или связанных гостей,
+            поэтому разрез по источнику появится после привязки выборки.
+          </p>
+        )}
+
+        {hiddenCount > 0 ? (
+          <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">
+            Еще {formatNumber(hiddenCount)} источников скрыто для компактности.
+          </p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function CampaignAudienceBreakdownRowView({
+  row,
+  maxRevenue,
+}: {
+  row: MarketingCampaignAudienceBreakdownRow;
+  maxRevenue: number;
+}) {
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.72fr)] lg:items-center">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="truncate font-semibold">{row.label}</p>
+              <p className="mt-1 text-sm leading-5 text-zinc-500 dark:text-zinc-400">
+                {row.ruleLabel ?? row.hint ?? "Правило отбора не описано"}
+              </p>
+            </div>
+            <p className="text-right text-lg font-semibold">
+              {formatRubles(row.metrics.totalRevenue)}
+            </p>
+          </div>
+
+          <div className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+            <div
+              className="h-full rounded-full bg-emerald-500"
+              style={{
+                width: `${barWidth(
+                  percentOf(row.metrics.totalRevenue, maxRevenue),
+                )}%`,
+              }}
+            />
+          </div>
+          <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+            {formatNumber(row.linkedTargetGuests)} из{" "}
+            {formatNumber(row.targetTotal)} гостей связаны с Langame ID
+            {row.unlinkedTargetMembers > 0
+              ? `, без связки ${formatNumber(row.unlinkedTargetMembers)}`
+              : ""}
+          </p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 text-sm">
+          <AudienceBreakdownMetric
+            label="Контакты"
+            value={`${formatNumber(row.metrics.contacts)} шт`}
+          />
+          <AudienceBreakdownMetric
+            label="Посетили"
+            value={`${formatNumber(row.metrics.activeGuests)} гостей`}
+          />
+          <AudienceBreakdownMetric
+            label="Повторные"
+            value={`${formatNumber(row.metrics.repeatGuests)} гостей`}
+          />
+          <AudienceBreakdownMetric
+            label="Бар"
+            value={formatRubles(row.metrics.barRevenue)}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AudienceBreakdownMetric({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-md bg-zinc-50 p-2 dark:bg-zinc-900">
+      <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+        {label}
+      </p>
+      <p className="mt-1 font-semibold">{value}</p>
     </div>
   );
 }

@@ -17,11 +17,9 @@ import { ReportLoadingLink } from "@/components/report-loading-link";
 import { SalesDetailPreviewTable } from "@/components/sales-detail-report-table";
 import {
   getAssortmentReport,
-  getInventoryTurnoverReport,
   getLflReport,
   getNewProductsReport,
   getOperationalReport,
-  getPlanFactReport,
   getReplenishmentReport,
   getSalesDetailReport,
   getSkuPerformanceReport,
@@ -29,13 +27,9 @@ import {
   type LflPeriod,
   type LflReport,
   type LflReportRow,
-  type InventoryTurnoverReport,
-  type InventoryTurnoverRow,
   type LowMarginProduct,
   type NewProductsReport,
   type OutOfStockRiskProduct,
-  type PlanFactReport,
-  type PlanFactReportRow,
   type ReplenishmentRow,
   type ReportRecommendation,
   type ReportGroup,
@@ -197,8 +191,6 @@ export default async function ReportsPage({
   const [
     assortmentReport,
     operationalReport,
-    inventoryTurnoverReport,
-    planFactReport,
     salesDetailReport,
     skuPerformanceReport,
     replenishmentReport,
@@ -212,8 +204,6 @@ export default async function ReportsPage({
   ] = await Promise.all([
     getAssortmentReport(),
     getOperationalReport(filters),
-    getInventoryTurnoverReport(filters),
-    getPlanFactReport(filters),
     getSalesDetailReport(filters),
     getSkuPerformanceReport(filters),
     getReplenishmentReport(filters),
@@ -278,14 +268,36 @@ export default async function ReportsPage({
             title="Оборачиваемость и медленные SKU"
             description="Текущий остаток, продажи за период, дни запаса и деньги в остатках."
           >
-            <InventoryTurnoverPanel report={inventoryTurnoverReport} />
+            <ReportRoutePanel
+              title="Оборачиваемость и медленные SKU"
+              description="Полная таблица считает продажи за выбранный период против текущего остатка, показывает дни запаса, оборот/остаток, деньги в остатках и статусы медленного или замороженного SKU."
+              href={`/reports/inventory-turnover/table?${reportTableParams(
+                operationalReport,
+              )}`}
+              metrics={[
+                { label: "Порог медленного SKU", value: "30+ дней" },
+                { label: "Деньги в остатках", value: "остаток × оценка" },
+                { label: "Уровень", value: "клуб + SKU" },
+              ]}
+            />
           </ReportDisclosure>
 
           <ReportDisclosure
             title="План-факт"
             description="Факт выбранного периода против предыдущего сопоставимого периода по сети, клубам, категориям и поставщикам."
           >
-            <PlanFactPanel report={planFactReport} />
+            <ReportRoutePanel
+              title="План-факт"
+              description="Полный отчет сравнивает факт выбранного периода с предыдущим периодом той же длины. Сейчас это базовый коммерческий план v1 без ручных плановых значений."
+              href={`/reports/plan-fact/table?${reportTableParams(
+                operationalReport,
+              )}`}
+              metrics={[
+                { label: "Сеть", value: "факт / план" },
+                { label: "Клубы", value: "отклонение" },
+                { label: "Категории и поставщики", value: "% выполнения" },
+              ]}
+            />
           </ReportDisclosure>
 
           <ReportDisclosure
@@ -632,185 +644,36 @@ function AssortmentRiskPanel({
   );
 }
 
-function InventoryTurnoverPanel({
-  report,
+function ReportRoutePanel({
+  title,
+  description,
+  href,
+  metrics,
 }: {
-  report: InventoryTurnoverReport;
+  title: string;
+  description: string;
+  href: string;
+  metrics: { label: string; value: string }[];
 }) {
-  const rows = report.rows.slice(0, 20);
-
   return (
     <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
       <div className="flex flex-col gap-3 border-b border-zinc-200 px-5 py-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <h2 className="text-base font-semibold">
-            Оборачиваемость и медленные SKU
-          </h2>
-          <p className="mt-1 text-sm text-zinc-500">
-            Расчет v1: продажи за {report.periodDays} дн. против текущего
-            остатка. Медленные SKU - запас от 30 дней, замороженные - остаток
-            без продаж за период.
-          </p>
+          <h2 className="text-base font-semibold">{title}</h2>
+          <p className="mt-1 max-w-4xl text-sm text-zinc-500">{description}</p>
         </div>
         <ReportLoadingLink
-          href={`/reports/inventory-turnover/table?${reportTableParams(report)}`}
-          className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
-        >
-          Открыть полный отчет
-        </ReportLoadingLink>
-      </div>
-      <div className="grid gap-px bg-zinc-200 sm:grid-cols-4">
-        <Metric
-          label="Деньги в остатках"
-          value={formatMoney(report.totalFrozenStockAmount)}
-        />
-        <Metric label="Остаток, шт" value={formatQuantity(report.totalStockQuantity)} />
-        <Metric label="Медленные SKU" value={report.slowSkuCount} />
-        <Metric label="SKU без продаж" value={report.frozenSkuCount} />
-      </div>
-      <InventoryTurnoverRows rows={rows} />
-    </section>
-  );
-}
-
-function InventoryTurnoverRows({ rows }: { rows: InventoryTurnoverRow[] }) {
-  return rows.length > 0 ? (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[1160px] text-left text-sm">
-        <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
-          <tr>
-            <th className="px-5 py-3 font-medium">Статус</th>
-            <th className="px-5 py-3 font-medium">Клуб</th>
-            <th className="px-5 py-3 font-medium">Товар</th>
-            <th className="px-5 py-3 font-medium">Категория</th>
-            <th className="px-5 py-3 font-medium">Поставщик</th>
-            <th className="px-5 py-3 text-right font-medium">Остаток</th>
-            <th className="px-5 py-3 text-right font-medium">Продано</th>
-            <th className="px-5 py-3 text-right font-medium">Дней запаса</th>
-            <th className="px-5 py-3 text-right font-medium">Заморожено</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-zinc-100">
-          {rows.map((row) => (
-            <tr key={`${row.storeId}:${row.productId}`}>
-              <td className="px-5 py-4 text-zinc-700">
-                {inventoryStatusLabel(row.status)}
-              </td>
-              <td className="px-5 py-4 text-zinc-700">{row.storeName}</td>
-              <td className="px-5 py-4 font-medium text-zinc-950">{row.name}</td>
-              <td className="px-5 py-4 text-zinc-700">
-                {row.categoryName ?? "Без категории"}
-              </td>
-              <td className="px-5 py-4 text-zinc-700">
-                {row.supplierName ?? "Без поставщика"}
-              </td>
-              <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                {formatQuantity(row.stockQuantity)}
-              </td>
-              <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                {formatQuantity(row.soldQuantity)}
-              </td>
-              <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                {row.stockDays === null ? "—" : formatQuantity(row.stockDays)}
-              </td>
-              <td className="px-5 py-4 text-right tabular-nums font-semibold text-zinc-950">
-                {formatMoney(row.frozenStockAmount)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  ) : (
-    <p className="px-5 py-6 text-sm text-zinc-500">
-      Товаров с текущим остатком в выбранном фильтре нет.
-    </p>
-  );
-}
-
-function PlanFactPanel({ report }: { report: PlanFactReport }) {
-  const rows = report.rows.slice(0, 16);
-
-  return (
-    <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
-      <div className="flex flex-col gap-3 border-b border-zinc-200 px-5 py-4 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <h2 className="text-base font-semibold">План-факт</h2>
-          <p className="mt-1 text-sm text-zinc-500">
-            План v1 берется из предыдущего сопоставимого периода:{" "}
-            {formatDateLabel(report.planFrom)} - {formatDateLabel(report.planTo)}
-            . Ручные планы можно подключить позже без смены интерфейса.
-          </p>
-        </div>
-        <ReportLoadingLink
-          href={`/reports/plan-fact/table?${reportTableParams(report)}`}
+          href={href}
           className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
         >
           Открыть полный отчет
         </ReportLoadingLink>
       </div>
       <div className="grid gap-px bg-zinc-200 sm:grid-cols-3">
-        <Metric
-          label="Выполнение выручки"
-          value={formatNullablePercent(report.summary.revenueCompletionPercent)}
-        />
-        <Metric
-          label="Факт выручки"
-          value={formatMoney(report.summary.currentRevenue)}
-        />
-        <Metric
-          label="Отклонение"
-          value={formatMoney(report.summary.revenueDelta)}
-        />
+        {metrics.map((metric) => (
+          <Metric key={metric.label} label={metric.label} value={metric.value} />
+        ))}
       </div>
-      {rows.length > 0 ? (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1080px] text-left text-sm">
-            <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
-              <tr>
-                <th className="px-5 py-3 font-medium">Уровень</th>
-                <th className="px-5 py-3 font-medium">Название</th>
-                <th className="px-5 py-3 text-right font-medium">Факт</th>
-                <th className="px-5 py-3 text-right font-medium">План</th>
-                <th className="px-5 py-3 text-right font-medium">%</th>
-                <th className="px-5 py-3 text-right font-medium">Прибыль</th>
-                <th className="px-5 py-3 text-right font-medium">Штуки</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-100">
-              {rows.map((row) => (
-                <tr key={row.id}>
-                  <td className="px-5 py-4 text-zinc-500">
-                    {planFactLevelLabel(row.level)}
-                  </td>
-                  <td className="px-5 py-4 font-medium text-zinc-950">
-                    {row.name}
-                  </td>
-                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                    {formatMoney(row.currentRevenue)}
-                  </td>
-                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                    {formatMoney(row.planRevenue)}
-                  </td>
-                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                    {formatNullablePercent(row.revenueCompletionPercent)}
-                  </td>
-                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                    {formatMoney(row.currentGrossProfit)}
-                  </td>
-                  <td className="px-5 py-4 text-right tabular-nums text-zinc-700">
-                    {formatQuantity(row.currentQuantity)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <p className="px-5 py-6 text-sm text-zinc-500">
-          В выбранном периоде нет строк для план-факта.
-        </p>
-      )}
     </section>
   );
 }
@@ -1142,27 +1005,6 @@ function reportTableParams(report: {
   }
 
   return params.toString();
-}
-
-function inventoryStatusLabel(status: InventoryTurnoverRow["status"]) {
-  const labels: Record<InventoryTurnoverRow["status"], string> = {
-    OK: "Норма",
-    SLOW: "Медленный SKU",
-    FROZEN: "Без продаж",
-  };
-
-  return labels[status];
-}
-
-function planFactLevelLabel(level: PlanFactReportRow["level"]) {
-  const labels: Record<PlanFactReportRow["level"], string> = {
-    network: "Вся сеть",
-    store: "Клуб",
-    category: "Категория",
-    supplier: "Поставщик",
-  };
-
-  return labels[level];
 }
 
 function lflLevelLabel(level: LflReportRow["level"]) {

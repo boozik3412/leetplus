@@ -2508,6 +2508,8 @@ export class ReportsService {
             : historicalUnitRevenue > 0
               ? 'HISTORICAL_REVENUE'
               : 'UNKNOWN';
+        const stockQuantity = this.round(item.stockQuantity);
+        const frozenStockUnitValue = this.round(unitValue);
 
         return {
           productId: item.productId,
@@ -2517,10 +2519,10 @@ export class ReportsService {
           name: item.name,
           isCanonical: item.isCanonical,
           canonicalProductName: item.canonicalProductName,
-          stockQuantity: this.round(item.stockQuantity),
-          frozenStockUnitValue: this.round(unitValue),
+          stockQuantity,
+          frozenStockUnitValue,
           frozenStockValuation,
-          frozenStockAmount: this.round(item.stockQuantity * unitValue),
+          frozenStockAmount: this.round(stockQuantity * frozenStockUnitValue),
           lastSaleDate: lastSaleDate
             ? this.toDateInputValue(lastSaleDate)
             : null,

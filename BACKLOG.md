@@ -183,6 +183,7 @@ Status: MVP 1 read-only guest analytics is live in production. Automatic rewards
 - Done: PC context is pulled from Langame `global/types_of_pc_in_clubs/list` + `global/linking_pc_by_type/list`, stored on `Store.computerCount`, and used for network/club load percent.
 - Done: guest summary can backfill missing PC counts on demand when `Store.computerCount` is empty.
 - Done: `/sync` now lives in a separate `Управление` navigation block, retries Langame date endpoints with `дд.мм.гггг` after `400`, shows compact latest sync job per source, and automatically marks stale guest `RUNNING` sync runs older than 2 hours as failed.
+- Done: `/sync` now has a compact data-status block with the latest successful товарный sync, active Langame sources, source-level errors, and guest foundation status in one place.
 - Done: `/sync` guest diagnostics now expose endpoint error details, not only counts and endpoint names, so unavailable or parameter-sensitive Langame endpoints such as `guests/logs` can be triaged from the UI.
 - Done: `guests/logs` is now treated as an optional extended endpoint and is not called by the standard guest foundation sync unless explicitly requested, because the public docs do not confirm period/pagination filters for it.
 - Done: guest current-day analytics now counts session overlap across date boundaries, fixing zero guests/load for current day when sessions started before midnight.

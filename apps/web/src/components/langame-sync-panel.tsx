@@ -52,6 +52,18 @@ type CombinedSyncResult = {
   guests: GuestSyncStatus | null;
 };
 
+type LangameSyncJob = LangameSettings["syncJobs"][number];
+
+type SourceSyncHealth = {
+  id: string;
+  domain: string;
+  name: string;
+  status: "SUCCESS" | "FAILED" | "IDLE";
+  lastSyncedAt: string | null;
+  errorMessage: string | null;
+  latestJob: LangameSyncJob | null;
+};
+
 const guestSyncPollIntervalMs = 4000;
 const guestSyncPollAttempts = 75;
 
@@ -328,6 +340,10 @@ export function LangameSyncPanel({
         ) : null}
       </div>
 
+      <SyncHealthSummary
+        latestGuestStatus={latestGuestStatus}
+        settings={settings}
+      />
       <LatestGuestDiagnostics status={latestGuestStatus} />
       <SyncHistory jobs={settings.syncJobs} />
     </section>
@@ -420,6 +436,204 @@ function SyncResultSummary({ result }: { result: CombinedSyncResult }) {
       {guestDiagnostics ? (
         <PcDiagnostics diagnostics={guestDiagnostics} className="mt-4" />
       ) : null}
+    </div>
+  );
+}
+
+function SyncHealthSummary({
+  settings,
+  latestGuestStatus,
+}: {
+  settings: LangameSettings;
+  latestGuestStatus: GuestSyncStatus | null;
+}) {
+  const sourceRows = getSourceSyncHealth(settings);
+  const activeSourcesCount = settings.sources.filter(
+    (source) => source.isActive,
+  ).length;
+  const failedSources = sourceRows.filter((source) => source.status === "FAILED");
+  const sourcesWithoutSuccess = sourceRows.filter(
+    (source) => !source.lastSyncedAt && source.status !== "FAILED",
+  );
+  const latestSuccess = settings.latestSuccessfulSyncJob;
+  const latestSuccessTime = latestSuccess ? getSyncJobTime(latestSuccess) : null;
+  const guestRun = latestGuestStatus?.latestRun ?? null;
+  const guestStatus = guestRun?.status ?? latestGuestStatus?.status ?? "IDLE";
+  const guestEndpointErrors = Object.entries(
+    guestRun?.diagnostics.endpointErrors ?? {},
+  );
+
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300">
+            Статус данных
+          </p>
+          <h2 className="mt-1 text-lg font-semibold text-zinc-950 dark:text-zinc-50">
+            Состояние синхронизации
+          </h2>
+          <p className="mt-1 max-w-2xl text-sm text-zinc-500 dark:text-zinc-400">
+            Последний успешный запуск, активные источники и видимые ошибки
+            собраны в одном месте.
+          </p>
+        </div>
+        <span className={statusBadgeClass(guestStatus)}>
+          Гости: {syncStatusLabel(guestStatus)}
+        </span>
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <SyncHealthMetric
+          detail="активных Langame-доменов"
+          label="Источники"
+          value={`${activeSourcesCount}/${settings.sources.length}`}
+        />
+        <SyncHealthMetric
+          detail={latestSuccess?.domain ?? "успешных запусков пока нет"}
+          label="Последний успех"
+          value={latestSuccessTime ? formatDateTime(latestSuccessTime) : "не было"}
+        />
+        <SyncHealthMetric
+          detail={
+            failedSources.length > 0
+              ? failedSources.map((source) => source.domain).join(", ")
+              : "критичных ошибок нет"
+          }
+          label="Ошибки источников"
+          tone={failedSources.length > 0 ? "danger" : "neutral"}
+          value={failedSources.length}
+        />
+        <SyncHealthMetric
+          detail={
+            guestRun
+              ? `${formatDateTime(guestRun.startedAt)}, endpoint-ошибок: ${guestEndpointErrors.length}`
+              : "гостевых запусков пока нет"
+          }
+          label="Гостевой слой"
+          tone={statusTone(guestStatus)}
+          value={syncStatusLabel(guestStatus)}
+        />
+      </div>
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-[1.4fr_1fr]">
+        <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+                Источники Langame
+              </h3>
+              <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                Последний запуск по каждому активному домену и последняя
+                успешная дата данных.
+              </p>
+            </div>
+            {sourcesWithoutSuccess.length > 0 ? (
+              <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
+                без успеха: {sourcesWithoutSuccess.length}
+              </span>
+            ) : null}
+          </div>
+
+          {sourceRows.length > 0 ? (
+            <div className="mt-3 space-y-2">
+              {sourceRows.map((source) => (
+                <div
+                  key={source.id}
+                  className="rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <p className="font-medium text-zinc-950 dark:text-zinc-50">
+                        {source.name && source.name !== source.domain
+                          ? `${source.name} · ${source.domain}`
+                          : source.domain}
+                      </p>
+                      <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                        {source.lastSyncedAt
+                          ? `Данные источника: ${formatDateTime(source.lastSyncedAt)}`
+                          : "успешной синхронизации источника пока нет"}
+                      </p>
+                    </div>
+                    <span className={statusBadgeClass(source.status)}>
+                      {sourceStatusLabel(source.status)}
+                    </span>
+                  </div>
+                  {source.errorMessage ? (
+                    <p className="mt-2 break-words text-xs text-red-700 dark:text-red-300">
+                      {compactEndpointError(source.errorMessage)}
+                    </p>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-3 rounded-md border border-zinc-200 bg-white px-3 py-3 text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
+              Активные Langame-источники пока не настроены.
+            </p>
+          )}
+        </div>
+
+        <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+                Гостевая синхронизация
+              </h3>
+              <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                Последний foundation-запуск и ошибки дополнительных endpoints.
+              </p>
+            </div>
+            <span className={statusBadgeClass(guestStatus)}>
+              {syncStatusLabel(guestStatus)}
+            </span>
+          </div>
+
+          {guestRun ? (
+            <div className="mt-3 space-y-3 text-sm">
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+                <div className="rounded-md border border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950">
+                  <p className="text-xs text-zinc-500">Последний запуск</p>
+                  <p className="mt-1 font-medium text-zinc-950 dark:text-zinc-50">
+                    {formatDateTime(guestRun.startedAt)}
+                  </p>
+                  <p className="mt-1 text-xs text-zinc-500">{guestRun.domain}</p>
+                </div>
+                <div className="rounded-md border border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950">
+                  <p className="text-xs text-zinc-500">Endpoint-ошибки</p>
+                  <p
+                    className={[
+                      "mt-1 font-medium",
+                      guestEndpointErrors.length > 0
+                        ? "text-red-700 dark:text-red-300"
+                        : "text-zinc-950 dark:text-zinc-50",
+                    ].join(" ")}
+                  >
+                    {guestEndpointErrors.length}
+                  </p>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    {guestEndpointErrors.length > 0
+                      ? guestEndpointErrors
+                          .map(([endpoint]) => endpoint)
+                          .slice(0, 2)
+                          .join(", ")
+                      : "ошибок нет"}
+                  </p>
+                </div>
+              </div>
+              {guestRun.errorMessage ? (
+                <p className="break-words rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-200">
+                  {compactEndpointError(guestRun.errorMessage)}
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <p className="mt-3 rounded-md border border-zinc-200 bg-white px-3 py-3 text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
+              Гостевых запусков пока не было.
+            </p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -637,6 +851,105 @@ function getLatestSyncJobsByDomain(jobs: LangameSettings["syncJobs"]) {
   });
 
   return Array.from(byDomain.values());
+}
+
+function getSourceSyncHealth(settings: LangameSettings): SourceSyncHealth[] {
+  const latestJobsByDomain = new Map(
+    getLatestSyncJobsByDomain(settings.syncJobs).map((job) => [job.domain, job]),
+  );
+
+  return settings.sources
+    .filter((source) => source.isActive)
+    .map((source) => {
+      const latestJob = latestJobsByDomain.get(source.domain) ?? null;
+      const status = latestJob?.status ?? (source.lastSyncedAt ? "SUCCESS" : "IDLE");
+
+      return {
+        id: source.id,
+        domain: source.domain,
+        name: source.name,
+        status,
+        lastSyncedAt: source.lastSyncedAt,
+        errorMessage:
+          latestJob?.status === "FAILED" ? latestJob.errorMessage : null,
+        latestJob,
+      };
+    });
+}
+
+function getSyncJobTime(job: LangameSyncJob) {
+  return job.finishedAt ?? job.startedAt;
+}
+
+function sourceStatusLabel(value: SourceSyncHealth["status"]) {
+  if (value === "IDLE") {
+    return "Нет запуска";
+  }
+
+  return syncStatusLabel(value);
+}
+
+function statusTone(value: string): "neutral" | "danger" | "warning" {
+  if (value === "FAILED") {
+    return "danger";
+  }
+
+  if (value === "RUNNING" || value === "IDLE") {
+    return "warning";
+  }
+
+  return "neutral";
+}
+
+function statusBadgeClass(value: string) {
+  const base = "rounded-full px-2.5 py-1 text-xs font-medium";
+
+  if (value === "SUCCESS") {
+    return `${base} bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200`;
+  }
+
+  if (value === "FAILED") {
+    return `${base} bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-200`;
+  }
+
+  if (value === "RUNNING") {
+    return `${base} bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-200`;
+  }
+
+  return `${base} bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300`;
+}
+
+function SyncHealthMetric({
+  label,
+  value,
+  detail,
+  tone = "neutral",
+}: {
+  label: string;
+  value: string | number;
+  detail: string;
+  tone?: "neutral" | "danger" | "warning";
+}) {
+  return (
+    <div
+      className={[
+        "rounded-md border bg-zinc-50 px-3 py-2 dark:bg-zinc-900/50",
+        tone === "danger"
+          ? "border-red-200 dark:border-red-900/70"
+          : tone === "warning"
+            ? "border-amber-200 dark:border-amber-900/70"
+            : "border-zinc-200 dark:border-zinc-800",
+      ].join(" ")}
+    >
+      <p className="text-xs text-zinc-500 dark:text-zinc-400">{label}</p>
+      <p className="mt-1 text-lg font-semibold tabular-nums text-zinc-950 dark:text-zinc-50">
+        {value}
+      </p>
+      <p className="mt-1 truncate text-xs text-zinc-500 dark:text-zinc-400" title={detail}>
+        {detail}
+      </p>
+    </div>
+  );
 }
 
 function Metric({ label, value }: { label: string; value: number }) {

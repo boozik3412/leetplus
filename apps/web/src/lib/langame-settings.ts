@@ -16,6 +16,7 @@ export type LangameSettings = {
   domains: string[];
   sources: LangameSourceSettings[];
   syncJobs: LangameSyncJob[];
+  latestSuccessfulSyncJob: LangameSyncJob | null;
 };
 
 export type LangameSyncJob = {

@@ -24,28 +24,51 @@ export class LangameSettingsService {
 
   async getSettings(user: AuthenticatedUser) {
     const { tenantId } = await this.tenantContextService.resolve(user);
-    const [tenant, credential, sources, syncJobs] = await Promise.all([
-      this.prisma.tenant.findUnique({
-        where: { id: tenantId },
-        select: { name: true },
-      }),
-      this.findCredential(tenantId),
-      this.prisma.integrationSource.findMany({
-        where: {
-          tenantId,
-          provider: IntegrationProvider.LANGAME,
-        },
-        orderBy: { domain: 'asc' },
-      }),
-      this.prisma.integrationSyncJob.findMany({
-        where: {
-          tenantId,
-          provider: IntegrationProvider.LANGAME,
-        },
-        orderBy: { startedAt: 'desc' },
-        take: 10,
-      }),
-    ]);
+    const [tenant, credential, sources, syncJobs, latestSuccessfulSyncJob] =
+      await Promise.all([
+        this.prisma.tenant.findUnique({
+          where: { id: tenantId },
+          select: { name: true },
+        }),
+        this.findCredential(tenantId),
+        this.prisma.integrationSource.findMany({
+          where: {
+            tenantId,
+            provider: IntegrationProvider.LANGAME,
+          },
+          orderBy: { domain: 'asc' },
+        }),
+        this.prisma.integrationSyncJob.findMany({
+          where: {
+            tenantId,
+            provider: IntegrationProvider.LANGAME,
+          },
+          orderBy: { startedAt: 'desc' },
+          take: 10,
+        }),
+        this.prisma.integrationSyncJob.findFirst({
+          where: {
+            tenantId,
+            provider: IntegrationProvider.LANGAME,
+            status: 'SUCCESS',
+          },
+          orderBy: { startedAt: 'desc' },
+        }),
+      ]);
+    const mapSyncJob = (job: (typeof syncJobs)[number]) => ({
+      id: job.id,
+      domain: job.domain,
+      status: job.status,
+      startedAt: job.startedAt.toISOString(),
+      finishedAt: job.finishedAt?.toISOString() ?? null,
+      storesCount: job.storesCount,
+      productsCount: job.productsCount,
+      inventoryCount: job.inventoryCount,
+      salesCount: job.salesCount,
+      discrepancyCount: job.discrepancyCount,
+      hasDiscrepancyLog: Boolean(job.discrepancyLogPath),
+      errorMessage: job.errorMessage,
+    });
 
     return {
       tenantName: tenant?.name ?? '',
@@ -62,20 +85,10 @@ export class LangameSettingsService {
         lastSyncedAt: source.lastSyncedAt?.toISOString() ?? null,
         lastSyncedDate: source.lastSyncedDate?.toISOString() ?? null,
       })),
-      syncJobs: syncJobs.map((job) => ({
-        id: job.id,
-        domain: job.domain,
-        status: job.status,
-        startedAt: job.startedAt.toISOString(),
-        finishedAt: job.finishedAt?.toISOString() ?? null,
-        storesCount: job.storesCount,
-        productsCount: job.productsCount,
-        inventoryCount: job.inventoryCount,
-        salesCount: job.salesCount,
-        discrepancyCount: job.discrepancyCount,
-        hasDiscrepancyLog: Boolean(job.discrepancyLogPath),
-        errorMessage: job.errorMessage,
-      })),
+      syncJobs: syncJobs.map(mapSyncJob),
+      latestSuccessfulSyncJob: latestSuccessfulSyncJob
+        ? mapSyncJob(latestSuccessfulSyncJob)
+        : null,
     };
   }
 

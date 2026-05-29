@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { MarketingCampaignCrmTaskButton } from "@/components/marketing-campaign-crm-task-button";
 import { MarketingCampaignContactForm } from "@/components/marketing-campaign-contact-form";
 import { MarketingCampaignWorkspace } from "@/components/marketing-campaign-workspace";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
@@ -639,8 +640,14 @@ function CrmTaskCard({
           </div>
         ) : (
           <div className="rounded-lg border border-dashed border-zinc-300 p-5 text-sm leading-6 text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
-            CRM-задача еще не создана. Создайте ее из списка кампаний, чтобы
-            закрепить ответственного, срок и рабочее описание для контакта.
+            <p>
+              CRM-задача еще не создана. Создайте ее здесь, чтобы связать
+              кампанию с планом контакта, ответственным и сроком.
+            </p>
+            <MarketingCampaignCrmTaskButton
+              campaignId={campaign.id}
+              className="mt-4 inline-flex min-h-10 items-center justify-center rounded-md bg-emerald-500 px-3 text-sm font-semibold text-zinc-950 hover:bg-emerald-400 disabled:cursor-wait disabled:opacity-70"
+            />
           </div>
         )}
       </div>

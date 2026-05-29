@@ -242,7 +242,7 @@ Status: MVP 1 read-only guest analytics is live in production. Automatic rewards
 - Next: connect operation categories to concrete administrator shifts when Langame exposes a reliable operator identifier in operation/cash logs.
 - Done: production `/dashboard` current-day load percentage was verified on 2026-05-29: guest summary returned 122.4 play hours, 185 PCs, 4440 possible PC-hours, and 2.8% load instead of `нет данных`.
 - Done: campaign/contact outcome analytics now starts from campaign detail: direct contact attribution, group fallback, before/after windows, visits, sessions, play hours, balance-spend revenue, bar revenue, and attribution limitations.
-- Next: connect campaign contact creation UI to `marketingCampaignId`, then expand conversion from planned contact to completed result by group, CRM task, and responsible user.
+- Done: campaign contact workflow is connected to `marketingCampaignId`: campaign detail can create the linked CRM task from the contacts tab, contact results are saved directly to the campaign, and effect analytics tracks group, CRM task, responsible user, channel, visits, revenue, and bar.
 - Planned analytics: RFM, retention, churn risk, heatmaps, LTV, bonus load, campaign effect, and guest-flow forecasts.
 - Planned CRM layer: segments, saved groups, CRM statuses, notes, tasks, communication history, and next-best-action recommendations.
 - Planned loyalty/gamification: missions, rewards, budgets, limits, anti-fraud, and manual payout queue until a safe Langame write API is confirmed.
@@ -479,6 +479,7 @@ Goal: let a manager create a simple campaign from a business signal and control 
 - Done: campaign detail page added with breadcrumbs, launch plan, linked CRM task, group contact history, consent coverage, and effect analytics.
 - Done: real campaign effect measurement added with before/after windows, direct `marketingCampaignId` contact attribution, group fallback for older contacts, visits, sessions, play hours, balance-spend revenue, bar revenue, and explicit attribution limitations.
 - Done: campaign detail now has a compact contact-result form that saves new CRM contact facts directly to the selected `marketingCampaignId` and refreshes the campaign journal/effect data.
+- Done: campaign detail contacts tab can create the linked CRM task directly, so the planned contact step stays inside the campaign instead of sending the user back to the campaign list.
 - Done: campaign detail now shows a compact funnel from target group to contact plan, completed contacts, recorded result, visits, repeat guests, revenue, bar, CRM task, and responsible user.
 - Done: campaign effect now includes a compact store breakdown: revenue, bar, active guests, play hours, repeat guests, before/after delta, and a separate unallocated row when facts have no store.
 - Done: campaign detail now shows execution by responsible user and channel: contacts, results, linked guests, visits, repeat guests, revenue, and bar revenue.
@@ -560,7 +561,7 @@ Acceptance criteria:
 Goal: measure whether marketing actions produced useful commercial effect.
 
 - Started: campaign detail now compares before/after windows for the selected campaign and shows contacts, visitors, sessions, play hours, balance-spend revenue, bar revenue, total target size, linked guests, and attribution limits.
-- Started: newly recorded campaign contacts are now directly attributed to `marketingCampaignId`; older contacts still use group fallback.
+- Done: newly recorded campaign contacts are directly attributed to `marketingCampaignId`; older contacts still use group fallback.
 - Started: campaign detail now has the first funnel view: target group -> planned contacts -> completed contacts -> recorded result -> visited -> revenue -> bar -> repeat guests.
 - Started: effect by club is now visible in campaign detail with store-scoped revenue, bar, guests, hours, repeat guests, and before/after deltas.
 - Started: effect by responsible user and channel is visible in campaign detail with contacts, linked guests, visits, revenue, and bar.

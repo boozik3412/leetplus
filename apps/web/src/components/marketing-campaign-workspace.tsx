@@ -442,7 +442,7 @@ function buildChecklist(
         : "Создайте задачу, чтобы запуск не потерялся в переписках.",
       done: Boolean(campaign.crmTask),
       action: campaign.crmTask ? "Открыть" : "Создать",
-      href: "/guests/crm/tasks",
+      href: "?tab=contacts#contacts",
     },
     {
       title: "Первые контакты зафиксированы",

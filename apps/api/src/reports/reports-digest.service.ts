@@ -50,10 +50,14 @@ export class ReportsDigestService {
     };
   }
 
-  async sendScheduledDigests(dto: SendScheduledReportDigestDto) {
+  async sendScheduledDigests(
+    dto: SendScheduledReportDigestDto,
+    options: { tenantId?: string } = {},
+  ) {
     const type = this.resolveDigestType(dto.type);
     const recipients = await this.prisma.user.findMany({
       where: {
+        ...(options.tenantId ? { tenantId: options.tenantId } : {}),
         role: { in: [UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER] },
       },
       include: {

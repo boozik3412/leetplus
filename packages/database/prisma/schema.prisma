@@ -141,6 +141,7 @@ model Tenant {
   marketingPromoBundleLaunches MarketingPromoBundleLaunch[]
   marketingPromoBundleUsages MarketingPromoBundleUsage[]
   recommendationStates       RecommendationState[]
+  reportDigestScheduleRuns   ReportDigestScheduleRun[]
   guestStaffIdentityMappings GuestStaffIdentityMapping[]
   guestSavedFilters          GuestSavedFilter[]
   guestAudiences             GuestAudience[]
@@ -421,6 +422,25 @@ model RecommendationState {
   @@index([tenantId, status], map: "recommendation_state_status_idx")
   @@index([tenantId, role], map: "recommendation_state_role_idx")
   @@index([tenantId, lastSeenAt], map: "recommendation_state_last_seen_idx")
+}
+
+model ReportDigestScheduleRun {
+  id               String    @id @default(uuid())
+  tenantId         String
+  type             String
+  scheduledForDate String
+  status           String    @default("RUNNING")
+  startedAt        DateTime  @default(now())
+  completedAt      DateTime?
+  sentCount        Int       @default(0)
+  errorMessage     String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, type, scheduledForDate], map: "report_digest_schedule_tenant_type_date_uidx")
+  @@index([tenantId, status, startedAt], map: "report_digest_schedule_status_started_idx")
 }
 
 model SalesFact {

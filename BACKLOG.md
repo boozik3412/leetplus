@@ -154,21 +154,23 @@ Status: implemented; remains in production verification and workflow UX polish m
 
 ## Stage 5. Regular Digests
 
-Status: started; manual email sending and service endpoint are implemented, VDS schedule setup remains separate.
+Status: implemented; automatic delivery runs inside the API process, while the service endpoint remains available for manual/VDS calls.
 
 - Done: added daily email digest for network-level money, margin, OOS, write-offs, no-sales SKU, and required actions from recommendations.
 - Done: added weekly commercial email report with comparison to the previous 7-day period and XLSX report attachment.
 - Done: added `/reports` UI block for sending the daily digest or weekly report to an email recipient.
 - Done: added protected service endpoint `POST /reports/digests/scheduled` for future VDS timer calls through `SYNC_SERVICE_TOKEN`.
 - Done: `/reports` no longer preloads the full sales-detail dataset into the first screen, so the digest block and report hub can render without the multi-megabyte preview.
-- Next: agree and configure VDS schedule for daily and weekly automatic delivery.
+- Done: added an API-side daily/weekly digest scheduler with tenant-level run journal and duplicate protection by digest type/date.
 - Later add Telegram/MAX alerts for critical events after channel/legal setup.
 
 ## Stage 6. Product Commercialization
 
-- Demo mode with prepared data and clear value story without Langame setup.
-- Commercial network audit page: losses, growth opportunities, matrix quality, and expected effect.
-- Tariff levels: basic analytics, advanced reports, recommendations, regular digests, and assortment audit.
+Status: started.
+
+- Done: added `/commercial/audit` as a management-side commercial audit page: losses, growth opportunities, matrix quality, expected effect, and links to the detailed reports.
+- Next: demo mode with prepared data and clear value story without Langame setup.
+- Next: tariff levels: basic analytics, advanced reports, recommendations, regular digests, and assortment audit.
 
 ## Stage 7. Guest Management Module
 

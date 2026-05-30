@@ -115,7 +115,10 @@ export class AuthService {
   }
 
   async login(dto: LoginDto): Promise<AuthResponse> {
-    const email = this.normalizeEmail(dto.email);
+    const email = this.normalizeEmail(dto?.email);
+    this.assertEmail(email);
+    this.assertPassword(dto?.password);
+
     const user = await this.prisma.user.findUnique({
       where: { email },
       include: {
@@ -212,11 +215,19 @@ export class AuthService {
     };
   }
 
-  private normalizeEmail(email: string): string {
+  private normalizeEmail(email: unknown): string {
+    if (typeof email !== 'string') {
+      return '';
+    }
+
     return email.trim().toLowerCase();
   }
 
-  private normalizeTenantSlug(tenantSlug: string): string {
+  private normalizeTenantSlug(tenantSlug: unknown): string {
+    if (typeof tenantSlug !== 'string') {
+      return '';
+    }
+
     return tenantSlug.trim().toLowerCase();
   }
 
@@ -226,8 +237,8 @@ export class AuthService {
     }
   }
 
-  private assertPassword(password: string): void {
-    if (!password || password.length < 8) {
+  private assertPassword(password: unknown): asserts password is string {
+    if (typeof password !== 'string' || password.length < 8) {
       throw new BadRequestException(
         'Password must contain at least 8 characters',
       );

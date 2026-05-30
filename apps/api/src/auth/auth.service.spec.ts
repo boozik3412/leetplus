@@ -197,6 +197,14 @@ describe('AuthService', () => {
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
+  it('rejects malformed login payload without querying users', async () => {
+    await expect(
+      service.login({ password: 'strong-password' } as never),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+  });
+
   it('returns current user by token subject', async () => {
     prisma.user.findUnique.mockResolvedValue(createUserWithTenant());
 

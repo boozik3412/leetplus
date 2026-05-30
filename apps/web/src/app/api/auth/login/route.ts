@@ -11,22 +11,40 @@ const AUTH_COOKIE_MAX_AGE = 60 * 60;
 const REMEMBERED_AUTH_COOKIE_MAX_AGE = 60 * 60 * 24 * 30;
 
 export async function POST(request: Request) {
-  const payload = (await request.json()) as {
+  let payload: {
     email?: string;
     password?: string;
     rememberMe?: boolean;
   };
 
-  const response = await fetch(`${getApiUrl()}/auth/login`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      email: payload.email,
-      password: payload.password,
-    }),
-  });
+  try {
+    payload = (await request.json()) as typeof payload;
+  } catch {
+    return NextResponse.json<ApiErrorResponse>(
+      { message: "Некорректные данные входа" },
+      { status: 400 },
+    );
+  }
+
+  let response: Response;
+
+  try {
+    response = await fetch(`${getApiUrl()}/auth/login`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        email: payload.email,
+        password: payload.password,
+      }),
+    });
+  } catch {
+    return NextResponse.json<ApiErrorResponse>(
+      { message: "Backend недоступен. Попробуйте еще раз через минуту." },
+      { status: 503 },
+    );
+  }
 
   if (!response.ok) {
     const message = await readApiError(response);

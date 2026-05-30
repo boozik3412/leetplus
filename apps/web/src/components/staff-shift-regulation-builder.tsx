@@ -584,7 +584,9 @@ export function StaffShiftRegulationBuilder({
                   onClick={() => save("PUBLISHED")}
                   className="h-10 rounded-md bg-emerald-500 px-3 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Опубликовать
+                  {selectedRow?.status === "PUBLISHED"
+                    ? "Опубликовать новую версию"
+                    : "Опубликовать"}
                 </button>
               </>
             ) : null}
@@ -655,6 +657,72 @@ export function StaffShiftRegulationBuilder({
                 ))}
               </div>
             ) : null}
+          </div>
+        ) : null}
+
+        {selectedRow ? (
+          <div className="mt-4 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+                  История версий
+                </p>
+                <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+                  Опубликованные снимки регламента. Чеклисты и ознакомления
+                  остаются привязаны к своей версии.
+                </p>
+              </div>
+              <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
+                v{selectedRow.version}
+              </span>
+            </div>
+
+            {selectedRow.versions.length > 0 ? (
+              <div className="mt-3 grid gap-2">
+                {selectedRow.versions.map((version) => (
+                  <div
+                    key={version.id}
+                    className="rounded-md border border-zinc-200 bg-zinc-50 p-3 text-sm dark:border-zinc-800 dark:bg-zinc-900/40"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <p className="font-semibold">
+                          v{version.version} · {version.title}
+                        </p>
+                        <p className="mt-1 text-xs text-zinc-500">
+                          {shiftKindLabels[version.shiftKind]} ·{" "}
+                          {roleScopeLabels[version.roleScope]} ·{" "}
+                          {version.store?.name ?? "Вся сеть"}
+                        </p>
+                      </div>
+                      <div className="text-right text-xs text-zinc-500">
+                        {version.version === selectedRow.version ? (
+                          <span className="mb-1 inline-flex rounded-full bg-emerald-100 px-2 py-0.5 font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200">
+                            текущая
+                          </span>
+                        ) : null}
+                        <p>{formatDateTime(version.publishedAt)}</p>
+                      </div>
+                    </div>
+                    <p className="mt-2 text-xs text-zinc-500">
+                      {version.sectionsCount} разд., {version.itemsCount}{" "}
+                      пунктов, с доказательством:{" "}
+                      {version.requiredEvidenceItems}
+                      {version.createdByUser
+                        ? ` · опубликовал ${
+                            version.createdByUser.fullName ??
+                            version.createdByUser.email
+                          }`
+                        : ""}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-3 rounded-md border border-dashed border-zinc-300 p-3 text-sm text-zinc-500 dark:border-zinc-800">
+                История начнет фиксироваться при публикации следующей версии.
+              </p>
+            )}
           </div>
         ) : null}
 

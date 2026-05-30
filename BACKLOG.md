@@ -1,6 +1,6 @@
 # LeetPlus Backlog
 
-Last updated: 2026-05-30
+Last updated: 2026-05-31
 
 This file is the source of truth for product backlog, near-term roadmap, planned modules, and deferred ideas. `PROJECT_STATE.md` should stay focused on current project state, workflow, production context, and data rules.
 
@@ -363,7 +363,7 @@ Status: started. Goal: turn daily operating standards into controlled execution.
 - Done: first checklist-run execution layer added: tenant-scoped `StaffChecklistRun`, migration, API `/staff/checklists`, `/staff/checklists` UI, sidebar entry, creation from published regulations, answer/evidence capture, submission blocking for missing required answers/evidence, manager accept/return statuses, and automatic follow-up tasks for failed items.
 - Done: shift-regulation constructor now includes two admin templates from the current `Регламент.docx`: day shift `09:00-20:00` and night shift `21:00-08:00`, with timing sections, standing rules, bar/accounting, report evidence, and incident rules.
 - Done: published shift regulations now support required employee acknowledgement by selected role and club scope; the constructor shows required/acknowledged/pending counts, employees can confirm the current version, and republishing creates a new acknowledgement version.
-- Add versioned regulation history beyond the current version number.
+- Done: shift regulations now keep versioned publication snapshots in `StaffShiftRegulationVersion`; existing published regulations are backfilled during migration, every publication records title/scope/sections, and the constructor shows a compact version history.
 - Add checklist template builder with sections, required fields, evidence requirements, and scoring.
 - Started: add checklist runs tied to club, shift, employee, role, and scheduled time. First runs use the published regulation snapshot and store assigned user, club, optional Langame shift, schedule, status, answers, score, failed items, and evidence counters.
 - Started: add standard checklist packs. Day/night administrator regulation templates now cover opening/closing timing, cleanliness, bar, accounting/report evidence, and incidents; specialized cash desk, PC zone, inventory handover, and training packs remain next.
@@ -451,7 +451,7 @@ Acceptance criteria:
 4. Started: implement backend CRUD and list APIs for tasks with tenant/store/staff access control. List/create/status update plus comment/evidence endpoint are in place.
 5. Started: implement `/staff/tasks` or `/operations/tasks` UI for manager and administrator workflows. `/staff/tasks` now includes creation, filters, status actions, execution comments, evidence links, and audit history preview.
 6. Started: add checklist templates and checklist runs. First shift-regulation constructor defines sections/items/evidence rules, and the first checklist-run execution workspace now reuses published regulation snapshots.
-7. Started: add regulation documents, versions, acknowledgements, and role/club targeting. First draft/published/archived shift-regulation entity is in place; acknowledgements and full version history remain next.
+7. Started: add regulation documents, versions, acknowledgements, and role/club targeting. First draft/published/archived shift-regulation entity, acknowledgement tracking, and publication version snapshots are in place; attached regulation documents remain next.
 8. Add training materials, courses, tests, and attestation reports.
 9. Add analytics, exports, and connections to current staff-control signals.
 10. Add AI assistance only after real workflows produce enough structured data.

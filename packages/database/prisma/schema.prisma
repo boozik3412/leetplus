@@ -152,6 +152,7 @@ model Tenant {
   staffTaskComments                    StaffTaskComment[]
   staffTaskAuditEvents                 StaffTaskAuditEvent[]
   staffShiftRegulations                StaffShiftRegulation[]
+  staffShiftRegulationVersions         StaffShiftRegulationVersion[]
   staffShiftRegulationAcknowledgements StaffShiftRegulationAcknowledgement[]
   staffChecklistRuns                   StaffChecklistRun[]
   staffChatChannels                    StaffChatChannel[]
@@ -199,6 +200,7 @@ model User {
   staffTaskComments                    StaffTaskComment[]                    @relation("StaffTaskCommentAuthor")
   staffTaskAuditEvents                 StaffTaskAuditEvent[]                 @relation("StaffTaskAuditActor")
   createdStaffShiftRegulations         StaffShiftRegulation[]                @relation("StaffShiftRegulationCreatedBy")
+  createdStaffShiftRegulationVersions  StaffShiftRegulationVersion[]         @relation("StaffShiftRegulationVersionCreatedBy")
   staffShiftRegulationAcknowledgements StaffShiftRegulationAcknowledgement[]
   createdStaffChecklistRuns            StaffChecklistRun[]                   @relation("StaffChecklistRunCreatedBy")
   assignedStaffChecklistRuns           StaffChecklistRun[]                   @relation("StaffChecklistRunAssignedTo")
@@ -329,23 +331,24 @@ model Store {
   createdAt             DateTime             @default(now())
   updatedAt             DateTime             @updatedAt
 
-  tenant                     Tenant                      @relation(fields: [tenantId], references: [id])
-  integrationSource          IntegrationSource?          @relation(fields: [integrationSourceId], references: [id], onDelete: SetNull)
-  salesFacts                 SalesFact[]
-  guestSessions              GuestSession[]
-  guestTransactions          GuestTransaction[]
-  guestOperationLogs         GuestOperationLog[]
-  guestWorkingShifts         GuestWorkingShift[]
-  clubRevenueFacts           ClubRevenueFact[]
-  inventorySnapshots         InventorySnapshot[]
-  stockMovements             StockMovement[]
-  marketingPromoBundleUsages MarketingPromoBundleUsage[]
-  staffTasks                 StaffTask[]
-  staffShiftRegulations      StaffShiftRegulation[]
-  staffChecklistRuns         StaffChecklistRun[]
-  staffChatChannels          StaffChatChannel[]
-  staffChatMessages          StaffChatMessage[]
-  userAccesses               UserStoreAccess[]
+  tenant                       Tenant                        @relation(fields: [tenantId], references: [id])
+  integrationSource            IntegrationSource?            @relation(fields: [integrationSourceId], references: [id], onDelete: SetNull)
+  salesFacts                   SalesFact[]
+  guestSessions                GuestSession[]
+  guestTransactions            GuestTransaction[]
+  guestOperationLogs           GuestOperationLog[]
+  guestWorkingShifts           GuestWorkingShift[]
+  clubRevenueFacts             ClubRevenueFact[]
+  inventorySnapshots           InventorySnapshot[]
+  stockMovements               StockMovement[]
+  marketingPromoBundleUsages   MarketingPromoBundleUsage[]
+  staffTasks                   StaffTask[]
+  staffShiftRegulations        StaffShiftRegulation[]
+  staffShiftRegulationVersions StaffShiftRegulationVersion[]
+  staffChecklistRuns           StaffChecklistRun[]
+  staffChatChannels            StaffChatChannel[]
+  staffChatMessages            StaffChatMessage[]
+  userAccesses                 UserStoreAccess[]
 
   @@unique([tenantId, externalProvider, externalDomain, externalClubId])
   @@index([tenantId])
@@ -1379,6 +1382,7 @@ model StaffShiftRegulation {
   tenant           Tenant                                @relation(fields: [tenantId], references: [id])
   store            Store?                                @relation(fields: [storeId], references: [id], onDelete: SetNull)
   createdByUser    User?                                 @relation("StaffShiftRegulationCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  versions         StaffShiftRegulationVersion[]
   acknowledgements StaffShiftRegulationAcknowledgement[]
   checklistRuns    StaffChecklistRun[]
 
@@ -1386,6 +1390,34 @@ model StaffShiftRegulation {
   @@index([tenantId, createdAt], map: "staff_shift_regulation_created_idx")
   @@index([storeId], map: "staff_shift_regulation_store_idx")
   @@index([createdByUserId], map: "staff_shift_regulation_created_by_idx")
+}
+
+model StaffShiftRegulationVersion {
+  id              String    @id @default(uuid())
+  tenantId        String
+  regulationId    String
+  storeId         String?
+  createdByUserId String?
+  version         Int
+  title           String
+  description     String?
+  shiftKind       String
+  roleScope       String
+  sections        Json
+  effectiveFrom   DateTime?
+  publishedAt     DateTime?
+  createdAt       DateTime  @default(now())
+
+  tenant        Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  regulation    StaffShiftRegulation @relation(fields: [regulationId], references: [id], onDelete: Cascade)
+  store         Store?               @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  createdByUser User?                @relation("StaffShiftRegulationVersionCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([regulationId, version], map: "staff_shift_regulation_version_unique")
+  @@index([tenantId, regulationId, version], map: "staff_shift_regulation_version_regulation_idx")
+  @@index([tenantId, createdAt], map: "staff_shift_regulation_version_created_idx")
+  @@index([storeId], map: "staff_shift_regulation_version_store_idx")
+  @@index([createdByUserId], map: "staff_shift_regulation_version_created_by_idx")
 }
 
 model StaffShiftRegulationAcknowledgement {

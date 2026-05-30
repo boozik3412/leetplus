@@ -124,6 +124,23 @@ export type StaffShiftRegulationAcknowledgementSummary = {
   acknowledgedAt: string | null;
 };
 
+export type StaffShiftRegulationVersionResponse = {
+  id: string;
+  version: number;
+  title: string;
+  description: string | null;
+  shiftKind: StaffShiftKind;
+  roleScope: StaffShiftRoleScope;
+  sectionsCount: number;
+  itemsCount: number;
+  requiredEvidenceItems: number;
+  effectiveFrom: string | null;
+  publishedAt: string | null;
+  createdAt: string;
+  store: { id: string; name: string; isActive: boolean } | null;
+  createdByUser: { id: string; email: string; fullName: string | null } | null;
+};
+
 export type StaffShiftRegulationResponse = {
   id: string;
   title: string;
@@ -145,11 +162,20 @@ export type StaffShiftRegulationResponse = {
   createdByUser: { id: string; email: string; fullName: string | null } | null;
   acknowledgementSummary: StaffShiftRegulationAcknowledgementSummary;
   acknowledgements: StaffShiftRegulationAcknowledgementResponse[];
+  versions: StaffShiftRegulationVersionResponse[];
 };
 
 const regulationInclude = {
   store: { select: { id: true, name: true, isActive: true } },
   createdByUser: { select: { id: true, email: true, fullName: true } },
+  versions: {
+    include: {
+      store: { select: { id: true, name: true, isActive: true } },
+      createdByUser: { select: { id: true, email: true, fullName: true } },
+    },
+    orderBy: { version: 'desc' },
+    take: 20,
+  },
   acknowledgements: {
     include: {
       user: { select: { id: true, email: true, fullName: true, role: true } },
@@ -233,16 +259,27 @@ export class StaffShiftRegulationsService {
     });
     const status = data.status ?? 'DRAFT';
 
-    const regulation = await this.prisma.staffShiftRegulation.create({
-      data: {
-        ...data,
-        tenantId,
-        status,
-        createdByUserId: user.id,
-        publishedAt: status === 'PUBLISHED' ? new Date() : null,
-        archivedAt: status === 'ARCHIVED' ? new Date() : null,
-      },
-      include: regulationInclude,
+    const regulation = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.staffShiftRegulation.create({
+        data: {
+          ...data,
+          tenantId,
+          status,
+          createdByUserId: user.id,
+          publishedAt: status === 'PUBLISHED' ? new Date() : null,
+          archivedAt: status === 'ARCHIVED' ? new Date() : null,
+        },
+        include: regulationInclude,
+      });
+
+      if (status === 'PUBLISHED') {
+        await this.createVersionSnapshot(tx, created, user.id);
+      }
+
+      return tx.staffShiftRegulation.findUniqueOrThrow({
+        where: { id: created.id },
+        include: regulationInclude,
+      });
     });
 
     const activeUsers = await this.getAcknowledgementUsers(tenantId);
@@ -258,7 +295,7 @@ export class StaffShiftRegulationsService {
     const { tenantId } = await this.tenantContextService.resolve(user);
     const current = await this.prisma.staffShiftRegulation.findFirst({
       where: { id, tenantId },
-      select: { id: true, status: true, version: true },
+      select: { id: true, status: true, version: true, publishedAt: true },
     });
 
     if (!current) {
@@ -272,20 +309,32 @@ export class StaffShiftRegulationsService {
     const shouldPublish = data.status === 'PUBLISHED';
     const shouldArchive = data.status === 'ARCHIVED';
     const shouldCreateNewPublishedVersion =
-      shouldPublish && ['PUBLISHED', 'ARCHIVED'].includes(current.status);
+      shouldPublish &&
+      (current.status !== 'DRAFT' || Boolean(current.publishedAt));
 
-    const regulation = await this.prisma.staffShiftRegulation.update({
-      where: { id: current.id },
-      data: {
-        ...data,
-        version: shouldCreateNewPublishedVersion
-          ? current.version + 1
-          : undefined,
-        publishedAt: shouldPublish ? new Date() : undefined,
-        archivedAt: shouldArchive ? new Date() : undefined,
-        status,
-      },
-      include: regulationInclude,
+    const regulation = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.staffShiftRegulation.update({
+        where: { id: current.id },
+        data: {
+          ...data,
+          version: shouldCreateNewPublishedVersion
+            ? current.version + 1
+            : undefined,
+          publishedAt: shouldPublish ? new Date() : undefined,
+          archivedAt: shouldArchive ? new Date() : undefined,
+          status,
+        },
+        include: regulationInclude,
+      });
+
+      if (shouldPublish) {
+        await this.createVersionSnapshot(tx, updated, user.id);
+      }
+
+      return tx.staffShiftRegulation.findUniqueOrThrow({
+        where: { id: current.id },
+        include: regulationInclude,
+      });
     });
 
     const activeUsers = await this.getAcknowledgementUsers(tenantId);
@@ -563,6 +612,62 @@ export class StaffShiftRegulationsService {
       acknowledgements: currentVersionAcknowledgements.map((acknowledgement) =>
         this.toAcknowledgementResponse(acknowledgement),
       ),
+      versions: row.versions.map((version) => this.toVersionResponse(version)),
+    };
+  }
+
+  private async createVersionSnapshot(
+    tx: Prisma.TransactionClient,
+    row: StaffShiftRegulationRow,
+    createdByUserId: string,
+  ) {
+    await tx.staffShiftRegulationVersion.upsert({
+      where: {
+        regulationId_version: {
+          regulationId: row.id,
+          version: row.version,
+        },
+      },
+      create: {
+        tenantId: row.tenantId,
+        regulationId: row.id,
+        storeId: row.storeId,
+        createdByUserId,
+        version: row.version,
+        title: row.title,
+        description: row.description,
+        shiftKind: row.shiftKind,
+        roleScope: row.roleScope,
+        sections: row.sections as Prisma.InputJsonValue,
+        effectiveFrom: row.effectiveFrom,
+        publishedAt: row.publishedAt,
+      },
+      update: {},
+    });
+  }
+
+  private toVersionResponse(
+    version: StaffShiftRegulationRow['versions'][number],
+  ): StaffShiftRegulationVersionResponse {
+    const sections = this.normalizeSections(version.sections);
+    const items = sections.flatMap((section) => section.items);
+
+    return {
+      id: version.id,
+      version: version.version,
+      title: version.title,
+      description: version.description,
+      shiftKind: version.shiftKind as StaffShiftKind,
+      roleScope: version.roleScope as StaffShiftRoleScope,
+      sectionsCount: sections.length,
+      itemsCount: items.length,
+      requiredEvidenceItems: items.filter((item) => item.evidenceRequired)
+        .length,
+      effectiveFrom: version.effectiveFrom?.toISOString() ?? null,
+      publishedAt: version.publishedAt?.toISOString() ?? null,
+      createdAt: version.createdAt.toISOString(),
+      store: version.store,
+      createdByUser: version.createdByUser,
     };
   }
 

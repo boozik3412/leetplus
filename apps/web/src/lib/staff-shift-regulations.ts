@@ -58,6 +58,27 @@ export type StaffShiftRegulationSection = {
   items: StaffShiftRegulationItem[];
 };
 
+export type StaffShiftRegulationVersion = {
+  id: string;
+  version: number;
+  title: string;
+  description: string | null;
+  shiftKind: StaffShiftKind;
+  roleScope: StaffShiftRoleScope;
+  sectionsCount: number;
+  itemsCount: number;
+  requiredEvidenceItems: number;
+  effectiveFrom: string | null;
+  publishedAt: string | null;
+  createdAt: string;
+  store: StaffShiftRegulationStore | null;
+  createdByUser: {
+    id: string;
+    email: string;
+    fullName: string | null;
+  } | null;
+};
+
 export type StaffShiftRegulation = {
   id: string;
   title: string;
@@ -97,6 +118,7 @@ export type StaffShiftRegulation = {
     acknowledgedAt: string;
     user: StaffShiftRegulationUser;
   }>;
+  versions: StaffShiftRegulationVersion[];
 };
 
 export type StaffShiftRegulationFilters = {

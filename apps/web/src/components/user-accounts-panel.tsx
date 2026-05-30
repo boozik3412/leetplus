@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { AuthUser } from "@/lib/auth";
+import type { Capability } from "@/lib/permissions";
 import {
   getAssignableRoles,
   getRoleLabel,
@@ -10,6 +11,7 @@ import {
 } from "@/lib/roles";
 import type {
   UserAccount,
+  UserAccessRole,
   UserAccountsResponse,
   UserAccountStore,
 } from "@/lib/users";
@@ -18,6 +20,7 @@ type FormState = {
   email: string;
   fullName: string;
   role: UserRole;
+  customRoleId: string | null;
   isActive: boolean;
   password: string;
   scope: "NETWORK" | "STORES";
@@ -29,6 +32,7 @@ function createEmptyForm(defaultRole: UserRole): FormState {
     email: "",
     fullName: "",
     role: defaultRole,
+    customRoleId: null,
     isActive: true,
     password: "",
     scope: "NETWORK",
@@ -41,11 +45,38 @@ function formFromAccount(account: UserAccount): FormState {
     email: account.email,
     fullName: account.fullName ?? "",
     role: account.role,
+    customRoleId: account.customRoleId,
     isActive: account.isActive,
     password: "",
     scope: account.scope,
     storeIds: account.stores.map((store) => store.id),
   };
+}
+
+type AccessRoleFormState = {
+  name: string;
+  description: string;
+  permissions: Capability[];
+};
+
+function createEmptyRoleForm(): AccessRoleFormState {
+  return {
+    name: "",
+    description: "",
+    permissions: ["view_dashboard"],
+  };
+}
+
+function roleFormFromCustomRole(role: UserAccessRole): AccessRoleFormState {
+  return {
+    name: role.name,
+    description: role.description ?? "",
+    permissions: role.permissions,
+  };
+}
+
+function accountRoleLabel(account: UserAccount) {
+  return account.customRole?.name ?? getRoleLabel(account.role);
 }
 
 function formatDate(value: string) {
@@ -89,14 +120,24 @@ export function UserAccountsPanel({
     ? "CLUB_ADMINISTRATOR"
     : assignableRoles[0] ?? currentUser.role;
   const [users, setUsers] = useState(initialData.users);
+  const [customRoles, setCustomRoles] = useState(initialData.customRoles);
   const [form, setForm] = useState<FormState>(() => createEmptyForm(defaultRole));
+  const [roleForm, setRoleForm] = useState<AccessRoleFormState>(
+    createEmptyRoleForm,
+  );
+  const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<{
     type: "idle" | "success" | "error";
     message: string;
   }>({ type: "idle", message: "" });
+  const [roleStatus, setRoleStatus] = useState<{
+    type: "idle" | "success" | "error";
+    message: string;
+  }>({ type: "idle", message: "" });
   const [isSaving, setIsSaving] = useState(false);
+  const [isRoleSaving, setIsRoleSaving] = useState(false);
 
   const selectedUser = selectedId
     ? users.find((account) => account.id === selectedId) ?? null
@@ -107,6 +148,12 @@ export function UserAccountsPanel({
   const selectedRoleOption = initialData.roleOptions.find(
     (option) => option.role === form.role,
   );
+  const selectedCustomRole = form.customRoleId
+    ? customRoles.find((role) => role.id === form.customRoleId) ?? null
+    : null;
+  const roleAssignmentValue = form.customRoleId
+    ? `custom:${form.customRoleId}`
+    : `system:${form.role}`;
 
   if (
     selectedRoleOption &&
@@ -130,7 +177,7 @@ export function UserAccountsPanel({
       const haystack = [
         account.email,
         account.fullName,
-        getRoleLabel(account.role),
+        accountRoleLabel(account),
         scopeLabel(account),
       ]
         .filter(Boolean)
@@ -162,6 +209,102 @@ export function UserAccountsPanel({
     }));
   }
 
+  function updateRoleAssignment(value: string) {
+    if (value.startsWith("custom:")) {
+      const customRoleId = value.replace("custom:", "");
+      setForm((current) => ({
+        ...current,
+        role: "CLUB_ADMINISTRATOR",
+        customRoleId,
+      }));
+      return;
+    }
+
+    setForm((current) => ({
+      ...current,
+      role: value.replace("system:", "") as UserRole,
+      customRoleId: null,
+    }));
+  }
+
+  function startCreateRole() {
+    setSelectedRoleId(null);
+    setRoleForm(createEmptyRoleForm());
+    setRoleStatus({ type: "idle", message: "" });
+  }
+
+  function startEditRole(role: UserAccessRole) {
+    setSelectedRoleId(role.id);
+    setRoleForm(roleFormFromCustomRole(role));
+    setRoleStatus({ type: "idle", message: "" });
+  }
+
+  function updateRolePermission(permission: Capability, checked: boolean) {
+    setRoleForm((current) => ({
+      ...current,
+      permissions: checked
+        ? Array.from(new Set([...current.permissions, permission]))
+        : current.permissions.filter((item) => item !== permission),
+    }));
+  }
+
+  async function saveAccessRole(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsRoleSaving(true);
+    setRoleStatus({ type: "idle", message: "" });
+
+    const endpoint = selectedRoleId
+      ? `/api/users/roles/${selectedRoleId}`
+      : "/api/users/roles";
+    const response = await fetch(endpoint, {
+      method: selectedRoleId ? "PATCH" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(roleForm),
+    });
+
+    if (!response.ok) {
+      setRoleStatus({
+        type: "error",
+        message: await readResponseError(response),
+      });
+      setIsRoleSaving(false);
+      return;
+    }
+
+    const saved = (await response.json()) as UserAccessRole;
+    setCustomRoles((current) => {
+      const exists = current.some((role) => role.id === saved.id);
+
+      if (!exists) {
+        return [...current, saved].sort((a, b) =>
+          a.name.localeCompare(b.name, "ru"),
+        );
+      }
+
+      return current
+        .map((role) => (role.id === saved.id ? saved : role))
+        .sort((a, b) => a.name.localeCompare(b.name, "ru"));
+    });
+    setUsers((current) =>
+      current.map((account) =>
+        account.customRoleId === saved.id
+          ? {
+              ...account,
+              customRole: saved,
+              permissions: saved.permissions,
+            }
+          : account,
+      ),
+    );
+    setSelectedRoleId(saved.id);
+    setRoleForm(roleFormFromCustomRole(saved));
+    setRoleStatus({
+      type: "success",
+      message: selectedRoleId ? "Роль обновлена" : "Роль создана",
+    });
+    setIsRoleSaving(false);
+  }
+
   async function saveAccount(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsSaving(true);
@@ -171,6 +314,7 @@ export function UserAccountsPanel({
       email: form.email,
       fullName: form.fullName,
       role: form.role,
+      customRoleId: form.customRoleId,
       isActive: form.isActive,
       ...(form.password.trim() ? { password: form.password.trim() } : {}),
       storeIds: form.scope === "STORES" ? form.storeIds : [],
@@ -272,7 +416,7 @@ export function UserAccountsPanel({
               </div>
               <div className="mt-3 flex flex-wrap gap-2 text-xs text-zinc-500">
                 <span className="rounded-full bg-zinc-200/70 px-2 py-1 dark:bg-zinc-800">
-                  {getRoleLabel(account.role)}
+                  {accountRoleLabel(account)}
                 </span>
                 <span className="rounded-full bg-zinc-200/70 px-2 py-1 dark:bg-zinc-800">
                   {scopeLabel(account)}
@@ -349,24 +493,35 @@ export function UserAccountsPanel({
               Роль
             </span>
             <select
-              value={form.role}
+              value={roleAssignmentValue}
               disabled={selectedUser?.id === currentUser.id || !canSaveSelected}
-              onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  role: event.target.value as UserRole,
-                }))
-              }
+              onChange={(event) => updateRoleAssignment(event.target.value)}
               className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950"
             >
-              {roleOptions.map((option) => (
-                <option key={option.role} value={option.role}>
-                  {option.label}
-                </option>
-              ))}
+              <optgroup label="Системные роли">
+                {roleOptions.map((option) => (
+                  <option key={option.role} value={`system:${option.role}`}>
+                    {option.label}
+                  </option>
+                ))}
+              </optgroup>
+              {customRoles.length > 0 ? (
+                <optgroup label="Роли клуба">
+                  {customRoles.map((role) => (
+                    <option key={role.id} value={`custom:${role.id}`}>
+                      {role.name}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
             </select>
             <span className="block text-xs leading-5 text-zinc-500">
-              {roleDescriptions[form.role]}
+              {selectedCustomRole
+                ? selectedCustomRole.description ||
+                  `${selectedCustomRole.permissions.length} доступов в роли`
+                : selectedRoleOption
+                  ? roleDescriptions[form.role]
+                  : "Выберите системную роль или роль клуба."}
             </span>
           </label>
 
@@ -490,7 +645,11 @@ export function UserAccountsPanel({
           <div className="flex flex-wrap gap-2">
             <button
               type="submit"
-              disabled={isSaving || roleOptions.length === 0 || !canSaveSelected}
+              disabled={
+                isSaving ||
+                (roleOptions.length === 0 && customRoles.length === 0) ||
+                !canSaveSelected
+              }
               className="inline-flex h-11 items-center justify-center rounded-md bg-zinc-950 px-5 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
             >
               {isSaving
@@ -516,6 +675,184 @@ export function UserAccountsPanel({
             </p>
           ) : null}
         </form>
+      </section>
+
+      <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950 lg:col-span-2">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+              Роли клуба
+            </p>
+            <h2 className="mt-1 text-xl font-semibold">
+              Настройка доступов
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+              Создайте роль под структуру клуба и отметьте только те разделы,
+              которые сотрудник должен видеть или редактировать.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={startCreateRole}
+            className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+          >
+            Новая роль
+          </button>
+        </div>
+
+        <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(16rem,0.8fr)_minmax(0,1.2fr)]">
+          <div className="space-y-2">
+            {customRoles.map((role) => (
+              <button
+                key={role.id}
+                type="button"
+                onClick={() => startEditRole(role)}
+                className={[
+                  "w-full rounded-lg border p-3 text-left transition hover:-translate-y-0.5 hover:border-emerald-500/70 hover:bg-emerald-500/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50",
+                  selectedRoleId === role.id
+                    ? "border-emerald-500 bg-emerald-500/10"
+                    : "border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/60",
+                ].join(" ")}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold">{role.name}</p>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      {role.permissions.length} доступов
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-zinc-200/70 px-2 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                    Роль клуба
+                  </span>
+                </div>
+                {role.description ? (
+                  <p className="mt-2 line-clamp-2 text-xs leading-5 text-zinc-500">
+                    {role.description}
+                  </p>
+                ) : null}
+              </button>
+            ))}
+
+            {customRoles.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-zinc-300 p-5 text-sm text-zinc-500 dark:border-zinc-800">
+                Кастомных ролей пока нет. Создайте первую роль и назначьте ее
+                пользователю выше.
+              </div>
+            ) : null}
+          </div>
+
+          <form
+            onSubmit={saveAccessRole}
+            className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60"
+          >
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="space-y-1">
+                <span className="text-xs font-bold uppercase text-zinc-500">
+                  Название роли
+                </span>
+                <input
+                  required
+                  value={roleForm.name}
+                  onChange={(event) =>
+                    setRoleForm((current) => ({
+                      ...current,
+                      name: event.target.value,
+                    }))
+                  }
+                  placeholder="Например: Управляющий сменой"
+                  className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+                />
+              </label>
+
+              <label className="space-y-1">
+                <span className="text-xs font-bold uppercase text-zinc-500">
+                  Описание
+                </span>
+                <input
+                  value={roleForm.description}
+                  onChange={(event) =>
+                    setRoleForm((current) => ({
+                      ...current,
+                      description: event.target.value,
+                    }))
+                  }
+                  placeholder="Коротко: зона ответственности"
+                  className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+                />
+              </label>
+            </div>
+
+            <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              {initialData.capabilityOptions.map((capability) => (
+                <label
+                  key={capability.key}
+                  className={[
+                    "flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm transition hover:border-emerald-500/70 hover:bg-emerald-500/5",
+                    roleForm.permissions.includes(capability.key)
+                      ? "border-emerald-500 bg-emerald-500/10"
+                      : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950",
+                  ].join(" ")}
+                >
+                  <input
+                    type="checkbox"
+                    checked={roleForm.permissions.includes(capability.key)}
+                    onChange={(event) =>
+                      updateRolePermission(
+                        capability.key,
+                        event.target.checked,
+                      )
+                    }
+                    className="mt-1 h-4 w-4 rounded border-zinc-300 text-emerald-500 focus:ring-emerald-500"
+                  />
+                  <span>
+                    <span className="block font-semibold">
+                      {capability.label}
+                    </span>
+                    <span className="mt-1 block text-xs leading-5 text-zinc-500">
+                      {capability.description}
+                    </span>
+                  </span>
+                </label>
+              ))}
+            </div>
+
+            {roleStatus.type !== "idle" ? (
+              <div
+                className={[
+                  "mt-4 rounded-md border px-3 py-2 text-sm",
+                  roleStatus.type === "success"
+                    ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200"
+                    : "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-200",
+                ].join(" ")}
+              >
+                {roleStatus.message}
+              </div>
+            ) : null}
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="submit"
+                disabled={isRoleSaving}
+                className="inline-flex h-11 items-center justify-center rounded-md bg-zinc-950 px-5 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
+              >
+                {isRoleSaving
+                  ? "Сохраняем..."
+                  : selectedRoleId
+                    ? "Сохранить роль"
+                    : "Создать роль"}
+              </button>
+              {selectedRoleId ? (
+                <button
+                  type="button"
+                  onClick={startCreateRole}
+                  className="inline-flex h-11 items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                >
+                  Сбросить форму
+                </button>
+              ) : null}
+            </div>
+          </form>
+        </div>
       </section>
     </div>
   );

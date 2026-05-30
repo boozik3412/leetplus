@@ -7,6 +7,13 @@ import {
 } from '@nestjs/common';
 import { Prisma, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import {
+  accessCapabilityCatalog,
+  hasCapability,
+  normalizeCapabilities,
+  resolveUserCapabilities,
+  type AccessCapability,
+} from '../auth/capabilities';
 import { PasswordService } from '../auth/password.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
@@ -96,6 +103,16 @@ const roleOptions = [
 }>;
 
 const userAccountInclude = {
+  customRole: {
+    select: {
+      id: true,
+      name: true,
+      description: true,
+      permissions: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  },
   storeAccesses: {
     include: {
       store: {
@@ -113,6 +130,15 @@ type UserAccountRow = Prisma.UserGetPayload<{
   include: typeof userAccountInclude;
 }>;
 
+type UserAccessRoleRow = {
+  id: string;
+  name: string;
+  description: string | null;
+  permissions: string[];
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 export type UserAccountStore = {
   id: string;
   name: string;
@@ -124,6 +150,9 @@ export type UserAccount = {
   email: string;
   fullName: string | null;
   role: UserRole;
+  customRoleId: string | null;
+  customRole: UserAccessRoleAccount | null;
+  permissions: AccessCapability[];
   isActive: boolean;
   isPlatformAdmin: boolean;
   emailVerifiedAt: string | null;
@@ -133,10 +162,21 @@ export type UserAccount = {
   stores: UserAccountStore[];
 };
 
+export type UserAccessRoleAccount = {
+  id: string;
+  name: string;
+  description: string | null;
+  permissions: AccessCapability[];
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type UserAccountsResponse = {
   users: UserAccount[];
   stores: UserAccountStore[];
   roleOptions: typeof roleOptions;
+  customRoles: UserAccessRoleAccount[];
+  capabilityOptions: typeof accessCapabilityCatalog;
 };
 
 export type UserAccountDto = {
@@ -144,8 +184,15 @@ export type UserAccountDto = {
   fullName?: string | null;
   password?: string;
   role?: UserRole;
+  customRoleId?: string | null;
   isActive?: boolean;
   storeIds?: string[];
+};
+
+export type UserAccessRoleDto = {
+  name?: string;
+  description?: string | null;
+  permissions?: string[];
 };
 
 @Injectable()
@@ -158,7 +205,7 @@ export class UsersService {
 
   async getUsers(user: AuthenticatedUser): Promise<UserAccountsResponse> {
     const { tenantId } = await this.tenantContextService.resolve(user);
-    const [users, stores] = await Promise.all([
+    const [users, stores, customRoles] = await Promise.all([
       this.prisma.user.findMany({
         where: { tenantId },
         include: userAccountInclude,
@@ -169,12 +216,18 @@ export class UsersService {
         select: { id: true, name: true, isActive: true },
         orderBy: { name: 'asc' },
       }),
+      this.prisma.userAccessRole.findMany({
+        where: { tenantId },
+        orderBy: [{ name: 'asc' }, { createdAt: 'asc' }],
+      }),
     ]);
 
     return {
       users: users.map((account) => this.toAccount(account)),
       stores,
       roleOptions,
+      customRoles: customRoles.map((role) => this.toAccessRole(role)),
+      capabilityOptions: accessCapabilityCatalog,
     };
   }
 
@@ -184,18 +237,22 @@ export class UsersService {
   ): Promise<UserAccount> {
     const { tenantId } = await this.tenantContextService.resolve(actor);
     const email = this.normalizeEmail(dto.email);
-    const role = this.parseRole(dto.role);
+    const customRoleId = this.normalizeOptionalId(dto.customRoleId);
+    const role = customRoleId
+      ? UserRole.CLUB_ADMINISTRATOR
+      : this.parseRole(dto.role);
     const fullName = this.normalizeNullableText(dto.fullName);
     const password = dto.password?.trim() ?? '';
 
     this.assertEmail(email);
     this.assertPassword(password);
-    this.assertCanAssignRole(actor, role);
 
-    const [existingUser, storeIds] = await Promise.all([
+    const [existingUser, storeIds, customRole] = await Promise.all([
       this.prisma.user.findUnique({ where: { email } }),
       this.resolveStoreIds(tenantId, dto.storeIds),
+      this.resolveCustomRole(tenantId, customRoleId),
     ]);
+    this.assertCanAssignAccountRole(actor, role, customRole);
 
     if (existingUser) {
       throw new ConflictException('User with this email already exists');
@@ -210,6 +267,7 @@ export class UsersService {
           fullName,
           passwordHash,
           role,
+          customRoleId: customRole?.id ?? null,
           isActive: dto.isActive ?? true,
           emailVerifiedAt: new Date(),
         },
@@ -244,14 +302,40 @@ export class UsersService {
     this.assertCanManageExistingUser(actor, existing);
 
     const data: Prisma.UserUpdateInput = {};
-    const nextRole = dto.role ? this.parseRole(dto.role) : existing.role;
+    const customRoleId =
+      dto.customRoleId === undefined
+        ? existing.customRoleId
+        : this.normalizeOptionalId(dto.customRoleId);
+    const customRole =
+      dto.customRoleId === undefined
+        ? existing.customRole
+        : await this.resolveCustomRole(tenantId, customRoleId);
+    const nextRole = customRole
+      ? UserRole.CLUB_ADMINISTRATOR
+      : dto.role
+        ? this.parseRole(dto.role)
+        : existing.role;
+    const roleChanged =
+      nextRole !== existing.role ||
+      (customRole?.id ?? null) !== existing.customRoleId;
 
-    if (dto.role && dto.role !== existing.role) {
+    if (roleChanged) {
       if (existing.id === actor.id) {
         throw new BadRequestException('You cannot change your own role');
       }
-      this.assertCanAssignRole(actor, nextRole);
+      this.assertCanAssignAccountRole(actor, nextRole, customRole);
       data.role = nextRole;
+      if (customRole) {
+        data.customRole = {
+          connect: {
+            id: customRole.id,
+          },
+        };
+      } else if (existing.customRoleId) {
+        data.customRole = {
+          disconnect: true,
+        };
+      }
     }
 
     if (dto.email !== undefined) {
@@ -310,6 +394,50 @@ export class UsersService {
     return this.toAccount(updated);
   }
 
+  async createAccessRole(
+    actor: AuthenticatedUser,
+    dto: UserAccessRoleDto,
+  ): Promise<UserAccessRoleAccount> {
+    const { tenantId } = await this.tenantContextService.resolve(actor);
+    this.assertCanManageUsers(actor);
+    const data = this.normalizeAccessRoleDto(dto);
+
+    try {
+      const role = await this.prisma.userAccessRole.create({
+        data: {
+          tenantId,
+          ...data,
+        },
+      });
+
+      return this.toAccessRole(role);
+    } catch (error) {
+      this.handleUniqueRoleNameError(error);
+    }
+  }
+
+  async updateAccessRole(
+    actor: AuthenticatedUser,
+    id: string,
+    dto: UserAccessRoleDto,
+  ): Promise<UserAccessRoleAccount> {
+    const { tenantId } = await this.tenantContextService.resolve(actor);
+    this.assertCanManageUsers(actor);
+    await this.assertAccessRoleExists(tenantId, id);
+    const data = this.normalizeAccessRoleDto(dto);
+
+    try {
+      const role = await this.prisma.userAccessRole.update({
+        where: { id },
+        data,
+      });
+
+      return this.toAccessRole(role);
+    } catch (error) {
+      this.handleUniqueRoleNameError(error);
+    }
+  }
+
   private assertCanManageExistingUser(
     actor: AuthenticatedUser,
     target: Pick<UserAccountRow, 'role'>,
@@ -327,13 +455,57 @@ export class UsersService {
       return;
     }
 
+    if (hasCapability(actor, 'manage_users')) {
+      if (target.role === UserRole.OWNER || target.role === UserRole.ADMIN) {
+        throw new ForbiddenException(
+          'Only owner can manage owner or system admin accounts',
+        );
+      }
+      return;
+    }
+
     throw new ForbiddenException('Insufficient role permissions');
   }
 
-  private assertCanAssignRole(actor: AuthenticatedUser, role: UserRole) {
-    if (!assignableRolesByActor[actor.role]?.includes(role)) {
-      throw new ForbiddenException('You cannot assign this role');
+  private assertCanManageUsers(actor: AuthenticatedUser) {
+    if (
+      actor.role === UserRole.OWNER ||
+      actor.role === UserRole.ADMIN ||
+      hasCapability(actor, 'manage_users')
+    ) {
+      return;
     }
+
+    throw new ForbiddenException('Insufficient role permissions');
+  }
+
+  private assertCanAssignAccountRole(
+    actor: AuthenticatedUser,
+    role: UserRole,
+    customRole: UserAccessRoleRow | null,
+  ) {
+    if (customRole) {
+      this.assertCanManageUsers(actor);
+      return;
+    }
+
+    this.assertCanAssignRole(actor, role);
+  }
+
+  private assertCanAssignRole(actor: AuthenticatedUser, role: UserRole) {
+    if (assignableRolesByActor[actor.role]?.includes(role)) {
+      return;
+    }
+
+    if (
+      hasCapability(actor, 'manage_users') &&
+      role !== UserRole.OWNER &&
+      role !== UserRole.ADMIN
+    ) {
+      return;
+    }
+
+    throw new ForbiddenException('You cannot assign this role');
   }
 
   private parseRole(role: unknown): UserRole {
@@ -346,6 +518,81 @@ export class UsersService {
     }
 
     return role as UserRole;
+  }
+
+  private normalizeOptionalId(value: unknown): string | null {
+    if (value === undefined || value === null) {
+      return null;
+    }
+
+    if (typeof value !== 'string') {
+      throw new BadRequestException('Role id must be a string');
+    }
+
+    return value.trim() || null;
+  }
+
+  private async resolveCustomRole(
+    tenantId: string,
+    customRoleId: string | null,
+  ): Promise<UserAccessRoleRow | null> {
+    if (!customRoleId) {
+      return null;
+    }
+
+    const role = await this.prisma.userAccessRole.findFirst({
+      where: { id: customRoleId, tenantId },
+    });
+
+    if (!role) {
+      throw new BadRequestException('Custom role was not found');
+    }
+
+    return role;
+  }
+
+  private async assertAccessRoleExists(tenantId: string, id: string) {
+    const role = await this.prisma.userAccessRole.findFirst({
+      where: { id, tenantId },
+      select: { id: true },
+    });
+
+    if (!role) {
+      throw new NotFoundException('Custom role not found');
+    }
+  }
+
+  private normalizeAccessRoleDto(dto: UserAccessRoleDto) {
+    const name = this.normalizeText(dto.name);
+
+    if (!name) {
+      throw new BadRequestException('Role name is required');
+    }
+
+    return {
+      name,
+      description: this.normalizeNullableText(dto.description),
+      permissions: normalizeCapabilities(dto.permissions),
+    };
+  }
+
+  private normalizeText(value: unknown): string {
+    if (typeof value !== 'string') {
+      return '';
+    }
+
+    return value.trim();
+  }
+
+  private handleUniqueRoleNameError(error: unknown): never {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002'
+    ) {
+      throw new ConflictException('Role with this name already exists');
+    }
+
+    throw error;
   }
 
   private normalizeEmail(email: unknown): string {
@@ -440,6 +687,11 @@ export class UsersService {
       email: account.email,
       fullName: account.fullName,
       role: account.role,
+      customRoleId: account.customRoleId,
+      customRole: account.customRole
+        ? this.toAccessRole(account.customRole)
+        : null,
+      permissions: resolveUserCapabilities(account),
       isActive: account.isActive,
       isPlatformAdmin: account.isPlatformAdmin,
       emailVerifiedAt: account.emailVerifiedAt?.toISOString() ?? null,
@@ -447,6 +699,17 @@ export class UsersService {
       updatedAt: account.updatedAt.toISOString(),
       scope: stores.length > 0 ? 'STORES' : 'NETWORK',
       stores,
+    };
+  }
+
+  private toAccessRole(role: UserAccessRoleRow): UserAccessRoleAccount {
+    return {
+      id: role.id,
+      name: role.name,
+      description: role.description,
+      permissions: normalizeCapabilities(role.permissions),
+      createdAt: role.createdAt.toISOString(),
+      updatedAt: role.updatedAt.toISOString(),
     };
   }
 }

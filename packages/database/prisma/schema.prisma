@@ -156,6 +156,7 @@ model Tenant {
   guestSavedFilters            GuestSavedFilter[]
   guestAudiences               GuestAudience[]
   guestAudienceMembers         GuestAudienceMember[]
+  userAccessRoles              UserAccessRole[]
 }
 
 model User {
@@ -165,6 +166,7 @@ model User {
   passwordHash    String
   fullName        String?
   role            UserRole  @default(OWNER)
+  customRoleId    String?
   isActive        Boolean   @default(true)
   isPlatformAdmin Boolean   @default(false)
   emailVerifiedAt DateTime?
@@ -172,6 +174,7 @@ model User {
   updatedAt       DateTime  @updatedAt
 
   tenant                              Tenant                       @relation(fields: [tenantId], references: [id])
+  customRole                          UserAccessRole?              @relation(fields: [customRoleId], references: [id], onDelete: SetNull)
   emailVerificationTokens             EmailVerificationToken[]
   importJobs                          ImportJob[]
   guestCrmEvents                      GuestCrmEvent[]
@@ -200,6 +203,23 @@ model User {
   @@index([tenantId])
   @@index([tenantId, role])
   @@index([tenantId, isActive])
+  @@index([customRoleId])
+}
+
+model UserAccessRole {
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String
+  description String?
+  permissions String[] @default([])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  users  User[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId, createdAt])
 }
 
 model UserStoreAccess {

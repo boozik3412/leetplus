@@ -1,0 +1,191 @@
+import { UserRole } from '@prisma/client';
+
+export const accessCapabilityCatalog = [
+  {
+    key: 'view_dashboard',
+    label: 'Дашборд',
+    description: 'Сводный дашборд сети и управленческие сигналы.',
+  },
+  {
+    key: 'view_reports',
+    label: 'Отчеты и ассортимент',
+    description:
+      'Отчеты, ассортиментный блок, матрица, рекомендации и товарные таблицы.',
+  },
+  {
+    key: 'view_guests',
+    label: 'Гости и CRM',
+    description:
+      'Гостевая аналитика, CRM, группы, задачи контакта и карточки гостей.',
+  },
+  {
+    key: 'view_marketing',
+    label: 'Маркетинг',
+    description: 'Кампании, промо-механики, промо-наборы и оценка эффекта.',
+  },
+  {
+    key: 'view_staff',
+    label: 'Персонал',
+    description: 'Задачи, регламенты, чек-листы и контроль администраторов.',
+  },
+  {
+    key: 'manage_users',
+    label: 'Пользователи и роли',
+    description:
+      'Создание учетных записей, назначение ролей и настройка доступов.',
+  },
+  {
+    key: 'manage_integrations',
+    label: 'Настройки Langame',
+    description: 'Настройка API-ключей, доменов и источников Langame.',
+  },
+  {
+    key: 'run_sync',
+    label: 'Синхронизация',
+    description:
+      'Запуск ручной синхронизации данных и просмотр статусов загрузки.',
+  },
+  {
+    key: 'import_data',
+    label: 'Импорт данных',
+    description: 'Ручной импорт товаров, остатков, продаж и движений.',
+  },
+  {
+    key: 'use_utilities',
+    label: 'Утилиты',
+    description: 'Парсинг, нормализация и служебные инструменты ассортимента.',
+  },
+  {
+    key: 'edit_products',
+    label: 'Редактирование товаров',
+    description: 'Создание и изменение товарных карточек.',
+  },
+  {
+    key: 'edit_catalog',
+    label: 'Справочники',
+    description: 'Категории, поставщики и ассортиментные справочники.',
+  },
+  {
+    key: 'edit_stores',
+    label: 'Клубы',
+    description: 'Создание и изменение клубов сети.',
+  },
+] as const;
+
+export type AccessCapability = (typeof accessCapabilityCatalog)[number]['key'];
+
+const validCapabilities = new Set<string>(
+  accessCapabilityCatalog.map((capability) => capability.key),
+);
+
+export const roleCapabilities: Record<UserRole, AccessCapability[]> = {
+  [UserRole.OWNER]: [
+    'view_dashboard',
+    'view_reports',
+    'view_guests',
+    'view_marketing',
+    'view_staff',
+    'manage_users',
+    'manage_integrations',
+    'run_sync',
+    'import_data',
+    'use_utilities',
+    'edit_products',
+    'edit_catalog',
+    'edit_stores',
+  ],
+  [UserRole.ADMIN]: [
+    'view_dashboard',
+    'view_reports',
+    'view_guests',
+    'view_marketing',
+    'view_staff',
+    'manage_users',
+    'manage_integrations',
+    'run_sync',
+    'import_data',
+    'use_utilities',
+    'edit_products',
+    'edit_catalog',
+    'edit_stores',
+  ],
+  [UserRole.MANAGER]: [
+    'view_dashboard',
+    'view_reports',
+    'view_guests',
+    'view_marketing',
+    'view_staff',
+    'import_data',
+    'use_utilities',
+    'edit_products',
+    'edit_catalog',
+    'edit_stores',
+  ],
+  [UserRole.BUYER]: [
+    'view_dashboard',
+    'view_reports',
+    'use_utilities',
+    'edit_products',
+  ],
+  [UserRole.MARKETER]: [
+    'view_dashboard',
+    'view_reports',
+    'view_guests',
+    'view_marketing',
+  ],
+  [UserRole.CLUB_MANAGER]: [
+    'view_dashboard',
+    'view_reports',
+    'view_guests',
+    'view_marketing',
+    'view_staff',
+  ],
+  [UserRole.STANDARDS_MANAGER]: ['view_dashboard', 'view_staff'],
+  [UserRole.SENIOR_ADMINISTRATOR]: ['view_dashboard', 'view_staff'],
+  [UserRole.CLUB_ADMINISTRATOR]: ['view_dashboard', 'view_staff'],
+};
+
+export function normalizeCapabilities(
+  permissions: readonly string[] | null | undefined,
+): AccessCapability[] {
+  if (!permissions) {
+    return [];
+  }
+
+  return Array.from(
+    new Set(
+      permissions.filter((permission): permission is AccessCapability =>
+        validCapabilities.has(permission),
+      ),
+    ),
+  );
+}
+
+export function resolveUserCapabilities(input: {
+  role: UserRole;
+  customRole?: { permissions: string[] } | null;
+}): AccessCapability[] {
+  const customPermissions = normalizeCapabilities(
+    input.customRole?.permissions,
+  );
+
+  if (input.customRole) {
+    return customPermissions;
+  }
+
+  return roleCapabilities[input.role] ?? [];
+}
+
+export function hasCapability(
+  user: { permissions?: AccessCapability[] } | null | undefined,
+  capability: AccessCapability,
+) {
+  return Boolean(user?.permissions?.includes(capability));
+}
+
+export function hasAnyCapability(
+  user: { permissions?: AccessCapability[] } | null | undefined,
+  capabilities: AccessCapability[],
+) {
+  return capabilities.some((capability) => hasCapability(user, capability));
+}

@@ -17,6 +17,8 @@ import {
   UsersService,
   type UserAccount,
   type UserAccountDto,
+  type UserAccessRoleAccount,
+  type UserAccessRoleDto,
   type UserAccountsResponse,
 } from './users.service';
 
@@ -48,5 +50,22 @@ export class UsersController {
     @Body() dto: UserAccountDto,
   ): Promise<UserAccount> {
     return this.usersService.updateUser(user, id, dto);
+  }
+
+  @Post('roles')
+  createAccessRole(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: UserAccessRoleDto,
+  ): Promise<UserAccessRoleAccount> {
+    return this.usersService.createAccessRole(user, dto);
+  }
+
+  @Patch('roles/:id')
+  updateAccessRole(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: UserAccessRoleDto,
+  ): Promise<UserAccessRoleAccount> {
+    return this.usersService.updateAccessRole(user, id, dto);
   }
 }

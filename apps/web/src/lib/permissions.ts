@@ -15,6 +15,84 @@ export type Capability =
   | "edit_catalog"
   | "edit_stores";
 
+export type CapabilityOption = {
+  key: Capability;
+  label: string;
+  description: string;
+};
+
+export const capabilityOptions: CapabilityOption[] = [
+  {
+    key: "view_dashboard",
+    label: "Дашборд",
+    description: "Сводный дашборд сети и управленческие сигналы.",
+  },
+  {
+    key: "view_reports",
+    label: "Отчеты и ассортимент",
+    description:
+      "Отчеты, ассортиментный блок, матрица, рекомендации и товарные таблицы.",
+  },
+  {
+    key: "view_guests",
+    label: "Гости и CRM",
+    description:
+      "Гостевая аналитика, CRM, группы, задачи контакта и карточки гостей.",
+  },
+  {
+    key: "view_marketing",
+    label: "Маркетинг",
+    description: "Кампании, промо-механики, промо-наборы и оценка эффекта.",
+  },
+  {
+    key: "view_staff",
+    label: "Персонал",
+    description: "Задачи, регламенты, чек-листы и контроль администраторов.",
+  },
+  {
+    key: "manage_users",
+    label: "Пользователи и роли",
+    description:
+      "Создание учетных записей, назначение ролей и настройка доступов.",
+  },
+  {
+    key: "manage_integrations",
+    label: "Настройки Langame",
+    description: "Настройка API-ключей, доменов и источников Langame.",
+  },
+  {
+    key: "run_sync",
+    label: "Синхронизация",
+    description:
+      "Запуск ручной синхронизации данных и просмотр статусов загрузки.",
+  },
+  {
+    key: "import_data",
+    label: "Импорт данных",
+    description: "Ручной импорт товаров, остатков, продаж и движений.",
+  },
+  {
+    key: "use_utilities",
+    label: "Утилиты",
+    description: "Парсинг, нормализация и служебные инструменты ассортимента.",
+  },
+  {
+    key: "edit_products",
+    label: "Редактирование товаров",
+    description: "Создание и изменение товарных карточек.",
+  },
+  {
+    key: "edit_catalog",
+    label: "Справочники",
+    description: "Категории, поставщики и ассортиментные справочники.",
+  },
+  {
+    key: "edit_stores",
+    label: "Клубы",
+    description: "Создание и изменение клубов сети.",
+  },
+];
+
 const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
   OWNER: [
     "view_dashboard",
@@ -82,6 +160,14 @@ export function can(user: AuthUser | null, capability: Capability) {
     return false;
   }
 
+  if (user.permissions?.includes(capability)) {
+    return true;
+  }
+
+  if (user.customRoleId) {
+    return false;
+  }
+
   return roleCapabilities[user.role].includes(capability);
 }
 
@@ -106,15 +192,25 @@ export function canAccessPath(user: AuthUser | null, href: string) {
     return can(user, "view_guests");
   }
 
-  if (
-    href.startsWith("/assortment") ||
-    href.startsWith("/products") ||
-    href.startsWith("/categories") ||
-    href.startsWith("/suppliers") ||
-    href.startsWith("/stores") ||
-    href.startsWith("/reports")
-  ) {
+  if (href.startsWith("/categories") || href.startsWith("/suppliers")) {
+    return can(user, "view_reports") || can(user, "edit_catalog");
+  }
+
+  if (href.startsWith("/stores")) {
+    return can(user, "view_reports") || can(user, "edit_stores");
+  }
+
+  if (href.startsWith("/products")) {
     return can(user, "view_reports") || can(user, "edit_products");
+  }
+
+  if (href.startsWith("/assortment") || href.startsWith("/reports")) {
+    return (
+      can(user, "view_reports") ||
+      can(user, "edit_products") ||
+      can(user, "edit_catalog") ||
+      can(user, "edit_stores")
+    );
   }
 
   if (href === "/settings") {

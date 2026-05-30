@@ -9,6 +9,7 @@ import { UserRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoginDto, RegisterDto } from './auth.dto';
 import { AuthenticatedUser, AuthTokenPayload } from './auth.types';
+import { resolveUserCapabilities } from './capabilities';
 import { EmailVerificationService } from './email-verification.service';
 import { PasswordService } from './password.service';
 
@@ -22,6 +23,7 @@ type UserWithTenant = {
   email: string;
   fullName: string | null;
   role: UserRole;
+  customRoleId: string | null;
   isActive: boolean;
   isPlatformAdmin: boolean;
   passwordHash: string;
@@ -29,6 +31,11 @@ type UserWithTenant = {
   tenant: {
     slug: string;
   };
+  customRole?: {
+    id: string;
+    name: string;
+    permissions: string[];
+  } | null;
 };
 
 @Injectable()
@@ -104,6 +111,8 @@ export class AuthService {
       email: owner.email,
       fullName: owner.fullName,
       role: owner.role,
+      customRoleId: null,
+      customRole: null,
       isActive: owner.isActive,
       isPlatformAdmin: owner.isPlatformAdmin,
       passwordHash: owner.passwordHash,
@@ -125,6 +134,13 @@ export class AuthService {
         tenant: {
           select: {
             slug: true,
+          },
+        },
+        customRole: {
+          select: {
+            id: true,
+            name: true,
+            permissions: true,
           },
         },
       },
@@ -159,6 +175,13 @@ export class AuthService {
             slug: true,
           },
         },
+        customRole: {
+          select: {
+            id: true,
+            name: true,
+            permissions: true,
+          },
+        },
       },
     });
 
@@ -191,6 +214,8 @@ export class AuthService {
       sub: authenticatedUser.id,
       email: authenticatedUser.email,
       role: authenticatedUser.role,
+      customRoleId: authenticatedUser.customRoleId,
+      permissions: authenticatedUser.permissions,
       isPlatformAdmin: authenticatedUser.isPlatformAdmin,
       tenantId: authenticatedUser.tenantId,
       tenantSlug: authenticatedUser.tenantSlug,
@@ -208,6 +233,9 @@ export class AuthService {
       email: user.email,
       fullName: user.fullName,
       role: user.role,
+      customRoleId: user.customRole?.id ?? user.customRoleId ?? null,
+      customRoleName: user.customRole?.name ?? null,
+      permissions: resolveUserCapabilities(user),
       isActive: user.isActive,
       isPlatformAdmin: user.isPlatformAdmin,
       tenantId: user.tenantId,

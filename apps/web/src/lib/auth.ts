@@ -15,6 +15,9 @@ export type AuthUser = {
     | "STANDARDS_MANAGER"
     | "SENIOR_ADMINISTRATOR"
     | "CLUB_ADMINISTRATOR";
+  customRoleId?: string | null;
+  customRoleName?: string | null;
+  permissions?: string[];
   isActive?: boolean;
   isPlatformAdmin: boolean;
   tenantId: string;

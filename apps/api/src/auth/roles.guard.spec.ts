@@ -6,7 +6,10 @@ import { RolesGuard } from './roles.guard';
 type RequestWithUser = {
   user?: {
     role: UserRole;
+    permissions?: string[];
   };
+  method?: string;
+  path?: string;
 };
 
 function createContext(request: RequestWithUser): ExecutionContext {
@@ -51,6 +54,40 @@ describe('RolesGuard', () => {
 
     expect(() =>
       guard.canActivate(createContext({ user: { role: UserRole.BUYER } })),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('allows custom role permissions for mapped route access', () => {
+    reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
+
+    expect(
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/marketing/campaigns',
+          user: {
+            role: UserRole.CLUB_ADMINISTRATOR,
+            permissions: ['view_marketing'],
+          },
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects custom role without mapped route permission', () => {
+    reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/marketing/campaigns',
+          user: {
+            role: UserRole.CLUB_ADMINISTRATOR,
+            permissions: ['view_staff'],
+          },
+        }),
+      ),
     ).toThrow(ForbiddenException);
   });
 });

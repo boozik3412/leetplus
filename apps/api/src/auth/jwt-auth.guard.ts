@@ -7,6 +7,7 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthenticatedRequest, AuthTokenPayload } from './auth.types';
+import { resolveUserCapabilities } from './capabilities';
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
@@ -39,6 +40,13 @@ export class JwtAuthGuard implements CanActivate {
               slug: true,
             },
           },
+          customRole: {
+            select: {
+              id: true,
+              name: true,
+              permissions: true,
+            },
+          },
         },
       });
 
@@ -51,6 +59,9 @@ export class JwtAuthGuard implements CanActivate {
         email: user.email,
         fullName: user.fullName,
         role: user.role,
+        customRoleId: user.customRole?.id ?? user.customRoleId ?? null,
+        customRoleName: user.customRole?.name ?? null,
+        permissions: resolveUserCapabilities(user),
         isActive: user.isActive,
         isPlatformAdmin: user.isPlatformAdmin,
         tenantId: user.tenantId,

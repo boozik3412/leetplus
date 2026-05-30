@@ -307,6 +307,7 @@ Goal: let managers create short-term and long-term tasks for shifts, periods, cl
 - Done: staff tasks now support execution comments, evidence links, and an audit journal for create/update/status/comment/evidence events; `/staff/tasks` shows a compact `История и подтверждение` block in each task.
 - Done: tenant user roles and account issuing added: `OWNER`, `ADMIN`, `MANAGER`, `BUYER`, `MARKETER`, `CLUB_MANAGER`, `STANDARDS_MANAGER`, `SENIOR_ADMINISTRATOR`, and `CLUB_ADMINISTRATOR`; `/users` lets owner/system admin create accounts, set active status, reset password, and scope access to the whole network or selected clubs.
 - Done: added `STANDARDS_MANAGER` for training, administrator hiring, regulations, checklists, work standards, administrator control, and attestations; the role can access staff operations and staff-control reports without opening the full guest/CRM area in navigation.
+- Done: added tenant-specific custom role setup for the main club/network account: `/users` can create and edit roles with permission checkboxes, assign them to user accounts, and the API guard validates custom permissions for protected route groups.
 - Done: protected API guards now re-read the current user from DB, so deactivated accounts and changed roles stop using protected routes after token verification.
 - Create staff directory and role model independent from guest analytics, while reusing current staff identity mapping where useful.
 - Support employee-to-Langame mapping from `working_shifts.user_id` and future operator identifiers.

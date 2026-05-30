@@ -8,6 +8,8 @@ import { StaffChecklistsController } from './staff-checklists.controller';
 import { StaffChecklistsService } from './staff-checklists.service';
 import { StaffShiftRegulationsController } from './staff-shift-regulations.controller';
 import { StaffShiftRegulationsService } from './staff-shift-regulations.service';
+import { StaffTaskTemplatesController } from './staff-task-templates.controller';
+import { StaffTaskTemplatesService } from './staff-task-templates.service';
 import { StaffTeamChatController } from './staff-team-chat.controller';
 import { StaffTeamChatService } from './staff-team-chat.service';
 import { StaffTasksController } from './staff-tasks.controller';
@@ -17,6 +19,7 @@ import { StaffTasksService } from './staff-tasks.service';
   imports: [AuthModule, PrismaModule, TenancyModule],
   controllers: [
     StaffTasksController,
+    StaffTaskTemplatesController,
     StaffShiftRegulationsController,
     StaffChecklistTemplatesController,
     StaffChecklistsController,
@@ -24,6 +27,7 @@ import { StaffTasksService } from './staff-tasks.service';
   ],
   providers: [
     StaffTasksService,
+    StaffTaskTemplatesService,
     StaffShiftRegulationsService,
     StaffChecklistTemplatesService,
     StaffChecklistsService,

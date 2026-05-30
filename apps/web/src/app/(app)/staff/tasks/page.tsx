@@ -239,12 +239,20 @@ export default async function StaffTasksPage({
               подключаться к этой очереди следующим шагом.
             </p>
           </div>
-          <Link
-            href="/guests/staff-control"
-            className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
-          >
-            Контроль администраторов
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/staff/task-templates"
+              className="inline-flex h-10 items-center justify-center rounded-md bg-emerald-500 px-3 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
+            >
+              Шаблоны задач
+            </Link>
+            <Link
+              href="/guests/staff-control"
+              className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+            >
+              Контроль администраторов
+            </Link>
+          </div>
         </header>
 
         <section className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">

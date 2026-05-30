@@ -80,6 +80,7 @@ Connected production Langame sources:
 - Expanded Stage 6 commercialization: `/commercial/audit` shows live audit signals, `/commercial/demo` shows prepared demo data without Langame setup, and `/commercial/tariffs` packages the product into tariff levels.
 - Tightened marketing campaign contact workflow: campaign detail can create the linked CRM task from the contacts tab, contact results save to `marketingCampaignId`, and campaign effect tracks group/task/responsible/channel outcomes.
 - Expanded Stage 8 Staff Operations: staff tasks now have execution comments, evidence links, and an audit journal for create/update/status/comment/evidence events.
+- Added task templates for Staff Operations: `StaffTaskTemplate`, API `/staff/task-templates`, page `/staff/task-templates`, reusable packs for common club operations, default deadline offsets, labels, and task creation from a template.
 - Added the first shift-regulation constructor for Stage 8 MVP 2: draft/published/archived standards for opening/closing/cash/bar/PC-zone shift work.
 - Added employee acknowledgement tracking for published shift regulations: required counts are calculated by role and club scope, users can confirm the current regulation version, and republishing creates a new acknowledgement version.
 - Added versioned publication snapshots for shift regulations: existing published regulations are backfilled, new publications keep title/scope/sections history, and the constructor shows the version log.

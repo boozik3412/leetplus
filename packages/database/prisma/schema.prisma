@@ -149,6 +149,7 @@ model Tenant {
   reportDigestScheduleRuns             ReportDigestScheduleRun[]
   guestStaffIdentityMappings           GuestStaffIdentityMapping[]
   staffTasks                           StaffTask[]
+  staffTaskTemplates                   StaffTaskTemplate[]
   staffTaskComments                    StaffTaskComment[]
   staffTaskAuditEvents                 StaffTaskAuditEvent[]
   staffShiftRegulations                StaffShiftRegulation[]
@@ -197,6 +198,7 @@ model User {
   createdMarketingPromoBundleUsages    MarketingPromoBundleUsage[]           @relation("MarketingPromoBundleUsageCreatedBy")
   guestStaffIdentityMappings           GuestStaffIdentityMapping[]
   createdStaffTasks                    StaffTask[]                           @relation("StaffTaskCreatedBy")
+  createdStaffTaskTemplates            StaffTaskTemplate[]                   @relation("StaffTaskTemplateCreatedBy")
   assignedStaffTasks                   StaffTask[]                           @relation("StaffTaskAssignedTo")
   staffTaskComments                    StaffTaskComment[]                    @relation("StaffTaskCommentAuthor")
   staffTaskAuditEvents                 StaffTaskAuditEvent[]                 @relation("StaffTaskAuditActor")
@@ -345,6 +347,7 @@ model Store {
   stockMovements               StockMovement[]
   marketingPromoBundleUsages   MarketingPromoBundleUsage[]
   staffTasks                   StaffTask[]
+  staffTaskTemplates           StaffTaskTemplate[]
   staffShiftRegulations        StaffShiftRegulation[]
   staffShiftRegulationVersions StaffShiftRegulationVersion[]
   staffChecklistTemplates      StaffChecklistTemplate[]
@@ -1295,6 +1298,7 @@ model StaffTask {
   tenantId         String
   storeId          String?
   shiftId          String?
+  sourceTemplateId String?
   createdByUserId  String?
   assignedToUserId String?
   title            String
@@ -1312,6 +1316,7 @@ model StaffTask {
   tenant         Tenant                @relation(fields: [tenantId], references: [id])
   store          Store?                @relation(fields: [storeId], references: [id], onDelete: SetNull)
   shift          GuestWorkingShift?    @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  sourceTemplate StaffTaskTemplate?    @relation(fields: [sourceTemplateId], references: [id], onDelete: SetNull)
   createdByUser  User?                 @relation("StaffTaskCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   assignedToUser User?                 @relation("StaffTaskAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
   comments       StaffTaskComment[]
@@ -1321,8 +1326,36 @@ model StaffTask {
   @@index([tenantId, createdAt], map: "staff_task_created_idx")
   @@index([storeId], map: "staff_task_store_idx")
   @@index([shiftId], map: "staff_task_shift_idx")
+  @@index([sourceTemplateId], map: "staff_task_source_template_idx")
   @@index([createdByUserId], map: "staff_task_created_by_idx")
   @@index([assignedToUserId], map: "staff_task_assigned_to_idx")
+}
+
+model StaffTaskTemplate {
+  id               String   @id @default(uuid())
+  tenantId         String
+  storeId          String?
+  createdByUserId  String?
+  title            String
+  description      String?
+  type             String   @default("SHIFT")
+  priority         String   @default("NORMAL")
+  status           String   @default("DRAFT")
+  dueOffsetMinutes Int?
+  labels           Json?
+  checklist        Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  tenant        Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  store         Store?      @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  createdByUser User?       @relation("StaffTaskTemplateCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  tasks         StaffTask[]
+
+  @@index([tenantId, status, type], map: "staff_task_template_status_type_idx")
+  @@index([tenantId, createdAt], map: "staff_task_template_created_idx")
+  @@index([storeId], map: "staff_task_template_store_idx")
+  @@index([createdByUserId], map: "staff_task_template_created_by_idx")
 }
 
 model StaffTaskComment {

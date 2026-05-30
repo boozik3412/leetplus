@@ -318,6 +318,7 @@ Goal: let managers create short-term and long-term tasks for shifts, periods, cl
 - Done: added tenant-specific custom role setup for the main club/network account: `/users` can create and edit roles with permission checkboxes, assign them to user accounts, and the API guard validates custom permissions for protected route groups.
 - Done: added registration invite links for configured roles and club scopes: `/users` can generate a one-time link with system/custom role and selected clubs, and `/register?invite=...` lets the employee set email/password and join the existing tenant.
 - Done: protected API guards now re-read the current user from DB, so deactivated accounts and changed roles stop using protected routes after token verification.
+- Done: task templates added for common club operations: tenant-scoped `StaffTaskTemplate`, API `/staff/task-templates`, UI `/staff/task-templates`, reusable packs, per-club scope, default deadline offset, labels, and one-click task creation from a template.
 - Create staff directory and role model independent from guest analytics, while reusing current staff identity mapping where useful.
 - Support employee-to-Langame mapping from `working_shifts.user_id` and future operator identifiers.
 - Add task types: one-time, shift, recurring, long-term, personal, club, role.
@@ -327,7 +328,7 @@ Goal: let managers create short-term and long-term tasks for shifts, periods, cl
 - Add templates for common club operations.
 - Add basic task list views: today, overdue, my tasks, by club, by employee, by shift, by status.
 - Add audit history for every task.
-- Next: add task templates and reusable operational packs before moving into full checklist runs.
+- Next: add staff directory/fuller identity model, recurring task rules, and binary attachment storage.
 
 Acceptance criteria:
 
@@ -448,9 +449,9 @@ Acceptance criteria:
 
 1. Done: create `STAFF_OPERATIONS_MODULE_TZ.md` with roles, scenarios, data model, permissions, MVP scope, and acceptance criteria.
 2. Extract staff identity into a reusable staff domain that can serve both `/guests/staff-control` and the new operations module.
-3. Started: add database schema for tasks, task templates, task comments, attachments, audit events, and staff assignments. `StaffTask`, `StaffTaskComment`, and `StaffTaskAuditEvent` are in place; task templates and binary attachment storage remain next.
+3. Started: add database schema for tasks, task templates, task comments, attachments, audit events, and staff assignments. `StaffTask`, `StaffTaskTemplate`, `StaffTaskComment`, and `StaffTaskAuditEvent` are in place; binary attachment storage remains next.
 4. Started: implement backend CRUD and list APIs for tasks with tenant/store/staff access control. List/create/status update plus comment/evidence endpoint are in place.
-5. Started: implement `/staff/tasks` or `/operations/tasks` UI for manager and administrator workflows. `/staff/tasks` now includes creation, filters, status actions, execution comments, evidence links, and audit history preview.
+5. Started: implement `/staff/tasks` or `/operations/tasks` UI for manager and administrator workflows. `/staff/tasks` now includes creation, filters, status actions, execution comments, evidence links, audit history preview, and task-template launching through `/staff/task-templates`.
 6. Started: add checklist templates and checklist runs. `StaffChecklistTemplate` and `/staff/checklist-templates` are in place; checklist runs can use published regulation snapshots or active template snapshots.
 7. Started: add regulation documents, versions, acknowledgements, and role/club targeting. First draft/published/archived shift-regulation entity, acknowledgement tracking, publication version snapshots, and attached link materials are in place; binary attachment storage remains later.
 8. Add training materials, courses, tests, and attestation reports.

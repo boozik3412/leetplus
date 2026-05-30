@@ -342,7 +342,8 @@ Goal: give the club team a fast internal communication layer without introducing
 
 - Started: build `/staff/team-chat` as a tenant-scoped operational feed with channels, messages, pinned announcements, read receipts, club/role context, and a simple refresh workflow.
 - Started: add persistent `StaffChatChannel`, `StaffChatMessage`, and `StaffChatReadReceipt` models so the first feed can later grow into a realtime chat without changing the data foundation.
-- Next: connect messages to staff tasks, checklist runs, shift incidents, and critical dashboard signals.
+- Done: chat messages can now be turned into staff tasks directly from `/staff/team-chat`; the task keeps the original message text, channel/store context, priority, deadline, and `source=team_chat` metadata in labels.
+- Next: connect chat context to checklist runs, shift incidents, and critical dashboard signals.
 - Later: add WebSocket/SSE realtime delivery, file attachments, push/browser notifications, message mentions, and external messenger bridges only after access rules and notification policy are stable.
 
 Acceptance criteria:

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type {
@@ -9,6 +9,7 @@ import type {
   StaffChatMessage,
   StaffChatMessageKind,
   StaffChatMessagePriority,
+  StaffChatStore,
   StaffTeamChatReport,
 } from "@/lib/staff-team-chat";
 
@@ -28,6 +29,14 @@ type ChannelFormState = {
   roleScope: string;
 };
 
+type TaskDraftState = {
+  messageId: string;
+  title: string;
+  priority: "NORMAL" | "HIGH" | "URGENT";
+  dueAt: string;
+  storeId: string;
+};
+
 const kindLabels: Record<StaffChatMessageKind, string> = {
   MESSAGE: "Сообщение",
   ANNOUNCEMENT: "Объявление",
@@ -37,6 +46,12 @@ const kindLabels: Record<StaffChatMessageKind, string> = {
 const priorityLabels: Record<StaffChatMessagePriority, string> = {
   NORMAL: "Обычное",
   HIGH: "Важное",
+  URGENT: "Срочно",
+};
+
+const taskPriorityLabels: Record<TaskDraftState["priority"], string> = {
+  NORMAL: "Обычный",
+  HIGH: "Высокий",
   URGENT: "Срочно",
 };
 
@@ -73,7 +88,12 @@ export function StaffTeamChatWorkspace({
   const [channelForm, setChannelForm] =
     useState<ChannelFormState>(emptyChannelForm);
   const [showChannelForm, setShowChannelForm] = useState(false);
+  const [taskDraft, setTaskDraft] = useState<TaskDraftState | null>(null);
+  const [taskPendingMessageId, setTaskPendingMessageId] = useState<string | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const activeChannel = useMemo(
     () =>
       report.channels.find((channel) => channel.id === report.activeChannelId) ??
@@ -85,6 +105,7 @@ export function StaffTeamChatWorkspace({
 
   async function sendMessage() {
     setError(null);
+    setSuccess(null);
 
     if (!activeChannel) {
       setError("Сначала нужен канал для сообщения.");
@@ -123,6 +144,7 @@ export function StaffTeamChatWorkspace({
 
   async function createChannel() {
     setError(null);
+    setSuccess(null);
 
     if (!channelForm.name.trim()) {
       setError("Введите название канала.");
@@ -167,6 +189,7 @@ export function StaffTeamChatWorkspace({
     }
 
     setError(null);
+    setSuccess(null);
     const response = await fetch("/api/staff/team-chat/read", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -186,6 +209,7 @@ export function StaffTeamChatWorkspace({
 
   async function togglePinned(message: StaffChatMessage) {
     setError(null);
+    setSuccess(null);
     const response = await fetch(
       `/api/staff/team-chat/messages/${encodeURIComponent(message.id)}`,
       {
@@ -204,6 +228,83 @@ export function StaffTeamChatWorkspace({
     }
 
     startTransition(() => router.refresh());
+  }
+
+  function openTaskDraft(message: StaffChatMessage) {
+    setError(null);
+    setSuccess(null);
+    setTaskDraft({
+      messageId: message.id,
+      title: buildTaskTitle(message),
+      priority: message.priority === "NORMAL" ? "NORMAL" : message.priority,
+      dueAt: "",
+      storeId: message.store?.id ?? "",
+    });
+  }
+
+  async function createTaskFromMessage(message: StaffChatMessage) {
+    if (!taskDraft || taskDraft.messageId !== message.id) {
+      return;
+    }
+
+    const title = taskDraft.title.trim();
+
+    if (!title) {
+      setError("Укажите название задачи.");
+      return;
+    }
+
+    const dueAtDate = taskDraft.dueAt ? new Date(taskDraft.dueAt) : null;
+
+    if (dueAtDate && Number.isNaN(dueAtDate.getTime())) {
+      setError("Проверьте дату дедлайна.");
+      return;
+    }
+
+    const dueAt = dueAtDate ? dueAtDate.toISOString() : null;
+    const sourceUrl = `/staff/team-chat?channelId=${encodeURIComponent(
+      message.channelId,
+    )}`;
+    setTaskPendingMessageId(message.id);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const response = await fetch("/api/staff/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          description: buildTaskDescription(message, activeChannel),
+          type: taskDraft.storeId ? "CLUB" : "ONE_TIME",
+          priority: taskDraft.priority,
+          dueAt,
+          storeId: taskDraft.storeId || null,
+          labels: {
+            source: "team_chat",
+            staffChatMessageId: message.id,
+            staffChatChannelId: message.channelId,
+            staffChatChannelName: activeChannel?.name ?? null,
+            sourceUrl,
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as
+          | { message?: string }
+          | null;
+        throw new Error(payload?.message ?? "Не удалось создать задачу.");
+      }
+
+      setTaskDraft(null);
+      setSuccess("Задача создана из сообщения. Она появилась в задачах персонала.");
+      startTransition(() => router.refresh());
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Ошибка запроса.");
+    } finally {
+      setTaskPendingMessageId(null);
+    }
   }
 
   return (
@@ -379,6 +480,12 @@ export function StaffTeamChatWorkspace({
               ) : null}
             </div>
             <div className="flex flex-wrap gap-2">
+              <Link
+                href="/staff/tasks"
+                className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-semibold transition hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-800 dark:hover:border-emerald-500 dark:hover:text-emerald-200"
+              >
+                Открыть задачи
+              </Link>
               <button
                 type="button"
                 onClick={() => startTransition(() => router.refresh())}
@@ -437,6 +544,15 @@ export function StaffTeamChatWorkspace({
           </div>
         ) : null}
 
+        {success ? (
+          <div className="mx-4 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100">
+            <span>{success}</span>
+            <Link className="font-semibold underline" href="/staff/tasks">
+              Перейти к задачам
+            </Link>
+          </div>
+        ) : null}
+
         {pinnedMessages.length > 0 ? (
           <div className="border-b border-zinc-200 p-4 dark:border-zinc-800 sm:p-5">
             <p className="text-xs font-bold uppercase text-zinc-500">
@@ -448,7 +564,14 @@ export function StaffTeamChatWorkspace({
                   key={`pinned-${message.id}`}
                   message={message}
                   compact
+                  stores={report.stores}
+                  taskDraft={taskDraft}
+                  taskPendingMessageId={taskPendingMessageId}
                   onTogglePinned={togglePinned}
+                  onOpenTaskDraft={openTaskDraft}
+                  onCancelTaskDraft={() => setTaskDraft(null)}
+                  onTaskDraftChange={setTaskDraft}
+                  onCreateTask={createTaskFromMessage}
                 />
               ))}
             </div>
@@ -460,7 +583,14 @@ export function StaffTeamChatWorkspace({
             <MessageCard
               key={message.id}
               message={message}
+              stores={report.stores}
+              taskDraft={taskDraft}
+              taskPendingMessageId={taskPendingMessageId}
               onTogglePinned={togglePinned}
+              onOpenTaskDraft={openTaskDraft}
+              onCancelTaskDraft={() => setTaskDraft(null)}
+              onTaskDraftChange={setTaskDraft}
+              onCreateTask={createTaskFromMessage}
             />
           ))}
 
@@ -593,13 +723,30 @@ function ChannelLink({
 
 function MessageCard({
   message,
+  stores,
   compact = false,
+  taskDraft,
+  taskPendingMessageId,
   onTogglePinned,
+  onOpenTaskDraft,
+  onCancelTaskDraft,
+  onTaskDraftChange,
+  onCreateTask,
 }: {
   message: StaffChatMessage;
+  stores: StaffChatStore[];
   compact?: boolean;
+  taskDraft: TaskDraftState | null;
+  taskPendingMessageId: string | null;
   onTogglePinned: (message: StaffChatMessage) => void;
+  onOpenTaskDraft: (message: StaffChatMessage) => void;
+  onCancelTaskDraft: () => void;
+  onTaskDraftChange: (draft: TaskDraftState) => void;
+  onCreateTask: (message: StaffChatMessage) => void;
 }) {
+  const isTaskDraftOpen = taskDraft?.messageId === message.id && !compact;
+  const isTaskPending = taskPendingMessageId === message.id;
+
   return (
     <article
       className={[
@@ -626,19 +773,31 @@ function MessageCard({
               </Badge>
             ) : null}
             {message.isPinned ? <Badge tone="emerald">Закреплено</Badge> : null}
+            {!message.isReadByMe ? <Badge tone="emerald">Новое</Badge> : null}
           </div>
           <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
             {formatDateTime(message.createdAt)}
             {message.store ? ` · ${message.store.name}` : ""}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => onTogglePinned(message)}
-          className="rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs font-semibold transition hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-700 dark:hover:border-emerald-500 dark:hover:text-emerald-200"
-        >
-          {message.isPinned ? "Открепить" : "Закрепить"}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          {!compact ? (
+            <button
+              type="button"
+              onClick={() => onOpenTaskDraft(message)}
+              className="rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs font-semibold transition hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-700 dark:hover:border-emerald-500 dark:hover:text-emerald-200"
+            >
+              Создать задачу
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => onTogglePinned(message)}
+            className="rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs font-semibold transition hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-700 dark:hover:border-emerald-500 dark:hover:text-emerald-200"
+          >
+            {message.isPinned ? "Открепить" : "Закрепить"}
+          </button>
+        </div>
       </div>
       <p
         className={[
@@ -648,6 +807,123 @@ function MessageCard({
       >
         {message.body}
       </p>
+
+      {isTaskDraftOpen && taskDraft ? (
+        <div className="mt-3 rounded-lg border border-emerald-200 bg-white p-3 dark:border-emerald-500/30 dark:bg-zinc-950">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+                Задача из сообщения
+              </p>
+              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+                Текст сообщения сохранится в описании, а связь с чатом попадет
+                в служебные метки задачи.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onCancelTaskDraft}
+              className="rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs font-semibold transition hover:border-zinc-400 dark:border-zinc-700"
+            >
+              Закрыть
+            </button>
+          </div>
+
+          <div className="mt-3 grid gap-3 lg:grid-cols-[1.4fr_150px_170px_170px]">
+            <label className="space-y-1">
+              <span className="text-xs font-bold uppercase text-zinc-500">
+                Что сделать
+              </span>
+              <input
+                value={taskDraft.title}
+                onChange={(event) =>
+                  onTaskDraftChange({
+                    ...taskDraft,
+                    title: event.target.value,
+                  })
+                }
+                className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+              />
+            </label>
+            <label className="space-y-1">
+              <span className="text-xs font-bold uppercase text-zinc-500">
+                Приоритет
+              </span>
+              <select
+                value={taskDraft.priority}
+                onChange={(event) =>
+                  onTaskDraftChange({
+                    ...taskDraft,
+                    priority: event.target.value as TaskDraftState["priority"],
+                  })
+                }
+                className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+              >
+                {Object.entries(taskPriorityLabels).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-1">
+              <span className="text-xs font-bold uppercase text-zinc-500">
+                Клуб
+              </span>
+              <select
+                value={taskDraft.storeId}
+                onChange={(event) =>
+                  onTaskDraftChange({
+                    ...taskDraft,
+                    storeId: event.target.value,
+                  })
+                }
+                className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+              >
+                <option value="">Вся сеть</option>
+                {stores.map((store) => (
+                  <option key={store.id} value={store.id}>
+                    {store.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-1">
+              <span className="text-xs font-bold uppercase text-zinc-500">
+                Дедлайн
+              </span>
+              <input
+                value={taskDraft.dueAt}
+                type="datetime-local"
+                onChange={(event) =>
+                  onTaskDraftChange({
+                    ...taskDraft,
+                    dueAt: event.target.value,
+                  })
+                }
+                className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+              />
+            </label>
+          </div>
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => onCreateTask(message)}
+              disabled={isTaskPending}
+              className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isTaskPending ? "Создаем..." : "Создать задачу"}
+            </button>
+            <Link
+              href="/staff/tasks"
+              className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold transition hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-700 dark:hover:border-emerald-500"
+            >
+              Задачи персонала
+            </Link>
+          </div>
+        </div>
+      ) : null}
     </article>
   );
 }
@@ -667,7 +943,7 @@ function Badge({
   children,
   tone = "zinc",
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   tone?: "zinc" | "emerald" | "amber" | "red";
 }) {
   const classes = {
@@ -680,7 +956,9 @@ function Badge({
   };
 
   return (
-    <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${classes[tone]}`}>
+    <span
+      className={`rounded-full px-2 py-0.5 text-xs font-semibold ${classes[tone]}`}
+    >
       {children}
     </span>
   );
@@ -696,6 +974,36 @@ function channelScopeLabel(channel: StaffChatChannel) {
   }
 
   return "Вся сеть";
+}
+
+function buildTaskTitle(message: StaffChatMessage) {
+  const firstLine = message.body
+    .split("\n")
+    .map((line) => line.trim())
+    .find(Boolean);
+  const base = firstLine ?? "Сообщение из командного чата";
+  const clipped = base.length > 80 ? `${base.slice(0, 77)}...` : base;
+  return `Из чата: ${clipped}`;
+}
+
+function buildTaskDescription(
+  message: StaffChatMessage,
+  channel: StaffChatChannel | null,
+) {
+  const author =
+    message.authorUser?.fullName ?? message.authorUser?.email ?? "Сотрудник";
+  const lines = [
+    "Источник: командный чат LeetPlus.",
+    `Канал: ${channel?.name ?? message.channelId}`,
+    `Автор: ${author}`,
+    `Дата сообщения: ${formatDateTime(message.createdAt)}`,
+    message.store ? `Клуб: ${message.store.name}` : "Клуб: вся сеть",
+    "",
+    "Сообщение:",
+    message.body,
+  ];
+
+  return lines.join("\n");
 }
 
 function formatDateTime(value: string) {

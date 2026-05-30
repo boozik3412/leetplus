@@ -22,7 +22,13 @@ type NavItem = {
 
 type NavGroup = {
   title: string;
-  icon: "guests" | "staff" | "marketing" | "assortment" | "management";
+  icon:
+    | "guests"
+    | "staff"
+    | "marketing"
+    | "assortment"
+    | "management"
+    | "administration";
   items: NavItem[];
 };
 
@@ -67,7 +73,6 @@ const navGroups: NavGroup[] = [
     title: "Ассортимент",
     icon: "assortment",
     items: [
-      { href: "/admin", label: "Админ платформы" },
       { href: "/assortment/dashboard", label: "Дашборд ассортимента" },
       { href: "/products", label: "Товары" },
       { href: "/categories", label: "Категории" },
@@ -88,6 +93,15 @@ const navGroups: NavGroup[] = [
       { href: "/users", label: "Пользователи и роли" },
       { href: "/sync", label: "Синхронизация" },
       { href: "/settings", label: "Настройки" },
+    ],
+  },
+  {
+    title: "Администрирование",
+    icon: "administration",
+    items: [
+      { href: "/administration", label: "Обзор платформы" },
+      { href: "/administration#tenants", label: "Сети tenant" },
+      { href: "/administration#sync-jobs", label: "Синхронизации" },
     ],
   },
 ];
@@ -361,6 +375,16 @@ function SectionIcon({ icon }: { icon: NavGroup["icon"] }) {
     );
   }
 
+  if (icon === "administration") {
+    return (
+      <svg {...common}>
+        <path d="M12 3 19 6v5c0 4.8-2.9 8.2-7 10-4.1-1.8-7-5.2-7-10V6z" />
+        <path d="M9 12h6" />
+        <path d="M12 9v6" />
+      </svg>
+    );
+  }
+
   if (icon === "marketing") {
     return (
       <svg {...common}>
@@ -413,6 +437,8 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
     pathname.startsWith("/staff") || pathname.startsWith("/guests/staff-control");
   const currentProductArea = isStaffArea
     ? "Персонал"
+    : pathname.startsWith("/administration") || pathname.startsWith("/admin")
+    ? "Администрирование"
     : pathname.startsWith("/marketing")
     ? "Маркетинг"
     : pathname.startsWith("/guests")

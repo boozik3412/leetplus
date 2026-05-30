@@ -95,6 +95,14 @@ Each signal card should answer:
 - Every major workflow should have a clear `next action` and a visible `effect` layer.
 - New sidebar items must be added when a feature becomes user-facing, otherwise the feature is considered undiscoverable.
 
+## Platform Administration
+
+Status: first control-plane separation implemented.
+
+- Done: platform-level control moved into a separate `Администрирование` sidebar block visible only to `isPlatformAdmin` users.
+- Done: `/administration` is the platform control plane for tenant networks, Langame sources, and recent sync jobs across tenants; legacy `/admin` redirects there.
+- Next: add tenant lifecycle actions, platform diagnostics, and support tools only after each action has explicit permissions, audit trail, and confirmation rules.
+
 ## Stage 1. Management Dashboard
 
 Status: implemented; remains in production UX polish mode.

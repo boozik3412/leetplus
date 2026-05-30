@@ -172,7 +172,7 @@ export function can(user: AuthUser | null, capability: Capability) {
 }
 
 export function canAccessPath(user: AuthUser | null, href: string) {
-  if (href === "/admin") {
+  if (href === "/admin" || href.startsWith("/administration")) {
     return Boolean(user?.isPlatformAdmin);
   }
 

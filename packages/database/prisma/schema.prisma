@@ -110,58 +110,59 @@ model Tenant {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users                        User[]
-  stores                       Store[]
-  suppliers                    Supplier[]
-  products                     Product[]
-  canonicalProducts            CanonicalProduct[]
-  productParsingRuns           ProductParsingRun[]
-  productParsingSuggestions    ProductParsingSuggestion[]
-  productOosExclusions         ProductOosExclusion[]
-  categories                   Category[]
-  importJobs                   ImportJob[]
-  salesFacts                   SalesFact[]
-  clubRevenueFacts             ClubRevenueFact[]
-  inventorySnapshots           InventorySnapshot[]
-  stockMovements               StockMovement[]
-  integrationCredentials       IntegrationCredential[]
-  integrationSources           IntegrationSource[]
-  integrationSyncJobs          IntegrationSyncJob[]
-  guests                       Guest[]
-  guestGroups                  GuestGroup[]
-  guestBalanceSnapshots        GuestBalanceSnapshot[]
-  guestBonusBalanceSnapshots   GuestBonusBalanceSnapshot[]
-  guestSessions                GuestSession[]
-  guestLogs                    GuestLog[]
-  guestTransactions            GuestTransaction[]
-  guestOperationLogs           GuestOperationLog[]
-  guestWorkingShifts           GuestWorkingShift[]
-  guestDataProfileRuns         GuestDataProfileRun[]
-  guestCrmEvents               GuestCrmEvent[]
-  guestCrmLeads                GuestCrmLead[]
-  guestCrmTasks                GuestCrmTask[]
-  guestCrmContactEvents        GuestCrmContactEvent[]
-  marketingCampaigns           MarketingCampaign[]
-  marketingPromoBundles        MarketingPromoBundle[]
-  marketingPromoBundleLaunches MarketingPromoBundleLaunch[]
-  marketingPromoBundleUsages   MarketingPromoBundleUsage[]
-  recommendationStates         RecommendationState[]
-  reportDigestScheduleRuns     ReportDigestScheduleRun[]
-  guestStaffIdentityMappings   GuestStaffIdentityMapping[]
-  staffTasks                   StaffTask[]
-  staffTaskComments            StaffTaskComment[]
-  staffTaskAuditEvents         StaffTaskAuditEvent[]
-  staffShiftRegulations        StaffShiftRegulation[]
-  staffChecklistRuns           StaffChecklistRun[]
-  staffChatChannels            StaffChatChannel[]
-  staffChatChannelMembers       StaffChatChannelMember[]
-  staffChatMessages            StaffChatMessage[]
-  staffChatReadReceipts        StaffChatReadReceipt[]
-  guestSavedFilters            GuestSavedFilter[]
-  guestAudiences               GuestAudience[]
-  guestAudienceMembers         GuestAudienceMember[]
-  userAccessRoles              UserAccessRole[]
-  userInvites                  UserInvite[]
+  users                                User[]
+  stores                               Store[]
+  suppliers                            Supplier[]
+  products                             Product[]
+  canonicalProducts                    CanonicalProduct[]
+  productParsingRuns                   ProductParsingRun[]
+  productParsingSuggestions            ProductParsingSuggestion[]
+  productOosExclusions                 ProductOosExclusion[]
+  categories                           Category[]
+  importJobs                           ImportJob[]
+  salesFacts                           SalesFact[]
+  clubRevenueFacts                     ClubRevenueFact[]
+  inventorySnapshots                   InventorySnapshot[]
+  stockMovements                       StockMovement[]
+  integrationCredentials               IntegrationCredential[]
+  integrationSources                   IntegrationSource[]
+  integrationSyncJobs                  IntegrationSyncJob[]
+  guests                               Guest[]
+  guestGroups                          GuestGroup[]
+  guestBalanceSnapshots                GuestBalanceSnapshot[]
+  guestBonusBalanceSnapshots           GuestBonusBalanceSnapshot[]
+  guestSessions                        GuestSession[]
+  guestLogs                            GuestLog[]
+  guestTransactions                    GuestTransaction[]
+  guestOperationLogs                   GuestOperationLog[]
+  guestWorkingShifts                   GuestWorkingShift[]
+  guestDataProfileRuns                 GuestDataProfileRun[]
+  guestCrmEvents                       GuestCrmEvent[]
+  guestCrmLeads                        GuestCrmLead[]
+  guestCrmTasks                        GuestCrmTask[]
+  guestCrmContactEvents                GuestCrmContactEvent[]
+  marketingCampaigns                   MarketingCampaign[]
+  marketingPromoBundles                MarketingPromoBundle[]
+  marketingPromoBundleLaunches         MarketingPromoBundleLaunch[]
+  marketingPromoBundleUsages           MarketingPromoBundleUsage[]
+  recommendationStates                 RecommendationState[]
+  reportDigestScheduleRuns             ReportDigestScheduleRun[]
+  guestStaffIdentityMappings           GuestStaffIdentityMapping[]
+  staffTasks                           StaffTask[]
+  staffTaskComments                    StaffTaskComment[]
+  staffTaskAuditEvents                 StaffTaskAuditEvent[]
+  staffShiftRegulations                StaffShiftRegulation[]
+  staffShiftRegulationAcknowledgements StaffShiftRegulationAcknowledgement[]
+  staffChecklistRuns                   StaffChecklistRun[]
+  staffChatChannels                    StaffChatChannel[]
+  staffChatChannelMembers              StaffChatChannelMember[]
+  staffChatMessages                    StaffChatMessage[]
+  staffChatReadReceipts                StaffChatReadReceipt[]
+  guestSavedFilters                    GuestSavedFilter[]
+  guestAudiences                       GuestAudience[]
+  guestAudienceMembers                 GuestAudienceMember[]
+  userAccessRoles                      UserAccessRole[]
+  userInvites                          UserInvite[]
 }
 
 model User {
@@ -178,39 +179,40 @@ model User {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  tenant                              Tenant                       @relation(fields: [tenantId], references: [id])
-  customRole                          UserAccessRole?              @relation(fields: [customRoleId], references: [id], onDelete: SetNull)
-  emailVerificationTokens             EmailVerificationToken[]
-  importJobs                          ImportJob[]
-  guestCrmEvents                      GuestCrmEvent[]
-  guestCrmLeads                       GuestCrmLead[]
-  guestCrmTasks                       GuestCrmTask[]               @relation("GuestCrmTaskCreatedBy")
-  assignedGuestCrmTasks               GuestCrmTask[]               @relation("GuestCrmTaskAssignedTo")
-  guestCrmContactEvents               GuestCrmContactEvent[]
-  createdMarketingCampaigns           MarketingCampaign[]          @relation("MarketingCampaignCreatedBy")
-  ownedMarketingCampaigns             MarketingCampaign[]          @relation("MarketingCampaignOwner")
-  createdMarketingPromoBundles        MarketingPromoBundle[]       @relation("MarketingPromoBundleCreatedBy")
-  createdMarketingPromoBundleLaunches MarketingPromoBundleLaunch[] @relation("MarketingPromoBundleLaunchCreatedBy")
-  createdMarketingPromoBundleUsages   MarketingPromoBundleUsage[]  @relation("MarketingPromoBundleUsageCreatedBy")
-  guestStaffIdentityMappings          GuestStaffIdentityMapping[]
-  createdStaffTasks                   StaffTask[]                  @relation("StaffTaskCreatedBy")
-  assignedStaffTasks                  StaffTask[]                  @relation("StaffTaskAssignedTo")
-  staffTaskComments                   StaffTaskComment[]           @relation("StaffTaskCommentAuthor")
-  staffTaskAuditEvents                StaffTaskAuditEvent[]        @relation("StaffTaskAuditActor")
-  createdStaffShiftRegulations        StaffShiftRegulation[]       @relation("StaffShiftRegulationCreatedBy")
-  createdStaffChecklistRuns           StaffChecklistRun[]          @relation("StaffChecklistRunCreatedBy")
-  assignedStaffChecklistRuns          StaffChecklistRun[]          @relation("StaffChecklistRunAssignedTo")
-  reviewedStaffChecklistRuns          StaffChecklistRun[]          @relation("StaffChecklistRunReviewedBy")
-  guestSavedFilters                   GuestSavedFilter[]
-  guestAudiences                      GuestAudience[]
-  storeAccesses                       UserStoreAccess[]
-  createdUserInvites                  UserInvite[]                 @relation("UserInviteCreatedBy")
-  acceptedUserInvites                 UserInvite[]                 @relation("UserInviteAcceptedBy")
-  createdStaffChatChannels            StaffChatChannel[]           @relation("StaffChatChannelCreatedBy")
-  staffChatChannelMemberships          StaffChatChannelMember[]     @relation("StaffChatChannelMemberUser")
-  addedStaffChatChannelMembers         StaffChatChannelMember[]     @relation("StaffChatChannelMemberAddedBy")
-  authoredStaffChatMessages           StaffChatMessage[]           @relation("StaffChatMessageAuthor")
-  staffChatReadReceipts               StaffChatReadReceipt[]
+  tenant                               Tenant                                @relation(fields: [tenantId], references: [id])
+  customRole                           UserAccessRole?                       @relation(fields: [customRoleId], references: [id], onDelete: SetNull)
+  emailVerificationTokens              EmailVerificationToken[]
+  importJobs                           ImportJob[]
+  guestCrmEvents                       GuestCrmEvent[]
+  guestCrmLeads                        GuestCrmLead[]
+  guestCrmTasks                        GuestCrmTask[]                        @relation("GuestCrmTaskCreatedBy")
+  assignedGuestCrmTasks                GuestCrmTask[]                        @relation("GuestCrmTaskAssignedTo")
+  guestCrmContactEvents                GuestCrmContactEvent[]
+  createdMarketingCampaigns            MarketingCampaign[]                   @relation("MarketingCampaignCreatedBy")
+  ownedMarketingCampaigns              MarketingCampaign[]                   @relation("MarketingCampaignOwner")
+  createdMarketingPromoBundles         MarketingPromoBundle[]                @relation("MarketingPromoBundleCreatedBy")
+  createdMarketingPromoBundleLaunches  MarketingPromoBundleLaunch[]          @relation("MarketingPromoBundleLaunchCreatedBy")
+  createdMarketingPromoBundleUsages    MarketingPromoBundleUsage[]           @relation("MarketingPromoBundleUsageCreatedBy")
+  guestStaffIdentityMappings           GuestStaffIdentityMapping[]
+  createdStaffTasks                    StaffTask[]                           @relation("StaffTaskCreatedBy")
+  assignedStaffTasks                   StaffTask[]                           @relation("StaffTaskAssignedTo")
+  staffTaskComments                    StaffTaskComment[]                    @relation("StaffTaskCommentAuthor")
+  staffTaskAuditEvents                 StaffTaskAuditEvent[]                 @relation("StaffTaskAuditActor")
+  createdStaffShiftRegulations         StaffShiftRegulation[]                @relation("StaffShiftRegulationCreatedBy")
+  staffShiftRegulationAcknowledgements StaffShiftRegulationAcknowledgement[]
+  createdStaffChecklistRuns            StaffChecklistRun[]                   @relation("StaffChecklistRunCreatedBy")
+  assignedStaffChecklistRuns           StaffChecklistRun[]                   @relation("StaffChecklistRunAssignedTo")
+  reviewedStaffChecklistRuns           StaffChecklistRun[]                   @relation("StaffChecklistRunReviewedBy")
+  guestSavedFilters                    GuestSavedFilter[]
+  guestAudiences                       GuestAudience[]
+  storeAccesses                        UserStoreAccess[]
+  createdUserInvites                   UserInvite[]                          @relation("UserInviteCreatedBy")
+  acceptedUserInvites                  UserInvite[]                          @relation("UserInviteAcceptedBy")
+  createdStaffChatChannels             StaffChatChannel[]                    @relation("StaffChatChannelCreatedBy")
+  staffChatChannelMemberships          StaffChatChannelMember[]              @relation("StaffChatChannelMemberUser")
+  addedStaffChatChannelMembers         StaffChatChannelMember[]              @relation("StaffChatChannelMemberAddedBy")
+  authoredStaffChatMessages            StaffChatMessage[]                    @relation("StaffChatMessageAuthor")
+  staffChatReadReceipts                StaffChatReadReceipt[]
 
   @@index([tenantId])
   @@index([tenantId, role])
@@ -227,8 +229,8 @@ model UserAccessRole {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  users  User[]
+  tenant  Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  users   User[]
   invites UserInvite[]
 
   @@unique([tenantId, name])
@@ -1374,15 +1376,36 @@ model StaffShiftRegulation {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  tenant        Tenant              @relation(fields: [tenantId], references: [id])
-  store         Store?              @relation(fields: [storeId], references: [id], onDelete: SetNull)
-  createdByUser User?               @relation("StaffShiftRegulationCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  checklistRuns StaffChecklistRun[]
+  tenant           Tenant                                @relation(fields: [tenantId], references: [id])
+  store            Store?                                @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  createdByUser    User?                                 @relation("StaffShiftRegulationCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  acknowledgements StaffShiftRegulationAcknowledgement[]
+  checklistRuns    StaffChecklistRun[]
 
   @@index([tenantId, status, shiftKind], map: "staff_shift_regulation_status_kind_idx")
   @@index([tenantId, createdAt], map: "staff_shift_regulation_created_idx")
   @@index([storeId], map: "staff_shift_regulation_store_idx")
   @@index([createdByUserId], map: "staff_shift_regulation_created_by_idx")
+}
+
+model StaffShiftRegulationAcknowledgement {
+  id             String   @id @default(uuid())
+  tenantId       String
+  regulationId   String
+  userId         String
+  version        Int
+  comment        String?
+  acknowledgedAt DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  tenant     Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  regulation StaffShiftRegulation @relation(fields: [regulationId], references: [id], onDelete: Cascade)
+  user       User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([regulationId, userId, version], map: "staff_shift_regulation_ack_unique")
+  @@index([tenantId, userId, acknowledgedAt], map: "staff_shift_regulation_ack_user_idx")
+  @@index([tenantId, regulationId, version], map: "staff_shift_regulation_ack_regulation_idx")
 }
 
 model StaffChecklistRun {
@@ -1449,9 +1472,9 @@ model StaffChatChannel {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  tenant        Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  createdByUser User?                  @relation("StaffChatChannelCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  store         Store?                 @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  tenant        Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdByUser User?                    @relation("StaffChatChannelCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  store         Store?                   @relation(fields: [storeId], references: [id], onDelete: SetNull)
   members       StaffChatChannelMember[]
   messages      StaffChatMessage[]
   readReceipts  StaffChatReadReceipt[]
@@ -1483,17 +1506,17 @@ model StaffChatChannelMember {
 }
 
 model StaffChatMessage {
-  id            String   @id @default(uuid())
-  tenantId      String
-  channelId     String
-  authorUserId  String?
-  storeId       String?
-  body          String
-  kind          String   @default("MESSAGE")
-  priority      String   @default("NORMAL")
-  isPinned      Boolean  @default(false)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           String   @id @default(uuid())
+  tenantId     String
+  channelId    String
+  authorUserId String?
+  storeId      String?
+  body         String
+  kind         String   @default("MESSAGE")
+  priority     String   @default("NORMAL")
+  isPinned     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   tenant       Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   channel      StaffChatChannel       @relation(fields: [channelId], references: [id], onDelete: Cascade)

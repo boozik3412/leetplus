@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
@@ -59,6 +59,10 @@ export type StaffShiftRegulationDto = {
   sections?: unknown;
 };
 
+export type StaffShiftRegulationAcknowledgementDto = {
+  comment?: string | null;
+};
+
 export type StaffShiftRegulationSection = {
   id: string;
   title: string;
@@ -89,9 +93,35 @@ export type StaffShiftRegulationReport = {
     published: number;
     archived: number;
     requiredEvidenceItems: number;
+    requiredAcknowledgements: number;
+    acknowledged: number;
+    pendingAcknowledgements: number;
   };
   rows: StaffShiftRegulationResponse[];
   stores: Array<{ id: string; name: string; isActive: boolean }>;
+};
+
+export type StaffShiftRegulationAcknowledgementResponse = {
+  id: string;
+  userId: string;
+  version: number;
+  comment: string | null;
+  acknowledgedAt: string;
+  user: {
+    id: string;
+    email: string;
+    fullName: string | null;
+    role: UserRole;
+  };
+};
+
+export type StaffShiftRegulationAcknowledgementSummary = {
+  requiredCount: number;
+  acknowledgedCount: number;
+  pendingCount: number;
+  requiredByMe: boolean;
+  acknowledgedByMe: boolean;
+  acknowledgedAt: string | null;
 };
 
 export type StaffShiftRegulationResponse = {
@@ -113,15 +143,39 @@ export type StaffShiftRegulationResponse = {
   updatedAt: string;
   store: { id: string; name: string; isActive: boolean } | null;
   createdByUser: { id: string; email: string; fullName: string | null } | null;
+  acknowledgementSummary: StaffShiftRegulationAcknowledgementSummary;
+  acknowledgements: StaffShiftRegulationAcknowledgementResponse[];
 };
 
 const regulationInclude = {
   store: { select: { id: true, name: true, isActive: true } },
   createdByUser: { select: { id: true, email: true, fullName: true } },
+  acknowledgements: {
+    include: {
+      user: { select: { id: true, email: true, fullName: true, role: true } },
+    },
+    orderBy: { acknowledgedAt: 'desc' },
+  },
 } satisfies Prisma.StaffShiftRegulationInclude;
 
 type StaffShiftRegulationRow = Prisma.StaffShiftRegulationGetPayload<{
   include: typeof regulationInclude;
+}>;
+
+const acknowledgementUserInclude = {
+  storeAccesses: { select: { storeId: true } },
+} satisfies Prisma.UserInclude;
+
+type AcknowledgementUserRow = Prisma.UserGetPayload<{
+  include: typeof acknowledgementUserInclude;
+}>;
+
+type AcknowledgementRow = Prisma.StaffShiftRegulationAcknowledgementGetPayload<{
+  include: {
+    user: {
+      select: { id: true; email: true; fullName: true; role: true };
+    };
+  };
 }>;
 
 @Injectable()
@@ -139,7 +193,7 @@ export class StaffShiftRegulationsService {
     const filters = this.resolveFilters(query);
     const where = this.buildWhere(tenantId, filters);
 
-    const [rows, stores] = await Promise.all([
+    const [rows, stores, activeUsers] = await Promise.all([
       this.prisma.staffShiftRegulation.findMany({
         where,
         include: regulationInclude,
@@ -151,8 +205,15 @@ export class StaffShiftRegulationsService {
         select: { id: true, name: true, isActive: true },
         orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
       }),
+      this.prisma.user.findMany({
+        where: { tenantId, isActive: true },
+        include: acknowledgementUserInclude,
+        orderBy: [{ role: 'asc' }, { fullName: 'asc' }, { email: 'asc' }],
+      }),
     ]);
-    const responseRows = rows.map((row) => this.toRegulationResponse(row));
+    const responseRows = rows.map((row) =>
+      this.toRegulationResponse(row, user.id, activeUsers),
+    );
 
     return {
       filters,
@@ -184,7 +245,9 @@ export class StaffShiftRegulationsService {
       include: regulationInclude,
     });
 
-    return this.toRegulationResponse(regulation);
+    const activeUsers = await this.getAcknowledgementUsers(tenantId);
+
+    return this.toRegulationResponse(regulation, user.id, activeUsers);
   }
 
   async updateRegulation(
@@ -208,15 +271,16 @@ export class StaffShiftRegulationsService {
     const status = data.status ?? current.status;
     const shouldPublish = data.status === 'PUBLISHED';
     const shouldArchive = data.status === 'ARCHIVED';
+    const shouldCreateNewPublishedVersion =
+      shouldPublish && ['PUBLISHED', 'ARCHIVED'].includes(current.status);
 
     const regulation = await this.prisma.staffShiftRegulation.update({
       where: { id: current.id },
       data: {
         ...data,
-        version:
-          shouldPublish && current.status === 'ARCHIVED'
-            ? current.version + 1
-            : undefined,
+        version: shouldCreateNewPublishedVersion
+          ? current.version + 1
+          : undefined,
         publishedAt: shouldPublish ? new Date() : undefined,
         archivedAt: shouldArchive ? new Date() : undefined,
         status,
@@ -224,7 +288,76 @@ export class StaffShiftRegulationsService {
       include: regulationInclude,
     });
 
-    return this.toRegulationResponse(regulation);
+    const activeUsers = await this.getAcknowledgementUsers(tenantId);
+
+    return this.toRegulationResponse(regulation, user.id, activeUsers);
+  }
+
+  async acknowledgeRegulation(
+    user: AuthenticatedUser,
+    id: string,
+    dto: StaffShiftRegulationAcknowledgementDto = {},
+  ) {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const [regulation, actor] = await Promise.all([
+      this.prisma.staffShiftRegulation.findFirst({
+        where: { id, tenantId },
+        include: regulationInclude,
+      }),
+      this.prisma.user.findFirst({
+        where: { id: user.id, tenantId, isActive: true },
+        include: acknowledgementUserInclude,
+      }),
+    ]);
+
+    if (!regulation) {
+      throw new NotFoundException('Shift regulation not found');
+    }
+
+    if (!actor) {
+      throw new BadRequestException('Active user is required');
+    }
+
+    if (regulation.status !== 'PUBLISHED') {
+      throw new BadRequestException(
+        'Only published regulations can be acknowledged',
+      );
+    }
+
+    if (!this.userMatchesRegulationTarget(actor, regulation)) {
+      throw new BadRequestException(
+        'Regulation is not assigned to this employee role or club',
+      );
+    }
+
+    const acknowledgement =
+      await this.prisma.staffShiftRegulationAcknowledgement.upsert({
+        where: {
+          regulationId_userId_version: {
+            regulationId: regulation.id,
+            userId: user.id,
+            version: regulation.version,
+          },
+        },
+        create: {
+          tenantId,
+          regulationId: regulation.id,
+          userId: user.id,
+          version: regulation.version,
+          comment: this.normalizeOptionalString(dto.comment),
+        },
+        update: {
+          comment: this.normalizeOptionalString(dto.comment),
+          acknowledgedAt: new Date(),
+        },
+        include: {
+          user: {
+            select: { id: true, email: true, fullName: true, role: true },
+          },
+        },
+      });
+
+    return this.toAcknowledgementResponse(acknowledgement);
   }
 
   private resolveFilters(
@@ -279,6 +412,11 @@ export class StaffShiftRegulationsService {
       (summary, row) => {
         summary.total += 1;
         summary.requiredEvidenceItems += row.requiredEvidenceItems;
+        summary.requiredAcknowledgements +=
+          row.acknowledgementSummary.requiredCount;
+        summary.acknowledged += row.acknowledgementSummary.acknowledgedCount;
+        summary.pendingAcknowledgements +=
+          row.acknowledgementSummary.pendingCount;
 
         if (row.status === 'DRAFT') {
           summary.draft += 1;
@@ -296,6 +434,9 @@ export class StaffShiftRegulationsService {
         published: 0,
         archived: 0,
         requiredEvidenceItems: 0,
+        requiredAcknowledgements: 0,
+        acknowledged: 0,
+        pendingAcknowledgements: 0,
       },
     );
   }
@@ -361,9 +502,31 @@ export class StaffShiftRegulationsService {
 
   private toRegulationResponse(
     row: StaffShiftRegulationRow,
+    currentUserId: string,
+    activeUsers: AcknowledgementUserRow[],
   ): StaffShiftRegulationResponse {
     const sections = this.normalizeSections(row.sections);
     const items = sections.flatMap((section) => section.items);
+    const targetUsers = activeUsers.filter((candidate) =>
+      this.userMatchesRegulationTarget(candidate, row),
+    );
+    const currentVersionAcknowledgements = row.acknowledgements.filter(
+      (acknowledgement) => acknowledgement.version === row.version,
+    );
+    const acknowledgedUserIds = new Set(
+      currentVersionAcknowledgements.map(
+        (acknowledgement) => acknowledgement.userId,
+      ),
+    );
+    const acknowledgementByMe = currentVersionAcknowledgements.find(
+      (acknowledgement) => acknowledgement.userId === currentUserId,
+    );
+    const acknowledgedCount = targetUsers.filter((candidate) =>
+      acknowledgedUserIds.has(candidate.id),
+    ).length;
+    const requiredByMe =
+      row.status === 'PUBLISHED' &&
+      targetUsers.some((candidate) => candidate.id === currentUserId);
 
     return {
       id: row.id,
@@ -385,7 +548,104 @@ export class StaffShiftRegulationsService {
       updatedAt: row.updatedAt.toISOString(),
       store: row.store,
       createdByUser: row.createdByUser,
+      acknowledgementSummary: {
+        requiredCount: row.status === 'PUBLISHED' ? targetUsers.length : 0,
+        acknowledgedCount: row.status === 'PUBLISHED' ? acknowledgedCount : 0,
+        pendingCount:
+          row.status === 'PUBLISHED'
+            ? Math.max(targetUsers.length - acknowledgedCount, 0)
+            : 0,
+        requiredByMe,
+        acknowledgedByMe: Boolean(acknowledgementByMe),
+        acknowledgedAt:
+          acknowledgementByMe?.acknowledgedAt.toISOString() ?? null,
+      },
+      acknowledgements: currentVersionAcknowledgements.map((acknowledgement) =>
+        this.toAcknowledgementResponse(acknowledgement),
+      ),
     };
+  }
+
+  private toAcknowledgementResponse(
+    acknowledgement: AcknowledgementRow,
+  ): StaffShiftRegulationAcknowledgementResponse {
+    return {
+      id: acknowledgement.id,
+      userId: acknowledgement.userId,
+      version: acknowledgement.version,
+      comment: acknowledgement.comment,
+      acknowledgedAt: acknowledgement.acknowledgedAt.toISOString(),
+      user: acknowledgement.user,
+    };
+  }
+
+  private getAcknowledgementUsers(tenantId: string) {
+    return this.prisma.user.findMany({
+      where: { tenantId, isActive: true },
+      include: acknowledgementUserInclude,
+      orderBy: [{ role: 'asc' }, { fullName: 'asc' }, { email: 'asc' }],
+    });
+  }
+
+  private userMatchesRegulationTarget(
+    user: AcknowledgementUserRow,
+    regulation: { roleScope: string; storeId: string | null },
+  ) {
+    if (
+      !this.roleMatchesRegulationScope(
+        user.role,
+        regulation.roleScope as StaffShiftRoleScope,
+      )
+    ) {
+      return false;
+    }
+
+    if (!regulation.storeId) {
+      return true;
+    }
+
+    if (user.storeAccesses.length === 0) {
+      return true;
+    }
+
+    return user.storeAccesses.some(
+      (access) => access.storeId === regulation.storeId,
+    );
+  }
+
+  private roleMatchesRegulationScope(
+    role: UserRole,
+    scope: StaffShiftRoleScope,
+  ) {
+    if (scope === 'ALL_STAFF') {
+      return (
+        [
+          UserRole.MANAGER,
+          UserRole.CLUB_MANAGER,
+          UserRole.STANDARDS_MANAGER,
+          UserRole.SENIOR_ADMINISTRATOR,
+          UserRole.CLUB_ADMINISTRATOR,
+        ] as UserRole[]
+      ).includes(role);
+    }
+
+    if (scope === 'MANAGER') {
+      return (
+        [
+          UserRole.MANAGER,
+          UserRole.CLUB_MANAGER,
+          UserRole.STANDARDS_MANAGER,
+        ] as UserRole[]
+      ).includes(role);
+    }
+
+    if (scope === 'SENIOR_ADMINISTRATOR') {
+      return role === UserRole.SENIOR_ADMINISTRATOR;
+    }
+
+    return (
+      [UserRole.SENIOR_ADMINISTRATOR, UserRole.CLUB_ADMINISTRATOR] as UserRole[]
+    ).includes(role);
   }
 
   private normalizeSections(value: unknown): StaffShiftRegulationSection[] {

@@ -34,6 +34,13 @@ export type StaffShiftRegulationStore = {
   isActive: boolean;
 };
 
+export type StaffShiftRegulationUser = {
+  id: string;
+  email: string;
+  fullName: string | null;
+  role: string;
+};
+
 export type StaffShiftRegulationItem = {
   id: string;
   title: string;
@@ -74,6 +81,22 @@ export type StaffShiftRegulation = {
     email: string;
     fullName: string | null;
   } | null;
+  acknowledgementSummary: {
+    requiredCount: number;
+    acknowledgedCount: number;
+    pendingCount: number;
+    requiredByMe: boolean;
+    acknowledgedByMe: boolean;
+    acknowledgedAt: string | null;
+  };
+  acknowledgements: Array<{
+    id: string;
+    userId: string;
+    version: number;
+    comment: string | null;
+    acknowledgedAt: string;
+    user: StaffShiftRegulationUser;
+  }>;
 };
 
 export type StaffShiftRegulationFilters = {
@@ -96,6 +119,9 @@ export type StaffShiftRegulationReport = {
     published: number;
     archived: number;
     requiredEvidenceItems: number;
+    requiredAcknowledgements: number;
+    acknowledged: number;
+    pendingAcknowledgements: number;
   };
   rows: StaffShiftRegulation[];
   stores: StaffShiftRegulationStore[];

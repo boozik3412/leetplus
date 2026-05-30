@@ -16,6 +16,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import {
   StaffShiftRegulationsService,
+  type StaffShiftRegulationAcknowledgementDto,
   type StaffShiftRegulationDto,
   type StaffShiftRegulationReport,
   type StaffShiftRegulationsQuery,
@@ -29,6 +30,7 @@ import {
   UserRole.CLUB_MANAGER,
   UserRole.STANDARDS_MANAGER,
   UserRole.SENIOR_ADMINISTRATOR,
+  UserRole.CLUB_ADMINISTRATOR,
 )
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class StaffShiftRegulationsController {
@@ -45,6 +47,14 @@ export class StaffShiftRegulationsController {
   }
 
   @Post()
+  @Roles(
+    UserRole.OWNER,
+    UserRole.ADMIN,
+    UserRole.MANAGER,
+    UserRole.CLUB_MANAGER,
+    UserRole.STANDARDS_MANAGER,
+    UserRole.SENIOR_ADMINISTRATOR,
+  )
   createRegulation(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: StaffShiftRegulationDto,
@@ -53,11 +63,41 @@ export class StaffShiftRegulationsController {
   }
 
   @Patch(':id')
+  @Roles(
+    UserRole.OWNER,
+    UserRole.ADMIN,
+    UserRole.MANAGER,
+    UserRole.CLUB_MANAGER,
+    UserRole.STANDARDS_MANAGER,
+    UserRole.SENIOR_ADMINISTRATOR,
+  )
   updateRegulation(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
     @Body() dto: StaffShiftRegulationDto,
   ) {
     return this.staffShiftRegulationsService.updateRegulation(user, id, dto);
+  }
+
+  @Post(':id/acknowledgements')
+  @Roles(
+    UserRole.OWNER,
+    UserRole.ADMIN,
+    UserRole.MANAGER,
+    UserRole.CLUB_MANAGER,
+    UserRole.STANDARDS_MANAGER,
+    UserRole.SENIOR_ADMINISTRATOR,
+    UserRole.CLUB_ADMINISTRATOR,
+  )
+  acknowledgeRegulation(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: StaffShiftRegulationAcknowledgementDto,
+  ) {
+    return this.staffShiftRegulationsService.acknowledgeRegulation(
+      user,
+      id,
+      dto,
+    );
   }
 }

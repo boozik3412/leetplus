@@ -82,7 +82,7 @@ export default async function StaffShiftRegulationsPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  const user = await requireCurrentUser();
   const params = await searchParams;
   const filters = resolveFilters(params);
   const report = await getStaffShiftRegulationReport(filters);
@@ -93,6 +93,7 @@ export default async function StaffShiftRegulationsPage({
     { label: "Опубликовано", value: report.summary.published },
     { label: "Архив", value: report.summary.archived },
     { label: "Пунктов с доказательством", value: report.summary.requiredEvidenceItems },
+    { label: "Ждут ознакомления", value: report.summary.pendingAcknowledgements },
   ];
 
   return (
@@ -129,7 +130,7 @@ export default async function StaffShiftRegulationsPage({
           </Link>
         </header>
 
-        <section className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <section className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
           {summaryCards.map((card) => (
             <div
               key={card.label}
@@ -223,6 +224,7 @@ export default async function StaffShiftRegulationsPage({
           <StaffShiftRegulationBuilder
             rows={report.rows}
             stores={report.stores}
+            currentUserRole={user.role}
           />
         </section>
       </div>

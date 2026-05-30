@@ -159,19 +159,49 @@ function statusClass(status: StaffShiftRegulationStatus) {
   return "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200";
 }
 
+function formatDateTime(value: string | null) {
+  if (!value) {
+    return "";
+  }
+
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
 export function StaffShiftRegulationBuilder({
   rows,
   stores,
+  currentUserRole,
 }: {
   rows: StaffShiftRegulation[];
   stores: StaffShiftRegulationStore[];
+  currentUserRole: string;
 }) {
   const router = useRouter();
   const [draft, setDraft] = useState<DraftRegulation>(() =>
     rows[0] ? fromRegulation(rows[0]) : defaultDraft(),
   );
   const [isPending, setIsPending] = useState(false);
+  const [acknowledgementPendingId, setAcknowledgementPendingId] = useState<
+    string | null
+  >(null);
   const [error, setError] = useState<string | null>(null);
+  const canManageRegulations = [
+    "OWNER",
+    "ADMIN",
+    "MANAGER",
+    "CLUB_MANAGER",
+    "STANDARDS_MANAGER",
+    "SENIOR_ADMINISTRATOR",
+  ].includes(currentUserRole);
+  const selectedRow = draft.id
+    ? rows.find((row) => row.id === draft.id) ?? null
+    : null;
 
   const totals = useMemo(() => {
     const items = draft.sections.flatMap((section) => section.items);
@@ -298,6 +328,11 @@ export function StaffShiftRegulationBuilder({
   }
 
   async function save(statusOverride?: StaffShiftRegulationStatus) {
+    if (!canManageRegulations) {
+      setError("Редактирование регламентов доступно управляющим ролям.");
+      return;
+    }
+
     const title = draft.title.trim();
 
     if (!title) {
@@ -376,6 +411,37 @@ export function StaffShiftRegulationBuilder({
     }
   }
 
+  async function acknowledge(row: StaffShiftRegulation) {
+    setAcknowledgementPendingId(row.id);
+    setError(null);
+
+    try {
+      const response = await fetch(
+        `/api/staff/shift-regulations/${encodeURIComponent(
+          row.id,
+        )}/acknowledgements`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        },
+      );
+
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as {
+          message?: string;
+        } | null;
+        throw new Error(data?.message ?? "Не удалось подтвердить регламент");
+      }
+
+      router.refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Ошибка запроса");
+    } finally {
+      setAcknowledgementPendingId(null);
+    }
+  }
+
   return (
     <div className="grid gap-5 xl:grid-cols-[340px_1fr]">
       <aside className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
@@ -389,6 +455,7 @@ export function StaffShiftRegulationBuilder({
           <button
             type="button"
             onClick={() => setDraft(defaultDraft())}
+            disabled={!canManageRegulations}
             className="h-9 rounded-md bg-emerald-500 px-3 text-xs font-semibold text-zinc-950 transition hover:bg-emerald-400"
           >
             Новый
@@ -470,6 +537,20 @@ export function StaffShiftRegulationBuilder({
                 <p className="mt-1 text-xs text-zinc-500">
                   {row.sectionsCount} разд., {row.itemsCount} пунктов, v{row.version}
                 </p>
+                {row.status === "PUBLISHED" ? (
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                    <span>
+                      Ознакомились:{" "}
+                      {row.acknowledgementSummary.acknowledgedCount}/
+                      {row.acknowledgementSummary.requiredCount}
+                    </span>
+                    {row.acknowledgementSummary.pendingCount > 0 ? (
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-700 dark:bg-amber-500/15 dark:text-amber-200">
+                        ждут {row.acknowledgementSummary.pendingCount}
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
               </button>
             ))
           )}
@@ -487,23 +568,27 @@ export function StaffShiftRegulationBuilder({
             </h2>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              disabled={isPending}
-              onClick={() => save("DRAFT")}
-              className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:hover:bg-zinc-900"
-            >
-              Сохранить черновик
-            </button>
-            <button
-              type="button"
-              disabled={isPending}
-              onClick={() => save("PUBLISHED")}
-              className="h-10 rounded-md bg-emerald-500 px-3 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              Опубликовать
-            </button>
-            {draft.id ? (
+            {canManageRegulations ? (
+              <>
+                <button
+                  type="button"
+                  disabled={isPending}
+                  onClick={() => save("DRAFT")}
+                  className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:hover:bg-zinc-900"
+                >
+                  Сохранить черновик
+                </button>
+                <button
+                  type="button"
+                  disabled={isPending}
+                  onClick={() => save("PUBLISHED")}
+                  className="h-10 rounded-md bg-emerald-500 px-3 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Опубликовать
+                </button>
+              </>
+            ) : null}
+            {draft.id && canManageRegulations ? (
               <button
                 type="button"
                 disabled={isPending}
@@ -513,8 +598,65 @@ export function StaffShiftRegulationBuilder({
                 В архив
               </button>
             ) : null}
+            {selectedRow?.status === "PUBLISHED" &&
+            selectedRow.acknowledgementSummary.requiredByMe &&
+            !selectedRow.acknowledgementSummary.acknowledgedByMe ? (
+              <button
+                type="button"
+                disabled={acknowledgementPendingId === selectedRow.id}
+                onClick={() => acknowledge(selectedRow)}
+                className="h-10 rounded-md bg-emerald-500 px-3 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {acknowledgementPendingId === selectedRow.id
+                  ? "Подтверждаем..."
+                  : "Подтвердить ознакомление"}
+              </button>
+            ) : null}
           </div>
         </div>
+
+        {selectedRow?.status === "PUBLISHED" ? (
+          <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+                  Ознакомление
+                </p>
+                <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+                  Версия v{selectedRow.version}. Требуется подтверждение для
+                  сотрудников выбранной роли и клуба.
+                </p>
+              </div>
+              <div className="text-right text-sm">
+                <p className="font-semibold">
+                  {selectedRow.acknowledgementSummary.acknowledgedCount}/
+                  {selectedRow.acknowledgementSummary.requiredCount}
+                </p>
+                <p className="text-xs text-zinc-500">
+                  ждут: {selectedRow.acknowledgementSummary.pendingCount}
+                </p>
+              </div>
+            </div>
+            {selectedRow.acknowledgementSummary.acknowledgedByMe ? (
+              <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100">
+                Вы подтвердили ознакомление{" "}
+                {formatDateTime(selectedRow.acknowledgementSummary.acknowledgedAt)}.
+              </p>
+            ) : null}
+            {selectedRow.acknowledgements.length > 0 ? (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {selectedRow.acknowledgements.slice(0, 8).map((item) => (
+                  <span
+                    key={item.id}
+                    className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-950 dark:text-zinc-300"
+                  >
+                    {item.user.fullName ?? item.user.email}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         <div className="mt-4 grid gap-3 lg:grid-cols-[1.5fr_1fr_1fr]">
           <label className="space-y-1">

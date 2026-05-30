@@ -53,6 +53,7 @@ const navGroups: NavGroup[] = [
       { href: "/staff/task-templates", label: "Шаблоны задач" },
       { href: "/staff/team-chat", label: "Командный чат" },
       { href: "/staff/knowledge-base", label: "База знаний" },
+      { href: "/staff/training-courses", label: "Курсы обучения" },
       { href: "/staff/shift-regulations", label: "Регламенты смены" },
       { href: "/staff/checklist-templates", label: "Шаблоны чеклистов" },
       { href: "/staff/checklists", label: "Чеклисты смены" },

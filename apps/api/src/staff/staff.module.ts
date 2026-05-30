@@ -14,6 +14,8 @@ import { StaffTaskTemplatesController } from './staff-task-templates.controller'
 import { StaffTaskTemplatesService } from './staff-task-templates.service';
 import { StaffTeamChatController } from './staff-team-chat.controller';
 import { StaffTeamChatService } from './staff-team-chat.service';
+import { StaffTrainingCoursesController } from './staff-training-courses.controller';
+import { StaffTrainingCoursesService } from './staff-training-courses.service';
 import { StaffTasksController } from './staff-tasks.controller';
 import { StaffTasksService } from './staff-tasks.service';
 
@@ -23,6 +25,7 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffTasksController,
     StaffTaskTemplatesController,
     StaffKnowledgeBaseController,
+    StaffTrainingCoursesController,
     StaffShiftRegulationsController,
     StaffChecklistTemplatesController,
     StaffChecklistsController,
@@ -32,6 +35,7 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffTasksService,
     StaffTaskTemplatesService,
     StaffKnowledgeBaseService,
+    StaffTrainingCoursesService,
     StaffShiftRegulationsService,
     StaffChecklistTemplatesService,
     StaffChecklistsService,

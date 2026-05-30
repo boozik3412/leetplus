@@ -456,6 +456,18 @@ export class StaffChecklistsService {
         );
       }
 
+      if (isSubmit && metrics.failedItems > 0) {
+        await this.createChecklistIncidentMessage(
+          tx,
+          tenantId,
+          user.id,
+          current,
+          sections,
+          answers,
+          metrics,
+        );
+      }
+
       return this.fetchRunOrThrow(tx, tenantId, current.id);
     });
 
@@ -943,6 +955,128 @@ export class StaffChecklistsService {
         },
       });
     }
+  }
+
+  private async createChecklistIncidentMessage(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    actorUserId: string,
+    run: StaffChecklistRunRow,
+    sections: StaffChecklistSection[],
+    answers: StaffChecklistAnswer[],
+    metrics: Metrics,
+  ) {
+    const channelId = await this.ensureDefaultChatChannel(tx, tenantId);
+    const message = await tx.staffChatMessage.create({
+      data: {
+        tenantId,
+        channelId,
+        authorUserId: actorUserId,
+        storeId: run.storeId,
+        body: this.buildChecklistIncidentBody(run, sections, answers, metrics),
+        kind: 'INCIDENT',
+        priority: metrics.failedItems >= 3 ? 'URGENT' : 'HIGH',
+        isPinned: false,
+      },
+      select: { id: true },
+    });
+
+    await tx.staffChatReadReceipt.createMany({
+      data: [
+        {
+          tenantId,
+          channelId,
+          messageId: message.id,
+          userId: actorUserId,
+        },
+      ],
+      skipDuplicates: true,
+    });
+  }
+
+  private async ensureDefaultChatChannel(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+  ) {
+    const channel = await tx.staffChatChannel.upsert({
+      where: {
+        tenantId_name: {
+          tenantId,
+          name: 'Вся сеть',
+        },
+      },
+      create: {
+        tenantId,
+        name: 'Вся сеть',
+        description: 'Операционные объявления и сообщения для всей сети.',
+        scope: 'NETWORK',
+        isDefault: true,
+      },
+      update: {
+        isDefault: true,
+        isArchived: false,
+        scope: 'NETWORK',
+      },
+      select: { id: true },
+    });
+
+    return channel.id;
+  }
+
+  private buildChecklistIncidentBody(
+    run: StaffChecklistRunRow,
+    sections: StaffChecklistSection[],
+    answers: StaffChecklistAnswer[],
+    metrics: Metrics,
+  ) {
+    const itemByKey = new Map(
+      sections.flatMap((section) =>
+        section.items.map((item) => [
+          `${section.id}::${item.id}`,
+          { section, item },
+        ]),
+      ),
+    );
+    const failedLines = answers
+      .filter((answer) => answer.status === 'FAILED')
+      .slice(0, 5)
+      .map((answer) => {
+        const source = itemByKey.get(`${answer.sectionId}::${answer.itemId}`);
+        const title = source
+          ? `${source.section.title}: ${source.item.title}`
+          : answer.itemId;
+        const note = answer.note ? ` — ${answer.note}` : '';
+        return `- ${title}${note}`;
+      });
+    const assignedTo =
+      run.assignedToUser?.fullName ?? run.assignedToUser?.email ?? null;
+    const score =
+      metrics.scoreTotal > 0
+        ? `${metrics.scoreEarned}/${metrics.scoreTotal}`
+        : 'без баллов';
+
+    return [
+      'Чеклист отправлен на проверку с проблемными пунктами.',
+      '',
+      `Чеклист: ${run.title}`,
+      `Клуб: ${run.store?.name ?? 'вся сеть'}`,
+      assignedTo ? `Ответственный: ${assignedTo}` : null,
+      `Провалено пунктов: ${metrics.failedItems}`,
+      `Оценка: ${score}`,
+      '',
+      'Проблемные пункты:',
+      ...failedLines,
+      metrics.failedItems > failedLines.length
+        ? `- Еще ${metrics.failedItems - failedLines.length} пункт(ов)`
+        : null,
+      '',
+      'Источник: чеклист смены LeetPlus.',
+      `Открыть чеклисты: /staff/checklists?search=${encodeURIComponent(
+        run.title,
+      )}`,
+    ]
+      .filter(Boolean)
+      .join('\n');
   }
 
   private async fetchRunOrThrow(

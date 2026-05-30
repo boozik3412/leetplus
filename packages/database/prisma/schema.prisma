@@ -147,6 +147,7 @@ model Tenant {
   staffTaskComments            StaffTaskComment[]
   staffTaskAuditEvents         StaffTaskAuditEvent[]
   staffShiftRegulations        StaffShiftRegulation[]
+  staffChecklistRuns           StaffChecklistRun[]
   guestSavedFilters            GuestSavedFilter[]
   guestAudiences               GuestAudience[]
   guestAudienceMembers         GuestAudienceMember[]
@@ -183,6 +184,9 @@ model User {
   staffTaskComments                   StaffTaskComment[]           @relation("StaffTaskCommentAuthor")
   staffTaskAuditEvents                StaffTaskAuditEvent[]        @relation("StaffTaskAuditActor")
   createdStaffShiftRegulations        StaffShiftRegulation[]       @relation("StaffShiftRegulationCreatedBy")
+  createdStaffChecklistRuns           StaffChecklistRun[]          @relation("StaffChecklistRunCreatedBy")
+  assignedStaffChecklistRuns          StaffChecklistRun[]          @relation("StaffChecklistRunAssignedTo")
+  reviewedStaffChecklistRuns          StaffChecklistRun[]          @relation("StaffChecklistRunReviewedBy")
   guestSavedFilters                   GuestSavedFilter[]
   guestAudiences                      GuestAudience[]
 
@@ -252,6 +256,7 @@ model Store {
   marketingPromoBundleUsages MarketingPromoBundleUsage[]
   staffTasks                 StaffTask[]
   staffShiftRegulations      StaffShiftRegulation[]
+  staffChecklistRuns         StaffChecklistRun[]
 
   @@unique([tenantId, externalProvider, externalDomain, externalClubId])
   @@index([tenantId])
@@ -1155,10 +1160,11 @@ model GuestWorkingShift {
   createdAt         DateTime             @default(now())
   updatedAt         DateTime             @updatedAt
 
-  tenant     Tenant      @relation(fields: [tenantId], references: [id])
-  guest      Guest?      @relation(fields: [guestId], references: [id], onDelete: SetNull)
-  store      Store?      @relation(fields: [storeId], references: [id], onDelete: SetNull)
-  staffTasks StaffTask[]
+  tenant        Tenant              @relation(fields: [tenantId], references: [id])
+  guest         Guest?              @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  store         Store?              @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  staffTasks    StaffTask[]
+  checklistRuns StaffChecklistRun[]
 
   @@unique([tenantId, externalProvider, externalDomain, externalShiftId])
   @@index([tenantId, startedAt])
@@ -1281,14 +1287,65 @@ model StaffShiftRegulation {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  tenant        Tenant @relation(fields: [tenantId], references: [id])
-  store         Store? @relation(fields: [storeId], references: [id], onDelete: SetNull)
-  createdByUser User?  @relation("StaffShiftRegulationCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  tenant        Tenant              @relation(fields: [tenantId], references: [id])
+  store         Store?              @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  createdByUser User?               @relation("StaffShiftRegulationCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  checklistRuns StaffChecklistRun[]
 
   @@index([tenantId, status, shiftKind], map: "staff_shift_regulation_status_kind_idx")
   @@index([tenantId, createdAt], map: "staff_shift_regulation_created_idx")
   @@index([storeId], map: "staff_shift_regulation_store_idx")
   @@index([createdByUserId], map: "staff_shift_regulation_created_by_idx")
+}
+
+model StaffChecklistRun {
+  id                 String    @id @default(uuid())
+  tenantId           String
+  regulationId       String
+  storeId            String?
+  shiftId            String?
+  createdByUserId    String?
+  assignedToUserId   String?
+  reviewedByUserId   String?
+  title              String
+  shiftKind          String    @default("OPENING")
+  roleScope          String    @default("ADMINISTRATOR")
+  status             String    @default("OPEN")
+  regulationVersion  Int       @default(1)
+  scheduledAt        DateTime?
+  startedAt          DateTime?
+  submittedAt        DateTime?
+  reviewedAt         DateTime?
+  sectionsSnapshot   Json
+  answers            Json
+  scoreTotal         Int       @default(0)
+  scoreEarned        Int       @default(0)
+  requiredItemsTotal Int       @default(0)
+  requiredItemsDone  Int       @default(0)
+  evidenceTotal      Int       @default(0)
+  evidenceDone       Int       @default(0)
+  failedItems        Int       @default(0)
+  blockingIssues     Json?
+  reviewComment      String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  tenant         Tenant               @relation(fields: [tenantId], references: [id])
+  regulation     StaffShiftRegulation @relation(fields: [regulationId], references: [id], onDelete: Restrict)
+  store          Store?               @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  shift          GuestWorkingShift?   @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  createdByUser  User?                @relation("StaffChecklistRunCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  assignedToUser User?                @relation("StaffChecklistRunAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  reviewedByUser User?                @relation("StaffChecklistRunReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status, scheduledAt], map: "staff_checklist_run_status_schedule_idx")
+  @@index([tenantId, shiftKind, createdAt], map: "staff_checklist_run_kind_created_idx")
+  @@index([regulationId], map: "staff_checklist_run_regulation_idx")
+  @@index([storeId], map: "staff_checklist_run_store_idx")
+  @@index([shiftId], map: "staff_checklist_run_shift_idx")
+  @@index([createdByUserId], map: "staff_checklist_run_created_by_idx")
+  @@index([assignedToUserId], map: "staff_checklist_run_assigned_to_idx")
+  @@index([reviewedByUserId], map: "staff_checklist_run_reviewed_by_idx")
 }
 
 model GuestSavedFilter {

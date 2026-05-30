@@ -328,22 +328,23 @@ Acceptance criteria:
 Status: started. Goal: turn daily operating standards into controlled execution.
 
 - Done: first shift-regulation constructor added: tenant-scoped `StaffShiftRegulation`, migration, API `/staff/shift-regulations`, `/staff/shift-regulations` UI, sidebar entry, statuses draft/published/archived, sections, items, required/evidence flags, value type, score, role, club, and effective date.
+- Done: first checklist-run execution layer added: tenant-scoped `StaffChecklistRun`, migration, API `/staff/checklists`, `/staff/checklists` UI, sidebar entry, creation from published regulations, answer/evidence capture, submission blocking for missing required answers/evidence, manager accept/return statuses, and automatic follow-up tasks for failed items.
 - Add versioned regulation history beyond the current version number.
 - Add required employee acknowledgement for selected roles or clubs.
 - Add checklist template builder with sections, required fields, evidence requirements, and scoring.
-- Add checklist runs tied to club, shift, employee, role, and scheduled time.
+- Started: add checklist runs tied to club, shift, employee, role, and scheduled time. First runs use the published regulation snapshot and store assigned user, club, optional Langame shift, schedule, status, answers, score, failed items, and evidence counters.
 - Add standard checklist packs: opening shift, closing shift, cash desk, bar, PC zone, cleanliness, incident handling, inventory handover.
-- Allow checklist items to create violation tasks automatically.
-- Add manager review flow: accepted, returned for correction, escalated.
-- Add evidence: photo, video/file link, comment, numeric value, checkbox, select, timestamp.
+- Started: allow checklist items to create violation tasks automatically. Failed checklist answers now create high-priority staff follow-up tasks on submission.
+- Started: add manager review flow: accepted, returned for correction, escalated. First flow supports `ON_REVIEW`, `ACCEPTED`, and `RETURNED`; escalation remains next.
+- Started: add evidence: photo, video/file link, comment, numeric value, checkbox, select, timestamp. First execution UI captures result, value, evidence URL, and comment per item.
 - Add execution report by club, shift, employee, and checklist.
 
 Acceptance criteria:
 
-- An administrator can complete an opening or closing shift checklist.
-- Required items cannot be closed without required evidence.
-- A failed checklist item creates a follow-up task.
-- A manager sees missed, late, failed, and returned checklist runs.
+- Done: an administrator can complete an opening or closing shift checklist from a published regulation snapshot.
+- Done: required items cannot be submitted for review without required evidence.
+- Done: a failed checklist item creates a follow-up task.
+- Started: a manager sees missed, late, failed, and returned checklist runs through the first checklist workspace summary and filters; a fuller execution report remains next.
 
 ### MVP 3. Training, Knowledge Base, And Attestations
 
@@ -416,7 +417,7 @@ Acceptance criteria:
 3. Started: add database schema for tasks, task templates, task comments, attachments, audit events, and staff assignments. `StaffTask`, `StaffTaskComment`, and `StaffTaskAuditEvent` are in place; task templates and binary attachment storage remain next.
 4. Started: implement backend CRUD and list APIs for tasks with tenant/store/staff access control. List/create/status update plus comment/evidence endpoint are in place.
 5. Started: implement `/staff/tasks` or `/operations/tasks` UI for manager and administrator workflows. `/staff/tasks` now includes creation, filters, status actions, execution comments, evidence links, and audit history preview.
-6. Started: add checklist templates and checklist runs. First shift-regulation constructor already defines sections/items/evidence rules that checklist runs can reuse.
+6. Started: add checklist templates and checklist runs. First shift-regulation constructor defines sections/items/evidence rules, and the first checklist-run execution workspace now reuses published regulation snapshots.
 7. Started: add regulation documents, versions, acknowledgements, and role/club targeting. First draft/published/archived shift-regulation entity is in place; acknowledgements and full version history remain next.
 8. Add training materials, courses, tests, and attestation reports.
 9. Add analytics, exports, and connections to current staff-control signals.

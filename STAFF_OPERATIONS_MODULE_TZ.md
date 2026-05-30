@@ -147,6 +147,7 @@ Reusable execution template generated from a published shift regulation or creat
 ### Checklist Run
 
 Concrete completion instance tied to club, shift, employee, scheduled time, answers, evidence, score, and review result.
+The first implementation stores `StaffChecklistRun` as a regulation snapshot, so historical execution remains stable after the source regulation changes.
 
 ### Regulation
 
@@ -190,13 +191,15 @@ Implemented first:
 - `StaffShiftRegulation` model with tenant, club, author, status, shift kind, role scope, effective date, version, and JSON sections.
 - `/staff/shift-regulations` API and UI constructor.
 - Sections and items support required flag, evidence-required flag, value type, instruction, and score.
+- `StaffChecklistRun` model with tenant, regulation snapshot, club, optional Langame shift, assigned user, schedule, status, answers, evidence counters, score, failed item count, blocking issues, and review comment.
+- `/staff/checklists` API and UI workspace for creating checklist runs from published regulations, filling answers/evidence, submitting for review, accepting/returning, and creating follow-up staff tasks from failed items.
 
 Acceptance criteria:
 
-- An administrator can complete an opening or closing checklist.
-- Required evidence blocks closure when missing.
-- Failed checklist item can create a follow-up task.
-- Manager sees missed, late, failed, returned, and accepted checklist runs.
+- Done: an administrator can complete an opening or closing checklist from a published regulation snapshot.
+- Done: required evidence blocks closure when missing.
+- Done: failed checklist item can create a follow-up task.
+- Started: manager sees missed, late, failed, returned, and accepted checklist runs in the first checklist workspace; deeper analytics remain MVP 4.
 
 ## 7. MVP 3: Training, Knowledge Base, And Attestations
 

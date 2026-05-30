@@ -27,6 +27,7 @@ type ChannelFormState = {
   scope: StaffChatChannelScope;
   storeId: string;
   roleScope: string;
+  memberUserIds: string[];
 };
 
 type TaskDraftState = {
@@ -59,6 +60,7 @@ const scopeLabels: Record<StaffChatChannelScope, string> = {
   NETWORK: "Вся сеть",
   STORE: "Клуб",
   ROLE: "Роль",
+  CUSTOM: "Кастомный",
 };
 
 const emptyForm: FormState = {
@@ -75,6 +77,7 @@ const emptyChannelForm: ChannelFormState = {
   scope: "NETWORK",
   storeId: "",
   roleScope: "ALL_STAFF",
+  memberUserIds: [],
 };
 
 export function StaffTeamChatWorkspace({
@@ -156,6 +159,14 @@ export function StaffTeamChatWorkspace({
       return;
     }
 
+    if (
+      channelForm.scope === "CUSTOM" &&
+      channelForm.memberUserIds.length === 0
+    ) {
+      setError("Для кастомного канала выберите сотрудников.");
+      return;
+    }
+
     const response = await fetch("/api/staff/team-chat/channels", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -167,6 +178,10 @@ export function StaffTeamChatWorkspace({
           channelForm.scope === "STORE" ? channelForm.storeId : undefined,
         roleScope:
           channelForm.scope === "ROLE" ? channelForm.roleScope : undefined,
+        memberUserIds:
+          channelForm.scope === "CUSTOM"
+            ? channelForm.memberUserIds
+            : undefined,
       }),
     });
 
@@ -181,6 +196,20 @@ export function StaffTeamChatWorkspace({
     setChannelForm(emptyChannelForm);
     setShowChannelForm(false);
     startTransition(() => router.refresh());
+  }
+
+  function toggleChannelMember(userId: string) {
+    setChannelForm((current) => {
+      const selected = new Set(current.memberUserIds);
+
+      if (selected.has(userId)) {
+        selected.delete(userId);
+      } else {
+        selected.add(userId);
+      }
+
+      return { ...current, memberUserIds: Array.from(selected) };
+    });
   }
 
   async function markChannelRead() {
@@ -392,6 +421,8 @@ export function StaffTeamChatWorkspace({
                     setChannelForm((current) => ({
                       ...current,
                       scope: event.target.value as StaffChatChannelScope,
+                      storeId: "",
+                      memberUserIds: [],
                     }))
                   }
                   className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-emerald-500 dark:border-zinc-800 dark:bg-zinc-950"
@@ -449,6 +480,56 @@ export function StaffTeamChatWorkspace({
                     ))}
                   </select>
                 </label>
+              ) : null}
+              {channelForm.scope === "CUSTOM" ? (
+                <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase text-zinc-500">
+                        Участники
+                      </p>
+                      <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                        Выберите сотрудников, которые увидят этот канал.
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-zinc-200 px-2 py-0.5 text-xs font-semibold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
+                      {channelForm.memberUserIds.length}
+                    </span>
+                  </div>
+                  <div className="mt-3 max-h-56 space-y-2 overflow-y-auto pr-1">
+                    {report.users.map((user) => {
+                      const checked = channelForm.memberUserIds.includes(
+                        user.id,
+                      );
+
+                      return (
+                        <label
+                          key={user.id}
+                          className={[
+                            "flex cursor-pointer items-center justify-between gap-3 rounded-lg border px-3 py-2 text-sm transition",
+                            checked
+                              ? "border-emerald-500 bg-emerald-500/10"
+                              : "border-zinc-200 bg-white hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-emerald-500",
+                          ].join(" ")}
+                        >
+                          <span className="min-w-0">
+                            <span className="block truncate font-semibold">
+                              {user.fullName ?? user.email}
+                            </span>
+                            <span className="block truncate text-xs text-zinc-500 dark:text-zinc-400">
+                              {user.email}
+                            </span>
+                          </span>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleChannelMember(user.id)}
+                          />
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
               ) : null}
               <button
                 type="button"
@@ -971,6 +1052,10 @@ function channelScopeLabel(channel: StaffChatChannel) {
 
   if (channel.scope === "ROLE") {
     return channel.roleScope ?? "Канал роли";
+  }
+
+  if (channel.scope === "CUSTOM") {
+    return `${formatNumber(channel.members.length)} участн.`;
   }
 
   return "Вся сеть";

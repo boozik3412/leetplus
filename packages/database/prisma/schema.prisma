@@ -154,6 +154,7 @@ model Tenant {
   staffShiftRegulations        StaffShiftRegulation[]
   staffChecklistRuns           StaffChecklistRun[]
   staffChatChannels            StaffChatChannel[]
+  staffChatChannelMembers       StaffChatChannelMember[]
   staffChatMessages            StaffChatMessage[]
   staffChatReadReceipts        StaffChatReadReceipt[]
   guestSavedFilters            GuestSavedFilter[]
@@ -206,6 +207,8 @@ model User {
   createdUserInvites                  UserInvite[]                 @relation("UserInviteCreatedBy")
   acceptedUserInvites                 UserInvite[]                 @relation("UserInviteAcceptedBy")
   createdStaffChatChannels            StaffChatChannel[]           @relation("StaffChatChannelCreatedBy")
+  staffChatChannelMemberships          StaffChatChannelMember[]     @relation("StaffChatChannelMemberUser")
+  addedStaffChatChannelMembers         StaffChatChannelMember[]     @relation("StaffChatChannelMemberAddedBy")
   authoredStaffChatMessages           StaffChatMessage[]           @relation("StaffChatMessageAuthor")
   staffChatReadReceipts               StaffChatReadReceipt[]
 
@@ -1449,6 +1452,7 @@ model StaffChatChannel {
   tenant        Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   createdByUser User?                  @relation("StaffChatChannelCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   store         Store?                 @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  members       StaffChatChannelMember[]
   messages      StaffChatMessage[]
   readReceipts  StaffChatReadReceipt[]
 
@@ -1456,6 +1460,26 @@ model StaffChatChannel {
   @@index([tenantId, isArchived, scope], map: "staff_chat_channel_scope_idx")
   @@index([storeId], map: "staff_chat_channel_store_idx")
   @@index([createdByUserId], map: "staff_chat_channel_created_by_idx")
+}
+
+model StaffChatChannelMember {
+  id            String   @id @default(uuid())
+  tenantId      String
+  channelId     String
+  userId        String
+  addedByUserId String?
+  role          String   @default("MEMBER")
+  createdAt     DateTime @default(now())
+
+  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  channel     StaffChatChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user        User             @relation("StaffChatChannelMemberUser", fields: [userId], references: [id], onDelete: Cascade)
+  addedByUser User?            @relation("StaffChatChannelMemberAddedBy", fields: [addedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([channelId, userId], map: "staff_chat_channel_member_unique")
+  @@index([tenantId, userId], map: "staff_chat_channel_member_user_idx")
+  @@index([tenantId, channelId], map: "staff_chat_channel_member_channel_idx")
+  @@index([addedByUserId], map: "staff_chat_channel_member_added_by_idx")
 }
 
 model StaffChatMessage {

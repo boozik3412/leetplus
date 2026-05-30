@@ -1002,13 +1002,14 @@ export class StaffChecklistsService {
       where: {
         tenantId_name: {
           tenantId,
-          name: 'Вся сеть',
+          name: 'Информация и объявления',
         },
       },
       create: {
         tenantId,
-        name: 'Вся сеть',
-        description: 'Операционные объявления и сообщения для всей сети.',
+        name: 'Информация и объявления',
+        description:
+          'Официальные объявления, регламенты и важные сообщения для всей сети.',
         scope: 'NETWORK',
         isDefault: true,
       },

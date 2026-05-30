@@ -1,6 +1,6 @@
 import { getApiUrl, getAuthHeaders } from "./api";
 
-export type StaffChatChannelScope = "NETWORK" | "STORE" | "ROLE";
+export type StaffChatChannelScope = "NETWORK" | "STORE" | "ROLE" | "CUSTOM";
 export type StaffChatMessageKind = "MESSAGE" | "ANNOUNCEMENT" | "INCIDENT";
 export type StaffChatMessagePriority = "NORMAL" | "HIGH" | "URGENT";
 
@@ -8,6 +8,7 @@ export type StaffChatUser = {
   id: string;
   email: string;
   fullName: string | null;
+  role?: string;
 };
 
 export type StaffChatStore = {
@@ -28,6 +29,7 @@ export type StaffChatChannel = {
   updatedAt: string;
   store: StaffChatStore | null;
   createdByUser: StaffChatUser | null;
+  members: StaffChatUser[];
   messagesCount: number;
   unreadCount: number;
   pinnedCount: number;
@@ -72,6 +74,7 @@ export type StaffTeamChatReport = {
   channels: StaffChatChannel[];
   messages: StaffChatMessage[];
   stores: StaffChatStore[];
+  users: StaffChatUser[];
   roleScopes: Array<{ value: string; label: string }>;
 };
 

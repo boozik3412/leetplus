@@ -8,10 +8,28 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 
-const channelScopes = ['NETWORK', 'STORE', 'ROLE'] as const;
+const channelScopes = ['NETWORK', 'STORE', 'ROLE', 'CUSTOM'] as const;
 const messageKinds = ['MESSAGE', 'ANNOUNCEMENT', 'INCIDENT'] as const;
 const messagePriorities = ['NORMAL', 'HIGH', 'URGENT'] as const;
 const roleScopes = ['ALL_STAFF', 'MANAGERS', 'ADMINISTRATORS'] as const;
+const defaultNetworkChannels = [
+  {
+    name: 'Информация и объявления',
+    description:
+      'Официальные объявления, регламенты и важные сообщения для всей сети.',
+  },
+  {
+    name: 'Техническая поддержка',
+    description:
+      'Вопросы по оборудованию, кассе, сервисам, доступам и срочным техническим проблемам.',
+  },
+  {
+    name: 'Общение',
+    description:
+      'Рабочее общение команды без привязки к конкретному клубу или задаче.',
+  },
+] as const;
+const primaryDefaultChannelName = defaultNetworkChannels[0].name;
 
 export type StaffChatChannelScope = (typeof channelScopes)[number];
 export type StaffChatMessageKind = (typeof messageKinds)[number];
@@ -33,6 +51,7 @@ export type StaffChatChannelDto = {
   scope?: StaffChatChannelScope;
   storeId?: string | null;
   roleScope?: StaffChatRoleScope | null;
+  memberUserIds?: string[] | null;
 };
 
 export type StaffChatMessageDto = {
@@ -70,7 +89,15 @@ export type StaffTeamChatReport = {
   channels: StaffChatChannelResponse[];
   messages: StaffChatMessageResponse[];
   stores: Array<{ id: string; name: string; isActive: boolean }>;
+  users: StaffChatUserResponse[];
   roleScopes: Array<{ value: StaffChatRoleScope; label: string }>;
+};
+
+export type StaffChatUserResponse = {
+  id: string;
+  email: string;
+  fullName: string | null;
+  role: UserRole;
 };
 
 export type StaffChatChannelResponse = {
@@ -85,6 +112,7 @@ export type StaffChatChannelResponse = {
   updatedAt: string;
   store: { id: string; name: string; isActive: boolean } | null;
   createdByUser: { id: string; email: string; fullName: string | null } | null;
+  members: StaffChatUserResponse[];
   messagesCount: number;
   unreadCount: number;
   pinnedCount: number;
@@ -108,6 +136,12 @@ export type StaffChatMessageResponse = {
 const channelInclude = {
   store: { select: { id: true, name: true, isActive: true } },
   createdByUser: { select: { id: true, email: true, fullName: true } },
+  members: {
+    include: {
+      user: { select: { id: true, email: true, fullName: true, role: true } },
+    },
+    orderBy: { createdAt: 'asc' },
+  },
 } satisfies Prisma.StaffChatChannelInclude;
 
 const messageInclude = {
@@ -143,7 +177,7 @@ export class StaffTeamChatService {
     query: StaffTeamChatQuery = {},
   ): Promise<StaffTeamChatReport> {
     const { tenantId } = await this.tenantContextService.resolve(user);
-    await this.ensureDefaultChannel(tenantId);
+    await this.ensureDefaultChannels(tenantId);
     const accessWhere = await this.buildAccessibleChannelWhere(user, tenantId);
     const filters = this.resolveFilters(query);
 
@@ -155,6 +189,7 @@ export class StaffTeamChatService {
 
     const activeChannel =
       channels.find((channel) => channel.id === filters.channelId) ??
+      channels.find((channel) => channel.name === primaryDefaultChannelName) ??
       channels.find((channel) => channel.isDefault) ??
       channels[0] ??
       null;
@@ -174,11 +209,18 @@ export class StaffTeamChatService {
         })
       : [];
 
-    const stores = await this.prisma.store.findMany({
-      where: { tenantId },
-      select: { id: true, name: true, isActive: true },
-      orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
-    });
+    const [stores, users] = await Promise.all([
+      this.prisma.store.findMany({
+        where: { tenantId },
+        select: { id: true, name: true, isActive: true },
+        orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+      }),
+      this.prisma.user.findMany({
+        where: { tenantId, isActive: true },
+        select: { id: true, email: true, fullName: true, role: true },
+        orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
+      }),
+    ]);
 
     const totals = Array.from(stats.values()).reduce(
       (acc, item) => ({
@@ -206,6 +248,7 @@ export class StaffTeamChatService {
         .map((message) => this.toMessageResponse(message, user.id))
         .reverse(),
       stores,
+      users,
       roleScopes: [
         { value: 'ALL_STAFF', label: 'Весь персонал' },
         { value: 'MANAGERS', label: 'Управляющие и менеджеры' },
@@ -220,15 +263,42 @@ export class StaffTeamChatService {
   async createChannel(user: AuthenticatedUser, dto: StaffChatChannelDto) {
     const { tenantId } = await this.tenantContextService.resolve(user);
     const data = await this.normalizeChannelData(tenantId, dto);
+    const memberUserIds =
+      data.scope === 'CUSTOM'
+        ? await this.resolveChannelMemberUserIds(
+            tenantId,
+            dto.memberUserIds,
+            user.id,
+          )
+        : [];
 
     try {
-      const channel = await this.prisma.staffChatChannel.create({
-        data: {
-          ...data,
-          tenantId,
-          createdByUserId: user.id,
-        },
-        include: channelInclude,
+      const channel = await this.prisma.$transaction(async (tx) => {
+        const created = await tx.staffChatChannel.create({
+          data: {
+            ...data,
+            tenantId,
+            createdByUserId: user.id,
+          },
+          select: { id: true },
+        });
+
+        if (memberUserIds.length > 0) {
+          await tx.staffChatChannelMember.createMany({
+            data: memberUserIds.map((userId) => ({
+              tenantId,
+              channelId: created.id,
+              userId,
+              addedByUserId: user.id,
+            })),
+            skipDuplicates: true,
+          });
+        }
+
+        return tx.staffChatChannel.findUniqueOrThrow({
+          where: { id: created.id },
+          include: channelInclude,
+        });
       });
 
       return this.toChannelResponse(channel);
@@ -246,7 +316,7 @@ export class StaffTeamChatService {
 
   async createMessage(user: AuthenticatedUser, dto: StaffChatMessageDto) {
     const { tenantId } = await this.tenantContextService.resolve(user);
-    await this.ensureDefaultChannel(tenantId);
+    await this.ensureDefaultChannels(tenantId);
     const channel = await this.resolveAccessibleChannel(
       user,
       tenantId,
@@ -444,39 +514,116 @@ export class StaffTeamChatService {
     return stats;
   }
 
-  private async ensureDefaultChannel(tenantId: string) {
-    const existing = await this.prisma.staffChatChannel.findFirst({
-      where: { tenantId, isDefault: true, scope: 'NETWORK' },
-      select: { id: true },
+  private async ensureDefaultChannels(tenantId: string) {
+    const stores = await this.prisma.store.findMany({
+      where: { tenantId },
+      select: { id: true, name: true, isActive: true },
+      orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
     });
+    const storeNameCounts = stores.reduce((acc, store) => {
+      acc.set(store.name, (acc.get(store.name) ?? 0) + 1);
+      return acc;
+    }, new Map<string, number>());
 
-    if (existing) {
-      return existing.id;
-    }
+    return this.prisma.$transaction(async (tx) => {
+      await tx.staffChatChannel.updateMany({
+        where: { tenantId, name: 'Вся сеть', isDefault: true },
+        data: { isDefault: false },
+      });
 
-    const created = await this.prisma.staffChatChannel.upsert({
-      where: {
-        tenantId_name: {
-          tenantId,
-          name: 'Вся сеть',
-        },
-      },
-      create: {
-        tenantId,
-        name: 'Вся сеть',
-        description: 'Операционные объявления и сообщения для всей сети.',
-        scope: 'NETWORK',
-        isDefault: true,
-      },
-      update: {
-        isDefault: true,
-        isArchived: false,
-        scope: 'NETWORK',
-      },
-      select: { id: true },
+      let primaryChannelId: string | null = null;
+
+      for (const defaultChannel of defaultNetworkChannels) {
+        const channel = await tx.staffChatChannel.upsert({
+          where: {
+            tenantId_name: {
+              tenantId,
+              name: defaultChannel.name,
+            },
+          },
+          create: {
+            tenantId,
+            name: defaultChannel.name,
+            description: defaultChannel.description,
+            scope: 'NETWORK',
+            isDefault: true,
+          },
+          update: {
+            description: defaultChannel.description,
+            isDefault: true,
+            isArchived: false,
+            scope: 'NETWORK',
+            storeId: null,
+            roleScope: null,
+          },
+          select: { id: true },
+        });
+
+        if (defaultChannel.name === primaryDefaultChannelName) {
+          primaryChannelId = channel.id;
+        }
+      }
+
+      for (const store of stores) {
+        const name = this.buildStoreChannelName(
+          store.name,
+          (storeNameCounts.get(store.name) ?? 0) > 1 ? store.id : null,
+        );
+        const description = `Операционный канал клуба ${store.name}.`;
+        const existing = await tx.staffChatChannel.findFirst({
+          where: {
+            tenantId,
+            scope: 'STORE',
+            storeId: store.id,
+            isDefault: true,
+          },
+          select: { id: true },
+        });
+
+        if (existing) {
+          await tx.staffChatChannel.update({
+            where: { id: existing.id },
+            data: {
+              name,
+              description,
+              isDefault: true,
+              isArchived: false,
+              scope: 'STORE',
+              roleScope: null,
+            },
+          });
+          continue;
+        }
+
+        await tx.staffChatChannel.upsert({
+          where: {
+            tenantId_name: {
+              tenantId,
+              name,
+            },
+          },
+          create: {
+            tenantId,
+            name,
+            description,
+            scope: 'STORE',
+            storeId: store.id,
+            isDefault: true,
+          },
+          update: {
+            description,
+            scope: 'STORE',
+            storeId: store.id,
+            roleScope: null,
+            isDefault: true,
+            isArchived: false,
+          },
+          select: { id: true },
+        });
+      }
+
+      return primaryChannelId;
     });
-
-    return created.id;
   }
 
   private async buildAccessibleChannelWhere(
@@ -501,6 +648,7 @@ export class StaffTeamChatService {
         { scope: 'NETWORK' },
         storeChannelWhere,
         { scope: 'ROLE', roleScope: { in: roleScopeValues } },
+        { scope: 'CUSTOM', members: { some: { userId: user.id } } },
       ],
     };
   }
@@ -513,7 +661,11 @@ export class StaffTeamChatService {
     const accessWhere = await this.buildAccessibleChannelWhere(user, tenantId);
     const targetId =
       this.normalizeOptionalString(channelId) ??
-      (await this.ensureDefaultChannel(tenantId));
+      (await this.ensureDefaultChannels(tenantId));
+
+    if (!targetId) {
+      throw new NotFoundException('Chat channel not found');
+    }
 
     const channel = await this.prisma.staffChatChannel.findFirst({
       where: {
@@ -625,6 +777,31 @@ export class StaffTeamChatService {
     return store.id;
   }
 
+  private async resolveChannelMemberUserIds(
+    tenantId: string,
+    values: string[] | null | undefined,
+    creatorUserId: string,
+  ) {
+    const requestedIds = Array.isArray(values)
+      ? values
+          .map((value) => this.normalizeOptionalString(value))
+          .filter((value): value is string => Boolean(value))
+      : [];
+    const ids = Array.from(new Set([creatorUserId, ...requestedIds]));
+
+    const users = await this.prisma.user.findMany({
+      where: { tenantId, isActive: true, id: { in: ids } },
+      select: { id: true },
+    });
+    const foundIds = new Set(users.map((item) => item.id));
+
+    if (ids.some((id) => !foundIds.has(id))) {
+      throw new BadRequestException('Channel members must be active users');
+    }
+
+    return ids;
+  }
+
   private async resolveMessageId(
     tenantId: string,
     channelId: string,
@@ -707,6 +884,15 @@ export class StaffTeamChatService {
     return accesses.map((access) => access.storeId);
   }
 
+  private buildStoreChannelName(storeName: string, storeId?: string | null) {
+    const suffix = storeId ? ` (${storeId.slice(0, 8)})` : '';
+    return this.normalizeRequiredString(
+      `Клуб: ${storeName}${suffix}`,
+      'Store channel',
+      80,
+    );
+  }
+
   private toChannelResponse(
     channel: StaffChatChannelRow,
     stats?: ChannelStats,
@@ -723,6 +909,7 @@ export class StaffTeamChatService {
       updatedAt: channel.updatedAt.toISOString(),
       store: channel.store,
       createdByUser: channel.createdByUser,
+      members: channel.members.map((member) => member.user),
       messagesCount: stats?.messagesCount ?? 0,
       unreadCount: stats?.unreadCount ?? 0,
       pinnedCount: stats?.pinnedCount ?? 0,

@@ -340,8 +340,9 @@ Acceptance criteria:
 
 Goal: give the club team a fast internal communication layer without introducing full realtime messenger infrastructure too early.
 
-- Started: build `/staff/team-chat` as a tenant-scoped operational feed with channels, messages, pinned announcements, read receipts, club/role context, and a simple refresh workflow.
-- Started: add persistent `StaffChatChannel`, `StaffChatMessage`, and `StaffChatReadReceipt` models so the first feed can later grow into a realtime chat without changing the data foundation.
+- Done: build `/staff/team-chat` as a tenant-scoped operational feed with channels, messages, pinned announcements, read receipts, club/role context, and a simple refresh workflow.
+- Done: add persistent `StaffChatChannel`, `StaffChatMessage`, `StaffChatReadReceipt`, and `StaffChatChannelMember` models so the first feed can later grow into a realtime chat without changing the data foundation.
+- Done: team chat now creates default channels for `Информация и объявления`, `Техническая поддержка`, `Общение`, and one default club channel per store; custom channels can be created with selected employee members.
 - Done: chat messages can now be turned into staff tasks directly from `/staff/team-chat`; the task keeps the original message text, channel/store context, priority, deadline, and `source=team_chat` metadata in labels.
 - Done: failed checklist submissions now create a team-chat incident in the default network channel with checklist, club, responsible user, score, failed-item summary, and a link back to checklist filtering.
 - Next: connect chat context to shift incidents and critical dashboard signals.

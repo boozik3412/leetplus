@@ -336,6 +336,22 @@ Acceptance criteria:
 - A manager sees completion status, overdue tasks, and task history.
 - Existing Langame sync does not overwrite LeetPlus-owned staff/task data.
 
+### MVP 1A. Inside-Team Operational Feed
+
+Goal: give the club team a fast internal communication layer without introducing full realtime messenger infrastructure too early.
+
+- Started: build `/staff/team-chat` as a tenant-scoped operational feed with channels, messages, pinned announcements, read receipts, club/role context, and a simple refresh workflow.
+- Started: add persistent `StaffChatChannel`, `StaffChatMessage`, and `StaffChatReadReceipt` models so the first feed can later grow into a realtime chat without changing the data foundation.
+- Next: connect messages to staff tasks, checklist runs, shift incidents, and critical dashboard signals.
+- Later: add WebSocket/SSE realtime delivery, file attachments, push/browser notifications, message mentions, and external messenger bridges only after access rules and notification policy are stable.
+
+Acceptance criteria:
+
+- A manager can post an operational announcement to the whole network, a club channel, or a role channel.
+- Employees with staff access can read the feed, see pinned items, and mark channel messages as read.
+- Messages preserve author, tenant, channel, store context, created time, priority, and pinned state.
+- The first implementation remains usable without Telegram/MAX/VDS changes or additional infrastructure.
+
 ### MVP 2. Shift Checklists And Regulations
 
 Status: started. Goal: turn daily operating standards into controlled execution.

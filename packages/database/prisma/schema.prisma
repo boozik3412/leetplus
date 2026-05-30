@@ -153,6 +153,9 @@ model Tenant {
   staffTaskAuditEvents         StaffTaskAuditEvent[]
   staffShiftRegulations        StaffShiftRegulation[]
   staffChecklistRuns           StaffChecklistRun[]
+  staffChatChannels            StaffChatChannel[]
+  staffChatMessages            StaffChatMessage[]
+  staffChatReadReceipts        StaffChatReadReceipt[]
   guestSavedFilters            GuestSavedFilter[]
   guestAudiences               GuestAudience[]
   guestAudienceMembers         GuestAudienceMember[]
@@ -202,6 +205,9 @@ model User {
   storeAccesses                       UserStoreAccess[]
   createdUserInvites                  UserInvite[]                 @relation("UserInviteCreatedBy")
   acceptedUserInvites                 UserInvite[]                 @relation("UserInviteAcceptedBy")
+  createdStaffChatChannels            StaffChatChannel[]           @relation("StaffChatChannelCreatedBy")
+  authoredStaffChatMessages           StaffChatMessage[]           @relation("StaffChatMessageAuthor")
+  staffChatReadReceipts               StaffChatReadReceipt[]
 
   @@index([tenantId])
   @@index([tenantId, role])
@@ -332,6 +338,8 @@ model Store {
   staffTasks                 StaffTask[]
   staffShiftRegulations      StaffShiftRegulation[]
   staffChecklistRuns         StaffChecklistRun[]
+  staffChatChannels          StaffChatChannel[]
+  staffChatMessages          StaffChatMessage[]
   userAccesses               UserStoreAccess[]
 
   @@unique([tenantId, externalProvider, externalDomain, externalClubId])
@@ -1422,6 +1430,76 @@ model StaffChecklistRun {
   @@index([createdByUserId], map: "staff_checklist_run_created_by_idx")
   @@index([assignedToUserId], map: "staff_checklist_run_assigned_to_idx")
   @@index([reviewedByUserId], map: "staff_checklist_run_reviewed_by_idx")
+}
+
+model StaffChatChannel {
+  id              String   @id @default(uuid())
+  tenantId        String
+  createdByUserId String?
+  storeId         String?
+  name            String
+  description     String?
+  scope           String   @default("NETWORK")
+  roleScope       String?
+  isDefault       Boolean  @default(false)
+  isArchived      Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant        Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdByUser User?                  @relation("StaffChatChannelCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  store         Store?                 @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  messages      StaffChatMessage[]
+  readReceipts  StaffChatReadReceipt[]
+
+  @@unique([tenantId, name], map: "staff_chat_channel_tenant_name_unique")
+  @@index([tenantId, isArchived, scope], map: "staff_chat_channel_scope_idx")
+  @@index([storeId], map: "staff_chat_channel_store_idx")
+  @@index([createdByUserId], map: "staff_chat_channel_created_by_idx")
+}
+
+model StaffChatMessage {
+  id            String   @id @default(uuid())
+  tenantId      String
+  channelId     String
+  authorUserId  String?
+  storeId       String?
+  body          String
+  kind          String   @default("MESSAGE")
+  priority      String   @default("NORMAL")
+  isPinned      Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  tenant       Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  channel      StaffChatChannel       @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  authorUser   User?                  @relation("StaffChatMessageAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
+  store        Store?                 @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  readReceipts StaffChatReadReceipt[]
+
+  @@index([tenantId, createdAt], map: "staff_chat_message_tenant_created_idx")
+  @@index([tenantId, isPinned, createdAt], map: "staff_chat_message_pinned_idx")
+  @@index([channelId, createdAt], map: "staff_chat_message_channel_created_idx")
+  @@index([authorUserId], map: "staff_chat_message_author_idx")
+  @@index([storeId], map: "staff_chat_message_store_idx")
+}
+
+model StaffChatReadReceipt {
+  id        String   @id @default(uuid())
+  tenantId  String
+  channelId String
+  messageId String
+  userId    String
+  readAt    DateTime @default(now())
+
+  tenant  Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  channel StaffChatChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  message StaffChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId], map: "staff_chat_read_receipt_message_user_unique")
+  @@index([tenantId, userId, readAt], map: "staff_chat_read_receipt_user_idx")
+  @@index([channelId, userId], map: "staff_chat_read_receipt_channel_user_idx")
 }
 
 model GuestSavedFilter {

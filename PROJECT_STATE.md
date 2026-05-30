@@ -67,6 +67,7 @@ Connected production Langame sources:
 - Products/stores/directories: inline editing, multi-club filters, exports, manual store name preservation.
 - Guest module: first production read-only layer is live, including data foundation sync, guest analytics dashboard, full guest report, guest card, mini CRM fields, first staff-control report, and PC-count based load calculation.
 - Staff operations: Stage 8 has started with `STAFF_OPERATIONS_MODULE_TZ.md`, `/staff/tasks` for tenant-scoped operational tasks, `/staff/shift-regulations` for constructing shift regulations, and `/staff/checklists` for first execution runs with required answers, evidence, review, and failed-item follow-up tasks.
+- Inside-team communication: `/staff/team-chat` is the first tenant-scoped operational feed for staff channels, announcements, incidents, pinned messages, and read receipts without realtime infrastructure yet.
 - Access control: `/users` manages tenant user accounts, system roles, tenant-specific custom roles, permission checkboxes, active status, password resets, one-time registration invite links, and whole-network or selected-club access scopes, including a standards manager role for training, regulations, checklists, administrator control, and attestations.
 - Platform administration: `/administration` is a separate platform-admin-only control plane for tenants, Langame sources, and recent sync jobs across all tenants; legacy `/admin` redirects there.
 - Sync/admin UX: `/settings` is for Langame connection settings only; `/sync` is the dedicated synchronization page with one combined sync action for assortment/sales/revenue plus guests.
@@ -87,6 +88,7 @@ Connected production Langame sources:
 - Added tenant-specific custom roles in `/users`: owners/system admins can create club roles, choose section/action permissions, assign them to accounts, and the API guard checks those permissions for protected route groups.
 - Added one-time registration invite links in `/users`: owners/system admins can preconfigure a system/custom role plus whole-network or selected-club scope, copy the link, and the employee completes registration through `/register?invite=...`.
 - Added a separate `Администрирование` navigation block for platform admins and moved the platform control plane from `/admin` under assortment to `/administration`.
+- Started the inside-team operational feed: `StaffChatChannel`, `StaffChatMessage`, `StaffChatReadReceipt`, API `/staff/team-chat`, web proxies, sidebar entry, and `/staff/team-chat` workspace for channels, messages, pins, read state, and club/role context.
 - Added recommendation workflow state: persisted statuses, responsible roles, financial effect, and an interactive recommendations queue.
 - Fixed dashboard trend card sizing behavior.
 - Preserved manual store names during sync.

@@ -20,6 +20,8 @@ import {
   type UserAccessRoleAccount,
   type UserAccessRoleDto,
   type UserAccountsResponse,
+  type UserInviteAccount,
+  type UserInviteDto,
 } from './users.service';
 
 @Controller('users')
@@ -41,6 +43,14 @@ export class UsersController {
     @Body() dto: UserAccountDto,
   ): Promise<UserAccount> {
     return this.usersService.createUser(user, dto);
+  }
+
+  @Post('invites')
+  createInvite(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: UserInviteDto,
+  ): Promise<UserInviteAccount> {
+    return this.usersService.createInvite(user, dto);
   }
 
   @Patch(':id')

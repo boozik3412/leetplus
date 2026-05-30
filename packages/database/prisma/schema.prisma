@@ -157,6 +157,7 @@ model Tenant {
   guestAudiences               GuestAudience[]
   guestAudienceMembers         GuestAudienceMember[]
   userAccessRoles              UserAccessRole[]
+  userInvites                  UserInvite[]
 }
 
 model User {
@@ -199,6 +200,8 @@ model User {
   guestSavedFilters                   GuestSavedFilter[]
   guestAudiences                      GuestAudience[]
   storeAccesses                       UserStoreAccess[]
+  createdUserInvites                  UserInvite[]                 @relation("UserInviteCreatedBy")
+  acceptedUserInvites                 UserInvite[]                 @relation("UserInviteAcceptedBy")
 
   @@index([tenantId])
   @@index([tenantId, role])
@@ -217,9 +220,39 @@ model UserAccessRole {
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   users  User[]
+  invites UserInvite[]
 
   @@unique([tenantId, name])
   @@index([tenantId, createdAt])
+}
+
+model UserInvite {
+  id               String    @id @default(uuid())
+  tenantId         String
+  email            String?
+  fullName         String?
+  role             UserRole
+  customRoleId     String?
+  storeIds         String[]  @default([])
+  tokenHash        String    @unique
+  expiresAt        DateTime
+  acceptedAt       DateTime?
+  acceptedByUserId String?
+  createdByUserId  String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  tenant     Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customRole UserAccessRole? @relation(fields: [customRoleId], references: [id], onDelete: SetNull)
+  createdBy  User?           @relation("UserInviteCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  acceptedBy User?           @relation("UserInviteAcceptedBy", fields: [acceptedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, acceptedAt])
+  @@index([expiresAt])
+  @@index([customRoleId])
+  @@index([createdByUserId])
+  @@index([acceptedByUserId])
 }
 
 model UserStoreAccess {

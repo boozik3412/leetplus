@@ -6,6 +6,12 @@ export type RegisterDto = {
   fullName?: string;
 };
 
+export type AcceptUserInviteDto = {
+  email?: string;
+  password?: string;
+  fullName?: string;
+};
+
 export type LoginDto = {
   email: string;
   password: string;

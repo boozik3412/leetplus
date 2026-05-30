@@ -5,6 +5,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { createHash, randomBytes } from 'node:crypto';
 import { Prisma, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import {
@@ -126,8 +128,25 @@ const userAccountInclude = {
   },
 } satisfies Prisma.UserInclude;
 
+const userInviteInclude = {
+  customRole: {
+    select: {
+      id: true,
+      name: true,
+      description: true,
+      permissions: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  },
+} satisfies Prisma.UserInviteInclude;
+
 type UserAccountRow = Prisma.UserGetPayload<{
   include: typeof userAccountInclude;
+}>;
+
+type UserInviteRow = Prisma.UserInviteGetPayload<{
+  include: typeof userInviteInclude;
 }>;
 
 type UserAccessRoleRow = {
@@ -171,11 +190,27 @@ export type UserAccessRoleAccount = {
   updatedAt: string;
 };
 
+export type UserInviteAccount = {
+  id: string;
+  email: string | null;
+  fullName: string | null;
+  role: UserRole;
+  customRoleId: string | null;
+  customRole: UserAccessRoleAccount | null;
+  scope: 'NETWORK' | 'STORES';
+  stores: UserAccountStore[];
+  expiresAt: string;
+  acceptedAt: string | null;
+  createdAt: string;
+  registrationUrl?: string;
+};
+
 export type UserAccountsResponse = {
   users: UserAccount[];
   stores: UserAccountStore[];
   roleOptions: typeof roleOptions;
   customRoles: UserAccessRoleAccount[];
+  invites: UserInviteAccount[];
   capabilityOptions: typeof accessCapabilityCatalog;
 };
 
@@ -195,17 +230,27 @@ export type UserAccessRoleDto = {
   permissions?: string[];
 };
 
+export type UserInviteDto = {
+  email?: string | null;
+  fullName?: string | null;
+  role?: UserRole;
+  customRoleId?: string | null;
+  storeIds?: string[];
+  expiresInDays?: number;
+};
+
 @Injectable()
 export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly passwordService: PasswordService,
     private readonly tenantContextService: TenantContextService,
+    private readonly configService: ConfigService,
   ) {}
 
   async getUsers(user: AuthenticatedUser): Promise<UserAccountsResponse> {
     const { tenantId } = await this.tenantContextService.resolve(user);
-    const [users, stores, customRoles] = await Promise.all([
+    const [users, stores, customRoles, invites] = await Promise.all([
       this.prisma.user.findMany({
         where: { tenantId },
         include: userAccountInclude,
@@ -220,13 +265,25 @@ export class UsersService {
         where: { tenantId },
         orderBy: [{ name: 'asc' }, { createdAt: 'asc' }],
       }),
+      this.prisma.userInvite.findMany({
+        where: {
+          tenantId,
+          acceptedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+        include: userInviteInclude,
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+      }),
     ]);
+    const storesById = this.createStoreMap(stores);
 
     return {
       users: users.map((account) => this.toAccount(account)),
       stores,
       roleOptions,
       customRoles: customRoles.map((role) => this.toAccessRole(role)),
+      invites: invites.map((invite) => this.toInvite(invite, storesById)),
       capabilityOptions: accessCapabilityCatalog,
     };
   }
@@ -282,6 +339,58 @@ export class UsersService {
     });
 
     return this.toAccount(created);
+  }
+
+  async createInvite(
+    actor: AuthenticatedUser,
+    dto: UserInviteDto,
+  ): Promise<UserInviteAccount> {
+    const { tenantId } = await this.tenantContextService.resolve(actor);
+    const email = this.normalizeOptionalEmail(dto.email);
+    const fullName = this.normalizeNullableText(dto.fullName);
+    const customRoleId = this.normalizeOptionalId(dto.customRoleId);
+    const role = customRoleId
+      ? UserRole.CLUB_ADMINISTRATOR
+      : this.parseRole(dto.role);
+    const expiresAt = this.resolveInviteExpiry(dto.expiresInDays);
+
+    const [existingUser, storeIds, customRole, stores] = await Promise.all([
+      email ? this.prisma.user.findUnique({ where: { email } }) : null,
+      this.resolveStoreIds(tenantId, dto.storeIds),
+      this.resolveCustomRole(tenantId, customRoleId),
+      this.prisma.store.findMany({
+        where: { tenantId },
+        select: { id: true, name: true, isActive: true },
+        orderBy: { name: 'asc' },
+      }),
+    ]);
+    this.assertCanAssignAccountRole(actor, role, customRole);
+
+    if (existingUser) {
+      throw new ConflictException('User with this email already exists');
+    }
+
+    const rawToken = randomBytes(32).toString('base64url');
+    const invite = await this.prisma.userInvite.create({
+      data: {
+        tenantId,
+        email,
+        fullName,
+        role,
+        customRoleId: customRole?.id ?? null,
+        storeIds,
+        tokenHash: this.hashInviteToken(rawToken),
+        expiresAt,
+        createdByUserId: actor.id,
+      },
+      include: userInviteInclude,
+    });
+
+    return this.toInvite(
+      invite,
+      this.createStoreMap(stores),
+      this.buildInviteUrl(rawToken),
+    );
   }
 
   async updateUser(
@@ -603,6 +712,17 @@ export class UsersService {
     return email.trim().toLowerCase();
   }
 
+  private normalizeOptionalEmail(email: unknown): string | null {
+    const normalizedEmail = this.normalizeEmail(email);
+
+    if (!normalizedEmail) {
+      return null;
+    }
+
+    this.assertEmail(normalizedEmail);
+    return normalizedEmail;
+  }
+
   private normalizeNullableText(value: unknown): string | null {
     if (typeof value !== 'string') {
       return null;
@@ -624,6 +744,30 @@ export class UsersService {
         'Password must contain at least 8 characters',
       );
     }
+  }
+
+  private resolveInviteExpiry(value: unknown): Date {
+    const days =
+      typeof value === 'number' && Number.isFinite(value) ? value : 7;
+    const normalizedDays = Math.min(30, Math.max(1, Math.floor(days)));
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + normalizedDays);
+    return expiresAt;
+  }
+
+  private hashInviteToken(token: string): string {
+    return createHash('sha256').update(token).digest('hex');
+  }
+
+  private buildInviteUrl(token: string): string {
+    const configuredBase =
+      this.configService.get<string>('WEB_URL') ??
+      this.configService.get<string>('FRONTEND_URL') ??
+      this.configService.get<string>('NEXT_PUBLIC_WEB_URL') ??
+      'https://leetplus.ru';
+    const base = configuredBase.replace(/\/+$/, '');
+
+    return `${base}/register?invite=${encodeURIComponent(token)}`;
   }
 
   private async resolveStoreIds(tenantId: string, storeIds: unknown) {
@@ -658,6 +802,10 @@ export class UsersService {
     }
 
     return uniqueIds;
+  }
+
+  private createStoreMap(stores: UserAccountStore[]) {
+    return new Map(stores.map((store) => [store.id, store] as const));
   }
 
   private async replaceStoreAccesses(
@@ -710,6 +858,34 @@ export class UsersService {
       permissions: normalizeCapabilities(role.permissions),
       createdAt: role.createdAt.toISOString(),
       updatedAt: role.updatedAt.toISOString(),
+    };
+  }
+
+  private toInvite(
+    invite: UserInviteRow,
+    storesById: Map<string, UserAccountStore>,
+    registrationUrl?: string,
+  ): UserInviteAccount {
+    const stores = invite.storeIds
+      .map((storeId) => storesById.get(storeId))
+      .filter((store): store is UserAccountStore => Boolean(store))
+      .sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+
+    return {
+      id: invite.id,
+      email: invite.email,
+      fullName: invite.fullName,
+      role: invite.role,
+      customRoleId: invite.customRoleId,
+      customRole: invite.customRole
+        ? this.toAccessRole(invite.customRole)
+        : null,
+      scope: stores.length > 0 ? 'STORES' : 'NETWORK',
+      stores,
+      expiresAt: invite.expiresAt.toISOString(),
+      acceptedAt: invite.acceptedAt?.toISOString() ?? null,
+      createdAt: invite.createdAt.toISOString(),
+      ...(registrationUrl ? { registrationUrl } : {}),
     };
   }
 }

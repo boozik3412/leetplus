@@ -3,11 +3,13 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
+import { getRoleLabel, type UserRole } from "@/lib/roles";
 
 type AuthMode = "login" | "register";
 
 type AuthFormProps = {
   mode: AuthMode;
+  inviteToken?: string | null;
 };
 
 type FormState = {
@@ -36,6 +38,29 @@ type LangameSettingsResponse = {
   }>;
 };
 
+type InvitePreview = {
+  email: string | null;
+  fullName: string | null;
+  role: UserRole;
+  customRole: {
+    id: string;
+    name: string;
+    description: string | null;
+    permissions: string[];
+  } | null;
+  tenant: {
+    name: string;
+    slug: string;
+  };
+  scope: "NETWORK" | "STORES";
+  stores: Array<{
+    id: string;
+    name: string;
+    isActive: boolean;
+  }>;
+  expiresAt: string;
+};
+
 function getErrorMessage(data: unknown) {
   if (
     data &&
@@ -49,15 +74,18 @@ function getErrorMessage(data: unknown) {
   return "Не удалось выполнить запрос";
 }
 
-export function AuthForm({ mode }: AuthFormProps) {
+export function AuthForm({ mode, inviteToken }: AuthFormProps) {
   const router = useRouter();
+  const isRegister = mode === "register";
+  const isInviteRegister = isRegister && Boolean(inviteToken);
   const [form, setForm] = useState<FormState>(initialState);
   const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [invite, setInvite] = useState<InvitePreview | null>(null);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [isInviteLoading, setIsInviteLoading] = useState(isInviteRegister);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRedirecting, setIsRedirecting] = useState(false);
-
-  const isRegister = mode === "register";
 
   useEffect(() => {
     if (isRegister) {
@@ -76,14 +104,76 @@ export function AuthForm({ mode }: AuthFormProps) {
     return () => window.clearTimeout(timeoutId);
   }, [isRegister]);
 
+  useEffect(() => {
+    if (!isInviteRegister || !inviteToken) {
+      return;
+    }
+
+    let isCancelled = false;
+
+    fetch(`/api/auth/invites/${encodeURIComponent(inviteToken)}`, {
+      cache: "no-store",
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          const data = (await response.json()) as unknown;
+          throw new Error(getErrorMessage(data));
+        }
+
+        return response.json() as Promise<InvitePreview>;
+      })
+      .then((loadedInvite) => {
+        if (isCancelled) {
+          return;
+        }
+
+        setInvite(loadedInvite);
+        setForm((current) => ({
+          ...current,
+          email: loadedInvite.email ?? current.email,
+          fullName: loadedInvite.fullName ?? current.fullName,
+        }));
+      })
+      .catch((fetchError: unknown) => {
+        if (isCancelled) {
+          return;
+        }
+
+        setInviteError(
+          fetchError instanceof Error
+            ? fetchError.message
+            : "Не удалось открыть приглашение",
+        );
+      })
+      .finally(() => {
+        if (!isCancelled) {
+          setIsInviteLoading(false);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [inviteToken, isInviteRegister]);
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
     setIsSubmitting(true);
     let keepLoading = false;
 
-    const endpoint = isRegister ? "/api/auth/register" : "/api/auth/login";
-    const payload = isRegister
+    const endpoint = isInviteRegister
+      ? `/api/auth/invites/${encodeURIComponent(inviteToken ?? "")}/accept`
+      : isRegister
+        ? "/api/auth/register"
+        : "/api/auth/login";
+    const payload = isInviteRegister
+      ? {
+          email: form.email,
+          password: form.password,
+          fullName: form.fullName || undefined,
+        }
+      : isRegister
       ? {
           email: form.email,
           password: form.password,
@@ -125,7 +215,9 @@ export function AuthForm({ mode }: AuthFormProps) {
       keepLoading = true;
       setIsRedirecting(true);
       router.push(
-        isRegister
+        isInviteRegister
+          ? "/dashboard"
+          : isRegister
           ? `/verify-email?email=${encodeURIComponent(form.email)}`
           : "/dashboard",
       );
@@ -141,13 +233,43 @@ export function AuthForm({ mode }: AuthFormProps) {
 
   return (
     <>
-      {isRedirecting ? <AuthRedirectOverlay isRegister={isRegister} /> : null}
+      {isRedirecting ? (
+        <AuthRedirectOverlay
+          isRegister={isRegister}
+          isInviteRegister={isInviteRegister}
+        />
+      ) : null}
       <form onSubmit={handleSubmit} className="space-y-4">
+      {isInviteRegister ? (
+        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm text-emerald-950">
+          {isInviteLoading ? (
+            <p>Проверяем ссылку приглашения...</p>
+          ) : inviteError ? (
+            <p>{inviteError}</p>
+          ) : invite ? (
+            <>
+              <p className="font-semibold">
+                Приглашение в {invite.tenant.name}
+              </p>
+              <p className="mt-1 text-emerald-800">
+                Роль: {invite.customRole?.name ?? getRoleLabel(invite.role)}
+              </p>
+              <p className="mt-1 text-emerald-800">
+                Доступ:{" "}
+                {invite.scope === "NETWORK"
+                  ? "вся сеть"
+                  : invite.stores.map((store) => store.name).join(", ")}
+              </p>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+
       {isRegister ? (
         <>
           <label className="block">
             <span className="text-sm font-medium text-zinc-700">
-              Имя владельца
+              {isInviteRegister ? "Имя сотрудника" : "Имя владельца"}
             </span>
             <input
               name="name"
@@ -164,50 +286,54 @@ export function AuthForm({ mode }: AuthFormProps) {
             />
           </label>
 
-          <label className="block">
-            <span className="text-sm font-medium text-zinc-700">
-              Организация
-            </span>
-            <input
-              name="organization"
-              autoComplete="organization"
-              value={form.organizationName}
-              onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  organizationName: event.target.value,
-                }))
-              }
-              className="mt-1 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
-              placeholder="Cyber Club A"
-              required
-            />
-          </label>
+          {!isInviteRegister ? (
+            <>
+              <label className="block">
+                <span className="text-sm font-medium text-zinc-700">
+                  Организация
+                </span>
+                <input
+                  name="organization"
+                  autoComplete="organization"
+                  value={form.organizationName}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      organizationName: event.target.value,
+                    }))
+                  }
+                  className="mt-1 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+                  placeholder="Cyber Club A"
+                  required
+                />
+              </label>
 
-          <label className="block">
-            <span className="text-sm font-medium text-zinc-700">
-              Поддомен
-            </span>
-            <div className="mt-1 flex rounded-md border border-zinc-300 bg-white focus-within:border-zinc-500 focus-within:ring-2 focus-within:ring-zinc-200">
-              <input
-                name="tenantSlug"
-                autoComplete="off"
-                value={form.tenantSlug}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    tenantSlug: event.target.value,
-                  }))
-                }
-                className="min-w-0 flex-1 rounded-l-md px-3 py-2 text-sm outline-none"
-                placeholder="club-a"
-                required
-              />
-              <span className="rounded-r-md border-l border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-500">
-                .leetplus.ru
-              </span>
-            </div>
-          </label>
+              <label className="block">
+                <span className="text-sm font-medium text-zinc-700">
+                  Поддомен
+                </span>
+                <div className="mt-1 flex rounded-md border border-zinc-300 bg-white focus-within:border-zinc-500 focus-within:ring-2 focus-within:ring-zinc-200">
+                  <input
+                    name="tenantSlug"
+                    autoComplete="off"
+                    value={form.tenantSlug}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        tenantSlug: event.target.value,
+                      }))
+                    }
+                    className="min-w-0 flex-1 rounded-l-md px-3 py-2 text-sm outline-none"
+                    placeholder="club-a"
+                    required
+                  />
+                  <span className="rounded-r-md border-l border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-500">
+                    .leetplus.ru
+                  </span>
+                </div>
+              </label>
+            </>
+          ) : null}
         </>
       ) : null}
 
@@ -218,11 +344,14 @@ export function AuthForm({ mode }: AuthFormProps) {
           type="email"
           autoComplete="email"
           value={form.email}
+          readOnly={Boolean(isInviteRegister && invite?.email)}
           onChange={(event) =>
             setForm((current) => ({ ...current, email: event.target.value }))
           }
-          className="mt-1 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
-          placeholder="owner@club-a.leetplus.ru"
+          className="mt-1 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 read-only:bg-zinc-50 read-only:text-zinc-500"
+          placeholder={
+            isInviteRegister ? "employee@club.ru" : "owner@club-a.leetplus.ru"
+          }
           required
         />
       </label>
@@ -271,16 +400,24 @@ export function AuthForm({ mode }: AuthFormProps) {
 
         <button
           type="submit"
-          disabled={isSubmitting || isRedirecting}
+          disabled={
+            isSubmitting ||
+            isRedirecting ||
+            (isInviteRegister && (isInviteLoading || Boolean(inviteError)))
+          }
           className="w-full rounded-md bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400"
         >
           {isRedirecting
-            ? isRegister
+            ? isInviteRegister
+              ? "Открываем рабочий кабинет..."
+              : isRegister
               ? "Открываем подтверждение..."
               : "Загружаем дашборд..."
             : isSubmitting
               ? "Отправка..."
-              : isRegister
+              : isInviteRegister
+                ? "Завершить регистрацию"
+                : isRegister
                 ? "Создать организацию"
                 : "Войти"}
         </button>
@@ -299,16 +436,28 @@ export function AuthForm({ mode }: AuthFormProps) {
   );
 }
 
-function AuthRedirectOverlay({ isRegister }: { isRegister: boolean }) {
+function AuthRedirectOverlay({
+  isRegister,
+  isInviteRegister,
+}: {
+  isRegister: boolean;
+  isInviteRegister: boolean;
+}) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/70 px-6 backdrop-blur-sm">
       <div className="w-full max-w-sm rounded-lg border border-zinc-800 bg-zinc-950 px-6 py-6 text-center text-zinc-100 shadow-xl">
         <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-emerald-900 border-t-emerald-400" />
         <p className="mt-4 text-base font-semibold">
-          {isRegister ? "Открываем подтверждение" : "Вход выполнен"}
+          {isInviteRegister
+            ? "Регистрация завершена"
+            : isRegister
+              ? "Открываем подтверждение"
+              : "Вход выполнен"}
         </p>
         <p className="mt-2 text-sm leading-6 text-zinc-400">
-          {isRegister
+          {isInviteRegister
+            ? "Готовим рабочий кабинет с уже настроенной ролью и доступами."
+            : isRegister
             ? "Подготавливаем страницу подтверждения email."
             : "Загружаем LeetPlus и актуальные данные дашборда."}
         </p>

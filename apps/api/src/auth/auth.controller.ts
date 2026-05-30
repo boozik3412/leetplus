@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { CurrentUser } from './current-user.decorator';
 import type {
   ConfirmEmailDto,
+  AcceptUserInviteDto,
   LoginDto,
   RegisterDto,
   ResendEmailVerificationDto,
@@ -17,6 +18,19 @@ export class AuthController {
   @Post('register')
   register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);
+  }
+
+  @Get('invites/:token')
+  getInvite(@Param('token') token: string) {
+    return this.authService.getInvite(token);
+  }
+
+  @Post('invites/:token/accept')
+  acceptInvite(
+    @Param('token') token: string,
+    @Body() dto: AcceptUserInviteDto,
+  ) {
+    return this.authService.acceptInvite(token, dto);
   }
 
   @Post('login')

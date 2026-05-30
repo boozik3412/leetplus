@@ -34,6 +34,21 @@ export type UserAccessRole = {
   updatedAt: string;
 };
 
+export type UserInvite = {
+  id: string;
+  email: string | null;
+  fullName: string | null;
+  role: UserRole;
+  customRoleId: string | null;
+  customRole: UserAccessRole | null;
+  scope: "NETWORK" | "STORES";
+  stores: UserAccountStore[];
+  expiresAt: string;
+  acceptedAt: string | null;
+  createdAt: string;
+  registrationUrl?: string;
+};
+
 export type UserRoleOption = {
   role: UserRole;
   label: string;
@@ -51,6 +66,7 @@ export type UserAccountsResponse = {
   stores: UserAccountStore[];
   roleOptions: UserRoleOption[];
   customRoles: UserAccessRole[];
+  invites: UserInvite[];
   capabilityOptions: CapabilityOption[];
 };
 

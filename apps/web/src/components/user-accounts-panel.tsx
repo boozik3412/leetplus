@@ -14,7 +14,10 @@ import type {
   UserAccessRole,
   UserAccountsResponse,
   UserAccountStore,
+  UserInvite,
 } from "@/lib/users";
+
+type AccountFormMode = "account" | "invite";
 
 type FormState = {
   email: string;
@@ -79,6 +82,10 @@ function accountRoleLabel(account: UserAccount) {
   return account.customRole?.name ?? getRoleLabel(account.role);
 }
 
+function inviteRoleLabel(invite: UserInvite) {
+  return invite.customRole?.name ?? getRoleLabel(invite.role);
+}
+
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("ru-RU", {
     day: "2-digit",
@@ -121,7 +128,12 @@ export function UserAccountsPanel({
     : assignableRoles[0] ?? currentUser.role;
   const [users, setUsers] = useState(initialData.users);
   const [customRoles, setCustomRoles] = useState(initialData.customRoles);
+  const [invites, setInvites] = useState(initialData.invites ?? []);
   const [form, setForm] = useState<FormState>(() => createEmptyForm(defaultRole));
+  const [accountFormMode, setAccountFormMode] =
+    useState<AccountFormMode>("account");
+  const [createdInviteUrl, setCreatedInviteUrl] = useState<string | null>(null);
+  const [copyStatus, setCopyStatus] = useState("");
   const [roleForm, setRoleForm] = useState<AccessRoleFormState>(
     createEmptyRoleForm,
   );
@@ -190,13 +202,19 @@ export function UserAccountsPanel({
 
   function startCreate() {
     setSelectedId(null);
+    setAccountFormMode("account");
     setForm(createEmptyForm(defaultRole));
+    setCreatedInviteUrl(null);
+    setCopyStatus("");
     setStatus({ type: "idle", message: "" });
   }
 
   function startEdit(account: UserAccount) {
     setSelectedId(account.id);
+    setAccountFormMode("account");
     setForm(formFromAccount(account));
+    setCreatedInviteUrl(null);
+    setCopyStatus("");
     setStatus({ type: "idle", message: "" });
   }
 
@@ -225,6 +243,19 @@ export function UserAccountsPanel({
       role: value.replace("system:", "") as UserRole,
       customRoleId: null,
     }));
+  }
+
+  async function copyInviteUrl() {
+    if (!createdInviteUrl) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(createdInviteUrl);
+      setCopyStatus("Ссылка скопирована");
+    } catch {
+      setCopyStatus("Скопируйте ссылку из поля вручную");
+    }
   }
 
   function startCreateRole() {
@@ -309,6 +340,8 @@ export function UserAccountsPanel({
     event.preventDefault();
     setIsSaving(true);
     setStatus({ type: "idle", message: "" });
+    setCopyStatus("");
+    setCreatedInviteUrl(null);
 
     const payload = {
       email: form.email,
@@ -319,6 +352,37 @@ export function UserAccountsPanel({
       ...(form.password.trim() ? { password: form.password.trim() } : {}),
       storeIds: form.scope === "STORES" ? form.storeIds : [],
     };
+    if (!selectedUser && accountFormMode === "invite") {
+      const response = await fetch("/api/users/invites", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: form.email || undefined,
+          fullName: form.fullName || undefined,
+          role: form.role,
+          customRoleId: form.customRoleId,
+          storeIds: payload.storeIds,
+          expiresInDays: 7,
+        }),
+      });
+
+      if (!response.ok) {
+        setStatus({ type: "error", message: await readResponseError(response) });
+        setIsSaving(false);
+        return;
+      }
+
+      const invite = (await response.json()) as UserInvite;
+      setInvites((current) => [invite, ...current.filter((item) => item.id !== invite.id)]);
+      setCreatedInviteUrl(invite.registrationUrl ?? null);
+      setStatus({
+        type: "success",
+        message: "Ссылка создана. Передайте ее сотруднику для регистрации.",
+      });
+      setIsSaving(false);
+      return;
+    }
+
     const endpoint = selectedUser ? `/api/users/${selectedUser.id}` : "/api/users";
     const response = await fetch(endpoint, {
       method: selectedUser ? "PATCH" : "POST",
@@ -441,14 +505,46 @@ export function UserAccountsPanel({
           <h2 className="mt-1 text-xl font-semibold">
             {selectedUser
               ? selectedUser.fullName || selectedUser.email
-              : "Новая учетная запись"}
+              : accountFormMode === "invite"
+                ? "Ссылка для регистрации"
+                : "Новая учетная запись"}
           </h2>
           <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-            Роль определяет доступ к разделам LeetPlus. Клубы задают рабочий
-            контур сотрудника и будут использоваться для дальнейшего
-            ограничения операционных данных.
+            {accountFormMode === "invite" && !selectedUser
+              ? "Настройте роль и клубы, создайте ссылку и передайте ее сотруднику. Он сам задаст email и пароль при регистрации."
+              : "Роль определяет доступ к разделам LeetPlus. Клубы задают рабочий контур сотрудника и будут использоваться для дальнейшего ограничения операционных данных."}
           </p>
         </div>
+
+        {!selectedUser ? (
+          <div className="mt-5 inline-flex rounded-md border border-zinc-300 bg-zinc-50 p-1 text-sm dark:border-zinc-700 dark:bg-zinc-900/60">
+            {(
+              [
+                ["account", "Создать вручную"],
+                ["invite", "Ссылка-приглашение"],
+              ] as const
+            ).map(([mode, label]) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => {
+                  setAccountFormMode(mode);
+                  setStatus({ type: "idle", message: "" });
+                  setCreatedInviteUrl(null);
+                  setCopyStatus("");
+                }}
+                className={[
+                  "rounded px-3 py-1.5 font-semibold transition",
+                  accountFormMode === mode
+                    ? "bg-zinc-950 text-white dark:bg-emerald-400 dark:text-zinc-950"
+                    : "text-zinc-500 hover:text-zinc-950 dark:hover:text-zinc-100",
+                ].join(" ")}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        ) : null}
 
         <form onSubmit={saveAccount} className="mt-5 space-y-5">
           <div className="grid gap-3 sm:grid-cols-2">
@@ -457,7 +553,7 @@ export function UserAccountsPanel({
                 Email
               </span>
               <input
-                required
+                required={selectedUser !== null || accountFormMode === "account"}
                 type="email"
                 value={form.email}
                 onChange={(event) =>
@@ -465,6 +561,11 @@ export function UserAccountsPanel({
                     ...current,
                     email: event.target.value,
                   }))
+                }
+                placeholder={
+                  accountFormMode === "invite"
+                    ? "Можно оставить пустым для универсальной ссылки"
+                    : undefined
                 }
                 className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
               />
@@ -579,48 +680,54 @@ export function UserAccountsPanel({
             ) : null}
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
-            <label className="space-y-1">
-              <span className="text-xs font-bold uppercase text-zinc-500">
-                {selectedUser ? "Новый пароль" : "Пароль"}
-              </span>
-              <input
-                required={!selectedUser}
-                type="password"
-                value={form.password}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    password: event.target.value,
-                  }))
-                }
-                placeholder={
-                  selectedUser ? "Оставьте пустым, если не менять" : "От 8 символов"
-                }
-                className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
-              />
-              <span className="block text-xs leading-5 text-zinc-500">
-                Пароль передается сотруднику вручную. Автоотправку письма
-                подключим отдельным SMTP-слоем.
-              </span>
-            </label>
+          {selectedUser || accountFormMode === "account" ? (
+            <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+              <label className="space-y-1">
+                <span className="text-xs font-bold uppercase text-zinc-500">
+                  {selectedUser ? "Новый пароль" : "Пароль"}
+                </span>
+                <input
+                  required={!selectedUser}
+                  type="password"
+                  value={form.password}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      password: event.target.value,
+                    }))
+                  }
+                  placeholder={
+                    selectedUser
+                      ? "Оставьте пустым, если не менять"
+                      : "От 8 символов"
+                  }
+                  className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+                />
+                <span className="block text-xs leading-5 text-zinc-500">
+                  Пароль передается сотруднику вручную. Автоотправку письма
+                  подключим отдельным SMTP-слоем.
+                </span>
+              </label>
 
-            <label className="flex h-11 items-center gap-2 rounded-md border border-zinc-300 px-3 text-sm font-semibold dark:border-zinc-700">
-              <input
-                type="checkbox"
-                checked={form.isActive}
-                disabled={selectedUser?.id === currentUser.id || !canSaveSelected}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    isActive: event.target.checked,
-                  }))
-                }
-                className="h-4 w-4 rounded border-zinc-300 text-emerald-500 focus:ring-emerald-500"
-              />
-              Активен
-            </label>
-          </div>
+              <label className="flex h-11 items-center gap-2 rounded-md border border-zinc-300 px-3 text-sm font-semibold dark:border-zinc-700">
+                <input
+                  type="checkbox"
+                  checked={form.isActive}
+                  disabled={
+                    selectedUser?.id === currentUser.id || !canSaveSelected
+                  }
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      isActive: event.target.checked,
+                    }))
+                  }
+                  className="h-4 w-4 rounded border-zinc-300 text-emerald-500 focus:ring-emerald-500"
+                />
+                Активен
+              </label>
+            </div>
+          ) : null}
 
           {status.type !== "idle" ? (
             <div
@@ -632,6 +739,33 @@ export function UserAccountsPanel({
               ].join(" ")}
             >
               {status.message}
+            </div>
+          ) : null}
+
+          {createdInviteUrl ? (
+            <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-3">
+              <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-200">
+                Ссылка готова
+              </p>
+              <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_auto]">
+                <input
+                  readOnly
+                  value={createdInviteUrl}
+                  className="h-10 min-w-0 rounded-md border border-emerald-500/40 bg-white px-3 text-sm outline-none dark:bg-zinc-950"
+                />
+                <button
+                  type="button"
+                  onClick={copyInviteUrl}
+                  className="inline-flex h-10 items-center justify-center rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
+                >
+                  Скопировать
+                </button>
+              </div>
+              {copyStatus ? (
+                <p className="mt-2 text-xs text-emerald-700 dark:text-emerald-200">
+                  {copyStatus}
+                </p>
+              ) : null}
             </div>
           ) : null}
 
@@ -655,8 +789,10 @@ export function UserAccountsPanel({
               {isSaving
                 ? "Сохраняем..."
                 : selectedUser
-                ? "Сохранить изменения"
-                : "Создать учетную запись"}
+                  ? "Сохранить изменения"
+                  : accountFormMode === "invite"
+                    ? "Создать ссылку"
+                    : "Создать учетную запись"}
             </button>
             {selectedUser ? (
               <button
@@ -675,6 +811,36 @@ export function UserAccountsPanel({
             </p>
           ) : null}
         </form>
+
+        {!selectedUser && invites.length > 0 ? (
+          <div className="mt-5 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
+            <p className="text-xs font-bold uppercase text-zinc-500">
+              Активные ссылки
+            </p>
+            <div className="mt-3 space-y-2">
+              {invites.slice(0, 4).map((invite) => (
+                <div
+                  key={invite.id}
+                  className="rounded-md border border-zinc-200 bg-white p-3 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <p className="font-semibold">
+                        {invite.fullName || invite.email || "Без привязки к email"}
+                      </p>
+                      <p className="mt-1 text-xs text-zinc-500">
+                        {inviteRoleLabel(invite)} - {scopeLabel(invite)}
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-zinc-200/70 px-2 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                      до {formatDate(invite.expiresAt)}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </section>
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950 lg:col-span-2">

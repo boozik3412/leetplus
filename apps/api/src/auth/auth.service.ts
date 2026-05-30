@@ -2,12 +2,14 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { createHash } from 'node:crypto';
 import { UserRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { LoginDto, RegisterDto } from './auth.dto';
+import { AcceptUserInviteDto, LoginDto, RegisterDto } from './auth.dto';
 import { AuthenticatedUser, AuthTokenPayload } from './auth.types';
 import { resolveUserCapabilities } from './capabilities';
 import { EmailVerificationService } from './email-verification.service';
@@ -36,6 +38,29 @@ type UserWithTenant = {
     name: string;
     permissions: string[];
   } | null;
+};
+
+type UserInvitePreview = {
+  email: string | null;
+  fullName: string | null;
+  role: UserRole;
+  customRole: {
+    id: string;
+    name: string;
+    description: string | null;
+    permissions: string[];
+  } | null;
+  tenant: {
+    name: string;
+    slug: string;
+  };
+  scope: 'NETWORK' | 'STORES';
+  stores: Array<{
+    id: string;
+    name: string;
+    isActive: boolean;
+  }>;
+  expiresAt: string;
 };
 
 @Injectable()
@@ -123,6 +148,106 @@ export class AuthService {
     });
   }
 
+  async getInvite(token: string): Promise<UserInvitePreview> {
+    const invite = await this.resolveActiveInvite(token);
+    const stores = await this.resolveInviteStores(
+      invite.tenantId,
+      invite.storeIds,
+    );
+
+    return {
+      email: invite.email,
+      fullName: invite.fullName,
+      role: invite.role,
+      customRole: invite.customRole
+        ? {
+            id: invite.customRole.id,
+            name: invite.customRole.name,
+            description: invite.customRole.description,
+            permissions: invite.customRole.permissions,
+          }
+        : null,
+      tenant: {
+        name: invite.tenant.name,
+        slug: invite.tenant.slug,
+      },
+      scope: stores.length > 0 ? 'STORES' : 'NETWORK',
+      stores,
+      expiresAt: invite.expiresAt.toISOString(),
+    };
+  }
+
+  async acceptInvite(
+    token: string,
+    dto: AcceptUserInviteDto,
+  ): Promise<AuthResponse> {
+    const invite = await this.resolveActiveInvite(token);
+    const email = this.resolveInviteEmail(invite.email, dto.email);
+    const fullName = this.resolveInviteFullName(invite.fullName, dto.fullName);
+    const password = dto.password;
+    this.assertPassword(password);
+
+    const [existingUser, storeIds] = await Promise.all([
+      this.prisma.user.findUnique({ where: { email } }),
+      this.resolveInviteStoreIds(invite.tenantId, invite.storeIds),
+    ]);
+
+    if (existingUser) {
+      throw new ConflictException('User with this email already exists');
+    }
+
+    const passwordHash = await this.passwordService.hash(password);
+    const created = await this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          tenantId: invite.tenantId,
+          email,
+          fullName,
+          passwordHash,
+          role: invite.role,
+          customRoleId: invite.customRoleId,
+          isActive: true,
+          emailVerifiedAt: new Date(),
+        },
+      });
+
+      if (storeIds.length > 0) {
+        await tx.userStoreAccess.createMany({
+          data: storeIds.map((storeId) => ({ userId: user.id, storeId })),
+          skipDuplicates: true,
+        });
+      }
+
+      await tx.userInvite.update({
+        where: { id: invite.id },
+        data: {
+          acceptedAt: new Date(),
+          acceptedByUserId: user.id,
+        },
+      });
+
+      return tx.user.findUniqueOrThrow({
+        where: { id: user.id },
+        include: {
+          tenant: {
+            select: {
+              slug: true,
+            },
+          },
+          customRole: {
+            select: {
+              id: true,
+              name: true,
+              permissions: true,
+            },
+          },
+        },
+      });
+    });
+
+    return this.createAuthResponse(created);
+  }
+
   async login(dto: LoginDto): Promise<AuthResponse> {
     const email = this.normalizeEmail(dto?.email);
     this.assertEmail(email);
@@ -204,6 +329,117 @@ export class AuthService {
     const normalizedEmail = this.normalizeEmail(email);
     this.assertEmail(normalizedEmail);
     return this.emailVerificationService.resendByEmail(normalizedEmail);
+  }
+
+  private async resolveActiveInvite(token: string) {
+    const normalizedToken = typeof token === 'string' ? token.trim() : '';
+
+    if (!normalizedToken) {
+      throw new BadRequestException('Invite token is required');
+    }
+
+    const invite = await this.prisma.userInvite.findUnique({
+      where: { tokenHash: this.hashInviteToken(normalizedToken) },
+      include: {
+        tenant: {
+          select: {
+            name: true,
+            slug: true,
+          },
+        },
+        customRole: {
+          select: {
+            id: true,
+            name: true,
+            description: true,
+            permissions: true,
+          },
+        },
+      },
+    });
+
+    if (!invite) {
+      throw new NotFoundException('Invite was not found');
+    }
+
+    if (invite.acceptedAt) {
+      throw new BadRequestException('Invite is already used');
+    }
+
+    if (invite.expiresAt.getTime() <= Date.now()) {
+      throw new BadRequestException('Invite is expired');
+    }
+
+    return invite;
+  }
+
+  private hashInviteToken(token: string): string {
+    return createHash('sha256').update(token).digest('hex');
+  }
+
+  private resolveInviteEmail(
+    invitedEmail: string | null,
+    submittedEmail: unknown,
+  ): string {
+    const email = this.normalizeEmail(invitedEmail ?? submittedEmail);
+    this.assertEmail(email);
+
+    if (invitedEmail) {
+      const normalizedSubmittedEmail = this.normalizeEmail(submittedEmail);
+
+      if (
+        normalizedSubmittedEmail &&
+        normalizedSubmittedEmail !== invitedEmail
+      ) {
+        throw new BadRequestException('Invite is issued for another email');
+      }
+    }
+
+    return email;
+  }
+
+  private resolveInviteFullName(
+    invitedFullName: string | null,
+    submittedFullName: unknown,
+  ): string | null {
+    if (typeof submittedFullName === 'string' && submittedFullName.trim()) {
+      return submittedFullName.trim();
+    }
+
+    return invitedFullName;
+  }
+
+  private async resolveInviteStores(tenantId: string, storeIds: string[]) {
+    if (storeIds.length === 0) {
+      return [];
+    }
+
+    const stores = await this.prisma.store.findMany({
+      where: {
+        tenantId,
+        id: { in: storeIds },
+      },
+      select: {
+        id: true,
+        name: true,
+        isActive: true,
+      },
+      orderBy: { name: 'asc' },
+    });
+
+    return stores;
+  }
+
+  private async resolveInviteStoreIds(tenantId: string, storeIds: string[]) {
+    const stores = await this.resolveInviteStores(tenantId, storeIds);
+
+    if (stores.length !== storeIds.length) {
+      throw new BadRequestException(
+        'One or more invited stores are unavailable',
+      );
+    }
+
+    return storeIds;
   }
 
   private async createAuthResponse(

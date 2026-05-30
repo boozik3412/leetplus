@@ -86,14 +86,29 @@ export type StaffChecklistRegulationOption = {
   requiredEvidenceItems: number;
 };
 
+export type StaffChecklistTemplateOption = {
+  id: string;
+  title: string;
+  shiftKind: StaffChecklistShiftKind;
+  roleScope: string;
+  status: string;
+  version: number;
+  store: StaffChecklistStore | null;
+  sectionsCount: number;
+  itemsCount: number;
+  requiredEvidenceItems: number;
+};
+
 export type StaffChecklistRun = {
   id: string;
-  regulationId: string;
+  regulationId: string | null;
+  templateId: string | null;
   title: string;
   shiftKind: StaffChecklistShiftKind;
   roleScope: string;
   status: StaffChecklistStatus;
   regulationVersion: number;
+  templateVersion: number | null;
   scheduledAt: string | null;
   startedAt: string | null;
   submittedAt: string | null;
@@ -112,7 +127,8 @@ export type StaffChecklistRun = {
   isOverdue: boolean;
   createdAt: string;
   updatedAt: string;
-  regulation: { id: string; title: string; status: string; version: number };
+  regulation: { id: string; title: string; status: string; version: number } | null;
+  template: { id: string; title: string; status: string; version: number } | null;
   store: StaffChecklistStore | null;
   shift: {
     id: string;
@@ -158,6 +174,7 @@ export type StaffChecklistReport = {
   };
   rows: StaffChecklistRun[];
   publishedRegulations: StaffChecklistRegulationOption[];
+  checklistTemplates: StaffChecklistTemplateOption[];
   stores: StaffChecklistStore[];
   users: StaffChecklistUser[];
 };

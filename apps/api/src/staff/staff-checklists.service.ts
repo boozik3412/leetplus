@@ -61,6 +61,7 @@ export type StaffChecklistsQuery = {
 
 export type StaffChecklistCreateDto = {
   regulationId?: string;
+  templateId?: string;
   title?: string | null;
   storeId?: string | null;
   shiftId?: string | null;
@@ -132,6 +133,7 @@ export type StaffChecklistReport = {
   };
   rows: StaffChecklistRunResponse[];
   publishedRegulations: StaffChecklistRegulationOption[];
+  checklistTemplates: StaffChecklistTemplateOption[];
   stores: Array<{ id: string; name: string; isActive: boolean }>;
   users: Array<{ id: string; email: string; fullName: string | null }>;
 };
@@ -148,14 +150,29 @@ export type StaffChecklistRegulationOption = {
   requiredEvidenceItems: number;
 };
 
+export type StaffChecklistTemplateOption = {
+  id: string;
+  title: string;
+  shiftKind: StaffChecklistShiftKind;
+  roleScope: string;
+  status: string;
+  version: number;
+  store: { id: string; name: string; isActive: boolean } | null;
+  sectionsCount: number;
+  itemsCount: number;
+  requiredEvidenceItems: number;
+};
+
 export type StaffChecklistRunResponse = {
   id: string;
-  regulationId: string;
+  regulationId: string | null;
+  templateId: string | null;
   title: string;
   shiftKind: StaffChecklistShiftKind;
   roleScope: string;
   status: StaffChecklistStatus;
   regulationVersion: number;
+  templateVersion: number | null;
   scheduledAt: string | null;
   startedAt: string | null;
   submittedAt: string | null;
@@ -174,7 +191,18 @@ export type StaffChecklistRunResponse = {
   isOverdue: boolean;
   createdAt: string;
   updatedAt: string;
-  regulation: { id: string; title: string; status: string; version: number };
+  regulation: {
+    id: string;
+    title: string;
+    status: string;
+    version: number;
+  } | null;
+  template: {
+    id: string;
+    title: string;
+    status: string;
+    version: number;
+  } | null;
   store: { id: string; name: string; isActive: boolean } | null;
   shift: {
     id: string;
@@ -190,6 +218,9 @@ export type StaffChecklistRunResponse = {
 
 const checklistRunInclude = {
   regulation: {
+    select: { id: true, title: true, status: true, version: true },
+  },
+  template: {
     select: { id: true, title: true, status: true, version: true },
   },
   store: { select: { id: true, name: true, isActive: true } },
@@ -222,6 +253,17 @@ type Metrics = {
   blockingIssues: StaffChecklistBlockingIssue[];
 };
 
+type ChecklistSource = {
+  kind: 'REGULATION' | 'TEMPLATE';
+  id: string;
+  title: string;
+  shiftKind: string;
+  roleScope: string;
+  version: number;
+  storeId: string | null;
+  sections: Prisma.JsonValue;
+};
+
 @Injectable()
 export class StaffChecklistsService {
   constructor(
@@ -238,48 +280,64 @@ export class StaffChecklistsService {
     const baseWhere = this.buildWhere(tenantId, filters, false);
     const rowsWhere = this.buildWhere(tenantId, filters, true);
 
-    const [rows, summaryRows, regulations, stores, users] = await Promise.all([
-      this.prisma.staffChecklistRun.findMany({
-        where: rowsWhere,
-        include: checklistRunInclude,
-        orderBy: [{ scheduledAt: 'asc' }, { createdAt: 'desc' }],
-        take: 200,
-      }),
-      this.prisma.staffChecklistRun.findMany({
-        where: baseWhere,
-        select: {
-          status: true,
-          scheduledAt: true,
-          failedItems: true,
-          blockingIssues: true,
-        },
-        take: 2000,
-      }),
-      this.prisma.staffShiftRegulation.findMany({
-        where: { tenantId, status: 'PUBLISHED' },
-        select: {
-          id: true,
-          title: true,
-          shiftKind: true,
-          roleScope: true,
-          version: true,
-          sections: true,
-          store: { select: { id: true, name: true, isActive: true } },
-        },
-        orderBy: [{ updatedAt: 'desc' }],
-        take: 200,
-      }),
-      this.prisma.store.findMany({
-        where: { tenantId },
-        select: { id: true, name: true, isActive: true },
-        orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
-      }),
-      this.prisma.user.findMany({
-        where: { tenantId, isActive: true },
-        select: { id: true, email: true, fullName: true },
-        orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
-      }),
-    ]);
+    const [rows, summaryRows, regulations, templates, stores, users] =
+      await Promise.all([
+        this.prisma.staffChecklistRun.findMany({
+          where: rowsWhere,
+          include: checklistRunInclude,
+          orderBy: [{ scheduledAt: 'asc' }, { createdAt: 'desc' }],
+          take: 200,
+        }),
+        this.prisma.staffChecklistRun.findMany({
+          where: baseWhere,
+          select: {
+            status: true,
+            scheduledAt: true,
+            failedItems: true,
+            blockingIssues: true,
+          },
+          take: 2000,
+        }),
+        this.prisma.staffShiftRegulation.findMany({
+          where: { tenantId, status: 'PUBLISHED' },
+          select: {
+            id: true,
+            title: true,
+            shiftKind: true,
+            roleScope: true,
+            version: true,
+            sections: true,
+            store: { select: { id: true, name: true, isActive: true } },
+          },
+          orderBy: [{ updatedAt: 'desc' }],
+          take: 200,
+        }),
+        this.prisma.staffChecklistTemplate.findMany({
+          where: { tenantId, status: 'ACTIVE' },
+          select: {
+            id: true,
+            title: true,
+            shiftKind: true,
+            roleScope: true,
+            status: true,
+            version: true,
+            sections: true,
+            store: { select: { id: true, name: true, isActive: true } },
+          },
+          orderBy: [{ updatedAt: 'desc' }],
+          take: 200,
+        }),
+        this.prisma.store.findMany({
+          where: { tenantId },
+          select: { id: true, name: true, isActive: true },
+          orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+        }),
+        this.prisma.user.findMany({
+          where: { tenantId, isActive: true },
+          select: { id: true, email: true, fullName: true },
+          orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
+        }),
+      ]);
 
     return {
       filters,
@@ -288,6 +346,7 @@ export class StaffChecklistsService {
       publishedRegulations: regulations.map((row) =>
         this.toRegulationOption(row),
       ),
+      checklistTemplates: templates.map((row) => this.toTemplateOption(row)),
       stores,
       users,
     };
@@ -295,65 +354,64 @@ export class StaffChecklistsService {
 
   async createChecklist(user: AuthenticatedUser, dto: StaffChecklistCreateDto) {
     const { tenantId } = await this.tenantContextService.resolve(user);
-    const regulationId = this.normalizeRequiredString(
-      dto.regulationId,
-      'Regulation is required',
-    );
-    const regulation = await this.prisma.staffShiftRegulation.findFirst({
-      where: { id: regulationId, tenantId, status: 'PUBLISHED' },
-      select: {
-        id: true,
-        title: true,
-        shiftKind: true,
-        roleScope: true,
-        version: true,
-        storeId: true,
-        sections: true,
-      },
-    });
+    const regulationId = this.normalizeOptionalString(dto.regulationId);
+    const templateId = this.normalizeOptionalString(dto.templateId);
 
-    if (!regulation) {
-      throw new BadRequestException('Published regulation not found');
+    if (!regulationId && !templateId) {
+      throw new BadRequestException(
+        'Regulation or checklist template is required',
+      );
     }
+
+    if (regulationId && templateId) {
+      throw new BadRequestException(
+        'Choose either a regulation or a checklist template',
+      );
+    }
+
+    const source = regulationId
+      ? await this.resolveRegulationSource(tenantId, regulationId)
+      : await this.resolveTemplateSource(tenantId, templateId!);
 
     const requestedStoreId = this.normalizeOptionalString(dto.storeId);
 
     if (
-      regulation.storeId &&
+      source.storeId &&
       requestedStoreId &&
-      requestedStoreId !== regulation.storeId
+      requestedStoreId !== source.storeId
     ) {
-      throw new BadRequestException('Checklist store must match regulation');
+      throw new BadRequestException('Checklist store must match source');
     }
 
     const storeId = await this.resolveStoreId(
       tenantId,
-      regulation.storeId ?? requestedStoreId,
+      source.storeId ?? requestedStoreId,
     );
     const shiftId = await this.resolveShiftId(tenantId, dto.shiftId);
     const assignedToUserId = await this.resolveUserId(
       tenantId,
       dto.assignedToUserId,
     );
-    const sections = this.normalizeSections(regulation.sections);
+    const sections = this.normalizeSections(source.sections);
     const answers = this.defaultAnswers(sections);
     const metrics = this.calculateMetrics(sections, answers);
     const title =
-      this.normalizeOptionalString(dto.title) ??
-      `${regulation.title}: выполнение`;
+      this.normalizeOptionalString(dto.title) ?? `${source.title}: выполнение`;
 
     const run = await this.prisma.staffChecklistRun.create({
       data: {
         tenantId,
-        regulationId: regulation.id,
+        regulationId: source.kind === 'REGULATION' ? source.id : null,
+        templateId: source.kind === 'TEMPLATE' ? source.id : null,
         storeId,
         shiftId,
         createdByUserId: user.id,
         assignedToUserId,
         title,
-        shiftKind: regulation.shiftKind,
-        roleScope: regulation.roleScope,
-        regulationVersion: regulation.version,
+        shiftKind: source.shiftKind,
+        roleScope: source.roleScope,
+        regulationVersion: source.kind === 'REGULATION' ? source.version : 0,
+        templateVersion: source.kind === 'TEMPLATE' ? source.version : null,
         scheduledAt: this.normalizeDateTime(dto.scheduledAt, 'scheduled date'),
         sectionsSnapshot: sections,
         answers,
@@ -474,6 +532,60 @@ export class StaffChecklistsService {
     return this.toRunResponse(run);
   }
 
+  private async resolveRegulationSource(
+    tenantId: string,
+    regulationId: string,
+  ): Promise<ChecklistSource> {
+    const regulation = await this.prisma.staffShiftRegulation.findFirst({
+      where: { id: regulationId, tenantId, status: 'PUBLISHED' },
+      select: {
+        id: true,
+        title: true,
+        shiftKind: true,
+        roleScope: true,
+        version: true,
+        storeId: true,
+        sections: true,
+      },
+    });
+
+    if (!regulation) {
+      throw new BadRequestException('Published regulation not found');
+    }
+
+    return {
+      kind: 'REGULATION',
+      ...regulation,
+    };
+  }
+
+  private async resolveTemplateSource(
+    tenantId: string,
+    templateId: string,
+  ): Promise<ChecklistSource> {
+    const template = await this.prisma.staffChecklistTemplate.findFirst({
+      where: { id: templateId, tenantId, status: 'ACTIVE' },
+      select: {
+        id: true,
+        title: true,
+        shiftKind: true,
+        roleScope: true,
+        version: true,
+        storeId: true,
+        sections: true,
+      },
+    });
+
+    if (!template) {
+      throw new BadRequestException('Active checklist template not found');
+    }
+
+    return {
+      kind: 'TEMPLATE',
+      ...template,
+    };
+  }
+
   private resolveFilters(
     query: StaffChecklistsQuery,
   ): StaffChecklistReport['filters'] {
@@ -528,6 +640,11 @@ export class StaffChecklistsService {
         { title: { contains: filters.search, mode: 'insensitive' } },
         {
           regulation: {
+            title: { contains: filters.search, mode: 'insensitive' },
+          },
+        },
+        {
+          template: {
             title: { contains: filters.search, mode: 'insensitive' },
           },
         },
@@ -617,6 +734,34 @@ export class StaffChecklistsService {
     };
   }
 
+  private toTemplateOption(row: {
+    id: string;
+    title: string;
+    shiftKind: string;
+    roleScope: string;
+    status: string;
+    version: number;
+    sections: Prisma.JsonValue;
+    store: { id: string; name: string; isActive: boolean } | null;
+  }): StaffChecklistTemplateOption {
+    const sections = this.normalizeSections(row.sections);
+    const items = sections.flatMap((section) => section.items);
+
+    return {
+      id: row.id,
+      title: row.title,
+      shiftKind: row.shiftKind as StaffChecklistShiftKind,
+      roleScope: row.roleScope,
+      status: row.status,
+      version: row.version,
+      store: row.store,
+      sectionsCount: sections.length,
+      itemsCount: items.length,
+      requiredEvidenceItems: items.filter((item) => item.evidenceRequired)
+        .length,
+    };
+  }
+
   private toRunResponse(row: StaffChecklistRunRow): StaffChecklistRunResponse {
     const sections = this.normalizeSections(row.sectionsSnapshot);
     const answers = this.normalizeAnswers(row.answers, sections);
@@ -630,11 +775,13 @@ export class StaffChecklistsService {
     return {
       id: row.id,
       regulationId: row.regulationId,
+      templateId: row.templateId,
       title: row.title,
       shiftKind: row.shiftKind as StaffChecklistShiftKind,
       roleScope: row.roleScope,
       status: row.status as StaffChecklistStatus,
       regulationVersion: row.regulationVersion,
+      templateVersion: row.templateVersion,
       scheduledAt: row.scheduledAt?.toISOString() ?? null,
       startedAt: row.startedAt?.toISOString() ?? null,
       submittedAt: row.submittedAt?.toISOString() ?? null,
@@ -654,6 +801,7 @@ export class StaffChecklistsService {
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
       regulation: row.regulation,
+      template: row.template,
       store: row.store,
       shift: row.shift
         ? {
@@ -933,6 +1081,7 @@ export class StaffChecklistsService {
             source: 'CHECKLIST_FAILED_ITEM',
             checklistRunId: run.id,
             regulationId: run.regulationId,
+            templateId: run.templateId,
             sectionId: answer.sectionId,
             itemId: answer.itemId,
           },
@@ -950,6 +1099,7 @@ export class StaffChecklistsService {
           metadata: {
             checklistRunId: run.id,
             regulationId: run.regulationId,
+            templateId: run.templateId,
             itemId: answer.itemId,
           },
         },

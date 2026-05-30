@@ -9,6 +9,7 @@ import type {
   StaffChecklistReport,
   StaffChecklistRun,
   StaffChecklistStatus,
+  StaffChecklistTemplateOption,
 } from "@/lib/staff-checklists";
 
 const statusLabels: Record<StaffChecklistStatus, string> = {
@@ -37,6 +38,16 @@ const shiftKindLabels: Record<StaffChecklistRegulationOption["shiftKind"], strin
   INVENTORY: "Передача ТМЦ",
   CUSTOM: "Другое",
 };
+
+type ChecklistSourceOption =
+  | (StaffChecklistRegulationOption & {
+      key: string;
+      kind: "REGULATION";
+    })
+  | (StaffChecklistTemplateOption & {
+      key: string;
+      kind: "TEMPLATE";
+    });
 
 function answerKey(answer: Pick<StaffChecklistAnswer, "sectionId" | "itemId">) {
   return `${answer.sectionId}::${answer.itemId}`;
@@ -106,11 +117,26 @@ export function StaffChecklistWorkspace({
     report.rows.find((run) => run.id === selectedRunId) ??
     report.rows[0] ??
     null;
-  const [selectedRegulationId, setSelectedRegulationId] = useState(
-    report.publishedRegulations[0]?.id ?? "",
+  const sourceOptions = useMemo<ChecklistSourceOption[]>(
+    () => [
+      ...report.publishedRegulations.map((regulation) => ({
+        ...regulation,
+        key: `regulation:${regulation.id}`,
+        kind: "REGULATION" as const,
+      })),
+      ...report.checklistTemplates.map((template) => ({
+        ...template,
+        key: `template:${template.id}`,
+        kind: "TEMPLATE" as const,
+      })),
+    ],
+    [report.checklistTemplates, report.publishedRegulations],
   );
-  const selectedRegulation = report.publishedRegulations.find(
-    (regulation) => regulation.id === selectedRegulationId,
+  const [selectedSourceKey, setSelectedSourceKey] = useState(
+    sourceOptions[0]?.key ?? "",
+  );
+  const selectedSource = sourceOptions.find(
+    (source) => source.key === selectedSourceKey,
   );
   const [storeId, setStoreId] = useState("");
   const [assignedToUserId, setAssignedToUserId] = useState("");
@@ -119,8 +145,8 @@ export function StaffChecklistWorkspace({
   const [isPending, setIsPending] = useState(false);
 
   async function createRun() {
-    if (!selectedRegulationId) {
-      setMessage("Сначала опубликуйте хотя бы один регламент смены.");
+    if (!selectedSource) {
+      setMessage("Сначала опубликуйте регламент или активируйте шаблон чеклиста.");
       return;
     }
 
@@ -131,7 +157,9 @@ export function StaffChecklistWorkspace({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        regulationId: selectedRegulationId,
+        regulationId:
+          selectedSource.kind === "REGULATION" ? selectedSource.id : null,
+        templateId: selectedSource.kind === "TEMPLATE" ? selectedSource.id : null,
         storeId: storeId || null,
         assignedToUserId: assignedToUserId || null,
         scheduledAt: scheduledAt || null,
@@ -162,55 +190,54 @@ export function StaffChecklistWorkspace({
             <h2 className="mt-1 text-lg font-semibold">Новый чеклист смены</h2>
           </div>
           <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
-            {formatNumber(report.publishedRegulations.length)} регл.
+            {formatNumber(sourceOptions.length)} основ
           </span>
         </div>
 
         <div className="mt-4 space-y-3">
           <label className="block text-sm">
             <span className="text-xs font-semibold uppercase text-zinc-500">
-              Регламент
+              Основа чеклиста
             </span>
             <select
-              value={selectedRegulationId}
+              value={selectedSourceKey}
               onChange={(event) => {
                 const value = event.target.value;
-                const next = report.publishedRegulations.find(
-                  (regulation) => regulation.id === value,
-                );
+                const next = sourceOptions.find((source) => source.key === value);
 
-                setSelectedRegulationId(value);
+                setSelectedSourceKey(value);
                 setStoreId(next?.store?.id ?? "");
               }}
               className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
             >
-              {report.publishedRegulations.length === 0 ? (
-                <option value="">Нет опубликованных регламентов</option>
+              {sourceOptions.length === 0 ? (
+                <option value="">Нет регламентов или активных шаблонов</option>
               ) : null}
-              {report.publishedRegulations.map((regulation) => (
-                <option key={regulation.id} value={regulation.id}>
-                  {regulation.title}
+              {sourceOptions.map((source) => (
+                <option key={source.key} value={source.key}>
+                  {source.kind === "REGULATION" ? "Регламент" : "Шаблон"} ·{" "}
+                  {source.title}
                 </option>
               ))}
             </select>
           </label>
 
           <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-300">
-            {selectedRegulation ? (
+            {selectedSource ? (
               <div className="space-y-1">
                 <p className="font-semibold text-zinc-900 dark:text-zinc-100">
-                  {shiftKindLabels[selectedRegulation.shiftKind]} · v
-                  {selectedRegulation.version}
+                  {shiftKindLabels[selectedSource.shiftKind]} · v
+                  {selectedSource.version}
                 </p>
                 <p>
-                  {formatNumber(selectedRegulation.itemsCount)} пунктов,{" "}
-                  {formatNumber(selectedRegulation.requiredEvidenceItems)} с
+                  {formatNumber(selectedSource.itemsCount)} пунктов,{" "}
+                  {formatNumber(selectedSource.requiredEvidenceItems)} с
                   доказательствами
                 </p>
-                <p>{selectedRegulation.store?.name ?? "Вся сеть"}</p>
+                <p>{selectedSource.store?.name ?? "Вся сеть"}</p>
               </div>
             ) : (
-              "Опубликованный регламент нужен, чтобы создать чеклист."
+              "Опубликованный регламент или активный шаблон нужен, чтобы создать чеклист."
             )}
           </div>
 
@@ -221,7 +248,7 @@ export function StaffChecklistWorkspace({
             <select
               value={storeId}
               onChange={(event) => setStoreId(event.target.value)}
-              disabled={Boolean(selectedRegulation?.store)}
+              disabled={Boolean(selectedSource?.store)}
               className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-950"
             >
               <option value="">Вся сеть / не указан</option>
@@ -266,7 +293,7 @@ export function StaffChecklistWorkspace({
           <button
             type="button"
             onClick={createRun}
-            disabled={isPending || report.publishedRegulations.length === 0}
+            disabled={isPending || sourceOptions.length === 0}
             className="w-full rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
           >
             Создать чеклист
@@ -285,8 +312,8 @@ export function StaffChecklistWorkspace({
           <div className="mt-2 space-y-2">
             {report.rows.length === 0 ? (
               <p className="rounded-lg border border-dashed border-zinc-300 px-3 py-4 text-sm text-zinc-500 dark:border-zinc-700">
-                Выполнений пока нет. Создайте чеклист из опубликованного
-                регламента.
+                Выполнений пока нет. Создайте чеклист из регламента или
+                шаблона.
               </p>
             ) : null}
             {report.rows.map((run) => (
@@ -324,7 +351,7 @@ export function StaffChecklistWorkspace({
           <ChecklistRunEditor key={selectedRun.id} run={selectedRun} />
         ) : (
           <div className="flex min-h-[24rem] items-center justify-center rounded-lg border border-dashed border-zinc-300 p-6 text-center text-zinc-500 dark:border-zinc-700">
-            Создайте первый чеклист смены из опубликованного регламента.
+            Создайте первый чеклист смены из регламента или шаблона.
           </div>
         )}
       </section>
@@ -415,7 +442,8 @@ function ChecklistRunEditor({ run }: { run: StaffChecklistRun }) {
           </p>
           <h2 className="mt-1 text-2xl font-semibold">{run.title}</h2>
           <p className="mt-2 text-sm text-zinc-500">
-            {run.regulation.title} · v{run.regulationVersion} ·{" "}
+            {run.regulation?.title ?? run.template?.title ?? "Чеклист"} · v
+            {run.regulation ? run.regulationVersion : run.templateVersion} ·{" "}
             {shiftKindLabels[run.shiftKind]}
           </p>
         </div>

@@ -154,6 +154,7 @@ model Tenant {
   staffShiftRegulations                StaffShiftRegulation[]
   staffShiftRegulationVersions         StaffShiftRegulationVersion[]
   staffShiftRegulationAcknowledgements StaffShiftRegulationAcknowledgement[]
+  staffChecklistTemplates              StaffChecklistTemplate[]
   staffChecklistRuns                   StaffChecklistRun[]
   staffChatChannels                    StaffChatChannel[]
   staffChatChannelMembers              StaffChatChannelMember[]
@@ -202,6 +203,7 @@ model User {
   createdStaffShiftRegulations         StaffShiftRegulation[]                @relation("StaffShiftRegulationCreatedBy")
   createdStaffShiftRegulationVersions  StaffShiftRegulationVersion[]         @relation("StaffShiftRegulationVersionCreatedBy")
   staffShiftRegulationAcknowledgements StaffShiftRegulationAcknowledgement[]
+  createdStaffChecklistTemplates       StaffChecklistTemplate[]              @relation("StaffChecklistTemplateCreatedBy")
   createdStaffChecklistRuns            StaffChecklistRun[]                   @relation("StaffChecklistRunCreatedBy")
   assignedStaffChecklistRuns           StaffChecklistRun[]                   @relation("StaffChecklistRunAssignedTo")
   reviewedStaffChecklistRuns           StaffChecklistRun[]                   @relation("StaffChecklistRunReviewedBy")
@@ -345,6 +347,7 @@ model Store {
   staffTasks                   StaffTask[]
   staffShiftRegulations        StaffShiftRegulation[]
   staffShiftRegulationVersions StaffShiftRegulationVersion[]
+  staffChecklistTemplates      StaffChecklistTemplate[]
   staffChecklistRuns           StaffChecklistRun[]
   staffChatChannels            StaffChatChannel[]
   staffChatMessages            StaffChatMessage[]
@@ -1379,12 +1382,13 @@ model StaffShiftRegulation {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  tenant           Tenant                                @relation(fields: [tenantId], references: [id])
-  store            Store?                                @relation(fields: [storeId], references: [id], onDelete: SetNull)
-  createdByUser    User?                                 @relation("StaffShiftRegulationCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  versions         StaffShiftRegulationVersion[]
-  acknowledgements StaffShiftRegulationAcknowledgement[]
-  checklistRuns    StaffChecklistRun[]
+  tenant             Tenant                                @relation(fields: [tenantId], references: [id])
+  store              Store?                                @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  createdByUser      User?                                 @relation("StaffShiftRegulationCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  versions           StaffShiftRegulationVersion[]
+  acknowledgements   StaffShiftRegulationAcknowledgement[]
+  checklistTemplates StaffChecklistTemplate[]
+  checklistRuns      StaffChecklistRun[]
 
   @@index([tenantId, status, shiftKind], map: "staff_shift_regulation_status_kind_idx")
   @@index([tenantId, createdAt], map: "staff_shift_regulation_created_idx")
@@ -1440,10 +1444,45 @@ model StaffShiftRegulationAcknowledgement {
   @@index([tenantId, regulationId, version], map: "staff_shift_regulation_ack_regulation_idx")
 }
 
+model StaffChecklistTemplate {
+  id                 String   @id @default(uuid())
+  tenantId           String
+  storeId            String?
+  sourceRegulationId String?
+  createdByUserId    String?
+  title              String
+  description        String?
+  shiftKind          String   @default("OPENING")
+  roleScope          String   @default("ADMINISTRATOR")
+  status             String   @default("DRAFT")
+  version            Int      @default(1)
+  sections           Json
+  sectionsCount      Int      @default(0)
+  itemsCount         Int      @default(0)
+  requiredItemsCount Int      @default(0)
+  evidenceItemsCount Int      @default(0)
+  scoreTotal         Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  tenant           Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  store            Store?                @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  sourceRegulation StaffShiftRegulation? @relation(fields: [sourceRegulationId], references: [id], onDelete: SetNull)
+  createdByUser    User?                 @relation("StaffChecklistTemplateCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  checklistRuns    StaffChecklistRun[]
+
+  @@index([tenantId, status, shiftKind], map: "staff_checklist_template_status_kind_idx")
+  @@index([tenantId, createdAt], map: "staff_checklist_template_created_idx")
+  @@index([storeId], map: "staff_checklist_template_store_idx")
+  @@index([sourceRegulationId], map: "staff_checklist_template_source_regulation_idx")
+  @@index([createdByUserId], map: "staff_checklist_template_created_by_idx")
+}
+
 model StaffChecklistRun {
   id                 String    @id @default(uuid())
   tenantId           String
-  regulationId       String
+  regulationId       String?
+  templateId         String?
   storeId            String?
   shiftId            String?
   createdByUserId    String?
@@ -1454,6 +1493,7 @@ model StaffChecklistRun {
   roleScope          String    @default("ADMINISTRATOR")
   status             String    @default("OPEN")
   regulationVersion  Int       @default(1)
+  templateVersion    Int?
   scheduledAt        DateTime?
   startedAt          DateTime?
   submittedAt        DateTime?
@@ -1472,17 +1512,19 @@ model StaffChecklistRun {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
-  tenant         Tenant               @relation(fields: [tenantId], references: [id])
-  regulation     StaffShiftRegulation @relation(fields: [regulationId], references: [id], onDelete: Restrict)
-  store          Store?               @relation(fields: [storeId], references: [id], onDelete: SetNull)
-  shift          GuestWorkingShift?   @relation(fields: [shiftId], references: [id], onDelete: SetNull)
-  createdByUser  User?                @relation("StaffChecklistRunCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  assignedToUser User?                @relation("StaffChecklistRunAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
-  reviewedByUser User?                @relation("StaffChecklistRunReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  tenant         Tenant                  @relation(fields: [tenantId], references: [id])
+  regulation     StaffShiftRegulation?   @relation(fields: [regulationId], references: [id], onDelete: Restrict)
+  template       StaffChecklistTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  store          Store?                  @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  shift          GuestWorkingShift?      @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  createdByUser  User?                   @relation("StaffChecklistRunCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  assignedToUser User?                   @relation("StaffChecklistRunAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  reviewedByUser User?                   @relation("StaffChecklistRunReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, status, scheduledAt], map: "staff_checklist_run_status_schedule_idx")
   @@index([tenantId, shiftKind, createdAt], map: "staff_checklist_run_kind_created_idx")
   @@index([regulationId], map: "staff_checklist_run_regulation_idx")
+  @@index([templateId], map: "staff_checklist_run_template_idx")
   @@index([storeId], map: "staff_checklist_run_store_idx")
   @@index([shiftId], map: "staff_checklist_run_shift_idx")
   @@index([createdByUserId], map: "staff_checklist_run_created_by_idx")

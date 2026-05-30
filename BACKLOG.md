@@ -370,14 +370,14 @@ Status: started. Goal: turn daily operating standards into controlled execution.
 - Started: allow checklist items to create violation tasks automatically. Failed checklist answers now create high-priority staff follow-up tasks on submission.
 - Started: add manager review flow: accepted, returned for correction, escalated. First flow supports `ON_REVIEW`, `ACCEPTED`, and `RETURNED`; escalation remains next.
 - Started: add evidence: photo, video/file link, comment, numeric value, checkbox, select, timestamp. First execution UI captures result, value, evidence URL, and comment per item.
-- Add execution report by club, shift, employee, and checklist.
+- Done: added execution report by club, shift, employee, and checklist: API `/staff/checklists/report`, page `/staff/checklists/report`, filters by period/status/type/club/employee/search, summary cards, grouped tables, and latest checklist runs.
 
 Acceptance criteria:
 
 - Done: an administrator can complete an opening or closing shift checklist from a published regulation snapshot.
 - Done: required items cannot be submitted for review without required evidence.
 - Done: a failed checklist item creates a follow-up task.
-- Started: a manager sees missed, late, failed, and returned checklist runs through the first checklist workspace summary and filters; a fuller execution report remains next.
+- Done: a manager sees missed, late, failed, and returned checklist runs through the checklist workspace summary, filters, and the fuller execution report by club, shift, employee, and checklist.
 
 ### MVP 3. Training, Knowledge Base, And Attestations
 

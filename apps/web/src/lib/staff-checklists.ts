@@ -151,6 +151,11 @@ export type StaffChecklistFilters = {
   search?: string;
 };
 
+export type StaffChecklistExecutionReportFilters = StaffChecklistFilters & {
+  dateFrom?: string;
+  dateTo?: string;
+};
+
 export type StaffChecklistReport = {
   filters: {
     status: StaffChecklistFilterStatus;
@@ -179,6 +184,72 @@ export type StaffChecklistReport = {
   users: StaffChecklistUser[];
 };
 
+export type StaffChecklistExecutionMetrics = {
+  total: number;
+  open: number;
+  inProgress: number;
+  onReview: number;
+  accepted: number;
+  returned: number;
+  canceled: number;
+  overdue: number;
+  failedItems: number;
+  blockingIssues: number;
+  scoreTotal: number;
+  scoreEarned: number;
+  scorePercent: number;
+  requiredItemsTotal: number;
+  requiredItemsDone: number;
+  requiredPercent: number;
+  evidenceTotal: number;
+  evidenceDone: number;
+  evidencePercent: number;
+};
+
+export type StaffChecklistExecutionGroup = StaffChecklistExecutionMetrics & {
+  key: string;
+  label: string;
+  caption: string | null;
+};
+
+export type StaffChecklistExecutionRun = StaffChecklistExecutionMetrics & {
+  id: string;
+  title: string;
+  status: StaffChecklistStatus;
+  activityDate: string;
+  scheduledAt: string | null;
+  submittedAt: string | null;
+  store: StaffChecklistStore | null;
+  assignedToUser: StaffChecklistUser | null;
+  checklist: {
+    id: string | null;
+    title: string;
+    type: "REGULATION" | "TEMPLATE" | "RUN";
+  };
+  shift: {
+    id: string;
+    externalShiftId: string;
+    startedAt: string | null;
+    stoppedAt: string | null;
+    store: { id: string; name: string } | null;
+  } | null;
+};
+
+export type StaffChecklistExecutionReport = {
+  filters: StaffChecklistReport["filters"] & {
+    dateFrom: string | null;
+    dateTo: string | null;
+  };
+  summary: StaffChecklistExecutionMetrics;
+  byClub: StaffChecklistExecutionGroup[];
+  byShift: StaffChecklistExecutionGroup[];
+  byEmployee: StaffChecklistExecutionGroup[];
+  byChecklist: StaffChecklistExecutionGroup[];
+  runs: StaffChecklistExecutionRun[];
+  stores: StaffChecklistStore[];
+  users: StaffChecklistUser[];
+};
+
 export async function getStaffChecklistReport(
   filters: StaffChecklistFilters = {},
 ): Promise<StaffChecklistReport> {
@@ -192,6 +263,21 @@ export async function getStaffChecklistReport(
   }
 
   return response.json() as Promise<StaffChecklistReport>;
+}
+
+export async function getStaffChecklistExecutionReport(
+  filters: StaffChecklistExecutionReportFilters = {},
+): Promise<StaffChecklistExecutionReport> {
+  const response = await fetch(`${getApiUrl()}/staff/checklists/report${query(filters)}`, {
+    cache: "no-store",
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch staff checklist execution report");
+  }
+
+  return response.json() as Promise<StaffChecklistExecutionReport>;
 }
 
 function query(filters: Record<string, string | undefined>) {

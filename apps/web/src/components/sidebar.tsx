@@ -54,6 +54,7 @@ const navGroups: NavGroup[] = [
       { href: "/staff/shift-regulations", label: "Регламенты смены" },
       { href: "/staff/checklist-templates", label: "Шаблоны чеклистов" },
       { href: "/staff/checklists", label: "Чеклисты смены" },
+      { href: "/staff/checklists/report", label: "Отчет по чеклистам" },
       { href: "/guests/staff-control", label: "Контроль персонала" },
       { href: "/guests/staff-control/operators", label: "Администраторы" },
     ],

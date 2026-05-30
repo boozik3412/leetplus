@@ -133,6 +133,12 @@ export default async function StaffChecklistsPage({
           </div>
           <div className="flex flex-wrap gap-2">
             <Link
+              href="/staff/checklists/report"
+              className="inline-flex rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900"
+            >
+              Отчет по чеклистам
+            </Link>
+            <Link
               href="/staff/checklist-templates"
               className="inline-flex rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
             >

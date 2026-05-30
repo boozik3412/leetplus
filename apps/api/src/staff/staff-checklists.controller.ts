@@ -17,6 +17,8 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import {
   StaffChecklistsService,
   type StaffChecklistCreateDto,
+  type StaffChecklistExecutionReport,
+  type StaffChecklistExecutionReportQuery,
   type StaffChecklistReport,
   type StaffChecklistsQuery,
   type StaffChecklistUpdateDto,
@@ -44,6 +46,14 @@ export class StaffChecklistsController {
     @Query() query: StaffChecklistsQuery,
   ): Promise<StaffChecklistReport> {
     return this.staffChecklistsService.getChecklists(user, query);
+  }
+
+  @Get('report')
+  getExecutionReport(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: StaffChecklistExecutionReportQuery,
+  ): Promise<StaffChecklistExecutionReport> {
+    return this.staffChecklistsService.getExecutionReport(user, query);
   }
 
   @Post()

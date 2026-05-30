@@ -59,6 +59,11 @@ export type StaffChecklistsQuery = {
   search?: string;
 };
 
+export type StaffChecklistExecutionReportQuery = StaffChecklistsQuery & {
+  dateFrom?: string;
+  dateTo?: string;
+};
+
 export type StaffChecklistCreateDto = {
   regulationId?: string;
   templateId?: string;
@@ -134,6 +139,72 @@ export type StaffChecklistReport = {
   rows: StaffChecklistRunResponse[];
   publishedRegulations: StaffChecklistRegulationOption[];
   checklistTemplates: StaffChecklistTemplateOption[];
+  stores: Array<{ id: string; name: string; isActive: boolean }>;
+  users: Array<{ id: string; email: string; fullName: string | null }>;
+};
+
+export type StaffChecklistExecutionMetrics = {
+  total: number;
+  open: number;
+  inProgress: number;
+  onReview: number;
+  accepted: number;
+  returned: number;
+  canceled: number;
+  overdue: number;
+  failedItems: number;
+  blockingIssues: number;
+  scoreTotal: number;
+  scoreEarned: number;
+  scorePercent: number;
+  requiredItemsTotal: number;
+  requiredItemsDone: number;
+  requiredPercent: number;
+  evidenceTotal: number;
+  evidenceDone: number;
+  evidencePercent: number;
+};
+
+export type StaffChecklistExecutionGroup = StaffChecklistExecutionMetrics & {
+  key: string;
+  label: string;
+  caption: string | null;
+};
+
+export type StaffChecklistExecutionRun = StaffChecklistExecutionMetrics & {
+  id: string;
+  title: string;
+  status: StaffChecklistStatus;
+  activityDate: string;
+  scheduledAt: string | null;
+  submittedAt: string | null;
+  store: { id: string; name: string; isActive: boolean } | null;
+  assignedToUser: { id: string; email: string; fullName: string | null } | null;
+  checklist: {
+    id: string | null;
+    title: string;
+    type: 'REGULATION' | 'TEMPLATE' | 'RUN';
+  };
+  shift: {
+    id: string;
+    externalShiftId: string;
+    startedAt: string | null;
+    stoppedAt: string | null;
+    store: { id: string; name: string } | null;
+  } | null;
+};
+
+export type StaffChecklistExecutionReport = {
+  filters: StaffChecklistReport['filters'] & {
+    dateFrom: string | null;
+    dateTo: string | null;
+  };
+  summary: StaffChecklistExecutionMetrics;
+  byClub: StaffChecklistExecutionGroup[];
+  byShift: StaffChecklistExecutionGroup[];
+  byEmployee: StaffChecklistExecutionGroup[];
+  byChecklist: StaffChecklistExecutionGroup[];
+  runs: StaffChecklistExecutionRun[];
   stores: Array<{ id: string; name: string; isActive: boolean }>;
   users: Array<{ id: string; email: string; fullName: string | null }>;
 };
@@ -347,6 +418,101 @@ export class StaffChecklistsService {
         this.toRegulationOption(row),
       ),
       checklistTemplates: templates.map((row) => this.toTemplateOption(row)),
+      stores,
+      users,
+    };
+  }
+
+  async getExecutionReport(
+    user: AuthenticatedUser,
+    query: StaffChecklistExecutionReportQuery = {},
+  ): Promise<StaffChecklistExecutionReport> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const filters = this.resolveExecutionFilters(query);
+    const where = this.buildExecutionWhere(tenantId, filters);
+
+    const [rows, stores, users] = await Promise.all([
+      this.prisma.staffChecklistRun.findMany({
+        where,
+        include: checklistRunInclude,
+        orderBy: [
+          { submittedAt: 'desc' },
+          { scheduledAt: 'desc' },
+          { createdAt: 'desc' },
+        ],
+        take: 5000,
+      }),
+      this.prisma.store.findMany({
+        where: { tenantId },
+        select: { id: true, name: true, isActive: true },
+        orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+      }),
+      this.prisma.user.findMany({
+        where: { tenantId, isActive: true },
+        select: { id: true, email: true, fullName: true },
+        orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
+      }),
+    ]);
+
+    const summary = this.createExecutionMetrics();
+    const byClub = new Map<string, StaffChecklistExecutionGroup>();
+    const byShift = new Map<string, StaffChecklistExecutionGroup>();
+    const byEmployee = new Map<string, StaffChecklistExecutionGroup>();
+    const byChecklist = new Map<string, StaffChecklistExecutionGroup>();
+
+    rows.forEach((row) => {
+      this.addRunToExecutionMetrics(summary, row);
+
+      const clubGroup = this.getExecutionGroup(
+        byClub,
+        row.store?.id ?? 'network',
+        row.store?.name ?? 'Вся сеть / клуб не указан',
+        row.store?.isActive === false ? 'неактивный клуб' : null,
+      );
+      this.addRunToExecutionMetrics(clubGroup, row);
+
+      const shiftGroup = this.getExecutionGroup(
+        byShift,
+        row.shift?.id ?? 'no-shift',
+        row.shift
+          ? `Смена ${row.shift.externalShiftId}`
+          : 'Без привязки к смене',
+        row.shift?.store?.name ?? row.store?.name ?? null,
+      );
+      this.addRunToExecutionMetrics(shiftGroup, row);
+
+      const employeeGroup = this.getExecutionGroup(
+        byEmployee,
+        row.assignedToUser?.id ?? 'unassigned',
+        row.assignedToUser?.fullName ??
+          row.assignedToUser?.email ??
+          'Не назначен',
+        row.assignedToUser?.email ?? null,
+      );
+      this.addRunToExecutionMetrics(employeeGroup, row);
+
+      const source = this.resolveChecklistSource(row);
+      const checklistGroup = this.getExecutionGroup(
+        byChecklist,
+        source.key,
+        source.title,
+        source.type === 'REGULATION'
+          ? 'регламент смены'
+          : source.type === 'TEMPLATE'
+            ? 'шаблон чеклиста'
+            : 'разовое выполнение',
+      );
+      this.addRunToExecutionMetrics(checklistGroup, row);
+    });
+
+    return {
+      filters,
+      summary: this.finalizeExecutionMetrics(summary),
+      byClub: this.finalizeExecutionGroups(byClub),
+      byShift: this.finalizeExecutionGroups(byShift),
+      byEmployee: this.finalizeExecutionGroups(byEmployee),
+      byChecklist: this.finalizeExecutionGroups(byChecklist),
+      runs: rows.slice(0, 300).map((row) => this.toExecutionRun(row)),
       stores,
       users,
     };
@@ -586,6 +752,58 @@ export class StaffChecklistsService {
     };
   }
 
+  private resolveExecutionFilters(
+    query: StaffChecklistExecutionReportQuery,
+  ): StaffChecklistExecutionReport['filters'] {
+    const baseFilters = this.resolveFilters(query);
+
+    return {
+      ...baseFilters,
+      dateFrom: this.normalizeDateFilter(query.dateFrom),
+      dateTo: this.normalizeDateFilter(query.dateTo),
+    };
+  }
+
+  private buildExecutionWhere(
+    tenantId: string,
+    filters: StaffChecklistExecutionReport['filters'],
+  ): Prisma.StaffChecklistRunWhereInput {
+    const where = this.buildWhere(tenantId, filters, true);
+    const dateFrom = this.normalizeDateTime(filters.dateFrom, 'date from');
+    const dateTo = this.normalizeDateTime(filters.dateTo, 'date to');
+
+    if (dateFrom || dateTo) {
+      const dateRange: { gte?: Date; lte?: Date } = {};
+
+      if (dateFrom) {
+        dateRange.gte = dateFrom;
+      }
+
+      if (dateTo) {
+        const end = new Date(dateTo);
+        end.setHours(23, 59, 59, 999);
+        dateRange.lte = end;
+      }
+
+      where.AND = [
+        ...(Array.isArray(where.AND)
+          ? where.AND
+          : where.AND
+            ? [where.AND]
+            : []),
+        {
+          OR: [
+            { submittedAt: dateRange },
+            { submittedAt: null, scheduledAt: dateRange },
+            { submittedAt: null, scheduledAt: null, createdAt: dateRange },
+          ],
+        },
+      ];
+    }
+
+    return where;
+  }
+
   private resolveFilters(
     query: StaffChecklistsQuery,
   ): StaffChecklistReport['filters'] {
@@ -691,11 +909,7 @@ export class StaffChecklistsService {
         summary.canceled += 1;
       }
 
-      if (
-        row.scheduledAt &&
-        row.scheduledAt < now &&
-        ['OPEN', 'IN_PROGRESS', 'RETURNED'].includes(row.status)
-      ) {
+      if (this.isRunOverdue(row.status, row.scheduledAt, now)) {
         summary.overdue += 1;
       }
 
@@ -706,6 +920,142 @@ export class StaffChecklistsService {
     });
 
     return summary;
+  }
+
+  private createExecutionMetrics(): StaffChecklistExecutionMetrics {
+    return {
+      total: 0,
+      open: 0,
+      inProgress: 0,
+      onReview: 0,
+      accepted: 0,
+      returned: 0,
+      canceled: 0,
+      overdue: 0,
+      failedItems: 0,
+      blockingIssues: 0,
+      scoreTotal: 0,
+      scoreEarned: 0,
+      scorePercent: 0,
+      requiredItemsTotal: 0,
+      requiredItemsDone: 0,
+      requiredPercent: 0,
+      evidenceTotal: 0,
+      evidenceDone: 0,
+      evidencePercent: 0,
+    };
+  }
+
+  private getExecutionGroup(
+    groups: Map<string, StaffChecklistExecutionGroup>,
+    key: string,
+    label: string,
+    caption: string | null,
+  ) {
+    const current = groups.get(key);
+
+    if (current) {
+      return current;
+    }
+
+    const group = {
+      key,
+      label,
+      caption,
+      ...this.createExecutionMetrics(),
+    };
+
+    groups.set(key, group);
+    return group;
+  }
+
+  private addRunToExecutionMetrics(
+    metrics: StaffChecklistExecutionMetrics,
+    row: StaffChecklistRunRow,
+  ) {
+    metrics.total += 1;
+
+    if (row.status === 'OPEN') {
+      metrics.open += 1;
+    } else if (row.status === 'IN_PROGRESS') {
+      metrics.inProgress += 1;
+    } else if (row.status === 'ON_REVIEW') {
+      metrics.onReview += 1;
+    } else if (row.status === 'ACCEPTED') {
+      metrics.accepted += 1;
+    } else if (row.status === 'RETURNED') {
+      metrics.returned += 1;
+    } else if (row.status === 'CANCELED') {
+      metrics.canceled += 1;
+    }
+
+    if (this.isRunOverdue(row.status, row.scheduledAt)) {
+      metrics.overdue += 1;
+    }
+
+    metrics.failedItems += row.failedItems;
+    metrics.blockingIssues += this.normalizeBlockingIssues(
+      row.blockingIssues,
+    ).length;
+    metrics.scoreTotal += row.scoreTotal;
+    metrics.scoreEarned += row.scoreEarned;
+    metrics.requiredItemsTotal += row.requiredItemsTotal;
+    metrics.requiredItemsDone += row.requiredItemsDone;
+    metrics.evidenceTotal += row.evidenceTotal;
+    metrics.evidenceDone += row.evidenceDone;
+  }
+
+  private finalizeExecutionGroups(
+    groups: Map<string, StaffChecklistExecutionGroup>,
+  ) {
+    return [...groups.values()]
+      .map((group) => this.finalizeExecutionMetrics(group))
+      .sort((left, right) => {
+        if (right.failedItems !== left.failedItems) {
+          return right.failedItems - left.failedItems;
+        }
+
+        return right.total - left.total;
+      });
+  }
+
+  private finalizeExecutionMetrics<T extends StaffChecklistExecutionMetrics>(
+    metrics: T,
+  ): T {
+    metrics.scorePercent = this.percent(
+      metrics.scoreEarned,
+      metrics.scoreTotal,
+    );
+    metrics.requiredPercent = this.percent(
+      metrics.requiredItemsDone,
+      metrics.requiredItemsTotal,
+    );
+    metrics.evidencePercent = this.percent(
+      metrics.evidenceDone,
+      metrics.evidenceTotal,
+    );
+
+    return metrics;
+  }
+
+  private percent(value: number, total: number) {
+    if (total <= 0) {
+      return 0;
+    }
+
+    return Math.round((value / total) * 100);
+  }
+
+  private isRunOverdue(
+    status: string,
+    scheduledAt: Date | null,
+    now = new Date(),
+  ) {
+    return (
+      Boolean(scheduledAt) &&
+      scheduledAt! < now &&
+      ['OPEN', 'IN_PROGRESS', 'RETURNED'].includes(status)
+    );
   }
 
   private toRegulationOption(row: {
@@ -766,11 +1116,7 @@ export class StaffChecklistsService {
     const sections = this.normalizeSections(row.sectionsSnapshot);
     const answers = this.normalizeAnswers(row.answers, sections);
     const blockingIssues = this.normalizeBlockingIssues(row.blockingIssues);
-    const now = new Date();
-    const isOverdue =
-      Boolean(row.scheduledAt) &&
-      row.scheduledAt! < now &&
-      ['OPEN', 'IN_PROGRESS', 'RETURNED'].includes(row.status);
+    const isOverdue = this.isRunOverdue(row.status, row.scheduledAt);
 
     return {
       id: row.id,
@@ -816,6 +1162,71 @@ export class StaffChecklistsService {
       assignedToUser: row.assignedToUser,
       reviewedByUser: row.reviewedByUser,
     };
+  }
+
+  private toExecutionRun(
+    row: StaffChecklistRunRow,
+  ): StaffChecklistExecutionRun {
+    const metrics = this.createExecutionMetrics();
+    this.addRunToExecutionMetrics(metrics, row);
+    const source = this.resolveChecklistSource(row);
+
+    return {
+      id: row.id,
+      title: row.title,
+      status: row.status as StaffChecklistStatus,
+      activityDate: this.executionActivityDate(row).toISOString(),
+      scheduledAt: row.scheduledAt?.toISOString() ?? null,
+      submittedAt: row.submittedAt?.toISOString() ?? null,
+      store: row.store,
+      assignedToUser: row.assignedToUser,
+      checklist: {
+        id: source.id,
+        title: source.title,
+        type: source.type,
+      },
+      shift: row.shift
+        ? {
+            id: row.shift.id,
+            externalShiftId: row.shift.externalShiftId,
+            startedAt: row.shift.startedAt?.toISOString() ?? null,
+            stoppedAt: row.shift.stoppedAt?.toISOString() ?? null,
+            store: row.shift.store,
+          }
+        : null,
+      ...this.finalizeExecutionMetrics(metrics),
+    };
+  }
+
+  private resolveChecklistSource(row: StaffChecklistRunRow) {
+    if (row.templateId || row.template) {
+      return {
+        key: `template:${row.templateId ?? 'missing'}`,
+        id: row.templateId,
+        title: row.template?.title ?? row.title,
+        type: 'TEMPLATE' as const,
+      };
+    }
+
+    if (row.regulationId || row.regulation) {
+      return {
+        key: `regulation:${row.regulationId ?? 'missing'}`,
+        id: row.regulationId,
+        title: row.regulation?.title ?? row.title,
+        type: 'REGULATION' as const,
+      };
+    }
+
+    return {
+      key: `run:${row.id}`,
+      id: null,
+      title: row.title,
+      type: 'RUN' as const,
+    };
+  }
+
+  private executionActivityDate(row: StaffChecklistRunRow) {
+    return row.submittedAt ?? row.scheduledAt ?? row.createdAt;
   }
 
   private normalizeSections(value: unknown): StaffChecklistSection[] {
@@ -1309,6 +1720,22 @@ export class StaffChecklistsService {
     }
 
     return fallback;
+  }
+
+  private normalizeDateFilter(value: unknown) {
+    const normalized = this.normalizeOptionalString(value);
+
+    if (!normalized) {
+      return null;
+    }
+
+    const date = new Date(normalized);
+
+    if (Number.isNaN(date.getTime())) {
+      throw new BadRequestException('Invalid date filter');
+    }
+
+    return normalized;
   }
 
   private normalizeScore(value: unknown) {

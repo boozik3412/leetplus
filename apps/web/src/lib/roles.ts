@@ -9,6 +9,7 @@ export const roleLabels: Record<UserRole, string> = {
   BUYER: "Закупщик",
   MARKETER: "Маркетолог",
   CLUB_MANAGER: "Управляющий клубом",
+  STANDARDS_MANAGER: "Менеджер по стандартам",
   SENIOR_ADMINISTRATOR: "Старший администратор",
   CLUB_ADMINISTRATOR: "Администратор клуба",
 };
@@ -20,6 +21,8 @@ export const roleDescriptions: Record<UserRole, string> = {
   BUYER: "Ассортимент, товары, поставщики и коммерческие отчеты.",
   MARKETER: "Маркетинг, CRM-группы, кампании и промо-наборы.",
   CLUB_MANAGER: "Операционная работа по выбранным клубам и персоналу.",
+  STANDARDS_MANAGER:
+    "Обучение, подбор администраторов, регламенты, чек-листы, стандарты работы, контроль администраторов и аттестации.",
   SENIOR_ADMINISTRATOR:
     "Задачи персонала, чеклисты смены и контроль выполнения.",
   CLUB_ADMINISTRATOR:
@@ -31,6 +34,7 @@ export const roleOrder: UserRole[] = [
   "ADMIN",
   "MANAGER",
   "CLUB_MANAGER",
+  "STANDARDS_MANAGER",
   "MARKETER",
   "BUYER",
   "SENIOR_ADMINISTRATOR",

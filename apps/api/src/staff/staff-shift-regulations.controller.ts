@@ -27,6 +27,7 @@ import {
   UserRole.ADMIN,
   UserRole.MANAGER,
   UserRole.CLUB_MANAGER,
+  UserRole.STANDARDS_MANAGER,
   UserRole.SENIOR_ADMINISTRATOR,
 )
 @UseGuards(JwtAuthGuard, RolesGuard)

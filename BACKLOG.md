@@ -1,6 +1,6 @@
 # LeetPlus Backlog
 
-Last updated: 2026-05-29
+Last updated: 2026-05-30
 
 This file is the source of truth for product backlog, near-term roadmap, planned modules, and deferred ideas. `PROJECT_STATE.md` should stay focused on current project state, workflow, production context, and data rules.
 
@@ -305,7 +305,8 @@ Goal: let managers create short-term and long-term tasks for shifts, periods, cl
 - Done: created `STAFF_OPERATIONS_MODULE_TZ.md` with roles, scenarios, data model, permissions, MVP scope, acceptance criteria, and data rules.
 - Done: first staff-task foundation added: tenant-scoped `StaffTask` model, migration, API for list/create/status update, `/staff/tasks` workspace, and `Персонал -> Задачи персонала` navigation entry.
 - Done: staff tasks now support execution comments, evidence links, and an audit journal for create/update/status/comment/evidence events; `/staff/tasks` shows a compact `История и подтверждение` block in each task.
-- Done: tenant user roles and account issuing added: `OWNER`, `ADMIN`, `MANAGER`, `BUYER`, `MARKETER`, `CLUB_MANAGER`, `SENIOR_ADMINISTRATOR`, and `CLUB_ADMINISTRATOR`; `/users` lets owner/system admin create accounts, set active status, reset password, and scope access to the whole network or selected clubs.
+- Done: tenant user roles and account issuing added: `OWNER`, `ADMIN`, `MANAGER`, `BUYER`, `MARKETER`, `CLUB_MANAGER`, `STANDARDS_MANAGER`, `SENIOR_ADMINISTRATOR`, and `CLUB_ADMINISTRATOR`; `/users` lets owner/system admin create accounts, set active status, reset password, and scope access to the whole network or selected clubs.
+- Done: added `STANDARDS_MANAGER` for training, administrator hiring, regulations, checklists, work standards, administrator control, and attestations; the role can access staff operations and staff-control reports without opening the full guest/CRM area in navigation.
 - Done: protected API guards now re-read the current user from DB, so deactivated accounts and changed roles stop using protected routes after token verification.
 - Create staff directory and role model independent from guest analytics, while reusing current staff identity mapping where useful.
 - Support employee-to-Langame mapping from `working_shifts.user_id` and future operator identifiers.

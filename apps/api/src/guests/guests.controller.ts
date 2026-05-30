@@ -51,6 +51,16 @@ import {
   type GuestsSummaryQuery,
 } from './guests.service';
 
+const staffControlAccessRoles = [
+  UserRole.OWNER,
+  UserRole.ADMIN,
+  UserRole.MANAGER,
+  UserRole.CLUB_MANAGER,
+  UserRole.STANDARDS_MANAGER,
+  UserRole.SENIOR_ADMINISTRATOR,
+  UserRole.CLUB_ADMINISTRATOR,
+] satisfies UserRole[];
+
 @Controller('guests')
 @Roles(
   UserRole.OWNER,
@@ -254,6 +264,7 @@ export class GuestsController {
     });
   }
 
+  @Roles(...staffControlAccessRoles)
   @Get('staff-control')
   getStaffControl(
     @CurrentUser() user: AuthenticatedUser,
@@ -262,6 +273,7 @@ export class GuestsController {
     return this.guestsService.getStaffControl(user, query);
   }
 
+  @Roles(...staffControlAccessRoles)
   @Get('staff-control/operators')
   getStaffOperators(
     @CurrentUser() user: AuthenticatedUser,
@@ -270,6 +282,7 @@ export class GuestsController {
     return this.guestsService.getStaffOperators(user, query);
   }
 
+  @Roles(...staffControlAccessRoles)
   @Get('staff-control/operators/export')
   async exportStaffOperators(
     @CurrentUser() user: AuthenticatedUser,
@@ -287,6 +300,7 @@ export class GuestsController {
     });
   }
 
+  @Roles(...staffControlAccessRoles)
   @Get('staff-control/operations')
   getStaffOperations(
     @CurrentUser() user: AuthenticatedUser,
@@ -295,6 +309,7 @@ export class GuestsController {
     return this.guestsService.getStaffOperations(user, query);
   }
 
+  @Roles(...staffControlAccessRoles)
   @Get('staff-control/operations/export')
   async exportStaffOperations(
     @CurrentUser() user: AuthenticatedUser,
@@ -310,6 +325,7 @@ export class GuestsController {
     });
   }
 
+  @Roles(...staffControlAccessRoles)
   @Post('staff-control/identity-mappings')
   mapStaffIdentity(
     @CurrentUser() user: AuthenticatedUser,
@@ -318,6 +334,7 @@ export class GuestsController {
     return this.guestsService.mapStaffIdentity(user, dto);
   }
 
+  @Roles(...staffControlAccessRoles)
   @Delete('staff-control/identity-mappings/:id')
   unmapStaffIdentity(
     @CurrentUser() user: AuthenticatedUser,

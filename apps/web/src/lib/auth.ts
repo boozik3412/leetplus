@@ -12,6 +12,7 @@ export type AuthUser = {
     | "ADMIN"
     | "MARKETER"
     | "CLUB_MANAGER"
+    | "STANDARDS_MANAGER"
     | "SENIOR_ADMINISTRATOR"
     | "CLUB_ADMINISTRATOR";
   isActive?: boolean;

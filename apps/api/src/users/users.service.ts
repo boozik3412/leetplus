@@ -19,6 +19,7 @@ const assignableRolesByActor: Record<UserRole, UserRole[]> = {
     UserRole.BUYER,
     UserRole.MARKETER,
     UserRole.CLUB_MANAGER,
+    UserRole.STANDARDS_MANAGER,
     UserRole.SENIOR_ADMINISTRATOR,
     UserRole.CLUB_ADMINISTRATOR,
   ],
@@ -27,6 +28,7 @@ const assignableRolesByActor: Record<UserRole, UserRole[]> = {
     UserRole.BUYER,
     UserRole.MARKETER,
     UserRole.CLUB_MANAGER,
+    UserRole.STANDARDS_MANAGER,
     UserRole.SENIOR_ADMINISTRATOR,
     UserRole.CLUB_ADMINISTRATOR,
   ],
@@ -34,6 +36,7 @@ const assignableRolesByActor: Record<UserRole, UserRole[]> = {
   [UserRole.BUYER]: [],
   [UserRole.MARKETER]: [],
   [UserRole.CLUB_MANAGER]: [],
+  [UserRole.STANDARDS_MANAGER]: [],
   [UserRole.SENIOR_ADMINISTRATOR]: [],
   [UserRole.CLUB_ADMINISTRATOR]: [],
 };
@@ -64,6 +67,12 @@ const roleOptions = [
     role: UserRole.MARKETER,
     label: 'Маркетолог',
     description: 'Маркетинг, CRM-группы, кампании и промо-наборы.',
+  },
+  {
+    role: UserRole.STANDARDS_MANAGER,
+    label: 'Менеджер по стандартам',
+    description:
+      'Обучение, подбор администраторов, регламенты, чек-листы, стандарты работы, контроль администраторов и аттестации.',
   },
   {
     role: UserRole.BUYER,

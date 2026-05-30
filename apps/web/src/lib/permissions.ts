@@ -72,6 +72,7 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "view_marketing",
     "view_staff",
   ],
+  STANDARDS_MANAGER: ["view_dashboard", "view_staff"],
   SENIOR_ADMINISTRATOR: ["view_dashboard", "view_staff"],
   CLUB_ADMINISTRATOR: ["view_dashboard", "view_staff"],
 };

@@ -2,6 +2,10 @@
 
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import {
+  staffShiftRegulationTemplates,
+  type StaffShiftRegulationTemplate,
+} from "@/lib/staff-shift-regulation-templates";
 import type {
   StaffShiftItemValueType,
   StaffShiftKind,
@@ -62,6 +66,29 @@ type DraftRegulation = {
 
 function uid(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function cloneSections(sections: StaffShiftRegulationSection[]) {
+  return sections.map((section) => ({
+    ...section,
+    items: section.items.map((item) => ({ ...item })),
+  }));
+}
+
+function draftFromTemplate(
+  template: StaffShiftRegulationTemplate,
+): DraftRegulation {
+  return {
+    id: null,
+    title: template.title,
+    description: template.description,
+    shiftKind: template.shiftKind,
+    status: "DRAFT",
+    roleScope: template.roleScope,
+    storeId: "",
+    effectiveFrom: "",
+    sections: cloneSections(template.sections),
+  };
 }
 
 function defaultDraft(): DraftRegulation {
@@ -160,6 +187,11 @@ export function StaffShiftRegulationBuilder({
 
   function updateDraft(patch: Partial<DraftRegulation>) {
     setDraft((current) => ({ ...current, ...patch }));
+  }
+
+  function applyTemplate(template: StaffShiftRegulationTemplate) {
+    setDraft(draftFromTemplate(template));
+    setError(null);
   }
 
   function updateSection(
@@ -361,6 +393,47 @@ export function StaffShiftRegulationBuilder({
           >
             Новый
           </button>
+        </div>
+
+        <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
+          <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+            Шаблоны из регламента
+          </p>
+          <p className="mt-1 text-xs leading-5 text-zinc-500">
+            Дневная и ночная смена администратора по текущему файлу.
+          </p>
+          <div className="mt-3 space-y-2">
+            {staffShiftRegulationTemplates.map((template) => {
+              const sectionsCount = template.sections.length;
+              const itemsCount = template.sections.reduce(
+                (sum, section) => sum + section.items.length,
+                0,
+              );
+              const isCurrentTemplate =
+                !draft.id && draft.title === template.title;
+
+              return (
+                <button
+                  key={template.id}
+                  type="button"
+                  onClick={() => applyTemplate(template)}
+                  className={[
+                    "w-full rounded-md border p-3 text-left transition hover:border-emerald-500/70 hover:bg-emerald-50 dark:hover:bg-emerald-500/10",
+                    isCurrentTemplate
+                      ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-500/10"
+                      : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950",
+                  ].join(" ")}
+                >
+                  <span className="block text-sm font-semibold">
+                    {template.subtitle}
+                  </span>
+                  <span className="mt-1 block text-xs text-zinc-500">
+                    {sectionsCount} разделов, {itemsCount} пунктов
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         <div className="mt-4 space-y-2">

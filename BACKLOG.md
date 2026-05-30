@@ -329,11 +329,12 @@ Status: started. Goal: turn daily operating standards into controlled execution.
 
 - Done: first shift-regulation constructor added: tenant-scoped `StaffShiftRegulation`, migration, API `/staff/shift-regulations`, `/staff/shift-regulations` UI, sidebar entry, statuses draft/published/archived, sections, items, required/evidence flags, value type, score, role, club, and effective date.
 - Done: first checklist-run execution layer added: tenant-scoped `StaffChecklistRun`, migration, API `/staff/checklists`, `/staff/checklists` UI, sidebar entry, creation from published regulations, answer/evidence capture, submission blocking for missing required answers/evidence, manager accept/return statuses, and automatic follow-up tasks for failed items.
+- Done: shift-regulation constructor now includes two admin templates from the current `Регламент.docx`: day shift `09:00-20:00` and night shift `21:00-08:00`, with timing sections, standing rules, bar/accounting, report evidence, and incident rules.
 - Add versioned regulation history beyond the current version number.
 - Add required employee acknowledgement for selected roles or clubs.
 - Add checklist template builder with sections, required fields, evidence requirements, and scoring.
 - Started: add checklist runs tied to club, shift, employee, role, and scheduled time. First runs use the published regulation snapshot and store assigned user, club, optional Langame shift, schedule, status, answers, score, failed items, and evidence counters.
-- Add standard checklist packs: opening shift, closing shift, cash desk, bar, PC zone, cleanliness, incident handling, inventory handover.
+- Started: add standard checklist packs. Day/night administrator regulation templates now cover opening/closing timing, cleanliness, bar, accounting/report evidence, and incidents; specialized cash desk, PC zone, inventory handover, and training packs remain next.
 - Started: allow checklist items to create violation tasks automatically. Failed checklist answers now create high-priority staff follow-up tasks on submission.
 - Started: add manager review flow: accepted, returned for correction, escalated. First flow supports `ON_REVIEW`, `ACCEPTED`, and `RETURNED`; escalation remains next.
 - Started: add evidence: photo, video/file link, comment, numeric value, checkbox, select, timestamp. First execution UI captures result, value, evidence URL, and comment per item.

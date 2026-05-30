@@ -191,6 +191,7 @@ Implemented first:
 - `StaffShiftRegulation` model with tenant, club, author, status, shift kind, role scope, effective date, version, and JSON sections.
 - `/staff/shift-regulations` API and UI constructor.
 - Sections and items support required flag, evidence-required flag, value type, instruction, and score.
+- Two first regulation templates based on the current administrator `Регламент.docx`: day shift `09:00-20:00` and night shift `21:00-08:00`, including timed tasks, standing rules, bar/accounting, report evidence, and incident handling.
 - `StaffChecklistRun` model with tenant, regulation snapshot, club, optional Langame shift, assigned user, schedule, status, answers, evidence counters, score, failed item count, blocking issues, and review comment.
 - `/staff/checklists` API and UI workspace for creating checklist runs from published regulations, filling answers/evidence, submitting for review, accepting/returning, and creating follow-up staff tasks from failed items.
 

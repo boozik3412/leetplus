@@ -78,6 +78,7 @@ Connected production Langame sources:
 - Tightened marketing campaign contact workflow: campaign detail can create the linked CRM task from the contacts tab, contact results save to `marketingCampaignId`, and campaign effect tracks group/task/responsible/channel outcomes.
 - Expanded Stage 8 Staff Operations: staff tasks now have execution comments, evidence links, and an audit journal for create/update/status/comment/evidence events.
 - Added the first shift-regulation constructor for Stage 8 MVP 2: draft/published/archived standards for opening/closing/cash/bar/PC-zone shift work.
+- Added day and night administrator regulation templates from the current `Регламент.docx` into the shift-regulation constructor.
 - Added the first shift-checklist execution workspace for Stage 8 MVP 2: published regulation snapshots can become checklist runs, block submission without required evidence, and create follow-up staff tasks from failed items.
 - Added recommendation workflow state: persisted statuses, responsible roles, financial effect, and an interactive recommendations queue.
 - Fixed dashboard trend card sizing behavior.

@@ -83,6 +83,7 @@ Connected production Langame sources:
 - Added the first shift-regulation constructor for Stage 8 MVP 2: draft/published/archived standards for opening/closing/cash/bar/PC-zone shift work.
 - Added employee acknowledgement tracking for published shift regulations: required counts are calculated by role and club scope, users can confirm the current regulation version, and republishing creates a new acknowledgement version.
 - Added versioned publication snapshots for shift regulations: existing published regulations are backfilled, new publications keep title/scope/sections history, and the constructor shows the version log.
+- Added attached link materials for shift regulations: documents, files, images, videos, and external URLs can be stored on a regulation and snapshotted into each published version.
 - Added day and night administrator regulation templates from the current `Регламент.docx` into the shift-regulation constructor.
 - Added the first shift-checklist execution workspace for Stage 8 MVP 2: published regulation snapshots can become checklist runs, block submission without required evidence, and create follow-up staff tasks from failed items.
 - Added reusable checklist templates for Staff Operations: `StaffChecklistTemplate`, API `/staff/checklist-templates`, a dedicated `/staff/checklist-templates` constructor, sidebar entry, creation from published regulations, and checklist runs from either published regulation snapshots or active template snapshots.

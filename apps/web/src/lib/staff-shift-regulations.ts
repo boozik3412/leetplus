@@ -27,6 +27,13 @@ export type StaffShiftItemValueType =
   | "FILE_LINK"
   | "SELECT"
   | "TIMESTAMP";
+export type StaffShiftRegulationAttachmentType =
+  | "DOCUMENT"
+  | "IMAGE"
+  | "VIDEO"
+  | "FILE_LINK"
+  | "EXTERNAL_LINK"
+  | "OTHER";
 
 export type StaffShiftRegulationStore = {
   id: string;
@@ -58,6 +65,15 @@ export type StaffShiftRegulationSection = {
   items: StaffShiftRegulationItem[];
 };
 
+export type StaffShiftRegulationAttachment = {
+  id: string;
+  title: string;
+  type: StaffShiftRegulationAttachmentType;
+  url: string;
+  note: string | null;
+  required: boolean;
+};
+
 export type StaffShiftRegulationVersion = {
   id: string;
   version: number;
@@ -65,6 +81,7 @@ export type StaffShiftRegulationVersion = {
   description: string | null;
   shiftKind: StaffShiftKind;
   roleScope: StaffShiftRoleScope;
+  attachmentsCount: number;
   sectionsCount: number;
   itemsCount: number;
   requiredEvidenceItems: number;
@@ -88,6 +105,8 @@ export type StaffShiftRegulation = {
   roleScope: StaffShiftRoleScope;
   version: number;
   sections: StaffShiftRegulationSection[];
+  attachments: StaffShiftRegulationAttachment[];
+  attachmentsCount: number;
   sectionsCount: number;
   itemsCount: number;
   requiredEvidenceItems: number;

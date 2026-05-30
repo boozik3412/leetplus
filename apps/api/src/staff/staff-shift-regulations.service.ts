@@ -35,11 +35,21 @@ const itemValueTypes = [
   'SELECT',
   'TIMESTAMP',
 ] as const;
+const attachmentTypes = [
+  'DOCUMENT',
+  'IMAGE',
+  'VIDEO',
+  'FILE_LINK',
+  'EXTERNAL_LINK',
+  'OTHER',
+] as const;
 
 export type StaffShiftRegulationStatus = (typeof regulationStatuses)[number];
 export type StaffShiftKind = (typeof shiftKinds)[number];
 export type StaffShiftRoleScope = (typeof roleScopes)[number];
 export type StaffShiftItemValueType = (typeof itemValueTypes)[number];
+export type StaffShiftRegulationAttachmentType =
+  (typeof attachmentTypes)[number];
 
 export type StaffShiftRegulationsQuery = {
   status?: StaffShiftRegulationStatus | 'all';
@@ -57,6 +67,7 @@ export type StaffShiftRegulationDto = {
   storeId?: string | null;
   effectiveFrom?: string | null;
   sections?: unknown;
+  attachments?: unknown;
 };
 
 export type StaffShiftRegulationAcknowledgementDto = {
@@ -78,6 +89,15 @@ export type StaffShiftRegulationItem = {
   required: boolean;
   evidenceRequired: boolean;
   score: number;
+};
+
+export type StaffShiftRegulationAttachment = {
+  id: string;
+  title: string;
+  type: StaffShiftRegulationAttachmentType;
+  url: string;
+  note: string | null;
+  required: boolean;
 };
 
 export type StaffShiftRegulationReport = {
@@ -131,6 +151,7 @@ export type StaffShiftRegulationVersionResponse = {
   description: string | null;
   shiftKind: StaffShiftKind;
   roleScope: StaffShiftRoleScope;
+  attachmentsCount: number;
   sectionsCount: number;
   itemsCount: number;
   requiredEvidenceItems: number;
@@ -150,6 +171,8 @@ export type StaffShiftRegulationResponse = {
   roleScope: StaffShiftRoleScope;
   version: number;
   sections: StaffShiftRegulationSection[];
+  attachments: StaffShiftRegulationAttachment[];
+  attachmentsCount: number;
   sectionsCount: number;
   itemsCount: number;
   requiredEvidenceItems: number;
@@ -546,6 +569,10 @@ export class StaffShiftRegulationsService {
       data.sections = this.normalizeSections(dto.sections);
     }
 
+    if (dto.attachments !== undefined || options.requireTitle) {
+      data.attachments = this.normalizeAttachments(dto.attachments);
+    }
+
     return data;
   }
 
@@ -555,6 +582,7 @@ export class StaffShiftRegulationsService {
     activeUsers: AcknowledgementUserRow[],
   ): StaffShiftRegulationResponse {
     const sections = this.normalizeSections(row.sections);
+    const attachments = this.normalizeAttachments(row.attachments);
     const items = sections.flatMap((section) => section.items);
     const targetUsers = activeUsers.filter((candidate) =>
       this.userMatchesRegulationTarget(candidate, row),
@@ -586,6 +614,8 @@ export class StaffShiftRegulationsService {
       roleScope: row.roleScope as StaffShiftRoleScope,
       version: row.version,
       sections,
+      attachments,
+      attachmentsCount: attachments.length,
       sectionsCount: sections.length,
       itemsCount: items.length,
       requiredEvidenceItems: items.filter((item) => item.evidenceRequired)
@@ -639,6 +669,7 @@ export class StaffShiftRegulationsService {
         shiftKind: row.shiftKind,
         roleScope: row.roleScope,
         sections: row.sections as Prisma.InputJsonValue,
+        attachments: this.normalizeAttachments(row.attachments),
         effectiveFrom: row.effectiveFrom,
         publishedAt: row.publishedAt,
       },
@@ -650,6 +681,7 @@ export class StaffShiftRegulationsService {
     version: StaffShiftRegulationRow['versions'][number],
   ): StaffShiftRegulationVersionResponse {
     const sections = this.normalizeSections(version.sections);
+    const attachments = this.normalizeAttachments(version.attachments);
     const items = sections.flatMap((section) => section.items);
 
     return {
@@ -659,6 +691,7 @@ export class StaffShiftRegulationsService {
       description: version.description,
       shiftKind: version.shiftKind as StaffShiftKind,
       roleScope: version.roleScope as StaffShiftRoleScope,
+      attachmentsCount: attachments.length,
       sectionsCount: sections.length,
       itemsCount: items.length,
       requiredEvidenceItems: items.filter((item) => item.evidenceRequired)
@@ -751,6 +784,53 @@ export class StaffShiftRegulationsService {
     return (
       [UserRole.SENIOR_ADMINISTRATOR, UserRole.CLUB_ADMINISTRATOR] as UserRole[]
     ).includes(role);
+  }
+
+  private normalizeAttachments(
+    value: unknown,
+  ): StaffShiftRegulationAttachment[] {
+    const rawAttachments = Array.isArray(value) ? value : [];
+    const attachments: StaffShiftRegulationAttachment[] = [];
+
+    rawAttachments.slice(0, 20).forEach((attachment, index) => {
+      const record = this.asRecord(attachment);
+      const title = this.normalizeOptionalString(record.title);
+      const url = this.normalizeOptionalString(record.url);
+
+      if (!title && !url) {
+        return;
+      }
+
+      if (!title || !url) {
+        throw new BadRequestException('Attachment title and URL are required');
+      }
+
+      if (!this.isAllowedAttachmentUrl(url)) {
+        throw new BadRequestException(
+          'Attachment URL must start with http:// or https://',
+        );
+      }
+
+      attachments.push({
+        id:
+          this.normalizeOptionalString(record.id) ?? `attachment-${index + 1}`,
+        title: title.slice(0, 160),
+        type: this.resolveOne(
+          this.normalizeOptionalString(record.type),
+          attachmentTypes,
+          'DOCUMENT',
+        ),
+        url: url.slice(0, 2000),
+        note: this.normalizeOptionalString(record.note)?.slice(0, 500) ?? null,
+        required: this.normalizeBoolean(record.required, false),
+      });
+    });
+
+    return attachments;
+  }
+
+  private isAllowedAttachmentUrl(value: string) {
+    return /^https?:\/\//i.test(value);
   }
 
   private normalizeSections(value: unknown): StaffShiftRegulationSection[] {

@@ -7,6 +7,8 @@ import {
   type StaffShiftRegulationTemplate,
 } from "@/lib/staff-shift-regulation-templates";
 import type {
+  StaffShiftRegulationAttachment,
+  StaffShiftRegulationAttachmentType,
   StaffShiftItemValueType,
   StaffShiftKind,
   StaffShiftRegulation,
@@ -52,6 +54,16 @@ const valueTypeLabels: Record<StaffShiftItemValueType, string> = {
   TIMESTAMP: "Время",
 };
 
+const attachmentTypeLabels: Record<StaffShiftRegulationAttachmentType, string> =
+  {
+    DOCUMENT: "Документ",
+    IMAGE: "Изображение",
+    VIDEO: "Видео",
+    FILE_LINK: "Файл",
+    EXTERNAL_LINK: "Ссылка",
+    OTHER: "Другое",
+  };
+
 type DraftRegulation = {
   id: string | null;
   title: string;
@@ -61,6 +73,7 @@ type DraftRegulation = {
   roleScope: StaffShiftRoleScope;
   storeId: string;
   effectiveFrom: string;
+  attachments: StaffShiftRegulationAttachment[];
   sections: StaffShiftRegulationSection[];
 };
 
@@ -87,6 +100,7 @@ function draftFromTemplate(
     roleScope: template.roleScope,
     storeId: "",
     effectiveFrom: "",
+    attachments: [],
     sections: cloneSections(template.sections),
   };
 }
@@ -101,6 +115,7 @@ function defaultDraft(): DraftRegulation {
     roleScope: "ADMINISTRATOR",
     storeId: "",
     effectiveFrom: "",
+    attachments: [],
     sections: [
       {
         id: uid("section"),
@@ -143,6 +158,7 @@ function fromRegulation(row: StaffShiftRegulation): DraftRegulation {
     roleScope: row.roleScope,
     storeId: row.store?.id ?? "",
     effectiveFrom: row.effectiveFrom?.slice(0, 16) ?? "",
+    attachments: row.attachments,
     sections: row.sections,
   };
 }
@@ -212,8 +228,11 @@ export function StaffShiftRegulationBuilder({
       required: items.filter((item) => item.required).length,
       evidence: items.filter((item) => item.evidenceRequired).length,
       score: items.reduce((sum, item) => sum + item.score, 0),
+      attachments: draft.attachments.filter(
+        (attachment) => attachment.title.trim() && attachment.url.trim(),
+      ).length,
     };
-  }, [draft.sections]);
+  }, [draft.attachments, draft.sections]);
 
   function updateDraft(patch: Partial<DraftRegulation>) {
     setDraft((current) => ({ ...current, ...patch }));
@@ -327,6 +346,46 @@ export function StaffShiftRegulationBuilder({
     }));
   }
 
+  function addAttachment() {
+    setDraft((current) => ({
+      ...current,
+      attachments: [
+        ...current.attachments,
+        {
+          id: uid("attachment"),
+          title: "",
+          type: "DOCUMENT",
+          url: "",
+          note: "",
+          required: false,
+        },
+      ],
+    }));
+  }
+
+  function updateAttachment(
+    attachmentId: string,
+    patch: Partial<StaffShiftRegulationAttachment>,
+  ) {
+    setDraft((current) => ({
+      ...current,
+      attachments: current.attachments.map((attachment) =>
+        attachment.id === attachmentId
+          ? { ...attachment, ...patch }
+          : attachment,
+      ),
+    }));
+  }
+
+  function removeAttachment(attachmentId: string) {
+    setDraft((current) => ({
+      ...current,
+      attachments: current.attachments.filter(
+        (attachment) => attachment.id !== attachmentId,
+      ),
+    }));
+  }
+
   async function save(statusOverride?: StaffShiftRegulationStatus) {
     if (!canManageRegulations) {
       setError("Редактирование регламентов доступно управляющим ролям.");
@@ -354,6 +413,18 @@ export function StaffShiftRegulationBuilder({
       return;
     }
 
+    const incompleteAttachment = draft.attachments.find((attachment) => {
+      const title = attachment.title.trim();
+      const url = attachment.url.trim();
+
+      return (title || url) && (!title || !url);
+    });
+
+    if (incompleteAttachment) {
+      setError("Для каждого материала укажите название и ссылку.");
+      return;
+    }
+
     setIsPending(true);
     setError(null);
 
@@ -367,6 +438,14 @@ export function StaffShiftRegulationBuilder({
       effectiveFrom: draft.effectiveFrom
         ? new Date(draft.effectiveFrom).toISOString()
         : null,
+      attachments: draft.attachments
+        .map((attachment) => ({
+          ...attachment,
+          title: attachment.title.trim(),
+          url: attachment.url.trim(),
+          note: attachment.note?.trim() || null,
+        }))
+        .filter((attachment) => attachment.title && attachment.url),
       sections: draft.sections.map((section) => ({
         ...section,
         title: section.title.trim() || "Раздел",
@@ -535,7 +614,8 @@ export function StaffShiftRegulationBuilder({
                   {shiftKindLabels[row.shiftKind]} · {row.store?.name ?? "Вся сеть"}
                 </p>
                 <p className="mt-1 text-xs text-zinc-500">
-                  {row.sectionsCount} разд., {row.itemsCount} пунктов, v{row.version}
+                  {row.sectionsCount} разд., {row.itemsCount} пунктов,{" "}
+                  материалов: {row.attachmentsCount}, v{row.version}
                 </p>
                 {row.status === "PUBLISHED" ? (
                   <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
@@ -657,6 +737,34 @@ export function StaffShiftRegulationBuilder({
                 ))}
               </div>
             ) : null}
+            {selectedRow.attachments.length > 0 ? (
+              <div className="mt-3 grid gap-2">
+                {selectedRow.attachments.map((attachment) => (
+                  <a
+                    key={attachment.id}
+                    href={attachment.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-md border border-zinc-200 bg-white p-3 text-sm transition hover:border-emerald-500 hover:bg-emerald-50 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-emerald-500/10"
+                  >
+                    <span className="font-semibold">{attachment.title}</span>
+                    <span className="ml-2 rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                      {attachmentTypeLabels[attachment.type]}
+                    </span>
+                    {attachment.required ? (
+                      <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200">
+                        обязательно
+                      </span>
+                    ) : null}
+                    {attachment.note ? (
+                      <span className="mt-1 block text-xs text-zinc-500">
+                        {attachment.note}
+                      </span>
+                    ) : null}
+                  </a>
+                ))}
+              </div>
+            ) : null}
           </div>
         ) : null}
 
@@ -708,6 +816,9 @@ export function StaffShiftRegulationBuilder({
                       {version.sectionsCount} разд., {version.itemsCount}{" "}
                       пунктов, с доказательством:{" "}
                       {version.requiredEvidenceItems}
+                      {version.attachmentsCount > 0
+                        ? ` · материалов: ${version.attachmentsCount}`
+                        : ""}
                       {version.createdByUser
                         ? ` · опубликовал ${
                             version.createdByUser.fullName ??
@@ -820,7 +931,8 @@ export function StaffShiftRegulationBuilder({
               {totals.sections} разд. · {totals.items} пунктов · {totals.score} баллов
             </p>
             <p className="mt-1 text-xs text-zinc-500">
-              Обязательных: {totals.required}, с доказательством: {totals.evidence}
+              Обязательных: {totals.required}, с доказательством:{" "}
+              {totals.evidence}, материалов: {totals.attachments}
             </p>
           </div>
         </div>
@@ -838,6 +950,139 @@ export function StaffShiftRegulationBuilder({
             className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
           />
         </label>
+
+        <div className="mt-5 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+                Материалы регламента
+              </p>
+              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+                Прикрепите ссылки на файл регламента, фото-инструкцию, видео или
+                внешний документ. При публикации материалы попадут в снимок версии.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={addAttachment}
+              className="h-9 rounded-md border border-zinc-300 px-3 text-xs font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+            >
+              Добавить материал
+            </button>
+          </div>
+
+          {draft.attachments.length === 0 ? (
+            <p className="mt-3 rounded-md border border-dashed border-zinc-300 p-3 text-sm text-zinc-500 dark:border-zinc-800">
+              Материалов пока нет. Можно оставить пустым или добавить ссылку на
+              актуальный документ, видеоразбор или чек-лист стандарта.
+            </p>
+          ) : (
+            <div className="mt-3 space-y-3">
+              {draft.attachments.map((attachment, attachmentIndex) => (
+                <div
+                  key={attachment.id}
+                  className="rounded-md bg-zinc-50 p-3 dark:bg-zinc-900/50"
+                >
+                  <div className="grid gap-3 lg:grid-cols-[1fr_11rem_1.5fr_auto]">
+                    <label className="space-y-1">
+                      <span className="text-xs font-bold uppercase text-zinc-500">
+                        Материал {attachmentIndex + 1}
+                      </span>
+                      <input
+                        value={attachment.title}
+                        onChange={(event) =>
+                          updateAttachment(attachment.id, {
+                            title: event.target.value,
+                          })
+                        }
+                        placeholder="Например: регламент смены PDF"
+                        className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+                      />
+                    </label>
+
+                    <label className="space-y-1">
+                      <span className="text-xs font-bold uppercase text-zinc-500">
+                        Тип
+                      </span>
+                      <select
+                        value={attachment.type}
+                        onChange={(event) =>
+                          updateAttachment(attachment.id, {
+                            type: event.target
+                              .value as StaffShiftRegulationAttachmentType,
+                          })
+                        }
+                        className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+                      >
+                        {Object.entries(attachmentTypeLabels).map(
+                          ([value, label]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          ),
+                        )}
+                      </select>
+                    </label>
+
+                    <label className="space-y-1">
+                      <span className="text-xs font-bold uppercase text-zinc-500">
+                        Ссылка
+                      </span>
+                      <input
+                        value={attachment.url}
+                        onChange={(event) =>
+                          updateAttachment(attachment.id, {
+                            url: event.target.value,
+                          })
+                        }
+                        placeholder="https://..."
+                        className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+                      />
+                    </label>
+
+                    <div className="flex items-end gap-2">
+                      <label className="inline-flex h-10 items-center gap-2 rounded-md border border-zinc-300 px-3 text-xs font-semibold dark:border-zinc-700">
+                        <input
+                          type="checkbox"
+                          checked={attachment.required}
+                          onChange={(event) =>
+                            updateAttachment(attachment.id, {
+                              required: event.target.checked,
+                            })
+                          }
+                        />
+                        Обяз.
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => removeAttachment(attachment.id)}
+                        className="h-10 rounded-md border border-zinc-300 px-3 text-xs font-semibold text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+                      >
+                        Убрать
+                      </button>
+                    </div>
+                  </div>
+
+                  <label className="mt-3 block space-y-1">
+                    <span className="text-xs font-bold uppercase text-zinc-500">
+                      Примечание
+                    </span>
+                    <input
+                      value={attachment.note ?? ""}
+                      onChange={(event) =>
+                        updateAttachment(attachment.id, {
+                          note: event.target.value,
+                        })
+                      }
+                      placeholder="Что сотрудник должен посмотреть в материале"
+                      className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+                    />
+                  </label>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
         <div className="mt-5 flex items-center justify-between gap-3">
           <h3 className="text-lg font-semibold">Секции и пункты</h3>

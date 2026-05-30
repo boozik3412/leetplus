@@ -1376,6 +1376,7 @@ model StaffShiftRegulation {
   roleScope       String    @default("ADMINISTRATOR")
   version         Int       @default(1)
   sections        Json
+  attachments     Json?
   effectiveFrom   DateTime?
   publishedAt     DateTime?
   archivedAt      DateTime?
@@ -1408,6 +1409,7 @@ model StaffShiftRegulationVersion {
   shiftKind       String
   roleScope       String
   sections        Json
+  attachments     Json?
   effectiveFrom   DateTime?
   publishedAt     DateTime?
   createdAt       DateTime  @default(now())

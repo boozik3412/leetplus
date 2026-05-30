@@ -13,6 +13,10 @@ import type {
   StaffChecklistTemplateSection,
   StaffChecklistTemplateStatus,
 } from "@/lib/staff-checklist-templates";
+import {
+  staffChecklistTemplatePacks,
+  type StaffChecklistTemplatePack,
+} from "@/lib/staff-checklist-template-packs";
 
 const statusLabels: Record<StaffChecklistTemplateStatus, string> = {
   DRAFT: "Черновик",
@@ -99,6 +103,19 @@ function defaultSections(): StaffChecklistTemplateSection[] {
   ];
 }
 
+function clonePackSections(
+  sections: StaffChecklistTemplateSection[],
+): StaffChecklistTemplateSection[] {
+  return sections.map((section) => ({
+    ...section,
+    id: createId(section.id || "section"),
+    items: section.items.map((item) => ({
+      ...item,
+      id: createId(item.id || "item"),
+    })),
+  }));
+}
+
 function toDraft(template: StaffChecklistTemplate | null): DraftTemplate {
   if (!template) {
     return {
@@ -129,6 +146,10 @@ function toDraft(template: StaffChecklistTemplate | null): DraftTemplate {
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat("ru-RU").format(value);
+}
+
+function getPackItemsCount(pack: StaffChecklistTemplatePack) {
+  return pack.sections.reduce((sum, section) => sum + section.items.length, 0);
 }
 
 async function readResponseError(response: Response) {
@@ -175,6 +196,22 @@ export function StaffChecklistTemplateBuilder({
     setSelectedId(template?.id ?? "");
     setDraft(toDraft(template));
     setMessage(null);
+  }
+
+  function loadTemplatePack(pack: StaffChecklistTemplatePack) {
+    setSelectedId("");
+    setDraft({
+      id: null,
+      title: pack.title,
+      description: pack.description,
+      shiftKind: pack.shiftKind,
+      roleScope: pack.roleScope,
+      status: "DRAFT",
+      storeId: "",
+      sourceRegulationId: "",
+      sections: clonePackSections(pack.sections),
+    });
+    setMessage("Пак загружен в конструктор. Проверьте клуб, пункты и сохраните как шаблон.");
   }
 
   function patchDraft(patch: Partial<DraftTemplate>) {
@@ -404,6 +441,48 @@ export function StaffChecklistTemplateBuilder({
           >
             Создать копию
           </button>
+        </div>
+
+        <div className="mt-4 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase text-zinc-500">
+                Готовые паки
+              </p>
+              <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+                Возьмите основу под типовой контроль и отредактируйте под клуб.
+              </p>
+            </div>
+            <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
+              {staffChecklistTemplatePacks.length}
+            </span>
+          </div>
+          <div className="mt-3 space-y-2">
+            {staffChecklistTemplatePacks.map((pack) => (
+              <button
+                key={pack.id}
+                type="button"
+                onClick={() => loadTemplatePack(pack)}
+                className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-3 text-left transition hover:border-emerald-400 hover:bg-emerald-50/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-500 dark:border-zinc-800 dark:bg-zinc-900/40 dark:hover:bg-emerald-500/10"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold">{pack.title}</p>
+                    <p className="mt-1 text-xs leading-5 text-zinc-500">
+                      {pack.subtitle}
+                    </p>
+                  </div>
+                  <span className="shrink-0 rounded-full bg-zinc-100 px-2 py-1 text-[11px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                    {shiftKindLabels[pack.shiftKind]}
+                  </span>
+                </div>
+                <p className="mt-2 text-xs text-zinc-500">
+                  {formatNumber(pack.sections.length)} раздела ·{" "}
+                  {formatNumber(getPackItemsCount(pack))} пунктов
+                </p>
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="mt-4 space-y-2">

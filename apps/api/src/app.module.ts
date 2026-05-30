@@ -18,6 +18,7 @@ import { StoresModule } from './stores/stores.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 import { TenancyModule } from './tenancy/tenancy.module';
 import { UtilitiesModule } from './utilities/utilities.module';
+import { UsersModule } from './users/users.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { UtilitiesModule } from './utilities/utilities.module';
     MarketingModule,
     StaffModule,
     UtilitiesModule,
+    UsersModule,
   ],
   controllers: [AppController],
   providers: [AppService],

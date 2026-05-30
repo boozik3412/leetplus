@@ -23,7 +23,14 @@ import {
 } from './staff-checklists.service';
 
 @Controller('staff/checklists')
-@Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
+@Roles(
+  UserRole.OWNER,
+  UserRole.ADMIN,
+  UserRole.MANAGER,
+  UserRole.CLUB_MANAGER,
+  UserRole.SENIOR_ADMINISTRATOR,
+  UserRole.CLUB_ADMINISTRATOR,
+)
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class StaffChecklistsController {
   constructor(

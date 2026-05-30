@@ -22,6 +22,7 @@ type UserWithTenant = {
   email: string;
   fullName: string | null;
   role: UserRole;
+  isActive: boolean;
   isPlatformAdmin: boolean;
   passwordHash: string;
   tenantId: string;
@@ -103,6 +104,7 @@ export class AuthService {
       email: owner.email,
       fullName: owner.fullName,
       role: owner.role,
+      isActive: owner.isActive,
       isPlatformAdmin: owner.isPlatformAdmin,
       passwordHash: owner.passwordHash,
       tenantId: owner.tenantId,
@@ -127,6 +129,10 @@ export class AuthService {
 
     if (!user) {
       throw new UnauthorizedException('Invalid email or password');
+    }
+
+    if (!user.isActive) {
+      throw new UnauthorizedException('User account is inactive');
     }
 
     const isPasswordValid = await this.passwordService.verify(
@@ -155,6 +161,10 @@ export class AuthService {
 
     if (!user) {
       throw new UnauthorizedException('User no longer exists');
+    }
+
+    if (!user.isActive) {
+      throw new UnauthorizedException('User account is inactive');
     }
 
     return this.toAuthenticatedUser(user);
@@ -195,6 +205,7 @@ export class AuthService {
       email: user.email,
       fullName: user.fullName,
       role: user.role,
+      isActive: user.isActive,
       isPlatformAdmin: user.isPlatformAdmin,
       tenantId: user.tenantId,
       tenantSlug: user.tenant.slug,

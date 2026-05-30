@@ -12,6 +12,10 @@ enum UserRole {
   MANAGER
   BUYER
   ADMIN
+  MARKETER
+  CLUB_MANAGER
+  SENIOR_ADMINISTRATOR
+  CLUB_ADMINISTRATOR
 }
 
 enum StockMovementType {
@@ -160,6 +164,7 @@ model User {
   passwordHash    String
   fullName        String?
   role            UserRole  @default(OWNER)
+  isActive        Boolean   @default(true)
   isPlatformAdmin Boolean   @default(false)
   emailVerifiedAt DateTime?
   createdAt       DateTime  @default(now())
@@ -189,8 +194,24 @@ model User {
   reviewedStaffChecklistRuns          StaffChecklistRun[]          @relation("StaffChecklistRunReviewedBy")
   guestSavedFilters                   GuestSavedFilter[]
   guestAudiences                      GuestAudience[]
+  storeAccesses                       UserStoreAccess[]
 
   @@index([tenantId])
+  @@index([tenantId, role])
+  @@index([tenantId, isActive])
+}
+
+model UserStoreAccess {
+  id        String   @id @default(uuid())
+  userId    String
+  storeId   String
+  createdAt DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, storeId])
+  @@index([storeId])
 }
 
 model ImportJob {
@@ -257,6 +278,7 @@ model Store {
   staffTasks                 StaffTask[]
   staffShiftRegulations      StaffShiftRegulation[]
   staffChecklistRuns         StaffChecklistRun[]
+  userAccesses               UserStoreAccess[]
 
   @@unique([tenantId, externalProvider, externalDomain, externalClubId])
   @@index([tenantId])

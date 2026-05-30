@@ -37,7 +37,14 @@ import {
 } from './marketing.service';
 
 @Controller('marketing')
-@Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.BUYER)
+@Roles(
+  UserRole.OWNER,
+  UserRole.ADMIN,
+  UserRole.MANAGER,
+  UserRole.BUYER,
+  UserRole.MARKETER,
+  UserRole.CLUB_MANAGER,
+)
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class MarketingController {
   constructor(private readonly marketingService: MarketingService) {}

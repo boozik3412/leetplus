@@ -11,6 +11,7 @@ import {
 } from "react";
 import type { AuthUser } from "@/lib/auth";
 import { canAccessPath } from "@/lib/permissions";
+import { getRoleLabel } from "@/lib/roles";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 
 type NavItem = {
@@ -84,6 +85,7 @@ const navGroups: NavGroup[] = [
       { href: "/commercial/audit", label: "Коммерческий аудит" },
       { href: "/commercial/demo", label: "Демо-режим" },
       { href: "/commercial/tariffs", label: "Тарифы" },
+      { href: "/users", label: "Пользователи и роли" },
       { href: "/sync", label: "Синхронизация" },
       { href: "/settings", label: "Настройки" },
     ],
@@ -416,6 +418,7 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
     : pathname.startsWith("/guests")
     ? "Гости"
     : pathname.startsWith("/commercial") ||
+        pathname.startsWith("/users") ||
         pathname.startsWith("/sync") ||
         pathname.startsWith("/settings")
       ? "Управление"
@@ -610,7 +613,7 @@ function UserPanel({
             {user.fullName ?? user.email}
           </p>
           <p className="truncate text-xs text-zinc-500">
-            {user.tenantSlug}.leetplus.ru · {user.role}
+            {user.tenantSlug}.leetplus.ru · {getRoleLabel(user.role)}
           </p>
         </div>
         <button

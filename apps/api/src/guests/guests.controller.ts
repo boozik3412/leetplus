@@ -52,7 +52,14 @@ import {
 } from './guests.service';
 
 @Controller('guests')
-@Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.BUYER)
+@Roles(
+  UserRole.OWNER,
+  UserRole.ADMIN,
+  UserRole.MANAGER,
+  UserRole.BUYER,
+  UserRole.MARKETER,
+  UserRole.CLUB_MANAGER,
+)
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class GuestsController {
   constructor(private readonly guestsService: GuestsService) {}

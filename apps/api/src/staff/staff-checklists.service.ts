@@ -275,7 +275,7 @@ export class StaffChecklistsService {
         orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
       }),
       this.prisma.user.findMany({
-        where: { tenantId },
+        where: { tenantId, isActive: true },
         select: { id: true, email: true, fullName: true },
         orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
       }),

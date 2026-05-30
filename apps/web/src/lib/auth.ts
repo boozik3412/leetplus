@@ -5,7 +5,16 @@ export type AuthUser = {
   id: string;
   email: string;
   fullName: string | null;
-  role: "OWNER" | "MANAGER" | "BUYER" | "ADMIN";
+  role:
+    | "OWNER"
+    | "MANAGER"
+    | "BUYER"
+    | "ADMIN"
+    | "MARKETER"
+    | "CLUB_MANAGER"
+    | "SENIOR_ADMINISTRATOR"
+    | "CLUB_ADMINISTRATOR";
+  isActive?: boolean;
   isPlatformAdmin: boolean;
   tenantId: string;
   tenantSlug: string;

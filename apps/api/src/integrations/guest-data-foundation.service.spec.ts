@@ -6,6 +6,7 @@ const user = {
   email: 'owner@example.com',
   fullName: 'Owner',
   role: UserRole.OWNER,
+  isActive: true,
   isPlatformAdmin: false,
   tenantId: 'tenant-1',
   tenantSlug: 'tenant',

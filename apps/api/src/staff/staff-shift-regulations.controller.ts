@@ -22,7 +22,13 @@ import {
 } from './staff-shift-regulations.service';
 
 @Controller('staff/shift-regulations')
-@Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
+@Roles(
+  UserRole.OWNER,
+  UserRole.ADMIN,
+  UserRole.MANAGER,
+  UserRole.CLUB_MANAGER,
+  UserRole.SENIOR_ADMINISTRATOR,
+)
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class StaffShiftRegulationsController {
   constructor(

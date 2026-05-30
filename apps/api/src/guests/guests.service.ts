@@ -1465,7 +1465,7 @@ export class GuestsService {
   async getGuestCrmUsers(user: AuthenticatedUser): Promise<GuestCrmUser[]> {
     const { tenantId } = await this.tenantContextService.resolve(user);
     const rows = await this.prisma.user.findMany({
-      where: { tenantId },
+      where: { tenantId, isActive: true },
       orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
       select: { id: true, fullName: true, email: true, role: true },
     });

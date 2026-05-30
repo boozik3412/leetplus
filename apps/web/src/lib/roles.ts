@@ -1,0 +1,54 @@
+import type { AuthUser } from "./auth";
+
+export type UserRole = AuthUser["role"];
+
+export const roleLabels: Record<UserRole, string> = {
+  OWNER: "Владелец",
+  ADMIN: "Администратор системы",
+  MANAGER: "Управляющий сетью",
+  BUYER: "Закупщик",
+  MARKETER: "Маркетолог",
+  CLUB_MANAGER: "Управляющий клубом",
+  SENIOR_ADMINISTRATOR: "Старший администратор",
+  CLUB_ADMINISTRATOR: "Администратор клуба",
+};
+
+export const roleDescriptions: Record<UserRole, string> = {
+  OWNER: "Полный доступ к сети, настройкам, ролям и финансам.",
+  ADMIN: "Операционное администрирование LeetPlus без смены владельца.",
+  MANAGER: "Дашборды, гости, маркетинг, персонал и ассортиментные отчеты.",
+  BUYER: "Ассортимент, товары, поставщики и коммерческие отчеты.",
+  MARKETER: "Маркетинг, CRM-группы, кампании и промо-наборы.",
+  CLUB_MANAGER: "Операционная работа по выбранным клубам и персоналу.",
+  SENIOR_ADMINISTRATOR:
+    "Задачи персонала, чеклисты смены и контроль выполнения.",
+  CLUB_ADMINISTRATOR:
+    "Сменные задачи и чеклисты без лишних управленческих данных.",
+};
+
+export const roleOrder: UserRole[] = [
+  "OWNER",
+  "ADMIN",
+  "MANAGER",
+  "CLUB_MANAGER",
+  "MARKETER",
+  "BUYER",
+  "SENIOR_ADMINISTRATOR",
+  "CLUB_ADMINISTRATOR",
+];
+
+export function getRoleLabel(role: UserRole) {
+  return roleLabels[role] ?? role;
+}
+
+export function getAssignableRoles(actorRole: UserRole) {
+  if (actorRole === "OWNER") {
+    return roleOrder;
+  }
+
+  if (actorRole === "ADMIN") {
+    return roleOrder.filter((role) => role !== "OWNER" && role !== "ADMIN");
+  }
+
+  return [];
+}

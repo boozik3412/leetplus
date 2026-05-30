@@ -58,6 +58,7 @@ export class ReportsDigestService {
     const recipients = await this.prisma.user.findMany({
       where: {
         ...(options.tenantId ? { tenantId: options.tenantId } : {}),
+        isActive: true,
         role: { in: [UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER] },
       },
       include: {

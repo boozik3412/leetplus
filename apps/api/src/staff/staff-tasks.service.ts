@@ -212,7 +212,7 @@ export class StaffTasksService {
         take: 2000,
       }),
       this.prisma.user.findMany({
-        where: { tenantId },
+        where: { tenantId, isActive: true },
         select: { id: true, email: true, fullName: true },
         orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
       }),

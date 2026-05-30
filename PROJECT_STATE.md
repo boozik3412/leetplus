@@ -67,6 +67,7 @@ Connected production Langame sources:
 - Products/stores/directories: inline editing, multi-club filters, exports, manual store name preservation.
 - Guest module: first production read-only layer is live, including data foundation sync, guest analytics dashboard, full guest report, guest card, mini CRM fields, first staff-control report, and PC-count based load calculation.
 - Staff operations: Stage 8 has started with `STAFF_OPERATIONS_MODULE_TZ.md`, `/staff/tasks` for tenant-scoped operational tasks, `/staff/shift-regulations` for constructing shift regulations, and `/staff/checklists` for first execution runs with required answers, evidence, review, and failed-item follow-up tasks.
+- Access control: `/users` manages tenant user accounts, roles, active status, password resets, and whole-network or selected-club access scopes.
 - Sync/admin UX: `/settings` is for Langame connection settings only; `/sync` is the dedicated synchronization page with one combined sync action for assortment/sales/revenue plus guests.
 - Mail: Mail.ru/VK WorkSpace domain is configured; SMTP uses `reports@leetplus.ru`.
 
@@ -80,6 +81,7 @@ Connected production Langame sources:
 - Added the first shift-regulation constructor for Stage 8 MVP 2: draft/published/archived standards for opening/closing/cash/bar/PC-zone shift work.
 - Added day and night administrator regulation templates from the current `Регламент.docx` into the shift-regulation constructor.
 - Added the first shift-checklist execution workspace for Stage 8 MVP 2: published regulation snapshots can become checklist runs, block submission without required evidence, and create follow-up staff tasks from failed items.
+- Added tenant user roles and account issuing: owner/system admin can create and edit users for managers, marketers, buyers, club managers, senior administrators, and club administrators; inactive users cannot log in or use protected API routes.
 - Added recommendation workflow state: persisted statuses, responsible roles, financial effect, and an interactive recommendations queue.
 - Fixed dashboard trend card sizing behavior.
 - Preserved manual store names during sync.

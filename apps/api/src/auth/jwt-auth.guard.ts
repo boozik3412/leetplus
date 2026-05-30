@@ -5,11 +5,15 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { PrismaService } from '../prisma/prisma.service';
 import { AuthenticatedRequest, AuthTokenPayload } from './auth.types';
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
-  constructor(private readonly jwtService: JwtService) {}
+  constructor(
+    private readonly jwtService: JwtService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
@@ -27,15 +31,30 @@ export class JwtAuthGuard implements CanActivate {
     try {
       const payload =
         await this.jwtService.verifyAsync<AuthTokenPayload>(token);
+      const user = await this.prisma.user.findUnique({
+        where: { id: payload.sub },
+        include: {
+          tenant: {
+            select: {
+              slug: true,
+            },
+          },
+        },
+      });
+
+      if (!user || !user.isActive) {
+        throw new UnauthorizedException('Invalid authorization token');
+      }
 
       return {
-        id: payload.sub,
-        email: payload.email,
-        fullName: null,
-        role: payload.role,
-        isPlatformAdmin: payload.isPlatformAdmin,
-        tenantId: payload.tenantId,
-        tenantSlug: payload.tenantSlug,
+        id: user.id,
+        email: user.email,
+        fullName: user.fullName,
+        role: user.role,
+        isActive: user.isActive,
+        isPlatformAdmin: user.isPlatformAdmin,
+        tenantId: user.tenantId,
+        tenantSlug: user.tenant.slug,
       };
     } catch {
       throw new UnauthorizedException('Invalid authorization token');

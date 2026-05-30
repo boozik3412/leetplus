@@ -385,8 +385,8 @@ Acceptance criteria:
 
 Goal: make onboarding and standard knowledge measurable.
 
-- Add knowledge base for administrators with search, categories, tags, and role visibility.
-- Add training materials: text, files, images, video links, external links.
+- Done: first knowledge base layer added: tenant-scoped `StaffKnowledgeArticle`, API `/staff/knowledge-base`, page `/staff/knowledge-base`, search, categories, tags, role visibility, store scope, draft/published/archive statuses, and manager-only editing.
+- Done: training materials can now be attached to knowledge articles as structured text blocks, file links, images, video links, external links, notes, and required flags.
 - Add courses by role and club.
 - Add onboarding plan for new administrators.
 - Add tests and attestations with pass threshold, retakes, result history, and expiration.
@@ -454,7 +454,7 @@ Acceptance criteria:
 5. Started: implement `/staff/tasks` or `/operations/tasks` UI for manager and administrator workflows. `/staff/tasks` now includes creation, filters, status actions, execution comments, evidence links, audit history preview, and task-template launching through `/staff/task-templates`.
 6. Started: add checklist templates and checklist runs. `StaffChecklistTemplate` and `/staff/checklist-templates` are in place; checklist runs can use published regulation snapshots or active template snapshots.
 7. Started: add regulation documents, versions, acknowledgements, and role/club targeting. First draft/published/archived shift-regulation entity, acknowledgement tracking, publication version snapshots, and attached link materials are in place; binary attachment storage remains later.
-8. Add training materials, courses, tests, and attestation reports.
+8. Started: add training materials, courses, tests, and attestation reports. The first knowledge base and structured training-material layer is in place; courses, tests, onboarding plans, employee profiles, and attestation reports remain next.
 9. Add analytics, exports, and connections to current staff-control signals.
 10. Add AI assistance only after real workflows produce enough structured data.
 

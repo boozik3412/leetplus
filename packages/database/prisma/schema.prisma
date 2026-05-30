@@ -152,6 +152,7 @@ model Tenant {
   staffTaskTemplates                   StaffTaskTemplate[]
   staffTaskComments                    StaffTaskComment[]
   staffTaskAuditEvents                 StaffTaskAuditEvent[]
+  staffKnowledgeArticles               StaffKnowledgeArticle[]
   staffShiftRegulations                StaffShiftRegulation[]
   staffShiftRegulationVersions         StaffShiftRegulationVersion[]
   staffShiftRegulationAcknowledgements StaffShiftRegulationAcknowledgement[]
@@ -202,6 +203,7 @@ model User {
   assignedStaffTasks                   StaffTask[]                           @relation("StaffTaskAssignedTo")
   staffTaskComments                    StaffTaskComment[]                    @relation("StaffTaskCommentAuthor")
   staffTaskAuditEvents                 StaffTaskAuditEvent[]                 @relation("StaffTaskAuditActor")
+  createdStaffKnowledgeArticles        StaffKnowledgeArticle[]               @relation("StaffKnowledgeArticleCreatedBy")
   createdStaffShiftRegulations         StaffShiftRegulation[]                @relation("StaffShiftRegulationCreatedBy")
   createdStaffShiftRegulationVersions  StaffShiftRegulationVersion[]         @relation("StaffShiftRegulationVersionCreatedBy")
   staffShiftRegulationAcknowledgements StaffShiftRegulationAcknowledgement[]
@@ -348,6 +350,7 @@ model Store {
   marketingPromoBundleUsages   MarketingPromoBundleUsage[]
   staffTasks                   StaffTask[]
   staffTaskTemplates           StaffTaskTemplate[]
+  staffKnowledgeArticles       StaffKnowledgeArticle[]
   staffShiftRegulations        StaffShiftRegulation[]
   staffShiftRegulationVersions StaffShiftRegulationVersion[]
   staffChecklistTemplates      StaffChecklistTemplate[]
@@ -1395,6 +1398,34 @@ model StaffTaskAuditEvent {
   @@index([tenantId, createdAt], map: "staff_task_audit_tenant_created_idx")
   @@index([taskId, createdAt], map: "staff_task_audit_task_created_idx")
   @@index([actorUserId], map: "staff_task_audit_actor_idx")
+}
+
+model StaffKnowledgeArticle {
+  id              String    @id @default(uuid())
+  tenantId        String
+  storeId         String?
+  createdByUserId String?
+  title           String
+  summary         String?
+  content         String?
+  category        String    @default("Общие стандарты")
+  roleScope       String    @default("ALL_STAFF")
+  status          String    @default("DRAFT")
+  tags            String[]  @default([])
+  materials       Json?
+  publishedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  tenant        Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  store         Store? @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  createdByUser User?  @relation("StaffKnowledgeArticleCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status, roleScope], map: "staff_knowledge_status_role_idx")
+  @@index([tenantId, category], map: "staff_knowledge_category_idx")
+  @@index([tenantId, createdAt], map: "staff_knowledge_created_idx")
+  @@index([storeId], map: "staff_knowledge_store_idx")
+  @@index([createdByUserId], map: "staff_knowledge_created_by_idx")
 }
 
 model StaffShiftRegulation {

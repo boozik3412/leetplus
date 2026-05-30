@@ -6,6 +6,8 @@ import { StaffChecklistTemplatesController } from './staff-checklist-templates.c
 import { StaffChecklistTemplatesService } from './staff-checklist-templates.service';
 import { StaffChecklistsController } from './staff-checklists.controller';
 import { StaffChecklistsService } from './staff-checklists.service';
+import { StaffKnowledgeBaseController } from './staff-knowledge-base.controller';
+import { StaffKnowledgeBaseService } from './staff-knowledge-base.service';
 import { StaffShiftRegulationsController } from './staff-shift-regulations.controller';
 import { StaffShiftRegulationsService } from './staff-shift-regulations.service';
 import { StaffTaskTemplatesController } from './staff-task-templates.controller';
@@ -20,6 +22,7 @@ import { StaffTasksService } from './staff-tasks.service';
   controllers: [
     StaffTasksController,
     StaffTaskTemplatesController,
+    StaffKnowledgeBaseController,
     StaffShiftRegulationsController,
     StaffChecklistTemplatesController,
     StaffChecklistsController,
@@ -28,6 +31,7 @@ import { StaffTasksService } from './staff-tasks.service';
   providers: [
     StaffTasksService,
     StaffTaskTemplatesService,
+    StaffKnowledgeBaseService,
     StaffShiftRegulationsService,
     StaffChecklistTemplatesService,
     StaffChecklistsService,

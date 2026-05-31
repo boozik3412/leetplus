@@ -330,11 +330,12 @@ LeetPlus должен развиваться из набора отчетов в
 - Добавить типы задач: one-time, shift, recurring, long-term, personal, club, role.
 - Добавить статусы задач: new, in progress, on review, done, overdue, canceled.
 - Добавить priority, deadline, responsible employee, club, shift, author, observer, labels, attachments, comments и checklist внутри задачи.
-- Добавить recurring rules: daily, weekly, monthly, by shift opening, by shift closing.
+- Готово: добавлены recurring rules для задач: daily, weekly, monthly, opening shift и closing shift, с привязкой к шаблону задачи, клубу, исполнителю, плановому времени и ручным запуском перед автоматизацией.
 - Добавить templates для типовых операций клуба.
 - Добавить базовые views списка задач: today, overdue, my tasks, by club, by employee, by shift, by status.
 - Добавить audit history для каждой задачи.
-- Следующее: добавить recurring task rules поверх задач и шаблонов: daily, weekly, monthly, opening/closing shift rules с безопасным ручным запуском перед автоматизацией.
+- Готово: `/staff/task-rules` стал конструктором регулярных задач: каталог правил, создание/редактирование, расписание, связь с `StaffTaskTemplate`, next run preview и ручное создание задачи из правила.
+- Следующее: после production-проверки ручного контура добавить безопасный scheduler автосоздания задач по active rules, защиту от дублей и журнал автоматических запусков.
 
 Критерии приемки:
 
@@ -467,9 +468,9 @@ LeetPlus должен развиваться из набора отчетов в
 
 1. Готово: создать `STAFF_OPERATIONS_MODULE_TZ.md` с ролями, сценариями, data model, permissions, MVP scope и acceptance criteria.
 2. Готово: выделить staff identity в reusable staff domain, который сможет обслуживать и `/guests/staff-control`, и новый operations module. Первый слой `StaffMember` и `/staff/directory` уже связывает сотрудника с LeetPlus account, клубом и Langame `working_shifts.user_id`.
-3. Начато: добавить database schema для tasks, task templates, task comments, attachments, audit events и staff assignments. `StaffTask`, `StaffTaskTemplate`, `StaffTaskComment`, `StaffTaskAuditEvent`, `StaffAttachment` и `StaffMember` уже есть; recurring rules остаются следующим шагом.
-4. Начато: реализовать backend CRUD и list APIs для tasks с tenant/store/staff access control. List/create/status update плюс comment/evidence endpoint уже есть.
-5. Начато: реализовать UI `/staff/tasks` или `/operations/tasks` для manager и administrator workflows. `/staff/tasks` содержит создание, filters, status actions, execution comments, evidence links, audit history preview и запуск task-template через `/staff/task-templates`.
+3. Начато: добавить database schema для tasks, task templates, recurring task rules, task comments, attachments, audit events и staff assignments. `StaffTask`, `StaffTaskTemplate`, `StaffTaskRecurringRule`, `StaffTaskComment`, `StaffTaskAuditEvent`, `StaffAttachment` и `StaffMember` уже есть; следующий слой - scheduler и журнал автоматических запусков.
+4. Начато: реализовать backend CRUD и list APIs для tasks с tenant/store/staff access control. List/create/status update плюс comment/evidence endpoint уже есть; `/staff/task-rules` добавляет CRUD регулярных правил и ручное создание задач из правила.
+5. Начато: реализовать UI `/staff/tasks` или `/operations/tasks` для manager и administrator workflows. `/staff/tasks` содержит создание, filters, status actions, execution comments, evidence links, audit history preview, запуск task-template через `/staff/task-templates` и регулярные правила через `/staff/task-rules`.
 6. Начато: добавить checklist templates и checklist runs. `StaffChecklistTemplate` и `/staff/checklist-templates` уже есть; checklist runs могут использовать published regulation snapshots или active template snapshots.
 7. Начато: добавить regulation documents, versions, acknowledgements и role/club targeting. Первый draft/published/archived shift-regulation entity, acknowledgement tracking, publication version snapshots, attached link materials и uploaded file attachments уже есть.
 8. Готово: добавить training materials, courses, tests и attestation reports. Knowledge base, structured training-material layer, training courses, onboarding plans, tests/attestations с result history, employee training profiles и readiness/attestation manager report уже есть.

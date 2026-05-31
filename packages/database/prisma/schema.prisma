@@ -151,6 +151,7 @@ model Tenant {
   staffMembers                         StaffMember[]
   staffTasks                           StaffTask[]
   staffTaskTemplates                   StaffTaskTemplate[]
+  staffTaskRecurringRules              StaffTaskRecurringRule[]
   staffTaskComments                    StaffTaskComment[]
   staffTaskAuditEvents                 StaffTaskAuditEvent[]
   staffKnowledgeArticles               StaffKnowledgeArticle[]
@@ -215,6 +216,8 @@ model User {
   createdStaffMembers                  StaffMember[]                        @relation("StaffMemberCreatedBy")
   createdStaffTasks                    StaffTask[]                           @relation("StaffTaskCreatedBy")
   createdStaffTaskTemplates            StaffTaskTemplate[]                   @relation("StaffTaskTemplateCreatedBy")
+  createdStaffTaskRecurringRules       StaffTaskRecurringRule[]              @relation("StaffTaskRecurringRuleCreatedBy")
+  assignedStaffTaskRecurringRules      StaffTaskRecurringRule[]              @relation("StaffTaskRecurringRuleAssignedTo")
   assignedStaffTasks                   StaffTask[]                           @relation("StaffTaskAssignedTo")
   staffTaskComments                    StaffTaskComment[]                    @relation("StaffTaskCommentAuthor")
   staffTaskAuditEvents                 StaffTaskAuditEvent[]                 @relation("StaffTaskAuditActor")
@@ -381,6 +384,7 @@ model Store {
   marketingPromoBundleUsages   MarketingPromoBundleUsage[]
   staffTasks                   StaffTask[]
   staffTaskTemplates           StaffTaskTemplate[]
+  staffTaskRecurringRules      StaffTaskRecurringRule[]
   staffKnowledgeArticles       StaffKnowledgeArticle[]
   staffTrainingCourses         StaffTrainingCourse[]
   staffOnboardingPlans         StaffOnboardingPlan[]
@@ -1373,6 +1377,7 @@ model StaffTask {
   storeId          String?
   shiftId          String?
   sourceTemplateId String?
+  sourceRecurringRuleId String?
   createdByUserId  String?
   assignedToUserId String?
   title            String
@@ -1391,8 +1396,10 @@ model StaffTask {
   store          Store?                @relation(fields: [storeId], references: [id], onDelete: SetNull)
   shift          GuestWorkingShift?    @relation(fields: [shiftId], references: [id], onDelete: SetNull)
   sourceTemplate StaffTaskTemplate?    @relation(fields: [sourceTemplateId], references: [id], onDelete: SetNull)
+  sourceRecurringRule StaffTaskRecurringRule? @relation("StaffTaskRecurringRuleTasks", fields: [sourceRecurringRuleId], references: [id], onDelete: SetNull)
   createdByUser  User?                 @relation("StaffTaskCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   assignedToUser User?                 @relation("StaffTaskAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  lastRecurringRuleRuns StaffTaskRecurringRule[] @relation("StaffTaskRecurringRuleLastTask")
   comments       StaffTaskComment[]
   auditEvents    StaffTaskAuditEvent[]
 
@@ -1401,6 +1408,7 @@ model StaffTask {
   @@index([storeId], map: "staff_task_store_idx")
   @@index([shiftId], map: "staff_task_shift_idx")
   @@index([sourceTemplateId], map: "staff_task_source_template_idx")
+  @@index([sourceRecurringRuleId], map: "staff_task_source_recurring_rule_idx")
   @@index([createdByUserId], map: "staff_task_created_by_idx")
   @@index([assignedToUserId], map: "staff_task_assigned_to_idx")
 }
@@ -1425,11 +1433,54 @@ model StaffTaskTemplate {
   store         Store?      @relation(fields: [storeId], references: [id], onDelete: SetNull)
   createdByUser User?       @relation("StaffTaskTemplateCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   tasks         StaffTask[]
+  recurringRules StaffTaskRecurringRule[]
 
   @@index([tenantId, status, type], map: "staff_task_template_status_type_idx")
   @@index([tenantId, createdAt], map: "staff_task_template_created_idx")
   @@index([storeId], map: "staff_task_template_store_idx")
   @@index([createdByUserId], map: "staff_task_template_created_by_idx")
+}
+
+model StaffTaskRecurringRule {
+  id                String   @id @default(uuid())
+  tenantId          String
+  templateId        String?
+  storeId           String?
+  createdByUserId   String?
+  assignedToUserId  String?
+  lastCreatedTaskId String?
+  title             String
+  description       String?
+  cadence           String   @default("DAILY")
+  status            String   @default("ACTIVE")
+  taskType          String   @default("RECURRING")
+  priority          String   @default("NORMAL")
+  timeOfDay         String?
+  dayOfWeek         Int?
+  dayOfMonth        Int?
+  dueOffsetMinutes  Int?
+  nextRunAt         DateTime?
+  lastManualRunAt   DateTime?
+  labels            Json?
+  checklist         Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  tenant          Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  template        StaffTaskTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  store           Store?             @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  createdByUser   User?              @relation("StaffTaskRecurringRuleCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  assignedToUser  User?              @relation("StaffTaskRecurringRuleAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  lastCreatedTask StaffTask?         @relation("StaffTaskRecurringRuleLastTask", fields: [lastCreatedTaskId], references: [id], onDelete: SetNull)
+  generatedTasks  StaffTask[]        @relation("StaffTaskRecurringRuleTasks")
+
+  @@index([tenantId, status, cadence], map: "staff_task_rule_status_cadence_idx")
+  @@index([tenantId, nextRunAt], map: "staff_task_rule_next_run_idx")
+  @@index([templateId], map: "staff_task_rule_template_idx")
+  @@index([storeId], map: "staff_task_rule_store_idx")
+  @@index([createdByUserId], map: "staff_task_rule_created_by_idx")
+  @@index([assignedToUserId], map: "staff_task_rule_assigned_to_idx")
+  @@index([lastCreatedTaskId], map: "staff_task_rule_last_task_idx")
 }
 
 model StaffTaskComment {

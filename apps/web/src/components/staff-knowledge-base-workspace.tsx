@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useMemo, useState, type FormEvent } from "react";
+import { StaffMaterialPreview } from "@/components/staff-material-preview";
 import type {
   StaffKnowledgeArticle,
   StaffKnowledgeArticleStatus,
@@ -691,6 +692,70 @@ export function StaffKnowledgeBaseWorkspace({
                     ))}
                   </div>
                 )}
+              </div>
+
+              <div className="mt-5">
+                <StaffMaterialPreview
+                  title={draft.title}
+                  description={draft.summary}
+                  body={draft.content}
+                  metrics={[
+                    { label: "Категория", value: draft.category || "Без категории" },
+                    { label: "Видимость", value: roleScopeLabels[draft.roleScope] },
+                    {
+                      label: "Контур",
+                      value: draft.storeId
+                        ? report.stores.find((store) => store.id === draft.storeId)
+                            ?.name ?? "Клуб"
+                        : "Вся сеть",
+                    },
+                    { label: "Статус", value: statusLabels[draft.status] },
+                  ]}
+                  tags={tagsFromText(draft.tagsText)}
+                  steps={[
+                    {
+                      id: "knowledge-read",
+                      title: "Прочитать материал",
+                      typeLabel: "Статья",
+                      content:
+                        draft.summary ||
+                        "Сотрудник видит основной текст и материалы статьи.",
+                      required: true,
+                    },
+                    ...draft.materials
+                      .filter(
+                        (material) =>
+                          material.title.trim() ||
+                          material.content?.trim() ||
+                          material.url?.trim(),
+                      )
+                      .map((material, index) => ({
+                        id: material.id || `knowledge-material-${index}`,
+                        title: material.title || `Материал ${index + 1}`,
+                        typeLabel: materialTypeLabels[material.type],
+                        content: material.note || material.content,
+                        url: material.url,
+                        required: material.required,
+                      })),
+                  ]}
+                  attachments={draft.materials
+                    .filter(
+                      (material) =>
+                        material.title.trim() ||
+                        material.content?.trim() ||
+                        material.url?.trim(),
+                    )
+                    .map((material, index) => ({
+                      id: material.id || `knowledge-attachment-${index}`,
+                      title: material.title || `Материал ${index + 1}`,
+                      typeLabel: materialTypeLabels[material.type],
+                      url: material.url,
+                      content: material.content,
+                      note: material.note,
+                      required: material.required,
+                    }))}
+                  emptyLabel="В статье пока нет тестовых действий для сотрудника."
+                />
               </div>
             </form>
           ) : selectedArticle ? (

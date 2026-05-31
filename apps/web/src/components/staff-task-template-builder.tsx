@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useMemo, useState, type FormEvent } from "react";
+import { StaffMaterialPreview } from "@/components/staff-material-preview";
 import type {
   StaffTaskPriority,
   StaffTaskType,
@@ -540,6 +541,44 @@ export function StaffTaskTemplateBuilder({
               />
             </label>
           </form>
+
+          <div className="mt-5">
+            <StaffMaterialPreview
+              title={draft.title}
+              description={draft.description}
+              metrics={[
+                { label: "Тип", value: typeLabels[draft.type] },
+                { label: "Приоритет", value: priorityLabels[draft.priority] },
+                {
+                  label: "Контур",
+                  value: draft.storeId
+                    ? report.stores.find((store) => store.id === draft.storeId)
+                        ?.name ?? "Клуб"
+                    : "Вся сеть",
+                },
+                { label: "Статус", value: statusLabels[draft.status] },
+                {
+                  label: "Дедлайн",
+                  value: draft.dueOffsetMinutes.trim()
+                    ? `через ${draft.dueOffsetMinutes.trim()} мин.`
+                    : "без срока",
+                },
+              ]}
+              tags={labelsFromText(draft.labelsText)}
+              steps={[
+                {
+                  id: "task-template-preview",
+                  title: draft.title || "Задача из шаблона",
+                  typeLabel: typeLabels[draft.type],
+                  content:
+                    draft.description ||
+                    "Описание пока не заполнено. Добавьте ожидаемый результат и критерии проверки.",
+                  required: true,
+                },
+              ]}
+              emptyLabel="Описание задачи пока не заполнено."
+            />
+          </div>
 
           {selectedTemplate ? (
             <div className="mt-5 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">

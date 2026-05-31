@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useMemo, useState, type FormEvent } from "react";
+import { StaffMaterialPreview } from "@/components/staff-material-preview";
 import type {
   StaffOnboardingPlan,
   StaffOnboardingPlanStatus,
@@ -590,6 +591,41 @@ export function StaffOnboardingWorkspace({
                     ))}
                   </div>
                 )}
+              </div>
+
+              <div className="mt-5">
+                <StaffMaterialPreview
+                  title={draft.title}
+                  description={draft.description}
+                  metrics={[
+                    { label: "Роль", value: roleScopeLabels[draft.roleScope] },
+                    {
+                      label: "Контур",
+                      value: draft.storeId
+                        ? report.stores.find((store) => store.id === draft.storeId)
+                            ?.name ?? "Клуб"
+                        : "Вся сеть",
+                    },
+                    { label: "Статус", value: statusLabels[draft.status] },
+                    {
+                      label: "Длительность",
+                      value: draft.durationDays.trim()
+                        ? `${draft.durationDays.trim()} дн.`
+                        : "без срока",
+                    },
+                  ]}
+                  steps={draft.steps.map((step, index) => ({
+                    id: step.id || `onboarding-step-${index}`,
+                    title: step.title || `Шаг ${index + 1}`,
+                    typeLabel: stepTypeLabels[step.type],
+                    referenceLabel: stepReferenceTitle(report, step),
+                    content: step.content,
+                    url: step.url,
+                    required: step.required,
+                    dayLabel: step.day ? `день ${step.day}` : null,
+                  }))}
+                  emptyLabel="В маршруте пока нет шагов для адаптации сотрудника."
+                />
               </div>
             </form>
           ) : selectedPlan ? (

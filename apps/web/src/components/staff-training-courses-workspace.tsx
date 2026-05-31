@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useMemo, useState, type FormEvent } from "react";
+import { StaffMaterialPreview } from "@/components/staff-material-preview";
 import type {
   StaffTrainingCourse,
   StaffTrainingCourseStatus,
@@ -585,6 +586,49 @@ export function StaffTrainingCoursesWorkspace({
                     ))}
                   </div>
                 )}
+              </div>
+
+              <div className="mt-5">
+                <StaffMaterialPreview
+                  title={draft.title}
+                  description={draft.description}
+                  metrics={[
+                    { label: "Роль", value: roleScopeLabels[draft.roleScope] },
+                    {
+                      label: "Контур",
+                      value: draft.storeId
+                        ? report.stores.find((store) => store.id === draft.storeId)
+                            ?.name ?? "Клуб"
+                        : "Вся сеть",
+                    },
+                    { label: "Статус", value: statusLabels[draft.status] },
+                    {
+                      label: "Срок",
+                      value: draft.dueDays.trim()
+                        ? `${draft.dueDays.trim()} дн.`
+                        : "без срока",
+                    },
+                    {
+                      label: "Обязательность",
+                      value: draft.required ? "обязательный" : "необязательный",
+                    },
+                  ]}
+                  steps={draft.steps.map((step, index) => ({
+                    id: step.id || `course-step-${index}`,
+                    title: step.title || `Шаг ${index + 1}`,
+                    typeLabel: stepTypeLabels[step.type],
+                    referenceLabel:
+                      step.type === "ARTICLE" && step.articleId
+                        ? articleTitle(report, step.articleId)
+                        : step.type === "LINK"
+                          ? "Внешняя ссылка"
+                          : null,
+                    content: step.content,
+                    url: step.url,
+                    required: step.required,
+                  }))}
+                  emptyLabel="В курсе пока нет шагов для прохождения сотрудником."
+                />
               </div>
             </form>
           ) : selectedCourse ? (

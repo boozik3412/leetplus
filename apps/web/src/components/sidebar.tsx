@@ -129,8 +129,7 @@ const navGroups: NavGroup[] = [
 
 function NavLink({ href, label, onNavigate }: NavItem) {
   const pathname = usePathname();
-  const hrefPath = href.split("#")[0];
-  const isActive = pathname === hrefPath && !href.includes("#");
+  const isActive = isNavigationItemActive(pathname, href);
 
   return (
     <Link
@@ -508,6 +507,21 @@ function isDashboardPath(pathname: string) {
     currentPathname === "/dashboard" ||
     currentPathname.startsWith("/dashboard/")
   );
+}
+
+function isNavigationItemActive(pathname: string, href: string) {
+  if (href.includes("#")) {
+    return false;
+  }
+
+  const currentPathname = normalizeNavigationPath(pathname);
+  const hrefPath = normalizeNavigationPath(href);
+
+  if (hrefPath === "/dashboard") {
+    return isDashboardPath(currentPathname);
+  }
+
+  return currentPathname === hrefPath;
 }
 
 function resolveCurrentProductArea(pathname: string): ProductArea {

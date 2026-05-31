@@ -119,8 +119,10 @@ const navGroups: NavGroup[] = [
     icon: "administration",
     items: [
       { href: "/administration", label: "Обзор платформы" },
+      { href: "/administration#diagnostics", label: "Диагностика" },
       { href: "/administration#tenants", label: "Сети tenant" },
       { href: "/administration#sync-jobs", label: "Синхронизации" },
+      { href: "/administration#audit", label: "Audit trail" },
     ],
   },
 ];

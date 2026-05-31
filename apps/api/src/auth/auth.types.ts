@@ -14,6 +14,7 @@ export type AuthenticatedUser = {
   isPlatformAdmin: boolean;
   tenantId: string;
   tenantSlug: string;
+  tenantStatus?: string;
 };
 
 export type AuthTokenPayload = {

@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { createHash } from 'node:crypto';
-import { UserRole } from '@prisma/client';
+import { TenantLifecycleStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AcceptUserInviteDto, LoginDto, RegisterDto } from './auth.dto';
 import { AuthenticatedUser, AuthTokenPayload } from './auth.types';
@@ -32,6 +32,7 @@ type UserWithTenant = {
   tenantId: string;
   tenant: {
     slug: string;
+    status: TenantLifecycleStatus;
   };
   customRole?: {
     id: string;
@@ -144,12 +145,14 @@ export class AuthService {
       tenantId: owner.tenantId,
       tenant: {
         slug: tenant.slug,
+        status: tenant.status,
       },
     });
   }
 
   async getInvite(token: string): Promise<UserInvitePreview> {
     const invite = await this.resolveActiveInvite(token);
+    this.assertTenantActive(invite.tenant.status);
     const stores = await this.resolveInviteStores(
       invite.tenantId,
       invite.storeIds,
@@ -182,6 +185,7 @@ export class AuthService {
     dto: AcceptUserInviteDto,
   ): Promise<AuthResponse> {
     const invite = await this.resolveActiveInvite(token);
+    this.assertTenantActive(invite.tenant.status);
     const email = this.resolveInviteEmail(invite.email, dto.email);
     const fullName = this.resolveInviteFullName(invite.fullName, dto.fullName);
     const password = dto.password;
@@ -232,6 +236,7 @@ export class AuthService {
           tenant: {
             select: {
               slug: true,
+              status: true,
             },
           },
           customRole: {
@@ -259,6 +264,7 @@ export class AuthService {
         tenant: {
           select: {
             slug: true,
+            status: true,
           },
         },
         customRole: {
@@ -298,6 +304,7 @@ export class AuthService {
         tenant: {
           select: {
             slug: true,
+            status: true,
           },
         },
         customRole: {
@@ -317,6 +324,8 @@ export class AuthService {
     if (!user.isActive) {
       throw new UnauthorizedException('User account is inactive');
     }
+
+    this.assertTenantActiveForUser(user);
 
     return this.toAuthenticatedUser(user);
   }
@@ -345,6 +354,7 @@ export class AuthService {
           select: {
             name: true,
             slug: true,
+            status: true,
           },
         },
         customRole: {
@@ -445,6 +455,8 @@ export class AuthService {
   private async createAuthResponse(
     user: UserWithTenant,
   ): Promise<AuthResponse> {
+    this.assertTenantActiveForUser(user);
+
     const authenticatedUser = this.toAuthenticatedUser(user);
     const payload: AuthTokenPayload = {
       sub: authenticatedUser.id,
@@ -476,7 +488,22 @@ export class AuthService {
       isPlatformAdmin: user.isPlatformAdmin,
       tenantId: user.tenantId,
       tenantSlug: user.tenant.slug,
+      tenantStatus: user.tenant.status,
     };
+  }
+
+  private assertTenantActive(status: TenantLifecycleStatus): void {
+    if (status !== TenantLifecycleStatus.ACTIVE) {
+      throw new UnauthorizedException('Tenant is not active');
+    }
+  }
+
+  private assertTenantActiveForUser(user: UserWithTenant): void {
+    if (user.isPlatformAdmin) {
+      return;
+    }
+
+    this.assertTenantActive(user.tenant.status);
   }
 
   private normalizeEmail(email: unknown): string {

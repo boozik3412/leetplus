@@ -5,6 +5,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { TenantLifecycleStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthenticatedRequest, AuthTokenPayload } from './auth.types';
 import { resolveUserCapabilities } from './capabilities';
@@ -39,6 +40,7 @@ export class OptionalJwtAuthGuard implements CanActivate {
           tenant: {
             select: {
               slug: true,
+              status: true,
             },
           },
           customRole: {
@@ -55,6 +57,13 @@ export class OptionalJwtAuthGuard implements CanActivate {
         throw new UnauthorizedException('Invalid authorization token');
       }
 
+      if (
+        user.tenant.status !== TenantLifecycleStatus.ACTIVE &&
+        !user.isPlatformAdmin
+      ) {
+        throw new UnauthorizedException('Invalid authorization token');
+      }
+
       request.user = {
         id: user.id,
         email: user.email,
@@ -67,6 +76,7 @@ export class OptionalJwtAuthGuard implements CanActivate {
         isPlatformAdmin: user.isPlatformAdmin,
         tenantId: user.tenantId,
         tenantSlug: user.tenant.slug,
+        tenantStatus: user.tenant.status,
       };
       return true;
     } catch {

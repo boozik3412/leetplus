@@ -8,6 +8,11 @@ import { StaffChecklistTemplatesController } from './staff-checklist-templates.c
 import { StaffChecklistTemplatesService } from './staff-checklist-templates.service';
 import { StaffChecklistsController } from './staff-checklists.controller';
 import { StaffChecklistsService } from './staff-checklists.service';
+import {
+  StaffAdministratorRatingsController,
+  StaffDisciplineController,
+} from './staff-discipline.controller';
+import { StaffDisciplineService } from './staff-discipline.service';
 import { StaffKnowledgeBaseController } from './staff-knowledge-base.controller';
 import { StaffKnowledgeBaseService } from './staff-knowledge-base.service';
 import { StaffOnboardingPlansController } from './staff-onboarding-plans.controller';
@@ -45,6 +50,8 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffChecklistTemplatesController,
     StaffChecklistsController,
     StaffTeamChatController,
+    StaffDisciplineController,
+    StaffAdministratorRatingsController,
   ],
   providers: [
     StaffTasksService,
@@ -60,6 +67,7 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffChecklistTemplatesService,
     StaffChecklistsService,
     StaffTeamChatService,
+    StaffDisciplineService,
   ],
 })
 export class StaffModule {}

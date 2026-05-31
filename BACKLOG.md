@@ -304,6 +304,7 @@ Conclusion for LeetPlus: combine Service Inspector-style operational proof with 
 - Checklist run: concrete completion instance tied to shift, employee, club, and time.
 - Evidence: photo, video, file, comment, numeric value, yes/no answer, timestamp.
 - Violation: failed checklist item or manually created issue that can spawn a task.
+- Discipline rule: warning/fine template by category, enabled network/club policy, and manual record for an administrator.
 - Audit event: immutable history of creation, edit, assignment, acknowledgement, completion, rejection, and verification.
 
 ### MVP 1. Staff Foundation And Tasks
@@ -393,6 +394,7 @@ Goal: make onboarding and standard knowledge measurable.
 - Done: regulations can now require a linked test or attestation retake after publication; the selected active assessment is stored on the regulation and snapshotted into each published version together with the acknowledgement requirement.
 - Done: employee training profiles added: `StaffTrainingProgress`, API `/staff/training-profiles`, page `/staff/training-profiles`, assigned courses, progress updates, overdue learning, certificates, expired certificates, and linked test/attestation status by employee.
 - Done: manager readiness report added: API `/staff/readiness-report`, page `/staff/readiness-report`, sidebar entry, combined readiness status by employee, required course gaps, failed tests, failed/expired attestations, and pending regulation acknowledgements.
+- Next polish: expand the knowledge base with ready-made article templates, approval workflow, version history, and links from repeated violations/checklist failures to the relevant standard.
 
 Acceptance criteria:
 
@@ -410,9 +412,12 @@ Goal: show not only completion, but operational quality and risk.
 - Done: club rating by task/checklist discipline is visible in `/staff/operations-dashboard`, with score, overdue, failed, returned, unchecked, readiness and repeated-issue penalties.
 - Done: employee rating combines timely completion, repeated checklist violations, training/readiness status, and review outcomes from tasks and checklist runs.
 - Done: recurring issue detection groups repeated failed checklist items by club, employee and shift type, with latest run link back to checklist execution.
+- Done: warning/fine system added from the provided Excel template: tenant-scoped rules for `Чистота`, `Взаимодействие`, and `Соблюдение регламента`, two warnings per category, escalating fines by violation, per-network/per-club enable switch, API `/staff/discipline`, and UI `/staff/discipline`.
+- Done: separate administrator rating added at `/staff/administrator-ratings`, combining regulation acknowledgements, checklist quality, attestation status, warnings and fines into one score.
 - Connect with existing `/guests/staff-control`: shifts, linked/unlinked operators, cash shift, refunds, incassation, middle check.
 - Add anomaly cards: cash/refund anomalies plus missed checklist, suspicious self-service activity plus employee identity, poor bar sales plus missed bar checklist.
 - Add XLSX/CSV export for tasks, checklist runs, training results, and violations.
+- Next: add salary calculation and a constructor for administrator salary schemes, fixed rates, bonuses, penalties, and payout-period rules.
 
 Acceptance criteria:
 
@@ -441,7 +446,7 @@ Acceptance criteria:
 
 - Full universal project management clone with complex boards, CRM, and arbitrary workflows.
 - Separate public mobile app in app stores.
-- Automatic payroll, fines, bonuses, or sanctions.
+- Automatic payroll, bonuses, or sanctions; manual warnings/fines are implemented, payroll calculation remains planned.
 - Automatic write-back into Langame.
 - Complex low-code business process designer.
 - Mass Telegram/MAX workflows without separate legal and channel setup.
@@ -456,7 +461,7 @@ Acceptance criteria:
 6. Started: add checklist templates and checklist runs. `StaffChecklistTemplate` and `/staff/checklist-templates` are in place; checklist runs can use published regulation snapshots or active template snapshots.
 7. Started: add regulation documents, versions, acknowledgements, and role/club targeting. First draft/published/archived shift-regulation entity, acknowledgement tracking, publication version snapshots, and attached link materials are in place; binary attachment storage remains later.
 8. Done: add training materials, courses, tests, and attestation reports. The knowledge base, structured training-material layer, training courses, onboarding plans, tests/attestations with result history, employee training profiles, and the readiness/attestation manager report are in place.
-9. Started: add analytics, exports, and connections to current staff-control signals. `/staff/operations-dashboard` now covers operational discipline, club/employee ratings, recurring checklist issues, and current risk routing; exports and staff-control anomaly connections remain next.
+9. Started: add analytics, exports, and connections to current staff-control signals. `/staff/operations-dashboard` now covers operational discipline, club/employee ratings, recurring checklist issues, warning/fine discipline, administrator rating, and current risk routing; exports, payroll, and staff-control anomaly connections remain next.
 10. Add AI assistance only after real workflows produce enough structured data.
 
 ### Key Data Rules

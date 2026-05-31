@@ -163,6 +163,9 @@ model Tenant {
   staffShiftRegulationAcknowledgements StaffShiftRegulationAcknowledgement[]
   staffChecklistTemplates              StaffChecklistTemplate[]
   staffChecklistRuns                   StaffChecklistRun[]
+  staffDisciplinePolicies              StaffDisciplinePolicy[]
+  staffDisciplineRules                 StaffDisciplineRule[]
+  staffDisciplineRecords               StaffDisciplineRecord[]
   staffChatChannels                    StaffChatChannel[]
   staffChatChannelMembers              StaffChatChannelMember[]
   staffChatMessages                    StaffChatMessage[]
@@ -223,6 +226,10 @@ model User {
   createdStaffChecklistRuns            StaffChecklistRun[]                   @relation("StaffChecklistRunCreatedBy")
   assignedStaffChecklistRuns           StaffChecklistRun[]                   @relation("StaffChecklistRunAssignedTo")
   reviewedStaffChecklistRuns           StaffChecklistRun[]                   @relation("StaffChecklistRunReviewedBy")
+  updatedStaffDisciplinePolicies       StaffDisciplinePolicy[]               @relation("StaffDisciplinePolicyUpdatedBy")
+  createdStaffDisciplineRules          StaffDisciplineRule[]                 @relation("StaffDisciplineRuleCreatedBy")
+  staffDisciplineRecords               StaffDisciplineRecord[]               @relation("StaffDisciplineRecordUser")
+  createdStaffDisciplineRecords        StaffDisciplineRecord[]               @relation("StaffDisciplineRecordCreatedBy")
   guestSavedFilters                    GuestSavedFilter[]
   guestAudiences                       GuestAudience[]
   storeAccesses                        UserStoreAccess[]
@@ -370,6 +377,8 @@ model Store {
   staffShiftRegulationVersions StaffShiftRegulationVersion[]
   staffChecklistTemplates      StaffChecklistTemplate[]
   staffChecklistRuns           StaffChecklistRun[]
+  staffDisciplinePolicies      StaffDisciplinePolicy[]
+  staffDisciplineRecords       StaffDisciplineRecord[]
   staffChatChannels            StaffChatChannel[]
   staffChatMessages            StaffChatMessage[]
   userAccesses                 UserStoreAccess[]
@@ -1765,6 +1774,81 @@ model StaffChecklistRun {
   @@index([createdByUserId], map: "staff_checklist_run_created_by_idx")
   @@index([assignedToUserId], map: "staff_checklist_run_assigned_to_idx")
   @@index([reviewedByUserId], map: "staff_checklist_run_reviewed_by_idx")
+}
+
+model StaffDisciplinePolicy {
+  id              String   @id @default(uuid())
+  tenantId        String
+  storeId         String?
+  enabled         Boolean  @default(true)
+  updatedByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant        Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  store         Store? @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  updatedByUser User?  @relation("StaffDisciplinePolicyUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, storeId], map: "staff_discipline_policy_scope_unique")
+  @@index([tenantId, enabled], map: "staff_discipline_policy_enabled_idx")
+  @@index([storeId], map: "staff_discipline_policy_store_idx")
+  @@index([updatedByUserId], map: "staff_discipline_policy_updated_by_idx")
+}
+
+model StaffDisciplineRule {
+  id              String   @id @default(uuid())
+  tenantId        String
+  createdByUserId String?
+  category        String
+  title           String
+  firstFineAmount Decimal  @default(0) @db.Decimal(12, 2)
+  secondFineAmount Decimal @default(0) @db.Decimal(12, 2)
+  thirdFineAmount Decimal  @default(0) @db.Decimal(12, 2)
+  isActive        Boolean  @default(true)
+  sortOrder       Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant        Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdByUser User?                   @relation("StaffDisciplineRuleCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  records       StaffDisciplineRecord[]
+
+  @@unique([tenantId, category, title], map: "staff_discipline_rule_unique")
+  @@index([tenantId, isActive, sortOrder], map: "staff_discipline_rule_active_order_idx")
+  @@index([createdByUserId], map: "staff_discipline_rule_created_by_idx")
+}
+
+model StaffDisciplineRecord {
+  id                String   @id @default(uuid())
+  tenantId          String
+  ruleId            String
+  storeId           String?
+  userId            String
+  createdByUserId   String?
+  occurredAt        DateTime @default(now())
+  categorySnapshot  String
+  ruleTitleSnapshot String
+  level             String
+  amount            Decimal  @default(0) @db.Decimal(12, 2)
+  status            String   @default("ACTIVE")
+  comment           String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  rule          StaffDisciplineRule @relation(fields: [ruleId], references: [id], onDelete: Restrict)
+  store         Store?              @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  user          User                @relation("StaffDisciplineRecordUser", fields: [userId], references: [id], onDelete: Cascade)
+  createdByUser User?               @relation("StaffDisciplineRecordCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, occurredAt], map: "staff_discipline_record_occurred_idx")
+  @@index([tenantId, userId, categorySnapshot], map: "staff_discipline_record_user_category_idx")
+  @@index([tenantId, ruleId, userId], map: "staff_discipline_record_rule_user_idx")
+  @@index([tenantId, status], map: "staff_discipline_record_status_idx")
+  @@index([ruleId], map: "staff_discipline_record_rule_idx")
+  @@index([storeId], map: "staff_discipline_record_store_idx")
+  @@index([userId], map: "staff_discipline_record_user_idx")
+  @@index([createdByUserId], map: "staff_discipline_record_created_by_idx")
 }
 
 model StaffChatChannel {

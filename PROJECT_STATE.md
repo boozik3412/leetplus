@@ -106,6 +106,7 @@ Connected production Langame sources:
 - Added the first operational discipline dashboard for Staff Operations: API `/staff/operations-dashboard`, page `/staff/operations-dashboard`, staff sidebar link, done-on-time/overdue/failed/returned/unchecked metrics, club and employee ratings, readiness blockers, repeated checklist issue detection, and current risk routing back to tasks/checklists.
 - Added the administrator warning/fine system from the provided Excel template: API `/staff/discipline`, page `/staff/discipline`, default categories/rates, two warnings before fines, escalating fine amounts, active/canceled/reset records, and network/club enable switches.
 - Added the administrator rating page `/staff/administrator-ratings`: regulation acknowledgements, checklist quality, attestation status, warnings and fines are combined into one score with per-criterion details.
+- Added XLSX/CSV exports for Staff Operations: tasks, checklist execution report, training profiles/results, and discipline violations can be downloaded with current filters.
 - Connected `/staff/operations-dashboard` to `/guests/staff-control` shift facts: the dashboard now summarizes shifts, linked/unlinked operators, shift hours, cash/payment amount, refunds, incassation, middle check, and shows shift/cash anomaly cards with drilldowns.
 - Added recommendation workflow state: persisted statuses, responsible roles, financial effect, and an interactive recommendations queue.
 - Fixed dashboard trend card sizing behavior.

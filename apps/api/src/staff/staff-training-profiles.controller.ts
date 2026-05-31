@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Patch, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Patch,
+  Query,
+  StreamableFile,
+  UseGuards,
+} from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -7,6 +15,7 @@ import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import {
   StaffTrainingProfilesService,
+  type StaffTrainingProfilesExportQuery,
   type StaffTrainingProfileReport,
   type StaffTrainingProfilesQuery,
   type StaffTrainingProgressDto,
@@ -34,6 +43,23 @@ export class StaffTrainingProfilesController {
     @Query() query: StaffTrainingProfilesQuery,
   ): Promise<StaffTrainingProfileReport> {
     return this.staffTrainingProfilesService.getProfiles(user, query);
+  }
+
+  @Get('export')
+  async exportProfiles(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: StaffTrainingProfilesExportQuery,
+  ): Promise<StreamableFile> {
+    const file = await this.staffTrainingProfilesService.exportProfiles(
+      user,
+      query,
+    );
+
+    return new StreamableFile(file.buffer, {
+      type: file.contentType,
+      disposition: `attachment; filename="${file.fileName}"`,
+      length: file.buffer.length,
+    });
   }
 
   @Patch('progress')

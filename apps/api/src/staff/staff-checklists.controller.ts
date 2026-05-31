@@ -6,6 +6,7 @@ import {
   Patch,
   Post,
   Query,
+  StreamableFile,
   UseGuards,
 } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
@@ -17,6 +18,7 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import {
   StaffChecklistsService,
   type StaffChecklistCreateDto,
+  type StaffChecklistExecutionExportQuery,
   type StaffChecklistExecutionReport,
   type StaffChecklistExecutionReportQuery,
   type StaffChecklistReport,
@@ -54,6 +56,23 @@ export class StaffChecklistsController {
     @Query() query: StaffChecklistExecutionReportQuery,
   ): Promise<StaffChecklistExecutionReport> {
     return this.staffChecklistsService.getExecutionReport(user, query);
+  }
+
+  @Get('report/export')
+  async exportExecutionReport(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: StaffChecklistExecutionExportQuery,
+  ): Promise<StreamableFile> {
+    const file = await this.staffChecklistsService.exportExecutionReport(
+      user,
+      query,
+    );
+
+    return new StreamableFile(file.buffer, {
+      type: file.contentType,
+      disposition: `attachment; filename="${file.fileName}"`,
+      length: file.buffer.length,
+    });
   }
 
   @Post()

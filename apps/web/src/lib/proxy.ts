@@ -34,3 +34,42 @@ export async function proxyJsonRequest(
 
   return NextResponse.json(await response.json());
 }
+
+export async function proxyFileRequest(
+  request: Request,
+  path: string,
+  fallbackFileName: string,
+) {
+  const headers = await getAuthHeaders();
+
+  if (!headers.Authorization) {
+    return NextResponse.json(
+      { message: "РќРµРѕР±С…РѕРґРёРјРѕ РІРѕР№С‚Рё РІ Р°РєРєР°СѓРЅС‚" },
+      { status: 401 },
+    );
+  }
+
+  const url = new URL(request.url);
+  const response = await fetch(`${getApiUrl()}${path}${url.search}`, {
+    headers,
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    return NextResponse.json(
+      { message: await readApiError(response) },
+      { status: response.status },
+    );
+  }
+
+  return new Response(await response.arrayBuffer(), {
+    status: response.status,
+    headers: {
+      "Content-Type":
+        response.headers.get("content-type") ?? "application/octet-stream",
+      "Content-Disposition":
+        response.headers.get("content-disposition") ??
+        `attachment; filename="${fallbackFileName}"`,
+    },
+  });
+}

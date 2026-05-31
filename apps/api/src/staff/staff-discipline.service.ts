@@ -8,6 +8,14 @@ import { Prisma, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import {
+  buildStaffExportFile,
+  formatStaffDateTime,
+  resolveStaffExportFormat,
+  staffUserLabel,
+  type StaffExportCell,
+  type StaffExportFile,
+} from './staff-export';
 
 const adminRoles = [
   UserRole.SENIOR_ADMINISTRATOR,
@@ -139,6 +147,10 @@ export type StaffDisciplineQuery = {
   search?: string;
 };
 
+export type StaffDisciplineExportQuery = StaffDisciplineQuery & {
+  format?: string;
+};
+
 export type StaffAdministratorRatingsQuery = {
   dateFrom?: string;
   dateTo?: string;
@@ -260,6 +272,49 @@ export class StaffDisciplineService {
       stores,
       users,
     };
+  }
+
+  async exportRecords(
+    user: AuthenticatedUser,
+    query: StaffDisciplineExportQuery = {},
+  ): Promise<StaffExportFile> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    await this.ensureDefaultRules(tenantId);
+    const filters = this.resolveFilters(query);
+    const format = resolveStaffExportFormat(query.format);
+    const records = await this.prisma.staffDisciplineRecord.findMany({
+      where: this.buildRecordWhere(tenantId, filters),
+      include: disciplineRecordInclude,
+      orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
+      take: 10000,
+    });
+
+    return buildStaffExportFile({
+      format,
+      fileNameBase: 'leetplus-staff-violations',
+      sheetName: 'Violations',
+      rows: [
+        [
+          'ID',
+          'Дата',
+          'Сотрудник',
+          'Email',
+          'Роль',
+          'Клуб',
+          'Категория',
+          'Нарушение',
+          'Уровень',
+          'Сумма штрафа',
+          'Статус',
+          'Кто создал',
+          'Комментарий',
+          'Создано',
+          'Обновлено',
+        ],
+        ...records.map((record) => this.toDisciplineExportRow(record)),
+      ],
+      widths: [36, 20, 28, 28, 24, 24, 24, 46, 18, 16, 16, 28, 42, 20, 20],
+    });
   }
 
   async updatePolicy(user: AuthenticatedUser, dto: StaffDisciplinePolicyDto) {
@@ -833,6 +888,66 @@ export class StaffDisciplineService {
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),
     };
+  }
+
+  private toDisciplineExportRow(
+    record: StaffDisciplineRecordRow,
+  ): StaffExportCell[] {
+    const response = this.toRecordResponse(record);
+
+    return [
+      response.id,
+      formatStaffDateTime(response.occurredAt),
+      response.user.fullName ?? response.user.email,
+      response.user.email,
+      this.userRoleLabel(response.user.role),
+      response.store?.name ?? null,
+      response.category,
+      response.ruleTitle,
+      this.disciplineLevelLabel(response.level),
+      response.amount,
+      this.disciplineStatusLabel(response.status),
+      staffUserLabel(response.createdByUser),
+      response.comment,
+      formatStaffDateTime(response.createdAt),
+      formatStaffDateTime(response.updatedAt),
+    ];
+  }
+
+  private disciplineLevelLabel(level: StaffDisciplineLevel) {
+    const labels: Record<StaffDisciplineLevel, string> = {
+      WARNING_1: 'Предупреждение 1',
+      WARNING_2: 'Предупреждение 2',
+      FINE_1: 'Штраф 1',
+      FINE_2: 'Штраф 2',
+      FINE_3: 'Штраф 3',
+    };
+
+    return labels[level];
+  }
+
+  private disciplineStatusLabel(status: StaffDisciplineRecordStatus) {
+    const labels: Record<StaffDisciplineRecordStatus, string> = {
+      ACTIVE: 'Активно',
+      CANCELED: 'Отменено',
+      RESET: 'Сброшено',
+    };
+
+    return labels[status];
+  }
+
+  private userRoleLabel(role: UserRole) {
+    const labels: Partial<Record<UserRole, string>> = {
+      OWNER: 'Владелец',
+      ADMIN: 'Администратор платформы',
+      MANAGER: 'Управляющий',
+      CLUB_MANAGER: 'Управляющий клубом',
+      STANDARDS_MANAGER: 'Менеджер по стандартам',
+      SENIOR_ADMINISTRATOR: 'Старший администратор',
+      CLUB_ADMINISTRATOR: 'Администратор клуба',
+    };
+
+    return labels[role] ?? role;
   }
 
   private groupChecklistsByUser(

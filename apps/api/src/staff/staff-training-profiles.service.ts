@@ -7,6 +7,14 @@ import { Prisma, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import {
+  buildStaffExportFile,
+  formatStaffDateTime,
+  resolveStaffExportFormat,
+  staffYesNo,
+  type StaffExportCell,
+  type StaffExportFile,
+} from './staff-export';
 
 const progressStatuses = [
   'NOT_STARTED',
@@ -46,6 +54,10 @@ export type StaffTrainingProfilesQuery = {
     | 'completed'
     | 'missing_attestation';
   search?: string;
+};
+
+export type StaffTrainingProfilesExportQuery = StaffTrainingProfilesQuery & {
+  format?: string;
 };
 
 export type StaffTrainingProgressDto = {
@@ -327,6 +339,41 @@ export class StaffTrainingProfilesService {
       users: users.map((row) => this.toUser(row)),
       stores,
     };
+  }
+
+  async exportProfiles(
+    user: AuthenticatedUser,
+    query: StaffTrainingProfilesExportQuery = {},
+  ): Promise<StaffExportFile> {
+    const report = await this.getProfiles(user, query);
+    const format = resolveStaffExportFormat(query.format);
+
+    return buildStaffExportFile({
+      format,
+      fileNameBase: 'leetplus-staff-training-results',
+      sheetName: 'Training',
+      rows: [
+        [
+          'Тип строки',
+          'Сотрудник',
+          'Email',
+          'Роль',
+          'Клубы',
+          'Материал',
+          'Тип',
+          'Статус',
+          'Прогресс, %',
+          'Дедлайн',
+          'Просрочено',
+          'Завершено / сдано',
+          'Сертификат до',
+          'Балл',
+          'Комментарий',
+        ],
+        ...this.buildTrainingExportRows(report.rows),
+      ],
+      widths: [18, 28, 28, 24, 34, 34, 18, 20, 14, 20, 14, 20, 20, 12, 42],
+    });
   }
 
   async updateProgress(user: AuthenticatedUser, dto: StaffTrainingProgressDto) {
@@ -667,6 +714,120 @@ export class StaffTrainingProfilesService {
           }
         : null,
     };
+  }
+
+  private buildTrainingExportRows(
+    rows: StaffTrainingProfileRow[],
+  ): StaffExportCell[][] {
+    return rows.flatMap((profile) => {
+      const base = this.trainingExportBase(profile);
+      const exportRows: StaffExportCell[][] = [];
+
+      if (profile.courses.length === 0 && profile.assessments.length === 0) {
+        exportRows.push([
+          'Профиль',
+          ...base,
+          null,
+          null,
+          null,
+          profile.progressPercent,
+          null,
+          null,
+          null,
+          null,
+          null,
+        ]);
+      }
+
+      profile.courses.forEach((course) => {
+        exportRows.push([
+          'Курс',
+          ...base,
+          course.title,
+          course.required ? 'Обязательный курс' : 'Курс',
+          this.trainingProgressLabel(course.progress.status),
+          course.progress.progressPercent,
+          formatStaffDateTime(course.progress.dueAt),
+          staffYesNo(course.progress.overdue),
+          formatStaffDateTime(course.progress.completedAt),
+          formatStaffDateTime(course.progress.certificateExpiresAt),
+          null,
+          course.progress.comment,
+        ]);
+      });
+
+      profile.assessments.forEach((assessment) => {
+        exportRows.push([
+          assessment.assessmentKind === 'ATTESTATION' ? 'Аттестация' : 'Тест',
+          ...base,
+          assessment.title,
+          this.assessmentKindLabel(assessment.assessmentKind),
+          this.assessmentStatusLabel(assessment.status),
+          null,
+          null,
+          staffYesNo(assessment.status === 'EXPIRED'),
+          formatStaffDateTime(assessment.latestResult?.submittedAt ?? null),
+          formatStaffDateTime(assessment.latestResult?.expiresAt ?? null),
+          assessment.latestResult?.score ?? null,
+          null,
+        ]);
+      });
+
+      return exportRows;
+    });
+  }
+
+  private trainingExportBase(profile: StaffTrainingProfileRow) {
+    return [
+      profile.user.fullName ?? profile.user.email,
+      profile.user.email,
+      this.userRoleLabel(profile.user.role),
+      profile.user.stores.map((store) => store.name).join(', ') || 'Вся сеть',
+    ];
+  }
+
+  private trainingProgressLabel(status: StaffTrainingProgressStatus) {
+    const labels: Record<StaffTrainingProgressStatus, string> = {
+      NOT_STARTED: 'Не начато',
+      IN_PROGRESS: 'В обучении',
+      COMPLETED: 'Завершено',
+      WAIVED: 'Зачтено вручную',
+    };
+
+    return labels[status];
+  }
+
+  private assessmentKindLabel(
+    kind: StaffTrainingProfileAssessment['assessmentKind'],
+  ) {
+    return kind === 'ATTESTATION' ? 'Аттестация' : 'Тест';
+  }
+
+  private assessmentStatusLabel(
+    status: StaffTrainingProfileAssessment['status'],
+  ) {
+    const labels: Record<StaffTrainingProfileAssessment['status'], string> = {
+      PASSED: 'Сдано',
+      FAILED: 'Не сдано',
+      PENDING: 'Ожидает',
+      EXPIRED: 'Истекло',
+    };
+
+    return labels[status];
+  }
+
+  private userRoleLabel(role: UserRole) {
+    const labels: Partial<Record<UserRole, string>> = {
+      OWNER: 'Владелец',
+      ADMIN: 'Администратор платформы',
+      MANAGER: 'Управляющий',
+      CLUB_MANAGER: 'Управляющий клубом',
+      STANDARDS_MANAGER: 'Менеджер по стандартам',
+      SENIOR_ADMINISTRATOR: 'Старший администратор',
+      CLUB_ADMINISTRATOR: 'Администратор клуба',
+    };
+
+    return labels[role] ?? role;
   }
 
   private buildSummary(rows: StaffTrainingProfileRow[]) {

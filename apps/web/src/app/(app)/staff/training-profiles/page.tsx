@@ -70,6 +70,18 @@ function formatNumber(value: number) {
   return new Intl.NumberFormat("ru-RU").format(value);
 }
 
+function exportHref(format: "csv" | "xlsx", filters: StaffTrainingProfilesFilters) {
+  const params = new URLSearchParams();
+
+  Object.entries({ ...filters, format }).forEach(([key, value]) => {
+    if (value) {
+      params.set(key, value);
+    }
+  });
+
+  return `/api/staff/training-profiles/export?${params.toString()}`;
+}
+
 export default async function StaffTrainingProfilesPage({
   searchParams,
 }: {
@@ -113,6 +125,18 @@ export default async function StaffTrainingProfilesPage({
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <a
+              href={exportHref("csv", filters)}
+              className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+            >
+              CSV
+            </a>
+            <a
+              href={exportHref("xlsx", filters)}
+              className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+            >
+              XLSX
+            </a>
             <Link
               href="/staff/training-courses"
               className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"

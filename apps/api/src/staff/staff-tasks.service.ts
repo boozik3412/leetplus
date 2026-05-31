@@ -7,6 +7,15 @@ import { Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import {
+  buildStaffExportFile,
+  formatStaffDateTime,
+  resolveStaffExportFormat,
+  staffUserLabel,
+  staffYesNo,
+  type StaffExportCell,
+  type StaffExportFile,
+} from './staff-export';
 
 const taskStatuses = [
   'OPEN',
@@ -53,6 +62,10 @@ export type StaffTasksQuery = {
   sort?: StaffTaskSortKey;
   direction?: 'asc' | 'desc';
   pageSize?: string;
+};
+
+export type StaffTasksExportQuery = StaffTasksQuery & {
+  format?: string;
 };
 
 export type StaffTaskDto = {
@@ -230,6 +243,48 @@ export class StaffTasksService {
       users,
       stores,
     };
+  }
+
+  async exportTasks(
+    user: AuthenticatedUser,
+    query: StaffTasksExportQuery = {},
+  ): Promise<StaffExportFile> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const filters = this.resolveFilters(query);
+    const format = resolveStaffExportFormat(query.format);
+    const rows = await this.prisma.staffTask.findMany({
+      where: this.buildWhere(tenantId, filters, true),
+      include: taskInclude,
+      orderBy: this.buildOrderBy(filters),
+      take: 10000,
+    });
+
+    return buildStaffExportFile({
+      format,
+      fileNameBase: 'leetplus-staff-tasks',
+      sheetName: 'Tasks',
+      rows: [
+        [
+          'ID',
+          'Задача',
+          'Статус',
+          'Тип',
+          'Приоритет',
+          'Клуб',
+          'Исполнитель',
+          'Дедлайн',
+          'Завершено',
+          'Просрочено',
+          'Создано',
+          'Обновлено',
+          'Последний комментарий',
+          'Доказательство',
+          'Описание',
+        ],
+        ...rows.map((task) => this.toTaskExportRow(this.toTaskResponse(task))),
+      ],
+      widths: [36, 34, 18, 20, 16, 24, 28, 20, 20, 14, 20, 20, 44, 36, 48],
+    });
   }
 
   async createTask(user: AuthenticatedUser, dto: StaffTaskDto) {
@@ -678,6 +733,65 @@ export class StaffTasksService {
         actorUser: event.actorUser,
       })),
     };
+  }
+
+  private toTaskExportRow(task: StaffTaskResponse): StaffExportCell[] {
+    const latestComment = task.comments[0] ?? null;
+
+    return [
+      task.id,
+      task.title,
+      this.taskStatusLabel(task.status),
+      this.taskTypeLabel(task.type),
+      this.taskPriorityLabel(task.priority),
+      task.store?.name ?? null,
+      staffUserLabel(task.assignedToUser),
+      formatStaffDateTime(task.dueAt),
+      formatStaffDateTime(task.completedAt),
+      staffYesNo(task.isOverdue),
+      formatStaffDateTime(task.createdAt),
+      formatStaffDateTime(task.updatedAt),
+      latestComment?.body ?? null,
+      latestComment?.evidenceLabel ?? latestComment?.evidenceUrl ?? null,
+      task.description,
+    ];
+  }
+
+  private taskStatusLabel(status: StaffTaskStatus) {
+    const labels: Record<StaffTaskStatus, string> = {
+      OPEN: 'Новая',
+      IN_PROGRESS: 'В работе',
+      ON_REVIEW: 'На проверке',
+      DONE: 'Готово',
+      CANCELED: 'Отменена',
+    };
+
+    return labels[status];
+  }
+
+  private taskTypeLabel(type: StaffTaskType) {
+    const labels: Record<StaffTaskType, string> = {
+      ONE_TIME: 'Разовая',
+      SHIFT: 'На смену',
+      RECURRING: 'Повторяемая',
+      LONG_TERM: 'Долгосрочная',
+      PERSONAL: 'Личная',
+      CLUB: 'Для клуба',
+      ROLE: 'Для роли',
+    };
+
+    return labels[type];
+  }
+
+  private taskPriorityLabel(priority: StaffTaskPriority) {
+    const labels: Record<StaffTaskPriority, string> = {
+      LOW: 'Низкий',
+      NORMAL: 'Обычный',
+      HIGH: 'Высокий',
+      URGENT: 'Срочно',
+    };
+
+    return labels[priority];
   }
 
   private async fetchTaskOrThrow(

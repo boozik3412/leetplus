@@ -6,6 +6,7 @@ import {
   Patch,
   Post,
   Query,
+  StreamableFile,
   UseGuards,
 } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
@@ -17,6 +18,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import {
   StaffDisciplineService,
   type StaffAdministratorRatingsQuery,
+  type StaffDisciplineExportQuery,
   type StaffDisciplinePolicyDto,
   type StaffDisciplineQuery,
   type StaffDisciplineRecordDto,
@@ -44,6 +46,20 @@ export class StaffDisciplineController {
     @Query() query: StaffDisciplineQuery,
   ) {
     return this.staffDisciplineService.getReport(user, query);
+  }
+
+  @Get('export')
+  async exportRecords(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: StaffDisciplineExportQuery,
+  ): Promise<StreamableFile> {
+    const file = await this.staffDisciplineService.exportRecords(user, query);
+
+    return new StreamableFile(file.buffer, {
+      type: file.contentType,
+      disposition: `attachment; filename="${file.fileName}"`,
+      length: file.buffer.length,
+    });
   }
 
   @Patch('policy')

@@ -7,6 +7,15 @@ import { Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import {
+  buildStaffExportFile,
+  formatStaffDateTime,
+  resolveStaffExportFormat,
+  staffUserLabel,
+  staffYesNo,
+  type StaffExportCell,
+  type StaffExportFile,
+} from './staff-export';
 
 const checklistStatuses = [
   'OPEN',
@@ -63,6 +72,11 @@ export type StaffChecklistExecutionReportQuery = StaffChecklistsQuery & {
   dateFrom?: string;
   dateTo?: string;
 };
+
+export type StaffChecklistExecutionExportQuery =
+  StaffChecklistExecutionReportQuery & {
+    format?: string;
+  };
 
 export type StaffChecklistCreateDto = {
   regulationId?: string;
@@ -516,6 +530,53 @@ export class StaffChecklistsService {
       stores,
       users,
     };
+  }
+
+  async exportExecutionReport(
+    user: AuthenticatedUser,
+    query: StaffChecklistExecutionExportQuery = {},
+  ): Promise<StaffExportFile> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const filters = this.resolveExecutionFilters(query);
+    const format = resolveStaffExportFormat(query.format);
+    const rows = await this.prisma.staffChecklistRun.findMany({
+      where: this.buildExecutionWhere(tenantId, filters),
+      include: checklistRunInclude,
+      orderBy: [
+        { submittedAt: 'desc' },
+        { scheduledAt: 'desc' },
+        { createdAt: 'desc' },
+      ],
+      take: 10000,
+    });
+
+    return buildStaffExportFile({
+      format,
+      fileNameBase: 'leetplus-staff-checklists',
+      sheetName: 'Checklists',
+      rows: [
+        [
+          'ID',
+          'Чеклист',
+          'Источник',
+          'Статус',
+          'Клуб',
+          'Сотрудник',
+          'Дата активности',
+          'Запланировано',
+          'Отправлено',
+          'Смена',
+          'Просрочено',
+          'Проблемных пунктов',
+          'Блокирующих проблем',
+          'Оценка, %',
+          'Обязательные, %',
+          'Доказательства, %',
+        ],
+        ...rows.map((row) => this.toExecutionExportRow(row)),
+      ],
+      widths: [36, 34, 18, 18, 24, 28, 20, 20, 20, 22, 14, 18, 18, 14, 16, 18],
+    });
   }
 
   async createChecklist(user: AuthenticatedUser, dto: StaffChecklistCreateDto) {
@@ -1196,6 +1257,57 @@ export class StaffChecklistsService {
         : null,
       ...this.finalizeExecutionMetrics(metrics),
     };
+  }
+
+  private toExecutionExportRow(row: StaffChecklistRunRow): StaffExportCell[] {
+    const run = this.toExecutionRun(row);
+
+    return [
+      run.id,
+      run.title,
+      this.checklistSourceLabel(run.checklist.type),
+      this.checklistStatusLabel(run.status),
+      run.store?.name ?? null,
+      staffUserLabel(run.assignedToUser),
+      formatStaffDateTime(run.activityDate),
+      formatStaffDateTime(run.scheduledAt),
+      formatStaffDateTime(run.submittedAt),
+      run.shift ? `Смена ${run.shift.externalShiftId}` : null,
+      staffYesNo(run.overdue > 0),
+      run.failedItems,
+      run.blockingIssues,
+      run.scorePercent,
+      run.requiredPercent,
+      run.evidencePercent,
+    ];
+  }
+
+  private checklistSourceLabel(
+    type: StaffChecklistExecutionRun['checklist']['type'],
+  ) {
+    const labels: Record<
+      StaffChecklistExecutionRun['checklist']['type'],
+      string
+    > = {
+      REGULATION: 'Регламент смены',
+      TEMPLATE: 'Шаблон чеклиста',
+      RUN: 'Разовое выполнение',
+    };
+
+    return labels[type];
+  }
+
+  private checklistStatusLabel(status: StaffChecklistStatus) {
+    const labels: Record<StaffChecklistStatus, string> = {
+      OPEN: 'Новый',
+      IN_PROGRESS: 'В работе',
+      ON_REVIEW: 'На проверке',
+      ACCEPTED: 'Принят',
+      RETURNED: 'Возвращен',
+      CANCELED: 'Отменен',
+    };
+
+    return labels[status];
   }
 
   private resolveChecklistSource(row: StaffChecklistRunRow) {

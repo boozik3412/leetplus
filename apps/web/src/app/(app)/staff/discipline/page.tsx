@@ -32,6 +32,18 @@ function formatMoney(value: number) {
   return `${formatNumber(Math.round(value))} руб`;
 }
 
+function exportHref(format: "csv" | "xlsx", filters: StaffDisciplineFilters) {
+  const params = new URLSearchParams();
+
+  Object.entries({ ...filters, format }).forEach(([key, value]) => {
+    if (value) {
+      params.set(key, value);
+    }
+  });
+
+  return `/api/staff/discipline/export?${params.toString()}`;
+}
+
 export default async function StaffDisciplinePage({
   searchParams,
 }: {
@@ -39,7 +51,8 @@ export default async function StaffDisciplinePage({
 }) {
   await requireCurrentUser();
   const params = await searchParams;
-  const report = await getStaffDisciplineReport(resolveFilters(params));
+  const filters = resolveFilters(params);
+  const report = await getStaffDisciplineReport(filters);
   const cards = [
     { label: "Предупреждения", value: report.summary.warnings },
     { label: "Штрафы", value: report.summary.fines },
@@ -74,6 +87,18 @@ export default async function StaffDisciplinePage({
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <a
+              href={exportHref("csv", filters)}
+              className="inline-flex h-10 items-center rounded-md border border-zinc-300 px-3 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+            >
+              CSV
+            </a>
+            <a
+              href={exportHref("xlsx", filters)}
+              className="inline-flex h-10 items-center rounded-md border border-zinc-300 px-3 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+            >
+              XLSX
+            </a>
             <Link
               href="/staff/administrator-ratings"
               className="inline-flex h-10 items-center rounded-md bg-emerald-500 px-3 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"

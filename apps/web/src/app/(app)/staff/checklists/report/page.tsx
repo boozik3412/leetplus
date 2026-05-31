@@ -101,6 +101,21 @@ function formatNumber(value: number) {
   return new Intl.NumberFormat("ru-RU").format(value);
 }
 
+function exportHref(
+  format: "csv" | "xlsx",
+  filters: StaffChecklistExecutionReportFilters,
+) {
+  const params = new URLSearchParams();
+
+  Object.entries({ ...filters, format }).forEach(([key, value]) => {
+    if (value) {
+      params.set(key, value);
+    }
+  });
+
+  return `/api/staff/checklists/report/export?${params.toString()}`;
+}
+
 function formatDate(value: string | null) {
   if (!value) {
     return "не указано";
@@ -181,6 +196,18 @@ export default async function StaffChecklistExecutionReportPage({
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <a
+              href={exportHref("csv", filters)}
+              className="inline-flex rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900"
+            >
+              CSV
+            </a>
+            <a
+              href={exportHref("xlsx", filters)}
+              className="inline-flex rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900"
+            >
+              XLSX
+            </a>
             <Link
               href="/staff/checklists"
               className="inline-flex rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"

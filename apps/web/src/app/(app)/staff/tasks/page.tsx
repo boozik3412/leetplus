@@ -139,6 +139,20 @@ function formatNumber(value: number) {
   return new Intl.NumberFormat("ru-RU").format(value);
 }
 
+function exportHref(format: "csv" | "xlsx", filters: StaffTaskFilters) {
+  const params = new URLSearchParams();
+
+  Object.entries({ ...filters, format, pageSize: undefined }).forEach(
+    ([key, value]) => {
+      if (value) {
+        params.set(key, value);
+      }
+    },
+  );
+
+  return `/api/staff/tasks/export?${params.toString()}`;
+}
+
 function formatDateTime(value: string | null) {
   if (!value) {
     return "без срока";
@@ -240,6 +254,18 @@ export default async function StaffTasksPage({
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <a
+              href={exportHref("csv", filters)}
+              className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+            >
+              CSV
+            </a>
+            <a
+              href={exportHref("xlsx", filters)}
+              className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+            >
+              XLSX
+            </a>
             <Link
               href="/staff/task-templates"
               className="inline-flex h-10 items-center justify-center rounded-md bg-emerald-500 px-3 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"

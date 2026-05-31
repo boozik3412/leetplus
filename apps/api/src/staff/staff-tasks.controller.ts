@@ -6,6 +6,7 @@ import {
   Patch,
   Post,
   Query,
+  StreamableFile,
   UseGuards,
 } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
@@ -19,6 +20,7 @@ import {
   type StaffTaskCommentDto,
   type StaffTaskDto,
   type StaffTaskReport,
+  type StaffTasksExportQuery,
   type StaffTasksQuery,
 } from './staff-tasks.service';
 
@@ -42,6 +44,20 @@ export class StaffTasksController {
     @Query() query: StaffTasksQuery,
   ): Promise<StaffTaskReport> {
     return this.staffTasksService.getTasks(user, query);
+  }
+
+  @Get('export')
+  async exportTasks(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: StaffTasksExportQuery,
+  ): Promise<StreamableFile> {
+    const file = await this.staffTasksService.exportTasks(user, query);
+
+    return new StreamableFile(file.buffer, {
+      type: file.contentType,
+      disposition: `attachment; filename="${file.fileName}"`,
+      length: file.buffer.length,
+    });
   }
 
   @Post()

@@ -114,7 +114,38 @@ export type StaffKnowledgeBaseReport = {
   folders: string[];
   categories: string[];
   rows: StaffKnowledgeArticleResponse[];
+  articleSuggestions: StaffKnowledgeArticleSuggestion[];
   stores: Array<{ id: string; name: string; isActive: boolean }>;
+};
+
+export type StaffKnowledgeArticleSuggestion = {
+  id: string;
+  issueTitle: string;
+  title: string;
+  detail: string;
+  occurrences: number;
+  failedRuns: number;
+  firstSeen: string;
+  lastSeen: string;
+  latestRunTitle: string;
+  shiftKind: string;
+  store: { id: string; name: string; isActive: boolean } | null;
+  employee: { id: string; email: string; fullName: string | null } | null;
+  href: string;
+  draft: {
+    title: string;
+    summary: string;
+    content: string;
+    folder: string;
+    category: string;
+    roleScope: StaffKnowledgeRoleScope;
+    templateKey: string;
+    requiresReading: boolean;
+    tags: string[];
+    materials: StaffKnowledgeMaterial[];
+    relatedLinks: StaffKnowledgeRelatedLink[];
+    approvalNote: string;
+  };
 };
 
 export type StaffKnowledgeArticleResponse = {
@@ -175,12 +206,43 @@ const articleInclude = {
   },
 } satisfies Prisma.StaffKnowledgeArticleInclude;
 
+const knowledgeSuggestionChecklistSelect = {
+  id: true,
+  title: true,
+  shiftKind: true,
+  status: true,
+  scheduledAt: true,
+  submittedAt: true,
+  reviewedAt: true,
+  createdAt: true,
+  failedItems: true,
+  sectionsSnapshot: true,
+  answers: true,
+  store: { select: { id: true, name: true, isActive: true } },
+  assignedToUser: { select: { id: true, email: true, fullName: true } },
+} satisfies Prisma.StaffChecklistRunSelect;
+
 type StaffKnowledgeArticleRow = Prisma.StaffKnowledgeArticleGetPayload<{
   include: typeof articleInclude;
 }>;
 
+type StaffKnowledgeSuggestionChecklistRow = Prisma.StaffChecklistRunGetPayload<{
+  select: typeof knowledgeSuggestionChecklistSelect;
+}>;
+
 type StaffKnowledgeArticleVersionRow =
   StaffKnowledgeArticleRow['versions'][number];
+
+type StaffKnowledgeFailedIssue = {
+  title: string;
+  date: Date;
+  run: StaffKnowledgeSuggestionChecklistRow;
+};
+
+type StaffKnowledgeSuggestionDraft = StaffKnowledgeFailedIssue & {
+  occurrences: number;
+  runIds: Set<string>;
+};
 
 type StaffKnowledgeArticleSnapshotSource = {
   id: string;
@@ -322,6 +384,9 @@ export class StaffKnowledgeBaseService {
     const responseRows = rows.map((row) =>
       this.toArticleResponse(row, user.id, activeUsers),
     );
+    const articleSuggestions = canManageKnowledge
+      ? await this.buildArticleSuggestions(tenantId, filters.storeId)
+      : [];
 
     return {
       filters,
@@ -330,6 +395,7 @@ export class StaffKnowledgeBaseService {
       folders: folders.map((row) => row.folder),
       categories: categories.map((row) => row.category),
       rows: responseRows,
+      articleSuggestions,
       stores,
     };
   }
@@ -632,6 +698,305 @@ export class StaffKnowledgeBaseService {
         materialsCount: 0,
       },
     );
+  }
+
+  private async buildArticleSuggestions(
+    tenantId: string,
+    storeId: string | null,
+  ): Promise<StaffKnowledgeArticleSuggestion[]> {
+    const since = new Date();
+    since.setDate(since.getDate() - 90);
+
+    const [runs, existingArticles] = await Promise.all([
+      this.prisma.staffChecklistRun.findMany({
+        where: {
+          tenantId,
+          failedItems: { gt: 0 },
+          status: { not: 'CANCELED' },
+          createdAt: { gte: since },
+          ...(storeId ? { storeId } : {}),
+        },
+        select: knowledgeSuggestionChecklistSelect,
+        orderBy: [{ submittedAt: 'desc' }, { createdAt: 'desc' }],
+        take: 400,
+      }),
+      this.prisma.staffKnowledgeArticle.findMany({
+        where: { tenantId, status: { not: 'ARCHIVED' } },
+        select: { title: true, tags: true },
+        take: 500,
+      }),
+    ]);
+
+    const existingIndex = existingArticles.map((article) =>
+      [article.title, ...article.tags].join(' ').toLowerCase(),
+    );
+    const issuesByKey = new Map<string, StaffKnowledgeSuggestionDraft>();
+
+    runs.forEach((run) => {
+      this.extractFailedIssues(run).forEach((issue) => {
+        if (this.hasExistingKnowledgeArticle(issue.title, existingIndex)) {
+          return;
+        }
+
+        const key = [
+          run.store?.id ?? 'network',
+          run.shiftKind,
+          this.normalizeIssueKey(issue.title),
+        ].join('::');
+        const existing = issuesByKey.get(key);
+
+        if (!existing) {
+          issuesByKey.set(key, {
+            ...issue,
+            occurrences: 1,
+            runIds: new Set([run.id]),
+          });
+          return;
+        }
+
+        existing.occurrences += 1;
+        existing.runIds.add(run.id);
+
+        if (issue.date < existing.date) {
+          existing.date = issue.date;
+        }
+
+        if (issue.date > this.activityDate(existing.run)) {
+          existing.run = run;
+        }
+      });
+    });
+
+    return Array.from(issuesByKey.values())
+      .filter((issue) => issue.occurrences > 1)
+      .map((issue) => this.toArticleSuggestion(issue))
+      .sort((a, b) => b.occurrences - a.occurrences)
+      .slice(0, 8);
+  }
+
+  private toArticleSuggestion(
+    issue: StaffKnowledgeSuggestionDraft,
+  ): StaffKnowledgeArticleSuggestion {
+    const category = this.suggestKnowledgeCategory(issue.title);
+    const href = `/staff/checklists?search=${encodeURIComponent(issue.title)}`;
+    const scopeParts = [
+      issue.run.store?.name ?? 'вся сеть',
+      this.shiftKindLabel(issue.run.shiftKind),
+      issue.run.assignedToUser?.fullName ??
+        issue.run.assignedToUser?.email ??
+        'исполнитель не назначен',
+    ];
+    const tags = Array.from(
+      new Set([
+        'чек-лист',
+        'повторное нарушение',
+        category.toLowerCase(),
+        this.shiftKindLabel(issue.run.shiftKind).toLowerCase(),
+      ]),
+    );
+
+    return {
+      id: `knowledge-suggestion-${this.stableHash(
+        [
+          issue.run.store?.id ?? 'network',
+          issue.run.shiftKind,
+          issue.title,
+        ].join('::'),
+      )}`,
+      issueTitle: issue.title,
+      title: `Разобрать стандарт: ${issue.title}`,
+      detail: [
+        `${issue.occurrences} повторов в ${issue.runIds.size} выполнениях`,
+        scopeParts.join(' · '),
+      ].join(' · '),
+      occurrences: issue.occurrences,
+      failedRuns: issue.runIds.size,
+      firstSeen: issue.date.toISOString(),
+      lastSeen: this.activityDate(issue.run).toISOString(),
+      latestRunTitle: issue.run.title,
+      shiftKind: issue.run.shiftKind,
+      store: issue.run.store,
+      employee: issue.run.assignedToUser,
+      href,
+      draft: {
+        title: `Стандарт: ${issue.title}`,
+        summary: `Материал создан из повторяющегося провала чек-листа: ${issue.occurrences} повторов за последние 90 дней.`,
+        content: [
+          `Проблема: ${issue.title}.`,
+          `Где повторяется: ${scopeParts.join(' · ')}.`,
+          'Что должен сделать сотрудник:',
+          '1. Проверить требование до отметки пункта чек-листа.',
+          '2. Зафиксировать результат понятным комментарием или доказательством, если оно требуется.',
+          '3. Если выполнить стандарт нельзя, сразу создать задачу или написать управляющему в командный чат.',
+          'Контроль: управляющий проверяет следующие выполнения чек-листа и возвращает результат, если причина не устранена.',
+        ].join('\n\n'),
+        folder: 'Разборы нарушений',
+        category,
+        roleScope: 'ADMINISTRATOR',
+        templateKey: `checklist-issue-${this.stableHash(issue.title)}`,
+        requiresReading: true,
+        tags,
+        materials: [
+          {
+            id: 'material-checklist-context',
+            title: 'Контекст повторения',
+            type: 'TEXT',
+            url: null,
+            content: `Провал найден в чек-листах ${issue.runIds.size} раз(а). Последний чек-лист: ${issue.run.title}.`,
+            note: null,
+            required: false,
+          },
+        ],
+        relatedLinks: [
+          {
+            id: 'link-checklist-failures',
+            type: 'CHECKLIST',
+            title: 'Проваленные чек-листы по этому пункту',
+            url: href,
+            note: 'Откройте список выполнений и проверьте последние причины провала.',
+          },
+        ],
+        approvalNote:
+          'Черновик создан из повторяющихся провалов чек-листа. Перед публикацией проверьте формулировки и добавьте локальные правила клуба.',
+      },
+    };
+  }
+
+  private extractFailedIssues(
+    run: StaffKnowledgeSuggestionChecklistRow,
+  ): StaffKnowledgeFailedIssue[] {
+    const itemTitles = this.mapChecklistItemTitles(run.sectionsSnapshot);
+    const answers = Array.isArray(run.answers) ? run.answers : [];
+    const date = this.activityDate(run);
+
+    return answers
+      .map((answer) => {
+        const record = this.asRecord(answer);
+
+        if (record.status !== 'FAILED') {
+          return null;
+        }
+
+        const sectionId = this.normalizeOptionalString(record.sectionId) ?? '';
+        const itemId = this.normalizeOptionalString(record.itemId) ?? '';
+        const title =
+          itemTitles.get(`${sectionId}::${itemId}`) ??
+          this.normalizeOptionalString(record.note) ??
+          'Пункт чек-листа';
+
+        return { title, date, run } satisfies StaffKnowledgeFailedIssue;
+      })
+      .filter((issue): issue is StaffKnowledgeFailedIssue => Boolean(issue));
+  }
+
+  private mapChecklistItemTitles(value: unknown) {
+    const map = new Map<string, string>();
+    const sections = Array.isArray(value) ? value : [];
+
+    sections.forEach((section) => {
+      const sectionRecord = this.asRecord(section);
+      const sectionTitle = this.normalizeOptionalString(sectionRecord.title);
+      const sectionId = this.normalizeOptionalString(sectionRecord.id) ?? '';
+      const items = Array.isArray(sectionRecord.items)
+        ? sectionRecord.items
+        : [];
+
+      items.forEach((item) => {
+        const itemRecord = this.asRecord(item);
+        const itemId = this.normalizeOptionalString(itemRecord.id) ?? '';
+        const itemTitle =
+          this.normalizeOptionalString(itemRecord.title) ?? 'Пункт чек-листа';
+        map.set(
+          `${sectionId}::${itemId}`,
+          sectionTitle ? `${sectionTitle}: ${itemTitle}` : itemTitle,
+        );
+      });
+    });
+
+    return map;
+  }
+
+  private activityDate(run: StaffKnowledgeSuggestionChecklistRow) {
+    return (
+      run.reviewedAt ?? run.submittedAt ?? run.scheduledAt ?? run.createdAt
+    );
+  }
+
+  private hasExistingKnowledgeArticle(issueTitle: string, existing: string[]) {
+    const issue = this.normalizeIssueKey(issueTitle);
+
+    if (issue.length < 8) {
+      return false;
+    }
+
+    return existing.some((candidate) => {
+      const normalized = this.normalizeIssueKey(candidate);
+      if (normalized.length < 8) {
+        return false;
+      }
+
+      return normalized.includes(issue) || issue.includes(normalized);
+    });
+  }
+
+  private normalizeIssueKey(value: string) {
+    return value
+      .toLowerCase()
+      .replace(/ё/g, 'е')
+      .replace(/[^a-zа-я0-9]+/gi, ' ')
+      .trim();
+  }
+
+  private suggestKnowledgeCategory(issueTitle: string) {
+    const value = issueTitle.toLowerCase();
+
+    if (/касс|инкас|налич|оплат|чек|деньг/.test(value)) {
+      return 'Касса';
+    }
+
+    if (/бар|товар|витрин|напит|склад|остат/.test(value)) {
+      return 'Бар';
+    }
+
+    if (/чист|зал|мусор|санит|уборк/.test(value)) {
+      return 'Чистота';
+    }
+
+    if (/пк|комп|мест|тех|оборуд|монитор|мыш|клав/.test(value)) {
+      return 'ПК-зона';
+    }
+
+    if (/гост|сервис|конфликт|брон/.test(value)) {
+      return 'Сервис';
+    }
+
+    return 'Операционные стандарты';
+  }
+
+  private shiftKindLabel(value: string) {
+    const labels: Record<string, string> = {
+      OPENING: 'Открытие',
+      CLOSING: 'Закрытие',
+      CASH: 'Касса',
+      BAR: 'Бар',
+      PC_ZONE: 'ПК-зона',
+      CLEANLINESS: 'Чистота',
+      INCIDENT: 'Инцидент',
+      INVENTORY: 'Инвентаризация',
+      CUSTOM: 'Произвольная смена',
+    };
+
+    return labels[value] ?? value;
+  }
+
+  private stableHash(value: string) {
+    let hash = 0;
+
+    for (let index = 0; index < value.length; index += 1) {
+      hash = (hash * 31 + value.charCodeAt(index)) | 0;
+    }
+
+    return Math.abs(hash).toString(36);
   }
 
   private async normalizeArticleData(

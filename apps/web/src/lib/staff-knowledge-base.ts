@@ -128,6 +128,40 @@ export type StaffKnowledgeArticle = {
   versions: StaffKnowledgeArticleVersion[];
 };
 
+export type StaffKnowledgeArticleSuggestion = {
+  id: string;
+  issueTitle: string;
+  title: string;
+  detail: string;
+  occurrences: number;
+  failedRuns: number;
+  firstSeen: string;
+  lastSeen: string;
+  latestRunTitle: string;
+  shiftKind: string;
+  store: StaffTaskStore | null;
+  employee: {
+    id: string;
+    email: string;
+    fullName: string | null;
+  } | null;
+  href: string;
+  draft: {
+    title: string;
+    summary: string;
+    content: string;
+    folder: string;
+    category: string;
+    roleScope: StaffKnowledgeRoleScope;
+    templateKey: string;
+    requiresReading: boolean;
+    tags: string[];
+    materials: StaffKnowledgeMaterial[];
+    relatedLinks: StaffKnowledgeRelatedLink[];
+    approvalNote: string;
+  };
+};
+
 export type StaffKnowledgeBaseFilters = {
   status?: StaffKnowledgeArticleStatus | "all";
   roleScope?: StaffKnowledgeRoleScope | "all";
@@ -162,6 +196,7 @@ export type StaffKnowledgeBaseReport = {
   folders: string[];
   categories: string[];
   rows: StaffKnowledgeArticle[];
+  articleSuggestions: StaffKnowledgeArticleSuggestion[];
   stores: StaffTaskStore[];
 };
 

@@ -1653,6 +1653,8 @@ model StaffKnowledgeArticle {
   reviewRequestedAt DateTime?
   approvedAt        DateTime?
   approvalNote      String?
+  returnedAt        DateTime?
+  revisionDueAt     DateTime?
   publishedAt       DateTime?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
@@ -1668,6 +1670,7 @@ model StaffKnowledgeArticle {
   @@index([tenantId, folder], map: "staff_knowledge_folder_idx")
   @@index([tenantId, category], map: "staff_knowledge_category_idx")
   @@index([tenantId, requiresReading], map: "staff_knowledge_required_idx")
+  @@index([tenantId, revisionDueAt], map: "staff_knowledge_revision_due_idx")
   @@index([tenantId, createdAt], map: "staff_knowledge_created_idx")
   @@index([storeId], map: "staff_knowledge_store_idx")
   @@index([createdByUserId], map: "staff_knowledge_created_by_idx")

@@ -15,6 +15,7 @@ export type StaffTaskViewMode =
   | "overdue"
   | "my"
   | "watched"
+  | "approval"
   | "byClub"
   | "byEmployee"
   | "byShift"

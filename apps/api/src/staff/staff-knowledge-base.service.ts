@@ -41,6 +41,7 @@ const relatedLinkTypes = [
   'TASK',
   'OTHER',
 ] as const;
+const RETURNED_ARTICLE_REVISION_SLA_DAYS = 2;
 
 export type StaffKnowledgeArticleStatus = (typeof articleStatuses)[number];
 export type StaffKnowledgeRoleScope = (typeof roleScopes)[number];
@@ -178,6 +179,8 @@ export type StaffKnowledgeArticleResponse = {
   reviewRequestedAt: string | null;
   approvedAt: string | null;
   approvalNote: string | null;
+  returnedAt: string | null;
+  revisionDueAt: string | null;
   publishedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -451,7 +454,13 @@ export class StaffKnowledgeBaseService {
           createdByUserId: user.id,
           reviewRequestedAt: status === 'REVIEW' ? now : null,
           approvedAt: status === 'PUBLISHED' ? now : null,
-          approvedByUserId: status === 'PUBLISHED' ? user.id : null,
+          approvedByUserId:
+            status === 'PUBLISHED' || status === 'RETURNED' ? user.id : null,
+          returnedAt: status === 'RETURNED' ? now : null,
+          revisionDueAt:
+            status === 'RETURNED'
+              ? this.addDays(now, RETURNED_ARTICLE_REVISION_SLA_DAYS)
+              : null,
           publishedAt: status === 'PUBLISHED' ? now : null,
           version: status === 'PUBLISHED' ? 1 : 0,
         },
@@ -485,7 +494,12 @@ export class StaffKnowledgeBaseService {
 
     const current = await this.prisma.staffKnowledgeArticle.findFirst({
       where: { id, tenantId },
-      select: { id: true, status: true, publishedAt: true },
+      select: {
+        id: true,
+        status: true,
+        publishedAt: true,
+        returnedAt: true,
+      },
     });
 
     if (!current) {
@@ -501,6 +515,12 @@ export class StaffKnowledgeBaseService {
     this.assertKnowledgeWriteAllowed(user, nextStatus);
     const now = new Date();
     const shouldCreateVersion = nextStatus === 'PUBLISHED';
+    const returnSlaStart =
+      nextStatus === 'RETURNED'
+        ? current.status === 'RETURNED' && current.returnedAt
+          ? current.returnedAt
+          : now
+        : null;
     const updated = await this.prisma.$transaction(async (tx) => {
       const article = await tx.staffKnowledgeArticle.update({
         where: { id: current.id },
@@ -508,6 +528,18 @@ export class StaffKnowledgeBaseService {
           ...data,
           reviewRequestedAt: nextStatus === 'REVIEW' ? now : undefined,
           approvedAt: nextStatus === 'PUBLISHED' ? now : undefined,
+          returnedAt:
+            nextStatus === 'RETURNED'
+              ? returnSlaStart
+              : current.status === 'RETURNED'
+                ? null
+                : undefined,
+          revisionDueAt:
+            nextStatus === 'RETURNED' && returnSlaStart
+              ? this.addDays(returnSlaStart, RETURNED_ARTICLE_REVISION_SLA_DAYS)
+              : current.status === 'RETURNED'
+                ? null
+                : undefined,
           approvedByUserId:
             nextStatus === 'PUBLISHED' ||
             nextStatus === 'RETURNED' ||
@@ -1277,6 +1309,8 @@ export class StaffKnowledgeBaseService {
       reviewRequestedAt: row.reviewRequestedAt?.toISOString() ?? null,
       approvedAt: row.approvedAt?.toISOString() ?? null,
       approvalNote: row.approvalNote,
+      returnedAt: row.returnedAt?.toISOString() ?? null,
+      revisionDueAt: row.revisionDueAt?.toISOString() ?? null,
       publishedAt: row.publishedAt?.toISOString() ?? null,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
@@ -1325,12 +1359,20 @@ export class StaffKnowledgeBaseService {
     }
 
     if (row.status === 'RETURNED') {
+      const detail = [
+        row.approvalNote,
+        row.revisionDueAt
+          ? `Срок реакции: ${this.formatSlaDate(row.revisionDueAt)}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join('\n');
       events.push({
         id: `returned:${row.id}`,
         type: 'RETURNED',
         title: 'Возвращено на доработку',
-        detail: row.approvalNote,
-        happenedAt: row.updatedAt.toISOString(),
+        detail: detail || null,
+        happenedAt: (row.returnedAt ?? row.updatedAt).toISOString(),
         actor: row.approvedByUser,
       });
     }
@@ -1450,13 +1492,22 @@ export class StaffKnowledgeBaseService {
       approvalNote: string | null;
       createdByUserId: string | null;
       approvedByUserId: string | null;
+      returnedAt: Date | null;
+      revisionDueAt: Date | null;
     },
     reviewer: AuthenticatedUser,
   ) {
     const dedupeKey = `knowledge-base:${article.id}:returned`;
     const reviewerLabel = reviewer.fullName ?? reviewer.email;
+    const severity =
+      article.revisionDueAt && article.revisionDueAt < new Date()
+        ? 'CRITICAL'
+        : 'WARNING';
     const message = [
       reviewerLabel ? `Проверил: ${reviewerLabel}` : null,
+      article.revisionDueAt
+        ? `Срок реакции: ${this.formatSlaDate(article.revisionDueAt)}`
+        : null,
       article.approvalNote
         ? `Комментарий: ${article.approvalNote}`
         : 'Нужно доработать материал и снова отправить на согласование.',
@@ -1477,7 +1528,7 @@ export class StaffKnowledgeBaseService {
         targetUserId: article.createdByUserId,
         sourceType: 'KNOWLEDGE_BASE',
         sourceId: article.id,
-        severity: 'WARNING',
+        severity,
         status: 'OPEN',
         title: `Материал базы знаний возвращен: ${article.title}`.slice(0, 240),
         message,
@@ -1489,6 +1540,9 @@ export class StaffKnowledgeBaseService {
           approvalNote: article.approvalNote,
           authorUserId: article.createdByUserId,
           reviewerUserId: article.approvedByUserId,
+          returnedAt: article.returnedAt?.toISOString() ?? null,
+          revisionDueAt: article.revisionDueAt?.toISOString() ?? null,
+          slaDays: RETURNED_ARTICLE_REVISION_SLA_DAYS,
         },
       },
       update: {
@@ -1496,7 +1550,7 @@ export class StaffKnowledgeBaseService {
         targetUserId: article.createdByUserId,
         sourceType: 'KNOWLEDGE_BASE',
         sourceId: article.id,
-        severity: 'WARNING',
+        severity,
         status: 'OPEN',
         title: `Материал базы знаний возвращен: ${article.title}`.slice(0, 240),
         message,
@@ -1511,6 +1565,9 @@ export class StaffKnowledgeBaseService {
           approvalNote: article.approvalNote,
           authorUserId: article.createdByUserId,
           reviewerUserId: article.approvedByUserId,
+          returnedAt: article.returnedAt?.toISOString() ?? null,
+          revisionDueAt: article.revisionDueAt?.toISOString() ?? null,
+          slaDays: RETURNED_ARTICLE_REVISION_SLA_DAYS,
         },
       },
     });
@@ -1534,6 +1591,20 @@ export class StaffKnowledgeBaseService {
           'Материал больше не находится в статусе возврата на доработку.',
       },
     });
+  }
+
+  private addDays(date: Date, days: number) {
+    return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
+  }
+
+  private formatSlaDate(date: Date) {
+    return new Intl.DateTimeFormat('ru-RU', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(date);
   }
 
   private getActiveKnowledgeUsers(tenantId: string) {

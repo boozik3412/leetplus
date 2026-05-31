@@ -110,6 +110,8 @@ export type StaffKnowledgeArticle = {
   reviewRequestedAt: string | null;
   approvedAt: string | null;
   approvalNote: string | null;
+  returnedAt: string | null;
+  revisionDueAt: string | null;
   publishedAt: string | null;
   createdAt: string;
   updatedAt: string;

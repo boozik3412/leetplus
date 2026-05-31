@@ -347,6 +347,63 @@ function formatDateTime(value: string | null) {
   }).format(new Date(value));
 }
 
+function revisionSlaBadge(article: StaffKnowledgeArticle) {
+  if (article.status !== "RETURNED") {
+    return null;
+  }
+
+  if (!article.revisionDueAt) {
+    return {
+      label: "SLA не задан",
+      className:
+        "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300",
+    };
+  }
+
+  const dueAt = new Date(article.revisionDueAt);
+  const hoursLeft = Math.ceil(
+    (dueAt.getTime() - Date.now()) / (60 * 60 * 1000),
+  );
+
+  if (hoursLeft < 0) {
+    return {
+      label: `SLA просрочен: ${formatDateTime(article.revisionDueAt)}`,
+      className:
+        "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-200",
+    };
+  }
+
+  if (hoursLeft <= 24) {
+    return {
+      label: `Реакция сегодня: ${formatDateTime(article.revisionDueAt)}`,
+      className:
+        "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200",
+    };
+  }
+
+  return {
+    label: `Реакция до ${formatDateTime(article.revisionDueAt)}`,
+    className:
+      "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200",
+  };
+}
+
+function RevisionSlaPill({ article }: { article: StaffKnowledgeArticle }) {
+  const badge = revisionSlaBadge(article);
+
+  if (!badge) {
+    return null;
+  }
+
+  return (
+    <span
+      className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${badge.className}`}
+    >
+      {badge.label}
+    </span>
+  );
+}
+
 export function StaffKnowledgeBaseWorkspace({
   report,
 }: {
@@ -641,7 +698,9 @@ export function StaffKnowledgeBaseWorkspace({
     const observerUserIds = article.approvedByUser?.id
       ? [article.approvedByUser.id]
       : [];
-    const dueAt = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
+    const dueAt = article.revisionDueAt
+      ? new Date(article.revisionDueAt)
+      : new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
     const payload = {
       title: `Доработать материал базы знаний: ${article.title}`,
       description: [
@@ -649,6 +708,9 @@ export function StaffKnowledgeBaseWorkspace({
         `Раздел: ${article.folder} / ${article.category}`,
         article.approvalNote
           ? `Комментарий согласования: ${article.approvalNote}`
+          : null,
+        article.revisionDueAt
+          ? `SLA реакции: до ${formatDateTime(article.revisionDueAt)}`
           : null,
         `Открыть материал: /staff/knowledge-base?status=RETURNED&search=${encodeURIComponent(article.title)}`,
       ]
@@ -660,6 +722,15 @@ export function StaffKnowledgeBaseWorkspace({
       storeId: article.store?.id ?? null,
       assignedToUserId: article.createdByUser?.id ?? null,
       observerUserIds,
+      labels: {
+        source: "KNOWLEDGE_BASE",
+        workflow: "KNOWLEDGE_BASE_APPROVAL",
+        workflowStep: "RETURNED_ARTICLE_REVISION",
+        articleId: article.id,
+        articleTitle: article.title,
+        returnedAt: article.returnedAt,
+        revisionDueAt: article.revisionDueAt,
+      },
     };
 
     try {
@@ -795,6 +866,12 @@ export function StaffKnowledgeBaseWorkspace({
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
+              <a
+                href="/staff/tasks?view=approval"
+                className="inline-flex h-9 items-center rounded-md border border-amber-300 bg-amber-50 px-3 text-xs font-semibold text-amber-800 transition hover:border-amber-400 hover:bg-amber-100 dark:border-amber-500/50 dark:bg-amber-500/10 dark:text-amber-100 dark:hover:bg-amber-500/15"
+              >
+                Задачи на доработку
+              </a>
               {reviewQueueTabs.map((tab) => {
                 const count = report.rows.filter(
                   (row) => row.status === tab.key,
@@ -840,6 +917,7 @@ export function StaffKnowledgeBaseWorkspace({
                     <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
                       {statusLabels[row.status]}
                     </span>
+                    <RevisionSlaPill article={row} />
                   </span>
                   <span className="mt-2 block text-xs leading-5 text-zinc-500">
                     {row.folder} · {row.category} ·{" "}
@@ -900,6 +978,7 @@ export function StaffKnowledgeBaseWorkspace({
                         {statusLabels[row.status]}
                       </span>
                     ) : null}
+                    <RevisionSlaPill article={row} />
                   </span>
                   {row.summary ? (
                     <span className="mt-2 block text-sm text-zinc-600 dark:text-zinc-400">
@@ -967,6 +1046,9 @@ export function StaffKnowledgeBaseWorkspace({
                         {item.label}
                       </span>
                     ))}
+                    {selectedArticle ? (
+                      <RevisionSlaPill article={selectedArticle} />
+                    ) : null}
                   </div>
                 </div>
                 <button

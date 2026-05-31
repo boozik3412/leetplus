@@ -101,6 +101,7 @@ function isView(value: string | undefined): value is StaffTaskViewMode {
     value === "overdue" ||
     value === "my" ||
     value === "watched" ||
+    value === "approval" ||
     value === "byClub" ||
     value === "byEmployee" ||
     value === "byShift" ||
@@ -230,6 +231,35 @@ function observerLabels(task: StaffTask) {
     .map((observer) => userLabel(observer.user))
     .filter(Boolean)
     .join(", ");
+}
+
+function taskLabelsRecord(task: StaffTask) {
+  if (
+    task.labels &&
+    typeof task.labels === "object" &&
+    !Array.isArray(task.labels)
+  ) {
+    return task.labels as Record<string, unknown>;
+  }
+
+  return null;
+}
+
+function isApprovalWorkflowTask(task: StaffTask) {
+  const labels = taskLabelsRecord(task);
+
+  return (
+    labels?.workflow === "KNOWLEDGE_BASE_APPROVAL" ||
+    labels?.workflowStep === "RETURNED_ARTICLE_REVISION" ||
+    task.title.toLocaleLowerCase("ru-RU").startsWith(
+      "доработать материал базы знаний:",
+    ) ||
+    Boolean(
+      task.description?.includes(
+        "Материал возвращен на доработку из базы знаний.",
+      ),
+    )
+  );
 }
 
 function statusBadgeClass(task: StaffTask) {
@@ -483,7 +513,9 @@ export default async function StaffTasksPage({
               const href = taskListHref(filters, {
                 view: view.key,
                 status:
-                  view.key === "today" || view.key === "overdue"
+                  view.key === "today" ||
+                  view.key === "overdue" ||
+                  view.key === "approval"
                     ? "all"
                     : filters.status,
                 shiftId: view.key === "byShift" ? null : filters.shiftId,
@@ -672,6 +704,11 @@ export default async function StaffTasksPage({
                       <span className="text-xs text-zinc-500">
                         {typeLabels[task.type]}
                       </span>
+                      {isApprovalWorkflowTask(task) ? (
+                        <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700 dark:bg-amber-500/15 dark:text-amber-200">
+                          Из согласования базы знаний
+                        </span>
+                      ) : null}
                     </div>
 
                     <h2 className="mt-3 text-lg font-semibold">{task.title}</h2>

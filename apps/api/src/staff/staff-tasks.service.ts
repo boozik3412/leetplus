@@ -32,6 +32,7 @@ const taskViewModes = [
   'overdue',
   'my',
   'watched',
+  'approval',
   'byClub',
   'byEmployee',
   'byShift',
@@ -297,6 +298,9 @@ export class StaffTasksService {
             storeId: true,
             shiftId: true,
             type: true,
+            title: true,
+            description: true,
+            labels: true,
             observers: { select: { userId: true } },
           },
           take: 5000,
@@ -671,6 +675,10 @@ export class StaffTasksService {
       and.push({ status: { notIn: ['DONE', 'CANCELED'] }, dueAt: { lt: now } });
     }
 
+    if (includeStatus && filters.view === 'approval') {
+      and.push(this.buildApprovalWorkflowWhere());
+    }
+
     if (includeStatus && filters.view === 'byShift' && !filters.shiftId) {
       and.push({ OR: [{ shiftId: { not: null } }, { type: 'SHIFT' }] });
     }
@@ -730,6 +738,69 @@ export class StaffTasksService {
     }
 
     return where;
+  }
+
+  private buildApprovalWorkflowWhere(): Prisma.StaffTaskWhereInput {
+    return {
+      OR: [
+        {
+          labels: {
+            path: ['workflow'],
+            equals: 'KNOWLEDGE_BASE_APPROVAL',
+          },
+        },
+        {
+          labels: {
+            path: ['workflowStep'],
+            equals: 'RETURNED_ARTICLE_REVISION',
+          },
+        },
+        {
+          title: {
+            startsWith: 'Доработать материал базы знаний:',
+            mode: 'insensitive',
+          },
+        },
+        {
+          description: {
+            contains: 'Материал возвращен на доработку из базы знаний.',
+            mode: 'insensitive',
+          },
+        },
+      ],
+    };
+  }
+
+  private isApprovalWorkflowTask(row: {
+    title: string;
+    description: string | null;
+    labels: Prisma.JsonValue | null;
+  }) {
+    if (
+      row.labels &&
+      typeof row.labels === 'object' &&
+      !Array.isArray(row.labels)
+    ) {
+      const labels = row.labels as Record<string, unknown>;
+
+      if (
+        labels.workflow === 'KNOWLEDGE_BASE_APPROVAL' ||
+        labels.workflowStep === 'RETURNED_ARTICLE_REVISION'
+      ) {
+        return true;
+      }
+    }
+
+    return (
+      row.title
+        .toLocaleLowerCase('ru-RU')
+        .startsWith('доработать материал базы знаний:') ||
+      Boolean(
+        row.description?.includes(
+          'Материал возвращен на доработку из базы знаний.',
+        ),
+      )
+    );
   }
 
   private buildQuickViewWhere(
@@ -826,6 +897,9 @@ export class StaffTasksService {
       storeId: string | null;
       shiftId: string | null;
       type: string;
+      title: string;
+      description: string | null;
+      labels: Prisma.JsonValue | null;
       observers: Array<{ userId: string }>;
     }>,
     currentUserId: string,
@@ -860,6 +934,11 @@ export class StaffTasksService {
         count: rows.filter((row) =>
           row.observers.some((observer) => observer.userId === currentUserId),
         ).length,
+      },
+      {
+        key: 'approval',
+        label: 'Согласование',
+        count: rows.filter((row) => this.isApprovalWorkflowTask(row)).length,
       },
       {
         key: 'byClub',

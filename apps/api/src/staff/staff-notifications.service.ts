@@ -492,12 +492,14 @@ export class StaffNotificationsService {
       ...returnedArticles.map((article): SignalDraft => {
         const author = this.userLabel(article.createdByUser);
         const reviewer = this.userLabel(article.approvedByUser);
+        const isSlaOverdue =
+          Boolean(article.revisionDueAt) && article.revisionDueAt! < now;
 
         return {
           sourceType: 'KNOWLEDGE_BASE',
           sourceId: article.id,
           dedupeKey: `knowledge-base:${article.id}:returned`,
-          severity: 'WARNING',
+          severity: isSlaOverdue ? 'CRITICAL' : 'WARNING',
           title: `Материал базы знаний возвращен: ${article.title}`.slice(
             0,
             240,
@@ -506,6 +508,9 @@ export class StaffNotificationsService {
             article.store ? `Клуб: ${article.store.name}` : 'Клуб: вся сеть',
             author ? `Автор: ${author}` : null,
             reviewer ? `Проверил: ${reviewer}` : null,
+            article.revisionDueAt
+              ? `Срок реакции: ${article.revisionDueAt.toLocaleString('ru-RU')}`
+              : null,
             article.approvalNote
               ? `Комментарий: ${article.approvalNote}`
               : 'Нужно доработать материал и снова отправить на согласование.',
@@ -521,6 +526,9 @@ export class StaffNotificationsService {
             approvalNote: article.approvalNote,
             authorUserId: article.createdByUserId,
             reviewerUserId: article.approvedByUserId,
+            returnedAt: article.returnedAt?.toISOString() ?? null,
+            revisionDueAt: article.revisionDueAt?.toISOString() ?? null,
+            slaOverdue: isSlaOverdue,
           },
         };
       }),

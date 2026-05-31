@@ -419,7 +419,9 @@ LeetPlus должен развиваться из набора отчетов в
 - Готово: добавлены employee training profiles: `StaffTrainingProgress`, API `/staff/training-profiles`, page `/staff/training-profiles`, assigned courses, progress updates, overdue learning, certificates, expired certificates и linked test/attestation status by employee.
 - Готово: добавлен manager readiness report: API `/staff/readiness-report`, page `/staff/readiness-report`, sidebar entry, combined readiness status by employee, required course gaps, failed tests, failed/expired attestations и pending regulation acknowledgements.
 - Готово: возврат материала базы знаний создает адресное уведомление автору в `/staff/notifications`, а в `/staff/knowledge-base` для возвращенной статьи доступна быстрая кнопка создания задачи на доработку с комментарием согласования и ссылкой на материал.
-- Следующая полировка: добавить SLA/сроки реакции по возвращенным материалам базы знаний и отдельный фильтр задач, созданных из workflow согласования.
+- Готово: возвращенные материалы базы знаний получили SLA реакции: `returnedAt`, `revisionDueAt`, индикаторы срока в очереди согласования/каталоге/карточке, SLA в адресном уведомлении автору и повышенную критичность сигнала после просрочки.
+- Готово: задачи, созданные из workflow согласования базы знаний, помечаются `KNOWLEDGE_BASE_APPROVAL`, используют срок SLA статьи и доступны отдельным быстрым фильтром `Согласование` в `/staff/tasks`.
+- Следующая полировка: добавить настройку SLA по типу материала/роли и автосоздание задачи на доработку при возврате, если у статьи есть автор.
 
 Критерии приемки:
 

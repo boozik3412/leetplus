@@ -419,7 +419,7 @@ Goal: show not only completion, but operational quality and risk.
 - Done: `/staff/operations-dashboard` is connected with existing `/guests/staff-control`: shifts, linked/unlinked operators, shift hours, cash/payment amount, refunds, incassation, and middle check are summarized from `GuestWorkingShift`.
 - Started: staff-control anomaly cards were added to `/staff/operations-dashboard` for refunds, missing incassation, unlinked high-cash operators, long shifts, low middle check, cash risks with missed cash/closing checklists, and low middle check with failed/missed bar checklist. Next: add true self-service activity detection when Langame operation logs expose stable employee identity for that signal, and add bar-sales-specific scoring when bar revenue is mapped per shift.
 - Done: XLSX/CSV export added for staff tasks, checklist execution report, training profiles/results, and discipline violations, with current filters preserved from the UI.
-- Next: add salary calculation and a constructor for administrator salary schemes, fixed rates, bonuses, penalties, and payout-period rules.
+- Done: added administrator salary calculation and `/staff/salary` constructor: tenant-scoped salary schemes with network/club scope, status, period type, fixed amount, shift/hour rates, bonus rules, penalty rules, discipline fine inclusion, and a calculation report by administrator using tasks, checklists, linked shifts, warnings, and fines.
 
 Acceptance criteria:
 

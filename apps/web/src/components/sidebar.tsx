@@ -55,6 +55,7 @@ const navGroups: NavGroup[] = [
       { href: "/staff/operations-dashboard", label: "Операционная дисциплина" },
       { href: "/staff/administrator-ratings", label: "Рейтинг администраторов" },
       { href: "/staff/discipline", label: "Предупреждения и штрафы" },
+      { href: "/staff/salary", label: "Зарплата" },
       { href: "/staff/knowledge-base", label: "База знаний" },
       { href: "/staff/training-courses", label: "Курсы обучения" },
       { href: "/staff/training-profiles", label: "Профили обучения" },

@@ -33,7 +33,7 @@ The module must not become a generic task manager. Every screen should answer a 
 
 ### Out Of Scope For First Release
 
-- Payroll, fines, automatic sanctions, or automatic bonus changes.
+- Automatic payroll payouts, automatic sanctions, or automatic bonus changes in external systems; LeetPlus salary calculation remains an internal planning/reporting layer.
 - Automatic write-back into Langame.
 - Public mobile app.
 - Universal project-management boards unrelated to club operations.

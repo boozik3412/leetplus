@@ -21,6 +21,8 @@ import { StaffOperationsDashboardController } from './staff-operations-dashboard
 import { StaffOperationsDashboardService } from './staff-operations-dashboard.service';
 import { StaffReadinessReportController } from './staff-readiness-report.controller';
 import { StaffReadinessReportService } from './staff-readiness-report.service';
+import { StaffSalaryController } from './staff-salary.controller';
+import { StaffSalaryService } from './staff-salary.service';
 import { StaffShiftRegulationsController } from './staff-shift-regulations.controller';
 import { StaffShiftRegulationsService } from './staff-shift-regulations.service';
 import { StaffTaskTemplatesController } from './staff-task-templates.controller';
@@ -52,6 +54,7 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffTeamChatController,
     StaffDisciplineController,
     StaffAdministratorRatingsController,
+    StaffSalaryController,
   ],
   providers: [
     StaffTasksService,
@@ -68,6 +71,7 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffChecklistsService,
     StaffTeamChatService,
     StaffDisciplineService,
+    StaffSalaryService,
   ],
 })
 export class StaffModule {}

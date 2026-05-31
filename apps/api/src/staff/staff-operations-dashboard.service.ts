@@ -129,6 +129,12 @@ export type StaffOperationsDashboard = {
   users: UserOption[];
 };
 
+export type StaffOperationsDashboardSignalsReport = {
+  dateFrom: string;
+  dateTo: string;
+  anomalies: StaffOperationsStaffControlAnomaly[];
+};
+
 export type StaffOperationsSummary = {
   totalSignals: number;
   tasksTotal: number;
@@ -411,6 +417,37 @@ export class StaffOperationsDashboardService {
       ),
       stores,
       users,
+    };
+  }
+
+  async getCurrentStaffControlSignals(
+    tenantId: string,
+  ): Promise<StaffOperationsDashboardSignalsReport> {
+    const filters = this.resolveFilters({});
+    const [shifts, checklists] = await Promise.all([
+      this.prisma.guestWorkingShift.findMany({
+        where: this.buildShiftWhere(tenantId, filters),
+        select: shiftDashboardSelect,
+        orderBy: [{ startedAt: 'desc' }, { createdAt: 'desc' }],
+        take: 5000,
+      }),
+      this.prisma.staffChecklistRun.findMany({
+        where: this.buildChecklistWhere(tenantId, filters),
+        select: checklistDashboardSelect,
+        orderBy: [
+          { submittedAt: 'desc' },
+          { scheduledAt: 'desc' },
+          { createdAt: 'desc' },
+        ],
+        take: 5000,
+      }),
+    ]);
+    const staffControl = this.buildStaffControl(shifts, checklists, filters);
+
+    return {
+      dateFrom: filters.dateFrom,
+      dateTo: filters.dateTo,
+      anomalies: staffControl.anomalies,
     };
   }
 

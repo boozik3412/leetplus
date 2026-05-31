@@ -3,6 +3,10 @@ import { Prisma } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import {
+  StaffOperationsDashboardService,
+  type StaffOperationsStaffControlAnomaly,
+} from './staff-operations-dashboard.service';
 
 const notificationStatuses = ['OPEN', 'ACKNOWLEDGED', 'RESOLVED'] as const;
 const notificationSeverities = ['INFO', 'WARNING', 'CRITICAL'] as const;
@@ -12,6 +16,7 @@ const notificationSourceTypes = [
   'RECURRING_RULE',
   'TEAM_CHAT',
   'KNOWLEDGE_BASE',
+  'OPERATIONS_DASHBOARD',
 ] as const;
 const notificationStatusFilters = ['all', ...notificationStatuses] as const;
 const notificationSeverityFilters = ['all', ...notificationSeverities] as const;
@@ -124,6 +129,7 @@ export class StaffNotificationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
+    private readonly staffOperationsDashboardService: StaffOperationsDashboardService,
   ) {}
 
   async getReport(
@@ -299,92 +305,101 @@ export class StaffNotificationsService {
     const now = new Date();
     const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
 
-    const [tasks, checklists, rules, incidents, returnedArticles] =
-      await Promise.all([
-        this.prisma.staffTask.findMany({
-          where: {
-            tenantId,
-            status: { in: ['OPEN', 'IN_PROGRESS', 'ON_REVIEW'] },
-            dueAt: { lt: now },
-            priority: { in: ['HIGH', 'URGENT'] },
+    const [
+      tasks,
+      checklists,
+      rules,
+      incidents,
+      returnedArticles,
+      operationsDashboardSignals,
+    ] = await Promise.all([
+      this.prisma.staffTask.findMany({
+        where: {
+          tenantId,
+          status: { in: ['OPEN', 'IN_PROGRESS', 'ON_REVIEW'] },
+          dueAt: { lt: now },
+          priority: { in: ['HIGH', 'URGENT'] },
+        },
+        include: {
+          store: { select: { id: true, name: true } },
+          assignedToUser: {
+            select: { id: true, email: true, fullName: true },
           },
-          include: {
-            store: { select: { id: true, name: true } },
-            assignedToUser: {
-              select: { id: true, email: true, fullName: true },
+        },
+        orderBy: { dueAt: 'asc' },
+        take: 100,
+      }),
+      this.prisma.staffChecklistRun.findMany({
+        where: {
+          tenantId,
+          OR: [
+            { status: 'ESCALATED' },
+            {
+              status: { in: ['ON_REVIEW', 'RETURNED'] },
+              failedItems: { gt: 0 },
             },
+          ],
+        },
+        include: {
+          store: { select: { id: true, name: true } },
+          assignedToUser: {
+            select: { id: true, email: true, fullName: true },
           },
-          orderBy: { dueAt: 'asc' },
-          take: 100,
-        }),
-        this.prisma.staffChecklistRun.findMany({
-          where: {
-            tenantId,
-            OR: [
-              { status: 'ESCALATED' },
-              {
-                status: { in: ['ON_REVIEW', 'RETURNED'] },
-                failedItems: { gt: 0 },
-              },
-            ],
+        },
+        orderBy: [{ status: 'desc' }, { updatedAt: 'desc' }],
+        take: 100,
+      }),
+      this.prisma.staffTaskRecurringRule.findMany({
+        where: {
+          tenantId,
+          status: 'ACTIVE',
+          nextRunAt: { lte: now },
+        },
+        include: {
+          store: { select: { id: true, name: true } },
+          assignedToUser: {
+            select: { id: true, email: true, fullName: true },
           },
-          include: {
-            store: { select: { id: true, name: true } },
-            assignedToUser: {
-              select: { id: true, email: true, fullName: true },
-            },
+        },
+        orderBy: { nextRunAt: 'asc' },
+        take: 100,
+      }),
+      this.prisma.staffChatMessage.findMany({
+        where: {
+          tenantId,
+          kind: 'INCIDENT',
+          createdAt: { gte: fourteenDaysAgo },
+          OR: [{ priority: 'URGENT' }, { isPinned: true }],
+        },
+        include: {
+          channel: { select: { id: true, name: true } },
+          store: { select: { id: true, name: true } },
+          authorUser: { select: { id: true, email: true, fullName: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+      }),
+      this.prisma.staffKnowledgeArticle.findMany({
+        where: {
+          tenantId,
+          status: 'RETURNED',
+        },
+        include: {
+          store: { select: { id: true, name: true } },
+          createdByUser: {
+            select: { id: true, email: true, fullName: true },
           },
-          orderBy: [{ status: 'desc' }, { updatedAt: 'desc' }],
-          take: 100,
-        }),
-        this.prisma.staffTaskRecurringRule.findMany({
-          where: {
-            tenantId,
-            status: 'ACTIVE',
-            nextRunAt: { lte: now },
+          approvedByUser: {
+            select: { id: true, email: true, fullName: true },
           },
-          include: {
-            store: { select: { id: true, name: true } },
-            assignedToUser: {
-              select: { id: true, email: true, fullName: true },
-            },
-          },
-          orderBy: { nextRunAt: 'asc' },
-          take: 100,
-        }),
-        this.prisma.staffChatMessage.findMany({
-          where: {
-            tenantId,
-            kind: 'INCIDENT',
-            createdAt: { gte: fourteenDaysAgo },
-            OR: [{ priority: 'URGENT' }, { isPinned: true }],
-          },
-          include: {
-            channel: { select: { id: true, name: true } },
-            store: { select: { id: true, name: true } },
-            authorUser: { select: { id: true, email: true, fullName: true } },
-          },
-          orderBy: { createdAt: 'desc' },
-          take: 100,
-        }),
-        this.prisma.staffKnowledgeArticle.findMany({
-          where: {
-            tenantId,
-            status: 'RETURNED',
-          },
-          include: {
-            store: { select: { id: true, name: true } },
-            createdByUser: {
-              select: { id: true, email: true, fullName: true },
-            },
-            approvedByUser: {
-              select: { id: true, email: true, fullName: true },
-            },
-          },
-          orderBy: { updatedAt: 'desc' },
-          take: 100,
-        }),
-      ]);
+        },
+        orderBy: { updatedAt: 'desc' },
+        take: 100,
+      }),
+      this.staffOperationsDashboardService.getCurrentStaffControlSignals(
+        tenantId,
+      ),
+    ]);
 
     return [
       ...tasks.map((task): SignalDraft => {
@@ -562,7 +577,56 @@ export class StaffNotificationsService {
           },
         }),
       ),
+      ...operationsDashboardSignals.anomalies
+        .filter((anomaly) => anomaly.severity === 'HIGH')
+        .map((anomaly) =>
+          this.toOperationsDashboardSignal(
+            anomaly,
+            operationsDashboardSignals.dateFrom,
+            operationsDashboardSignals.dateTo,
+          ),
+        ),
     ];
+  }
+
+  private toOperationsDashboardSignal(
+    anomaly: StaffOperationsStaffControlAnomaly,
+    dateFrom: string,
+    dateTo: string,
+  ): SignalDraft {
+    return {
+      sourceType: 'OPERATIONS_DASHBOARD',
+      sourceId: anomaly.id,
+      dedupeKey: `operations-dashboard:${anomaly.kind}:${anomaly.id}`,
+      severity: 'CRITICAL',
+      title: `Операционный риск: ${anomaly.title}`.slice(0, 240),
+      message: [
+        anomaly.store ? `Клуб: ${anomaly.store.name}` : 'Клуб: вся сеть',
+        `Период: ${this.formatDate(dateFrom)} - ${this.formatDate(dateTo)}`,
+        `Сигналов: ${anomaly.count}`,
+        anomaly.amount !== null
+          ? `Сумма: ${anomaly.amount.toLocaleString('ru-RU')} руб`
+          : null,
+        anomaly.operatorLabel ? `Оператор: ${anomaly.operatorLabel}` : null,
+        anomaly.detail,
+      ]
+        .filter(Boolean)
+        .join('\n'),
+      storeId: anomaly.store?.id ?? null,
+      targetUserId: null,
+      actionLabel: this.operationsDashboardActionLabel(anomaly.href),
+      actionHref: anomaly.href || '/staff/operations-dashboard',
+      metadata: {
+        kind: anomaly.kind,
+        riskLevel: anomaly.severity,
+        count: anomaly.count,
+        amount: anomaly.amount,
+        dateFrom,
+        dateTo,
+        operatorLabel: anomaly.operatorLabel,
+        dashboardHref: '/staff/operations-dashboard',
+      },
+    };
   }
 
   private resolveFilters(query: StaffNotificationsQuery): NotificationFilters {
@@ -725,6 +789,28 @@ export class StaffNotificationsService {
       acknowledgedByUser: row.acknowledgedByUser,
       resolvedByUser: row.resolvedByUser,
     };
+  }
+
+  private operationsDashboardActionLabel(href: string) {
+    if (href.startsWith('/guests/staff-control/operators')) {
+      return 'Открыть операторов';
+    }
+
+    if (href.startsWith('/staff/checklists/report')) {
+      return 'Открыть отчет чек-листов';
+    }
+
+    return 'Открыть дашборд';
+  }
+
+  private formatDate(value: string) {
+    const [year, month, day] = value.split('-');
+
+    if (!year || !month || !day) {
+      return value;
+    }
+
+    return `${day}.${month}.${year}`;
   }
 
   private userLabel(

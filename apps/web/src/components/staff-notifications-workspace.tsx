@@ -29,6 +29,7 @@ const sourceLabels: Record<StaffNotificationSourceType, string> = {
   RECURRING_RULE: "Регулярное правило",
   TEAM_CHAT: "Командный чат",
   KNOWLEDGE_BASE: "База знаний",
+  OPERATIONS_DASHBOARD: "Опер. дашборд",
 };
 
 export function StaffNotificationsWorkspace({

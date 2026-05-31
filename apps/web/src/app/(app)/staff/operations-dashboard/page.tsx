@@ -29,6 +29,7 @@ const readinessLabels = {
 const riskKindLabels: Record<StaffOperationsRiskItem["kind"], string> = {
   TASK_OVERDUE: "Просрочена задача",
   TASK_UNCHECKED: "Задача на проверке",
+  CHECKLIST_ESCALATED: "Чеклист эскалирован",
   CHECKLIST_RETURNED: "Чеклист возвращен",
   CHECKLIST_FAILED: "Провален пункт",
   CHECKLIST_UNCHECKED: "Чеклист на проверке",
@@ -128,6 +129,7 @@ export default async function StaffOperationsDashboardPage({
     { label: "Просрочено", value: dashboard.summary.overdue, tone: "HIGH" },
     { label: "На проверке", value: dashboard.summary.unchecked, tone: "MEDIUM" },
     { label: "Возвращено", value: dashboard.summary.returned, tone: "HIGH" },
+    { label: "Эскалации", value: dashboard.summary.escalated, tone: "HIGH" },
     { label: "Повторы", value: dashboard.summary.recurringIssues, tone: "MEDIUM" },
   ] as const;
 
@@ -178,7 +180,7 @@ export default async function StaffOperationsDashboardPage({
           </div>
         </header>
 
-        <section className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+        <section className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-7">
           {summaryCards.map((card) => (
             <div
               key={card.label}
@@ -553,12 +555,13 @@ function MetricsLine({ row }: { row: StaffOperationsRating }) {
     ["Проср.", row.overdue],
     ["Провалено", row.failedItems],
     ["Возврат", row.returned],
+    ["Эскал.", row.escalated],
     ["Проверка", row.unchecked],
     ["Повтор", row.repeatedIssues],
   ] as const;
 
   return (
-    <div className="mt-3 grid grid-cols-3 gap-2 text-xs sm:grid-cols-6">
+    <div className="mt-3 grid grid-cols-3 gap-2 text-xs sm:grid-cols-7">
       {items.map(([label, value]) => (
         <div
           key={label}

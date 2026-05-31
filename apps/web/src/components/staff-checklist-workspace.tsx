@@ -18,6 +18,7 @@ const statusLabels: Record<StaffChecklistStatus, string> = {
   ON_REVIEW: "На проверке",
   ACCEPTED: "Принят",
   RETURNED: "Возвращен",
+  ESCALATED: "Эскалирован",
   CANCELED: "Отменен",
 };
 
@@ -70,6 +71,10 @@ function statusClass(status: StaffChecklistStatus, isOverdue: boolean) {
 
   if (status === "RETURNED") {
     return `${base} bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200`;
+  }
+
+  if (status === "ESCALATED") {
+    return `${base} bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-200`;
   }
 
   if (status === "CANCELED") {
@@ -425,9 +430,15 @@ function ChecklistRunEditor({ run }: { run: StaffChecklistRun }) {
       return;
     }
 
+    const successMessages: Partial<Record<StaffChecklistStatus, string>> = {
+      ON_REVIEW: "Чеклист отправлен на проверку.",
+      ACCEPTED: "Чеклист принят.",
+      RETURNED: "Чеклист возвращен на доработку.",
+      ESCALATED: "Чеклист эскалирован и отправлен в командный чат.",
+    };
     setMessage(
-      status === "ON_REVIEW"
-        ? "Чеклист отправлен на проверку."
+      status
+        ? successMessages[status] ?? "Чеклист обновлен."
         : "Чеклист обновлен.",
     );
     router.refresh();
@@ -608,7 +619,7 @@ function ChecklistRunEditor({ run }: { run: StaffChecklistRun }) {
             onChange={(event) => setReviewComment(event.target.value)}
             rows={2}
             className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
-            placeholder="Почему приняли или вернули чеклист"
+            placeholder="Почему приняли, вернули или эскалировали чеклист"
           />
         </label>
         <div className="mt-3 flex flex-wrap gap-2">
@@ -638,6 +649,14 @@ function ChecklistRunEditor({ run }: { run: StaffChecklistRun }) {
             className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100"
           >
             Вернуть
+          </button>
+          <button
+            type="button"
+            onClick={() => updateRun("ESCALATED")}
+            disabled={isPending || run.status !== "ON_REVIEW"}
+            className="rounded-xl border border-red-300 bg-red-50 px-4 py-2 text-sm font-semibold text-red-800 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-100"
+          >
+            Эскалировать
           </button>
         </div>
       </div>

@@ -6,6 +6,7 @@ export type StaffChecklistStatus =
   | "ON_REVIEW"
   | "ACCEPTED"
   | "RETURNED"
+  | "ESCALATED"
   | "CANCELED";
 export type StaffChecklistFilterStatus = StaffChecklistStatus | "OVERDUE" | "all";
 export type StaffChecklistShiftKind =
@@ -172,6 +173,7 @@ export type StaffChecklistReport = {
     onReview: number;
     accepted: number;
     returned: number;
+    escalated: number;
     canceled: number;
     overdue: number;
     failedItems: number;
@@ -191,6 +193,7 @@ export type StaffChecklistExecutionMetrics = {
   onReview: number;
   accepted: number;
   returned: number;
+  escalated: number;
   canceled: number;
   overdue: number;
   failedItems: number;

@@ -372,7 +372,7 @@ Status: started. Goal: turn daily operating standards into controlled execution.
 - Started: add checklist runs tied to club, shift, employee, role, and scheduled time. Runs can now use either a published regulation snapshot or an active checklist template snapshot and store assigned user, club, optional Langame shift, schedule, status, answers, score, failed items, and evidence counters.
 - Done: standard checklist packs are available in `/staff/checklist-templates`: cash desk, PC zone, inventory handover, and administrator training load as editable drafts with sections, required answers, evidence, and scores.
 - Started: allow checklist items to create violation tasks automatically. Failed checklist answers now create high-priority staff follow-up tasks on submission.
-- Started: add manager review flow: accepted, returned for correction, escalated. First flow supports `ON_REVIEW`, `ACCEPTED`, and `RETURNED`; escalation remains next.
+- Done: manager review flow now supports `ON_REVIEW`, `ACCEPTED`, `RETURNED`, and `ESCALATED`; escalation stores reviewer/comment, appears in checklist workspace filters and execution reports, counts as an unresolved operational risk, and creates a pinned urgent incident in the team chat.
 - Started: add evidence: photo, video/file link, comment, numeric value, checkbox, select, timestamp. First execution UI captures result, value, evidence URL, and comment per item.
 - Done: added execution report by club, shift, employee, and checklist: API `/staff/checklists/report`, page `/staff/checklists/report`, filters by period/status/type/club/employee/search, summary cards, grouped tables, and latest checklist runs.
 
@@ -382,6 +382,7 @@ Acceptance criteria:
 - Done: required items cannot be submitted for review without required evidence.
 - Done: a failed checklist item creates a follow-up task.
 - Done: a manager sees missed, late, failed, and returned checklist runs through the checklist workspace summary, filters, and the fuller execution report by club, shift, employee, and checklist.
+- Done: a manager can escalate a checklist under review; escalations are visible in reports and the operations dashboard and create an urgent team-chat incident.
 
 ### MVP 3. Training, Knowledge Base, And Attestations
 

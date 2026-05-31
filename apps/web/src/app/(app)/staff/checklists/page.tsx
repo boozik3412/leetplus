@@ -18,6 +18,7 @@ const statusLabels: Record<StaffChecklistFilterStatus, string> = {
   ON_REVIEW: "На проверке",
   ACCEPTED: "Приняты",
   RETURNED: "Возвращены",
+  ESCALATED: "Эскалированы",
   CANCELED: "Отменены",
   OVERDUE: "Просрочены",
 };
@@ -47,6 +48,7 @@ function isStatus(value: string | undefined): value is StaffChecklistFilterStatu
     value === "ON_REVIEW" ||
     value === "ACCEPTED" ||
     value === "RETURNED" ||
+    value === "ESCALATED" ||
     value === "CANCELED" ||
     value === "OVERDUE"
   );
@@ -102,6 +104,7 @@ export default async function StaffChecklistsPage({
     { label: "Просрочено", value: report.summary.overdue },
     { label: "На проверке", value: report.summary.onReview },
     { label: "Принято", value: report.summary.accepted },
+    { label: "Эскалировано", value: report.summary.escalated },
     { label: "Проблемные пункты", value: report.summary.failedItems },
   ];
 
@@ -153,7 +156,7 @@ export default async function StaffChecklistsPage({
           </div>
         </header>
 
-        <section className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <section className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
           {summaryCards.map((card) => (
             <div
               key={card.label}

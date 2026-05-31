@@ -20,6 +20,7 @@ const statusLabels: Record<StaffChecklistFilterStatus, string> = {
   ON_REVIEW: "На проверке",
   ACCEPTED: "Приняты",
   RETURNED: "Возвращены",
+  ESCALATED: "Эскалированы",
   CANCELED: "Отменены",
   OVERDUE: "Просрочены",
 };
@@ -30,6 +31,7 @@ const runStatusLabels: Record<StaffChecklistStatus, string> = {
   ON_REVIEW: "На проверке",
   ACCEPTED: "Принят",
   RETURNED: "Возвращен",
+  ESCALATED: "Эскалирован",
   CANCELED: "Отменен",
 };
 
@@ -58,6 +60,7 @@ function isStatus(value: string | undefined): value is StaffChecklistFilterStatu
     value === "ON_REVIEW" ||
     value === "ACCEPTED" ||
     value === "RETURNED" ||
+    value === "ESCALATED" ||
     value === "CANCELED" ||
     value === "OVERDUE"
   );
@@ -149,6 +152,10 @@ function statusClass(status: StaffChecklistStatus, overdue: number) {
     return `${base} bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200`;
   }
 
+  if (status === "ESCALATED") {
+    return `${base} bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-200`;
+  }
+
   return `${base} bg-zinc-100 text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300`;
 }
 
@@ -164,6 +171,7 @@ export default async function StaffChecklistExecutionReportPage({
   const summaryCards = [
     { label: "Выполнений", value: report.summary.total },
     { label: "Принято", value: report.summary.accepted },
+    { label: "Эскалировано", value: report.summary.escalated },
     { label: "Просрочено", value: report.summary.overdue },
     { label: "Проблемных пунктов", value: report.summary.failedItems },
     { label: "Средняя оценка", value: `${report.summary.scorePercent}%` },
@@ -223,7 +231,7 @@ export default async function StaffChecklistExecutionReportPage({
           </div>
         </header>
 
-        <section className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <section className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
           {summaryCards.map((card) => (
             <div
               key={card.label}
@@ -439,6 +447,7 @@ function GroupTable({
               <th className="px-4 py-3 font-medium">Разрез</th>
               <th className="px-4 py-3 text-right font-medium">Всего</th>
               <th className="px-4 py-3 text-right font-medium">Принято</th>
+              <th className="px-4 py-3 text-right font-medium">Эскалации</th>
               <th className="px-4 py-3 text-right font-medium">Проблемы</th>
               <th className="px-4 py-3 text-right font-medium">Оценка</th>
             </tr>
@@ -447,7 +456,7 @@ function GroupTable({
             {rows.length === 0 ? (
               <tr>
                 <td
-                  colSpan={5}
+                  colSpan={6}
                   className="px-4 py-6 text-center text-sm text-zinc-500"
                 >
                   Нет данных в выбранном периоде.
@@ -465,6 +474,17 @@ function GroupTable({
                 <td className="px-4 py-3 text-right">{formatNumber(row.total)}</td>
                 <td className="px-4 py-3 text-right">
                   {formatNumber(row.accepted)}
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <span
+                    className={
+                      row.escalated > 0
+                        ? "font-semibold text-red-600 dark:text-red-300"
+                        : "text-zinc-500"
+                    }
+                  >
+                    {formatNumber(row.escalated)}
+                  </span>
                 </td>
                 <td className="px-4 py-3 text-right">
                   <span

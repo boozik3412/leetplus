@@ -23,6 +23,7 @@ export type StaffOperationsSummary = {
   overdue: number;
   failedItems: number;
   returned: number;
+  escalated: number;
   unchecked: number;
   readinessBlocked: number;
   recurringIssues: number;
@@ -80,6 +81,7 @@ export type StaffOperationsRating = {
   overdue: number;
   failedItems: number;
   returned: number;
+  escalated: number;
   unchecked: number;
   readinessBlocked: number;
   readinessAttention: number;
@@ -116,6 +118,7 @@ export type StaffOperationsRiskItem = {
   kind:
     | "TASK_OVERDUE"
     | "TASK_UNCHECKED"
+    | "CHECKLIST_ESCALATED"
     | "CHECKLIST_RETURNED"
     | "CHECKLIST_FAILED"
     | "CHECKLIST_UNCHECKED"

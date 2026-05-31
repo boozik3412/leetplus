@@ -137,6 +137,7 @@ export type StaffOperationsSummary = {
   overdue: number;
   failedItems: number;
   returned: number;
+  escalated: number;
   unchecked: number;
   readinessBlocked: number;
   recurringIssues: number;
@@ -194,6 +195,7 @@ export type StaffOperationsRating = {
   overdue: number;
   failedItems: number;
   returned: number;
+  escalated: number;
   unchecked: number;
   readinessBlocked: number;
   readinessAttention: number;
@@ -230,6 +232,7 @@ export type StaffOperationsRiskItem = {
   kind:
     | 'TASK_OVERDUE'
     | 'TASK_UNCHECKED'
+    | 'CHECKLIST_ESCALATED'
     | 'CHECKLIST_RETURNED'
     | 'CHECKLIST_FAILED'
     | 'CHECKLIST_UNCHECKED'
@@ -254,6 +257,7 @@ type DisciplineMetrics = {
   checklistDoneOnTime: number;
   checklistOverdue: number;
   checklistReturned: number;
+  checklistEscalated: number;
   checklistUnchecked: number;
   failedItems: number;
   readinessBlocked: number;
@@ -574,6 +578,7 @@ export class StaffOperationsDashboardService {
       checklistDoneOnTime: 0,
       checklistOverdue: 0,
       checklistReturned: 0,
+      checklistEscalated: 0,
       checklistUnchecked: 0,
       failedItems: 0,
       readinessBlocked: 0,
@@ -632,6 +637,10 @@ export class StaffOperationsDashboardService {
 
     if (run.status === 'RETURNED') {
       metrics.checklistReturned += 1;
+    }
+
+    if (run.status === 'ESCALATED') {
+      metrics.checklistEscalated += 1;
     }
 
     if (run.status === 'ON_REVIEW') {
@@ -1330,6 +1339,22 @@ export class StaffOperationsDashboardService {
     });
 
     checklists.forEach((run) => {
+      if (run.status === 'ESCALATED') {
+        risks.push({
+          id: `checklist-escalated:${run.id}`,
+          kind: 'CHECKLIST_ESCALATED',
+          title: run.title,
+          detail:
+            run.reviewComment ??
+            'Чеклист эскалирован менеджером и требует решения ответственного',
+          severity: 'HIGH',
+          date: (run.reviewedAt ?? this.activityDate(run)).toISOString(),
+          store: run.store,
+          user: run.assignedToUser,
+          href: `/staff/checklists?search=${encodeURIComponent(run.title)}`,
+        });
+      }
+
       if (run.status === 'RETURNED') {
         risks.push({
           id: `checklist-returned:${run.id}`,
@@ -1408,6 +1433,7 @@ export class StaffOperationsDashboardService {
     const overdue = metrics.taskOverdue + metrics.checklistOverdue;
     const unchecked = metrics.taskUnchecked + metrics.checklistUnchecked;
     const returned = metrics.checklistReturned;
+    const escalated = metrics.checklistEscalated;
     const doneOnTime = metrics.taskDoneOnTime + metrics.checklistDoneOnTime;
     const score = this.scoreMetrics(metrics);
     const staffControlRisks =
@@ -1428,6 +1454,7 @@ export class StaffOperationsDashboardService {
       overdue,
       failedItems: metrics.failedItems,
       returned,
+      escalated,
       unchecked,
       readinessBlocked: metrics.readinessBlocked,
       recurringIssues: metrics.repeatedIssues,
@@ -1436,6 +1463,7 @@ export class StaffOperationsDashboardService {
         score,
         overdue +
           returned +
+          escalated +
           unchecked +
           metrics.failedItems +
           staffControlRisks,
@@ -1472,6 +1500,7 @@ export class StaffOperationsDashboardService {
       overdue +
       unchecked +
       draft.checklistReturned +
+      draft.checklistEscalated +
       draft.failedItems +
       draft.readinessBlocked +
       draft.repeatedIssues;
@@ -1488,6 +1517,7 @@ export class StaffOperationsDashboardService {
       overdue,
       failedItems: draft.failedItems,
       returned: draft.checklistReturned,
+      escalated: draft.checklistEscalated,
       unchecked,
       readinessBlocked: draft.readinessBlocked,
       readinessAttention: draft.readinessAttention,
@@ -1505,6 +1535,7 @@ export class StaffOperationsDashboardService {
     const penalty =
       metrics.taskOverdue * 12 +
       metrics.checklistOverdue * 12 +
+      metrics.checklistEscalated * 16 +
       metrics.checklistReturned * 10 +
       metrics.failedItems * 4 +
       (metrics.taskUnchecked + metrics.checklistUnchecked) * 6 +

@@ -23,6 +23,7 @@ const checklistStatuses = [
   'ON_REVIEW',
   'ACCEPTED',
   'RETURNED',
+  'ESCALATED',
   'CANCELED',
 ] as const;
 const checklistFilterStatuses = [
@@ -145,6 +146,7 @@ export type StaffChecklistReport = {
     onReview: number;
     accepted: number;
     returned: number;
+    escalated: number;
     canceled: number;
     overdue: number;
     failedItems: number;
@@ -164,6 +166,7 @@ export type StaffChecklistExecutionMetrics = {
   onReview: number;
   accepted: number;
   returned: number;
+  escalated: number;
   canceled: number;
   overdue: number;
   failedItems: number;
@@ -686,8 +689,12 @@ export class StaffChecklistsService {
     const isSubmit =
       nextStatus === 'ON_REVIEW' && currentStatus !== 'ON_REVIEW';
     const isReview =
-      (nextStatus === 'ACCEPTED' || nextStatus === 'RETURNED') &&
+      (nextStatus === 'ACCEPTED' ||
+        nextStatus === 'RETURNED' ||
+        nextStatus === 'ESCALATED') &&
       nextStatus !== currentStatus;
+    const isEscalation =
+      nextStatus === 'ESCALATED' && nextStatus !== currentStatus;
     const now = new Date();
 
     if (nextStatus === 'ON_REVIEW' && metrics.blockingIssues.length > 0) {
@@ -750,6 +757,19 @@ export class StaffChecklistsService {
           sections,
           answers,
           metrics,
+        );
+      }
+
+      if (isEscalation) {
+        await this.createChecklistEscalationMessage(
+          tx,
+          tenantId,
+          user.id,
+          current,
+          sections,
+          answers,
+          metrics,
+          this.normalizeOptionalString(dto.reviewComment),
         );
       }
 
@@ -891,7 +911,7 @@ export class StaffChecklistsService {
 
     if (includeStatus && filters.status !== 'all') {
       if (filters.status === 'OVERDUE') {
-        where.status = { in: ['OPEN', 'IN_PROGRESS', 'RETURNED'] };
+        where.status = { in: ['OPEN', 'IN_PROGRESS', 'RETURNED', 'ESCALATED'] };
         where.scheduledAt = { lt: new Date() };
       } else {
         where.status = filters.status;
@@ -949,6 +969,7 @@ export class StaffChecklistsService {
       onReview: 0,
       accepted: 0,
       returned: 0,
+      escalated: 0,
       canceled: 0,
       overdue: 0,
       failedItems: 0,
@@ -966,6 +987,8 @@ export class StaffChecklistsService {
         summary.accepted += 1;
       } else if (row.status === 'RETURNED') {
         summary.returned += 1;
+      } else if (row.status === 'ESCALATED') {
+        summary.escalated += 1;
       } else if (row.status === 'CANCELED') {
         summary.canceled += 1;
       }
@@ -991,6 +1014,7 @@ export class StaffChecklistsService {
       onReview: 0,
       accepted: 0,
       returned: 0,
+      escalated: 0,
       canceled: 0,
       overdue: 0,
       failedItems: 0,
@@ -1046,6 +1070,8 @@ export class StaffChecklistsService {
       metrics.accepted += 1;
     } else if (row.status === 'RETURNED') {
       metrics.returned += 1;
+    } else if (row.status === 'ESCALATED') {
+      metrics.escalated += 1;
     } else if (row.status === 'CANCELED') {
       metrics.canceled += 1;
     }
@@ -1115,7 +1141,7 @@ export class StaffChecklistsService {
     return (
       Boolean(scheduledAt) &&
       scheduledAt! < now &&
-      ['OPEN', 'IN_PROGRESS', 'RETURNED'].includes(status)
+      ['OPEN', 'IN_PROGRESS', 'RETURNED', 'ESCALATED'].includes(status)
     );
   }
 
@@ -1304,6 +1330,7 @@ export class StaffChecklistsService {
       ON_REVIEW: 'На проверке',
       ACCEPTED: 'Принят',
       RETURNED: 'Возвращен',
+      ESCALATED: 'Эскалирован',
       CANCELED: 'Отменен',
     };
 
@@ -1667,6 +1694,50 @@ export class StaffChecklistsService {
     });
   }
 
+  private async createChecklistEscalationMessage(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    actorUserId: string,
+    run: StaffChecklistRunRow,
+    sections: StaffChecklistSection[],
+    answers: StaffChecklistAnswer[],
+    metrics: Metrics,
+    reviewComment: string | null,
+  ) {
+    const channelId = await this.ensureDefaultChatChannel(tx, tenantId);
+    const message = await tx.staffChatMessage.create({
+      data: {
+        tenantId,
+        channelId,
+        authorUserId: actorUserId,
+        storeId: run.storeId,
+        body: this.buildChecklistEscalationBody(
+          run,
+          sections,
+          answers,
+          metrics,
+          reviewComment,
+        ),
+        kind: 'INCIDENT',
+        priority: 'URGENT',
+        isPinned: true,
+      },
+      select: { id: true },
+    });
+
+    await tx.staffChatReadReceipt.createMany({
+      data: [
+        {
+          tenantId,
+          channelId,
+          messageId: message.id,
+          userId: actorUserId,
+        },
+      ],
+      skipDuplicates: true,
+    });
+  }
+
   private async ensureDefaultChatChannel(
     tx: Prisma.TransactionClient,
     tenantId: string,
@@ -1745,6 +1816,65 @@ export class StaffChecklistsService {
         : null,
       '',
       'Источник: чеклист смены LeetPlus.',
+      `Открыть чеклисты: /staff/checklists?search=${encodeURIComponent(
+        run.title,
+      )}`,
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  private buildChecklistEscalationBody(
+    run: StaffChecklistRunRow,
+    sections: StaffChecklistSection[],
+    answers: StaffChecklistAnswer[],
+    metrics: Metrics,
+    reviewComment: string | null,
+  ) {
+    const itemByKey = new Map(
+      sections.flatMap((section) =>
+        section.items.map((item) => [
+          `${section.id}::${item.id}`,
+          { section, item },
+        ]),
+      ),
+    );
+    const failedLines = answers
+      .filter((answer) => answer.status === 'FAILED')
+      .slice(0, 5)
+      .map((answer) => {
+        const source = itemByKey.get(`${answer.sectionId}::${answer.itemId}`);
+        const title = source
+          ? `${source.section.title}: ${source.item.title}`
+          : answer.itemId;
+        const note = answer.note ? ` - ${answer.note}` : '';
+        return `- ${title}${note}`;
+      });
+    const assignedTo =
+      run.assignedToUser?.fullName ?? run.assignedToUser?.email ?? null;
+    const score =
+      metrics.scoreTotal > 0
+        ? `${metrics.scoreEarned}/${metrics.scoreTotal}`
+        : 'без баллов';
+
+    return [
+      'Чеклист эскалирован менеджером.',
+      '',
+      `Чеклист: ${run.title}`,
+      `Клуб: ${run.store?.name ?? 'вся сеть'}`,
+      assignedTo ? `Ответственный: ${assignedTo}` : null,
+      reviewComment ? `Комментарий проверки: ${reviewComment}` : null,
+      `Проблемных пунктов: ${metrics.failedItems}`,
+      `Блокеров сдачи: ${metrics.blockingIssues.length}`,
+      `Оценка: ${score}`,
+      '',
+      failedLines.length > 0 ? 'Проблемные пункты:' : null,
+      ...failedLines,
+      metrics.failedItems > failedLines.length
+        ? `- Еще ${metrics.failedItems - failedLines.length} пункт(ов)`
+        : null,
+      '',
+      'Источник: эскалация чеклиста смены LeetPlus.',
       `Открыть чеклисты: /staff/checklists?search=${encodeURIComponent(
         run.title,
       )}`,

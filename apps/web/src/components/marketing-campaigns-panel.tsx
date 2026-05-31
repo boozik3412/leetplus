@@ -47,6 +47,7 @@ type CampaignFormState = {
 
 type PromoBundleLaunchFormState = {
   promoBundleId: string;
+  audienceId: string;
   scope: "NETWORK" | "STORES";
   storeIds: string[];
   periodFrom: string;
@@ -402,6 +403,7 @@ const emptyForm: CampaignFormState = {
 
 const emptyPromoBundleLaunchForm: PromoBundleLaunchFormState = {
   promoBundleId: "",
+  audienceId: "",
   scope: "NETWORK",
   storeIds: [],
   periodFrom: "",
@@ -912,6 +914,7 @@ export function MarketingCampaignsPanel({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         promoBundleId: launchForm.promoBundleId,
+        audienceId: launchForm.audienceId || null,
         storeIds: launchForm.scope === "NETWORK" ? [] : launchForm.storeIds,
         periodFrom: launchForm.periodFrom || null,
         periodTo: launchForm.periodTo || null,
@@ -934,6 +937,7 @@ export function MarketingCampaignsPanel({
     setLaunchForm((current) => ({
       ...emptyPromoBundleLaunchForm,
       promoBundleId: launch.promoBundle.id,
+      audienceId: current.audienceId,
       maxUses: current.maxUses,
     }));
     setIsCreatingLaunch(false);
@@ -1049,6 +1053,7 @@ export function MarketingCampaignsPanel({
         launchForm={launchForm}
         selectedPromoBundle={selectedLaunchPromoBundle}
         promoBundles={savedPromoBundles}
+        audiences={audiences}
         stores={stores}
         isCreatingLaunch={isCreatingLaunch}
         pendingLaunchId={pendingLaunchId}
@@ -2716,6 +2721,7 @@ function PromoBundleUsageJournal({
             {launchOptions.map((launch) => (
               <option key={launch.id} value={launch.id}>
                 {promoBundleLaunchStatusLabel(launch.status)} ·{" "}
+                {promoBundleLaunchAudienceLabel(launch)} ·{" "}
                 {launchPeriodLabel(launch)}
               </option>
             ))}
@@ -3840,6 +3846,7 @@ function PromoBundleStandaloneLaunchPanel({
   launchForm,
   selectedPromoBundle,
   promoBundles,
+  audiences,
   stores,
   isCreatingLaunch,
   pendingLaunchId,
@@ -3851,6 +3858,7 @@ function PromoBundleStandaloneLaunchPanel({
   launchForm: PromoBundleLaunchFormState;
   selectedPromoBundle: MarketingPromoBundle | null;
   promoBundles: MarketingPromoBundle[];
+  audiences: GuestAudience[];
   stores: Store[];
   isCreatingLaunch: boolean;
   pendingLaunchId: string | null;
@@ -3868,6 +3876,8 @@ function PromoBundleStandaloneLaunchPanel({
   const selectedEconomics = selectedDraft
     ? buildPromoBundleEconomics(selectedDraft)
     : null;
+  const selectedAudience =
+    audiences.find((audience) => audience.id === launchForm.audienceId) ?? null;
   const canCreate =
     Boolean(launchForm.promoBundleId) &&
     (launchForm.scope === "NETWORK" || launchForm.storeIds.length > 0);
@@ -3920,10 +3930,11 @@ function PromoBundleStandaloneLaunchPanel({
                 Отдельный промо-набор для сети или клубов
               </h3>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                Используйте сохраненный набор как клубный оффер без группы гостей,
+                Используйте сохраненный набор как клубный оффер для всей
+                аудитории или выбранной сохраненной группы гостей, без
                 CRM-задачи и карточки кампании. Он остается в каталоге, а запуск
-                фиксирует область действия, период, лимит и инструкцию для
-                администраторов.
+                фиксирует аудиторию, область действия, период, лимит и
+                инструкцию для администраторов.
               </p>
             </div>
             <div className="grid grid-cols-2 gap-2 text-center">
@@ -3943,6 +3954,26 @@ function PromoBundleStandaloneLaunchPanel({
                 {promoBundles.map((bundle) => (
                   <option key={bundle.id} value={bundle.id}>
                     {bundle.name} · {promoBundleTypeLabel(bundle.bundleType)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <Field label="Группа гостей">
+              <select
+                value={launchForm.audienceId}
+                onChange={(event) =>
+                  onLaunchFormChange({
+                    ...launchForm,
+                    audienceId: event.target.value,
+                  })
+                }
+                className={fieldClassName}
+              >
+                <option value="">Любые гости</option>
+                {audiences.map((audience) => (
+                  <option key={audience.id} value={audience.id}>
+                    {audience.name} · {formatNumber(audience.guestsCount)} гостей
                   </option>
                 ))}
               </select>
@@ -4018,6 +4049,16 @@ function PromoBundleStandaloneLaunchPanel({
                       launchForm.scope === "NETWORK"
                         ? "Вся сеть"
                         : storeLabel(launchForm.storeIds, stores)
+                      }
+                  />
+                  <CompactInfo
+                    label="Гости"
+                    value={
+                      selectedAudience
+                        ? `${selectedAudience.name} · ${formatNumber(
+                            selectedAudience.guestsCount,
+                          )} гостей`
+                        : "Любые гости"
                     }
                   />
                   <CompactInfo
@@ -4111,8 +4152,8 @@ function PromoBundleStandaloneLaunchPanel({
               Текущие отдельные запуски
             </p>
             <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-              Это не кампании: здесь нет группы гостей и CRM-задачи. Запуск
-              показывает, где набор можно применять и в каком статусе он сейчас.
+              Это не кампании: здесь нет CRM-задачи. Аудиторию можно оставить
+              общей или ограничить сохраненной группой гостей.
             </p>
           </div>
           <div className="max-h-[520px] divide-y divide-zinc-200 overflow-y-auto dark:divide-zinc-800">
@@ -4135,6 +4176,10 @@ function PromoBundleStandaloneLaunchPanel({
                       <CompactInfo
                         label="Клубы"
                         value={storeLabel(launch.storeIds, stores)}
+                      />
+                      <CompactInfo
+                        label="Гости"
+                        value={promoBundleLaunchAudienceLabel(launch)}
                       />
                       <CompactInfo
                         label="Период"
@@ -5815,6 +5860,12 @@ function launchPeriodLabel(launch: MarketingPromoBundleLaunch) {
   return `${formatDate(launch.periodFrom)} - ${formatDate(launch.periodTo)}`;
 }
 
+function promoBundleLaunchAudienceLabel(launch: MarketingPromoBundleLaunch) {
+  return launch.audience
+    ? `${launch.audience.name} · ${formatNumber(launch.audience.guestsCount)} гостей`
+    : "Любые гости";
+}
+
 function promoBundleOperationalLaunchLabel(
   launches: MarketingPromoBundleLaunch[],
   stores: Store[],
@@ -5827,7 +5878,10 @@ function promoBundleOperationalLaunchLabel(
   const moreLaunches =
     launches.length > 1 ? `, еще ${formatNumber(launches.length - 1)}` : "";
 
-  return `${storeLabel(firstLaunch.storeIds, stores)}, ${launchPeriodLabel(
+  return `${storeLabel(
+    firstLaunch.storeIds,
+    stores,
+  )}, ${promoBundleLaunchAudienceLabel(firstLaunch)}, ${launchPeriodLabel(
     firstLaunch,
   )}${moreLaunches}`;
 }

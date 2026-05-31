@@ -155,6 +155,12 @@ export type MarketingPromoBundle = {
 export type MarketingPromoBundleLaunch = {
   id: string;
   status: MarketingPromoBundleLaunchStatus;
+  audience: {
+    id: string;
+    name: string;
+    description: string | null;
+    guestsCount: number;
+  } | null;
   storeIds: string[];
   periodFrom: string | null;
   periodTo: string | null;
@@ -200,6 +206,7 @@ export type MarketingPromoBundleUsage = {
   launch: {
     id: string;
     status: MarketingPromoBundleLaunchStatus;
+    audience: { id: string; name: string; guestsCount: number } | null;
     storeIds: string[];
     periodFrom: string | null;
     periodTo: string | null;
@@ -253,6 +260,7 @@ export type MarketingPromoBundleReconciliationTotals = {
 export type MarketingPromoBundleReconciliationLaunch = {
   launchId: string;
   status: MarketingPromoBundleLaunchStatus;
+  audience: { id: string; name: string; guestsCount: number } | null;
   storeIds: string[];
   periodFrom: string | null;
   periodTo: string | null;

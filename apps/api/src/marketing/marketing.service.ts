@@ -54,6 +54,9 @@ const marketingPromoBundleLaunchInclude = {
       note: true,
     },
   },
+  audience: {
+    select: { id: true, name: true, description: true, guestsCount: true },
+  },
   createdByUser: { select: { id: true, fullName: true, email: true } },
 } satisfies Prisma.MarketingPromoBundleLaunchInclude;
 
@@ -79,6 +82,7 @@ const marketingPromoBundleUsageInclude = {
       periodFrom: true,
       periodTo: true,
       maxUses: true,
+      audience: { select: { id: true, name: true, guestsCount: true } },
     },
   },
   store: { select: { id: true, name: true } },
@@ -110,6 +114,7 @@ const marketingPromoBundleReconciliationInclude = {
       periodFrom: true,
       periodTo: true,
       maxUses: true,
+      audience: { select: { id: true, name: true, guestsCount: true } },
       createdAt: true,
       updatedAt: true,
     },
@@ -203,6 +208,7 @@ export type MarketingPromoBundleUpdateDto = Partial<MarketingPromoBundleDto>;
 
 export type MarketingPromoBundleLaunchDto = {
   promoBundleId?: string | null;
+  audienceId?: string | null;
   status?: string | null;
   storeIds?: string[] | null;
   periodFrom?: string | null;
@@ -385,6 +391,12 @@ export type MarketingPromoBundle = {
 export type MarketingPromoBundleLaunch = {
   id: string;
   status: MarketingPromoBundleLaunchStatus;
+  audience: {
+    id: string;
+    name: string;
+    description: string | null;
+    guestsCount: number;
+  } | null;
   storeIds: string[];
   periodFrom: string | null;
   periodTo: string | null;
@@ -430,6 +442,7 @@ export type MarketingPromoBundleUsage = {
   launch: {
     id: string;
     status: MarketingPromoBundleLaunchStatus;
+    audience: { id: string; name: string; guestsCount: number } | null;
     storeIds: string[];
     periodFrom: string | null;
     periodTo: string | null;
@@ -475,6 +488,7 @@ export type MarketingPromoBundleReconciliationTotals = {
 export type MarketingPromoBundleReconciliationLaunch = {
   launchId: string;
   status: MarketingPromoBundleLaunchStatus;
+  audience: { id: string; name: string; guestsCount: number } | null;
   storeIds: string[];
   periodFrom: string | null;
   periodTo: string | null;
@@ -1472,6 +1486,7 @@ export class MarketingService {
     }
 
     const storeIds = await this.resolveStoreIds(user, dto.storeIds);
+    const audienceId = await this.resolveAudienceId(user, dto.audienceId);
     const periodFrom = parseOptionalDate(dto.periodFrom);
     const periodTo = parseOptionalDate(dto.periodTo);
     validateDateRange(periodFrom, periodTo);
@@ -1481,6 +1496,7 @@ export class MarketingService {
         tenantId: user.tenantId,
         createdByUserId: user.id,
         promoBundleId,
+        audienceId,
         status: resolvePromoBundleLaunchStatus(dto.status ?? 'ACTIVE'),
         storeIds: storeIds.length > 0 ? storeIds : Prisma.JsonNull,
         periodFrom,
@@ -1536,6 +1552,13 @@ export class MarketingService {
     if (hasOwn(dto, 'storeIds')) {
       const storeIds = await this.resolveStoreIds(user, dto.storeIds);
       data.storeIds = storeIds.length > 0 ? storeIds : Prisma.JsonNull;
+    }
+
+    if (hasOwn(dto, 'audienceId')) {
+      data.audience = await this.resolvePromoBundleLaunchAudienceRelation(
+        user,
+        dto.audienceId,
+      );
     }
 
     if (hasOwn(dto, 'periodFrom')) {
@@ -3040,6 +3063,13 @@ export class MarketingService {
     return {
       launchId: launch.id,
       status: resolvePromoBundleLaunchStatus(launch.status),
+      audience: launch.audience
+        ? {
+            id: launch.audience.id,
+            name: launch.audience.name,
+            guestsCount: launch.audience.guestsCount,
+          }
+        : null,
       storeIds,
       periodFrom: launch.periodFrom?.toISOString() ?? null,
       periodTo: launch.periodTo?.toISOString() ?? null,
@@ -3275,6 +3305,14 @@ export class MarketingService {
     user: AuthenticatedUser,
     value?: string | null,
   ): Promise<Prisma.GuestAudienceUpdateOneWithoutMarketingCampaignsNestedInput> {
+    const audienceId = await this.resolveAudienceId(user, value);
+    return audienceId ? { connect: { id: audienceId } } : { disconnect: true };
+  }
+
+  private async resolvePromoBundleLaunchAudienceRelation(
+    user: AuthenticatedUser,
+    value?: string | null,
+  ): Promise<Prisma.GuestAudienceUpdateOneWithoutPromoBundleLaunchesNestedInput> {
     const audienceId = await this.resolveAudienceId(user, value);
     return audienceId ? { connect: { id: audienceId } } : { disconnect: true };
   }
@@ -3906,6 +3944,14 @@ export class MarketingService {
     return {
       id: row.id,
       status: resolvePromoBundleLaunchStatus(row.status),
+      audience: row.audience
+        ? {
+            id: row.audience.id,
+            name: row.audience.name,
+            description: row.audience.description,
+            guestsCount: row.audience.guestsCount,
+          }
+        : null,
       storeIds: parseStringArray(row.storeIds),
       periodFrom: row.periodFrom?.toISOString() ?? null,
       periodTo: row.periodTo?.toISOString() ?? null,
@@ -3963,6 +4009,13 @@ export class MarketingService {
         ? {
             id: row.launch.id,
             status: resolvePromoBundleLaunchStatus(row.launch.status),
+            audience: row.launch.audience
+              ? {
+                  id: row.launch.audience.id,
+                  name: row.launch.audience.name,
+                  guestsCount: row.launch.audience.guestsCount,
+                }
+              : null,
             storeIds: parseStringArray(row.launch.storeIds),
             periodFrom: row.launch.periodFrom?.toISOString() ?? null,
             periodTo: row.launch.periodTo?.toISOString() ?? null,

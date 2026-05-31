@@ -489,53 +489,74 @@ function CompactHomeLink({
   );
 }
 
+function normalizeNavigationPath(pathname: string) {
+  const [pathWithoutQuery] = pathname.split("?");
+  const [pathWithoutHash] = pathWithoutQuery.split("#");
+
+  if (pathWithoutHash !== "/" && pathWithoutHash.endsWith("/")) {
+    return pathWithoutHash.slice(0, -1);
+  }
+
+  return pathWithoutHash;
+}
+
 function isDashboardPath(pathname: string) {
+  const currentPathname = normalizeNavigationPath(pathname);
+
   return (
-    pathname === "/" ||
-    pathname === "/dashboard" ||
-    pathname.startsWith("/dashboard/")
+    currentPathname === "/" ||
+    currentPathname === "/dashboard" ||
+    currentPathname.startsWith("/dashboard/")
   );
 }
 
 function resolveCurrentProductArea(pathname: string): ProductArea {
-  if (isDashboardPath(pathname)) {
+  const currentPathname = normalizeNavigationPath(pathname);
+
+  if (isDashboardPath(currentPathname)) {
     return "Главная";
   }
 
-  if (pathname.startsWith("/staff") || pathname.startsWith("/guests/staff-control")) {
+  if (
+    currentPathname.startsWith("/staff") ||
+    currentPathname.startsWith("/guests/staff-control")
+  ) {
     return "Персонал";
   }
 
-  if (pathname.startsWith("/administration") || pathname.startsWith("/admin")) {
+  if (
+    currentPathname.startsWith("/administration") ||
+    currentPathname.startsWith("/admin")
+  ) {
     return "Администрирование";
   }
 
-  if (pathname.startsWith("/marketing")) {
+  if (currentPathname.startsWith("/marketing")) {
     return "Маркетинг";
   }
 
-  if (pathname.startsWith("/guests")) {
+  if (currentPathname.startsWith("/guests")) {
     return "Гости";
   }
 
   if (
-    pathname.startsWith("/commercial") ||
-    pathname.startsWith("/users") ||
-    pathname.startsWith("/sync") ||
-    pathname.startsWith("/settings")
+    currentPathname.startsWith("/commercial") ||
+    currentPathname.startsWith("/users") ||
+    currentPathname.startsWith("/sync") ||
+    currentPathname.startsWith("/settings")
   ) {
     return "Управление";
   }
 
   if (
-    pathname.startsWith("/assortment") ||
-    pathname.startsWith("/products") ||
-    pathname.startsWith("/categories") ||
-    pathname.startsWith("/suppliers") ||
-    pathname.startsWith("/stores") ||
-    pathname.startsWith("/reports") ||
-    pathname.startsWith("/import") ||
-    pathname.startsWith("/utilities")
+    currentPathname.startsWith("/assortment") ||
+    currentPathname.startsWith("/products") ||
+    currentPathname.startsWith("/categories") ||
+    currentPathname.startsWith("/suppliers") ||
+    currentPathname.startsWith("/stores") ||
+    currentPathname.startsWith("/reports") ||
+    currentPathname.startsWith("/import") ||
+    currentPathname.startsWith("/utilities")
   ) {
     return "Ассортимент";
   }

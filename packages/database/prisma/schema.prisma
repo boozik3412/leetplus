@@ -1081,6 +1081,7 @@ model MarketingPromoBundleLaunch {
   id              String    @id @default(uuid())
   tenantId        String
   promoBundleId   String
+  audienceId      String?
   createdByUserId String?
   status          String    @default("ACTIVE")
   storeIds        Json?
@@ -1093,11 +1094,13 @@ model MarketingPromoBundleLaunch {
 
   tenant        Tenant                      @relation(fields: [tenantId], references: [id])
   promoBundle   MarketingPromoBundle        @relation(fields: [promoBundleId], references: [id], onDelete: Cascade)
+  audience      GuestAudience?              @relation(fields: [audienceId], references: [id], onDelete: SetNull)
   createdByUser User?                       @relation("MarketingPromoBundleLaunchCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   usages        MarketingPromoBundleUsage[]
 
   @@index([tenantId, status, updatedAt], map: "marketing_promo_bundle_launch_status_idx")
   @@index([promoBundleId], map: "marketing_promo_bundle_launch_bundle_idx")
+  @@index([audienceId], map: "marketing_promo_bundle_launch_audience_idx")
   @@index([createdByUserId], map: "marketing_promo_bundle_launch_created_by_idx")
 }
 
@@ -2304,6 +2307,7 @@ model GuestAudience {
   crmTasks           GuestCrmTask[]
   crmContactEvents   GuestCrmContactEvent[]
   marketingCampaigns MarketingCampaign[]
+  promoBundleLaunches MarketingPromoBundleLaunch[]
 
   @@index([tenantId, createdAt], map: "guest_audience_tenant_created_idx")
   @@index([createdByUserId], map: "guest_audience_user_idx")

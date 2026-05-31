@@ -48,6 +48,14 @@ export type StaffShiftRegulationUser = {
   role: string;
 };
 
+export type StaffShiftRegulationAssessmentOption = {
+  id: string;
+  title: string;
+  assessmentKind: string;
+  roleScope: string;
+  store: StaffShiftRegulationStore | null;
+};
+
 export type StaffShiftRegulationItem = {
   id: string;
   title: string;
@@ -85,6 +93,9 @@ export type StaffShiftRegulationVersion = {
   sectionsCount: number;
   itemsCount: number;
   requiredEvidenceItems: number;
+  requiresAssessmentRetake: boolean;
+  assessmentId: string | null;
+  assessmentTitle: string | null;
   effectiveFrom: string | null;
   publishedAt: string | null;
   createdAt: string;
@@ -110,6 +121,9 @@ export type StaffShiftRegulation = {
   sectionsCount: number;
   itemsCount: number;
   requiredEvidenceItems: number;
+  requiresAssessmentRetake: boolean;
+  assessmentId: string | null;
+  assessment: StaffShiftRegulationAssessmentOption | null;
   effectiveFrom: string | null;
   publishedAt: string | null;
   archivedAt: string | null;
@@ -163,9 +177,11 @@ export type StaffShiftRegulationReport = {
     requiredAcknowledgements: number;
     acknowledged: number;
     pendingAcknowledgements: number;
+    retakeRequired: number;
   };
   rows: StaffShiftRegulation[];
   stores: StaffShiftRegulationStore[];
+  assessments: StaffShiftRegulationAssessmentOption[];
 };
 
 export async function getStaffShiftRegulationReport(

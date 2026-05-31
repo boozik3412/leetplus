@@ -390,7 +390,7 @@ Goal: make onboarding and standard knowledge measurable.
 - Done: courses by role and club added: tenant-scoped `StaffTrainingCourse`, API `/staff/training-courses`, page `/staff/training-courses`, catalog, filters, draft/active/archive statuses, required flag, due date, club scope, role visibility, ordered steps, knowledge-base article links, text, links, and task steps.
 - Done: onboarding plans for new administrators added: tenant-scoped `StaffOnboardingPlan`, API `/staff/onboarding`, page `/staff/onboarding`, role/club scope, draft/active/archive statuses, duration, ordered adaptation steps, links to courses, task templates, checklist templates, regulations, text, and external links.
 - Done: tests and attestations added: tenant-scoped `StaffAssessment` and `StaffAssessmentResult`, API `/staff/assessments`, page `/staff/assessments`, draft/active/archive statuses, role/club scope, tests vs attestations, pass threshold, attempt limit, expiration period, automatic scoring for choice questions, free-text evidence answers, and result history.
-- Link regulations to training: updated regulation can require acknowledgement or test retake.
+- Done: regulations can now require a linked test or attestation retake after publication; the selected active assessment is stored on the regulation and snapshotted into each published version together with the acknowledgement requirement.
 - Add employee training profile: courses assigned, progress, overdue learning, certificates/attestations.
 - Add manager report: who is ready for shift work, who failed tests, who has expired attestations.
 
@@ -398,7 +398,7 @@ Acceptance criteria:
 
 - Done: a new administrator can see active onboarding paths targeted to administrator roles and club/network scope.
 - Started: a manager sees test and attestation result attempts, pass rate, failed attempts, and expired results; full course completion percentage remains in the employee training profile step.
-- A published regulation update can trigger acknowledgement or attestation.
+- Done: a published regulation update can trigger acknowledgement and a linked test/attestation retake.
 - Training results remain historical after employee role or club changes.
 
 ### MVP 4. Control And Analytics

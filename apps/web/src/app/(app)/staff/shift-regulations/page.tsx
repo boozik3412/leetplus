@@ -94,6 +94,7 @@ export default async function StaffShiftRegulationsPage({
     { label: "Архив", value: report.summary.archived },
     { label: "Пунктов с доказательством", value: report.summary.requiredEvidenceItems },
     { label: "Ждут ознакомления", value: report.summary.pendingAcknowledgements },
+    { label: "С пересдачей", value: report.summary.retakeRequired },
   ];
 
   return (
@@ -130,7 +131,7 @@ export default async function StaffShiftRegulationsPage({
           </Link>
         </header>
 
-        <section className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+        <section className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-7">
           {summaryCards.map((card) => (
             <div
               key={card.label}
@@ -224,6 +225,7 @@ export default async function StaffShiftRegulationsPage({
           <StaffShiftRegulationBuilder
             rows={report.rows}
             stores={report.stores}
+            assessments={report.assessments}
             currentUserRole={user.role}
           />
         </section>

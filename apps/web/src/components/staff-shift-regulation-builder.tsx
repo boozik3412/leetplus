@@ -12,6 +12,7 @@ import type {
   StaffShiftItemValueType,
   StaffShiftKind,
   StaffShiftRegulation,
+  StaffShiftRegulationAssessmentOption,
   StaffShiftRegulationItem,
   StaffShiftRegulationSection,
   StaffShiftRegulationStatus,
@@ -64,6 +65,11 @@ const attachmentTypeLabels: Record<StaffShiftRegulationAttachmentType, string> =
     OTHER: "Другое",
   };
 
+const assessmentKindLabels: Record<string, string> = {
+  TEST: "Тест",
+  ATTESTATION: "Аттестация",
+};
+
 type DraftRegulation = {
   id: string | null;
   title: string;
@@ -73,6 +79,8 @@ type DraftRegulation = {
   roleScope: StaffShiftRoleScope;
   storeId: string;
   effectiveFrom: string;
+  requiresAssessmentRetake: boolean;
+  assessmentId: string;
   attachments: StaffShiftRegulationAttachment[];
   sections: StaffShiftRegulationSection[];
 };
@@ -100,6 +108,8 @@ function draftFromTemplate(
     roleScope: template.roleScope,
     storeId: "",
     effectiveFrom: "",
+    requiresAssessmentRetake: false,
+    assessmentId: "",
     attachments: [],
     sections: cloneSections(template.sections),
   };
@@ -115,6 +125,8 @@ function defaultDraft(): DraftRegulation {
     roleScope: "ADMINISTRATOR",
     storeId: "",
     effectiveFrom: "",
+    requiresAssessmentRetake: false,
+    assessmentId: "",
     attachments: [],
     sections: [
       {
@@ -158,9 +170,20 @@ function fromRegulation(row: StaffShiftRegulation): DraftRegulation {
     roleScope: row.roleScope,
     storeId: row.store?.id ?? "",
     effectiveFrom: row.effectiveFrom?.slice(0, 16) ?? "",
+    requiresAssessmentRetake: row.requiresAssessmentRetake,
+    assessmentId: row.assessmentId ?? "",
     attachments: row.attachments,
     sections: row.sections,
   };
+}
+
+function formatAssessmentOption(
+  assessment: StaffShiftRegulationAssessmentOption,
+) {
+  const kind = assessmentKindLabels[assessment.assessmentKind] ?? "Проверка";
+  return `${kind}: ${assessment.title}${
+    assessment.store ? ` · ${assessment.store.name}` : " · вся сеть"
+  }`;
 }
 
 function statusClass(status: StaffShiftRegulationStatus) {
@@ -192,10 +215,12 @@ function formatDateTime(value: string | null) {
 export function StaffShiftRegulationBuilder({
   rows,
   stores,
+  assessments,
   currentUserRole,
 }: {
   rows: StaffShiftRegulation[];
   stores: StaffShiftRegulationStore[];
+  assessments: StaffShiftRegulationAssessmentOption[];
   currentUserRole: string;
 }) {
   const router = useRouter();
@@ -425,6 +450,11 @@ export function StaffShiftRegulationBuilder({
       return;
     }
 
+    if (draft.requiresAssessmentRetake && !draft.assessmentId) {
+      setError("Выберите активный тест или аттестацию для пересдачи после публикации.");
+      return;
+    }
+
     setIsPending(true);
     setError(null);
 
@@ -438,6 +468,8 @@ export function StaffShiftRegulationBuilder({
       effectiveFrom: draft.effectiveFrom
         ? new Date(draft.effectiveFrom).toISOString()
         : null,
+      requiresAssessmentRetake: draft.requiresAssessmentRetake,
+      assessmentId: draft.requiresAssessmentRetake ? draft.assessmentId : null,
       attachments: draft.attachments
         .map((attachment) => ({
           ...attachment,
@@ -617,6 +649,12 @@ export function StaffShiftRegulationBuilder({
                   {row.sectionsCount} разд., {row.itemsCount} пунктов,{" "}
                   материалов: {row.attachmentsCount}, v{row.version}
                 </p>
+                {row.requiresAssessmentRetake ? (
+                  <p className="mt-1 text-xs font-semibold text-amber-600 dark:text-amber-300">
+                    Пересдача:{" "}
+                    {row.assessment ? row.assessment.title : "проверка не выбрана"}
+                  </p>
+                ) : null}
                 {row.status === "PUBLISHED" ? (
                   <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
                     <span>
@@ -725,6 +763,16 @@ export function StaffShiftRegulationBuilder({
                 {formatDateTime(selectedRow.acknowledgementSummary.acknowledgedAt)}.
               </p>
             ) : null}
+            {selectedRow.requiresAssessmentRetake ? (
+              <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+                <p className="font-semibold">После этой версии требуется пересдача</p>
+                <p className="mt-1 text-xs">
+                  {selectedRow.assessment
+                    ? formatAssessmentOption(selectedRow.assessment)
+                    : "Связанная проверка была удалена или архивирована."}
+                </p>
+              </div>
+            ) : null}
             {selectedRow.acknowledgements.length > 0 ? (
               <div className="mt-3 flex flex-wrap gap-2">
                 {selectedRow.acknowledgements.slice(0, 8).map((item) => (
@@ -818,6 +866,11 @@ export function StaffShiftRegulationBuilder({
                       {version.requiredEvidenceItems}
                       {version.attachmentsCount > 0
                         ? ` · материалов: ${version.attachmentsCount}`
+                        : ""}
+                      {version.requiresAssessmentRetake
+                        ? ` · пересдача: ${
+                            version.assessmentTitle ?? "проверка не выбрана"
+                          }`
                         : ""}
                       {version.createdByUser
                         ? ` · опубликовал ${
@@ -934,6 +987,60 @@ export function StaffShiftRegulationBuilder({
               Обязательных: {totals.required}, с доказательством:{" "}
               {totals.evidence}, материалов: {totals.attachments}
             </p>
+          </div>
+        </div>
+
+        <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
+          <div className="grid gap-3 lg:grid-cols-[1fr_1.4fr]">
+            <label className="flex items-start gap-3 rounded-md border border-zinc-200 bg-white p-3 text-sm transition hover:border-emerald-500/60 dark:border-zinc-800 dark:bg-zinc-950">
+              <input
+                type="checkbox"
+                checked={draft.requiresAssessmentRetake}
+                onChange={(event) =>
+                  updateDraft({
+                    requiresAssessmentRetake: event.target.checked,
+                    assessmentId: event.target.checked ? draft.assessmentId : "",
+                  })
+                }
+                className="mt-1"
+              />
+              <span>
+                <span className="block text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+                  Контроль знаний
+                </span>
+                <span className="mt-1 block font-semibold">
+                  Требовать пересдачу после публикации
+                </span>
+                <span className="mt-1 block text-xs leading-5 text-zinc-500">
+                  Новая версия регламента останется с обязательным ознакомлением, а сотрудник увидит связанный тест или аттестацию как следующий контроль.
+                </span>
+              </span>
+            </label>
+
+            <label className="space-y-1">
+              <span className="text-xs font-bold uppercase text-zinc-500">
+                Тест или аттестация
+              </span>
+              <select
+                value={draft.assessmentId}
+                disabled={!draft.requiresAssessmentRetake || assessments.length === 0}
+                onChange={(event) =>
+                  updateDraft({ assessmentId: event.target.value })
+                }
+                className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950"
+              >
+                <option value="">
+                  {assessments.length === 0
+                    ? "Сначала создайте активный тест"
+                    : "Выберите проверку"}
+                </option>
+                {assessments.map((assessment) => (
+                  <option key={assessment.id} value={assessment.id}>
+                    {formatAssessmentOption(assessment)}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
         </div>
 

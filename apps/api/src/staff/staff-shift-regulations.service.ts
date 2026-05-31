@@ -68,6 +68,8 @@ export type StaffShiftRegulationDto = {
   effectiveFrom?: string | null;
   sections?: unknown;
   attachments?: unknown;
+  requiresAssessmentRetake?: boolean;
+  assessmentId?: string | null;
 };
 
 export type StaffShiftRegulationAcknowledgementDto = {
@@ -116,9 +118,19 @@ export type StaffShiftRegulationReport = {
     requiredAcknowledgements: number;
     acknowledged: number;
     pendingAcknowledgements: number;
+    retakeRequired: number;
   };
   rows: StaffShiftRegulationResponse[];
   stores: Array<{ id: string; name: string; isActive: boolean }>;
+  assessments: StaffShiftRegulationAssessmentOption[];
+};
+
+export type StaffShiftRegulationAssessmentOption = {
+  id: string;
+  title: string;
+  assessmentKind: string;
+  roleScope: string;
+  store: { id: string; name: string; isActive: boolean } | null;
 };
 
 export type StaffShiftRegulationAcknowledgementResponse = {
@@ -155,6 +167,9 @@ export type StaffShiftRegulationVersionResponse = {
   sectionsCount: number;
   itemsCount: number;
   requiredEvidenceItems: number;
+  requiresAssessmentRetake: boolean;
+  assessmentId: string | null;
+  assessmentTitle: string | null;
   effectiveFrom: string | null;
   publishedAt: string | null;
   createdAt: string;
@@ -176,6 +191,9 @@ export type StaffShiftRegulationResponse = {
   sectionsCount: number;
   itemsCount: number;
   requiredEvidenceItems: number;
+  requiresAssessmentRetake: boolean;
+  assessmentId: string | null;
+  assessment: StaffShiftRegulationAssessmentOption | null;
   effectiveFrom: string | null;
   publishedAt: string | null;
   archivedAt: string | null;
@@ -191,6 +209,15 @@ export type StaffShiftRegulationResponse = {
 const regulationInclude = {
   store: { select: { id: true, name: true, isActive: true } },
   createdByUser: { select: { id: true, email: true, fullName: true } },
+  assessment: {
+    select: {
+      id: true,
+      title: true,
+      assessmentKind: true,
+      roleScope: true,
+      store: { select: { id: true, name: true, isActive: true } },
+    },
+  },
   versions: {
     include: {
       store: { select: { id: true, name: true, isActive: true } },
@@ -242,7 +269,7 @@ export class StaffShiftRegulationsService {
     const filters = this.resolveFilters(query);
     const where = this.buildWhere(tenantId, filters);
 
-    const [rows, stores, activeUsers] = await Promise.all([
+    const [rows, stores, activeUsers, assessments] = await Promise.all([
       this.prisma.staffShiftRegulation.findMany({
         where,
         include: regulationInclude,
@@ -259,6 +286,17 @@ export class StaffShiftRegulationsService {
         include: acknowledgementUserInclude,
         orderBy: [{ role: 'asc' }, { fullName: 'asc' }, { email: 'asc' }],
       }),
+      this.prisma.staffAssessment.findMany({
+        where: { tenantId, status: 'ACTIVE' },
+        select: {
+          id: true,
+          title: true,
+          assessmentKind: true,
+          roleScope: true,
+          store: { select: { id: true, name: true, isActive: true } },
+        },
+        orderBy: [{ assessmentKind: 'asc' }, { title: 'asc' }],
+      }),
     ]);
     const responseRows = rows.map((row) =>
       this.toRegulationResponse(row, user.id, activeUsers),
@@ -269,6 +307,7 @@ export class StaffShiftRegulationsService {
       summary: this.buildSummary(responseRows),
       rows: responseRows,
       stores,
+      assessments,
     };
   }
 
@@ -489,6 +528,9 @@ export class StaffShiftRegulationsService {
         summary.acknowledged += row.acknowledgementSummary.acknowledgedCount;
         summary.pendingAcknowledgements +=
           row.acknowledgementSummary.pendingCount;
+        if (row.requiresAssessmentRetake) {
+          summary.retakeRequired += 1;
+        }
 
         if (row.status === 'DRAFT') {
           summary.draft += 1;
@@ -509,6 +551,7 @@ export class StaffShiftRegulationsService {
         requiredAcknowledgements: 0,
         acknowledged: 0,
         pendingAcknowledgements: 0,
+        retakeRequired: 0,
       },
     );
   }
@@ -573,6 +616,33 @@ export class StaffShiftRegulationsService {
       data.attachments = this.normalizeAttachments(dto.attachments);
     }
 
+    const requiresAssessmentRetake =
+      dto.requiresAssessmentRetake !== undefined
+        ? this.normalizeBoolean(dto.requiresAssessmentRetake, false)
+        : undefined;
+
+    if (requiresAssessmentRetake !== undefined) {
+      data.requiresAssessmentRetake = requiresAssessmentRetake;
+    }
+
+    if (requiresAssessmentRetake === false) {
+      data.assessmentId = null;
+    }
+
+    if (requiresAssessmentRetake === true || dto.assessmentId !== undefined) {
+      const assessmentId = this.normalizeOptionalString(dto.assessmentId);
+
+      if (requiresAssessmentRetake && !assessmentId) {
+        throw new BadRequestException(
+          'Active assessment is required for regulation retake',
+        );
+      }
+
+      data.assessmentId = assessmentId
+        ? await this.resolveAssessmentId(tenantId, assessmentId)
+        : null;
+    }
+
     return data;
   }
 
@@ -620,6 +690,9 @@ export class StaffShiftRegulationsService {
       itemsCount: items.length,
       requiredEvidenceItems: items.filter((item) => item.evidenceRequired)
         .length,
+      requiresAssessmentRetake: row.requiresAssessmentRetake,
+      assessmentId: row.assessmentId,
+      assessment: row.assessment,
       effectiveFrom: row.effectiveFrom?.toISOString() ?? null,
       publishedAt: row.publishedAt?.toISOString() ?? null,
       archivedAt: row.archivedAt?.toISOString() ?? null,
@@ -663,6 +736,7 @@ export class StaffShiftRegulationsService {
         regulationId: row.id,
         storeId: row.storeId,
         createdByUserId,
+        assessmentId: row.assessmentId,
         version: row.version,
         title: row.title,
         description: row.description,
@@ -670,6 +744,8 @@ export class StaffShiftRegulationsService {
         roleScope: row.roleScope,
         sections: row.sections as Prisma.InputJsonValue,
         attachments: this.normalizeAttachments(row.attachments),
+        requiresAssessmentRetake: row.requiresAssessmentRetake,
+        assessmentTitle: row.assessment?.title ?? null,
         effectiveFrom: row.effectiveFrom,
         publishedAt: row.publishedAt,
       },
@@ -696,6 +772,9 @@ export class StaffShiftRegulationsService {
       itemsCount: items.length,
       requiredEvidenceItems: items.filter((item) => item.evidenceRequired)
         .length,
+      requiresAssessmentRetake: version.requiresAssessmentRetake,
+      assessmentId: version.assessmentId,
+      assessmentTitle: version.assessmentTitle,
       effectiveFrom: version.effectiveFrom?.toISOString() ?? null,
       publishedAt: version.publishedAt?.toISOString() ?? null,
       createdAt: version.createdAt.toISOString(),
@@ -1015,6 +1094,28 @@ export class StaffShiftRegulationsService {
     }
 
     return date;
+  }
+
+  private async resolveAssessmentId(
+    tenantId: string,
+    value: string | null | undefined,
+  ) {
+    const id = this.normalizeOptionalString(value);
+
+    if (!id) {
+      return null;
+    }
+
+    const assessment = await this.prisma.staffAssessment.findFirst({
+      where: { id, tenantId, status: 'ACTIVE' },
+      select: { id: true },
+    });
+
+    if (!assessment) {
+      throw new BadRequestException('Active assessment not found');
+    }
+
+    return assessment.id;
   }
 
   private async resolveStoreId(

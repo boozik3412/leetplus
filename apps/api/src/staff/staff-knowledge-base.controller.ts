@@ -19,6 +19,7 @@ import {
   type StaffKnowledgeArticleDto,
   type StaffKnowledgeBaseQuery,
   type StaffKnowledgeBaseReport,
+  type StaffKnowledgeReadReceiptDto,
 } from './staff-knowledge-base.service';
 
 @Controller('staff/knowledge-base')
@@ -60,5 +61,14 @@ export class StaffKnowledgeBaseController {
     @Body() dto: StaffKnowledgeArticleDto,
   ) {
     return this.staffKnowledgeBaseService.updateArticle(user, id, dto);
+  }
+
+  @Post(':id/read-receipts')
+  markArticleRead(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: StaffKnowledgeReadReceiptDto,
+  ) {
+    return this.staffKnowledgeBaseService.markArticleRead(user, id, dto);
   }
 }

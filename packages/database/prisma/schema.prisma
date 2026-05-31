@@ -154,6 +154,7 @@ model Tenant {
   staffTaskAuditEvents                 StaffTaskAuditEvent[]
   staffKnowledgeArticles               StaffKnowledgeArticle[]
   staffKnowledgeArticleVersions        StaffKnowledgeArticleVersion[]
+  staffKnowledgeArticleReadReceipts    StaffKnowledgeArticleReadReceipt[]
   staffTrainingCourses                 StaffTrainingCourse[]
   staffTrainingProgresses              StaffTrainingProgress[]
   staffOnboardingPlans                 StaffOnboardingPlan[]
@@ -217,6 +218,7 @@ model User {
   createdStaffKnowledgeArticles        StaffKnowledgeArticle[]               @relation("StaffKnowledgeArticleCreatedBy")
   approvedStaffKnowledgeArticles       StaffKnowledgeArticle[]               @relation("StaffKnowledgeArticleApprovedBy")
   createdStaffKnowledgeArticleVersions StaffKnowledgeArticleVersion[]         @relation("StaffKnowledgeArticleVersionCreatedBy")
+  staffKnowledgeArticleReadReceipts    StaffKnowledgeArticleReadReceipt[]     @relation("StaffKnowledgeArticleReadReceiptUser")
   createdStaffTrainingCourses          StaffTrainingCourse[]                 @relation("StaffTrainingCourseCreatedBy")
   staffTrainingProgresses              StaffTrainingProgress[]               @relation("StaffTrainingProgressUser")
   updatedStaffTrainingProgresses       StaffTrainingProgress[]               @relation("StaffTrainingProgressUpdatedBy")
@@ -1480,6 +1482,7 @@ model StaffKnowledgeArticle {
   createdByUser User?  @relation("StaffKnowledgeArticleCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   approvedByUser User?  @relation("StaffKnowledgeArticleApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
   versions      StaffKnowledgeArticleVersion[]
+  readReceipts  StaffKnowledgeArticleReadReceipt[]
 
   @@index([tenantId, status, roleScope], map: "staff_knowledge_status_role_idx")
   @@index([tenantId, folder], map: "staff_knowledge_folder_idx")
@@ -1489,6 +1492,24 @@ model StaffKnowledgeArticle {
   @@index([storeId], map: "staff_knowledge_store_idx")
   @@index([createdByUserId], map: "staff_knowledge_created_by_idx")
   @@index([approvedByUserId], map: "staff_knowledge_approved_by_idx")
+}
+
+model StaffKnowledgeArticleReadReceipt {
+  id        String   @id @default(uuid())
+  tenantId  String
+  articleId String
+  userId    String
+  version   Int
+  readAt    DateTime @default(now())
+  note      String?
+
+  tenant  Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  article StaffKnowledgeArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  user    User                  @relation("StaffKnowledgeArticleReadReceiptUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([articleId, userId, version], map: "staff_knowledge_read_article_user_version_key")
+  @@index([tenantId, userId, readAt], map: "staff_knowledge_read_user_idx")
+  @@index([tenantId, articleId, version], map: "staff_knowledge_read_article_idx")
 }
 
 model StaffKnowledgeArticleVersion {

@@ -102,7 +102,12 @@ export default async function StaffKnowledgeBasePage({
     { label: "Опубликовано", value: report.summary.published },
     { label: "Черновики", value: report.summary.draft },
     { label: "На согласовании", value: report.summary.review },
-    { label: "Обязательные", value: report.summary.requiredReading },
+    {
+      label: "Прочтение",
+      value: `${formatNumber(report.summary.readReceipts)}/${formatNumber(
+        report.summary.requiredAudience,
+      )}`,
+    },
   ];
 
   return (
@@ -147,9 +152,7 @@ export default async function StaffKnowledgeBasePage({
               <p className="text-xs font-bold uppercase text-zinc-500">
                 {card.label}
               </p>
-              <p className="mt-2 text-2xl font-semibold">
-                {formatNumber(card.value)}
-              </p>
+              <p className="mt-2 text-2xl font-semibold">{card.value}</p>
             </div>
           ))}
         </section>

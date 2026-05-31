@@ -67,6 +67,29 @@ export type StaffKnowledgeArticleVersion = {
   } | null;
 };
 
+export type StaffKnowledgeReadingSummary = {
+  requiredCount: number;
+  readCount: number;
+  pendingCount: number;
+  requiredByMe: boolean;
+  readByMe: boolean;
+  readAt: string | null;
+};
+
+export type StaffKnowledgeReadReceipt = {
+  id: string;
+  userId: string;
+  version: number;
+  note: string | null;
+  readAt: string;
+  user: {
+    id: string;
+    email: string;
+    fullName: string | null;
+    role: string;
+  };
+};
+
 export type StaffKnowledgeArticle = {
   id: string;
   title: string;
@@ -100,6 +123,8 @@ export type StaffKnowledgeArticle = {
     email: string;
     fullName: string | null;
   } | null;
+  readingSummary: StaffKnowledgeReadingSummary;
+  readReceipts: StaffKnowledgeReadReceipt[];
   versions: StaffKnowledgeArticleVersion[];
 };
 
@@ -128,6 +153,9 @@ export type StaffKnowledgeBaseReport = {
     review: number;
     archived: number;
     requiredReading: number;
+    requiredAudience: number;
+    readReceipts: number;
+    pendingReads: number;
     materialsCount: number;
   };
   canManageKnowledge: boolean;

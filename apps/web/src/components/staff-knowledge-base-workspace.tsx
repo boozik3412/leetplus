@@ -246,6 +246,7 @@ export function StaffKnowledgeBaseWorkspace({
     report.rows[0] ? fromArticle(report.rows[0]) : defaultDraft(),
   );
   const [isPending, setIsPending] = useState(false);
+  const [readPendingId, setReadPendingId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -414,6 +415,37 @@ export function StaffKnowledgeBaseWorkspace({
     }
   }
 
+  async function markRead(article: StaffKnowledgeArticle) {
+    setReadPendingId(article.id);
+    setMessage(null);
+    setError(null);
+
+    try {
+      const response = await fetch(
+        `/api/staff/knowledge-base/${article.id}/read-receipts`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ note: "Прочитано из базы знаний" }),
+        },
+      );
+
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as {
+          message?: string;
+        } | null;
+        throw new Error(data?.message ?? "Не удалось отметить прочтение");
+      }
+
+      setMessage("Прочтение отмечено.");
+      router.refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Ошибка запроса");
+    } finally {
+      setReadPendingId(null);
+    }
+  }
+
   return (
     <div className="space-y-6">
       {report.canManageKnowledge ? (
@@ -507,6 +539,16 @@ export function StaffKnowledgeBaseWorkspace({
                     {row.materialsCount}
                     {row.requiresReading ? " · обязательное прочтение" : ""}
                   </span>
+                  {row.requiresReading ? (
+                    <span className="mt-2 block text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                      Прочитали {row.readingSummary.readCount}/
+                      {row.readingSummary.requiredCount}
+                      {row.readingSummary.requiredByMe &&
+                      !row.readingSummary.readByMe
+                        ? " · требуется от вас"
+                        : ""}
+                    </span>
+                  ) : null}
                 </button>
               ))
             )}
@@ -1084,7 +1126,11 @@ export function StaffKnowledgeBaseWorkspace({
               ) : null}
             </form>
           ) : selectedArticle ? (
-            <ArticlePreview article={selectedArticle} />
+            <ArticlePreview
+              article={selectedArticle}
+              onMarkRead={markRead}
+              isReadPending={readPendingId === selectedArticle.id}
+            />
           ) : (
             <p className="rounded-md border border-dashed border-zinc-300 p-4 text-sm text-zinc-500 dark:border-zinc-800">
               Выберите материал слева.
@@ -1107,7 +1153,15 @@ export function StaffKnowledgeBaseWorkspace({
   );
 }
 
-function ArticlePreview({ article }: { article: StaffKnowledgeArticle }) {
+function ArticlePreview({
+  article,
+  onMarkRead,
+  isReadPending,
+}: {
+  article: StaffKnowledgeArticle;
+  onMarkRead: (article: StaffKnowledgeArticle) => void;
+  isReadPending: boolean;
+}) {
   return (
     <div>
       <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
@@ -1120,6 +1174,42 @@ function ArticlePreview({ article }: { article: StaffKnowledgeArticle }) {
         опубликовано: {formatDateTime(article.publishedAt)}
         {article.requiresReading ? " · обязательное прочтение" : ""}
       </p>
+      {article.requiresReading ? (
+        <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm dark:border-emerald-900/60 dark:bg-emerald-950/20">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-semibold text-emerald-900 dark:text-emerald-100">
+                {article.readingSummary.readByMe
+                  ? "Вы уже отметили прочтение"
+                  : article.readingSummary.requiredByMe
+                    ? "Материал назначен вам для обязательного прочтения"
+                    : "Материал обязательный для целевой роли"}
+              </p>
+              <p className="mt-1 text-emerald-800/80 dark:text-emerald-200/80">
+                Прочитали {article.readingSummary.readCount}/
+                {article.readingSummary.requiredCount}; ждут{" "}
+                {article.readingSummary.pendingCount}.
+                {article.readingSummary.readAt
+                  ? ` Ваша отметка: ${formatDateTime(
+                      article.readingSummary.readAt,
+                    )}.`
+                  : ""}
+              </p>
+            </div>
+            {article.readingSummary.requiredByMe &&
+            !article.readingSummary.readByMe ? (
+              <button
+                type="button"
+                disabled={isReadPending}
+                onClick={() => onMarkRead(article)}
+                className="h-10 rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isReadPending ? "Отмечаем..." : "Отметить прочтение"}
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
       {article.summary ? (
         <p className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm leading-6 dark:border-zinc-800 dark:bg-zinc-900/50">
           {article.summary}
@@ -1244,6 +1334,36 @@ function VersionHistory({ article }: { article: StaffKnowledgeArticle }) {
         <p className="mt-3 rounded-md bg-zinc-50 p-3 text-sm text-zinc-600 dark:bg-zinc-900/50 dark:text-zinc-300">
           {article.approvalNote}
         </p>
+      ) : null}
+
+      {article.requiresReading ? (
+        <div className="mt-3 rounded-md bg-zinc-50 p-3 text-sm dark:bg-zinc-900/50">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="font-semibold">Контроль прочтения</span>
+            <span className="text-xs text-zinc-500">
+              {article.readingSummary.readCount}/
+              {article.readingSummary.requiredCount} прочитали, ждут{" "}
+              {article.readingSummary.pendingCount}
+            </span>
+          </div>
+          {article.readReceipts.length > 0 ? (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {article.readReceipts.slice(0, 8).map((receipt) => (
+                <span
+                  key={receipt.id}
+                  className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-950 dark:text-zinc-300"
+                >
+                  {receipt.user.fullName ?? receipt.user.email} ·{" "}
+                  {formatDateTime(receipt.readAt)}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-2 text-xs text-zinc-500">
+              Отметок прочтения по текущей версии пока нет.
+            </p>
+          )}
+        </div>
       ) : null}
 
       {article.versions.length === 0 ? (

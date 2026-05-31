@@ -66,6 +66,10 @@ export type StaffKnowledgeArticleDto = {
   approvalNote?: string | null;
 };
 
+export type StaffKnowledgeReadReceiptDto = {
+  note?: string | null;
+};
+
 export type StaffKnowledgeMaterial = {
   id: string;
   title: string;
@@ -101,6 +105,9 @@ export type StaffKnowledgeBaseReport = {
     review: number;
     archived: number;
     requiredReading: number;
+    requiredAudience: number;
+    readReceipts: number;
+    pendingReads: number;
     materialsCount: number;
   };
   canManageKnowledge: boolean;
@@ -135,6 +142,8 @@ export type StaffKnowledgeArticleResponse = {
   store: { id: string; name: string; isActive: boolean } | null;
   createdByUser: { id: string; email: string; fullName: string | null } | null;
   approvedByUser: { id: string; email: string; fullName: string | null } | null;
+  readingSummary: StaffKnowledgeReadingSummary;
+  readReceipts: StaffKnowledgeReadReceiptResponse[];
   versions: StaffKnowledgeArticleVersionResponse[];
 };
 
@@ -147,6 +156,21 @@ const articleInclude = {
     take: 5,
     include: {
       createdByUser: { select: { id: true, email: true, fullName: true } },
+    },
+  },
+  readReceipts: {
+    orderBy: { readAt: 'desc' },
+    take: 20,
+    include: {
+      user: {
+        select: {
+          id: true,
+          email: true,
+          fullName: true,
+          role: true,
+          storeAccesses: { select: { storeId: true } },
+        },
+      },
     },
   },
 } satisfies Prisma.StaffKnowledgeArticleInclude;
@@ -188,6 +212,40 @@ export type StaffKnowledgeArticleVersionResponse = {
   createdByUser: { id: string; email: string; fullName: string | null } | null;
 };
 
+type StaffKnowledgeReadUser = {
+  id: string;
+  email: string;
+  fullName: string | null;
+  role: UserRole;
+  storeAccesses: Array<{ storeId: string }>;
+};
+
+type StaffKnowledgeReadReceiptRow =
+  StaffKnowledgeArticleRow['readReceipts'][number];
+
+export type StaffKnowledgeReadingSummary = {
+  requiredCount: number;
+  readCount: number;
+  pendingCount: number;
+  requiredByMe: boolean;
+  readByMe: boolean;
+  readAt: string | null;
+};
+
+export type StaffKnowledgeReadReceiptResponse = {
+  id: string;
+  userId: string;
+  version: number;
+  note: string | null;
+  readAt: string;
+  user: {
+    id: string;
+    email: string;
+    fullName: string | null;
+    role: UserRole;
+  };
+};
+
 @Injectable()
 export class StaffKnowledgeBaseService {
   constructor(
@@ -204,7 +262,7 @@ export class StaffKnowledgeBaseService {
     const filters = this.resolveFilters(query, canManageKnowledge);
     const where = this.buildWhere(tenantId, user, filters, canManageKnowledge);
 
-    const [rows, stores, folders, categories] = await Promise.all([
+    const [rows, stores, activeUsers, folders, categories] = await Promise.all([
       this.prisma.staffKnowledgeArticle.findMany({
         where,
         include: articleInclude,
@@ -220,6 +278,17 @@ export class StaffKnowledgeBaseService {
         where: { tenantId },
         select: { id: true, name: true, isActive: true },
         orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+      }),
+      this.prisma.user.findMany({
+        where: { tenantId, isActive: true },
+        select: {
+          id: true,
+          email: true,
+          fullName: true,
+          role: true,
+          storeAccesses: { select: { storeId: true } },
+        },
+        orderBy: [{ role: 'asc' }, { fullName: 'asc' }, { email: 'asc' }],
       }),
       this.prisma.staffKnowledgeArticle.findMany({
         where: {
@@ -250,7 +319,9 @@ export class StaffKnowledgeBaseService {
         orderBy: { category: 'asc' },
       }),
     ]);
-    const responseRows = rows.map((row) => this.toArticleResponse(row));
+    const responseRows = rows.map((row) =>
+      this.toArticleResponse(row, user.id, activeUsers),
+    );
 
     return {
       filters,
@@ -301,7 +372,9 @@ export class StaffKnowledgeBaseService {
       });
     });
 
-    return this.toArticleResponse(created);
+    const activeUsers = await this.getActiveKnowledgeUsers(tenantId);
+
+    return this.toArticleResponse(created, user.id, activeUsers);
   }
 
   async updateArticle(
@@ -358,7 +431,85 @@ export class StaffKnowledgeBaseService {
       });
     });
 
-    return this.toArticleResponse(updated);
+    const activeUsers = await this.getActiveKnowledgeUsers(tenantId);
+
+    return this.toArticleResponse(updated, user.id, activeUsers);
+  }
+
+  async markArticleRead(
+    user: AuthenticatedUser,
+    id: string,
+    dto: StaffKnowledgeReadReceiptDto = {},
+  ): Promise<StaffKnowledgeReadReceiptResponse> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const article = await this.prisma.staffKnowledgeArticle.findFirst({
+      where: { id, tenantId },
+      select: {
+        id: true,
+        tenantId: true,
+        status: true,
+        version: true,
+        roleScope: true,
+        storeId: true,
+      },
+    });
+
+    if (!article) {
+      throw new NotFoundException('Knowledge article not found');
+    }
+
+    if (article.status !== 'PUBLISHED' || article.version < 1) {
+      throw new BadRequestException(
+        'Only published articles can be marked read',
+      );
+    }
+
+    const currentUser = await this.prisma.user.findFirst({
+      where: { id: user.id, tenantId, isActive: true },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        role: true,
+        storeAccesses: { select: { storeId: true } },
+      },
+    });
+
+    if (
+      !currentUser ||
+      !this.userMatchesKnowledgeTarget(currentUser, article)
+    ) {
+      throw new BadRequestException('Article is not assigned to this user');
+    }
+
+    const note = this.normalizeOptionalString(dto.note)?.slice(0, 500) ?? null;
+    const receipt = await this.prisma.staffKnowledgeArticleReadReceipt.upsert({
+      where: {
+        articleId_userId_version: {
+          articleId: article.id,
+          userId: user.id,
+          version: article.version,
+        },
+      },
+      create: {
+        tenantId,
+        articleId: article.id,
+        userId: user.id,
+        version: article.version,
+        note,
+      },
+      update: {
+        readAt: new Date(),
+        note,
+      },
+      include: {
+        user: {
+          select: { id: true, email: true, fullName: true, role: true },
+        },
+      },
+    });
+
+    return this.toReadReceiptResponse(receipt);
   }
 
   private resolveFilters(
@@ -461,6 +612,9 @@ export class StaffKnowledgeBaseService {
 
         if (row.requiresReading) {
           summary.requiredReading += 1;
+          summary.requiredAudience += row.readingSummary.requiredCount;
+          summary.readReceipts += row.readingSummary.readCount;
+          summary.pendingReads += row.readingSummary.pendingCount;
         }
 
         return summary;
@@ -472,6 +626,9 @@ export class StaffKnowledgeBaseService {
         review: 0,
         archived: 0,
         requiredReading: 0,
+        requiredAudience: 0,
+        readReceipts: 0,
+        pendingReads: 0,
         materialsCount: 0,
       },
     );
@@ -660,9 +817,32 @@ export class StaffKnowledgeBaseService {
 
   private toArticleResponse(
     row: StaffKnowledgeArticleRow,
+    currentUserId: string,
+    activeUsers: StaffKnowledgeReadUser[],
   ): StaffKnowledgeArticleResponse {
     const materials = this.normalizeMaterials(row.materials);
     const relatedLinks = this.normalizeRelatedLinks(row.relatedLinks);
+    const targetUsers =
+      row.status === 'PUBLISHED' && row.requiresReading
+        ? activeUsers.filter((candidate) =>
+            this.userMatchesKnowledgeTarget(candidate, row),
+          )
+        : [];
+    const currentVersionReceipts = row.readReceipts.filter(
+      (receipt) => receipt.version === row.version,
+    );
+    const readUserIds = new Set(
+      currentVersionReceipts.map((receipt) => receipt.userId),
+    );
+    const readByMe = currentVersionReceipts.find(
+      (receipt) => receipt.userId === currentUserId,
+    );
+    const readCount = targetUsers.filter((candidate) =>
+      readUserIds.has(candidate.id),
+    ).length;
+    const requiredByMe = targetUsers.some(
+      (candidate) => candidate.id === currentUserId,
+    );
 
     return {
       id: row.id,
@@ -689,7 +869,50 @@ export class StaffKnowledgeBaseService {
       store: row.store,
       createdByUser: row.createdByUser,
       approvedByUser: row.approvedByUser,
+      readingSummary: {
+        requiredCount: targetUsers.length,
+        readCount,
+        pendingCount: Math.max(targetUsers.length - readCount, 0),
+        requiredByMe,
+        readByMe: Boolean(readByMe),
+        readAt: readByMe?.readAt.toISOString() ?? null,
+      },
+      readReceipts: currentVersionReceipts.map((receipt) =>
+        this.toReadReceiptResponse(receipt),
+      ),
       versions: row.versions.map((version) => this.toVersionResponse(version)),
+    };
+  }
+
+  private toReadReceiptResponse(
+    row:
+      | StaffKnowledgeReadReceiptRow
+      | {
+          id: string;
+          userId: string;
+          version: number;
+          note: string | null;
+          readAt: Date;
+          user: {
+            id: string;
+            email: string;
+            fullName: string | null;
+            role: UserRole;
+          };
+        },
+  ): StaffKnowledgeReadReceiptResponse {
+    return {
+      id: row.id,
+      userId: row.userId,
+      version: row.version,
+      note: row.note,
+      readAt: row.readAt.toISOString(),
+      user: {
+        id: row.user.id,
+        email: row.user.email,
+        fullName: row.user.fullName,
+        role: row.user.role,
+      },
     };
   }
 
@@ -736,6 +959,20 @@ export class StaffKnowledgeBaseService {
     });
   }
 
+  private getActiveKnowledgeUsers(tenantId: string) {
+    return this.prisma.user.findMany({
+      where: { tenantId, isActive: true },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        role: true,
+        storeAccesses: { select: { storeId: true } },
+      },
+      orderBy: [{ role: 'asc' }, { fullName: 'asc' }, { email: 'asc' }],
+    });
+  }
+
   private canManageKnowledge(user: AuthenticatedUser) {
     switch (user.role) {
       case UserRole.OWNER:
@@ -747,6 +984,79 @@ export class StaffKnowledgeBaseService {
       default:
         return false;
     }
+  }
+
+  private userMatchesKnowledgeTarget(
+    user: StaffKnowledgeReadUser,
+    article: { roleScope: string; storeId: string | null },
+  ) {
+    if (
+      !this.roleMatchesKnowledgeScope(
+        user.role,
+        article.roleScope as StaffKnowledgeRoleScope,
+      )
+    ) {
+      return false;
+    }
+
+    if (!article.storeId) {
+      return true;
+    }
+
+    if (user.storeAccesses.length === 0) {
+      return true;
+    }
+
+    return user.storeAccesses.some(
+      (access) => access.storeId === article.storeId,
+    );
+  }
+
+  private roleMatchesKnowledgeScope(
+    role: UserRole,
+    scope: StaffKnowledgeRoleScope,
+  ) {
+    if (scope === 'ALL_STAFF') {
+      return (
+        [
+          UserRole.OWNER,
+          UserRole.ADMIN,
+          UserRole.MANAGER,
+          UserRole.CLUB_MANAGER,
+          UserRole.STANDARDS_MANAGER,
+          UserRole.SENIOR_ADMINISTRATOR,
+          UserRole.CLUB_ADMINISTRATOR,
+        ] as UserRole[]
+      ).includes(role);
+    }
+
+    if (scope === 'MANAGER') {
+      return (
+        [
+          UserRole.OWNER,
+          UserRole.ADMIN,
+          UserRole.MANAGER,
+          UserRole.CLUB_MANAGER,
+          UserRole.STANDARDS_MANAGER,
+        ] as UserRole[]
+      ).includes(role);
+    }
+
+    if (scope === 'CLUB_MANAGER') {
+      return role === UserRole.CLUB_MANAGER;
+    }
+
+    if (scope === 'STANDARDS_MANAGER') {
+      return role === UserRole.STANDARDS_MANAGER;
+    }
+
+    if (scope === 'SENIOR_ADMINISTRATOR') {
+      return role === UserRole.SENIOR_ADMINISTRATOR;
+    }
+
+    return (
+      [UserRole.SENIOR_ADMINISTRATOR, UserRole.CLUB_ADMINISTRATOR] as UserRole[]
+    ).includes(role);
   }
 
   private visibleRoleScopes(role: UserRole): StaffKnowledgeRoleScope[] {

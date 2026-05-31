@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { DashboardFilters } from "@/components/dashboard-filters";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
@@ -53,11 +54,9 @@ function dashboardHref(filters: {
   dateFrom?: string;
   dateTo?: string;
   storeIds: readonly string[];
-  skuGrouping: "club" | "network";
 }) {
   const params = new URLSearchParams();
   params.set("period", filters.period);
-  params.set("skuGrouping", filters.skuGrouping);
 
   if (filters.period === "custom") {
     if (filters.dateFrom) {
@@ -75,12 +74,52 @@ function dashboardHref(filters: {
   return `/dashboard${query ? `?${query}` : ""}`;
 }
 
+function diagnosticsCanonicalHref(params: {
+  period?: string | string[];
+  dateFrom?: string | string[];
+  dateTo?: string | string[];
+  storeIds?: string | string[];
+}) {
+  const canonicalParams = new URLSearchParams();
+  const period = searchParam(params.period);
+
+  if (period) {
+    canonicalParams.set("period", period);
+  }
+
+  if (period === "custom") {
+    const dateFrom = searchParam(params.dateFrom);
+    const dateTo = searchParam(params.dateTo);
+
+    if (dateFrom) {
+      canonicalParams.set("dateFrom", dateFrom);
+    }
+
+    if (dateTo) {
+      canonicalParams.set("dateTo", dateTo);
+    }
+  }
+
+  searchParamsArray(params.storeIds).forEach((storeId) => {
+    canonicalParams.append("storeIds", storeId);
+  });
+
+  const query = canonicalParams.toString();
+
+  return `/dashboard/revenue-diagnostics${query ? `?${query}` : ""}`;
+}
+
 export default async function DashboardRevenueDiagnosticsPage({
   searchParams,
 }: {
   searchParams: SearchParams;
 }) {
   const params = await searchParams;
+
+  if (params.skuGrouping !== undefined) {
+    redirect(diagnosticsCanonicalHref(params));
+  }
+
   await requireCurrentUser();
 
   const filters = {
@@ -88,8 +127,7 @@ export default async function DashboardRevenueDiagnosticsPage({
     dateFrom: searchParam(params.dateFrom),
     dateTo: searchParam(params.dateTo),
     storeIds: searchParamsArray(params.storeIds),
-    skuGrouping:
-      searchParam(params.skuGrouping) === "club" ? "club" : "network",
+    skuGrouping: "network",
   } as const;
   const [report, stores] = await Promise.all([
     getDashboardRevenueDiagnostics(filters),
@@ -140,7 +178,6 @@ export default async function DashboardRevenueDiagnosticsPage({
             period={filters.period}
             dateFrom={report.periodFrom}
             dateTo={report.periodTo}
-            skuGrouping={filters.skuGrouping}
             stores={stores}
             selectedStoreIds={report.selectedStoreIds}
           />

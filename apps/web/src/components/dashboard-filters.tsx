@@ -113,7 +113,7 @@ export function DashboardFilters({
   period: string;
   dateFrom: string;
   dateTo: string;
-  skuGrouping: DashboardSkuGrouping;
+  skuGrouping?: DashboardSkuGrouping;
   stores: Store[];
   selectedStoreIds: string[];
 }) {
@@ -200,7 +200,10 @@ export function DashboardFilters({
     const closePanel = options.closePanel ?? true;
 
     params.set("period", nextPeriod);
-    params.set("skuGrouping", nextGrouping);
+
+    if (nextGrouping) {
+      params.set("skuGrouping", nextGrouping);
+    }
 
     if (nextPeriod === "custom") {
       params.set("dateFrom", nextDateFrom);

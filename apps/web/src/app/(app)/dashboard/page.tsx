@@ -14,6 +14,7 @@ import {
 import { getOperationalReport } from "@/lib/reports";
 import { getStores } from "@/lib/stores";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
 
@@ -36,7 +37,6 @@ type DashboardHrefFilters = {
   dateFrom?: string;
   dateTo?: string;
   storeIds: readonly string[];
-  skuGrouping: "club" | "network";
 };
 
 function dashboardQuery(filters: DashboardHrefFilters) {
@@ -54,8 +54,6 @@ function dashboardQuery(filters: DashboardHrefFilters) {
     }
   }
 
-  params.set("skuGrouping", filters.skuGrouping);
-
   filters.storeIds.forEach((storeId) => {
     params.append("storeIds", storeId);
   });
@@ -68,6 +66,48 @@ function dashboardRevenueByClubHref(filters: DashboardHrefFilters) {
   const query = params.toString();
 
   return `/dashboard/revenue-by-club${query ? `?${query}` : ""}`;
+}
+
+function dashboardCanonicalHref(params: {
+  period?: string | string[];
+  dateFrom?: string | string[];
+  dateTo?: string | string[];
+  revenueView?: string | string[];
+  storeIds?: string | string[];
+}) {
+  const canonicalParams = new URLSearchParams();
+  const period = searchParam(params.period);
+
+  if (period) {
+    canonicalParams.set("period", period);
+  }
+
+  if (period === "custom") {
+    const dateFrom = searchParam(params.dateFrom);
+    const dateTo = searchParam(params.dateTo);
+
+    if (dateFrom) {
+      canonicalParams.set("dateFrom", dateFrom);
+    }
+
+    if (dateTo) {
+      canonicalParams.set("dateTo", dateTo);
+    }
+  }
+
+  const revenueView = searchParam(params.revenueView);
+
+  if (revenueView) {
+    canonicalParams.set("revenueView", revenueView);
+  }
+
+  searchParamsArray(params.storeIds).forEach((storeId) => {
+    canonicalParams.append("storeIds", storeId);
+  });
+
+  const query = canonicalParams.toString();
+
+  return `/dashboard${query ? `?${query}` : ""}`;
 }
 
 function formatPercent(value: number) {
@@ -349,14 +389,18 @@ export default async function DashboardPage({
   searchParams: SearchParams;
 }) {
   const params = await searchParams;
+
+  if (params.skuGrouping !== undefined) {
+    redirect(dashboardCanonicalHref(params));
+  }
+
   await requireCurrentUser();
   const filters = {
     period: searchParam(params.period) ?? "day",
     dateFrom: searchParam(params.dateFrom),
     dateTo: searchParam(params.dateTo),
     storeIds: searchParamsArray(params.storeIds),
-    skuGrouping:
-      searchParam(params.skuGrouping) === "club" ? "club" : "network",
+    skuGrouping: "network",
   } as const;
   const revenueView: DashboardRevenueView =
     searchParam(params.revenueView) === "stores" ? "stores" : "summary";
@@ -437,7 +481,6 @@ export default async function DashboardPage({
                   period={filters.period}
                   dateFrom={summary.periodFrom}
                   dateTo={summary.periodTo}
-                  skuGrouping={summary.skuGrouping}
                   stores={stores}
                   selectedStoreIds={summary.selectedStoreIds}
                 />

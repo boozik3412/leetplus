@@ -283,6 +283,20 @@ type StaffKnowledgeArticleSnapshotSource = {
   relatedLinks: Prisma.JsonValue | null;
 };
 
+type ReturnedKnowledgeArticleWorkflowSource = {
+  id: string;
+  title: string;
+  folder: string;
+  category: string;
+  storeId: string | null;
+  status: string;
+  approvalNote: string | null;
+  createdByUserId: string | null;
+  approvedByUserId: string | null;
+  returnedAt: Date | null;
+  revisionDueAt: Date | null;
+};
+
 export type StaffKnowledgeArticleVersionResponse = {
   id: string;
   version: number;
@@ -560,6 +574,12 @@ export class StaffKnowledgeBaseService {
 
       if (nextStatus === 'RETURNED') {
         await this.upsertReturnedArticleNotification(
+          tx,
+          tenantId,
+          article,
+          user,
+        );
+        await this.upsertReturnedArticleRevisionTask(
           tx,
           tenantId,
           article,
@@ -1481,20 +1501,148 @@ export class StaffKnowledgeBaseService {
     });
   }
 
+  private async upsertReturnedArticleRevisionTask(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    article: ReturnedKnowledgeArticleWorkflowSource,
+    reviewer: AuthenticatedUser,
+  ) {
+    if (!article.createdByUserId) {
+      return;
+    }
+
+    const dueAt =
+      article.revisionDueAt ??
+      this.addDays(
+        article.returnedAt ?? new Date(),
+        RETURNED_ARTICLE_REVISION_SLA_DAYS,
+      );
+    const title = `Доработать материал базы знаний: ${article.title}`.slice(
+      0,
+      240,
+    );
+    const actionHref = `/staff/knowledge-base?status=RETURNED&search=${encodeURIComponent(article.title)}`;
+    const description = [
+      'Материал возвращен на доработку из базы знаний.',
+      `Раздел: ${article.folder} / ${article.category}`,
+      article.approvalNote
+        ? `Комментарий согласования: ${article.approvalNote}`
+        : null,
+      article.revisionDueAt
+        ? `SLA реакции: до ${this.formatSlaDate(article.revisionDueAt)}`
+        : null,
+      `Открыть материал: ${actionHref}`,
+    ]
+      .filter((line): line is string => Boolean(line))
+      .join('\n');
+    const labels = {
+      source: 'KNOWLEDGE_BASE',
+      workflow: 'KNOWLEDGE_BASE_APPROVAL',
+      workflowStep: 'RETURNED_ARTICLE_REVISION',
+      articleId: article.id,
+      articleTitle: article.title,
+      returnedAt: article.returnedAt?.toISOString() ?? null,
+      revisionDueAt: article.revisionDueAt?.toISOString() ?? null,
+      autoCreated: true,
+    };
+    const existing = await tx.staffTask.findFirst({
+      where: {
+        tenantId,
+        status: { notIn: ['DONE', 'CANCELED'] },
+        AND: [
+          {
+            labels: {
+              path: ['workflowStep'],
+              equals: 'RETURNED_ARTICLE_REVISION',
+            },
+          },
+          {
+            labels: {
+              path: ['articleId'],
+              equals: article.id,
+            },
+          },
+        ],
+      },
+      select: { id: true },
+    });
+
+    const task = existing
+      ? await tx.staffTask.update({
+          where: { id: existing.id },
+          data: {
+            storeId: article.storeId,
+            assignedToUserId: article.createdByUserId,
+            title,
+            description,
+            type: 'LONG_TERM',
+            priority: 'NORMAL',
+            dueAt,
+            labels,
+          },
+          select: { id: true },
+        })
+      : await tx.staffTask.create({
+          data: {
+            tenantId,
+            storeId: article.storeId,
+            createdByUserId: reviewer.id,
+            assignedToUserId: article.createdByUserId,
+            title,
+            description,
+            type: 'LONG_TERM',
+            status: 'OPEN',
+            priority: 'NORMAL',
+            dueAt,
+            labels,
+          },
+          select: { id: true },
+        });
+
+    await tx.staffTaskAuditEvent.create({
+      data: {
+        tenantId,
+        taskId: task.id,
+        actorUserId: reviewer.id,
+        action: existing ? 'UPDATED' : 'CREATED',
+        message: existing
+          ? 'Knowledge base revision task updated'
+          : 'Knowledge base revision task created',
+        metadata: {
+          source: 'KNOWLEDGE_BASE',
+          workflowStep: 'RETURNED_ARTICLE_REVISION',
+          articleId: article.id,
+          articleTitle: article.title,
+          authorUserId: article.createdByUserId,
+          reviewerUserId: reviewer.id,
+          dueAt: dueAt.toISOString(),
+          autoCreated: true,
+        },
+      },
+    });
+
+    if (reviewer.id !== article.createdByUserId) {
+      await tx.staffTaskObserver.upsert({
+        where: {
+          taskId_userId: {
+            taskId: task.id,
+            userId: reviewer.id,
+          },
+        },
+        create: {
+          tenantId,
+          taskId: task.id,
+          userId: reviewer.id,
+        },
+        update: {},
+      });
+    }
+  }
+
   private async upsertReturnedArticleNotification(
     tx: Prisma.TransactionClient,
     tenantId: string,
-    article: {
-      id: string;
-      title: string;
-      storeId: string | null;
-      status: string;
-      approvalNote: string | null;
-      createdByUserId: string | null;
-      approvedByUserId: string | null;
-      returnedAt: Date | null;
-      revisionDueAt: Date | null;
-    },
+    article: ReturnedKnowledgeArticleWorkflowSource,
     reviewer: AuthenticatedUser,
   ) {
     const dedupeKey = `knowledge-base:${article.id}:returned`;

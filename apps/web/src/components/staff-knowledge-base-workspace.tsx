@@ -417,7 +417,6 @@ export function StaffKnowledgeBaseWorkspace({
   );
   const [isPending, setIsPending] = useState(false);
   const [readPendingId, setReadPendingId] = useState<string | null>(null);
-  const [taskPendingId, setTaskPendingId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -687,75 +686,6 @@ export function StaffKnowledgeBaseWorkspace({
       setError(caught instanceof Error ? caught.message : "Ошибка запроса");
     } finally {
       setReadPendingId(null);
-    }
-  }
-
-  async function createRevisionTask(article: StaffKnowledgeArticle) {
-    setTaskPendingId(article.id);
-    setMessage(null);
-    setError(null);
-
-    const observerUserIds = article.approvedByUser?.id
-      ? [article.approvedByUser.id]
-      : [];
-    const dueAt = article.revisionDueAt
-      ? new Date(article.revisionDueAt)
-      : new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
-    const payload = {
-      title: `Доработать материал базы знаний: ${article.title}`,
-      description: [
-        "Материал возвращен на доработку из базы знаний.",
-        `Раздел: ${article.folder} / ${article.category}`,
-        article.approvalNote
-          ? `Комментарий согласования: ${article.approvalNote}`
-          : null,
-        article.revisionDueAt
-          ? `SLA реакции: до ${formatDateTime(article.revisionDueAt)}`
-          : null,
-        `Открыть материал: /staff/knowledge-base?status=RETURNED&search=${encodeURIComponent(article.title)}`,
-      ]
-        .filter(Boolean)
-        .join("\n"),
-      type: "LONG_TERM",
-      priority: "NORMAL",
-      dueAt: dueAt.toISOString(),
-      storeId: article.store?.id ?? null,
-      assignedToUserId: article.createdByUser?.id ?? null,
-      observerUserIds,
-      labels: {
-        source: "KNOWLEDGE_BASE",
-        workflow: "KNOWLEDGE_BASE_APPROVAL",
-        workflowStep: "RETURNED_ARTICLE_REVISION",
-        articleId: article.id,
-        articleTitle: article.title,
-        returnedAt: article.returnedAt,
-        revisionDueAt: article.revisionDueAt,
-      },
-    };
-
-    try {
-      const response = await fetch("/api/staff/tasks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      if (!response.ok) {
-        const data = (await response.json().catch(() => null)) as {
-          message?: string;
-        } | null;
-        throw new Error(data?.message ?? "Не удалось создать задачу на доработку");
-      }
-
-      const created = (await response.json()) as { title?: string };
-      setMessage(
-        `Задача на доработку создана: ${created.title ?? payload.title}.`,
-      );
-      router.refresh();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Ошибка запроса");
-    } finally {
-      setTaskPendingId(null);
     }
   }
 
@@ -1063,16 +993,12 @@ export function StaffKnowledgeBaseWorkspace({
                       : "Нет прав"}
                 </button>
                 {selectedArticle?.status === "RETURNED" ? (
-                  <button
-                    type="button"
-                    onClick={() => createRevisionTask(selectedArticle)}
-                    disabled={taskPendingId === selectedArticle.id}
-                    className="h-10 rounded-md border border-amber-300 bg-amber-50 px-4 text-sm font-semibold text-amber-800 transition hover:border-amber-400 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-500/50 dark:bg-amber-500/10 dark:text-amber-100 dark:hover:bg-amber-500/15"
+                  <a
+                    href="/staff/tasks?view=approval"
+                    className="inline-flex h-10 items-center rounded-md border border-amber-300 bg-amber-50 px-4 text-sm font-semibold text-amber-800 transition hover:border-amber-400 hover:bg-amber-100 dark:border-amber-500/50 dark:bg-amber-500/10 dark:text-amber-100 dark:hover:bg-amber-500/15"
                   >
-                    {taskPendingId === selectedArticle.id
-                      ? "Создаем задачу..."
-                      : "Создать задачу на доработку"}
-                  </button>
+                    Открыть задачу на доработку
+                  </a>
                 ) : null}
               </div>
 

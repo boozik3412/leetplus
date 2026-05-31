@@ -14,6 +14,7 @@ export type StaffTaskViewMode =
   | "today"
   | "overdue"
   | "my"
+  | "watched"
   | "byClub"
   | "byEmployee"
   | "byShift"
@@ -67,6 +68,12 @@ export type StaffTaskAuditEvent = {
   actorUser: StaffTaskUser | null;
 };
 
+export type StaffTaskObserver = {
+  id: string;
+  createdAt: string;
+  user: StaffTaskUser;
+};
+
 export type StaffTask = {
   id: string;
   title: string;
@@ -89,6 +96,7 @@ export type StaffTask = {
   } | null;
   createdByUser: StaffTaskUser | null;
   assignedToUser: StaffTaskUser | null;
+  observers: StaffTaskObserver[];
   labels: unknown;
   checklist: unknown;
   comments: StaffTaskComment[];
@@ -103,6 +111,7 @@ export type StaffTaskFilters = {
   storeId?: string;
   shiftId?: string;
   assignedToUserId?: string;
+  observerUserId?: string;
   search?: string;
   dueFrom?: string;
   dueTo?: string;
@@ -121,6 +130,7 @@ export type StaffTaskReport = {
     storeId: string | null;
     shiftId: string | null;
     assignedToUserId: string | null;
+    observerUserId: string | null;
     search: string | null;
     dueFrom: string | null;
     dueTo: string | null;

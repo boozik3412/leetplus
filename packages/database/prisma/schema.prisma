@@ -153,6 +153,7 @@ model Tenant {
   staffTaskTemplates                   StaffTaskTemplate[]
   staffTaskRecurringRules              StaffTaskRecurringRule[]
   staffTaskRecurringRuleRuns           StaffTaskRecurringRuleRun[]
+  staffTaskObservers                   StaffTaskObserver[]
   staffTaskComments                    StaffTaskComment[]
   staffTaskAuditEvents                 StaffTaskAuditEvent[]
   staffKnowledgeArticles               StaffKnowledgeArticle[]
@@ -221,6 +222,7 @@ model User {
   createdStaffTaskRecurringRules       StaffTaskRecurringRule[]              @relation("StaffTaskRecurringRuleCreatedBy")
   assignedStaffTaskRecurringRules      StaffTaskRecurringRule[]              @relation("StaffTaskRecurringRuleAssignedTo")
   assignedStaffTasks                   StaffTask[]                           @relation("StaffTaskAssignedTo")
+  observedStaffTasks                   StaffTaskObserver[]                   @relation("StaffTaskObserverUser")
   staffTaskComments                    StaffTaskComment[]                    @relation("StaffTaskCommentAuthor")
   staffTaskAuditEvents                 StaffTaskAuditEvent[]                 @relation("StaffTaskAuditActor")
   createdStaffKnowledgeArticles        StaffKnowledgeArticle[]               @relation("StaffKnowledgeArticleCreatedBy")
@@ -1406,6 +1408,7 @@ model StaffTask {
   assignedToUser User?                 @relation("StaffTaskAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
   lastRecurringRuleRuns StaffTaskRecurringRule[] @relation("StaffTaskRecurringRuleLastTask")
   recurringRuleScheduleRuns StaffTaskRecurringRuleRun[]
+  observers      StaffTaskObserver[]
   comments       StaffTaskComment[]
   auditEvents    StaffTaskAuditEvent[]
 
@@ -1417,6 +1420,22 @@ model StaffTask {
   @@index([sourceRecurringRuleId], map: "staff_task_source_recurring_rule_idx")
   @@index([createdByUserId], map: "staff_task_created_by_idx")
   @@index([assignedToUserId], map: "staff_task_assigned_to_idx")
+}
+
+model StaffTaskObserver {
+  id        String   @id @default(uuid())
+  tenantId  String
+  taskId    String
+  userId    String
+  createdAt DateTime @default(now())
+
+  tenant Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  task   StaffTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user   User      @relation("StaffTaskObserverUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, userId], map: "staff_task_observer_task_user_unique")
+  @@index([tenantId, taskId], map: "staff_task_observer_tenant_task_idx")
+  @@index([tenantId, userId], map: "staff_task_observer_tenant_user_idx")
 }
 
 model StaffTaskTemplate {

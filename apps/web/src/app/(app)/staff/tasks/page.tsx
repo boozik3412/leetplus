@@ -100,6 +100,7 @@ function isView(value: string | undefined): value is StaffTaskViewMode {
     value === "today" ||
     value === "overdue" ||
     value === "my" ||
+    value === "watched" ||
     value === "byClub" ||
     value === "byEmployee" ||
     value === "byShift" ||
@@ -158,6 +159,7 @@ function resolveFilters(params: Awaited<SearchParams>): StaffTaskFilters {
     storeId: searchParam(params.storeId),
     shiftId: searchParam(params.shiftId),
     assignedToUserId: searchParam(params.assignedToUserId),
+    observerUserId: searchParam(params.observerUserId),
     search: searchParam(params.search)?.trim(),
     dueFrom: searchParam(params.dueFrom),
     dueTo: searchParam(params.dueTo),
@@ -217,6 +219,17 @@ function formatDateTime(value: string | null) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
+}
+
+function userLabel(user: StaffTask["assignedToUser"]) {
+  return user?.fullName ?? user?.email ?? null;
+}
+
+function observerLabels(task: StaffTask) {
+  return task.observers
+    .map((observer) => userLabel(observer.user))
+    .filter(Boolean)
+    .join(", ");
 }
 
 function statusBadgeClass(task: StaffTask) {
@@ -474,6 +487,8 @@ export default async function StaffTasksPage({
                     ? "all"
                     : filters.status,
                 shiftId: view.key === "byShift" ? null : filters.shiftId,
+                observerUserId:
+                  view.key === "watched" ? null : filters.observerUserId,
               });
 
               return (
@@ -507,7 +522,7 @@ export default async function StaffTasksPage({
         </section>
 
         <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-          <form className="grid gap-3 lg:grid-cols-[1fr_1fr_1fr_1fr_auto]">
+          <form className="grid gap-3 lg:grid-cols-[1fr_1fr_1fr_1fr_1fr_auto]">
             <label className="space-y-1">
               <span className="text-xs font-bold uppercase text-zinc-500">
                 Статус
@@ -563,6 +578,24 @@ export default async function StaffTasksPage({
 
             <label className="space-y-1">
               <span className="text-xs font-bold uppercase text-zinc-500">
+                Наблюдатель
+              </span>
+              <select
+                name="observerUserId"
+                defaultValue={report.filters.observerUserId ?? ""}
+                className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+              >
+                <option value="">Все</option>
+                {report.users.map((user) => (
+                  <option key={user.id} value={user.id}>
+                    {user.fullName ?? user.email}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="space-y-1">
+              <span className="text-xs font-bold uppercase text-zinc-500">
                 Поиск
               </span>
               <input
@@ -584,6 +617,16 @@ export default async function StaffTasksPage({
             <span>Тип: {typeLabels[report.filters.type]}</span>
             <span>Приоритет: {priorityLabels[report.filters.priority]}</span>
             <span>Сортировка: {sortLabels[report.filters.sort]}</span>
+            {report.filters.observerUserId ? (
+              <span>
+                Наблюдатель:{" "}
+                {userLabel(
+                  report.users.find(
+                    (user) => user.id === report.filters.observerUserId,
+                  ) ?? null,
+                ) ?? "выбран"}
+              </span>
+            ) : null}
           </div>
         </section>
 
@@ -638,7 +681,7 @@ export default async function StaffTasksPage({
                       </p>
                     ) : null}
 
-                    <dl className="mt-3 grid gap-2 text-sm text-zinc-600 dark:text-zinc-400 sm:grid-cols-2 lg:grid-cols-4">
+                    <dl className="mt-3 grid gap-2 text-sm text-zinc-600 dark:text-zinc-400 sm:grid-cols-2 lg:grid-cols-5">
                       <div>
                         <dt className="text-xs font-bold uppercase text-zinc-500">
                           Срок
@@ -656,10 +699,14 @@ export default async function StaffTasksPage({
                           Ответственный
                         </dt>
                         <dd>
-                          {task.assignedToUser?.fullName ??
-                            task.assignedToUser?.email ??
-                            "Не назначен"}
+                          {userLabel(task.assignedToUser) ?? "Не назначен"}
                         </dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs font-bold uppercase text-zinc-500">
+                          Наблюдатели
+                        </dt>
+                        <dd>{observerLabels(task) || "Нет"}</dd>
                       </div>
                       <div>
                         <dt className="text-xs font-bold uppercase text-zinc-500">

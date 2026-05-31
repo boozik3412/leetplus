@@ -330,7 +330,7 @@ LeetPlus должен развиваться из набора отчетов в
 - Готово: поддержана ручная employee-to-Langame mapping через `externalDomain` и `working_shifts.user_id`; это готовит дальнейшее связывание смен, рейтингов и операционных задач с устойчивой идентичностью сотрудника.
 - Готово: добавлены типы задач one-time, shift, recurring, long-term, personal, club и role.
 - Готово: добавлены статусы задач new/open, in progress, on review, done, overdue и canceled.
-- Начато: задачи поддерживают priority, deadline, responsible employee, club, shift, author, labels, comments, evidence attachments и checklist; observer остается отдельным будущим расширением.
+- Готово: задачи поддерживают priority, deadline, responsible employee, club, shift, author, labels, comments, evidence attachments, checklist и observers; `/staff/tasks` умеет назначать нескольких наблюдателей, фильтровать по наблюдателю и показывать quick view `Наблюдаю`.
 - Готово: добавлены recurring rules для задач: daily, weekly, monthly, opening shift и closing shift, с привязкой к шаблону задачи, клубу, исполнителю, плановому времени и ручным запуском перед автоматизацией.
 - Готово: templates для типовых операций клуба вынесены в `/staff/task-templates` и могут создавать задачи в один клик.
 - Готово: `/staff/tasks` получил базовые views списка задач: today, overdue, my tasks, by club, by employee, by shift и by status с быстрыми счетчиками и drilldown-фильтрами.

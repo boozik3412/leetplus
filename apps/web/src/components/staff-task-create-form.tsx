@@ -53,6 +53,10 @@ export function StaffTaskCreateForm({
     setError(null);
 
     const dueAt = String(form.get("dueAt") ?? "").trim();
+    const observerUserIds = form
+      .getAll("observerUserIds")
+      .map((value) => String(value).trim())
+      .filter(Boolean);
     const payload = {
       title,
       description: String(form.get("description") ?? "").trim() || null,
@@ -62,6 +66,7 @@ export function StaffTaskCreateForm({
       storeId: String(form.get("storeId") ?? "").trim() || null,
       assignedToUserId:
         String(form.get("assignedToUserId") ?? "").trim() || null,
+      observerUserIds,
     };
 
     try {
@@ -202,6 +207,43 @@ export function StaffTaskCreateForm({
           </select>
         </label>
       </div>
+
+      {users.length > 0 ? (
+        <fieldset className="mt-3 rounded-lg border border-dashed border-zinc-200 p-3 dark:border-zinc-800">
+          <legend className="px-1 text-xs font-bold uppercase text-zinc-500">
+            Наблюдатели
+          </legend>
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="mt-1 text-xs leading-5 text-zinc-500">
+                Получают задачу в свой список наблюдения, но не становятся
+                ответственными.
+              </p>
+            </div>
+            <span className="text-xs font-semibold text-zinc-500">
+              Можно выбрать несколько
+            </span>
+          </div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {users.map((user) => (
+              <label
+                key={user.id}
+                className="flex min-h-10 items-center gap-2 rounded-md border border-zinc-200 px-3 py-2 text-sm transition hover:border-emerald-300 hover:bg-emerald-50 dark:border-zinc-800 dark:hover:border-emerald-500/70 dark:hover:bg-emerald-500/10"
+              >
+                <input
+                  name="observerUserIds"
+                  type="checkbox"
+                  value={user.id}
+                  className="h-4 w-4 rounded border-zinc-300 text-emerald-500 focus:ring-emerald-500"
+                />
+                <span className="min-w-0 truncate">
+                  {user.fullName ?? user.email}
+                </span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      ) : null}
 
       <label className="mt-3 block space-y-1">
         <span className="text-xs font-bold uppercase text-zinc-500">

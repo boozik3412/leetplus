@@ -31,6 +31,7 @@ const taskViewModes = [
   'today',
   'overdue',
   'my',
+  'watched',
   'byClub',
   'byEmployee',
   'byShift',
@@ -69,6 +70,7 @@ export type StaffTasksQuery = {
   storeId?: string;
   shiftId?: string;
   assignedToUserId?: string;
+  observerUserId?: string;
   search?: string;
   dueFrom?: string;
   dueTo?: string;
@@ -91,6 +93,7 @@ export type StaffTaskDto = {
   storeId?: string | null;
   shiftId?: string | null;
   assignedToUserId?: string | null;
+  observerUserIds?: unknown;
   labels?: unknown;
   checklist?: unknown;
 };
@@ -112,6 +115,7 @@ export type StaffTaskReport = {
     storeId: string | null;
     shiftId: string | null;
     assignedToUserId: string | null;
+    observerUserId: string | null;
     search: string | null;
     dueFrom: string | null;
     dueTo: string | null;
@@ -185,10 +189,17 @@ export type StaffTaskResponse = {
   } | null;
   createdByUser: { id: string; email: string; fullName: string | null } | null;
   assignedToUser: { id: string; email: string; fullName: string | null } | null;
+  observers: StaffTaskObserverResponse[];
   labels: Prisma.JsonValue | null;
   checklist: Prisma.JsonValue | null;
   comments: StaffTaskCommentResponse[];
   auditEvents: StaffTaskAuditEventResponse[];
+};
+
+export type StaffTaskObserverResponse = {
+  id: string;
+  createdAt: string;
+  user: { id: string; email: string; fullName: string | null };
 };
 
 export type StaffTaskCommentResponse = {
@@ -223,6 +234,12 @@ const taskInclude = {
   },
   createdByUser: { select: { id: true, email: true, fullName: true } },
   assignedToUser: { select: { id: true, email: true, fullName: true } },
+  observers: {
+    orderBy: { createdAt: 'asc' },
+    include: {
+      user: { select: { id: true, email: true, fullName: true } },
+    },
+  },
   comments: {
     orderBy: { createdAt: 'desc' },
     take: 3,
@@ -280,6 +297,7 @@ export class StaffTasksService {
             storeId: true,
             shiftId: true,
             type: true,
+            observers: { select: { userId: true } },
           },
           take: 5000,
         }),
@@ -354,6 +372,7 @@ export class StaffTasksService {
           'Приоритет',
           'Клуб',
           'Исполнитель',
+          'Наблюдатели',
           'Дедлайн',
           'Завершено',
           'Просрочено',
@@ -365,7 +384,7 @@ export class StaffTasksService {
         ],
         ...rows.map((task) => this.toTaskExportRow(this.toTaskResponse(task))),
       ],
-      widths: [36, 34, 18, 20, 16, 24, 28, 20, 20, 14, 20, 20, 44, 36, 48],
+      widths: [36, 34, 18, 20, 16, 24, 28, 34, 20, 20, 14, 20, 20, 44, 36, 48],
     });
   }
 
@@ -374,6 +393,8 @@ export class StaffTasksService {
     const data = await this.normalizeTaskData(tenantId, dto, {
       requireTitle: true,
     });
+    const observerUserIds =
+      (await this.resolveObserverUserIds(tenantId, dto.observerUserIds)) ?? [];
     const status = (data.status as StaffTaskStatus | undefined) ?? 'OPEN';
 
     const task = await this.prisma.$transaction(async (tx) => {
@@ -399,9 +420,12 @@ export class StaffTasksService {
             status,
             priority: data.priority ?? 'NORMAL',
             type: data.type ?? 'ONE_TIME',
+            observerUserIds,
           },
         },
       });
+
+      await this.syncTaskObservers(tx, tenantId, created.id, observerUserIds);
 
       return this.fetchTaskOrThrow(tx, tenantId, created.id);
     });
@@ -423,37 +447,61 @@ export class StaffTasksService {
     const data = await this.normalizeTaskData(tenantId, dto, {
       requireTitle: false,
     });
+    const observerUserIds = await this.resolveObserverUserIds(
+      tenantId,
+      dto.observerUserIds,
+    );
     const normalizedStatus = data.status as StaffTaskStatus | undefined;
     const currentStatus = current.status as StaffTaskStatus;
     const nextStatus = normalizedStatus ?? currentStatus;
+    const dataFields = Object.keys(data);
 
     const task = await this.prisma.$transaction(async (tx) => {
-      await tx.staffTask.update({
-        where: { id: current.id },
-        data: {
-          ...data,
-          completedAt:
-            data.status === undefined
-              ? undefined
-              : nextStatus === 'DONE'
-                ? new Date()
-                : null,
-        },
-        select: { id: true },
-      });
+      if (dataFields.length > 0) {
+        await tx.staffTask.update({
+          where: { id: current.id },
+          data: {
+            ...data,
+            completedAt:
+              data.status === undefined
+                ? undefined
+                : nextStatus === 'DONE'
+                  ? new Date()
+                  : null,
+          },
+          select: { id: true },
+        });
+      }
+
+      if (observerUserIds !== undefined) {
+        await this.syncTaskObservers(tx, tenantId, current.id, observerUserIds);
+      }
 
       await tx.staffTaskAuditEvent.create({
         data: {
           tenantId,
           taskId: current.id,
           actorUserId: user.id,
-          action: normalizedStatus ? 'STATUS_CHANGED' : 'UPDATED',
+          action: normalizedStatus
+            ? 'STATUS_CHANGED'
+            : observerUserIds !== undefined && dataFields.length === 0
+              ? 'OBSERVERS_UPDATED'
+              : 'UPDATED',
           message: normalizedStatus
             ? `Status changed from ${currentStatus} to ${nextStatus}`
-            : 'Task updated',
+            : observerUserIds !== undefined && dataFields.length === 0
+              ? 'Task observers updated'
+              : 'Task updated',
           metadata: normalizedStatus
-            ? { fromStatus: currentStatus, toStatus: nextStatus }
-            : { fields: Object.keys(data) },
+            ? {
+                fromStatus: currentStatus,
+                toStatus: nextStatus,
+                ...(observerUserIds !== undefined ? { observerUserIds } : {}),
+              }
+            : {
+                fields: dataFields,
+                ...(observerUserIds !== undefined ? { observerUserIds } : {}),
+              },
         },
       });
 
@@ -580,6 +628,7 @@ export class StaffTasksService {
       storeId: this.normalizeOptionalString(query.storeId),
       shiftId: this.normalizeOptionalString(query.shiftId),
       assignedToUserId: this.normalizeOptionalString(query.assignedToUserId),
+      observerUserId: this.normalizeOptionalString(query.observerUserId),
       search: this.normalizeOptionalString(query.search),
       dueFrom: this.normalizeDateString(query.dueFrom),
       dueTo: this.normalizeDateString(query.dueTo),
@@ -648,6 +697,12 @@ export class StaffTasksService {
       where.assignedToUserId = currentUserId;
     }
 
+    if (filters.observerUserId) {
+      where.observers = { some: { userId: filters.observerUserId } };
+    } else if (includeStatus && filters.view === 'watched') {
+      where.observers = { some: { userId: currentUserId } };
+    }
+
     if (filters.search) {
       and.push({
         OR: [
@@ -691,6 +746,8 @@ export class StaffTasksService {
         shiftId: filters.view === 'byShift' ? null : filters.shiftId,
         assignedToUserId:
           filters.view === 'my' ? null : filters.assignedToUserId,
+        observerUserId:
+          filters.view === 'watched' ? null : filters.observerUserId,
       },
       false,
       currentUserId,
@@ -769,6 +826,7 @@ export class StaffTasksService {
       storeId: string | null;
       shiftId: string | null;
       type: string;
+      observers: Array<{ userId: string }>;
     }>,
     currentUserId: string,
   ): StaffTaskReport['quickViews'] {
@@ -795,6 +853,13 @@ export class StaffTasksService {
         label: 'Мои',
         count: rows.filter((row) => row.assignedToUserId === currentUserId)
           .length,
+      },
+      {
+        key: 'watched',
+        label: 'Наблюдаю',
+        count: rows.filter((row) =>
+          row.observers.some((observer) => observer.userId === currentUserId),
+        ).length,
       },
       {
         key: 'byClub',
@@ -1016,6 +1081,84 @@ export class StaffTasksService {
     return data;
   }
 
+  private async resolveObserverUserIds(
+    tenantId: string,
+    value: unknown,
+  ): Promise<string[] | undefined> {
+    if (value === undefined) {
+      return undefined;
+    }
+
+    const values = Array.isArray(value)
+      ? value
+      : typeof value === 'string'
+        ? value.split(',')
+        : [];
+    const ids = Array.from(
+      new Set(
+        values
+          .map((item) => (typeof item === 'string' ? item.trim() : ''))
+          .filter(Boolean),
+      ),
+    );
+
+    if (ids.length === 0) {
+      return [];
+    }
+
+    const users = await this.prisma.user.findMany({
+      where: { tenantId, id: { in: ids }, isActive: true },
+      select: { id: true },
+    });
+    const foundIds = new Set(users.map((observer) => observer.id));
+    const missingId = ids.find((id) => !foundIds.has(id));
+
+    if (missingId) {
+      throw new BadRequestException('Observer user not found');
+    }
+
+    return ids;
+  }
+
+  private async syncTaskObservers(
+    prisma: Prisma.TransactionClient,
+    tenantId: string,
+    taskId: string,
+    observerUserIds: string[],
+  ) {
+    await prisma.staffTaskObserver.deleteMany({
+      where: {
+        tenantId,
+        taskId,
+        userId: { notIn: observerUserIds },
+      },
+    });
+
+    if (observerUserIds.length === 0) {
+      return;
+    }
+
+    const existing = await prisma.staffTaskObserver.findMany({
+      where: { tenantId, taskId },
+      select: { userId: true },
+    });
+    const existingIds = new Set(existing.map((observer) => observer.userId));
+    const newObserverIds = observerUserIds.filter((id) => !existingIds.has(id));
+
+    if (newObserverIds.length === 0) {
+      return;
+    }
+
+    await prisma.staffTaskObserver.createMany({
+      data: newObserverIds.map((userId) => ({
+        tenantId,
+        taskId,
+        userId,
+      })),
+      skipDuplicates: true,
+    });
+  }
+
   private toTaskResponse(task: StaffTaskRow): StaffTaskResponse {
     const now = new Date();
     const isOverdue =
@@ -1048,6 +1191,11 @@ export class StaffTasksService {
         : null,
       createdByUser: task.createdByUser,
       assignedToUser: task.assignedToUser,
+      observers: task.observers.map((observer) => ({
+        id: observer.id,
+        createdAt: observer.createdAt.toISOString(),
+        user: observer.user,
+      })),
       labels: task.labels,
       checklist: task.checklist,
       comments: task.comments.map((comment) => ({
@@ -1081,6 +1229,9 @@ export class StaffTasksService {
       this.taskPriorityLabel(task.priority),
       task.store?.name ?? null,
       staffUserLabel(task.assignedToUser),
+      task.observers
+        .map((observer) => staffUserLabel(observer.user))
+        .join(', '),
       formatStaffDateTime(task.dueAt),
       formatStaffDateTime(task.completedAt),
       staffYesNo(task.isOverdue),

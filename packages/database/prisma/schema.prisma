@@ -153,6 +153,7 @@ model Tenant {
   staffTaskComments                    StaffTaskComment[]
   staffTaskAuditEvents                 StaffTaskAuditEvent[]
   staffKnowledgeArticles               StaffKnowledgeArticle[]
+  staffKnowledgeArticleVersions        StaffKnowledgeArticleVersion[]
   staffTrainingCourses                 StaffTrainingCourse[]
   staffTrainingProgresses              StaffTrainingProgress[]
   staffOnboardingPlans                 StaffOnboardingPlan[]
@@ -214,6 +215,8 @@ model User {
   staffTaskComments                    StaffTaskComment[]                    @relation("StaffTaskCommentAuthor")
   staffTaskAuditEvents                 StaffTaskAuditEvent[]                 @relation("StaffTaskAuditActor")
   createdStaffKnowledgeArticles        StaffKnowledgeArticle[]               @relation("StaffKnowledgeArticleCreatedBy")
+  approvedStaffKnowledgeArticles       StaffKnowledgeArticle[]               @relation("StaffKnowledgeArticleApprovedBy")
+  createdStaffKnowledgeArticleVersions StaffKnowledgeArticleVersion[]         @relation("StaffKnowledgeArticleVersionCreatedBy")
   createdStaffTrainingCourses          StaffTrainingCourse[]                 @relation("StaffTrainingCourseCreatedBy")
   staffTrainingProgresses              StaffTrainingProgress[]               @relation("StaffTrainingProgressUser")
   updatedStaffTrainingProgresses       StaffTrainingProgress[]               @relation("StaffTrainingProgressUpdatedBy")
@@ -1451,14 +1454,23 @@ model StaffKnowledgeArticle {
   tenantId        String
   storeId         String?
   createdByUserId String?
+  approvedByUserId String?
   title           String
   summary         String?
   content         String?
+  folder          String    @default("Общие")
   category        String    @default("Общие стандарты")
   roleScope       String    @default("ALL_STAFF")
   status          String    @default("DRAFT")
+  templateKey     String?
+  requiresReading Boolean   @default(false)
   tags            String[]  @default([])
   materials       Json?
+  relatedLinks    Json?
+  version         Int       @default(0)
+  reviewRequestedAt DateTime?
+  approvedAt      DateTime?
+  approvalNote    String?
   publishedAt     DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
@@ -1466,12 +1478,43 @@ model StaffKnowledgeArticle {
   tenant        Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   store         Store? @relation(fields: [storeId], references: [id], onDelete: SetNull)
   createdByUser User?  @relation("StaffKnowledgeArticleCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  approvedByUser User?  @relation("StaffKnowledgeArticleApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+  versions      StaffKnowledgeArticleVersion[]
 
   @@index([tenantId, status, roleScope], map: "staff_knowledge_status_role_idx")
+  @@index([tenantId, folder], map: "staff_knowledge_folder_idx")
   @@index([tenantId, category], map: "staff_knowledge_category_idx")
+  @@index([tenantId, requiresReading], map: "staff_knowledge_required_idx")
   @@index([tenantId, createdAt], map: "staff_knowledge_created_idx")
   @@index([storeId], map: "staff_knowledge_store_idx")
   @@index([createdByUserId], map: "staff_knowledge_created_by_idx")
+  @@index([approvedByUserId], map: "staff_knowledge_approved_by_idx")
+}
+
+model StaffKnowledgeArticleVersion {
+  id              String   @id @default(uuid())
+  tenantId        String
+  articleId       String
+  createdByUserId String?
+  version         Int
+  title           String
+  summary         String?
+  content         String?
+  folder          String
+  category        String
+  roleScope       String
+  tags            String[] @default([])
+  materials       Json?
+  relatedLinks    Json?
+  createdAt       DateTime @default(now())
+
+  tenant        Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  article       StaffKnowledgeArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  createdByUser User?                 @relation("StaffKnowledgeArticleVersionCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([articleId, version], map: "staff_knowledge_version_article_version_key")
+  @@index([tenantId, createdAt], map: "staff_knowledge_version_tenant_created_idx")
+  @@index([createdByUserId], map: "staff_knowledge_version_created_by_idx")
 }
 
 model StaffTrainingCourse {

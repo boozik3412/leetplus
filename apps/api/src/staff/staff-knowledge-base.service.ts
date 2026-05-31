@@ -8,7 +8,7 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 
-const articleStatuses = ['DRAFT', 'PUBLISHED', 'ARCHIVED'] as const;
+const articleStatuses = ['DRAFT', 'REVIEW', 'PUBLISHED', 'ARCHIVED'] as const;
 const roleScopes = [
   'ALL_STAFF',
   'ADMINISTRATOR',
@@ -25,6 +25,15 @@ const materialTypes = [
   'EXTERNAL_LINK',
   'OTHER',
 ] as const;
+const relatedLinkTypes = [
+  'REGULATION',
+  'CHECKLIST',
+  'TRAINING',
+  'ONBOARDING',
+  'DISCIPLINE',
+  'TASK',
+  'OTHER',
+] as const;
 
 export type StaffKnowledgeArticleStatus = (typeof articleStatuses)[number];
 export type StaffKnowledgeRoleScope = (typeof roleScopes)[number];
@@ -33,21 +42,28 @@ export type StaffKnowledgeMaterialType = (typeof materialTypes)[number];
 export type StaffKnowledgeBaseQuery = {
   status?: StaffKnowledgeArticleStatus | 'all';
   roleScope?: StaffKnowledgeRoleScope | 'all';
+  folder?: string;
   category?: string;
   storeId?: string;
   search?: string;
+  requiredReading?: 'all' | 'required' | 'optional';
 };
 
 export type StaffKnowledgeArticleDto = {
   title?: string;
   summary?: string | null;
   content?: string | null;
+  folder?: string | null;
   category?: string | null;
   roleScope?: StaffKnowledgeRoleScope;
   status?: StaffKnowledgeArticleStatus;
   storeId?: string | null;
+  templateKey?: string | null;
+  requiresReading?: boolean | string | null;
   tags?: unknown;
   materials?: unknown;
+  relatedLinks?: unknown;
+  approvalNote?: string | null;
 };
 
 export type StaffKnowledgeMaterial = {
@@ -60,22 +76,35 @@ export type StaffKnowledgeMaterial = {
   required: boolean;
 };
 
+export type StaffKnowledgeRelatedLink = {
+  id: string;
+  type: (typeof relatedLinkTypes)[number];
+  title: string;
+  url: string | null;
+  note: string | null;
+};
+
 export type StaffKnowledgeBaseReport = {
   filters: {
     status: StaffKnowledgeArticleStatus | 'all';
     roleScope: StaffKnowledgeRoleScope | 'all';
+    folder: string | null;
     category: string | null;
     storeId: string | null;
     search: string | null;
+    requiredReading: 'all' | 'required' | 'optional';
   };
   summary: {
     total: number;
     published: number;
     draft: number;
+    review: number;
     archived: number;
+    requiredReading: number;
     materialsCount: number;
   };
   canManageKnowledge: boolean;
+  folders: string[];
   categories: string[];
   rows: StaffKnowledgeArticleResponse[];
   stores: Array<{ id: string; name: string; isActive: boolean }>;
@@ -86,27 +115,78 @@ export type StaffKnowledgeArticleResponse = {
   title: string;
   summary: string | null;
   content: string | null;
+  folder: string;
   category: string;
   roleScope: StaffKnowledgeRoleScope;
   status: StaffKnowledgeArticleStatus;
+  templateKey: string | null;
+  requiresReading: boolean;
   tags: string[];
   materials: StaffKnowledgeMaterial[];
+  relatedLinks: StaffKnowledgeRelatedLink[];
   materialsCount: number;
+  version: number;
+  reviewRequestedAt: string | null;
+  approvedAt: string | null;
+  approvalNote: string | null;
   publishedAt: string | null;
   createdAt: string;
   updatedAt: string;
   store: { id: string; name: string; isActive: boolean } | null;
   createdByUser: { id: string; email: string; fullName: string | null } | null;
+  approvedByUser: { id: string; email: string; fullName: string | null } | null;
+  versions: StaffKnowledgeArticleVersionResponse[];
 };
 
 const articleInclude = {
   store: { select: { id: true, name: true, isActive: true } },
   createdByUser: { select: { id: true, email: true, fullName: true } },
+  approvedByUser: { select: { id: true, email: true, fullName: true } },
+  versions: {
+    orderBy: { version: 'desc' },
+    take: 5,
+    include: {
+      createdByUser: { select: { id: true, email: true, fullName: true } },
+    },
+  },
 } satisfies Prisma.StaffKnowledgeArticleInclude;
 
 type StaffKnowledgeArticleRow = Prisma.StaffKnowledgeArticleGetPayload<{
   include: typeof articleInclude;
 }>;
+
+type StaffKnowledgeArticleVersionRow =
+  StaffKnowledgeArticleRow['versions'][number];
+
+type StaffKnowledgeArticleSnapshotSource = {
+  id: string;
+  tenantId: string;
+  version: number;
+  title: string;
+  summary: string | null;
+  content: string | null;
+  folder: string;
+  category: string;
+  roleScope: string;
+  tags: string[];
+  materials: Prisma.JsonValue | null;
+  relatedLinks: Prisma.JsonValue | null;
+};
+
+export type StaffKnowledgeArticleVersionResponse = {
+  id: string;
+  version: number;
+  title: string;
+  summary: string | null;
+  folder: string;
+  category: string;
+  roleScope: StaffKnowledgeRoleScope;
+  tags: string[];
+  materialsCount: number;
+  relatedLinksCount: number;
+  createdAt: string;
+  createdByUser: { id: string; email: string; fullName: string | null } | null;
+};
 
 @Injectable()
 export class StaffKnowledgeBaseService {
@@ -124,12 +204,13 @@ export class StaffKnowledgeBaseService {
     const filters = this.resolveFilters(query, canManageKnowledge);
     const where = this.buildWhere(tenantId, user, filters, canManageKnowledge);
 
-    const [rows, stores, categories] = await Promise.all([
+    const [rows, stores, folders, categories] = await Promise.all([
       this.prisma.staffKnowledgeArticle.findMany({
         where,
         include: articleInclude,
         orderBy: [
           { status: 'asc' },
+          { folder: 'asc' },
           { category: 'asc' },
           { updatedAt: 'desc' },
         ],
@@ -139,6 +220,20 @@ export class StaffKnowledgeBaseService {
         where: { tenantId },
         select: { id: true, name: true, isActive: true },
         orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+      }),
+      this.prisma.staffKnowledgeArticle.findMany({
+        where: {
+          tenantId,
+          ...(canManageKnowledge
+            ? {}
+            : {
+                status: 'PUBLISHED',
+                roleScope: { in: this.visibleRoleScopes(user.role) },
+              }),
+        },
+        select: { folder: true },
+        distinct: ['folder'],
+        orderBy: { folder: 'asc' },
       }),
       this.prisma.staffKnowledgeArticle.findMany({
         where: {
@@ -161,6 +256,7 @@ export class StaffKnowledgeBaseService {
       filters,
       summary: this.buildSummary(responseRows),
       canManageKnowledge,
+      folders: folders.map((row) => row.folder),
       categories: categories.map((row) => row.category),
       rows: responseRows,
       stores,
@@ -179,15 +275,30 @@ export class StaffKnowledgeBaseService {
     });
     const status =
       (data.status as StaffKnowledgeArticleStatus | undefined) ?? 'DRAFT';
-    const created = await this.prisma.staffKnowledgeArticle.create({
-      data: {
-        ...(data as Prisma.StaffKnowledgeArticleUncheckedCreateInput),
-        tenantId,
-        status,
-        createdByUserId: user.id,
-        publishedAt: status === 'PUBLISHED' ? new Date() : null,
-      },
-      include: articleInclude,
+    const now = new Date();
+    const created = await this.prisma.$transaction(async (tx) => {
+      const article = await tx.staffKnowledgeArticle.create({
+        data: {
+          ...(data as Prisma.StaffKnowledgeArticleUncheckedCreateInput),
+          tenantId,
+          status,
+          createdByUserId: user.id,
+          reviewRequestedAt: status === 'REVIEW' ? now : null,
+          approvedAt: status === 'PUBLISHED' ? now : null,
+          approvedByUserId: status === 'PUBLISHED' ? user.id : null,
+          publishedAt: status === 'PUBLISHED' ? now : null,
+          version: status === 'PUBLISHED' ? 1 : 0,
+        },
+      });
+
+      if (status === 'PUBLISHED') {
+        await this.createArticleVersion(tx, article, user.id);
+      }
+
+      return tx.staffKnowledgeArticle.findUniqueOrThrow({
+        where: { id: article.id },
+        include: articleInclude,
+      });
     });
 
     return this.toArticleResponse(created);
@@ -219,16 +330,32 @@ export class StaffKnowledgeBaseService {
     const nextStatus =
       (data.status as StaffKnowledgeArticleStatus | undefined) ??
       (current.status as StaffKnowledgeArticleStatus);
-    const updated = await this.prisma.staffKnowledgeArticle.update({
-      where: { id: current.id },
-      data: {
-        ...data,
-        publishedAt:
-          nextStatus === 'PUBLISHED' && !current.publishedAt
-            ? new Date()
-            : undefined,
-      },
-      include: articleInclude,
+    const now = new Date();
+    const shouldCreateVersion = nextStatus === 'PUBLISHED';
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const article = await tx.staffKnowledgeArticle.update({
+        where: { id: current.id },
+        data: {
+          ...data,
+          reviewRequestedAt: nextStatus === 'REVIEW' ? now : undefined,
+          approvedAt: nextStatus === 'PUBLISHED' ? now : undefined,
+          approvedByUserId: nextStatus === 'PUBLISHED' ? user.id : undefined,
+          publishedAt:
+            nextStatus === 'PUBLISHED' && !current.publishedAt
+              ? now
+              : undefined,
+          version: shouldCreateVersion ? { increment: 1 } : undefined,
+        },
+      });
+
+      if (shouldCreateVersion) {
+        await this.createArticleVersion(tx, article, user.id);
+      }
+
+      return tx.staffKnowledgeArticle.findUniqueOrThrow({
+        where: { id: article.id },
+        include: articleInclude,
+      });
     });
 
     return this.toArticleResponse(updated);
@@ -251,9 +378,15 @@ export class StaffKnowledgeBaseService {
         ['all', ...roleScopes] as const,
         'all',
       ),
+      folder: this.normalizeOptionalString(query.folder),
       category: this.normalizeOptionalString(query.category),
       storeId: this.normalizeOptionalString(query.storeId),
       search: this.normalizeOptionalString(query.search),
+      requiredReading: this.resolveOne(
+        query.requiredReading,
+        ['all', 'required', 'optional'] as const,
+        'all',
+      ),
     };
   }
 
@@ -273,6 +406,10 @@ export class StaffKnowledgeBaseService {
       where.roleScope = filters.roleScope;
     }
 
+    if (filters.folder) {
+      where.folder = filters.folder;
+    }
+
     if (!canManageKnowledge) {
       where.status = 'PUBLISHED';
       where.roleScope = { in: this.visibleRoleScopes(user.role) };
@@ -286,11 +423,18 @@ export class StaffKnowledgeBaseService {
       where.storeId = filters.storeId;
     }
 
+    if (filters.requiredReading === 'required') {
+      where.requiresReading = true;
+    } else if (filters.requiredReading === 'optional') {
+      where.requiresReading = false;
+    }
+
     if (filters.search) {
       where.OR = [
         { title: { contains: filters.search, mode: 'insensitive' } },
         { summary: { contains: filters.search, mode: 'insensitive' } },
         { content: { contains: filters.search, mode: 'insensitive' } },
+        { folder: { contains: filters.search, mode: 'insensitive' } },
         { category: { contains: filters.search, mode: 'insensitive' } },
         { tags: { has: filters.search } },
       ];
@@ -307,15 +451,29 @@ export class StaffKnowledgeBaseService {
 
         if (row.status === 'PUBLISHED') {
           summary.published += 1;
+        } else if (row.status === 'REVIEW') {
+          summary.review += 1;
         } else if (row.status === 'DRAFT') {
           summary.draft += 1;
         } else if (row.status === 'ARCHIVED') {
           summary.archived += 1;
         }
 
+        if (row.requiresReading) {
+          summary.requiredReading += 1;
+        }
+
         return summary;
       },
-      { total: 0, published: 0, draft: 0, archived: 0, materialsCount: 0 },
+      {
+        total: 0,
+        published: 0,
+        draft: 0,
+        review: 0,
+        archived: 0,
+        requiredReading: 0,
+        materialsCount: 0,
+      },
     );
   }
 
@@ -341,6 +499,11 @@ export class StaffKnowledgeBaseService {
       data.content = this.normalizeOptionalString(dto.content)?.slice(0, 12000);
     }
 
+    if (dto.folder !== undefined || options.requireTitle) {
+      data.folder =
+        this.normalizeOptionalString(dto.folder)?.slice(0, 80) ?? 'Общие';
+    }
+
     if (dto.category !== undefined || options.requireTitle) {
       data.category =
         this.normalizeOptionalString(dto.category)?.slice(0, 80) ??
@@ -355,6 +518,20 @@ export class StaffKnowledgeBaseService {
       data.status = this.resolveOne(dto.status, articleStatuses, 'DRAFT');
     }
 
+    if (dto.templateKey !== undefined) {
+      data.templateKey =
+        this.normalizeOptionalString(dto.templateKey)?.slice(0, 80) ?? null;
+    }
+
+    if (dto.requiresReading !== undefined || options.requireTitle) {
+      data.requiresReading = this.normalizeBoolean(dto.requiresReading, false);
+    }
+
+    if (dto.approvalNote !== undefined) {
+      data.approvalNote =
+        this.normalizeOptionalString(dto.approvalNote)?.slice(0, 1000) ?? null;
+    }
+
     if (dto.storeId !== undefined) {
       data.storeId = await this.resolveStoreId(tenantId, dto.storeId);
     }
@@ -365,6 +542,10 @@ export class StaffKnowledgeBaseService {
 
     if (dto.materials !== undefined || options.requireTitle) {
       data.materials = this.normalizeMaterials(dto.materials);
+    }
+
+    if (dto.relatedLinks !== undefined || options.requireTitle) {
+      data.relatedLinks = this.normalizeRelatedLinks(dto.relatedLinks);
     }
 
     return data;
@@ -421,6 +602,45 @@ export class StaffKnowledgeBaseService {
     return materials;
   }
 
+  private normalizeRelatedLinks(value: unknown): StaffKnowledgeRelatedLink[] {
+    const rawLinks = Array.isArray(value) ? value : [];
+    const links: StaffKnowledgeRelatedLink[] = [];
+
+    rawLinks.slice(0, 20).forEach((link, index) => {
+      const record = this.asRecord(link);
+      const title = this.normalizeOptionalString(record.title);
+      const url = this.normalizeOptionalString(record.url);
+
+      if (!title && !url) {
+        return;
+      }
+
+      if (!title) {
+        throw new BadRequestException('Related link title is required');
+      }
+
+      if (url && !this.isAllowedInternalOrExternalUrl(url)) {
+        throw new BadRequestException(
+          'Related link URL must be an internal path or start with http:// or https://',
+        );
+      }
+
+      links.push({
+        id: this.normalizeOptionalString(record.id) ?? `link-${index + 1}`,
+        type: this.resolveOne(
+          this.normalizeOptionalString(record.type),
+          relatedLinkTypes,
+          'OTHER',
+        ),
+        title: title.slice(0, 160),
+        url: url?.slice(0, 2000) ?? null,
+        note: this.normalizeOptionalString(record.note)?.slice(0, 500) ?? null,
+      });
+    });
+
+    return links;
+  }
+
   private normalizeTags(value: unknown) {
     const rawTags = Array.isArray(value)
       ? value
@@ -442,24 +662,78 @@ export class StaffKnowledgeBaseService {
     row: StaffKnowledgeArticleRow,
   ): StaffKnowledgeArticleResponse {
     const materials = this.normalizeMaterials(row.materials);
+    const relatedLinks = this.normalizeRelatedLinks(row.relatedLinks);
 
     return {
       id: row.id,
       title: row.title,
       summary: row.summary,
       content: row.content,
+      folder: row.folder,
       category: row.category,
       roleScope: row.roleScope as StaffKnowledgeRoleScope,
       status: row.status as StaffKnowledgeArticleStatus,
+      templateKey: row.templateKey,
+      requiresReading: row.requiresReading,
       tags: row.tags,
       materials,
+      relatedLinks,
       materialsCount: materials.length,
+      version: row.version,
+      reviewRequestedAt: row.reviewRequestedAt?.toISOString() ?? null,
+      approvedAt: row.approvedAt?.toISOString() ?? null,
+      approvalNote: row.approvalNote,
       publishedAt: row.publishedAt?.toISOString() ?? null,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
       store: row.store,
       createdByUser: row.createdByUser,
+      approvedByUser: row.approvedByUser,
+      versions: row.versions.map((version) => this.toVersionResponse(version)),
     };
+  }
+
+  private toVersionResponse(
+    row: StaffKnowledgeArticleVersionRow,
+  ): StaffKnowledgeArticleVersionResponse {
+    return {
+      id: row.id,
+      version: row.version,
+      title: row.title,
+      summary: row.summary,
+      folder: row.folder,
+      category: row.category,
+      roleScope: row.roleScope as StaffKnowledgeRoleScope,
+      tags: row.tags,
+      materialsCount: this.normalizeMaterials(row.materials).length,
+      relatedLinksCount: this.normalizeRelatedLinks(row.relatedLinks).length,
+      createdAt: row.createdAt.toISOString(),
+      createdByUser: row.createdByUser,
+    };
+  }
+
+  private async createArticleVersion(
+    tx: Prisma.TransactionClient,
+    article: StaffKnowledgeArticleSnapshotSource,
+    userId: string,
+  ) {
+    await tx.staffKnowledgeArticleVersion.create({
+      data: {
+        tenantId: article.tenantId,
+        articleId: article.id,
+        createdByUserId: userId,
+        version: article.version,
+        title: article.title,
+        summary: article.summary,
+        content: article.content,
+        folder: article.folder,
+        category: article.category,
+        roleScope: article.roleScope,
+        tags: article.tags,
+        materials: article.materials ?? Prisma.JsonNull,
+        relatedLinks: article.relatedLinks ?? Prisma.JsonNull,
+      },
+    });
   }
 
   private canManageKnowledge(user: AuthenticatedUser) {
@@ -574,6 +848,10 @@ export class StaffKnowledgeBaseService {
 
   private isAllowedUrl(value: string) {
     return /^https?:\/\//i.test(value);
+  }
+
+  private isAllowedInternalOrExternalUrl(value: string) {
+    return value.startsWith('/') || this.isAllowedUrl(value);
   }
 
   private asRecord(value: unknown): Record<string, unknown> {

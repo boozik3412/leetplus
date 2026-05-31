@@ -394,8 +394,9 @@ LeetPlus должен развиваться из набора отчетов в
 
 Цель: сделать onboarding и знание стандартов измеримыми.
 
-- Готово: добавлен первый слой knowledge base: tenant-scoped `StaffKnowledgeArticle`, API `/staff/knowledge-base`, page `/staff/knowledge-base`, search, categories, tags, role visibility, store scope, draft/published/archive statuses и manager-only editing.
-- Запланировано: развить `/staff/knowledge-base` в полноценный самостоятельный раздел базы знаний для стандартов, инструкций, training materials, файлов и видео, с article templates, folders/categories, approval flow, version history, required-reading status и ссылками из regulations, checklists, violations, training courses и administrator onboarding.
+- Готово: добавлен первый слой базы знаний: tenant-scoped `StaffKnowledgeArticle`, API `/staff/knowledge-base`, страница `/staff/knowledge-base`, поиск, категории, теги, видимость по ролям, scope клуба, статусы draft/published/archive и редактирование только для управляющих.
+- Готово: база знаний получила первый workflow полноценного раздела: папки, шаблоны статей, статус согласования `REVIEW`, обязательное прочтение, заметку утверждения, связанные стандарты и version snapshots через `StaffKnowledgeArticleVersion` при публикации.
+- Следующая полировка: связать required-reading с отдельным журналом прочтения сотрудников и автоматически предлагать статьи базы знаний из repeated violations/checklist failures.
 - Готово: training materials можно прикреплять к knowledge articles как structured text blocks, file links, images, video links, external links, notes и required flags.
 - Готово: добавлены courses by role and club: tenant-scoped `StaffTrainingCourse`, API `/staff/training-courses`, page `/staff/training-courses`, catalog, filters, draft/active/archive statuses, required flag, due date, club scope, role visibility, ordered steps, knowledge-base article links, text, links и task steps.
 - Готово: добавлены onboarding plans для новых администраторов: tenant-scoped `StaffOnboardingPlan`, API `/staff/onboarding`, page `/staff/onboarding`, role/club scope, draft/active/archive statuses, duration, ordered adaptation steps, links to courses, task templates, checklist templates, regulations, text и external links.
@@ -403,7 +404,7 @@ LeetPlus должен развиваться из набора отчетов в
 - Готово: regulations могут требовать linked test или attestation retake после publication; выбранный active assessment хранится в regulation и snapshotted в каждую published version вместе с acknowledgement requirement.
 - Готово: добавлены employee training profiles: `StaffTrainingProgress`, API `/staff/training-profiles`, page `/staff/training-profiles`, assigned courses, progress updates, overdue learning, certificates, expired certificates и linked test/attestation status by employee.
 - Готово: добавлен manager readiness report: API `/staff/readiness-report`, page `/staff/readiness-report`, sidebar entry, combined readiness status by employee, required course gaps, failed tests, failed/expired attestations и pending regulation acknowledgements.
-- Следующая полировка: расширить knowledge base готовыми article templates, approval workflow, version history и ссылками из repeated violations/checklist failures на соответствующий standard.
+- Следующая полировка: расширить базу знаний готовыми шаблонами под кассу, сервис, бар, техподдержку и найм, а также approval workflow с отдельными правами reviewer/publisher.
 
 Критерии приемки:
 

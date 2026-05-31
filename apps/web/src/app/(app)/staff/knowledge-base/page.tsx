@@ -14,6 +14,7 @@ type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
 const statusLabels: Record<StaffKnowledgeArticleStatus | "all", string> = {
   all: "Все статусы",
   DRAFT: "Черновики",
+  REVIEW: "На согласовании",
   PUBLISHED: "Опубликованные",
   ARCHIVED: "Архив",
 };
@@ -38,9 +39,16 @@ function isStatus(
   return (
     value === "all" ||
     value === "DRAFT" ||
+    value === "REVIEW" ||
     value === "PUBLISHED" ||
     value === "ARCHIVED"
   );
+}
+
+function isRequiredReading(
+  value: string | undefined,
+): value is "all" | "required" | "optional" {
+  return value === "all" || value === "required" || value === "optional";
 }
 
 function isRoleScope(
@@ -60,13 +68,18 @@ function isRoleScope(
 function resolveFilters(params: Awaited<SearchParams>): StaffKnowledgeBaseFilters {
   const status = searchParam(params.status);
   const roleScope = searchParam(params.roleScope);
+  const requiredReading = searchParam(params.requiredReading);
 
   return {
     status: isStatus(status) ? status : "all",
     roleScope: isRoleScope(roleScope) ? roleScope : "all",
+    folder: searchParam(params.folder),
     category: searchParam(params.category),
     storeId: searchParam(params.storeId),
     search: searchParam(params.search)?.trim(),
+    requiredReading: isRequiredReading(requiredReading)
+      ? requiredReading
+      : "all",
   };
 }
 
@@ -88,7 +101,8 @@ export default async function StaffKnowledgeBasePage({
     { label: "Всего", value: report.summary.total },
     { label: "Опубликовано", value: report.summary.published },
     { label: "Черновики", value: report.summary.draft },
-    { label: "Материалы", value: report.summary.materialsCount },
+    { label: "На согласовании", value: report.summary.review },
+    { label: "Обязательные", value: report.summary.requiredReading },
   ];
 
   return (
@@ -141,7 +155,7 @@ export default async function StaffKnowledgeBasePage({
         </section>
 
         <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-          <form className="grid gap-3 lg:grid-cols-[1fr_1fr_1fr_1fr_auto]">
+          <form className="grid gap-3 lg:grid-cols-[1fr_1fr_1fr_1fr_1fr_auto]">
             {report.canManageKnowledge ? (
               <label className="space-y-1">
                 <span className="text-xs font-bold uppercase text-zinc-500">
@@ -180,6 +194,24 @@ export default async function StaffKnowledgeBasePage({
 
             <label className="space-y-1">
               <span className="text-xs font-bold uppercase text-zinc-500">
+                Папка
+              </span>
+              <select
+                name="folder"
+                defaultValue={report.filters.folder ?? ""}
+                className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+              >
+                <option value="">Все папки</option>
+                {report.folders.map((folder) => (
+                  <option key={folder} value={folder}>
+                    {folder}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="space-y-1">
+              <span className="text-xs font-bold uppercase text-zinc-500">
                 Категория
               </span>
               <select
@@ -193,6 +225,21 @@ export default async function StaffKnowledgeBasePage({
                     {category}
                   </option>
                 ))}
+              </select>
+            </label>
+
+            <label className="space-y-1">
+              <span className="text-xs font-bold uppercase text-zinc-500">
+                Обязательность
+              </span>
+              <select
+                name="requiredReading"
+                defaultValue={report.filters.requiredReading}
+                className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+              >
+                <option value="all">Все материалы</option>
+                <option value="required">Обязательные</option>
+                <option value="optional">Необязательные</option>
               </select>
             </label>
 

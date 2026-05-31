@@ -1,7 +1,11 @@
 import { getApiUrl, getAuthHeaders } from "./api";
 import type { StaffTaskStore } from "./staff-tasks";
 
-export type StaffKnowledgeArticleStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED";
+export type StaffKnowledgeArticleStatus =
+  | "DRAFT"
+  | "REVIEW"
+  | "PUBLISHED"
+  | "ARCHIVED";
 export type StaffKnowledgeRoleScope =
   | "ALL_STAFF"
   | "ADMINISTRATOR"
@@ -27,17 +31,61 @@ export type StaffKnowledgeMaterial = {
   required: boolean;
 };
 
+export type StaffKnowledgeRelatedLinkType =
+  | "REGULATION"
+  | "CHECKLIST"
+  | "TRAINING"
+  | "ONBOARDING"
+  | "DISCIPLINE"
+  | "TASK"
+  | "OTHER";
+
+export type StaffKnowledgeRelatedLink = {
+  id: string;
+  type: StaffKnowledgeRelatedLinkType;
+  title: string;
+  url: string | null;
+  note: string | null;
+};
+
+export type StaffKnowledgeArticleVersion = {
+  id: string;
+  version: number;
+  title: string;
+  summary: string | null;
+  folder: string;
+  category: string;
+  roleScope: StaffKnowledgeRoleScope;
+  tags: string[];
+  materialsCount: number;
+  relatedLinksCount: number;
+  createdAt: string;
+  createdByUser: {
+    id: string;
+    email: string;
+    fullName: string | null;
+  } | null;
+};
+
 export type StaffKnowledgeArticle = {
   id: string;
   title: string;
   summary: string | null;
   content: string | null;
+  folder: string;
   category: string;
   roleScope: StaffKnowledgeRoleScope;
   status: StaffKnowledgeArticleStatus;
+  templateKey: string | null;
+  requiresReading: boolean;
   tags: string[];
   materials: StaffKnowledgeMaterial[];
+  relatedLinks: StaffKnowledgeRelatedLink[];
   materialsCount: number;
+  version: number;
+  reviewRequestedAt: string | null;
+  approvedAt: string | null;
+  approvalNote: string | null;
   publishedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -47,30 +95,43 @@ export type StaffKnowledgeArticle = {
     email: string;
     fullName: string | null;
   } | null;
+  approvedByUser: {
+    id: string;
+    email: string;
+    fullName: string | null;
+  } | null;
+  versions: StaffKnowledgeArticleVersion[];
 };
 
 export type StaffKnowledgeBaseFilters = {
   status?: StaffKnowledgeArticleStatus | "all";
   roleScope?: StaffKnowledgeRoleScope | "all";
+  folder?: string;
   category?: string;
   storeId?: string;
   search?: string;
+  requiredReading?: "all" | "required" | "optional";
 };
 
 export type StaffKnowledgeBaseReport = {
   filters: Required<Pick<StaffKnowledgeBaseFilters, "status" | "roleScope">> & {
     category: string | null;
+    folder: string | null;
     storeId: string | null;
     search: string | null;
+    requiredReading: "all" | "required" | "optional";
   };
   summary: {
     total: number;
     published: number;
     draft: number;
+    review: number;
     archived: number;
+    requiredReading: number;
     materialsCount: number;
   };
   canManageKnowledge: boolean;
+  folders: string[];
   categories: string[];
   rows: StaffKnowledgeArticle[];
   stores: StaffTaskStore[];

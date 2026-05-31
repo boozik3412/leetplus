@@ -13,11 +13,14 @@ import type {
   StaffKnowledgeBaseReport,
   StaffKnowledgeMaterial,
   StaffKnowledgeMaterialType,
+  StaffKnowledgeRelatedLink,
+  StaffKnowledgeRelatedLinkType,
   StaffKnowledgeRoleScope,
 } from "@/lib/staff-knowledge-base";
 
 const statusLabels: Record<StaffKnowledgeArticleStatus, string> = {
   DRAFT: "Черновик",
+  REVIEW: "На согласовании",
   PUBLISHED: "Опубликовано",
   ARCHIVED: "Архив",
 };
@@ -40,17 +43,32 @@ const materialTypeLabels: Record<StaffKnowledgeMaterialType, string> = {
   OTHER: "Другое",
 };
 
+const relatedLinkTypeLabels: Record<StaffKnowledgeRelatedLinkType, string> = {
+  REGULATION: "Регламент",
+  CHECKLIST: "Чек-лист",
+  TRAINING: "Обучение",
+  ONBOARDING: "Адаптация",
+  DISCIPLINE: "Нарушение",
+  TASK: "Задача",
+  OTHER: "Другое",
+};
+
 type DraftArticle = {
   id: string | null;
   title: string;
   summary: string;
   content: string;
+  folder: string;
   category: string;
   roleScope: StaffKnowledgeRoleScope;
   status: StaffKnowledgeArticleStatus;
+  templateKey: string;
+  requiresReading: boolean;
   storeId: string;
   tagsText: string;
   materials: StaffKnowledgeMaterial[];
+  relatedLinks: StaffKnowledgeRelatedLink[];
+  approvalNote: string;
 };
 
 const seedArticles: Array<Omit<DraftArticle, "id" | "storeId">> = [
@@ -60,9 +78,12 @@ const seedArticles: Array<Omit<DraftArticle, "id" | "storeId">> = [
       "Короткая памятка: что проверить в первые минуты смены и что обязательно зафиксировать.",
     content:
       "Проверьте рабочее место, кассу, бар, чистоту, активные брони и состояние зала. Если есть отклонения, создайте задачу или зафиксируйте комментарий в чеклисте смены.",
+    folder: "Смены",
     category: "Смена",
     roleScope: "ADMINISTRATOR",
-    status: "PUBLISHED",
+    status: "DRAFT",
+    templateKey: "shift-start",
+    requiresReading: true,
     tagsText: "смена, открытие, стандарт",
     materials: [
       {
@@ -76,6 +97,16 @@ const seedArticles: Array<Omit<DraftArticle, "id" | "storeId">> = [
         required: true,
       },
     ],
+    relatedLinks: [
+      {
+        id: "link-shift-regulations",
+        type: "REGULATION",
+        title: "Регламенты смены",
+        url: "/staff/shift-regulations",
+        note: "Проверьте актуальную опубликованную версию перед запуском.",
+      },
+    ],
+    approvalNote: "",
   },
   {
     title: "Работа с конфликтным гостем",
@@ -83,11 +114,16 @@ const seedArticles: Array<Omit<DraftArticle, "id" | "storeId">> = [
       "Порядок действий, когда гость недоволен услугой, оплатой, местом или поведением другого посетителя.",
     content:
       "Сначала выслушайте гостя без спора, зафиксируйте факт, предложите понятное решение в рамках полномочий и передайте управляющему, если ситуация влияет на деньги, безопасность или репутацию клуба.",
+    folder: "Сервис",
     category: "Сервис",
     roleScope: "ALL_STAFF",
     status: "DRAFT",
+    templateKey: "guest-conflict",
+    requiresReading: true,
     tagsText: "сервис, конфликт, гости",
     materials: [],
+    relatedLinks: [],
+    approvalNote: "",
   },
   {
     title: "Проверка бара перед пиком",
@@ -95,11 +131,24 @@ const seedArticles: Array<Omit<DraftArticle, "id" | "storeId">> = [
       "Как быстро убедиться, что бар готов к вечерней загрузке и не потеряет продажи.",
     content:
       "Проверьте наличие ходовых позиций, ценники, чистоту витрины и товары с низким остатком. По дефициту создайте задачу закупки или пополнения.",
+    folder: "Бар",
     category: "Бар",
     roleScope: "SENIOR_ADMINISTRATOR",
     status: "DRAFT",
+    templateKey: "bar-peak-readiness",
+    requiresReading: false,
     tagsText: "бар, продажи, остатки",
     materials: [],
+    relatedLinks: [
+      {
+        id: "link-checklist-templates",
+        type: "CHECKLIST",
+        title: "Шаблоны чек-листов",
+        url: "/staff/checklist-templates",
+        note: "Используйте как основу для проверки бара перед пиком.",
+      },
+    ],
+    approvalNote: "",
   },
 ];
 
@@ -117,12 +166,17 @@ function defaultDraft(): DraftArticle {
     title: "",
     summary: "",
     content: "",
+    folder: "Общие",
     category: "Общие стандарты",
     roleScope: "ALL_STAFF",
     status: "DRAFT",
+    templateKey: "",
+    requiresReading: false,
     storeId: "",
     tagsText: "",
     materials: [],
+    relatedLinks: [],
+    approvalNote: "",
   };
 }
 
@@ -132,12 +186,17 @@ function fromArticle(row: StaffKnowledgeArticle): DraftArticle {
     title: row.title,
     summary: row.summary ?? "",
     content: row.content ?? "",
+    folder: row.folder,
     category: row.category,
     roleScope: row.roleScope,
     status: row.status,
+    templateKey: row.templateKey ?? "",
+    requiresReading: row.requiresReading,
     storeId: row.store?.id ?? "",
     tagsText: row.tags.join(", "),
     materials: row.materials,
+    relatedLinks: row.relatedLinks,
+    approvalNote: row.approvalNote ?? "",
   };
 }
 
@@ -244,6 +303,41 @@ export function StaffKnowledgeBaseWorkspace({
     }));
   }
 
+  function addRelatedLink() {
+    setDraft((current) => ({
+      ...current,
+      relatedLinks: [
+        ...current.relatedLinks,
+        {
+          id: uid("link"),
+          type: "OTHER",
+          title: "",
+          url: "",
+          note: "",
+        },
+      ],
+    }));
+  }
+
+  function updateRelatedLink(
+    linkId: string,
+    patch: Partial<StaffKnowledgeRelatedLink>,
+  ) {
+    setDraft((current) => ({
+      ...current,
+      relatedLinks: current.relatedLinks.map((link) =>
+        link.id === linkId ? { ...link, ...patch } : link,
+      ),
+    }));
+  }
+
+  function removeRelatedLink(linkId: string) {
+    setDraft((current) => ({
+      ...current,
+      relatedLinks: current.relatedLinks.filter((link) => link.id !== linkId),
+    }));
+  }
+
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -260,9 +354,12 @@ export function StaffKnowledgeBaseWorkspace({
       title: draft.title.trim(),
       summary: draft.summary.trim() || null,
       content: draft.content.trim() || null,
+      folder: draft.folder.trim() || "Общие",
       category: draft.category.trim() || "Общие стандарты",
       roleScope: draft.roleScope,
       status: draft.status,
+      templateKey: draft.templateKey || null,
+      requiresReading: draft.requiresReading,
       storeId: draft.storeId || null,
       tags: tagsFromText(draft.tagsText),
       materials: draft.materials
@@ -276,6 +373,15 @@ export function StaffKnowledgeBaseWorkspace({
         .filter(
           (material) => material.title || material.url || material.content,
         ),
+      relatedLinks: draft.relatedLinks
+        .map((link) => ({
+          ...link,
+          title: link.title.trim(),
+          url: link.url?.trim() || null,
+          note: link.note?.trim() || null,
+        }))
+        .filter((link) => link.title || link.url),
+      approvalNote: draft.approvalNote.trim() || null,
     };
 
     try {
@@ -395,9 +501,11 @@ export function StaffKnowledgeBaseWorkspace({
                     </span>
                   ) : null}
                   <span className="mt-2 block text-xs text-zinc-500">
-                    {row.category} · {roleScopeLabels[row.roleScope]} ·{" "}
+                    {row.folder} · {row.category} ·{" "}
+                    {roleScopeLabels[row.roleScope]} ·{" "}
                     {row.store?.name ?? "Вся сеть"} · материалов:{" "}
                     {row.materialsCount}
+                    {row.requiresReading ? " · обязательное прочтение" : ""}
                   </span>
                 </button>
               ))
@@ -463,7 +571,30 @@ export function StaffKnowledgeBaseWorkspace({
                 </label>
               </div>
 
-              <div className="mt-3 grid gap-3 lg:grid-cols-3">
+              <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm leading-6 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-300">
+                <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+                  Workflow:
+                </span>{" "}
+                черновик можно отправить на согласование, публикация создаст
+                новую версию материала, а обязательные статьи попадут в контур
+                контроля прочтения сотрудниками.
+              </div>
+
+              <div className="mt-3 grid gap-3 lg:grid-cols-4">
+                <label className="space-y-1">
+                  <span className="text-xs font-bold uppercase text-zinc-500">
+                    Папка
+                  </span>
+                  <input
+                    value={draft.folder}
+                    onChange={(event) =>
+                      updateDraft({ folder: event.target.value })
+                    }
+                    placeholder="Сервис, смены, касса"
+                    className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+                  />
+                </label>
+
                 <label className="space-y-1">
                   <span className="text-xs font-bold uppercase text-zinc-500">
                     Категория
@@ -517,6 +648,33 @@ export function StaffKnowledgeBaseWorkspace({
                       </option>
                     ))}
                   </select>
+                </label>
+              </div>
+
+              <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_1fr]">
+                <label className="inline-flex min-h-11 items-center gap-3 rounded-md border border-zinc-300 px-3 text-sm font-semibold dark:border-zinc-700">
+                  <input
+                    type="checkbox"
+                    checked={draft.requiresReading}
+                    onChange={(event) =>
+                      updateDraft({ requiresReading: event.target.checked })
+                    }
+                  />
+                  Обязательное прочтение сотрудниками
+                </label>
+
+                <label className="space-y-1">
+                  <span className="text-xs font-bold uppercase text-zinc-500">
+                    Заметка согласования
+                  </span>
+                  <input
+                    value={draft.approvalNote}
+                    onChange={(event) =>
+                      updateDraft({ approvalNote: event.target.value })
+                    }
+                    placeholder="Что изменено или почему материал готов"
+                    className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+                  />
                 </label>
               </div>
 
@@ -723,12 +881,130 @@ export function StaffKnowledgeBaseWorkspace({
                 )}
               </div>
 
+              <div className="mt-5 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+                      Связанные стандарты
+                    </p>
+                    <p className="mt-1 text-sm text-zinc-500">
+                      Ссылки на регламенты, чек-листы, обучение, адаптацию,
+                      задачи или разборы нарушений.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={addRelatedLink}
+                    className="h-9 rounded-md border border-zinc-300 px-3 text-xs font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+                  >
+                    Добавить связь
+                  </button>
+                </div>
+
+                {draft.relatedLinks.length === 0 ? (
+                  <p className="mt-3 rounded-md border border-dashed border-zinc-300 p-3 text-sm text-zinc-500 dark:border-zinc-800">
+                    Связей пока нет. Их можно добавить позднее, когда статья
+                    станет частью регламента, чек-листа или курса.
+                  </p>
+                ) : (
+                  <div className="mt-3 space-y-3">
+                    {draft.relatedLinks.map((link) => (
+                      <div
+                        key={link.id}
+                        className="grid gap-3 rounded-md bg-zinc-50 p-3 dark:bg-zinc-900/50 lg:grid-cols-[11rem_1fr_1fr_auto]"
+                      >
+                        <label className="space-y-1">
+                          <span className="text-xs font-bold uppercase text-zinc-500">
+                            Тип
+                          </span>
+                          <select
+                            value={link.type}
+                            onChange={(event) =>
+                              updateRelatedLink(link.id, {
+                                type: event.target
+                                  .value as StaffKnowledgeRelatedLinkType,
+                              })
+                            }
+                            className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                          >
+                            {Object.entries(relatedLinkTypeLabels).map(
+                              ([value, label]) => (
+                                <option key={value} value={value}>
+                                  {label}
+                                </option>
+                              ),
+                            )}
+                          </select>
+                        </label>
+
+                        <label className="space-y-1">
+                          <span className="text-xs font-bold uppercase text-zinc-500">
+                            Название
+                          </span>
+                          <input
+                            value={link.title}
+                            onChange={(event) =>
+                              updateRelatedLink(link.id, {
+                                title: event.target.value,
+                              })
+                            }
+                            placeholder="Например: чек-лист кассы"
+                            className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                          />
+                        </label>
+
+                        <label className="space-y-1">
+                          <span className="text-xs font-bold uppercase text-zinc-500">
+                            Ссылка
+                          </span>
+                          <input
+                            value={link.url ?? ""}
+                            onChange={(event) =>
+                              updateRelatedLink(link.id, {
+                                url: event.target.value,
+                              })
+                            }
+                            placeholder="/staff/checklist-templates"
+                            className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                          />
+                        </label>
+
+                        <button
+                          type="button"
+                          onClick={() => removeRelatedLink(link.id)}
+                          className="self-end rounded-md border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+                        >
+                          Убрать
+                        </button>
+
+                        <label className="space-y-1 lg:col-span-4">
+                          <span className="text-xs font-bold uppercase text-zinc-500">
+                            Примечание
+                          </span>
+                          <input
+                            value={link.note ?? ""}
+                            onChange={(event) =>
+                              updateRelatedLink(link.id, {
+                                note: event.target.value,
+                              })
+                            }
+                            placeholder="Зачем эта связь нужна сотруднику"
+                            className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                          />
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div className="mt-5">
                 <StaffMaterialPreview
                   title={draft.title}
                   description={draft.summary}
                   body={draft.content}
                   metrics={[
+                    { label: "Папка", value: draft.folder || "Общие" },
                     { label: "Категория", value: draft.category || "Без категории" },
                     { label: "Видимость", value: roleScopeLabels[draft.roleScope] },
                     {
@@ -739,6 +1015,12 @@ export function StaffKnowledgeBaseWorkspace({
                         : "Вся сеть",
                     },
                     { label: "Статус", value: statusLabels[draft.status] },
+                    {
+                      label: "Прочтение",
+                      value: draft.requiresReading
+                        ? "Обязательное"
+                        : "Необязательное",
+                    },
                   ]}
                   tags={tagsFromText(draft.tagsText)}
                   steps={[
@@ -766,6 +1048,16 @@ export function StaffKnowledgeBaseWorkspace({
                         url: material.url,
                         required: material.required,
                       })),
+                    ...draft.relatedLinks
+                      .filter((link) => link.title.trim() || link.url?.trim())
+                      .map((link, index) => ({
+                        id: link.id || `knowledge-link-${index}`,
+                        title: link.title || `Связь ${index + 1}`,
+                        typeLabel: relatedLinkTypeLabels[link.type],
+                        content: link.note,
+                        url: link.url,
+                        required: false,
+                      })),
                   ]}
                   attachments={draft.materials
                     .filter(
@@ -786,6 +1078,10 @@ export function StaffKnowledgeBaseWorkspace({
                   emptyLabel="В статье пока нет тестовых действий для сотрудника."
                 />
               </div>
+
+              {selectedArticle ? (
+                <VersionHistory article={selectedArticle} />
+              ) : null}
             </form>
           ) : selectedArticle ? (
             <ArticlePreview article={selectedArticle} />
@@ -819,8 +1115,10 @@ function ArticlePreview({ article }: { article: StaffKnowledgeArticle }) {
       </p>
       <h2 className="mt-1 text-2xl font-semibold">{article.title}</h2>
       <p className="mt-2 text-sm text-zinc-500">
-        {article.category} · {roleScopeLabels[article.roleScope]} ·{" "}
+        {article.folder} · {article.category} ·{" "}
+        {roleScopeLabels[article.roleScope]} ·{" "}
         опубликовано: {formatDateTime(article.publishedAt)}
+        {article.requiresReading ? " · обязательное прочтение" : ""}
       </p>
       {article.summary ? (
         <p className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm leading-6 dark:border-zinc-800 dark:bg-zinc-900/50">
@@ -884,6 +1182,102 @@ function ArticlePreview({ article }: { article: StaffKnowledgeArticle }) {
           ))}
         </div>
       ) : null}
+      {article.relatedLinks.length > 0 ? (
+        <div className="mt-5 space-y-2">
+          <p className="text-xs font-bold uppercase text-zinc-500">
+            Связанные стандарты
+          </p>
+          {article.relatedLinks.map((link) => (
+            <div
+              key={link.id}
+              className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-semibold">{link.title}</span>
+                <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                  {relatedLinkTypeLabels[link.type]}
+                </span>
+              </div>
+              {link.note ? (
+                <p className="mt-2 text-sm text-zinc-500">{link.note}</p>
+              ) : null}
+              {link.url ? (
+                <a
+                  href={link.url}
+                  target={link.url.startsWith("/") ? undefined : "_blank"}
+                  rel={link.url.startsWith("/") ? undefined : "noreferrer"}
+                  className="mt-2 inline-flex text-sm font-semibold text-emerald-700 hover:text-emerald-600 dark:text-emerald-300"
+                >
+                  Открыть связанный раздел
+                </a>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
+      <VersionHistory article={article} />
+    </div>
+  );
+}
+
+function VersionHistory({ article }: { article: StaffKnowledgeArticle }) {
+  return (
+    <div className="mt-5 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+            История версий
+          </p>
+          <p className="mt-1 text-sm text-zinc-500">
+            Текущая версия: {article.version || "нет опубликованных версий"}.
+            Публикация создает новый snapshot материала.
+          </p>
+        </div>
+        {article.approvedAt ? (
+          <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200">
+            утверждено {formatDateTime(article.approvedAt)}
+          </span>
+        ) : null}
+      </div>
+
+      {article.approvalNote ? (
+        <p className="mt-3 rounded-md bg-zinc-50 p-3 text-sm text-zinc-600 dark:bg-zinc-900/50 dark:text-zinc-300">
+          {article.approvalNote}
+        </p>
+      ) : null}
+
+      {article.versions.length === 0 ? (
+        <p className="mt-3 rounded-md border border-dashed border-zinc-300 p-3 text-sm text-zinc-500 dark:border-zinc-800">
+          Версий пока нет. Они появятся после публикации материала.
+        </p>
+      ) : (
+        <div className="mt-3 space-y-2">
+          {article.versions.map((version) => (
+            <div
+              key={version.id}
+              className="rounded-md bg-zinc-50 p-3 text-sm dark:bg-zinc-900/50"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-semibold">Версия {version.version}</span>
+                <span className="text-xs text-zinc-500">
+                  {formatDateTime(version.createdAt)}
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-zinc-500">
+                {version.folder} · {version.category} ·{" "}
+                {roleScopeLabels[version.roleScope]} · материалов:{" "}
+                {version.materialsCount} · связей: {version.relatedLinksCount}
+              </p>
+              {version.createdByUser ? (
+                <p className="mt-1 text-xs text-zinc-500">
+                  Автор версии:{" "}
+                  {version.createdByUser.fullName ?? version.createdByUser.email}
+                </p>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

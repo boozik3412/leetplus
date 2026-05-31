@@ -32,6 +32,8 @@ type NavGroup = {
   items: NavItem[];
 };
 
+type ProductArea = "Главная" | NavGroup["title"];
+
 const navGroups: NavGroup[] = [
   {
     title: "Гости",
@@ -473,6 +475,56 @@ function CompactHomeLink({
   );
 }
 
+function isDashboardPath(pathname: string) {
+  return pathname === "/" || pathname === "/dashboard" || pathname.startsWith("/dashboard/");
+}
+
+function resolveCurrentProductArea(pathname: string): ProductArea {
+  if (isDashboardPath(pathname)) {
+    return "Главная";
+  }
+
+  if (pathname.startsWith("/staff") || pathname.startsWith("/guests/staff-control")) {
+    return "Персонал";
+  }
+
+  if (pathname.startsWith("/administration") || pathname.startsWith("/admin")) {
+    return "Администрирование";
+  }
+
+  if (pathname.startsWith("/marketing")) {
+    return "Маркетинг";
+  }
+
+  if (pathname.startsWith("/guests")) {
+    return "Гости";
+  }
+
+  if (
+    pathname.startsWith("/commercial") ||
+    pathname.startsWith("/users") ||
+    pathname.startsWith("/sync") ||
+    pathname.startsWith("/settings")
+  ) {
+    return "Управление";
+  }
+
+  if (
+    pathname.startsWith("/assortment") ||
+    pathname.startsWith("/products") ||
+    pathname.startsWith("/categories") ||
+    pathname.startsWith("/suppliers") ||
+    pathname.startsWith("/stores") ||
+    pathname.startsWith("/reports") ||
+    pathname.startsWith("/import") ||
+    pathname.startsWith("/utilities")
+  ) {
+    return "Ассортимент";
+  }
+
+  return "Главная";
+}
+
 export function Sidebar({ user }: { user: AuthUser | null }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -488,26 +540,8 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
     }))
     .filter((group) => group.items.length > 0);
   const canViewDashboard = canAccessPath(user, "/dashboard");
-  const isDashboardArea =
-    pathname === "/dashboard" || pathname.startsWith("/dashboard/");
-  const isStaffArea =
-    pathname.startsWith("/staff") || pathname.startsWith("/guests/staff-control");
-  const currentProductArea = isDashboardArea
-    ? "Главная"
-    : isStaffArea
-    ? "Персонал"
-    : pathname.startsWith("/administration") || pathname.startsWith("/admin")
-    ? "Администрирование"
-    : pathname.startsWith("/marketing")
-    ? "Маркетинг"
-    : pathname.startsWith("/guests")
-    ? "Гости"
-    : pathname.startsWith("/commercial") ||
-        pathname.startsWith("/users") ||
-        pathname.startsWith("/sync") ||
-        pathname.startsWith("/settings")
-      ? "Управление"
-      : "Ассортимент";
+  const isDashboardArea = isDashboardPath(pathname);
+  const currentProductArea = resolveCurrentProductArea(pathname);
   const hasOpenNavGroup = Object.values(openNavGroups).some(Boolean);
 
   useEffect(() => {

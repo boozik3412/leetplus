@@ -6,6 +6,7 @@ import {
   staffShiftRegulationTemplates,
   type StaffShiftRegulationTemplate,
 } from "@/lib/staff-shift-regulation-templates";
+import { StaffTemplatePreview } from "@/components/staff-template-preview";
 import type {
   StaffShiftRegulationAttachment,
   StaffShiftRegulationAttachmentType,
@@ -231,6 +232,7 @@ export function StaffShiftRegulationBuilder({
   const [acknowledgementPendingId, setAcknowledgementPendingId] = useState<
     string | null
   >(null);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const canManageRegulations = [
     "OWNER",
@@ -243,6 +245,8 @@ export function StaffShiftRegulationBuilder({
   const selectedRow = draft.id
     ? rows.find((row) => row.id === draft.id) ?? null
     : null;
+  const selectedStoreName =
+    stores.find((store) => store.id === draft.storeId)?.name ?? "Вся сеть";
 
   const totals = useMemo(() => {
     const items = draft.sections.flatMap((section) => section.items);
@@ -686,6 +690,18 @@ export function StaffShiftRegulationBuilder({
             </h2>
           </div>
           <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setIsPreviewOpen((current) => !current)}
+              className={[
+                "h-10 rounded-md border px-3 text-sm font-semibold transition",
+                isPreviewOpen
+                  ? "border-emerald-500 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-200"
+                  : "border-zinc-300 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900",
+              ].join(" ")}
+            >
+              {isPreviewOpen ? "Скрыть предпросмотр" : "Предпросмотр"}
+            </button>
             {canManageRegulations ? (
               <>
                 <button
@@ -887,6 +903,21 @@ export function StaffShiftRegulationBuilder({
                 История начнет фиксироваться при публикации следующей версии.
               </p>
             )}
+          </div>
+        ) : null}
+
+        {isPreviewOpen ? (
+          <div className="mt-4">
+            <StaffTemplatePreview
+              title={draft.title}
+              description={draft.description || null}
+              roleLabel={roleScopeLabels[draft.roleScope]}
+              scopeLabel={selectedStoreName}
+              shiftKindLabel={shiftKindLabels[draft.shiftKind]}
+              statusLabel={statusLabels[draft.status]}
+              sections={draft.sections}
+              attachments={draft.attachments}
+            />
           </div>
         ) : null}
 

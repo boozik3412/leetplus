@@ -13,6 +13,7 @@ import type {
   StaffChecklistTemplateSection,
   StaffChecklistTemplateStatus,
 } from "@/lib/staff-checklist-templates";
+import { StaffTemplatePreview } from "@/components/staff-template-preview";
 import {
   staffChecklistTemplatePacks,
   type StaffChecklistTemplatePack,
@@ -179,7 +180,11 @@ export function StaffChecklistTemplateBuilder({
     report.publishedRegulations[0]?.id ?? "",
   );
   const [message, setMessage] = useState<string | null>(null);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [isPending, setIsPending] = useState(false);
+  const selectedStoreName =
+    report.stores.find((store) => store.id === draft.storeId)?.name ??
+    "Вся сеть";
   const summary = useMemo(() => {
     const items = draft.sections.flatMap((section) => section.items);
 
@@ -531,6 +536,18 @@ export function StaffChecklistTemplateBuilder({
             <h2 className="mt-1 text-xl font-semibold">{draft.title}</h2>
           </div>
           <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setIsPreviewOpen((current) => !current)}
+              className={[
+                "h-10 rounded-lg border px-3 text-sm font-semibold transition",
+                isPreviewOpen
+                  ? "border-emerald-500 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-200"
+                  : "border-zinc-200 hover:bg-zinc-100 dark:border-zinc-800 dark:hover:bg-zinc-900",
+              ].join(" ")}
+            >
+              {isPreviewOpen ? "Скрыть предпросмотр" : "Предпросмотр"}
+            </button>
             <Metric label="Разделы" value={summary.sections} />
             <Metric label="Пункты" value={summary.items} />
             <Metric label="Обяз." value={summary.required} />
@@ -543,6 +560,20 @@ export function StaffChecklistTemplateBuilder({
           <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
             {message}
           </p>
+        ) : null}
+
+        {isPreviewOpen ? (
+          <div className="mt-4">
+            <StaffTemplatePreview
+              title={draft.title}
+              description={draft.description || null}
+              roleLabel={roleScopeLabels[draft.roleScope]}
+              scopeLabel={selectedStoreName}
+              shiftKindLabel={shiftKindLabels[draft.shiftKind]}
+              statusLabel={statusLabels[draft.status]}
+              sections={draft.sections}
+            />
+          </div>
         ) : null}
 
         <div className="mt-4 grid gap-3 lg:grid-cols-2">

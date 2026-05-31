@@ -385,11 +385,11 @@ LeetPlus должен развиваться из набора отчетов в
 - Готово: добавлен checklist template builder с tenant-scoped `StaffChecklistTemplate`, migration, API `/staff/checklist-templates`, UI `/staff/checklist-templates`, sidebar entry, draft/active/archive statuses, sections, required fields, evidence requirements, scoring, club/role scope и созданием из published regulation.
 - Готово: preview/test mode доступен прямо в employee-facing builders: shift regulations, checklist templates, task templates, training courses, onboarding routes и knowledge-base articles имеют sandbox previews с fake answers/evidence, required-step readiness, employee-facing layout и без создания real operational facts, tasks, training progress или acknowledgements.
 - Product rule: при создании шаблонов регламентов, чек-листов, задач, курсов, материалов базы знаний и любых будущих стандартов для сотрудников обязательно добавлять предпросмотр employee-facing сценария. Управляющий должен уметь протестировать шаблон без входа под учетной записью администратора/сотрудника и без создания реальных задач, фактов обучения, подтверждений или операционных событий.
-- Начато: добавить checklist runs с привязкой к club, shift, employee, role и scheduled time. Runs могут использовать published regulation snapshot или active checklist template snapshot и сохраняют assigned user, club, optional Langame shift, schedule, status, answers, score, failed items и evidence counters.
+- Готово: checklist runs привязаны к club, shift, employee, role и scheduled time. Runs используют published regulation snapshot или active checklist template snapshot и сохраняют assigned user, club, optional Langame shift, schedule, status, answers, score, failed items и evidence counters.
 - Готово: standard checklist packs доступны в `/staff/checklist-templates`: cash desk, PC zone, inventory handover и administrator training загружаются как editable drafts с sections, required answers, evidence и scores.
-- Начато: разрешить checklist items автоматически создавать violation tasks. Failed checklist answers создают high-priority staff follow-up tasks при submit.
+- Готово: checklist items автоматически создают violation tasks. Failed checklist answers создают high-priority staff follow-up tasks при submit.
 - Готово: manager review flow поддерживает `ON_REVIEW`, `ACCEPTED`, `RETURNED` и `ESCALATED`; escalation сохраняет reviewer/comment, появляется в checklist workspace filters и execution reports, считается unresolved operational risk и создает pinned urgent incident в team chat.
-- Начато: добавить evidence: photo, video/file link, comment, numeric value, checkbox, select, timestamp. Первый execution UI фиксирует result, value, evidence URL, uploaded file attachment и comment по item.
+- Готово: evidence поддерживает photo, video/file link, comment, numeric value, checkbox, select и timestamp. Execution UI фиксирует result, value, evidence URL, uploaded file attachment и comment по item.
 - Готово: добавлен execution report по club, shift, employee и checklist: API `/staff/checklists/report`, page `/staff/checklists/report`, filters by period/status/type/club/employee/search, summary cards, grouped tables и latest checklist runs.
 
 Критерии приемки:
@@ -629,12 +629,12 @@ LeetPlus должен развиваться из набора отчетов в
 
 Цель: измерять, дали ли маркетинговые действия полезный коммерческий эффект.
 
-- Начато: страница кампании сравнивает окна до/после для выбранной кампании и показывает контакты, посетителей, сессии, игровые часы, revenue по списаниям баланса, bar revenue, общий размер целевой группы, связанных гостей и ограничения атрибуции.
+- Готово: страница кампании сравнивает окна до/после для выбранной кампании и показывает контакты, посетителей, сессии, игровые часы, revenue по списаниям баланса, bar revenue, общий размер целевой группы, связанных гостей и ограничения атрибуции.
 - Готово: новые контакты кампаний напрямую атрибутируются к `marketingCampaignId`; старые контакты все еще используют group fallback.
-- Начато: страница кампании имеет первый вид воронки: целевая группа -> планируемые контакты -> завершенные контакты -> записанный результат -> визит -> выручка -> бар -> повторные гости.
-- Начато: эффект по клубам виден на странице кампании со store-scoped revenue, баром, гостями, часами, повторными гостями и дельтами до/после.
-- Начато: эффект по ответственному пользователю и каналу виден на странице кампании с контактами, связанными гостями, визитами, выручкой и баром.
-- Начато: CSV export результата кампании и исходов контактов доступен на странице кампании.
+- Готово: страница кампании имеет первый вид воронки: целевая группа -> планируемые контакты -> завершенные контакты -> записанный результат -> визит -> выручка -> бар -> повторные гости.
+- Готово: эффект по клубам виден на странице кампании со store-scoped revenue, баром, гостями, часами, повторными гостями и дельтами до/после.
+- Готово: эффект по ответственному пользователю и каналу виден на странице кампании с контактами, связанными гостями, визитами, выручкой и баром.
+- Готово: CSV export результата кампании и исходов контактов доступен на странице кампании.
 - Готово: эффект кампании показывает breakdown по источнику сохраненной группы/правила с размером цели, связанными гостями, контактами, визитами, повторными визитами, выручкой и bar revenue; готово к росту от одной сохраненной группы к нескольким источникам кампании.
 - Готово: атрибуция эффекта кампании разделяет attributed revenue, store-scoped revenue, факты без клуба и исключенные нераспределенные online top-ups в API, UI и export.
 - Готово: XLSX export доступен после проверки колонок CSV и использует тот же dataset результата кампании.

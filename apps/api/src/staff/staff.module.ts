@@ -19,6 +19,8 @@ import { StaffDirectoryController } from './staff-directory.controller';
 import { StaffDirectoryService } from './staff-directory.service';
 import { StaffKnowledgeBaseController } from './staff-knowledge-base.controller';
 import { StaffKnowledgeBaseService } from './staff-knowledge-base.service';
+import { StaffNotificationsController } from './staff-notifications.controller';
+import { StaffNotificationsService } from './staff-notifications.service';
 import { StaffOnboardingPlansController } from './staff-onboarding-plans.controller';
 import { StaffOnboardingPlansService } from './staff-onboarding-plans.service';
 import { StaffOperationsDashboardController } from './staff-operations-dashboard.controller';
@@ -64,6 +66,7 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffChecklistTemplatesController,
     StaffChecklistsController,
     StaffTeamChatController,
+    StaffNotificationsController,
     StaffDisciplineController,
     StaffAdministratorRatingsController,
     StaffSalaryController,
@@ -86,6 +89,7 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffChecklistTemplatesService,
     StaffChecklistsService,
     StaffTeamChatService,
+    StaffNotificationsService,
     StaffDisciplineService,
     StaffSalaryService,
   ],

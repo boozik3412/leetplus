@@ -353,7 +353,8 @@ LeetPlus должен развиваться из набора отчетов в
 - Готово: team chat создает default channels `Информация и объявления`, `Техническая поддержка`, `Общение` и один default club channel на каждый store; custom channels можно создавать с выбранными employee members.
 - Готово: chat messages можно превращать в staff tasks прямо из `/staff/team-chat`; задача сохраняет original message text, channel/store context, priority, deadline и metadata `source=team_chat` в labels.
 - Готово: failed checklist submissions создают team-chat incident в default network channel с checklist, club, responsible user, score, failed-item summary и ссылкой обратно на filtering чек-листов.
-- Следующее: связать chat context с shift incidents и критическими dashboard signals.
+- Готово: `/staff/notifications` добавляет tenant-scoped центр внутренних уведомлений по просроченным важным задачам, due-rules, проблемным чек-листам и срочным incident-сообщениям командного чата; уведомления можно принять, закрыть, отфильтровать по клубу/источнику/критичности и открыть исходный рабочий сценарий.
+- Следующее: расширить источники `/staff/notifications` true shift incidents и критическими dashboard signals после стабилизации employee identity в Langame operation/cash logs.
 - Позже: добавить WebSocket/SSE realtime delivery, file attachments, push/browser notifications, message mentions и external messenger bridges только после стабилизации access rules и notification policy.
 
 Критерии приемки:

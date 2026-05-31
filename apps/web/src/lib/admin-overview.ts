@@ -1,5 +1,33 @@
 import { getApiUrl, getAuthHeaders } from "./api";
 
+export type AdminAuditEvent = {
+  id: string;
+  tenantId: string | null;
+  action: string;
+  targetType: string;
+  targetId: string | null;
+  reason: string | null;
+  before: unknown;
+  after: unknown;
+  metadata: unknown;
+  createdAt: string;
+  tenant: {
+    id: string;
+    name: string;
+    slug: string;
+  } | null;
+  actor: {
+    id: string;
+    email: string;
+    fullName: string | null;
+  } | null;
+};
+
+export type AdminAuditEventsResponse = {
+  events: AdminAuditEvent[];
+  count: number;
+};
+
 export type AdminOverview = {
   totals: {
     tenants: number;
@@ -62,28 +90,7 @@ export type AdminOverview = {
     discrepancyCount: number;
     errorMessage: string | null;
   }[];
-  auditEvents: {
-    id: string;
-    tenantId: string | null;
-    action: string;
-    targetType: string;
-    targetId: string | null;
-    reason: string | null;
-    before: unknown;
-    after: unknown;
-    metadata: unknown;
-    createdAt: string;
-    tenant: {
-      id: string;
-      name: string;
-      slug: string;
-    } | null;
-    actor: {
-      id: string;
-      email: string;
-      fullName: string | null;
-    } | null;
-  }[];
+  auditEvents: AdminAuditEvent[];
 };
 
 export async function getAdminOverview(): Promise<AdminOverview> {

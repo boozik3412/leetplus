@@ -1,9 +1,21 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  StreamableFile,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PlatformAdminGuard } from '../auth/platform-admin.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/auth.types';
-import { AdminService } from './admin.service';
+import {
+  AdminService,
+  type PlatformAdminAuditEventQuery,
+} from './admin.service';
 
 @Controller('admin')
 @UseGuards(JwtAuthGuard, PlatformAdminGuard)
@@ -13,6 +25,24 @@ export class AdminController {
   @Get('overview')
   getOverview() {
     return this.adminService.getOverview();
+  }
+
+  @Get('audit-events')
+  getAuditEvents(@Query() query: PlatformAdminAuditEventQuery) {
+    return this.adminService.getAuditEvents(query);
+  }
+
+  @Get('audit-events/export')
+  async exportAuditEvents(
+    @Query() query: PlatformAdminAuditEventQuery,
+  ): Promise<StreamableFile> {
+    const file = await this.adminService.exportAuditEvents(query);
+
+    return new StreamableFile(file.buffer, {
+      type: file.contentType,
+      disposition: `attachment; filename="${file.fileName}"`,
+      length: file.buffer.byteLength,
+    });
   }
 
   @Post('tenants/:tenantId/lifecycle')

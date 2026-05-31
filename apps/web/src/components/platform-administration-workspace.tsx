@@ -2,7 +2,11 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import type { AdminOverview } from "@/lib/admin-overview";
+import type {
+  AdminAuditEvent,
+  AdminAuditEventsResponse,
+  AdminOverview,
+} from "@/lib/admin-overview";
 
 type Tenant = AdminOverview["tenants"][number];
 type LangameSource = Tenant["langameSources"][number];
@@ -26,6 +30,15 @@ type SourceFormState = {
   supportTicket: string;
   message: string | null;
   error: string | null;
+};
+
+type AuditFilters = {
+  tenantId: string;
+  actor: string;
+  targetType: string;
+  dateFrom: string;
+  dateTo: string;
+  limit: string;
 };
 
 const statusLabels: Record<Tenant["status"], string> = {
@@ -65,6 +78,17 @@ const sourceActionLabels: Record<SourceSupportAction, string> = {
   ENABLE: "Включить источник",
   MARK_FOR_REVIEW: "На перепроверку",
 };
+
+const defaultAuditFilters: AuditFilters = {
+  tenantId: "",
+  actor: "",
+  targetType: "",
+  dateFrom: "",
+  dateTo: "",
+  limit: "100",
+};
+
+const baseTargetTypeOptions = ["TENANT", "INTEGRATION_SOURCE"];
 
 function formatDate(value: string | null) {
   if (!value) {
@@ -144,6 +168,20 @@ export function PlatformAdministrationWorkspace({
         ),
       ),
   );
+  const [auditFilters, setAuditFilters] =
+    useState<AuditFilters>(defaultAuditFilters);
+  const [auditEvents, setAuditEvents] = useState<AdminAuditEvent[]>(
+    overview.auditEvents,
+  );
+  const [auditCount, setAuditCount] = useState(overview.auditEvents.length);
+  const [isAuditLoading, setIsAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState<string | null>(null);
+  const targetTypeOptions = Array.from(
+    new Set([
+      ...baseTargetTypeOptions,
+      ...overview.auditEvents.map((event) => event.targetType),
+    ]),
+  ).sort();
 
   const cards = [
     { label: "Сетей", value: overview.totals.tenants },
@@ -195,6 +233,60 @@ export function PlatformAdministrationWorkspace({
     }));
   }
 
+  function updateAuditFilter(patch: Partial<AuditFilters>) {
+    setAuditFilters((current) => ({
+      ...current,
+      ...patch,
+    }));
+  }
+
+  function buildAuditSearchParams() {
+    const params = new URLSearchParams();
+    const entries = Object.entries(auditFilters) as Array<
+      [keyof AuditFilters, string]
+    >;
+
+    for (const [key, value] of entries) {
+      const normalized = value.trim();
+
+      if (normalized) {
+        params.set(key, normalized);
+      }
+    }
+
+    return params;
+  }
+
+  async function loadAuditEvents() {
+    setIsAuditLoading(true);
+    setAuditError(null);
+
+    const response = await fetch(
+      `/api/admin/audit-events?${buildAuditSearchParams().toString()}`,
+      {
+        cache: "no-store",
+      },
+    );
+
+    if (!response.ok) {
+      setAuditError(await readError(response));
+      setIsAuditLoading(false);
+      return;
+    }
+
+    const data = (await response.json()) as AdminAuditEventsResponse;
+    setAuditEvents(data.events);
+    setAuditCount(data.count);
+    setIsAuditLoading(false);
+  }
+
+  function resetAuditFilters() {
+    setAuditFilters(defaultAuditFilters);
+    setAuditEvents(overview.auditEvents);
+    setAuditCount(overview.auditEvents.length);
+    setAuditError(null);
+  }
+
   async function submitLifecycle(tenant: Tenant) {
     const form = forms[tenant.id] ?? initialFormState(tenant);
     updateForm(tenant.id, { error: null, message: null });
@@ -220,6 +312,7 @@ export function PlatformAdministrationWorkspace({
       confirmation: "",
       message: "Действие записано в audit trail.",
     });
+    await loadAuditEvents();
     startTransition(() => router.refresh());
   }
 
@@ -251,6 +344,7 @@ export function PlatformAdministrationWorkspace({
       confirmation: "",
       message: "Support-заметка добавлена в audit trail.",
     });
+    await loadAuditEvents();
     startTransition(() => router.refresh());
   }
 
@@ -282,8 +376,11 @@ export function PlatformAdministrationWorkspace({
       confirmation: "",
       message: "Действие по источнику записано в audit trail.",
     });
+    await loadAuditEvents();
     startTransition(() => router.refresh());
   }
+
+  const auditExportHref = `/api/admin/audit-events/export?${buildAuditSearchParams().toString()}`;
 
   return (
     <main className="px-4 py-6 text-zinc-950 dark:text-zinc-100">
@@ -843,15 +940,135 @@ export function PlatformAdministrationWorkspace({
           className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
         >
           <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
-            <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
-              Audit trail
-            </p>
-            <h2 className="mt-1 text-base font-semibold">
-              Последние действия платформы
-            </h2>
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+                  Audit trail
+                </p>
+                <h2 className="mt-1 text-base font-semibold">
+                  Журнал действий платформы
+                </h2>
+                <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+                  Фильтруйте действия по tenant, actor, типу объекта и периоду.
+                </p>
+              </div>
+              <a
+                className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold transition hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-800 dark:hover:text-emerald-200"
+                href={auditExportHref}
+              >
+                Скачать CSV
+              </a>
+            </div>
+            <div className="mt-4 grid gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40 lg:grid-cols-[1.1fr_1fr_0.9fr_0.8fr_0.8fr_120px]">
+              <label className="text-xs font-semibold uppercase text-zinc-500">
+                Tenant
+                <select
+                  className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-normal normal-case text-zinc-950 outline-none transition hover:border-emerald-400 focus:border-emerald-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100"
+                  value={auditFilters.tenantId}
+                  onChange={(event) =>
+                    updateAuditFilter({ tenantId: event.target.value })
+                  }
+                >
+                  <option value="">Все сети</option>
+                  {overview.tenants.map((tenant) => (
+                    <option key={tenant.id} value={tenant.id}>
+                      {tenant.name} ({tenant.slug})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-xs font-semibold uppercase text-zinc-500">
+                Actor
+                <input
+                  className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-normal normal-case text-zinc-950 outline-none transition hover:border-emerald-400 focus:border-emerald-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100"
+                  placeholder="email, имя или id"
+                  value={auditFilters.actor}
+                  onChange={(event) =>
+                    updateAuditFilter({ actor: event.target.value })
+                  }
+                />
+              </label>
+              <label className="text-xs font-semibold uppercase text-zinc-500">
+                Тип объекта
+                <select
+                  className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-normal normal-case text-zinc-950 outline-none transition hover:border-emerald-400 focus:border-emerald-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100"
+                  value={auditFilters.targetType}
+                  onChange={(event) =>
+                    updateAuditFilter({ targetType: event.target.value })
+                  }
+                >
+                  <option value="">Все типы</option>
+                  {targetTypeOptions.map((targetType) => (
+                    <option key={targetType} value={targetType}>
+                      {targetType}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-xs font-semibold uppercase text-zinc-500">
+                С даты
+                <input
+                  className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-normal normal-case text-zinc-950 outline-none transition hover:border-emerald-400 focus:border-emerald-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100"
+                  type="date"
+                  value={auditFilters.dateFrom}
+                  onChange={(event) =>
+                    updateAuditFilter({ dateFrom: event.target.value })
+                  }
+                />
+              </label>
+              <label className="text-xs font-semibold uppercase text-zinc-500">
+                По дату
+                <input
+                  className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-normal normal-case text-zinc-950 outline-none transition hover:border-emerald-400 focus:border-emerald-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100"
+                  type="date"
+                  value={auditFilters.dateTo}
+                  onChange={(event) =>
+                    updateAuditFilter({ dateTo: event.target.value })
+                  }
+                />
+              </label>
+              <label className="text-xs font-semibold uppercase text-zinc-500">
+                Лимит
+                <input
+                  className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-normal normal-case text-zinc-950 outline-none transition hover:border-emerald-400 focus:border-emerald-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100"
+                  min="1"
+                  max="200"
+                  type="number"
+                  value={auditFilters.limit}
+                  onChange={(event) =>
+                    updateAuditFilter({ limit: event.target.value })
+                  }
+                />
+              </label>
+              <div className="flex flex-wrap items-end gap-2 lg:col-span-6">
+                <button
+                  type="button"
+                  className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={isAuditLoading}
+                  onClick={loadAuditEvents}
+                >
+                  {isAuditLoading ? "Загружаем..." : "Применить"}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold transition hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-800 dark:hover:text-emerald-200"
+                  onClick={resetAuditFilters}
+                >
+                  Сбросить
+                </button>
+                <span className="text-sm text-zinc-500 dark:text-zinc-400">
+                  Показано: {formatNumber(auditCount)}
+                </span>
+              </div>
+            </div>
+            {auditError ? (
+              <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-200">
+                {auditError}
+              </p>
+            ) : null}
           </div>
           <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
-            {overview.auditEvents.map((event) => (
+            {auditEvents.map((event) => (
               <div key={event.id} className="px-5 py-4 text-sm">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
@@ -875,9 +1092,9 @@ export function PlatformAdministrationWorkspace({
                 ) : null}
               </div>
             ))}
-            {overview.auditEvents.length === 0 ? (
+            {auditEvents.length === 0 ? (
               <p className="px-5 py-6 text-sm text-zinc-500">
-                Действий администратора платформы пока не было.
+                По выбранным фильтрам действий пока нет.
               </p>
             ) : null}
           </div>

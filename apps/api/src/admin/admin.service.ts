@@ -6,6 +6,7 @@ import {
 import {
   IntegrationProvider,
   IntegrationSyncStatus,
+  Prisma,
   TenantLifecycleStatus,
 } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
@@ -34,6 +35,53 @@ type SourceSupportActionDto = {
   confirmation?: unknown;
   reason?: unknown;
   supportTicket?: unknown;
+};
+
+export type PlatformAdminAuditEventQuery = {
+  tenantId?: unknown;
+  actor?: unknown;
+  actorUserId?: unknown;
+  targetType?: unknown;
+  dateFrom?: unknown;
+  dateTo?: unknown;
+  limit?: unknown;
+};
+
+type ParsedAuditEventQuery = {
+  tenantId?: string;
+  actor?: string;
+  actorUserId?: string;
+  targetType?: string;
+  dateFrom?: Date;
+  dateTo?: Date;
+  limit: number;
+};
+
+type AuditEventWithRelations = Prisma.PlatformAdminAuditEventGetPayload<{
+  include: {
+    tenant: {
+      select: {
+        id: true;
+        name: true;
+        slug: true;
+      };
+    };
+    actor: {
+      select: {
+        id: true;
+        email: true;
+        fullName: true;
+      };
+    };
+  };
+}>;
+
+type CsvCell = string | number | boolean | null | undefined | Date;
+
+export type PlatformAdminAuditExportFile = {
+  fileName: string;
+  contentType: string;
+  buffer: Buffer;
 };
 
 const STALE_SYNC_THRESHOLD_MS = 24 * 60 * 60 * 1000;
@@ -274,32 +322,62 @@ export class AdminService {
         discrepancyCount: job.discrepancyCount,
         errorMessage: job.errorMessage,
       })),
-      auditEvents: auditEvents.map((event) => ({
-        id: event.id,
-        tenantId: event.tenantId,
-        action: event.action,
-        targetType: event.targetType,
-        targetId: event.targetId,
-        reason: event.reason,
-        before: event.before,
-        after: event.after,
-        metadata: event.metadata,
-        createdAt: event.createdAt.toISOString(),
-        tenant: event.tenant
-          ? {
-              id: event.tenant.id,
-              name: event.tenant.name,
-              slug: event.tenant.slug,
-            }
-          : null,
-        actor: event.actor
-          ? {
-              id: event.actor.id,
-              email: event.actor.email,
-              fullName: event.actor.fullName,
-            }
-          : null,
-      })),
+      auditEvents: auditEvents.map((event) => this.mapAuditEvent(event)),
+    };
+  }
+
+  async getAuditEvents(query: PlatformAdminAuditEventQuery) {
+    const parsed = this.parseAuditEventQuery(query, 200);
+    const events = await this.findAuditEvents(parsed);
+
+    return {
+      events: events.map((event) => this.mapAuditEvent(event)),
+      count: events.length,
+    };
+  }
+
+  async exportAuditEvents(
+    query: PlatformAdminAuditEventQuery,
+  ): Promise<PlatformAdminAuditExportFile> {
+    const parsed = this.parseAuditEventQuery(query, 1000);
+    const events = await this.findAuditEvents(parsed);
+    const rows: CsvCell[][] = [
+      [
+        'Дата',
+        'Tenant',
+        'Slug',
+        'Actor',
+        'Actor email',
+        'Действие',
+        'Тип объекта',
+        'ID объекта',
+        'Причина',
+        'Metadata',
+        'Before',
+        'After',
+      ],
+      ...events.map((event) => [
+        event.createdAt,
+        event.tenant?.name ?? '',
+        event.tenant?.slug ?? '',
+        event.actor?.fullName ?? '',
+        event.actor?.email ?? '',
+        event.action,
+        event.targetType,
+        event.targetId,
+        event.reason,
+        this.stringifyAuditJson(event.metadata),
+        this.stringifyAuditJson(event.before),
+        this.stringifyAuditJson(event.after),
+      ]),
+    ];
+    const from = this.normalizeOptionalText(query.dateFrom) ?? 'all';
+    const to = this.normalizeOptionalText(query.dateTo) ?? 'all';
+
+    return {
+      fileName: `leetplus-platform-audit-${from}-${to}.csv`,
+      contentType: 'text/csv; charset=utf-8',
+      buffer: Buffer.from(this.toCsv(rows), 'utf8'),
     };
   }
 
@@ -613,6 +691,191 @@ export class AdminService {
     if (typeof value !== 'string' || value.trim() !== tenantSlug) {
       throw new BadRequestException('Tenant slug confirmation is required');
     }
+  }
+
+  private parseAuditEventQuery(
+    query: PlatformAdminAuditEventQuery,
+    maxLimit: number,
+  ): ParsedAuditEventQuery {
+    const dateFrom = this.parseAuditDate(query.dateFrom, 'dateFrom', false);
+    const dateTo = this.parseAuditDate(query.dateTo, 'dateTo', true);
+
+    if (dateFrom && dateTo && dateFrom.getTime() > dateTo.getTime()) {
+      throw new BadRequestException('dateFrom must be before dateTo');
+    }
+
+    return {
+      tenantId: this.normalizeOptionalText(query.tenantId) ?? undefined,
+      actor: this.normalizeOptionalText(query.actor) ?? undefined,
+      actorUserId: this.normalizeOptionalText(query.actorUserId) ?? undefined,
+      targetType: this.normalizeOptionalText(query.targetType) ?? undefined,
+      dateFrom: dateFrom ?? undefined,
+      dateTo: dateTo ?? undefined,
+      limit: this.parseLimit(query.limit, maxLimit),
+    };
+  }
+
+  private parseAuditDate(value: unknown, field: string, endOfDay: boolean) {
+    const text = this.normalizeOptionalText(value);
+
+    if (!text) {
+      return null;
+    }
+
+    const normalized = /^\d{4}-\d{2}-\d{2}$/.test(text)
+      ? `${text}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}Z`
+      : text;
+    const date = new Date(normalized);
+
+    if (Number.isNaN(date.getTime())) {
+      throw new BadRequestException(`${field} must be a valid date`);
+    }
+
+    return date;
+  }
+
+  private parseLimit(value: unknown, maxLimit: number) {
+    const fallback = Math.min(100, maxLimit);
+
+    if (typeof value !== 'string' || value.trim() === '') {
+      return fallback;
+    }
+
+    const parsed = Number(value);
+
+    if (!Number.isInteger(parsed) || parsed < 1) {
+      throw new BadRequestException('limit must be a positive integer');
+    }
+
+    return Math.min(parsed, maxLimit);
+  }
+
+  private buildAuditWhere(
+    query: ParsedAuditEventQuery,
+  ): Prisma.PlatformAdminAuditEventWhereInput {
+    const createdAt: Prisma.DateTimeFilter = {};
+
+    if (query.dateFrom) {
+      createdAt.gte = query.dateFrom;
+    }
+
+    if (query.dateTo) {
+      createdAt.lte = query.dateTo;
+    }
+
+    return {
+      ...(query.tenantId ? { tenantId: query.tenantId } : {}),
+      ...(query.actorUserId ? { actorUserId: query.actorUserId } : {}),
+      ...(query.targetType ? { targetType: query.targetType } : {}),
+      ...(query.actor
+        ? {
+            actor: {
+              is: {
+                OR: [
+                  {
+                    email: {
+                      contains: query.actor,
+                      mode: 'insensitive',
+                    },
+                  },
+                  {
+                    fullName: {
+                      contains: query.actor,
+                      mode: 'insensitive',
+                    },
+                  },
+                  { id: query.actor },
+                ],
+              },
+            },
+          }
+        : {}),
+      ...(Object.keys(createdAt).length > 0 ? { createdAt } : {}),
+    };
+  }
+
+  private findAuditEvents(query: ParsedAuditEventQuery) {
+    return this.prisma.platformAdminAuditEvent.findMany({
+      where: this.buildAuditWhere(query),
+      orderBy: { createdAt: 'desc' },
+      take: query.limit,
+      include: {
+        tenant: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+          },
+        },
+        actor: {
+          select: {
+            id: true,
+            email: true,
+            fullName: true,
+          },
+        },
+      },
+    });
+  }
+
+  private mapAuditEvent(event: AuditEventWithRelations) {
+    return {
+      id: event.id,
+      tenantId: event.tenantId,
+      action: event.action,
+      targetType: event.targetType,
+      targetId: event.targetId,
+      reason: event.reason,
+      before: event.before,
+      after: event.after,
+      metadata: event.metadata,
+      createdAt: event.createdAt.toISOString(),
+      tenant: event.tenant
+        ? {
+            id: event.tenant.id,
+            name: event.tenant.name,
+            slug: event.tenant.slug,
+          }
+        : null,
+      actor: event.actor
+        ? {
+            id: event.actor.id,
+            email: event.actor.email,
+            fullName: event.actor.fullName,
+          }
+        : null,
+    };
+  }
+
+  private stringifyAuditJson(value: Prisma.JsonValue) {
+    if (value === null) {
+      return '';
+    }
+
+    return JSON.stringify(value);
+  }
+
+  private toCsv(rows: CsvCell[][]) {
+    return `\uFEFF${rows.map((row) => this.csvRow(row)).join('\n')}`;
+  }
+
+  private csvRow(row: CsvCell[]) {
+    return row.map((cell) => this.csvCell(cell)).join(';');
+  }
+
+  private csvCell(cell: CsvCell) {
+    if (cell === null || cell === undefined) {
+      return '';
+    }
+
+    const value = cell instanceof Date ? cell.toISOString() : String(cell);
+    const escaped = value.replace(/"/g, '""');
+
+    if (/[;\n\r"]/.test(escaped)) {
+      return `"${escaped}"`;
+    }
+
+    return escaped;
   }
 
   private serializeTenantStatus(tenant: {

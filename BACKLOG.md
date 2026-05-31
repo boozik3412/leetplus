@@ -1,655 +1,655 @@
-# LeetPlus Backlog
+# LeetPlus Бэклог
 
-Last updated: 2026-05-31
+Последнее обновление: 2026-05-31
 
-This file is the source of truth for product backlog, near-term roadmap, planned modules, and deferred ideas. `PROJECT_STATE.md` should stay focused on current project state, workflow, production context, and data rules.
+Этот файл - источник правды по продуктовому бэклогу, ближайшей дорожной карте, планируемым модулям и отложенным идеям. `PROJECT_STATE.md` должен оставаться документом про текущее состояние проекта, рабочий процесс, production-контекст и правила данных.
 
-Правило ведения: новые записи в backlog ведем на русском языке. Отдельным проходом нужно перевести оставшиеся англоязычные формулировки backlog на русский, не меняя смысл статусов и уже зафиксированных решений.
+Правило ведения: новые записи в бэклоге ведем на русском языке. Технические названия API, моделей, статусов в коде и общепринятые термины (`tenant`, `dashboard`, `API`, `CRM`) можно оставлять как есть, если перевод ухудшает точность.
 
-## Status Labels
+## Статусы
 
-- Done: implemented and available or ready for production verification.
-- Current risk: known production or data-quality risk that can affect existing behavior.
-- Current limitation: known boundary of the current implementation.
-- Next: near-term implementation candidate.
-- Planned: accepted direction, not necessarily next in development.
+- Готово: реализовано и доступно или готово к production-проверке.
+- Текущий риск: известный production-риск или риск качества данных, который может влиять на существующее поведение.
+- Текущее ограничение: известная граница текущей реализации.
+- Следующее: ближайший кандидат на реализацию.
+- Запланировано: принятое направление, не обязательно ближайшее в разработке.
 
-## Product UX Architecture
+## Продуктовая UX-архитектура
 
-Status: active product direction. Use this section as a UX decision frame for new dashboards, reports, CRM screens, assortment tools, marketing tools, and staff workflows.
+Статус: активное продуктовое направление. Этот раздел используется как рамка UX-решений для новых дашбордов, отчетов, CRM-экранов, инструментов ассортимента, маркетинга и сценариев персонала.
 
-LeetPlus should evolve from a set of reports into a commercial operating system for computer club networks. The main UX principle is:
+LeetPlus должен развиваться из набора отчетов в коммерческую операционную систему для сетей компьютерных клубов. Главный UX-принцип:
 
-`Signal -> Work Scenario -> Decision -> Task/Launch -> Control -> Effect`
+`Сигнал -> Рабочий сценарий -> Решение -> Задача/запуск -> Контроль -> Эффект`
 
-The first screen should not overload the user with every table, filter, and raw report. It should show the most important business signals, then route the user into the correct working scenario. Full reports, filters, exports, and diagnostics remain available, but they should unfold after the user chooses a scenario.
+Первый экран не должен перегружать пользователя всеми таблицами, фильтрами и сырыми отчетами. Он должен показывать главные бизнес-сигналы и вести пользователя в нужный рабочий сценарий. Полные отчеты, фильтры, экспорты и диагностика остаются доступными, но раскрываются после выбора сценария.
 
-### Top-Level Business Blocks
+### Верхнеуровневые бизнес-блоки
 
 1. `Управление гостями / CRM`
-   - Business question: who should we retain, return, develop, or contact manually?
-   - Signals: falling repeat visits, growing risk guests, low new-to-repeat conversion, overdue CRM tasks, VIP/TOP guest inactivity, event/booking leads without follow-up.
-   - Route: signal -> guest group -> CRM task or campaign -> responsible user and deadline -> contact result -> effect in visits, revenue, load, and bar.
+   - Бизнес-вопрос: кого удерживать, возвращать, развивать или обрабатывать вручную?
+   - Сигналы: падающие повторные визиты, рост гостей в риске, низкая конверсия новых гостей во второй визит, просроченные CRM-задачи, неактивность VIP/TOP гостей, заявки на события/бронирования без follow-up.
+   - Маршрут: сигнал -> группа гостей -> CRM-задача или кампания -> ответственный и срок -> результат контакта -> эффект в визитах, выручке, загрузке и баре.
 
 2. `Управление ассортиментом`
-   - Business question: what should we buy, remove, redistribute, reprice, or investigate?
-   - Signals: OOS, frozen money in stock, low margin, no sales, category decline, bar decline, write-offs, supplier/category problems.
-   - Route: signal -> category/SKU/store scope -> cause diagnostics -> category-management decision -> task for action -> execution control -> effect in revenue, margin, OOS, turnover, stock, and write-offs.
+   - Бизнес-вопрос: что закупать, убирать, перераспределять, переоценивать или разбирать?
+   - Сигналы: OOS, замороженные деньги в остатках, низкая маржа, нет продаж, падение категории, падение бара, списания, проблемы поставщиков/категорий.
+   - Маршрут: сигнал -> категория/SKU/клуб -> диагностика причины -> категорийное решение -> задача на действие -> контроль исполнения -> эффект в выручке, марже, OOS, оборачиваемости, остатках и списаниях.
 
 3. `Маркетинг`
-   - Business question: how do we stimulate demand and communicate value to guests?
-   - Signals: need to raise traffic, low weak-hour load, low bar share, low repeat visits, event promotion needed, need to sell a promo bundle, inactive guest group ready for reactivation.
-   - Route: signal -> marketing goal -> target guest group -> promo mechanic -> channel -> launch/control -> effect in reach, visits, revenue, bar, repeat visits, cost, and ROI.
+   - Бизнес-вопрос: как стимулировать спрос и донести ценность до гостей?
+   - Сигналы: нужно поднять трафик, низкая загрузка тихих часов, низкая доля бара, мало повторных визитов, нужно продвинуть событие, нужно продать промо-набор, неактивная группа готова к реактивации.
+   - Маршрут: сигнал -> маркетинговая цель -> целевая группа гостей -> промо-механика -> канал -> запуск/контроль -> эффект в охвате, визитах, выручке, баре, повторных визитах, стоимости и ROI.
 
 4. `Персонал`
-   - Business question: who executes commercial and operational actions, and where is execution quality weak?
-   - Signals: overdue tasks, shift anomalies, refunds, cash/incassation mismatch, weak administrator metrics, missed checklists, training gaps.
-   - Route: signal -> employee/shift/club scope -> action or review -> responsible manager -> control -> effect in discipline, service quality, revenue protection, and risk reduction.
+   - Бизнес-вопрос: кто исполняет коммерческие и операционные действия, и где проседает качество исполнения?
+   - Сигналы: просроченные задачи, аномалии смен, возвраты, расхождение кассы/инкассации, слабые метрики администраторов, пропущенные чек-листы, пробелы обучения.
+   - Маршрут: сигнал -> сотрудник/смена/клуб -> действие или проверка -> ответственный управляющий -> контроль -> эффект в дисциплине, качестве сервиса, защите выручки и снижении риска.
 
-### Dashboard UX Rule
+### UX-правило дашборда
 
-The management dashboard should group signals by business logic instead of by database/report origin:
+Управленческий дашборд должен группировать сигналы по бизнес-логике, а не по происхождению из базы данных или отчета:
 
-- `Клиентская база`: guests in risk, new guests without second visit, CRM overdue, VIP inactivity.
-- `Ассортимент`: OOS, money in stock, no-sales SKU, low margin, write-offs.
-- `Маркетинг`: weak-hour demand, promo opportunities, bar activation, event promotion, campaign effect.
-- `Персонал`: overdue execution, administrator signals, shift/cash risks, operational discipline.
+- `Клиентская база`: гости в риске, новые гости без второго визита, просроченные CRM-задачи, неактивность VIP.
+- `Ассортимент`: OOS, деньги в остатках, SKU без продаж, низкая маржа, списания.
+- `Маркетинг`: спрос в тихие часы, промо-возможности, активация бара, продвижение событий, эффект кампаний.
+- `Персонал`: просроченное исполнение, сигналы по администраторам, риски смен/кассы, операционная дисциплина.
 
-Each signal card should answer:
+Каждая карточка сигнала должна отвечать:
 
-- what happened;
-- why it matters commercially;
-- expected business impact where measurable;
-- one clear next action (`Разобрать`, `Создать кампанию`, `Создать задачу`, `Открыть отчет`).
+- что произошло;
+- почему это коммерчески важно;
+- какой ожидаемый бизнес-эффект можно измерить;
+- какое одно понятное следующее действие доступно (`Разобрать`, `Создать кампанию`, `Создать задачу`, `Открыть отчет`).
 
-### CRM Decision Route
+### Маршрут CRM-решения
 
-- Choose problem or opportunity: return guests, develop new guests, protect TOP/VIP, process event/booking lead, recover risk guests.
-- Choose guest group: saved group, segment, manual CRM guests, matched Langame guests.
-- Choose action: CRM task, call, message, campaign, event follow-up, next contact.
-- Assign: responsible user, channel, deadline, note.
-- Record result: contacted, no answer, refused, promised to visit, booked, needs next contact, unsubscribed.
-- Measure effect: returned guests, repeat visits, revenue after contact, bar, load, campaign conversion.
+- Выбрать проблему или возможность: вернуть гостей, развить новых гостей, защитить TOP/VIP, обработать заявку на событие/бронь, восстановить гостей в риске.
+- Выбрать группу гостей: сохраненная группа, сегмент, ручные CRM-гости, сопоставленные гости Langame.
+- Выбрать действие: CRM-задача, звонок, сообщение, кампания, follow-up по событию, следующий контакт.
+- Назначить: ответственный, канал, срок, заметка.
+- Зафиксировать результат: связались, нет ответа, отказ, обещал прийти, забронировал, нужен следующий контакт, отписался.
+- Измерить эффект: вернувшиеся гости, повторные визиты, выручка после контакта, бар, загрузка, конверсия кампании.
 
-### Assortment Decision Route
+### Маршрут ассортиментного решения
 
-- Choose signal: OOS, excess stock, low margin, no sales, category decline, write-off/loss.
-- Diagnose cause: demand, stock, supplier, category role, price, club distribution, replacement SKU, shelf/bar execution.
-- Choose category-management action: reorder, redistribute, reduce purchase, reprice, remove SKU, add replacement/new product, check supplier, create club task.
-- Control execution: who owns action, due date, affected clubs/SKU/categories, completion status.
-- Measure effect: sales, gross profit, margin, OOS reduction, turnover, stock release, write-off reduction.
+- Выбрать сигнал: OOS, избыточный остаток, низкая маржа, нет продаж, падение категории, списание/потери.
+- Диагностировать причину: спрос, остаток, поставщик, роль категории, цена, распределение по клубам, замещающий SKU, исполнение на полке/баре.
+- Выбрать категорийное действие: дозаказать, перераспределить, сократить закупку, изменить цену, убрать SKU, добавить замену/новинку, проверить поставщика, создать задачу клубу.
+- Проконтролировать исполнение: кто отвечает, срок, затронутые клубы/SKU/категории, статус выполнения.
+- Измерить эффект: продажи, валовая прибыль, маржа, снижение OOS, оборачиваемость, высвобождение остатка, снижение списаний.
 
-### Marketing Decision Route
+### Маршрут маркетингового решения
 
-- Choose goal first, not an empty promo builder: attract guests, return guests, increase repeat visits, fill weak hours, grow bar, promote tournament/event, sell promo bundle.
-- Choose target group: saved guest group, CRM leads, new guests, risk guests, TOP/VIP, low-bar guests, weak-hour visitors.
-- Choose mechanic: discount, bonus, promo bundle, mission/challenge, coupon, tournament, personal offer, referral mechanic.
-- Configure rules: period, clubs, products/services, limits, budget, participation rules, anti-fraud constraints.
-- Choose channel: in-club announcement, CRM task to administrator, Telegram/MAX, SMS/call, push/mobile app, social networks.
-- Measure effect: reach, contacts, visits, revenue, bar, repeat visits, cost, ROI.
+- Сначала выбрать цель, а не пустой промо-конструктор: привлечь гостей, вернуть гостей, увеличить повторные визиты, заполнить тихие часы, вырастить бар, продвинуть турнир/событие, продать промо-набор.
+- Выбрать целевую группу: сохраненная группа гостей, CRM-лиды, новые гости, гости в риске, TOP/VIP, гости с низкой долей бара, посетители тихих часов.
+- Выбрать механику: скидка, бонус, промо-набор, миссия/челлендж, купон, турнир, персональное предложение, реферальная механика.
+- Настроить правила: период, клубы, товары/услуги, лимиты, бюджет, правила участия, антифрод-ограничения.
+- Выбрать канал: объявление в клубе, CRM-задача администратору, Telegram/MAX, SMS/звонок, push/mobile app, соцсети.
+- Измерить эффект: охват, контакты, визиты, выручка, бар, повторные визиты, стоимость, ROI.
 
-### UX Acceptance Rules
+### UX-критерии приемки
 
-- Default screens should show compact previews, not full raw tables.
-- Full reports should open separately, have breadcrumbs, filters, sorting, export, and responsive table/card layouts.
-- Filters should be collapsed or compact by default when they are not the primary task.
-- Buttons should be action-specific and named by user intent, not by internal data source.
-- Every major workflow should have a clear `next action` and a visible `effect` layer.
-- New sidebar items must be added when a feature becomes user-facing, otherwise the feature is considered undiscoverable.
+- Экраны по умолчанию должны показывать компактные превью, а не полные сырые таблицы.
+- Полные отчеты должны открываться отдельно, иметь breadcrumbs, фильтры, сортировку, экспорт и адаптивный табличный/карточный вид.
+- Фильтры должны быть свернутыми или компактными по умолчанию, если они не являются основной задачей экрана.
+- Кнопки должны быть названы по действию пользователя, а не по внутреннему источнику данных.
+- У каждого крупного workflow должно быть понятное `следующее действие` и видимый слой `эффекта`.
+- Новые пункты sidebar нужно добавлять, когда функция становится пользовательской; иначе функция считается недоступной для обнаружения.
 
-## Platform Administration
+## Администрирование платформы
 
-Status: first control-plane separation implemented.
+Статус: первое разделение control plane реализовано.
 
-- Done: platform-level control moved into a separate `Администрирование` sidebar block visible only to `isPlatformAdmin` users.
-- Done: `/administration` is the platform control plane for tenant networks, Langame sources, and recent sync jobs across tenants; legacy `/admin` redirects there.
-- Next: add tenant lifecycle actions, platform diagnostics, and support tools only after each action has explicit permissions, audit trail, and confirmation rules.
+- Готово: управление уровнем платформы вынесено в отдельный блок sidebar `Администрирование`, видимый только пользователям `isPlatformAdmin`.
+- Готово: `/administration` является control plane платформы для tenant-сетей, источников Langame и последних sync jobs по всем tenant; старый `/admin` редиректит туда.
+- Следующее: добавить действия жизненного цикла tenant, диагностику платформы и support-инструменты только после явных прав, audit trail и правил подтверждения для каждого действия.
 
-## Stage 1. Management Dashboard
+## Этап 1. Управленческий дашборд
 
-Status: implemented; remains in production UX polish mode.
+Статус: реализовано; остается в режиме production-полировки UX.
 
-- Done: first screen is focused on commercial control: total network revenue, club drilldown, guest/CRM signal, assortment signal, marketing/load signal, and clear next actions.
-- Done: dashboard v2 now starts from business-signal groups by work scenario: client base/CRM, assortment management, and marketing; personnel control stays in its own dedicated section.
-- Done: network dashboard was simplified into the agreed scenario model: total network revenue with club drilldown plus three primary work routes - guests/CRM, assortment management, and marketing; duplicate assortment tables, trend blocks, generic navigation cards, and staff-control previews were removed from the first screen.
-- Done: duplicated assortment focus/actions were removed from the network dashboard and moved into a dedicated `/assortment/dashboard` working screen for category-management decisions.
-- Done: current/full period selectors, default current-day view, European date formatting, report anchors, responsive fixes, and compact report previews.
-- Done: executive summary now combines total revenue, guests, assortment and load; the load metric uses PC capacity when PC count is available from Langame/global endpoints.
-- Done: "What changed" now compares the latest full day against the previous full day for current-day mode; other periods keep analogous-period comparison.
-- Done: "Main focus" includes money units in financial values and links "Money at risk" to the hybrid assortment-loss report.
-- Done: dashboard auto-sync now refreshes both assortment/revenue data and guest foundation data, so the executive dashboard is responsible for all first-screen metrics.
-- Done: current-day guest and load metrics count sessions by overlap with the selected period, so overnight sessions contribute to the current day instead of only to the day they started.
-- Done: dashboard club revenue formula no longer treats Langame balance top-ups (`plus`) as club revenue; club revenue now uses confirmed balance spend/write-off in a concrete club with product/bar revenue as the safe fallback, so mobile app top-ups are not assigned to a store.
-- Done: guest foundation sync now sends official ISO dates first and lets the Langame client fallback to `dd.mm.yyyy` only when the endpoint returns empty/400; `all_operations_log/list` additionally probes `operation_type=Списание/Пополнение`, so dashboard revenue can use balance spend facts when Langame returns them.
-- Done: `transactions/list.balance` is now persisted as the transaction amount for non-cancelled rows, and dashboard diagnostics separately expose transaction spend candidates; mobile/top-up operations are still excluded from store revenue.
-- Done: `log_cash_transaction/list` is now requested per club with required `club_id`, matching the official Langame API contract.
-- Done: network-level total revenue now includes balance top-ups from Langame operation log as unallocated network revenue, while club/store breakdowns still stay based on store-scoped spend and product/bar facts.
-- Done: `GuestOperationLog` now persists Langame `name/source/form`, so unallocated network top-ups can be narrowed to online-like sources such as app, guest account, web interface, QR, and legacy rows without any club binding.
-- Done: `/dashboard/revenue-diagnostics` now shows unallocated online top-ups as a separate network money stream with source/form/name breakdown, and treats Langame `club_id=0` as unassigned network revenue instead of a club.
-- Done: `/dashboard` is treated as the standalone main page of LeetPlus, with a separate home icon in navigation; it no longer falls back to the assortment block highlight.
-- Current risk: production still needs live verification that Langame returns enough PC context for all clubs; if load remains `нет данных`, inspect latest guest sync profile endpoint errors/field counts or VDS API logs.
-- Current risk: current-day total revenue remains dependent on Langame returning balance-spend facts from `all_operations_log/list` or store-scoped `transactions/list`; if these sources stay empty after sync, the dashboard intentionally falls back to product/bar revenue and undercounts total club revenue.
-- Current limitation: exact split between gameplay, services, app top-ups, and club-cash sources still needs production verification after a fresh sync with the newly persisted operation source/form fields.
-- Next polish: continue adjusting color accents, wording, and direct action links from live `leetplus.ru` review.
+- Готово: первый экран сфокусирован на коммерческом контроле: общая выручка сети, drilldown по клубам, сигнал гости/CRM, сигнал ассортимента, сигнал маркетинга/загрузки и понятные следующие действия.
+- Готово: dashboard v2 начинается с групп бизнес-сигналов по рабочим сценариям: клиентская база/CRM, управление ассортиментом и маркетинг; контроль персонала остается в отдельном специализированном разделе.
+- Готово: сетевой дашборд упрощен до согласованной сценарной модели: общая выручка сети с drilldown по клубам плюс три основных маршрута работы - гости/CRM, управление ассортиментом и маркетинг; дублирующие ассортиментные таблицы, trend-блоки, общие навигационные карточки и превью staff-control убраны с первого экрана.
+- Готово: дублирующий фокус/действия ассортимента убраны из сетевого дашборда и перенесены в отдельный рабочий экран `/assortment/dashboard` для категорийных решений.
+- Готово: селекторы текущих/полных периодов, дефолтный режим текущего дня, европейский формат дат, anchors отчетов, responsive-правки и компактные preview отчетов.
+- Готово: executive summary объединяет общую выручку, гостей, ассортимент и загрузку; метрика загрузки использует PC-мощность, когда количество ПК доступно из Langame/global endpoints.
+- Готово: блок "Что изменилось" сравнивает последний полный день с предыдущим полным днем для режима текущего дня; остальные периоды сохраняют сравнение с аналогичным периодом.
+- Готово: блок "Главное внимание" показывает денежные единицы в финансовых значениях и ведет "Деньги в риске" в гибридный отчет потерь ассортимента.
+- Готово: авто-синхронизация дашборда обновляет ассортимент/выручку и guest foundation, поэтому executive dashboard отвечает за все метрики первого экрана.
+- Готово: метрики гостей и загрузки за текущий день считают пересечение сессий с выбранным периодом, поэтому ночные сессии попадают в текущий день, а не только в день старта.
+- Готово: формула клубной выручки дашборда больше не считает пополнения баланса Langame (`plus`) выручкой клуба; клубная выручка использует подтвержденные списания/расходы баланса в конкретном клубе с безопасным fallback на товарную/барную выручку, поэтому пополнения из mobile app не назначаются клубу.
+- Готово: guest foundation sync сначала отправляет официальные ISO-даты и дает Langame client fallback на `dd.mm.yyyy`, если endpoint возвращает пусто/400; `all_operations_log/list` дополнительно пробует `operation_type=Списание/Пополнение`, чтобы dashboard revenue мог использовать факты списания баланса, когда Langame их возвращает.
+- Готово: `transactions/list.balance` сохраняется как сумма транзакции для неотмененных строк, а diagnostics дашборда отдельно показывают кандидаты списаний по транзакциям; mobile/top-up операции по-прежнему исключены из store revenue.
+- Готово: `log_cash_transaction/list` запрашивается по каждому клубу с обязательным `club_id`, в соответствии с официальным контрактом Langame API.
+- Готово: общесетевая выручка теперь включает пополнения баланса из operation log Langame как нераспределенную сетевую выручку, а разбивка по клубам остается на store-scoped списаниях и товарных/барных фактах.
+- Готово: `GuestOperationLog` сохраняет Langame `name/source/form`, поэтому нераспределенные сетевые пополнения можно сузить до online-like источников: приложение, кабинет гостя, web-интерфейс, QR и legacy-строки без привязки к клубу.
+- Готово: `/dashboard/revenue-diagnostics` показывает нераспределенные online top-ups отдельным денежным потоком сети с разбивкой source/form/name и трактует Langame `club_id=0` как неназначенную сетевую выручку, а не клуб.
+- Готово: `/dashboard` является самостоятельной главной страницей LeetPlus с отдельной home-иконкой в навигации и больше не подсвечивает блок ассортимента.
+- Текущий риск: на production нужно проверить, что Langame возвращает достаточно PC-контекста по всем клубам; если загрузка остается `нет данных`, смотреть ошибки/счетчики полей в latest guest sync profile endpoint или VDS API logs.
+- Текущий риск: выручка текущего дня зависит от того, возвращает ли Langame факты списаний баланса из `all_operations_log/list` или store-scoped `transactions/list`; если эти источники пустые после sync, dashboard осознанно падает на product/bar revenue и недосчитывает клубную выручку.
+- Текущее ограничение: точное разделение gameplay, services, app top-ups и club-cash источников еще требует production-проверки после свежей синхронизации с сохраненными operation source/form.
+- Следующая полировка: продолжать настраивать цветовые акценты, формулировки и прямые action-ссылки по результатам live review на `leetplus.ru`.
 
-## Stage 2. Commercial Reports
+## Этап 2. Коммерческие отчеты
 
-Status: implemented; remains in production verification and UX polish mode.
+Статус: реализовано; остается в режиме production-проверки и UX-полировки.
 
-- Done: OOS report has revenue/profit-at-risk estimates per day and profit at risk for the selected period.
-- Done: hybrid "Money at risk" report combines OOS profit risk with frozen stock in no-sales SKU and is visible from dashboard and reports.
-- Done: frozen stock fallback uses available cost/sale price so positions without cost do not collapse to 0 rubles when a sale price is known.
-- Done: replenishment report full table has status/product/club/supplier/category filters, sortable stock/sales/demand/order columns, server XLSX/CSV export, local Excel/1C/PDF export, and email sending.
-- Done: replenishment server XLSX/CSV export can optionally receive the table filter/sort state and export the same visible rows as the current filtered table.
-- Done: frozen-stock reports now expose the unit valuation source, explain the calculation assumptions in UI, and can be validated on production by comparing stock quantity x unit value to frozen amount.
-- Done: added turnover and slow-SKU control beyond the no-sales/OOS hybrid: `/reports/inventory-turnover/table` shows current stock, period sales, days of stock, turnover rate, money in stock, valuation source, slow SKU and frozen stock statuses.
-- Done: added plan/fact v1 by network, club, category, and supplier: `/reports/plan-fact/table` compares the selected period against the previous comparable period of the same length until manual commercial plans are introduced.
-- Done: added supplier scorecard: the reports page and `/reports/supplier-scorecard/table` now combine sales, profit, write-offs, OOS, slow/frozen SKU, money in stock, problem category, supplier terms, and the current limitation that factual delivery SLA is not imported yet.
+- Готово: OOS-отчет содержит оценку выручки/прибыли в риске за день и прибыль в риске за выбранный период.
+- Готово: гибридный отчет "Деньги в риске" объединяет риск прибыли из-за OOS и замороженный остаток в SKU без продаж, доступен из dashboard и reports.
+- Готово: fallback оценки замороженных остатков использует доступную себестоимость/цену продажи, чтобы позиции без себестоимости не схлопывались в 0 рублей при известной цене продажи.
+- Готово: полный отчет пополнения имеет фильтры статус/товар/клуб/поставщик/категория, сортируемые колонки остаток/продажи/спрос/заказ, серверный XLSX/CSV экспорт, локальный Excel/1C/PDF экспорт и отправку на email.
+- Готово: серверный XLSX/CSV экспорт пополнения может получать состояние фильтров/сортировки таблицы и выгружать те же видимые строки, что текущая таблица.
+- Готово: frozen-stock отчеты показывают источник оценки единицы, объясняют расчетные допущения в UI и могут проверяться на production через сравнение количество остатка x стоимость единицы с замороженной суммой.
+- Готово: добавлен контроль оборачиваемости и slow-SKU поверх no-sales/OOS-гибрида: `/reports/inventory-turnover/table` показывает текущий остаток, продажи за период, дни запаса, коэффициент оборачиваемости, деньги в остатке, источник оценки, статусы slow SKU и frozen stock.
+- Готово: добавлен plan/fact v1 по сети, клубу, категории и поставщику: `/reports/plan-fact/table` сравнивает выбранный период с предыдущим сопоставимым периодом такой же длины до появления ручных коммерческих планов.
+- Готово: добавлена карточка поставщика: страница reports и `/reports/supplier-scorecard/table` объединяют продажи, прибыль, списания, OOS, slow/frozen SKU, деньги в остатках, проблемную категорию, условия поставщика и текущее ограничение, что фактический delivery SLA еще не импортируется.
 
-## Stage 3. Assortment Matrix
+## Этап 3. Ассортиментная матрица
 
-Status: implemented; remains in production verification and UX polish mode.
+Статус: реализовано; остается в режиме production-проверки и UX-полировки.
 
-- Done: added mandatory SKU and assortment role concepts to products.
-- Done: added the product x club matrix API and `/reports/assortment-matrix/table` with sold/in-stock/no-stock/no-sales/missing/replenishment statuses.
-- Done: added assortment quality index by network, club, and category, plus links from reports and the assortment dashboard.
+- Готово: к товарам добавлены обязательный SKU и ассортиментная роль.
+- Готово: добавлены API матрицы товар x клуб и `/reports/assortment-matrix/table` со статусами sold/in-stock/no-stock/no-sales/missing/replenishment.
+- Готово: добавлен индекс качества ассортимента по сети, клубу и категории, а также ссылки из reports и ассортиментного dashboard.
 
-## Stage 4. Recommendations Workflow
+## Этап 4. Workflow рекомендаций
 
-Status: implemented; remains in production verification and workflow UX polish mode.
+Статус: реализовано; остается в режиме production-проверки и UX-полировки workflow.
 
-- Done: recommendations now show financial effect for profit protection, stock release, and margin uplift.
-- Done: recommendations are split by responsible role: commercial director, buyer, club manager.
-- Done: recommendation workflow state is persisted with statuses: new, in progress, done, rejected, hidden, reappeared.
-- Done: `/reports/recommendations/table` became a working queue with filters by status/role and inline status update.
+- Готово: рекомендации показывают финансовый эффект по защите прибыли, высвобождению остатка и росту маржи.
+- Готово: рекомендации разделены по ответственным ролям: коммерческий директор, закупщик, управляющий клубом.
+- Готово: состояние workflow рекомендаций сохраняется со статусами: new, in progress, done, rejected, hidden, reappeared.
+- Готово: `/reports/recommendations/table` стал рабочей очередью с фильтрами по статусу/роли и inline-обновлением статуса.
 
-## Stage 5. Regular Digests
+## Этап 5. Регулярные дайджесты
 
-Status: implemented; automatic delivery runs inside the API process, while the service endpoint remains available for manual/VDS calls.
+Статус: реализовано; автоматическая отправка работает внутри API-процесса, сервисный endpoint остается доступен для ручных/VDS-вызовов.
 
-- Done: added daily email digest for network-level money, margin, OOS, write-offs, no-sales SKU, and required actions from recommendations.
-- Done: added weekly commercial email report with comparison to the previous 7-day period and XLSX report attachment.
-- Done: added `/reports` UI block for sending the daily digest or weekly report to an email recipient.
-- Done: added protected service endpoint `POST /reports/digests/scheduled` for future VDS timer calls through `SYNC_SERVICE_TOKEN`.
-- Done: `/reports` no longer preloads the full sales-detail dataset into the first screen, so the digest block and report hub can render without the multi-megabyte preview.
-- Done: added an API-side daily/weekly digest scheduler with tenant-level run journal and duplicate protection by digest type/date.
-- Later add Telegram/MAX alerts for critical events after channel/legal setup.
+- Готово: добавлен ежедневный email-дайджест по деньгам сети, марже, OOS, списаниям, SKU без продаж и нужным действиям из рекомендаций.
+- Готово: добавлен еженедельный коммерческий email-отчет со сравнением с предыдущими 7 днями и XLSX-вложением.
+- Готово: добавлен UI-блок `/reports` для отправки ежедневного дайджеста или еженедельного отчета на email.
+- Готово: добавлен защищенный service endpoint `POST /reports/digests/scheduled` для будущих вызовов VDS timer через `SYNC_SERVICE_TOKEN`.
+- Готово: `/reports` больше не preload-ит полный sales-detail dataset на первом экране, поэтому блок дайджестов и report hub рендерятся без многомегабайтного preview.
+- Готово: добавлен API-side scheduler ежедневного/еженедельного дайджеста с tenant-level журналом запусков и защитой от дублей по типу/дате дайджеста.
+- Позже: добавить Telegram/MAX alerts для критических событий после настройки канала и юридической схемы.
 
-## Stage 6. Product Commercialization
+## Этап 6. Коммерциализация продукта
 
-Status: implemented; remains in production verification and packaging polish mode.
+Статус: реализовано; остается в режиме production-проверки и упаковочной полировки.
 
-- Done: added `/commercial/audit` as a management-side commercial audit page: losses, growth opportunities, matrix quality, expected effect, and links to the detailed reports.
-- Done: added `/commercial/demo` with prepared demo data and a clear value story that does not require Langame setup or synchronization.
-- Done: added `/commercial/tariffs` with tariff levels for basic analytics, advanced reports, recommendations, regular digests, and assortment audit.
-- Next polish: verify the new commercial pages on production, then tune wording and package boundaries from live sales feedback.
+- Готово: добавлен `/commercial/audit` как management-side страница коммерческого аудита: потери, возможности роста, качество матрицы, ожидаемый эффект и ссылки на детальные отчеты.
+- Готово: добавлен `/commercial/demo` с подготовленными demo-данными и ясной value story без необходимости настройки Langame или синхронизации.
+- Готово: добавлен `/commercial/tariffs` с тарифными уровнями: базовая аналитика, расширенные отчеты, рекомендации, регулярные дайджесты и аудит ассортимента.
+- Следующая полировка: проверить новые коммерческие страницы на production, затем настроить формулировки и границы пакетов по обратной связи продаж.
 
-## Stage 7. Guest Management Module
+## Этап 7. Модуль управления гостями
 
-Status: MVP 1 read-only guest analytics is live in production. Automatic rewards and write-back to Langame are not implemented.
+Статус: MVP 1 read-only аналитики гостей работает в production. Автоматические награды и write-back в Langame не реализованы.
 
-- Source document: `GUEST_MANAGEMENT_MODULE_TZ.md`.
-- Done: product navigation has two left-nav blocks, "Ассортимент" and "Гости"; subsections are collapsed by default and open on click.
-- Done: data profiling and read-only foundation sync for guest-related Langame endpoints started before reward/bonus write-back.
-- Done: initial tenant-scoped guest foundation tables and manual endpoint `POST /integrations/langame/guests/foundation/sync`.
-- Done: first protected guest analytics API and `/guests` dashboard with active/new/repeat/risk/lost guests, sessions, play hours, transaction revenue, bar revenue, visit trend, top guests, and endpoint data-quality warnings.
-- Done: guest dashboard v1.1 adds period, club, guest group, segment, and search filters; paginated guest list; sort links; and a protected guest card `/guests/[id]` with sessions, transactions, and bar purchases.
-- Done: guest phone and full name are now stored encrypted at application level and shown in full to authorized users; raw documents are still not stored or displayed.
-- Done: `/guests` includes a manual foundation sync button so production users can refresh guest data and populate newly added encrypted contact fields after deploy.
-- Done: guest CRM v1 adds manual LeetPlus-only status, note, next action, next contact date, and CRM event history on the protected guest card; these fields are not touched by Langame sync.
-- Done: `/guests/report` full report opens separately with dates, club, group, segment, CRM status, search, sort, direction, and page-size filters.
-- Done: client guest analytics excludes administrator groups by default, but administrator groups remain available in the group filter for explicit drilldown.
-- Done: `/guests/staff-control` adds the first staff-control report for administrator groups and operation-log summary.
-- Done: `/guests/staff-control` surfaces safe data-shape diagnostics for `all_operations_log/list`, `log_cash_transaction/list`, and `working_shifts/list` so the next iteration can validate real operator/admin identifiers.
-- Done: `working_shifts/list` is persisted as tenant-scoped shift facts and linked to staff guests through `user_id` when it matches a Langame guest id; `/guests/staff-control` now shows shift counts, linked shifts, shift hours, shift payment amount, refunds, incassation, and middle check.
-- Done: `/guests/staff-control` now exposes unmatched Langame operators grouped by `externalDomain + user_id` with shift hours, payments, refunds, incassation, middle check, and store list.
-- Done: staff identity mapping v1 adds a tenant-scoped manual link from `working_shifts.user_id` to a staff guest, backfills already loaded shifts, and applies the mapping during future guest foundation sync runs.
-- Done: `/guests/staff-control/operators` opens the full Langame operator report with period/club/status/search/sort filters plus link/unlink tools for staff identity mappings.
-- Done: PC context is pulled from Langame `global/types_of_pc_in_clubs/list` + `global/linking_pc_by_type/list`, stored on `Store.computerCount`, and used for network/club load percent.
-- Done: guest summary can backfill missing PC counts on demand when `Store.computerCount` is empty.
-- Done: `/sync` now lives in a separate `Управление` navigation block, retries Langame date endpoints with `дд.мм.гггг` after `400`, shows compact latest sync job per source, and automatically marks stale guest `RUNNING` sync runs older than 2 hours as failed.
-- Done: `/sync` now has a compact data-status block with the latest successful товарный sync, active Langame sources, source-level errors, and guest foundation status in one place.
-- Done: `/sync` now shows a compact guest foundation run history next to товарные `syncJobs`: recent runs by source, period, counts, endpoint errors, and failure reason.
-- Done: `/sync` guest diagnostics now expose endpoint error details, not only counts and endpoint names, so unavailable or parameter-sensitive Langame endpoints such as `guests/logs` can be triaged from the UI.
-- Done: `guests/logs` is now treated as an optional extended endpoint and is not called by the standard guest foundation sync unless explicitly requested, because the public docs do not confirm period/pagination filters for it.
-- Done: guest current-day analytics now counts session overlap across date boundaries, fixing zero guests/load for current day when sessions started before midnight.
-- Done: `/guests/staff-control` now shows first shift anomaly cards for refunds, missing incassation, long shifts, low middle check, and high-cash unmapped operators.
-- Done: shift anomaly cards now drill down into `/guests/staff-control/operators` with an explicit signal filter, matching sort, and linked/unlinked context where needed.
-- Done: `/guests/staff-control` was converted to compact previews with full separate reports for administrators, operators, operations, and diagnostics; full reports now use breadcrumbs.
-- Done: `/guests/staff-control` now has semantic management blocks with report descriptions: shift signals, employees/operators, and primary Langame data sources.
-- Done: the "long shifts" staff-control signal now means average shift duration >= 14 hours, with inline explanations for every anomaly card.
-- Done: `/guests/staff-control/operators` UI is now positioned as administrator comparison with infographic bars, rankings, and visible wording without "operator" terminology.
-- Done: administrator comparison filters are compact by default, showing active filter chips and expanding into the full filter form on demand.
-- Done: administrator comparison now starts with useful top rankings instead of aggregate totals: total revenue, revenue per shift, bar, bar per shift, bar share, and hookah revenue.
-- Done: administrator top ranking cards are now more visual, with highlighted leaders, rank badges, and comparison bars for each metric.
-- Done: administrator comparison page is compact by default; detailed per-admin comparison and mapping list open in full mode via `view=full`.
-- Done: administrator ranking cards were toned down to a single calm accent, long names now wrap, and the sidebar item is named "Администраторы".
-- Done: desktop sidebar is now a compact icon rail with popover menus for sections, while mobile keeps the slide-out menu.
-- Done: compact desktop sidebar popovers now render above dashboard content without text overlap, close cleanly, and use clearer section icons for guests, staff, assortment, and management.
-- Done: dashboard revenue uses the selected-period network revenue explicitly, and successful login can trigger a daily catch-up sync when Langame data is stale.
-- Done: administrator comparison now includes compact shift-level details with shift ID, period, club, cash, refunds, incassation, bar revenue, and anomaly signals.
-- Done: `/guests/staff-control/operations` now has a dedicated operations report with semantic categories for refunds/cancellations, discounts/bonuses, cash, guests, service operations, filters, sorting, and responsive cards.
-- Done: `/guests/staff-control` now has a daily reconciliation block that places shift signals and operation-log categories side by side with direct drilldowns.
-- Done: `/guests/report` now has a server-side CSV export for the full filtered guest selection, not only the current page.
-- Done: `/guests/staff-control/operators` now has a server-side CSV export for the full filtered administrator comparison report.
-- Done: `/guests/staff-control/operations` now has a server-side CSV export for the full filtered operation-log type summary.
-- Done: `/guests/report` now has tenant-scoped saved filters for quick guest segments: save current filters, apply them later, and delete obsolete filters.
-- Done: `/guests/report` now has tenant-scoped saved groups: save the current filtered guest selection as a snapshot with member rows, apply its filters later, and delete obsolete groups.
-- Done: the `Гости` sidebar section now exposes distinct destinations for guest dashboard, guest list, full report, and saved groups instead of duplicate links to the same page.
-- Done: `/guests/report#audiences` now starts the CRM workflow for groups: users can create contact tasks for saved groups and see the latest CRM tasks next to saved group snapshots.
-- Done: manual CRM guests/leads can be added before Langame registration, with encrypted full name and phone storage; future guest sync links these leads to Langame guests by normalized phone hash and copies the CRM status/action into the matched guest only when the matched guest has no CRM status yet.
-- Done: manual CRM leads with a next action now automatically create linked CRM tasks, and the group CRM panel supports task statuses: new, in progress, done, and canceled.
-- Done: manual CRM leads now capture phone/messenger communication consent v1; the consent status is visible in the group CRM panel and is copied to the matched Langame guest during phone-based sync when the guest has no consent status yet.
-- Done: group CRM panel now supports consent and unsubscribe handling for existing manual CRM leads; if a matched contact is marked unsubscribed, the linked guest is moved to `DO_NOT_CONTACT` with a CRM event.
-- Done: group CRM panel now has CRM contact history v1: users can record contact channel, date, result, and note for manual leads; events are tenant-scoped and linked to the matched guest when available.
-- Done: guest CRM now has a dedicated `/guests/crm` entry point and a separate sidebar item under `Гости`, so groups, manual leads, CRM tasks, consents, and contact history are discoverable without opening the full report anchor.
-- Done: CRM tasks now support tenant-scoped assignees from LeetPlus users; the CRM workspace and group panel show/select the responsible user for each task.
-- Done: saved groups and manual CRM guests now have a campaign-ready planning workflow: create a CRM task with target, channel, deadline, responsible user, and contact note before any automated messaging is introduced.
-- Done: group CRM panel now has compact campaign analytics: active and overdue tasks, completed tasks, contact channels, contact results, saved group coverage, and nearest deadlines.
-- Done: CRM tasks now have a full `/guests/crm/tasks` work report with filters by status, responsible user, target type, due period, search, sorting, responsive cards/table, breadcrumbs, and CSV export.
-- Current limitation: `all_operations_log` is stored and summarized, but it still does not expose a reliable administrator identifier. `log_cash_transaction/list` currently returns errors on production sources, so cashier analytics starts from working shifts.
-- Current limitation: PC-count parsing is defensive because real `global/*` payload shape may differ by Langame source; production verification should confirm `computerCount` is filled for each club.
-- Planned data foundation: guests, guest groups, balances, bonus balances, sessions, transactions, all operations log, product expenses by guest, clubs, tariffs, shifts, and PC context.
-- Next: connect operation categories to concrete administrator shifts when Langame exposes a reliable operator identifier in operation/cash logs.
-- Done: production `/dashboard` current-day load percentage was verified on 2026-05-29: guest summary returned 122.4 play hours, 185 PCs, 4440 possible PC-hours, and 2.8% load instead of `нет данных`.
-- Done: campaign/contact outcome analytics now starts from campaign detail: direct contact attribution, group fallback, before/after windows, visits, sessions, play hours, balance-spend revenue, bar revenue, and attribution limitations.
-- Done: campaign contact workflow is connected to `marketingCampaignId`: campaign detail can create the linked CRM task from the contacts tab, contact results are saved directly to the campaign, and effect analytics tracks group, CRM task, responsible user, channel, visits, revenue, and bar.
-- Planned analytics: RFM, retention, churn risk, heatmaps, LTV, bonus load, campaign effect, and guest-flow forecasts.
-- Planned CRM layer: segments, saved groups, CRM statuses, notes, tasks, communication history, and next-best-action recommendations.
-- Planned loyalty/gamification: missions, rewards, budgets, limits, anti-fraud, and manual payout queue until a safe Langame write API is confirmed.
-- Planned channels: Telegram bot/Mini App first, MAX bot/Mini App later after legal/account setup; all channels require explicit consent and unsubscribe support.
+- Исходный документ: `GUEST_MANAGEMENT_MODULE_TZ.md`.
+- Готово: продуктовая навигация имеет два left-nav блока: `Ассортимент` и `Гости`; подразделы свернуты по умолчанию и открываются по клику.
+- Готово: data profiling и read-only foundation sync для гостевых endpoints Langame начаты до reward/bonus write-back.
+- Готово: первые tenant-scoped guest foundation таблицы и ручной endpoint `POST /integrations/langame/guests/foundation/sync`.
+- Готово: первый защищенный guest analytics API и dashboard `/guests` с активными/новыми/повторными/рисковыми/потерянными гостями, сессиями, игровыми часами, transaction revenue, bar revenue, динамикой визитов, top-гостями и warnings качества данных endpoints.
+- Готово: guest dashboard v1.1 добавляет фильтры период/клуб/группа гостей/сегмент/поиск, пагинированный список гостей, ссылки сортировки и защищенную карточку `/guests/[id]` с сессиями, транзакциями и барными покупками.
+- Готово: телефон и ФИО гостя хранятся зашифрованно на application level и показываются полностью авторизованным пользователям; сырые документы по-прежнему не сохраняются и не отображаются.
+- Готово: `/guests` содержит ручную кнопку foundation sync, чтобы production-пользователи могли обновить гостевые данные и заполнить новые зашифрованные контактные поля после deploy.
+- Готово: guest CRM v1 добавляет ручной LeetPlus-only статус, заметку, следующий шаг, дату следующего контакта и историю CRM-событий в защищенной карточке гостя; эти поля не трогаются Langame sync.
+- Готово: полный отчет `/guests/report` открывается отдельно с датами, клубом, группой, сегментом, CRM-статусом, поиском, сортировкой, направлением и page-size фильтрами.
+- Готово: клиентская гостевая аналитика по умолчанию исключает группы администраторов, но группы администраторов остаются доступны в фильтре для явного drilldown.
+- Готово: `/guests/staff-control` добавляет первый staff-control отчет по группам администраторов и сводку operation-log.
+- Готово: `/guests/staff-control` показывает безопасную диагностику формы данных для `all_operations_log/list`, `log_cash_transaction/list` и `working_shifts/list`, чтобы следующая итерация могла проверить реальные operator/admin identifiers.
+- Готово: `working_shifts/list` сохраняется как tenant-scoped факты смен и связывается со staff guests через `user_id`, если он совпадает с Langame guest id; `/guests/staff-control` показывает количество смен, связанные смены, часы смен, payment amount, refunds, incassation и middle check.
+- Готово: `/guests/staff-control` показывает несопоставленных операторов Langame, сгруппированных по `externalDomain + user_id`, с часами смен, payments, refunds, incassation, middle check и списком клубов.
+- Готово: staff identity mapping v1 добавляет tenant-scoped ручную связь `working_shifts.user_id` со staff guest, backfill уже загруженных смен и применение связи в будущих guest foundation sync runs.
+- Готово: `/guests/staff-control/operators` открывает полный отчет операторов Langame с фильтрами период/клуб/статус/поиск/сортировка и инструментами link/unlink для staff identity mappings.
+- Готово: PC-контекст подтягивается из Langame `global/types_of_pc_in_clubs/list` + `global/linking_pc_by_type/list`, сохраняется в `Store.computerCount` и используется для процента загрузки сети/клуба.
+- Готово: guest summary может дозаполнить missing PC counts on demand, если `Store.computerCount` пустой.
+- Готово: `/sync` находится в отдельном навигационном блоке `Управление`, повторяет Langame date endpoints с `дд.мм.гггг` после `400`, показывает компактный latest sync job по источнику и автоматически помечает устаревшие guest `RUNNING` sync runs старше 2 часов как failed.
+- Готово: `/sync` имеет компактный data-status блок с последним успешным товарным sync, активными Langame sources, ошибками по источникам и guest foundation status в одном месте.
+- Готово: `/sync` показывает компактную историю guest foundation run рядом с товарными `syncJobs`: последние runs по source, period, counts, endpoint errors и failure reason.
+- Готово: guest diagnostics в `/sync` показывают детали endpoint errors, а не только counts и endpoint names, поэтому недоступные или чувствительные к параметрам endpoints Langame вроде `guests/logs` можно разбирать из UI.
+- Готово: `guests/logs` считается optional extended endpoint и не вызывается стандартным guest foundation sync без явного запроса, потому что public docs не подтверждают period/pagination filters для него.
+- Готово: current-day analytics гостей считает пересечение сессий через границы дат, исправляя нулевых гостей/загрузку за текущий день, когда сессии начались до полуночи.
+- Готово: `/guests/staff-control` показывает первые shift anomaly cards: refunds, missing incassation, long shifts, low middle check и high-cash unmapped operators.
+- Готово: shift anomaly cards ведут в `/guests/staff-control/operators` с явным signal filter, matching sort и linked/unlinked context где нужно.
+- Готово: `/guests/staff-control` переведен в compact previews с отдельными полными отчетами по администраторам, операторам, операциям и diagnostics; полные отчеты теперь используют breadcrumbs.
+- Готово: `/guests/staff-control` имеет смысловые управленческие блоки с описаниями отчетов: сигналы смен, employees/operators и основные источники Langame data.
+- Готово: сигнал "long shifts" в staff-control означает среднюю длительность смены >= 14 часов, с inline-пояснениями для каждой anomaly card.
+- Готово: UI `/guests/staff-control/operators` позиционируется как сравнение администраторов с infographic bars, rankings и понятным текстом без терминологии "operator".
+- Готово: фильтры сравнения администраторов компактны по умолчанию, показывают active filter chips и раскрываются в полную форму по необходимости.
+- Готово: сравнение администраторов начинается с полезных top rankings вместо агрегатных totals: total revenue, revenue per shift, bar, bar per shift, bar share и hookah revenue.
+- Готово: top ranking cards администраторов стали визуальнее, с highlighted leaders, rank badges и comparison bars для каждой метрики.
+- Готово: страница сравнения администраторов компактна по умолчанию; детальное сравнение по администраторам и mapping list открываются в full mode через `view=full`.
+- Готово: ranking cards администраторов приглушены до одного спокойного акцента, длинные имена переносятся, пункт sidebar называется "Администраторы".
+- Готово: desktop sidebar стал компактным icon rail с popover menus по разделам, mobile сохраняет slide-out menu.
+- Готово: popover-меню компактного desktop sidebar рендерятся поверх dashboard content без overlap текста, корректно закрываются и используют более понятные иконки разделов для гостей, staff, assortment и management.
+- Готово: dashboard revenue явно использует network revenue выбранного периода, а успешный login может запустить daily catch-up sync, когда Langame data устарели.
+- Готово: сравнение администраторов содержит компактные shift-level details с shift ID, периодом, клубом, cash, refunds, incassation, bar revenue и anomaly signals.
+- Готово: `/guests/staff-control/operations` имеет отдельный отчет операций с semantic categories для refunds/cancellations, discounts/bonuses, cash, guests, service operations, фильтрами, сортировкой и responsive cards.
+- Готово: `/guests/staff-control` имеет daily reconciliation блок, который ставит shift signals и operation-log categories рядом с прямыми drilldowns.
+- Готово: `/guests/report` имеет server-side CSV export для полной отфильтрованной выборки гостей, а не только текущей страницы.
+- Готово: `/guests/staff-control/operators` имеет server-side CSV export для полного отфильтрованного отчета сравнения администраторов.
+- Готово: `/guests/staff-control/operations` имеет server-side CSV export для полной отфильтрованной сводки типов operation-log.
+- Готово: `/guests/report` имеет tenant-scoped saved filters для быстрых гостевых сегментов: сохранить текущие фильтры, применить позже и удалить устаревшие.
+- Готово: `/guests/report` имеет tenant-scoped saved groups: сохранить текущую отфильтрованную выборку гостей как snapshot с member rows, применить ее фильтры позже и удалить устаревшие группы.
+- Готово: раздел sidebar `Гости` показывает отдельные destination для guest dashboard, guest list, full report и saved groups вместо дублей на одну страницу.
+- Готово: `/guests/report#audiences` запускает CRM workflow для групп: пользователи могут создавать contact tasks для saved groups и видеть последние CRM tasks рядом со snapshots групп.
+- Готово: ручные CRM-гости/leads можно добавлять до регистрации в Langame, с шифрованием ФИО и телефона; будущий guest sync связывает leads с гостями Langame по normalized phone hash и копирует CRM status/action в matched guest только если у matched guest еще нет CRM status.
+- Готово: manual CRM leads с next action автоматически создают linked CRM tasks, а group CRM panel поддерживает статусы задач: new, in progress, done и canceled.
+- Готово: manual CRM leads фиксируют phone/messenger communication consent v1; consent status виден в group CRM panel и копируется в matched Langame guest во время phone-based sync, если у гостя еще нет consent status.
+- Готово: group CRM panel поддерживает consent и unsubscribe handling для существующих manual CRM leads; если matched contact отмечен как unsubscribed, linked guest переводится в `DO_NOT_CONTACT` с CRM event.
+- Готово: group CRM panel имеет CRM contact history v1: пользователи могут записывать contact channel, date, result и note по manual leads; events tenant-scoped и привязываются к matched guest, если он доступен.
+- Готово: guest CRM имеет отдельную entry point `/guests/crm` и отдельный пункт sidebar в `Гости`, чтобы groups, manual leads, CRM tasks, consents и contact history находились без открытия full report anchor.
+- Готово: CRM tasks поддерживают tenant-scoped assignees из пользователей LeetPlus; CRM workspace и group panel показывают/выбирают responsible user для каждой задачи.
+- Готово: saved groups и manual CRM guests имеют campaign-ready planning workflow: создать CRM task с target, channel, deadline, responsible user и contact note до введения автоматизированных сообщений.
+- Готово: group CRM panel имеет компактную campaign analytics: активные и просроченные задачи, завершенные задачи, contact channels, contact results, покрытие saved group и ближайшие deadlines.
+- Готово: CRM tasks имеют полный рабочий отчет `/guests/crm/tasks` с фильтрами по status, responsible user, target type, due period, search, sorting, responsive cards/table, breadcrumbs и CSV export.
+- Текущее ограничение: `all_operations_log` сохраняется и суммируется, но все еще не дает надежный administrator identifier. `log_cash_transaction/list` сейчас возвращает ошибки на production sources, поэтому cashier analytics начинается от working shifts.
+- Текущее ограничение: парсинг PC-count защитный, потому что реальная форма `global/*` payload может отличаться по источникам Langame; production verification должна подтвердить, что `computerCount` заполнен для каждого клуба.
+- Запланированная data foundation: гости, группы гостей, балансы, бонусные балансы, сессии, транзакции, all operations log, product expenses по гостю, клубы, тарифы, смены и PC-контекст.
+- Следующее: связать operation categories с конкретными сменами администраторов, когда Langame начнет отдавать надежный operator identifier в operation/cash logs.
+- Готово: production `/dashboard` current-day load percentage проверен 2026-05-29: guest summary вернул 122.4 play hours, 185 PCs, 4440 possible PC-hours и 2.8% load вместо `нет данных`.
+- Готово: analytics результата кампаний/контактов начинается с campaign detail: direct contact attribution, group fallback, before/after windows, visits, sessions, play hours, balance-spend revenue, bar revenue и attribution limitations.
+- Готово: campaign contact workflow связан с `marketingCampaignId`: campaign detail может создавать linked CRM task из вкладки contacts, contact results сохраняются прямо в campaign, а effect analytics отслеживает group, CRM task, responsible user, channel, visits, revenue и bar.
+- Запланированная аналитика: RFM, retention, churn risk, heatmaps, LTV, bonus load, campaign effect и guest-flow forecasts.
+- Запланированный CRM-слой: segments, saved groups, CRM statuses, notes, tasks, communication history и next-best-action recommendations.
+- Запланированная loyalty/gamification: missions, rewards, budgets, limits, anti-fraud и manual payout queue до подтверждения безопасного Langame write API.
+- Запланированные каналы: сначала Telegram bot/Mini App, затем MAX bot/Mini App после legal/account setup; всем каналам нужны явное согласие и unsubscribe support.
 
-## Stage 8. Staff Operations Module
+## Этап 8. Модуль операций персонала
 
-Status: started. This is a new operational module for employees of computer club networks: regulations, shift checklists, training, knowledge base, and task control. MVP 1 starts from an operational task queue for clubs, shifts, and responsible employees.
+Статус: начато. Это новый операционный модуль для сотрудников сетей компьютерных клубов: регламенты, чек-листы смен, обучение, база знаний и контроль задач. MVP 1 начинается с очереди операционных задач по клубам, сменам и ответственным сотрудникам.
 
-### Product Positioning
+### Продуктовое позиционирование
 
-The module should not be a generic task tracker. It should become an operational control system for a computer club shift:
+Модуль не должен быть generic task tracker. Он должен стать системой операционного контроля смены компьютерного клуба:
 
-- regulations define how work must be done;
-- training explains and validates that employees understand the work;
-- tasks and checklists turn the standard into daily actions;
-- evidence and audit history prove what happened;
-- analytics shows where clubs, shifts, and employees need attention.
+- регламенты определяют, как должна выполняться работа;
+- обучение объясняет и проверяет, что сотрудники понимают работу;
+- задачи и чек-листы превращают стандарт в ежедневные действия;
+- evidence и audit history подтверждают, что произошло;
+- analytics показывает, где клубам, сменам и сотрудникам нужно внимание.
 
-Recommended navigation block names: `Персонал`, `Операции`, or `Стандарты и смены`. Preferred first product name: `Персонал`, because it can naturally include tasks, training, regulations, and staff-control analytics.
+Рекомендованные названия навигационного блока: `Персонал`, `Операции` или `Стандарты и смены`. Предпочтительное первое продуктовое название: `Персонал`, потому что туда естественно входят задачи, обучение, регламенты и staff-control analytics.
 
-### Competitor Notes
+### Заметки по конкурентам
 
-- Service Inspector: strongest reference for electronic checklists, regulations, standards, attestations, journals, instructions, mobile execution, photo/video evidence, violation tasks, notifications, and analytics. Source: https://serviceinspector.ru/
-- LeaderTask: reference for fast task creation from app, email, Telegram, voice, and browser widget; also useful for reminders, recurring tasks, nested tasks, attachments, roles, permissions, offline mode, and mobile apps. Source: https://www.leadertask.ru/
-- Todoist: reference for simple team workspaces, task assignment, comments, files, sections, subtasks, board/calendar/list views, templates, integrations, activity log, permissions, and AI Assist for task breakdown and filters. Source: https://www.todoist.com/
-- YouGile: reference for board-based work, built-in messenger, many task fields/tools, nested subtasks, role permissions, templates, automated task transfer, API, mobile apps, and boxed/on-premise option. Source: https://ru.yougile.com/
+- Service Inspector: сильный ориентир для электронных чек-листов, регламентов, стандартов, аттестаций, журналов, инструкций, мобильного выполнения, фото/видео-доказательств, задач по нарушениям, уведомлений и аналитики. Источник: https://serviceinspector.ru/
+- LeaderTask: ориентир для быстрого создания задач из приложения, email, Telegram, голоса и browser widget; также полезен для reminders, recurring tasks, nested tasks, attachments, roles, permissions, offline mode и mobile apps. Источник: https://www.leadertask.ru/
+- Todoist: ориентир по простым team workspaces, назначению задач, комментариям, файлам, секциям, subtasks, board/calendar/list views, templates, integrations, activity log, permissions и AI Assist для декомпозиции задач и фильтров. Источник: https://www.todoist.com/
+- YouGile: ориентир по board-based работе, встроенному messenger, множеству task fields/tools, nested subtasks, role permissions, templates, automated task transfer, API, mobile apps и boxed/on-premise варианту. Источник: https://ru.yougile.com/
 
-Conclusion for LeetPlus: combine Service Inspector-style operational proof with LeetPlus-specific staff, shift, cash, guest, and assortment analytics. Compete by industry depth, not by copying a universal task manager.
+Вывод для LeetPlus: объединить operational proof в стиле Service Inspector с собственной аналитикой LeetPlus по персоналу, сменам, кассе, гостям и ассортименту. Конкурировать глубиной отрасли, а не копированием универсального task manager.
 
-### Target Users
+### Целевые пользователи
 
-- Network owner: sees operational discipline across clubs and understands where money, service, or compliance is at risk.
-- Operations director or regional manager: controls execution by clubs, shifts, and managers.
-- Club manager: assigns work, checks shift quality, trains employees, handles recurring issues.
-- Senior administrator: runs the current shift and closes required checklists.
-- Administrator: sees personal tasks, shift tasks, regulations, training, and knowledge base.
+- Владелец сети: видит операционную дисциплину по клубам и понимает, где деньги, сервис или compliance находятся в риске.
+- Операционный директор или региональный управляющий: контролирует исполнение по клубам, сменам и управляющим.
+- Управляющий клубом: назначает работу, проверяет качество смены, обучает сотрудников, разбирает повторяющиеся проблемы.
+- Старший администратор: ведет текущую смену и закрывает обязательные чек-листы.
+- Администратор: видит личные задачи, задачи смены, регламенты, обучение и базу знаний.
 
-### Core Entities
+### Ключевые сущности
 
-- Staff member: LeetPlus employee identity, optionally linked to Langame operator/guest/admin identifiers.
+- Staff member: идентичность сотрудника LeetPlus, опционально связанная с Langame operator/guest/admin identifiers.
 - Role: owner, manager, senior administrator, administrator, auditor, viewer.
-- Staff group: role, department, club team, trainee group.
-- Regulation: versioned document with owner, status, effective date, required acknowledgement, attached materials.
-- Knowledge base article: quick operational answer for administrators.
-- Training material: text, file, image, video link, external link.
-- Course: ordered set of materials, tasks, and tests.
-- Test/attestation: questions, pass threshold, attempts, expiration date, result history.
-- Task: one-time, recurring, shift-based, period-based, role-based, club-based, or personal.
+- Staff group: роль, отдел, команда клуба, trainee group.
+- Regulation: версионируемый документ с владельцем, статусом, датой действия, обязательным подтверждением и attached materials.
+- Knowledge base article: быстрый операционный ответ для администраторов.
+- Training material: текст, файл, изображение, video link, external link.
+- Course: упорядоченный набор материалов, задач и тестов.
+- Test/attestation: вопросы, порог прохождения, попытки, срок действия, история результатов.
+- Task: one-time, recurring, shift-based, period-based, role-based, club-based или personal.
 - Checklist template: reusable operational checklist.
-- Checklist run: concrete completion instance tied to shift, employee, club, and time.
-- Evidence: photo, video, file, comment, numeric value, yes/no answer, timestamp.
-- Violation: failed checklist item or manually created issue that can spawn a task.
-- Discipline rule: warning/fine template by category, enabled network/club policy, and manual record for an administrator.
-- Audit event: immutable history of creation, edit, assignment, acknowledgement, completion, rejection, and verification.
+- Checklist run: конкретный факт выполнения, привязанный к смене, сотруднику, клубу и времени.
+- Evidence: фото, видео, файл, комментарий, numeric value, yes/no answer, timestamp.
+- Violation: проваленный пункт чек-листа или ручная проблема, из которой может появиться задача.
+- Discipline rule: шаблон предупреждения/штрафа по категории, включенная policy сети/клуба и ручная запись по администратору.
+- Audit event: неизменяемая история создания, редактирования, назначения, подтверждения, выполнения, отклонения и проверки.
 
 ### MVP 1. Staff Foundation And Tasks
 
-Goal: let managers create short-term and long-term tasks for shifts, periods, clubs, roles, or specific employees.
+Цель: дать управляющим возможность создавать краткосрочные и долгосрочные задачи для смен, периодов, клубов, ролей или конкретных сотрудников.
 
-- Done: created `STAFF_OPERATIONS_MODULE_TZ.md` with roles, scenarios, data model, permissions, MVP scope, acceptance criteria, and data rules.
-- Done: first staff-task foundation added: tenant-scoped `StaffTask` model, migration, API for list/create/status update, `/staff/tasks` workspace, and `Персонал -> Задачи персонала` navigation entry.
-- Done: staff tasks now support execution comments, evidence links, and an audit journal for create/update/status/comment/evidence events; `/staff/tasks` shows a compact `История и подтверждение` block in each task.
-- Done: tenant user roles and account issuing added: `OWNER`, `ADMIN`, `MANAGER`, `BUYER`, `MARKETER`, `CLUB_MANAGER`, `STANDARDS_MANAGER`, `SENIOR_ADMINISTRATOR`, and `CLUB_ADMINISTRATOR`; `/users` lets owner/system admin create accounts, set active status, reset password, and scope access to the whole network or selected clubs.
-- Done: added `STANDARDS_MANAGER` for training, administrator hiring, regulations, checklists, work standards, administrator control, and attestations; the role can access staff operations and staff-control reports without opening the full guest/CRM area in navigation.
-- Done: added tenant-specific custom role setup for the main club/network account: `/users` can create and edit roles with permission checkboxes, assign them to user accounts, and the API guard validates custom permissions for protected route groups.
-- Done: added registration invite links for configured roles and club scopes: `/users` can generate a one-time link with system/custom role and selected clubs, and `/register?invite=...` lets the employee set email/password and join the existing tenant.
-- Done: protected API guards now re-read the current user from DB, so deactivated accounts and changed roles stop using protected routes after token verification.
-- Done: task templates added for common club operations: tenant-scoped `StaffTaskTemplate`, API `/staff/task-templates`, UI `/staff/task-templates`, reusable packs, per-club scope, default deadline offset, labels, and one-click task creation from a template.
-- Done: first tenant-scoped binary attachment storage added for staff operations: `StaffAttachment`, upload/download API `/staff/attachments`, web proxy, and upload controls in task evidence, checklist evidence, shift-regulation materials, and knowledge-base materials.
-- Create staff directory and role model independent from guest analytics, while reusing current staff identity mapping where useful.
-- Support employee-to-Langame mapping from `working_shifts.user_id` and future operator identifiers.
-- Add task types: one-time, shift, recurring, long-term, personal, club, role.
-- Add task statuses: new, in progress, on review, done, overdue, canceled.
-- Add priority, deadline, responsible employee, club, shift, author, observer, labels, attachments, comments, and checklist inside a task.
-- Add recurring rules: daily, weekly, monthly, by shift opening, by shift closing.
-- Add templates for common club operations.
-- Add basic task list views: today, overdue, my tasks, by club, by employee, by shift, by status.
-- Add audit history for every task.
-- Next: add staff directory/fuller identity model and recurring task rules.
+- Готово: создан `STAFF_OPERATIONS_MODULE_TZ.md` с ролями, сценариями, моделью данных, permissions, MVP scope, критериями приемки и data rules.
+- Готово: добавлена первая staff-task foundation: tenant-scoped модель `StaffTask`, миграция, API для list/create/status update, workspace `/staff/tasks` и пункт навигации `Персонал -> Задачи персонала`.
+- Готово: staff tasks поддерживают комментарии выполнения, evidence links и audit journal для create/update/status/comment/evidence events; `/staff/tasks` показывает компактный блок `История и подтверждение` в каждой задаче.
+- Готово: добавлены tenant user roles и выдача учетных записей: `OWNER`, `ADMIN`, `MANAGER`, `BUYER`, `MARKETER`, `CLUB_MANAGER`, `STANDARDS_MANAGER`, `SENIOR_ADMINISTRATOR` и `CLUB_ADMINISTRATOR`; `/users` позволяет owner/system admin создавать accounts, менять active status, reset password и scope доступа на всю сеть или выбранные клубы.
+- Готово: добавлена роль `STANDARDS_MANAGER` для обучения, подбора администраторов, регламентов, чек-листов, стандартов работы, контроля администраторов и аттестаций; роль может открывать staff operations и staff-control reports без полного гостевого/CRM блока в навигации.
+- Готово: добавлена tenant-specific настройка custom roles для главной учетной записи клуба/сети: `/users` может создавать и редактировать роли с permission checkboxes, назначать их user accounts, а API guard проверяет custom permissions для protected route groups.
+- Готово: добавлены registration invite links для настроенных ролей и club scopes: `/users` генерирует one-time link с system/custom role и выбранными клубами, а `/register?invite=...` дает сотруднику задать email/password и войти в существующий tenant.
+- Готово: protected API guards перечитывают текущего пользователя из DB, поэтому deactivated accounts и измененные роли перестают использовать protected routes после token verification.
+- Готово: добавлены task templates для типовых операций клуба: tenant-scoped `StaffTaskTemplate`, API `/staff/task-templates`, UI `/staff/task-templates`, reusable packs, per-club scope, default deadline offset, labels и создание задачи из шаблона в один клик.
+- Готово: добавлено первое tenant-scoped binary attachment storage для staff operations: `StaffAttachment`, upload/download API `/staff/attachments`, web proxy и upload controls в task evidence, checklist evidence, shift-regulation materials и knowledge-base materials.
+- Создать staff directory и role model, независимые от guest analytics, переиспользуя текущий staff identity mapping там, где это полезно.
+- Поддержать employee-to-Langame mapping из `working_shifts.user_id` и будущих operator identifiers.
+- Добавить типы задач: one-time, shift, recurring, long-term, personal, club, role.
+- Добавить статусы задач: new, in progress, on review, done, overdue, canceled.
+- Добавить priority, deadline, responsible employee, club, shift, author, observer, labels, attachments, comments и checklist внутри задачи.
+- Добавить recurring rules: daily, weekly, monthly, by shift opening, by shift closing.
+- Добавить templates для типовых операций клуба.
+- Добавить базовые views списка задач: today, overdue, my tasks, by club, by employee, by shift, by status.
+- Добавить audit history для каждой задачи.
+- Следующее: добавить staff directory/полную модель идентичности сотрудников и recurring task rules.
 
-Acceptance criteria:
+Критерии приемки:
 
-- A manager can create a task for a concrete evening shift in one club.
-- An administrator sees assigned shift tasks and can mark them complete with a comment or attachment.
-- A manager sees completion status, overdue tasks, and task history.
-- Existing Langame sync does not overwrite LeetPlus-owned staff/task data.
+- Управляющий может создать задачу на конкретную вечернюю смену в одном клубе.
+- Администратор видит назначенные задачи смены и может отметить выполнение с комментарием или вложением.
+- Управляющий видит статус выполнения, просрочки и историю задачи.
+- Существующий Langame sync не перетирает staff/task data, принадлежащие LeetPlus.
 
-### MVP 1A. Inside-Team Operational Feed
+### MVP 1A. Внутрикомандная операционная лента
 
-Goal: give the club team a fast internal communication layer without introducing full realtime messenger infrastructure too early.
+Цель: дать команде клуба быстрый внутренний слой коммуникации без преждевременного ввода полной realtime messenger инфраструктуры.
 
-- Done: build `/staff/team-chat` as a tenant-scoped operational feed with channels, messages, pinned announcements, read receipts, club/role context, and a simple refresh workflow.
-- Done: add persistent `StaffChatChannel`, `StaffChatMessage`, `StaffChatReadReceipt`, and `StaffChatChannelMember` models so the first feed can later grow into a realtime chat without changing the data foundation.
-- Done: team chat now creates default channels for `Информация и объявления`, `Техническая поддержка`, `Общение`, and one default club channel per store; custom channels can be created with selected employee members.
-- Done: chat messages can now be turned into staff tasks directly from `/staff/team-chat`; the task keeps the original message text, channel/store context, priority, deadline, and `source=team_chat` metadata in labels.
-- Done: failed checklist submissions now create a team-chat incident in the default network channel with checklist, club, responsible user, score, failed-item summary, and a link back to checklist filtering.
-- Next: connect chat context to shift incidents and critical dashboard signals.
-- Later: add WebSocket/SSE realtime delivery, file attachments, push/browser notifications, message mentions, and external messenger bridges only after access rules and notification policy are stable.
+- Готово: построить `/staff/team-chat` как tenant-scoped operational feed с channels, messages, pinned announcements, read receipts, club/role context и простым refresh workflow.
+- Готово: добавить persistent модели `StaffChatChannel`, `StaffChatMessage`, `StaffChatReadReceipt` и `StaffChatChannelMember`, чтобы первая лента могла вырасти в realtime chat без изменения data foundation.
+- Готово: team chat создает default channels `Информация и объявления`, `Техническая поддержка`, `Общение` и один default club channel на каждый store; custom channels можно создавать с выбранными employee members.
+- Готово: chat messages можно превращать в staff tasks прямо из `/staff/team-chat`; задача сохраняет original message text, channel/store context, priority, deadline и metadata `source=team_chat` в labels.
+- Готово: failed checklist submissions создают team-chat incident в default network channel с checklist, club, responsible user, score, failed-item summary и ссылкой обратно на filtering чек-листов.
+- Следующее: связать chat context с shift incidents и критическими dashboard signals.
+- Позже: добавить WebSocket/SSE realtime delivery, file attachments, push/browser notifications, message mentions и external messenger bridges только после стабилизации access rules и notification policy.
 
-Acceptance criteria:
+Критерии приемки:
 
-- A manager can post an operational announcement to the whole network, a club channel, or a role channel.
-- Employees with staff access can read the feed, see pinned items, and mark channel messages as read.
-- Messages preserve author, tenant, channel, store context, created time, priority, and pinned state.
-- The first implementation remains usable without Telegram/MAX/VDS changes or additional infrastructure.
+- Управляющий может опубликовать операционное объявление на всю сеть, в канал клуба или в role channel.
+- Сотрудники со staff access могут читать ленту, видеть pinned items и отмечать channel messages как прочитанные.
+- Сообщения сохраняют автора, tenant, channel, store context, время создания, priority и pinned state.
+- Первая реализация остается полезной без Telegram/MAX/VDS-изменений или дополнительной инфраструктуры.
 
-### MVP 2. Shift Checklists And Regulations
+### MVP 2. Чек-листы смен и регламенты
 
-Status: started. Goal: turn daily operating standards into controlled execution.
+Статус: начато. Цель: превратить ежедневные операционные стандарты в контролируемое исполнение.
 
-- Done: first shift-regulation constructor added: tenant-scoped `StaffShiftRegulation`, migration, API `/staff/shift-regulations`, `/staff/shift-regulations` UI, sidebar entry, statuses draft/published/archived, sections, items, required/evidence flags, value type, score, role, club, and effective date.
-- Done: first checklist-run execution layer added: tenant-scoped `StaffChecklistRun`, migration, API `/staff/checklists`, `/staff/checklists` UI, sidebar entry, creation from published regulations, answer/evidence capture, submission blocking for missing required answers/evidence, manager accept/return statuses, and automatic follow-up tasks for failed items.
-- Done: shift-regulation constructor now includes two admin templates from the current `Регламент.docx`: day shift `09:00-20:00` and night shift `21:00-08:00`, with timing sections, standing rules, bar/accounting, report evidence, and incident rules.
-- Done: published shift regulations now support required employee acknowledgement by selected role and club scope; the constructor shows required/acknowledged/pending counts, employees can confirm the current version, and republishing creates a new acknowledgement version.
-- Done: shift regulations now keep versioned publication snapshots in `StaffShiftRegulationVersion`; existing published regulations are backfilled during migration, every publication records title/scope/sections, and the constructor shows a compact version history.
-- Done: shift regulations now support attached link materials: document, file, image, video, external URL, note, required flag, current regulation editing, and publication snapshots with attachment counts.
-- Done: checklist template builder added with tenant-scoped `StaffChecklistTemplate`, migration, API `/staff/checklist-templates`, `/staff/checklist-templates` UI, sidebar entry, draft/active/archive statuses, sections, required fields, evidence requirements, scoring, club/role scope, and creation from a published regulation.
-- Done: preview/test mode is available directly inside employee-facing builders: shift regulations, checklist templates, task templates, training courses, onboarding routes, and knowledge-base articles now have sandbox previews with fake answers/evidence, required-step readiness, employee-facing layout, and no real operational facts, tasks, training progress, or acknowledgements created.
+- Готово: добавлен первый конструктор shift regulations: tenant-scoped `StaffShiftRegulation`, migration, API `/staff/shift-regulations`, UI `/staff/shift-regulations`, sidebar entry, statuses draft/published/archived, sections, items, required/evidence flags, value type, score, role, club и effective date.
+- Готово: добавлен первый слой checklist-run execution: tenant-scoped `StaffChecklistRun`, migration, API `/staff/checklists`, UI `/staff/checklists`, sidebar entry, создание из published regulations, capture ответов/evidence, блокировка submit при отсутствии required answers/evidence, manager accept/return statuses и automatic follow-up tasks по failed items.
+- Готово: shift-regulation constructor содержит два admin templates из текущего `Регламент.docx`: day shift `09:00-20:00` и night shift `21:00-08:00`, с timing sections, standing rules, bar/accounting, report evidence и incident rules.
+- Готово: published shift regulations поддерживают required employee acknowledgement по selected role и club scope; constructor показывает required/acknowledged/pending counts, employees могут подтвердить current version, а republishing создает новую acknowledgement version.
+- Готово: shift regulations хранят versioned publication snapshots в `StaffShiftRegulationVersion`; существующие published regulations backfilled во время migration, каждая publication записывает title/scope/sections, а constructor показывает compact version history.
+- Готово: shift regulations поддерживают attached link materials: document, file, image, video, external URL, note, required flag, current regulation editing и publication snapshots с attachment counts.
+- Готово: добавлен checklist template builder с tenant-scoped `StaffChecklistTemplate`, migration, API `/staff/checklist-templates`, UI `/staff/checklist-templates`, sidebar entry, draft/active/archive statuses, sections, required fields, evidence requirements, scoring, club/role scope и созданием из published regulation.
+- Готово: preview/test mode доступен прямо в employee-facing builders: shift regulations, checklist templates, task templates, training courses, onboarding routes и knowledge-base articles имеют sandbox previews с fake answers/evidence, required-step readiness, employee-facing layout и без создания real operational facts, tasks, training progress или acknowledgements.
 - Product rule: при создании шаблонов регламентов, чек-листов, задач, курсов, материалов базы знаний и любых будущих стандартов для сотрудников обязательно добавлять предпросмотр employee-facing сценария. Управляющий должен уметь протестировать шаблон без входа под учетной записью администратора/сотрудника и без создания реальных задач, фактов обучения, подтверждений или операционных событий.
-- Started: add checklist runs tied to club, shift, employee, role, and scheduled time. Runs can now use either a published regulation snapshot or an active checklist template snapshot and store assigned user, club, optional Langame shift, schedule, status, answers, score, failed items, and evidence counters.
-- Done: standard checklist packs are available in `/staff/checklist-templates`: cash desk, PC zone, inventory handover, and administrator training load as editable drafts with sections, required answers, evidence, and scores.
-- Started: allow checklist items to create violation tasks automatically. Failed checklist answers now create high-priority staff follow-up tasks on submission.
-- Done: manager review flow now supports `ON_REVIEW`, `ACCEPTED`, `RETURNED`, and `ESCALATED`; escalation stores reviewer/comment, appears in checklist workspace filters and execution reports, counts as an unresolved operational risk, and creates a pinned urgent incident in the team chat.
-- Started: add evidence: photo, video/file link, comment, numeric value, checkbox, select, timestamp. First execution UI captures result, value, evidence URL, uploaded file attachment, and comment per item.
-- Done: added execution report by club, shift, employee, and checklist: API `/staff/checklists/report`, page `/staff/checklists/report`, filters by period/status/type/club/employee/search, summary cards, grouped tables, and latest checklist runs.
+- Начато: добавить checklist runs с привязкой к club, shift, employee, role и scheduled time. Runs могут использовать published regulation snapshot или active checklist template snapshot и сохраняют assigned user, club, optional Langame shift, schedule, status, answers, score, failed items и evidence counters.
+- Готово: standard checklist packs доступны в `/staff/checklist-templates`: cash desk, PC zone, inventory handover и administrator training загружаются как editable drafts с sections, required answers, evidence и scores.
+- Начато: разрешить checklist items автоматически создавать violation tasks. Failed checklist answers создают high-priority staff follow-up tasks при submit.
+- Готово: manager review flow поддерживает `ON_REVIEW`, `ACCEPTED`, `RETURNED` и `ESCALATED`; escalation сохраняет reviewer/comment, появляется в checklist workspace filters и execution reports, считается unresolved operational risk и создает pinned urgent incident в team chat.
+- Начато: добавить evidence: photo, video/file link, comment, numeric value, checkbox, select, timestamp. Первый execution UI фиксирует result, value, evidence URL, uploaded file attachment и comment по item.
+- Готово: добавлен execution report по club, shift, employee и checklist: API `/staff/checklists/report`, page `/staff/checklists/report`, filters by period/status/type/club/employee/search, summary cards, grouped tables и latest checklist runs.
 
-Acceptance criteria:
+Критерии приемки:
 
-- Done: an administrator can complete an opening or closing shift checklist from a published regulation snapshot.
-- Done: a manager can preview/test a regulation or checklist template as an employee-facing flow before publication, with fake answers/evidence only.
-- Done: required items cannot be submitted for review without required evidence.
-- Done: a failed checklist item creates a follow-up task.
-- Done: a manager sees missed, late, failed, and returned checklist runs through the checklist workspace summary, filters, and the fuller execution report by club, shift, employee, and checklist.
-- Done: a manager can escalate a checklist under review; escalations are visible in reports and the operations dashboard and create an urgent team-chat incident.
+- Готово: администратор может выполнить opening или closing shift checklist из published regulation snapshot.
+- Готово: управляющий может preview/test регламент или checklist template как employee-facing flow до публикации, только с fake answers/evidence.
+- Готово: required items нельзя отправить на review без required evidence.
+- Готово: failed checklist item создает follow-up task.
+- Готово: управляющий видит missed, late, failed и returned checklist runs через checklist workspace summary, filters и полный execution report по club, shift, employee и checklist.
+- Готово: управляющий может escalate checklist under review; escalations видны в reports и operations dashboard и создают urgent team-chat incident.
 
-### MVP 3. Training, Knowledge Base, And Attestations
+### MVP 3. Обучение, база знаний и аттестации
 
-Goal: make onboarding and standard knowledge measurable.
+Цель: сделать onboarding и знание стандартов измеримыми.
 
-- Done: first knowledge base layer added: tenant-scoped `StaffKnowledgeArticle`, API `/staff/knowledge-base`, page `/staff/knowledge-base`, search, categories, tags, role visibility, store scope, draft/published/archive statuses, and manager-only editing.
-- Planned: evolve `/staff/knowledge-base` into a full standalone knowledge-base section for standards, instructions, training materials, files and videos, with article templates, folders/categories, approval flow, version history, required-reading status, and links from regulations, checklists, violations, training courses, and administrator onboarding.
-- Done: training materials can now be attached to knowledge articles as structured text blocks, file links, images, video links, external links, notes, and required flags.
-- Done: courses by role and club added: tenant-scoped `StaffTrainingCourse`, API `/staff/training-courses`, page `/staff/training-courses`, catalog, filters, draft/active/archive statuses, required flag, due date, club scope, role visibility, ordered steps, knowledge-base article links, text, links, and task steps.
-- Done: onboarding plans for new administrators added: tenant-scoped `StaffOnboardingPlan`, API `/staff/onboarding`, page `/staff/onboarding`, role/club scope, draft/active/archive statuses, duration, ordered adaptation steps, links to courses, task templates, checklist templates, regulations, text, and external links.
-- Done: tests and attestations added: tenant-scoped `StaffAssessment` and `StaffAssessmentResult`, API `/staff/assessments`, page `/staff/assessments`, draft/active/archive statuses, role/club scope, tests vs attestations, pass threshold, attempt limit, expiration period, automatic scoring for choice questions, free-text evidence answers, and result history.
-- Done: regulations can now require a linked test or attestation retake after publication; the selected active assessment is stored on the regulation and snapshotted into each published version together with the acknowledgement requirement.
-- Done: employee training profiles added: `StaffTrainingProgress`, API `/staff/training-profiles`, page `/staff/training-profiles`, assigned courses, progress updates, overdue learning, certificates, expired certificates, and linked test/attestation status by employee.
-- Done: manager readiness report added: API `/staff/readiness-report`, page `/staff/readiness-report`, sidebar entry, combined readiness status by employee, required course gaps, failed tests, failed/expired attestations, and pending regulation acknowledgements.
-- Next polish: expand the knowledge base with ready-made article templates, approval workflow, version history, and links from repeated violations/checklist failures to the relevant standard.
+- Готово: добавлен первый слой knowledge base: tenant-scoped `StaffKnowledgeArticle`, API `/staff/knowledge-base`, page `/staff/knowledge-base`, search, categories, tags, role visibility, store scope, draft/published/archive statuses и manager-only editing.
+- Запланировано: развить `/staff/knowledge-base` в полноценный самостоятельный раздел базы знаний для стандартов, инструкций, training materials, файлов и видео, с article templates, folders/categories, approval flow, version history, required-reading status и ссылками из regulations, checklists, violations, training courses и administrator onboarding.
+- Готово: training materials можно прикреплять к knowledge articles как structured text blocks, file links, images, video links, external links, notes и required flags.
+- Готово: добавлены courses by role and club: tenant-scoped `StaffTrainingCourse`, API `/staff/training-courses`, page `/staff/training-courses`, catalog, filters, draft/active/archive statuses, required flag, due date, club scope, role visibility, ordered steps, knowledge-base article links, text, links и task steps.
+- Готово: добавлены onboarding plans для новых администраторов: tenant-scoped `StaffOnboardingPlan`, API `/staff/onboarding`, page `/staff/onboarding`, role/club scope, draft/active/archive statuses, duration, ordered adaptation steps, links to courses, task templates, checklist templates, regulations, text и external links.
+- Готово: добавлены tests и attestations: tenant-scoped `StaffAssessment` и `StaffAssessmentResult`, API `/staff/assessments`, page `/staff/assessments`, draft/active/archive statuses, role/club scope, tests vs attestations, pass threshold, attempt limit, expiration period, automatic scoring for choice questions, free-text evidence answers и result history.
+- Готово: regulations могут требовать linked test или attestation retake после publication; выбранный active assessment хранится в regulation и snapshotted в каждую published version вместе с acknowledgement requirement.
+- Готово: добавлены employee training profiles: `StaffTrainingProgress`, API `/staff/training-profiles`, page `/staff/training-profiles`, assigned courses, progress updates, overdue learning, certificates, expired certificates и linked test/attestation status by employee.
+- Готово: добавлен manager readiness report: API `/staff/readiness-report`, page `/staff/readiness-report`, sidebar entry, combined readiness status by employee, required course gaps, failed tests, failed/expired attestations и pending regulation acknowledgements.
+- Следующая полировка: расширить knowledge base готовыми article templates, approval workflow, version history и ссылками из repeated violations/checklist failures на соответствующий standard.
 
-Acceptance criteria:
+Критерии приемки:
 
-- Done: a new administrator can see active onboarding paths targeted to administrator roles and club/network scope.
-- Done: a manager sees test and attestation result attempts, pass rate, failed attempts, expired results, assigned course completion percentage, overdue courses, and certificate status in the employee training profile.
-- Done: a manager sees who is ready for shift work, who has blocked admission, who failed tests, who has expired attestations, and who has not confirmed the current shift regulation.
-- Done: a published regulation update can trigger acknowledgement and a linked test/attestation retake.
-- Training results remain historical after employee role or club changes.
+- Готово: новый администратор видит active onboarding paths, нацеленные на administrator roles и club/network scope.
+- Готово: управляющий видит attempts результатов тестов и аттестаций, pass rate, failed attempts, expired results, assigned course completion percentage, overdue courses и certificate status в employee training profile.
+- Готово: управляющий видит, кто готов к сменной работе, у кого blocked admission, кто failed tests, у кого expired attestations и кто не подтвердил current shift regulation.
+- Готово: обновление published regulation может запускать acknowledgement и linked test/attestation retake.
+- Training results остаются историческими после изменения роли сотрудника или клуба.
 
-### MVP 4. Control And Analytics
+### MVP 4. Контроль и аналитика
 
-Goal: show not only completion, but operational quality and risk.
+Цель: показывать не только факт выполнения, но и операционное качество и риск.
 
-- Done: `/staff/operations-dashboard` adds the first operational discipline dashboard: done on time, overdue, failed checklist items, returned runs, unchecked tasks/checklists, readiness blockers, and current risk list.
-- Done: club rating by task/checklist discipline is visible in `/staff/operations-dashboard`, with score, overdue, failed, returned, unchecked, readiness and repeated-issue penalties.
-- Done: employee rating combines timely completion, repeated checklist violations, training/readiness status, and review outcomes from tasks and checklist runs.
-- Done: recurring issue detection groups repeated failed checklist items by club, employee and shift type, with latest run link back to checklist execution.
-- Done: warning/fine system added from the provided Excel template: tenant-scoped rules for `Чистота`, `Взаимодействие`, and `Соблюдение регламента`, two warnings per category, escalating fines by violation, per-network/per-club enable switch, API `/staff/discipline`, and UI `/staff/discipline`.
-- Done: separate administrator rating added at `/staff/administrator-ratings`, combining regulation acknowledgements, checklist quality, attestation status, warnings and fines into one score.
-- Done: `/staff/operations-dashboard` is connected with existing `/guests/staff-control`: shifts, linked/unlinked operators, shift hours, cash/payment amount, refunds, incassation, and middle check are summarized from `GuestWorkingShift`.
-- Started: staff-control anomaly cards were added to `/staff/operations-dashboard` for refunds, missing incassation, unlinked high-cash operators, long shifts, low middle check, cash risks with missed cash/closing checklists, and low middle check with failed/missed bar checklist. Next: add true self-service activity detection when Langame operation logs expose stable employee identity for that signal, and add bar-sales-specific scoring when bar revenue is mapped per shift.
-- Done: XLSX/CSV export added for staff tasks, checklist execution report, training profiles/results, and discipline violations, with current filters preserved from the UI.
-- Done: added administrator salary calculation and `/staff/salary` constructor: tenant-scoped salary schemes with network/club scope, status, period type, fixed amount, shift/hour rates, bonus rules, penalty rules, discipline fine inclusion, and a calculation report by administrator using tasks, checklists, linked shifts, warnings, and fines.
+- Готово: `/staff/operations-dashboard` добавляет первый dashboard операционной дисциплины: done on time, overdue, failed checklist items, returned runs, unchecked tasks/checklists, readiness blockers и current risk list.
+- Готово: club rating по task/checklist discipline виден в `/staff/operations-dashboard`, со score, overdue, failed, returned, unchecked, readiness и repeated-issue penalties.
+- Готово: employee rating объединяет timely completion, repeated checklist violations, training/readiness status и review outcomes из tasks и checklist runs.
+- Готово: recurring issue detection группирует repeated failed checklist items по club, employee и shift type, с latest run link обратно к checklist execution.
+- Готово: warning/fine system добавлена из предоставленного Excel template: tenant-scoped rules для `Чистота`, `Взаимодействие` и `Соблюдение регламента`, два предупреждения на category, escalating fines by violation, per-network/per-club enable switch, API `/staff/discipline` и UI `/staff/discipline`.
+- Готово: отдельный administrator rating добавлен на `/staff/administrator-ratings`, объединяя regulation acknowledgements, checklist quality, attestation status, warnings и fines в один score.
+- Готово: `/staff/operations-dashboard` связан с существующим `/guests/staff-control`: shifts, linked/unlinked operators, shift hours, cash/payment amount, refunds, incassation и middle check суммируются из `GuestWorkingShift`.
+- Начато: staff-control anomaly cards добавлены в `/staff/operations-dashboard` для refunds, missing incassation, unlinked high-cash operators, long shifts, low middle check, cash risks with missed cash/closing checklists и low middle check with failed/missed bar checklist. Следующее: добавить true self-service activity detection, когда Langame operation logs начнут отдавать stable employee identity для этого сигнала, и bar-sales-specific scoring, когда bar revenue будет mapped per shift.
+- Готово: XLSX/CSV export добавлен для staff tasks, checklist execution report, training profiles/results и discipline violations, с сохранением current filters из UI.
+- Готово: добавлены administrator salary calculation и constructor `/staff/salary`: tenant-scoped salary schemes с network/club scope, status, period type, fixed amount, shift/hour rates, bonus rules, penalty rules, discipline fine inclusion и calculation report по administrator через tasks, checklists, linked shifts, warnings и fines.
 
-Acceptance criteria:
+Критерии приемки:
 
-- Done: owner sees clubs with the highest operational risk in the club rating.
-- Started: manager can drill down from risk rows into task/checklist lists; direct shift/evidence/task-history drilldown remains tied to existing detail surfaces.
-- Staff-control anomalies can reference operational context where available.
+- Готово: owner видит клубы с самым высоким operational risk в club rating.
+- Начато: manager может drill down из risk rows в task/checklist lists; direct shift/evidence/task-history drilldown остается привязан к существующим detail surfaces.
+- Staff-control anomalies могут ссылаться на operational context, когда он доступен.
 
-### MVP 5. AI Assistance
+### MVP 5. AI-помощь
 
-Goal: add useful assistance after basic data and workflows exist.
+Цель: добавить полезную помощь после появления базовых данных и workflow.
 
-- Generate checklist draft from regulation text.
-- Summarize long regulation into short shift instruction.
-- Suggest task breakdown for a broad instruction.
-- Detect repeated weak points by club, employee, checklist, and shift.
-- Suggest training material or retest after repeated mistakes.
-- Prepare weekly manager summary with completed work, overdue work, violations, and recommended actions.
+- Генерировать черновик чек-листа из текста регламента.
+- Суммировать длинный регламент в короткую инструкцию смены.
+- Предлагать декомпозицию задач для широкой инструкции.
+- Находить повторяющиеся слабые места по клубу, сотруднику, чек-листу и смене.
+- Предлагать обучающий материал или retest после повторяющихся ошибок.
+- Готовить еженедельную manager summary с выполненной работой, просрочками, нарушениями и рекомендуемыми действиями.
 
-Acceptance criteria:
+Критерии приемки:
 
-- AI output is optional and never silently changes published regulations, tasks, or training.
-- Every AI-generated checklist, summary, or recommendation requires user confirmation before publication or assignment.
-- Sensitive staff and guest data is minimized in prompts and logs.
+- AI output опционален и никогда не меняет published regulations, tasks или training без явного действия.
+- Каждый AI-generated checklist, summary или recommendation требует подтверждения пользователя перед publication или assignment.
+- Sensitive staff и guest data минимизируется в prompts и logs.
 
-### Out Of First Release
+### Вне первого релиза
 
-- Full universal project management clone with complex boards, CRM, and arbitrary workflows.
-- Separate public mobile app in app stores.
-- Automatic payroll, bonuses, or sanctions; manual warnings/fines are implemented, payroll calculation remains planned.
-- Automatic write-back into Langame.
-- Complex low-code business process designer.
-- Mass Telegram/MAX workflows without separate legal and channel setup.
+- Полный universal project management clone со сложными boards, CRM и произвольными workflows.
+- Отдельное public mobile app в app stores.
+- Automatic payroll, bonuses или sanctions; manual warnings/fines реализованы, payroll calculation уже добавлен первым слоем и требует дальнейшей проверки.
+- Automatic write-back в Langame.
+- Сложный low-code business process designer.
+- Массовые Telegram/MAX workflows без отдельной юридической и канальной настройки.
 
-### Recommended Technical Sequence
+### Рекомендуемая техническая последовательность
 
-1. Done: create `STAFF_OPERATIONS_MODULE_TZ.md` with roles, scenarios, data model, permissions, MVP scope, and acceptance criteria.
-2. Extract staff identity into a reusable staff domain that can serve both `/guests/staff-control` and the new operations module.
-3. Started: add database schema for tasks, task templates, task comments, attachments, audit events, and staff assignments. `StaffTask`, `StaffTaskTemplate`, `StaffTaskComment`, `StaffTaskAuditEvent`, and first `StaffAttachment` binary storage are in place; recurring rules and fuller staff identity remain next.
-4. Started: implement backend CRUD and list APIs for tasks with tenant/store/staff access control. List/create/status update plus comment/evidence endpoint are in place.
-5. Started: implement `/staff/tasks` or `/operations/tasks` UI for manager and administrator workflows. `/staff/tasks` now includes creation, filters, status actions, execution comments, evidence links, audit history preview, and task-template launching through `/staff/task-templates`.
-6. Started: add checklist templates and checklist runs. `StaffChecklistTemplate` and `/staff/checklist-templates` are in place; checklist runs can use published regulation snapshots or active template snapshots.
-7. Started: add regulation documents, versions, acknowledgements, and role/club targeting. First draft/published/archived shift-regulation entity, acknowledgement tracking, publication version snapshots, attached link materials, and uploaded file attachments are in place.
-8. Done: add training materials, courses, tests, and attestation reports. The knowledge base, structured training-material layer, training courses, onboarding plans, tests/attestations with result history, employee training profiles, and the readiness/attestation manager report are in place.
-9. Started: add analytics, exports, and connections to current staff-control signals. `/staff/operations-dashboard` now covers operational discipline, club/employee ratings, recurring checklist issues, warning/fine discipline, administrator rating, and current risk routing; exports, payroll, and staff-control anomaly connections remain next.
-10. Add AI assistance only after real workflows produce enough structured data.
+1. Готово: создать `STAFF_OPERATIONS_MODULE_TZ.md` с ролями, сценариями, data model, permissions, MVP scope и acceptance criteria.
+2. Выделить staff identity в reusable staff domain, который сможет обслуживать и `/guests/staff-control`, и новый operations module.
+3. Начато: добавить database schema для tasks, task templates, task comments, attachments, audit events и staff assignments. `StaffTask`, `StaffTaskTemplate`, `StaffTaskComment`, `StaffTaskAuditEvent` и первый `StaffAttachment` binary storage уже есть; recurring rules и fuller staff identity остаются следующими.
+4. Начато: реализовать backend CRUD и list APIs для tasks с tenant/store/staff access control. List/create/status update плюс comment/evidence endpoint уже есть.
+5. Начато: реализовать UI `/staff/tasks` или `/operations/tasks` для manager и administrator workflows. `/staff/tasks` содержит создание, filters, status actions, execution comments, evidence links, audit history preview и запуск task-template через `/staff/task-templates`.
+6. Начато: добавить checklist templates и checklist runs. `StaffChecklistTemplate` и `/staff/checklist-templates` уже есть; checklist runs могут использовать published regulation snapshots или active template snapshots.
+7. Начато: добавить regulation documents, versions, acknowledgements и role/club targeting. Первый draft/published/archived shift-regulation entity, acknowledgement tracking, publication version snapshots, attached link materials и uploaded file attachments уже есть.
+8. Готово: добавить training materials, courses, tests и attestation reports. Knowledge base, structured training-material layer, training courses, onboarding plans, tests/attestations с result history, employee training profiles и readiness/attestation manager report уже есть.
+9. Начато: добавить analytics, exports и connections к текущим staff-control signals. `/staff/operations-dashboard` покрывает operational discipline, club/employee ratings, recurring checklist issues, warning/fine discipline, administrator rating и current risk routing; exports, payroll и staff-control anomaly connections остаются next.
+10. Добавлять AI assistance только после накопления достаточного количества структурированных данных из реальных workflows.
 
-### Key Data Rules
+### Правила данных
 
-- Historical task, checklist, training, and attestation facts must remain stable after employee rename, club rename, role change, or staff mapping change.
-- Deleting or unlinking a staff mapping must not delete historical shift/task/checklist facts.
-- Langame sync must not overwrite LeetPlus-owned staff statuses, notes, tasks, training results, acknowledgements, or role assignments.
-- Staff personal data must be role-protected; expose only what is needed for operations.
-- Attachments may contain sensitive workplace information and need tenant scoping, access control, and retention rules.
-- Dates in UI should use `дд.мм.гггг`; money should show `руб`; counts and hours should be labeled.
+- Исторические факты задач, чек-листов, обучения и аттестаций должны оставаться стабильными после переименования сотрудника, переименования клуба, смены роли или изменения staff mapping.
+- Удаление или отвязка staff mapping не должны удалять исторические shift/task/checklist facts.
+- Langame sync не должен перетирать статусы сотрудников, заметки, задачи, результаты обучения, подтверждения и назначения ролей, принадлежащие LeetPlus.
+- Персональные данные сотрудников должны быть защищены ролями; показывать нужно только то, что необходимо для операций.
+- Вложения могут содержать чувствительную рабочую информацию и требуют tenant scoping, контроля доступа и правил хранения.
+- Даты в UI должны использовать `дд.мм.гггг`; деньги должны показываться как `руб`; количества и часы должны иметь подписи.
 
-## Stage 9. Marketing Module
+## Этап 9. Маркетинговый модуль
 
-Status: started. This module should cover promo actions, guest mechanics, campaign communication, announcements, and measurable campaign effect. It should be designed around business goals first, not around an empty promo constructor.
+Статус: начато. Модуль должен покрывать промо-акции, механики для гостей, коммуникации кампаний, объявления и измеримый эффект кампаний. Дизайн должен начинаться с бизнес-целей, а не с пустого конструктора промо.
 
-### Product Positioning
+### Продуктовое позиционирование
 
-Marketing in LeetPlus should help a club network stimulate demand and connect guest analytics with concrete offers:
+Маркетинг в LeetPlus должен помогать сети клубов стимулировать спрос и связывать гостевую аналитику с конкретными предложениями:
 
-- fill weak hours and weak clubs;
-- increase repeat visits;
-- return inactive guests;
-- grow bar and promo bundle sales;
-- promote tournaments, events, birthdays, and full-club bookings;
-- create understandable mechanics for guests: bonuses, missions, challenges, coupons, bundles, and personal offers;
-- measure commercial effect after launch.
+- заполнять слабые часы и слабые клубы;
+- увеличивать повторные визиты;
+- возвращать неактивных гостей;
+- растить продажи бара и промо-наборов;
+- продвигать турниры, события, дни рождения и бронирование клуба целиком;
+- создавать понятные гостям механики: бонусы, миссии, челленджи, купоны, наборы и персональные предложения;
+- измерять коммерческий эффект после запуска.
 
-Marketing should be connected to CRM groups and consent rules. At the current stage, public Langame write-back for automatic bonus issuance is not confirmed, so the first implementation should support planning, communication, manual execution, and effect analytics before automatic reward issuance.
+Маркетинг должен быть связан с CRM-группами и правилами согласий. На текущем этапе public Langame write-back для автоматического начисления бонусов не подтвержден, поэтому первая реализация должна поддерживать планирование, коммуникацию, ручное исполнение и аналитику эффекта до автоматической выдачи наград.
 
-### Core Scenarios
+### Ключевые сценарии
 
-- Promo campaign for a saved guest group.
-- Promo bundle constructor: game time + bar + hookah/service/product combinations.
-- Weak-hour activation: offer for low-load hours or specific clubs.
-- Bar growth campaign: target guests with low bar share or promote bundle mechanics.
-- Reactivation campaign: risk/lost guests with controlled contact and return measurement.
-- New guest second-visit campaign.
-- Event/tournament promotion.
-- Manual announcement/campaign task for administrators.
-- Campaign performance review after launch.
+- Промо-кампания для сохраненной группы гостей.
+- Конструктор промо-набора: игровое время + бар + кальян, услуги или товары в разных комбинациях.
+- Активация слабых часов: предложение для часов с низкой загрузкой или конкретных клубов.
+- Кампания роста бара: целевые гости с низкой долей бара или продвижение механик наборов.
+- Кампания реактивации: гости в риске или потерянные гости с контролируемым контактом и измерением возврата.
+- Кампания второго визита для новых гостей.
+- Продвижение события или турнира.
+- Ручное объявление или задача кампании для администраторов.
+- Разбор эффективности кампании после запуска.
 
-### Core Entities
+### Ключевые сущности
 
-- Marketing campaign: goal, name, period, clubs, status, budget, owner.
-- Target group: saved guest group, CRM leads, segment, manual selection, or rule-based audience.
-- Promo mechanic: discount, bonus, promo bundle, mission/challenge, coupon, tournament, personal offer, referral mechanic.
-- Promo bundle: items/services, base price, promo price, margin estimate, validity rules.
-- Channel: in-club announcement, CRM task, Telegram/MAX, SMS/call, push/mobile app, social networks.
-- Consent snapshot: who can be contacted and by which channel.
-- Launch checklist: copy, channel, responsible user, schedule, approval.
-- Campaign result: contacts, reach, visits, revenue, bar, load, repeat visits, cost, ROI.
+- Маркетинговая кампания: цель, название, период, клубы, статус, бюджет, владелец.
+- Целевая группа: сохраненная группа гостей, CRM-лиды, сегмент, ручной выбор или аудитория по правилам.
+- Промо-механика: скидка, бонус, промо-набор, миссия или челлендж, купон, турнир, персональное предложение, реферальная механика.
+- Промо-набор: товары или услуги, базовая цена, промо-цена, оценка маржи, правила действия.
+- Канал: объявление в клубе, CRM-задача, Telegram/MAX, SMS/звонок, push/mobile app, соцсети.
+- Снимок согласий: с кем можно связаться и через какой канал.
+- Чек-лист запуска: текст, канал, ответственный пользователь, расписание, согласование.
+- Результат кампании: контакты, охват, визиты, выручка, бар, загрузка, повторные визиты, стоимость, ROI.
 
-### MVP 1. Campaign Planning And Manual Launch
+### MVP 1. Планирование кампаний и ручной запуск
 
-Goal: let a manager create a simple campaign from a business signal and control manual execution.
+Цель: дать управляющему возможность создать простую кампанию из бизнес-сигнала и контролировать ручное исполнение.
 
-- Done: `/marketing` entry point and sidebar block added as a lightweight scenario workspace: goal selection, saved groups/CRM lead/task readiness, and route from business goal to group, mechanic, channel, control, and effect.
-- Done: dashboard marketing scenario now routes to `/marketing` instead of hiding campaign planning inside CRM.
-- Done: persistent campaign drafts added with tenant-scoped storage, API, migration, status changes, goal, saved group, channel, mechanic, responsible user, period, deadline, budget, and note.
-- Done: campaign drafts can generate one linked CRM task for manual execution and reuse the existing task on repeated clicks instead of creating duplicates.
-- Done: campaign cards now show contact consent coverage before task launch: target group size, contactable guests, excluded guests, opt-outs, denied and unknown consent statuses.
-- Done: campaign detail page added with breadcrumbs, launch plan, linked CRM task, group contact history, consent coverage, and effect analytics.
-- Done: real campaign effect measurement added with before/after windows, direct `marketingCampaignId` contact attribution, group fallback for older contacts, visits, sessions, play hours, balance-spend revenue, bar revenue, and explicit attribution limitations.
-- Done: campaign detail now has a compact contact-result form that saves new CRM contact facts directly to the selected `marketingCampaignId` and refreshes the campaign journal/effect data.
-- Done: campaign detail contacts tab can create the linked CRM task directly, so the planned contact step stays inside the campaign instead of sending the user back to the campaign list.
-- Done: campaign detail now shows a compact funnel from target group to contact plan, completed contacts, recorded result, visits, repeat guests, revenue, bar, CRM task, and responsible user.
-- Done: campaign effect now includes a compact store breakdown: revenue, bar, active guests, play hours, repeat guests, before/after delta, and a separate unallocated row when facts have no store.
-- Done: campaign detail now shows execution by responsible user and channel: contacts, results, linked guests, visits, repeat guests, revenue, and bar revenue.
-- Done: campaign detail now has CSV export for campaign plan, funnel, before/after effect, store breakdown, execution by responsible/channel, and contact outcomes.
-- Done: campaign detail now has a scenario launch workspace: checklist readiness, direct anchors to contacts/effect, and editable campaign notes stored in the existing campaign note field.
-- Done: campaign launch workspace now supports explicit status transitions: draft -> planned -> running -> finished, cancel, and return to running.
-- Done: campaign launch workspace now generates per-channel execution prompts: phone/message/in-club/CRM instruction, preflight checks, facts to record, and copy-to-clipboard text for manual execution.
-- Done: campaign detail now supports XLSX export with the same validated result columns as CSV: plan, funnel, before/after effect, club breakdown, responsible/channel execution, and contact outcomes.
-- Done: campaign detail now starts with an executive summary: verdict, next action, target group, contactability, contacts, recorded results, visits, revenue, and bar.
-- Done: campaign detail now unfolds through scenario tabs: plan, launch, contacts, effect, and export; summary and checklist links open the correct scenario instead of exposing every block at once.
-- Done: `/marketing` now starts MVP 2 with a lightweight mechanic builder: templates for second visit, weak hours, bar combo, and events plus a promo-bundle calculator that fills campaign goal, mechanic, budget, and launch notes with limits and anti-fraud rules.
-- Done: marketing UI now exposes implemented features as explicit routes: sidebar entries and `/marketing` anchors for goals, mechanics, promo bundle, campaigns, guest groups, and contact tasks so new capabilities are not hidden inside one long screen.
-- Done: promo mechanics now include broader scenarios: second visit, weak hours, bar combo, event, birthday/full-club booking, tournament, referral, and VIP/TOP guest offers.
-- Done: promo-bundle builder now includes launch limits and anti-fraud controls: minimum spend, validity days, max uses, one-per-guest flag, manual approval, and no-stacking rule; these rules are written into the campaign note when the bundle is applied.
-- Done: `/marketing` campaign list is now compact and status-driven: filters for all, active, draft, planned, running, finished, and canceled campaigns plus a clear next action for each row.
-- Done: generated CRM tasks from marketing campaigns now include a campaign detail link, readable goal label, consent exclusions, channel-specific execution instruction, and a checklist of facts to record for later effect analytics.
-- Done: campaign launch now has channel-specific consent policy: calls, messages, CRM contacts, in-club announcements, and public social posts show different contact rules, required consent, and exclusion reasons before execution.
-- Done: `/marketing` campaign cards now show compact launch readiness: group, channel, mechanic, contact access, responsible user/deadline, CRM task, progress bar, and the next missing step.
-- Done: campaign creation now exposes the group route directly in UI: select a saved group, open CRM groups, or create a new group from guest filters before launch.
-- Done: promo-bundle builder now has a commercial readiness check before launch: blocking issues, warning checks, revenue/margin/discount budget, minimum check, validity, and preview of the campaign note.
-- Done: mechanic templates now explain business fit before launch: target group, KPI, control point, and risk; applying a template writes this logic into the campaign note.
-- Done: marketing campaigns now persist structured mechanic configuration in `mechanicConfig` JSON: applied template metadata or promo-bundle economics/limits/readiness are saved separately from the human-readable note and shown in campaign cards/detail plan.
-- Done: promo-bundle builder now exposes editable combo composition, field tooltips for pricing inputs, and a fixed adaptive campaign status header.
-- Done: promo-bundle tooltips now render above the page shell without sidebar clipping, and the bundle action clearly transfers the configured offer into the campaign form before saving the campaign draft.
-- Done: promo-bundle builder was rebuilt as a step-by-step constructor: choose combo type, edit the first/second part with contextual filters, review economics, then transfer the offer into the campaign draft.
-- Done: promo-bundle constructor now distinguishes composition fields from price fields, resets part defaults when the combo type changes, and explains that prices are only for economy calculation.
-- Done: promo-bundle commercial check now ends with a clear "Создать промо-набор" action and aligned Step 3 fields for composition plus price.
-- Done: promo-bundle commercial check was redesigned as a decision card with status, next-step action, compact checks, and campaign note preview.
-- Done: promo bundles now have the first separate catalog entity (`MarketingPromoBundle`) with tenant-scoped API, campaign linking, migration, and UI selection from existing bundles in Step 1.
-- Done: the promo-bundle constructor can save a bundle into the catalog, use an existing bundle in a new campaign, or load an existing bundle as a basis for a new variant.
-- Done: promo-bundle UX now moves creation into the commercial-check decision card, aligns Step 3 composition/price editing, and explains the catalog -> campaign -> future assortment/accounting path after saving.
-- Done: saved promo bundles in Step 1 now open from a compact catalog chooser with search, economics preview, and separate actions to use a bundle or load it as a new basis.
-- Done: saved promo bundles can now be launched independently from campaigns for the whole network or selected clubs, with period, usage limit, instruction, status control, tenant-scoped API, and a separate `MarketingPromoBundleLaunch` entity.
-- Done: promo bundles now have a dedicated `/marketing/promo-bundles` workspace for catalog creation without loading campaign, CRM group, lead, or user context.
-- Done: `/marketing/promo-bundles` was simplified into a focused constructor/catalog: standalone launch block removed, existing bundles are visible in a compact list and can be loaded back into the constructor for correction.
-- Done: promo bundles now expose a compact structured passport for catalog rows and the constructor: composition, price, margin, limits, anti-fraud flags, and accounting readiness are available separately from the human-readable note.
-- Done: promo-bundle constructor now saves accounting links for both bundle parts: product/service/bonus/manual reference, product IDs when selected, write-off rule, and accounting note.
-- Done: dedicated promo-bundle catalog now has a compact operational accounting report: readiness, product/service references, write-off rule, and active launch scope without reintroducing the removed standalone launch form.
-- Done: promo-bundle catalog now has first read-only launch reconciliation: linked product sales are matched to promo-bundle launch periods and clubs, with revenue, cost, gross profit, usage progress, and explicit accuracy limits.
-- Done: promo-bundle reconciliation now also shows linked product stock write-off facts from `StockMovement` by launch period and club, so sales proxy and stock movement proxy are visible together.
-- Done: promo bundles now have exact usage facts through `MarketingPromoBundleUsage`: manual redemption journal, optional launch/club/guest/check references, revenue/cost amount, cancel status, and source/external fields for future Langame or API import.
-- Done: `/marketing/promo-bundles` operational summary now combines launch limits, manual usage facts, linked product sales, stock write-offs, margin, and remaining usage limit in one compact workspace.
-- Done: promo-bundle usage facts now have a bulk import endpoint with idempotency by `source/externalProvider/externalDomain/externalId`, automatic active launch matching by bundle, club, and usage date, a compact usage analytics block, and a per-bundle "fix usage" UX action.
-- Done: promo-bundle usage analytics now separates facts by source (`MANUAL`, `API_IMPORT`, `LANGAME`, `CASHIER`), shows source/domain coverage and externalId completeness, so confirmed Langame or cashier imports can be validated without mixing them with the manual journal.
-- Next: connect a confirmed Langame or cashier-system source to the promo-bundle usage import endpoint after the external fact format is approved.
-- Done: let the user choose a saved guest group or create one from guest filters.
-- Add campaign fields: goal, period, clubs, target group, channel, responsible user, deadline, note, status.
-- Done: improve generated CRM tasks with per-channel instructions and campaign detail links.
-- Done: improve communication consent handling with channel-specific exclusions before launch.
-- Done: show a compact campaign list: planned, running, finished, canceled.
-- Done: improve campaign launch workspace prompts from real usage feedback.
+- Готово: `/marketing` как точка входа и блок в sidebar добавлены как легкое сценарное рабочее пространство: выбор цели, готовность сохраненных групп/CRM-лидов/задач и маршрут от бизнес-цели к группе, механике, каналу, контролю и эффекту.
+- Готово: маркетинговый сценарий на дашборде ведет в `/marketing`, а не прячет планирование кампаний внутри CRM.
+- Готово: добавлены постоянные черновики кампаний с tenant-scoped хранением, API, миграцией, сменой статусов, целью, сохраненной группой, каналом, механикой, ответственным пользователем, периодом, сроком, бюджетом и заметкой.
+- Готово: черновики кампаний могут генерировать одну связанную CRM-задачу для ручного исполнения и повторно использовать существующую задачу при повторных кликах вместо создания дублей.
+- Готово: карточки кампаний показывают покрытие контактных согласий перед запуском задачи: размер целевой группы, доступные для контакта гости, исключенные гости, отписки, запреты и неизвестные статусы согласий.
+- Готово: добавлена страница кампании с breadcrumbs, планом запуска, связанной CRM-задачей, историей контактов группы, покрытием согласий и аналитикой эффекта.
+- Готово: добавлено измерение реального эффекта кампании с окнами до/после, прямой атрибуцией контактов по `marketingCampaignId`, group fallback для старых контактов, визитами, сессиями, игровыми часами, выручкой по списаниям баланса, выручкой бара и явными ограничениями атрибуции.
+- Готово: страница кампании имеет компактную форму результата контакта, которая сохраняет новые CRM-факты контактов прямо в выбранный `marketingCampaignId` и обновляет журнал кампании/данные эффекта.
+- Готово: вкладка контактов на странице кампании может создавать связанную CRM-задачу напрямую, поэтому планируемый шаг контакта остается внутри кампании, а не отправляет пользователя назад к списку кампаний.
+- Готово: страница кампании показывает компактную воронку от целевой группы к плану контактов, завершенным контактам, записанному результату, визитам, повторным гостям, выручке, бару, CRM-задаче и ответственному пользователю.
+- Готово: эффект кампании включает компактную разбивку по клубам: выручка, бар, активные гости, игровые часы, повторные гости, дельта до/после и отдельная строка без распределения, когда факты не имеют клуба.
+- Готово: страница кампании показывает исполнение по ответственному пользователю и каналу: контакты, результаты, связанные гости, визиты, повторные гости, выручка и выручка бара.
+- Готово: страница кампании имеет CSV-экспорт по плану кампании, воронке, эффекту до/после, разбивке по клубам, исполнению по ответственному/каналу и исходам контактов.
+- Готово: страница кампании имеет сценарное рабочее пространство запуска: готовность чек-листа, прямые anchors к контактам/эффекту и редактируемые заметки кампании, сохраненные в существующем поле заметки.
+- Готово: рабочее пространство запуска кампании поддерживает явные переходы статусов: draft -> planned -> running -> finished, отмена и возврат к running.
+- Готово: рабочее пространство запуска кампании генерирует подсказки исполнения по каналам: телефон/сообщение/в клубе/CRM-инструкция, preflight checks, факты для записи и текст для копирования при ручном исполнении.
+- Готово: страница кампании поддерживает XLSX-экспорт с теми же проверенными колонками результата, что CSV: план, воронка, эффект до/после, разбивка по клубам, исполнение по ответственному/каналу и исходы контактов.
+- Готово: страница кампании начинается с executive summary: verdict, next action, целевая группа, доступность контакта, контакты, записанные результаты, визиты, выручка и бар.
+- Готово: страница кампании раскрывается через сценарные вкладки: план, запуск, контакты, эффект и экспорт; summary и ссылки чек-листа открывают нужный сценарий, а не показывают все блоки сразу.
+- Готово: `/marketing` начинает MVP 2 с легкого конструктора механик: templates для second visit, weak hours, bar combo и events плюс калькулятор промо-набора, который заполняет цель кампании, механику, бюджет и заметки запуска с лимитами и anti-fraud rules.
+- Готово: marketing UI показывает реализованные функции как явные маршруты: пункты sidebar и anchors `/marketing` для целей, механик, промо-наборов, кампаний, групп гостей и контактных задач, чтобы новые возможности не терялись внутри длинного экрана.
+- Готово: промо-механики включают более широкие сценарии: second visit, weak hours, bar combo, event, birthday/full-club booking, tournament, referral и VIP/TOP guest offers.
+- Готово: конструктор промо-наборов включает лимиты запуска и anti-fraud controls: minimum spend, validity days, max uses, one-per-guest flag, manual approval и no-stacking rule; эти правила пишутся в заметку кампании при применении набора.
+- Готово: список кампаний `/marketing` стал компактным и status-driven: filters для all, active, draft, planned, running, finished и canceled campaigns плюс понятное следующее действие для каждой строки.
+- Готово: сгенерированные CRM-задачи из маркетинговых кампаний содержат ссылку на страницу кампании, readable goal label, consent exclusions, channel-specific execution instruction и checklist фактов, которые нужно записать для дальнейшей аналитики эффекта.
+- Готово: запуск кампании имеет channel-specific consent policy: звонки, сообщения, CRM contacts, объявления в клубе и public social posts показывают разные правила контакта, required consent и причины исключения до исполнения.
+- Готово: карточки кампаний `/marketing` показывают компактную готовность запуска: группа, канал, механика, доступ к контакту, ответственный/срок, CRM-задача, progress bar и следующий недостающий шаг.
+- Готово: создание кампании показывает маршрут группы напрямую в UI: выбрать сохраненную группу, открыть CRM groups или создать новую группу из фильтров гостей до запуска.
+- Готово: конструктор промо-набора имеет коммерческую проверку до запуска: blocking issues, warning checks, revenue/margin/discount budget, minimum check, validity и preview of campaign note.
+- Готово: templates механик объясняют business fit before launch: target group, KPI, control point и risk; применение template пишет эту логику в заметку кампании.
+- Готово: маркетинговые кампании сохраняют структурированную конфигурацию механики в `mechanicConfig` JSON: applied template metadata или promo-bundle economics/limits/readiness сохраняются отдельно от human-readable note и показываются в карточках кампаний/плане страницы.
+- Готово: конструктор промо-набора показывает редактируемый состав комбо, field tooltips для pricing inputs и fixed adaptive campaign status header.
+- Готово: tooltips промо-набора рендерятся над page shell без clipping sidebar, а действие набора явно переносит configured offer в форму кампании перед сохранением черновика кампании.
+- Готово: конструктор промо-набора перестроен как пошаговый конструктор: выбрать тип комбо, отредактировать первую/вторую часть с contextual filters, проверить экономику, затем перенести оффер в черновик кампании.
+- Готово: конструктор промо-набора различает поля состава и цены, сбрасывает defaults частей при смене типа комбо и объясняет, что prices нужны только для расчета экономики.
+- Готово: коммерческая проверка промо-набора заканчивается понятным действием "Создать промо-набор" и выровненными полями шага 3 для состава и цены.
+- Готово: коммерческая проверка промо-набора переработана в карточку решения со статусом, следующим действием, компактными проверками и предпросмотром заметки кампании.
+- Готово: промо-наборы имеют первую отдельную каталожную сущность (`MarketingPromoBundle`) с tenant-scoped API, связью с кампанией, миграцией и выбором существующих наборов в шаге 1.
+- Готово: конструктор промо-набора может сохранить набор в каталог, использовать существующий набор в новой кампании или загрузить существующий набор как основу для новой версии.
+- Готово: UX промо-набора переносит создание в карточку коммерческой проверки, выравнивает редактирование состава/цены на шаге 3 и объясняет путь каталог -> кампания -> будущий ассортимент/учет после сохранения.
+- Готово: сохраненные промо-наборы в шаге 1 открываются из компактного выбора каталога с поиском, предпросмотром экономики и отдельными действиями "использовать набор" или "загрузить как основу".
+- Готово: сохраненные промо-наборы могут запускаться независимо от кампаний для всей сети или выбранных клубов, с периодом, лимитом использований, инструкцией, управлением статусом, tenant-scoped API и отдельной сущностью `MarketingPromoBundleLaunch`.
+- Готово: промо-наборы имеют отдельный workspace `/marketing/promo-bundles` для создания каталога без загрузки контекста кампании, CRM-группы, лида или пользователя.
+- Готово: `/marketing/promo-bundles` упрощен до сфокусированного конструктора/каталога: отдельный блок запуска удален, существующие наборы видны компактным списком и могут загружаться обратно в конструктор для корректировки.
+- Готово: промо-наборы показывают компактный структурированный паспорт для строк каталога и конструктора: состав, цена, маржа, лимиты, anti-fraud flags и готовность учета доступны отдельно от человекочитаемой заметки.
+- Готово: конструктор промо-набора сохраняет учетные связи для обеих частей набора: товар/услуга/бонус/ручная ссылка, product IDs при выборе, правило списания и учетная заметка.
+- Готово: отдельный каталог промо-наборов имеет компактный операционный отчет учета: готовность, ссылки на товары/услуги, правило списания и активный охват запуска без возвращения удаленной отдельной формы запуска.
+- Готово: каталог промо-наборов имеет первую read-only сверку запуска: связанные продажи товаров сопоставляются с периодами и клубами запуска промо-набора, с выручкой, себестоимостью, валовой прибылью, прогрессом использования и явными ограничениями точности.
+- Готово: сверка промо-наборов также показывает связанные факты списания остатков из `StockMovement` по периоду запуска и клубу, поэтому proxy продаж и proxy складских списаний видны вместе.
+- Готово: промо-наборы имеют точные факты использования через `MarketingPromoBundleUsage`: ручной журнал погашений, необязательные ссылки на запуск/клуб/гостя/чек, суммы выручки/себестоимости, статус отмены и поля source/external для будущего импорта из Langame или API.
+- Готово: операционная сводка `/marketing/promo-bundles` объединяет лимиты запусков, ручные факты использования, связанные продажи товаров, складские списания, маржу и остаток лимита использований в одном компактном workspace.
+- Готово: факты использования промо-наборов имеют endpoint массового импорта с идемпотентностью по `source/externalProvider/externalDomain/externalId`, автоматическим сопоставлением активного запуска по набору, клубу и дате использования, компактным блоком аналитики использования и UX-действием "исправить использование" на уровне набора.
+- Готово: аналитика использования промо-наборов разделяет факты по source (`MANUAL`, `API_IMPORT`, `LANGAME`, `CASHIER`), показывает покрытие source/domain и полноту externalId, чтобы подтвержденные импорты из Langame или cashier-system можно было валидировать отдельно от ручного журнала.
+- Следующее: подключить подтвержденный Langame или cashier-system source к endpoint импорта использований промо-наборов после утверждения формата внешних фактов.
+- Готово: пользователь может выбрать сохраненную группу гостей или создать ее из фильтров гостей.
+- Добавить поля кампании: цель, период, клубы, целевая группа, канал, ответственный пользователь, срок, заметка, статус.
+- Готово: улучшить generated CRM tasks: инструкции по каналам и ссылки на страницу кампании.
+- Готово: улучшить обработку коммуникационных согласий с channel-specific exclusions до запуска.
+- Готово: показывать компактный список кампаний: planned, running, finished, canceled.
+- Готово: улучшить prompts workspace запуска кампании по обратной связи реального использования.
 
-Acceptance criteria:
+Критерии приемки:
 
-- A manager can create a campaign for a saved guest group without opening raw guest tables.
-- The campaign creates clear tasks for responsible users.
-- Guests without required consent are visible as excluded, not silently contacted.
-- Campaign facts remain tenant-scoped and are not overwritten by Langame sync.
+- Управляющий может создать кампанию для сохраненной группы гостей без открытия сырых таблиц гостей.
+- Кампания создает понятные задачи для ответственных пользователей.
+- Гости без обязательного согласия видны как исключенные, а не контактируются молча.
+- Факты кампаний остаются tenant-scoped и не перетираются Langame sync.
 
-### MVP 2. Promo Bundles And Mechanics
+### MVP 2. Промо-наборы и механики
 
-Goal: help clubs create commercially sane promo offers.
+Цель: помочь клубам создавать коммерчески здравые промо-предложения.
 
-- Started: add promo bundle constructor with game time, bar products, hookah/services, discount, and price.
-- Done: show estimated revenue, margin, cost risk, discount budget, launch readiness, and the note that will be saved into the campaign.
-- Done: add mechanic templates with target group, KPI, control point, and risk: second visit, weak hours, birthday/event, bar combo, tournament, referral, VIP/TOP guest.
-- Done: persist promo bundles as reusable catalog objects independent from one campaign, with a link from campaign to saved bundle and Step 1 selection of existing bundles.
-- Started: add limits: period, clubs, max uses, one per guest, minimum spend, group eligibility.
-- Started: add anti-fraud notes and manual approval before any automatic reward workflow.
+- Начато: добавить конструктор промо-набора с игровым временем, товарами бара, кальяном/услугами, скидкой и ценой.
+- Готово: показывать estimated revenue, margin, cost risk, discount budget, готовность запуска и заметку, которая будет сохранена в кампании.
+- Готово: добавить templates механик с целевой группой, KPI, контрольной точкой и риском: second visit, weak hours, birthday/event, bar combo, tournament, referral, VIP/TOP guest.
+- Готово: сохранять промо-наборы как переиспользуемые объекты каталога независимо от одной кампании, со связью campaign -> saved bundle и выбором существующих наборов на шаге 1.
+- Начато: добавить лимиты: период, клубы, max uses, one per guest, minimum spend, eligibility группы.
+- Начато: добавить anti-fraud notes и ручное согласование до любого автоматического workflow наград.
 
-Acceptance criteria:
+Критерии приемки:
 
-- A manager can create a promo bundle with clear price and expected margin.
-- The UI explains the commercial tradeoff before launch.
-- The system can link a promo bundle to a campaign and target group.
+- Управляющий может создать промо-набор с понятной ценой и ожидаемой маржей.
+- UI объясняет коммерческий компромисс до запуска.
+- Система может связать промо-набор с кампанией и целевой группой.
 
-### MVP 3. Campaign Effect Analytics
+### MVP 3. Аналитика эффекта кампаний
 
-Goal: measure whether marketing actions produced useful commercial effect.
+Цель: измерять, дали ли маркетинговые действия полезный коммерческий эффект.
 
-- Started: campaign detail now compares before/after windows for the selected campaign and shows contacts, visitors, sessions, play hours, balance-spend revenue, bar revenue, total target size, linked guests, and attribution limits.
-- Done: newly recorded campaign contacts are directly attributed to `marketingCampaignId`; older contacts still use group fallback.
-- Started: campaign detail now has the first funnel view: target group -> planned contacts -> completed contacts -> recorded result -> visited -> revenue -> bar -> repeat guests.
-- Started: effect by club is now visible in campaign detail with store-scoped revenue, bar, guests, hours, repeat guests, and before/after deltas.
-- Started: effect by responsible user and channel is visible in campaign detail with contacts, linked guests, visits, revenue, and bar.
-- Started: campaign result and contact outcome CSV export is available from the campaign detail page.
-- Done: campaign effect now exposes saved group/rule source breakdown with target size, linked guests, contacts, visits, repeat visits, revenue, and bar revenue; it is ready to grow from one saved group to multiple campaign sources.
-- Done: campaign effect attribution now separates attributed revenue, store-scoped revenue, facts without club, and excluded unallocated online top-ups in API, UI, and export.
-- Done: XLSX export is available after CSV column validation, using the same campaign result dataset.
+- Начато: страница кампании сравнивает окна до/после для выбранной кампании и показывает контакты, посетителей, сессии, игровые часы, revenue по списаниям баланса, bar revenue, общий размер целевой группы, связанных гостей и ограничения атрибуции.
+- Готово: новые контакты кампаний напрямую атрибутируются к `marketingCampaignId`; старые контакты все еще используют group fallback.
+- Начато: страница кампании имеет первый вид воронки: целевая группа -> планируемые контакты -> завершенные контакты -> записанный результат -> визит -> выручка -> бар -> повторные гости.
+- Начато: эффект по клубам виден на странице кампании со store-scoped revenue, баром, гостями, часами, повторными гостями и дельтами до/после.
+- Начато: эффект по ответственному пользователю и каналу виден на странице кампании с контактами, связанными гостями, визитами, выручкой и баром.
+- Начато: CSV export результата кампании и исходов контактов доступен на странице кампании.
+- Готово: эффект кампании показывает breakdown по источнику сохраненной группы/правила с размером цели, связанными гостями, контактами, визитами, повторными визитами, выручкой и bar revenue; готово к росту от одной сохраненной группы к нескольким источникам кампании.
+- Готово: атрибуция эффекта кампании разделяет attributed revenue, store-scoped revenue, факты без клуба и исключенные нераспределенные online top-ups в API, UI и export.
+- Готово: XLSX export доступен после проверки колонок CSV и использует тот же dataset результата кампании.
 
-Acceptance criteria:
+Критерии приемки:
 
-- Commercial director sees which campaign produced visits and revenue.
-- Campaign effect does not claim precision where attribution is uncertain.
-- Online/unallocated top-ups are shown separately when they cannot be assigned to a club.
+- Коммерческий директор видит, какая кампания дала визиты и выручку.
+- Эффект кампании не заявляет точность там, где атрибуция неопределенная.
+- Online/unallocated top-ups показываются отдельно, когда их нельзя назначить клубу.
 
-### Future Marketing Capabilities
+### Будущие возможности маркетинга
 
-- Automatic Telegram/MAX flows after legal/account/channel setup.
-- Push/mobile app integrations if an approved channel exists.
-- Guest-facing missions and gamification.
-- Bonus budget limits and anti-fraud controls.
-- Manual payout queue until a safe Langame write API is confirmed.
-- AI suggestions for campaign goals, target groups, copy, and mechanics after enough campaign history exists.
+- Автоматические Telegram/MAX flows после юридической настройки, учетных записей и каналов.
+- Интеграции push/mobile app при наличии согласованного канала.
+- Миссии и геймификация для гостей.
+- Лимиты бонусного бюджета и anti-fraud controls.
+- Очередь ручных выплат до подтверждения безопасного Langame write API.
+- AI suggestions для целей кампаний, целевых групп, текстов и механик после накопления достаточной истории кампаний.
 
-### Key Data Rules
+### Правила данных
 
-- Communication requires consent, consent history, and unsubscribe support.
-- Campaign membership should be snapshotted so history does not change when a guest profile/group changes later.
-- Marketing should not store documents or unnecessary personal data.
-- Campaign results should preserve historical product, club, guest, and price context.
-- Money in campaign reports must show `руб`; dates must use `дд.мм.гггг`; guests, visits, hours, contacts, and units must be labeled.
+- Коммуникации требуют согласия, истории согласий и поддержки отписки.
+- Состав кампании должен snapshot-иться, чтобы история не менялась при последующем изменении профиля гостя или группы.
+- Маркетинг не должен хранить документы или лишние персональные данные.
+- Результаты кампаний должны сохранять исторический контекст товара, клуба, гостя и цены.
+- Деньги в отчетах кампаний должны показываться как `руб`; даты должны использовать `дд.мм.гггг`; гости, визиты, часы, контакты и единицы должны быть подписаны.
 
-## Continuous Polish
+## Постоянная полировка
 
-- Continue polishing report table UX, filters, exports, and mobile layout based on live `leetplus.ru` review.
-- Keep README, `PROJECT_STATE.md`, and this file aligned when workflow, data rules, production setup, or roadmap changes.
+- Продолжать полировать UX таблиц отчетов, фильтров, экспортов и мобильной верстки по результатам live review на `leetplus.ru`.
+- Поддерживать README, `PROJECT_STATE.md` и этот файл согласованными при изменениях workflow, правил данных, production setup или roadmap.

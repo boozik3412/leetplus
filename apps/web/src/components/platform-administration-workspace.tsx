@@ -105,6 +105,24 @@ function formatNumber(value: number) {
   return new Intl.NumberFormat("ru-RU").format(value);
 }
 
+function formatAuditJson(value: unknown) {
+  if (value === null || value === undefined) {
+    return "Нет данных";
+  }
+
+  if (typeof value === "string") {
+    return value || "Нет данных";
+  }
+
+  const text = JSON.stringify(value, null, 2) ?? "Нет данных";
+
+  if (text.length > 5000) {
+    return `${text.slice(0, 5000)}\n...`;
+  }
+
+  return text;
+}
+
 function defaultAction(status: Tenant["status"]): LifecycleAction {
   if (status === "ACTIVE") {
     return "SUSPEND";
@@ -1090,6 +1108,30 @@ export function PlatformAdministrationWorkspace({
                     {event.reason}
                   </p>
                 ) : null}
+                <details className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
+                  <summary className="cursor-pointer text-xs font-semibold uppercase text-zinc-500 transition hover:text-emerald-700 dark:hover:text-emerald-200">
+                    Детали события
+                  </summary>
+                  <div className="mt-3 grid gap-3 lg:grid-cols-3">
+                    {[
+                      ["Metadata", event.metadata],
+                      ["До изменения", event.before],
+                      ["После изменения", event.after],
+                    ].map(([label, value]) => (
+                      <div
+                        key={String(label)}
+                        className="min-w-0 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950"
+                      >
+                        <p className="text-xs font-semibold uppercase text-zinc-500">
+                          {String(label)}
+                        </p>
+                        <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-zinc-700 dark:text-zinc-300">
+                          {formatAuditJson(value)}
+                        </pre>
+                      </div>
+                    ))}
+                  </div>
+                </details>
               </div>
             ))}
             {auditEvents.length === 0 ? (

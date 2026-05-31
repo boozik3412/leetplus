@@ -406,18 +406,18 @@ Acceptance criteria:
 
 Goal: show not only completion, but operational quality and risk.
 
-- Add dashboard for operational discipline: done on time, overdue, failed, returned, unchecked.
-- Add club rating by task/checklist discipline.
-- Add employee rating by timely completion, repeated violations, training status, and review outcomes.
-- Add recurring issue detection: same failed checklist item by club, role, employee, time, or shift type.
+- Done: `/staff/operations-dashboard` adds the first operational discipline dashboard: done on time, overdue, failed checklist items, returned runs, unchecked tasks/checklists, readiness blockers, and current risk list.
+- Done: club rating by task/checklist discipline is visible in `/staff/operations-dashboard`, with score, overdue, failed, returned, unchecked, readiness and repeated-issue penalties.
+- Done: employee rating combines timely completion, repeated checklist violations, training/readiness status, and review outcomes from tasks and checklist runs.
+- Done: recurring issue detection groups repeated failed checklist items by club, employee and shift type, with latest run link back to checklist execution.
 - Connect with existing `/guests/staff-control`: shifts, linked/unlinked operators, cash shift, refunds, incassation, middle check.
 - Add anomaly cards: cash/refund anomalies plus missed checklist, suspicious self-service activity plus employee identity, poor bar sales plus missed bar checklist.
 - Add XLSX/CSV export for tasks, checklist runs, training results, and violations.
 
 Acceptance criteria:
 
-- Owner sees clubs with the highest operational risk.
-- Manager can drill down from club to shift, employee, checklist, evidence, and task history.
+- Done: owner sees clubs with the highest operational risk in the club rating.
+- Started: manager can drill down from risk rows into task/checklist lists; direct shift/evidence/task-history drilldown remains tied to existing detail surfaces.
 - Staff-control anomalies can reference operational context where available.
 
 ### MVP 5. AI Assistance
@@ -456,7 +456,7 @@ Acceptance criteria:
 6. Started: add checklist templates and checklist runs. `StaffChecklistTemplate` and `/staff/checklist-templates` are in place; checklist runs can use published regulation snapshots or active template snapshots.
 7. Started: add regulation documents, versions, acknowledgements, and role/club targeting. First draft/published/archived shift-regulation entity, acknowledgement tracking, publication version snapshots, and attached link materials are in place; binary attachment storage remains later.
 8. Done: add training materials, courses, tests, and attestation reports. The knowledge base, structured training-material layer, training courses, onboarding plans, tests/attestations with result history, employee training profiles, and the readiness/attestation manager report are in place.
-9. Add analytics, exports, and connections to current staff-control signals.
+9. Started: add analytics, exports, and connections to current staff-control signals. `/staff/operations-dashboard` now covers operational discipline, club/employee ratings, recurring checklist issues, and current risk routing; exports and staff-control anomaly connections remain next.
 10. Add AI assistance only after real workflows produce enough structured data.
 
 ### Key Data Rules

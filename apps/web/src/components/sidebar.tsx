@@ -49,6 +49,7 @@ const navGroups: NavGroup[] = [
     title: "Персонал",
     icon: "staff",
     items: [
+      { href: "/staff/directory", label: "Сотрудники" },
       { href: "/staff/tasks", label: "Задачи персонала" },
       { href: "/staff/task-templates", label: "Шаблоны задач" },
       { href: "/staff/team-chat", label: "Командный чат" },

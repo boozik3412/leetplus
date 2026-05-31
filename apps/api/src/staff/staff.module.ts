@@ -15,6 +15,8 @@ import {
   StaffDisciplineController,
 } from './staff-discipline.controller';
 import { StaffDisciplineService } from './staff-discipline.service';
+import { StaffDirectoryController } from './staff-directory.controller';
+import { StaffDirectoryService } from './staff-directory.service';
 import { StaffKnowledgeBaseController } from './staff-knowledge-base.controller';
 import { StaffKnowledgeBaseService } from './staff-knowledge-base.service';
 import { StaffOnboardingPlansController } from './staff-onboarding-plans.controller';
@@ -42,6 +44,7 @@ import { StaffTasksService } from './staff-tasks.service';
   imports: [AuthModule, PrismaModule, TenancyModule],
   controllers: [
     StaffTasksController,
+    StaffDirectoryController,
     StaffTaskTemplatesController,
     StaffKnowledgeBaseController,
     StaffTrainingCoursesController,
@@ -61,6 +64,7 @@ import { StaffTasksService } from './staff-tasks.service';
   ],
   providers: [
     StaffTasksService,
+    StaffDirectoryService,
     StaffTaskTemplatesService,
     StaffKnowledgeBaseService,
     StaffTrainingCoursesService,

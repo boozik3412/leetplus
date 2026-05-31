@@ -324,8 +324,8 @@ LeetPlus должен развиваться из набора отчетов в
 - Готово: protected API guards перечитывают текущего пользователя из DB, поэтому deactivated accounts и измененные роли перестают использовать protected routes после token verification.
 - Готово: добавлены task templates для типовых операций клуба: tenant-scoped `StaffTaskTemplate`, API `/staff/task-templates`, UI `/staff/task-templates`, reusable packs, per-club scope, default deadline offset, labels и создание задачи из шаблона в один клик.
 - Готово: добавлено первое tenant-scoped binary attachment storage для staff operations: `StaffAttachment`, upload/download API `/staff/attachments`, web proxy и upload controls в task evidence, checklist evidence, shift-regulation materials и knowledge-base materials.
-- Создать staff directory и role model, независимые от guest analytics, переиспользуя текущий staff identity mapping там, где это полезно.
-- Поддержать employee-to-Langame mapping из `working_shifts.user_id` и будущих operator identifiers.
+- Готово: создан первый staff directory, независимый от guest analytics: `StaffMember`, API `/staff/directory`, UI `/staff/directory`, связь с LeetPlus user account, клубом, ролью, статусом и старой staff-control identity mapping там, где она полезна.
+- Готово: поддержана ручная employee-to-Langame mapping через `externalDomain` и `working_shifts.user_id`; это готовит дальнейшее связывание смен, рейтингов и операционных задач с устойчивой идентичностью сотрудника.
 - Добавить типы задач: one-time, shift, recurring, long-term, personal, club, role.
 - Добавить статусы задач: new, in progress, on review, done, overdue, canceled.
 - Добавить priority, deadline, responsible employee, club, shift, author, observer, labels, attachments, comments и checklist внутри задачи.
@@ -333,7 +333,7 @@ LeetPlus должен развиваться из набора отчетов в
 - Добавить templates для типовых операций клуба.
 - Добавить базовые views списка задач: today, overdue, my tasks, by club, by employee, by shift, by status.
 - Добавить audit history для каждой задачи.
-- Следующее: добавить staff directory/полную модель идентичности сотрудников и recurring task rules.
+- Следующее: добавить recurring task rules поверх задач и шаблонов: daily, weekly, monthly, opening/closing shift rules с безопасным ручным запуском перед автоматизацией.
 
 Критерии приемки:
 
@@ -465,8 +465,8 @@ LeetPlus должен развиваться из набора отчетов в
 ### Рекомендуемая техническая последовательность
 
 1. Готово: создать `STAFF_OPERATIONS_MODULE_TZ.md` с ролями, сценариями, data model, permissions, MVP scope и acceptance criteria.
-2. Выделить staff identity в reusable staff domain, который сможет обслуживать и `/guests/staff-control`, и новый operations module.
-3. Начато: добавить database schema для tasks, task templates, task comments, attachments, audit events и staff assignments. `StaffTask`, `StaffTaskTemplate`, `StaffTaskComment`, `StaffTaskAuditEvent` и первый `StaffAttachment` binary storage уже есть; recurring rules и fuller staff identity остаются следующими.
+2. Готово: выделить staff identity в reusable staff domain, который сможет обслуживать и `/guests/staff-control`, и новый operations module. Первый слой `StaffMember` и `/staff/directory` уже связывает сотрудника с LeetPlus account, клубом и Langame `working_shifts.user_id`.
+3. Начато: добавить database schema для tasks, task templates, task comments, attachments, audit events и staff assignments. `StaffTask`, `StaffTaskTemplate`, `StaffTaskComment`, `StaffTaskAuditEvent`, `StaffAttachment` и `StaffMember` уже есть; recurring rules остаются следующим шагом.
 4. Начато: реализовать backend CRUD и list APIs для tasks с tenant/store/staff access control. List/create/status update плюс comment/evidence endpoint уже есть.
 5. Начато: реализовать UI `/staff/tasks` или `/operations/tasks` для manager и administrator workflows. `/staff/tasks` содержит создание, filters, status actions, execution comments, evidence links, audit history preview и запуск task-template через `/staff/task-templates`.
 6. Начато: добавить checklist templates и checklist runs. `StaffChecklistTemplate` и `/staff/checklist-templates` уже есть; checklist runs могут использовать published regulation snapshots или active template snapshots.

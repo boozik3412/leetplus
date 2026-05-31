@@ -148,6 +148,7 @@ model Tenant {
   recommendationStates                 RecommendationState[]
   reportDigestScheduleRuns             ReportDigestScheduleRun[]
   guestStaffIdentityMappings           GuestStaffIdentityMapping[]
+  staffMembers                         StaffMember[]
   staffTasks                           StaffTask[]
   staffTaskTemplates                   StaffTaskTemplate[]
   staffTaskComments                    StaffTaskComment[]
@@ -210,6 +211,8 @@ model User {
   createdMarketingPromoBundleLaunches  MarketingPromoBundleLaunch[]          @relation("MarketingPromoBundleLaunchCreatedBy")
   createdMarketingPromoBundleUsages    MarketingPromoBundleUsage[]           @relation("MarketingPromoBundleUsageCreatedBy")
   guestStaffIdentityMappings           GuestStaffIdentityMapping[]
+  staffMember                          StaffMember?                         @relation("StaffMemberUser")
+  createdStaffMembers                  StaffMember[]                        @relation("StaffMemberCreatedBy")
   createdStaffTasks                    StaffTask[]                           @relation("StaffTaskCreatedBy")
   createdStaffTaskTemplates            StaffTaskTemplate[]                   @relation("StaffTaskTemplateCreatedBy")
   assignedStaffTasks                   StaffTask[]                           @relation("StaffTaskAssignedTo")
@@ -391,6 +394,7 @@ model Store {
   staffSalarySchemes           StaffSalaryScheme[]
   staffChatChannels            StaffChatChannel[]
   staffChatMessages            StaffChatMessage[]
+  staffMembers                 StaffMember[]
   userAccesses                 UserStoreAccess[]
 
   @@unique([tenantId, externalProvider, externalDomain, externalClubId])
@@ -1328,6 +1332,39 @@ model GuestStaffIdentityMapping {
   @@index([tenantId], map: "guest_staff_identity_mapping_tenant_idx")
   @@index([guestId], map: "guest_staff_identity_mapping_guest_idx")
   @@index([createdByUserId], map: "guest_staff_identity_mapping_user_idx")
+}
+
+model StaffMember {
+  id               String               @id @default(uuid())
+  tenantId         String
+  userId           String?              @unique(map: "staff_member_user_id_unique")
+  storeId          String?
+  createdByUserId  String?
+  displayName      String
+  role             UserRole             @default(CLUB_ADMINISTRATOR)
+  status           String               @default("ACTIVE")
+  position         String?
+  employmentType   String?
+  email            String?
+  phone            String?
+  hiredAt          DateTime?
+  dismissedAt      DateTime?
+  externalProvider IntegrationProvider?
+  externalDomain   String?
+  externalUserId   String?
+  note             String?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  tenant        Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user          User?  @relation("StaffMemberUser", fields: [userId], references: [id], onDelete: SetNull)
+  store         Store? @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  createdByUser User?  @relation("StaffMemberCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, externalProvider, externalDomain, externalUserId], map: "staff_member_external_identity_unique")
+  @@index([tenantId, status, role], map: "staff_member_status_role_idx")
+  @@index([tenantId, storeId], map: "staff_member_store_idx")
+  @@index([createdByUserId], map: "staff_member_created_by_idx")
 }
 
 model StaffTask {

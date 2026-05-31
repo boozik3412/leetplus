@@ -15,6 +15,7 @@ const statusLabels: Record<StaffKnowledgeArticleStatus | "all", string> = {
   all: "Все статусы",
   DRAFT: "Черновики",
   REVIEW: "На согласовании",
+  RETURNED: "Возвращенные",
   PUBLISHED: "Опубликованные",
   ARCHIVED: "Архив",
 };
@@ -40,6 +41,7 @@ function isStatus(
     value === "all" ||
     value === "DRAFT" ||
     value === "REVIEW" ||
+    value === "RETURNED" ||
     value === "PUBLISHED" ||
     value === "ARCHIVED"
   );
@@ -102,6 +104,7 @@ export default async function StaffKnowledgeBasePage({
     { label: "Опубликовано", value: report.summary.published },
     { label: "Черновики", value: report.summary.draft },
     { label: "На согласовании", value: report.summary.review },
+    { label: "Возвращено", value: report.summary.returned },
     {
       label: "Прочтение",
       value: `${formatNumber(report.summary.readReceipts)}/${formatNumber(
@@ -143,7 +146,7 @@ export default async function StaffKnowledgeBasePage({
           </Link>
         </header>
 
-        <section className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <section className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           {summaryCards.map((card) => (
             <div
               key={card.label}

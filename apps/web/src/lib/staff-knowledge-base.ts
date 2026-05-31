@@ -4,6 +4,7 @@ import type { StaffTaskStore } from "./staff-tasks";
 export type StaffKnowledgeArticleStatus =
   | "DRAFT"
   | "REVIEW"
+  | "RETURNED"
   | "PUBLISHED"
   | "ARCHIVED";
 export type StaffKnowledgeRoleScope =
@@ -126,6 +127,20 @@ export type StaffKnowledgeArticle = {
   readingSummary: StaffKnowledgeReadingSummary;
   readReceipts: StaffKnowledgeReadReceipt[];
   versions: StaffKnowledgeArticleVersion[];
+  workflowEvents: StaffKnowledgeWorkflowEvent[];
+};
+
+export type StaffKnowledgeWorkflowEvent = {
+  id: string;
+  type: "CREATED" | "REVIEW_REQUESTED" | "RETURNED" | "PUBLISHED" | "ARCHIVED";
+  title: string;
+  detail: string | null;
+  happenedAt: string;
+  actor: {
+    id: string;
+    email: string;
+    fullName: string | null;
+  } | null;
 };
 
 export type StaffKnowledgeArticleSuggestion = {
@@ -185,6 +200,7 @@ export type StaffKnowledgeBaseReport = {
     published: number;
     draft: number;
     review: number;
+    returned: number;
     archived: number;
     requiredReading: number;
     requiredAudience: number;

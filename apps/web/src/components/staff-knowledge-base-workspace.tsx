@@ -22,9 +22,28 @@ import type {
 const statusLabels: Record<StaffKnowledgeArticleStatus, string> = {
   DRAFT: "Черновик",
   REVIEW: "На согласовании",
+  RETURNED: "Возвращено",
   PUBLISHED: "Опубликовано",
   ARCHIVED: "Архив",
 };
+
+const reviewQueueTabs = [
+  {
+    key: "REVIEW",
+    label: "Ждет проверки",
+    empty: "Материалов на согласовании пока нет.",
+  },
+  {
+    key: "RETURNED",
+    label: "Возвращено",
+    empty: "Возвращенных на доработку материалов пока нет.",
+  },
+  {
+    key: "PUBLISHED",
+    label: "Опубликовано",
+    empty: "Опубликованных материалов в текущей выборке пока нет.",
+  },
+] as const;
 
 const roleScopeLabels: Record<StaffKnowledgeRoleScope, string> = {
   ALL_STAFF: "Весь персонал",
@@ -334,6 +353,8 @@ export function StaffKnowledgeBaseWorkspace({
   report: StaffKnowledgeBaseReport;
 }) {
   const router = useRouter();
+  const [reviewQueueTab, setReviewQueueTab] =
+    useState<(typeof reviewQueueTabs)[number]["key"]>("REVIEW");
   const [draft, setDraft] = useState<DraftArticle>(() =>
     report.rows[0] ? fromArticle(report.rows[0]) : defaultDraft(),
   );
@@ -353,7 +374,13 @@ export function StaffKnowledgeBaseWorkspace({
   const canSaveCurrentStatus =
     draft.status === "PUBLISHED" || draft.status === "ARCHIVED"
       ? report.canPublishKnowledge
+      : draft.status === "RETURNED"
+        ? report.canReviewKnowledge
       : canSaveArticle;
+  const reviewQueueRows = useMemo(
+    () => report.rows.filter((row) => row.status === reviewQueueTab),
+    [report.rows, reviewQueueTab],
+  );
   const statusOptions = useMemo(
     () =>
       (Object.entries(statusLabels) as Array<
@@ -369,6 +396,10 @@ export function StaffKnowledgeBaseWorkspace({
 
         if (value === "REVIEW") {
           return report.canEditKnowledge || report.canReviewKnowledge;
+        }
+
+        if (value === "RETURNED") {
+          return report.canReviewKnowledge;
         }
 
         return report.canEditKnowledge || report.canReviewKnowledge;
@@ -691,6 +722,88 @@ export function StaffKnowledgeBaseWorkspace({
         </section>
       ) : null}
 
+      {report.canReviewKnowledge || report.canPublishKnowledge ? (
+        <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+                Очередь согласования
+              </p>
+              <h2 className="mt-1 text-lg font-semibold">
+                Проверка и публикация материалов
+              </h2>
+              <p className="mt-1 text-sm leading-6 text-zinc-500">
+                Проверяющий возвращает материал с комментарием или передает
+                дальше, публикатор выпускает версию и запускает контроль
+                прочтения.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {reviewQueueTabs.map((tab) => {
+                const count = report.rows.filter(
+                  (row) => row.status === tab.key,
+                ).length;
+
+                return (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    onClick={() => setReviewQueueTab(tab.key)}
+                    className={[
+                      "h-9 rounded-md border px-3 text-xs font-semibold transition",
+                      reviewQueueTab === tab.key
+                        ? "border-emerald-500 bg-emerald-500 text-zinc-950"
+                        : "border-zinc-300 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900",
+                    ].join(" ")}
+                  >
+                    {tab.label} · {count}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {reviewQueueRows.length === 0 ? (
+            <p className="mt-4 rounded-md border border-dashed border-zinc-300 p-3 text-sm text-zinc-500 dark:border-zinc-800">
+              {
+                reviewQueueTabs.find((tab) => tab.key === reviewQueueTab)
+                  ?.empty
+              }
+            </p>
+          ) : (
+            <div className="mt-4 grid gap-3 lg:grid-cols-3">
+              {reviewQueueRows.map((row) => (
+                <button
+                  key={row.id}
+                  type="button"
+                  onClick={() => setDraft(fromArticle(row))}
+                  className="rounded-lg border border-zinc-200 p-3 text-left transition hover:border-emerald-500 hover:bg-emerald-50/70 dark:border-zinc-800 dark:hover:bg-emerald-500/10"
+                >
+                  <span className="flex flex-wrap items-center gap-2">
+                    <span className="font-semibold">{row.title}</span>
+                    <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                      {statusLabels[row.status]}
+                    </span>
+                  </span>
+                  <span className="mt-2 block text-xs leading-5 text-zinc-500">
+                    {row.folder} · {row.category} ·{" "}
+                    {row.store?.name ?? "Вся сеть"}
+                  </span>
+                  {row.approvalNote ? (
+                    <span className="mt-2 block text-xs leading-5 text-zinc-500">
+                      {row.approvalNote}
+                    </span>
+                  ) : null}
+                  <span className="mt-2 block text-[11px] font-semibold uppercase text-zinc-400">
+                    Обновлено {formatDateTime(row.updatedAt)}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+      ) : null}
+
       <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
         <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
           <div className="flex items-start justify-between gap-3">
@@ -855,8 +968,8 @@ export function StaffKnowledgeBaseWorkspace({
                   Workflow:
                 </span>{" "}
                 черновики редактируют роли с правом базы знаний, согласование
-                ведут reviewer-роли, публикация и архив требуют отдельного
-                publisher-права. Публикация создает новую версию, а
+                ведут проверяющие, публикация и архив требуют отдельного
+                права публикатора. Публикация создает новую версию, а
                 обязательные статьи попадают в контроль прочтения.
               </div>
 
@@ -1601,6 +1714,38 @@ function VersionHistory({ article }: { article: StaffKnowledgeArticle }) {
               Отметок прочтения по текущей версии пока нет.
             </p>
           )}
+        </div>
+      ) : null}
+
+      {article.workflowEvents.length > 0 ? (
+        <div className="mt-3 rounded-md bg-zinc-50 p-3 text-sm dark:bg-zinc-900/50">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="font-semibold">Журнал согласования</span>
+            <span className="text-xs text-zinc-500">
+              {article.workflowEvents.length} событий
+            </span>
+          </div>
+          <div className="mt-3 space-y-2">
+            {article.workflowEvents.map((event) => (
+              <div
+                key={event.id}
+                className="border-l-2 border-zinc-300 pl-3 dark:border-zinc-700"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-sm font-semibold">{event.title}</span>
+                  <span className="text-xs text-zinc-500">
+                    {formatDateTime(event.happenedAt)}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-zinc-500">
+                  {event.actor
+                    ? event.actor.fullName ?? event.actor.email
+                    : "Системное событие"}
+                  {event.detail ? ` · ${event.detail}` : ""}
+                </p>
+              </div>
+            ))}
+          </div>
         </div>
       ) : null}
 

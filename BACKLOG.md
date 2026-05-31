@@ -411,13 +411,14 @@ LeetPlus должен развиваться из набора отчетов в
 - Готово: база знаний автоматически предлагает черновики статей из повторяющихся провалов чек-листов за последние 90 дней, группирует их по клубу/типу смены/пункту, подставляет текст стандарта, теги, связь с чек-листами и не показывает подсказку, если похожий материал уже заведен.
 - Готово: training materials можно прикреплять к knowledge articles как structured text blocks, file links, images, video links, external links, notes и required flags.
 - Готово: база знаний получила готовые шаблоны под кассу, сервис, бар, техподдержку и найм; custom roles теперь могут отдельно получать права на черновики, согласование и публикацию/архивирование материалов.
+- Готово: база знаний получила очередь согласования: статус `RETURNED`, фильтры "ждет проверки/возвращено/опубликовано", возврат проверяющим с комментарием и журнал workflow-событий по созданию, отправке на согласование, возврату, публикации версий и архивированию.
 - Готово: добавлены courses by role and club: tenant-scoped `StaffTrainingCourse`, API `/staff/training-courses`, page `/staff/training-courses`, catalog, filters, draft/active/archive statuses, required flag, due date, club scope, role visibility, ordered steps, knowledge-base article links, text, links и task steps.
 - Готово: добавлены onboarding plans для новых администраторов: tenant-scoped `StaffOnboardingPlan`, API `/staff/onboarding`, page `/staff/onboarding`, role/club scope, draft/active/archive statuses, duration, ordered adaptation steps, links to courses, task templates, checklist templates, regulations, text и external links.
 - Готово: добавлены tests и attestations: tenant-scoped `StaffAssessment` и `StaffAssessmentResult`, API `/staff/assessments`, page `/staff/assessments`, draft/active/archive statuses, role/club scope, tests vs attestations, pass threshold, attempt limit, expiration period, automatic scoring for choice questions, free-text evidence answers и result history.
 - Готово: regulations могут требовать linked test или attestation retake после publication; выбранный active assessment хранится в regulation и snapshotted в каждую published version вместе с acknowledgement requirement.
 - Готово: добавлены employee training profiles: `StaffTrainingProgress`, API `/staff/training-profiles`, page `/staff/training-profiles`, assigned courses, progress updates, overdue learning, certificates, expired certificates и linked test/attestation status by employee.
 - Готово: добавлен manager readiness report: API `/staff/readiness-report`, page `/staff/readiness-report`, sidebar entry, combined readiness status by employee, required course gaps, failed tests, failed/expired attestations и pending regulation acknowledgements.
-- Следующая полировка: добавить очередь согласования базы знаний с фильтрами "ждет проверки", "возвращено на доработку" и журналом действий reviewer/publisher.
+- Следующая полировка: связать возврат материала базы знаний с уведомлением автору и быстрым созданием задачи на доработку.
 
 Критерии приемки:
 

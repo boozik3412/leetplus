@@ -9,7 +9,13 @@ import { hasCapability } from '../auth/capabilities';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 
-const articleStatuses = ['DRAFT', 'REVIEW', 'PUBLISHED', 'ARCHIVED'] as const;
+const articleStatuses = [
+  'DRAFT',
+  'REVIEW',
+  'RETURNED',
+  'PUBLISHED',
+  'ARCHIVED',
+] as const;
 const roleScopes = [
   'ALL_STAFF',
   'ADMINISTRATOR',
@@ -104,6 +110,7 @@ export type StaffKnowledgeBaseReport = {
     published: number;
     draft: number;
     review: number;
+    returned: number;
     archived: number;
     requiredReading: number;
     requiredAudience: number;
@@ -180,6 +187,16 @@ export type StaffKnowledgeArticleResponse = {
   readingSummary: StaffKnowledgeReadingSummary;
   readReceipts: StaffKnowledgeReadReceiptResponse[];
   versions: StaffKnowledgeArticleVersionResponse[];
+  workflowEvents: StaffKnowledgeWorkflowEventResponse[];
+};
+
+export type StaffKnowledgeWorkflowEventResponse = {
+  id: string;
+  type: 'CREATED' | 'REVIEW_REQUESTED' | 'RETURNED' | 'PUBLISHED' | 'ARCHIVED';
+  title: string;
+  detail: string | null;
+  happenedAt: string;
+  actor: { id: string; email: string; fullName: string | null } | null;
 };
 
 const articleInclude = {
@@ -491,7 +508,12 @@ export class StaffKnowledgeBaseService {
           ...data,
           reviewRequestedAt: nextStatus === 'REVIEW' ? now : undefined,
           approvedAt: nextStatus === 'PUBLISHED' ? now : undefined,
-          approvedByUserId: nextStatus === 'PUBLISHED' ? user.id : undefined,
+          approvedByUserId:
+            nextStatus === 'PUBLISHED' ||
+            nextStatus === 'RETURNED' ||
+            nextStatus === 'ARCHIVED'
+              ? user.id
+              : undefined,
           publishedAt:
             nextStatus === 'PUBLISHED' && !current.publishedAt
               ? now
@@ -683,6 +705,8 @@ export class StaffKnowledgeBaseService {
           summary.published += 1;
         } else if (row.status === 'REVIEW') {
           summary.review += 1;
+        } else if (row.status === 'RETURNED') {
+          summary.returned += 1;
         } else if (row.status === 'DRAFT') {
           summary.draft += 1;
         } else if (row.status === 'ARCHIVED') {
@@ -703,6 +727,7 @@ export class StaffKnowledgeBaseService {
         published: 0,
         draft: 0,
         review: 0,
+        returned: 0,
         archived: 0,
         requiredReading: 0,
         requiredAudience: 0,
@@ -1259,7 +1284,73 @@ export class StaffKnowledgeBaseService {
         this.toReadReceiptResponse(receipt),
       ),
       versions: row.versions.map((version) => this.toVersionResponse(version)),
+      workflowEvents: this.toWorkflowEvents(row),
     };
+  }
+
+  private toWorkflowEvents(
+    row: StaffKnowledgeArticleRow,
+  ): StaffKnowledgeWorkflowEventResponse[] {
+    const events: StaffKnowledgeWorkflowEventResponse[] = [
+      {
+        id: `created:${row.id}`,
+        type: 'CREATED',
+        title: 'Создан черновик',
+        detail: row.summary,
+        happenedAt: row.createdAt.toISOString(),
+        actor: row.createdByUser,
+      },
+    ];
+
+    if (row.reviewRequestedAt) {
+      events.push({
+        id: `review:${row.id}`,
+        type: 'REVIEW_REQUESTED',
+        title: 'Отправлено на согласование',
+        detail: row.approvalNote,
+        happenedAt: row.reviewRequestedAt.toISOString(),
+        actor: row.createdByUser,
+      });
+    }
+
+    if (row.status === 'RETURNED') {
+      events.push({
+        id: `returned:${row.id}`,
+        type: 'RETURNED',
+        title: 'Возвращено на доработку',
+        detail: row.approvalNote,
+        happenedAt: row.updatedAt.toISOString(),
+        actor: row.approvedByUser,
+      });
+    }
+
+    row.versions.forEach((version) => {
+      events.push({
+        id: `published:${row.id}:${version.version}`,
+        type: 'PUBLISHED',
+        title: `Опубликована версия ${version.version}`,
+        detail: version.summary,
+        happenedAt: version.createdAt.toISOString(),
+        actor: version.createdByUser,
+      });
+    });
+
+    if (row.status === 'ARCHIVED') {
+      events.push({
+        id: `archived:${row.id}`,
+        type: 'ARCHIVED',
+        title: 'Материал архивирован',
+        detail: row.approvalNote,
+        happenedAt: row.updatedAt.toISOString(),
+        actor: row.approvedByUser,
+      });
+    }
+
+    return events.sort(
+      (left, right) =>
+        new Date(right.happenedAt).getTime() -
+        new Date(left.happenedAt).getTime(),
+    );
   }
 
   private toReadReceiptResponse(
@@ -1364,6 +1455,15 @@ export class StaffKnowledgeBaseService {
       if (!this.canPublishKnowledge(user)) {
         throw new BadRequestException(
           'Knowledge base publication is not allowed',
+        );
+      }
+      return;
+    }
+
+    if (status === 'RETURNED') {
+      if (!this.canReviewKnowledge(user)) {
+        throw new BadRequestException(
+          'Knowledge base review workflow is not allowed',
         );
       }
       return;

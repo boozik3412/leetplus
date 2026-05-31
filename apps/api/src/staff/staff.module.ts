@@ -8,6 +8,8 @@ import { StaffChecklistsController } from './staff-checklists.controller';
 import { StaffChecklistsService } from './staff-checklists.service';
 import { StaffKnowledgeBaseController } from './staff-knowledge-base.controller';
 import { StaffKnowledgeBaseService } from './staff-knowledge-base.service';
+import { StaffOnboardingPlansController } from './staff-onboarding-plans.controller';
+import { StaffOnboardingPlansService } from './staff-onboarding-plans.service';
 import { StaffShiftRegulationsController } from './staff-shift-regulations.controller';
 import { StaffShiftRegulationsService } from './staff-shift-regulations.service';
 import { StaffTaskTemplatesController } from './staff-task-templates.controller';
@@ -26,6 +28,7 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffTaskTemplatesController,
     StaffKnowledgeBaseController,
     StaffTrainingCoursesController,
+    StaffOnboardingPlansController,
     StaffShiftRegulationsController,
     StaffChecklistTemplatesController,
     StaffChecklistsController,
@@ -36,6 +39,7 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffTaskTemplatesService,
     StaffKnowledgeBaseService,
     StaffTrainingCoursesService,
+    StaffOnboardingPlansService,
     StaffShiftRegulationsService,
     StaffChecklistTemplatesService,
     StaffChecklistsService,

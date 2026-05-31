@@ -154,6 +154,7 @@ model Tenant {
   staffTaskAuditEvents                 StaffTaskAuditEvent[]
   staffKnowledgeArticles               StaffKnowledgeArticle[]
   staffTrainingCourses                 StaffTrainingCourse[]
+  staffOnboardingPlans                 StaffOnboardingPlan[]
   staffShiftRegulations                StaffShiftRegulation[]
   staffShiftRegulationVersions         StaffShiftRegulationVersion[]
   staffShiftRegulationAcknowledgements StaffShiftRegulationAcknowledgement[]
@@ -206,6 +207,7 @@ model User {
   staffTaskAuditEvents                 StaffTaskAuditEvent[]                 @relation("StaffTaskAuditActor")
   createdStaffKnowledgeArticles        StaffKnowledgeArticle[]               @relation("StaffKnowledgeArticleCreatedBy")
   createdStaffTrainingCourses          StaffTrainingCourse[]                 @relation("StaffTrainingCourseCreatedBy")
+  createdStaffOnboardingPlans          StaffOnboardingPlan[]                 @relation("StaffOnboardingPlanCreatedBy")
   createdStaffShiftRegulations         StaffShiftRegulation[]                @relation("StaffShiftRegulationCreatedBy")
   createdStaffShiftRegulationVersions  StaffShiftRegulationVersion[]         @relation("StaffShiftRegulationVersionCreatedBy")
   staffShiftRegulationAcknowledgements StaffShiftRegulationAcknowledgement[]
@@ -354,6 +356,7 @@ model Store {
   staffTaskTemplates           StaffTaskTemplate[]
   staffKnowledgeArticles       StaffKnowledgeArticle[]
   staffTrainingCourses         StaffTrainingCourse[]
+  staffOnboardingPlans         StaffOnboardingPlan[]
   staffShiftRegulations        StaffShiftRegulation[]
   staffShiftRegulationVersions StaffShiftRegulationVersion[]
   staffChecklistTemplates      StaffChecklistTemplate[]
@@ -1456,6 +1459,33 @@ model StaffTrainingCourse {
   @@index([tenantId, createdAt], map: "staff_training_course_created_idx")
   @@index([storeId], map: "staff_training_course_store_idx")
   @@index([createdByUserId], map: "staff_training_course_created_by_idx")
+}
+
+model StaffOnboardingPlan {
+  id              String   @id @default(uuid())
+  tenantId        String
+  storeId         String?
+  createdByUserId String?
+  title           String
+  description     String?
+  roleScope       String   @default("ADMINISTRATOR")
+  status          String   @default("DRAFT")
+  durationDays    Int?
+  steps           Json
+  stepsCount      Int      @default(0)
+  coursesCount    Int      @default(0)
+  tasksCount      Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant        Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  store         Store? @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  createdByUser User?  @relation("StaffOnboardingPlanCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status, roleScope], map: "staff_onboarding_plan_status_role_idx")
+  @@index([tenantId, createdAt], map: "staff_onboarding_plan_created_idx")
+  @@index([storeId], map: "staff_onboarding_plan_store_idx")
+  @@index([createdByUserId], map: "staff_onboarding_plan_created_by_idx")
 }
 
 model StaffShiftRegulation {

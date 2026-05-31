@@ -48,12 +48,44 @@ const checklistDashboardSelect = {
   assignedToUser: { select: { id: true, email: true, fullName: true } },
 } satisfies Prisma.StaffChecklistRunSelect;
 
+const shiftDashboardSelect = {
+  id: true,
+  guestId: true,
+  externalDomain: true,
+  externalShiftId: true,
+  externalUserId: true,
+  startedAt: true,
+  stoppedAt: true,
+  durationMinutes: true,
+  cashAmount: true,
+  cashlessAmount: true,
+  refundsCash: true,
+  refundsCashless: true,
+  mobilePay: true,
+  yandexPay: true,
+  incassAmount: true,
+  middleCheck: true,
+  store: { select: { id: true, name: true, isActive: true } },
+  guest: {
+    select: {
+      id: true,
+      externalGuestId: true,
+      fullNameMasked: true,
+      emailMasked: true,
+    },
+  },
+} satisfies Prisma.GuestWorkingShiftSelect;
+
 type TaskDashboardRow = Prisma.StaffTaskGetPayload<{
   select: typeof taskDashboardSelect;
 }>;
 
 type ChecklistDashboardRow = Prisma.StaffChecklistRunGetPayload<{
   select: typeof checklistDashboardSelect;
+}>;
+
+type ShiftDashboardRow = Prisma.GuestWorkingShiftGetPayload<{
+  select: typeof shiftDashboardSelect;
 }>;
 
 type StoreOption = { id: string; name: string; isActive: boolean };
@@ -90,6 +122,7 @@ export type StaffOperationsDashboard = {
   summary: StaffOperationsSummary;
   clubs: StaffOperationsRating[];
   employees: StaffOperationsEmployeeRating[];
+  staffControl: StaffOperationsStaffControl;
   recurringIssues: StaffOperationsRecurringIssue[];
   latestRisks: StaffOperationsRiskItem[];
   stores: StoreOption[];
@@ -109,6 +142,44 @@ export type StaffOperationsSummary = {
   recurringIssues: number;
   operationalScore: number;
   riskLevel: RiskLevel;
+};
+
+export type StaffOperationsStaffControl = {
+  summary: StaffOperationsStaffControlSummary;
+  anomalies: StaffOperationsStaffControlAnomaly[];
+};
+
+export type StaffOperationsStaffControlSummary = {
+  shiftsTotal: number;
+  linkedShifts: number;
+  unlinkedShifts: number;
+  shiftHours: number;
+  paymentAmount: number;
+  cashAmount: number;
+  refundAmount: number;
+  incassAmount: number;
+  averageMiddleCheck: number;
+  missedChecklistRuns: number;
+};
+
+export type StaffOperationsStaffControlAnomaly = {
+  id: string;
+  kind:
+    | 'SHIFT_REFUNDS'
+    | 'SHIFT_MISSING_INCASSATION'
+    | 'SHIFT_UNLINKED_OPERATOR'
+    | 'SHIFT_LONG'
+    | 'SHIFT_LOW_MIDDLE_CHECK'
+    | 'SHIFT_MISSED_CHECKLIST'
+    | 'SHIFT_BAR_CHECKLIST';
+  title: string;
+  detail: string;
+  severity: RiskLevel;
+  count: number;
+  amount: number | null;
+  store: StoreOption | null;
+  operatorLabel: string | null;
+  href: string;
 };
 
 export type StaffOperationsRating = {
@@ -161,7 +232,8 @@ export type StaffOperationsRiskItem = {
     | 'TASK_UNCHECKED'
     | 'CHECKLIST_RETURNED'
     | 'CHECKLIST_FAILED'
-    | 'CHECKLIST_UNCHECKED';
+    | 'CHECKLIST_UNCHECKED'
+    | StaffOperationsStaffControlAnomaly['kind'];
   title: string;
   detail: string;
   severity: RiskLevel;
@@ -226,41 +298,48 @@ export class StaffOperationsDashboardService {
     const { tenantId } = await this.tenantContextService.resolve(user);
     const filters = this.resolveFilters(query);
 
-    const [tasks, checklists, stores, users, readiness] = await Promise.all([
-      this.prisma.staffTask.findMany({
-        where: this.buildTaskWhere(tenantId, filters),
-        select: taskDashboardSelect,
-        orderBy: [{ dueAt: 'asc' }, { createdAt: 'desc' }],
-        take: 5000,
-      }),
-      this.prisma.staffChecklistRun.findMany({
-        where: this.buildChecklistWhere(tenantId, filters),
-        select: checklistDashboardSelect,
-        orderBy: [
-          { submittedAt: 'desc' },
-          { scheduledAt: 'desc' },
-          { createdAt: 'desc' },
-        ],
-        take: 5000,
-      }),
-      this.prisma.store.findMany({
-        where: { tenantId },
-        select: { id: true, name: true, isActive: true },
-        orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
-      }),
-      this.prisma.user.findMany({
-        where: { tenantId, isActive: true },
-        select: { id: true, email: true, fullName: true },
-        orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
-      }),
-      this.staffReadinessReportService.getReport(user, {
-        storeId: filters.storeId ?? undefined,
-        userId: filters.userId ?? undefined,
-        search: filters.search ?? undefined,
-        status: 'all',
-        role: 'all',
-      }),
-    ]);
+    const [tasks, checklists, shifts, stores, users, readiness] =
+      await Promise.all([
+        this.prisma.staffTask.findMany({
+          where: this.buildTaskWhere(tenantId, filters),
+          select: taskDashboardSelect,
+          orderBy: [{ dueAt: 'asc' }, { createdAt: 'desc' }],
+          take: 5000,
+        }),
+        this.prisma.staffChecklistRun.findMany({
+          where: this.buildChecklistWhere(tenantId, filters),
+          select: checklistDashboardSelect,
+          orderBy: [
+            { submittedAt: 'desc' },
+            { scheduledAt: 'desc' },
+            { createdAt: 'desc' },
+          ],
+          take: 5000,
+        }),
+        this.prisma.guestWorkingShift.findMany({
+          where: this.buildShiftWhere(tenantId, filters),
+          select: shiftDashboardSelect,
+          orderBy: [{ startedAt: 'desc' }, { createdAt: 'desc' }],
+          take: 5000,
+        }),
+        this.prisma.store.findMany({
+          where: { tenantId },
+          select: { id: true, name: true, isActive: true },
+          orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+        }),
+        this.prisma.user.findMany({
+          where: { tenantId, isActive: true },
+          select: { id: true, email: true, fullName: true },
+          orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
+        }),
+        this.staffReadinessReportService.getReport(user, {
+          storeId: filters.storeId ?? undefined,
+          userId: filters.userId ?? undefined,
+          search: filters.search ?? undefined,
+          status: 'all',
+          role: 'all',
+        }),
+      ]);
 
     const now = new Date();
     const summaryMetrics = this.createMetrics();
@@ -305,6 +384,7 @@ export class StaffOperationsDashboardService {
     const recurringIssues = this.buildRecurringIssues(checklists);
     this.applyRecurringIssues(recurringIssues, clubDrafts, employeeDrafts);
     summaryMetrics.repeatedIssues = recurringIssues.length;
+    const staffControl = this.buildStaffControl(shifts, checklists, filters);
 
     return {
       filters: {
@@ -314,11 +394,17 @@ export class StaffOperationsDashboardService {
         userId: filters.userId,
         search: filters.search,
       },
-      summary: this.toSummary(summaryMetrics),
+      summary: this.toSummary(summaryMetrics, staffControl),
       clubs: this.finalizeRatings(clubDrafts),
       employees: this.finalizeEmployeeRatings(employeeDrafts),
+      staffControl,
       recurringIssues,
-      latestRisks: this.buildLatestRisks(tasks, checklists, now),
+      latestRisks: this.buildLatestRisks(
+        tasks,
+        checklists,
+        now,
+        staffControl.anomalies,
+      ),
       stores,
       users,
     };
@@ -427,6 +513,47 @@ export class StaffOperationsDashboardService {
             {
               reviewComment: { contains: filters.search, mode: 'insensitive' },
             },
+          ],
+        },
+      ];
+    }
+
+    return where;
+  }
+
+  private buildShiftWhere(
+    tenantId: string,
+    filters: ResolvedStaffOperationsDashboardFilters,
+  ): Prisma.GuestWorkingShiftWhereInput {
+    const where: Prisma.GuestWorkingShiftWhereInput = {
+      tenantId,
+      OR: [
+        { startedAt: { gte: filters.start, lte: filters.end } },
+        { stoppedAt: { gte: filters.start, lte: filters.end } },
+        {
+          AND: [
+            { startedAt: { lte: filters.end } },
+            {
+              OR: [{ stoppedAt: null }, { stoppedAt: { gte: filters.start } }],
+            },
+          ],
+        },
+      ],
+    };
+
+    if (filters.storeId) {
+      where.storeId = filters.storeId;
+    }
+
+    if (filters.search) {
+      where.AND = [
+        ...(Array.isArray(where.AND) ? where.AND : []),
+        {
+          OR: [
+            { externalShiftId: { contains: filters.search } },
+            { externalUserId: { contains: filters.search } },
+            { guest: { fullNameMasked: { contains: filters.search } } },
+            { guest: { emailMasked: { contains: filters.search } } },
           ],
         },
       ];
@@ -744,10 +871,424 @@ export class StaffOperationsDashboardService {
     return map;
   }
 
+  private buildStaffControl(
+    shifts: ShiftDashboardRow[],
+    checklists: ChecklistDashboardRow[],
+    filters: ResolvedStaffOperationsDashboardFilters,
+  ): StaffOperationsStaffControl {
+    const summary = this.emptyStaffControlSummary();
+    let middleCheckSum = 0;
+    let middleCheckCount = 0;
+
+    shifts.forEach((shift) => {
+      const paymentAmount = this.shiftPaymentAmount(shift);
+      const cashAmount = this.decimalToNumber(shift.cashAmount) ?? 0;
+      const refundAmount = this.shiftRefundAmount(shift);
+      const incassAmount = this.decimalToNumber(shift.incassAmount) ?? 0;
+      const middleCheck = this.decimalToNumber(shift.middleCheck);
+
+      summary.shiftsTotal += 1;
+      summary.shiftHours += this.shiftHours(shift);
+      summary.paymentAmount += paymentAmount;
+      summary.cashAmount += cashAmount;
+      summary.refundAmount += refundAmount;
+      summary.incassAmount += incassAmount;
+
+      if (shift.guestId) {
+        summary.linkedShifts += 1;
+      } else {
+        summary.unlinkedShifts += 1;
+      }
+
+      if (middleCheck !== null && middleCheck > 0) {
+        middleCheckSum += middleCheck;
+        middleCheckCount += 1;
+      }
+    });
+
+    summary.shiftHours = this.round(summary.shiftHours, 1);
+    summary.paymentAmount = this.round(summary.paymentAmount, 2);
+    summary.cashAmount = this.round(summary.cashAmount, 2);
+    summary.refundAmount = this.round(summary.refundAmount, 2);
+    summary.incassAmount = this.round(summary.incassAmount, 2);
+    summary.averageMiddleCheck =
+      middleCheckCount > 0
+        ? this.round(middleCheckSum / middleCheckCount, 2)
+        : 0;
+
+    const missedChecklists = checklists.filter((run) =>
+      this.isMissedChecklist(run),
+    );
+    summary.missedChecklistRuns = missedChecklists.length;
+
+    const refundRows = shifts.filter(
+      (shift) => this.shiftRefundAmount(shift) > 0,
+    );
+    const missingIncassationRows = shifts.filter(
+      (shift) =>
+        this.shiftPaymentAmount(shift) >= 10_000 &&
+        (this.decimalToNumber(shift.incassAmount) ?? 0) <= 0,
+    );
+    const unlinkedHighCashRows = shifts.filter(
+      (shift) =>
+        !shift.guestId &&
+        Boolean(shift.externalUserId) &&
+        this.shiftPaymentAmount(shift) >= 10_000,
+    );
+    const longShiftRows = shifts.filter(
+      (shift) => this.shiftHours(shift) >= 14,
+    );
+    const lowMiddleCheckRows = shifts.filter((shift) => {
+      const middleCheck = this.decimalToNumber(shift.middleCheck) ?? 0;
+      return (
+        middleCheck > 0 &&
+        middleCheck < 100 &&
+        this.shiftPaymentAmount(shift) >= 5_000
+      );
+    });
+
+    const anomalies: StaffOperationsStaffControlAnomaly[] = [];
+    this.addShiftAnomaly(anomalies, {
+      kind: 'SHIFT_REFUNDS',
+      title: 'Возвраты по сменам',
+      rows: refundRows,
+      amount: refundRows.reduce(
+        (sum, shift) => sum + this.shiftRefundAmount(shift),
+        0,
+      ),
+      severity: summary.refundAmount >= 5_000 ? 'HIGH' : 'MEDIUM',
+      detailPrefix: 'Есть смены с возвратами или отменами',
+      href: this.staffControlOperatorsHref(
+        filters,
+        'refunds',
+        'refunds',
+        'desc',
+      ),
+    });
+    this.addShiftAnomaly(anomalies, {
+      kind: 'SHIFT_MISSING_INCASSATION',
+      title: 'Касса без инкассации',
+      rows: missingIncassationRows,
+      amount: missingIncassationRows.reduce(
+        (sum, shift) => sum + this.shiftPaymentAmount(shift),
+        0,
+      ),
+      severity: 'HIGH',
+      detailPrefix:
+        'Смена набрала кассу от 10 000 руб, но инкассация не отражена',
+      href: this.staffControlOperatorsHref(
+        filters,
+        'missing-incassation',
+        'cash',
+        'desc',
+      ),
+    });
+    this.addShiftAnomaly(anomalies, {
+      kind: 'SHIFT_UNLINKED_OPERATOR',
+      title: 'Сотрудник без привязки',
+      rows: unlinkedHighCashRows,
+      amount: unlinkedHighCashRows.reduce(
+        (sum, shift) => sum + this.shiftPaymentAmount(shift),
+        0,
+      ),
+      severity: 'HIGH',
+      detailPrefix:
+        'Langame user_id вел смену с существенной кассой, но не привязан к сотруднику',
+      href: this.staffControlOperatorsHref(
+        filters,
+        'unmapped-operator',
+        'cash',
+        'desc',
+        'unlinked',
+      ),
+    });
+    this.addShiftAnomaly(anomalies, {
+      kind: 'SHIFT_LONG',
+      title: 'Длинные смены',
+      rows: longShiftRows,
+      amount: null,
+      severity: 'MEDIUM',
+      detailPrefix: 'Есть смены длительностью 14+ часов',
+      href: this.staffControlOperatorsHref(
+        filters,
+        'long-shift',
+        'hours',
+        'desc',
+      ),
+    });
+    this.addShiftAnomaly(anomalies, {
+      kind: 'SHIFT_LOW_MIDDLE_CHECK',
+      title: 'Низкий средний чек',
+      rows: lowMiddleCheckRows,
+      amount: null,
+      severity: 'MEDIUM',
+      detailPrefix: 'Средний чек по смене ниже 100 руб при заметной кассе',
+      href: this.staffControlOperatorsHref(
+        filters,
+        'low-middle-check',
+        'middleCheck',
+        'asc',
+      ),
+    });
+
+    const cashRiskStoreIds = new Set(
+      [...refundRows, ...missingIncassationRows]
+        .map((shift) => shift.store?.id)
+        .filter((id): id is string => Boolean(id)),
+    );
+    const missedCashChecklists = missedChecklists.filter(
+      (run) =>
+        (run.shiftKind === 'CASH' || run.shiftKind === 'CLOSING') &&
+        (cashRiskStoreIds.size === 0 ||
+          (run.store?.id ? cashRiskStoreIds.has(run.store.id) : false)),
+    );
+    if (missedCashChecklists.length > 0) {
+      anomalies.push({
+        id: 'shift-missed-checklist:cash',
+        kind: 'SHIFT_MISSED_CHECKLIST',
+        title: 'Кассовый риск без чеклиста',
+        detail:
+          'Есть кассовые сигналы и просроченные чеклисты кассы или закрытия смены в том же контуре.',
+        severity: 'HIGH',
+        count: missedCashChecklists.length,
+        amount: null,
+        store: this.representativeChecklistStore(missedCashChecklists),
+        operatorLabel: null,
+        href: this.staffChecklistReportHref(filters, 'CASH'),
+      });
+    }
+
+    const lowMiddleStoreIds = new Set(
+      lowMiddleCheckRows
+        .map((shift) => shift.store?.id)
+        .filter((id): id is string => Boolean(id)),
+    );
+    const failedBarChecklists = checklists.filter(
+      (run) =>
+        run.shiftKind === 'BAR' &&
+        (run.failedItems > 0 || this.isMissedChecklist(run)) &&
+        (lowMiddleStoreIds.size === 0 ||
+          (run.store?.id ? lowMiddleStoreIds.has(run.store.id) : false)),
+    );
+    if (failedBarChecklists.length > 0) {
+      anomalies.push({
+        id: 'shift-bar-checklist:low-middle-check',
+        kind: 'SHIFT_BAR_CHECKLIST',
+        title: 'Слабый чек и барный чеклист',
+        detail:
+          'Низкий средний чек совпадает с проваленными или просроченными барными чеклистами.',
+        severity: 'MEDIUM',
+        count: failedBarChecklists.length,
+        amount: null,
+        store: this.representativeChecklistStore(failedBarChecklists),
+        operatorLabel: null,
+        href: this.staffChecklistReportHref(filters, 'BAR'),
+      });
+    }
+
+    return {
+      summary,
+      anomalies: anomalies
+        .sort(
+          (first, second) =>
+            this.severityWeight(second.severity) -
+              this.severityWeight(first.severity) ||
+            (second.amount ?? 0) - (first.amount ?? 0) ||
+            second.count - first.count,
+        )
+        .slice(0, 10),
+    };
+  }
+
+  private emptyStaffControlSummary(): StaffOperationsStaffControlSummary {
+    return {
+      shiftsTotal: 0,
+      linkedShifts: 0,
+      unlinkedShifts: 0,
+      shiftHours: 0,
+      paymentAmount: 0,
+      cashAmount: 0,
+      refundAmount: 0,
+      incassAmount: 0,
+      averageMiddleCheck: 0,
+      missedChecklistRuns: 0,
+    };
+  }
+
+  private addShiftAnomaly(
+    anomalies: StaffOperationsStaffControlAnomaly[],
+    input: {
+      kind: StaffOperationsStaffControlAnomaly['kind'];
+      title: string;
+      rows: ShiftDashboardRow[];
+      amount: number | null;
+      severity: RiskLevel;
+      detailPrefix: string;
+      href: string;
+    },
+  ) {
+    if (input.rows.length === 0) {
+      return;
+    }
+
+    const store = this.representativeShiftStore(input.rows);
+    const operatorLabel = this.representativeShiftOperator(input.rows);
+    const amountText =
+      input.amount !== null
+        ? ` Сумма: ${this.round(input.amount, 0).toLocaleString('ru-RU')} руб.`
+        : '';
+
+    anomalies.push({
+      id: `${input.kind.toLowerCase()}:${store?.id ?? 'network'}`,
+      kind: input.kind,
+      title: input.title,
+      detail: `${input.detailPrefix}.${amountText}`,
+      severity: input.severity,
+      count: input.rows.length,
+      amount: input.amount === null ? null : this.round(input.amount, 2),
+      store,
+      operatorLabel,
+      href: input.href,
+    });
+  }
+
+  private shiftPaymentAmount(shift: ShiftDashboardRow) {
+    return (
+      (this.decimalToNumber(shift.cashAmount) ?? 0) +
+      (this.decimalToNumber(shift.cashlessAmount) ?? 0) +
+      (this.decimalToNumber(shift.mobilePay) ?? 0) +
+      (this.decimalToNumber(shift.yandexPay) ?? 0)
+    );
+  }
+
+  private shiftRefundAmount(shift: ShiftDashboardRow) {
+    return (
+      (this.decimalToNumber(shift.refundsCash) ?? 0) +
+      (this.decimalToNumber(shift.refundsCashless) ?? 0)
+    );
+  }
+
+  private shiftHours(shift: ShiftDashboardRow) {
+    if (shift.durationMinutes && shift.durationMinutes > 0) {
+      return shift.durationMinutes / 60;
+    }
+
+    if (shift.startedAt && shift.stoppedAt) {
+      return Math.max(
+        (shift.stoppedAt.getTime() - shift.startedAt.getTime()) /
+          (1000 * 60 * 60),
+        0,
+      );
+    }
+
+    return 0;
+  }
+
+  private isMissedChecklist(run: ChecklistDashboardRow) {
+    if (!run.scheduledAt) {
+      return false;
+    }
+
+    return (
+      run.scheduledAt < new Date() &&
+      !checklistClosedStatuses.includes(run.status)
+    );
+  }
+
+  private representativeShiftStore(rows: ShiftDashboardRow[]) {
+    const stores = new Map<string, StoreOption>();
+
+    rows.forEach((row) => {
+      if (row.store) {
+        stores.set(row.store.id, row.store);
+      }
+    });
+
+    return stores.size === 1 ? Array.from(stores.values())[0] : null;
+  }
+
+  private representativeChecklistStore(rows: ChecklistDashboardRow[]) {
+    const stores = new Map<string, StoreOption>();
+
+    rows.forEach((row) => {
+      if (row.store) {
+        stores.set(row.store.id, row.store);
+      }
+    });
+
+    return stores.size === 1 ? Array.from(stores.values())[0] : null;
+  }
+
+  private representativeShiftOperator(rows: ShiftDashboardRow[]) {
+    const operators = new Set(
+      rows.map((row) => this.shiftOperatorLabel(row)).filter(Boolean),
+    );
+
+    return operators.size === 1 ? Array.from(operators)[0] : null;
+  }
+
+  private shiftOperatorLabel(shift: ShiftDashboardRow) {
+    return (
+      shift.guest?.fullNameMasked ??
+      shift.guest?.emailMasked ??
+      (shift.guest?.externalGuestId
+        ? `guest ${shift.guest.externalGuestId}`
+        : null) ??
+      (shift.externalUserId ? `user_id ${shift.externalUserId}` : null)
+    );
+  }
+
+  private staffControlOperatorsHref(
+    filters: ResolvedStaffOperationsDashboardFilters,
+    anomaly:
+      | 'refunds'
+      | 'missing-incassation'
+      | 'long-shift'
+      | 'low-middle-check'
+      | 'unmapped-operator',
+    sort: 'shifts' | 'hours' | 'cash' | 'refunds' | 'incass' | 'middleCheck',
+    direction: 'asc' | 'desc',
+    status: 'all' | 'linked' | 'unlinked' = 'all',
+  ) {
+    const params = new URLSearchParams({
+      dateFrom: filters.dateFrom,
+      dateTo: filters.dateTo,
+      anomaly,
+      sort,
+      direction,
+      status,
+    });
+
+    if (filters.storeId) {
+      params.set('storeId', filters.storeId);
+    }
+
+    return `/guests/staff-control/operators?${params.toString()}`;
+  }
+
+  private staffChecklistReportHref(
+    filters: ResolvedStaffOperationsDashboardFilters,
+    shiftKind: 'CASH' | 'BAR',
+  ) {
+    const params = new URLSearchParams({
+      dateFrom: filters.dateFrom,
+      dateTo: filters.dateTo,
+      status: 'all',
+      shiftKind,
+    });
+
+    if (filters.storeId) {
+      params.set('storeId', filters.storeId);
+    }
+
+    return `/staff/checklists/report?${params.toString()}`;
+  }
+
   private buildLatestRisks(
     tasks: TaskDashboardRow[],
     checklists: ChecklistDashboardRow[],
     now: Date,
+    staffControlAnomalies: StaffOperationsStaffControlAnomaly[],
   ): StaffOperationsRiskItem[] {
     const risks: StaffOperationsRiskItem[] = [];
 
@@ -832,6 +1373,20 @@ export class StaffOperationsDashboardService {
       }
     });
 
+    staffControlAnomalies.forEach((anomaly) => {
+      risks.push({
+        id: `staff-control:${anomaly.id}`,
+        kind: anomaly.kind,
+        title: anomaly.title,
+        detail: anomaly.detail,
+        severity: anomaly.severity,
+        date: now.toISOString(),
+        store: anomaly.store,
+        user: null,
+        href: anomaly.href,
+      });
+    });
+
     return risks
       .sort((a, b) => {
         const severityDiff =
@@ -846,18 +1401,24 @@ export class StaffOperationsDashboardService {
       .slice(0, 12);
   }
 
-  private toSummary(metrics: DisciplineMetrics): StaffOperationsSummary {
+  private toSummary(
+    metrics: DisciplineMetrics,
+    staffControl: StaffOperationsStaffControl,
+  ): StaffOperationsSummary {
     const overdue = metrics.taskOverdue + metrics.checklistOverdue;
     const unchecked = metrics.taskUnchecked + metrics.checklistUnchecked;
     const returned = metrics.checklistReturned;
     const doneOnTime = metrics.taskDoneOnTime + metrics.checklistDoneOnTime;
     const score = this.scoreMetrics(metrics);
+    const staffControlRisks =
+      staffControl.anomalies.length + staffControl.summary.unlinkedShifts;
     const totalSignals =
       metrics.tasksTotal +
       metrics.checklistsTotal +
       metrics.readinessBlocked +
       metrics.failedItems +
-      metrics.repeatedIssues;
+      metrics.repeatedIssues +
+      staffControlRisks;
 
     return {
       totalSignals,
@@ -873,7 +1434,11 @@ export class StaffOperationsDashboardService {
       operationalScore: score,
       riskLevel: this.riskLevel(
         score,
-        overdue + returned + unchecked + metrics.failedItems,
+        overdue +
+          returned +
+          unchecked +
+          metrics.failedItems +
+          staffControlRisks,
       ),
     };
   }
@@ -1040,6 +1605,24 @@ export class StaffOperationsDashboardService {
     const copy = new Date(date);
     copy.setUTCDate(copy.getUTCDate() + days);
     return copy;
+  }
+
+  private decimalToNumber(value: Prisma.Decimal | number | string | null) {
+    if (value === null) {
+      return null;
+    }
+
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value : null;
+    }
+
+    const parsed = Number(value.toString());
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  private round(value: number, precision = 2) {
+    const factor = 10 ** precision;
+    return Math.round(value * factor) / factor;
   }
 
   private asRecord(value: unknown): Record<string, unknown> {

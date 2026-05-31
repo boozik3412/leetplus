@@ -30,6 +30,44 @@ export type StaffOperationsSummary = {
   riskLevel: StaffOperationsRiskLevel;
 };
 
+export type StaffOperationsStaffControl = {
+  summary: StaffOperationsStaffControlSummary;
+  anomalies: StaffOperationsStaffControlAnomaly[];
+};
+
+export type StaffOperationsStaffControlSummary = {
+  shiftsTotal: number;
+  linkedShifts: number;
+  unlinkedShifts: number;
+  shiftHours: number;
+  paymentAmount: number;
+  cashAmount: number;
+  refundAmount: number;
+  incassAmount: number;
+  averageMiddleCheck: number;
+  missedChecklistRuns: number;
+};
+
+export type StaffOperationsStaffControlAnomaly = {
+  id: string;
+  kind:
+    | "SHIFT_REFUNDS"
+    | "SHIFT_MISSING_INCASSATION"
+    | "SHIFT_UNLINKED_OPERATOR"
+    | "SHIFT_LONG"
+    | "SHIFT_LOW_MIDDLE_CHECK"
+    | "SHIFT_MISSED_CHECKLIST"
+    | "SHIFT_BAR_CHECKLIST";
+  title: string;
+  detail: string;
+  severity: StaffOperationsRiskLevel;
+  count: number;
+  amount: number | null;
+  store: StaffTaskStore | null;
+  operatorLabel: string | null;
+  href: string;
+};
+
 export type StaffOperationsRating = {
   id: string;
   label: string;
@@ -80,7 +118,8 @@ export type StaffOperationsRiskItem = {
     | "TASK_UNCHECKED"
     | "CHECKLIST_RETURNED"
     | "CHECKLIST_FAILED"
-    | "CHECKLIST_UNCHECKED";
+    | "CHECKLIST_UNCHECKED"
+    | StaffOperationsStaffControlAnomaly["kind"];
   title: string;
   detail: string;
   severity: StaffOperationsRiskLevel;
@@ -99,6 +138,7 @@ export type StaffOperationsDashboard = {
   summary: StaffOperationsSummary;
   clubs: StaffOperationsRating[];
   employees: StaffOperationsEmployeeRating[];
+  staffControl: StaffOperationsStaffControl;
   recurringIssues: StaffOperationsRecurringIssue[];
   latestRisks: StaffOperationsRiskItem[];
   stores: StaffTaskStore[];

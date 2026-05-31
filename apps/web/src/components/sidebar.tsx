@@ -352,7 +352,7 @@ function compactGroupButtonClass({
     isActive
       ? "border-emerald-500/50 bg-emerald-500 text-zinc-950 shadow-sm"
       : isOpen
-        ? "border-emerald-500/45 bg-emerald-500/10 text-emerald-600 shadow-sm dark:text-emerald-300"
+        ? "border-zinc-300 bg-zinc-100 text-zinc-950 shadow-sm dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
       : "border-zinc-200 bg-white hover:border-zinc-300 hover:bg-zinc-100 hover:text-zinc-950 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-zinc-700 dark:hover:bg-zinc-900 dark:hover:text-zinc-100",
   ].join(" ");
 }
@@ -490,7 +490,11 @@ function CompactHomeLink({
 }
 
 function isDashboardPath(pathname: string) {
-  return pathname === "/" || pathname === "/dashboard" || pathname.startsWith("/dashboard/");
+  return (
+    pathname === "/" ||
+    pathname === "/dashboard" ||
+    pathname.startsWith("/dashboard/")
+  );
 }
 
 function resolveCurrentProductArea(pathname: string): ProductArea {
@@ -718,10 +722,18 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
         </div>
         <nav className="flex-1 space-y-2 overflow-visible px-3 py-4">
           {canViewDashboard ? (
-            <CompactHomeLink
-              isActive={isDashboardArea}
-              onNavigate={closeNavGroups}
-            />
+            <>
+              <CompactHomeLink
+                isActive={isDashboardArea}
+                onNavigate={closeNavGroups}
+              />
+              {allowedNavGroups.length > 0 ? (
+                <div
+                  aria-hidden="true"
+                  className="mx-auto h-px w-10 bg-zinc-200/80 dark:bg-zinc-800/80"
+                />
+              ) : null}
+            </>
           ) : null}
           {allowedNavGroups.map((group) => (
             <CompactNavSection

@@ -392,12 +392,13 @@ Goal: make onboarding and standard knowledge measurable.
 - Done: tests and attestations added: tenant-scoped `StaffAssessment` and `StaffAssessmentResult`, API `/staff/assessments`, page `/staff/assessments`, draft/active/archive statuses, role/club scope, tests vs attestations, pass threshold, attempt limit, expiration period, automatic scoring for choice questions, free-text evidence answers, and result history.
 - Done: regulations can now require a linked test or attestation retake after publication; the selected active assessment is stored on the regulation and snapshotted into each published version together with the acknowledgement requirement.
 - Done: employee training profiles added: `StaffTrainingProgress`, API `/staff/training-profiles`, page `/staff/training-profiles`, assigned courses, progress updates, overdue learning, certificates, expired certificates, and linked test/attestation status by employee.
-- Add manager report: who is ready for shift work, who failed tests, who has expired attestations.
+- Done: manager readiness report added: API `/staff/readiness-report`, page `/staff/readiness-report`, sidebar entry, combined readiness status by employee, required course gaps, failed tests, failed/expired attestations, and pending regulation acknowledgements.
 
 Acceptance criteria:
 
 - Done: a new administrator can see active onboarding paths targeted to administrator roles and club/network scope.
 - Done: a manager sees test and attestation result attempts, pass rate, failed attempts, expired results, assigned course completion percentage, overdue courses, and certificate status in the employee training profile.
+- Done: a manager sees who is ready for shift work, who has blocked admission, who failed tests, who has expired attestations, and who has not confirmed the current shift regulation.
 - Done: a published regulation update can trigger acknowledgement and a linked test/attestation retake.
 - Training results remain historical after employee role or club changes.
 
@@ -454,7 +455,7 @@ Acceptance criteria:
 5. Started: implement `/staff/tasks` or `/operations/tasks` UI for manager and administrator workflows. `/staff/tasks` now includes creation, filters, status actions, execution comments, evidence links, audit history preview, and task-template launching through `/staff/task-templates`.
 6. Started: add checklist templates and checklist runs. `StaffChecklistTemplate` and `/staff/checklist-templates` are in place; checklist runs can use published regulation snapshots or active template snapshots.
 7. Started: add regulation documents, versions, acknowledgements, and role/club targeting. First draft/published/archived shift-regulation entity, acknowledgement tracking, publication version snapshots, and attached link materials are in place; binary attachment storage remains later.
-8. Started: add training materials, courses, tests, and attestation reports. The first knowledge base, structured training-material layer, training courses, onboarding plans, tests/attestations with result history, and employee training profiles are in place; the next step is a fuller readiness/attestation manager report.
+8. Done: add training materials, courses, tests, and attestation reports. The knowledge base, structured training-material layer, training courses, onboarding plans, tests/attestations with result history, employee training profiles, and the readiness/attestation manager report are in place.
 9. Add analytics, exports, and connections to current staff-control signals.
 10. Add AI assistance only after real workflows produce enough structured data.
 

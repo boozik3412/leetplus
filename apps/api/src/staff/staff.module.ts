@@ -12,6 +12,8 @@ import { StaffKnowledgeBaseController } from './staff-knowledge-base.controller'
 import { StaffKnowledgeBaseService } from './staff-knowledge-base.service';
 import { StaffOnboardingPlansController } from './staff-onboarding-plans.controller';
 import { StaffOnboardingPlansService } from './staff-onboarding-plans.service';
+import { StaffReadinessReportController } from './staff-readiness-report.controller';
+import { StaffReadinessReportService } from './staff-readiness-report.service';
 import { StaffShiftRegulationsController } from './staff-shift-regulations.controller';
 import { StaffShiftRegulationsService } from './staff-shift-regulations.service';
 import { StaffTaskTemplatesController } from './staff-task-templates.controller';
@@ -33,6 +35,7 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffKnowledgeBaseController,
     StaffTrainingCoursesController,
     StaffTrainingProfilesController,
+    StaffReadinessReportController,
     StaffOnboardingPlansController,
     StaffAssessmentsController,
     StaffShiftRegulationsController,
@@ -46,6 +49,7 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffKnowledgeBaseService,
     StaffTrainingCoursesService,
     StaffTrainingProfilesService,
+    StaffReadinessReportService,
     StaffOnboardingPlansService,
     StaffAssessmentsService,
     StaffShiftRegulationsService,

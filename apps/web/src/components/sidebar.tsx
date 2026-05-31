@@ -714,7 +714,7 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
             <CompactNavSection
               key={group.title}
               group={group}
-              isActive={currentProductArea === group.title}
+              isActive={!isDashboardArea && currentProductArea === group.title}
               isOpen={Boolean(openNavGroups[group.title])}
               onOpen={() => openNavGroup(group.title)}
               onClose={closeNavGroups}

@@ -154,6 +154,7 @@ model Tenant {
   staffTaskAuditEvents                 StaffTaskAuditEvent[]
   staffKnowledgeArticles               StaffKnowledgeArticle[]
   staffTrainingCourses                 StaffTrainingCourse[]
+  staffTrainingProgresses              StaffTrainingProgress[]
   staffOnboardingPlans                 StaffOnboardingPlan[]
   staffAssessments                     StaffAssessment[]
   staffAssessmentResults               StaffAssessmentResult[]
@@ -209,6 +210,8 @@ model User {
   staffTaskAuditEvents                 StaffTaskAuditEvent[]                 @relation("StaffTaskAuditActor")
   createdStaffKnowledgeArticles        StaffKnowledgeArticle[]               @relation("StaffKnowledgeArticleCreatedBy")
   createdStaffTrainingCourses          StaffTrainingCourse[]                 @relation("StaffTrainingCourseCreatedBy")
+  staffTrainingProgresses              StaffTrainingProgress[]               @relation("StaffTrainingProgressUser")
+  updatedStaffTrainingProgresses       StaffTrainingProgress[]               @relation("StaffTrainingProgressUpdatedBy")
   createdStaffOnboardingPlans          StaffOnboardingPlan[]                 @relation("StaffOnboardingPlanCreatedBy")
   createdStaffAssessments              StaffAssessment[]                     @relation("StaffAssessmentCreatedBy")
   staffAssessmentResults               StaffAssessmentResult[]               @relation("StaffAssessmentUser")
@@ -1459,12 +1462,42 @@ model StaffTrainingCourse {
   tenant        Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   store         Store? @relation(fields: [storeId], references: [id], onDelete: SetNull)
   createdByUser User?  @relation("StaffTrainingCourseCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  progresses    StaffTrainingProgress[]
 
   @@index([tenantId, status, roleScope], map: "staff_training_course_status_role_idx")
   @@index([tenantId, required], map: "staff_training_course_required_idx")
   @@index([tenantId, createdAt], map: "staff_training_course_created_idx")
   @@index([storeId], map: "staff_training_course_store_idx")
   @@index([createdByUserId], map: "staff_training_course_created_by_idx")
+}
+
+model StaffTrainingProgress {
+  id                   String    @id @default(uuid())
+  tenantId             String
+  courseId             String
+  userId               String
+  updatedByUserId      String?
+  status               String    @default("NOT_STARTED")
+  progressPercent      Int       @default(0)
+  dueAt                DateTime?
+  startedAt            DateTime?
+  completedAt          DateTime?
+  certificateIssuedAt  DateTime?
+  certificateExpiresAt DateTime?
+  comment              String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  course        StaffTrainingCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  user          User                @relation("StaffTrainingProgressUser", fields: [userId], references: [id], onDelete: Cascade)
+  updatedByUser User?               @relation("StaffTrainingProgressUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([courseId, userId], map: "staff_training_progress_course_user_unique")
+  @@index([tenantId, userId, status], map: "staff_training_progress_user_status_idx")
+  @@index([tenantId, dueAt], map: "staff_training_progress_due_idx")
+  @@index([courseId], map: "staff_training_progress_course_idx")
+  @@index([updatedByUserId], map: "staff_training_progress_updated_by_idx")
 }
 
 model StaffOnboardingPlan {

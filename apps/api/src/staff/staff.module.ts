@@ -20,6 +20,8 @@ import { StaffTeamChatController } from './staff-team-chat.controller';
 import { StaffTeamChatService } from './staff-team-chat.service';
 import { StaffTrainingCoursesController } from './staff-training-courses.controller';
 import { StaffTrainingCoursesService } from './staff-training-courses.service';
+import { StaffTrainingProfilesController } from './staff-training-profiles.controller';
+import { StaffTrainingProfilesService } from './staff-training-profiles.service';
 import { StaffTasksController } from './staff-tasks.controller';
 import { StaffTasksService } from './staff-tasks.service';
 
@@ -30,6 +32,7 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffTaskTemplatesController,
     StaffKnowledgeBaseController,
     StaffTrainingCoursesController,
+    StaffTrainingProfilesController,
     StaffOnboardingPlansController,
     StaffAssessmentsController,
     StaffShiftRegulationsController,
@@ -42,6 +45,7 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffTaskTemplatesService,
     StaffKnowledgeBaseService,
     StaffTrainingCoursesService,
+    StaffTrainingProfilesService,
     StaffOnboardingPlansService,
     StaffAssessmentsService,
     StaffShiftRegulationsService,

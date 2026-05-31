@@ -7,7 +7,8 @@ export type StaffNotificationSourceType =
   | "TASK"
   | "CHECKLIST"
   | "RECURRING_RULE"
-  | "TEAM_CHAT";
+  | "TEAM_CHAT"
+  | "KNOWLEDGE_BASE";
 
 export type StaffNotification = {
   id: string;
@@ -20,6 +21,7 @@ export type StaffNotification = {
   actionLabel: string | null;
   actionHref: string | null;
   metadata: unknown;
+  targetUser: StaffTaskUser | null;
   acknowledgedAt: string | null;
   resolvedAt: string | null;
   createdAt: string;

@@ -28,6 +28,7 @@ const sourceLabels: Record<StaffNotificationSourceType, string> = {
   CHECKLIST: "Чек-лист",
   RECURRING_RULE: "Регулярное правило",
   TEAM_CHAT: "Командный чат",
+  KNOWLEDGE_BASE: "База знаний",
 };
 
 export function StaffNotificationsWorkspace({
@@ -289,6 +290,12 @@ function NotificationRow({
             <Badge tone="zinc">{sourceLabels[notification.sourceType]}</Badge>
             {notification.store ? (
               <Badge tone="zinc">{notification.store.name}</Badge>
+            ) : null}
+            {notification.targetUser ? (
+              <Badge tone="zinc">
+                {notification.targetUser.fullName ??
+                  notification.targetUser.email}
+              </Badge>
             ) : null}
           </div>
           <h2 className="mt-3 text-lg font-semibold leading-snug text-zinc-950 dark:text-zinc-100">

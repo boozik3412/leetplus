@@ -271,6 +271,7 @@ model User {
   uploadedStaffAttachments             StaffAttachment[]                     @relation("StaffAttachmentUploadedBy")
   acknowledgedStaffNotifications       StaffNotification[]                   @relation("StaffNotificationAcknowledgedBy")
   resolvedStaffNotifications           StaffNotification[]                   @relation("StaffNotificationResolvedBy")
+  targetedStaffNotifications           StaffNotification[]                   @relation("StaffNotificationTargetUser")
   platformAdminAuditEvents             PlatformAdminAuditEvent[]             @relation("PlatformAdminAuditActor")
 
   @@index([tenantId])
@@ -2240,6 +2241,7 @@ model StaffNotification {
   id                   String    @id @default(uuid())
   tenantId             String
   storeId              String?
+  targetUserId         String?
   sourceType           String
   sourceId             String?
   severity             String    @default("WARNING")
@@ -2259,6 +2261,7 @@ model StaffNotification {
 
   tenant             Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   store              Store? @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  targetUser         User?  @relation("StaffNotificationTargetUser", fields: [targetUserId], references: [id], onDelete: SetNull)
   acknowledgedByUser User?  @relation("StaffNotificationAcknowledgedBy", fields: [acknowledgedByUserId], references: [id], onDelete: SetNull)
   resolvedByUser     User?  @relation("StaffNotificationResolvedBy", fields: [resolvedByUserId], references: [id], onDelete: SetNull)
 
@@ -2267,6 +2270,7 @@ model StaffNotification {
   @@index([tenantId, sourceType, sourceId], map: "staff_notification_source_idx")
   @@index([tenantId, createdAt], map: "staff_notification_created_idx")
   @@index([storeId], map: "staff_notification_store_idx")
+  @@index([targetUserId], map: "staff_notification_target_user_idx")
   @@index([acknowledgedByUserId], map: "staff_notification_ack_user_idx")
   @@index([resolvedByUserId], map: "staff_notification_resolved_user_idx")
 }

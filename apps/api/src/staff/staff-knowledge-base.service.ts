@@ -526,6 +526,17 @@ export class StaffKnowledgeBaseService {
         await this.createArticleVersion(tx, article, user.id);
       }
 
+      if (nextStatus === 'RETURNED') {
+        await this.upsertReturnedArticleNotification(
+          tx,
+          tenantId,
+          article,
+          user,
+        );
+      } else if (current.status === 'RETURNED') {
+        await this.resolveReturnedArticleNotification(tx, tenantId, article.id);
+      }
+
       return tx.staffKnowledgeArticle.findUniqueOrThrow({
         where: { id: article.id },
         include: articleInclude,
@@ -1424,6 +1435,103 @@ export class StaffKnowledgeBaseService {
         tags: article.tags,
         materials: article.materials ?? Prisma.JsonNull,
         relatedLinks: article.relatedLinks ?? Prisma.JsonNull,
+      },
+    });
+  }
+
+  private async upsertReturnedArticleNotification(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    article: {
+      id: string;
+      title: string;
+      storeId: string | null;
+      status: string;
+      approvalNote: string | null;
+      createdByUserId: string | null;
+      approvedByUserId: string | null;
+    },
+    reviewer: AuthenticatedUser,
+  ) {
+    const dedupeKey = `knowledge-base:${article.id}:returned`;
+    const reviewerLabel = reviewer.fullName ?? reviewer.email;
+    const message = [
+      reviewerLabel ? `Проверил: ${reviewerLabel}` : null,
+      article.approvalNote
+        ? `Комментарий: ${article.approvalNote}`
+        : 'Нужно доработать материал и снова отправить на согласование.',
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    await tx.staffNotification.upsert({
+      where: {
+        tenantId_dedupeKey: {
+          tenantId,
+          dedupeKey,
+        },
+      },
+      create: {
+        tenantId,
+        storeId: article.storeId,
+        targetUserId: article.createdByUserId,
+        sourceType: 'KNOWLEDGE_BASE',
+        sourceId: article.id,
+        severity: 'WARNING',
+        status: 'OPEN',
+        title: `Материал базы знаний возвращен: ${article.title}`.slice(0, 240),
+        message,
+        actionLabel: 'Открыть материал',
+        actionHref: `/staff/knowledge-base?status=RETURNED&search=${encodeURIComponent(article.title)}`,
+        dedupeKey,
+        metadata: {
+          status: article.status,
+          approvalNote: article.approvalNote,
+          authorUserId: article.createdByUserId,
+          reviewerUserId: article.approvedByUserId,
+        },
+      },
+      update: {
+        storeId: article.storeId,
+        targetUserId: article.createdByUserId,
+        sourceType: 'KNOWLEDGE_BASE',
+        sourceId: article.id,
+        severity: 'WARNING',
+        status: 'OPEN',
+        title: `Материал базы знаний возвращен: ${article.title}`.slice(0, 240),
+        message,
+        actionLabel: 'Открыть материал',
+        actionHref: `/staff/knowledge-base?status=RETURNED&search=${encodeURIComponent(article.title)}`,
+        acknowledgedAt: null,
+        acknowledgedByUserId: null,
+        resolvedAt: null,
+        resolvedByUserId: null,
+        metadata: {
+          status: article.status,
+          approvalNote: article.approvalNote,
+          authorUserId: article.createdByUserId,
+          reviewerUserId: article.approvedByUserId,
+        },
+      },
+    });
+  }
+
+  private async resolveReturnedArticleNotification(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    articleId: string,
+  ) {
+    await tx.staffNotification.updateMany({
+      where: {
+        tenantId,
+        dedupeKey: `knowledge-base:${articleId}:returned`,
+        status: { not: 'RESOLVED' },
+      },
+      data: {
+        status: 'RESOLVED',
+        resolvedAt: new Date(),
+        message:
+          'Материал больше не находится в статусе возврата на доработку.',
       },
     });
   }

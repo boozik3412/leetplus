@@ -418,7 +418,8 @@ LeetPlus должен развиваться из набора отчетов в
 - Готово: regulations могут требовать linked test или attestation retake после publication; выбранный active assessment хранится в regulation и snapshotted в каждую published version вместе с acknowledgement requirement.
 - Готово: добавлены employee training profiles: `StaffTrainingProgress`, API `/staff/training-profiles`, page `/staff/training-profiles`, assigned courses, progress updates, overdue learning, certificates, expired certificates и linked test/attestation status by employee.
 - Готово: добавлен manager readiness report: API `/staff/readiness-report`, page `/staff/readiness-report`, sidebar entry, combined readiness status by employee, required course gaps, failed tests, failed/expired attestations и pending regulation acknowledgements.
-- Следующая полировка: связать возврат материала базы знаний с уведомлением автору и быстрым созданием задачи на доработку.
+- Готово: возврат материала базы знаний создает адресное уведомление автору в `/staff/notifications`, а в `/staff/knowledge-base` для возвращенной статьи доступна быстрая кнопка создания задачи на доработку с комментарием согласования и ссылкой на материал.
+- Следующая полировка: добавить SLA/сроки реакции по возвращенным материалам базы знаний и отдельный фильтр задач, созданных из workflow согласования.
 
 Критерии приемки:
 

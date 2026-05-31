@@ -11,6 +11,7 @@ const notificationSourceTypes = [
   'CHECKLIST',
   'RECURRING_RULE',
   'TEAM_CHAT',
+  'KNOWLEDGE_BASE',
 ] as const;
 const notificationStatusFilters = ['all', ...notificationStatuses] as const;
 const notificationSeverityFilters = ['all', ...notificationSeverities] as const;
@@ -69,6 +70,11 @@ export type StaffNotificationResponse = {
   actionLabel: string | null;
   actionHref: string | null;
   metadata: Prisma.JsonValue | null;
+  targetUser: {
+    id: string;
+    email: string;
+    fullName: string | null;
+  } | null;
   acknowledgedAt: string | null;
   resolvedAt: string | null;
   createdAt: string;
@@ -96,6 +102,7 @@ type SignalDraft = {
   title: string;
   message: string;
   storeId: string | null;
+  targetUserId: string | null;
   actionLabel: string;
   actionHref: string;
   metadata: Prisma.InputJsonValue;
@@ -103,6 +110,7 @@ type SignalDraft = {
 
 const notificationInclude = {
   store: { select: { id: true, name: true, isActive: true } },
+  targetUser: { select: { id: true, email: true, fullName: true } },
   acknowledgedByUser: { select: { id: true, email: true, fullName: true } },
   resolvedByUser: { select: { id: true, email: true, fullName: true } },
 } satisfies Prisma.StaffNotificationInclude;
@@ -126,7 +134,7 @@ export class StaffNotificationsService {
     await this.syncCurrentSignals(tenantId);
 
     const filters = this.resolveFilters(query);
-    const where = this.buildWhere(tenantId, filters);
+    const where = this.buildWhere(tenantId, filters, user.id);
 
     const [rows, summaryRows, stores] = await Promise.all([
       this.prisma.staffNotification.findMany({
@@ -140,7 +148,7 @@ export class StaffNotificationsService {
         take: filters.pageSize,
       }),
       this.prisma.staffNotification.findMany({
-        where: { tenantId },
+        where: this.buildVisibilityWhere(tenantId, user.id),
         select: { status: true, severity: true },
         take: 5000,
       }),
@@ -170,7 +178,7 @@ export class StaffNotificationsService {
 
   async acknowledge(user: AuthenticatedUser, id: string) {
     const { tenantId } = await this.tenantContextService.resolve(user);
-    const notification = await this.resolveNotification(tenantId, id);
+    const notification = await this.resolveNotification(tenantId, id, user.id);
     const now = new Date();
 
     const updated = await this.prisma.staffNotification.update({
@@ -191,7 +199,7 @@ export class StaffNotificationsService {
 
   async resolve(user: AuthenticatedUser, id: string) {
     const { tenantId } = await this.tenantContextService.resolve(user);
-    const notification = await this.resolveNotification(tenantId, id);
+    const notification = await this.resolveNotification(tenantId, id, user.id);
     const now = new Date();
 
     const updated = await this.prisma.staffNotification.update({
@@ -228,6 +236,7 @@ export class StaffNotificationsService {
             storeId: signal.storeId,
             sourceType: signal.sourceType,
             sourceId: signal.sourceId,
+            targetUserId: signal.targetUserId,
             severity: signal.severity,
             title: signal.title,
             message: signal.message,
@@ -242,6 +251,7 @@ export class StaffNotificationsService {
           data: {
             tenantId,
             storeId: signal.storeId,
+            targetUserId: signal.targetUserId,
             sourceType: signal.sourceType,
             sourceId: signal.sourceId,
             severity: signal.severity,
@@ -289,68 +299,92 @@ export class StaffNotificationsService {
     const now = new Date();
     const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
 
-    const [tasks, checklists, rules, incidents] = await Promise.all([
-      this.prisma.staffTask.findMany({
-        where: {
-          tenantId,
-          status: { in: ['OPEN', 'IN_PROGRESS', 'ON_REVIEW'] },
-          dueAt: { lt: now },
-          priority: { in: ['HIGH', 'URGENT'] },
-        },
-        include: {
-          store: { select: { id: true, name: true } },
-          assignedToUser: { select: { id: true, email: true, fullName: true } },
-        },
-        orderBy: { dueAt: 'asc' },
-        take: 100,
-      }),
-      this.prisma.staffChecklistRun.findMany({
-        where: {
-          tenantId,
-          OR: [
-            { status: 'ESCALATED' },
-            {
-              status: { in: ['ON_REVIEW', 'RETURNED'] },
-              failedItems: { gt: 0 },
+    const [tasks, checklists, rules, incidents, returnedArticles] =
+      await Promise.all([
+        this.prisma.staffTask.findMany({
+          where: {
+            tenantId,
+            status: { in: ['OPEN', 'IN_PROGRESS', 'ON_REVIEW'] },
+            dueAt: { lt: now },
+            priority: { in: ['HIGH', 'URGENT'] },
+          },
+          include: {
+            store: { select: { id: true, name: true } },
+            assignedToUser: {
+              select: { id: true, email: true, fullName: true },
             },
-          ],
-        },
-        include: {
-          store: { select: { id: true, name: true } },
-          assignedToUser: { select: { id: true, email: true, fullName: true } },
-        },
-        orderBy: [{ status: 'desc' }, { updatedAt: 'desc' }],
-        take: 100,
-      }),
-      this.prisma.staffTaskRecurringRule.findMany({
-        where: {
-          tenantId,
-          status: 'ACTIVE',
-          nextRunAt: { lte: now },
-        },
-        include: {
-          store: { select: { id: true, name: true } },
-          assignedToUser: { select: { id: true, email: true, fullName: true } },
-        },
-        orderBy: { nextRunAt: 'asc' },
-        take: 100,
-      }),
-      this.prisma.staffChatMessage.findMany({
-        where: {
-          tenantId,
-          kind: 'INCIDENT',
-          createdAt: { gte: fourteenDaysAgo },
-          OR: [{ priority: 'URGENT' }, { isPinned: true }],
-        },
-        include: {
-          channel: { select: { id: true, name: true } },
-          store: { select: { id: true, name: true } },
-          authorUser: { select: { id: true, email: true, fullName: true } },
-        },
-        orderBy: { createdAt: 'desc' },
-        take: 100,
-      }),
-    ]);
+          },
+          orderBy: { dueAt: 'asc' },
+          take: 100,
+        }),
+        this.prisma.staffChecklistRun.findMany({
+          where: {
+            tenantId,
+            OR: [
+              { status: 'ESCALATED' },
+              {
+                status: { in: ['ON_REVIEW', 'RETURNED'] },
+                failedItems: { gt: 0 },
+              },
+            ],
+          },
+          include: {
+            store: { select: { id: true, name: true } },
+            assignedToUser: {
+              select: { id: true, email: true, fullName: true },
+            },
+          },
+          orderBy: [{ status: 'desc' }, { updatedAt: 'desc' }],
+          take: 100,
+        }),
+        this.prisma.staffTaskRecurringRule.findMany({
+          where: {
+            tenantId,
+            status: 'ACTIVE',
+            nextRunAt: { lte: now },
+          },
+          include: {
+            store: { select: { id: true, name: true } },
+            assignedToUser: {
+              select: { id: true, email: true, fullName: true },
+            },
+          },
+          orderBy: { nextRunAt: 'asc' },
+          take: 100,
+        }),
+        this.prisma.staffChatMessage.findMany({
+          where: {
+            tenantId,
+            kind: 'INCIDENT',
+            createdAt: { gte: fourteenDaysAgo },
+            OR: [{ priority: 'URGENT' }, { isPinned: true }],
+          },
+          include: {
+            channel: { select: { id: true, name: true } },
+            store: { select: { id: true, name: true } },
+            authorUser: { select: { id: true, email: true, fullName: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 100,
+        }),
+        this.prisma.staffKnowledgeArticle.findMany({
+          where: {
+            tenantId,
+            status: 'RETURNED',
+          },
+          include: {
+            store: { select: { id: true, name: true } },
+            createdByUser: {
+              select: { id: true, email: true, fullName: true },
+            },
+            approvedByUser: {
+              select: { id: true, email: true, fullName: true },
+            },
+          },
+          orderBy: { updatedAt: 'desc' },
+          take: 100,
+        }),
+      ]);
 
     return [
       ...tasks.map((task): SignalDraft => {
@@ -371,6 +405,7 @@ export class StaffNotificationsService {
             .filter(Boolean)
             .join('\n'),
           storeId: task.storeId,
+          targetUserId: task.assignedToUserId,
           actionLabel: 'Открыть задачу',
           actionHref: `/staff/tasks?search=${encodeURIComponent(task.title)}`,
           metadata: {
@@ -404,6 +439,7 @@ export class StaffNotificationsService {
             .filter(Boolean)
             .join('\n'),
           storeId: run.storeId,
+          targetUserId: run.assignedToUserId,
           actionLabel: 'Открыть чек-листы',
           actionHref: `/staff/checklists?search=${encodeURIComponent(run.title)}`,
           metadata: {
@@ -443,12 +479,48 @@ export class StaffNotificationsService {
             .filter(Boolean)
             .join('\n'),
           storeId: rule.storeId,
+          targetUserId: rule.assignedToUserId,
           actionLabel: 'Открыть правила',
           actionHref: '/staff/task-rules',
           metadata: {
             cadence: rule.cadence,
             nextRunAt: rule.nextRunAt?.toISOString() ?? null,
             overdueHours,
+          },
+        };
+      }),
+      ...returnedArticles.map((article): SignalDraft => {
+        const author = this.userLabel(article.createdByUser);
+        const reviewer = this.userLabel(article.approvedByUser);
+
+        return {
+          sourceType: 'KNOWLEDGE_BASE',
+          sourceId: article.id,
+          dedupeKey: `knowledge-base:${article.id}:returned`,
+          severity: 'WARNING',
+          title: `Материал базы знаний возвращен: ${article.title}`.slice(
+            0,
+            240,
+          ),
+          message: [
+            article.store ? `Клуб: ${article.store.name}` : 'Клуб: вся сеть',
+            author ? `Автор: ${author}` : null,
+            reviewer ? `Проверил: ${reviewer}` : null,
+            article.approvalNote
+              ? `Комментарий: ${article.approvalNote}`
+              : 'Нужно доработать материал и снова отправить на согласование.',
+          ]
+            .filter(Boolean)
+            .join('\n'),
+          storeId: article.storeId,
+          targetUserId: article.createdByUserId,
+          actionLabel: 'Открыть материал',
+          actionHref: `/staff/knowledge-base?status=RETURNED&search=${encodeURIComponent(article.title)}`,
+          metadata: {
+            status: article.status,
+            approvalNote: article.approvalNote,
+            authorUserId: article.createdByUserId,
+            reviewerUserId: article.approvedByUserId,
           },
         };
       }),
@@ -472,6 +544,7 @@ export class StaffNotificationsService {
             .filter(Boolean)
             .join('\n'),
           storeId: message.storeId,
+          targetUserId: null,
           actionLabel: 'Открыть чат',
           actionHref: `/staff/team-chat?channelId=${encodeURIComponent(message.channelId)}`,
           metadata: {
@@ -506,8 +579,10 @@ export class StaffNotificationsService {
   private buildWhere(
     tenantId: string,
     filters: NotificationFilters,
+    currentUserId: string,
   ): Prisma.StaffNotificationWhereInput {
-    const where: Prisma.StaffNotificationWhereInput = { tenantId };
+    const where = this.buildVisibilityWhere(tenantId, currentUserId);
+    const and: Prisma.StaffNotificationWhereInput[] = [];
 
     if (filters.status !== 'all') {
       where.status = filters.status;
@@ -526,13 +601,29 @@ export class StaffNotificationsService {
     }
 
     if (filters.search) {
-      where.OR = [
-        { title: { contains: filters.search, mode: 'insensitive' } },
-        { message: { contains: filters.search, mode: 'insensitive' } },
-      ];
+      and.push({
+        OR: [
+          { title: { contains: filters.search, mode: 'insensitive' } },
+          { message: { contains: filters.search, mode: 'insensitive' } },
+        ],
+      });
+    }
+
+    if (and.length > 0) {
+      where.AND = and;
     }
 
     return where;
+  }
+
+  private buildVisibilityWhere(
+    tenantId: string,
+    currentUserId: string,
+  ): Prisma.StaffNotificationWhereInput {
+    return {
+      tenantId,
+      OR: [{ targetUserId: null }, { targetUserId: currentUserId }],
+    };
   }
 
   private buildSummary(rows: Array<{ status: string; severity: string }>) {
@@ -570,9 +661,16 @@ export class StaffNotificationsService {
     );
   }
 
-  private async resolveNotification(tenantId: string, id: string) {
+  private async resolveNotification(
+    tenantId: string,
+    id: string,
+    currentUserId: string,
+  ) {
     const notification = await this.prisma.staffNotification.findFirst({
-      where: { id, tenantId },
+      where: {
+        id,
+        ...this.buildVisibilityWhere(tenantId, currentUserId),
+      },
       select: {
         id: true,
         status: true,
@@ -610,6 +708,7 @@ export class StaffNotificationsService {
       actionLabel: row.actionLabel,
       actionHref: row.actionHref,
       metadata: row.metadata,
+      targetUser: row.targetUser,
       acknowledgedAt: row.acknowledgedAt?.toISOString() ?? null,
       resolvedAt: row.resolvedAt?.toISOString() ?? null,
       createdAt: row.createdAt.toISOString(),

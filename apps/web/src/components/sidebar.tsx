@@ -262,8 +262,9 @@ function CompactNavSection({
         href={group.items[0].href}
         title={group.title}
         aria-label={group.title}
+        aria-current={isActive ? "page" : undefined}
         onClick={onNavigate}
-        className={compactGroupButtonClass(isActive)}
+        className={compactGroupButtonClass({ isActive })}
       >
         <SectionIcon icon={group.icon} />
       </Link>
@@ -300,7 +301,7 @@ function CompactNavSection({
         aria-expanded={isOpen}
         aria-haspopup="menu"
         onClick={onOpen}
-        className={compactGroupButtonClass(isActive || isOpen)}
+        className={compactGroupButtonClass({ isActive, isOpen })}
       >
         <SectionIcon icon={group.icon} />
         <span className="sr-only">{group.title}</span>
@@ -337,11 +338,19 @@ function CompactNavSection({
   );
 }
 
-function compactGroupButtonClass(isActive: boolean) {
+function compactGroupButtonClass({
+  isActive,
+  isOpen = false,
+}: {
+  isActive: boolean;
+  isOpen?: boolean;
+}) {
   return [
     "group relative flex h-12 w-12 items-center justify-center rounded-2xl border text-zinc-500 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70",
     isActive
       ? "border-emerald-500/50 bg-emerald-500 text-zinc-950 shadow-sm"
+      : isOpen
+        ? "border-emerald-500/45 bg-emerald-500/10 text-emerald-600 shadow-sm dark:text-emerald-300"
       : "border-zinc-200 bg-white hover:border-zinc-300 hover:bg-zinc-100 hover:text-zinc-950 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-zinc-700 dark:hover:bg-zinc-900 dark:hover:text-zinc-100",
   ].join(" ");
 }
@@ -469,8 +478,9 @@ function CompactHomeLink({
       href="/dashboard"
       title="Главная"
       aria-label="Сводный дашборд"
+      aria-current={isActive ? "page" : undefined}
       onClick={onNavigate}
-      className={compactGroupButtonClass(isActive)}
+      className={compactGroupButtonClass({ isActive })}
     >
       <HomeIcon />
     </Link>

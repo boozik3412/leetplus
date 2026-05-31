@@ -76,6 +76,7 @@ Connected production Langame sources:
 ## Recent Work
 
 - Added quick views to `/staff/tasks`: today, overdue, my tasks, by club, by employee, by shift, and by status with counters, grouped drilldown cards, and API support for `view` and `shiftId` filters.
+- Clarified compact sidebar states: `/dashboard` remains the standalone `Главная` entry, while product groups opened by hover no longer reuse the active-page green state.
 - Added the Staff Operations internal notification center: `StaffNotification`, API `/staff/notifications`, page `/staff/notifications`, sidebar entry, idempotent signal sync from overdue important tasks, due recurring rules, failed/escalated checklists and urgent team-chat incidents, plus acknowledge/resolve workflow.
 - Added automatic recurring task rule scheduler for Staff Operations: `StaffTaskRecurringRuleRun` journal, duplicate protection by rule/due time, protected scheduled endpoint, API-side interval runner, UI due-run action, and latest run log in `/staff/task-rules`.
 - Hardened the network dashboard navigation: `/dashboard`, `/dashboard/*`, and the site root resolve to `Главная`, while `Ассортимент` is active only on explicit assortment routes.

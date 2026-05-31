@@ -60,6 +60,7 @@ export type StaffKnowledgeArticleVersion = {
   tags: string[];
   materialsCount: number;
   relatedLinksCount: number;
+  revisionSlaDays: number | null;
   createdAt: string;
   createdByUser: {
     id: string;
@@ -112,6 +113,8 @@ export type StaffKnowledgeArticle = {
   approvalNote: string | null;
   returnedAt: string | null;
   revisionDueAt: string | null;
+  revisionSlaDays: number | null;
+  revisionSlaDaysEffective: number;
   publishedAt: string | null;
   createdAt: string;
   updatedAt: string;

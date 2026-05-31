@@ -68,6 +68,7 @@ export type StaffKnowledgeArticleDto = {
   storeId?: string | null;
   templateKey?: string | null;
   requiresReading?: boolean | string | null;
+  revisionSlaDays?: number | string | null;
   tags?: unknown;
   materials?: unknown;
   relatedLinks?: unknown;
@@ -181,6 +182,8 @@ export type StaffKnowledgeArticleResponse = {
   approvalNote: string | null;
   returnedAt: string | null;
   revisionDueAt: string | null;
+  revisionSlaDays: number | null;
+  revisionSlaDaysEffective: number;
   publishedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -281,6 +284,7 @@ type StaffKnowledgeArticleSnapshotSource = {
   tags: string[];
   materials: Prisma.JsonValue | null;
   relatedLinks: Prisma.JsonValue | null;
+  revisionSlaDays: number | null;
 };
 
 type ReturnedKnowledgeArticleWorkflowSource = {
@@ -288,6 +292,8 @@ type ReturnedKnowledgeArticleWorkflowSource = {
   title: string;
   folder: string;
   category: string;
+  roleScope: string;
+  materials: Prisma.JsonValue | null;
   storeId: string | null;
   status: string;
   approvalNote: string | null;
@@ -295,6 +301,7 @@ type ReturnedKnowledgeArticleWorkflowSource = {
   approvedByUserId: string | null;
   returnedAt: Date | null;
   revisionDueAt: Date | null;
+  revisionSlaDays: number | null;
 };
 
 export type StaffKnowledgeArticleVersionResponse = {
@@ -308,6 +315,7 @@ export type StaffKnowledgeArticleVersionResponse = {
   tags: string[];
   materialsCount: number;
   relatedLinksCount: number;
+  revisionSlaDays: number | null;
   createdAt: string;
   createdByUser: { id: string; email: string; fullName: string | null } | null;
 };
@@ -459,6 +467,19 @@ export class StaffKnowledgeBaseService {
       (data.status as StaffKnowledgeArticleStatus | undefined) ?? 'DRAFT';
     this.assertKnowledgeWriteAllowed(user, status, { isCreate: true });
     const now = new Date();
+    const revisionSlaDays = this.resolveArticleRevisionSlaDays({
+      roleScope:
+        typeof data.roleScope === 'string' ? data.roleScope : 'ALL_STAFF',
+      materials:
+        data.materials === undefined
+          ? null
+          : (data.materials as Prisma.JsonValue),
+      revisionSlaDays:
+        typeof data.revisionSlaDays === 'number' ||
+        data.revisionSlaDays === null
+          ? data.revisionSlaDays
+          : null,
+    });
     const created = await this.prisma.$transaction(async (tx) => {
       const article = await tx.staffKnowledgeArticle.create({
         data: {
@@ -472,9 +493,7 @@ export class StaffKnowledgeBaseService {
             status === 'PUBLISHED' || status === 'RETURNED' ? user.id : null,
           returnedAt: status === 'RETURNED' ? now : null,
           revisionDueAt:
-            status === 'RETURNED'
-              ? this.addDays(now, RETURNED_ARTICLE_REVISION_SLA_DAYS)
-              : null,
+            status === 'RETURNED' ? this.addDays(now, revisionSlaDays) : null,
           publishedAt: status === 'PUBLISHED' ? now : null,
           version: status === 'PUBLISHED' ? 1 : 0,
         },
@@ -513,6 +532,9 @@ export class StaffKnowledgeBaseService {
         status: true,
         publishedAt: true,
         returnedAt: true,
+        roleScope: true,
+        materials: true,
+        revisionSlaDays: true,
       },
     });
 
@@ -529,6 +551,19 @@ export class StaffKnowledgeBaseService {
     this.assertKnowledgeWriteAllowed(user, nextStatus);
     const now = new Date();
     const shouldCreateVersion = nextStatus === 'PUBLISHED';
+    const revisionSlaDays = this.resolveArticleRevisionSlaDays({
+      roleScope:
+        typeof data.roleScope === 'string' ? data.roleScope : current.roleScope,
+      materials:
+        data.materials === undefined
+          ? current.materials
+          : (data.materials as Prisma.JsonValue),
+      revisionSlaDays:
+        typeof data.revisionSlaDays === 'number' ||
+        data.revisionSlaDays === null
+          ? data.revisionSlaDays
+          : current.revisionSlaDays,
+    });
     const returnSlaStart =
       nextStatus === 'RETURNED'
         ? current.status === 'RETURNED' && current.returnedAt
@@ -550,7 +585,7 @@ export class StaffKnowledgeBaseService {
                 : undefined,
           revisionDueAt:
             nextStatus === 'RETURNED' && returnSlaStart
-              ? this.addDays(returnSlaStart, RETURNED_ARTICLE_REVISION_SLA_DAYS)
+              ? this.addDays(returnSlaStart, revisionSlaDays)
               : current.status === 'RETURNED'
                 ? null
                 : undefined,
@@ -1150,6 +1185,10 @@ export class StaffKnowledgeBaseService {
       data.requiresReading = this.normalizeBoolean(dto.requiresReading, false);
     }
 
+    if (dto.revisionSlaDays !== undefined) {
+      data.revisionSlaDays = this.normalizeRevisionSlaDays(dto.revisionSlaDays);
+    }
+
     if (dto.approvalNote !== undefined) {
       data.approvalNote =
         this.normalizeOptionalString(dto.approvalNote)?.slice(0, 1000) ?? null;
@@ -1172,6 +1211,58 @@ export class StaffKnowledgeBaseService {
     }
 
     return data;
+  }
+
+  private normalizeRevisionSlaDays(value: unknown) {
+    if (value === null || value === '') {
+      return null;
+    }
+
+    const numberValue =
+      typeof value === 'number'
+        ? value
+        : typeof value === 'string'
+          ? Number.parseInt(value.trim(), 10)
+          : Number.NaN;
+
+    if (!Number.isFinite(numberValue)) {
+      throw new BadRequestException('Revision SLA days must be a number');
+    }
+
+    return Math.min(Math.max(Math.round(numberValue), 1), 14);
+  }
+
+  private resolveArticleRevisionSlaDays(article: {
+    revisionSlaDays: number | null;
+    roleScope: string;
+    materials: Prisma.JsonValue | null;
+  }) {
+    if (article.revisionSlaDays) {
+      return article.revisionSlaDays;
+    }
+
+    const materials = this.normalizeMaterials(article.materials);
+    const hasRichRequiredMaterial = materials.some(
+      (material) =>
+        material.required &&
+        ['FILE_LINK', 'IMAGE', 'VIDEO'].includes(material.type),
+    );
+
+    if (
+      article.roleScope === 'STANDARDS_MANAGER' ||
+      article.roleScope === 'MANAGER'
+    ) {
+      return hasRichRequiredMaterial ? 5 : 4;
+    }
+
+    if (
+      article.roleScope === 'CLUB_MANAGER' ||
+      article.roleScope === 'SENIOR_ADMINISTRATOR'
+    ) {
+      return hasRichRequiredMaterial ? 4 : 3;
+    }
+
+    return hasRichRequiredMaterial ? 3 : RETURNED_ARTICLE_REVISION_SLA_DAYS;
   }
 
   private normalizeMaterials(value: unknown): StaffKnowledgeMaterial[] {
@@ -1288,6 +1379,11 @@ export class StaffKnowledgeBaseService {
   ): StaffKnowledgeArticleResponse {
     const materials = this.normalizeMaterials(row.materials);
     const relatedLinks = this.normalizeRelatedLinks(row.relatedLinks);
+    const revisionSlaDaysEffective = this.resolveArticleRevisionSlaDays({
+      revisionSlaDays: row.revisionSlaDays,
+      roleScope: row.roleScope,
+      materials: row.materials,
+    });
     const targetUsers =
       row.status === 'PUBLISHED' && row.requiresReading
         ? activeUsers.filter((candidate) =>
@@ -1331,6 +1427,8 @@ export class StaffKnowledgeBaseService {
       approvalNote: row.approvalNote,
       returnedAt: row.returnedAt?.toISOString() ?? null,
       revisionDueAt: row.revisionDueAt?.toISOString() ?? null,
+      revisionSlaDays: row.revisionSlaDays,
+      revisionSlaDaysEffective,
       publishedAt: row.publishedAt?.toISOString() ?? null,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
@@ -1472,6 +1570,7 @@ export class StaffKnowledgeBaseService {
       tags: row.tags,
       materialsCount: this.normalizeMaterials(row.materials).length,
       relatedLinksCount: this.normalizeRelatedLinks(row.relatedLinks).length,
+      revisionSlaDays: row.revisionSlaDays,
       createdAt: row.createdAt.toISOString(),
       createdByUser: row.createdByUser,
     };
@@ -1497,6 +1596,7 @@ export class StaffKnowledgeBaseService {
         tags: article.tags,
         materials: article.materials ?? Prisma.JsonNull,
         relatedLinks: article.relatedLinks ?? Prisma.JsonNull,
+        revisionSlaDays: article.revisionSlaDays,
       },
     });
   }
@@ -1515,7 +1615,7 @@ export class StaffKnowledgeBaseService {
       article.revisionDueAt ??
       this.addDays(
         article.returnedAt ?? new Date(),
-        RETURNED_ARTICLE_REVISION_SLA_DAYS,
+        this.resolveArticleRevisionSlaDays(article),
       );
     const title = `Доработать материал базы знаний: ${article.title}`.slice(
       0,
@@ -1647,6 +1747,7 @@ export class StaffKnowledgeBaseService {
   ) {
     const dedupeKey = `knowledge-base:${article.id}:returned`;
     const reviewerLabel = reviewer.fullName ?? reviewer.email;
+    const slaDays = this.resolveArticleRevisionSlaDays(article);
     const severity =
       article.revisionDueAt && article.revisionDueAt < new Date()
         ? 'CRITICAL'
@@ -1690,7 +1791,7 @@ export class StaffKnowledgeBaseService {
           reviewerUserId: article.approvedByUserId,
           returnedAt: article.returnedAt?.toISOString() ?? null,
           revisionDueAt: article.revisionDueAt?.toISOString() ?? null,
-          slaDays: RETURNED_ARTICLE_REVISION_SLA_DAYS,
+          slaDays,
         },
       },
       update: {
@@ -1715,7 +1816,7 @@ export class StaffKnowledgeBaseService {
           reviewerUserId: article.approvedByUserId,
           returnedAt: article.returnedAt?.toISOString() ?? null,
           revisionDueAt: article.revisionDueAt?.toISOString() ?? null,
-          slaDays: RETURNED_ARTICLE_REVISION_SLA_DAYS,
+          slaDays,
         },
       },
     });

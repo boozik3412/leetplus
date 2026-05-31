@@ -1655,6 +1655,7 @@ model StaffKnowledgeArticle {
   approvalNote      String?
   returnedAt        DateTime?
   revisionDueAt     DateTime?
+  revisionSlaDays   Int?
   publishedAt       DateTime?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
@@ -1710,6 +1711,7 @@ model StaffKnowledgeArticleVersion {
   tags            String[] @default([])
   materials       Json?
   relatedLinks    Json?
+  revisionSlaDays Int?
   createdAt       DateTime @default(now())
 
   tenant        Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)

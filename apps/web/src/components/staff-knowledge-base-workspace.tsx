@@ -84,6 +84,7 @@ type DraftArticle = {
   status: StaffKnowledgeArticleStatus;
   templateKey: string;
   requiresReading: boolean;
+  revisionSlaDays: string;
   storeId: string;
   tagsText: string;
   materials: StaffKnowledgeMaterial[];
@@ -91,7 +92,9 @@ type DraftArticle = {
   approvalNote: string;
 };
 
-const seedArticles: Array<Omit<DraftArticle, "id" | "storeId">> = [
+const seedArticles: Array<
+  Omit<DraftArticle, "id" | "storeId" | "revisionSlaDays">
+> = [
   {
     title: "Кассовая дисциплина смены",
     summary:
@@ -283,6 +286,7 @@ function defaultDraft(): DraftArticle {
     status: "DRAFT",
     templateKey: "",
     requiresReading: false,
+    revisionSlaDays: "",
     storeId: "",
     tagsText: "",
     materials: [],
@@ -303,6 +307,7 @@ function fromArticle(row: StaffKnowledgeArticle): DraftArticle {
     status: row.status,
     templateKey: row.templateKey ?? "",
     requiresReading: row.requiresReading,
+    revisionSlaDays: row.revisionSlaDays?.toString() ?? "",
     storeId: row.store?.id ?? "",
     tagsText: row.tags.join(", "),
     materials: row.materials,
@@ -317,6 +322,27 @@ function tagsFromText(value: string) {
     .map((tag) => tag.trim())
     .filter(Boolean)
     .slice(0, 20);
+}
+
+function defaultRevisionSlaDays(
+  roleScope: StaffKnowledgeRoleScope,
+  materials: StaffKnowledgeMaterial[],
+) {
+  const hasRichRequiredMaterial = materials.some(
+    (material) =>
+      material.required &&
+      ["FILE_LINK", "IMAGE", "VIDEO"].includes(material.type),
+  );
+
+  if (roleScope === "STANDARDS_MANAGER" || roleScope === "MANAGER") {
+    return hasRichRequiredMaterial ? 5 : 4;
+  }
+
+  if (roleScope === "CLUB_MANAGER" || roleScope === "SENIOR_ADMINISTRATOR") {
+    return hasRichRequiredMaterial ? 4 : 3;
+  }
+
+  return hasRichRequiredMaterial ? 3 : 2;
 }
 
 function materialTypeFromAttachment(
@@ -434,6 +460,9 @@ export function StaffKnowledgeBaseWorkspace({
       : draft.status === "RETURNED"
         ? report.canReviewKnowledge
       : canSaveArticle;
+  const effectiveRevisionSlaDays = draft.revisionSlaDays.trim()
+    ? Number(draft.revisionSlaDays)
+    : defaultRevisionSlaDays(draft.roleScope, draft.materials);
   const reviewQueueRows = useMemo(
     () => report.rows.filter((row) => row.status === reviewQueueTab),
     [report.rows, reviewQueueTab],
@@ -475,8 +504,10 @@ export function StaffKnowledgeBaseWorkspace({
     setError(null);
   }
 
-  function loadSeed(seed: Omit<DraftArticle, "id" | "storeId">) {
-    setDraft({ ...seed, id: null, storeId: "" });
+  function loadSeed(
+    seed: Omit<DraftArticle, "id" | "storeId" | "revisionSlaDays">,
+  ) {
+    setDraft({ ...seed, id: null, storeId: "", revisionSlaDays: "" });
     setMessage("Черновик загружен. Проверьте текст и сохраните статью.");
     setError(null);
   }
@@ -493,6 +524,7 @@ export function StaffKnowledgeBaseWorkspace({
       status: "DRAFT",
       templateKey: suggestion.draft.templateKey,
       requiresReading: suggestion.draft.requiresReading,
+      revisionSlaDays: "",
       storeId: suggestion.store?.id ?? "",
       tagsText: suggestion.draft.tags.join(", "),
       materials: suggestion.draft.materials,
@@ -604,6 +636,9 @@ export function StaffKnowledgeBaseWorkspace({
       status: draft.status,
       templateKey: draft.templateKey || null,
       requiresReading: draft.requiresReading,
+      revisionSlaDays: draft.revisionSlaDays.trim()
+        ? Number(draft.revisionSlaDays)
+        : null,
       storeId: draft.storeId || null,
       tags: tagsFromText(draft.tagsText),
       materials: draft.materials
@@ -1101,6 +1136,30 @@ export function StaffKnowledgeBaseWorkspace({
 
                 <label className="space-y-1">
                   <span className="text-xs font-bold uppercase text-zinc-500">
+                    SLA возврата, дней
+                  </span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={14}
+                    value={draft.revisionSlaDays}
+                    onChange={(event) =>
+                      updateDraft({ revisionSlaDays: event.target.value })
+                    }
+                    placeholder={`${defaultRevisionSlaDays(
+                      draft.roleScope,
+                      draft.materials,
+                    )}`}
+                    className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+                  />
+                  <span className="block text-xs leading-5 text-zinc-500">
+                    Пусто = авто по роли и типам материалов:{" "}
+                    {effectiveRevisionSlaDays} дн.
+                  </span>
+                </label>
+
+                <label className="space-y-1">
+                  <span className="text-xs font-bold uppercase text-zinc-500">
                     Клуб
                   </span>
                   <select
@@ -1490,6 +1549,10 @@ export function StaffKnowledgeBaseWorkspace({
                         ? "Обязательное"
                         : "Необязательное",
                     },
+                    {
+                      label: "SLA возврата",
+                      value: `${effectiveRevisionSlaDays} дн.`,
+                    },
                   ]}
                   tags={tagsFromText(draft.tagsText)}
                   steps={[
@@ -1598,7 +1661,8 @@ function ArticlePreview({
       <p className="mt-2 text-sm text-zinc-500">
         {article.folder} · {article.category} ·{" "}
         {roleScopeLabels[article.roleScope]} ·{" "}
-        опубликовано: {formatDateTime(article.publishedAt)}
+        опубликовано: {formatDateTime(article.publishedAt)} · SLA возврата:{" "}
+        {article.revisionSlaDaysEffective} дн.
         {article.requiresReading ? " · обязательное прочтение" : ""}
       </p>
       {article.requiresReading ? (

@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { Prisma, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { hasCapability } from '../auth/capabilities';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 
@@ -111,6 +112,9 @@ export type StaffKnowledgeBaseReport = {
     materialsCount: number;
   };
   canManageKnowledge: boolean;
+  canEditKnowledge: boolean;
+  canReviewKnowledge: boolean;
+  canPublishKnowledge: boolean;
   folders: string[];
   categories: string[];
   rows: StaffKnowledgeArticleResponse[];
@@ -320,7 +324,11 @@ export class StaffKnowledgeBaseService {
     query: StaffKnowledgeBaseQuery = {},
   ): Promise<StaffKnowledgeBaseReport> {
     const { tenantId } = await this.tenantContextService.resolve(user);
-    const canManageKnowledge = this.canManageKnowledge(user);
+    const canEditKnowledge = this.canEditKnowledge(user);
+    const canReviewKnowledge = this.canReviewKnowledge(user);
+    const canPublishKnowledge = this.canPublishKnowledge(user);
+    const canManageKnowledge =
+      canEditKnowledge || canReviewKnowledge || canPublishKnowledge;
     const filters = this.resolveFilters(query, canManageKnowledge);
     const where = this.buildWhere(tenantId, user, filters, canManageKnowledge);
 
@@ -384,7 +392,7 @@ export class StaffKnowledgeBaseService {
     const responseRows = rows.map((row) =>
       this.toArticleResponse(row, user.id, activeUsers),
     );
-    const articleSuggestions = canManageKnowledge
+    const articleSuggestions = canEditKnowledge
       ? await this.buildArticleSuggestions(tenantId, filters.storeId)
       : [];
 
@@ -392,6 +400,9 @@ export class StaffKnowledgeBaseService {
       filters,
       summary: this.buildSummary(responseRows),
       canManageKnowledge,
+      canEditKnowledge,
+      canReviewKnowledge,
+      canPublishKnowledge,
       folders: folders.map((row) => row.folder),
       categories: categories.map((row) => row.category),
       rows: responseRows,
@@ -412,6 +423,7 @@ export class StaffKnowledgeBaseService {
     });
     const status =
       (data.status as StaffKnowledgeArticleStatus | undefined) ?? 'DRAFT';
+    this.assertKnowledgeWriteAllowed(user, status, { isCreate: true });
     const now = new Date();
     const created = await this.prisma.$transaction(async (tx) => {
       const article = await tx.staffKnowledgeArticle.create({
@@ -469,6 +481,7 @@ export class StaffKnowledgeBaseService {
     const nextStatus =
       (data.status as StaffKnowledgeArticleStatus | undefined) ??
       (current.status as StaffKnowledgeArticleStatus);
+    this.assertKnowledgeWriteAllowed(user, nextStatus);
     const now = new Date();
     const shouldCreateVersion = nextStatus === 'PUBLISHED';
     const updated = await this.prisma.$transaction(async (tx) => {
@@ -1338,7 +1351,73 @@ export class StaffKnowledgeBaseService {
     });
   }
 
+  private assertKnowledgeWriteAllowed(
+    user: AuthenticatedUser,
+    status: StaffKnowledgeArticleStatus,
+    options: { isCreate?: boolean } = {},
+  ) {
+    if (options.isCreate && !this.canEditKnowledge(user)) {
+      throw new BadRequestException('Knowledge base editing is not allowed');
+    }
+
+    if (status === 'PUBLISHED' || status === 'ARCHIVED') {
+      if (!this.canPublishKnowledge(user)) {
+        throw new BadRequestException(
+          'Knowledge base publication is not allowed',
+        );
+      }
+      return;
+    }
+
+    if (status === 'REVIEW') {
+      if (!this.canEditKnowledge(user) && !this.canReviewKnowledge(user)) {
+        throw new BadRequestException(
+          'Knowledge base review workflow is not allowed',
+        );
+      }
+      return;
+    }
+
+    if (!this.canEditKnowledge(user) && !this.canReviewKnowledge(user)) {
+      throw new BadRequestException('Knowledge base editing is not allowed');
+    }
+  }
+
   private canManageKnowledge(user: AuthenticatedUser) {
+    return (
+      this.canEditKnowledge(user) ||
+      this.canReviewKnowledge(user) ||
+      this.canPublishKnowledge(user)
+    );
+  }
+
+  private canEditKnowledge(user: AuthenticatedUser) {
+    return this.hasKnowledgeCapability(user, 'edit_staff_knowledge');
+  }
+
+  private canReviewKnowledge(user: AuthenticatedUser) {
+    return this.hasKnowledgeCapability(user, 'review_staff_knowledge');
+  }
+
+  private canPublishKnowledge(user: AuthenticatedUser) {
+    return this.hasKnowledgeCapability(user, 'publish_staff_knowledge');
+  }
+
+  private hasKnowledgeCapability(
+    user: AuthenticatedUser,
+    capability:
+      | 'edit_staff_knowledge'
+      | 'review_staff_knowledge'
+      | 'publish_staff_knowledge',
+  ) {
+    if (hasCapability(user, capability)) {
+      return true;
+    }
+
+    if (user.customRoleId) {
+      return false;
+    }
+
     switch (user.role) {
       case UserRole.OWNER:
       case UserRole.ADMIN:

@@ -6,6 +6,9 @@ export type Capability =
   | "view_guests"
   | "view_marketing"
   | "view_staff"
+  | "edit_staff_knowledge"
+  | "review_staff_knowledge"
+  | "publish_staff_knowledge"
   | "manage_users"
   | "manage_integrations"
   | "run_sync"
@@ -48,6 +51,24 @@ export const capabilityOptions: CapabilityOption[] = [
     key: "view_staff",
     label: "Персонал",
     description: "Задачи, регламенты, чек-листы и контроль администраторов.",
+  },
+  {
+    key: "edit_staff_knowledge",
+    label: "База знаний: черновики",
+    description:
+      "Создание и редактирование черновиков базы знаний, материалов и связей.",
+  },
+  {
+    key: "review_staff_knowledge",
+    label: "База знаний: согласование",
+    description:
+      "Проверка материалов базы знаний и возврат на доработку до публикации.",
+  },
+  {
+    key: "publish_staff_knowledge",
+    label: "База знаний: публикация",
+    description:
+      "Публикация и архивирование материалов базы знаний с созданием версии.",
   },
   {
     key: "manage_users",
@@ -100,6 +121,9 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "view_guests",
     "view_marketing",
     "view_staff",
+    "edit_staff_knowledge",
+    "review_staff_knowledge",
+    "publish_staff_knowledge",
     "manage_users",
     "manage_integrations",
     "run_sync",
@@ -115,6 +139,9 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "view_guests",
     "view_marketing",
     "view_staff",
+    "edit_staff_knowledge",
+    "review_staff_knowledge",
+    "publish_staff_knowledge",
     "manage_users",
     "manage_integrations",
     "run_sync",
@@ -130,6 +157,9 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "view_guests",
     "view_marketing",
     "view_staff",
+    "edit_staff_knowledge",
+    "review_staff_knowledge",
+    "publish_staff_knowledge",
     "import_data",
     "use_utilities",
     "edit_products",
@@ -149,8 +179,17 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "view_guests",
     "view_marketing",
     "view_staff",
+    "edit_staff_knowledge",
+    "review_staff_knowledge",
+    "publish_staff_knowledge",
   ],
-  STANDARDS_MANAGER: ["view_dashboard", "view_staff"],
+  STANDARDS_MANAGER: [
+    "view_dashboard",
+    "view_staff",
+    "edit_staff_knowledge",
+    "review_staff_knowledge",
+    "publish_staff_knowledge",
+  ],
   SENIOR_ADMINISTRATOR: ["view_dashboard", "view_staff"],
   CLUB_ADMINISTRATOR: ["view_dashboard", "view_staff"],
 };

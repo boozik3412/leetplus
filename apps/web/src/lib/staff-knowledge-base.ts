@@ -193,6 +193,9 @@ export type StaffKnowledgeBaseReport = {
     materialsCount: number;
   };
   canManageKnowledge: boolean;
+  canEditKnowledge: boolean;
+  canReviewKnowledge: boolean;
+  canPublishKnowledge: boolean;
   folders: string[];
   categories: string[];
   rows: StaffKnowledgeArticle[];

@@ -90,6 +90,7 @@ Connected production Langame sources:
 - Added first tenant-scoped binary attachments for Staff Operations: `StaffAttachment`, API `/staff/attachments`, web proxy upload/download routes, and upload controls for task evidence, checklist evidence, shift-regulation materials, and knowledge-base materials.
 - Expanded the Staff Operations knowledge base: articles now support folders, review status, required-reading flags, approval notes, related-standard links, and `StaffKnowledgeArticleVersion` snapshots when published.
 - Added required-reading receipts for the Staff Operations knowledge base: employees can mark the current published article version as read, while managers see read coverage and pending users by target role/store scope.
+- Expanded knowledge-base authoring with ready templates for cash desk, service, bar, technical support, and administrator hiring, plus separate custom-role capabilities for draft editing, review, and publication/archive workflow.
 - Recorded the backlog rule that new backlog entries are written in Russian and that the remaining English backlog wording should be translated in a separate documentation pass.
 - Made `/reports` lighter by removing the full sales-detail preload from the first screen; the full table remains available through its dedicated report page and email action.
 - Added API-side regular report digests: daily email digest, weekly commercial email report with XLSX attachment, `/reports` send UI, protected scheduled endpoint, automatic scheduler, and duplicate-protected run journal.

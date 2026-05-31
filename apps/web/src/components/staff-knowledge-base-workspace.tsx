@@ -74,43 +74,43 @@ type DraftArticle = {
 
 const seedArticles: Array<Omit<DraftArticle, "id" | "storeId">> = [
   {
-    title: "Старт смены администратора",
+    title: "Кассовая дисциплина смены",
     summary:
-      "Короткая памятка: что проверить в первые минуты смены и что обязательно зафиксировать.",
+      "Что администратор проверяет по кассе, оплатам и расхождениям до передачи смены.",
     content:
-      "Проверьте рабочее место, кассу, бар, чистоту, активные брони и состояние зала. Если есть отклонения, создайте задачу или зафиксируйте комментарий в чеклисте смены.",
-    folder: "Смены",
-    category: "Смена",
+      "Сверьте наличные, безналичные оплаты, возвраты, инкассацию, комментарии по спорным операциям и итог сменного отчета. Любое расхождение фиксируйте в чек-листе смены с суммой, причиной, фото или ссылкой на задачу управляющему.",
+    folder: "Касса",
+    category: "Касса",
     roleScope: "ADMINISTRATOR",
     status: "DRAFT",
-    templateKey: "shift-start",
+    templateKey: "cash-discipline",
     requiresReading: true,
-    tagsText: "смена, открытие, стандарт",
+    tagsText: "касса, смена, инкассация, возврат",
     materials: [
       {
-        id: "material-start-check",
-        title: "Что приложить к проверке",
+        id: "material-cash-evidence",
+        title: "Что приложить при расхождении",
         type: "TEXT",
         url: null,
         content:
-          "Фото кассовой зоны, комментарий по расхождениям и ссылка на задачу, если нужна помощь управляющего.",
+          "Сумма расхождения, тип оплаты, время операции, комментарий администратора и фото кассовой зоны или документа, если это допустимо внутренними правилами.",
         note: null,
         required: true,
       },
     ],
     relatedLinks: [
       {
-        id: "link-shift-regulations",
+        id: "link-cash-regulations",
         type: "REGULATION",
         title: "Регламенты смены",
         url: "/staff/shift-regulations",
-        note: "Проверьте актуальную опубликованную версию перед запуском.",
+        note: "Используйте опубликованный регламент как основной источник правил передачи кассы.",
       },
     ],
     approvalNote: "",
   },
   {
-    title: "Работа с конфликтным гостем",
+    title: "Сервис и конфликтный гость",
     summary:
       "Порядок действий, когда гость недоволен услугой, оплатой, местом или поведением другого посетителя.",
     content:
@@ -122,8 +122,27 @@ const seedArticles: Array<Omit<DraftArticle, "id" | "storeId">> = [
     templateKey: "guest-conflict",
     requiresReading: true,
     tagsText: "сервис, конфликт, гости",
-    materials: [],
-    relatedLinks: [],
+    materials: [
+      {
+        id: "material-service-script",
+        title: "Мини-скрипт разговора",
+        type: "TEXT",
+        url: null,
+        content:
+          "Признать проблему, уточнить ожидание гостя, предложить вариант решения, назвать срок и передать управляющему, если требуется компенсация или блокировка посетителя.",
+        note: "Нужен как короткая подсказка для новых администраторов.",
+        required: false,
+      },
+    ],
+    relatedLinks: [
+      {
+        id: "link-service-task",
+        type: "TASK",
+        title: "Задача управляющему",
+        url: "/staff/tasks",
+        note: "Создайте задачу, если конфликт требует управленческого решения.",
+      },
+    ],
     approvalNote: "",
   },
   {
@@ -147,6 +166,78 @@ const seedArticles: Array<Omit<DraftArticle, "id" | "storeId">> = [
         title: "Шаблоны чек-листов",
         url: "/staff/checklist-templates",
         note: "Используйте как основу для проверки бара перед пиком.",
+      },
+    ],
+    approvalNote: "",
+  },
+  {
+    title: "Первичная техподдержка места",
+    summary:
+      "Как администратор проверяет ПК, периферию и посадочное место до передачи проблемы технику.",
+    content:
+      "Уточните номер места, симптомы, время начала проблемы, действия гостя и последние изменения. Проверьте питание, монитор, периферию, сеть, клиентскую сессию и соседние места. Если проблема не решена за несколько минут, создайте задачу с фактами и не обещайте гостю технический результат без подтверждения.",
+    folder: "Техподдержка",
+    category: "ПК и периферия",
+    roleScope: "ADMINISTRATOR",
+    status: "DRAFT",
+    templateKey: "pc-first-line-support",
+    requiresReading: true,
+    tagsText: "техподдержка, пк, периферия, место",
+    materials: [
+      {
+        id: "material-tech-check",
+        title: "Данные для заявки",
+        type: "TEXT",
+        url: null,
+        content:
+          "Номер ПК, проблема со слов гостя, что уже проверено, фото/видео симптома и срочность: влияет ли на посадку, турнир или бронь.",
+        note: null,
+        required: true,
+      },
+    ],
+    relatedLinks: [
+      {
+        id: "link-tech-checklist",
+        type: "CHECKLIST",
+        title: "Чек-лист проверки места",
+        url: "/staff/checklist-templates",
+        note: "Используйте как основу для регулярного обхода зала.",
+      },
+    ],
+    approvalNote: "",
+  },
+  {
+    title: "Профиль администратора на найме",
+    summary:
+      "Критерии отбора и адаптации администратора: сервис, ответственность, касса и готовность к сменной работе.",
+    content:
+      "Проверьте опыт работы с гостями, внимательность к деньгам и документам, спокойствие в конфликте, готовность работать по регламентам и обучаться. После собеседования зафиксируйте сильные стороны, риски, условия выхода на стажировку и первые материалы для изучения.",
+    folder: "Найм",
+    category: "Подбор и адаптация",
+    roleScope: "STANDARDS_MANAGER",
+    status: "DRAFT",
+    templateKey: "administrator-hiring-profile",
+    requiresReading: false,
+    tagsText: "найм, адаптация, администратор, стандарты",
+    materials: [
+      {
+        id: "material-hiring-criteria",
+        title: "Критерии решения",
+        type: "TEXT",
+        url: null,
+        content:
+          "Сервисность, дисциплина, честность в кассовых вопросах, техническая базовая грамотность, обучаемость и готовность соблюдать стандарты клуба.",
+        note: "Подходит для стандартизации собеседований по сети.",
+        required: false,
+      },
+    ],
+    relatedLinks: [
+      {
+        id: "link-onboarding",
+        type: "ONBOARDING",
+        title: "Маршруты адаптации",
+        url: "/staff/onboarding",
+        note: "После найма сотрудника можно направить в готовый onboarding plan.",
       },
     ],
     approvalNote: "",
@@ -254,6 +345,40 @@ export function StaffKnowledgeBaseWorkspace({
   const selectedArticle = useMemo(
     () => report.rows.find((row) => row.id === draft.id) ?? null,
     [draft.id, report.rows],
+  );
+  const canSaveArticle =
+    report.canEditKnowledge ||
+    report.canReviewKnowledge ||
+    report.canPublishKnowledge;
+  const canSaveCurrentStatus =
+    draft.status === "PUBLISHED" || draft.status === "ARCHIVED"
+      ? report.canPublishKnowledge
+      : canSaveArticle;
+  const statusOptions = useMemo(
+    () =>
+      (Object.entries(statusLabels) as Array<
+        [StaffKnowledgeArticleStatus, string]
+      >).filter(([value]) => {
+        if (value === draft.status) {
+          return true;
+        }
+
+        if (value === "PUBLISHED" || value === "ARCHIVED") {
+          return report.canPublishKnowledge;
+        }
+
+        if (value === "REVIEW") {
+          return report.canEditKnowledge || report.canReviewKnowledge;
+        }
+
+        return report.canEditKnowledge || report.canReviewKnowledge;
+      }),
+    [
+      draft.status,
+      report.canEditKnowledge,
+      report.canPublishKnowledge,
+      report.canReviewKnowledge,
+    ],
   );
 
   function updateDraft(patch: Partial<DraftArticle>) {
@@ -372,6 +497,11 @@ export function StaffKnowledgeBaseWorkspace({
       return;
     }
 
+    if (!canSaveCurrentStatus) {
+      setError("У вашей роли нет прав на изменение базы знаний.");
+      return;
+    }
+
     setIsPending(true);
     setError(null);
     setMessage(null);
@@ -473,7 +603,7 @@ export function StaffKnowledgeBaseWorkspace({
 
   return (
     <div className="space-y-6">
-      {report.canManageKnowledge ? (
+      {report.canEditKnowledge ? (
         <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
@@ -493,7 +623,7 @@ export function StaffKnowledgeBaseWorkspace({
             </button>
           </div>
 
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
             {seedArticles.map((seed) => (
               <button
                 key={seed.title}
@@ -641,13 +771,45 @@ export function StaffKnowledgeBaseWorkspace({
                   <h2 className="mt-1 text-lg font-semibold">
                     {draft.id ? "Редактирование статьи" : "Новая статья"}
                   </h2>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {[
+                      {
+                        label: "Черновики",
+                        enabled: report.canEditKnowledge,
+                      },
+                      {
+                        label: "Согласование",
+                        enabled: report.canReviewKnowledge,
+                      },
+                      {
+                        label: "Публикация",
+                        enabled: report.canPublishKnowledge,
+                      },
+                    ].map((item) => (
+                      <span
+                        key={item.label}
+                        className={[
+                          "rounded-full px-2 py-0.5 text-[11px] font-semibold",
+                          item.enabled
+                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200"
+                            : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400",
+                        ].join(" ")}
+                      >
+                        {item.label}
+                      </span>
+                    ))}
+                  </div>
                 </div>
                 <button
                   type="submit"
-                  disabled={isPending}
+                  disabled={isPending || !canSaveCurrentStatus}
                   className="h-10 rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {isPending ? "Сохраняем..." : "Сохранить"}
+                  {isPending
+                    ? "Сохраняем..."
+                    : canSaveCurrentStatus
+                      ? "Сохранить"
+                      : "Нет прав"}
                 </button>
               </div>
 
@@ -679,7 +841,7 @@ export function StaffKnowledgeBaseWorkspace({
                     }
                     className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
                   >
-                    {Object.entries(statusLabels).map(([value, label]) => (
+                    {statusOptions.map(([value, label]) => (
                       <option key={value} value={value}>
                         {label}
                       </option>
@@ -692,9 +854,10 @@ export function StaffKnowledgeBaseWorkspace({
                 <span className="font-semibold text-zinc-900 dark:text-zinc-100">
                   Workflow:
                 </span>{" "}
-                черновик можно отправить на согласование, публикация создаст
-                новую версию материала, а обязательные статьи попадут в контур
-                контроля прочтения сотрудниками.
+                черновики редактируют роли с правом базы знаний, согласование
+                ведут reviewer-роли, публикация и архив требуют отдельного
+                publisher-права. Публикация создает новую версию, а
+                обязательные статьи попадают в контроль прочтения.
               </div>
 
               <div className="mt-3 grid gap-3 lg:grid-cols-4">

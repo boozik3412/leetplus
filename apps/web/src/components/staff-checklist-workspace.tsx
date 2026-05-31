@@ -2,6 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import { StaffAttachmentUpload } from "@/components/staff-attachment-upload";
 import type {
   StaffChecklistAnswer,
   StaffChecklistAnswerStatus,
@@ -588,6 +589,15 @@ function ChecklistRunEditor({ run }: { run: StaffChecklistRun }) {
                         }
                         placeholder="Ссылка на фото/файл, если нужно"
                         className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                      />
+                      <StaffAttachmentUpload
+                        label="Загрузить доказательство"
+                        buttonLabel="Загрузить файл"
+                        onUploaded={(attachment) =>
+                          patchAnswer(section.id, item.id, {
+                            evidenceUrl: attachment.url,
+                          })
+                        }
                       />
                       <textarea
                         value={answer?.note ?? ""}

@@ -4,6 +4,8 @@ Last updated: 2026-05-31
 
 This file is the source of truth for product backlog, near-term roadmap, planned modules, and deferred ideas. `PROJECT_STATE.md` should stay focused on current project state, workflow, production context, and data rules.
 
+Правило ведения: новые записи в backlog ведем на русском языке. Отдельным проходом нужно перевести оставшиеся англоязычные формулировки backlog на русский, не меняя смысл статусов и уже зафиксированных решений.
+
 ## Status Labels
 
 - Done: implemented and available or ready for production verification.
@@ -124,6 +126,7 @@ Status: implemented; remains in production UX polish mode.
 - Done: network-level total revenue now includes balance top-ups from Langame operation log as unallocated network revenue, while club/store breakdowns still stay based on store-scoped spend and product/bar facts.
 - Done: `GuestOperationLog` now persists Langame `name/source/form`, so unallocated network top-ups can be narrowed to online-like sources such as app, guest account, web interface, QR, and legacy rows without any club binding.
 - Done: `/dashboard/revenue-diagnostics` now shows unallocated online top-ups as a separate network money stream with source/form/name breakdown, and treats Langame `club_id=0` as unassigned network revenue instead of a club.
+- Done: `/dashboard` is treated as the standalone main page of LeetPlus, with a separate home icon in navigation; it no longer falls back to the assortment block highlight.
 - Current risk: production still needs live verification that Langame returns enough PC context for all clubs; if load remains `нет данных`, inspect latest guest sync profile endpoint errors/field counts or VDS API logs.
 - Current risk: current-day total revenue remains dependent on Langame returning balance-spend facts from `all_operations_log/list` or store-scoped `transactions/list`; if these sources stay empty after sync, the dashboard intentionally falls back to product/bar revenue and undercounts total club revenue.
 - Current limitation: exact split between gameplay, services, app top-ups, and club-cash sources still needs production verification after a fresh sync with the newly persisted operation source/form fields.
@@ -320,6 +323,7 @@ Goal: let managers create short-term and long-term tasks for shifts, periods, cl
 - Done: added registration invite links for configured roles and club scopes: `/users` can generate a one-time link with system/custom role and selected clubs, and `/register?invite=...` lets the employee set email/password and join the existing tenant.
 - Done: protected API guards now re-read the current user from DB, so deactivated accounts and changed roles stop using protected routes after token verification.
 - Done: task templates added for common club operations: tenant-scoped `StaffTaskTemplate`, API `/staff/task-templates`, UI `/staff/task-templates`, reusable packs, per-club scope, default deadline offset, labels, and one-click task creation from a template.
+- Done: first tenant-scoped binary attachment storage added for staff operations: `StaffAttachment`, upload/download API `/staff/attachments`, web proxy, and upload controls in task evidence, checklist evidence, shift-regulation materials, and knowledge-base materials.
 - Create staff directory and role model independent from guest analytics, while reusing current staff identity mapping where useful.
 - Support employee-to-Langame mapping from `working_shifts.user_id` and future operator identifiers.
 - Add task types: one-time, shift, recurring, long-term, personal, club, role.
@@ -329,7 +333,7 @@ Goal: let managers create short-term and long-term tasks for shifts, periods, cl
 - Add templates for common club operations.
 - Add basic task list views: today, overdue, my tasks, by club, by employee, by shift, by status.
 - Add audit history for every task.
-- Next: add staff directory/fuller identity model, recurring task rules, and binary attachment storage.
+- Next: add staff directory/fuller identity model and recurring task rules.
 
 Acceptance criteria:
 
@@ -369,12 +373,12 @@ Status: started. Goal: turn daily operating standards into controlled execution.
 - Done: shift regulations now support attached link materials: document, file, image, video, external URL, note, required flag, current regulation editing, and publication snapshots with attachment counts.
 - Done: checklist template builder added with tenant-scoped `StaffChecklistTemplate`, migration, API `/staff/checklist-templates`, `/staff/checklist-templates` UI, sidebar entry, draft/active/archive statuses, sections, required fields, evidence requirements, scoring, club/role scope, and creation from a published regulation.
 - Done: preview/test mode is available directly inside employee-facing builders: shift regulations, checklist templates, task templates, training courses, onboarding routes, and knowledge-base articles now have sandbox previews with fake answers/evidence, required-step readiness, employee-facing layout, and no real operational facts, tasks, training progress, or acknowledgements created.
-- Product rule: every new employee template or material builder (regulations, checklists, task templates, courses, onboarding, knowledge-base articles, and future staff standards) must include an employee-facing sandbox preview so a manager can test the flow without logging in as an administrator/employee and without creating real operational facts.
+- Product rule: при создании шаблонов регламентов, чек-листов, задач, курсов, материалов базы знаний и любых будущих стандартов для сотрудников обязательно добавлять предпросмотр employee-facing сценария. Управляющий должен уметь протестировать шаблон без входа под учетной записью администратора/сотрудника и без создания реальных задач, фактов обучения, подтверждений или операционных событий.
 - Started: add checklist runs tied to club, shift, employee, role, and scheduled time. Runs can now use either a published regulation snapshot or an active checklist template snapshot and store assigned user, club, optional Langame shift, schedule, status, answers, score, failed items, and evidence counters.
 - Done: standard checklist packs are available in `/staff/checklist-templates`: cash desk, PC zone, inventory handover, and administrator training load as editable drafts with sections, required answers, evidence, and scores.
 - Started: allow checklist items to create violation tasks automatically. Failed checklist answers now create high-priority staff follow-up tasks on submission.
 - Done: manager review flow now supports `ON_REVIEW`, `ACCEPTED`, `RETURNED`, and `ESCALATED`; escalation stores reviewer/comment, appears in checklist workspace filters and execution reports, counts as an unresolved operational risk, and creates a pinned urgent incident in the team chat.
-- Started: add evidence: photo, video/file link, comment, numeric value, checkbox, select, timestamp. First execution UI captures result, value, evidence URL, and comment per item.
+- Started: add evidence: photo, video/file link, comment, numeric value, checkbox, select, timestamp. First execution UI captures result, value, evidence URL, uploaded file attachment, and comment per item.
 - Done: added execution report by club, shift, employee, and checklist: API `/staff/checklists/report`, page `/staff/checklists/report`, filters by period/status/type/club/employee/search, summary cards, grouped tables, and latest checklist runs.
 
 Acceptance criteria:
@@ -460,11 +464,11 @@ Acceptance criteria:
 
 1. Done: create `STAFF_OPERATIONS_MODULE_TZ.md` with roles, scenarios, data model, permissions, MVP scope, and acceptance criteria.
 2. Extract staff identity into a reusable staff domain that can serve both `/guests/staff-control` and the new operations module.
-3. Started: add database schema for tasks, task templates, task comments, attachments, audit events, and staff assignments. `StaffTask`, `StaffTaskTemplate`, `StaffTaskComment`, and `StaffTaskAuditEvent` are in place; binary attachment storage remains next.
+3. Started: add database schema for tasks, task templates, task comments, attachments, audit events, and staff assignments. `StaffTask`, `StaffTaskTemplate`, `StaffTaskComment`, `StaffTaskAuditEvent`, and first `StaffAttachment` binary storage are in place; recurring rules and fuller staff identity remain next.
 4. Started: implement backend CRUD and list APIs for tasks with tenant/store/staff access control. List/create/status update plus comment/evidence endpoint are in place.
 5. Started: implement `/staff/tasks` or `/operations/tasks` UI for manager and administrator workflows. `/staff/tasks` now includes creation, filters, status actions, execution comments, evidence links, audit history preview, and task-template launching through `/staff/task-templates`.
 6. Started: add checklist templates and checklist runs. `StaffChecklistTemplate` and `/staff/checklist-templates` are in place; checklist runs can use published regulation snapshots or active template snapshots.
-7. Started: add regulation documents, versions, acknowledgements, and role/club targeting. First draft/published/archived shift-regulation entity, acknowledgement tracking, publication version snapshots, and attached link materials are in place; binary attachment storage remains later.
+7. Started: add regulation documents, versions, acknowledgements, and role/club targeting. First draft/published/archived shift-regulation entity, acknowledgement tracking, publication version snapshots, attached link materials, and uploaded file attachments are in place.
 8. Done: add training materials, courses, tests, and attestation reports. The knowledge base, structured training-material layer, training courses, onboarding plans, tests/attestations with result history, employee training profiles, and the readiness/attestation manager report are in place.
 9. Started: add analytics, exports, and connections to current staff-control signals. `/staff/operations-dashboard` now covers operational discipline, club/employee ratings, recurring checklist issues, warning/fine discipline, administrator rating, and current risk routing; exports, payroll, and staff-control anomaly connections remain next.
 10. Add AI assistance only after real workflows produce enough structured data.

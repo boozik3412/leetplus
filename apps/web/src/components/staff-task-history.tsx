@@ -2,6 +2,10 @@
 
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
+import {
+  StaffAttachmentUpload,
+  type StaffAttachmentUploadResult,
+} from "@/components/staff-attachment-upload";
 import type { StaffTask, StaffTaskStatus } from "@/lib/staff-tasks";
 
 const statusOptions: Array<{ value: StaffTaskStatus | ""; label: string }> = [
@@ -28,6 +32,26 @@ const auditLabels: Record<string, string> = {
   EVIDENCE_ADDED: "Доказательство",
 };
 
+function evidenceTypeFromAttachment(attachment: StaffAttachmentUploadResult) {
+  if (attachment.contentType.startsWith("image/")) {
+    return "PHOTO";
+  }
+
+  if (attachment.contentType.startsWith("video/")) {
+    return "VIDEO";
+  }
+
+  if (
+    attachment.contentType.includes("pdf") ||
+    attachment.contentType.includes("document") ||
+    attachment.contentType.includes("word")
+  ) {
+    return "DOCUMENT";
+  }
+
+  return "OTHER";
+}
+
 function formatDateTime(value: string) {
   return new Intl.DateTimeFormat("ru-RU", {
     day: "2-digit",
@@ -49,6 +73,9 @@ export function StaffTaskHistory({ task }: { task: StaffTask }) {
   const router = useRouter();
   const [isPending, setIsPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [evidenceUrl, setEvidenceUrl] = useState("");
+  const [evidenceLabel, setEvidenceLabel] = useState("");
+  const [evidenceType, setEvidenceType] = useState("LINK");
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -90,6 +117,9 @@ export function StaffTaskHistory({ task }: { task: StaffTask }) {
       }
 
       event.currentTarget.reset();
+      setEvidenceUrl("");
+      setEvidenceLabel("");
+      setEvidenceType("LINK");
       router.refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Ошибка запроса");
@@ -131,8 +161,19 @@ export function StaffTaskHistory({ task }: { task: StaffTask }) {
               <input
                 name="evidenceUrl"
                 type="url"
+                value={evidenceUrl}
+                onChange={(event) => setEvidenceUrl(event.target.value)}
                 placeholder="https://..."
                 className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+              />
+              <StaffAttachmentUpload
+                label="Загрузить доказательство"
+                buttonLabel="Загрузить файл"
+                onUploaded={(attachment) => {
+                  setEvidenceUrl(attachment.url);
+                  setEvidenceLabel((current) => current || attachment.fileName);
+                  setEvidenceType(evidenceTypeFromAttachment(attachment));
+                }}
               />
             </label>
 
@@ -142,6 +183,8 @@ export function StaffTaskHistory({ task }: { task: StaffTask }) {
               </span>
               <input
                 name="evidenceLabel"
+                value={evidenceLabel}
+                onChange={(event) => setEvidenceLabel(event.target.value)}
                 placeholder="Фото кассы, чек, акт"
                 className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
               />
@@ -155,7 +198,8 @@ export function StaffTaskHistory({ task }: { task: StaffTask }) {
               </span>
               <select
                 name="evidenceType"
-                defaultValue="LINK"
+                value={evidenceType}
+                onChange={(event) => setEvidenceType(event.target.value)}
                 className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
               >
                 {Object.entries(evidenceTypeLabels).map(([value, label]) => (

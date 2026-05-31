@@ -163,6 +163,7 @@ model Tenant {
   staffShiftRegulationAcknowledgements StaffShiftRegulationAcknowledgement[]
   staffChecklistTemplates              StaffChecklistTemplate[]
   staffChecklistRuns                   StaffChecklistRun[]
+  staffAttachments                     StaffAttachment[]
   staffDisciplinePolicies              StaffDisciplinePolicy[]
   staffDisciplineRules                 StaffDisciplineRule[]
   staffDisciplineRecords               StaffDisciplineRecord[]
@@ -242,6 +243,7 @@ model User {
   addedStaffChatChannelMembers         StaffChatChannelMember[]              @relation("StaffChatChannelMemberAddedBy")
   authoredStaffChatMessages            StaffChatMessage[]                    @relation("StaffChatMessageAuthor")
   staffChatReadReceipts                StaffChatReadReceipt[]
+  uploadedStaffAttachments             StaffAttachment[]                     @relation("StaffAttachmentUploadedBy")
 
   @@index([tenantId])
   @@index([tenantId, role])
@@ -1425,6 +1427,23 @@ model StaffTaskAuditEvent {
   @@index([tenantId, createdAt], map: "staff_task_audit_tenant_created_idx")
   @@index([taskId, createdAt], map: "staff_task_audit_task_created_idx")
   @@index([actorUserId], map: "staff_task_audit_actor_idx")
+}
+
+model StaffAttachment {
+  id               String   @id @default(uuid())
+  tenantId         String
+  uploadedByUserId String?
+  fileName         String
+  contentType      String
+  byteSize         Int
+  data             Bytes
+  createdAt        DateTime @default(now())
+
+  tenant         Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  uploadedByUser User?  @relation("StaffAttachmentUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt], map: "staff_attachment_tenant_created_idx")
+  @@index([uploadedByUserId], map: "staff_attachment_uploaded_by_idx")
 }
 
 model StaffKnowledgeArticle {

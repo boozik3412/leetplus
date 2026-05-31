@@ -2,6 +2,10 @@
 
 import { useRouter } from "next/navigation";
 import { useMemo, useState, type FormEvent } from "react";
+import {
+  StaffAttachmentUpload,
+  type StaffAttachmentUploadResult,
+} from "@/components/staff-attachment-upload";
 import { StaffMaterialPreview } from "@/components/staff-material-preview";
 import type {
   StaffKnowledgeArticle,
@@ -143,6 +147,20 @@ function tagsFromText(value: string) {
     .map((tag) => tag.trim())
     .filter(Boolean)
     .slice(0, 20);
+}
+
+function materialTypeFromAttachment(
+  attachment: StaffAttachmentUploadResult,
+): StaffKnowledgeMaterialType {
+  if (attachment.contentType.startsWith("image/")) {
+    return "IMAGE";
+  }
+
+  if (attachment.contentType.startsWith("video/")) {
+    return "VIDEO";
+  }
+
+  return "FILE_LINK";
 }
 
 function formatDateTime(value: string | null) {
@@ -577,7 +595,7 @@ export function StaffKnowledgeBaseWorkspace({
                         className="rounded-md bg-zinc-50 p-3 dark:bg-zinc-900/50"
                       >
                         <div className="grid gap-3 lg:grid-cols-[1fr_10rem_1fr_auto]">
-                          <label className="space-y-1">
+                          <div className="space-y-1">
                             <span className="text-xs font-bold uppercase text-zinc-500">
                               Материал {index + 1}
                             </span>
@@ -591,9 +609,9 @@ export function StaffKnowledgeBaseWorkspace({
                               placeholder="Название"
                               className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
                             />
-                          </label>
+                          </div>
 
-                          <label className="space-y-1">
+                          <div className="space-y-1">
                             <span className="text-xs font-bold uppercase text-zinc-500">
                               Тип
                             </span>
@@ -615,9 +633,9 @@ export function StaffKnowledgeBaseWorkspace({
                                 ),
                               )}
                             </select>
-                          </label>
+                          </div>
 
-                          <label className="space-y-1">
+                          <div className="space-y-1">
                             <span className="text-xs font-bold uppercase text-zinc-500">
                               Ссылка
                             </span>
@@ -631,7 +649,18 @@ export function StaffKnowledgeBaseWorkspace({
                               placeholder="https://..."
                               className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
                             />
-                          </label>
+                            <StaffAttachmentUpload
+                              label="Загрузить материал"
+                              buttonLabel="Загрузить файл"
+                              onUploaded={(attachment) =>
+                                updateMaterial(material.id, {
+                                  title: material.title || attachment.fileName,
+                                  type: materialTypeFromAttachment(attachment),
+                                  url: attachment.url,
+                                })
+                              }
+                            />
+                          </div>
 
                           <div className="flex items-end gap-2">
                             <label className="inline-flex h-10 items-center gap-2 rounded-md border border-zinc-300 px-3 text-xs font-semibold dark:border-zinc-700">

@@ -6,6 +6,10 @@ import {
   staffShiftRegulationTemplates,
   type StaffShiftRegulationTemplate,
 } from "@/lib/staff-shift-regulation-templates";
+import {
+  StaffAttachmentUpload,
+  type StaffAttachmentUploadResult,
+} from "@/components/staff-attachment-upload";
 import { StaffTemplatePreview } from "@/components/staff-template-preview";
 import type {
   StaffShiftRegulationAttachment,
@@ -88,6 +92,28 @@ type DraftRegulation = {
 
 function uid(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function attachmentTypeFromUpload(
+  attachment: StaffAttachmentUploadResult,
+): StaffShiftRegulationAttachmentType {
+  if (attachment.contentType.startsWith("image/")) {
+    return "IMAGE";
+  }
+
+  if (attachment.contentType.startsWith("video/")) {
+    return "VIDEO";
+  }
+
+  if (
+    attachment.contentType.includes("pdf") ||
+    attachment.contentType.includes("document") ||
+    attachment.contentType.includes("word")
+  ) {
+    return "DOCUMENT";
+  }
+
+  return "FILE_LINK";
 }
 
 function cloneSections(sections: StaffShiftRegulationSection[]) {
@@ -1122,7 +1148,7 @@ export function StaffShiftRegulationBuilder({
                   className="rounded-md bg-zinc-50 p-3 dark:bg-zinc-900/50"
                 >
                   <div className="grid gap-3 lg:grid-cols-[1fr_11rem_1.5fr_auto]">
-                    <label className="space-y-1">
+                    <div className="space-y-1">
                       <span className="text-xs font-bold uppercase text-zinc-500">
                         Материал {attachmentIndex + 1}
                       </span>
@@ -1136,9 +1162,9 @@ export function StaffShiftRegulationBuilder({
                         placeholder="Например: регламент смены PDF"
                         className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
                       />
-                    </label>
+                    </div>
 
-                    <label className="space-y-1">
+                    <div className="space-y-1">
                       <span className="text-xs font-bold uppercase text-zinc-500">
                         Тип
                       </span>
@@ -1160,9 +1186,9 @@ export function StaffShiftRegulationBuilder({
                           ),
                         )}
                       </select>
-                    </label>
+                    </div>
 
-                    <label className="space-y-1">
+                    <div className="space-y-1">
                       <span className="text-xs font-bold uppercase text-zinc-500">
                         Ссылка
                       </span>
@@ -1176,7 +1202,18 @@ export function StaffShiftRegulationBuilder({
                         placeholder="https://..."
                         className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
                       />
-                    </label>
+                      <StaffAttachmentUpload
+                        label="Загрузить материал"
+                        buttonLabel="Загрузить файл"
+                        onUploaded={(uploaded) =>
+                          updateAttachment(attachment.id, {
+                            title: attachment.title || uploaded.fileName,
+                            type: attachmentTypeFromUpload(uploaded),
+                            url: uploaded.url,
+                          })
+                        }
+                      />
+                    </div>
 
                     <div className="flex items-end gap-2">
                       <label className="inline-flex h-10 items-center gap-2 rounded-md border border-zinc-300 px-3 text-xs font-semibold dark:border-zinc-700">

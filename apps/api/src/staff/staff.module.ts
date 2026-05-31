@@ -4,6 +4,8 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { TenancyModule } from '../tenancy/tenancy.module';
 import { StaffAssessmentsController } from './staff-assessments.controller';
 import { StaffAssessmentsService } from './staff-assessments.service';
+import { StaffAttachmentsController } from './staff-attachments.controller';
+import { StaffAttachmentsService } from './staff-attachments.service';
 import { StaffChecklistTemplatesController } from './staff-checklist-templates.controller';
 import { StaffChecklistTemplatesService } from './staff-checklist-templates.service';
 import { StaffChecklistsController } from './staff-checklists.controller';
@@ -48,6 +50,7 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffOperationsDashboardController,
     StaffOnboardingPlansController,
     StaffAssessmentsController,
+    StaffAttachmentsController,
     StaffShiftRegulationsController,
     StaffChecklistTemplatesController,
     StaffChecklistsController,
@@ -66,6 +69,7 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffOperationsDashboardService,
     StaffOnboardingPlansService,
     StaffAssessmentsService,
+    StaffAttachmentsService,
     StaffShiftRegulationsService,
     StaffChecklistTemplatesService,
     StaffChecklistsService,

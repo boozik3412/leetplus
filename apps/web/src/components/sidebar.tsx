@@ -420,6 +420,25 @@ function SectionIcon({ icon }: { icon: NavGroup["icon"] }) {
   );
 }
 
+function HomeIcon() {
+  return (
+    <svg
+      className="h-5 w-5"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="m3 10.5 9-7 9 7" />
+      <path d="M5 9.5V20h14V9.5" />
+      <path d="M9.5 20v-6h5v6" />
+    </svg>
+  );
+}
+
 function LogoLink({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <Link
@@ -429,6 +448,26 @@ function LogoLink({ onNavigate }: { onNavigate?: () => void }) {
       className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-zinc-950 text-sm font-semibold text-white transition hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70 dark:bg-emerald-400 dark:text-zinc-950"
     >
       LP
+    </Link>
+  );
+}
+
+function CompactHomeLink({
+  isActive,
+  onNavigate,
+}: {
+  isActive: boolean;
+  onNavigate?: () => void;
+}) {
+  return (
+    <Link
+      href="/dashboard"
+      title="Главная"
+      aria-label="Сводный дашборд"
+      onClick={onNavigate}
+      className={compactGroupButtonClass(isActive)}
+    >
+      <HomeIcon />
     </Link>
   );
 }
@@ -447,9 +486,14 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
       items: group.items.filter((item) => canAccessPath(user, item.href)),
     }))
     .filter((group) => group.items.length > 0);
+  const canViewDashboard = canAccessPath(user, "/dashboard");
+  const isDashboardArea =
+    pathname === "/dashboard" || pathname.startsWith("/dashboard/");
   const isStaffArea =
     pathname.startsWith("/staff") || pathname.startsWith("/guests/staff-control");
-  const currentProductArea = isStaffArea
+  const currentProductArea = isDashboardArea
+    ? "Главная"
+    : isStaffArea
     ? "Персонал"
     : pathname.startsWith("/administration") || pathname.startsWith("/admin")
     ? "Администрирование"
@@ -585,6 +629,13 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
               </div>
             </div>
             <nav className="flex-1 space-y-1 overflow-y-auto p-3">
+              {canViewDashboard ? (
+                <NavLink
+                  href="/dashboard"
+                  label="Главная"
+                  onNavigate={() => setIsMobileMenuOpen(false)}
+                />
+              ) : null}
               {allowedNavGroups.map((group) => (
                 <NavSection
                   key={group.title}
@@ -617,6 +668,12 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
           <LogoLink />
         </div>
         <nav className="flex-1 space-y-2 overflow-visible px-3 py-4">
+          {canViewDashboard ? (
+            <CompactHomeLink
+              isActive={isDashboardArea}
+              onNavigate={closeNavGroups}
+            />
+          ) : null}
           {allowedNavGroups.map((group) => (
             <CompactNavSection
               key={group.title}

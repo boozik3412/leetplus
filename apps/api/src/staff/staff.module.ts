@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { TenancyModule } from '../tenancy/tenancy.module';
+import { StaffAssessmentsController } from './staff-assessments.controller';
+import { StaffAssessmentsService } from './staff-assessments.service';
 import { StaffChecklistTemplatesController } from './staff-checklist-templates.controller';
 import { StaffChecklistTemplatesService } from './staff-checklist-templates.service';
 import { StaffChecklistsController } from './staff-checklists.controller';
@@ -29,6 +31,7 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffKnowledgeBaseController,
     StaffTrainingCoursesController,
     StaffOnboardingPlansController,
+    StaffAssessmentsController,
     StaffShiftRegulationsController,
     StaffChecklistTemplatesController,
     StaffChecklistsController,
@@ -40,6 +43,7 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffKnowledgeBaseService,
     StaffTrainingCoursesService,
     StaffOnboardingPlansService,
+    StaffAssessmentsService,
     StaffShiftRegulationsService,
     StaffChecklistTemplatesService,
     StaffChecklistsService,

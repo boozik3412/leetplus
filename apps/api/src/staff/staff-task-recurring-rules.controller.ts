@@ -18,6 +18,8 @@ import {
   StaffTaskRecurringRulesService,
   type StaffTaskRecurringRuleDto,
   type StaffTaskRecurringRuleLaunchDto,
+  type StaffTaskRecurringRuleRunDueDto,
+  type StaffTaskRecurringRuleRunDueResult,
   type StaffTaskRecurringRulesQuery,
   type StaffTaskRecurringRulesReport,
 } from './staff-task-recurring-rules.service';
@@ -43,6 +45,14 @@ export class StaffTaskRecurringRulesController {
     @Query() query: StaffTaskRecurringRulesQuery,
   ): Promise<StaffTaskRecurringRulesReport> {
     return this.staffTaskRecurringRulesService.getRules(user, query);
+  }
+
+  @Post('run-due')
+  runDueRules(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: StaffTaskRecurringRuleRunDueDto,
+  ): Promise<StaffTaskRecurringRuleRunDueResult> {
+    return this.staffTaskRecurringRulesService.runDueRulesForUser(user, dto);
   }
 
   @Post()

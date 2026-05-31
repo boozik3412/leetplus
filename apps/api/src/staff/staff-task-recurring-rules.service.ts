@@ -66,6 +66,50 @@ export type StaffTaskRecurringRuleLaunchDto = {
   dueAt?: string | null;
 };
 
+export type StaffTaskRecurringRuleRunDueDto = {
+  limit?: number | string | null;
+  dryRun?: boolean | string | null;
+  now?: string | null;
+  tenantId?: string | null;
+};
+
+export type StaffTaskRecurringRuleRunResponse = {
+  id: string;
+  ruleId: string;
+  ruleTitle: string;
+  status: string;
+  scheduledFor: string;
+  startedAt: string;
+  completedAt: string | null;
+  message: string | null;
+  metadata: Prisma.JsonValue | null;
+  createdTask: {
+    id: string;
+    title: string;
+    status: string;
+    dueAt: string | null;
+    createdAt: string;
+  } | null;
+};
+
+export type StaffTaskRecurringRuleRunDueResult = {
+  now: string;
+  dryRun: boolean;
+  limit: number;
+  due: number;
+  created: number;
+  skipped: number;
+  failed: number;
+  runs: Array<{
+    ruleId: string;
+    ruleTitle: string;
+    scheduledFor: string;
+    status: 'DUE' | 'SUCCESS' | 'SKIPPED' | 'FAILED';
+    taskId: string | null;
+    message: string | null;
+  }>;
+};
+
 export type StaffTaskRecurringRulesReport = {
   filters: {
     status: StaffTaskRecurringRuleStatus | 'all';
@@ -83,6 +127,7 @@ export type StaffTaskRecurringRulesReport = {
     tasksCreated: number;
   };
   rows: StaffTaskRecurringRuleResponse[];
+  runs: StaffTaskRecurringRuleRunResponse[];
   stores: Array<{ id: string; name: string; isActive: boolean }>;
   users: Array<{ id: string; email: string; fullName: string | null }>;
   templates: Array<{
@@ -109,6 +154,7 @@ export type StaffTaskRecurringRuleResponse = {
   dueOffsetMinutes: number | null;
   nextRunAt: string | null;
   lastManualRunAt: string | null;
+  lastAutomaticRunAt: string | null;
   labels: Prisma.JsonValue | null;
   checklist: Prisma.JsonValue | null;
   tasksCreatedCount: number;
@@ -173,9 +219,31 @@ const ruleInclude = {
   _count: { select: { generatedTasks: true } },
 } satisfies Prisma.StaffTaskRecurringRuleInclude;
 
+const ruleRunInclude = {
+  rule: { select: { id: true, title: true } },
+  createdTask: {
+    select: {
+      id: true,
+      title: true,
+      status: true,
+      dueAt: true,
+      createdAt: true,
+    },
+  },
+} satisfies Prisma.StaffTaskRecurringRuleRunInclude;
+
 type StaffTaskRecurringRuleRow = Prisma.StaffTaskRecurringRuleGetPayload<{
   include: typeof ruleInclude;
 }>;
+
+type StaffTaskRecurringRuleRunRow = Prisma.StaffTaskRecurringRuleRunGetPayload<{
+  include: typeof ruleRunInclude;
+}>;
+
+type StaffTaskRecurringRuleWithTemplate =
+  Prisma.StaffTaskRecurringRuleGetPayload<{
+    include: { template: true };
+  }>;
 
 type RuleScheduleInput = {
   status: string;
@@ -183,6 +251,12 @@ type RuleScheduleInput = {
   timeOfDay: string | null;
   dayOfWeek: number | null;
   dayOfMonth: number | null;
+};
+
+type RunDueOptions = {
+  now: Date;
+  limit: number;
+  dryRun: boolean;
 };
 
 @Injectable()
@@ -200,7 +274,7 @@ export class StaffTaskRecurringRulesService {
     const filters = this.resolveFilters(query);
     const where = this.buildWhere(tenantId, filters);
 
-    const [rows, stores, users, templates] = await Promise.all([
+    const [rows, runs, stores, users, templates] = await Promise.all([
       this.prisma.staffTaskRecurringRule.findMany({
         where,
         include: ruleInclude,
@@ -210,6 +284,12 @@ export class StaffTaskRecurringRulesService {
           { updatedAt: 'desc' },
         ],
         take: 200,
+      }),
+      this.prisma.staffTaskRecurringRuleRun.findMany({
+        where: { tenantId },
+        include: ruleRunInclude,
+        orderBy: { startedAt: 'desc' },
+        take: 25,
       }),
       this.prisma.store.findMany({
         where: { tenantId },
@@ -241,6 +321,7 @@ export class StaffTaskRecurringRulesService {
       filters,
       summary: this.buildSummary(responseRows),
       rows: responseRows,
+      runs: runs.map((run) => this.toRunResponse(run)),
       stores,
       users,
       templates,
@@ -343,55 +424,17 @@ export class StaffTaskRecurringRulesService {
       throw new BadRequestException('Archived rule cannot create tasks');
     }
 
-    const storeId =
-      dto.storeId === undefined
-        ? (rule.storeId ?? rule.template?.storeId ?? null)
-        : await this.resolveStoreId(tenantId, dto.storeId);
-    const assignedToUserId =
-      dto.assignedToUserId === undefined
-        ? rule.assignedToUserId
-        : await this.resolveUserId(tenantId, dto.assignedToUserId);
-    const title =
-      this.normalizeOptionalString(dto.title) ??
-      rule.title.trim() ??
-      rule.template?.title.trim();
-
-    if (!title) {
-      throw new BadRequestException('Task title is required');
-    }
-
-    const description =
-      dto.description === undefined
-        ? (rule.description ?? rule.template?.description ?? null)
-        : this.normalizeOptionalString(dto.description);
-    const dueAt =
-      dto.dueAt === undefined
-        ? this.resolveDueDateFromOffset(
-            rule.dueOffsetMinutes ?? rule.template?.dueOffsetMinutes ?? null,
-          )
-        : this.normalizeDateTime(dto.dueAt);
-    const labels = rule.labels ?? rule.template?.labels ?? Prisma.DbNull;
-    const checklist =
-      rule.checklist ?? rule.template?.checklist ?? Prisma.DbNull;
+    const taskData = await this.buildTaskDataFromRule({
+      tenantId,
+      rule,
+      dto,
+      createdByUserId: user.id,
+    });
+    const now = new Date();
 
     const created = await this.prisma.$transaction(async (tx) => {
       const task = await tx.staffTask.create({
-        data: {
-          tenantId,
-          storeId,
-          assignedToUserId,
-          sourceTemplateId: rule.templateId,
-          sourceRecurringRuleId: rule.id,
-          createdByUserId: user.id,
-          title,
-          description,
-          type: rule.taskType,
-          priority: rule.priority,
-          status: 'OPEN',
-          dueAt,
-          labels,
-          checklist,
-        },
+        data: taskData,
         select: { id: true, title: true, dueAt: true },
       });
 
@@ -407,6 +450,7 @@ export class StaffTaskRecurringRulesService {
             ruleTitle: rule.title,
             cadence: rule.cadence,
             templateId: rule.templateId,
+            automatic: false,
           },
         },
       });
@@ -414,9 +458,9 @@ export class StaffTaskRecurringRulesService {
       await tx.staffTaskRecurringRule.update({
         where: { id: rule.id },
         data: {
-          lastManualRunAt: new Date(),
+          lastManualRunAt: now,
           lastCreatedTaskId: task.id,
-          nextRunAt: this.resolveNextRunAt(rule),
+          nextRunAt: this.resolveNextRunAt(rule, now),
         },
         select: { id: true },
       });
@@ -431,6 +475,48 @@ export class StaffTaskRecurringRulesService {
       ruleId: rule.id,
       templateId: rule.templateId,
     };
+  }
+
+  async runDueRulesForUser(
+    user: AuthenticatedUser,
+    dto: StaffTaskRecurringRuleRunDueDto = {},
+  ): Promise<StaffTaskRecurringRuleRunDueResult> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+
+    return this.runDueRulesForTenant(tenantId, dto);
+  }
+
+  async runDueRulesForTenant(
+    tenantId: string,
+    dto: StaffTaskRecurringRuleRunDueDto = {},
+  ): Promise<StaffTaskRecurringRuleRunDueResult> {
+    const options = this.resolveRunDueOptions(dto);
+
+    return this.runDueRules(tenantId, options);
+  }
+
+  async runDueRulesForAllTenants(
+    dto: StaffTaskRecurringRuleRunDueDto = {},
+  ): Promise<StaffTaskRecurringRuleRunDueResult> {
+    const options = this.resolveRunDueOptions(dto);
+    const tenantId = this.normalizeOptionalString(dto.tenantId);
+    const tenants = await this.prisma.tenant.findMany({
+      where: tenantId ? { id: tenantId } : undefined,
+      select: { id: true },
+      orderBy: { slug: 'asc' },
+    });
+    const aggregate = this.emptyRunDueResult(options);
+
+    for (const tenant of tenants) {
+      const result = await this.runDueRules(tenant.id, options);
+      aggregate.due += result.due;
+      aggregate.created += result.created;
+      aggregate.skipped += result.skipped;
+      aggregate.failed += result.failed;
+      aggregate.runs.push(...result.runs);
+    }
+
+    return aggregate;
   }
 
   private resolveFilters(
@@ -520,6 +606,244 @@ export class StaffTaskRecurringRulesService {
         tasksCreated: 0,
       },
     );
+  }
+
+  private async runDueRules(
+    tenantId: string,
+    options: RunDueOptions,
+  ): Promise<StaffTaskRecurringRuleRunDueResult> {
+    const result = this.emptyRunDueResult(options);
+    const dueRules = await this.prisma.staffTaskRecurringRule.findMany({
+      where: {
+        tenantId,
+        status: 'ACTIVE',
+        nextRunAt: { lte: options.now },
+      },
+      include: { template: true },
+      orderBy: { nextRunAt: 'asc' },
+      take: options.limit,
+    });
+    result.due = dueRules.length;
+
+    for (const rule of dueRules) {
+      const scheduledFor = rule.nextRunAt ?? options.now;
+      const baseRun = {
+        ruleId: rule.id,
+        ruleTitle: rule.title,
+        scheduledFor: scheduledFor.toISOString(),
+        taskId: null,
+      };
+
+      if (options.dryRun) {
+        result.runs.push({
+          ...baseRun,
+          status: 'DUE',
+          message: null,
+        });
+        continue;
+      }
+
+      const run = await this.createScheduleRun({
+        tenantId,
+        rule,
+        scheduledFor,
+      });
+
+      if (!run) {
+        result.skipped += 1;
+        result.runs.push({
+          ...baseRun,
+          status: 'SKIPPED',
+          message: 'Rule already has a scheduler run for this due time',
+        });
+        continue;
+      }
+
+      try {
+        const taskData = await this.buildTaskDataFromRule({
+          tenantId,
+          rule,
+          dto: {},
+          createdByUserId: null,
+        });
+
+        const task = await this.prisma.$transaction(async (tx) => {
+          const createdTask = await tx.staffTask.create({
+            data: taskData,
+            select: { id: true, title: true },
+          });
+
+          await tx.staffTaskAuditEvent.create({
+            data: {
+              tenantId,
+              taskId: createdTask.id,
+              actorUserId: null,
+              action: 'CREATED_FROM_RECURRING_RULE',
+              message: 'Task created automatically from recurring rule',
+              metadata: {
+                ruleId: rule.id,
+                ruleTitle: rule.title,
+                cadence: rule.cadence,
+                templateId: rule.templateId,
+                automatic: true,
+                scheduledFor: scheduledFor.toISOString(),
+                ruleRunId: run.id,
+              },
+            },
+          });
+
+          await tx.staffTaskRecurringRule.update({
+            where: { id: rule.id },
+            data: {
+              lastAutomaticRunAt: options.now,
+              lastCreatedTaskId: createdTask.id,
+              nextRunAt: this.resolveNextRunAt(rule, options.now),
+            },
+            select: { id: true },
+          });
+
+          await tx.staffTaskRecurringRuleRun.update({
+            where: { id: run.id },
+            data: {
+              status: 'SUCCESS',
+              createdTaskId: createdTask.id,
+              completedAt: new Date(),
+              message: 'Task created',
+            },
+            select: { id: true },
+          });
+
+          return createdTask;
+        });
+
+        result.created += 1;
+        result.runs.push({
+          ...baseRun,
+          status: 'SUCCESS',
+          taskId: task.id,
+          message: `Created task: ${task.title}`,
+        });
+      } catch (error) {
+        const message = this.errorMessage(error);
+        result.failed += 1;
+        await this.prisma.staffTaskRecurringRuleRun.update({
+          where: { id: run.id },
+          data: {
+            status: 'FAILED',
+            completedAt: new Date(),
+            message,
+          },
+        });
+        result.runs.push({
+          ...baseRun,
+          status: 'FAILED',
+          message,
+        });
+      }
+    }
+
+    return result;
+  }
+
+  private emptyRunDueResult(
+    options: RunDueOptions,
+  ): StaffTaskRecurringRuleRunDueResult {
+    return {
+      now: options.now.toISOString(),
+      dryRun: options.dryRun,
+      limit: options.limit,
+      due: 0,
+      created: 0,
+      skipped: 0,
+      failed: 0,
+      runs: [],
+    };
+  }
+
+  private async createScheduleRun({
+    tenantId,
+    rule,
+    scheduledFor,
+  }: {
+    tenantId: string;
+    rule: StaffTaskRecurringRuleWithTemplate;
+    scheduledFor: Date;
+  }) {
+    try {
+      return await this.prisma.staffTaskRecurringRuleRun.create({
+        data: {
+          tenantId,
+          ruleId: rule.id,
+          scheduledFor,
+          status: 'STARTED',
+          metadata: {
+            cadence: rule.cadence,
+            templateId: rule.templateId,
+            nextRunAt: rule.nextRunAt?.toISOString() ?? null,
+          },
+        },
+        select: { id: true },
+      });
+    } catch (error) {
+      if (this.isUniqueConstraintError(error)) {
+        return null;
+      }
+
+      throw error;
+    }
+  }
+
+  private async buildTaskDataFromRule({
+    tenantId,
+    rule,
+    dto,
+    createdByUserId,
+  }: {
+    tenantId: string;
+    rule: StaffTaskRecurringRuleWithTemplate;
+    dto: StaffTaskRecurringRuleLaunchDto;
+    createdByUserId: string | null;
+  }): Promise<Prisma.StaffTaskUncheckedCreateInput> {
+    const storeId =
+      dto.storeId === undefined
+        ? (rule.storeId ?? rule.template?.storeId ?? null)
+        : await this.resolveStoreId(tenantId, dto.storeId);
+    const assignedToUserId =
+      dto.assignedToUserId === undefined
+        ? rule.assignedToUserId
+        : await this.resolveUserId(tenantId, dto.assignedToUserId);
+    const title =
+      this.normalizeOptionalString(dto.title) ??
+      this.normalizeOptionalString(rule.title) ??
+      this.normalizeOptionalString(rule.template?.title) ??
+      this.required('Task title is required');
+    const description =
+      dto.description === undefined
+        ? (rule.description ?? rule.template?.description ?? null)
+        : this.normalizeOptionalString(dto.description);
+    const dueAt =
+      dto.dueAt === undefined
+        ? this.resolveDueDateFromOffset(
+            rule.dueOffsetMinutes ?? rule.template?.dueOffsetMinutes ?? null,
+          )
+        : this.normalizeDateTime(dto.dueAt);
+
+    return {
+      tenantId,
+      storeId,
+      assignedToUserId,
+      sourceTemplateId: rule.templateId,
+      sourceRecurringRuleId: rule.id,
+      createdByUserId,
+      title,
+      description,
+      type: rule.taskType,
+      priority: rule.priority,
+      status: 'OPEN',
+      dueAt,
+      labels: rule.labels ?? rule.template?.labels ?? Prisma.DbNull,
+      checklist: rule.checklist ?? rule.template?.checklist ?? Prisma.DbNull,
+    };
   }
 
   private async normalizeRuleData(
@@ -640,6 +964,7 @@ export class StaffTaskRecurringRulesService {
       dueOffsetMinutes: row.dueOffsetMinutes,
       nextRunAt: row.nextRunAt?.toISOString() ?? null,
       lastManualRunAt: row.lastManualRunAt?.toISOString() ?? null,
+      lastAutomaticRunAt: row.lastAutomaticRunAt?.toISOString() ?? null,
       labels: row.labels,
       checklist: row.checklist,
       tasksCreatedCount: row._count.generatedTasks,
@@ -671,12 +996,36 @@ export class StaffTaskRecurringRulesService {
     };
   }
 
-  private resolveNextRunAt(input: RuleScheduleInput) {
+  private toRunResponse(
+    row: StaffTaskRecurringRuleRunRow,
+  ): StaffTaskRecurringRuleRunResponse {
+    return {
+      id: row.id,
+      ruleId: row.ruleId,
+      ruleTitle: row.rule.title,
+      status: row.status,
+      scheduledFor: row.scheduledFor.toISOString(),
+      startedAt: row.startedAt.toISOString(),
+      completedAt: row.completedAt?.toISOString() ?? null,
+      message: row.message,
+      metadata: row.metadata,
+      createdTask: row.createdTask
+        ? {
+            id: row.createdTask.id,
+            title: row.createdTask.title,
+            status: row.createdTask.status,
+            dueAt: row.createdTask.dueAt?.toISOString() ?? null,
+            createdAt: row.createdTask.createdAt.toISOString(),
+          }
+        : null,
+    };
+  }
+
+  private resolveNextRunAt(input: RuleScheduleInput, from = new Date()) {
     if (input.status !== 'ACTIVE') {
       return null;
     }
 
-    const now = new Date();
     const { hours, minutes } = this.resolveScheduleTime(
       input.cadence,
       input.timeOfDay,
@@ -687,18 +1036,18 @@ export class StaffTaskRecurringRulesService {
       input.cadence === 'OPENING_SHIFT' ||
       input.cadence === 'CLOSING_SHIFT'
     ) {
-      return this.nextDaily(now, hours, minutes);
+      return this.nextDaily(from, hours, minutes);
     }
 
     if (input.cadence === 'WEEKLY') {
-      return this.nextWeekly(now, hours, minutes, input.dayOfWeek ?? 1);
+      return this.nextWeekly(from, hours, minutes, input.dayOfWeek ?? 1);
     }
 
     if (input.cadence === 'MONTHLY') {
-      return this.nextMonthly(now, hours, minutes, input.dayOfMonth ?? 1);
+      return this.nextMonthly(from, hours, minutes, input.dayOfMonth ?? 1);
     }
 
-    return this.nextDaily(now, hours, minutes);
+    return this.nextDaily(from, hours, minutes);
   }
 
   private resolveScheduleTime(cadence: string, value: string | null) {
@@ -798,6 +1147,73 @@ export class StaffTaskRecurringRulesService {
 
   private required(message: string): never {
     throw new BadRequestException(message);
+  }
+
+  private resolveRunDueOptions(
+    dto: StaffTaskRecurringRuleRunDueDto,
+  ): RunDueOptions {
+    return {
+      now: this.normalizeRunNow(dto.now),
+      limit: this.normalizeRunLimit(dto.limit),
+      dryRun: this.normalizeBoolean(dto.dryRun),
+    };
+  }
+
+  private normalizeRunNow(value: string | null | undefined) {
+    const normalized = this.normalizeOptionalString(value);
+
+    if (!normalized) {
+      return new Date();
+    }
+
+    const date = new Date(normalized);
+
+    if (Number.isNaN(date.getTime())) {
+      throw new BadRequestException('Invalid scheduler timestamp');
+    }
+
+    return date;
+  }
+
+  private normalizeRunLimit(value: number | string | null | undefined) {
+    if (value === null || value === undefined || value === '') {
+      return 50;
+    }
+
+    const limit = Math.trunc(Number(value));
+
+    if (!Number.isFinite(limit) || limit < 1 || limit > 500) {
+      throw new BadRequestException(
+        'Scheduler limit must be between 1 and 500',
+      );
+    }
+
+    return limit;
+  }
+
+  private normalizeBoolean(value: boolean | string | null | undefined) {
+    if (typeof value === 'boolean') {
+      return value;
+    }
+
+    if (typeof value !== 'string') {
+      return false;
+    }
+
+    return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
+  }
+
+  private errorMessage(error: unknown) {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  private isUniqueConstraintError(error: unknown) {
+    return (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      (error as { code?: string }).code === 'P2002'
+    );
   }
 
   private normalizeOptionalString(value: unknown) {

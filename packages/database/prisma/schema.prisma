@@ -152,6 +152,7 @@ model Tenant {
   staffTasks                           StaffTask[]
   staffTaskTemplates                   StaffTaskTemplate[]
   staffTaskRecurringRules              StaffTaskRecurringRule[]
+  staffTaskRecurringRuleRuns           StaffTaskRecurringRuleRun[]
   staffTaskComments                    StaffTaskComment[]
   staffTaskAuditEvents                 StaffTaskAuditEvent[]
   staffKnowledgeArticles               StaffKnowledgeArticle[]
@@ -1400,6 +1401,7 @@ model StaffTask {
   createdByUser  User?                 @relation("StaffTaskCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   assignedToUser User?                 @relation("StaffTaskAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
   lastRecurringRuleRuns StaffTaskRecurringRule[] @relation("StaffTaskRecurringRuleLastTask")
+  recurringRuleScheduleRuns StaffTaskRecurringRuleRun[]
   comments       StaffTaskComment[]
   auditEvents    StaffTaskAuditEvent[]
 
@@ -1461,6 +1463,7 @@ model StaffTaskRecurringRule {
   dueOffsetMinutes  Int?
   nextRunAt         DateTime?
   lastManualRunAt   DateTime?
+  lastAutomaticRunAt DateTime?
   labels            Json?
   checklist         Json?
   createdAt         DateTime @default(now())
@@ -1473,6 +1476,7 @@ model StaffTaskRecurringRule {
   assignedToUser  User?              @relation("StaffTaskRecurringRuleAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
   lastCreatedTask StaffTask?         @relation("StaffTaskRecurringRuleLastTask", fields: [lastCreatedTaskId], references: [id], onDelete: SetNull)
   generatedTasks  StaffTask[]        @relation("StaffTaskRecurringRuleTasks")
+  scheduleRuns    StaffTaskRecurringRuleRun[]
 
   @@index([tenantId, status, cadence], map: "staff_task_rule_status_cadence_idx")
   @@index([tenantId, nextRunAt], map: "staff_task_rule_next_run_idx")
@@ -1481,6 +1485,30 @@ model StaffTaskRecurringRule {
   @@index([createdByUserId], map: "staff_task_rule_created_by_idx")
   @@index([assignedToUserId], map: "staff_task_rule_assigned_to_idx")
   @@index([lastCreatedTaskId], map: "staff_task_rule_last_task_idx")
+}
+
+model StaffTaskRecurringRuleRun {
+  id            String   @id @default(uuid())
+  tenantId      String
+  ruleId        String
+  createdTaskId String?
+  scheduledFor  DateTime
+  status        String   @default("STARTED")
+  startedAt     DateTime @default(now())
+  completedAt   DateTime?
+  message       String?
+  metadata      Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  tenant      Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  rule        StaffTaskRecurringRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  createdTask StaffTask?             @relation(fields: [createdTaskId], references: [id], onDelete: SetNull)
+
+  @@unique([ruleId, scheduledFor], map: "staff_task_rule_run_unique")
+  @@index([tenantId, status, scheduledFor], map: "staff_task_rule_run_status_idx")
+  @@index([tenantId, startedAt], map: "staff_task_rule_run_started_idx")
+  @@index([createdTaskId], map: "staff_task_rule_run_task_idx")
 }
 
 model StaffTaskComment {

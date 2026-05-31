@@ -46,6 +46,7 @@ export type StaffTaskRule = {
   dueOffsetMinutes: number | null;
   nextRunAt: string | null;
   lastManualRunAt: string | null;
+  lastAutomaticRunAt: string | null;
   labels: unknown;
   checklist: unknown;
   tasksCreatedCount: number;
@@ -64,6 +65,43 @@ export type StaffTaskRule = {
   } | null;
 };
 
+export type StaffTaskRuleRun = {
+  id: string;
+  ruleId: string;
+  ruleTitle: string;
+  status: string;
+  scheduledFor: string;
+  startedAt: string;
+  completedAt: string | null;
+  message: string | null;
+  metadata: unknown;
+  createdTask: {
+    id: string;
+    title: string;
+    status: string;
+    dueAt: string | null;
+    createdAt: string;
+  } | null;
+};
+
+export type StaffTaskRuleRunDueResult = {
+  now: string;
+  dryRun: boolean;
+  limit: number;
+  due: number;
+  created: number;
+  skipped: number;
+  failed: number;
+  runs: Array<{
+    ruleId: string;
+    ruleTitle: string;
+    scheduledFor: string;
+    status: "DUE" | "SUCCESS" | "SKIPPED" | "FAILED";
+    taskId: string | null;
+    message: string | null;
+  }>;
+};
+
 export type StaffTaskRuleReport = {
   filters: Required<Pick<StaffTaskRuleFilters, "status" | "cadence">> & {
     storeId: string | null;
@@ -79,6 +117,7 @@ export type StaffTaskRuleReport = {
     tasksCreated: number;
   };
   rows: StaffTaskRule[];
+  runs: StaffTaskRuleRun[];
   stores: StaffTaskStore[];
   users: StaffTaskUser[];
   templates: StaffTaskRuleTemplate[];

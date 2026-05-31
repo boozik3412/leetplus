@@ -75,6 +75,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added automatic recurring task rule scheduler for Staff Operations: `StaffTaskRecurringRuleRun` journal, duplicate protection by rule/due time, protected scheduled endpoint, API-side interval runner, UI due-run action, and latest run log in `/staff/task-rules`.
 - Hardened the network dashboard navigation: `/dashboard`, `/dashboard/*`, and the site root resolve to `Главная`, while `Ассортимент` is active only on explicit assortment routes.
 - Made the network dashboard a standalone main navigation entry: `/dashboard` now shows as `Главная`, has its own home icon, and no longer activates the assortment block.
 - Added the first Staff Directory layer: `StaffMember`, API `/staff/directory`, page `/staff/directory`, sidebar entry, LeetPlus account link, club scope, role/status fields, and Langame `working_shifts.user_id` mapping independent of guest analytics.

@@ -335,7 +335,7 @@ LeetPlus должен развиваться из набора отчетов в
 - Добавить базовые views списка задач: today, overdue, my tasks, by club, by employee, by shift, by status.
 - Добавить audit history для каждой задачи.
 - Готово: `/staff/task-rules` стал конструктором регулярных задач: каталог правил, создание/редактирование, расписание, связь с `StaffTaskTemplate`, next run preview и ручное создание задачи из правила.
-- Следующее: после production-проверки ручного контура добавить безопасный scheduler автосоздания задач по active rules, защиту от дублей и журнал автоматических запусков.
+- Готово: добавлен безопасный scheduler автосоздания задач по active recurring rules, защита от дублей через журнал `StaffTaskRecurringRuleRun`, сервисный endpoint `/staff/task-rules/scheduled/run-due`, ручная проверка due-rules из UI и журнал автозапусков в `/staff/task-rules`.
 
 Критерии приемки:
 
@@ -468,8 +468,8 @@ LeetPlus должен развиваться из набора отчетов в
 
 1. Готово: создать `STAFF_OPERATIONS_MODULE_TZ.md` с ролями, сценариями, data model, permissions, MVP scope и acceptance criteria.
 2. Готово: выделить staff identity в reusable staff domain, который сможет обслуживать и `/guests/staff-control`, и новый operations module. Первый слой `StaffMember` и `/staff/directory` уже связывает сотрудника с LeetPlus account, клубом и Langame `working_shifts.user_id`.
-3. Начато: добавить database schema для tasks, task templates, recurring task rules, task comments, attachments, audit events и staff assignments. `StaffTask`, `StaffTaskTemplate`, `StaffTaskRecurringRule`, `StaffTaskComment`, `StaffTaskAuditEvent`, `StaffAttachment` и `StaffMember` уже есть; следующий слой - scheduler и журнал автоматических запусков.
-4. Начато: реализовать backend CRUD и list APIs для tasks с tenant/store/staff access control. List/create/status update плюс comment/evidence endpoint уже есть; `/staff/task-rules` добавляет CRUD регулярных правил и ручное создание задач из правила.
+3. Готово: добавлена database schema для tasks, task templates, recurring task rules, task comments, attachments, audit events и staff assignments. `StaffTask`, `StaffTaskTemplate`, `StaffTaskRecurringRule`, `StaffTaskRecurringRuleRun`, `StaffTaskComment`, `StaffTaskAuditEvent`, `StaffAttachment` и `StaffMember` уже есть; scheduler и журнал автоматических запусков добавлены.
+4. Начато: реализовать backend CRUD и list APIs для tasks с tenant/store/staff access control. List/create/status update плюс comment/evidence endpoint уже есть; `/staff/task-rules` добавляет CRUD регулярных правил, ручное создание задач из правила, due-run endpoint и автоматический scheduler.
 5. Начато: реализовать UI `/staff/tasks` или `/operations/tasks` для manager и administrator workflows. `/staff/tasks` содержит создание, filters, status actions, execution comments, evidence links, audit history preview, запуск task-template через `/staff/task-templates` и регулярные правила через `/staff/task-rules`.
 6. Начато: добавить checklist templates и checklist runs. `StaffChecklistTemplate` и `/staff/checklist-templates` уже есть; checklist runs могут использовать published regulation snapshots или active template snapshots.
 7. Начато: добавить regulation documents, versions, acknowledgements и role/club targeting. Первый draft/published/archived shift-regulation entity, acknowledgement tracking, publication version snapshots, attached link materials и uploaded file attachments уже есть.

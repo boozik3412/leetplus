@@ -7,6 +7,7 @@ import type {
   StaffTaskRule,
   StaffTaskRuleCadence,
   StaffTaskRuleReport,
+  StaffTaskRuleRunDueResult,
   StaffTaskRuleStatus,
 } from "@/lib/staff-task-rules";
 import type { StaffTaskPriority, StaffTaskType } from "@/lib/staff-tasks";
@@ -40,6 +41,13 @@ const priorityLabels: Record<StaffTaskPriority, string> = {
   NORMAL: "Обычный",
   HIGH: "Высокий",
   URGENT: "Срочно",
+};
+
+const runStatusLabels: Record<string, string> = {
+  STARTED: "В работе",
+  SUCCESS: "Создана задача",
+  SKIPPED: "Дубль пропущен",
+  FAILED: "Ошибка",
 };
 
 const weekdayLabels = [
@@ -176,6 +184,7 @@ export function StaffTaskRulesWorkspace({
   const [launchDueAt, setLaunchDueAt] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [isLaunching, setIsLaunching] = useState(false);
+  const [isRunningDue, setIsRunningDue] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastTaskHref, setLastTaskHref] = useState<string | null>(null);
@@ -331,6 +340,44 @@ export function StaffTaskRulesWorkspace({
     }
   }
 
+  async function runDueNow() {
+    setIsRunningDue(true);
+    setError(null);
+    setMessage(null);
+    setLastTaskHref(null);
+
+    try {
+      const response = await fetch("/api/staff/task-rules/run-due", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ limit: 50 }),
+      });
+
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as {
+          message?: string;
+        } | null;
+        throw new Error(
+          data?.message ?? "Не удалось запустить регулярные правила",
+        );
+      }
+
+      const result = (await response.json()) as StaffTaskRuleRunDueResult;
+      setMessage(
+        `Проверено правил: ${result.due}. Создано задач: ${result.created}. Пропущено дублей: ${result.skipped}. Ошибок: ${result.failed}.`,
+      );
+      router.refresh();
+    } catch (runError) {
+      setError(
+        runError instanceof Error
+          ? runError.message
+          : "Не удалось запустить регулярные правила",
+      );
+    } finally {
+      setIsRunningDue(false);
+    }
+  }
+
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
       <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
@@ -341,13 +388,23 @@ export function StaffTaskRulesWorkspace({
             </p>
             <h2 className="mt-1 text-xl font-semibold">Правила задач</h2>
           </div>
-          <button
-            type="button"
-            onClick={startNew}
-            className="h-10 rounded-md bg-emerald-500 px-3 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
-          >
-            Новое правило
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={runDueNow}
+              disabled={isRunningDue}
+              className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-100 dark:hover:bg-zinc-900"
+            >
+              {isRunningDue ? "Проверяем..." : "Запустить due"}
+            </button>
+            <button
+              type="button"
+              onClick={startNew}
+              className="h-10 rounded-md bg-emerald-500 px-3 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
+            >
+              Новое правило
+            </button>
+          </div>
         </div>
 
         <div className="mt-4 space-y-2">
@@ -392,6 +449,64 @@ export function StaffTaskRulesWorkspace({
               );
             })
           )}
+        </div>
+
+        <div className="mt-5 border-t border-zinc-200 pt-4 dark:border-zinc-800">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-bold uppercase text-zinc-500">
+                Журнал автозапусков
+              </p>
+              <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+                Последние проверки scheduler и защита от дублей.
+              </p>
+            </div>
+            {report.summary.dueNow > 0 ? (
+              <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-bold text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">
+                Due: {report.summary.dueNow}
+              </span>
+            ) : null}
+          </div>
+
+          <div className="mt-3 space-y-2">
+            {report.runs.length === 0 ? (
+              <div className="rounded-md border border-dashed border-zinc-300 px-3 py-4 text-sm text-zinc-500 dark:border-zinc-700">
+                Автоматических запусков пока нет.
+              </div>
+            ) : (
+              report.runs.slice(0, 8).map((run) => (
+                <div
+                  key={run.id}
+                  className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900/60"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <p className="font-semibold">{run.ruleTitle}</p>
+                      <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                        План: {formatDateTime(run.scheduledFor)} · запуск:{" "}
+                        {formatDateTime(run.startedAt)}
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-zinc-200 px-2 py-1 text-[11px] font-bold uppercase text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+                      {runStatusLabels[run.status] ?? run.status}
+                    </span>
+                  </div>
+                  {run.createdTask ? (
+                    <Link
+                      href={`/staff/tasks?search=${encodeURIComponent(run.createdTask.title)}`}
+                      className="mt-2 inline-flex text-xs font-semibold text-emerald-700 underline decoration-emerald-400 underline-offset-4 dark:text-emerald-300"
+                    >
+                      Открыть задачу
+                    </Link>
+                  ) : run.message ? (
+                    <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                      {run.message}
+                    </p>
+                  ) : null}
+                </div>
+              ))
+            )}
+          </div>
         </div>
       </section>
 

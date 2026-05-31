@@ -27,6 +27,15 @@ type TenantSupportNoteDto = {
   supportTicket?: unknown;
 };
 
+type SourceSupportAction = 'DISABLE' | 'ENABLE' | 'MARK_FOR_REVIEW';
+
+type SourceSupportActionDto = {
+  action?: unknown;
+  confirmation?: unknown;
+  reason?: unknown;
+  supportTicket?: unknown;
+};
+
 const STALE_SYNC_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 
 const lifecycleStatusByAction: Record<
@@ -71,9 +80,14 @@ export class AdminService {
           integrationSources: {
             where: { provider: IntegrationProvider.LANGAME },
             select: {
+              id: true,
               domain: true,
               isActive: true,
               lastSyncedAt: true,
+              supportDisabledAt: true,
+              supportDisabledReason: true,
+              supportReviewRequestedAt: true,
+              supportReviewReason: true,
             },
             orderBy: { domain: 'asc' },
           },
@@ -206,9 +220,15 @@ export class AdminService {
         productsCount: tenant._count.products,
         salesFactsCount: tenant._count.salesFacts,
         langameSources: tenant.integrationSources.map((source) => ({
+          id: source.id,
           domain: source.domain,
           isActive: source.isActive,
           lastSyncedAt: source.lastSyncedAt?.toISOString() ?? null,
+          supportDisabledAt: source.supportDisabledAt?.toISOString() ?? null,
+          supportDisabledReason: source.supportDisabledReason,
+          supportReviewRequestedAt:
+            source.supportReviewRequestedAt?.toISOString() ?? null,
+          supportReviewReason: source.supportReviewReason,
         })),
         diagnostics: {
           severity,
@@ -417,6 +437,96 @@ export class AdminService {
     };
   }
 
+  async updateIntegrationSourceSupportAction(
+    actor: AuthenticatedUser,
+    sourceId: string,
+    dto: SourceSupportActionDto,
+  ) {
+    const action = this.parseSourceSupportAction(dto.action);
+    const reason = this.normalizeRequiredText(dto.reason, 'reason', 10);
+    const supportTicket = this.normalizeOptionalText(dto.supportTicket);
+    const source = await this.prisma.integrationSource.findUnique({
+      where: { id: sourceId },
+      include: {
+        tenant: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+          },
+        },
+      },
+    });
+
+    if (!source) {
+      throw new NotFoundException('Integration source was not found');
+    }
+
+    this.assertConfirmation(dto.confirmation, source.tenant.slug);
+
+    const before = this.serializeIntegrationSource(source);
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const data =
+        action === 'DISABLE'
+          ? {
+              isActive: false,
+              supportDisabledAt: new Date(),
+              supportDisabledReason: reason,
+            }
+          : action === 'ENABLE'
+            ? {
+                isActive: true,
+                supportDisabledAt: null,
+                supportDisabledReason: null,
+                supportReviewRequestedAt: null,
+                supportReviewReason: null,
+              }
+            : {
+                supportReviewRequestedAt: new Date(),
+                supportReviewReason: reason,
+              };
+
+      const result = await tx.integrationSource.update({
+        where: { id: source.id },
+        data,
+        include: {
+          tenant: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+            },
+          },
+        },
+      });
+
+      await tx.platformAdminAuditEvent.create({
+        data: {
+          tenantId: source.tenantId,
+          actorUserId: actor.id,
+          action: `LANGAME_SOURCE_${action}`,
+          targetType: 'INTEGRATION_SOURCE',
+          targetId: source.id,
+          reason,
+          before,
+          after: this.serializeIntegrationSource(result),
+          metadata: {
+            domain: source.domain,
+            supportTicket,
+            confirmationRule: 'tenant_slug',
+          },
+        },
+      });
+
+      return result;
+    });
+
+    return {
+      ok: true,
+      source: this.serializeIntegrationSource(updated),
+    };
+  }
+
   private countByTenantAndActivity(
     rows: Array<{ tenantId: string; isActive: boolean }>,
   ) {
@@ -456,6 +566,18 @@ export class AdminService {
     }
 
     throw new BadRequestException('Unsupported tenant lifecycle action');
+  }
+
+  private parseSourceSupportAction(value: unknown): SourceSupportAction {
+    if (
+      value === 'DISABLE' ||
+      value === 'ENABLE' ||
+      value === 'MARK_FOR_REVIEW'
+    ) {
+      return value;
+    }
+
+    throw new BadRequestException('Unsupported integration source action');
   }
 
   private normalizeRequiredText(
@@ -508,6 +630,40 @@ export class AdminService {
       status: tenant.status,
       statusChangedAt: tenant.statusChangedAt?.toISOString() ?? null,
       statusReason: tenant.statusReason,
+    };
+  }
+
+  private serializeIntegrationSource(source: {
+    id: string;
+    tenantId: string;
+    provider: IntegrationProvider;
+    domain: string;
+    isActive: boolean;
+    lastSyncedAt: Date | null;
+    supportDisabledAt: Date | null;
+    supportDisabledReason: string | null;
+    supportReviewRequestedAt: Date | null;
+    supportReviewReason: string | null;
+    tenant: {
+      id: string;
+      name: string;
+      slug: string;
+    };
+  }) {
+    return {
+      id: source.id,
+      tenantId: source.tenantId,
+      tenantName: source.tenant.name,
+      tenantSlug: source.tenant.slug,
+      provider: source.provider,
+      domain: source.domain,
+      isActive: source.isActive,
+      lastSyncedAt: source.lastSyncedAt?.toISOString() ?? null,
+      supportDisabledAt: source.supportDisabledAt?.toISOString() ?? null,
+      supportDisabledReason: source.supportDisabledReason,
+      supportReviewRequestedAt:
+        source.supportReviewRequestedAt?.toISOString() ?? null,
+      supportReviewReason: source.supportReviewReason,
     };
   }
 }

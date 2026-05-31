@@ -5,13 +5,24 @@ import { useState, useTransition } from "react";
 import type { AdminOverview } from "@/lib/admin-overview";
 
 type Tenant = AdminOverview["tenants"][number];
+type LangameSource = Tenant["langameSources"][number];
 type LifecycleAction = "ACTIVATE" | "SUSPEND" | "ARCHIVE";
+type SourceSupportAction = "DISABLE" | "ENABLE" | "MARK_FOR_REVIEW";
 
 type TenantFormState = {
   action: LifecycleAction;
   reason: string;
   confirmation: string;
   supportNote: string;
+  supportTicket: string;
+  message: string | null;
+  error: string | null;
+};
+
+type SourceFormState = {
+  action: SourceSupportAction;
+  reason: string;
+  confirmation: string;
   supportTicket: string;
   message: string | null;
   error: string | null;
@@ -49,6 +60,12 @@ const actionLabels: Record<LifecycleAction, string> = {
   ARCHIVE: "Архивировать",
 };
 
+const sourceActionLabels: Record<SourceSupportAction, string> = {
+  DISABLE: "Отключить источник",
+  ENABLE: "Включить источник",
+  MARK_FOR_REVIEW: "На перепроверку",
+};
+
 function formatDate(value: string | null) {
   if (!value) {
     return "—";
@@ -84,6 +101,17 @@ function initialFormState(tenant: Tenant): TenantFormState {
   };
 }
 
+function initialSourceFormState(source: LangameSource): SourceFormState {
+  return {
+    action: source.isActive ? "MARK_FOR_REVIEW" : "ENABLE",
+    reason: "",
+    confirmation: "",
+    supportTicket: "",
+    message: null,
+    error: null,
+  };
+}
+
 async function readError(response: Response) {
   try {
     const data = (await response.json()) as { message?: string };
@@ -104,6 +132,17 @@ export function PlatformAdministrationWorkspace({
     Object.fromEntries(
       overview.tenants.map((tenant) => [tenant.id, initialFormState(tenant)]),
     ),
+  );
+  const [sourceForms, setSourceForms] = useState<Record<string, SourceFormState>>(
+    () =>
+      Object.fromEntries(
+        overview.tenants.flatMap((tenant) =>
+          tenant.langameSources.map((source) => [
+            source.id,
+            initialSourceFormState(source),
+          ]),
+        ),
+      ),
   );
 
   const cards = [
@@ -127,6 +166,26 @@ export function PlatformAdministrationWorkspace({
           reason: "",
           confirmation: "",
           supportNote: "",
+          supportTicket: "",
+          message: null,
+          error: null,
+        }),
+        ...patch,
+      },
+    }));
+  }
+
+  function updateSourceForm(
+    sourceId: string,
+    patch: Partial<SourceFormState>,
+  ): void {
+    setSourceForms((current) => ({
+      ...current,
+      [sourceId]: {
+        ...(current[sourceId] ?? {
+          action: "MARK_FOR_REVIEW",
+          reason: "",
+          confirmation: "",
           supportTicket: "",
           message: null,
           error: null,
@@ -191,6 +250,37 @@ export function PlatformAdministrationWorkspace({
       supportNote: "",
       confirmation: "",
       message: "Support-заметка добавлена в audit trail.",
+    });
+    startTransition(() => router.refresh());
+  }
+
+  async function submitSourceAction(tenant: Tenant, source: LangameSource) {
+    const form = sourceForms[source.id] ?? initialSourceFormState(source);
+    updateSourceForm(source.id, { error: null, message: null });
+
+    const response = await fetch(
+      `/api/admin/integration-sources/${source.id}/support-action`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: form.action,
+          reason: form.reason,
+          confirmation: form.confirmation,
+          supportTicket: form.supportTicket,
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      updateSourceForm(source.id, { error: await readError(response) });
+      return;
+    }
+
+    updateSourceForm(source.id, {
+      reason: "",
+      confirmation: "",
+      message: "Действие по источнику записано в audit trail.",
     });
     startTransition(() => router.refresh());
   }
@@ -400,18 +490,126 @@ export function PlatformAdministrationWorkspace({
                         <p className="text-xs font-semibold uppercase text-zinc-500">
                           Langame источники
                         </p>
-                        <div className="mt-2 flex flex-wrap gap-2">
+                        <div className="mt-3 space-y-3">
                           {tenant.langameSources.length > 0 ? (
-                            tenant.langameSources.map((source) => (
-                              <span
-                                key={source.domain}
-                                className="rounded-full border border-zinc-200 px-3 py-1 text-xs dark:border-zinc-800"
-                              >
-                                {source.domain} ·{" "}
-                                {source.isActive ? "on" : "off"} ·{" "}
-                                {formatDate(source.lastSyncedAt)}
-                              </span>
-                            ))
+                            tenant.langameSources.map((source) => {
+                              const sourceForm =
+                                sourceForms[source.id] ??
+                                initialSourceFormState(source);
+
+                              return (
+                                <div
+                                  key={source.id}
+                                  className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40"
+                                >
+                                  <div className="flex flex-wrap items-start justify-between gap-3">
+                                    <div>
+                                      <p className="font-semibold">
+                                        {source.domain}
+                                      </p>
+                                      <p className="mt-1 text-xs text-zinc-500">
+                                        {source.isActive ? "on" : "off"} · sync{" "}
+                                        {formatDate(source.lastSyncedAt)}
+                                      </p>
+                                    </div>
+                                    {source.supportReviewRequestedAt ? (
+                                      <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-700 dark:text-amber-200">
+                                        На перепроверке
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                  {source.supportDisabledReason ||
+                                  source.supportReviewReason ? (
+                                    <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                                      {source.supportDisabledReason ??
+                                        source.supportReviewReason}
+                                    </p>
+                                  ) : null}
+                                  <div className="mt-3 grid gap-2 md:grid-cols-[160px_1fr_160px_140px]">
+                                    <select
+                                      value={sourceForm.action}
+                                      onChange={(event) =>
+                                        updateSourceForm(source.id, {
+                                          action: event.target
+                                            .value as SourceSupportAction,
+                                          error: null,
+                                          message: null,
+                                        })
+                                      }
+                                      className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs outline-none transition hover:border-emerald-400 focus:border-emerald-500 dark:border-zinc-800 dark:bg-zinc-950"
+                                    >
+                                      {(
+                                        [
+                                          "DISABLE",
+                                          "ENABLE",
+                                          "MARK_FOR_REVIEW",
+                                        ] as const
+                                      ).map((action) => (
+                                        <option key={action} value={action}>
+                                          {sourceActionLabels[action]}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <input
+                                      value={sourceForm.reason}
+                                      onChange={(event) =>
+                                        updateSourceForm(source.id, {
+                                          reason: event.target.value,
+                                          error: null,
+                                          message: null,
+                                        })
+                                      }
+                                      className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs outline-none transition hover:border-emerald-400 focus:border-emerald-500 dark:border-zinc-800 dark:bg-zinc-950"
+                                      placeholder="Причина"
+                                    />
+                                    <input
+                                      value={sourceForm.confirmation}
+                                      onChange={(event) =>
+                                        updateSourceForm(source.id, {
+                                          confirmation: event.target.value,
+                                          error: null,
+                                          message: null,
+                                        })
+                                      }
+                                      className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs outline-none transition hover:border-emerald-400 focus:border-emerald-500 dark:border-zinc-800 dark:bg-zinc-950"
+                                      placeholder={tenant.slug}
+                                    />
+                                    <button
+                                      type="button"
+                                      disabled={isPending}
+                                      onClick={() =>
+                                        void submitSourceAction(tenant, source)
+                                      }
+                                      className="rounded-lg border border-zinc-200 px-3 py-2 text-xs font-semibold transition hover:border-emerald-400 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-800 dark:hover:text-emerald-200"
+                                    >
+                                      Записать
+                                    </button>
+                                  </div>
+                                  <input
+                                    value={sourceForm.supportTicket}
+                                    onChange={(event) =>
+                                      updateSourceForm(source.id, {
+                                        supportTicket: event.target.value,
+                                        error: null,
+                                        message: null,
+                                      })
+                                    }
+                                    className="mt-2 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs outline-none transition hover:border-emerald-400 focus:border-emerald-500 dark:border-zinc-800 dark:bg-zinc-950"
+                                    placeholder="Support ticket, опционально"
+                                  />
+                                  {sourceForm.error ? (
+                                    <p className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-700 dark:text-red-200">
+                                      {sourceForm.error}
+                                    </p>
+                                  ) : null}
+                                  {sourceForm.message ? (
+                                    <p className="mt-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-200">
+                                      {sourceForm.message}
+                                    </p>
+                                  ) : null}
+                                </div>
+                              );
+                            })
                           ) : (
                             <span className="text-zinc-500">—</span>
                           )}

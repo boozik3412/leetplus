@@ -182,7 +182,7 @@ model Tenant {
   staffDisciplinePolicies              StaffDisciplinePolicy[]
   staffDisciplineRules                 StaffDisciplineRule[]
   staffDisciplineRecords               StaffDisciplineRecord[]
-  staffSalarySchemes                    StaffSalaryScheme[]
+  staffSalarySchemes                   StaffSalaryScheme[]
   staffChatChannels                    StaffChatChannel[]
   staffChatChannelMembers              StaffChatChannelMember[]
   staffChatMessages                    StaffChatMessage[]
@@ -225,8 +225,8 @@ model User {
   createdMarketingPromoBundleLaunches  MarketingPromoBundleLaunch[]          @relation("MarketingPromoBundleLaunchCreatedBy")
   createdMarketingPromoBundleUsages    MarketingPromoBundleUsage[]           @relation("MarketingPromoBundleUsageCreatedBy")
   guestStaffIdentityMappings           GuestStaffIdentityMapping[]
-  staffMember                          StaffMember?                         @relation("StaffMemberUser")
-  createdStaffMembers                  StaffMember[]                        @relation("StaffMemberCreatedBy")
+  staffMember                          StaffMember?                          @relation("StaffMemberUser")
+  createdStaffMembers                  StaffMember[]                         @relation("StaffMemberCreatedBy")
   createdStaffTasks                    StaffTask[]                           @relation("StaffTaskCreatedBy")
   createdStaffTaskTemplates            StaffTaskTemplate[]                   @relation("StaffTaskTemplateCreatedBy")
   createdStaffTaskRecurringRules       StaffTaskRecurringRule[]              @relation("StaffTaskRecurringRuleCreatedBy")
@@ -237,8 +237,8 @@ model User {
   staffTaskAuditEvents                 StaffTaskAuditEvent[]                 @relation("StaffTaskAuditActor")
   createdStaffKnowledgeArticles        StaffKnowledgeArticle[]               @relation("StaffKnowledgeArticleCreatedBy")
   approvedStaffKnowledgeArticles       StaffKnowledgeArticle[]               @relation("StaffKnowledgeArticleApprovedBy")
-  createdStaffKnowledgeArticleVersions StaffKnowledgeArticleVersion[]         @relation("StaffKnowledgeArticleVersionCreatedBy")
-  staffKnowledgeArticleReadReceipts    StaffKnowledgeArticleReadReceipt[]     @relation("StaffKnowledgeArticleReadReceiptUser")
+  createdStaffKnowledgeArticleVersions StaffKnowledgeArticleVersion[]        @relation("StaffKnowledgeArticleVersionCreatedBy")
+  staffKnowledgeArticleReadReceipts    StaffKnowledgeArticleReadReceipt[]    @relation("StaffKnowledgeArticleReadReceiptUser")
   createdStaffTrainingCourses          StaffTrainingCourse[]                 @relation("StaffTrainingCourseCreatedBy")
   staffTrainingProgresses              StaffTrainingProgress[]               @relation("StaffTrainingProgressUser")
   updatedStaffTrainingProgresses       StaffTrainingProgress[]               @relation("StaffTrainingProgressUpdatedBy")
@@ -271,7 +271,7 @@ model User {
   uploadedStaffAttachments             StaffAttachment[]                     @relation("StaffAttachmentUploadedBy")
   acknowledgedStaffNotifications       StaffNotification[]                   @relation("StaffNotificationAcknowledgedBy")
   resolvedStaffNotifications           StaffNotification[]                   @relation("StaffNotificationResolvedBy")
-  platformAdminAuditEvents             PlatformAdminAuditEvent[]              @relation("PlatformAdminAuditActor")
+  platformAdminAuditEvents             PlatformAdminAuditEvent[]             @relation("PlatformAdminAuditActor")
 
   @@index([tenantId])
   @@index([tenantId, role])
@@ -744,18 +744,22 @@ model IntegrationCredential {
 }
 
 model IntegrationSource {
-  id             String              @id @default(uuid())
-  tenantId       String
-  credentialId   String
-  provider       IntegrationProvider
-  name           String
-  baseUrl        String
-  domain         String
-  isActive       Boolean             @default(true)
-  lastSyncedAt   DateTime?
-  lastSyncedDate DateTime?
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
+  id                       String              @id @default(uuid())
+  tenantId                 String
+  credentialId             String
+  provider                 IntegrationProvider
+  name                     String
+  baseUrl                  String
+  domain                   String
+  isActive                 Boolean             @default(true)
+  lastSyncedAt             DateTime?
+  lastSyncedDate           DateTime?
+  supportDisabledAt        DateTime?
+  supportDisabledReason    String?
+  supportReviewRequestedAt DateTime?
+  supportReviewReason      String?
+  createdAt                DateTime            @default(now())
+  updatedAt                DateTime            @updatedAt
 
   tenant               Tenant                @relation(fields: [tenantId], references: [id])
   credential           IntegrationCredential @relation(fields: [credentialId], references: [id])
@@ -1412,38 +1416,38 @@ model StaffMember {
 }
 
 model StaffTask {
-  id               String    @id @default(uuid())
-  tenantId         String
-  storeId          String?
-  shiftId          String?
-  sourceTemplateId String?
+  id                    String    @id @default(uuid())
+  tenantId              String
+  storeId               String?
+  shiftId               String?
+  sourceTemplateId      String?
   sourceRecurringRuleId String?
-  createdByUserId  String?
-  assignedToUserId String?
-  title            String
-  description      String?
-  type             String    @default("ONE_TIME")
-  status           String    @default("OPEN")
-  priority         String    @default("NORMAL")
-  dueAt            DateTime?
-  completedAt      DateTime?
-  labels           Json?
-  checklist        Json?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  createdByUserId       String?
+  assignedToUserId      String?
+  title                 String
+  description           String?
+  type                  String    @default("ONE_TIME")
+  status                String    @default("OPEN")
+  priority              String    @default("NORMAL")
+  dueAt                 DateTime?
+  completedAt           DateTime?
+  labels                Json?
+  checklist             Json?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
-  tenant         Tenant                @relation(fields: [tenantId], references: [id])
-  store          Store?                @relation(fields: [storeId], references: [id], onDelete: SetNull)
-  shift          GuestWorkingShift?    @relation(fields: [shiftId], references: [id], onDelete: SetNull)
-  sourceTemplate StaffTaskTemplate?    @relation(fields: [sourceTemplateId], references: [id], onDelete: SetNull)
-  sourceRecurringRule StaffTaskRecurringRule? @relation("StaffTaskRecurringRuleTasks", fields: [sourceRecurringRuleId], references: [id], onDelete: SetNull)
-  createdByUser  User?                 @relation("StaffTaskCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  assignedToUser User?                 @relation("StaffTaskAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
-  lastRecurringRuleRuns StaffTaskRecurringRule[] @relation("StaffTaskRecurringRuleLastTask")
+  tenant                    Tenant                      @relation(fields: [tenantId], references: [id])
+  store                     Store?                      @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  shift                     GuestWorkingShift?          @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  sourceTemplate            StaffTaskTemplate?          @relation(fields: [sourceTemplateId], references: [id], onDelete: SetNull)
+  sourceRecurringRule       StaffTaskRecurringRule?     @relation("StaffTaskRecurringRuleTasks", fields: [sourceRecurringRuleId], references: [id], onDelete: SetNull)
+  createdByUser             User?                       @relation("StaffTaskCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  assignedToUser            User?                       @relation("StaffTaskAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  lastRecurringRuleRuns     StaffTaskRecurringRule[]    @relation("StaffTaskRecurringRuleLastTask")
   recurringRuleScheduleRuns StaffTaskRecurringRuleRun[]
-  observers      StaffTaskObserver[]
-  comments       StaffTaskComment[]
-  auditEvents    StaffTaskAuditEvent[]
+  observers                 StaffTaskObserver[]
+  comments                  StaffTaskComment[]
+  auditEvents               StaffTaskAuditEvent[]
 
   @@index([tenantId, status, dueAt], map: "staff_task_status_due_idx")
   @@index([tenantId, createdAt], map: "staff_task_created_idx")
@@ -1487,10 +1491,10 @@ model StaffTaskTemplate {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  tenant        Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  store         Store?      @relation(fields: [storeId], references: [id], onDelete: SetNull)
-  createdByUser User?       @relation("StaffTaskTemplateCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  tasks         StaffTask[]
+  tenant         Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  store          Store?                   @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  createdByUser  User?                    @relation("StaffTaskTemplateCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  tasks          StaffTask[]
   recurringRules StaffTaskRecurringRule[]
 
   @@index([tenantId, status, type], map: "staff_task_template_status_type_idx")
@@ -1500,38 +1504,38 @@ model StaffTaskTemplate {
 }
 
 model StaffTaskRecurringRule {
-  id                String   @id @default(uuid())
-  tenantId          String
-  templateId        String?
-  storeId           String?
-  createdByUserId   String?
-  assignedToUserId  String?
-  lastCreatedTaskId String?
-  title             String
-  description       String?
-  cadence           String   @default("DAILY")
-  status            String   @default("ACTIVE")
-  taskType          String   @default("RECURRING")
-  priority          String   @default("NORMAL")
-  timeOfDay         String?
-  dayOfWeek         Int?
-  dayOfMonth        Int?
-  dueOffsetMinutes  Int?
-  nextRunAt         DateTime?
-  lastManualRunAt   DateTime?
+  id                 String    @id @default(uuid())
+  tenantId           String
+  templateId         String?
+  storeId            String?
+  createdByUserId    String?
+  assignedToUserId   String?
+  lastCreatedTaskId  String?
+  title              String
+  description        String?
+  cadence            String    @default("DAILY")
+  status             String    @default("ACTIVE")
+  taskType           String    @default("RECURRING")
+  priority           String    @default("NORMAL")
+  timeOfDay          String?
+  dayOfWeek          Int?
+  dayOfMonth         Int?
+  dueOffsetMinutes   Int?
+  nextRunAt          DateTime?
+  lastManualRunAt    DateTime?
   lastAutomaticRunAt DateTime?
-  labels            Json?
-  checklist         Json?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  labels             Json?
+  checklist          Json?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
-  tenant          Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  template        StaffTaskTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
-  store           Store?             @relation(fields: [storeId], references: [id], onDelete: SetNull)
-  createdByUser   User?              @relation("StaffTaskRecurringRuleCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  assignedToUser  User?              @relation("StaffTaskRecurringRuleAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
-  lastCreatedTask StaffTask?         @relation("StaffTaskRecurringRuleLastTask", fields: [lastCreatedTaskId], references: [id], onDelete: SetNull)
-  generatedTasks  StaffTask[]        @relation("StaffTaskRecurringRuleTasks")
+  tenant          Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  template        StaffTaskTemplate?          @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  store           Store?                      @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  createdByUser   User?                       @relation("StaffTaskRecurringRuleCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  assignedToUser  User?                       @relation("StaffTaskRecurringRuleAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  lastCreatedTask StaffTask?                  @relation("StaffTaskRecurringRuleLastTask", fields: [lastCreatedTaskId], references: [id], onDelete: SetNull)
+  generatedTasks  StaffTask[]                 @relation("StaffTaskRecurringRuleTasks")
   scheduleRuns    StaffTaskRecurringRuleRun[]
 
   @@index([tenantId, status, cadence], map: "staff_task_rule_status_cadence_idx")
@@ -1544,18 +1548,18 @@ model StaffTaskRecurringRule {
 }
 
 model StaffTaskRecurringRuleRun {
-  id            String   @id @default(uuid())
+  id            String    @id @default(uuid())
   tenantId      String
   ruleId        String
   createdTaskId String?
   scheduledFor  DateTime
-  status        String   @default("STARTED")
-  startedAt     DateTime @default(now())
+  status        String    @default("STARTED")
+  startedAt     DateTime  @default(now())
   completedAt   DateTime?
   message       String?
   metadata      Json?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   tenant      Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   rule        StaffTaskRecurringRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
@@ -1624,37 +1628,37 @@ model StaffAttachment {
 }
 
 model StaffKnowledgeArticle {
-  id              String    @id @default(uuid())
-  tenantId        String
-  storeId         String?
-  createdByUserId String?
-  approvedByUserId String?
-  title           String
-  summary         String?
-  content         String?
-  folder          String    @default("Общие")
-  category        String    @default("Общие стандарты")
-  roleScope       String    @default("ALL_STAFF")
-  status          String    @default("DRAFT")
-  templateKey     String?
-  requiresReading Boolean   @default(false)
-  tags            String[]  @default([])
-  materials       Json?
-  relatedLinks    Json?
-  version         Int       @default(0)
+  id                String    @id @default(uuid())
+  tenantId          String
+  storeId           String?
+  createdByUserId   String?
+  approvedByUserId  String?
+  title             String
+  summary           String?
+  content           String?
+  folder            String    @default("Общие")
+  category          String    @default("Общие стандарты")
+  roleScope         String    @default("ALL_STAFF")
+  status            String    @default("DRAFT")
+  templateKey       String?
+  requiresReading   Boolean   @default(false)
+  tags              String[]  @default([])
+  materials         Json?
+  relatedLinks      Json?
+  version           Int       @default(0)
   reviewRequestedAt DateTime?
-  approvedAt      DateTime?
-  approvalNote    String?
-  publishedAt     DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  approvedAt        DateTime?
+  approvalNote      String?
+  publishedAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  tenant        Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  store         Store? @relation(fields: [storeId], references: [id], onDelete: SetNull)
-  createdByUser User?  @relation("StaffKnowledgeArticleCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  approvedByUser User?  @relation("StaffKnowledgeArticleApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
-  versions      StaffKnowledgeArticleVersion[]
-  readReceipts  StaffKnowledgeArticleReadReceipt[]
+  tenant         Tenant                             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  store          Store?                             @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  createdByUser  User?                              @relation("StaffKnowledgeArticleCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  approvedByUser User?                              @relation("StaffKnowledgeArticleApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+  versions       StaffKnowledgeArticleVersion[]
+  readReceipts   StaffKnowledgeArticleReadReceipt[]
 
   @@index([tenantId, status, roleScope], map: "staff_knowledge_status_role_idx")
   @@index([tenantId, folder], map: "staff_knowledge_folder_idx")
@@ -1726,9 +1730,9 @@ model StaffTrainingCourse {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  tenant        Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  store         Store? @relation(fields: [storeId], references: [id], onDelete: SetNull)
-  createdByUser User?  @relation("StaffTrainingCourseCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  tenant        Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  store         Store?                  @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  createdByUser User?                   @relation("StaffTrainingCourseCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   progresses    StaffTrainingProgress[]
 
   @@index([tenantId, status, roleScope], map: "staff_training_course_status_role_idx")
@@ -1813,11 +1817,11 @@ model StaffAssessment {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  tenant        Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  store         Store?                  @relation(fields: [storeId], references: [id], onDelete: SetNull)
-  createdByUser User?                   @relation("StaffAssessmentCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  results       StaffAssessmentResult[]
-  shiftRegulations StaffShiftRegulation[] @relation("StaffShiftRegulationAssessment")
+  tenant           Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  store            Store?                  @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  createdByUser    User?                   @relation("StaffAssessmentCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  results          StaffAssessmentResult[]
+  shiftRegulations StaffShiftRegulation[]  @relation("StaffShiftRegulationAssessment")
 
   @@index([tenantId, status, roleScope], map: "staff_assessment_status_role_idx")
   @@index([tenantId, assessmentKind], map: "staff_assessment_kind_idx")
@@ -1858,25 +1862,25 @@ model StaffAssessmentResult {
 }
 
 model StaffShiftRegulation {
-  id              String    @id @default(uuid())
-  tenantId        String
-  storeId         String?
-  createdByUserId String?
-  assessmentId    String?
-  title           String
-  description     String?
-  shiftKind       String    @default("OPENING")
-  status          String    @default("DRAFT")
-  roleScope       String    @default("ADMINISTRATOR")
-  version         Int       @default(1)
-  sections        Json
-  attachments     Json?
-  requiresAssessmentRetake Boolean @default(false)
-  effectiveFrom   DateTime?
-  publishedAt     DateTime?
-  archivedAt      DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id                       String    @id @default(uuid())
+  tenantId                 String
+  storeId                  String?
+  createdByUserId          String?
+  assessmentId             String?
+  title                    String
+  description              String?
+  shiftKind                String    @default("OPENING")
+  status                   String    @default("DRAFT")
+  roleScope                String    @default("ADMINISTRATOR")
+  version                  Int       @default(1)
+  sections                 Json
+  attachments              Json?
+  requiresAssessmentRetake Boolean   @default(false)
+  effectiveFrom            DateTime?
+  publishedAt              DateTime?
+  archivedAt               DateTime?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
 
   tenant             Tenant                                @relation(fields: [tenantId], references: [id])
   store              Store?                                @relation(fields: [storeId], references: [id], onDelete: SetNull)
@@ -1895,24 +1899,24 @@ model StaffShiftRegulation {
 }
 
 model StaffShiftRegulationVersion {
-  id              String    @id @default(uuid())
-  tenantId        String
-  regulationId    String
-  storeId         String?
-  createdByUserId String?
-  assessmentId    String?
-  version         Int
-  title           String
-  description     String?
-  shiftKind       String
-  roleScope       String
-  sections        Json
-  attachments     Json?
-  requiresAssessmentRetake Boolean @default(false)
-  assessmentTitle String?
-  effectiveFrom   DateTime?
-  publishedAt     DateTime?
-  createdAt       DateTime  @default(now())
+  id                       String    @id @default(uuid())
+  tenantId                 String
+  regulationId             String
+  storeId                  String?
+  createdByUserId          String?
+  assessmentId             String?
+  version                  Int
+  title                    String
+  description              String?
+  shiftKind                String
+  roleScope                String
+  sections                 Json
+  attachments              Json?
+  requiresAssessmentRetake Boolean   @default(false)
+  assessmentTitle          String?
+  effectiveFrom            DateTime?
+  publishedAt              DateTime?
+  createdAt                DateTime  @default(now())
 
   tenant        Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   regulation    StaffShiftRegulation @relation(fields: [regulationId], references: [id], onDelete: Cascade)
@@ -2054,18 +2058,18 @@ model StaffDisciplinePolicy {
 }
 
 model StaffDisciplineRule {
-  id              String   @id @default(uuid())
-  tenantId        String
-  createdByUserId String?
-  category        String
-  title           String
-  firstFineAmount Decimal  @default(0) @db.Decimal(12, 2)
-  secondFineAmount Decimal @default(0) @db.Decimal(12, 2)
-  thirdFineAmount Decimal  @default(0) @db.Decimal(12, 2)
-  isActive        Boolean  @default(true)
-  sortOrder       Int      @default(0)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id               String   @id @default(uuid())
+  tenantId         String
+  createdByUserId  String?
+  category         String
+  title            String
+  firstFineAmount  Decimal  @default(0) @db.Decimal(12, 2)
+  secondFineAmount Decimal  @default(0) @db.Decimal(12, 2)
+  thirdFineAmount  Decimal  @default(0) @db.Decimal(12, 2)
+  isActive         Boolean  @default(true)
+  sortOrder        Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   tenant        Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   createdByUser User?                   @relation("StaffDisciplineRuleCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
@@ -2230,13 +2234,13 @@ model StaffChatReadReceipt {
 }
 
 model StaffNotification {
-  id                   String   @id @default(uuid())
+  id                   String    @id @default(uuid())
   tenantId             String
   storeId              String?
   sourceType           String
   sourceId             String?
-  severity             String   @default("WARNING")
-  status               String   @default("OPEN")
+  severity             String    @default("WARNING")
+  status               String    @default("OPEN")
   title                String
   message              String?
   actionLabel          String?
@@ -2247,8 +2251,8 @@ model StaffNotification {
   acknowledgedByUserId String?
   resolvedAt           DateTime?
   resolvedByUserId     String?
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
   tenant             Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   store              Store? @relation(fields: [storeId], references: [id], onDelete: SetNull)

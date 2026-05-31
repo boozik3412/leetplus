@@ -32,4 +32,17 @@ export class AdminController {
   ) {
     return this.adminService.addTenantSupportNote(user, tenantId, body ?? {});
   }
+
+  @Post('integration-sources/:sourceId/support-action')
+  updateIntegrationSourceSupportAction(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('sourceId') sourceId: string,
+    @Body() body: unknown,
+  ) {
+    return this.adminService.updateIntegrationSourceSupportAction(
+      user,
+      sourceId,
+      body ?? {},
+    );
+  }
 }

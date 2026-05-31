@@ -27,9 +27,14 @@ export type AdminOverview = {
     productsCount: number;
     salesFactsCount: number;
     langameSources: {
+      id: string;
       domain: string;
       isActive: boolean;
       lastSyncedAt: string | null;
+      supportDisabledAt: string | null;
+      supportDisabledReason: string | null;
+      supportReviewRequestedAt: string | null;
+      supportReviewReason: string | null;
     }[];
     diagnostics: {
       severity: "OK" | "WARNING" | "CRITICAL";

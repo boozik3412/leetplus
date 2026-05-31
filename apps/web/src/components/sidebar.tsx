@@ -592,7 +592,7 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
       items: group.items.filter((item) => canAccessPath(user, item.href)),
     }))
     .filter((group) => group.items.length > 0);
-  const canViewDashboard = canAccessPath(user, "/dashboard");
+  const showHomeLink = Boolean(user);
   const isDashboardArea = isDashboardPath(pathname);
   const currentProductArea = resolveCurrentProductArea(pathname);
   const hasOpenNavGroup = Object.values(openNavGroups).some(Boolean);
@@ -717,7 +717,7 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
               </div>
             </div>
             <nav className="flex-1 space-y-1 overflow-y-auto p-3">
-              {canViewDashboard ? (
+              {showHomeLink ? (
                 <NavLink
                   href="/dashboard"
                   label="Главная"
@@ -756,7 +756,7 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
           <LogoLink />
         </div>
         <nav className="flex-1 space-y-2 overflow-visible px-3 py-4">
-          {canViewDashboard ? (
+          {showHomeLink ? (
             <>
               <CompactHomeLink
                 isActive={isDashboardArea}

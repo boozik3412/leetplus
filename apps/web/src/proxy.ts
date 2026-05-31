@@ -16,6 +16,12 @@ const publicPathPrefixes = [
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  const dashboardCanonicalResponse = canonicalizeDashboardUrl(request);
+
+  if (dashboardCanonicalResponse) {
+    return dashboardCanonicalResponse;
+  }
+
   if (isPublicPath(pathname)) {
     return NextResponse.next();
   }
@@ -43,6 +49,27 @@ function isPublicPath(pathname: string) {
   }
 
   return /\.[a-z0-9]+$/i.test(pathname);
+}
+
+function canonicalizeDashboardUrl(request: NextRequest) {
+  const { nextUrl } = request;
+
+  if (
+    nextUrl.pathname !== "/dashboard" &&
+    !nextUrl.pathname.startsWith("/dashboard/")
+  ) {
+    return null;
+  }
+
+  if (!nextUrl.searchParams.has("skuGrouping")) {
+    return null;
+  }
+
+  const canonicalUrl = nextUrl.clone();
+
+  canonicalUrl.searchParams.delete("skuGrouping");
+
+  return NextResponse.redirect(canonicalUrl);
 }
 
 function isExpiredJwt(token: string) {

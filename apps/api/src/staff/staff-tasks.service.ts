@@ -26,6 +26,16 @@ const taskStatuses = [
 ] as const;
 
 const taskFilterStatuses = ['all', 'OVERDUE', ...taskStatuses] as const;
+const taskViewModes = [
+  'all',
+  'today',
+  'overdue',
+  'my',
+  'byClub',
+  'byEmployee',
+  'byShift',
+  'byStatus',
+] as const;
 const taskTypes = [
   'ONE_TIME',
   'SHIFT',
@@ -46,15 +56,18 @@ const taskSortKeys = [
 
 export type StaffTaskStatus = (typeof taskStatuses)[number];
 export type StaffTaskFilterStatus = (typeof taskFilterStatuses)[number];
+export type StaffTaskViewMode = (typeof taskViewModes)[number];
 export type StaffTaskType = (typeof taskTypes)[number];
 export type StaffTaskPriority = (typeof taskPriorities)[number];
 export type StaffTaskSortKey = (typeof taskSortKeys)[number];
 
 export type StaffTasksQuery = {
+  view?: StaffTaskViewMode;
   status?: StaffTaskFilterStatus;
   type?: StaffTaskType | 'all';
   priority?: StaffTaskPriority | 'all';
   storeId?: string;
+  shiftId?: string;
   assignedToUserId?: string;
   search?: string;
   dueFrom?: string;
@@ -92,10 +105,12 @@ export type StaffTaskCommentDto = {
 
 export type StaffTaskReport = {
   filters: {
+    view: StaffTaskViewMode;
     status: StaffTaskFilterStatus;
     type: StaffTaskType | 'all';
     priority: StaffTaskPriority | 'all';
     storeId: string | null;
+    shiftId: string | null;
     assignedToUserId: string | null;
     search: string | null;
     dueFrom: string | null;
@@ -113,9 +128,39 @@ export type StaffTaskReport = {
     overdue: number;
     canceled: number;
   };
+  quickViews: Array<{
+    key: StaffTaskViewMode;
+    label: string;
+    count: number;
+  }>;
+  groups: {
+    byClub: StaffTaskGroup[];
+    byEmployee: StaffTaskGroup[];
+    byShift: StaffTaskGroup[];
+    byStatus: StaffTaskGroup[];
+  };
   rows: StaffTaskResponse[];
   users: Array<{ id: string; email: string; fullName: string | null }>;
   stores: Array<{ id: string; name: string; isActive: boolean }>;
+};
+
+export type StaffTaskGroup = {
+  key: string;
+  label: string;
+  hint: string | null;
+  total: number;
+  open: number;
+  inProgress: number;
+  onReview: number;
+  done: number;
+  overdue: number;
+  canceled: number;
+  filter: {
+    status?: StaffTaskFilterStatus;
+    storeId?: string;
+    assignedToUserId?: string;
+    shiftId?: string;
+  };
 };
 
 export type StaffTaskResponse = {
@@ -209,36 +254,73 @@ export class StaffTasksService {
   ): Promise<StaffTaskReport> {
     const { tenantId } = await this.tenantContextService.resolve(user);
     const filters = this.resolveFilters(query);
-    const baseWhere = this.buildWhere(tenantId, filters, false);
-    const rowsWhere = this.buildWhere(tenantId, filters, true);
+    const baseWhere = this.buildWhere(tenantId, filters, false, user.id);
+    const rowsWhere = this.buildWhere(tenantId, filters, true, user.id);
+    const quickViewWhere = this.buildQuickViewWhere(tenantId, filters, user.id);
 
-    const [rows, summaryRows, users, stores] = await Promise.all([
-      this.prisma.staffTask.findMany({
-        where: rowsWhere,
-        include: taskInclude,
-        orderBy: this.buildOrderBy(filters),
-        take: filters.pageSize,
-      }),
-      this.prisma.staffTask.findMany({
-        where: baseWhere,
-        select: { status: true, dueAt: true },
-        take: 2000,
-      }),
-      this.prisma.user.findMany({
-        where: { tenantId, isActive: true },
-        select: { id: true, email: true, fullName: true },
-        orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
-      }),
-      this.prisma.store.findMany({
-        where: { tenantId },
-        select: { id: true, name: true, isActive: true },
-        orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
-      }),
-    ]);
+    const [rows, summaryRows, quickRows, groupRows, users, stores] =
+      await Promise.all([
+        this.prisma.staffTask.findMany({
+          where: rowsWhere,
+          include: taskInclude,
+          orderBy: this.buildOrderBy(filters),
+          take: filters.pageSize,
+        }),
+        this.prisma.staffTask.findMany({
+          where: baseWhere,
+          select: { status: true, dueAt: true },
+          take: 2000,
+        }),
+        this.prisma.staffTask.findMany({
+          where: quickViewWhere,
+          select: {
+            status: true,
+            dueAt: true,
+            assignedToUserId: true,
+            storeId: true,
+            shiftId: true,
+            type: true,
+          },
+          take: 5000,
+        }),
+        this.prisma.staffTask.findMany({
+          where: quickViewWhere,
+          select: {
+            status: true,
+            dueAt: true,
+            store: { select: { id: true, name: true } },
+            assignedToUser: {
+              select: { id: true, email: true, fullName: true },
+            },
+            shift: {
+              select: {
+                id: true,
+                externalShiftId: true,
+                startedAt: true,
+                store: { select: { name: true } },
+              },
+            },
+            type: true,
+          },
+          take: 5000,
+        }),
+        this.prisma.user.findMany({
+          where: { tenantId, isActive: true },
+          select: { id: true, email: true, fullName: true },
+          orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
+        }),
+        this.prisma.store.findMany({
+          where: { tenantId },
+          select: { id: true, name: true, isActive: true },
+          orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+        }),
+      ]);
 
     return {
       filters,
       summary: this.buildSummary(summaryRows),
+      quickViews: this.buildQuickViews(quickRows, user.id),
+      groups: this.buildGroups(groupRows),
       rows: rows.map((task) => this.toTaskResponse(task)),
       users,
       stores,
@@ -253,7 +335,7 @@ export class StaffTasksService {
     const filters = this.resolveFilters(query);
     const format = resolveStaffExportFormat(query.format);
     const rows = await this.prisma.staffTask.findMany({
-      where: this.buildWhere(tenantId, filters, true),
+      where: this.buildWhere(tenantId, filters, true, user.id),
       include: taskInclude,
       orderBy: this.buildOrderBy(filters),
       take: 10000,
@@ -471,6 +553,7 @@ export class StaffTasksService {
   }
 
   private resolveFilters(query: StaffTasksQuery): StaffTaskReport['filters'] {
+    const view = this.resolveOne(query.view, taskViewModes, 'all');
     const status = this.resolveOne(query.status, taskFilterStatuses, 'all');
     const type = this.resolveOne(
       query.type,
@@ -490,10 +573,12 @@ export class StaffTasksService {
     );
 
     return {
+      view,
       status,
       type,
       priority,
       storeId: this.normalizeOptionalString(query.storeId),
+      shiftId: this.normalizeOptionalString(query.shiftId),
       assignedToUserId: this.normalizeOptionalString(query.assignedToUserId),
       search: this.normalizeOptionalString(query.search),
       dueFrom: this.normalizeDateString(query.dueFrom),
@@ -508,16 +593,37 @@ export class StaffTasksService {
     tenantId: string,
     filters: StaffTaskReport['filters'],
     includeStatus: boolean,
+    currentUserId: string,
   ): Prisma.StaffTaskWhereInput {
     const where: Prisma.StaffTaskWhereInput = { tenantId };
+    const and: Prisma.StaffTaskWhereInput[] = [];
+    const now = new Date();
 
     if (includeStatus && filters.status !== 'all') {
       if (filters.status === 'OVERDUE') {
-        where.status = { notIn: ['DONE', 'CANCELED'] };
-        where.dueAt = { lt: new Date() };
+        and.push({
+          status: { notIn: ['DONE', 'CANCELED'] },
+          dueAt: { lt: now },
+        });
       } else {
-        where.status = filters.status;
+        and.push({ status: filters.status });
       }
+    }
+
+    if (includeStatus && filters.view === 'today') {
+      const { start, end } = this.todayRange();
+      and.push({
+        status: { notIn: ['DONE', 'CANCELED'] },
+        dueAt: { gte: start, lte: end },
+      });
+    }
+
+    if (includeStatus && filters.view === 'overdue') {
+      and.push({ status: { notIn: ['DONE', 'CANCELED'] }, dueAt: { lt: now } });
+    }
+
+    if (includeStatus && filters.view === 'byShift' && !filters.shiftId) {
+      and.push({ OR: [{ shiftId: { not: null } }, { type: 'SHIFT' }] });
     }
 
     if (filters.type !== 'all') {
@@ -532,29 +638,63 @@ export class StaffTasksService {
       where.storeId = filters.storeId;
     }
 
+    if (filters.shiftId) {
+      where.shiftId = filters.shiftId;
+    }
+
     if (filters.assignedToUserId) {
       where.assignedToUserId = filters.assignedToUserId;
+    } else if (includeStatus && filters.view === 'my') {
+      where.assignedToUserId = currentUserId;
     }
 
     if (filters.search) {
-      where.OR = [
-        { title: { contains: filters.search, mode: 'insensitive' } },
-        { description: { contains: filters.search, mode: 'insensitive' } },
-      ];
+      and.push({
+        OR: [
+          { title: { contains: filters.search, mode: 'insensitive' } },
+          { description: { contains: filters.search, mode: 'insensitive' } },
+        ],
+      });
     }
 
     if (filters.dueFrom || filters.dueTo) {
-      where.dueAt = {
-        ...(filters.dueFrom
-          ? { gte: new Date(`${filters.dueFrom}T00:00:00.000Z`) }
-          : {}),
-        ...(filters.dueTo
-          ? { lte: new Date(`${filters.dueTo}T23:59:59.999Z`) }
-          : {}),
-      };
+      and.push({
+        dueAt: {
+          ...(filters.dueFrom
+            ? { gte: new Date(`${filters.dueFrom}T00:00:00.000Z`) }
+            : {}),
+          ...(filters.dueTo
+            ? { lte: new Date(`${filters.dueTo}T23:59:59.999Z`) }
+            : {}),
+        },
+      });
+    }
+
+    if (and.length > 0) {
+      where.AND = and;
     }
 
     return where;
+  }
+
+  private buildQuickViewWhere(
+    tenantId: string,
+    filters: StaffTaskReport['filters'],
+    currentUserId: string,
+  ) {
+    return this.buildWhere(
+      tenantId,
+      {
+        ...filters,
+        view: 'all',
+        status: 'all',
+        shiftId: filters.view === 'byShift' ? null : filters.shiftId,
+        assignedToUserId:
+          filters.view === 'my' ? null : filters.assignedToUserId,
+      },
+      false,
+      currentUserId,
+    );
   }
 
   private buildOrderBy(
@@ -619,6 +759,201 @@ export class StaffTasksService {
     });
 
     return summary;
+  }
+
+  private buildQuickViews(
+    rows: Array<{
+      status: string;
+      dueAt: Date | null;
+      assignedToUserId: string | null;
+      storeId: string | null;
+      shiftId: string | null;
+      type: string;
+    }>,
+    currentUserId: string,
+  ): StaffTaskReport['quickViews'] {
+    const { start, end } = this.todayRange();
+    const activeRows = rows.filter((row) => !this.isTerminalStatus(row.status));
+
+    return [
+      { key: 'all', label: 'Все задачи', count: rows.length },
+      {
+        key: 'today',
+        label: 'Сегодня',
+        count: activeRows.filter(
+          (row) => row.dueAt && row.dueAt >= start && row.dueAt <= end,
+        ).length,
+      },
+      {
+        key: 'overdue',
+        label: 'Просрочены',
+        count: activeRows.filter((row) => row.dueAt && row.dueAt < new Date())
+          .length,
+      },
+      {
+        key: 'my',
+        label: 'Мои',
+        count: rows.filter((row) => row.assignedToUserId === currentUserId)
+          .length,
+      },
+      {
+        key: 'byClub',
+        label: 'По клубам',
+        count: rows.filter((row) => row.storeId).length,
+      },
+      {
+        key: 'byEmployee',
+        label: 'По сотрудникам',
+        count: rows.filter((row) => row.assignedToUserId).length,
+      },
+      {
+        key: 'byShift',
+        label: 'По сменам',
+        count: rows.filter((row) => row.shiftId || row.type === 'SHIFT').length,
+      },
+      { key: 'byStatus', label: 'По статусам', count: rows.length },
+    ];
+  }
+
+  private buildGroups(
+    rows: Array<{
+      status: string;
+      dueAt: Date | null;
+      store: { id: string; name: string } | null;
+      assignedToUser: {
+        id: string;
+        email: string;
+        fullName: string | null;
+      } | null;
+      shift: {
+        id: string;
+        externalShiftId: string;
+        startedAt: Date | null;
+        store: { name: string } | null;
+      } | null;
+      type: string;
+    }>,
+  ): StaffTaskReport['groups'] {
+    return {
+      byClub: this.groupTasks(rows, (row) => ({
+        key: row.store?.id ?? 'network',
+        label: row.store?.name ?? 'Вся сеть',
+        hint: row.store ? null : 'Задачи без привязки к клубу',
+        filter: row.store ? { storeId: row.store.id } : {},
+      })),
+      byEmployee: this.groupTasks(rows, (row) => ({
+        key: row.assignedToUser?.id ?? 'unassigned',
+        label:
+          row.assignedToUser?.fullName ??
+          row.assignedToUser?.email ??
+          'Не назначено',
+        hint: row.assignedToUser ? row.assignedToUser.email : null,
+        filter: row.assignedToUser
+          ? { assignedToUserId: row.assignedToUser.id }
+          : {},
+      })),
+      byShift: this.groupTasks(
+        rows.filter((row) => row.shift || row.type === 'SHIFT'),
+        (row) => ({
+          key: row.shift?.id ?? 'shift-type',
+          label: row.shift
+            ? `Смена ${row.shift.externalShiftId}`
+            : 'Сменные задачи без факта смены',
+          hint: row.shift
+            ? [
+                row.shift.store?.name,
+                row.shift.startedAt
+                  ? formatStaffDateTime(row.shift.startedAt.toISOString())
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(' · ') || null
+            : 'Тип задачи SHIFT',
+          filter: row.shift ? { shiftId: row.shift.id } : {},
+        }),
+      ),
+      byStatus: this.groupTasks(rows, (row) => ({
+        key: row.status,
+        label: this.taskStatusLabel(row.status as StaffTaskStatus),
+        hint: null,
+        filter: { status: row.status as StaffTaskFilterStatus },
+      })),
+    };
+  }
+
+  private groupTasks<T>(
+    rows: T[],
+    resolver: (row: T) => {
+      key: string;
+      label: string;
+      hint: string | null;
+      filter: StaffTaskGroup['filter'];
+    },
+  ) {
+    const groups = new Map<string, StaffTaskGroup>();
+    const now = new Date();
+
+    rows.forEach((row) => {
+      const meta = resolver(row);
+      const group = groups.get(meta.key) ?? {
+        key: meta.key,
+        label: meta.label,
+        hint: meta.hint,
+        total: 0,
+        open: 0,
+        inProgress: 0,
+        onReview: 0,
+        done: 0,
+        overdue: 0,
+        canceled: 0,
+        filter: meta.filter,
+      };
+      const task = row as { status: string; dueAt: Date | null };
+
+      group.total += 1;
+      if (task.status === 'OPEN') {
+        group.open += 1;
+      } else if (task.status === 'IN_PROGRESS') {
+        group.inProgress += 1;
+      } else if (task.status === 'ON_REVIEW') {
+        group.onReview += 1;
+      } else if (task.status === 'DONE') {
+        group.done += 1;
+      } else if (task.status === 'CANCELED') {
+        group.canceled += 1;
+      }
+
+      if (
+        task.dueAt &&
+        task.dueAt < now &&
+        !this.isTerminalStatus(task.status)
+      ) {
+        group.overdue += 1;
+      }
+
+      groups.set(meta.key, group);
+    });
+
+    return Array.from(groups.values()).sort((left, right) => {
+      if (right.overdue !== left.overdue) {
+        return right.overdue - left.overdue;
+      }
+
+      return right.total - left.total || left.label.localeCompare(right.label);
+    });
+  }
+
+  private todayRange() {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setHours(23, 59, 59, 999);
+
+    return { start, end };
+  }
+
+  private isTerminalStatus(status: string) {
+    return status === 'DONE' || status === 'CANCELED';
   }
 
   private async normalizeTaskData(

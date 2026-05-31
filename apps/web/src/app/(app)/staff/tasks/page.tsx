@@ -9,10 +9,12 @@ import {
   type StaffTask,
   type StaffTaskFilterStatus,
   type StaffTaskFilters,
+  type StaffTaskGroup,
   type StaffTaskPriority,
   type StaffTaskSortKey,
   type StaffTaskStatus,
   type StaffTaskType,
+  type StaffTaskViewMode,
 } from "@/lib/staff-tasks";
 
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
@@ -25,6 +27,20 @@ const statusLabels: Record<StaffTaskFilterStatus, string> = {
   DONE: "Готово",
   OVERDUE: "Просрочено",
   CANCELED: "Отменены",
+};
+
+const groupViewLabels: Partial<Record<StaffTaskViewMode, string>> = {
+  byClub: "Задачи по клубам",
+  byEmployee: "Задачи по сотрудникам",
+  byShift: "Задачи по сменам",
+  byStatus: "Задачи по статусам",
+};
+
+const groupViewDescriptions: Partial<Record<StaffTaskViewMode, string>> = {
+  byClub: "Где скапливается работа и просрочка по клубам.",
+  byEmployee: "Нагрузка, просрочка и проверка по ответственным.",
+  byShift: "Сменные задачи и задачи, уже связанные с фактами смен.",
+  byStatus: "Рабочая воронка задач от новых до закрытых.",
 };
 
 const taskStatusLabels: Record<StaffTaskStatus, string> = {
@@ -78,6 +94,19 @@ function isStatus(value: string | undefined): value is StaffTaskFilterStatus {
   );
 }
 
+function isView(value: string | undefined): value is StaffTaskViewMode {
+  return (
+    value === "all" ||
+    value === "today" ||
+    value === "overdue" ||
+    value === "my" ||
+    value === "byClub" ||
+    value === "byEmployee" ||
+    value === "byShift" ||
+    value === "byStatus"
+  );
+}
+
 function isType(value: string | undefined): value is StaffTaskType | "all" {
   return (
     value === "all" ||
@@ -114,6 +143,7 @@ function isSort(value: string | undefined): value is StaffTaskSortKey {
 }
 
 function resolveFilters(params: Awaited<SearchParams>): StaffTaskFilters {
+  const view = searchParam(params.view);
   const status = searchParam(params.status);
   const type = searchParam(params.type);
   const priority = searchParam(params.priority);
@@ -121,10 +151,12 @@ function resolveFilters(params: Awaited<SearchParams>): StaffTaskFilters {
   const direction = searchParam(params.direction);
 
   return {
+    view: isView(view) ? view : "all",
     status: isStatus(status) ? status : "all",
     type: isType(type) ? type : "all",
     priority: isPriority(priority) ? priority : "all",
     storeId: searchParam(params.storeId),
+    shiftId: searchParam(params.shiftId),
     assignedToUserId: searchParam(params.assignedToUserId),
     search: searchParam(params.search)?.trim(),
     dueFrom: searchParam(params.dueFrom),
@@ -151,6 +183,26 @@ function exportHref(format: "csv" | "xlsx", filters: StaffTaskFilters) {
   );
 
   return `/api/staff/tasks/export?${params.toString()}`;
+}
+
+function taskListHref(
+  filters: StaffTaskFilters,
+  patch: Record<string, string | null | undefined>,
+) {
+  const params = new URLSearchParams();
+  const next: Record<string, string | null | undefined> = {
+    ...filters,
+    ...patch,
+  };
+
+  Object.entries(next).forEach(([key, value]) => {
+    if (value) {
+      params.set(key, value);
+    }
+  });
+
+  const value = params.toString();
+  return value ? `/staff/tasks?${value}` : "/staff/tasks";
 }
 
 function formatDateTime(value: string | null) {
@@ -210,6 +262,110 @@ function priorityClass(priority: StaffTaskPriority) {
   return "text-zinc-700 dark:text-zinc-200";
 }
 
+function StaffTaskGroupSummary({
+  title,
+  description,
+  groups,
+  filters,
+}: {
+  title: string;
+  description: string;
+  groups: StaffTaskGroup[];
+  filters: StaffTaskFilters;
+}) {
+  return (
+    <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+            Быстрый разбор
+          </p>
+          <h2 className="mt-1 text-lg font-semibold">{title}</h2>
+          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+            {description}
+          </p>
+        </div>
+        <Link
+          href={taskListHref(filters, {
+            view: "all",
+            status: "all",
+            shiftId: null,
+          })}
+          className="text-sm font-semibold text-emerald-700 hover:text-emerald-600 dark:text-emerald-300 dark:hover:text-emerald-200"
+        >
+          Сбросить представление
+        </Link>
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {groups.slice(0, 12).map((group) => {
+          const activeCount =
+            group.open + group.inProgress + group.onReview;
+          const href = taskListHref(filters, {
+            view: "all",
+            status: group.filter.status ?? filters.status ?? "all",
+            storeId: group.filter.storeId ?? filters.storeId,
+            assignedToUserId:
+              group.filter.assignedToUserId ?? filters.assignedToUserId,
+            shiftId: group.filter.shiftId ?? filters.shiftId,
+          });
+
+          return (
+            <Link
+              key={group.key}
+              href={href}
+              className="rounded-lg border border-zinc-200 p-4 transition hover:border-emerald-300 hover:bg-emerald-50 dark:border-zinc-800 dark:hover:border-emerald-500/70 dark:hover:bg-emerald-500/10"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h3 className="truncate text-sm font-semibold">
+                    {group.label}
+                  </h3>
+                  {group.hint ? (
+                    <p className="mt-1 truncate text-xs text-zinc-500">
+                      {group.hint}
+                    </p>
+                  ) : null}
+                </div>
+                <span className="rounded-full bg-zinc-100 px-2 py-1 text-xs font-bold text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
+                  {formatNumber(group.total)}
+                </span>
+              </div>
+
+              <dl className="mt-4 grid grid-cols-3 gap-2 text-xs">
+                <div>
+                  <dt className="font-bold uppercase text-zinc-500">
+                    Активно
+                  </dt>
+                  <dd className="mt-1 text-base font-semibold">
+                    {formatNumber(activeCount)}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="font-bold uppercase text-zinc-500">
+                    Проср.
+                  </dt>
+                  <dd className="mt-1 text-base font-semibold text-red-600 dark:text-red-300">
+                    {formatNumber(group.overdue)}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="font-bold uppercase text-zinc-500">
+                    Готово
+                  </dt>
+                  <dd className="mt-1 text-base font-semibold text-emerald-700 dark:text-emerald-300">
+                    {formatNumber(group.done)}
+                  </dd>
+                </div>
+              </dl>
+            </Link>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 export default async function StaffTasksPage({
   searchParams,
 }: {
@@ -219,6 +375,16 @@ export default async function StaffTasksPage({
   const params = await searchParams;
   const filters = resolveFilters(params);
   const report = await getStaffTaskReport(filters);
+  const activeGroupRows =
+    report.filters.view === "byClub"
+      ? report.groups.byClub
+      : report.filters.view === "byEmployee"
+        ? report.groups.byEmployee
+        : report.filters.view === "byShift"
+          ? report.groups.byShift
+          : report.filters.view === "byStatus"
+            ? report.groups.byStatus
+            : [];
 
   const summaryCards = [
     { label: "Всего", value: report.summary.total },
@@ -295,6 +461,45 @@ export default async function StaffTasksPage({
               </p>
             </div>
           ))}
+        </section>
+
+        <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="flex flex-wrap gap-2">
+            {report.quickViews.map((view) => {
+              const isActive = report.filters.view === view.key;
+              const href = taskListHref(filters, {
+                view: view.key,
+                status:
+                  view.key === "today" || view.key === "overdue"
+                    ? "all"
+                    : filters.status,
+                shiftId: view.key === "byShift" ? null : filters.shiftId,
+              });
+
+              return (
+                <Link
+                  key={view.key}
+                  href={href}
+                  className={`inline-flex h-10 items-center gap-2 rounded-md border px-3 text-sm font-semibold transition ${
+                    isActive
+                      ? "border-emerald-400 bg-emerald-500 text-zinc-950"
+                      : "border-zinc-200 text-zinc-700 hover:border-emerald-300 hover:bg-emerald-50 dark:border-zinc-800 dark:text-zinc-200 dark:hover:border-emerald-500/70 dark:hover:bg-emerald-500/10"
+                  }`}
+                >
+                  <span>{view.label}</span>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-xs ${
+                      isActive
+                        ? "bg-zinc-950/10 text-zinc-950"
+                        : "bg-zinc-100 text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300"
+                    }`}
+                  >
+                    {formatNumber(view.count)}
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
         </section>
 
         <section className="mt-6">
@@ -381,6 +586,18 @@ export default async function StaffTasksPage({
             <span>Сортировка: {sortLabels[report.filters.sort]}</span>
           </div>
         </section>
+
+        {activeGroupRows.length > 0 ? (
+          <StaffTaskGroupSummary
+            filters={filters}
+            groups={activeGroupRows}
+            title={groupViewLabels[report.filters.view] ?? "Группировка задач"}
+            description={
+              groupViewDescriptions[report.filters.view] ??
+              "Сводка по текущему представлению задач."
+            }
+          />
+        ) : null}
 
         <section className="mt-6 space-y-3">
           {report.rows.length === 0 ? (

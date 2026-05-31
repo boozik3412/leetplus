@@ -327,13 +327,13 @@ LeetPlus должен развиваться из набора отчетов в
 - Готово: добавлено первое tenant-scoped binary attachment storage для staff operations: `StaffAttachment`, upload/download API `/staff/attachments`, web proxy и upload controls в task evidence, checklist evidence, shift-regulation materials и knowledge-base materials.
 - Готово: создан первый staff directory, независимый от guest analytics: `StaffMember`, API `/staff/directory`, UI `/staff/directory`, связь с LeetPlus user account, клубом, ролью, статусом и старой staff-control identity mapping там, где она полезна.
 - Готово: поддержана ручная employee-to-Langame mapping через `externalDomain` и `working_shifts.user_id`; это готовит дальнейшее связывание смен, рейтингов и операционных задач с устойчивой идентичностью сотрудника.
-- Добавить типы задач: one-time, shift, recurring, long-term, personal, club, role.
-- Добавить статусы задач: new, in progress, on review, done, overdue, canceled.
-- Добавить priority, deadline, responsible employee, club, shift, author, observer, labels, attachments, comments и checklist внутри задачи.
+- Готово: добавлены типы задач one-time, shift, recurring, long-term, personal, club и role.
+- Готово: добавлены статусы задач new/open, in progress, on review, done, overdue и canceled.
+- Начато: задачи поддерживают priority, deadline, responsible employee, club, shift, author, labels, comments, evidence attachments и checklist; observer остается отдельным будущим расширением.
 - Готово: добавлены recurring rules для задач: daily, weekly, monthly, opening shift и closing shift, с привязкой к шаблону задачи, клубу, исполнителю, плановому времени и ручным запуском перед автоматизацией.
-- Добавить templates для типовых операций клуба.
-- Добавить базовые views списка задач: today, overdue, my tasks, by club, by employee, by shift, by status.
-- Добавить audit history для каждой задачи.
+- Готово: templates для типовых операций клуба вынесены в `/staff/task-templates` и могут создавать задачи в один клик.
+- Готово: `/staff/tasks` получил базовые views списка задач: today, overdue, my tasks, by club, by employee, by shift и by status с быстрыми счетчиками и drilldown-фильтрами.
+- Готово: audit history доступна в каждой задаче через компактный блок истории действий.
 - Готово: `/staff/task-rules` стал конструктором регулярных задач: каталог правил, создание/редактирование, расписание, связь с `StaffTaskTemplate`, next run preview и ручное создание задачи из правила.
 - Готово: добавлен безопасный scheduler автосоздания задач по active recurring rules, защита от дублей через журнал `StaffTaskRecurringRuleRun`, сервисный endpoint `/staff/task-rules/scheduled/run-due`, ручная проверка due-rules из UI и журнал автозапусков в `/staff/task-rules`.
 

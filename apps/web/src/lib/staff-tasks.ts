@@ -9,6 +9,16 @@ export type StaffTaskStatus =
 
 export type StaffTaskFilterStatus = StaffTaskStatus | "OVERDUE" | "all";
 
+export type StaffTaskViewMode =
+  | "all"
+  | "today"
+  | "overdue"
+  | "my"
+  | "byClub"
+  | "byEmployee"
+  | "byShift"
+  | "byStatus";
+
 export type StaffTaskType =
   | "ONE_TIME"
   | "SHIFT"
@@ -86,10 +96,12 @@ export type StaffTask = {
 };
 
 export type StaffTaskFilters = {
+  view?: StaffTaskViewMode;
   status?: StaffTaskFilterStatus;
   type?: StaffTaskType | "all";
   priority?: StaffTaskPriority | "all";
   storeId?: string;
+  shiftId?: string;
   assignedToUserId?: string;
   search?: string;
   dueFrom?: string;
@@ -101,9 +113,13 @@ export type StaffTaskFilters = {
 
 export type StaffTaskReport = {
   filters: Required<
-    Pick<StaffTaskFilters, "status" | "type" | "priority" | "sort" | "direction">
+    Pick<
+      StaffTaskFilters,
+      "view" | "status" | "type" | "priority" | "sort" | "direction"
+    >
   > & {
     storeId: string | null;
+    shiftId: string | null;
     assignedToUserId: string | null;
     search: string | null;
     dueFrom: string | null;
@@ -119,9 +135,39 @@ export type StaffTaskReport = {
     overdue: number;
     canceled: number;
   };
+  quickViews: Array<{
+    key: StaffTaskViewMode;
+    label: string;
+    count: number;
+  }>;
+  groups: {
+    byClub: StaffTaskGroup[];
+    byEmployee: StaffTaskGroup[];
+    byShift: StaffTaskGroup[];
+    byStatus: StaffTaskGroup[];
+  };
   rows: StaffTask[];
   users: StaffTaskUser[];
   stores: StaffTaskStore[];
+};
+
+export type StaffTaskGroup = {
+  key: string;
+  label: string;
+  hint: string | null;
+  total: number;
+  open: number;
+  inProgress: number;
+  onReview: number;
+  done: number;
+  overdue: number;
+  canceled: number;
+  filter: {
+    status?: StaffTaskFilterStatus;
+    storeId?: string;
+    assignedToUserId?: string;
+    shiftId?: string;
+  };
 };
 
 export async function getStaffTaskReport(

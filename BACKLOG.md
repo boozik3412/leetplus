@@ -387,6 +387,7 @@ Acceptance criteria:
 Goal: make onboarding and standard knowledge measurable.
 
 - Done: first knowledge base layer added: tenant-scoped `StaffKnowledgeArticle`, API `/staff/knowledge-base`, page `/staff/knowledge-base`, search, categories, tags, role visibility, store scope, draft/published/archive statuses, and manager-only editing.
+- Planned: evolve `/staff/knowledge-base` into a full standalone knowledge-base section for standards, instructions, training materials, files and videos, with article templates, folders/categories, approval flow, version history, required-reading status, and links from regulations, checklists, violations, training courses, and administrator onboarding.
 - Done: training materials can now be attached to knowledge articles as structured text blocks, file links, images, video links, external links, notes, and required flags.
 - Done: courses by role and club added: tenant-scoped `StaffTrainingCourse`, API `/staff/training-courses`, page `/staff/training-courses`, catalog, filters, draft/active/archive statuses, required flag, due date, club scope, role visibility, ordered steps, knowledge-base article links, text, links, and task steps.
 - Done: onboarding plans for new administrators added: tenant-scoped `StaffOnboardingPlan`, API `/staff/onboarding`, page `/staff/onboarding`, role/club scope, draft/active/archive statuses, duration, ordered adaptation steps, links to courses, task templates, checklist templates, regulations, text, and external links.

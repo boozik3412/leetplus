@@ -369,6 +369,7 @@ Status: started. Goal: turn daily operating standards into controlled execution.
 - Done: shift regulations now support attached link materials: document, file, image, video, external URL, note, required flag, current regulation editing, and publication snapshots with attachment counts.
 - Done: checklist template builder added with tenant-scoped `StaffChecklistTemplate`, migration, API `/staff/checklist-templates`, `/staff/checklist-templates` UI, sidebar entry, draft/active/archive statuses, sections, required fields, evidence requirements, scoring, club/role scope, and creation from a published regulation.
 - Done: preview/test mode is available directly inside employee-facing builders: shift regulations, checklist templates, task templates, training courses, onboarding routes, and knowledge-base articles now have sandbox previews with fake answers/evidence, required-step readiness, employee-facing layout, and no real operational facts, tasks, training progress, or acknowledgements created.
+- Product rule: every new employee template or material builder (regulations, checklists, task templates, courses, onboarding, knowledge-base articles, and future staff standards) must include an employee-facing sandbox preview so a manager can test the flow without logging in as an administrator/employee and without creating real operational facts.
 - Started: add checklist runs tied to club, shift, employee, role, and scheduled time. Runs can now use either a published regulation snapshot or an active checklist template snapshot and store assigned user, club, optional Langame shift, schedule, status, answers, score, failed items, and evidence counters.
 - Done: standard checklist packs are available in `/staff/checklist-templates`: cash desk, PC zone, inventory handover, and administrator training load as editable drafts with sections, required answers, evidence, and scores.
 - Started: allow checklist items to create violation tasks automatically. Failed checklist answers now create high-priority staff follow-up tasks on submission.
@@ -379,6 +380,7 @@ Status: started. Goal: turn daily operating standards into controlled execution.
 Acceptance criteria:
 
 - Done: an administrator can complete an opening or closing shift checklist from a published regulation snapshot.
+- Done: a manager can preview/test a regulation or checklist template as an employee-facing flow before publication, with fake answers/evidence only.
 - Done: required items cannot be submitted for review without required evidence.
 - Done: a failed checklist item creates a follow-up task.
 - Done: a manager sees missed, late, failed, and returned checklist runs through the checklist workspace summary, filters, and the fuller execution report by club, shift, employee, and checklist.

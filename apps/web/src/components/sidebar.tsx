@@ -481,6 +481,9 @@ function CompactHomeLink({
       aria-label="Главная: сводный дашборд сети"
       aria-current={isActive ? "page" : undefined}
       onClick={onNavigate}
+      onFocus={onNavigate}
+      onMouseEnter={onNavigate}
+      onPointerEnter={onNavigate}
       className={compactGroupButtonClass({ isActive })}
     >
       <HomeIcon />
@@ -597,6 +600,20 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
   const isDashboardArea = isDashboardPath(pathname);
   const currentProductArea = resolveCurrentProductArea(pathname);
   const hasOpenNavGroup = Object.values(openNavGroups).some(Boolean);
+
+  useEffect(() => {
+    if (!isDashboardArea || !hasOpenNavGroup) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      setOpenNavGroups({});
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [hasOpenNavGroup, isDashboardArea]);
 
   useEffect(() => {
     if (!isDashboardArea || !searchParams.has("skuGrouping")) {

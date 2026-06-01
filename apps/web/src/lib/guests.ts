@@ -39,6 +39,7 @@ export type GuestDashboardRow = {
   currentCountHours: number | null;
   transactionAmount: number;
   barRevenue: number;
+  ltv: GuestLtvSummary;
   rfm: GuestRfmScore;
   churnRisk: GuestChurnRisk;
   segment: GuestSegment;
@@ -79,6 +80,17 @@ export type GuestRfmScore = {
   monetaryScore: number;
   totalScore: number;
   segment: GuestRfmSegment;
+};
+
+export type GuestLtvSummary = {
+  totalRevenue: number;
+  transactionRevenue: number;
+  barRevenue: number;
+  revenueDays: number;
+  firstRevenueAt: string | null;
+  lastRevenueAt: string | null;
+  averageRevenuePerRevenueDay: number;
+  averageRevenuePerCalendarDay: number;
 };
 
 export type GuestRetentionWindow = {
@@ -190,7 +202,8 @@ export type GuestListFilters = GuestsSummaryFilters & {
     | "lastActivity"
     | "registered"
     | "rfm"
-    | "churnRisk";
+    | "churnRisk"
+    | "ltv";
   direction?: "asc" | "desc";
 };
 

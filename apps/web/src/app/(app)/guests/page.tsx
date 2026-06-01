@@ -720,6 +720,7 @@ function GuestCompactRow({ row }: { row: GuestDashboardRow }) {
           {formatRubles(row.transactionAmount + row.barRevenue)}
         </p>
         <p className="text-xs text-zinc-500">
+          LTV {formatRubles(row.ltv.totalRevenue)} ·{" "}
           {formatNumber(row.sessionsCount)} сессий
         </p>
       </div>
@@ -750,6 +751,7 @@ function GuestListTable({
         </div>
         <div className="flex flex-wrap gap-2 text-xs font-medium">
           <SortLink filters={filters} sort="revenue" label="Деньги" />
+          <SortLink filters={filters} sort="ltv" label="LTV" />
           <SortLink filters={filters} sort="sessions" label="Сессии" />
           <SortLink filters={filters} sort="lastActivity" label="Активность" />
           <SortLink filters={filters} sort="registered" label="Регистрация" />
@@ -764,6 +766,7 @@ function GuestListTable({
                 <th className="px-4 py-3 text-left font-semibold">Сегмент</th>
                 <th className="px-4 py-3 text-right font-semibold">Сессии</th>
                 <th className="px-4 py-3 text-right font-semibold">Деньги</th>
+                <th className="px-4 py-3 text-right font-semibold">LTV</th>
                 <th className="px-4 py-3 text-left font-semibold">
                   Активность
                 </th>
@@ -798,6 +801,12 @@ function GuestListTable({
                     {formatRubles(row.transactionAmount + row.barRevenue)}
                     <p className="text-xs text-zinc-500">
                       бар {formatRubles(row.barRevenue)}
+                    </p>
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    {formatRubles(row.ltv.totalRevenue)}
+                    <p className="text-xs text-zinc-500">
+                      {formatNumber(row.ltv.revenueDays)} дн.
                     </p>
                   </td>
                   <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">

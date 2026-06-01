@@ -41,7 +41,8 @@ export type GuestListQuery = GuestsSummaryQuery & {
     | 'lastActivity'
     | 'registered'
     | 'rfm'
-    | 'churnRisk';
+    | 'churnRisk'
+    | 'ltv';
   direction?: 'asc' | 'desc';
 };
 
@@ -195,6 +196,7 @@ export type GuestDashboardRow = {
   currentCountHours: number | null;
   transactionAmount: number;
   barRevenue: number;
+  ltv: GuestLtvSummary;
   rfm: GuestRfmScore;
   churnRisk: GuestChurnRisk;
   segment: 'active' | 'new' | 'repeat' | 'risk' | 'lost' | 'quiet';
@@ -235,6 +237,17 @@ export type GuestRfmScore = {
   monetaryScore: number;
   totalScore: number;
   segment: GuestRfmSegment;
+};
+
+export type GuestLtvSummary = {
+  totalRevenue: number;
+  transactionRevenue: number;
+  barRevenue: number;
+  revenueDays: number;
+  firstRevenueAt: string | null;
+  lastRevenueAt: string | null;
+  averageRevenuePerRevenueDay: number;
+  averageRevenuePerCalendarDay: number;
 };
 
 export type GuestRetentionWindow = {
@@ -725,6 +738,11 @@ type GuestMetrics = {
   transactionAmount: number;
   barRevenue: number;
   barSalesCount: number;
+  lifetimeTransactionAmount: number;
+  lifetimeBarRevenue: number;
+  lifetimeRevenueDays: Set<string>;
+  lifetimeFirstRevenueAt: Date | null;
+  lifetimeLastRevenueAt: Date | null;
 };
 
 type StaffShiftMetrics = {
@@ -957,6 +975,12 @@ export class GuestsService {
         'Сессии',
         'Дни визитов',
         'Часы',
+        'LTV факт, руб',
+        'LTV операции, руб',
+        'LTV бар, руб',
+        'Дней с выручкой',
+        'Первая выручка',
+        'Последняя выручка',
         'Деньги, руб',
         'Бар, руб',
         'RFM балл',
@@ -985,6 +1009,12 @@ export class GuestsService {
         row.sessionsCount,
         row.visitsDays,
         row.playHours,
+        row.ltv.totalRevenue,
+        row.ltv.transactionRevenue,
+        row.ltv.barRevenue,
+        row.ltv.revenueDays,
+        this.formatExportDate(row.ltv.firstRevenueAt),
+        this.formatExportDate(row.ltv.lastRevenueAt),
         row.transactionAmount + row.barRevenue,
         row.barRevenue,
         row.rfm.totalScore,
@@ -2581,7 +2611,83 @@ export class GuestsService {
       ? allGuests.filter((guest) => metricsByGuestId.has(guest.id))
       : allGuests;
 
+    await this.applyLifetimeRevenueMetrics(
+      tenantId,
+      guestWhere,
+      filters,
+      metricsByGuestId,
+      guests.map((guest) => guest.id),
+    );
+
     return { guests, metricsByGuestId, groupsByKey };
+  }
+
+  private async applyLifetimeRevenueMetrics(
+    tenantId: string,
+    guestWhere: Prisma.GuestWhereInput,
+    filters: ResolvedGuestFilters,
+    metricsByGuestId: Map<string, GuestMetrics>,
+    guestIds: string[],
+  ) {
+    if (guestIds.length === 0) {
+      return;
+    }
+
+    const selectedGuestIds = new Set(guestIds);
+    const storeWhere = filters.storeId ? { storeId: filters.storeId } : {};
+    const [transactions, sales] = await Promise.all([
+      this.prisma.guestTransaction.findMany({
+        where: {
+          tenantId,
+          guest: { is: guestWhere },
+          ...storeWhere,
+        },
+        select: {
+          guestId: true,
+          happenedAt: true,
+          amount: true,
+        },
+      }),
+      this.prisma.salesFact.findMany({
+        where: {
+          tenantId,
+          guest: { is: guestWhere },
+          isCanceled: false,
+          ...storeWhere,
+        },
+        select: {
+          guestId: true,
+          saleDate: true,
+          revenue: true,
+        },
+      }),
+    ]);
+
+    for (const transaction of transactions) {
+      if (
+        !transaction.guestId ||
+        !transaction.happenedAt ||
+        !selectedGuestIds.has(transaction.guestId)
+      ) {
+        continue;
+      }
+
+      const metrics = this.ensureMetrics(metricsByGuestId, transaction.guestId);
+      metrics.lifetimeTransactionAmount += Math.abs(
+        this.decimalToNumber(transaction.amount) ?? 0,
+      );
+      this.applyLifetimeRevenueDate(metrics, transaction.happenedAt);
+    }
+
+    for (const sale of sales) {
+      if (!sale.guestId || !selectedGuestIds.has(sale.guestId)) {
+        continue;
+      }
+
+      const metrics = this.ensureMetrics(metricsByGuestId, sale.guestId);
+      metrics.lifetimeBarRevenue += this.decimalToNumber(sale.revenue) ?? 0;
+      this.applyLifetimeRevenueDate(metrics, sale.saleDate);
+    }
   }
 
   private buildGuestWhere(
@@ -4413,6 +4519,7 @@ export class GuestsService {
     const segment = this.segmentGuest(guest, metrics, latestActivityAt, period);
     const transactionAmount = this.round(metrics?.transactionAmount ?? 0, 2);
     const barRevenue = this.round(metrics?.barRevenue ?? 0, 2);
+    const ltv = this.buildGuestLtv(metrics);
     const rfm = this.buildGuestRfmScore(
       latestActivityAt,
       metrics,
@@ -4456,6 +4563,7 @@ export class GuestsService {
       currentCountHours: this.decimalToNumber(guest.currentCountHours),
       transactionAmount,
       barRevenue,
+      ltv,
       rfm,
       churnRisk,
       segment,
@@ -4545,6 +4653,35 @@ export class GuestsService {
         monetaryScore,
         totalScore,
       ),
+    };
+  }
+
+  private buildGuestLtv(metrics: GuestMetrics | undefined): GuestLtvSummary {
+    const transactionRevenue = this.round(
+      metrics?.lifetimeTransactionAmount ?? 0,
+      2,
+    );
+    const barRevenue = this.round(metrics?.lifetimeBarRevenue ?? 0, 2);
+    const totalRevenue = this.round(transactionRevenue + barRevenue, 2);
+    const revenueDays = metrics?.lifetimeRevenueDays.size ?? 0;
+    const firstRevenueAt = metrics?.lifetimeFirstRevenueAt ?? null;
+    const lastRevenueAt = metrics?.lifetimeLastRevenueAt ?? null;
+    const calendarDays =
+      firstRevenueAt && lastRevenueAt
+        ? this.daysBetweenDates(firstRevenueAt, lastRevenueAt) + 1
+        : 0;
+
+    return {
+      totalRevenue,
+      transactionRevenue,
+      barRevenue,
+      revenueDays,
+      firstRevenueAt: this.toIsoDateTime(firstRevenueAt),
+      lastRevenueAt: this.toIsoDateTime(lastRevenueAt),
+      averageRevenuePerRevenueDay:
+        revenueDays > 0 ? this.round(totalRevenue / revenueDays, 2) : 0,
+      averageRevenuePerCalendarDay:
+        calendarDays > 0 ? this.round(totalRevenue / calendarDays, 2) : 0,
     };
   }
 
@@ -5633,6 +5770,7 @@ export class GuestsService {
       'registered',
       'rfm',
       'churnRisk',
+      'ltv',
     ];
     return allowed.includes(value ?? '') ? (value ?? 'revenue') : 'revenue';
   }
@@ -5791,6 +5929,11 @@ export class GuestsService {
       transactionAmount: 0,
       barRevenue: 0,
       barSalesCount: 0,
+      lifetimeTransactionAmount: 0,
+      lifetimeBarRevenue: 0,
+      lifetimeRevenueDays: new Set<string>(),
+      lifetimeFirstRevenueAt: null,
+      lifetimeLastRevenueAt: null,
     };
     map.set(guestId, created);
 
@@ -5840,9 +5983,11 @@ export class GuestsService {
                 ? first.rfm.totalScore - second.rfm.totalScore
                 : sort === 'churnRisk'
                   ? first.churnRisk.score - second.churnRisk.score
-                  : first.transactionAmount +
-                    first.barRevenue -
-                    (second.transactionAmount + second.barRevenue);
+                  : sort === 'ltv'
+                    ? first.ltv.totalRevenue - second.ltv.totalRevenue
+                    : first.transactionAmount +
+                      first.barRevenue -
+                      (second.transactionAmount + second.barRevenue);
 
       if (compare !== 0) {
         return compare * multiplier;
@@ -5874,6 +6019,22 @@ export class GuestsService {
     }
 
     metrics.activityDays.add(this.toIsoDate(value));
+  }
+
+  private applyLifetimeRevenueDate(metrics: GuestMetrics, value: Date | null) {
+    if (!value) {
+      return;
+    }
+
+    metrics.lifetimeRevenueDays.add(this.toIsoDate(value));
+    metrics.lifetimeFirstRevenueAt = this.minDate(
+      metrics.lifetimeFirstRevenueAt,
+      value,
+    );
+    metrics.lifetimeLastRevenueAt = this.maxDate(
+      metrics.lifetimeLastRevenueAt,
+      value,
+    );
   }
 
   private sessionActivityAt(
@@ -6025,6 +6186,17 @@ export class GuestsService {
     }
 
     return first > second ? first : second;
+  }
+
+  private minDate(first: Date | null, second: Date | null) {
+    if (!first) {
+      return second;
+    }
+    if (!second) {
+      return first;
+    }
+
+    return first < second ? first : second;
   }
 
   private daysBetweenDates(from: Date, to: Date) {

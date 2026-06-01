@@ -112,7 +112,7 @@ export default async function GuestPage({ params }: { params: PageParams }) {
           </div>
         </section>
 
-        <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
           <Metric
             label="Сессии"
             value={formatNumber(guest.sessionsCount)}
@@ -127,6 +127,11 @@ export default async function GuestPage({ params }: { params: PageParams }) {
             label="Деньги"
             value={formatRubles(guest.transactionAmount + guest.barRevenue)}
             caption={`бар ${formatRubles(guest.barRevenue)}`}
+          />
+          <Metric
+            label="LTV факт"
+            value={formatRubles(guest.ltv.totalRevenue)}
+            caption={`${formatNumber(guest.ltv.revenueDays)} дней с выручкой`}
           />
           <Metric
             label="Накопленные часы"

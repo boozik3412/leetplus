@@ -52,6 +52,7 @@ const sortOptions: Array<NonNullable<GuestListFilters["sort"]>> = [
   "registered",
   "rfm",
   "churnRisk",
+  "ltv",
 ];
 
 function searchParam(value: string | string[] | undefined) {
@@ -185,6 +186,7 @@ function sortLabel(sort: NonNullable<GuestListFilters["sort"]>) {
     registered: "Регистрация",
     rfm: "RFM",
     churnRisk: "Риск оттока",
+    ltv: "LTV факт",
   };
 
   return labels[sort];
@@ -506,7 +508,7 @@ function ReportTable({
       </div>
       {guestList.rows.length > 0 ? (
         <div className="overflow-x-auto">
-          <table className="min-w-[1720px] divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
+          <table className="min-w-[1900px] divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
             <thead className="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900/60">
               <tr>
                 <th className="px-4 py-3 text-left font-semibold">Гость</th>
@@ -522,6 +524,9 @@ function ReportTable({
                 <th className="px-4 py-3 text-right font-semibold">Дни</th>
                 <th className="px-4 py-3 text-right font-semibold">Часы</th>
                 <th className="px-4 py-3 text-right font-semibold">Деньги</th>
+                <th className="px-4 py-3 text-right font-semibold">
+                  LTV факт
+                </th>
                 <th className="px-4 py-3 text-right font-semibold">Бар</th>
                 <th className="px-4 py-3 text-left font-semibold">
                   Регистрация
@@ -604,6 +609,12 @@ function ReportTable({
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums">
                     {formatRubles(row.transactionAmount + row.barRevenue)}
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    {formatRubles(row.ltv.totalRevenue)}
+                    <p className="text-xs text-zinc-500">
+                      {formatNumber(row.ltv.revenueDays)} дн. с выручкой
+                    </p>
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums">
                     {formatRubles(row.barRevenue)}

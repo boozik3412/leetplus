@@ -26,6 +26,10 @@ function formatRubles(value: number) {
   return `${formatNumber(value)} руб`;
 }
 
+function formatPercent(value: number) {
+  return `${formatNumber(value, 1)}%`;
+}
+
 function formatDate(value: string | null) {
   if (!value) {
     return "нет данных";
@@ -221,6 +225,8 @@ export default async function GuestsPage({
           />
         </section>
 
+        <RetentionPanel summary={summary} />
+
         <section className="mt-6 grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
           <VisitTrendPanel summary={summary} />
           <DataQualityPanel summary={summary} />
@@ -268,6 +274,99 @@ function KpiCard({
         {value}
       </p>
       <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">{caption}</p>
+    </div>
+  );
+}
+
+function RetentionPanel({ summary }: { summary: GuestsSummary }) {
+  const retention = summary.retention;
+
+  return (
+    <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-col gap-3 border-b border-zinc-200 px-5 py-4 dark:border-zinc-800 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h2 className="text-base font-semibold">
+            Удержание новых гостей
+          </h2>
+          <p className="mt-1 max-w-3xl text-sm text-zinc-500">
+            Считаем второй день активности для гостей, зарегистрированных в
+            выбранном периоде. В знаменателе только те, у кого окно 7/14/30
+            дней уже успело пройти.
+          </p>
+        </div>
+        <div className="grid gap-2 text-sm sm:grid-cols-3 lg:min-w-[420px]">
+          <RetentionMetric
+            label="Когорта"
+            value={formatNumber(retention.cohortGuests)}
+            caption="новых гостей"
+          />
+          <RetentionMetric
+            label="Без 2-го визита"
+            value={formatNumber(retention.withoutSecondActivity)}
+            caption="нужен контакт"
+          />
+          <RetentionMetric
+            label="До 2-го визита"
+            value={
+              retention.averageDaysToSecondActivity !== null
+                ? `${formatNumber(retention.averageDaysToSecondActivity, 1)} дн`
+                : "нет данных"
+            }
+            caption="среднее"
+          />
+        </div>
+      </div>
+      <div className="grid gap-3 p-5 md:grid-cols-3">
+        {retention.windows.map((window) => (
+          <div
+            key={window.days}
+            className="rounded-lg border border-zinc-100 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase text-zinc-500">
+                  {window.days} дней
+                </p>
+                <p className="mt-2 text-2xl font-semibold tabular-nums text-zinc-950 dark:text-zinc-50">
+                  {formatPercent(window.percent)}
+                </p>
+              </div>
+              <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-200 dark:ring-emerald-500/20">
+                {formatNumber(window.returnedGuests)}/
+                {formatNumber(window.eligibleGuests)}
+              </span>
+            </div>
+            <p className="mt-3 text-sm text-zinc-500">
+              {window.eligibleGuests > 0
+                ? "вернулись в окно из созревшей когорты"
+                : "когорта еще не созрела для этого окна"}
+              {window.pendingGuests > 0
+                ? `, ожидают ${formatNumber(window.pendingGuests)}`
+                : ""}
+            </p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function RetentionMetric({
+  label,
+  value,
+  caption,
+}: {
+  label: string;
+  value: string;
+  caption: string;
+}) {
+  return (
+    <div className="rounded-lg border border-zinc-100 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/60">
+      <p className="text-xs font-semibold uppercase text-zinc-500">{label}</p>
+      <p className="mt-1 font-semibold tabular-nums text-zinc-950 dark:text-zinc-50">
+        {value}
+      </p>
+      <p className="mt-0.5 text-xs text-zinc-500">{caption}</p>
     </div>
   );
 }

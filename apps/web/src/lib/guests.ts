@@ -81,6 +81,22 @@ export type GuestRfmScore = {
   segment: GuestRfmSegment;
 };
 
+export type GuestRetentionWindow = {
+  days: 7 | 14 | 30;
+  eligibleGuests: number;
+  returnedGuests: number;
+  pendingGuests: number;
+  percent: number;
+};
+
+export type GuestRetentionSummary = {
+  cohortGuests: number;
+  returnedGuests: number;
+  withoutSecondActivity: number;
+  averageDaysToSecondActivity: number | null;
+  windows: GuestRetentionWindow[];
+};
+
 export type GuestFilterOptions = {
   stores: Array<{
     id: string;
@@ -119,6 +135,7 @@ export type GuestsSummary = {
   transactionAmount: number;
   barRevenue: number;
   barSalesCount: number;
+  retention: GuestRetentionSummary;
   dataQuality: {
     latestProfileRuns: Array<{
       domain: string;

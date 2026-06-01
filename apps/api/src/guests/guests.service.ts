@@ -237,6 +237,22 @@ export type GuestRfmScore = {
   segment: GuestRfmSegment;
 };
 
+export type GuestRetentionWindow = {
+  days: 7 | 14 | 30;
+  eligibleGuests: number;
+  returnedGuests: number;
+  pendingGuests: number;
+  percent: number;
+};
+
+export type GuestRetentionSummary = {
+  cohortGuests: number;
+  returnedGuests: number;
+  withoutSecondActivity: number;
+  averageDaysToSecondActivity: number | null;
+  windows: GuestRetentionWindow[];
+};
+
 export type GuestFilterOptions = {
   stores: Array<{
     id: string;
@@ -275,6 +291,7 @@ export type GuestsSummary = {
   transactionAmount: number;
   barRevenue: number;
   barSalesCount: number;
+  retention: GuestRetentionSummary;
   dataQuality: {
     latestProfileRuns: Array<{
       domain: string;
@@ -831,6 +848,11 @@ export class GuestsService {
       playCapacityHours && playCapacityHours > 0
         ? this.round((playHours / playCapacityHours) * 100, 1)
         : null;
+    const retention = this.buildRetentionSummary(
+      guests,
+      metricsByGuestId,
+      period,
+    );
     const trend = await this.buildVisitTrend(tenantId, period, filters);
     const dataQuality = await this.getDataQuality(tenantId, period, filters);
 
@@ -863,6 +885,7 @@ export class GuestsService {
       transactionAmount: this.round(periodMetrics.transactionAmount, 2),
       barRevenue: this.round(periodMetrics.barRevenue, 2),
       barSalesCount: periodMetrics.barSalesCount,
+      retention,
       dataQuality,
       visitTrend: trend,
       topGuests: this.sortRows(rows, 'revenue', 'desc').slice(0, 12),
@@ -4480,6 +4503,98 @@ export class GuestsService {
         : intervals[middleIndex];
 
     return Math.min(Math.max(Math.round(median), 1), 90);
+  }
+
+  private buildRetentionSummary(
+    guests: GuestBase[],
+    metricsByGuestId: Map<string, GuestMetrics>,
+    period: Period,
+  ): GuestRetentionSummary {
+    const cohort = guests
+      .filter((guest) => {
+        if (!guest.insertedAt) {
+          return false;
+        }
+
+        const insertedDay = this.startOfUtcDay(guest.insertedAt);
+
+        return insertedDay >= period.fromDate && insertedDay <= period.toDate;
+      })
+      .map((guest) => {
+        const insertedDay = this.startOfUtcDay(guest.insertedAt as Date);
+        const daysToSecondActivity = this.resolveDaysToSecondActivity(
+          insertedDay,
+          metricsByGuestId.get(guest.id),
+        );
+
+        return {
+          ageDays: Math.max(
+            0,
+            this.daysBetweenDates(insertedDay, period.toDate),
+          ),
+          daysToSecondActivity,
+        };
+      });
+
+    const returnedGuests = cohort.filter(
+      (row) => row.daysToSecondActivity !== null,
+    ).length;
+    const daysToSecondActivity = cohort
+      .map((row) => row.daysToSecondActivity)
+      .filter((value): value is number => value !== null);
+    const windows = ([7, 14, 30] as const).map((days) => {
+      const eligibleGuests = cohort.filter((row) => row.ageDays >= days).length;
+      const returnedInWindow = cohort.filter(
+        (row) =>
+          row.ageDays >= days &&
+          row.daysToSecondActivity !== null &&
+          row.daysToSecondActivity <= days,
+      ).length;
+
+      return {
+        days,
+        eligibleGuests,
+        returnedGuests: returnedInWindow,
+        pendingGuests: Math.max(0, cohort.length - eligibleGuests),
+        percent:
+          eligibleGuests > 0
+            ? this.round((returnedInWindow / eligibleGuests) * 100, 1)
+            : 0,
+      };
+    });
+
+    return {
+      cohortGuests: cohort.length,
+      returnedGuests,
+      withoutSecondActivity: Math.max(0, cohort.length - returnedGuests),
+      averageDaysToSecondActivity:
+        daysToSecondActivity.length > 0
+          ? this.round(
+              daysToSecondActivity.reduce((sum, value) => sum + value, 0) /
+                daysToSecondActivity.length,
+              1,
+            )
+          : null,
+      windows,
+    };
+  }
+
+  private resolveDaysToSecondActivity(
+    insertedDay: Date,
+    metrics: GuestMetrics | undefined,
+  ) {
+    const activityDays = [...(metrics?.activityDays ?? new Set<string>())]
+      .map((day) => this.startOfUtcDay(new Date(`${day}T00:00:00.000Z`)))
+      .filter((day) => day >= insertedDay)
+      .sort((first, second) => first.getTime() - second.getTime());
+
+    const secondActivityDay = activityDays.find(
+      (day) => this.daysBetweenDates(insertedDay, day) > 0,
+    );
+
+    return secondActivityDay
+      ? this.daysBetweenDates(insertedDay, secondActivityDay)
+      : null;
   }
 
   private resolveChurnRiskLevel(

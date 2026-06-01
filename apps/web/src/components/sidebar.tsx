@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   useEffect,
   useRef,
@@ -581,6 +581,7 @@ function resolveCurrentProductArea(pathname: string): ProductArea {
 export function Sidebar({ user }: { user: AuthUser | null }) {
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const desktopSidebarRef = useRef<HTMLElement | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [openNavGroups, setOpenNavGroups] = useState<Record<string, boolean>>(
@@ -596,6 +597,22 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
   const isDashboardArea = isDashboardPath(pathname);
   const currentProductArea = resolveCurrentProductArea(pathname);
   const hasOpenNavGroup = Object.values(openNavGroups).some(Boolean);
+
+  useEffect(() => {
+    if (!isDashboardArea || !searchParams.has("skuGrouping")) {
+      return;
+    }
+
+    const canonicalParams = new URLSearchParams(searchParams.toString());
+
+    canonicalParams.delete("skuGrouping");
+
+    const query = canonicalParams.toString();
+
+    router.replace(query ? `${pathname}?${query}` : pathname, {
+      scroll: false,
+    });
+  }, [isDashboardArea, pathname, router, searchParams]);
 
   useEffect(() => {
     if (!hasOpenNavGroup) {

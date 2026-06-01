@@ -35,7 +35,7 @@ export type GuestListQuery = GuestsSummaryQuery & {
   search?: string;
   page?: string;
   pageSize?: string;
-  sort?: 'revenue' | 'sessions' | 'lastActivity' | 'registered';
+  sort?: 'revenue' | 'sessions' | 'lastActivity' | 'registered' | 'rfm';
   direction?: 'asc' | 'desc';
 };
 
@@ -189,6 +189,7 @@ export type GuestDashboardRow = {
   currentCountHours: number | null;
   transactionAmount: number;
   barRevenue: number;
+  rfm: GuestRfmScore;
   segment: 'active' | 'new' | 'repeat' | 'risk' | 'lost' | 'quiet';
   crmStatus: GuestCrmStatus;
   crmNote: string | null;
@@ -196,6 +197,25 @@ export type GuestDashboardRow = {
   nextContactAt: string | null;
   crmUpdatedAt: string | null;
   phoneConsentStatus: GuestCommunicationConsentStatus;
+};
+
+export type GuestRfmSegment =
+  | 'CHAMPION'
+  | 'LOYAL'
+  | 'PROMISING'
+  | 'NEED_ATTENTION'
+  | 'AT_RISK'
+  | 'LOST';
+
+export type GuestRfmScore = {
+  recencyDays: number | null;
+  frequency: number;
+  monetary: number;
+  recencyScore: number;
+  frequencyScore: number;
+  monetaryScore: number;
+  totalScore: number;
+  segment: GuestRfmSegment;
 };
 
 export type GuestFilterOptions = {
@@ -876,6 +896,11 @@ export class GuestsService {
         'Часы',
         'Деньги, руб',
         'Бар, руб',
+        'RFM балл',
+        'RFM сегмент',
+        'RFM давность, дн',
+        'RFM частота',
+        'RFM деньги, руб',
         'Дата регистрации',
         'Последняя активность',
         'Следующий шаг',
@@ -893,6 +918,11 @@ export class GuestsService {
         row.playHours,
         row.transactionAmount + row.barRevenue,
         row.barRevenue,
+        row.rfm.totalScore,
+        this.rfmSegmentExportLabel(row.rfm.segment),
+        row.rfm.recencyDays ?? '',
+        row.rfm.frequency,
+        row.rfm.monetary,
         this.formatExportDate(row.insertedAt),
         this.formatExportDate(row.lastActivityAt),
         row.nextAction,
@@ -4201,6 +4231,14 @@ export class GuestsService {
       metrics?.latestActivityAt ?? null,
     );
     const segment = this.segmentGuest(guest, metrics, latestActivityAt, period);
+    const transactionAmount = this.round(metrics?.transactionAmount ?? 0, 2);
+    const barRevenue = this.round(metrics?.barRevenue ?? 0, 2);
+    const rfm = this.buildGuestRfmScore(
+      latestActivityAt,
+      metrics,
+      transactionAmount + barRevenue,
+      period,
+    );
     const guestGroupName = guest.externalGuestTypeId
       ? (groupsByKey.get(
           this.guestGroupKey(guest.externalDomain, guest.externalGuestTypeId),
@@ -4230,8 +4268,9 @@ export class GuestsService {
       visitsDays: metrics?.visitsDays.size ?? 0,
       playHours: this.round((metrics?.playMinutes ?? 0) / 60, 1),
       currentCountHours: this.decimalToNumber(guest.currentCountHours),
-      transactionAmount: this.round(metrics?.transactionAmount ?? 0, 2),
-      barRevenue: this.round(metrics?.barRevenue ?? 0, 2),
+      transactionAmount,
+      barRevenue,
+      rfm,
       segment,
       crmStatus: guest.crmStatus,
       crmNote: guest.crmNote,
@@ -4285,6 +4324,95 @@ export class GuestsService {
     }
 
     return 'quiet';
+  }
+
+  private buildGuestRfmScore(
+    latestActivityAt: Date | null,
+    metrics: GuestMetrics | undefined,
+    monetary: number,
+    period: Period,
+  ): GuestRfmScore {
+    const recencyDays = latestActivityAt
+      ? Math.max(0, this.daysBetweenDates(latestActivityAt, period.toDate))
+      : null;
+    const frequency = Math.max(
+      metrics?.visitsDays.size ?? 0,
+      metrics?.sessionsCount ?? 0,
+    );
+    const recencyScore = this.rfmRecencyScore(recencyDays);
+    const frequencyScore = this.rfmFrequencyScore(frequency);
+    const monetaryScore = this.rfmMonetaryScore(monetary);
+    const totalScore = recencyScore + frequencyScore + monetaryScore;
+
+    return {
+      recencyDays,
+      frequency,
+      monetary: this.round(monetary, 2),
+      recencyScore,
+      frequencyScore,
+      monetaryScore,
+      totalScore,
+      segment: this.resolveRfmSegment(
+        recencyScore,
+        frequencyScore,
+        monetaryScore,
+        totalScore,
+      ),
+    };
+  }
+
+  private rfmRecencyScore(recencyDays: number | null) {
+    if (recencyDays === null) return 1;
+    if (recencyDays <= 7) return 5;
+    if (recencyDays <= 14) return 4;
+    if (recencyDays <= 30) return 3;
+    if (recencyDays <= 60) return 2;
+    return 1;
+  }
+
+  private rfmFrequencyScore(frequency: number) {
+    if (frequency >= 8) return 5;
+    if (frequency >= 4) return 4;
+    if (frequency >= 2) return 3;
+    if (frequency >= 1) return 2;
+    return 1;
+  }
+
+  private rfmMonetaryScore(monetary: number) {
+    if (monetary >= 10_000) return 5;
+    if (monetary >= 5_000) return 4;
+    if (monetary >= 2_000) return 3;
+    if (monetary >= 500) return 2;
+    return 1;
+  }
+
+  private resolveRfmSegment(
+    recencyScore: number,
+    frequencyScore: number,
+    monetaryScore: number,
+    totalScore: number,
+  ): GuestRfmSegment {
+    if (recencyScore <= 2 && totalScore <= 8) {
+      return 'LOST';
+    }
+
+    if (recencyScore <= 2 && monetaryScore >= 3) {
+      return 'AT_RISK';
+    }
+
+    if (totalScore >= 13) {
+      return 'CHAMPION';
+    }
+
+    if (frequencyScore >= 4 || monetaryScore >= 4) {
+      return 'LOYAL';
+    }
+
+    if (recencyScore >= 4 && totalScore >= 8) {
+      return 'PROMISING';
+    }
+
+    return 'NEED_ATTENTION';
   }
 
   private normalizeCrmUpdate(dto: GuestCrmUpdateDto) {
@@ -5119,7 +5247,13 @@ export class GuestsService {
   }
 
   private resolveSort(value: GuestListQuery['sort']) {
-    const allowed = ['revenue', 'sessions', 'lastActivity', 'registered'];
+    const allowed = [
+      'revenue',
+      'sessions',
+      'lastActivity',
+      'registered',
+      'rfm',
+    ];
     return allowed.includes(value ?? '') ? (value ?? 'revenue') : 'revenue';
   }
 
@@ -5150,6 +5284,19 @@ export class GuestsService {
       risk: 'В риске',
       lost: 'Потерянный',
       quiet: 'Тихий',
+    };
+
+    return labels[segment];
+  }
+
+  private rfmSegmentExportLabel(segment: GuestRfmSegment) {
+    const labels: Record<GuestRfmSegment, string> = {
+      CHAMPION: 'Чемпион',
+      LOYAL: 'Лояльный',
+      PROMISING: 'Перспективный',
+      NEED_ATTENTION: 'Нужен контакт',
+      AT_RISK: 'VIP в риске',
+      LOST: 'Потерянный',
     };
 
     return labels[segment];
@@ -5297,9 +5444,11 @@ export class GuestsService {
               )
             : sort === 'registered'
               ? (first.insertedAt ?? '').localeCompare(second.insertedAt ?? '')
-              : first.transactionAmount +
-                first.barRevenue -
-                (second.transactionAmount + second.barRevenue);
+              : sort === 'rfm'
+                ? first.rfm.totalScore - second.rfm.totalScore
+                : first.transactionAmount +
+                  first.barRevenue -
+                  (second.transactionAmount + second.barRevenue);
 
       if (compare !== 0) {
         return compare * multiplier;

@@ -39,6 +39,7 @@ export type GuestDashboardRow = {
   currentCountHours: number | null;
   transactionAmount: number;
   barRevenue: number;
+  rfm: GuestRfmScore;
   segment: GuestSegment;
   crmStatus: GuestCrmStatus;
   crmNote: string | null;
@@ -46,6 +47,25 @@ export type GuestDashboardRow = {
   nextContactAt: string | null;
   crmUpdatedAt: string | null;
   phoneConsentStatus: GuestCommunicationConsentStatus;
+};
+
+export type GuestRfmSegment =
+  | "CHAMPION"
+  | "LOYAL"
+  | "PROMISING"
+  | "NEED_ATTENTION"
+  | "AT_RISK"
+  | "LOST";
+
+export type GuestRfmScore = {
+  recencyDays: number | null;
+  frequency: number;
+  monetary: number;
+  recencyScore: number;
+  frequencyScore: number;
+  monetaryScore: number;
+  totalScore: number;
+  segment: GuestRfmSegment;
 };
 
 export type GuestFilterOptions = {
@@ -118,7 +138,7 @@ export type GuestListFilters = GuestsSummaryFilters & {
   search?: string;
   page?: string;
   pageSize?: string;
-  sort?: "revenue" | "sessions" | "lastActivity" | "registered";
+  sort?: "revenue" | "sessions" | "lastActivity" | "registered" | "rfm";
   direction?: "asc" | "desc";
 };
 

@@ -260,6 +260,7 @@ LeetPlus должен развиваться из набора отчетов в
 - Готово: saved groups и manual CRM guests имеют campaign-ready planning workflow: создать CRM task с target, channel, deadline, responsible user и contact note до введения автоматизированных сообщений.
 - Готово: group CRM panel имеет компактную campaign analytics: активные и просроченные задачи, завершенные задачи, contact channels, contact results, покрытие saved group и ближайшие deadlines.
 - Готово: CRM tasks имеют полный рабочий отчет `/guests/crm/tasks` с фильтрами по status, responsible user, target type, due period, search, sorting, responsive cards/table, breadcrumbs и CSV export.
+- Готово: RFM v1 добавлен в полный отчет гостей `/guests/report`: API считает recency/frequency/monetary, общий балл 3-15, RFM-сегмент, сортировку по RFM и CSV export с RFM-полями.
 - Текущее ограничение: `all_operations_log` сохраняется и суммируется, но все еще не дает надежный administrator identifier. `log_cash_transaction/list` сейчас возвращает ошибки на production sources, поэтому cashier analytics начинается от working shifts.
 - Текущее ограничение: парсинг PC-count защитный, потому что реальная форма `global/*` payload может отличаться по источникам Langame; production verification должна подтвердить, что `computerCount` заполнен для каждого клуба.
 - Запланированная data foundation: гости, группы гостей, балансы, бонусные балансы, сессии, транзакции, all operations log, product expenses по гостю, клубы, тарифы, смены и PC-контекст.
@@ -267,7 +268,7 @@ LeetPlus должен развиваться из набора отчетов в
 - Готово: production `/dashboard` current-day load percentage проверен 2026-05-29: guest summary вернул 122.4 play hours, 185 PCs, 4440 possible PC-hours и 2.8% load вместо `нет данных`.
 - Готово: analytics результата кампаний/контактов начинается с campaign detail: direct contact attribution, group fallback, before/after windows, visits, sessions, play hours, balance-spend revenue, bar revenue и attribution limitations.
 - Готово: campaign contact workflow связан с `marketingCampaignId`: campaign detail может создавать linked CRM task из вкладки contacts, contact results сохраняются прямо в campaign, а effect analytics отслеживает group, CRM task, responsible user, channel, visits, revenue и bar.
-- Запланированная аналитика: RFM, retention, churn risk, heatmaps, LTV, bonus load, campaign effect и guest-flow forecasts.
+- Запланированная аналитика: retention, churn risk, heatmaps, LTV, bonus load, расширенный campaign effect и guest-flow forecasts. RFM v1 уже добавлен в полный отчет гостей и export.
 - Запланированный CRM-слой: segments, saved groups, CRM statuses, notes, tasks, communication history и next-best-action recommendations.
 - Запланированная loyalty/gamification: missions, rewards, budgets, limits, anti-fraud и manual payout queue до подтверждения безопасного Langame write API.
 - Запланированные каналы: сначала Telegram bot/Mini App, затем MAX bot/Mini App после legal/account setup; всем каналам нужны явное согласие и unsubscribe support.

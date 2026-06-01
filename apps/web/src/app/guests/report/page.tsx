@@ -17,6 +17,7 @@ import {
   type GuestFilterOptions,
   type GuestListFilters,
   type GuestListResponse,
+  type GuestRfmSegment,
   type GuestSegment,
 } from "@/lib/guests";
 
@@ -48,6 +49,7 @@ const sortOptions: Array<NonNullable<GuestListFilters["sort"]>> = [
   "sessions",
   "lastActivity",
   "registered",
+  "rfm",
 ];
 
 function searchParam(value: string | string[] | undefined) {
@@ -121,12 +123,42 @@ function crmStatusLabel(status: GuestCrmStatus) {
   return labels[status];
 }
 
+function rfmSegmentLabel(segment: GuestRfmSegment) {
+  const labels: Record<GuestRfmSegment, string> = {
+    CHAMPION: "Чемпион",
+    LOYAL: "Лояльный",
+    PROMISING: "Перспективный",
+    NEED_ATTENTION: "Нужен контакт",
+    AT_RISK: "VIP в риске",
+    LOST: "Потерянный",
+  };
+
+  return labels[segment];
+}
+
+function rfmSegmentTone(segment: GuestRfmSegment) {
+  if (segment === "CHAMPION" || segment === "LOYAL") {
+    return "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300";
+  }
+
+  if (segment === "PROMISING") {
+    return "bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300";
+  }
+
+  if (segment === "AT_RISK" || segment === "LOST") {
+    return "bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300";
+  }
+
+  return "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300";
+}
+
 function sortLabel(sort: NonNullable<GuestListFilters["sort"]>) {
   const labels: Record<NonNullable<GuestListFilters["sort"]>, string> = {
     revenue: "Деньги",
     sessions: "Сессии",
     lastActivity: "Активность",
     registered: "Регистрация",
+    rfm: "RFM",
   };
 
   return labels[sort];
@@ -448,7 +480,7 @@ function ReportTable({
       </div>
       {guestList.rows.length > 0 ? (
         <div className="overflow-x-auto">
-          <table className="min-w-[1420px] divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
+          <table className="min-w-[1560px] divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
             <thead className="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900/60">
               <tr>
                 <th className="px-4 py-3 text-left font-semibold">Гость</th>
@@ -456,6 +488,7 @@ function ReportTable({
                 <th className="px-4 py-3 text-left font-semibold">Группа</th>
                 <th className="px-4 py-3 text-left font-semibold">Сегмент</th>
                 <th className="px-4 py-3 text-left font-semibold">CRM</th>
+                <th className="px-4 py-3 text-left font-semibold">RFM</th>
                 <th className="px-4 py-3 text-right font-semibold">Сессии</th>
                 <th className="px-4 py-3 text-right font-semibold">Дни</th>
                 <th className="px-4 py-3 text-right font-semibold">Часы</th>
@@ -499,6 +532,20 @@ function ReportTable({
                   </td>
                   <td className="px-4 py-3">{segmentLabel(row.segment)}</td>
                   <td className="px-4 py-3">{crmStatusLabel(row.crmStatus)}</td>
+                  <td className="px-4 py-3">
+                    <span
+                      className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${rfmSegmentTone(
+                        row.rfm.segment,
+                      )}`}
+                    >
+                      {row.rfm.totalScore}/15 · {rfmSegmentLabel(row.rfm.segment)}
+                    </span>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      R {row.rfm.recencyDays ?? "нет"} дн · F{" "}
+                      {formatNumber(row.rfm.frequency)} · M{" "}
+                      {formatRubles(row.rfm.monetary)}
+                    </p>
+                  </td>
                   <td className="px-4 py-3 text-right tabular-nums">
                     {formatNumber(row.sessionsCount)}
                   </td>

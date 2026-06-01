@@ -57,6 +57,17 @@ function segmentLabel(segment: GuestSegment) {
   return labels[segment];
 }
 
+function bonusLoadLabel(status: GuestDetail["bonusLoad"]["status"]) {
+  const labels: Record<GuestDetail["bonusLoad"]["status"], string> = {
+    NONE: "нет бонусного остатка",
+    NORMAL: "активный бонусный остаток",
+    WATCH: "есть бонусы, активности мало",
+    RISK: "бонусы лежат без активности",
+  };
+
+  return labels[status];
+}
+
 export default async function GuestPage({ params }: { params: PageParams }) {
   await requireCurrentUser();
   const { id } = await params;
@@ -112,7 +123,7 @@ export default async function GuestPage({ params }: { params: PageParams }) {
           </div>
         </section>
 
-        <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
           <Metric
             label="Сессии"
             value={formatNumber(guest.sessionsCount)}
@@ -132,6 +143,11 @@ export default async function GuestPage({ params }: { params: PageParams }) {
             label="LTV факт"
             value={formatRubles(guest.ltv.totalRevenue)}
             caption={`${formatNumber(guest.ltv.revenueDays)} дней с выручкой`}
+          />
+          <Metric
+            label="Бонусы"
+            value={formatRubles(guest.bonusLoad.currentBalance)}
+            caption={bonusLoadLabel(guest.bonusLoad.status)}
           />
           <Metric
             label="Накопленные часы"

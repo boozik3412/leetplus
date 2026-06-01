@@ -88,6 +88,33 @@ function segmentBadge(segment: GuestDashboardRow["segment"]) {
   );
 }
 
+function bonusLoadLabel(status: GuestDashboardRow["bonusLoad"]["status"]) {
+  const labels: Record<GuestDashboardRow["bonusLoad"]["status"], string> = {
+    NONE: "Нет бонусов",
+    NORMAL: "Активный остаток",
+    WATCH: "Наблюдать",
+    RISK: "Без активности",
+  };
+
+  return labels[status];
+}
+
+function bonusLoadTone(status: GuestDashboardRow["bonusLoad"]["status"]) {
+  if (status === "RISK") {
+    return "bg-rose-50 text-rose-700 ring-rose-100 dark:bg-rose-500/10 dark:text-rose-200 dark:ring-rose-500/20";
+  }
+
+  if (status === "WATCH") {
+    return "bg-amber-50 text-amber-700 ring-amber-100 dark:bg-amber-500/10 dark:text-amber-200 dark:ring-amber-500/20";
+  }
+
+  if (status === "NORMAL") {
+    return "bg-emerald-50 text-emerald-700 ring-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-200 dark:ring-emerald-500/20";
+  }
+
+  return "bg-zinc-100 text-zinc-700 ring-zinc-200 dark:bg-zinc-900 dark:text-zinc-300 dark:ring-zinc-800";
+}
+
 export default async function GuestsPage({
   searchParams,
 }: {
@@ -127,10 +154,11 @@ export default async function GuestsPage({
               Аналитика клиентской базы
             </h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-              Read-only слой по гостям: визиты, сессии, пополнения баланса и
-              покупки бара за период {formatPeriodDate(summary.periodFrom)} -{" "}
-              {formatPeriodDate(summary.periodTo)}. Бонусы и балансы скрыты,
-              пока Langame endpoints возвращают ошибки. По умолчанию
+              Read-only слой по гостям: визиты, сессии, пополнения баланса,
+              покупки бара и бонусная нагрузка за период{" "}
+              {formatPeriodDate(summary.periodFrom)} -{" "}
+              {formatPeriodDate(summary.periodTo)}. Бонусы считаются по
+              последнему снимку бонусных балансов Langame. По умолчанию
               администраторы исключены из клиентских отчетов; выберите
               админ-группу, чтобы посмотреть ее отдельно.
             </p>
@@ -225,6 +253,8 @@ export default async function GuestsPage({
           />
         </section>
 
+        <BonusLoadPanel summary={summary} />
+
         <RetentionPanel summary={summary} />
         <VisitHeatmapPanel summary={summary} />
 
@@ -276,6 +306,124 @@ function KpiCard({
       </p>
       <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">{caption}</p>
     </div>
+  );
+}
+
+function BonusLoadPanel({ summary }: { summary: GuestsSummary }) {
+  const bonusLoad = summary.bonusLoad;
+
+  return (
+    <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-col gap-3 border-b border-zinc-200 px-5 py-4 dark:border-zinc-800 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h2 className="text-base font-semibold">Бонусная нагрузка</h2>
+          <p className="mt-1 max-w-3xl text-sm text-zinc-500">
+            Считаем последний снимок бонусных балансов: общий бонусный долг
+            сети, сколько бонусов лежит у неактивных гостей и насколько
+            остаток сопоставим с выручкой выбранного периода.
+          </p>
+        </div>
+        <div className="rounded-lg border border-zinc-100 bg-zinc-50 px-4 py-3 text-sm dark:border-zinc-800 dark:bg-zinc-900/60 lg:min-w-[260px]">
+          <p className="text-xs font-semibold uppercase text-zinc-500">
+            Последний снимок
+          </p>
+          <p className="mt-1 font-semibold tabular-nums text-zinc-950 dark:text-zinc-50">
+            {formatDate(bonusLoad.latestSnapshotAt)}
+          </p>
+          <p className="mt-1 text-xs text-zinc-500">
+            Данные появляются после успешной синхронизации бонусных балансов.
+          </p>
+        </div>
+      </div>
+      <div className="grid gap-3 p-5 md:grid-cols-2 xl:grid-cols-4">
+        <KpiCard
+          label="Бонусный остаток"
+          value={formatRubles(bonusLoad.totalBalance)}
+          caption={`${formatNumber(bonusLoad.guestsWithBalance)} гостей с бонусами`}
+          tone={bonusLoad.totalBalance > 0 ? "warning" : "good"}
+        />
+        <KpiCard
+          label="Без активности"
+          value={formatRubles(bonusLoad.inactiveBalance)}
+          caption={`${formatNumber(bonusLoad.inactiveGuests)} гостей в риске или без визитов`}
+          tone={bonusLoad.inactiveBalance > 0 ? "danger" : "good"}
+        />
+        <KpiCard
+          label="Средний остаток"
+          value={formatRubles(bonusLoad.averageBalance)}
+          caption="на гостя с бонусным балансом"
+        />
+        <KpiCard
+          label="К выручке периода"
+          value={
+            bonusLoad.balanceToPeriodRevenuePercent === null
+              ? "нет данных"
+              : formatPercent(bonusLoad.balanceToPeriodRevenuePercent)
+          }
+          caption="бонусный остаток / деньги периода"
+          tone={
+            (bonusLoad.balanceToPeriodRevenuePercent ?? 0) >= 15
+              ? "warning"
+              : "neutral"
+          }
+        />
+      </div>
+      {summary.bonusLoadGuestsRows.length > 0 ? (
+        <div className="border-t border-zinc-100 px-5 py-4 dark:border-zinc-800">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h3 className="text-sm font-semibold">
+                Гости с самым большим бонусным остатком
+              </h3>
+              <p className="mt-1 text-sm text-zinc-500">
+                Откройте гостя или отсортируйте полный список по бонусам, чтобы
+                выбрать реактивацию.
+              </p>
+            </div>
+            <Link
+              href={guestsHref({ ...summaryToFilters(summary), sort: "bonusLoad" })}
+              className="inline-flex h-9 items-center justify-center rounded-full border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+            >
+              Все по бонусам
+            </Link>
+          </div>
+          <div className="mt-4 grid gap-3 lg:grid-cols-2">
+            {summary.bonusLoadGuestsRows.slice(0, 6).map((row) => (
+              <Link
+                key={row.id}
+                href={`/guests/${row.id}`}
+                className="rounded-lg border border-zinc-100 bg-zinc-50 p-3 transition hover:border-emerald-200 hover:bg-emerald-50/50 dark:border-zinc-800 dark:bg-zinc-900/50 dark:hover:border-emerald-500/30 dark:hover:bg-emerald-500/10"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+                      {row.displayName}
+                    </p>
+                    <p className="mt-1 truncate text-xs text-zinc-500">
+                      {row.guestGroupName ?? row.externalDomain ?? "источник"}
+                    </p>
+                  </div>
+                  <span
+                    className={[
+                      "shrink-0 rounded-full px-2 py-1 text-xs font-semibold ring-1",
+                      bonusLoadTone(row.bonusLoad.status),
+                    ].join(" ")}
+                  >
+                    {bonusLoadLabel(row.bonusLoad.status)}
+                  </span>
+                </div>
+                <p className="mt-3 text-lg font-semibold tabular-nums text-zinc-950 dark:text-zinc-50">
+                  {formatRubles(row.bonusLoad.currentBalance)}
+                </p>
+                <p className="mt-1 text-xs text-zinc-500">
+                  активность: {formatDate(row.lastActivityAt)}
+                </p>
+              </Link>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -703,7 +851,7 @@ function GuestCompactRow({ row }: { row: GuestDashboardRow }) {
   return (
     <Link
       href={`/guests/${row.id}`}
-      className="grid gap-3 px-5 py-4 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900/50 md:grid-cols-[minmax(0,1fr)_120px_140px]"
+      className="grid gap-3 px-5 py-4 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900/50 md:grid-cols-[minmax(0,1fr)_120px_170px]"
     >
       <div className="min-w-0">
         <p className="truncate font-medium text-zinc-950 dark:text-zinc-50">
@@ -723,6 +871,11 @@ function GuestCompactRow({ row }: { row: GuestDashboardRow }) {
           LTV {formatRubles(row.ltv.totalRevenue)} ·{" "}
           {formatNumber(row.sessionsCount)} сессий
         </p>
+        {row.bonusLoad.currentBalance > 0 ? (
+          <p className="text-xs text-amber-600 dark:text-amber-300">
+            бонусы {formatRubles(row.bonusLoad.currentBalance)}
+          </p>
+        ) : null}
       </div>
     </Link>
   );
@@ -752,6 +905,7 @@ function GuestListTable({
         <div className="flex flex-wrap gap-2 text-xs font-medium">
           <SortLink filters={filters} sort="revenue" label="Деньги" />
           <SortLink filters={filters} sort="ltv" label="LTV" />
+          <SortLink filters={filters} sort="bonusLoad" label="Бонусы" />
           <SortLink filters={filters} sort="sessions" label="Сессии" />
           <SortLink filters={filters} sort="lastActivity" label="Активность" />
           <SortLink filters={filters} sort="registered" label="Регистрация" />
@@ -767,6 +921,7 @@ function GuestListTable({
                 <th className="px-4 py-3 text-right font-semibold">Сессии</th>
                 <th className="px-4 py-3 text-right font-semibold">Деньги</th>
                 <th className="px-4 py-3 text-right font-semibold">LTV</th>
+                <th className="px-4 py-3 text-right font-semibold">Бонусы</th>
                 <th className="px-4 py-3 text-left font-semibold">
                   Активность
                 </th>
@@ -807,6 +962,21 @@ function GuestListTable({
                     {formatRubles(row.ltv.totalRevenue)}
                     <p className="text-xs text-zinc-500">
                       {formatNumber(row.ltv.revenueDays)} дн.
+                    </p>
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    {formatRubles(row.bonusLoad.currentBalance)}
+                    <p
+                      className={[
+                        "text-xs",
+                        row.bonusLoad.status === "RISK"
+                          ? "text-rose-600 dark:text-rose-300"
+                          : row.bonusLoad.status === "WATCH"
+                            ? "text-amber-600 dark:text-amber-300"
+                            : "text-zinc-500",
+                      ].join(" ")}
+                    >
+                      {bonusLoadLabel(row.bonusLoad.status)}
                     </p>
                   </td>
                   <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">
@@ -907,6 +1077,17 @@ function PaginationLink({
       {children}
     </Link>
   );
+}
+
+function summaryToFilters(summary: GuestsSummary): GuestListFilters {
+  return {
+    dateFrom: summary.periodFrom,
+    dateTo: summary.periodTo,
+    storeId: summary.storeId ?? undefined,
+    guestGroupId: summary.guestGroupId ?? undefined,
+    page: "1",
+    pageSize: "50",
+  };
 }
 
 function guestsHref(filters: GuestListFilters) {

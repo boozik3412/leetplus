@@ -53,6 +53,7 @@ const sortOptions: Array<NonNullable<GuestListFilters["sort"]>> = [
   "rfm",
   "churnRisk",
   "ltv",
+  "bonusLoad",
 ];
 
 function searchParam(value: string | string[] | undefined) {
@@ -178,6 +179,33 @@ function churnRiskTone(level: GuestChurnRiskLevel) {
   return "bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300";
 }
 
+function bonusLoadLabel(status: GuestDashboardRow["bonusLoad"]["status"]) {
+  const labels: Record<GuestDashboardRow["bonusLoad"]["status"], string> = {
+    NONE: "Нет бонусов",
+    NORMAL: "Активный остаток",
+    WATCH: "Наблюдать",
+    RISK: "Без активности",
+  };
+
+  return labels[status];
+}
+
+function bonusLoadTone(status: GuestDashboardRow["bonusLoad"]["status"]) {
+  if (status === "RISK") {
+    return "bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300";
+  }
+
+  if (status === "WATCH") {
+    return "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300";
+  }
+
+  if (status === "NORMAL") {
+    return "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300";
+  }
+
+  return "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300";
+}
+
 function sortLabel(sort: NonNullable<GuestListFilters["sort"]>) {
   const labels: Record<NonNullable<GuestListFilters["sort"]>, string> = {
     revenue: "Деньги",
@@ -187,6 +215,7 @@ function sortLabel(sort: NonNullable<GuestListFilters["sort"]>) {
     rfm: "RFM",
     churnRisk: "Риск оттока",
     ltv: "LTV факт",
+    bonusLoad: "Бонусы",
   };
 
   return labels[sort];
@@ -508,7 +537,7 @@ function ReportTable({
       </div>
       {guestList.rows.length > 0 ? (
         <div className="overflow-x-auto">
-          <table className="min-w-[1900px] divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
+          <table className="min-w-[2050px] divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
             <thead className="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900/60">
               <tr>
                 <th className="px-4 py-3 text-left font-semibold">Гость</th>
@@ -527,6 +556,7 @@ function ReportTable({
                 <th className="px-4 py-3 text-right font-semibold">
                   LTV факт
                 </th>
+                <th className="px-4 py-3 text-right font-semibold">Бонусы</th>
                 <th className="px-4 py-3 text-right font-semibold">Бар</th>
                 <th className="px-4 py-3 text-left font-semibold">
                   Регистрация
@@ -615,6 +645,21 @@ function ReportTable({
                     <p className="text-xs text-zinc-500">
                       {formatNumber(row.ltv.revenueDays)} дн. с выручкой
                     </p>
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    {formatRubles(row.bonusLoad.currentBalance)}
+                    <p
+                      className={`text-xs font-medium ${bonusLoadTone(
+                        row.bonusLoad.status,
+                      )} inline-flex rounded-full px-2 py-0.5`}
+                    >
+                      {bonusLoadLabel(row.bonusLoad.status)}
+                    </p>
+                    {row.bonusLoad.balanceToLtvPercent !== null ? (
+                      <p className="mt-1 text-xs text-zinc-500">
+                        {formatNumber(row.bonusLoad.balanceToLtvPercent, 1)}% от LTV
+                      </p>
+                    ) : null}
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums">
                     {formatRubles(row.barRevenue)}

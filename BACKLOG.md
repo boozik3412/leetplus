@@ -273,7 +273,8 @@ LeetPlus должен развиваться из набора отчетов в
 - Готово: analytics результата кампаний/контактов начинается с campaign detail: direct contact attribution, group fallback, before/after windows, visits, sessions, play hours, balance-spend revenue, bar revenue и attribution limitations.
 - Готово: campaign contact workflow связан с `marketingCampaignId`: campaign detail может создавать linked CRM task из вкладки contacts, contact results сохраняются прямо в campaign, а effect analytics отслеживает group, CRM task, responsible user, channel, visits, revenue и bar.
 - Готово: LTV v1 добавлен в гостевую аналитику: API считает пожизненную выручку гостя по игровым операциям и покупкам бара, `/guests`, `/guests/report`, карточка гостя, сортировка и CSV export показывают LTV факт.
-- Запланированная аналитика: бонусная нагрузка, расширенный эффект кампаний и прогноз гостевого потока. RFM v1, churn risk v1, retention v1, LTV v1 и тепловая карта визитов v1 уже добавлены в гостевую аналитику.
+- Готово: бонусная нагрузка v1 добавлена в гостевую аналитику: API берет последние снимки `GuestBonusBalanceSnapshot`, считает общий бонусный долг сети, гостей с бонусами, бонусы без активности, долю бонусного остатка к выручке периода, сортировку `bonusLoad`, карточку гостя и CSV export.
+- Запланированная аналитика: расширенный эффект кампаний и прогноз гостевого потока. RFM v1, churn risk v1, retention v1, LTV v1, бонусная нагрузка v1 и тепловая карта визитов v1 уже добавлены в гостевую аналитику.
 - Запланированный CRM-слой: segments, saved groups, CRM statuses, notes, tasks, communication history и next-best-action recommendations.
 - Запланированная loyalty/gamification: missions, rewards, budgets, limits, anti-fraud и manual payout queue до подтверждения безопасного Langame write API.
 - Запланированные каналы: сначала Telegram bot/Mini App, затем MAX bot/Mini App после legal/account setup; всем каналам нужны явное согласие и unsubscribe support.

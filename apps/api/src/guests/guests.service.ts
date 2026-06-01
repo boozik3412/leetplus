@@ -42,7 +42,8 @@ export type GuestListQuery = GuestsSummaryQuery & {
     | 'registered'
     | 'rfm'
     | 'churnRisk'
-    | 'ltv';
+    | 'ltv'
+    | 'bonusLoad';
   direction?: 'asc' | 'desc';
 };
 
@@ -197,6 +198,7 @@ export type GuestDashboardRow = {
   transactionAmount: number;
   barRevenue: number;
   ltv: GuestLtvSummary;
+  bonusLoad: GuestBonusLoadSummary;
   rfm: GuestRfmScore;
   churnRisk: GuestChurnRisk;
   segment: 'active' | 'new' | 'repeat' | 'risk' | 'lost' | 'quiet';
@@ -248,6 +250,25 @@ export type GuestLtvSummary = {
   lastRevenueAt: string | null;
   averageRevenuePerRevenueDay: number;
   averageRevenuePerCalendarDay: number;
+};
+
+export type GuestBonusLoadStatus = 'NONE' | 'NORMAL' | 'WATCH' | 'RISK';
+
+export type GuestBonusLoadSummary = {
+  currentBalance: number;
+  latestSnapshotAt: string | null;
+  balanceToLtvPercent: number | null;
+  status: GuestBonusLoadStatus;
+};
+
+export type GuestBonusLoadNetworkSummary = {
+  totalBalance: number;
+  guestsWithBalance: number;
+  inactiveBalance: number;
+  inactiveGuests: number;
+  averageBalance: number;
+  balanceToPeriodRevenuePercent: number | null;
+  latestSnapshotAt: string | null;
 };
 
 export type GuestRetentionWindow = {
@@ -319,6 +340,7 @@ export type GuestsSummary = {
   transactionAmount: number;
   barRevenue: number;
   barSalesCount: number;
+  bonusLoad: GuestBonusLoadNetworkSummary;
   retention: GuestRetentionSummary;
   visitHeatmap: GuestVisitHeatmapSummary;
   dataQuality: {
@@ -345,6 +367,7 @@ export type GuestsSummary = {
   }>;
   topGuests: GuestDashboardRow[];
   riskGuestsRows: GuestDashboardRow[];
+  bonusLoadGuestsRows: GuestDashboardRow[];
 };
 
 export type GuestListResponse = {
@@ -743,6 +766,8 @@ type GuestMetrics = {
   lifetimeRevenueDays: Set<string>;
   lifetimeFirstRevenueAt: Date | null;
   lifetimeLastRevenueAt: Date | null;
+  bonusBalance: number;
+  bonusSnapshotAt: Date | null;
 };
 
 type StaffShiftMetrics = {
@@ -869,6 +894,11 @@ export class GuestsService {
     const riskRows = rows.filter((row) => row.segment === 'risk');
     const lostRows = rows.filter((row) => row.segment === 'lost');
     const periodMetrics = this.sumPeriodMetrics(metricsByGuestId);
+    const periodRevenue = this.round(
+      periodMetrics.transactionAmount + periodMetrics.barRevenue,
+      2,
+    );
+    const bonusLoad = this.buildBonusLoadSummary(rows, periodRevenue);
     const playHours = this.round(periodMetrics.playMinutes / 60, 1);
     const computerCount = await this.resolveComputerCount(
       tenantId,
@@ -922,12 +952,18 @@ export class GuestsService {
       transactionAmount: this.round(periodMetrics.transactionAmount, 2),
       barRevenue: this.round(periodMetrics.barRevenue, 2),
       barSalesCount: periodMetrics.barSalesCount,
+      bonusLoad,
       retention,
       visitHeatmap,
       dataQuality,
       visitTrend: trend,
       topGuests: this.sortRows(rows, 'revenue', 'desc').slice(0, 12),
       riskGuestsRows: this.sortRows(riskRows, 'revenue', 'desc').slice(0, 12),
+      bonusLoadGuestsRows: this.sortRows(
+        rows.filter((row) => row.bonusLoad.currentBalance > 0),
+        'bonusLoad',
+        'desc',
+      ).slice(0, 12),
     };
   }
 
@@ -981,6 +1017,10 @@ export class GuestsService {
         'Дней с выручкой',
         'Первая выручка',
         'Последняя выручка',
+        'Бонусный остаток',
+        'Бонусная нагрузка',
+        'Бонус / LTV, %',
+        'Дата бонусного снимка',
         'Деньги, руб',
         'Бар, руб',
         'RFM балл',
@@ -1015,6 +1055,10 @@ export class GuestsService {
         row.ltv.revenueDays,
         this.formatExportDate(row.ltv.firstRevenueAt),
         this.formatExportDate(row.ltv.lastRevenueAt),
+        row.bonusLoad.currentBalance,
+        this.bonusLoadExportLabel(row.bonusLoad.status),
+        row.bonusLoad.balanceToLtvPercent ?? '',
+        this.formatExportDate(row.bonusLoad.latestSnapshotAt),
         row.transactionAmount + row.barRevenue,
         row.barRevenue,
         row.rfm.totalScore,
@@ -2610,16 +2654,59 @@ export class GuestsService {
     const guests = filters.storeId
       ? allGuests.filter((guest) => metricsByGuestId.has(guest.id))
       : allGuests;
+    const selectedGuestIds = guests.map((guest) => guest.id);
 
     await this.applyLifetimeRevenueMetrics(
       tenantId,
       guestWhere,
       filters,
       metricsByGuestId,
-      guests.map((guest) => guest.id),
+      selectedGuestIds,
+    );
+    await this.applyLatestBonusBalanceMetrics(
+      tenantId,
+      metricsByGuestId,
+      selectedGuestIds,
     );
 
     return { guests, metricsByGuestId, groupsByKey };
+  }
+
+  private async applyLatestBonusBalanceMetrics(
+    tenantId: string,
+    metricsByGuestId: Map<string, GuestMetrics>,
+    guestIds: string[],
+  ) {
+    if (guestIds.length === 0) {
+      return;
+    }
+
+    const snapshots = await this.prisma.guestBonusBalanceSnapshot.findMany({
+      where: {
+        tenantId,
+        guestId: { in: guestIds },
+      },
+      distinct: ['guestId'],
+      orderBy: [{ guestId: 'asc' }, { snapshotDate: 'desc' }],
+      select: {
+        guestId: true,
+        snapshotDate: true,
+        bonusBalance: true,
+      },
+    });
+
+    for (const snapshot of snapshots) {
+      if (!snapshot.guestId) {
+        continue;
+      }
+
+      const metrics = this.ensureMetrics(metricsByGuestId, snapshot.guestId);
+      metrics.bonusBalance = Math.max(
+        0,
+        this.decimalToNumber(snapshot.bonusBalance) ?? 0,
+      );
+      metrics.bonusSnapshotAt = snapshot.snapshotDate;
+    }
   }
 
   private async applyLifetimeRevenueMetrics(
@@ -4564,6 +4651,7 @@ export class GuestsService {
       transactionAmount,
       barRevenue,
       ltv,
+      bonusLoad: this.buildGuestBonusLoad(metrics, ltv, segment),
       rfm,
       churnRisk,
       segment,
@@ -4683,6 +4771,93 @@ export class GuestsService {
       averageRevenuePerCalendarDay:
         calendarDays > 0 ? this.round(totalRevenue / calendarDays, 2) : 0,
     };
+  }
+
+  private buildGuestBonusLoad(
+    metrics: GuestMetrics | undefined,
+    ltv: GuestLtvSummary,
+    segment: GuestDashboardRow['segment'],
+  ): GuestBonusLoadSummary {
+    const currentBalance = this.round(metrics?.bonusBalance ?? 0, 2);
+    const status = this.resolveBonusLoadStatus(currentBalance, segment);
+
+    return {
+      currentBalance,
+      latestSnapshotAt: this.toIsoDateTime(metrics?.bonusSnapshotAt ?? null),
+      balanceToLtvPercent:
+        currentBalance > 0 && ltv.totalRevenue > 0
+          ? this.round((currentBalance / ltv.totalRevenue) * 100, 1)
+          : null,
+      status,
+    };
+  }
+
+  private buildBonusLoadSummary(
+    rows: GuestDashboardRow[],
+    periodRevenue: number,
+  ): GuestBonusLoadNetworkSummary {
+    let totalBalance = 0;
+    let guestsWithBalance = 0;
+    let inactiveBalance = 0;
+    let inactiveGuests = 0;
+    let latestSnapshotAt: Date | null = null;
+
+    for (const row of rows) {
+      const balance = row.bonusLoad.currentBalance;
+      if (balance <= 0) {
+        continue;
+      }
+
+      totalBalance += balance;
+      guestsWithBalance += 1;
+
+      if (row.bonusLoad.latestSnapshotAt) {
+        latestSnapshotAt = this.maxDate(
+          latestSnapshotAt,
+          new Date(row.bonusLoad.latestSnapshotAt),
+        );
+      }
+
+      if (row.bonusLoad.status === 'RISK' || row.bonusLoad.status === 'WATCH') {
+        inactiveBalance += balance;
+        inactiveGuests += 1;
+      }
+    }
+
+    return {
+      totalBalance: this.round(totalBalance, 2),
+      guestsWithBalance,
+      inactiveBalance: this.round(inactiveBalance, 2),
+      inactiveGuests,
+      averageBalance:
+        guestsWithBalance > 0
+          ? this.round(totalBalance / guestsWithBalance, 2)
+          : 0,
+      balanceToPeriodRevenuePercent:
+        totalBalance > 0 && periodRevenue > 0
+          ? this.round((totalBalance / periodRevenue) * 100, 1)
+          : null,
+      latestSnapshotAt: this.toIsoDateTime(latestSnapshotAt),
+    };
+  }
+
+  private resolveBonusLoadStatus(
+    balance: number,
+    segment: GuestDashboardRow['segment'],
+  ): GuestBonusLoadStatus {
+    if (balance <= 0) {
+      return 'NONE';
+    }
+
+    if (segment === 'risk' || segment === 'lost') {
+      return 'RISK';
+    }
+
+    if (segment === 'quiet') {
+      return 'WATCH';
+    }
+
+    return 'NORMAL';
   }
 
   private buildGuestChurnRisk(
@@ -5771,6 +5946,7 @@ export class GuestsService {
       'rfm',
       'churnRisk',
       'ltv',
+      'bonusLoad',
     ];
     return allowed.includes(value ?? '') ? (value ?? 'revenue') : 'revenue';
   }
@@ -5829,6 +6005,17 @@ export class GuestsService {
     };
 
     return labels[level];
+  }
+
+  private bonusLoadExportLabel(status: GuestBonusLoadStatus) {
+    const labels: Record<GuestBonusLoadStatus, string> = {
+      NONE: 'Нет бонусов',
+      NORMAL: 'Активный остаток',
+      WATCH: 'Наблюдать',
+      RISK: 'Бонусы без активности',
+    };
+
+    return labels[status];
   }
 
   private crmStatusExportLabel(status: GuestCrmStatus) {
@@ -5934,6 +6121,8 @@ export class GuestsService {
       lifetimeRevenueDays: new Set<string>(),
       lifetimeFirstRevenueAt: null,
       lifetimeLastRevenueAt: null,
+      bonusBalance: 0,
+      bonusSnapshotAt: null,
     };
     map.set(guestId, created);
 
@@ -5985,9 +6174,12 @@ export class GuestsService {
                   ? first.churnRisk.score - second.churnRisk.score
                   : sort === 'ltv'
                     ? first.ltv.totalRevenue - second.ltv.totalRevenue
-                    : first.transactionAmount +
-                      first.barRevenue -
-                      (second.transactionAmount + second.barRevenue);
+                    : sort === 'bonusLoad'
+                      ? first.bonusLoad.currentBalance -
+                        second.bonusLoad.currentBalance
+                      : first.transactionAmount +
+                        first.barRevenue -
+                        (second.transactionAmount + second.barRevenue);
 
       if (compare !== 0) {
         return compare * multiplier;

@@ -40,6 +40,7 @@ export type GuestDashboardRow = {
   transactionAmount: number;
   barRevenue: number;
   ltv: GuestLtvSummary;
+  bonusLoad: GuestBonusLoadSummary;
   rfm: GuestRfmScore;
   churnRisk: GuestChurnRisk;
   segment: GuestSegment;
@@ -91,6 +92,25 @@ export type GuestLtvSummary = {
   lastRevenueAt: string | null;
   averageRevenuePerRevenueDay: number;
   averageRevenuePerCalendarDay: number;
+};
+
+export type GuestBonusLoadStatus = "NONE" | "NORMAL" | "WATCH" | "RISK";
+
+export type GuestBonusLoadSummary = {
+  currentBalance: number;
+  latestSnapshotAt: string | null;
+  balanceToLtvPercent: number | null;
+  status: GuestBonusLoadStatus;
+};
+
+export type GuestBonusLoadNetworkSummary = {
+  totalBalance: number;
+  guestsWithBalance: number;
+  inactiveBalance: number;
+  inactiveGuests: number;
+  averageBalance: number;
+  balanceToPeriodRevenuePercent: number | null;
+  latestSnapshotAt: string | null;
 };
 
 export type GuestRetentionWindow = {
@@ -162,6 +182,7 @@ export type GuestsSummary = {
   transactionAmount: number;
   barRevenue: number;
   barSalesCount: number;
+  bonusLoad: GuestBonusLoadNetworkSummary;
   retention: GuestRetentionSummary;
   visitHeatmap: GuestVisitHeatmapSummary;
   dataQuality: {
@@ -188,6 +209,7 @@ export type GuestsSummary = {
   }>;
   topGuests: GuestDashboardRow[];
   riskGuestsRows: GuestDashboardRow[];
+  bonusLoadGuestsRows: GuestDashboardRow[];
 };
 
 export type GuestListFilters = GuestsSummaryFilters & {
@@ -203,7 +225,8 @@ export type GuestListFilters = GuestsSummaryFilters & {
     | "registered"
     | "rfm"
     | "churnRisk"
-    | "ltv";
+    | "ltv"
+    | "bonusLoad";
   direction?: "asc" | "desc";
 };
 

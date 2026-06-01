@@ -132,7 +132,6 @@ export default async function DashboardRevenueByClubPage({
     dateFrom: searchParam(params.dateFrom),
     dateTo: searchParam(params.dateTo),
     storeIds: searchParamsArray(params.storeIds),
-    skuGrouping: "network",
   } as const;
 
   const [summary, stores] = await Promise.all([

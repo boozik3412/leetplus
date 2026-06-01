@@ -34,6 +34,11 @@ type NavGroup = {
 
 type ProductArea = "Главная" | NavGroup["title"];
 
+type OpenNavGroupsState = {
+  pathname: string;
+  groups: Record<string, boolean>;
+};
+
 const navGroups: NavGroup[] = [
   {
     title: "Гости",
@@ -587,9 +592,12 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
   const searchParams = useSearchParams();
   const desktopSidebarRef = useRef<HTMLElement | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [openNavGroups, setOpenNavGroups] = useState<Record<string, boolean>>(
-    {},
-  );
+  const [openNavState, setOpenNavState] = useState<OpenNavGroupsState>({
+    pathname: "",
+    groups: {},
+  });
+  const openNavGroups =
+    openNavState.pathname === pathname ? openNavState.groups : {};
   const allowedNavGroups = navGroups
     .map((group) => ({
       ...group,
@@ -600,20 +608,6 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
   const isDashboardArea = isDashboardPath(pathname);
   const currentProductArea = resolveCurrentProductArea(pathname);
   const hasOpenNavGroup = Object.values(openNavGroups).some(Boolean);
-
-  useEffect(() => {
-    if (!isDashboardArea || !hasOpenNavGroup) {
-      return;
-    }
-
-    const frame = window.requestAnimationFrame(() => {
-      setOpenNavGroups({});
-    });
-
-    return () => {
-      window.cancelAnimationFrame(frame);
-    };
-  }, [hasOpenNavGroup, isDashboardArea]);
 
   useEffect(() => {
     if (!isDashboardArea || !searchParams.has("skuGrouping")) {
@@ -647,12 +641,12 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
         return;
       }
 
-      setOpenNavGroups({});
+      setOpenNavState({ pathname, groups: {} });
     }
 
     function closeOnEscape(event: KeyboardEvent) {
       if (event.key === "Escape") {
-        setOpenNavGroups({});
+        setOpenNavState({ pathname, groups: {} });
       }
     }
 
@@ -665,7 +659,7 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
       document.removeEventListener("touchstart", closeOnOutsideClick);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [hasOpenNavGroup]);
+  }, [hasOpenNavGroup, pathname]);
 
   async function handleLogout() {
     await fetch("/api/auth/logout", {
@@ -676,17 +670,31 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
   }
 
   function toggleNavGroup(title: string) {
-    setOpenNavGroups((current) => ({
-      [title]: !current[title],
-    }));
+    setOpenNavState((current) => {
+      const currentGroups =
+        current.pathname === pathname ? current.groups : {};
+
+      return {
+        pathname,
+        groups: {
+          [title]: !currentGroups[title],
+        },
+      };
+    });
   }
 
   function openNavGroup(title: string) {
-    setOpenNavGroups({ [title]: true });
+    setOpenNavState({
+      pathname,
+      groups: { [title]: true },
+    });
   }
 
   function closeNavGroups() {
-    setOpenNavGroups({});
+    setOpenNavState({
+      pathname,
+      groups: {},
+    });
   }
 
   return (

@@ -127,7 +127,6 @@ export default async function DashboardRevenueDiagnosticsPage({
     dateFrom: searchParam(params.dateFrom),
     dateTo: searchParam(params.dateTo),
     storeIds: searchParamsArray(params.storeIds),
-    skuGrouping: "network",
   } as const;
   const [report, stores] = await Promise.all([
     getDashboardRevenueDiagnostics(filters),

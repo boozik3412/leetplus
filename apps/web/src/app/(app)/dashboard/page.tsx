@@ -400,7 +400,6 @@ export default async function DashboardPage({
     dateFrom: searchParam(params.dateFrom),
     dateTo: searchParam(params.dateTo),
     storeIds: searchParamsArray(params.storeIds),
-    skuGrouping: "network",
   } as const;
   const revenueView: DashboardRevenueView =
     searchParam(params.revenueView) === "stores" ? "stores" : "summary";

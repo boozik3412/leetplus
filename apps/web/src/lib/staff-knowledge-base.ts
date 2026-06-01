@@ -36,6 +36,20 @@ export type StaffKnowledgeSettings = {
     email: string;
     fullName: string | null;
   } | null;
+  history: StaffKnowledgeSettingsEvent[];
+};
+
+export type StaffKnowledgeSettingsEvent = {
+  id: string;
+  eventType: string;
+  previousRevisionSlaPolicy: StaffKnowledgeRevisionSlaPolicy | null;
+  nextRevisionSlaPolicy: StaffKnowledgeRevisionSlaPolicy;
+  actorUser: {
+    id: string;
+    email: string;
+    fullName: string | null;
+  } | null;
+  createdAt: string;
 };
 
 export type StaffKnowledgeMaterial = {

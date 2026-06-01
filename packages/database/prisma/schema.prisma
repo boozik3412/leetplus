@@ -166,6 +166,7 @@ model Tenant {
   staffTaskComments                    StaffTaskComment[]
   staffTaskAuditEvents                 StaffTaskAuditEvent[]
   staffKnowledgeSettings               StaffKnowledgeSettings?
+  staffKnowledgeSettingsEvents         StaffKnowledgeSettingsEvent[]
   staffKnowledgeArticles               StaffKnowledgeArticle[]
   staffKnowledgeArticleVersions        StaffKnowledgeArticleVersion[]
   staffKnowledgeArticleReadReceipts    StaffKnowledgeArticleReadReceipt[]
@@ -237,6 +238,7 @@ model User {
   staffTaskComments                    StaffTaskComment[]                    @relation("StaffTaskCommentAuthor")
   staffTaskAuditEvents                 StaffTaskAuditEvent[]                 @relation("StaffTaskAuditActor")
   updatedStaffKnowledgeSettings        StaffKnowledgeSettings[]              @relation("StaffKnowledgeSettingsUpdatedBy")
+  staffKnowledgeSettingsEvents         StaffKnowledgeSettingsEvent[]          @relation("StaffKnowledgeSettingsEventActor")
   createdStaffKnowledgeArticles        StaffKnowledgeArticle[]               @relation("StaffKnowledgeArticleCreatedBy")
   approvedStaffKnowledgeArticles       StaffKnowledgeArticle[]               @relation("StaffKnowledgeArticleApprovedBy")
   createdStaffKnowledgeArticleVersions StaffKnowledgeArticleVersion[]        @relation("StaffKnowledgeArticleVersionCreatedBy")
@@ -1643,8 +1645,28 @@ model StaffKnowledgeSettings {
 
   tenant        Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   updatedByUser User?  @relation("StaffKnowledgeSettingsUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  historyEvents StaffKnowledgeSettingsEvent[]
 
   @@index([updatedByUserId], map: "staff_knowledge_settings_updated_by_idx")
+}
+
+model StaffKnowledgeSettingsEvent {
+  id                        String   @id @default(uuid())
+  tenantId                  String
+  settingsId                String?
+  actorUserId               String?
+  eventType                 String   @default("REVISION_SLA_POLICY_UPDATED")
+  previousRevisionSlaPolicy Json?
+  nextRevisionSlaPolicy     Json?
+  createdAt                 DateTime @default(now())
+
+  tenant    Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  settings  StaffKnowledgeSettings? @relation(fields: [settingsId], references: [id], onDelete: SetNull)
+  actorUser User?                   @relation("StaffKnowledgeSettingsEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt], map: "staff_knowledge_settings_event_tenant_created_idx")
+  @@index([settingsId, createdAt], map: "staff_knowledge_settings_event_settings_created_idx")
+  @@index([actorUserId], map: "staff_knowledge_settings_event_actor_idx")
 }
 
 model StaffKnowledgeArticle {

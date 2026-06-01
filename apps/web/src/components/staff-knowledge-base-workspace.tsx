@@ -18,6 +18,7 @@ import type {
   StaffKnowledgeRelatedLinkType,
   StaffKnowledgeRevisionSlaPolicy,
   StaffKnowledgeRoleScope,
+  StaffKnowledgeSettingsEvent,
 } from "@/lib/staff-knowledge-base";
 
 const statusLabels: Record<StaffKnowledgeArticleStatus, string> = {
@@ -363,6 +364,47 @@ function defaultRevisionSlaDays(
   return Math.min(Math.max(Math.round(roleDays + materialExtraDays), 1), 14);
 }
 
+function formatSettingsActor(
+  user: StaffKnowledgeSettingsEvent["actorUser"],
+) {
+  return user?.fullName ?? user?.email ?? "Система";
+}
+
+function countPolicyChanges<T extends string>(
+  previous: Record<T, number>,
+  next: Record<T, number>,
+  keys: T[],
+) {
+  return keys.filter((key) => previous[key] !== next[key]).length;
+}
+
+function slaPolicyHistorySummary(event: StaffKnowledgeSettingsEvent) {
+  if (!event.previousRevisionSlaPolicy) {
+    return `Первичная настройка: базовый срок ${event.nextRevisionSlaPolicy.defaultDays} дн.`;
+  }
+
+  const roleChanges = countPolicyChanges(
+    event.previousRevisionSlaPolicy.roleDays,
+    event.nextRevisionSlaPolicy.roleDays,
+    revisionSlaRoleOrder,
+  );
+  const materialChanges = countPolicyChanges(
+    event.previousRevisionSlaPolicy.materialTypeExtraDays,
+    event.nextRevisionSlaPolicy.materialTypeExtraDays,
+    revisionSlaMaterialTypeOrder,
+  );
+  const details = [
+    event.previousRevisionSlaPolicy.defaultDays !==
+    event.nextRevisionSlaPolicy.defaultDays
+      ? `базовый срок ${event.previousRevisionSlaPolicy.defaultDays} -> ${event.nextRevisionSlaPolicy.defaultDays} дн.`
+      : null,
+    roleChanges > 0 ? `ролей изменено: ${roleChanges}` : null,
+    materialChanges > 0 ? `материалов изменено: ${materialChanges}` : null,
+  ].filter(Boolean);
+
+  return details.length > 0 ? details.join(", ") : "Без изменения числовых правил";
+}
+
 function materialTypeFromAttachment(
   attachment: StaffAttachmentUploadResult,
 ): StaffKnowledgeMaterialType {
@@ -465,6 +507,9 @@ export function StaffKnowledgeBaseWorkspace({
     useState<StaffKnowledgeRevisionSlaPolicy>(
       report.settings.revisionSlaPolicy,
     );
+  const [settingsHistory, setSettingsHistory] = useState(
+    report.settings.history,
+  );
   const [readPendingId, setReadPendingId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -804,8 +849,10 @@ export function StaffKnowledgeBaseWorkspace({
 
       const saved = (await response.json()) as {
         revisionSlaPolicy: StaffKnowledgeRevisionSlaPolicy;
+        history: StaffKnowledgeSettingsEvent[];
       };
       setRevisionSlaPolicy(saved.revisionSlaPolicy);
+      setSettingsHistory(saved.history);
       setMessage("Политика SLA базы знаний сохранена.");
       router.refresh();
     } catch (caught) {
@@ -916,6 +963,51 @@ export function StaffKnowledgeBaseWorkspace({
               >
                 {settingsPending ? "Сохраняем..." : "Сохранить SLA"}
               </button>
+            </div>
+
+            <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-xs font-bold uppercase text-zinc-500">
+                    История SLA
+                  </p>
+                  <p className="text-xs text-zinc-500">
+                    Последние изменения правил согласования базы знаний.
+                  </p>
+                </div>
+                {report.settings.updatedAt ? (
+                  <span className="text-xs text-zinc-500">
+                    Обновлено {formatDateTime(report.settings.updatedAt)}
+                  </span>
+                ) : null}
+              </div>
+
+              {settingsHistory.length > 0 ? (
+                <div className="mt-3 grid gap-2">
+                  {settingsHistory.map((event) => (
+                    <div
+                      key={event.id}
+                      className="rounded-md border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950"
+                    >
+                      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                        <p className="text-sm font-semibold">
+                          {slaPolicyHistorySummary(event)}
+                        </p>
+                        <span className="text-xs text-zinc-500">
+                          {formatDateTime(event.createdAt)}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs text-zinc-500">
+                        Изменил: {formatSettingsActor(event.actorUser)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-3 rounded-md border border-dashed border-zinc-300 px-3 py-2 text-xs text-zinc-500 dark:border-zinc-700">
+                  История появится после первого сохранения политики SLA.
+                </p>
+              )}
             </div>
           </div>
         </details>

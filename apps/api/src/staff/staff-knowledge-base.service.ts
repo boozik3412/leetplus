@@ -268,6 +268,13 @@ const articleInclude = {
 
 const knowledgeSettingsInclude = {
   updatedByUser: { select: { id: true, email: true, fullName: true } },
+  historyEvents: {
+    orderBy: { createdAt: 'desc' },
+    take: 8,
+    include: {
+      actorUser: { select: { id: true, email: true, fullName: true } },
+    },
+  },
 } satisfies Prisma.StaffKnowledgeSettingsInclude;
 
 const knowledgeSuggestionChecklistSelect = {
@@ -399,6 +406,16 @@ export type StaffKnowledgeSettingsResponse = {
   revisionSlaPolicy: StaffKnowledgeRevisionSlaPolicy;
   updatedAt: string | null;
   updatedByUser: { id: string; email: string; fullName: string | null } | null;
+  history: StaffKnowledgeSettingsEventResponse[];
+};
+
+export type StaffKnowledgeSettingsEventResponse = {
+  id: string;
+  eventType: string;
+  previousRevisionSlaPolicy: StaffKnowledgeRevisionSlaPolicy | null;
+  nextRevisionSlaPolicy: StaffKnowledgeRevisionSlaPolicy;
+  actorUser: { id: string; email: string; fullName: string | null } | null;
+  createdAt: string;
 };
 
 @Injectable()
@@ -530,6 +547,19 @@ export class StaffKnowledgeBaseService {
       dto.revisionSlaPolicy,
     );
     const settings = await this.prisma.$transaction(async (tx) => {
+      const previousSettings = await tx.staffKnowledgeSettings.findUnique({
+        where: { tenantId },
+        select: { id: true, revisionSlaPolicy: true },
+      });
+      const previousRevisionSlaPolicy = previousSettings
+        ? this.normalizeRevisionSlaPolicy(previousSettings.revisionSlaPolicy)
+        : null;
+      const shouldCreateHistoryEvent =
+        !previousRevisionSlaPolicy ||
+        !this.areRevisionSlaPoliciesEqual(
+          previousRevisionSlaPolicy,
+          revisionSlaPolicy,
+        );
       const upserted = await tx.staffKnowledgeSettings.upsert({
         where: { tenantId },
         create: {
@@ -547,6 +577,20 @@ export class StaffKnowledgeBaseService {
           },
         },
       });
+
+      if (shouldCreateHistoryEvent) {
+        await tx.staffKnowledgeSettingsEvent.create({
+          data: {
+            tenantId,
+            settingsId: upserted.id,
+            actorUserId: user.id,
+            eventType: 'REVISION_SLA_POLICY_UPDATED',
+            previousRevisionSlaPolicy: previousRevisionSlaPolicy ?? undefined,
+            nextRevisionSlaPolicy: revisionSlaPolicy,
+          },
+          select: { id: true },
+        });
+      }
 
       const returnedArticles = await tx.staffKnowledgeArticle.findMany({
         where: {
@@ -586,7 +630,10 @@ export class StaffKnowledgeBaseService {
         });
       }
 
-      return upserted;
+      return tx.staffKnowledgeSettings.findUniqueOrThrow({
+        where: { tenantId },
+        include: knowledgeSettingsInclude,
+      });
     });
 
     return this.toKnowledgeSettingsResponse(settings);
@@ -1844,7 +1891,27 @@ export class StaffKnowledgeBaseService {
       ),
       updatedAt: row?.updatedAt.toISOString() ?? null,
       updatedByUser: row?.updatedByUser ?? null,
+      history:
+        row?.historyEvents.map((event) => ({
+          id: event.id,
+          eventType: event.eventType,
+          previousRevisionSlaPolicy: event.previousRevisionSlaPolicy
+            ? this.normalizeRevisionSlaPolicy(event.previousRevisionSlaPolicy)
+            : null,
+          nextRevisionSlaPolicy: this.normalizeRevisionSlaPolicy(
+            event.nextRevisionSlaPolicy,
+          ),
+          actorUser: event.actorUser,
+          createdAt: event.createdAt.toISOString(),
+        })) ?? [],
     };
+  }
+
+  private areRevisionSlaPoliciesEqual(
+    left: StaffKnowledgeRevisionSlaPolicy,
+    right: StaffKnowledgeRevisionSlaPolicy,
+  ) {
+    return JSON.stringify(left) === JSON.stringify(right);
   }
 
   private async createArticleVersion(

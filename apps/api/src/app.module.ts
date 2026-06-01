@@ -6,6 +6,7 @@ import { AdminModule } from './admin/admin.module';
 import { AuthModule } from './auth/auth.module';
 import { CategoriesModule } from './categories/categories.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { GuestGamificationModule } from './guest-gamification/guest-gamification.module';
 import { GuestsModule } from './guests/guests.module';
 import { ImportsModule } from './imports/imports.module';
 import { IntegrationsModule } from './integrations/integrations.module';
@@ -38,6 +39,7 @@ import { UsersModule } from './users/users.module';
     ReportsModule,
     DashboardModule,
     GuestsModule,
+    GuestGamificationModule,
     MarketingModule,
     StaffModule,
     UtilitiesModule,

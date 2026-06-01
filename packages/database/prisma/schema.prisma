@@ -150,6 +150,12 @@ model Tenant {
   guestCrmLeads                        GuestCrmLead[]
   guestCrmTasks                        GuestCrmTask[]
   guestCrmContactEvents                GuestCrmContactEvent[]
+  guestGameProfiles                    GuestGameProfile[]
+  guestGameLootBoxes                   GuestGameLootBox[]
+  guestGameMissions                    GuestGameMission[]
+  guestGameSeasons                     GuestGameSeason[]
+  guestGameRewards                     GuestGameReward[]
+  guestGameEvents                      GuestGameEvent[]
   marketingCampaigns                   MarketingCampaign[]
   marketingPromoBundles                MarketingPromoBundle[]
   marketingPromoBundleLaunches         MarketingPromoBundleLaunch[]
@@ -231,6 +237,13 @@ model User {
   createdMarketingMissions             MarketingMission[]                    @relation("MarketingMissionCreatedBy")
   createdMarketingMissionRewards       MarketingMissionReward[]              @relation("MarketingMissionRewardCreatedBy")
   approvedMarketingMissionRewards      MarketingMissionReward[]              @relation("MarketingMissionRewardApprovedBy")
+  createdGuestGameProfiles             GuestGameProfile[]                    @relation("GuestGameProfileCreatedBy")
+  createdGuestGameLootBoxes            GuestGameLootBox[]                    @relation("GuestGameLootBoxCreatedBy")
+  createdGuestGameMissions             GuestGameMission[]                    @relation("GuestGameMissionCreatedBy")
+  createdGuestGameSeasons              GuestGameSeason[]                     @relation("GuestGameSeasonCreatedBy")
+  createdGuestGameRewards              GuestGameReward[]                     @relation("GuestGameRewardCreatedBy")
+  approvedGuestGameRewards             GuestGameReward[]                     @relation("GuestGameRewardApprovedBy")
+  createdGuestGameEvents               GuestGameEvent[]                      @relation("GuestGameEventCreatedBy")
   guestStaffIdentityMappings           GuestStaffIdentityMapping[]
   staffMember                          StaffMember?                          @relation("StaffMemberUser")
   createdStaffMembers                  StaffMember[]                         @relation("StaffMemberCreatedBy")
@@ -432,6 +445,7 @@ model Store {
   stockMovements               StockMovement[]
   marketingPromoBundleUsages   MarketingPromoBundleUsage[]
   marketingMissionRewards      MarketingMissionReward[]
+  guestGameRewards             GuestGameReward[]
   staffTasks                   StaffTask[]
   staffTaskTemplates           StaffTaskTemplate[]
   staffTaskRecurringRules      StaffTaskRecurringRule[]
@@ -895,6 +909,9 @@ model Guest {
   staffIdentityMappings GuestStaffIdentityMapping[]
   audienceMembers       GuestAudienceMember[]
   marketingMissionRewards MarketingMissionReward[]
+  gameProfiles          GuestGameProfile[]
+  gameRewards           GuestGameReward[]
+  gameEvents            GuestGameEvent[]
 
   @@unique([tenantId, externalProvider, externalDomain, externalGuestId])
   @@index([tenantId])
@@ -958,6 +975,7 @@ model GuestCrmLead {
   createdByUser    User?                  @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
   crmTasks         GuestCrmTask[]
   crmContactEvents GuestCrmContactEvent[]
+  gameProfiles     GuestGameProfile[]
 
   @@index([tenantId, createdAt], map: "guest_crm_lead_tenant_created_idx")
   @@index([tenantId, phoneHash], map: "guest_crm_lead_phone_idx")
@@ -1225,6 +1243,238 @@ model MarketingMissionReward {
   @@index([storeId], map: "marketing_mission_reward_store_idx")
   @@index([createdByUserId], map: "marketing_mission_reward_created_by_idx")
   @@index([approvedByUserId], map: "marketing_mission_reward_approved_by_idx")
+}
+
+model GuestGameProfile {
+  id              String    @id @default(uuid())
+  tenantId        String
+  guestId         String?
+  leadId          String?
+  createdByUserId String?
+  displayName     String?
+  contactMasked   String?
+  phoneHash       String?
+  telegramIdentity String?
+  maxIdentity     String?
+  xp              Int       @default(0)
+  level           Int       @default(1)
+  status          String    @default("ACTIVE")
+  lastActivityAt  DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  tenant        Tenant           @relation(fields: [tenantId], references: [id])
+  guest         Guest?           @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  lead          GuestCrmLead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  createdByUser User?           @relation("GuestGameProfileCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  rewards       GuestGameReward[]
+  events        GuestGameEvent[]
+
+  @@unique([tenantId, guestId], map: "guest_game_profile_guest_uidx")
+  @@unique([tenantId, leadId], map: "guest_game_profile_lead_uidx")
+  @@index([tenantId, status, updatedAt], map: "guest_game_profile_status_idx")
+  @@index([tenantId, phoneHash], map: "guest_game_profile_phone_idx")
+  @@index([tenantId, level], map: "guest_game_profile_level_idx")
+  @@index([createdByUserId], map: "guest_game_profile_created_by_idx")
+}
+
+model GuestGameLootBox {
+  id                     String    @id @default(uuid())
+  tenantId               String
+  audienceId             String?
+  createdByUserId        String?
+  name                   String
+  status                 String    @default("DRAFT")
+  triggerKind            String
+  rewardType             String
+  rewardAmount           Decimal?  @db.Decimal(12, 2)
+  rewardLabel            String?
+  segment                String?
+  sessionType            String?
+  storeIds               Json?
+  periodRules            Json?
+  limits                 Json?
+  probabilityRules       Json
+  budgetAmount           Decimal?  @db.Decimal(12, 2)
+  antiFraudRules         Json?
+  manualApprovalRequired Boolean   @default(true)
+  note                   String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  tenant        Tenant            @relation(fields: [tenantId], references: [id])
+  audience      GuestAudience?    @relation(fields: [audienceId], references: [id], onDelete: SetNull)
+  createdByUser User?            @relation("GuestGameLootBoxCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  rewards       GuestGameReward[]
+  events        GuestGameEvent[]
+
+  @@index([tenantId, status, updatedAt], map: "guest_game_loot_box_status_idx")
+  @@index([tenantId, triggerKind], map: "guest_game_loot_box_trigger_idx")
+  @@index([audienceId], map: "guest_game_loot_box_audience_idx")
+  @@index([createdByUserId], map: "guest_game_loot_box_created_by_idx")
+}
+
+model GuestGameMission {
+  id                     String    @id @default(uuid())
+  tenantId               String
+  audienceId             String?
+  createdByUserId        String?
+  name                   String
+  status                 String    @default("DRAFT")
+  missionType            String
+  triggerKind            String
+  rewardType             String
+  rewardAmount           Decimal?  @db.Decimal(12, 2)
+  rewardLabel            String?
+  xpReward               Int       @default(0)
+  progressTarget         Int?
+  progressUnit           String?
+  conditions             Json
+  storeIds               Json?
+  periodFrom             DateTime?
+  periodTo               DateTime?
+  budgetAmount           Decimal?  @db.Decimal(12, 2)
+  perGuestLimit          Int?
+  totalRewardLimit       Int?
+  antiFraudRules         Json?
+  manualApprovalRequired Boolean   @default(true)
+  note                   String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  tenant        Tenant            @relation(fields: [tenantId], references: [id])
+  audience      GuestAudience?    @relation(fields: [audienceId], references: [id], onDelete: SetNull)
+  createdByUser User?            @relation("GuestGameMissionCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  rewards       GuestGameReward[]
+  events        GuestGameEvent[]
+
+  @@index([tenantId, status, updatedAt], map: "guest_game_mission_status_idx")
+  @@index([tenantId, missionType], map: "guest_game_mission_type_idx")
+  @@index([audienceId], map: "guest_game_mission_audience_idx")
+  @@index([createdByUserId], map: "guest_game_mission_created_by_idx")
+}
+
+model GuestGameSeason {
+  id                     String    @id @default(uuid())
+  tenantId               String
+  audienceId             String?
+  createdByUserId        String?
+  name                   String
+  status                 String    @default("DRAFT")
+  seasonType             String
+  periodFrom             DateTime?
+  periodTo               DateTime?
+  xpRules                Json
+  levels                 Json
+  freeRewards            Json?
+  premiumRewards         Json?
+  premiumEnabled         Boolean   @default(false)
+  premiumUpgradeMode     String?
+  budgetAmount           Decimal?  @db.Decimal(12, 2)
+  manualApprovalRequired Boolean   @default(true)
+  note                   String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  tenant        Tenant            @relation(fields: [tenantId], references: [id])
+  audience      GuestAudience?    @relation(fields: [audienceId], references: [id], onDelete: SetNull)
+  createdByUser User?            @relation("GuestGameSeasonCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  rewards       GuestGameReward[]
+  events        GuestGameEvent[]
+
+  @@index([tenantId, status, updatedAt], map: "guest_game_season_status_idx")
+  @@index([tenantId, seasonType], map: "guest_game_season_type_idx")
+  @@index([audienceId], map: "guest_game_season_audience_idx")
+  @@index([createdByUserId], map: "guest_game_season_created_by_idx")
+}
+
+model GuestGameReward {
+  id               String               @id @default(uuid())
+  tenantId         String
+  profileId        String?
+  guestId          String?
+  lootBoxId        String?
+  missionId        String?
+  seasonId         String?
+  storeId          String?
+  createdByUserId  String?
+  approvedByUserId String?
+  status           String               @default("PENDING")
+  source           String               @default("MANUAL")
+  externalProvider IntegrationProvider?
+  externalDomain   String?
+  externalId       String?
+  guestExternalId  String?
+  rewardType       String
+  rewardAmount     Decimal              @default(0) @db.Decimal(12, 2)
+  rewardLabel      String
+  rewardCode       String?
+  qualifiedAt      DateTime             @default(now())
+  expiresAt        DateTime?
+  paidAt           DateTime?
+  note             String?
+  evidence         Json?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  tenant         Tenant            @relation(fields: [tenantId], references: [id])
+  profile        GuestGameProfile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  guest          Guest?            @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  lootBox        GuestGameLootBox? @relation(fields: [lootBoxId], references: [id], onDelete: SetNull)
+  mission        GuestGameMission? @relation(fields: [missionId], references: [id], onDelete: SetNull)
+  season         GuestGameSeason?  @relation(fields: [seasonId], references: [id], onDelete: SetNull)
+  store          Store?            @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  createdByUser  User?             @relation("GuestGameRewardCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  approvedByUser User?             @relation("GuestGameRewardApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, source, externalProvider, externalDomain, externalId], map: "guest_game_reward_external_uidx")
+  @@index([tenantId, status, qualifiedAt], map: "guest_game_reward_status_idx")
+  @@index([profileId], map: "guest_game_reward_profile_idx")
+  @@index([guestId], map: "guest_game_reward_guest_idx")
+  @@index([lootBoxId], map: "guest_game_reward_loot_box_idx")
+  @@index([missionId], map: "guest_game_reward_mission_idx")
+  @@index([seasonId], map: "guest_game_reward_season_idx")
+  @@index([storeId], map: "guest_game_reward_store_idx")
+  @@index([createdByUserId], map: "guest_game_reward_created_by_idx")
+  @@index([approvedByUserId], map: "guest_game_reward_approved_by_idx")
+}
+
+model GuestGameEvent {
+  id              String               @id @default(uuid())
+  tenantId        String
+  profileId       String?
+  guestId         String?
+  lootBoxId       String?
+  missionId       String?
+  seasonId        String?
+  createdByUserId String?
+  eventType       String
+  source          String               @default("MANUAL")
+  externalProvider IntegrationProvider?
+  externalDomain  String?
+  externalId      String?
+  xpDelta         Int                  @default(0)
+  occurredAt      DateTime             @default(now())
+  payload         Json?
+  note            String?
+  createdAt       DateTime             @default(now())
+
+  tenant        Tenant            @relation(fields: [tenantId], references: [id])
+  profile       GuestGameProfile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  guest         Guest?            @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  lootBox       GuestGameLootBox? @relation(fields: [lootBoxId], references: [id], onDelete: SetNull)
+  mission       GuestGameMission? @relation(fields: [missionId], references: [id], onDelete: SetNull)
+  season        GuestGameSeason?  @relation(fields: [seasonId], references: [id], onDelete: SetNull)
+  createdByUser User?             @relation("GuestGameEventCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, source, externalProvider, externalDomain, externalId], map: "guest_game_event_external_uidx")
+  @@index([tenantId, eventType, occurredAt], map: "guest_game_event_type_idx")
+  @@index([profileId], map: "guest_game_event_profile_idx")
+  @@index([guestId], map: "guest_game_event_guest_idx")
+  @@index([lootBoxId], map: "guest_game_event_loot_box_idx")
+  @@index([missionId], map: "guest_game_event_mission_idx")
+  @@index([seasonId], map: "guest_game_event_season_idx")
+  @@index([createdByUserId], map: "guest_game_event_created_by_idx")
 }
 
 model GuestGroup {
@@ -2437,6 +2687,9 @@ model GuestAudience {
   marketingCampaigns MarketingCampaign[]
   promoBundleLaunches MarketingPromoBundleLaunch[]
   marketingMissions  MarketingMission[]
+  gameLootBoxes      GuestGameLootBox[]
+  gameMissions       GuestGameMission[]
+  gameSeasons        GuestGameSeason[]
 
   @@index([tenantId, createdAt], map: "guest_audience_tenant_created_idx")
   @@index([createdByUserId], map: "guest_audience_user_idx")

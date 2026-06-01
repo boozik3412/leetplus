@@ -302,6 +302,29 @@ export type GuestVisitHeatmapSummary = {
   cells: GuestVisitHeatmapCell[];
 };
 
+export type GuestFlowForecastConfidence = 'LOW' | 'MEDIUM' | 'HIGH';
+
+export type GuestFlowForecastDay = {
+  date: string;
+  weekday: GuestVisitHeatmapCell['weekday'];
+  expectedSessions: number;
+  expectedActiveGuests: number;
+  expectedPlayHours: number;
+  confidence: GuestFlowForecastConfidence;
+};
+
+export type GuestFlowForecastSummary = {
+  horizonDays: number;
+  baselineDays: number;
+  totalExpectedSessions: number;
+  totalExpectedActiveGuests: number;
+  totalExpectedPlayHours: number;
+  confidence: GuestFlowForecastConfidence;
+  peakDay: GuestFlowForecastDay | null;
+  quietDay: GuestFlowForecastDay | null;
+  days: GuestFlowForecastDay[];
+};
+
 export type GuestFilterOptions = {
   stores: Array<{
     id: string;
@@ -343,6 +366,7 @@ export type GuestsSummary = {
   bonusLoad: GuestBonusLoadNetworkSummary;
   retention: GuestRetentionSummary;
   visitHeatmap: GuestVisitHeatmapSummary;
+  flowForecast: GuestFlowForecastSummary;
   dataQuality: {
     latestProfileRuns: Array<{
       domain: string;
@@ -917,9 +941,10 @@ export class GuestsService {
       metricsByGuestId,
       period,
     );
-    const [trend, visitHeatmap, dataQuality] = await Promise.all([
+    const [trend, visitHeatmap, flowForecast, dataQuality] = await Promise.all([
       this.buildVisitTrend(tenantId, period, filters),
       this.buildVisitHeatmap(tenantId, period, filters),
+      this.buildFlowForecast(tenantId, period, filters),
       this.getDataQuality(tenantId, period, filters),
     ]);
 
@@ -955,6 +980,7 @@ export class GuestsService {
       bonusLoad,
       retention,
       visitHeatmap,
+      flowForecast,
       dataQuality,
       visitTrend: trend,
       topGuests: this.sortRows(rows, 'revenue', 'desc').slice(0, 12),
@@ -3021,6 +3047,199 @@ export class GuestsService {
       maxActiveGuests,
       peak,
       cells: heatmapCells,
+    };
+  }
+
+  private async buildFlowForecast(
+    tenantId: string,
+    period: Period,
+    filters: ResolvedGuestFilters,
+  ): Promise<GuestFlowForecastSummary> {
+    const horizonDays = 7;
+    const baselineTo = new Date(period.toDate);
+    const baselineFrom = this.startOfUtcDay(period.toDate);
+    baselineFrom.setUTCDate(baselineFrom.getUTCDate() - 55);
+    const baselineDayKeys = this.daysBetween(baselineFrom, baselineTo);
+    const dailyRows = new Map<
+      string,
+      {
+        weekday: GuestVisitHeatmapCell['weekday'];
+        sessionsCount: number;
+        activeGuestIds: Set<string>;
+        playMinutes: number;
+      }
+    >();
+
+    for (const day of baselineDayKeys) {
+      const date = new Date(`${day}T00:00:00.000Z`);
+      dailyRows.set(day, {
+        weekday: this.weekdayFromDate(date),
+        sessionsCount: 0,
+        activeGuestIds: new Set<string>(),
+        playMinutes: 0,
+      });
+    }
+
+    const storeWhere = filters.storeId ? { storeId: filters.storeId } : {};
+    const guestWhere = this.buildGuestWhere(tenantId, filters);
+    const sessions = await this.prisma.guestSession.findMany({
+      where: {
+        tenantId,
+        guest: { is: guestWhere },
+        startedAt: { lte: baselineTo },
+        OR: [{ stoppedAt: null }, { stoppedAt: { gte: baselineFrom } }],
+        ...storeWhere,
+      },
+      select: {
+        guestId: true,
+        startedAt: true,
+        stoppedAt: true,
+        durationMinutes: true,
+      },
+    });
+    const now = new Date();
+
+    for (const session of sessions) {
+      if (!session.guestId || !session.startedAt) {
+        continue;
+      }
+
+      for (const day of this.overlapVisitDays(
+        session.startedAt,
+        session.stoppedAt,
+        session.durationMinutes,
+        baselineFrom,
+        baselineTo,
+        now,
+      )) {
+        const row = dailyRows.get(day);
+        if (!row) {
+          continue;
+        }
+
+        const dayStart = new Date(`${day}T00:00:00.000Z`);
+        const dayEnd = new Date(`${day}T23:59:59.999Z`);
+        row.sessionsCount += 1;
+        row.activeGuestIds.add(session.guestId);
+        row.playMinutes += this.sessionOverlapMinutes(
+          session.startedAt,
+          session.stoppedAt,
+          session.durationMinutes,
+          dayStart,
+          dayEnd,
+          now,
+        );
+      }
+    }
+
+    const weekdayBuckets = new Map<
+      GuestVisitHeatmapCell['weekday'],
+      {
+        daysCount: number;
+        observedDays: number;
+        sessionsCount: number;
+        activeGuestsSum: number;
+        playMinutes: number;
+      }
+    >();
+
+    for (let weekday = 1; weekday <= 7; weekday += 1) {
+      weekdayBuckets.set(weekday as GuestVisitHeatmapCell['weekday'], {
+        daysCount: 0,
+        observedDays: 0,
+        sessionsCount: 0,
+        activeGuestsSum: 0,
+        playMinutes: 0,
+      });
+    }
+
+    for (const row of dailyRows.values()) {
+      const bucket = weekdayBuckets.get(row.weekday);
+      if (!bucket) {
+        continue;
+      }
+
+      bucket.daysCount += 1;
+      bucket.sessionsCount += row.sessionsCount;
+      bucket.activeGuestsSum += row.activeGuestIds.size;
+      bucket.playMinutes += row.playMinutes;
+
+      if (row.sessionsCount > 0) {
+        bucket.observedDays += 1;
+      }
+    }
+
+    const forecastStart = this.startOfUtcDay(period.toDate);
+    forecastStart.setUTCDate(forecastStart.getUTCDate() + 1);
+    const days: GuestFlowForecastDay[] = [];
+
+    for (let index = 0; index < horizonDays; index += 1) {
+      const forecastDate = new Date(forecastStart);
+      forecastDate.setUTCDate(forecastStart.getUTCDate() + index);
+      const weekday = this.weekdayFromDate(forecastDate);
+      const bucket = weekdayBuckets.get(weekday);
+      const daysCount = Math.max(bucket?.daysCount ?? 0, 1);
+
+      days.push({
+        date: this.toIsoDate(forecastDate),
+        weekday,
+        expectedSessions: Math.round((bucket?.sessionsCount ?? 0) / daysCount),
+        expectedActiveGuests: Math.round(
+          (bucket?.activeGuestsSum ?? 0) / daysCount,
+        ),
+        expectedPlayHours: this.round(
+          (bucket?.playMinutes ?? 0) / daysCount / 60,
+          1,
+        ),
+        confidence: this.resolveFlowForecastConfidence(
+          baselineDayKeys.length,
+          bucket?.observedDays ?? 0,
+        ),
+      });
+    }
+
+    const totalExpectedSessions = days.reduce(
+      (sum, day) => sum + day.expectedSessions,
+      0,
+    );
+    const totalExpectedActiveGuests = days.reduce(
+      (sum, day) => sum + day.expectedActiveGuests,
+      0,
+    );
+    const totalExpectedPlayHours = this.round(
+      days.reduce((sum, day) => sum + day.expectedPlayHours, 0),
+      1,
+    );
+    const peakDay =
+      [...days].sort(
+        (first, second) =>
+          second.expectedSessions - first.expectedSessions ||
+          second.expectedActiveGuests - first.expectedActiveGuests,
+      )[0] ?? null;
+    const quietDay =
+      [...days].sort(
+        (first, second) =>
+          first.expectedSessions - second.expectedSessions ||
+          first.expectedActiveGuests - second.expectedActiveGuests,
+      )[0] ?? null;
+    const observedDays = Array.from(weekdayBuckets.values()).reduce(
+      (sum, bucket) => sum + bucket.observedDays,
+      0,
+    );
+
+    return {
+      horizonDays,
+      baselineDays: baselineDayKeys.length,
+      totalExpectedSessions,
+      totalExpectedActiveGuests,
+      totalExpectedPlayHours,
+      confidence: this.resolveFlowForecastConfidence(
+        baselineDayKeys.length,
+        observedDays,
+      ),
+      peakDay,
+      quietDay,
+      days,
     };
   }
 
@@ -6402,6 +6621,21 @@ export class GuestsService {
     const day = value.getUTCDay();
 
     return (day === 0 ? 7 : day) as GuestVisitHeatmapCell['weekday'];
+  }
+
+  private resolveFlowForecastConfidence(
+    baselineDays: number,
+    observedDays: number,
+  ): GuestFlowForecastConfidence {
+    if (baselineDays >= 42 && observedDays >= 21) {
+      return 'HIGH';
+    }
+
+    if (baselineDays >= 21 && observedDays >= 7) {
+      return 'MEDIUM';
+    }
+
+    return 'LOW';
   }
 
   private daysBetween(from: Date, to: Date) {

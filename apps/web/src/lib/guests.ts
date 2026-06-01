@@ -144,6 +144,29 @@ export type GuestVisitHeatmapSummary = {
   cells: GuestVisitHeatmapCell[];
 };
 
+export type GuestFlowForecastConfidence = "LOW" | "MEDIUM" | "HIGH";
+
+export type GuestFlowForecastDay = {
+  date: string;
+  weekday: GuestVisitHeatmapCell["weekday"];
+  expectedSessions: number;
+  expectedActiveGuests: number;
+  expectedPlayHours: number;
+  confidence: GuestFlowForecastConfidence;
+};
+
+export type GuestFlowForecastSummary = {
+  horizonDays: number;
+  baselineDays: number;
+  totalExpectedSessions: number;
+  totalExpectedActiveGuests: number;
+  totalExpectedPlayHours: number;
+  confidence: GuestFlowForecastConfidence;
+  peakDay: GuestFlowForecastDay | null;
+  quietDay: GuestFlowForecastDay | null;
+  days: GuestFlowForecastDay[];
+};
+
 export type GuestFilterOptions = {
   stores: Array<{
     id: string;
@@ -185,6 +208,7 @@ export type GuestsSummary = {
   bonusLoad: GuestBonusLoadNetworkSummary;
   retention: GuestRetentionSummary;
   visitHeatmap: GuestVisitHeatmapSummary;
+  flowForecast: GuestFlowForecastSummary;
   dataQuality: {
     latestProfileRuns: Array<{
       domain: string;

@@ -257,6 +257,7 @@ export default async function GuestsPage({
 
         <RetentionPanel summary={summary} />
         <VisitHeatmapPanel summary={summary} />
+        <FlowForecastPanel summary={summary} />
 
         <section className="mt-6 grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
           <VisitTrendPanel summary={summary} />
@@ -437,6 +438,32 @@ const weekdayLabels: Record<1 | 2 | 3 | 4 | 5 | 6 | 7, string> = {
   7: "Вс",
 };
 
+function forecastConfidenceLabel(
+  confidence: GuestsSummary["flowForecast"]["confidence"],
+) {
+  const labels: Record<GuestsSummary["flowForecast"]["confidence"], string> = {
+    LOW: "мало данных",
+    MEDIUM: "средняя",
+    HIGH: "высокая",
+  };
+
+  return labels[confidence];
+}
+
+function forecastConfidenceTone(
+  confidence: GuestsSummary["flowForecast"]["confidence"],
+) {
+  if (confidence === "HIGH") {
+    return "bg-emerald-50 text-emerald-700 ring-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-200 dark:ring-emerald-500/20";
+  }
+
+  if (confidence === "MEDIUM") {
+    return "bg-sky-50 text-sky-700 ring-sky-100 dark:bg-sky-500/10 dark:text-sky-200 dark:ring-sky-500/20";
+  }
+
+  return "bg-amber-50 text-amber-700 ring-amber-100 dark:bg-amber-500/10 dark:text-amber-200 dark:ring-amber-500/20";
+}
+
 function VisitHeatmapPanel({ summary }: { summary: GuestsSummary }) {
   const heatmap = summary.visitHeatmap;
   const maxSessionsCount = Math.max(heatmap.maxSessionsCount, 1);
@@ -527,6 +554,137 @@ function VisitHeatmapPanel({ summary }: { summary: GuestsSummary }) {
         </div>
       </div>
     </section>
+  );
+}
+
+function FlowForecastPanel({ summary }: { summary: GuestsSummary }) {
+  const forecast = summary.flowForecast;
+  const maxSessions = Math.max(
+    ...forecast.days.map((day) => day.expectedSessions),
+    1,
+  );
+
+  return (
+    <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-col gap-3 border-b border-zinc-200 px-5 py-4 dark:border-zinc-800 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h2 className="text-base font-semibold">Прогноз гостевого потока</h2>
+          <p className="mt-1 max-w-3xl text-sm text-zinc-500">
+            Прогноз на ближайшие 7 дней строится по средним значениям
+            аналогичных дней недели из последней исторической выборки.
+          </p>
+        </div>
+        <span
+          className={[
+            "inline-flex w-fit rounded-full px-3 py-1 text-xs font-semibold ring-1",
+            forecastConfidenceTone(forecast.confidence),
+          ].join(" ")}
+        >
+          Надежность: {forecastConfidenceLabel(forecast.confidence)}
+        </span>
+      </div>
+      <div className="grid gap-3 p-5 md:grid-cols-3">
+        <KpiCard
+          label="Визиты 7 дней"
+          value={formatNumber(forecast.totalExpectedSessions)}
+          caption={`${formatNumber(forecast.baselineDays)} дней в базе прогноза`}
+        />
+        <KpiCard
+          label="Гости 7 дней"
+          value={formatNumber(forecast.totalExpectedActiveGuests)}
+          caption="сумма дневных прогнозов"
+        />
+        <KpiCard
+          label="Игровые часы"
+          value={`${formatNumber(forecast.totalExpectedPlayHours, 1)} ч`}
+          caption={
+            forecast.peakDay
+              ? `пиковый день: ${weekdayLabels[forecast.peakDay.weekday]}`
+              : "пик пока не определен"
+          }
+        />
+      </div>
+      <div className="grid gap-5 border-t border-zinc-100 p-5 dark:border-zinc-800 xl:grid-cols-[1fr_280px]">
+        <div className="space-y-3">
+          {forecast.days.map((day) => {
+            const width = Math.max(
+              day.expectedSessions > 0 ? 6 : 0,
+              (day.expectedSessions / maxSessions) * 100,
+            );
+
+            return (
+              <div key={day.date} className="grid gap-2 sm:grid-cols-[120px_1fr_120px] sm:items-center">
+                <div>
+                  <p className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+                    {weekdayLabels[day.weekday]}
+                  </p>
+                  <p className="text-xs text-zinc-500">
+                    {formatPeriodDate(day.date)}
+                  </p>
+                </div>
+                <div className="h-2.5 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-900">
+                  <div
+                    className="h-full rounded-full bg-emerald-500"
+                    style={{ width: `${width}%` }}
+                  />
+                </div>
+                <div className="text-sm tabular-nums text-zinc-600 dark:text-zinc-300 sm:text-right">
+                  <span className="font-semibold text-zinc-950 dark:text-zinc-50">
+                    {formatNumber(day.expectedSessions)}
+                  </span>{" "}
+                  визитов
+                  <p className="text-xs text-zinc-500">
+                    {formatNumber(day.expectedActiveGuests)} гостей ·{" "}
+                    {formatNumber(day.expectedPlayHours, 1)} ч
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="grid gap-3 text-sm">
+          <ForecastSideCard
+            label="Пиковый день"
+            day={forecast.peakDay}
+            empty="недостаточно данных"
+          />
+          <ForecastSideCard
+            label="Тихий день"
+            day={forecast.quietDay}
+            empty="недостаточно данных"
+          />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ForecastSideCard({
+  label,
+  day,
+  empty,
+}: {
+  label: string;
+  day: GuestsSummary["flowForecast"]["peakDay"];
+  empty: string;
+}) {
+  return (
+    <div className="rounded-lg border border-zinc-100 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+      <p className="text-xs font-semibold uppercase text-zinc-500">{label}</p>
+      {day ? (
+        <>
+          <p className="mt-2 text-lg font-semibold text-zinc-950 dark:text-zinc-50">
+            {weekdayLabels[day.weekday]}, {formatPeriodDate(day.date)}
+          </p>
+          <p className="mt-1 text-sm text-zinc-500">
+            {formatNumber(day.expectedSessions)} визитов,{" "}
+            {formatNumber(day.expectedActiveGuests)} гостей
+          </p>
+        </>
+      ) : (
+        <p className="mt-2 text-sm text-zinc-500">{empty}</p>
+      )}
+    </div>
   );
 }
 

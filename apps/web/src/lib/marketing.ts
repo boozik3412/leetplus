@@ -325,6 +325,32 @@ export type MarketingCampaignRevenueAttribution = {
   delta: MarketingCampaignRevenueAttributionPeriod;
 };
 
+export type MarketingCampaignEconomicsPaybackStatus =
+  | "NO_BUDGET"
+  | "NO_REVENUE"
+  | "LOSS"
+  | "PARTIAL"
+  | "PAID_OFF";
+
+export type MarketingCampaignEconomics = {
+  budget: number | null;
+  attributedRevenueAfter: number;
+  attributedRevenueDelta: number;
+  incrementalRevenue: number;
+  incrementalBarRevenue: number;
+  incrementalActiveGuests: number;
+  incrementalRepeatGuests: number;
+  costPerTargetGuest: number | null;
+  costPerContact: number | null;
+  costPerRespondedContact: number | null;
+  costPerVisit: number | null;
+  revenuePerBudgetRub: number | null;
+  roiPercent: number | null;
+  paybackStatus: MarketingCampaignEconomicsPaybackStatus;
+  paybackLabel: string;
+  recommendation: string;
+};
+
 export type MarketingCampaignFunnel = {
   targetTotal: number;
   linkedTargetGuests: number;
@@ -430,6 +456,7 @@ export type MarketingCampaignEffect = {
   delta: Omit<MarketingCampaignEffectPeriod, "from" | "to" | "days">;
   funnel: MarketingCampaignFunnel;
   revenueAttribution?: MarketingCampaignRevenueAttribution;
+  economics?: MarketingCampaignEconomics;
   audienceBreakdown?: MarketingCampaignAudienceBreakdownRow[];
   storeBreakdown: MarketingCampaignStoreEffect[];
   executionBreakdown: MarketingCampaignExecutionBreakdown;

@@ -17,6 +17,8 @@ import {
   getMarketingCampaignEffect,
   type MarketingCampaign,
   type MarketingCampaignAudienceBreakdownRow,
+  type MarketingCampaignEconomics,
+  type MarketingCampaignEconomicsPaybackStatus,
   type MarketingCampaignExecutionBreakdownRow,
   type MarketingCampaignEffect,
   type MarketingCampaignEffectPeriod,
@@ -755,6 +757,7 @@ function EffectAnalytics({
   }
 
   const revenueAttribution = campaignRevenueAttribution(effect);
+  const economics = campaignEconomics(effect, campaign);
   const effectCards = [
     {
       label: "Контакты",
@@ -828,6 +831,7 @@ function EffectAnalytics({
       </div>
 
       <CampaignRevenueAttributionCard attribution={revenueAttribution} />
+      <CampaignEconomicsCard economics={economics} />
       <CampaignFunnelCard campaign={campaign} effect={effect} />
       <CampaignAudienceBreakdownCard effect={effect} />
       <CampaignStoreBreakdownCard
@@ -931,6 +935,118 @@ function CampaignRevenueAttributionCard({
               </p>
             </div>
           ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CampaignEconomicsCard({
+  economics,
+}: {
+  economics: MarketingCampaignEconomics;
+}) {
+  const primaryRows = [
+    {
+      label: "Бюджет",
+      value: formatRubles(economics.budget),
+      hint: "из карточки кампании",
+    },
+    {
+      label: "Прирост выручки",
+      value: formatSignedRubles(economics.attributedRevenueDelta),
+      hint: "атрибутированная дельта после/до",
+    },
+    {
+      label: "ROI",
+      value: formatSignedPercent(economics.roiPercent),
+      hint:
+        economics.revenuePerBudgetRub === null
+          ? "нужен бюджет"
+          : `${formatNumber(economics.revenuePerBudgetRub)} руб на 1 руб бюджета`,
+    },
+    {
+      label: "Стоимость визита",
+      value: formatRubles(economics.costPerVisit),
+      hint: "бюджет / гости с визитом",
+    },
+  ];
+  const detailRows = [
+    ["Стоимость гостя в группе", formatRubles(economics.costPerTargetGuest)],
+    ["Стоимость контакта", formatRubles(economics.costPerContact)],
+    ["Стоимость результата", formatRubles(economics.costPerRespondedContact)],
+    [
+      "Прирост визитов",
+      formatSignedNumber(economics.incrementalActiveGuests, "гостей"),
+    ],
+    [
+      "Повторные гости",
+      formatSignedNumber(economics.incrementalRepeatGuests, "гостей"),
+    ],
+    ["Прирост бара", formatSignedRubles(economics.incrementalBarRevenue)],
+  ];
+
+  return (
+    <div className="border-t border-zinc-200 p-4 dark:border-zinc-800">
+      <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
+              Экономика кампании
+            </p>
+            <h3 className="mt-2 text-xl font-semibold">
+              Окупаемость и стоимость результата
+            </h3>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+              Считаем бюджет против атрибутированного прироста выручки, а также
+              стоимость контакта, результата и гостя, который пришел после
+              запуска.
+            </p>
+          </div>
+          <span className={campaignPaybackClass(economics.paybackStatus)}>
+            {economics.paybackLabel}
+          </span>
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {primaryRows.map((row) => (
+            <div
+              key={row.label}
+              className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950"
+            >
+              <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                {row.label}
+              </p>
+              <p className="mt-2 text-xl font-semibold">{row.value}</p>
+              <p className="mt-1 text-sm leading-5 text-zinc-600 dark:text-zinc-300">
+                {row.hint}
+              </p>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.56fr)]">
+          <dl className="grid gap-2 sm:grid-cols-2">
+            {detailRows.map(([label, value]) => (
+              <div
+                key={label}
+                className="flex items-center justify-between gap-3 rounded-md bg-white px-3 py-2 text-sm dark:bg-zinc-950"
+              >
+                <dt className="text-zinc-500 dark:text-zinc-400">{label}</dt>
+                <dd className="font-semibold text-zinc-950 dark:text-white">
+                  {value}
+                </dd>
+              </div>
+            ))}
+          </dl>
+          <div className="rounded-lg border border-zinc-200 bg-white p-3 text-sm leading-6 dark:border-zinc-800 dark:bg-zinc-950">
+            <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              Решение
+            </p>
+            <p className="mt-2 text-zinc-700 dark:text-zinc-200">
+              {economics.recommendation}
+            </p>
+          </div>
         </div>
       </div>
     </div>
@@ -1530,6 +1646,139 @@ function campaignRevenueAttribution(
   };
 }
 
+function campaignEconomics(
+  effect: MarketingCampaignEffect,
+  campaign: MarketingCampaign,
+): MarketingCampaignEconomics {
+  if (effect.economics) {
+    return effect.economics;
+  }
+
+  const attribution = campaignRevenueAttribution(effect);
+  const budget = campaign.budget !== null && campaign.budget > 0 ? campaign.budget : null;
+  const attributedRevenueDelta = roundCurrency(
+    attribution.delta.attributedRevenue,
+  );
+  const revenuePerBudgetRub =
+    budget !== null ? roundCurrency(attributedRevenueDelta / budget) : null;
+  const roiPercent =
+    budget !== null
+      ? Math.round(((attributedRevenueDelta - budget) / budget) * 1000) / 10
+      : null;
+  const { paybackStatus, paybackLabel } = campaignPaybackStatus(
+    budget,
+    attributedRevenueDelta,
+  );
+  const completedContacts = effect.funnel.completedContacts;
+  const respondedContacts = effect.funnel.respondedContacts;
+  const visitedGuests = effect.funnel.visitedGuests;
+
+  return {
+    budget,
+    attributedRevenueAfter: roundCurrency(attribution.after.attributedRevenue),
+    attributedRevenueDelta,
+    incrementalRevenue: roundCurrency(effect.delta.totalRevenue),
+    incrementalBarRevenue: roundCurrency(effect.delta.barRevenue),
+    incrementalActiveGuests: roundCurrency(effect.delta.activeGuests),
+    incrementalRepeatGuests: roundCurrency(effect.delta.repeatGuests),
+    costPerTargetGuest: campaignCostPerResult(budget, effect.targetTotal),
+    costPerContact: campaignCostPerResult(budget, completedContacts),
+    costPerRespondedContact: campaignCostPerResult(budget, respondedContacts),
+    costPerVisit: campaignCostPerResult(budget, visitedGuests),
+    revenuePerBudgetRub,
+    roiPercent,
+    paybackStatus,
+    paybackLabel,
+    recommendation: campaignEconomicsRecommendation({
+      budget,
+      attributedRevenueDelta,
+      completedContacts,
+      visitedGuests,
+      roiPercent,
+      paybackStatus,
+    }),
+  };
+}
+
+function campaignCostPerResult(budget: number | null, denominator: number) {
+  if (budget === null || denominator <= 0) {
+    return null;
+  }
+
+  return roundCurrency(budget / denominator);
+}
+
+function campaignPaybackStatus(
+  budget: number | null,
+  attributedRevenueDelta: number,
+): {
+  paybackStatus: MarketingCampaignEconomicsPaybackStatus;
+  paybackLabel: string;
+} {
+  if (budget === null) {
+    return { paybackStatus: "NO_BUDGET", paybackLabel: "бюджет не задан" };
+  }
+
+  if (attributedRevenueDelta < 0) {
+    return { paybackStatus: "LOSS", paybackLabel: "отрицательная дельта" };
+  }
+
+  if (attributedRevenueDelta === 0) {
+    return {
+      paybackStatus: "NO_REVENUE",
+      paybackLabel: "нет денежного эффекта",
+    };
+  }
+
+  if (attributedRevenueDelta >= budget) {
+    return { paybackStatus: "PAID_OFF", paybackLabel: "окупилась" };
+  }
+
+  return { paybackStatus: "PARTIAL", paybackLabel: "частичная окупаемость" };
+}
+
+function campaignEconomicsRecommendation({
+  budget,
+  attributedRevenueDelta,
+  completedContacts,
+  visitedGuests,
+  roiPercent,
+  paybackStatus,
+}: {
+  budget: number | null;
+  attributedRevenueDelta: number;
+  completedContacts: number;
+  visitedGuests: number;
+  roiPercent: number | null;
+  paybackStatus: MarketingCampaignEconomicsPaybackStatus;
+}) {
+  if (budget === null) {
+    return "Укажите бюджет кампании, чтобы LeetPlus посчитал стоимость контакта, визита и ROI.";
+  }
+
+  if (completedContacts === 0) {
+    return "Сначала доведите кампанию до контактов: без исполнения стоимость результата не считается.";
+  }
+
+  if (visitedGuests === 0) {
+    return "Контакты уже есть, но визитов нет: проверьте оффер, скрипт и качество выбранной группы.";
+  }
+
+  if (paybackStatus === "PAID_OFF") {
+    return `Кампания окупилась: зафиксируйте механику и повторите ее на похожей группе. ROI ${formatSignedPercent(
+      roiPercent,
+    )}.`;
+  }
+
+  if (paybackStatus === "PARTIAL") {
+    return `Денежный эффект есть, но бюджет еще не окупился: дожмите контакты или сузьте группу. Учтено ${formatRubles(
+      attributedRevenueDelta,
+    )} прироста.`;
+  }
+
+  return "Окупаемость не подтверждена: разберите атрибуцию, сегмент и механику до повторного запуска.";
+}
+
 function fallbackRevenueAttributionPeriod(
   period: MarketingCampaignEffectPeriod,
   storeBreakdown: MarketingCampaignEffect["storeBreakdown"],
@@ -1613,6 +1862,15 @@ function formatNumber(value: number) {
   return new Intl.NumberFormat("ru-RU").format(value);
 }
 
+function formatSignedNumber(value: number, unit: string) {
+  if (value === 0) {
+    return `0 ${unit}`;
+  }
+
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${formatNumber(value)} ${unit}`;
+}
+
 function formatRubles(value: number | null) {
   if (value === null) {
     return "не задан";
@@ -1656,6 +1914,15 @@ function formatPercent(value: number | null) {
   return `${formatNumber(value)}%`;
 }
 
+function formatSignedPercent(value: number | null) {
+  if (value === null) {
+    return "нет базы";
+  }
+
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${formatNumber(value)}%`;
+}
+
 function barWidth(value: number | null) {
   if (value === null) {
     return 0;
@@ -1676,6 +1943,25 @@ function deltaClassName(value: number) {
   }
 
   return `${base} text-zinc-500 dark:text-zinc-400`;
+}
+
+function campaignPaybackClass(status: MarketingCampaignEconomicsPaybackStatus) {
+  const base =
+    "inline-flex rounded-full px-3 py-1 text-sm font-semibold uppercase";
+
+  if (status === "PAID_OFF") {
+    return `${base} bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200`;
+  }
+
+  if (status === "PARTIAL") {
+    return `${base} bg-sky-50 text-sky-700 dark:bg-sky-500/15 dark:text-sky-200`;
+  }
+
+  if (status === "LOSS" || status === "NO_REVENUE") {
+    return `${base} bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200`;
+  }
+
+  return `${base} bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300`;
 }
 
 function formatDate(value: string | null) {

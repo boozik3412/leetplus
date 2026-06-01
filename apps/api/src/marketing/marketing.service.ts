@@ -553,6 +553,32 @@ export type MarketingCampaignRevenueAttribution = {
   delta: MarketingCampaignRevenueAttributionPeriod;
 };
 
+export type MarketingCampaignEconomicsPaybackStatus =
+  | 'NO_BUDGET'
+  | 'NO_REVENUE'
+  | 'LOSS'
+  | 'PARTIAL'
+  | 'PAID_OFF';
+
+export type MarketingCampaignEconomics = {
+  budget: number | null;
+  attributedRevenueAfter: number;
+  attributedRevenueDelta: number;
+  incrementalRevenue: number;
+  incrementalBarRevenue: number;
+  incrementalActiveGuests: number;
+  incrementalRepeatGuests: number;
+  costPerTargetGuest: number | null;
+  costPerContact: number | null;
+  costPerRespondedContact: number | null;
+  costPerVisit: number | null;
+  revenuePerBudgetRub: number | null;
+  roiPercent: number | null;
+  paybackStatus: MarketingCampaignEconomicsPaybackStatus;
+  paybackLabel: string;
+  recommendation: string;
+};
+
 export type MarketingCampaignFunnel = {
   targetTotal: number;
   linkedTargetGuests: number;
@@ -662,6 +688,7 @@ export type MarketingCampaignEffect = {
   delta: Omit<MarketingCampaignEffectPeriod, 'from' | 'to' | 'days'>;
   funnel: MarketingCampaignFunnel;
   revenueAttribution: MarketingCampaignRevenueAttribution;
+  economics: MarketingCampaignEconomics;
   audienceBreakdown: MarketingCampaignAudienceBreakdownRow[];
   storeBreakdown: MarketingCampaignStoreEffect[];
   executionBreakdown: MarketingCampaignExecutionBreakdown;
@@ -963,6 +990,37 @@ export class MarketingService {
       guestIds,
       after,
     });
+    const delta = {
+      contacts: this.round(after.contacts - before.contacts, 2),
+      directContacts: this.round(
+        after.directContacts - before.directContacts,
+        2,
+      ),
+      respondedContacts: this.round(
+        after.respondedContacts - before.respondedContacts,
+        2,
+      ),
+      activeGuests: this.round(after.activeGuests - before.activeGuests, 2),
+      repeatGuests: this.round(after.repeatGuests - before.repeatGuests, 2),
+      sessionsCount: this.round(after.sessionsCount - before.sessionsCount, 2),
+      playHours: this.round(after.playHours - before.playHours, 2),
+      balanceRevenue: this.round(
+        after.balanceRevenue - before.balanceRevenue,
+        2,
+      ),
+      barRevenue: this.round(after.barRevenue - before.barRevenue, 2),
+      totalRevenue: this.round(after.totalRevenue - before.totalRevenue, 2),
+      barSalesCount: this.round(after.barSalesCount - before.barSalesCount, 2),
+    };
+    const economics = this.buildCampaignEconomics({
+      budget: campaign.budget ? Number(campaign.budget) : null,
+      targetTotal,
+      completedContacts,
+      respondedContacts,
+      visitedGuests,
+      revenueAttribution,
+      delta,
+    });
 
     return {
       campaignId: campaign.id,
@@ -978,34 +1036,7 @@ export class MarketingService {
       },
       before,
       after,
-      delta: {
-        contacts: this.round(after.contacts - before.contacts, 2),
-        directContacts: this.round(
-          after.directContacts - before.directContacts,
-          2,
-        ),
-        respondedContacts: this.round(
-          after.respondedContacts - before.respondedContacts,
-          2,
-        ),
-        activeGuests: this.round(after.activeGuests - before.activeGuests, 2),
-        repeatGuests: this.round(after.repeatGuests - before.repeatGuests, 2),
-        sessionsCount: this.round(
-          after.sessionsCount - before.sessionsCount,
-          2,
-        ),
-        playHours: this.round(after.playHours - before.playHours, 2),
-        balanceRevenue: this.round(
-          after.balanceRevenue - before.balanceRevenue,
-          2,
-        ),
-        barRevenue: this.round(after.barRevenue - before.barRevenue, 2),
-        totalRevenue: this.round(after.totalRevenue - before.totalRevenue, 2),
-        barSalesCount: this.round(
-          after.barSalesCount - before.barSalesCount,
-          2,
-        ),
-      },
+      delta,
       funnel: {
         targetTotal,
         linkedTargetGuests,
@@ -1046,6 +1077,7 @@ export class MarketingService {
           : null,
       },
       revenueAttribution,
+      economics,
       audienceBreakdown,
       storeBreakdown,
       executionBreakdown,
@@ -1194,6 +1226,56 @@ export class MarketingService {
         effect.revenueAttribution.before.excludedOnlineTopupRevenue,
         effect.revenueAttribution.after.excludedOnlineTopupRevenue,
         effect.revenueAttribution.delta.excludedOnlineTopupRevenue,
+      ],
+      [],
+      ['Экономика кампании', 'Показатель', 'Значение', 'Комментарий'],
+      [
+        'Экономика кампании',
+        'Бюджет, руб',
+        effect.economics.budget,
+        'Из карточки кампании',
+      ],
+      [
+        'Экономика кампании',
+        'Прирост атрибутированной выручки, руб',
+        effect.economics.attributedRevenueDelta,
+        'После минус до, только факты целевой группы',
+      ],
+      [
+        'Экономика кампании',
+        'ROI, %',
+        effect.economics.roiPercent,
+        effect.economics.paybackLabel,
+      ],
+      [
+        'Экономика кампании',
+        'Выручка на 1 руб бюджета',
+        effect.economics.revenuePerBudgetRub,
+        null,
+      ],
+      [
+        'Экономика кампании',
+        'Стоимость контакта, руб',
+        effect.economics.costPerContact,
+        null,
+      ],
+      [
+        'Экономика кампании',
+        'Стоимость визита, руб',
+        effect.economics.costPerVisit,
+        null,
+      ],
+      [
+        'Экономика кампании',
+        'Прирост визитов',
+        effect.economics.incrementalActiveGuests,
+        'Активные гости после минус до',
+      ],
+      [
+        'Экономика кампании',
+        'Рекомендация',
+        effect.economics.recommendation,
+        null,
       ],
       [],
       [
@@ -2715,6 +2797,160 @@ export class MarketingService {
       ),
       excludedOnlineTopupRevenue: this.round(excludedOnlineTopupRevenue, 2),
     };
+  }
+
+  private buildCampaignEconomics({
+    budget,
+    targetTotal,
+    completedContacts,
+    respondedContacts,
+    visitedGuests,
+    revenueAttribution,
+    delta,
+  }: {
+    budget: number | null;
+    targetTotal: number;
+    completedContacts: number;
+    respondedContacts: number;
+    visitedGuests: number;
+    revenueAttribution: MarketingCampaignRevenueAttribution;
+    delta: Omit<MarketingCampaignEffectPeriod, 'from' | 'to' | 'days'>;
+  }): MarketingCampaignEconomics {
+    const positiveBudget = budget !== null && budget > 0 ? budget : null;
+    const attributedRevenueDelta = this.round(
+      revenueAttribution.delta.attributedRevenue,
+      2,
+    );
+    const costPerResult = (denominator: number) =>
+      positiveBudget !== null && denominator > 0
+        ? this.round(positiveBudget / denominator, 2)
+        : null;
+    const revenuePerBudgetRub =
+      positiveBudget !== null
+        ? this.round(attributedRevenueDelta / positiveBudget, 2)
+        : null;
+    const roiPercent =
+      positiveBudget !== null
+        ? this.round(
+            ((attributedRevenueDelta - positiveBudget) / positiveBudget) * 100,
+            1,
+          )
+        : null;
+    const { paybackStatus, paybackLabel } = this.resolveCampaignPayback({
+      budget: positiveBudget,
+      attributedRevenueDelta,
+    });
+
+    return {
+      budget: positiveBudget,
+      attributedRevenueAfter: this.round(
+        revenueAttribution.after.attributedRevenue,
+        2,
+      ),
+      attributedRevenueDelta,
+      incrementalRevenue: this.round(delta.totalRevenue, 2),
+      incrementalBarRevenue: this.round(delta.barRevenue, 2),
+      incrementalActiveGuests: this.round(delta.activeGuests, 2),
+      incrementalRepeatGuests: this.round(delta.repeatGuests, 2),
+      costPerTargetGuest: costPerResult(targetTotal),
+      costPerContact: costPerResult(completedContacts),
+      costPerRespondedContact: costPerResult(respondedContacts),
+      costPerVisit: costPerResult(visitedGuests),
+      revenuePerBudgetRub,
+      roiPercent,
+      paybackStatus,
+      paybackLabel,
+      recommendation: this.campaignEconomicsRecommendation({
+        budget: positiveBudget,
+        attributedRevenueDelta,
+        completedContacts,
+        visitedGuests,
+        roiPercent,
+        paybackStatus,
+      }),
+    };
+  }
+
+  private resolveCampaignPayback({
+    budget,
+    attributedRevenueDelta,
+  }: {
+    budget: number | null;
+    attributedRevenueDelta: number;
+  }): {
+    paybackStatus: MarketingCampaignEconomicsPaybackStatus;
+    paybackLabel: string;
+  } {
+    if (budget === null) {
+      return {
+        paybackStatus: 'NO_BUDGET',
+        paybackLabel: 'бюджет не задан',
+      };
+    }
+
+    if (attributedRevenueDelta < 0) {
+      return {
+        paybackStatus: 'LOSS',
+        paybackLabel: 'отрицательная дельта',
+      };
+    }
+
+    if (attributedRevenueDelta === 0) {
+      return {
+        paybackStatus: 'NO_REVENUE',
+        paybackLabel: 'нет денежного эффекта',
+      };
+    }
+
+    if (attributedRevenueDelta >= budget) {
+      return {
+        paybackStatus: 'PAID_OFF',
+        paybackLabel: 'окупилась',
+      };
+    }
+
+    return {
+      paybackStatus: 'PARTIAL',
+      paybackLabel: 'частичная окупаемость',
+    };
+  }
+
+  private campaignEconomicsRecommendation({
+    budget,
+    attributedRevenueDelta,
+    completedContacts,
+    visitedGuests,
+    roiPercent,
+    paybackStatus,
+  }: {
+    budget: number | null;
+    attributedRevenueDelta: number;
+    completedContacts: number;
+    visitedGuests: number;
+    roiPercent: number | null;
+    paybackStatus: MarketingCampaignEconomicsPaybackStatus;
+  }) {
+    if (budget === null) {
+      return 'Укажите бюджет кампании, чтобы LeetPlus посчитал стоимость контакта, визита и ROI.';
+    }
+
+    if (completedContacts === 0) {
+      return 'Сначала доведите кампанию до контактов: без исполнения стоимость результата не считается.';
+    }
+
+    if (visitedGuests === 0) {
+      return 'Контакты уже есть, но визитов нет: проверьте оффер, скрипт и качество выбранной группы.';
+    }
+
+    if (paybackStatus === 'PAID_OFF') {
+      return `Кампания окупилась: зафиксируйте механику и повторите ее на похожей группе. ROI ${roiPercent ?? 0}%.`;
+    }
+
+    if (paybackStatus === 'PARTIAL') {
+      return `Денежный эффект есть, но бюджет еще не окупился: дожмите контакты или сузьте группу. Учтено ${attributedRevenueDelta} руб прироста.`;
+    }
+
+    return 'Окупаемость не подтверждена: разберите атрибуцию, сегмент и механику до повторного запуска.';
   }
 
   private async buildUnallocatedOnlineTopupRevenue({

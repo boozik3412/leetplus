@@ -29,14 +29,6 @@ const initialState: FormState = {
 };
 
 const REMEMBER_EMAIL_KEY = "leetplus_remembered_email";
-const LOGIN_AUTO_SYNC_DATE_KEY = "leetplus.login.autoSyncDate";
-
-type LangameSettingsResponse = {
-  sources?: Array<{
-    isActive: boolean;
-    lastSyncedDate: string | null;
-  }>;
-};
 
 type InvitePreview = {
   email: string | null;
@@ -208,8 +200,6 @@ export function AuthForm({ mode, inviteToken }: AuthFormProps) {
         } else {
           window.localStorage.removeItem(REMEMBER_EMAIL_KEY);
         }
-
-        void startDailyLoginAutoSync();
       }
 
       keepLoading = true;
@@ -464,64 +454,4 @@ function AuthRedirectOverlay({
       </div>
     </div>
   );
-}
-
-async function startDailyLoginAutoSync() {
-  const todayKey = new Date().toISOString().slice(0, 10);
-
-  if (window.localStorage.getItem(LOGIN_AUTO_SYNC_DATE_KEY) === todayKey) {
-    return;
-  }
-
-  try {
-    const settingsResponse = await fetch("/api/integrations/langame/settings", {
-      cache: "no-store",
-    });
-
-    if (!settingsResponse.ok) {
-      return;
-    }
-
-    const settings = (await settingsResponse.json()) as LangameSettingsResponse;
-    const activeSources = (settings.sources ?? []).filter(
-      (source) => source.isActive,
-    );
-    const shouldSync = activeSources.some(
-      (source) => source.lastSyncedDate?.slice(0, 10) !== todayKey,
-    );
-
-    if (!shouldSync) {
-      window.localStorage.setItem(LOGIN_AUTO_SYNC_DATE_KEY, todayKey);
-      return;
-    }
-
-    window.localStorage.setItem(LOGIN_AUTO_SYNC_DATE_KEY, todayKey);
-
-    const results = await Promise.allSettled([
-      fetch("/api/integrations/langame/sync", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          mode: "BACKFILL",
-          catchUp: true,
-        }),
-      }),
-      fetch("/api/integrations/langame/guests/foundation/sync/start", {
-        method: "POST",
-      }),
-    ]);
-
-    if (
-      !results.some(
-        (result) => result.status === "fulfilled" && result.value.ok,
-      )
-    ) {
-      window.localStorage.removeItem(LOGIN_AUTO_SYNC_DATE_KEY);
-    }
-  } catch {
-    window.localStorage.removeItem(LOGIN_AUTO_SYNC_DATE_KEY);
-    // Login must stay fast and reliable even when background sync is unavailable.
-  }
 }

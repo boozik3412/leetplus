@@ -1,7 +1,6 @@
 import { getDashboardSummary } from "@/lib/dashboard-summary";
 import { buildAssortmentRiskSummary } from "@/lib/assortment-risk";
 import { DashboardFilters } from "@/components/dashboard-filters";
-import { DashboardAutoSync } from "@/components/dashboard-auto-sync";
 import { DashboardQuickSyncButton } from "@/components/dashboard-quick-sync-button";
 import { DashboardRevenuePanel } from "@/components/dashboard-revenue-panel";
 import { requireCurrentUser } from "@/lib/auth";
@@ -470,7 +469,6 @@ export default async function DashboardPage({
 
   return (
     <main className="px-6 py-8 text-zinc-950 dark:text-zinc-100">
-      <DashboardAutoSync />
       <div className="mx-auto max-w-7xl">
         <section className="overflow-visible rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
           <div className="grid gap-6 p-5 min-[1250px]:grid-cols-[1.1fr_0.9fr] lg:p-8">

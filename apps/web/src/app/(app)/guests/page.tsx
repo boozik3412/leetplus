@@ -226,6 +226,7 @@ export default async function GuestsPage({
         </section>
 
         <RetentionPanel summary={summary} />
+        <VisitHeatmapPanel summary={summary} />
 
         <section className="mt-6 grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
           <VisitTrendPanel summary={summary} />
@@ -276,6 +277,116 @@ function KpiCard({
       <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">{caption}</p>
     </div>
   );
+}
+
+const weekdayLabels: Record<1 | 2 | 3 | 4 | 5 | 6 | 7, string> = {
+  1: "Пн",
+  2: "Вт",
+  3: "Ср",
+  4: "Чт",
+  5: "Пт",
+  6: "Сб",
+  7: "Вс",
+};
+
+function VisitHeatmapPanel({ summary }: { summary: GuestsSummary }) {
+  const heatmap = summary.visitHeatmap;
+  const maxSessionsCount = Math.max(heatmap.maxSessionsCount, 1);
+  const peak = heatmap.peak;
+
+  return (
+    <section className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-col gap-3 border-b border-zinc-200 px-5 py-4 dark:border-zinc-800 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h2 className="text-base font-semibold">Тепловая карта визитов</h2>
+          <p className="mt-1 max-w-3xl text-sm text-zinc-500">
+            Сессии сгруппированы по дню недели и часу старта за выбранный
+            период. Насыщенность показывает, где загрузка уже есть, а где можно
+            запускать офферы на тихие часы.
+          </p>
+        </div>
+        <div className="rounded-lg border border-zinc-100 bg-zinc-50 px-4 py-3 text-sm dark:border-zinc-800 dark:bg-zinc-900/60 lg:min-w-[260px]">
+          <p className="text-xs font-semibold uppercase text-zinc-500">
+            Пиковое окно
+          </p>
+          <p className="mt-1 font-semibold tabular-nums text-zinc-950 dark:text-zinc-50">
+            {peak
+              ? `${weekdayLabels[peak.weekday]}, ${formatHourRange(peak.hour)}`
+              : "нет данных"}
+          </p>
+          <p className="mt-1 text-xs text-zinc-500">
+            {peak
+              ? `${formatNumber(peak.sessionsCount)} визитов, ${formatNumber(peak.activeGuests)} гостей`
+              : "за период нет сессий"}
+          </p>
+        </div>
+      </div>
+      <div className="p-5">
+        <div className="overflow-x-auto">
+          <div className="min-w-[820px]">
+            <div className="grid grid-cols-[44px_repeat(24,minmax(0,1fr))] gap-1 text-[10px] text-zinc-400">
+              <span />
+              {Array.from({ length: 24 }, (_, hour) => (
+                <span key={hour} className="text-center tabular-nums">
+                  {hour}
+                </span>
+              ))}
+            </div>
+            <div className="mt-2 space-y-1">
+              {([1, 2, 3, 4, 5, 6, 7] as const).map((weekday) => (
+                <div
+                  key={weekday}
+                  className="grid grid-cols-[44px_repeat(24,minmax(0,1fr))] gap-1"
+                >
+                  <div className="flex h-8 items-center text-xs font-semibold text-zinc-500">
+                    {weekdayLabels[weekday]}
+                  </div>
+                  {Array.from({ length: 24 }, (_, hour) => {
+                    const cell = heatmap.cells.find(
+                      (item) => item.weekday === weekday && item.hour === hour,
+                    );
+                    const sessionsCount = cell?.sessionsCount ?? 0;
+                    const intensity =
+                      sessionsCount > 0
+                        ? Math.max(0.16, sessionsCount / maxSessionsCount)
+                        : 0;
+
+                    return (
+                      <div
+                        key={`${weekday}-${hour}`}
+                        title={`${weekdayLabels[weekday]}, ${formatHourRange(hour)}: ${formatNumber(sessionsCount)} визитов, ${formatNumber(cell?.activeGuests ?? 0)} гостей, ${formatNumber(cell?.playHours ?? 0, 1)} ч`}
+                        className="flex h-8 min-w-0 items-center justify-center rounded border border-zinc-100 text-[10px] font-semibold tabular-nums text-zinc-700 transition-transform hover:scale-105 dark:border-zinc-800 dark:text-zinc-100"
+                        style={{
+                          backgroundColor:
+                            intensity > 0
+                              ? `rgba(16, 185, 129, ${0.12 + intensity * 0.68})`
+                              : "transparent",
+                        }}
+                      >
+                        {sessionsCount > 0 ? sessionsCount : ""}
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className="mt-4 flex flex-wrap gap-4 text-xs text-zinc-500">
+          <span>Максимум в ячейке: {formatNumber(heatmap.maxSessionsCount)} визитов</span>
+          <span>Максимум гостей: {formatNumber(heatmap.maxActiveGuests)}</span>
+          <span>Время показано по данным стартов сессий Langame.</span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function formatHourRange(hour: number) {
+  const nextHour = (hour + 1) % 24;
+  const pad = (value: number) => value.toString().padStart(2, "0");
+
+  return `${pad(hour)}:00-${pad(nextHour)}:00`;
 }
 
 function RetentionPanel({ summary }: { summary: GuestsSummary }) {

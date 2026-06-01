@@ -97,6 +97,21 @@ export type GuestRetentionSummary = {
   windows: GuestRetentionWindow[];
 };
 
+export type GuestVisitHeatmapCell = {
+  weekday: 1 | 2 | 3 | 4 | 5 | 6 | 7;
+  hour: number;
+  sessionsCount: number;
+  activeGuests: number;
+  playHours: number;
+};
+
+export type GuestVisitHeatmapSummary = {
+  maxSessionsCount: number;
+  maxActiveGuests: number;
+  peak: GuestVisitHeatmapCell | null;
+  cells: GuestVisitHeatmapCell[];
+};
+
 export type GuestFilterOptions = {
   stores: Array<{
     id: string;
@@ -136,6 +151,7 @@ export type GuestsSummary = {
   barRevenue: number;
   barSalesCount: number;
   retention: GuestRetentionSummary;
+  visitHeatmap: GuestVisitHeatmapSummary;
   dataQuality: {
     latestProfileRuns: Array<{
       domain: string;

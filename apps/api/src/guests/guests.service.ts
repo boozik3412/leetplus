@@ -253,6 +253,21 @@ export type GuestRetentionSummary = {
   windows: GuestRetentionWindow[];
 };
 
+export type GuestVisitHeatmapCell = {
+  weekday: 1 | 2 | 3 | 4 | 5 | 6 | 7;
+  hour: number;
+  sessionsCount: number;
+  activeGuests: number;
+  playHours: number;
+};
+
+export type GuestVisitHeatmapSummary = {
+  maxSessionsCount: number;
+  maxActiveGuests: number;
+  peak: GuestVisitHeatmapCell | null;
+  cells: GuestVisitHeatmapCell[];
+};
+
 export type GuestFilterOptions = {
   stores: Array<{
     id: string;
@@ -292,6 +307,7 @@ export type GuestsSummary = {
   barRevenue: number;
   barSalesCount: number;
   retention: GuestRetentionSummary;
+  visitHeatmap: GuestVisitHeatmapSummary;
   dataQuality: {
     latestProfileRuns: Array<{
       domain: string;
@@ -853,8 +869,11 @@ export class GuestsService {
       metricsByGuestId,
       period,
     );
-    const trend = await this.buildVisitTrend(tenantId, period, filters);
-    const dataQuality = await this.getDataQuality(tenantId, period, filters);
+    const [trend, visitHeatmap, dataQuality] = await Promise.all([
+      this.buildVisitTrend(tenantId, period, filters),
+      this.buildVisitHeatmap(tenantId, period, filters),
+      this.getDataQuality(tenantId, period, filters),
+    ]);
 
     return {
       tenantId,
@@ -886,6 +905,7 @@ export class GuestsService {
       barRevenue: this.round(periodMetrics.barRevenue, 2),
       barSalesCount: periodMetrics.barSalesCount,
       retention,
+      visitHeatmap,
       dataQuality,
       visitTrend: trend,
       topGuests: this.sortRows(rows, 'revenue', 'desc').slice(0, 12),
@@ -2705,6 +2725,110 @@ export class GuestsService {
       activeGuests: row.activeGuestIds.size,
       barRevenue: this.round(row.barRevenue, 2),
     }));
+  }
+
+  private async buildVisitHeatmap(
+    tenantId: string,
+    period: Period,
+    filters: ResolvedGuestFilters,
+  ): Promise<GuestVisitHeatmapSummary> {
+    const storeWhere = filters.storeId ? { storeId: filters.storeId } : {};
+    const guestWhere = this.buildGuestWhere(tenantId, filters);
+    const sessions = await this.prisma.guestSession.findMany({
+      where: {
+        tenantId,
+        guest: { is: guestWhere },
+        startedAt: { gte: period.fromDate, lte: period.toDate },
+        ...storeWhere,
+      },
+      select: {
+        guestId: true,
+        startedAt: true,
+        stoppedAt: true,
+        durationMinutes: true,
+      },
+    });
+    const cells = new Map<
+      string,
+      {
+        weekday: GuestVisitHeatmapCell['weekday'];
+        hour: number;
+        sessionsCount: number;
+        activeGuestIds: Set<string>;
+        playMinutes: number;
+      }
+    >();
+
+    for (let weekday = 1; weekday <= 7; weekday += 1) {
+      for (let hour = 0; hour < 24; hour += 1) {
+        cells.set(`${weekday}:${hour}`, {
+          weekday: weekday as GuestVisitHeatmapCell['weekday'],
+          hour,
+          sessionsCount: 0,
+          activeGuestIds: new Set<string>(),
+          playMinutes: 0,
+        });
+      }
+    }
+
+    const now = new Date();
+
+    for (const session of sessions) {
+      if (!session.guestId || !session.startedAt) {
+        continue;
+      }
+
+      const weekday = this.weekdayFromDate(session.startedAt);
+      const hour = session.startedAt.getUTCHours();
+      const cell = cells.get(`${weekday}:${hour}`);
+
+      if (!cell) {
+        continue;
+      }
+
+      cell.sessionsCount += 1;
+      cell.activeGuestIds.add(session.guestId);
+      cell.playMinutes += this.sessionOverlapMinutes(
+        session.startedAt,
+        session.stoppedAt,
+        session.durationMinutes,
+        period.fromDate,
+        period.toDate,
+        now,
+      );
+    }
+
+    const heatmapCells = Array.from(cells.values()).map((cell) => ({
+      weekday: cell.weekday,
+      hour: cell.hour,
+      sessionsCount: cell.sessionsCount,
+      activeGuests: cell.activeGuestIds.size,
+      playHours: this.round(cell.playMinutes / 60, 1),
+    }));
+    const maxSessionsCount = Math.max(
+      ...heatmapCells.map((cell) => cell.sessionsCount),
+      0,
+    );
+    const maxActiveGuests = Math.max(
+      ...heatmapCells.map((cell) => cell.activeGuests),
+      0,
+    );
+    const peak =
+      heatmapCells
+        .filter((cell) => cell.sessionsCount > 0)
+        .sort(
+          (first, second) =>
+            second.sessionsCount - first.sessionsCount ||
+            second.activeGuests - first.activeGuests ||
+            second.playHours - first.playHours,
+        )[0] ?? null;
+
+    return {
+      maxSessionsCount,
+      maxActiveGuests,
+      peak,
+      cells: heatmapCells,
+    };
   }
 
   private async getDataQuality(
@@ -5908,6 +6032,12 @@ export class GuestsService {
       (this.startOfUtcDay(to).getTime() - this.startOfUtcDay(from).getTime()) /
         86_400_000,
     );
+  }
+
+  private weekdayFromDate(value: Date): GuestVisitHeatmapCell['weekday'] {
+    const day = value.getUTCDay();
+
+    return (day === 0 ? 7 : day) as GuestVisitHeatmapCell['weekday'];
   }
 
   private daysBetween(from: Date, to: Date) {

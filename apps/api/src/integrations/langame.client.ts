@@ -258,6 +258,32 @@ export class LangameClient {
     );
   }
 
+  async getRoutes(baseUrl: string, apiKey: string) {
+    const response = await fetch(
+      new URL(`${this.normalizeBaseUrl(baseUrl)}/routes`),
+      {
+        method: 'GET',
+        headers: {
+          'X-API-KEY': apiKey,
+        },
+      },
+    );
+
+    if (!response.ok) {
+      const errorDetails = await this.readErrorDetails(response);
+      throw new BadRequestException(
+        [
+          `Langame /routes failed: ${response.status} ${response.statusText}`,
+          errorDetails,
+        ]
+          .filter(Boolean)
+          .join(' - '),
+      );
+    }
+
+    return this.readJsonOrText(response);
+  }
+
   private async getList<T>(
     baseUrl: string,
     path: string,
@@ -383,6 +409,20 @@ export class LangameClient {
       return this.compactErrorDetails(body);
     } catch {
       return '';
+    }
+  }
+
+  private async readJsonOrText(response: Response) {
+    const body = await response.text();
+
+    if (!body.trim()) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(body) as unknown;
+    } catch {
+      return this.compactErrorDetails(body);
     }
   }
 

@@ -143,6 +143,31 @@ export type LangamePcTypeInClub = Record<string, unknown>;
 
 export type LangamePcTypeLink = Record<string, unknown>;
 
+export type LangameRouteSummary = {
+  method: string | null;
+  path: string | null;
+  name: string | null;
+  params: unknown;
+  raw: unknown;
+};
+
+export type LangameRoutesDiagnosticsSource = {
+  id: string;
+  name: string;
+  domain: string;
+  baseUrl: string;
+  status: 'SUCCESS' | 'FAILED';
+  routesCount: number;
+  routes: LangameRouteSummary[];
+  payload: unknown;
+  errorMessage: string | null;
+};
+
+export type LangameRoutesDiagnosticsResult = {
+  checkedAt: string;
+  sources: LangameRoutesDiagnosticsSource[];
+};
+
 export type LangameSyncQuery = {
   dateFrom?: string;
   dateTo?: string;

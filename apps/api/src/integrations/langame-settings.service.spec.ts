@@ -2,6 +2,7 @@ import { IntegrationProvider, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { LangameClient } from './langame.client';
 import { LangameSettingsService } from './langame-settings.service';
 import { SecretEncryptionService } from './secret-encryption.service';
 
@@ -32,6 +33,10 @@ type TenantContextMock = {
 type EncryptionMock = {
   encrypt: jest.Mock;
   decrypt: jest.Mock;
+};
+
+type LangameClientMock = {
+  getRoutes: jest.Mock;
 };
 
 type CredentialUpsertCall = [
@@ -81,6 +86,7 @@ describe('LangameSettingsService', () => {
   let prisma: PrismaMock;
   let tenantContext: TenantContextMock;
   let encryption: EncryptionMock;
+  let langameClient: LangameClientMock;
   let service: LangameSettingsService;
 
   beforeEach(() => {
@@ -94,6 +100,9 @@ describe('LangameSettingsService', () => {
     encryption = {
       encrypt: jest.fn((value: string) => `encrypted:${value}`),
       decrypt: jest.fn((value: string) => value.replace('encrypted:', '')),
+    };
+    langameClient = {
+      getRoutes: jest.fn(),
     };
     prisma.tenant.findUnique.mockResolvedValue({
       name: 'Demo Cyber Club',
@@ -123,6 +132,7 @@ describe('LangameSettingsService', () => {
       prisma as unknown as PrismaService,
       tenantContext as unknown as TenantContextService,
       encryption as unknown as SecretEncryptionService,
+      langameClient as unknown as LangameClient,
     );
   });
 
@@ -192,5 +202,53 @@ describe('LangameSettingsService', () => {
         },
       ],
     });
+  });
+
+  it('returns sanitized routes diagnostics without leaking credentials', async () => {
+    prisma.integrationCredential.findFirst.mockResolvedValue({
+      id: 'credential-1',
+      apiKeyEncrypted: 'encrypted:secret-key',
+    });
+    langameClient.getRoutes.mockResolvedValue({
+      status: true,
+      apiKey: 'must-not-leak',
+      data: [
+        {
+          method: 'GET',
+          path: '/transactions/list',
+          token: 'also-hidden',
+          params: ['date_from', 'date_to'],
+        },
+      ],
+    });
+
+    await expect(service.getRoutesDiagnostics(user)).resolves.toMatchObject({
+      sources: [
+        {
+          domain: '443.langame.ru',
+          status: 'SUCCESS',
+          routesCount: 1,
+          routes: [
+            {
+              method: 'GET',
+              path: '/transactions/list',
+              params: ['date_from', 'date_to'],
+            },
+          ],
+          payload: {
+            apiKey: '[hidden]',
+            data: [
+              {
+                token: '[hidden]',
+              },
+            ],
+          },
+        },
+      ],
+    });
+    expect(langameClient.getRoutes).toHaveBeenCalledWith(
+      'https://443.langame.ru/public_api',
+      'secret-key',
+    );
   });
 });

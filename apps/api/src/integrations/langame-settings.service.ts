@@ -4,7 +4,12 @@ import { readFile } from 'node:fs/promises';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { LangameClient } from './langame.client';
 import { SecretEncryptionService } from './secret-encryption.service';
+import type {
+  LangameRouteSummary,
+  LangameRoutesDiagnosticsResult,
+} from './langame.types';
 
 const CREDENTIAL_NAME = 'Langame API key';
 
@@ -20,6 +25,7 @@ export class LangameSettingsService {
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
     private readonly secretEncryptionService: SecretEncryptionService,
+    private readonly langameClient: LangameClient,
   ) {}
 
   async getSettings(user: AuthenticatedUser) {
@@ -234,6 +240,57 @@ export class LangameSettingsService {
     ) as unknown;
   }
 
+  async getRoutesDiagnostics(
+    user: AuthenticatedUser,
+  ): Promise<LangameRoutesDiagnosticsResult> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { apiKey, sources } = await this.resolveTenantAccess(tenantId);
+    const checkedAt = new Date().toISOString();
+    const diagnostics = await Promise.all(
+      sources.map(async (source) => {
+        try {
+          const payload = this.sanitizePayload(
+            await this.langameClient.getRoutes(source.baseUrl, apiKey),
+          );
+          const routeRows = this.extractRoutes(payload);
+          const routes = routeRows.map((route) => this.toRouteSummary(route));
+
+          return {
+            id: source.id,
+            name: source.name,
+            domain: source.domain,
+            baseUrl: source.baseUrl,
+            status: 'SUCCESS' as const,
+            routesCount: routes.length,
+            routes,
+            payload,
+            errorMessage: null,
+          };
+        } catch (error) {
+          return {
+            id: source.id,
+            name: source.name,
+            domain: source.domain,
+            baseUrl: source.baseUrl,
+            status: 'FAILED' as const,
+            routesCount: 0,
+            routes: [],
+            payload: null,
+            errorMessage:
+              error instanceof Error
+                ? error.message
+                : 'Unknown Langame routes diagnostics error',
+          };
+        }
+      }),
+    );
+
+    return {
+      checkedAt,
+      sources: diagnostics,
+    };
+  }
+
   private findCredential(tenantId: string) {
     return this.prisma.integrationCredential.findFirst({
       where: {
@@ -267,5 +324,125 @@ export class LangameSettingsService {
     }
 
     return normalized;
+  }
+
+  private extractRoutes(payload: unknown): unknown[] {
+    if (Array.isArray(payload)) {
+      return payload;
+    }
+
+    if (!this.isPlainObject(payload)) {
+      return [];
+    }
+
+    const routeKeys = [
+      'data',
+      'routes',
+      'items',
+      'result',
+      'availableRoutes',
+      'available_routes',
+    ];
+
+    for (const key of routeKeys) {
+      const value = payload[key];
+
+      if (Array.isArray(value)) {
+        return value;
+      }
+    }
+
+    return [];
+  }
+
+  private toRouteSummary(route: unknown): LangameRouteSummary {
+    if (typeof route === 'string') {
+      return {
+        method: null,
+        path: route,
+        name: null,
+        params: null,
+        raw: route,
+      };
+    }
+
+    if (!this.isPlainObject(route)) {
+      return {
+        method: null,
+        path: null,
+        name: null,
+        params: null,
+        raw: route,
+      };
+    }
+
+    return {
+      method: this.firstString(route, [
+        'method',
+        'httpMethod',
+        'http_method',
+        'verb',
+      ]),
+      path: this.firstString(route, [
+        'path',
+        'route',
+        'uri',
+        'url',
+        'endpoint',
+      ]),
+      name: this.firstString(route, ['name', 'title', 'description']),
+      params:
+        route.params ??
+        route.parameters ??
+        route.query ??
+        route.required_params ??
+        null,
+      raw: route,
+    };
+  }
+
+  private sanitizePayload(value: unknown, depth = 0): unknown {
+    if (depth > 8) {
+      return '[depth-limit]';
+    }
+
+    if (Array.isArray(value)) {
+      return value.map((item) => this.sanitizePayload(item, depth + 1));
+    }
+
+    if (!this.isPlainObject(value)) {
+      return value;
+    }
+
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        this.isSensitiveField(key)
+          ? '[hidden]'
+          : this.sanitizePayload(entry, depth + 1),
+      ]),
+    );
+  }
+
+  private firstString(payload: Record<string, unknown>, keys: string[]) {
+    for (const key of keys) {
+      const value = payload[key];
+
+      if (typeof value === 'string' && value.trim()) {
+        return value;
+      }
+    }
+
+    return null;
+  }
+
+  private isPlainObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+  }
+
+  private isSensitiveField(field: string) {
+    return /api[_-]?key|token|secret|password|credential|authorization/i.test(
+      field,
+    );
   }
 }

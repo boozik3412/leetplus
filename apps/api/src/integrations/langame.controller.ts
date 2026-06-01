@@ -39,6 +39,11 @@ export class LangameController {
     return this.langameSettingsService.getSettings(user);
   }
 
+  @Get('routes-diagnostics')
+  getRoutesDiagnostics(@CurrentUser() user: AuthenticatedUser) {
+    return this.langameSettingsService.getRoutesDiagnostics(user);
+  }
+
   @Put('settings')
   saveSettings(
     @CurrentUser() user: AuthenticatedUser,

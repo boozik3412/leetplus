@@ -40,6 +40,7 @@ export type GuestDashboardRow = {
   transactionAmount: number;
   barRevenue: number;
   rfm: GuestRfmScore;
+  churnRisk: GuestChurnRisk;
   segment: GuestSegment;
   crmStatus: GuestCrmStatus;
   crmNote: string | null;
@@ -47,6 +48,18 @@ export type GuestDashboardRow = {
   nextContactAt: string | null;
   crmUpdatedAt: string | null;
   phoneConsentStatus: GuestCommunicationConsentStatus;
+};
+
+export type GuestChurnRiskLevel = "LOW" | "MEDIUM" | "HIGH" | "LOST";
+
+export type GuestChurnRisk = {
+  level: GuestChurnRiskLevel;
+  score: number;
+  daysSinceActivity: number | null;
+  expectedIntervalDays: number | null;
+  thresholdDays: number | null;
+  valueAtRisk: number;
+  reason: string;
 };
 
 export type GuestRfmSegment =
@@ -138,7 +151,13 @@ export type GuestListFilters = GuestsSummaryFilters & {
   search?: string;
   page?: string;
   pageSize?: string;
-  sort?: "revenue" | "sessions" | "lastActivity" | "registered" | "rfm";
+  sort?:
+    | "revenue"
+    | "sessions"
+    | "lastActivity"
+    | "registered"
+    | "rfm"
+    | "churnRisk";
   direction?: "asc" | "desc";
 };
 

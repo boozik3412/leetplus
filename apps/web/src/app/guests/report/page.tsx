@@ -12,6 +12,7 @@ import {
   getGuestFilterOptions,
   getGuestSavedFilters,
   getGuests,
+  type GuestChurnRiskLevel,
   type GuestCrmStatus,
   type GuestDashboardRow,
   type GuestFilterOptions,
@@ -50,6 +51,7 @@ const sortOptions: Array<NonNullable<GuestListFilters["sort"]>> = [
   "lastActivity",
   "registered",
   "rfm",
+  "churnRisk",
 ];
 
 function searchParam(value: string | string[] | undefined) {
@@ -152,6 +154,29 @@ function rfmSegmentTone(segment: GuestRfmSegment) {
   return "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300";
 }
 
+function churnRiskLabel(level: GuestChurnRiskLevel) {
+  const labels: Record<GuestChurnRiskLevel, string> = {
+    LOW: "Низкий",
+    MEDIUM: "Наблюдать",
+    HIGH: "Высокий",
+    LOST: "Потерян",
+  };
+
+  return labels[level];
+}
+
+function churnRiskTone(level: GuestChurnRiskLevel) {
+  if (level === "LOW") {
+    return "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300";
+  }
+
+  if (level === "MEDIUM") {
+    return "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300";
+  }
+
+  return "bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300";
+}
+
 function sortLabel(sort: NonNullable<GuestListFilters["sort"]>) {
   const labels: Record<NonNullable<GuestListFilters["sort"]>, string> = {
     revenue: "Деньги",
@@ -159,6 +184,7 @@ function sortLabel(sort: NonNullable<GuestListFilters["sort"]>) {
     lastActivity: "Активность",
     registered: "Регистрация",
     rfm: "RFM",
+    churnRisk: "Риск оттока",
   };
 
   return labels[sort];
@@ -480,7 +506,7 @@ function ReportTable({
       </div>
       {guestList.rows.length > 0 ? (
         <div className="overflow-x-auto">
-          <table className="min-w-[1560px] divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
+          <table className="min-w-[1720px] divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
             <thead className="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900/60">
               <tr>
                 <th className="px-4 py-3 text-left font-semibold">Гость</th>
@@ -489,6 +515,9 @@ function ReportTable({
                 <th className="px-4 py-3 text-left font-semibold">Сегмент</th>
                 <th className="px-4 py-3 text-left font-semibold">CRM</th>
                 <th className="px-4 py-3 text-left font-semibold">RFM</th>
+                <th className="px-4 py-3 text-left font-semibold">
+                  Риск оттока
+                </th>
                 <th className="px-4 py-3 text-right font-semibold">Сессии</th>
                 <th className="px-4 py-3 text-right font-semibold">Дни</th>
                 <th className="px-4 py-3 text-right font-semibold">Часы</th>
@@ -545,6 +574,24 @@ function ReportTable({
                       {formatNumber(row.rfm.frequency)} · M{" "}
                       {formatRubles(row.rfm.monetary)}
                     </p>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span
+                      className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${churnRiskTone(
+                        row.churnRisk.level,
+                      )}`}
+                    >
+                      {churnRiskLabel(row.churnRisk.level)} ·{" "}
+                      {row.churnRisk.score}/100
+                    </span>
+                    <p className="mt-1 max-w-48 text-xs text-zinc-500">
+                      {row.churnRisk.reason}
+                    </p>
+                    {row.churnRisk.valueAtRisk > 0 ? (
+                      <p className="mt-1 text-xs font-medium text-rose-600 dark:text-rose-300">
+                        в риске {formatRubles(row.churnRisk.valueAtRisk)}
+                      </p>
+                    ) : null}
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums">
                     {formatNumber(row.sessionsCount)}

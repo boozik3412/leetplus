@@ -35,7 +35,13 @@ export type GuestListQuery = GuestsSummaryQuery & {
   search?: string;
   page?: string;
   pageSize?: string;
-  sort?: 'revenue' | 'sessions' | 'lastActivity' | 'registered' | 'rfm';
+  sort?:
+    | 'revenue'
+    | 'sessions'
+    | 'lastActivity'
+    | 'registered'
+    | 'rfm'
+    | 'churnRisk';
   direction?: 'asc' | 'desc';
 };
 
@@ -190,6 +196,7 @@ export type GuestDashboardRow = {
   transactionAmount: number;
   barRevenue: number;
   rfm: GuestRfmScore;
+  churnRisk: GuestChurnRisk;
   segment: 'active' | 'new' | 'repeat' | 'risk' | 'lost' | 'quiet';
   crmStatus: GuestCrmStatus;
   crmNote: string | null;
@@ -197,6 +204,18 @@ export type GuestDashboardRow = {
   nextContactAt: string | null;
   crmUpdatedAt: string | null;
   phoneConsentStatus: GuestCommunicationConsentStatus;
+};
+
+export type GuestChurnRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'LOST';
+
+export type GuestChurnRisk = {
+  level: GuestChurnRiskLevel;
+  score: number;
+  daysSinceActivity: number | null;
+  expectedIntervalDays: number | null;
+  thresholdDays: number | null;
+  valueAtRisk: number;
+  reason: string;
 };
 
 export type GuestRfmSegment =
@@ -665,6 +684,7 @@ type GuestBase = {
 
 type GuestMetrics = {
   latestActivityAt: Date | null;
+  activityDays: Set<string>;
   sessionsCount: number;
   visitsDays: Set<string>;
   playMinutes: number;
@@ -901,6 +921,12 @@ export class GuestsService {
         'RFM давность, дн',
         'RFM частота',
         'RFM деньги, руб',
+        'Риск оттока',
+        'Риск оттока, балл',
+        'Дней без активности',
+        'Ожидаемый интервал, дн',
+        'Порог риска, дн',
+        'Деньги в риске, руб',
         'Дата регистрации',
         'Последняя активность',
         'Следующий шаг',
@@ -923,6 +949,12 @@ export class GuestsService {
         row.rfm.recencyDays ?? '',
         row.rfm.frequency,
         row.rfm.monetary,
+        this.churnRiskExportLabel(row.churnRisk.level),
+        row.churnRisk.score,
+        row.churnRisk.daysSinceActivity ?? '',
+        row.churnRisk.expectedIntervalDays ?? '',
+        row.churnRisk.thresholdDays ?? '',
+        row.churnRisk.valueAtRisk,
         this.formatExportDate(row.insertedAt),
         this.formatExportDate(row.lastActivityAt),
         row.nextAction,
@@ -2432,15 +2464,14 @@ export class GuestsService {
         continue;
       }
       const metrics = this.ensureMetrics(metricsByGuestId, session.guestId);
-      this.applyLatest(
-        metrics,
-        this.sessionActivityAt(
-          session.startedAt,
-          session.stoppedAt,
-          session.durationMinutes,
-          now,
-        ),
+      const sessionActivityAt = this.sessionActivityAt(
+        session.startedAt,
+        session.stoppedAt,
+        session.durationMinutes,
+        now,
       );
+      this.applyLatest(metrics, sessionActivityAt);
+      this.addActivityDay(metrics, sessionActivityAt);
 
       if (
         this.sessionOverlapsPeriod(
@@ -2479,6 +2510,7 @@ export class GuestsService {
       }
       const metrics = this.ensureMetrics(metricsByGuestId, transaction.guestId);
       this.applyLatest(metrics, transaction.happenedAt);
+      this.addActivityDay(metrics, transaction.happenedAt);
 
       if (transaction.happenedAt >= period.fromDate) {
         metrics.transactionsCount += 1;
@@ -2494,6 +2526,7 @@ export class GuestsService {
       }
       const metrics = this.ensureMetrics(metricsByGuestId, sale.guestId);
       this.applyLatest(metrics, sale.saleDate);
+      this.addActivityDay(metrics, sale.saleDate);
 
       if (sale.saleDate >= period.fromDate) {
         metrics.barSalesCount += 1;
@@ -4239,6 +4272,12 @@ export class GuestsService {
       transactionAmount + barRevenue,
       period,
     );
+    const churnRisk = this.buildGuestChurnRisk(
+      latestActivityAt,
+      metrics,
+      transactionAmount + barRevenue,
+      period,
+    );
     const guestGroupName = guest.externalGuestTypeId
       ? (groupsByKey.get(
           this.guestGroupKey(guest.externalDomain, guest.externalGuestTypeId),
@@ -4271,6 +4310,7 @@ export class GuestsService {
       transactionAmount,
       barRevenue,
       rfm,
+      churnRisk,
       segment,
       crmStatus: guest.crmStatus,
       crmNote: guest.crmNote,
@@ -4359,6 +4399,106 @@ export class GuestsService {
         totalScore,
       ),
     };
+  }
+
+  private buildGuestChurnRisk(
+    latestActivityAt: Date | null,
+    metrics: GuestMetrics | undefined,
+    monetary: number,
+    period: Period,
+  ): GuestChurnRisk {
+    if (!latestActivityAt) {
+      return {
+        level: 'LOST',
+        score: 100,
+        daysSinceActivity: null,
+        expectedIntervalDays: null,
+        thresholdDays: null,
+        valueAtRisk: this.round(monetary, 2),
+        reason: 'нет активности в доступной истории',
+      };
+    }
+
+    const daysSinceActivity = Math.max(
+      0,
+      this.daysBetweenDates(latestActivityAt, period.toDate),
+    );
+    const expectedIntervalDays = this.resolveExpectedVisitIntervalDays(metrics);
+    const thresholdDays = expectedIntervalDays
+      ? Math.max(7, Math.ceil(expectedIntervalDays * 1.5))
+      : 14;
+    const ratio = thresholdDays > 0 ? daysSinceActivity / thresholdDays : 0;
+    const score = Math.min(100, Math.max(0, Math.round(ratio * 100)));
+    const level = this.resolveChurnRiskLevel(daysSinceActivity, thresholdDays);
+
+    return {
+      level,
+      score,
+      daysSinceActivity,
+      expectedIntervalDays,
+      thresholdDays,
+      valueAtRisk: this.round(
+        level === 'HIGH' || level === 'LOST'
+          ? monetary
+          : level === 'MEDIUM'
+            ? monetary * 0.5
+            : 0,
+        2,
+      ),
+      reason:
+        expectedIntervalDays !== null
+          ? `нет активности ${daysSinceActivity} дн.; обычный интервал ${expectedIntervalDays} дн.`
+          : `нет активности ${daysSinceActivity} дн.; мало истории, используется базовый порог`,
+    };
+  }
+
+  private resolveExpectedVisitIntervalDays(metrics: GuestMetrics | undefined) {
+    const activityDays = [
+      ...(metrics?.activityDays ?? new Set<string>()),
+    ].sort();
+
+    if (activityDays.length < 2) {
+      return null;
+    }
+
+    const intervals = activityDays
+      .slice(1)
+      .map((day, index) =>
+        this.daysBetweenDates(new Date(activityDays[index]), new Date(day)),
+      )
+      .filter((value) => value > 0)
+      .sort((left, right) => left - right);
+
+    if (intervals.length === 0) {
+      return null;
+    }
+
+    const middleIndex = Math.floor(intervals.length / 2);
+    const median =
+      intervals.length % 2 === 0
+        ? (intervals[middleIndex - 1] + intervals[middleIndex]) / 2
+        : intervals[middleIndex];
+
+    return Math.min(Math.max(Math.round(median), 1), 90);
+  }
+
+  private resolveChurnRiskLevel(
+    daysSinceActivity: number,
+    thresholdDays: number,
+  ): GuestChurnRiskLevel {
+    if (daysSinceActivity >= 60) {
+      return 'LOST';
+    }
+
+    if (daysSinceActivity >= thresholdDays) {
+      return 'HIGH';
+    }
+
+    if (daysSinceActivity >= Math.ceil(thresholdDays * 0.7)) {
+      return 'MEDIUM';
+    }
+
+    return 'LOW';
   }
 
   private rfmRecencyScore(recencyDays: number | null) {
@@ -5253,6 +5393,7 @@ export class GuestsService {
       'lastActivity',
       'registered',
       'rfm',
+      'churnRisk',
     ];
     return allowed.includes(value ?? '') ? (value ?? 'revenue') : 'revenue';
   }
@@ -5300,6 +5441,17 @@ export class GuestsService {
     };
 
     return labels[segment];
+  }
+
+  private churnRiskExportLabel(level: GuestChurnRiskLevel) {
+    const labels: Record<GuestChurnRiskLevel, string> = {
+      LOW: 'Низкий',
+      MEDIUM: 'Наблюдать',
+      HIGH: 'Высокий',
+      LOST: 'Потерян',
+    };
+
+    return labels[level];
   }
 
   private crmStatusExportLabel(status: GuestCrmStatus) {
@@ -5392,6 +5544,7 @@ export class GuestsService {
 
     const created: GuestMetrics = {
       latestActivityAt: null,
+      activityDays: new Set<string>(),
       sessionsCount: 0,
       visitsDays: new Set<string>(),
       playMinutes: 0,
@@ -5446,9 +5599,11 @@ export class GuestsService {
               ? (first.insertedAt ?? '').localeCompare(second.insertedAt ?? '')
               : sort === 'rfm'
                 ? first.rfm.totalScore - second.rfm.totalScore
-                : first.transactionAmount +
-                  first.barRevenue -
-                  (second.transactionAmount + second.barRevenue);
+                : sort === 'churnRisk'
+                  ? first.churnRisk.score - second.churnRisk.score
+                  : first.transactionAmount +
+                    first.barRevenue -
+                    (second.transactionAmount + second.barRevenue);
 
       if (compare !== 0) {
         return compare * multiplier;
@@ -5472,6 +5627,14 @@ export class GuestsService {
     }
 
     metrics.latestActivityAt = this.maxDate(metrics.latestActivityAt, value);
+  }
+
+  private addActivityDay(metrics: GuestMetrics, value: Date | null) {
+    if (!value) {
+      return;
+    }
+
+    metrics.activityDays.add(this.toIsoDate(value));
   }
 
   private sessionActivityAt(

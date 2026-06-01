@@ -61,6 +61,7 @@ const navGroups: NavGroup[] = [
       { href: "/staff/task-templates", label: "Шаблоны задач" },
       { href: "/staff/task-rules", label: "Регулярные задачи" },
       { href: "/staff/notifications", label: "Уведомления" },
+      { href: "/staff/ai-assistant", label: "AI-помощник" },
       { href: "/staff/team-chat", label: "Командный чат" },
       { href: "/staff/operations-dashboard", label: "Операционная дисциплина" },
       { href: "/staff/administrator-ratings", label: "Рейтинг администраторов" },

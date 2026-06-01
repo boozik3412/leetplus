@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { TenancyModule } from '../tenancy/tenancy.module';
+import { StaffAiAssistantController } from './staff-ai-assistant.controller';
+import { StaffAiAssistantService } from './staff-ai-assistant.service';
 import { StaffAssessmentsController } from './staff-assessments.controller';
 import { StaffAssessmentsService } from './staff-assessments.service';
 import { StaffAttachmentsController } from './staff-attachments.controller';
@@ -50,6 +52,7 @@ import { StaffTasksService } from './staff-tasks.service';
   imports: [AuthModule, PrismaModule, TenancyModule],
   controllers: [
     StaffTasksController,
+    StaffAiAssistantController,
     StaffDirectoryController,
     StaffTaskTemplatesController,
     StaffTaskRecurringRulesController,
@@ -73,6 +76,7 @@ import { StaffTasksService } from './staff-tasks.service';
   ],
   providers: [
     StaffTasksService,
+    StaffAiAssistantService,
     StaffDirectoryService,
     StaffTaskTemplatesService,
     StaffTaskRecurringRulesService,

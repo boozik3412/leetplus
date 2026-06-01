@@ -5,6 +5,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -20,6 +21,7 @@ import {
   type StaffKnowledgeBaseQuery,
   type StaffKnowledgeBaseReport,
   type StaffKnowledgeReadReceiptDto,
+  type StaffKnowledgeSettingsDto,
 } from './staff-knowledge-base.service';
 
 @Controller('staff/knowledge-base')
@@ -44,6 +46,19 @@ export class StaffKnowledgeBaseController {
     @Query() query: StaffKnowledgeBaseQuery,
   ): Promise<StaffKnowledgeBaseReport> {
     return this.staffKnowledgeBaseService.getArticles(user, query);
+  }
+
+  @Get('settings')
+  getSettings(@CurrentUser() user: AuthenticatedUser) {
+    return this.staffKnowledgeBaseService.getSettings(user);
+  }
+
+  @Put('settings')
+  updateSettings(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: StaffKnowledgeSettingsDto,
+  ) {
+    return this.staffKnowledgeBaseService.updateSettings(user, dto);
   }
 
   @Post()

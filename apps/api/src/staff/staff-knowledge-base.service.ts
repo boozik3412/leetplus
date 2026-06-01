@@ -42,10 +42,38 @@ const relatedLinkTypes = [
   'OTHER',
 ] as const;
 const RETURNED_ARTICLE_REVISION_SLA_DAYS = 2;
+const DEFAULT_REVISION_SLA_ROLE_DAYS = {
+  ALL_STAFF: 2,
+  ADMINISTRATOR: 2,
+  SENIOR_ADMINISTRATOR: 3,
+  CLUB_MANAGER: 3,
+  MANAGER: 4,
+  STANDARDS_MANAGER: 4,
+} as const;
+const DEFAULT_REVISION_SLA_MATERIAL_EXTRA_DAYS = {
+  TEXT: 0,
+  FILE_LINK: 1,
+  IMAGE: 1,
+  VIDEO: 1,
+  EXTERNAL_LINK: 0,
+  OTHER: 0,
+} as const;
 
 export type StaffKnowledgeArticleStatus = (typeof articleStatuses)[number];
 export type StaffKnowledgeRoleScope = (typeof roleScopes)[number];
 export type StaffKnowledgeMaterialType = (typeof materialTypes)[number];
+
+export type StaffKnowledgeRevisionSlaPolicy = {
+  defaultDays: number;
+  roleDays: Record<StaffKnowledgeRoleScope, number>;
+  materialTypeExtraDays: Record<StaffKnowledgeMaterialType, number>;
+};
+
+const DEFAULT_REVISION_SLA_POLICY: StaffKnowledgeRevisionSlaPolicy = {
+  defaultDays: RETURNED_ARTICLE_REVISION_SLA_DAYS,
+  roleDays: { ...DEFAULT_REVISION_SLA_ROLE_DAYS },
+  materialTypeExtraDays: { ...DEFAULT_REVISION_SLA_MATERIAL_EXTRA_DAYS },
+};
 
 export type StaffKnowledgeBaseQuery = {
   status?: StaffKnowledgeArticleStatus | 'all';
@@ -77,6 +105,10 @@ export type StaffKnowledgeArticleDto = {
 
 export type StaffKnowledgeReadReceiptDto = {
   note?: string | null;
+};
+
+export type StaffKnowledgeSettingsDto = {
+  revisionSlaPolicy?: unknown;
 };
 
 export type StaffKnowledgeMaterial = {
@@ -129,6 +161,7 @@ export type StaffKnowledgeBaseReport = {
   rows: StaffKnowledgeArticleResponse[];
   articleSuggestions: StaffKnowledgeArticleSuggestion[];
   stores: Array<{ id: string; name: string; isActive: boolean }>;
+  settings: StaffKnowledgeSettingsResponse;
 };
 
 export type StaffKnowledgeArticleSuggestion = {
@@ -233,6 +266,10 @@ const articleInclude = {
   },
 } satisfies Prisma.StaffKnowledgeArticleInclude;
 
+const knowledgeSettingsInclude = {
+  updatedByUser: { select: { id: true, email: true, fullName: true } },
+} satisfies Prisma.StaffKnowledgeSettingsInclude;
+
 const knowledgeSuggestionChecklistSelect = {
   id: true,
   title: true,
@@ -251,6 +288,10 @@ const knowledgeSuggestionChecklistSelect = {
 
 type StaffKnowledgeArticleRow = Prisma.StaffKnowledgeArticleGetPayload<{
   include: typeof articleInclude;
+}>;
+
+type StaffKnowledgeSettingsRow = Prisma.StaffKnowledgeSettingsGetPayload<{
+  include: typeof knowledgeSettingsInclude;
 }>;
 
 type StaffKnowledgeSuggestionChecklistRow = Prisma.StaffChecklistRunGetPayload<{
@@ -354,6 +395,12 @@ export type StaffKnowledgeReadReceiptResponse = {
   };
 };
 
+export type StaffKnowledgeSettingsResponse = {
+  revisionSlaPolicy: StaffKnowledgeRevisionSlaPolicy;
+  updatedAt: string | null;
+  updatedByUser: { id: string; email: string; fullName: string | null } | null;
+};
+
 @Injectable()
 export class StaffKnowledgeBaseService {
   constructor(
@@ -374,65 +421,73 @@ export class StaffKnowledgeBaseService {
     const filters = this.resolveFilters(query, canManageKnowledge);
     const where = this.buildWhere(tenantId, user, filters, canManageKnowledge);
 
-    const [rows, stores, activeUsers, folders, categories] = await Promise.all([
-      this.prisma.staffKnowledgeArticle.findMany({
-        where,
-        include: articleInclude,
-        orderBy: [
-          { status: 'asc' },
-          { folder: 'asc' },
-          { category: 'asc' },
-          { updatedAt: 'desc' },
-        ],
-        take: 300,
-      }),
-      this.prisma.store.findMany({
-        where: { tenantId },
-        select: { id: true, name: true, isActive: true },
-        orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
-      }),
-      this.prisma.user.findMany({
-        where: { tenantId, isActive: true },
-        select: {
-          id: true,
-          email: true,
-          fullName: true,
-          role: true,
-          storeAccesses: { select: { storeId: true } },
-        },
-        orderBy: [{ role: 'asc' }, { fullName: 'asc' }, { email: 'asc' }],
-      }),
-      this.prisma.staffKnowledgeArticle.findMany({
-        where: {
-          tenantId,
-          ...(canManageKnowledge
-            ? {}
-            : {
-                status: 'PUBLISHED',
-                roleScope: { in: this.visibleRoleScopes(user.role) },
-              }),
-        },
-        select: { folder: true },
-        distinct: ['folder'],
-        orderBy: { folder: 'asc' },
-      }),
-      this.prisma.staffKnowledgeArticle.findMany({
-        where: {
-          tenantId,
-          ...(canManageKnowledge
-            ? {}
-            : {
-                status: 'PUBLISHED',
-                roleScope: { in: this.visibleRoleScopes(user.role) },
-              }),
-        },
-        select: { category: true },
-        distinct: ['category'],
-        orderBy: { category: 'asc' },
-      }),
-    ]);
+    const [rows, stores, activeUsers, folders, categories, settings] =
+      await Promise.all([
+        this.prisma.staffKnowledgeArticle.findMany({
+          where,
+          include: articleInclude,
+          orderBy: [
+            { status: 'asc' },
+            { folder: 'asc' },
+            { category: 'asc' },
+            { updatedAt: 'desc' },
+          ],
+          take: 300,
+        }),
+        this.prisma.store.findMany({
+          where: { tenantId },
+          select: { id: true, name: true, isActive: true },
+          orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+        }),
+        this.prisma.user.findMany({
+          where: { tenantId, isActive: true },
+          select: {
+            id: true,
+            email: true,
+            fullName: true,
+            role: true,
+            storeAccesses: { select: { storeId: true } },
+          },
+          orderBy: [{ role: 'asc' }, { fullName: 'asc' }, { email: 'asc' }],
+        }),
+        this.prisma.staffKnowledgeArticle.findMany({
+          where: {
+            tenantId,
+            ...(canManageKnowledge
+              ? {}
+              : {
+                  status: 'PUBLISHED',
+                  roleScope: { in: this.visibleRoleScopes(user.role) },
+                }),
+          },
+          select: { folder: true },
+          distinct: ['folder'],
+          orderBy: { folder: 'asc' },
+        }),
+        this.prisma.staffKnowledgeArticle.findMany({
+          where: {
+            tenantId,
+            ...(canManageKnowledge
+              ? {}
+              : {
+                  status: 'PUBLISHED',
+                  roleScope: { in: this.visibleRoleScopes(user.role) },
+                }),
+          },
+          select: { category: true },
+          distinct: ['category'],
+          orderBy: { category: 'asc' },
+        }),
+        this.getKnowledgeSettingsRow(tenantId),
+      ]);
+    const settingsResponse = this.toKnowledgeSettingsResponse(settings);
     const responseRows = rows.map((row) =>
-      this.toArticleResponse(row, user.id, activeUsers),
+      this.toArticleResponse(
+        row,
+        user.id,
+        activeUsers,
+        settingsResponse.revisionSlaPolicy,
+      ),
     );
     const articleSuggestions = canEditKnowledge
       ? await this.buildArticleSuggestions(tenantId, filters.storeId)
@@ -450,7 +505,91 @@ export class StaffKnowledgeBaseService {
       rows: responseRows,
       articleSuggestions,
       stores,
+      settings: settingsResponse,
     };
+  }
+
+  async getSettings(user: AuthenticatedUser) {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const settings = await this.getKnowledgeSettingsRow(tenantId);
+
+    return this.toKnowledgeSettingsResponse(settings);
+  }
+
+  async updateSettings(
+    user: AuthenticatedUser,
+    dto: StaffKnowledgeSettingsDto,
+  ) {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+
+    if (!this.canManageKnowledge(user)) {
+      throw new BadRequestException('Knowledge base settings are not allowed');
+    }
+
+    const revisionSlaPolicy = this.normalizeRevisionSlaPolicy(
+      dto.revisionSlaPolicy,
+    );
+    const settings = await this.prisma.$transaction(async (tx) => {
+      const upserted = await tx.staffKnowledgeSettings.upsert({
+        where: { tenantId },
+        create: {
+          tenantId,
+          revisionSlaPolicy,
+          updatedByUserId: user.id,
+        },
+        update: {
+          revisionSlaPolicy,
+          updatedByUserId: user.id,
+        },
+        include: {
+          updatedByUser: {
+            select: { id: true, email: true, fullName: true },
+          },
+        },
+      });
+
+      const returnedArticles = await tx.staffKnowledgeArticle.findMany({
+        where: {
+          tenantId,
+          status: 'RETURNED',
+          revisionSlaDays: null,
+          returnedAt: { not: null },
+        },
+        select: {
+          id: true,
+          returnedAt: true,
+          roleScope: true,
+          materials: true,
+          revisionSlaDays: true,
+        },
+      });
+
+      for (const article of returnedArticles) {
+        await tx.staffKnowledgeArticle.update({
+          where: { id: article.id },
+          data: {
+            revisionDueAt: article.returnedAt
+              ? this.addDays(
+                  article.returnedAt,
+                  this.resolveArticleRevisionSlaDays(
+                    {
+                      revisionSlaDays: article.revisionSlaDays,
+                      roleScope: article.roleScope,
+                      materials: article.materials,
+                    },
+                    revisionSlaPolicy,
+                  ),
+                )
+              : undefined,
+          },
+          select: { id: true },
+        });
+      }
+
+      return upserted;
+    });
+
+    return this.toKnowledgeSettingsResponse(settings);
   }
 
   async createArticle(user: AuthenticatedUser, dto: StaffKnowledgeArticleDto) {
@@ -467,19 +606,23 @@ export class StaffKnowledgeBaseService {
       (data.status as StaffKnowledgeArticleStatus | undefined) ?? 'DRAFT';
     this.assertKnowledgeWriteAllowed(user, status, { isCreate: true });
     const now = new Date();
-    const revisionSlaDays = this.resolveArticleRevisionSlaDays({
-      roleScope:
-        typeof data.roleScope === 'string' ? data.roleScope : 'ALL_STAFF',
-      materials:
-        data.materials === undefined
-          ? null
-          : (data.materials as Prisma.JsonValue),
-      revisionSlaDays:
-        typeof data.revisionSlaDays === 'number' ||
-        data.revisionSlaDays === null
-          ? data.revisionSlaDays
-          : null,
-    });
+    const revisionSlaPolicy = await this.getRevisionSlaPolicy(tenantId);
+    const revisionSlaDays = this.resolveArticleRevisionSlaDays(
+      {
+        roleScope:
+          typeof data.roleScope === 'string' ? data.roleScope : 'ALL_STAFF',
+        materials:
+          data.materials === undefined
+            ? null
+            : (data.materials as Prisma.JsonValue),
+        revisionSlaDays:
+          typeof data.revisionSlaDays === 'number' ||
+          data.revisionSlaDays === null
+            ? data.revisionSlaDays
+            : null,
+      },
+      revisionSlaPolicy,
+    );
     const created = await this.prisma.$transaction(async (tx) => {
       const article = await tx.staffKnowledgeArticle.create({
         data: {
@@ -511,7 +654,12 @@ export class StaffKnowledgeBaseService {
 
     const activeUsers = await this.getActiveKnowledgeUsers(tenantId);
 
-    return this.toArticleResponse(created, user.id, activeUsers);
+    return this.toArticleResponse(
+      created,
+      user.id,
+      activeUsers,
+      revisionSlaPolicy,
+    );
   }
 
   async updateArticle(
@@ -551,19 +699,25 @@ export class StaffKnowledgeBaseService {
     this.assertKnowledgeWriteAllowed(user, nextStatus);
     const now = new Date();
     const shouldCreateVersion = nextStatus === 'PUBLISHED';
-    const revisionSlaDays = this.resolveArticleRevisionSlaDays({
-      roleScope:
-        typeof data.roleScope === 'string' ? data.roleScope : current.roleScope,
-      materials:
-        data.materials === undefined
-          ? current.materials
-          : (data.materials as Prisma.JsonValue),
-      revisionSlaDays:
-        typeof data.revisionSlaDays === 'number' ||
-        data.revisionSlaDays === null
-          ? data.revisionSlaDays
-          : current.revisionSlaDays,
-    });
+    const revisionSlaPolicy = await this.getRevisionSlaPolicy(tenantId);
+    const revisionSlaDays = this.resolveArticleRevisionSlaDays(
+      {
+        roleScope:
+          typeof data.roleScope === 'string'
+            ? data.roleScope
+            : current.roleScope,
+        materials:
+          data.materials === undefined
+            ? current.materials
+            : (data.materials as Prisma.JsonValue),
+        revisionSlaDays:
+          typeof data.revisionSlaDays === 'number' ||
+          data.revisionSlaDays === null
+            ? data.revisionSlaDays
+            : current.revisionSlaDays,
+      },
+      revisionSlaPolicy,
+    );
     const returnSlaStart =
       nextStatus === 'RETURNED'
         ? current.status === 'RETURNED' && current.returnedAt
@@ -632,7 +786,12 @@ export class StaffKnowledgeBaseService {
 
     const activeUsers = await this.getActiveKnowledgeUsers(tenantId);
 
-    return this.toArticleResponse(updated, user.id, activeUsers);
+    return this.toArticleResponse(
+      updated,
+      user.id,
+      activeUsers,
+      revisionSlaPolicy,
+    );
   }
 
   async markArticleRead(
@@ -1229,40 +1388,123 @@ export class StaffKnowledgeBaseService {
       throw new BadRequestException('Revision SLA days must be a number');
     }
 
-    return Math.min(Math.max(Math.round(numberValue), 1), 14);
+    return this.clampRevisionSlaDays(numberValue, 1, 14);
   }
 
-  private resolveArticleRevisionSlaDays(article: {
-    revisionSlaDays: number | null;
-    roleScope: string;
-    materials: Prisma.JsonValue | null;
-  }) {
+  private normalizeRevisionSlaPolicy(
+    value: unknown,
+  ): StaffKnowledgeRevisionSlaPolicy {
+    const record = this.asRecord(value);
+    const roleDaysRecord = this.asRecord(record.roleDays);
+    const materialTypeExtraRecord = this.asRecord(record.materialTypeExtraDays);
+    const defaultDays = this.normalizeSlaPolicyNumber(
+      record.defaultDays,
+      DEFAULT_REVISION_SLA_POLICY.defaultDays,
+      1,
+      14,
+    );
+
+    return {
+      defaultDays,
+      roleDays: Object.fromEntries(
+        roleScopes.map((roleScope) => [
+          roleScope,
+          this.normalizeSlaPolicyNumber(
+            roleDaysRecord[roleScope],
+            DEFAULT_REVISION_SLA_POLICY.roleDays[roleScope],
+            1,
+            14,
+          ),
+        ]),
+      ) as Record<StaffKnowledgeRoleScope, number>,
+      materialTypeExtraDays: Object.fromEntries(
+        materialTypes.map((materialType) => [
+          materialType,
+          this.normalizeSlaPolicyNumber(
+            materialTypeExtraRecord[materialType],
+            DEFAULT_REVISION_SLA_POLICY.materialTypeExtraDays[materialType],
+            0,
+            7,
+          ),
+        ]),
+      ) as Record<StaffKnowledgeMaterialType, number>,
+    };
+  }
+
+  private normalizeSlaPolicyNumber(
+    value: unknown,
+    fallback: number,
+    min: number,
+    max: number,
+  ) {
+    if (value === null || value === undefined || value === '') {
+      return fallback;
+    }
+
+    const numberValue =
+      typeof value === 'number'
+        ? value
+        : typeof value === 'string'
+          ? Number.parseInt(value.trim(), 10)
+          : Number.NaN;
+
+    if (!Number.isFinite(numberValue)) {
+      return fallback;
+    }
+
+    return this.clampRevisionSlaDays(numberValue, min, max);
+  }
+
+  private clampRevisionSlaDays(value: number, min: number, max: number) {
+    return Math.min(Math.max(Math.round(value), min), max);
+  }
+
+  private resolveArticleRevisionSlaDays(
+    article: {
+      revisionSlaDays: number | null;
+      roleScope: string;
+      materials: Prisma.JsonValue | null;
+    },
+    policy: StaffKnowledgeRevisionSlaPolicy = DEFAULT_REVISION_SLA_POLICY,
+  ) {
     if (article.revisionSlaDays) {
       return article.revisionSlaDays;
     }
 
     const materials = this.normalizeMaterials(article.materials);
-    const hasRichRequiredMaterial = materials.some(
-      (material) =>
-        material.required &&
-        ['FILE_LINK', 'IMAGE', 'VIDEO'].includes(material.type),
-    );
+    const materialExtraDays = materials.reduce((maxExtraDays, material) => {
+      if (!material.required) {
+        return maxExtraDays;
+      }
 
-    if (
-      article.roleScope === 'STANDARDS_MANAGER' ||
-      article.roleScope === 'MANAGER'
-    ) {
-      return hasRichRequiredMaterial ? 5 : 4;
+      return Math.max(
+        maxExtraDays,
+        policy.materialTypeExtraDays[material.type] ?? 0,
+      );
+    }, 0);
+    const roleDays =
+      policy.roleDays[article.roleScope as StaffKnowledgeRoleScope] ??
+      policy.defaultDays;
+
+    return this.clampRevisionSlaDays(roleDays + materialExtraDays, 1, 14);
+  }
+
+  private resolveReturnedArticleSlaDays(article: {
+    revisionSlaDays: number | null;
+    roleScope: string;
+    materials: Prisma.JsonValue | null;
+    returnedAt: Date | null;
+    revisionDueAt: Date | null;
+  }) {
+    if (article.returnedAt && article.revisionDueAt) {
+      const diffDays =
+        (article.revisionDueAt.getTime() - article.returnedAt.getTime()) /
+        (24 * 60 * 60 * 1000);
+
+      return this.clampRevisionSlaDays(diffDays, 1, 14);
     }
 
-    if (
-      article.roleScope === 'CLUB_MANAGER' ||
-      article.roleScope === 'SENIOR_ADMINISTRATOR'
-    ) {
-      return hasRichRequiredMaterial ? 4 : 3;
-    }
-
-    return hasRichRequiredMaterial ? 3 : RETURNED_ARTICLE_REVISION_SLA_DAYS;
+    return this.resolveArticleRevisionSlaDays(article);
   }
 
   private normalizeMaterials(value: unknown): StaffKnowledgeMaterial[] {
@@ -1376,14 +1618,18 @@ export class StaffKnowledgeBaseService {
     row: StaffKnowledgeArticleRow,
     currentUserId: string,
     activeUsers: StaffKnowledgeReadUser[],
+    revisionSlaPolicy: StaffKnowledgeRevisionSlaPolicy,
   ): StaffKnowledgeArticleResponse {
     const materials = this.normalizeMaterials(row.materials);
     const relatedLinks = this.normalizeRelatedLinks(row.relatedLinks);
-    const revisionSlaDaysEffective = this.resolveArticleRevisionSlaDays({
-      revisionSlaDays: row.revisionSlaDays,
-      roleScope: row.roleScope,
-      materials: row.materials,
-    });
+    const revisionSlaDaysEffective = this.resolveArticleRevisionSlaDays(
+      {
+        revisionSlaDays: row.revisionSlaDays,
+        roleScope: row.roleScope,
+        materials: row.materials,
+      },
+      revisionSlaPolicy,
+    );
     const targetUsers =
       row.status === 'PUBLISHED' && row.requiresReading
         ? activeUsers.filter((candidate) =>
@@ -1576,6 +1822,31 @@ export class StaffKnowledgeBaseService {
     };
   }
 
+  private getKnowledgeSettingsRow(tenantId: string) {
+    return this.prisma.staffKnowledgeSettings.findUnique({
+      where: { tenantId },
+      include: knowledgeSettingsInclude,
+    });
+  }
+
+  private async getRevisionSlaPolicy(tenantId: string) {
+    const settings = await this.getKnowledgeSettingsRow(tenantId);
+
+    return this.toKnowledgeSettingsResponse(settings).revisionSlaPolicy;
+  }
+
+  private toKnowledgeSettingsResponse(
+    row: StaffKnowledgeSettingsRow | null,
+  ): StaffKnowledgeSettingsResponse {
+    return {
+      revisionSlaPolicy: this.normalizeRevisionSlaPolicy(
+        row?.revisionSlaPolicy,
+      ),
+      updatedAt: row?.updatedAt.toISOString() ?? null,
+      updatedByUser: row?.updatedByUser ?? null,
+    };
+  }
+
   private async createArticleVersion(
     tx: Prisma.TransactionClient,
     article: StaffKnowledgeArticleSnapshotSource,
@@ -1747,7 +2018,7 @@ export class StaffKnowledgeBaseService {
   ) {
     const dedupeKey = `knowledge-base:${article.id}:returned`;
     const reviewerLabel = reviewer.fullName ?? reviewer.email;
-    const slaDays = this.resolveArticleRevisionSlaDays(article);
+    const slaDays = this.resolveReturnedArticleSlaDays(article);
     const severity =
       article.revisionDueAt && article.revisionDueAt < new Date()
         ? 'CRITICAL'

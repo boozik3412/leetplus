@@ -22,6 +22,22 @@ export type StaffKnowledgeMaterialType =
   | "EXTERNAL_LINK"
   | "OTHER";
 
+export type StaffKnowledgeRevisionSlaPolicy = {
+  defaultDays: number;
+  roleDays: Record<StaffKnowledgeRoleScope, number>;
+  materialTypeExtraDays: Record<StaffKnowledgeMaterialType, number>;
+};
+
+export type StaffKnowledgeSettings = {
+  revisionSlaPolicy: StaffKnowledgeRevisionSlaPolicy;
+  updatedAt: string | null;
+  updatedByUser: {
+    id: string;
+    email: string;
+    fullName: string | null;
+  } | null;
+};
+
 export type StaffKnowledgeMaterial = {
   id: string;
   title: string;
@@ -222,6 +238,7 @@ export type StaffKnowledgeBaseReport = {
   rows: StaffKnowledgeArticle[];
   articleSuggestions: StaffKnowledgeArticleSuggestion[];
   stores: StaffTaskStore[];
+  settings: StaffKnowledgeSettings;
 };
 
 export async function getStaffKnowledgeBaseReport(

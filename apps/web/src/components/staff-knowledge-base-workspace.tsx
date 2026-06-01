@@ -16,6 +16,7 @@ import type {
   StaffKnowledgeMaterialType,
   StaffKnowledgeRelatedLink,
   StaffKnowledgeRelatedLinkType,
+  StaffKnowledgeRevisionSlaPolicy,
   StaffKnowledgeRoleScope,
 } from "@/lib/staff-knowledge-base";
 
@@ -72,6 +73,24 @@ const relatedLinkTypeLabels: Record<StaffKnowledgeRelatedLinkType, string> = {
   TASK: "Задача",
   OTHER: "Другое",
 };
+
+const revisionSlaRoleOrder: StaffKnowledgeRoleScope[] = [
+  "ALL_STAFF",
+  "ADMINISTRATOR",
+  "SENIOR_ADMINISTRATOR",
+  "CLUB_MANAGER",
+  "MANAGER",
+  "STANDARDS_MANAGER",
+];
+
+const revisionSlaMaterialTypeOrder: StaffKnowledgeMaterialType[] = [
+  "TEXT",
+  "FILE_LINK",
+  "IMAGE",
+  "VIDEO",
+  "EXTERNAL_LINK",
+  "OTHER",
+];
 
 type DraftArticle = {
   id: string | null;
@@ -327,22 +346,21 @@ function tagsFromText(value: string) {
 function defaultRevisionSlaDays(
   roleScope: StaffKnowledgeRoleScope,
   materials: StaffKnowledgeMaterial[],
+  policy: StaffKnowledgeRevisionSlaPolicy,
 ) {
-  const hasRichRequiredMaterial = materials.some(
-    (material) =>
-      material.required &&
-      ["FILE_LINK", "IMAGE", "VIDEO"].includes(material.type),
-  );
+  const materialExtraDays = materials.reduce((maxExtraDays, material) => {
+    if (!material.required) {
+      return maxExtraDays;
+    }
 
-  if (roleScope === "STANDARDS_MANAGER" || roleScope === "MANAGER") {
-    return hasRichRequiredMaterial ? 5 : 4;
-  }
+    return Math.max(
+      maxExtraDays,
+      policy.materialTypeExtraDays[material.type] ?? 0,
+    );
+  }, 0);
+  const roleDays = policy.roleDays[roleScope] ?? policy.defaultDays;
 
-  if (roleScope === "CLUB_MANAGER" || roleScope === "SENIOR_ADMINISTRATOR") {
-    return hasRichRequiredMaterial ? 4 : 3;
-  }
-
-  return hasRichRequiredMaterial ? 3 : 2;
+  return Math.min(Math.max(Math.round(roleDays + materialExtraDays), 1), 14);
 }
 
 function materialTypeFromAttachment(
@@ -442,6 +460,11 @@ export function StaffKnowledgeBaseWorkspace({
     report.rows[0] ? fromArticle(report.rows[0]) : defaultDraft(),
   );
   const [isPending, setIsPending] = useState(false);
+  const [settingsPending, setSettingsPending] = useState(false);
+  const [revisionSlaPolicy, setRevisionSlaPolicy] =
+    useState<StaffKnowledgeRevisionSlaPolicy>(
+      report.settings.revisionSlaPolicy,
+    );
   const [readPendingId, setReadPendingId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -462,7 +485,11 @@ export function StaffKnowledgeBaseWorkspace({
       : canSaveArticle;
   const effectiveRevisionSlaDays = draft.revisionSlaDays.trim()
     ? Number(draft.revisionSlaDays)
-    : defaultRevisionSlaDays(draft.roleScope, draft.materials);
+    : defaultRevisionSlaDays(
+        draft.roleScope,
+        draft.materials,
+        revisionSlaPolicy,
+      );
   const reviewQueueRows = useMemo(
     () => report.rows.filter((row) => row.status === reviewQueueTab),
     [report.rows, reviewQueueTab],
@@ -724,8 +751,176 @@ export function StaffKnowledgeBaseWorkspace({
     }
   }
 
+  function updateRevisionSlaPolicy(
+    patch: Partial<StaffKnowledgeRevisionSlaPolicy>,
+  ) {
+    setRevisionSlaPolicy((current) => ({ ...current, ...patch }));
+    setMessage(null);
+    setError(null);
+  }
+
+  function updateRevisionSlaRole(
+    roleScope: StaffKnowledgeRoleScope,
+    value: string,
+  ) {
+    updateRevisionSlaPolicy({
+      roleDays: {
+        ...revisionSlaPolicy.roleDays,
+        [roleScope]: Number(value),
+      },
+    });
+  }
+
+  function updateRevisionSlaMaterialExtra(
+    materialType: StaffKnowledgeMaterialType,
+    value: string,
+  ) {
+    updateRevisionSlaPolicy({
+      materialTypeExtraDays: {
+        ...revisionSlaPolicy.materialTypeExtraDays,
+        [materialType]: Number(value),
+      },
+    });
+  }
+
+  async function saveRevisionSlaPolicy() {
+    setSettingsPending(true);
+    setMessage(null);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/staff/knowledge-base/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revisionSlaPolicy }),
+      });
+
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as {
+          message?: string;
+        } | null;
+        throw new Error(data?.message ?? "Не удалось сохранить SLA");
+      }
+
+      const saved = (await response.json()) as {
+        revisionSlaPolicy: StaffKnowledgeRevisionSlaPolicy;
+      };
+      setRevisionSlaPolicy(saved.revisionSlaPolicy);
+      setMessage("Политика SLA базы знаний сохранена.");
+      router.refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Ошибка запроса");
+    } finally {
+      setSettingsPending(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
+      {report.canManageKnowledge ? (
+        <details className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+          <summary className="cursor-pointer list-none">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+                  Политика SLA
+                </p>
+                <h2 className="mt-1 text-lg font-semibold">
+                  Возврат материалов на доработку
+                </h2>
+              </div>
+              <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                базово {revisionSlaPolicy.defaultDays} дн.
+              </span>
+            </div>
+          </summary>
+
+          <div className="mt-4 space-y-4 border-t border-zinc-200 pt-4 dark:border-zinc-800">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <label className="space-y-1">
+                <span className="text-xs font-bold uppercase text-zinc-500">
+                  Базовый срок
+                </span>
+                <input
+                  type="number"
+                  min={1}
+                  max={14}
+                  value={revisionSlaPolicy.defaultDays}
+                  onChange={(event) =>
+                    updateRevisionSlaPolicy({
+                      defaultDays: Number(event.target.value),
+                    })
+                  }
+                  className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                />
+              </label>
+
+              {revisionSlaRoleOrder.map((roleScope) => (
+                <label key={roleScope} className="space-y-1">
+                  <span className="text-xs font-bold uppercase text-zinc-500">
+                    {roleScopeLabels[roleScope]}
+                  </span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={14}
+                    value={revisionSlaPolicy.roleDays[roleScope]}
+                    onChange={(event) =>
+                      updateRevisionSlaRole(roleScope, event.target.value)
+                    }
+                    className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                  />
+                </label>
+              ))}
+            </div>
+
+            <div>
+              <p className="text-xs font-bold uppercase text-zinc-500">
+                Дополнительные дни за обязательные материалы
+              </p>
+              <div className="mt-2 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+                {revisionSlaMaterialTypeOrder.map((materialType) => (
+                  <label key={materialType} className="space-y-1">
+                    <span className="text-xs font-semibold text-zinc-500">
+                      {materialTypeLabels[materialType]}
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={7}
+                      value={revisionSlaPolicy.materialTypeExtraDays[materialType]}
+                      onChange={(event) =>
+                        updateRevisionSlaMaterialExtra(
+                          materialType,
+                          event.target.value,
+                        )
+                      }
+                      className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs leading-5 text-zinc-500">
+                Статьи без ручного SLA используют срок по роли и самый большой
+                бонус среди обязательных материалов. Уже возвращенные статьи
+                без ручного срока пересчитываются при сохранении политики.
+              </p>
+              <button
+                type="button"
+                onClick={() => void saveRevisionSlaPolicy()}
+                disabled={settingsPending}
+                className="h-10 rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {settingsPending ? "Сохраняем..." : "Сохранить SLA"}
+              </button>
+            </div>
+          </div>
+        </details>
+      ) : null}
+
       {report.canEditKnowledge ? (
         <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -1149,6 +1344,7 @@ export function StaffKnowledgeBaseWorkspace({
                     placeholder={`${defaultRevisionSlaDays(
                       draft.roleScope,
                       draft.materials,
+                      revisionSlaPolicy,
                     )}`}
                     className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
                   />

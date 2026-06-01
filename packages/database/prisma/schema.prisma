@@ -165,6 +165,7 @@ model Tenant {
   staffTaskObservers                   StaffTaskObserver[]
   staffTaskComments                    StaffTaskComment[]
   staffTaskAuditEvents                 StaffTaskAuditEvent[]
+  staffKnowledgeSettings               StaffKnowledgeSettings?
   staffKnowledgeArticles               StaffKnowledgeArticle[]
   staffKnowledgeArticleVersions        StaffKnowledgeArticleVersion[]
   staffKnowledgeArticleReadReceipts    StaffKnowledgeArticleReadReceipt[]
@@ -235,6 +236,7 @@ model User {
   observedStaffTasks                   StaffTaskObserver[]                   @relation("StaffTaskObserverUser")
   staffTaskComments                    StaffTaskComment[]                    @relation("StaffTaskCommentAuthor")
   staffTaskAuditEvents                 StaffTaskAuditEvent[]                 @relation("StaffTaskAuditActor")
+  updatedStaffKnowledgeSettings        StaffKnowledgeSettings[]              @relation("StaffKnowledgeSettingsUpdatedBy")
   createdStaffKnowledgeArticles        StaffKnowledgeArticle[]               @relation("StaffKnowledgeArticleCreatedBy")
   approvedStaffKnowledgeArticles       StaffKnowledgeArticle[]               @relation("StaffKnowledgeArticleApprovedBy")
   createdStaffKnowledgeArticleVersions StaffKnowledgeArticleVersion[]        @relation("StaffKnowledgeArticleVersionCreatedBy")
@@ -1629,6 +1631,20 @@ model StaffAttachment {
 
   @@index([tenantId, createdAt], map: "staff_attachment_tenant_created_idx")
   @@index([uploadedByUserId], map: "staff_attachment_uploaded_by_idx")
+}
+
+model StaffKnowledgeSettings {
+  id                String   @id @default(uuid())
+  tenantId          String   @unique
+  revisionSlaPolicy Json?
+  updatedByUserId   String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  tenant        Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  updatedByUser User?  @relation("StaffKnowledgeSettingsUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([updatedByUserId], map: "staff_knowledge_settings_updated_by_idx")
 }
 
 model StaffKnowledgeArticle {

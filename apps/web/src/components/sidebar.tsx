@@ -477,8 +477,8 @@ function CompactHomeLink({
   return (
     <Link
       href="/dashboard"
-      title="Главная"
-      aria-label="Сводный дашборд"
+      title="Главная: сводный дашборд сети"
+      aria-label="Главная: сводный дашборд сети"
       aria-current={isActive ? "page" : undefined}
       onClick={onNavigate}
       className={compactGroupButtonClass({ isActive })}

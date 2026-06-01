@@ -128,7 +128,9 @@ export function DashboardFilters({
   const [customFrom, setCustomFrom] = useState(dateFrom);
   const [customTo, setCustomTo] = useState(dateTo);
   const [selectedStores, setSelectedStores] = useState(selectedStoreIds);
-  const selectedGrouping = skuGrouping;
+  const shouldPersistSkuGrouping =
+    Boolean(skuGrouping) && isAssortmentPath(pathname);
+  const selectedGrouping = shouldPersistSkuGrouping ? skuGrouping : undefined;
   const selectedStoresLabel =
     selectedStores.length === 0
       ? "Вся сеть"
@@ -193,7 +195,9 @@ export function DashboardFilters({
   ) {
     const params = new URLSearchParams();
     const nextPeriod = overrides.period ?? selectedPeriod;
-    const nextGrouping = overrides.skuGrouping ?? selectedGrouping;
+    const nextGrouping = shouldPersistSkuGrouping
+      ? (overrides.skuGrouping ?? selectedGrouping)
+      : undefined;
     const nextStores = overrides.storeIds ?? selectedStores;
     const nextDateFrom = overrides.dateFrom ?? customFrom;
     const nextDateTo = overrides.dateTo ?? customTo;
@@ -512,6 +516,20 @@ function formatDateInputLabel(value: string) {
   }
 
   return `${match[3]}.${match[2]}.${match[1]}`;
+}
+
+function isAssortmentPath(pathname: string) {
+  const [pathWithoutQuery] = pathname.split("?");
+  const [pathWithoutHash] = pathWithoutQuery.split("#");
+  const normalizedPath =
+    pathWithoutHash !== "/" && pathWithoutHash.endsWith("/")
+      ? pathWithoutHash.slice(0, -1)
+      : pathWithoutHash;
+
+  return (
+    normalizedPath === "/assortment" ||
+    normalizedPath.startsWith("/assortment/")
+  );
 }
 
 function isPeriod(value: string): value is DashboardPeriod {

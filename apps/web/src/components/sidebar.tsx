@@ -88,6 +88,7 @@ const navGroups: NavGroup[] = [
       { href: "/marketing#goals", label: "Цели" },
       { href: "/marketing#mechanics", label: "Механики" },
       { href: "/marketing/promo-bundles", label: "Промо-наборы" },
+      { href: "/marketing/missions", label: "Миссии" },
       { href: "/marketing#campaigns", label: "Кампании" },
       { href: "/guests/report#audiences", label: "Группы гостей" },
       { href: "/guests/crm/tasks", label: "Задачи контакта" },

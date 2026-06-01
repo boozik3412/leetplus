@@ -34,6 +34,12 @@ import {
   type MarketingPromoBundleUsageImportDto,
   type MarketingPromoBundleUsageImportResult,
   type MarketingPromoBundleUsageUpdateDto,
+  type MarketingMission,
+  type MarketingMissionDto,
+  type MarketingMissionReward,
+  type MarketingMissionRewardDto,
+  type MarketingMissionRewardUpdateDto,
+  type MarketingMissionUpdateDto,
 } from './marketing.service';
 
 @Controller('marketing')
@@ -82,6 +88,20 @@ export class MarketingController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<MarketingPromoBundleReconciliation[]> {
     return this.marketingService.getPromoBundleReconciliation(user);
+  }
+
+  @Get('missions')
+  getMissions(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<MarketingMission[]> {
+    return this.marketingService.getMissions(user);
+  }
+
+  @Get('mission-rewards')
+  getMissionRewards(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<MarketingMissionReward[]> {
+    return this.marketingService.getMissionRewards(user);
   }
 
   @Post('promo-bundles')
@@ -141,6 +161,40 @@ export class MarketingController {
     @Body() dto: MarketingPromoBundleUsageUpdateDto,
   ): Promise<MarketingPromoBundleUsage> {
     return this.marketingService.updatePromoBundleUsage(user, id, dto);
+  }
+
+  @Post('missions')
+  createMission(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: MarketingMissionDto,
+  ): Promise<MarketingMission> {
+    return this.marketingService.createMission(user, dto);
+  }
+
+  @Patch('missions/:id')
+  updateMission(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: MarketingMissionUpdateDto,
+  ): Promise<MarketingMission> {
+    return this.marketingService.updateMission(user, id, dto);
+  }
+
+  @Post('mission-rewards')
+  createMissionReward(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: MarketingMissionRewardDto,
+  ): Promise<MarketingMissionReward> {
+    return this.marketingService.createMissionReward(user, dto);
+  }
+
+  @Patch('mission-rewards/:id')
+  updateMissionReward(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: MarketingMissionRewardUpdateDto,
+  ): Promise<MarketingMissionReward> {
+    return this.marketingService.updateMissionReward(user, id, dto);
   }
 
   @Get('campaigns/:id')

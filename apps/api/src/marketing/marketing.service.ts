@@ -93,6 +93,47 @@ type MarketingPromoBundleUsageRow = Prisma.MarketingPromoBundleUsageGetPayload<{
   include: typeof marketingPromoBundleUsageInclude;
 }>;
 
+const marketingMissionInclude = {
+  audience: {
+    select: { id: true, name: true, description: true, guestsCount: true },
+  },
+  createdByUser: { select: { id: true, fullName: true, email: true } },
+} satisfies Prisma.MarketingMissionInclude;
+
+type MarketingMissionRow = Prisma.MarketingMissionGetPayload<{
+  include: typeof marketingMissionInclude;
+}>;
+
+const marketingMissionRewardInclude = {
+  mission: {
+    select: {
+      id: true,
+      name: true,
+      status: true,
+      missionType: true,
+      rewardType: true,
+      rewardLabel: true,
+    },
+  },
+  guest: {
+    select: {
+      id: true,
+      externalDomain: true,
+      externalGuestId: true,
+      fullNameMasked: true,
+      phoneMasked: true,
+      emailMasked: true,
+    },
+  },
+  store: { select: { id: true, name: true } },
+  createdByUser: { select: { id: true, fullName: true, email: true } },
+  approvedByUser: { select: { id: true, fullName: true, email: true } },
+} satisfies Prisma.MarketingMissionRewardInclude;
+
+type MarketingMissionRewardRow = Prisma.MarketingMissionRewardGetPayload<{
+  include: typeof marketingMissionRewardInclude;
+}>;
+
 type MarketingPromoBundleUsageLaunchMatch = {
   id: string;
   storeIds: string[];
@@ -164,6 +205,52 @@ const promoBundleUsageSources = [
   'CASHIER',
 ] as const;
 
+const missionStatuses = [
+  'DRAFT',
+  'ACTIVE',
+  'PAUSED',
+  'FINISHED',
+  'ARCHIVED',
+] as const;
+
+const missionTypes = [
+  'QUIET_HOURS',
+  'SECOND_VISIT',
+  'BAR_PURCHASE',
+  'BIRTHDAY_EVENT',
+  'REFERRAL',
+  'TOURNAMENT',
+  'CUSTOM',
+] as const;
+
+const missionTriggerKinds = [
+  'VISIT',
+  'REPEAT_VISIT',
+  'PLAY_HOURS',
+  'BAR_PURCHASE',
+  'BALANCE_TOPUP',
+  'EVENT_PARTICIPATION',
+  'REFERRAL',
+  'MANUAL',
+] as const;
+
+const missionRewardTypes = [
+  'BONUS',
+  'BALANCE',
+  'PLAY_TIME',
+  'PROMO_BUNDLE',
+  'MANUAL',
+] as const;
+
+const missionRewardStatuses = [
+  'PENDING',
+  'APPROVED',
+  'PAID',
+  'CANCELED',
+] as const;
+
+const missionRewardSources = ['MANUAL', 'LANGAME', 'API_IMPORT'] as const;
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export type MarketingCampaignGoal = (typeof campaignGoals)[number];
@@ -175,6 +262,14 @@ export type MarketingPromoBundleUsageStatus =
   (typeof promoBundleUsageStatuses)[number];
 export type MarketingPromoBundleUsageSource =
   (typeof promoBundleUsageSources)[number];
+export type MarketingMissionStatus = (typeof missionStatuses)[number];
+export type MarketingMissionType = (typeof missionTypes)[number];
+export type MarketingMissionTriggerKind = (typeof missionTriggerKinds)[number];
+export type MarketingMissionRewardType = (typeof missionRewardTypes)[number];
+export type MarketingMissionRewardStatus =
+  (typeof missionRewardStatuses)[number];
+export type MarketingMissionRewardSource =
+  (typeof missionRewardSources)[number];
 
 export type MarketingCampaignDto = {
   goal?: string | null;
@@ -256,6 +351,49 @@ export type MarketingPromoBundleUsageImportResult = {
   errors: Array<{ index: number; message: string }>;
   usages: MarketingPromoBundleUsage[];
 };
+
+export type MarketingMissionDto = {
+  name?: string | null;
+  status?: string | null;
+  missionType?: string | null;
+  triggerKind?: string | null;
+  rewardType?: string | null;
+  rewardAmount?: string | number | null;
+  rewardLabel?: string | null;
+  conditions?: unknown;
+  audienceId?: string | null;
+  storeIds?: string[] | null;
+  periodFrom?: string | null;
+  periodTo?: string | null;
+  budgetAmount?: string | number | null;
+  perGuestLimit?: string | number | null;
+  totalRewardLimit?: string | number | null;
+  antiFraudRules?: unknown;
+  manualApprovalRequired?: boolean | null;
+  note?: string | null;
+};
+
+export type MarketingMissionUpdateDto = Partial<MarketingMissionDto>;
+
+export type MarketingMissionRewardDto = {
+  missionId?: string | null;
+  guestId?: string | null;
+  storeId?: string | null;
+  status?: string | null;
+  source?: string | null;
+  externalProvider?: string | null;
+  externalDomain?: string | null;
+  externalId?: string | null;
+  guestExternalId?: string | null;
+  qualifiedAt?: string | null;
+  rewardAmount?: string | number | null;
+  rewardLabel?: string | null;
+  note?: string | null;
+  evidence?: unknown;
+};
+
+export type MarketingMissionRewardUpdateDto =
+  Partial<MarketingMissionRewardDto>;
 
 export type MarketingCampaignExportFormat = 'csv' | 'xlsx';
 
@@ -450,6 +588,83 @@ export type MarketingPromoBundleUsage = {
   } | null;
   store: { id: string; name: string } | null;
   createdBy: { id: string; displayName: string; email: string } | null;
+};
+
+export type MarketingMissionRewardSummary = {
+  total: number;
+  pending: number;
+  approved: number;
+  paid: number;
+  canceled: number;
+  approvedAmount: number;
+  paidAmount: number;
+};
+
+export type MarketingMission = {
+  id: string;
+  name: string;
+  status: MarketingMissionStatus;
+  missionType: MarketingMissionType;
+  triggerKind: MarketingMissionTriggerKind;
+  rewardType: MarketingMissionRewardType;
+  rewardAmount: number | null;
+  rewardLabel: string | null;
+  conditions: Prisma.JsonValue;
+  storeIds: string[];
+  periodFrom: string | null;
+  periodTo: string | null;
+  budgetAmount: number | null;
+  perGuestLimit: number | null;
+  totalRewardLimit: number | null;
+  antiFraudRules: Prisma.JsonValue | null;
+  manualApprovalRequired: boolean;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+  audience: {
+    id: string;
+    name: string;
+    description: string | null;
+    guestsCount: number;
+  } | null;
+  rewardSummary: MarketingMissionRewardSummary;
+  createdBy: { id: string; displayName: string; email: string } | null;
+};
+
+export type MarketingMissionReward = {
+  id: string;
+  status: MarketingMissionRewardStatus;
+  source: MarketingMissionRewardSource;
+  externalProvider: string | null;
+  externalDomain: string | null;
+  externalId: string | null;
+  guestExternalId: string | null;
+  qualifiedAt: string;
+  rewardAmount: number;
+  rewardLabel: string;
+  note: string | null;
+  evidence: Prisma.JsonValue | null;
+  createdAt: string;
+  updatedAt: string;
+  mission: {
+    id: string;
+    name: string;
+    status: MarketingMissionStatus;
+    missionType: MarketingMissionType;
+    rewardType: MarketingMissionRewardType;
+    rewardLabel: string | null;
+  };
+  guest: {
+    id: string;
+    externalDomain: string | null;
+    externalGuestId: string;
+    displayName: string;
+    phoneMasked: string | null;
+    emailMasked: string | null;
+  } | null;
+  store: { id: string; name: string } | null;
+  createdBy: { id: string; displayName: string; email: string } | null;
+  approvedBy: { id: string; displayName: string; email: string } | null;
 };
 
 export type MarketingPromoBundleReconciliationStatus =
@@ -844,6 +1059,36 @@ export class MarketingService {
         }),
       ),
     );
+  }
+
+  async getMissions(user: AuthenticatedUser): Promise<MarketingMission[]> {
+    const rows = await this.prisma.marketingMission.findMany({
+      where: { tenantId: user.tenantId },
+      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+      take: 100,
+      include: marketingMissionInclude,
+    });
+    const summaries = await this.getMissionRewardSummaries(
+      user.tenantId,
+      rows.map((row) => row.id),
+    );
+
+    return rows.map((row) =>
+      this.toMarketingMission(row, summaries.get(row.id)),
+    );
+  }
+
+  async getMissionRewards(
+    user: AuthenticatedUser,
+  ): Promise<MarketingMissionReward[]> {
+    const rows = await this.prisma.marketingMissionReward.findMany({
+      where: { tenantId: user.tenantId },
+      orderBy: [{ qualifiedAt: 'desc' }, { createdAt: 'desc' }],
+      take: 200,
+      include: marketingMissionRewardInclude,
+    });
+
+    return rows.map((row) => this.toMarketingMissionReward(row));
   }
 
   async getCampaign(
@@ -1795,6 +2040,332 @@ export class MarketingService {
     });
 
     return this.toMarketingPromoBundleUsage(row);
+  }
+
+  async createMission(
+    user: AuthenticatedUser,
+    dto: MarketingMissionDto = {},
+  ): Promise<MarketingMission> {
+    const missionType = resolveMissionType(dto.missionType);
+    const triggerKind = resolveMissionTriggerKind(
+      dto.triggerKind ?? defaultMissionTriggerKind(missionType),
+    );
+    const rewardType = resolveMissionRewardType(dto.rewardType);
+    const rewardAmount = parseOptionalBudget(dto.rewardAmount);
+    const storeIds = await this.resolveStoreIds(user, dto.storeIds);
+    const audienceId = await this.resolveAudienceId(user, dto.audienceId);
+    const periodFrom = parseOptionalDate(dto.periodFrom);
+    const periodTo = parseOptionalDate(dto.periodTo);
+    validateDateRange(periodFrom, periodTo);
+
+    const row = await this.prisma.marketingMission.create({
+      data: {
+        tenantId: user.tenantId,
+        createdByUserId: user.id,
+        audienceId,
+        name:
+          normalizeText(dto.name, 140) ??
+          defaultMissionName(missionType, rewardType),
+        status: resolveMissionStatus(dto.status ?? 'DRAFT'),
+        missionType,
+        triggerKind,
+        rewardType,
+        rewardAmount,
+        rewardLabel:
+          normalizeText(dto.rewardLabel, 160) ??
+          defaultMissionRewardLabel(rewardType, rewardAmount),
+        conditions: normalizeMissionConfig(
+          dto.conditions,
+          defaultMissionConditions(missionType, triggerKind),
+          'Mission conditions',
+        ),
+        storeIds: storeIds.length > 0 ? storeIds : Prisma.JsonNull,
+        periodFrom,
+        periodTo,
+        budgetAmount: parseOptionalBudget(dto.budgetAmount),
+        perGuestLimit: parseOptionalPositiveInt(
+          dto.perGuestLimit,
+          'Per guest limit',
+        ),
+        totalRewardLimit: parseOptionalPositiveInt(
+          dto.totalRewardLimit,
+          'Total reward limit',
+        ),
+        antiFraudRules: normalizeMissionConfig(
+          dto.antiFraudRules,
+          defaultMissionAntiFraudRules(),
+          'Anti-fraud rules',
+        ),
+        manualApprovalRequired:
+          typeof dto.manualApprovalRequired === 'boolean'
+            ? dto.manualApprovalRequired
+            : true,
+        note: normalizeText(dto.note, 2000),
+      },
+      include: marketingMissionInclude,
+    });
+
+    return this.toMarketingMission(row);
+  }
+
+  async updateMission(
+    user: AuthenticatedUser,
+    id: string,
+    dto: MarketingMissionUpdateDto = {},
+  ): Promise<MarketingMission> {
+    const existing = await this.prisma.marketingMission.findFirst({
+      where: { id, tenantId: user.tenantId },
+      select: {
+        id: true,
+        name: true,
+        missionType: true,
+        triggerKind: true,
+        rewardType: true,
+        rewardAmount: true,
+        periodFrom: true,
+        periodTo: true,
+      },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Marketing mission not found');
+    }
+
+    const data: Prisma.MarketingMissionUpdateInput = {};
+    const missionType = hasOwn(dto, 'missionType')
+      ? resolveMissionType(dto.missionType)
+      : resolveMissionType(existing.missionType);
+    const triggerKind = hasOwn(dto, 'triggerKind')
+      ? resolveMissionTriggerKind(dto.triggerKind)
+      : resolveMissionTriggerKind(existing.triggerKind);
+    const rewardType = hasOwn(dto, 'rewardType')
+      ? resolveMissionRewardType(dto.rewardType)
+      : resolveMissionRewardType(existing.rewardType);
+    const rewardAmount = hasOwn(dto, 'rewardAmount')
+      ? parseOptionalBudget(dto.rewardAmount)
+      : existing.rewardAmount
+        ? Number(existing.rewardAmount)
+        : null;
+    let periodFrom = existing.periodFrom;
+    let periodTo = existing.periodTo;
+
+    if (hasOwn(dto, 'name')) {
+      data.name = normalizeText(dto.name, 140) ?? existing.name;
+    }
+
+    if (hasOwn(dto, 'status')) {
+      data.status = resolveMissionStatus(dto.status);
+    }
+
+    if (hasOwn(dto, 'missionType')) {
+      data.missionType = missionType;
+    }
+
+    if (hasOwn(dto, 'triggerKind')) {
+      data.triggerKind = triggerKind;
+    }
+
+    if (hasOwn(dto, 'rewardType')) {
+      data.rewardType = rewardType;
+    }
+
+    if (hasOwn(dto, 'rewardAmount')) {
+      data.rewardAmount = rewardAmount;
+    }
+
+    if (hasOwn(dto, 'rewardLabel')) {
+      data.rewardLabel =
+        normalizeText(dto.rewardLabel, 160) ??
+        defaultMissionRewardLabel(rewardType, rewardAmount);
+    }
+
+    if (hasOwn(dto, 'conditions')) {
+      data.conditions = normalizeMissionConfig(
+        dto.conditions,
+        defaultMissionConditions(missionType, triggerKind),
+        'Mission conditions',
+      );
+    }
+
+    if (hasOwn(dto, 'audienceId')) {
+      data.audience = await this.resolveMissionAudienceRelation(
+        user,
+        dto.audienceId,
+      );
+    }
+
+    if (hasOwn(dto, 'storeIds')) {
+      const storeIds = await this.resolveStoreIds(user, dto.storeIds);
+      data.storeIds = storeIds.length > 0 ? storeIds : Prisma.JsonNull;
+    }
+
+    if (hasOwn(dto, 'periodFrom')) {
+      periodFrom = parseOptionalDate(dto.periodFrom);
+      data.periodFrom = periodFrom;
+    }
+
+    if (hasOwn(dto, 'periodTo')) {
+      periodTo = parseOptionalDate(dto.periodTo);
+      data.periodTo = periodTo;
+    }
+
+    validateDateRange(periodFrom, periodTo);
+
+    if (hasOwn(dto, 'budgetAmount')) {
+      data.budgetAmount = parseOptionalBudget(dto.budgetAmount);
+    }
+
+    if (hasOwn(dto, 'perGuestLimit')) {
+      data.perGuestLimit = parseOptionalPositiveInt(
+        dto.perGuestLimit,
+        'Per guest limit',
+      );
+    }
+
+    if (hasOwn(dto, 'totalRewardLimit')) {
+      data.totalRewardLimit = parseOptionalPositiveInt(
+        dto.totalRewardLimit,
+        'Total reward limit',
+      );
+    }
+
+    if (hasOwn(dto, 'antiFraudRules')) {
+      data.antiFraudRules = normalizeMissionConfig(
+        dto.antiFraudRules,
+        defaultMissionAntiFraudRules(),
+        'Anti-fraud rules',
+      );
+    }
+
+    if (hasOwn(dto, 'manualApprovalRequired')) {
+      data.manualApprovalRequired = Boolean(dto.manualApprovalRequired);
+    }
+
+    if (hasOwn(dto, 'note')) {
+      data.note = normalizeText(dto.note, 2000);
+    }
+
+    const row = await this.prisma.marketingMission.update({
+      where: { id },
+      data,
+      include: marketingMissionInclude,
+    });
+    const summaries = await this.getMissionRewardSummaries(user.tenantId, [
+      row.id,
+    ]);
+
+    return this.toMarketingMission(row, summaries.get(row.id));
+  }
+
+  async createMissionReward(
+    user: AuthenticatedUser,
+    dto: MarketingMissionRewardDto = {},
+  ): Promise<MarketingMissionReward> {
+    const mission = await this.resolveMissionForReward(user, dto.missionId);
+    const status = resolveMissionRewardStatus(dto.status ?? 'PENDING');
+    const guestId = await this.resolveGuestId(
+      user,
+      dto.guestId,
+      dto.guestExternalId,
+      dto.externalDomain,
+    );
+    const row = await this.prisma.marketingMissionReward.create({
+      data: {
+        tenantId: user.tenantId,
+        missionId: mission.id,
+        guestId,
+        storeId: await this.resolveStoreId(user, dto.storeId),
+        createdByUserId: user.id,
+        approvedByUserId:
+          status === 'APPROVED' || status === 'PAID' ? user.id : null,
+        status,
+        source: resolveMissionRewardSource(dto.source ?? 'MANUAL'),
+        externalProvider: resolveIntegrationProvider(dto.externalProvider),
+        externalDomain: normalizeText(dto.externalDomain, 160),
+        externalId: normalizeText(dto.externalId, 160),
+        guestExternalId: normalizeText(dto.guestExternalId, 160),
+        qualifiedAt: parseOptionalDate(dto.qualifiedAt) ?? new Date(),
+        rewardAmount:
+          parseOptionalBudget(dto.rewardAmount) ??
+          (mission.rewardAmount ? Number(mission.rewardAmount) : 0),
+        rewardLabel:
+          normalizeText(dto.rewardLabel, 160) ??
+          mission.rewardLabel ??
+          defaultMissionRewardLabel(
+            resolveMissionRewardType(mission.rewardType),
+            mission.rewardAmount ? Number(mission.rewardAmount) : null,
+          ),
+        note: normalizeText(dto.note, 2000),
+        evidence: normalizeOptionalJsonValue(dto.evidence),
+      },
+      include: marketingMissionRewardInclude,
+    });
+
+    return this.toMarketingMissionReward(row);
+  }
+
+  async updateMissionReward(
+    user: AuthenticatedUser,
+    id: string,
+    dto: MarketingMissionRewardUpdateDto = {},
+  ): Promise<MarketingMissionReward> {
+    const existing = await this.prisma.marketingMissionReward.findFirst({
+      where: { id, tenantId: user.tenantId },
+      select: { id: true, status: true },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Marketing mission reward not found');
+    }
+
+    const data: Prisma.MarketingMissionRewardUpdateInput = {};
+
+    if (hasOwn(dto, 'status')) {
+      const status = resolveMissionRewardStatus(dto.status);
+      data.status = status;
+
+      if (
+        (status === 'APPROVED' || status === 'PAID') &&
+        existing.status !== status
+      ) {
+        data.approvedByUser = { connect: { id: user.id } };
+      }
+    }
+
+    if (hasOwn(dto, 'storeId')) {
+      const storeId = await this.resolveStoreId(user, dto.storeId);
+      data.store = storeId
+        ? { connect: { id: storeId } }
+        : { disconnect: true };
+    }
+
+    if (hasOwn(dto, 'qualifiedAt')) {
+      data.qualifiedAt = parseOptionalDate(dto.qualifiedAt) ?? new Date();
+    }
+
+    if (hasOwn(dto, 'rewardAmount')) {
+      data.rewardAmount = parseOptionalBudget(dto.rewardAmount) ?? 0;
+    }
+
+    if (hasOwn(dto, 'rewardLabel')) {
+      data.rewardLabel = requireText(dto.rewardLabel, 'Reward label', 160);
+    }
+
+    if (hasOwn(dto, 'note')) {
+      data.note = normalizeText(dto.note, 2000);
+    }
+
+    if (hasOwn(dto, 'evidence')) {
+      data.evidence = normalizeOptionalJsonValue(dto.evidence);
+    }
+
+    const row = await this.prisma.marketingMissionReward.update({
+      where: { id },
+      data,
+      include: marketingMissionRewardInclude,
+    });
+
+    return this.toMarketingMissionReward(row);
   }
 
   private async createPromoBundleUsageRow(
@@ -3553,6 +4124,81 @@ export class MarketingService {
     return audienceId ? { connect: { id: audienceId } } : { disconnect: true };
   }
 
+  private async resolveMissionAudienceRelation(
+    user: AuthenticatedUser,
+    value?: string | null,
+  ): Promise<Prisma.GuestAudienceUpdateOneWithoutMarketingMissionsNestedInput> {
+    const audienceId = await this.resolveAudienceId(user, value);
+    return audienceId ? { connect: { id: audienceId } } : { disconnect: true };
+  }
+
+  private async resolveMissionForReward(
+    user: AuthenticatedUser,
+    value?: string | null,
+  ) {
+    const missionId = normalizeText(value, 80);
+
+    if (!missionId) {
+      throw new BadRequestException('Marketing mission is required');
+    }
+
+    const mission = await this.prisma.marketingMission.findFirst({
+      where: { id: missionId, tenantId: user.tenantId },
+      select: {
+        id: true,
+        rewardType: true,
+        rewardAmount: true,
+        rewardLabel: true,
+      },
+    });
+
+    if (!mission) {
+      throw new BadRequestException('Marketing mission not found');
+    }
+
+    return mission;
+  }
+
+  private async resolveGuestId(
+    user: AuthenticatedUser,
+    value?: string | null,
+    guestExternalIdValue?: string | null,
+    externalDomainValue?: string | null,
+  ) {
+    const guestId = normalizeText(value, 80);
+
+    if (guestId) {
+      const guest = await this.prisma.guest.findFirst({
+        where: { id: guestId, tenantId: user.tenantId },
+        select: { id: true },
+      });
+
+      if (!guest) {
+        throw new BadRequestException('Guest not found');
+      }
+
+      return guest.id;
+    }
+
+    const guestExternalId = normalizeText(guestExternalIdValue, 160);
+
+    if (!guestExternalId) {
+      return null;
+    }
+
+    const externalDomain = normalizeText(externalDomainValue, 160);
+    const guest = await this.prisma.guest.findFirst({
+      where: {
+        tenantId: user.tenantId,
+        externalGuestId: guestExternalId,
+        ...(externalDomain ? { externalDomain } : {}),
+      },
+      select: { id: true },
+    });
+
+    return guest?.id ?? null;
+  }
+
   private async resolvePromoBundleId(
     user: AuthenticatedUser,
     value?: string | null,
@@ -4093,6 +4739,54 @@ export class MarketingService {
     return `"${value.replaceAll('"', '""')}"`;
   }
 
+  private async getMissionRewardSummaries(
+    tenantId: string,
+    missionIds: string[],
+  ) {
+    const summaries = new Map<string, MarketingMissionRewardSummary>();
+
+    missionIds.forEach((missionId) => {
+      summaries.set(missionId, emptyMissionRewardSummary());
+    });
+
+    if (missionIds.length === 0) {
+      return summaries;
+    }
+
+    const groups = await this.prisma.marketingMissionReward.groupBy({
+      by: ['missionId', 'status'],
+      where: { tenantId, missionId: { in: missionIds } },
+      _count: { _all: true },
+      _sum: { rewardAmount: true },
+    });
+
+    groups.forEach((group) => {
+      const status = resolveMissionRewardStatus(group.status);
+      const summary =
+        summaries.get(group.missionId) ?? emptyMissionRewardSummary();
+      const count = group._count._all;
+      const amount = group._sum.rewardAmount?.toNumber() ?? 0;
+
+      summary.total += count;
+
+      if (status === 'PENDING') {
+        summary.pending += count;
+      } else if (status === 'APPROVED') {
+        summary.approved += count;
+        summary.approvedAmount += amount;
+      } else if (status === 'PAID') {
+        summary.paid += count;
+        summary.paidAmount += amount;
+      } else if (status === 'CANCELED') {
+        summary.canceled += count;
+      }
+
+      summaries.set(group.missionId, summary);
+    });
+
+    return summaries;
+  }
+
   private resolveExportFormat(
     format: string | null | undefined,
   ): MarketingCampaignExportFormat {
@@ -4262,6 +4956,90 @@ export class MarketingService {
       createdBy: row.createdByUser ? toUserSummary(row.createdByUser) : null,
     };
   }
+
+  private toMarketingMission(
+    row: MarketingMissionRow,
+    summary: MarketingMissionRewardSummary = emptyMissionRewardSummary(),
+  ): MarketingMission {
+    return {
+      id: row.id,
+      name: row.name,
+      status: resolveMissionStatus(row.status),
+      missionType: resolveMissionType(row.missionType),
+      triggerKind: resolveMissionTriggerKind(row.triggerKind),
+      rewardType: resolveMissionRewardType(row.rewardType),
+      rewardAmount: row.rewardAmount ? row.rewardAmount.toNumber() : null,
+      rewardLabel: row.rewardLabel,
+      conditions: row.conditions,
+      storeIds: parseStringArray(row.storeIds),
+      periodFrom: row.periodFrom?.toISOString() ?? null,
+      periodTo: row.periodTo?.toISOString() ?? null,
+      budgetAmount: row.budgetAmount ? row.budgetAmount.toNumber() : null,
+      perGuestLimit: row.perGuestLimit,
+      totalRewardLimit: row.totalRewardLimit,
+      antiFraudRules: row.antiFraudRules ?? null,
+      manualApprovalRequired: row.manualApprovalRequired,
+      note: row.note,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+      audience: row.audience
+        ? {
+            id: row.audience.id,
+            name: row.audience.name,
+            description: row.audience.description,
+            guestsCount: row.audience.guestsCount,
+          }
+        : null,
+      rewardSummary: summary,
+      createdBy: row.createdByUser ? toUserSummary(row.createdByUser) : null,
+    };
+  }
+
+  private toMarketingMissionReward(
+    row: MarketingMissionRewardRow,
+  ): MarketingMissionReward {
+    return {
+      id: row.id,
+      status: resolveMissionRewardStatus(row.status),
+      source: resolveMissionRewardSource(row.source),
+      externalProvider: row.externalProvider ?? null,
+      externalDomain: row.externalDomain,
+      externalId: row.externalId,
+      guestExternalId: row.guestExternalId,
+      qualifiedAt: row.qualifiedAt.toISOString(),
+      rewardAmount: row.rewardAmount.toNumber(),
+      rewardLabel: row.rewardLabel,
+      note: row.note,
+      evidence: row.evidence ?? null,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+      mission: {
+        id: row.mission.id,
+        name: row.mission.name,
+        status: resolveMissionStatus(row.mission.status),
+        missionType: resolveMissionType(row.mission.missionType),
+        rewardType: resolveMissionRewardType(row.mission.rewardType),
+        rewardLabel: row.mission.rewardLabel,
+      },
+      guest: row.guest
+        ? {
+            id: row.guest.id,
+            externalDomain: row.guest.externalDomain,
+            externalGuestId: row.guest.externalGuestId,
+            displayName:
+              row.guest.fullNameMasked ??
+              row.guest.phoneMasked ??
+              row.guest.emailMasked ??
+              row.guest.externalGuestId,
+            phoneMasked: row.guest.phoneMasked,
+            emailMasked: row.guest.emailMasked,
+          }
+        : null,
+      store: row.store ? { id: row.store.id, name: row.store.name } : null,
+      createdBy: row.createdByUser ? toUserSummary(row.createdByUser) : null,
+      approvedBy: row.approvedByUser ? toUserSummary(row.approvedByUser) : null,
+    };
+  }
 }
 
 function normalizeText(value: unknown, maxLength: number) {
@@ -4342,6 +5120,35 @@ function normalizeOptionalJsonValue(
   }
 }
 
+function normalizeMissionConfig(
+  value: unknown,
+  fallback: Prisma.InputJsonValue,
+  label: string,
+): Prisma.InputJsonValue {
+  const source = value === null || value === undefined ? fallback : value;
+
+  if (!source || typeof source !== 'object' || Array.isArray(source)) {
+    throw new BadRequestException(`${label} must be an object`);
+  }
+
+  try {
+    const json = JSON.parse(JSON.stringify(source)) as Prisma.InputJsonValue;
+    const serialized = JSON.stringify(json);
+
+    if (serialized.length > 8000) {
+      throw new BadRequestException(`${label} is too large`);
+    }
+
+    return json;
+  } catch (error) {
+    if (error instanceof BadRequestException) {
+      throw error;
+    }
+
+    throw new BadRequestException(`${label} must be valid JSON`);
+  }
+}
+
 function resolveGoal(value: unknown): MarketingCampaignGoal {
   if (campaignGoals.includes(value as MarketingCampaignGoal)) {
     return value as MarketingCampaignGoal;
@@ -4400,6 +5207,61 @@ function resolvePromoBundleUsageSource(
     promoBundleUsageSources.includes(value as MarketingPromoBundleUsageSource)
   ) {
     return value as MarketingPromoBundleUsageSource;
+  }
+
+  return fallback;
+}
+
+function resolveMissionStatus(value: unknown): MarketingMissionStatus {
+  if (missionStatuses.includes(value as MarketingMissionStatus)) {
+    return value as MarketingMissionStatus;
+  }
+
+  return 'DRAFT';
+}
+
+function resolveMissionType(value: unknown): MarketingMissionType {
+  if (missionTypes.includes(value as MarketingMissionType)) {
+    return value as MarketingMissionType;
+  }
+
+  return 'CUSTOM';
+}
+
+function resolveMissionTriggerKind(
+  value: unknown,
+): MarketingMissionTriggerKind {
+  if (missionTriggerKinds.includes(value as MarketingMissionTriggerKind)) {
+    return value as MarketingMissionTriggerKind;
+  }
+
+  return 'MANUAL';
+}
+
+function resolveMissionRewardType(value: unknown): MarketingMissionRewardType {
+  if (missionRewardTypes.includes(value as MarketingMissionRewardType)) {
+    return value as MarketingMissionRewardType;
+  }
+
+  return 'BONUS';
+}
+
+function resolveMissionRewardStatus(
+  value: unknown,
+): MarketingMissionRewardStatus {
+  if (missionRewardStatuses.includes(value as MarketingMissionRewardStatus)) {
+    return value as MarketingMissionRewardStatus;
+  }
+
+  return 'PENDING';
+}
+
+function resolveMissionRewardSource(
+  value: unknown,
+  fallback: MarketingMissionRewardSource = 'MANUAL',
+): MarketingMissionRewardSource {
+  if (missionRewardSources.includes(value as MarketingMissionRewardSource)) {
+    return value as MarketingMissionRewardSource;
   }
 
   return fallback;
@@ -4849,6 +5711,143 @@ function parseStringArray(value: Prisma.JsonValue | null) {
   return value.filter((item): item is string => typeof item === 'string');
 }
 
+function emptyMissionRewardSummary(): MarketingMissionRewardSummary {
+  return {
+    total: 0,
+    pending: 0,
+    approved: 0,
+    paid: 0,
+    canceled: 0,
+    approvedAmount: 0,
+    paidAmount: 0,
+  };
+}
+
+function defaultMissionTriggerKind(
+  missionType: MarketingMissionType,
+): MarketingMissionTriggerKind {
+  const mapping: Record<MarketingMissionType, MarketingMissionTriggerKind> = {
+    QUIET_HOURS: 'VISIT',
+    SECOND_VISIT: 'REPEAT_VISIT',
+    BAR_PURCHASE: 'BAR_PURCHASE',
+    BIRTHDAY_EVENT: 'EVENT_PARTICIPATION',
+    REFERRAL: 'REFERRAL',
+    TOURNAMENT: 'EVENT_PARTICIPATION',
+    CUSTOM: 'MANUAL',
+  };
+
+  return mapping[missionType];
+}
+
+function defaultMissionName(
+  missionType: MarketingMissionType,
+  rewardType: MarketingMissionRewardType,
+) {
+  const labels: Record<MarketingMissionType, string> = {
+    QUIET_HOURS: 'Миссия на тихие часы',
+    SECOND_VISIT: 'Миссия на повторный визит',
+    BAR_PURCHASE: 'Миссия на покупку в баре',
+    BIRTHDAY_EVENT: 'Миссия на событие или день рождения',
+    REFERRAL: 'Миссия за приглашение друга',
+    TOURNAMENT: 'Миссия на турнир',
+    CUSTOM: 'Пользовательская миссия',
+  };
+
+  return `${labels[missionType]}: ${missionRewardTypeLabel(rewardType)}`;
+}
+
+function missionRewardTypeLabel(rewardType: MarketingMissionRewardType) {
+  const labels: Record<MarketingMissionRewardType, string> = {
+    BONUS: 'бонусы',
+    BALANCE: 'пополнение баланса',
+    PLAY_TIME: 'игровое время',
+    PROMO_BUNDLE: 'промо-набор',
+    MANUAL: 'ручная награда',
+  };
+
+  return labels[rewardType];
+}
+
+function defaultMissionRewardLabel(
+  rewardType: MarketingMissionRewardType,
+  amount: number | null,
+) {
+  const amountLabel = amount && amount > 0 ? `${amount} руб` : null;
+  const labels: Record<MarketingMissionRewardType, string> = {
+    BONUS: amountLabel ? `${amountLabel} бонусами` : 'Бонусы вручную',
+    BALANCE: amountLabel
+      ? `${amountLabel} на баланс`
+      : 'Пополнение баланса вручную',
+    PLAY_TIME: amountLabel
+      ? `${amountLabel} игровым временем`
+      : 'Игровое время',
+    PROMO_BUNDLE: 'Промо-набор вручную',
+    MANUAL: amountLabel ? `${amountLabel} вручную` : 'Ручная награда',
+  };
+
+  return labels[rewardType];
+}
+
+function defaultMissionConditions(
+  missionType: MarketingMissionType,
+  triggerKind: MarketingMissionTriggerKind,
+): Prisma.InputJsonValue {
+  const common = {
+    triggerKind,
+    dataSource: 'Langame facts',
+    calculationMode: 'manual_review',
+  };
+  const mapping: Record<MarketingMissionType, Prisma.InputJsonValue> = {
+    QUIET_HOURS: {
+      ...common,
+      quietHours: ['10:00-16:00'],
+      minVisits: 1,
+      requiredClubScope: 'selected_or_network',
+    },
+    SECOND_VISIT: {
+      ...common,
+      minVisits: 2,
+      windowDays: 14,
+      firstVisitSource: 'GuestSession',
+    },
+    BAR_PURCHASE: {
+      ...common,
+      minBarSpend: 300,
+      factSource: 'SalesFact.guestId',
+    },
+    BIRTHDAY_EVENT: {
+      ...common,
+      eventWindowDays: 7,
+      requiresCrmConfirmation: true,
+    },
+    REFERRAL: {
+      ...common,
+      referralEvidence: 'manual_or_external_id',
+      requiresAntiSelfReferralCheck: true,
+    },
+    TOURNAMENT: {
+      ...common,
+      eventName: 'Турнир',
+      participationSource: 'manual_or_event_list',
+    },
+    CUSTOM: {
+      ...common,
+      description: 'Опишите условия выполнения миссии.',
+    },
+  };
+
+  return mapping[missionType];
+}
+
+function defaultMissionAntiFraudRules(): Prisma.InputJsonValue {
+  return {
+    oneRewardPerGuestByDefault: true,
+    requireManualApprovalBeforeLangameWrite: true,
+    checkDuplicateExternalId: true,
+    checkSelfReferral: true,
+  };
+}
+
 function campaignAudienceRuleLabel(filters: Prisma.JsonValue | null) {
   if (!filters || typeof filters !== 'object' || Array.isArray(filters)) {
     return null;
@@ -5202,7 +6201,7 @@ function isBalanceTopUpOperationType(type: string | null) {
     normalizedType.includes('deposit') ||
     normalizedType.includes('top_up') ||
     normalizedType.includes('recharge') ||
-    normalizedType.includes('РїРѕРїРѕР»РЅ')
+    normalizedType.includes('пополн')
   );
 }
 

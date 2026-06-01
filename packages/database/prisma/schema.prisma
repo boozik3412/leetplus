@@ -154,6 +154,8 @@ model Tenant {
   marketingPromoBundles                MarketingPromoBundle[]
   marketingPromoBundleLaunches         MarketingPromoBundleLaunch[]
   marketingPromoBundleUsages           MarketingPromoBundleUsage[]
+  marketingMissions                    MarketingMission[]
+  marketingMissionRewards              MarketingMissionReward[]
   recommendationStates                 RecommendationState[]
   reportDigestScheduleRuns             ReportDigestScheduleRun[]
   guestStaffIdentityMappings           GuestStaffIdentityMapping[]
@@ -226,6 +228,9 @@ model User {
   createdMarketingPromoBundles         MarketingPromoBundle[]                @relation("MarketingPromoBundleCreatedBy")
   createdMarketingPromoBundleLaunches  MarketingPromoBundleLaunch[]          @relation("MarketingPromoBundleLaunchCreatedBy")
   createdMarketingPromoBundleUsages    MarketingPromoBundleUsage[]           @relation("MarketingPromoBundleUsageCreatedBy")
+  createdMarketingMissions             MarketingMission[]                    @relation("MarketingMissionCreatedBy")
+  createdMarketingMissionRewards       MarketingMissionReward[]              @relation("MarketingMissionRewardCreatedBy")
+  approvedMarketingMissionRewards      MarketingMissionReward[]              @relation("MarketingMissionRewardApprovedBy")
   guestStaffIdentityMappings           GuestStaffIdentityMapping[]
   staffMember                          StaffMember?                          @relation("StaffMemberUser")
   createdStaffMembers                  StaffMember[]                         @relation("StaffMemberCreatedBy")
@@ -426,6 +431,7 @@ model Store {
   inventorySnapshots           InventorySnapshot[]
   stockMovements               StockMovement[]
   marketingPromoBundleUsages   MarketingPromoBundleUsage[]
+  marketingMissionRewards      MarketingMissionReward[]
   staffTasks                   StaffTask[]
   staffTaskTemplates           StaffTaskTemplate[]
   staffTaskRecurringRules      StaffTaskRecurringRule[]
@@ -888,6 +894,7 @@ model Guest {
   crmContactEvents      GuestCrmContactEvent[]
   staffIdentityMappings GuestStaffIdentityMapping[]
   audienceMembers       GuestAudienceMember[]
+  marketingMissionRewards MarketingMissionReward[]
 
   @@unique([tenantId, externalProvider, externalDomain, externalGuestId])
   @@index([tenantId])
@@ -1144,6 +1151,80 @@ model MarketingPromoBundleUsage {
   @@index([launchId], map: "marketing_promo_bundle_usage_launch_idx")
   @@index([storeId], map: "marketing_promo_bundle_usage_store_idx")
   @@index([createdByUserId], map: "marketing_promo_bundle_usage_user_idx")
+}
+
+model MarketingMission {
+  id                     String    @id @default(uuid())
+  tenantId               String
+  audienceId             String?
+  createdByUserId        String?
+  name                   String
+  status                 String    @default("DRAFT")
+  missionType            String
+  triggerKind            String
+  rewardType             String
+  rewardAmount           Decimal?  @db.Decimal(12, 2)
+  rewardLabel            String?
+  conditions             Json
+  storeIds               Json?
+  periodFrom             DateTime?
+  periodTo               DateTime?
+  budgetAmount           Decimal?  @db.Decimal(12, 2)
+  perGuestLimit          Int?
+  totalRewardLimit       Int?
+  antiFraudRules         Json?
+  manualApprovalRequired Boolean   @default(true)
+  note                   String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  tenant        Tenant                   @relation(fields: [tenantId], references: [id])
+  audience      GuestAudience?           @relation(fields: [audienceId], references: [id], onDelete: SetNull)
+  createdByUser User?                    @relation("MarketingMissionCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  rewards       MarketingMissionReward[]
+
+  @@index([tenantId, status, updatedAt], map: "marketing_mission_status_idx")
+  @@index([tenantId, missionType], map: "marketing_mission_type_idx")
+  @@index([audienceId], map: "marketing_mission_audience_idx")
+  @@index([createdByUserId], map: "marketing_mission_created_by_idx")
+}
+
+model MarketingMissionReward {
+  id               String               @id @default(uuid())
+  tenantId         String
+  missionId        String
+  guestId          String?
+  storeId          String?
+  createdByUserId  String?
+  approvedByUserId String?
+  status           String               @default("PENDING")
+  source           String               @default("MANUAL")
+  externalProvider IntegrationProvider?
+  externalDomain   String?
+  externalId       String?
+  guestExternalId  String?
+  qualifiedAt      DateTime             @default(now())
+  rewardAmount     Decimal              @default(0) @db.Decimal(12, 2)
+  rewardLabel      String
+  note             String?
+  evidence         Json?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  tenant         Tenant           @relation(fields: [tenantId], references: [id])
+  mission        MarketingMission @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  guest          Guest?           @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  store          Store?           @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  createdByUser  User?            @relation("MarketingMissionRewardCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  approvedByUser User?            @relation("MarketingMissionRewardApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, source, externalProvider, externalDomain, externalId], map: "marketing_mission_reward_external_uidx")
+  @@index([tenantId, status, qualifiedAt], map: "marketing_mission_reward_status_idx")
+  @@index([missionId], map: "marketing_mission_reward_mission_idx")
+  @@index([guestId], map: "marketing_mission_reward_guest_idx")
+  @@index([storeId], map: "marketing_mission_reward_store_idx")
+  @@index([createdByUserId], map: "marketing_mission_reward_created_by_idx")
+  @@index([approvedByUserId], map: "marketing_mission_reward_approved_by_idx")
 }
 
 model GuestGroup {
@@ -2355,6 +2436,7 @@ model GuestAudience {
   crmContactEvents   GuestCrmContactEvent[]
   marketingCampaigns MarketingCampaign[]
   promoBundleLaunches MarketingPromoBundleLaunch[]
+  marketingMissions  MarketingMission[]
 
   @@index([tenantId, createdAt], map: "guest_audience_tenant_created_idx")
   @@index([createdByUserId], map: "guest_audience_user_idx")

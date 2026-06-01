@@ -33,6 +33,50 @@ export type MarketingPromoBundleUsageSource =
   | "API_IMPORT"
   | "CASHIER";
 
+export type MarketingMissionStatus =
+  | "DRAFT"
+  | "ACTIVE"
+  | "PAUSED"
+  | "FINISHED"
+  | "ARCHIVED";
+
+export type MarketingMissionType =
+  | "QUIET_HOURS"
+  | "SECOND_VISIT"
+  | "BAR_PURCHASE"
+  | "BIRTHDAY_EVENT"
+  | "REFERRAL"
+  | "TOURNAMENT"
+  | "CUSTOM";
+
+export type MarketingMissionTriggerKind =
+  | "VISIT"
+  | "REPEAT_VISIT"
+  | "PLAY_HOURS"
+  | "BAR_PURCHASE"
+  | "BALANCE_TOPUP"
+  | "EVENT_PARTICIPATION"
+  | "REFERRAL"
+  | "MANUAL";
+
+export type MarketingMissionRewardType =
+  | "BONUS"
+  | "BALANCE"
+  | "PLAY_TIME"
+  | "PROMO_BUNDLE"
+  | "MANUAL";
+
+export type MarketingMissionRewardStatus =
+  | "PENDING"
+  | "APPROVED"
+  | "PAID"
+  | "CANCELED";
+
+export type MarketingMissionRewardSource =
+  | "MANUAL"
+  | "LANGAME"
+  | "API_IMPORT";
+
 export type MarketingPromoBundleStructure = {
   composition: {
     typeLabel: string;
@@ -222,6 +266,83 @@ export type MarketingPromoBundleUsageImportResult = {
   skipped: number;
   errors: Array<{ index: number; message: string }>;
   usages: MarketingPromoBundleUsage[];
+};
+
+export type MarketingMissionRewardSummary = {
+  total: number;
+  pending: number;
+  approved: number;
+  paid: number;
+  canceled: number;
+  approvedAmount: number;
+  paidAmount: number;
+};
+
+export type MarketingMission = {
+  id: string;
+  name: string;
+  status: MarketingMissionStatus;
+  missionType: MarketingMissionType;
+  triggerKind: MarketingMissionTriggerKind;
+  rewardType: MarketingMissionRewardType;
+  rewardAmount: number | null;
+  rewardLabel: string | null;
+  conditions: MarketingMechanicConfig;
+  storeIds: string[];
+  periodFrom: string | null;
+  periodTo: string | null;
+  budgetAmount: number | null;
+  perGuestLimit: number | null;
+  totalRewardLimit: number | null;
+  antiFraudRules: MarketingMechanicConfig | null;
+  manualApprovalRequired: boolean;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+  audience: {
+    id: string;
+    name: string;
+    description: string | null;
+    guestsCount: number;
+  } | null;
+  rewardSummary: MarketingMissionRewardSummary;
+  createdBy: { id: string; displayName: string; email: string } | null;
+};
+
+export type MarketingMissionReward = {
+  id: string;
+  status: MarketingMissionRewardStatus;
+  source: MarketingMissionRewardSource;
+  externalProvider: string | null;
+  externalDomain: string | null;
+  externalId: string | null;
+  guestExternalId: string | null;
+  qualifiedAt: string;
+  rewardAmount: number;
+  rewardLabel: string;
+  note: string | null;
+  evidence: MarketingMechanicConfig | null;
+  createdAt: string;
+  updatedAt: string;
+  mission: {
+    id: string;
+    name: string;
+    status: MarketingMissionStatus;
+    missionType: MarketingMissionType;
+    rewardType: MarketingMissionRewardType;
+    rewardLabel: string | null;
+  };
+  guest: {
+    id: string;
+    externalDomain: string | null;
+    externalGuestId: string;
+    displayName: string;
+    phoneMasked: string | null;
+    emailMasked: string | null;
+  } | null;
+  store: { id: string; name: string } | null;
+  createdBy: { id: string; displayName: string; email: string } | null;
+  approvedBy: { id: string; displayName: string; email: string } | null;
 };
 
 export type MarketingPromoBundleReconciliationStatus =
@@ -541,6 +662,34 @@ export async function getMarketingPromoBundleReconciliation(): Promise<
   }
 
   return response.json() as Promise<MarketingPromoBundleReconciliation[]>;
+}
+
+export async function getMarketingMissions(): Promise<MarketingMission[]> {
+  const response = await fetch(`${getApiUrl()}/marketing/missions`, {
+    cache: "no-store",
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch marketing missions");
+  }
+
+  return response.json() as Promise<MarketingMission[]>;
+}
+
+export async function getMarketingMissionRewards(): Promise<
+  MarketingMissionReward[]
+> {
+  const response = await fetch(`${getApiUrl()}/marketing/mission-rewards`, {
+    cache: "no-store",
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch marketing mission rewards");
+  }
+
+  return response.json() as Promise<MarketingMissionReward[]>;
 }
 
 export async function getMarketingCampaign(

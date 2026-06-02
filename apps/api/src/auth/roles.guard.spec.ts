@@ -90,4 +90,45 @@ describe('RolesGuard', () => {
       ),
     ).toThrow(ForbiddenException);
   });
+
+  it('allows managers when user access route metadata includes them', () => {
+    reflector.getAllAndOverride.mockReturnValue([
+      UserRole.OWNER,
+      UserRole.ADMIN,
+      UserRole.MANAGER,
+      UserRole.STANDARDS_MANAGER,
+    ]);
+
+    expect(
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/users',
+          user: { role: UserRole.MANAGER },
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it('does not open user access routes through custom manage_users alone', () => {
+    reflector.getAllAndOverride.mockReturnValue([
+      UserRole.OWNER,
+      UserRole.ADMIN,
+      UserRole.MANAGER,
+      UserRole.STANDARDS_MANAGER,
+    ]);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/users',
+          user: {
+            role: UserRole.CLUB_ADMINISTRATOR,
+            permissions: ['manage_users'],
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+  });
 });

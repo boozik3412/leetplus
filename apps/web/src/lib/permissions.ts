@@ -1,4 +1,5 @@
 import type { AuthUser } from "./auth";
+import { canManageUserAccess } from "./roles";
 
 export type Capability =
   | "view_dashboard"
@@ -220,7 +221,7 @@ export function canAccessPath(user: AuthUser | null, href: string) {
   }
 
   if (href === "/users") {
-    return can(user, "manage_users");
+    return Boolean(user && canManageUserAccess(user.role));
   }
 
   if (href.startsWith("/staff") || href.startsWith("/guests/staff-control")) {

@@ -11,7 +11,6 @@ import { Prisma, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import {
   accessCapabilityCatalog,
-  hasCapability,
   normalizeCapabilities,
   roleCapabilities,
   resolveUserCapabilities,
@@ -34,6 +33,8 @@ const assignableRolesByActor: Record<UserRole, UserRole[]> = {
     UserRole.CLUB_ADMINISTRATOR,
   ],
   [UserRole.ADMIN]: [
+    UserRole.OWNER,
+    UserRole.ADMIN,
     UserRole.MANAGER,
     UserRole.BUYER,
     UserRole.MARKETER,
@@ -42,11 +43,22 @@ const assignableRolesByActor: Record<UserRole, UserRole[]> = {
     UserRole.SENIOR_ADMINISTRATOR,
     UserRole.CLUB_ADMINISTRATOR,
   ],
-  [UserRole.MANAGER]: [],
+  [UserRole.MANAGER]: [
+    UserRole.CLUB_MANAGER,
+    UserRole.STANDARDS_MANAGER,
+    UserRole.MARKETER,
+    UserRole.BUYER,
+    UserRole.SENIOR_ADMINISTRATOR,
+    UserRole.CLUB_ADMINISTRATOR,
+  ],
   [UserRole.BUYER]: [],
   [UserRole.MARKETER]: [],
   [UserRole.CLUB_MANAGER]: [],
-  [UserRole.STANDARDS_MANAGER]: [],
+  [UserRole.STANDARDS_MANAGER]: [
+    UserRole.CLUB_MANAGER,
+    UserRole.SENIOR_ADMINISTRATOR,
+    UserRole.CLUB_ADMINISTRATOR,
+  ],
   [UserRole.SENIOR_ADMINISTRATOR]: [],
   [UserRole.CLUB_ADMINISTRATOR]: [],
 };
@@ -562,25 +574,7 @@ export class UsersService {
     actor: AuthenticatedUser,
     target: Pick<UserAccountRow, 'role'>,
   ) {
-    if (actor.role === UserRole.OWNER) {
-      return;
-    }
-
-    if (actor.role === UserRole.ADMIN) {
-      if (target.role === UserRole.OWNER || target.role === UserRole.ADMIN) {
-        throw new ForbiddenException(
-          'Only owner can manage owner or system admin accounts',
-        );
-      }
-      return;
-    }
-
-    if (hasCapability(actor, 'manage_users')) {
-      if (target.role === UserRole.OWNER || target.role === UserRole.ADMIN) {
-        throw new ForbiddenException(
-          'Only owner can manage owner or system admin accounts',
-        );
-      }
+    if (this.getAssignableRoles(actor).includes(target.role)) {
       return;
     }
 
@@ -588,11 +582,7 @@ export class UsersService {
   }
 
   private assertCanManageUsers(actor: AuthenticatedUser) {
-    if (
-      actor.role === UserRole.OWNER ||
-      actor.role === UserRole.ADMIN ||
-      hasCapability(actor, 'manage_users')
-    ) {
+    if (this.getAssignableRoles(actor).length > 0) {
       return;
     }
 
@@ -613,19 +603,15 @@ export class UsersService {
   }
 
   private assertCanAssignRole(actor: AuthenticatedUser, role: UserRole) {
-    if (assignableRolesByActor[actor.role]?.includes(role)) {
-      return;
-    }
-
-    if (
-      hasCapability(actor, 'manage_users') &&
-      role !== UserRole.OWNER &&
-      role !== UserRole.ADMIN
-    ) {
+    if (this.getAssignableRoles(actor).includes(role)) {
       return;
     }
 
     throw new ForbiddenException('You cannot assign this role');
+  }
+
+  private getAssignableRoles(actor: AuthenticatedUser) {
+    return assignableRolesByActor[actor.role] ?? [];
   }
 
   private parseRole(role: unknown): UserRole {

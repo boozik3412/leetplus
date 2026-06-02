@@ -47,10 +47,6 @@ export class RolesGuard implements CanActivate {
     const path = this.normalizePath(request);
     const method = request.method?.toUpperCase() ?? 'GET';
 
-    if (path.startsWith('/users')) {
-      return 'manage_users';
-    }
-
     if (path.startsWith('/integrations/langame/settings')) {
       return 'manage_integrations';
     }

@@ -41,17 +41,43 @@ export const roleOrder: UserRole[] = [
   "CLUB_ADMINISTRATOR",
 ];
 
+const userAccessManagerRoles: UserRole[] = [
+  "OWNER",
+  "ADMIN",
+  "MANAGER",
+  "STANDARDS_MANAGER",
+];
+
 export function getRoleLabel(role: UserRole) {
   return roleLabels[role] ?? role;
 }
 
+export function canManageUserAccess(role: UserRole) {
+  return userAccessManagerRoles.includes(role);
+}
+
 export function getAssignableRoles(actorRole: UserRole) {
-  if (actorRole === "OWNER") {
+  if (actorRole === "OWNER" || actorRole === "ADMIN") {
     return roleOrder;
   }
 
-  if (actorRole === "ADMIN") {
-    return roleOrder.filter((role) => role !== "OWNER" && role !== "ADMIN");
+  if (actorRole === "MANAGER") {
+    return [
+      "CLUB_MANAGER",
+      "STANDARDS_MANAGER",
+      "MARKETER",
+      "BUYER",
+      "SENIOR_ADMINISTRATOR",
+      "CLUB_ADMINISTRATOR",
+    ] satisfies UserRole[];
+  }
+
+  if (actorRole === "STANDARDS_MANAGER") {
+    return [
+      "CLUB_MANAGER",
+      "SENIOR_ADMINISTRATOR",
+      "CLUB_ADMINISTRATOR",
+    ] satisfies UserRole[];
   }
 
   return [];

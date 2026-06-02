@@ -25,7 +25,12 @@ import {
 } from './users.service';
 
 @Controller('users')
-@Roles(UserRole.OWNER, UserRole.ADMIN)
+@Roles(
+  UserRole.OWNER,
+  UserRole.ADMIN,
+  UserRole.MANAGER,
+  UserRole.STANDARDS_MANAGER,
+)
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}

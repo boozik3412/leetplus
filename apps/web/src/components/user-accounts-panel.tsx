@@ -176,9 +176,7 @@ export function UserAccountsPanel({
   }
 
   const canSaveSelected =
-    !selectedUser ||
-    currentUser.role === "OWNER" ||
-    (selectedUser.role !== "OWNER" && selectedUser.role !== "ADMIN");
+    !selectedUser || assignableRoles.includes(selectedUser.role);
   const filteredUsers = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
 
@@ -791,8 +789,7 @@ export function UserAccountsPanel({
 
           {!canSaveSelected ? (
             <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-200">
-              Только владелец может менять учетные записи владельца и
-              системных администраторов.
+              Ваша роль не может менять доступы этой учетной записи.
             </div>
           ) : null}
 

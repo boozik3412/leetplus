@@ -3,6 +3,7 @@ import {
   StoreCreateForm,
   StoreEditForm,
 } from "@/components/store-actions";
+import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { getStores } from "@/lib/stores";
@@ -15,6 +16,13 @@ export default async function StoresPage() {
   return (
     <main className="px-6 py-8 text-zinc-950">
       <div className="mx-auto max-w-6xl">
+        <ReportBreadcrumbs
+          current="Клубы"
+          items={[
+            { href: "/dashboard", label: "Дашборд" },
+            { href: "/administration", label: "Администрирование" },
+          ]}
+        />
         <div className="mb-8">
           <h1 className="text-2xl font-semibold tracking-tight">
             Торговые точки

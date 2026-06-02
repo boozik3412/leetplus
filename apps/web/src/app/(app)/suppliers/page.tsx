@@ -3,6 +3,7 @@ import {
   CatalogDeleteButton,
   CatalogRenameForm,
 } from "@/components/catalog-actions";
+import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
 import { getSuppliers } from "@/lib/catalog";
 import { can } from "@/lib/permissions";
@@ -27,6 +28,13 @@ export default async function SuppliersPage() {
   return (
     <main className="px-6 py-8 text-zinc-950">
       <div className="mx-auto max-w-6xl">
+        <ReportBreadcrumbs
+          current="Поставщики"
+          items={[
+            { href: "/dashboard", label: "Дашборд" },
+            { href: "/assortment/dashboard", label: "Ассортимент" },
+          ]}
+        />
         <div className="mb-8">
           <h1 className="text-2xl font-semibold tracking-tight">Поставщики</h1>
           <p className="mt-1 text-sm text-zinc-600">

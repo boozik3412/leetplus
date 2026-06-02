@@ -1,4 +1,5 @@
 import { ProductParsingUtility } from "@/components/product-parsing-utility";
+import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
 import { getProductParsingOverview } from "@/lib/product-parsing";
 
@@ -9,6 +10,13 @@ export default async function UtilitiesPage() {
   return (
     <main className="px-6 py-8 text-zinc-950 dark:text-zinc-100">
       <div className="mx-auto max-w-7xl">
+        <ReportBreadcrumbs
+          current="Утилиты"
+          items={[
+            { href: "/dashboard", label: "Дашборд" },
+            { href: "/administration", label: "Администрирование" },
+          ]}
+        />
         <div>
           <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300">
             Операционные инструменты

@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { requireCurrentUser } from "@/lib/auth";
 import { GuestCrmForm, crmStatusLabel } from "@/components/guest-crm-form";
+import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
+import { requireCurrentUser } from "@/lib/auth";
 import { getGuest, type GuestDetail, type GuestSegment } from "@/lib/guests";
 
 type PageParams = Promise<{ id: string }>;
@@ -80,6 +81,13 @@ export default async function GuestPage({ params }: { params: PageParams }) {
   return (
     <main className="px-6 py-8 text-zinc-950 dark:text-zinc-100">
       <div className="mx-auto max-w-7xl">
+        <ReportBreadcrumbs
+          current="Карточка гостя"
+          items={[
+            { href: "/dashboard", label: "Дашборд" },
+            { href: "/guests", label: "Гости" },
+          ]}
+        />
         <Link
           href="/guests"
           className="text-sm font-medium text-zinc-500 hover:text-emerald-700 dark:hover:text-emerald-300"

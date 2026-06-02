@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { GuestAudiencesPanel } from "@/components/guest-audiences-panel";
+import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
 import {
   getGuestAudiences,
@@ -41,6 +42,13 @@ export default async function GuestCrmPage() {
   return (
     <main className="px-4 py-6 text-zinc-950 dark:text-zinc-100 md:px-6 md:py-8">
       <div className="mx-auto max-w-7xl">
+        <ReportBreadcrumbs
+          current="CRM гостей"
+          items={[
+            { href: "/dashboard", label: "Дашборд" },
+            { href: "/guests", label: "Гости" },
+          ]}
+        />
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="min-w-0">
             <p className="text-sm font-semibold uppercase text-emerald-700 dark:text-emerald-300">

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
 import {
   getGuestFilterOptions,
@@ -212,6 +213,13 @@ export default async function StaffControlPage({
   return (
     <main className="px-4 py-6 text-zinc-950 dark:text-zinc-100 sm:px-6 sm:py-8">
       <div className="mx-auto max-w-7xl">
+        <ReportBreadcrumbs
+          current="Контроль персонала"
+          items={[
+            { href: "/dashboard", label: "Дашборд" },
+            { href: "/staff", label: "Персонал" },
+          ]}
+        />
         <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="text-sm font-semibold uppercase text-emerald-700 dark:text-emerald-300">

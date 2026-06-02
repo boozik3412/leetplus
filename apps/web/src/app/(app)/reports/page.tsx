@@ -11,6 +11,7 @@ import {
 import { AbcReportToggle } from "@/components/abc-report-toggle";
 import { NoSalesPeriodTable } from "@/components/no-sales-period-table";
 import { OosExclusionActions } from "@/components/oos-exclusion-actions";
+import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { ReportDigestForm } from "@/components/report-digest-form";
 import { ReportEmailForm } from "@/components/report-email-form";
 import { ReportEmailInlineForm } from "@/components/report-email-inline-form";
@@ -220,6 +221,13 @@ export default async function ReportsPage({
   return (
     <main className="px-6 py-8 text-zinc-950">
       <div className="mx-auto max-w-7xl">
+        <ReportBreadcrumbs
+          current="Отчёты"
+          items={[
+            { href: "/dashboard", label: "Дашборд" },
+            { href: "/assortment/dashboard", label: "Ассортимент" },
+          ]}
+        />
         <div className="mb-8">
           <h1 className="text-2xl font-semibold tracking-tight">Отчёты</h1>
           <p className="mt-1 max-w-3xl text-sm text-zinc-600">

@@ -1,5 +1,5 @@
-import Link from "next/link";
 import type { ReactNode } from "react";
+import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
 import { buildAssortmentRiskSummary } from "@/lib/assortment-risk";
 import { ReportLoadingLink } from "@/components/report-loading-link";
@@ -115,17 +115,13 @@ export default async function CommercialAuditPage() {
   return (
     <main className="min-h-full bg-zinc-50 px-4 py-6 text-zinc-950 dark:bg-zinc-950 dark:text-zinc-100 sm:px-6 lg:px-10">
       <div className="mx-auto flex max-w-7xl flex-col gap-6">
-        <div className="flex flex-wrap items-center gap-2 text-sm text-zinc-500">
-          <Link href="/dashboard" className="transition hover:text-emerald-500">
-            Дашборд
-          </Link>
-          <span>/</span>
-          <span>Управление</span>
-          <span>/</span>
-          <span className="text-zinc-800 dark:text-zinc-200">
-            Коммерческий аудит
-          </span>
-        </div>
+        <ReportBreadcrumbs
+          current="Коммерческий аудит"
+          items={[
+            { href: "/dashboard", label: "Дашборд" },
+            { href: "/commercial/audit", label: "Управление" },
+          ]}
+        />
 
         <section className="flex flex-col gap-4 border-b border-zinc-200 pb-6 dark:border-zinc-800 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-3xl space-y-3">

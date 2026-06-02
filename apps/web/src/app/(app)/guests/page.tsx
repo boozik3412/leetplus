@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
 import { GuestDashboardFilters } from "@/components/guest-dashboard-filters";
 import {
@@ -145,6 +146,10 @@ export default async function GuestsPage({
   return (
     <main className="px-6 py-8 text-zinc-950 dark:text-zinc-100">
       <div className="mx-auto max-w-7xl">
+        <ReportBreadcrumbs
+          current="Гости"
+          items={[{ href: "/dashboard", label: "Дашборд" }]}
+        />
         <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="text-sm font-semibold uppercase text-emerald-700 dark:text-emerald-300">

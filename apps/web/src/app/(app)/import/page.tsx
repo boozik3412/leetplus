@@ -1,5 +1,6 @@
 import { FactCsvImport } from "@/components/fact-csv-import";
 import { ProductCsvImport } from "@/components/product-csv-import";
+import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
 import { getImportJobs, type ImportJob } from "@/lib/imports";
 import { can } from "@/lib/permissions";
@@ -12,6 +13,13 @@ export default async function ImportPage() {
   return (
     <main className="px-6 py-8 text-zinc-950 dark:text-zinc-100">
       <div className="mx-auto max-w-7xl">
+        <ReportBreadcrumbs
+          current="Импорт"
+          items={[
+            { href: "/dashboard", label: "Дашборд" },
+            { href: "/administration", label: "Администрирование" },
+          ]}
+        />
         <div className="mb-8">
           <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300">
             CSV pipeline

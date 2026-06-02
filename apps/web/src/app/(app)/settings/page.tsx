@@ -1,4 +1,5 @@
 import { LangameSettingsForm } from "@/components/langame-settings-form";
+import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
 import { getLangameSettings } from "@/lib/langame-settings";
 import { can } from "@/lib/permissions";
@@ -10,6 +11,13 @@ export default async function SettingsPage() {
     return (
       <main className="px-6 py-8 text-zinc-950 dark:text-zinc-100">
         <div className="mx-auto max-w-3xl rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+          <ReportBreadcrumbs
+            current="Настройки Langame"
+            items={[
+              { href: "/dashboard", label: "Дашборд" },
+              { href: "/administration", label: "Администрирование" },
+            ]}
+          />
           <h1 className="text-2xl font-semibold">Нет доступа</h1>
           <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
             Управление интеграциями доступно только владельцам и
@@ -25,6 +33,13 @@ export default async function SettingsPage() {
   return (
     <main className="px-6 py-8 text-zinc-950 dark:text-zinc-100">
       <div className="mx-auto max-w-7xl">
+        <ReportBreadcrumbs
+          current="Настройки Langame"
+          items={[
+            { href: "/dashboard", label: "Дашборд" },
+            { href: "/administration", label: "Администрирование" },
+          ]}
+        />
         <div>
           <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300">
             Управление сетью

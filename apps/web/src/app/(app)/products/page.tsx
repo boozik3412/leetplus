@@ -1,5 +1,6 @@
 import { ProductCreateForm } from "@/components/product-actions";
 import { ProductsTable } from "@/components/products-table";
+import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
 import { getCategories, getSuppliers } from "@/lib/catalog";
 import { can } from "@/lib/permissions";
@@ -65,6 +66,13 @@ export default async function ProductsPage({
   return (
     <main className="px-6 py-8 text-zinc-950">
       <div className="mx-auto max-w-7xl">
+        <ReportBreadcrumbs
+          current="Товары"
+          items={[
+            { href: "/dashboard", label: "Дашборд" },
+            { href: "/assortment/dashboard", label: "Ассортимент" },
+          ]}
+        />
         <div className="mb-8">
           <p className="text-sm font-medium text-zinc-500">LeetPlus</p>
           <h1 className="mt-1 text-3xl font-semibold tracking-tight">Товары</h1>

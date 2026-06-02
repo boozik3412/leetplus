@@ -19,6 +19,7 @@ export type LangameSettings = {
   latestSuccessfulSyncJob: LangameSyncJob | null;
   endpointProfiles: LangameEndpointProfileRunSummary[];
   endpointSnapshotCandidates: LangameEndpointSnapshotCandidate[];
+  endpointSnapshots: LangameEndpointSnapshotRunSummary[];
 };
 
 export type LangameEndpointProfileRunSummary = {
@@ -59,6 +60,25 @@ export type LangameEndpointSnapshotCandidate = {
   latestCheckedAt: string | null;
   rowCount: number;
   nextAction: string;
+};
+
+export type LangameEndpointSnapshotRunSummary = {
+  id: string;
+  domain: string;
+  endpointKey: string;
+  endpointPath: string;
+  group: string;
+  status: string;
+  startedAt: string;
+  finishedAt: string | null;
+  dateFrom: string | null;
+  dateTo: string | null;
+  requestParams: unknown;
+  rowCount: number;
+  payloadKind: string | null;
+  fieldKeys: string[];
+  summary: string | null;
+  errorMessage: string | null;
 };
 
 export type LangameSyncJob = {

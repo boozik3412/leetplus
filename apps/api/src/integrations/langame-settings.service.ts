@@ -14,6 +14,9 @@ import type {
   LangameEndpointProfileRunSummary,
   LangameEndpointSnapshotCandidate,
   LangameEndpointSnapshotCandidateStatus,
+  LangameEndpointSnapshotResult,
+  LangameEndpointSnapshotRunSummary,
+  LangameEndpointSnapshotSource,
   LangameGuestSearchDiagnosticsResult,
   LangameGuestSearchField,
   LangameGuestSearchQuery,
@@ -256,6 +259,13 @@ export type LangameSettingsDto = {
   domains?: string[];
 };
 
+type EndpointSnapshotSourceDraft = Omit<
+  LangameEndpointSnapshotSource,
+  'snapshotRunId'
+> & {
+  payloadPreview: unknown;
+};
+
 @Injectable()
 export class LangameSettingsService {
   constructor(
@@ -274,6 +284,7 @@ export class LangameSettingsService {
       syncJobs,
       latestSuccessfulSyncJob,
       latestEndpointProfileRuns,
+      latestEndpointSnapshotRuns,
     ] = await Promise.all([
       this.prisma.tenant.findUnique({
         where: { id: tenantId },
@@ -309,6 +320,14 @@ export class LangameSettingsService {
           provider: IntegrationProvider.LANGAME,
         },
         orderBy: { checkedAt: 'desc' },
+        take: 100,
+      }),
+      this.prisma.langameEndpointSnapshotRun.findMany({
+        where: {
+          tenantId,
+          provider: IntegrationProvider.LANGAME,
+        },
+        orderBy: { startedAt: 'desc' },
         take: 100,
       }),
     ]);
@@ -357,6 +376,9 @@ export class LangameSettingsService {
       endpointSnapshotCandidates: this.toEndpointSnapshotCandidates(
         endpointProfiles,
         activeSourcesCount,
+      ),
+      endpointSnapshots: this.toEndpointSnapshotRunSummaries(
+        latestEndpointSnapshotRuns,
       ),
     };
   }
@@ -719,6 +741,122 @@ export class LangameSettingsService {
     };
   }
 
+  async runEndpointSnapshot(
+    user: AuthenticatedUser,
+    dto: LangameEndpointProfileQuery,
+  ): Promise<LangameEndpointSnapshotResult> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { apiKey, sources } = await this.resolveTenantAccess(tenantId);
+    const endpoint =
+      PROFILE_DIAGNOSTIC_ENDPOINTS.find(
+        (item) => item.key === dto.endpointKey,
+      ) ?? PROFILE_DIAGNOSTIC_ENDPOINTS[0];
+
+    await this.assertEndpointSnapshotReady(tenantId, endpoint, sources.length);
+
+    const path = this.buildEndpointProfilePath(endpoint, dto);
+    const requestParams = this.buildEndpointProfileParams(endpoint, dto);
+    const filteredSources = sources.filter((source) => {
+      if (dto.sourceId) {
+        return source.id === dto.sourceId;
+      }
+
+      if (dto.sourceDomain) {
+        return source.domain === dto.sourceDomain;
+      }
+
+      return true;
+    });
+
+    if (filteredSources.length === 0) {
+      throw new BadRequestException(
+        'Langame source for endpoint snapshot is not found',
+      );
+    }
+
+    const startedAt = new Date().toISOString();
+    const snapshotSources = await Promise.all(
+      filteredSources.map(async (source) => {
+        try {
+          const payload = await this.langameClient.getDiagnosticEndpoint(
+            source.baseUrl,
+            apiKey,
+            path,
+            requestParams,
+          );
+          const rows = this.extractDiagnosticRows(payload);
+
+          return {
+            id: source.id,
+            name: source.name,
+            domain: source.domain,
+            baseUrl: source.baseUrl,
+            status: 'SUCCESS' as const,
+            path,
+            requestParams,
+            rowCount: rows.length,
+            payloadKind: this.getPayloadKind(payload),
+            fieldKeys: this.extractFieldKeys(rows),
+            summary: this.extractEndpointProfileSummary(payload),
+            payloadPreview: this.sanitizeEndpointProfilePayload(
+              endpoint,
+              payload,
+            ),
+            errorMessage: null,
+          };
+        } catch (error) {
+          return {
+            id: source.id,
+            name: source.name,
+            domain: source.domain,
+            baseUrl: source.baseUrl,
+            status: 'FAILED' as const,
+            path,
+            requestParams,
+            rowCount: 0,
+            payloadKind: 'empty' as const,
+            fieldKeys: [],
+            summary: null,
+            payloadPreview: null,
+            errorMessage:
+              error instanceof Error
+                ? error.message
+                : `Unknown Langame ${path} snapshot error`,
+          };
+        }
+      }),
+    );
+    const finishedAt = new Date().toISOString();
+    const persisted = await this.persistEndpointSnapshotRuns(
+      tenantId,
+      endpoint,
+      startedAt,
+      finishedAt,
+      snapshotSources,
+    );
+
+    return {
+      startedAt,
+      finishedAt,
+      endpoint,
+      sources: snapshotSources.map((source) => ({
+        id: source.id,
+        name: source.name,
+        domain: source.domain,
+        baseUrl: source.baseUrl,
+        status: source.status,
+        path: source.path,
+        requestParams: source.requestParams,
+        rowCount: source.rowCount,
+        payloadKind: source.payloadKind,
+        fieldKeys: source.fieldKeys,
+        summary: source.summary,
+        errorMessage: source.errorMessage,
+        snapshotRunId: persisted.get(source.id) ?? null,
+      })),
+    };
+  }
+
   async searchGuestDiagnostics(
     user: AuthenticatedUser,
     dto: LangameGuestSearchQuery,
@@ -880,6 +1018,85 @@ export class LangameSettingsService {
     });
   }
 
+  private async assertEndpointSnapshotReady(
+    tenantId: string,
+    endpoint: LangameEndpointProfileDefinition,
+    activeSourcesCount: number,
+  ) {
+    const latestEndpointProfileRuns =
+      await this.prisma.langameEndpointProfileRun.findMany({
+        where: {
+          tenantId,
+          provider: IntegrationProvider.LANGAME,
+        },
+        orderBy: { checkedAt: 'desc' },
+        take: 100,
+      });
+    const candidates = this.toEndpointSnapshotCandidates(
+      this.toEndpointProfileSummaries(latestEndpointProfileRuns),
+      activeSourcesCount,
+    );
+    const candidate = candidates.find(
+      (item) => item.endpointKey === endpoint.key,
+    );
+
+    if (candidate?.status !== 'READY') {
+      throw new BadRequestException(
+        [
+          `Endpoint ${endpoint.title} еще не готов к snapshot.`,
+          candidate?.nextAction ??
+            'Сначала запустите production-профилирование endpoint в /sync.',
+        ].join(' '),
+      );
+    }
+  }
+
+  private async persistEndpointSnapshotRuns(
+    tenantId: string,
+    endpoint: LangameEndpointProfileDefinition,
+    startedAt: string,
+    finishedAt: string,
+    sources: EndpointSnapshotSourceDraft[],
+  ) {
+    if (sources.length === 0) {
+      return new Map<string, string>();
+    }
+
+    const created = await Promise.all(
+      sources.map((source) =>
+        this.prisma.langameEndpointSnapshotRun.create({
+          data: {
+            tenantId,
+            integrationSourceId: source.id,
+            provider: IntegrationProvider.LANGAME,
+            domain: source.domain,
+            endpointKey: endpoint.key,
+            endpointPath: source.path,
+            group: endpoint.group,
+            status: source.status,
+            startedAt: new Date(startedAt),
+            finishedAt: new Date(finishedAt),
+            dateFrom: this.dateParamToDate(source.requestParams.date_from),
+            dateTo: this.dateParamToDate(source.requestParams.date_to),
+            requestParams: this.toInputJson(source.requestParams),
+            rowCount: source.rowCount,
+            payloadKind: source.payloadKind,
+            fieldKeys: this.toInputJson(source.fieldKeys),
+            snapshot: this.toInputJson({
+              summary: source.summary,
+              payloadPreview: source.payloadPreview,
+            }),
+            errorMessage: source.errorMessage,
+          },
+        }),
+      ),
+    );
+
+    return new Map(
+      created.map((run, index) => [sources[index].id, run.id] as const),
+    );
+  }
+
   private toEndpointProfileSummaries(
     runs: Array<{
       id: string;
@@ -928,6 +1145,60 @@ export class LangameSettingsService {
       payloadKind: run.payloadKind,
       fieldKeys: this.jsonArrayToStrings(run.fieldKeys),
       summary: this.profileSummary(run.profile),
+      errorMessage: run.errorMessage,
+    }));
+  }
+
+  private toEndpointSnapshotRunSummaries(
+    runs: Array<{
+      id: string;
+      domain: string;
+      endpointKey: string;
+      endpointPath: string;
+      group: string;
+      status: string;
+      startedAt: Date;
+      finishedAt: Date | null;
+      dateFrom: Date | null;
+      dateTo: Date | null;
+      requestParams: Prisma.JsonValue | null;
+      rowCount: number;
+      payloadKind: string | null;
+      fieldKeys: Prisma.JsonValue | null;
+      snapshot: Prisma.JsonValue | null;
+      errorMessage: string | null;
+    }>,
+  ): LangameEndpointSnapshotRunSummary[] {
+    const seen = new Set<string>();
+    const latestRuns: typeof runs = [];
+
+    for (const run of runs) {
+      const key = `${run.endpointKey}:${run.domain}`;
+
+      if (seen.has(key)) {
+        continue;
+      }
+
+      seen.add(key);
+      latestRuns.push(run);
+    }
+
+    return latestRuns.map((run) => ({
+      id: run.id,
+      domain: run.domain,
+      endpointKey: run.endpointKey,
+      endpointPath: run.endpointPath,
+      group: run.group,
+      status: run.status,
+      startedAt: run.startedAt.toISOString(),
+      finishedAt: run.finishedAt?.toISOString() ?? null,
+      dateFrom: run.dateFrom?.toISOString() ?? null,
+      dateTo: run.dateTo?.toISOString() ?? null,
+      requestParams: run.requestParams,
+      rowCount: run.rowCount,
+      payloadKind: run.payloadKind,
+      fieldKeys: this.jsonArrayToStrings(run.fieldKeys),
+      summary: this.profileSummary(run.snapshot),
       errorMessage: run.errorMessage,
     }));
   }
@@ -1319,7 +1590,9 @@ export class LangameSettingsService {
         key,
         this.isSensitiveField(key)
           ? '[hidden]'
-          : this.sanitizeServicePayload(entry, depth + 1),
+          : this.isGuestSensitiveField(key)
+            ? this.maskSensitiveValue(key, entry)
+            : this.sanitizeServicePayload(entry, depth + 1),
       ]),
     );
   }

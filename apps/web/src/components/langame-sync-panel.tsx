@@ -207,6 +207,7 @@ type EndpointProfileParamMode =
   | "guest_id";
 
 type EndpointProfileStatus = "idle" | "loading" | "success" | "error";
+type EndpointSnapshotStatus = "idle" | "loading" | "success" | "error";
 
 type EndpointProfileOption = {
   key: EndpointProfileKey;
@@ -234,6 +235,17 @@ type EndpointProfileDiagnosticsResult = {
   checkedAt: string;
   endpoint: Omit<EndpointProfileOption, "description">;
   sources: EndpointProfileDiagnosticsSource[];
+};
+
+type EndpointSnapshotSource = EndpointProfileDiagnosticsSource & {
+  snapshotRunId: string | null;
+};
+
+type EndpointSnapshotResult = {
+  startedAt: string;
+  finishedAt: string;
+  endpoint: Omit<EndpointProfileOption, "description">;
+  sources: EndpointSnapshotSource[];
 };
 
 type EndpointProfileHealthStatus =
@@ -907,6 +919,12 @@ export function LangameSyncPanel({
     useState<EndpointProfileStatus>("idle");
   const [endpointProfileError, setEndpointProfileError] =
     useState<string | null>(null);
+  const [endpointSnapshotResult, setEndpointSnapshotResult] =
+    useState<EndpointSnapshotResult | null>(null);
+  const [endpointSnapshotStatus, setEndpointSnapshotStatus] =
+    useState<EndpointSnapshotStatus>("idle");
+  const [endpointSnapshotError, setEndpointSnapshotError] =
+    useState<string | null>(null);
 
   useEffect(() => {
     let ignore = false;
@@ -1148,6 +1166,79 @@ export function LangameSyncPanel({
     }
   }
 
+  async function runEndpointSnapshot() {
+    const selectedEndpoint = endpointProfileOptions.find(
+      (endpoint) => endpoint.key === endpointProfileKey,
+    );
+
+    if (!selectedEndpoint) {
+      setEndpointSnapshotError("Endpoint не найден в карте snapshot");
+      setEndpointSnapshotStatus("error");
+      return;
+    }
+
+    if (
+      selectedEndpoint.requiredParams.includes("clubId") &&
+      !endpointProfileClubId.trim()
+    ) {
+      setEndpointSnapshotError("Укажите ID клуба для выбранного endpoint");
+      setEndpointSnapshotStatus("error");
+      return;
+    }
+
+    if (
+      selectedEndpoint.requiredParams.includes("guestId") &&
+      !endpointProfileGuestId.trim()
+    ) {
+      setEndpointSnapshotError("Укажите ID гостя для выбранного endpoint");
+      setEndpointSnapshotStatus("error");
+      return;
+    }
+
+    setEndpointSnapshotStatus("loading");
+    setEndpointSnapshotError(null);
+    setEndpointSnapshotResult(null);
+
+    try {
+      const response = await fetch(
+        "/api/integrations/langame/endpoint-snapshot",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            endpointKey: endpointProfileKey,
+            sourceId: endpointProfileSourceId || undefined,
+            dateFrom: syncDateFrom,
+            dateTo: syncDateTo,
+            clubId: endpointProfileClubId.trim() || undefined,
+            guestId: endpointProfileGuestId.trim() || undefined,
+            page: endpointProfilePage,
+            pageLimit: endpointProfilePageLimit,
+          }),
+          cache: "no-store",
+        },
+      );
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(getErrorMessage(data));
+      }
+
+      setEndpointSnapshotResult(data as EndpointSnapshotResult);
+      setEndpointSnapshotStatus("success");
+      await refreshSettings();
+    } catch (snapshotError) {
+      setEndpointSnapshotStatus("error");
+      setEndpointSnapshotError(
+        snapshotError instanceof Error
+          ? snapshotError.message
+          : "Не удалось создать snapshot Langame endpoint",
+      );
+    }
+  }
+
   async function searchGuestDiagnostics(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -1352,6 +1443,9 @@ export function LangameSyncPanel({
         profileStatus={endpointProfileStatus}
         result={endpointProfileResult}
         settings={settings}
+        snapshotError={endpointSnapshotError}
+        snapshotResult={endpointSnapshotResult}
+        snapshotStatus={endpointSnapshotStatus}
         sourceId={endpointProfileSourceId}
         onClubIdChange={setEndpointProfileClubId}
         onGuestIdChange={setEndpointProfileGuestId}
@@ -1359,6 +1453,7 @@ export function LangameSyncPanel({
         onPageLimitChange={setEndpointProfilePageLimit}
         onProfileKeyChange={setEndpointProfileKey}
         onSourceIdChange={setEndpointProfileSourceId}
+        onSnapshot={runEndpointSnapshot}
         onSubmit={checkEndpointProfileDiagnostics}
       />
       <ServiceDiagnosticsPanel
@@ -2042,8 +2137,11 @@ function EndpointProfileDiagnosticsPanel({
   dateFrom,
   dateTo,
   result,
+  snapshotResult,
   profileStatus,
+  snapshotStatus,
   profileError,
+  snapshotError,
   onProfileKeyChange,
   onSourceIdChange,
   onClubIdChange,
@@ -2051,6 +2149,7 @@ function EndpointProfileDiagnosticsPanel({
   onPageChange,
   onPageLimitChange,
   onSubmit,
+  onSnapshot,
 }: {
   settings: LangameSettings;
   profileKey: EndpointProfileKey;
@@ -2062,8 +2161,11 @@ function EndpointProfileDiagnosticsPanel({
   dateFrom: string;
   dateTo: string;
   result: EndpointProfileDiagnosticsResult | null;
+  snapshotResult: EndpointSnapshotResult | null;
   profileStatus: EndpointProfileStatus;
+  snapshotStatus: EndpointSnapshotStatus;
   profileError: string | null;
+  snapshotError: string | null;
   onProfileKeyChange: (key: EndpointProfileKey) => void;
   onSourceIdChange: (sourceId: string) => void;
   onClubIdChange: (clubId: string) => void;
@@ -2071,6 +2173,7 @@ function EndpointProfileDiagnosticsPanel({
   onPageChange: (page: string) => void;
   onPageLimitChange: (pageLimit: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onSnapshot: () => void;
 }) {
   const selectedEndpoint =
     endpointProfileOptions.find((endpoint) => endpoint.key === profileKey) ??
@@ -2093,6 +2196,18 @@ function EndpointProfileDiagnosticsPanel({
   const latestProfiles = (settings.endpointProfiles ?? []).filter(
     (profile) => profile.endpointKey === selectedEndpoint.key,
   );
+  const latestSnapshots = (settings.endpointSnapshots ?? []).filter(
+    (snapshot) => snapshot.endpointKey === selectedEndpoint.key,
+  );
+  const selectedCandidate = (settings.endpointSnapshotCandidates ?? []).find(
+    (candidate) => candidate.endpointKey === selectedEndpoint.key,
+  );
+  const canRunSnapshot =
+    selectedCandidate?.status === "READY" &&
+    snapshotStatus !== "loading" &&
+    settings.hasApiKey &&
+    (!needsClubId || Boolean(clubId.trim())) &&
+    (!needsGuestId || Boolean(guestId.trim()));
 
   return (
     <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
@@ -2228,18 +2343,28 @@ function EndpointProfileDiagnosticsPanel({
           <div className="hidden xl:block" />
         )}
 
-        <button
-          type="submit"
-          disabled={
-            profileStatus === "loading" ||
-            !settings.hasApiKey ||
-            (needsClubId && !clubId.trim()) ||
-            (needsGuestId && !guestId.trim())
-          }
-          className="mt-6 rounded-full bg-zinc-950 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
-        >
-          {profileStatus === "loading" ? "Проверяем..." : "Профилировать"}
-        </button>
+        <div className="mt-6 flex flex-wrap gap-2">
+          <button
+            type="submit"
+            disabled={
+              profileStatus === "loading" ||
+              !settings.hasApiKey ||
+              (needsClubId && !clubId.trim()) ||
+              (needsGuestId && !guestId.trim())
+            }
+            className="rounded-full bg-zinc-950 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
+          >
+            {profileStatus === "loading" ? "Проверяем..." : "Профилировать"}
+          </button>
+          <button
+            type="button"
+            disabled={!canRunSnapshot}
+            onClick={onSnapshot}
+            className="rounded-full border border-zinc-300 bg-white px-5 py-2.5 text-sm font-semibold text-zinc-900 transition hover:border-emerald-400 hover:text-emerald-700 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:text-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:border-emerald-500 dark:hover:text-emerald-300 dark:disabled:border-zinc-800 dark:disabled:text-zinc-600"
+          >
+            {snapshotStatus === "loading" ? "Snapshot..." : "Создать snapshot"}
+          </button>
+        </div>
       </form>
 
       <div className="mt-3 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-400">
@@ -2251,10 +2376,17 @@ function EndpointProfileDiagnosticsPanel({
         {usesDate
           ? `Период берется из общей формы синхронизации: ${formatDateLabel(dateFrom)} - ${formatDateLabel(dateTo)}.`
           : "Период для этого endpoint не нужен."}
+        <span className="mt-1 block font-medium text-zinc-700 dark:text-zinc-200">
+          Snapshot gate:{" "}
+          {selectedCandidate
+            ? `${endpointSnapshotCandidateStatusLabel(selectedCandidate.status)}. ${selectedCandidate.nextAction}`
+            : "сначала нужен сохраненный production-профиль."}
+        </span>
       </div>
 
       <LatestEndpointProfiles
         profiles={latestProfiles}
+        snapshots={latestSnapshots}
         selectedEndpoint={selectedEndpoint}
       />
 
@@ -2262,6 +2394,16 @@ function EndpointProfileDiagnosticsPanel({
         <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-200">
           {profileError}
         </p>
+      ) : null}
+
+      {snapshotError ? (
+        <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-200">
+          {snapshotError}
+        </p>
+      ) : null}
+
+      {snapshotResult ? (
+        <EndpointSnapshotResultSummary result={snapshotResult} />
       ) : null}
 
       {result ? (
@@ -2349,9 +2491,11 @@ function EndpointProfileDiagnosticsPanel({
 
 function LatestEndpointProfiles({
   profiles,
+  snapshots,
   selectedEndpoint,
 }: {
   profiles: LangameSettings["endpointProfiles"];
+  snapshots: LangameSettings["endpointSnapshots"];
   selectedEndpoint: EndpointProfileOption;
 }) {
   if (profiles.length === 0) {
@@ -2368,12 +2512,68 @@ function LatestEndpointProfiles({
     <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/50">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
-          Последние сохраненные профили
+          Последние сохраненные профили и snapshot
         </p>
         <span className="text-xs text-zinc-500 dark:text-zinc-400">
-          {profiles.length} источн.
+          профили: {profiles.length}, snapshot: {snapshots.length}
         </span>
       </div>
+      {snapshots.length > 0 ? (
+        <div className="mt-3 grid gap-2 lg:grid-cols-3">
+          {snapshots.map((snapshot) => (
+            <div
+              key={snapshot.id}
+              className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-3 text-xs dark:border-emerald-900/60 dark:bg-emerald-950/20"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <p className="font-semibold text-zinc-950 dark:text-zinc-50">
+                    Snapshot: {snapshot.domain}
+                  </p>
+                  <p className="mt-1 text-zinc-500 dark:text-zinc-400">
+                    {formatDateTime(snapshot.finishedAt ?? snapshot.startedAt)}
+                  </p>
+                </div>
+                <span
+                  className={[
+                    "rounded-full px-2 py-0.5 text-[11px] font-semibold",
+                    snapshot.status === "SUCCESS"
+                      ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-100"
+                      : "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-200",
+                  ].join(" ")}
+                >
+                  {snapshot.status === "SUCCESS" ? "готов" : "ошибка"}
+                </span>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-1.5 text-zinc-600 dark:text-zinc-300">
+                <span className="rounded-full bg-white px-2 py-1 dark:bg-zinc-950">
+                  строк: {snapshot.rowCount}
+                </span>
+                {snapshot.payloadKind ? (
+                  <span className="rounded-full bg-white px-2 py-1 dark:bg-zinc-950">
+                    {snapshot.payloadKind}
+                  </span>
+                ) : null}
+              </div>
+              {snapshot.summary ? (
+                <p className="mt-2 leading-5 text-zinc-500 dark:text-zinc-400">
+                  {snapshot.summary}
+                </p>
+              ) : null}
+              {snapshot.errorMessage ? (
+                <p className="mt-2 break-words text-red-600 dark:text-red-300">
+                  {compactEndpointError(snapshot.errorMessage)}
+                </p>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="mt-3 rounded-md border border-dashed border-zinc-300 px-3 py-3 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+          Snapshot для {selectedEndpoint.title} еще не создавался. После
+          успешного gate можно вручную сохранить подготовленный запуск.
+        </div>
+      )}
       <div className="mt-3 grid gap-2 lg:grid-cols-3">
         {profiles.map((profile) => (
           <div
@@ -2419,6 +2619,85 @@ function LatestEndpointProfiles({
             {profile.errorMessage ? (
               <p className="mt-2 break-words text-red-600 dark:text-red-300">
                 {compactEndpointError(profile.errorMessage)}
+              </p>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function EndpointSnapshotResultSummary({
+  result,
+}: {
+  result: EndpointSnapshotResult;
+}) {
+  const failedSources = result.sources.filter(
+    (source) => source.status === "FAILED",
+  );
+  const successfulSources = result.sources.filter(
+    (source) => source.status === "SUCCESS",
+  );
+
+  return (
+    <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900/60 dark:bg-emerald-950/20">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+            Snapshot создан: {result.endpoint.title}
+          </p>
+          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+            {formatDateTime(result.finishedAt)}. Успешно:{" "}
+            {successfulSources.length}, ошибок: {failedSources.length}
+          </p>
+        </div>
+        <span className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-emerald-700 dark:bg-zinc-950 dark:text-emerald-200">
+          ручной запуск
+        </span>
+      </div>
+      <div className="mt-3 grid gap-2 lg:grid-cols-3">
+        {result.sources.map((source) => (
+          <div
+            key={`${source.domain}-${source.snapshotRunId ?? source.status}`}
+            className="rounded-md border border-white bg-white px-3 py-3 text-xs dark:border-zinc-800 dark:bg-zinc-950"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <p className="font-semibold text-zinc-950 dark:text-zinc-50">
+                  {source.domain}
+                </p>
+                <p className="mt-1 break-all font-mono text-zinc-500 dark:text-zinc-400">
+                  {source.path}
+                </p>
+              </div>
+              <span
+                className={[
+                  "rounded-full px-2 py-0.5 text-[11px] font-semibold",
+                  source.status === "SUCCESS"
+                    ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200"
+                    : "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-200",
+                ].join(" ")}
+              >
+                {source.status === "SUCCESS" ? "готов" : "ошибка"}
+              </span>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1.5 text-zinc-500 dark:text-zinc-400">
+              <span className="rounded-full bg-zinc-100 px-2 py-1 dark:bg-zinc-900">
+                строк: {source.rowCount}
+              </span>
+              <span className="rounded-full bg-zinc-100 px-2 py-1 dark:bg-zinc-900">
+                {source.payloadKind}
+              </span>
+            </div>
+            {source.summary ? (
+              <p className="mt-2 leading-5 text-zinc-500 dark:text-zinc-400">
+                {source.summary}
+              </p>
+            ) : null}
+            {source.errorMessage ? (
+              <p className="mt-2 break-words text-red-600 dark:text-red-300">
+                {compactEndpointError(source.errorMessage)}
               </p>
             ) : null}
           </div>
@@ -3218,6 +3497,28 @@ function mapEndpointSnapshotCandidateStatus(
   }
 
   return "unchecked";
+}
+
+function endpointSnapshotCandidateStatusLabel(
+  status: LangameSettings["endpointSnapshotCandidates"][number]["status"],
+) {
+  if (status === "READY") {
+    return "готов к snapshot";
+  }
+
+  if (status === "PARTIAL") {
+    return "частично проверен";
+  }
+
+  if (status === "STALE") {
+    return "профиль устарел";
+  }
+
+  if (status === "FAILED") {
+    return "есть ошибка";
+  }
+
+  return "не профилировался";
 }
 
 function endpointProfileHealthBadgeClass(status: EndpointProfileHealthStatus) {

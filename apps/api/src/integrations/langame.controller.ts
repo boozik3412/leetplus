@@ -64,6 +64,14 @@ export class LangameController {
     );
   }
 
+  @Post('endpoint-snapshot')
+  runEndpointSnapshot(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() query: LangameEndpointProfileQuery,
+  ) {
+    return this.langameSettingsService.runEndpointSnapshot(user, query);
+  }
+
   @Post('guests/search-diagnostics')
   searchGuestDiagnostics(
     @CurrentUser() user: AuthenticatedUser,

@@ -338,6 +338,29 @@ export type LangameEndpointProfileDiagnosticsResult = {
   sources: LangameEndpointProfileDiagnosticsSource[];
 };
 
+export type LangameEndpointSnapshotSource = {
+  id: string;
+  name: string;
+  domain: string;
+  baseUrl: string;
+  status: 'SUCCESS' | 'FAILED';
+  path: string;
+  requestParams: Record<string, string>;
+  rowCount: number;
+  payloadKind: 'array' | 'object' | 'scalar' | 'empty';
+  fieldKeys: string[];
+  summary: string | null;
+  errorMessage: string | null;
+  snapshotRunId: string | null;
+};
+
+export type LangameEndpointSnapshotResult = {
+  startedAt: string;
+  finishedAt: string;
+  endpoint: LangameEndpointProfileDefinition;
+  sources: LangameEndpointSnapshotSource[];
+};
+
 export type LangameEndpointProfileRunSummary = {
   id: string;
   domain: string;
@@ -346,6 +369,25 @@ export type LangameEndpointProfileRunSummary = {
   group: string;
   status: string;
   checkedAt: string;
+  dateFrom: string | null;
+  dateTo: string | null;
+  requestParams: unknown;
+  rowCount: number;
+  payloadKind: string | null;
+  fieldKeys: string[];
+  summary: string | null;
+  errorMessage: string | null;
+};
+
+export type LangameEndpointSnapshotRunSummary = {
+  id: string;
+  domain: string;
+  endpointKey: string;
+  endpointPath: string;
+  group: string;
+  status: string;
+  startedAt: string;
+  finishedAt: string | null;
   dateFrom: string | null;
   dateTo: string | null;
   requestParams: unknown;

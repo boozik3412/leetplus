@@ -28,6 +28,10 @@ type PrismaMock = {
     createMany: jest.Mock;
     findMany: jest.Mock;
   };
+  langameEndpointSnapshotRun: {
+    create: jest.Mock;
+    findMany: jest.Mock;
+  };
 };
 
 type TenantContextMock = {
@@ -43,6 +47,14 @@ type LangameClientMock = {
   getRoutes: jest.Mock;
   getDiagnosticEndpoint: jest.Mock;
   searchGuests: jest.Mock;
+};
+
+type SnapshotCreateCall = {
+  data: {
+    domain: string;
+    snapshot?: unknown;
+    [key: string]: unknown;
+  };
 };
 
 type CredentialUpsertCall = [
@@ -87,6 +99,10 @@ function createPrismaMock(): PrismaMock {
     },
     langameEndpointProfileRun: {
       createMany: jest.fn(),
+      findMany: jest.fn(),
+    },
+    langameEndpointSnapshotRun: {
+      create: jest.fn(),
       findMany: jest.fn(),
     },
   };
@@ -142,6 +158,14 @@ describe('LangameSettingsService', () => {
     prisma.integrationSyncJob.findMany.mockResolvedValue([]);
     prisma.langameEndpointProfileRun.findMany.mockResolvedValue([]);
     prisma.langameEndpointProfileRun.createMany.mockResolvedValue({ count: 1 });
+    prisma.langameEndpointSnapshotRun.findMany.mockResolvedValue([]);
+    prisma.langameEndpointSnapshotRun.create.mockImplementation(
+      ({ data }: SnapshotCreateCall) =>
+        Promise.resolve({
+          id: `snapshot-${data.domain}`,
+          ...data,
+        }),
+    );
     service = new LangameSettingsService(
       prisma as unknown as PrismaService,
       tenantContext as unknown as TenantContextService,
@@ -220,6 +244,8 @@ describe('LangameSettingsService', () => {
 
   it('returns latest endpoint profile quality summaries in settings', async () => {
     const checkedAt = new Date();
+    const snapshotStartedAt = new Date();
+    const snapshotFinishedAt = new Date(snapshotStartedAt.getTime() + 1000);
 
     prisma.langameEndpointProfileRun.findMany.mockResolvedValue([
       {
@@ -241,6 +267,31 @@ describe('LangameSettingsService', () => {
         fieldKeys: ['guest_id', 'date_start'],
         profile: {
           summary: 'events=visit:20',
+        },
+        errorMessage: null,
+      },
+    ]);
+    prisma.langameEndpointSnapshotRun.findMany.mockResolvedValue([
+      {
+        id: 'snapshot-1',
+        domain: '443.langame.ru',
+        endpointKey: 'guestSessions',
+        endpointPath: '/guests/sessions',
+        group: 'guests',
+        status: 'SUCCESS',
+        startedAt: snapshotStartedAt,
+        finishedAt: snapshotFinishedAt,
+        dateFrom: new Date('2026-06-01T00:00:00.000Z'),
+        dateTo: new Date('2026-06-02T00:00:00.000Z'),
+        requestParams: {
+          page: '1',
+          page_limit: '20',
+        },
+        rowCount: 20,
+        payloadKind: 'object',
+        fieldKeys: ['guest_id'],
+        snapshot: {
+          summary: 'rows: 20',
         },
         errorMessage: null,
       },
@@ -284,6 +335,21 @@ describe('LangameSettingsService', () => {
         }),
       ]),
     );
+    expect(result.endpointSnapshots).toEqual([
+      expect.objectContaining({
+        id: 'snapshot-1',
+        endpointKey: 'guestSessions',
+        endpointPath: '/guests/sessions',
+        group: 'guests',
+        status: 'SUCCESS',
+        startedAt: snapshotStartedAt.toISOString(),
+        finishedAt: snapshotFinishedAt.toISOString(),
+        rowCount: 20,
+        payloadKind: 'object',
+        fieldKeys: ['guest_id'],
+        summary: 'rows: 20',
+      }),
+    ]);
   });
 
   it('returns sanitized routes diagnostics without leaking credentials', async () => {
@@ -504,6 +570,96 @@ describe('LangameSettingsService', () => {
         }),
       ],
     });
+  });
+
+  it('runs endpoint snapshot only after a fresh successful profile', async () => {
+    const checkedAt = new Date();
+
+    prisma.integrationCredential.findFirst.mockResolvedValue({
+      id: 'credential-1',
+      apiKeyEncrypted: 'encrypted:secret-key',
+    });
+    prisma.langameEndpointProfileRun.findMany.mockResolvedValue([
+      {
+        id: 'profile-1',
+        domain: '443.langame.ru',
+        endpointKey: 'transactions',
+        endpointPath: '/transactions/list',
+        group: 'dashboard',
+        status: 'SUCCESS',
+        checkedAt,
+        dateFrom: new Date('2026-06-01T00:00:00.000Z'),
+        dateTo: new Date('2026-06-02T00:00:00.000Z'),
+        requestParams: {
+          page: '1',
+          page_limit: '20',
+          date_from: '2026-06-01',
+          date_to: '2026-06-02',
+        },
+        rowCount: 1,
+        payloadKind: 'object',
+        fieldKeys: ['transaction_id', 'amount'],
+        profile: {
+          summary: 'rows: 1',
+        },
+        errorMessage: null,
+      },
+    ]);
+    langameClient.getDiagnosticEndpoint.mockResolvedValue({
+      status: true,
+      data: [
+        {
+          transaction_id: 101,
+          amount: 500,
+          phone: '+7 999 123-45-67',
+        },
+      ],
+    });
+
+    const result = await service.runEndpointSnapshot(user, {
+      endpointKey: 'transactions',
+      dateFrom: '2026-06-01',
+      dateTo: '2026-06-02',
+      page: 1,
+      pageLimit: 20,
+    });
+
+    expect(result.endpoint).toMatchObject({
+      key: 'transactions',
+      path: '/transactions/list',
+    });
+    expect(result.sources[0]).toMatchObject({
+      domain: '443.langame.ru',
+      status: 'SUCCESS',
+      rowCount: 1,
+      payloadKind: 'object',
+      snapshotRunId: 'snapshot-443.langame.ru',
+    });
+    const snapshotCreateCalls = prisma.langameEndpointSnapshotRun.create.mock
+      .calls as SnapshotCreateCall[][];
+    const snapshotCreateCall = snapshotCreateCalls[0]?.[0];
+
+    expect(snapshotCreateCall).toBeDefined();
+
+    expect(snapshotCreateCall?.data).toMatchObject({
+      tenantId: 'tenant-1',
+      integrationSourceId: 'source-1',
+      provider: IntegrationProvider.LANGAME,
+      domain: '443.langame.ru',
+      endpointKey: 'transactions',
+      endpointPath: '/transactions/list',
+      group: 'dashboard',
+      status: 'SUCCESS',
+      dateFrom: new Date('2026-06-01T00:00:00.000Z'),
+      dateTo: new Date('2026-06-02T00:00:00.000Z'),
+      rowCount: 1,
+      payloadKind: 'object',
+      fieldKeys: ['transaction_id', 'amount', 'phone'],
+      errorMessage: null,
+    });
+    expect(JSON.stringify(snapshotCreateCall?.data.snapshot)).not.toContain(
+      '+7 999 123-45-67',
+    );
   });
 
   it('requires club id before profiling club-scoped Langame endpoints', async () => {

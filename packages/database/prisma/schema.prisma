@@ -137,6 +137,7 @@ model Tenant {
   integrationSources                   IntegrationSource[]
   integrationSyncJobs                  IntegrationSyncJob[]
   langameEndpointProfileRuns           LangameEndpointProfileRun[]
+  langameEndpointSnapshotRuns          LangameEndpointSnapshotRun[]
   guests                               Guest[]
   guestGroups                          GuestGroup[]
   guestBalanceSnapshots                GuestBalanceSnapshot[]
@@ -793,6 +794,7 @@ model IntegrationSource {
   syncJobs             IntegrationSyncJob[]
   guestDataProfileRuns GuestDataProfileRun[]
   endpointProfileRuns  LangameEndpointProfileRun[]
+  endpointSnapshotRuns LangameEndpointSnapshotRun[]
 
   @@unique([tenantId, provider, domain])
   @@index([tenantId])
@@ -853,6 +855,36 @@ model LangameEndpointProfileRun {
 
   @@index([tenantId, endpointKey, checkedAt])
   @@index([integrationSourceId, checkedAt])
+  @@index([status])
+}
+
+model LangameEndpointSnapshotRun {
+  id                  String              @id @default(uuid())
+  tenantId            String
+  integrationSourceId String?
+  provider            IntegrationProvider
+  domain              String
+  endpointKey         String
+  endpointPath        String
+  group               String
+  status              String
+  startedAt           DateTime            @default(now())
+  finishedAt          DateTime?
+  dateFrom            DateTime?
+  dateTo              DateTime?
+  requestParams       Json?
+  rowCount            Int                 @default(0)
+  payloadKind         String?
+  fieldKeys           Json?
+  snapshot            Json?
+  errorMessage        String?
+  createdAt           DateTime            @default(now())
+
+  tenant            Tenant             @relation(fields: [tenantId], references: [id])
+  integrationSource IntegrationSource? @relation(fields: [integrationSourceId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, endpointKey, startedAt])
+  @@index([integrationSourceId, startedAt])
   @@index([status])
 }
 

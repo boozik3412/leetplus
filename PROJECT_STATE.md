@@ -1,6 +1,6 @@
 # LeetPlus Project State
 
-Last updated: 2026-06-01
+Last updated: 2026-06-02
 
 ## Current Workflow
 
@@ -76,6 +76,8 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added revenue diagnostics scenarios on `/dashboard/revenue-diagnostics`: current network KPI, club-allocated revenue, balance-spend revenue, bar/goods, shift cash, topups as cash flow, plus source inclusion rules for Langame endpoints.
+- Planned extended Langame route usage in `BACKLOG.md` across dashboard/revenue, guests/CRM/gamification, assortment/warehouse, marketing/tariffs, staff operations, service diagnostics, and the two confirmed POST routes.
 - Added marketing AI suggestions v1 on `/marketing`: local safe drafts from campaign history, saved audiences, CRM leads, contact tasks, and promo bundles now suggest the next campaign goal, target group, mechanic, channel, message copy, reason, and manual next action without sending anything automatically.
 - Added Staff AI assistant v1: API `/staff/ai-assistant`, page `/staff/ai-assistant`, sidebar entry, local deterministic manager summary, checklist drafts from shift regulations, short shift instructions, task decompositions from current risks, weak-spot recommendations from recurring checklist failures, and explicit guards that nothing is published or assigned without user confirmation.
 - Added marketing missions v1: `MarketingMission`, `MarketingMissionReward`, API `/marketing/missions` and `/marketing/mission-rewards`, web proxies, `/marketing/missions` UI, sidebar entry, mission templates, Langame-fact conditions, guest audience/store scope, budget/limit/anti-fraud fields, and manual reward approval/payment statuses before any Langame write API.

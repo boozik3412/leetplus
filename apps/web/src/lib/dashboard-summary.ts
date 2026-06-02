@@ -119,6 +119,29 @@ export type DashboardRevenueDiagnosticsUnallocatedTopups = {
   breakdown: DashboardRevenueDiagnosticsTypeBreakdown[];
 };
 
+export type DashboardRevenueDiagnosticsScenario = {
+  key: string;
+  title: string;
+  amount: number;
+  formula: string;
+  description: string;
+  includes: string[];
+  excludes: string[];
+  recommendation: "PRIMARY" | "CHECK" | "EXCLUDED";
+};
+
+export type DashboardRevenueDiagnosticsSourceMetric = {
+  key: string;
+  title: string;
+  endpoint: string;
+  amount: number | null;
+  count: number | null;
+  includedInNetworkRevenue: boolean;
+  includedInClubRevenue: boolean;
+  role: "PRIMARY" | "CONTROL" | "EXCLUDED";
+  note: string;
+};
+
 export type DashboardRevenueDiagnosticsRow = {
   storeId: string;
   storeName: string;
@@ -163,6 +186,8 @@ export type DashboardRevenueDiagnostics = {
   rows: DashboardRevenueDiagnosticsRow[];
   totals: Omit<DashboardRevenueDiagnosticsRow, "storeId" | "storeName" | "notes">;
   unallocatedTopups: DashboardRevenueDiagnosticsUnallocatedTopups;
+  revenueScenarios: DashboardRevenueDiagnosticsScenario[];
+  sourceMetrics: DashboardRevenueDiagnosticsSourceMetric[];
   interpretation: {
     primaryRecommendation: string;
     mobileTopupRule: string;

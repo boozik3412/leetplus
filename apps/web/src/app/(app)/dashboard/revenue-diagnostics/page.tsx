@@ -6,6 +6,8 @@ import { requireCurrentUser } from "@/lib/auth";
 import {
   getDashboardRevenueDiagnostics,
   type DashboardRevenueDiagnosticsRow,
+  type DashboardRevenueDiagnosticsScenario,
+  type DashboardRevenueDiagnosticsSourceMetric,
   type DashboardRevenueDiagnosticsTypeBreakdown,
 } from "@/lib/dashboard-summary";
 import { getStores } from "@/lib/stores";
@@ -32,6 +34,14 @@ function formatMoney(value: number) {
 
 function formatRubles(value: number) {
   return `${formatMoney(value)} руб`;
+}
+
+function formatNullableRubles(value: number | null) {
+  return value === null ? "не применяется" : formatRubles(value);
+}
+
+function formatNullableCount(value: number | null) {
+  return value === null ? "—" : formatMoney(value);
 }
 
 function formatPeriodDate(value: string) {
@@ -205,6 +215,50 @@ export default async function DashboardRevenueDiagnosticsPage({
           />
         </section>
 
+        <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-emerald-600 dark:text-emerald-300">
+                Варианты суммы
+              </p>
+              <h2 className="mt-1 text-lg font-semibold">
+                Какие суммы можно получить из Langame за период
+              </h2>
+              <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-500 dark:text-zinc-400">
+                Сводная выручка строится не из одного endpoint. Ниже показаны
+                разные денежные срезы, их формулы и правило включения в KPI сети
+                или клубов.
+              </p>
+            </div>
+            <p className="rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-semibold text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+              {formatPeriod(report.periodFrom, report.periodTo)}
+            </p>
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {report.revenueScenarios.map((scenario) => (
+              <RevenueScenarioCard key={scenario.key} scenario={scenario} />
+            ))}
+          </div>
+        </section>
+
+        <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+          <div>
+            <p className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+              Источники и правило включения
+            </p>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-500 dark:text-zinc-400">
+              Один и тот же денежный поток может быть выручкой, кассовой сверкой
+              или остатком на балансе. Здесь видно, как LeetPlus трактует каждый
+              источник до включения в бизнес-расчеты.
+            </p>
+          </div>
+          <div className="mt-4 overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
+            {report.sourceMetrics.map((source) => (
+              <RevenueSourceRow key={source.key} source={source} />
+            ))}
+          </div>
+        </section>
+
         <section className="mt-6 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
           <p className="font-semibold">{report.interpretation.mobileTopupRule}</p>
           <p className="mt-2">{report.interpretation.primaryRecommendation}</p>
@@ -272,6 +326,112 @@ function DiagnosticSummaryCard({
       </p>
       <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">{caption}</p>
     </article>
+  );
+}
+
+function RevenueScenarioCard({
+  scenario,
+}: {
+  scenario: DashboardRevenueDiagnosticsScenario;
+}) {
+  return (
+    <article
+      className={[
+        "rounded-lg border p-4",
+        scenario.recommendation === "PRIMARY"
+          ? "border-emerald-200 bg-emerald-50/70 dark:border-emerald-900/70 dark:bg-emerald-950/20"
+          : scenario.recommendation === "CHECK"
+            ? "border-amber-200 bg-amber-50/70 dark:border-amber-900/70 dark:bg-amber-950/20"
+            : "border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/50",
+      ].join(" ")}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+            {scenario.title}
+          </p>
+          <p className="mt-1 font-mono text-xs text-zinc-500 dark:text-zinc-400">
+            {scenario.formula}
+          </p>
+        </div>
+        <span className={scenarioBadgeClass(scenario.recommendation)}>
+          {scenarioRecommendationLabel(scenario.recommendation)}
+        </span>
+      </div>
+      <p className="mt-3 text-2xl font-semibold tabular-nums">
+        {formatRubles(scenario.amount)}
+      </p>
+      <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+        {scenario.description}
+      </p>
+      <div className="mt-3 grid gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+        <p>
+          <span className="font-semibold text-zinc-700 dark:text-zinc-200">
+            Входит:
+          </span>{" "}
+          {scenario.includes.join(", ")}
+        </p>
+        <p>
+          <span className="font-semibold text-zinc-700 dark:text-zinc-200">
+            Не входит:
+          </span>{" "}
+          {scenario.excludes.join(", ")}
+        </p>
+      </div>
+    </article>
+  );
+}
+
+function RevenueSourceRow({
+  source,
+}: {
+  source: DashboardRevenueDiagnosticsSourceMetric;
+}) {
+  return (
+    <div className="grid gap-3 border-b border-zinc-200 px-4 py-3 text-sm last:border-b-0 dark:border-zinc-800 lg:grid-cols-[1.2fr_1fr_auto_auto_1.4fr] lg:items-center">
+      <div>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="font-semibold text-zinc-950 dark:text-zinc-50">
+            {source.title}
+          </p>
+          <span className={sourceRoleBadgeClass(source.role)}>
+            {sourceRoleLabel(source.role)}
+          </span>
+        </div>
+        <p className="mt-1 break-all font-mono text-xs text-zinc-500 dark:text-zinc-400">
+          {source.endpoint}
+        </p>
+      </div>
+      <p className="text-zinc-600 dark:text-zinc-300">{source.note}</p>
+      <div className="tabular-nums">
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">Сумма</p>
+        <p className="font-semibold">{formatNullableRubles(source.amount)}</p>
+      </div>
+      <div className="tabular-nums">
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">Кол-во</p>
+        <p className="font-semibold">{formatNullableCount(source.count)}</p>
+      </div>
+      <div className="flex flex-wrap gap-2 lg:justify-end">
+        <span
+          className={
+            source.includedInNetworkRevenue
+              ? "rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200"
+              : "rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+          }
+        >
+          {source.includedInNetworkRevenue ? "в KPI сети" : "не в KPI сети"}
+        </span>
+        <span
+          className={
+            source.includedInClubRevenue
+              ? "rounded-full bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700 dark:bg-sky-950/40 dark:text-sky-200"
+              : "rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+          }
+        >
+          {source.includedInClubRevenue ? "в KPI клуба" : "не в KPI клуба"}
+        </span>
+      </div>
+    </div>
   );
 }
 
@@ -383,4 +543,64 @@ function TypeBreakdown({
       )}
     </div>
   );
+}
+
+function scenarioRecommendationLabel(
+  recommendation: DashboardRevenueDiagnosticsScenario["recommendation"],
+) {
+  if (recommendation === "PRIMARY") {
+    return "KPI";
+  }
+
+  if (recommendation === "CHECK") {
+    return "сверка";
+  }
+
+  return "не выручка";
+}
+
+function scenarioBadgeClass(
+  recommendation: DashboardRevenueDiagnosticsScenario["recommendation"],
+) {
+  const base = "rounded-full px-2.5 py-1 text-xs font-semibold";
+
+  if (recommendation === "PRIMARY") {
+    return `${base} bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-100`;
+  }
+
+  if (recommendation === "CHECK") {
+    return `${base} bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-100`;
+  }
+
+  return `${base} bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200`;
+}
+
+function sourceRoleLabel(
+  role: DashboardRevenueDiagnosticsSourceMetric["role"],
+) {
+  if (role === "PRIMARY") {
+    return "основной";
+  }
+
+  if (role === "CONTROL") {
+    return "контроль";
+  }
+
+  return "исключить";
+}
+
+function sourceRoleBadgeClass(
+  role: DashboardRevenueDiagnosticsSourceMetric["role"],
+) {
+  const base = "rounded-full px-2 py-0.5 text-[11px] font-medium";
+
+  if (role === "PRIMARY") {
+    return `${base} bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200`;
+  }
+
+  if (role === "CONTROL") {
+    return `${base} bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-200`;
+  }
+
+  return `${base} bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300`;
 }

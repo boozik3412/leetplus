@@ -146,6 +146,29 @@ export type DashboardRevenueDiagnosticsUnallocatedTopups = {
   breakdown: DashboardRevenueDiagnosticsTypeBreakdown[];
 };
 
+export type DashboardRevenueDiagnosticsScenario = {
+  key: string;
+  title: string;
+  amount: number;
+  formula: string;
+  description: string;
+  includes: string[];
+  excludes: string[];
+  recommendation: 'PRIMARY' | 'CHECK' | 'EXCLUDED';
+};
+
+export type DashboardRevenueDiagnosticsSourceMetric = {
+  key: string;
+  title: string;
+  endpoint: string;
+  amount: number | null;
+  count: number | null;
+  includedInNetworkRevenue: boolean;
+  includedInClubRevenue: boolean;
+  role: 'PRIMARY' | 'CONTROL' | 'EXCLUDED';
+  note: string;
+};
+
 export type DashboardRevenueDiagnosticsRow = {
   storeId: string;
   storeName: string;
@@ -193,6 +216,8 @@ export type DashboardRevenueDiagnostics = {
     'storeId' | 'storeName' | 'notes'
   >;
   unallocatedTopups: DashboardRevenueDiagnosticsUnallocatedTopups;
+  revenueScenarios: DashboardRevenueDiagnosticsScenario[];
+  sourceMetrics: DashboardRevenueDiagnosticsSourceMetric[];
   interpretation: {
     primaryRecommendation: string;
     mobileTopupRule: string;
@@ -886,6 +911,14 @@ export class DashboardService {
     const totals = this.buildRevenueDiagnosticsTotals(rows);
     const unallocatedTopups =
       this.buildRevenueDiagnosticsUnallocatedTopups(operationLogs);
+    const revenueScenarios = this.buildRevenueDiagnosticsScenarios(
+      totals,
+      unallocatedTopups,
+    );
+    const sourceMetrics = this.buildRevenueDiagnosticsSourceMetrics(
+      totals,
+      unallocatedTopups,
+    );
 
     return {
       tenantId,
@@ -898,6 +931,8 @@ export class DashboardService {
       rows,
       totals,
       unallocatedTopups,
+      revenueScenarios,
+      sourceMetrics,
       interpretation: {
         primaryRecommendation:
           'Для выручки клуба использовать подтвержденные списания/расход баланса внутри клуба, а мобильные пополнения держать отдельно как сетевой денежный поток.',
@@ -1747,6 +1782,192 @@ export class DashboardService {
         amount: this.round(item.amount),
       })),
     };
+  }
+
+  private buildRevenueDiagnosticsScenarios(
+    totals: Omit<
+      DashboardRevenueDiagnosticsRow,
+      'storeId' | 'storeName' | 'notes'
+    >,
+    unallocatedTopups: DashboardRevenueDiagnosticsUnallocatedTopups,
+  ): DashboardRevenueDiagnosticsScenario[] {
+    const allocatedClubRevenue = Math.max(
+      totals.productRevenue,
+      totals.balanceSpendRevenueCandidate,
+    );
+    const dashboardNetworkRevenue =
+      allocatedClubRevenue + unallocatedTopups.amount;
+    const balanceTopupFlow =
+      totals.operationPlusAmount + unallocatedTopups.amount;
+
+    return [
+      {
+        key: 'dashboard-network-revenue',
+        title: 'Текущий KPI сети',
+        amount: this.round(dashboardNetworkRevenue),
+        formula:
+          'max(бар/товары, списания баланса) + нераспределенные online-пополнения',
+        description:
+          'Сумма, которую сводный дашборд может использовать как сетевую выручку: клубная часть отдельно, online-пополнения отдельно.',
+        includes: [
+          'products/expense',
+          'all_operations_log/list или transactions/list',
+          'нераспределенные online-пополнения',
+        ],
+        excludes: ['working_shifts/list', 'balances/list'],
+        recommendation: 'PRIMARY',
+      },
+      {
+        key: 'allocated-club-revenue',
+        title: 'Разнесено по клубам',
+        amount: this.round(allocatedClubRevenue),
+        formula: 'max(бар/товары, списания баланса)',
+        description:
+          'Клубная часть без сетевых online-пополнений. Ее можно использовать для сравнения клубов и управленческих KPI по точкам.',
+        includes: [
+          'products/expense',
+          'all_operations_log/list или transactions/list',
+        ],
+        excludes: ['нераспределенные online-пополнения', 'working_shifts/list'],
+        recommendation: 'PRIMARY',
+      },
+      {
+        key: 'balance-spend-revenue',
+        title: 'Списания баланса',
+        amount: this.round(totals.balanceSpendRevenueCandidate),
+        formula:
+          'max(списания all_operations_log, подтвержденные расходы transactions)',
+        description:
+          'Основной кандидат на игровую и сервисную выручку клуба: деньги признаются в момент списания внутри клуба.',
+        includes: ['all_operations_log/list', 'transactions/list'],
+        excludes: ['пополнения баланса', 'остатки балансов'],
+        recommendation: 'PRIMARY',
+      },
+      {
+        key: 'products-bar-revenue',
+        title: 'Бар и товары',
+        amount: this.round(totals.productRevenue),
+        formula: 'сумма продаж products/expense',
+        description:
+          'Ассортиментная выручка: бар, товары и товарные позиции, которые уже попали в sales facts.',
+        includes: ['products/expense'],
+        excludes: ['игровые списания', 'online-пополнения'],
+        recommendation: 'CHECK',
+      },
+      {
+        key: 'shift-cash-revenue',
+        title: 'Сменная касса',
+        amount: this.round(totals.shiftRevenueCandidate),
+        formula: 'cash + cashless + mobilePay - refunds',
+        description:
+          'Операционная сверка по сменам. Полезно для контроля кассы, но не заменяет выручку по гостевым списаниям.',
+        includes: [
+          'working_shifts/list',
+          'log_cash_transaction/list как будущая сверка',
+        ],
+        excludes: ['нераспределенные online-пополнения'],
+        recommendation: 'CHECK',
+      },
+      {
+        key: 'balance-topup-flow',
+        title: 'Пополнения как денежный поток',
+        amount: this.round(balanceTopupFlow),
+        formula: 'пополнения в клубах + нераспределенные online-пополнения',
+        description:
+          'Это входящий денежный поток, но не всегда выручка клуба: часть денег может лежать на балансе гостя до будущего списания.',
+        includes: ['all_operations_log/list', 'transactions/list как контроль'],
+        excludes: ['признание выручки по клубу до списания'],
+        recommendation: 'EXCLUDED',
+      },
+    ];
+  }
+
+  private buildRevenueDiagnosticsSourceMetrics(
+    totals: Omit<
+      DashboardRevenueDiagnosticsRow,
+      'storeId' | 'storeName' | 'notes'
+    >,
+    unallocatedTopups: DashboardRevenueDiagnosticsUnallocatedTopups,
+  ): DashboardRevenueDiagnosticsSourceMetric[] {
+    return [
+      {
+        key: 'products-expense',
+        title: 'Бар и товары',
+        endpoint: 'GET /public_api/products/expense',
+        amount: this.round(totals.productRevenue),
+        count: totals.productSalesCount,
+        includedInNetworkRevenue: true,
+        includedInClubRevenue: true,
+        role: 'PRIMARY',
+        note: 'Товарная выручка и ассортиментные продажи, уже сохраненные как sales facts.',
+      },
+      {
+        key: 'operation-spend',
+        title: 'Списания баланса',
+        endpoint: 'GET /public_api/all_operations_log/list',
+        amount: this.round(totals.operationMinusAmount),
+        count: totals.operationMinusCount,
+        includedInNetworkRevenue: true,
+        includedInClubRevenue: true,
+        role: 'PRIMARY',
+        note: 'Основной источник признания игровой/сервисной выручки в клубе.',
+      },
+      {
+        key: 'transactions-spend',
+        title: 'Расходы по транзакциям',
+        endpoint: 'GET /public_api/transactions/list',
+        amount: this.round(totals.transactionSpendAmount),
+        count: totals.transactionCount,
+        includedInNetworkRevenue: true,
+        includedInClubRevenue: true,
+        role: 'CONTROL',
+        note: 'Используется как сверка списаний, пока семантика type/amount подтверждается на production.',
+      },
+      {
+        key: 'unallocated-topups',
+        title: 'Online-пополнения без клуба',
+        endpoint: 'GET /public_api/all_operations_log/list',
+        amount: this.round(unallocatedTopups.amount),
+        count: unallocatedTopups.count,
+        includedInNetworkRevenue: true,
+        includedInClubRevenue: false,
+        role: 'PRIMARY',
+        note: 'Входит в сетевую выручку как нераспределенный денежный поток, но не назначается конкретному клубу.',
+      },
+      {
+        key: 'working-shifts',
+        title: 'Сменная касса',
+        endpoint: 'GET /public_api/working_shifts/list',
+        amount: this.round(totals.shiftRevenueCandidate),
+        count: totals.shiftsCount,
+        includedInNetworkRevenue: false,
+        includedInClubRevenue: false,
+        role: 'CONTROL',
+        note: 'Нужна для операционной сверки кассы, возвратов и смен, но не является самостоятельным KPI выручки.',
+      },
+      {
+        key: 'balances',
+        title: 'Остатки балансов',
+        endpoint: 'GET /public_api/balances/list',
+        amount: null,
+        count: null,
+        includedInNetworkRevenue: false,
+        includedInClubRevenue: false,
+        role: 'EXCLUDED',
+        note: 'Остаток на балансе гостя не является выручкой периода; использовать как контроль будущих списаний после отдельной синхронизации.',
+      },
+      {
+        key: 'cash-log',
+        title: 'Кассовый лог',
+        endpoint: 'GET /public_api/log_cash_transaction/list',
+        amount: null,
+        count: null,
+        includedInNetworkRevenue: false,
+        includedInClubRevenue: false,
+        role: 'CONTROL',
+        note: 'Оставлен как будущий слой сверки кассы после подтверждения стабильных параметров и ответов Langame.',
+      },
+    ];
   }
 
   private operationChannelLabel(operationLog: {

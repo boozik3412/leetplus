@@ -41,6 +41,9 @@ type DashboardPrismaMock = {
   guestOperationLog: {
     findMany: jest.Mock;
   };
+  guestWorkingShift: {
+    findMany: jest.Mock;
+  };
 };
 
 type TenantContextMock = {
@@ -152,6 +155,9 @@ function createPrismaMock(): DashboardPrismaMock {
     guestOperationLog: {
       findMany: jest.fn(),
     },
+    guestWorkingShift: {
+      findMany: jest.fn(),
+    },
   };
 }
 
@@ -181,6 +187,7 @@ describe('DashboardService', () => {
     prisma.guestSession.findMany.mockResolvedValue([]);
     prisma.guestTransaction.findMany.mockResolvedValue([]);
     prisma.guestOperationLog.findMany.mockResolvedValue([]);
+    prisma.guestWorkingShift.findMany.mockResolvedValue([]);
     service = new DashboardService(
       prisma as unknown as PrismaService,
       tenantContext as unknown as TenantContextService,
@@ -432,6 +439,111 @@ describe('DashboardService', () => {
       totalRevenue: 7200,
       productRevenue: 0,
     });
+  });
+
+  it('returns revenue diagnostics scenarios and source inclusion rules', async () => {
+    mockEmptyDashboardData();
+    prisma.salesFact.findMany.mockResolvedValue([
+      {
+        storeId: 'store-1',
+        revenue: new Prisma.Decimal(1_000),
+        guestId: 'guest-1',
+        externalGuestId: null,
+      },
+    ]);
+    prisma.guestOperationLog.findMany.mockResolvedValue([
+      {
+        storeId: null,
+        externalClubId: '0',
+        type: 'plus',
+        operationName: 'mobile top-up',
+        operationSource: 'mobile',
+        operationForm: 'app',
+        amount: new Prisma.Decimal(10_000),
+      },
+      {
+        storeId: 'store-1',
+        externalClubId: '1',
+        type: 'plus',
+        operationName: 'desk top-up',
+        operationSource: 'cash desk',
+        operationForm: 'cash',
+        amount: new Prisma.Decimal(5_000),
+      },
+      {
+        storeId: 'store-1',
+        externalClubId: '1',
+        type: 'spend',
+        operationName: 'session spend',
+        operationSource: 'club',
+        operationForm: 'balance',
+        amount: new Prisma.Decimal(-4_000),
+      },
+    ]);
+    prisma.guestTransaction.findMany.mockResolvedValue([
+      {
+        storeId: 'store-1',
+        externalClubId: '1',
+        guestId: 'guest-1',
+        externalGuestId: null,
+        type: '1',
+        amount: new Prisma.Decimal(3_000),
+      },
+    ]);
+    prisma.guestWorkingShift.findMany.mockResolvedValue([
+      {
+        storeId: 'store-1',
+        externalClubId: '1',
+        cashAmount: new Prisma.Decimal(1_500),
+        cashlessAmount: new Prisma.Decimal(700),
+        mobilePay: new Prisma.Decimal(300),
+        refundsCash: new Prisma.Decimal(100),
+        refundsCashless: new Prisma.Decimal(0),
+      },
+    ]);
+
+    const diagnostics = await service.getRevenueDiagnostics(undefined, {
+      period: 'full-day',
+    });
+
+    expect(diagnostics.totals.productRevenue).toBe(1000);
+    expect(diagnostics.totals.balanceSpendRevenueCandidate).toBe(4000);
+    expect(diagnostics.unallocatedTopups.amount).toBe(10000);
+    expect(diagnostics.revenueScenarios).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: 'dashboard-network-revenue',
+          amount: 14000,
+          recommendation: 'PRIMARY',
+        }),
+        expect.objectContaining({
+          key: 'allocated-club-revenue',
+          amount: 4000,
+          recommendation: 'PRIMARY',
+        }),
+        expect.objectContaining({
+          key: 'balance-topup-flow',
+          amount: 15000,
+          recommendation: 'EXCLUDED',
+        }),
+      ]),
+    );
+    expect(diagnostics.sourceMetrics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: 'unallocated-topups',
+          amount: 10000,
+          includedInNetworkRevenue: true,
+          includedInClubRevenue: false,
+        }),
+        expect.objectContaining({
+          key: 'balances',
+          amount: null,
+          includedInNetworkRevenue: false,
+          role: 'EXCLUDED',
+        }),
+      ]),
+    );
   });
 
   it.each(calendarTrendCases)(

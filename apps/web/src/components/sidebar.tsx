@@ -316,11 +316,11 @@ function CompactNavSection({
         <div
           ref={menuRef}
           style={{ top: popoverPlacement.top }}
-          className="absolute left-full z-[80] ml-3 w-72 overflow-visible"
+          className="absolute left-full z-[80] ml-1 w-72 overflow-visible"
         >
           <span
             aria-hidden="true"
-            className="absolute -left-3 top-0 h-full w-3"
+            className="absolute -left-1 top-0 h-full w-1"
           />
           <span
             style={{ top: popoverPlacement.arrowTop }}

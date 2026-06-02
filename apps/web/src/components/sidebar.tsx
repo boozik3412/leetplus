@@ -289,7 +289,7 @@ function CompactNavSection({
   return (
     <div
       ref={containerRef}
-      className="relative"
+      className="relative w-12"
       onMouseEnter={onOpen}
       onMouseMove={onOpen}
       onMouseLeave={onClose}

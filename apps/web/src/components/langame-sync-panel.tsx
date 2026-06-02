@@ -170,6 +170,72 @@ type GuestSearchDiagnosticsResult = {
   sources: GuestSearchDiagnosticsSource[];
 };
 
+type EndpointProfileKey =
+  | "allOperationsLog"
+  | "transactions"
+  | "balances"
+  | "cashTransactions"
+  | "workingShifts"
+  | "productExpenses"
+  | "productArrivals"
+  | "clubs"
+  | "products"
+  | "goods"
+  | "pcTypesInClubs"
+  | "pcTypeLinks"
+  | "guests"
+  | "guestDetails"
+  | "guestGroups"
+  | "guestBalances"
+  | "guestBonusBalances"
+  | "guestSessions"
+  | "guestLogs"
+  | "tariffsByDays"
+  | "tariffsGroups"
+  | "tariffsTimePeriod"
+  | "tariffsTypesGroups"
+  | "users";
+
+type EndpointProfileParamMode =
+  | "none"
+  | "page"
+  | "date_page"
+  | "date"
+  | "club"
+  | "club_page"
+  | "club_date"
+  | "guest_id";
+
+type EndpointProfileStatus = "idle" | "loading" | "success" | "error";
+
+type EndpointProfileOption = {
+  key: EndpointProfileKey;
+  title: string;
+  path: string;
+  group: EndpointGroup;
+  paramMode: EndpointProfileParamMode;
+  requiredParams: string[];
+  description: string;
+};
+
+type EndpointProfileDiagnosticsSource = {
+  domain: string;
+  status: "SUCCESS" | "FAILED";
+  path: string;
+  requestParams: Record<string, string>;
+  rowCount: number;
+  payloadKind: "array" | "object" | "scalar" | "empty";
+  fieldKeys: string[];
+  summary: string | null;
+  errorMessage: string | null;
+};
+
+type EndpointProfileDiagnosticsResult = {
+  checkedAt: string;
+  endpoint: Omit<EndpointProfileOption, "description">;
+  sources: EndpointProfileDiagnosticsSource[];
+};
+
 type EndpointMapItem = {
   method: EndpointMethod;
   path: string;
@@ -222,6 +288,225 @@ const guestSearchFieldLabels: Record<GuestSearchField, string> = {
   fio: "ФИО",
   bonus_program_number: "Бонусная карта",
 };
+
+const endpointProfileOptions: EndpointProfileOption[] = [
+  {
+    key: "allOperationsLog",
+    title: "Операции и игровые списания",
+    path: "/public_api/all_operations_log/list",
+    group: "dashboard",
+    paramMode: "date",
+    requiredParams: ["dateFrom", "dateTo"],
+    description: "База для сценариев выручки, пополнений и сетевой сверки.",
+  },
+  {
+    key: "transactions",
+    title: "Транзакции гостей",
+    path: "/public_api/transactions/list",
+    group: "dashboard",
+    paramMode: "date_page",
+    requiredParams: ["dateFrom", "dateTo"],
+    description: "Пополнения, движения баланса и гостевой денежный слой.",
+  },
+  {
+    key: "balances",
+    title: "Состояние балансов",
+    path: "/public_api/balances/list",
+    group: "dashboard",
+    paramMode: "page",
+    requiredParams: [],
+    description: "Сверка денег на балансах гостей и нераспределенных сумм.",
+  },
+  {
+    key: "cashTransactions",
+    title: "Кассовые операции",
+    path: "/public_api/log_cash_transaction/list",
+    group: "dashboard",
+    paramMode: "club_date",
+    requiredParams: ["clubId", "dateFrom", "dateTo"],
+    description: "Смена, касса и операционный контроль по конкретному клубу.",
+  },
+  {
+    key: "workingShifts",
+    title: "Рабочие смены",
+    path: "/public_api/working_shifts/list",
+    group: "staff",
+    paramMode: "date_page",
+    requiredParams: ["dateFrom", "dateTo"],
+    description: "Связка смен, операторов Langame и контроля администраторов.",
+  },
+  {
+    key: "productExpenses",
+    title: "Списания и продажи товаров",
+    path: "/public_api/products/expense",
+    group: "assortment",
+    paramMode: "date_page",
+    requiredParams: ["dateFrom", "dateTo"],
+    description: "Бар, списания, продажи, маржа и факты для промо-наборов.",
+  },
+  {
+    key: "productArrivals",
+    title: "Приходы товаров",
+    path: "/public_api/products/arrival",
+    group: "assortment",
+    paramMode: "page",
+    requiredParams: [],
+    description: "Приходы для no-sales, новинок, supplier scorecard и движения товаров.",
+  },
+  {
+    key: "clubs",
+    title: "Клубы",
+    path: "/public_api/clubs/list",
+    group: "assortment",
+    paramMode: "none",
+    requiredParams: [],
+    description: "Справочник клубов и нормализация источников сети.",
+  },
+  {
+    key: "products",
+    title: "Справочник товаров",
+    path: "/public_api/products/list",
+    group: "assortment",
+    paramMode: "page",
+    requiredParams: [],
+    description: "Внешний справочник номенклатуры Langame.",
+  },
+  {
+    key: "goods",
+    title: "Остатки товаров клуба",
+    path: "/public_api/goods/list",
+    group: "assortment",
+    paramMode: "club_page",
+    requiredParams: ["clubId"],
+    description: "Остатки и клубные товарные позиции, нужен ID клуба.",
+  },
+  {
+    key: "pcTypesInClubs",
+    title: "Типы ПК в клубах",
+    path: "/public_api/global/types_of_pc_in_clubs/list",
+    group: "assortment",
+    paramMode: "none",
+    requiredParams: [],
+    description: "Основа расчета загрузки через доступные PC-часы.",
+  },
+  {
+    key: "pcTypeLinks",
+    title: "Связи ПК с типами",
+    path: "/public_api/global/linking_pc_by_type/list",
+    group: "assortment",
+    paramMode: "none",
+    requiredParams: [],
+    description: "Связь машин с типами ПК для загрузки и тарификации.",
+  },
+  {
+    key: "guests",
+    title: "Гости",
+    path: "/public_api/guests/list",
+    group: "guests",
+    paramMode: "page",
+    requiredParams: [],
+    description: "Профили гостей, статусы и базовая CRM-идентичность.",
+  },
+  {
+    key: "guestDetails",
+    title: "Карточка гостя",
+    path: "/public_api/guests/{guest_id}",
+    group: "guests",
+    paramMode: "guest_id",
+    requiredParams: ["guestId"],
+    description: "Точечная проверка детальной карточки гостя по ID.",
+  },
+  {
+    key: "guestGroups",
+    title: "Группы гостей",
+    path: "/public_api/guests/groups",
+    group: "guests",
+    paramMode: "none",
+    requiredParams: [],
+    description: "Группы, статусы и сегменты для CRM и геймификации.",
+  },
+  {
+    key: "guestBalances",
+    title: "Балансы гостей",
+    path: "/public_api/guests/balance",
+    group: "guests",
+    paramMode: "page",
+    requiredParams: [],
+    description: "Деньги на счетах гостей и риск неиспользованного депозита.",
+  },
+  {
+    key: "guestBonusBalances",
+    title: "Бонусные балансы гостей",
+    path: "/public_api/guests/bonus_balance",
+    group: "guests",
+    paramMode: "page",
+    requiredParams: [],
+    description: "Бонусная нагрузка и база будущих правил наград.",
+  },
+  {
+    key: "guestSessions",
+    title: "Сессии гостей",
+    path: "/public_api/guests/sessions",
+    group: "guests",
+    paramMode: "date_page",
+    requiredParams: ["dateFrom", "dateTo"],
+    description: "Визиты, длительность игры, лутбоксы и battle pass.",
+  },
+  {
+    key: "guestLogs",
+    title: "Логи гостей",
+    path: "/public_api/guests/logs",
+    group: "guests",
+    paramMode: "date_page",
+    requiredParams: ["dateFrom", "dateTo"],
+    description: "События гостя для миссий, антифрода и аудита.",
+  },
+  {
+    key: "tariffsByDays",
+    title: "Тарифы по дням",
+    path: "/public_api/tariffs/by_days/list",
+    group: "marketing",
+    paramMode: "none",
+    requiredParams: [],
+    description: "Дни недели и тарифные условия промо.",
+  },
+  {
+    key: "tariffsGroups",
+    title: "Группы тарифов",
+    path: "/public_api/tariffs/groups/list",
+    group: "marketing",
+    paramMode: "none",
+    requiredParams: [],
+    description: "Пакеты и группы тарифов для промо-сценариев.",
+  },
+  {
+    key: "tariffsTimePeriod",
+    title: "Тарифные периоды",
+    path: "/public_api/tariffs/time_period/list",
+    group: "marketing",
+    paramMode: "none",
+    requiredParams: [],
+    description: "Тихие часы, окна спроса и условия миссий.",
+  },
+  {
+    key: "tariffsTypesGroups",
+    title: "Типы тарифных групп",
+    path: "/public_api/tariffs/types_groups/list",
+    group: "marketing",
+    paramMode: "none",
+    requiredParams: [],
+    description: "Типы сессий и тарифных групп для конструктора офферов.",
+  },
+  {
+    key: "users",
+    title: "Операторы Langame",
+    path: "/public_api/users/list",
+    group: "staff",
+    paramMode: "page",
+    requiredParams: [],
+    description: "Внешний справочник операторов для связки со StaffMember.",
+  },
+];
 
 const langameEndpointMap: EndpointMapItem[] = [
   {
@@ -590,6 +875,19 @@ export function LangameSyncPanel({
   const [guestSearchStatus, setGuestSearchStatus] =
     useState<GuestSearchStatus>("idle");
   const [guestSearchError, setGuestSearchError] = useState<string | null>(null);
+  const [endpointProfileKey, setEndpointProfileKey] =
+    useState<EndpointProfileKey>("transactions");
+  const [endpointProfileSourceId, setEndpointProfileSourceId] = useState("");
+  const [endpointProfileClubId, setEndpointProfileClubId] = useState("");
+  const [endpointProfileGuestId, setEndpointProfileGuestId] = useState("");
+  const [endpointProfilePage, setEndpointProfilePage] = useState("1");
+  const [endpointProfilePageLimit, setEndpointProfilePageLimit] = useState("20");
+  const [endpointProfileResult, setEndpointProfileResult] =
+    useState<EndpointProfileDiagnosticsResult | null>(null);
+  const [endpointProfileStatus, setEndpointProfileStatus] =
+    useState<EndpointProfileStatus>("idle");
+  const [endpointProfileError, setEndpointProfileError] =
+    useState<string | null>(null);
 
   useEffect(() => {
     let ignore = false;
@@ -752,6 +1050,80 @@ export function LangameSyncPanel({
         serviceError instanceof Error
           ? serviceError.message
           : "Не удалось проверить сервисные endpoints Langame",
+      );
+    }
+  }
+
+  async function checkEndpointProfileDiagnostics(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const selectedEndpoint = endpointProfileOptions.find(
+      (endpoint) => endpoint.key === endpointProfileKey,
+    );
+
+    if (!selectedEndpoint) {
+      setEndpointProfileError("Endpoint не найден в карте профилирования");
+      setEndpointProfileStatus("error");
+      return;
+    }
+
+    if (
+      selectedEndpoint.requiredParams.includes("clubId") &&
+      !endpointProfileClubId.trim()
+    ) {
+      setEndpointProfileError("Укажите ID клуба для выбранного endpoint");
+      setEndpointProfileStatus("error");
+      return;
+    }
+
+    if (
+      selectedEndpoint.requiredParams.includes("guestId") &&
+      !endpointProfileGuestId.trim()
+    ) {
+      setEndpointProfileError("Укажите ID гостя для выбранного endpoint");
+      setEndpointProfileStatus("error");
+      return;
+    }
+
+    setEndpointProfileStatus("loading");
+    setEndpointProfileError(null);
+    setEndpointProfileResult(null);
+
+    try {
+      const response = await fetch(
+        "/api/integrations/langame/endpoint-profile-diagnostics",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            endpointKey: endpointProfileKey,
+            sourceId: endpointProfileSourceId || undefined,
+            dateFrom: syncDateFrom,
+            dateTo: syncDateTo,
+            clubId: endpointProfileClubId.trim() || undefined,
+            guestId: endpointProfileGuestId.trim() || undefined,
+            page: endpointProfilePage,
+            pageLimit: endpointProfilePageLimit,
+          }),
+          cache: "no-store",
+        },
+      );
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(getErrorMessage(data));
+      }
+
+      setEndpointProfileResult(data as EndpointProfileDiagnosticsResult);
+      setEndpointProfileStatus("success");
+    } catch (profileError) {
+      setEndpointProfileStatus("error");
+      setEndpointProfileError(
+        profileError instanceof Error
+          ? profileError.message
+          : "Не удалось профилировать endpoint Langame",
       );
     }
   }
@@ -942,6 +1314,27 @@ export function LangameSyncPanel({
         latestGuestStatus={latestGuestStatus}
         onCheckDiagnostics={checkRouteDiagnostics}
         settings={settings}
+      />
+      <EndpointProfileDiagnosticsPanel
+        clubId={endpointProfileClubId}
+        dateFrom={syncDateFrom}
+        dateTo={syncDateTo}
+        guestId={endpointProfileGuestId}
+        page={endpointProfilePage}
+        pageLimit={endpointProfilePageLimit}
+        profileError={endpointProfileError}
+        profileKey={endpointProfileKey}
+        profileStatus={endpointProfileStatus}
+        result={endpointProfileResult}
+        settings={settings}
+        sourceId={endpointProfileSourceId}
+        onClubIdChange={setEndpointProfileClubId}
+        onGuestIdChange={setEndpointProfileGuestId}
+        onPageChange={setEndpointProfilePage}
+        onPageLimitChange={setEndpointProfilePageLimit}
+        onProfileKeyChange={setEndpointProfileKey}
+        onSourceIdChange={setEndpointProfileSourceId}
+        onSubmit={checkEndpointProfileDiagnostics}
       />
       <ServiceDiagnosticsPanel
         diagnostics={serviceDiagnostics}
@@ -1475,6 +1868,314 @@ function EndpointMapPanel({
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function EndpointProfileDiagnosticsPanel({
+  settings,
+  profileKey,
+  sourceId,
+  clubId,
+  guestId,
+  page,
+  pageLimit,
+  dateFrom,
+  dateTo,
+  result,
+  profileStatus,
+  profileError,
+  onProfileKeyChange,
+  onSourceIdChange,
+  onClubIdChange,
+  onGuestIdChange,
+  onPageChange,
+  onPageLimitChange,
+  onSubmit,
+}: {
+  settings: LangameSettings;
+  profileKey: EndpointProfileKey;
+  sourceId: string;
+  clubId: string;
+  guestId: string;
+  page: string;
+  pageLimit: string;
+  dateFrom: string;
+  dateTo: string;
+  result: EndpointProfileDiagnosticsResult | null;
+  profileStatus: EndpointProfileStatus;
+  profileError: string | null;
+  onProfileKeyChange: (key: EndpointProfileKey) => void;
+  onSourceIdChange: (sourceId: string) => void;
+  onClubIdChange: (clubId: string) => void;
+  onGuestIdChange: (guestId: string) => void;
+  onPageChange: (page: string) => void;
+  onPageLimitChange: (pageLimit: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  const selectedEndpoint =
+    endpointProfileOptions.find((endpoint) => endpoint.key === profileKey) ??
+    endpointProfileOptions[0];
+  const activeSources = settings.sources.filter((source) => source.isActive);
+  const needsClubId = selectedEndpoint.requiredParams.includes("clubId");
+  const needsGuestId = selectedEndpoint.requiredParams.includes("guestId");
+  const usesDate =
+    selectedEndpoint.paramMode === "date" ||
+    selectedEndpoint.paramMode === "date_page" ||
+    selectedEndpoint.paramMode === "club_date";
+  const usesPage =
+    selectedEndpoint.paramMode === "page" ||
+    selectedEndpoint.paramMode === "date_page" ||
+    selectedEndpoint.paramMode === "club_page";
+  const failedSources =
+    result?.sources.filter((source) => source.status === "FAILED") ?? [];
+  const successfulSources =
+    result?.sources.filter((source) => source.status === "SUCCESS") ?? [];
+
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300">
+            Профилирование данных
+          </p>
+          <h2 className="mt-1 text-lg font-semibold text-zinc-950 dark:text-zinc-50">
+            Ручная проверка GET endpoint перед включением в расчеты
+          </h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-500 dark:text-zinc-400">
+            Проверка запускается только по кнопке: один выбранный endpoint,
+            ограниченная страница данных, реальные параметры, поля ответа,
+            пустые ответы и ошибки по каждому активному источнику.
+          </p>
+        </div>
+        {result ? (
+          <span
+            className={[
+              "rounded-full px-2.5 py-1 text-xs font-medium",
+              failedSources.length > 0
+                ? "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-200"
+                : "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200",
+            ].join(" ")}
+          >
+            {successfulSources.length} OK, ошибок {failedSources.length}
+          </span>
+        ) : null}
+      </div>
+
+      <form
+        onSubmit={onSubmit}
+        className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1.4fr)_minmax(12rem,0.8fr)_repeat(4,minmax(7rem,0.45fr))_auto]"
+      >
+        <label className="block">
+          <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+            Endpoint
+          </span>
+          <select
+            value={profileKey}
+            onChange={(event) =>
+              onProfileKeyChange(event.target.value as EndpointProfileKey)
+            }
+            className="mt-2 block w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+          >
+            {endpointProfileOptions.map((endpoint) => (
+              <option key={endpoint.key} value={endpoint.key}>
+                {endpointGroupLabels[endpoint.group]} - {endpoint.title}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="block">
+          <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+            Источник
+          </span>
+          <select
+            value={sourceId}
+            onChange={(event) => onSourceIdChange(event.target.value)}
+            className="mt-2 block w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+          >
+            <option value="">Все источники</option>
+            {activeSources.map((source) => (
+              <option key={source.id} value={source.id}>
+                {source.domain}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {usesPage ? (
+          <>
+            <label className="block">
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                Стр.
+              </span>
+              <input
+                value={page}
+                onChange={(event) => onPageChange(event.target.value)}
+                inputMode="numeric"
+                className="mt-2 block w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+              />
+            </label>
+            <label className="block">
+              <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                Лимит
+              </span>
+              <input
+                value={pageLimit}
+                onChange={(event) => onPageLimitChange(event.target.value)}
+                inputMode="numeric"
+                className="mt-2 block w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+              />
+            </label>
+          </>
+        ) : (
+          <div className="hidden xl:block" />
+        )}
+
+        {needsClubId ? (
+          <label className="block">
+            <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+              Club ID
+            </span>
+            <input
+              value={clubId}
+              onChange={(event) => onClubIdChange(event.target.value)}
+              inputMode="numeric"
+              placeholder="Напр. 1"
+              className="mt-2 block w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+            />
+          </label>
+        ) : (
+          <div className="hidden xl:block" />
+        )}
+
+        {needsGuestId ? (
+          <label className="block">
+            <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+              Guest ID
+            </span>
+            <input
+              value={guestId}
+              onChange={(event) => onGuestIdChange(event.target.value)}
+              inputMode="numeric"
+              placeholder="ID"
+              className="mt-2 block w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+            />
+          </label>
+        ) : (
+          <div className="hidden xl:block" />
+        )}
+
+        <button
+          type="submit"
+          disabled={
+            profileStatus === "loading" ||
+            !settings.hasApiKey ||
+            (needsClubId && !clubId.trim()) ||
+            (needsGuestId && !guestId.trim())
+          }
+          className="mt-6 rounded-full bg-zinc-950 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
+        >
+          {profileStatus === "loading" ? "Проверяем..." : "Профилировать"}
+        </button>
+      </form>
+
+      <div className="mt-3 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-400">
+        <span className="font-semibold text-zinc-700 dark:text-zinc-200">
+          {selectedEndpoint.title}
+        </span>{" "}
+        <span className="font-mono">{selectedEndpoint.path}</span>.{" "}
+        {selectedEndpoint.description}{" "}
+        {usesDate
+          ? `Период берется из общей формы синхронизации: ${formatDateLabel(dateFrom)} - ${formatDateLabel(dateTo)}.`
+          : "Период для этого endpoint не нужен."}
+      </div>
+
+      {profileError ? (
+        <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-200">
+          {profileError}
+        </p>
+      ) : null}
+
+      {result ? (
+        <div className="mt-4 space-y-3">
+          <div className="flex flex-wrap gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+            <span>Проверено: {formatDateTime(result.checkedAt)}</span>
+            <span>{result.endpoint.title}</span>
+          </div>
+          <div className="grid gap-3 xl:grid-cols-3">
+            {result.sources.map((source) => (
+              <div
+                key={source.domain}
+                className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <p className="font-medium text-zinc-950 dark:text-zinc-50">
+                      {source.domain}
+                    </p>
+                    <p className="mt-1 break-all font-mono text-xs text-zinc-500 dark:text-zinc-400">
+                      {source.path}
+                    </p>
+                  </div>
+                  <span
+                    className={[
+                      "rounded-full px-2 py-0.5 text-[11px] font-semibold",
+                      source.status === "SUCCESS"
+                        ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200"
+                        : "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-200",
+                    ].join(" ")}
+                  >
+                    {source.status === "SUCCESS" ? "успех" : "ошибка"}
+                  </span>
+                </div>
+
+                {Object.keys(source.requestParams).length > 0 ? (
+                  <p className="mt-3 break-words rounded-md border border-zinc-200 bg-white px-3 py-2 font-mono text-xs text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
+                    {Object.entries(source.requestParams)
+                      .map(([key, value]) => `${key}=${value}`)
+                      .join("&")}
+                  </p>
+                ) : (
+                  <p className="mt-3 rounded-md border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
+                    Query-параметры не отправлялись.
+                  </p>
+                )}
+
+                {source.errorMessage ? (
+                  <p className="mt-3 break-words rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-200">
+                    {compactEndpointError(source.errorMessage)}
+                  </p>
+                ) : (
+                  <div className="mt-3 space-y-2 text-xs text-zinc-500 dark:text-zinc-400">
+                    <div className="flex flex-wrap gap-2">
+                      <span className="rounded-full bg-white px-2 py-1 dark:bg-zinc-950">
+                        {source.payloadKind}
+                      </span>
+                      <span className="rounded-full bg-white px-2 py-1 dark:bg-zinc-950">
+                        строк: {source.rowCount}
+                      </span>
+                      {source.summary ? (
+                        <span className="rounded-full bg-white px-2 py-1 dark:bg-zinc-950">
+                          {source.summary}
+                        </span>
+                      ) : null}
+                    </div>
+                    {source.fieldKeys.length > 0 ? (
+                      <p className="leading-5">
+                        Поля: {source.fieldKeys.slice(0, 18).join(", ")}
+                        {source.fieldKeys.length > 18 ? "..." : ""}
+                      </p>
+                    ) : (
+                      <p>Поля не обнаружены или endpoint вернул пустой/scalar ответ.</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

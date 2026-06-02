@@ -284,9 +284,18 @@ export class LangameClient {
     return this.readJsonOrText(response);
   }
 
-  async getDiagnosticEndpoint(baseUrl: string, apiKey: string, path: string) {
+  async getDiagnosticEndpoint(
+    baseUrl: string,
+    apiKey: string,
+    path: string,
+    params: LangameQueryParams = {},
+  ) {
     const normalizedPath = path.startsWith('/') ? path : `/${path}`;
     const url = new URL(`${this.normalizeBaseUrl(baseUrl)}${normalizedPath}`);
+
+    Object.entries(params).forEach(([key, value]) => {
+      url.searchParams.set(key, value);
+    });
 
     const response = await fetch(url, {
       method: 'GET',

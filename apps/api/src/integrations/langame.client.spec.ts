@@ -134,7 +134,7 @@ describe('LangameClient', () => {
     });
   });
 
-  it('loads diagnostic GET endpoints without putting the API key into the URL', async () => {
+  it('loads diagnostic GET endpoints with query params without putting the API key into the URL', async () => {
     const fetchMock = jest.fn().mockResolvedValueOnce(
       responseWithBody({
         status: true,
@@ -146,7 +146,13 @@ describe('LangameClient', () => {
     const payload = await client.getDiagnosticEndpoint(
       'https://443.langame.ru/public_api',
       'test-key',
-      '/ver/get_po',
+      '/transactions/list',
+      {
+        page: '1',
+        page_limit: '20',
+        date_from: '2026-06-01',
+        date_to: '2026-06-01',
+      },
     );
 
     expect(payload).toEqual({
@@ -158,7 +164,13 @@ describe('LangameClient', () => {
     const url = new URL(calls[0][0]);
     const init = calls[0][1];
 
-    expect(url.toString()).toBe('https://443.langame.ru/public_api/ver/get_po');
+    expect(url.origin + url.pathname).toBe(
+      'https://443.langame.ru/public_api/transactions/list',
+    );
+    expect(url.searchParams.get('page')).toBe('1');
+    expect(url.searchParams.get('page_limit')).toBe('20');
+    expect(url.searchParams.get('date_from')).toBe('2026-06-01');
+    expect(url.searchParams.get('date_to')).toBe('2026-06-01');
     expect(url.searchParams.get('api_key')).toBeNull();
     expect(init?.method).toBe('GET');
     expect(init?.headers).toMatchObject({

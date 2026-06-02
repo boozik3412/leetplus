@@ -252,6 +252,92 @@ export type LangameGuestSearchDiagnosticsResult = {
   sources: LangameGuestSearchDiagnosticsSource[];
 };
 
+export type LangameEndpointProfileKey =
+  | 'allOperationsLog'
+  | 'transactions'
+  | 'balances'
+  | 'cashTransactions'
+  | 'workingShifts'
+  | 'productExpenses'
+  | 'productArrivals'
+  | 'clubs'
+  | 'products'
+  | 'goods'
+  | 'pcTypesInClubs'
+  | 'pcTypeLinks'
+  | 'guests'
+  | 'guestDetails'
+  | 'guestGroups'
+  | 'guestBalances'
+  | 'guestBonusBalances'
+  | 'guestSessions'
+  | 'guestLogs'
+  | 'tariffsByDays'
+  | 'tariffsGroups'
+  | 'tariffsTimePeriod'
+  | 'tariffsTypesGroups'
+  | 'users';
+
+export type LangameEndpointProfileParamMode =
+  | 'none'
+  | 'page'
+  | 'date_page'
+  | 'date'
+  | 'club'
+  | 'club_page'
+  | 'club_date'
+  | 'guest_id';
+
+export type LangameEndpointProfileGroup =
+  | 'dashboard'
+  | 'guests'
+  | 'assortment'
+  | 'marketing'
+  | 'staff';
+
+export type LangameEndpointProfileDefinition = {
+  key: LangameEndpointProfileKey;
+  title: string;
+  path: string;
+  group: LangameEndpointProfileGroup;
+  paramMode: LangameEndpointProfileParamMode;
+  requiredParams: string[];
+};
+
+export type LangameEndpointProfileQuery = {
+  endpointKey?: LangameEndpointProfileKey;
+  sourceId?: string;
+  sourceDomain?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  clubId?: string;
+  guestId?: string;
+  page?: number | string;
+  pageLimit?: number | string;
+};
+
+export type LangameEndpointProfileDiagnosticsSource = {
+  id: string;
+  name: string;
+  domain: string;
+  baseUrl: string;
+  status: 'SUCCESS' | 'FAILED';
+  path: string;
+  requestParams: Record<string, string>;
+  rowCount: number;
+  payloadKind: 'array' | 'object' | 'scalar' | 'empty';
+  fieldKeys: string[];
+  summary: string | null;
+  payloadPreview: unknown;
+  errorMessage: string | null;
+};
+
+export type LangameEndpointProfileDiagnosticsResult = {
+  checkedAt: string;
+  endpoint: LangameEndpointProfileDefinition;
+  sources: LangameEndpointProfileDiagnosticsSource[];
+};
+
 export type LangameSyncQuery = {
   dateFrom?: string;
   dateTo?: string;

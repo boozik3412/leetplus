@@ -23,6 +23,7 @@ import {
 } from './langame-settings.service';
 import { LangameSyncService } from './langame-sync.service';
 import type {
+  LangameEndpointProfileQuery,
   LangameGuestSearchQuery,
   LangameSyncQuery,
 } from './langame.types';
@@ -50,6 +51,17 @@ export class LangameController {
   @Get('service-diagnostics')
   getServiceDiagnostics(@CurrentUser() user: AuthenticatedUser) {
     return this.langameSettingsService.getServiceDiagnostics(user);
+  }
+
+  @Post('endpoint-profile-diagnostics')
+  getEndpointProfileDiagnostics(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() query: LangameEndpointProfileQuery,
+  ) {
+    return this.langameSettingsService.getEndpointProfileDiagnostics(
+      user,
+      query,
+    );
   }
 
   @Post('guests/search-diagnostics')

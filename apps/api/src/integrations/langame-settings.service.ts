@@ -7,6 +7,9 @@ import { TenantContextService } from '../tenancy/tenant-context.service';
 import { LangameClient } from './langame.client';
 import { SecretEncryptionService } from './secret-encryption.service';
 import type {
+  LangameEndpointProfileDefinition,
+  LangameEndpointProfileDiagnosticsResult,
+  LangameEndpointProfileQuery,
   LangameGuestSearchDiagnosticsResult,
   LangameGuestSearchField,
   LangameGuestSearchQuery,
@@ -44,6 +47,201 @@ const SERVICE_DIAGNOSTIC_ENDPOINTS: LangameServiceEndpointDefinition[] = [
     key: 'terminalVersion',
     title: 'Версия терминала',
     path: '/ver/get_terminal',
+  },
+];
+
+const PROFILE_DIAGNOSTIC_ENDPOINTS: LangameEndpointProfileDefinition[] = [
+  {
+    key: 'allOperationsLog',
+    title: 'Операции и игровые списания',
+    path: '/all_operations_log/list',
+    group: 'dashboard',
+    paramMode: 'date',
+    requiredParams: ['dateFrom', 'dateTo'],
+  },
+  {
+    key: 'transactions',
+    title: 'Транзакции гостей',
+    path: '/transactions/list',
+    group: 'dashboard',
+    paramMode: 'date_page',
+    requiredParams: ['dateFrom', 'dateTo'],
+  },
+  {
+    key: 'balances',
+    title: 'Состояние балансов',
+    path: '/balances/list',
+    group: 'dashboard',
+    paramMode: 'page',
+    requiredParams: [],
+  },
+  {
+    key: 'cashTransactions',
+    title: 'Кассовые операции',
+    path: '/log_cash_transaction/list',
+    group: 'dashboard',
+    paramMode: 'club_date',
+    requiredParams: ['clubId', 'dateFrom', 'dateTo'],
+  },
+  {
+    key: 'workingShifts',
+    title: 'Рабочие смены',
+    path: '/working_shifts/list',
+    group: 'staff',
+    paramMode: 'date_page',
+    requiredParams: ['dateFrom', 'dateTo'],
+  },
+  {
+    key: 'productExpenses',
+    title: 'Списания и продажи товаров',
+    path: '/products/expense',
+    group: 'assortment',
+    paramMode: 'date_page',
+    requiredParams: ['dateFrom', 'dateTo'],
+  },
+  {
+    key: 'productArrivals',
+    title: 'Приходы товаров',
+    path: '/products/arrival',
+    group: 'assortment',
+    paramMode: 'page',
+    requiredParams: [],
+  },
+  {
+    key: 'clubs',
+    title: 'Клубы',
+    path: '/clubs/list',
+    group: 'assortment',
+    paramMode: 'none',
+    requiredParams: [],
+  },
+  {
+    key: 'products',
+    title: 'Справочник товаров',
+    path: '/products/list',
+    group: 'assortment',
+    paramMode: 'page',
+    requiredParams: [],
+  },
+  {
+    key: 'goods',
+    title: 'Остатки товаров клуба',
+    path: '/goods/list',
+    group: 'assortment',
+    paramMode: 'club_page',
+    requiredParams: ['clubId'],
+  },
+  {
+    key: 'pcTypesInClubs',
+    title: 'Типы ПК в клубах',
+    path: '/global/types_of_pc_in_clubs/list',
+    group: 'assortment',
+    paramMode: 'none',
+    requiredParams: [],
+  },
+  {
+    key: 'pcTypeLinks',
+    title: 'Связи ПК с типами',
+    path: '/global/linking_pc_by_type/list',
+    group: 'assortment',
+    paramMode: 'none',
+    requiredParams: [],
+  },
+  {
+    key: 'guests',
+    title: 'Гости',
+    path: '/guests/list',
+    group: 'guests',
+    paramMode: 'page',
+    requiredParams: [],
+  },
+  {
+    key: 'guestDetails',
+    title: 'Карточка гостя',
+    path: '/guests/{guest_id}',
+    group: 'guests',
+    paramMode: 'guest_id',
+    requiredParams: ['guestId'],
+  },
+  {
+    key: 'guestGroups',
+    title: 'Группы гостей',
+    path: '/guests/groups',
+    group: 'guests',
+    paramMode: 'none',
+    requiredParams: [],
+  },
+  {
+    key: 'guestBalances',
+    title: 'Балансы гостей',
+    path: '/guests/balance',
+    group: 'guests',
+    paramMode: 'page',
+    requiredParams: [],
+  },
+  {
+    key: 'guestBonusBalances',
+    title: 'Бонусные балансы гостей',
+    path: '/guests/bonus_balance',
+    group: 'guests',
+    paramMode: 'page',
+    requiredParams: [],
+  },
+  {
+    key: 'guestSessions',
+    title: 'Сессии гостей',
+    path: '/guests/sessions',
+    group: 'guests',
+    paramMode: 'date_page',
+    requiredParams: ['dateFrom', 'dateTo'],
+  },
+  {
+    key: 'guestLogs',
+    title: 'Логи гостей',
+    path: '/guests/logs',
+    group: 'guests',
+    paramMode: 'date_page',
+    requiredParams: ['dateFrom', 'dateTo'],
+  },
+  {
+    key: 'tariffsByDays',
+    title: 'Тарифы по дням',
+    path: '/tariffs/by_days/list',
+    group: 'marketing',
+    paramMode: 'none',
+    requiredParams: [],
+  },
+  {
+    key: 'tariffsGroups',
+    title: 'Группы тарифов',
+    path: '/tariffs/groups/list',
+    group: 'marketing',
+    paramMode: 'none',
+    requiredParams: [],
+  },
+  {
+    key: 'tariffsTimePeriod',
+    title: 'Тарифные периоды',
+    path: '/tariffs/time_period/list',
+    group: 'marketing',
+    paramMode: 'none',
+    requiredParams: [],
+  },
+  {
+    key: 'tariffsTypesGroups',
+    title: 'Типы тарифных групп',
+    path: '/tariffs/types_groups/list',
+    group: 'marketing',
+    paramMode: 'none',
+    requiredParams: [],
+  },
+  {
+    key: 'users',
+    title: 'Операторы Langame',
+    path: '/users/list',
+    group: 'staff',
+    paramMode: 'page',
+    requiredParams: [],
   },
 ];
 
@@ -394,6 +592,96 @@ export class LangameSettingsService {
     };
   }
 
+  async getEndpointProfileDiagnostics(
+    user: AuthenticatedUser,
+    dto: LangameEndpointProfileQuery,
+  ): Promise<LangameEndpointProfileDiagnosticsResult> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { apiKey, sources } = await this.resolveTenantAccess(tenantId);
+    const endpoint =
+      PROFILE_DIAGNOSTIC_ENDPOINTS.find(
+        (item) => item.key === dto.endpointKey,
+      ) ?? PROFILE_DIAGNOSTIC_ENDPOINTS[0];
+    const path = this.buildEndpointProfilePath(endpoint, dto);
+    const requestParams = this.buildEndpointProfileParams(endpoint, dto);
+    const filteredSources = sources.filter((source) => {
+      if (dto.sourceId) {
+        return source.id === dto.sourceId;
+      }
+
+      if (dto.sourceDomain) {
+        return source.domain === dto.sourceDomain;
+      }
+
+      return true;
+    });
+
+    if (filteredSources.length === 0) {
+      throw new BadRequestException(
+        'Langame source for endpoint profile is not found',
+      );
+    }
+
+    const checkedAt = new Date().toISOString();
+    const diagnostics = await Promise.all(
+      filteredSources.map(async (source) => {
+        try {
+          const payload = await this.langameClient.getDiagnosticEndpoint(
+            source.baseUrl,
+            apiKey,
+            path,
+            requestParams,
+          );
+          const rows = this.extractDiagnosticRows(payload);
+
+          return {
+            id: source.id,
+            name: source.name,
+            domain: source.domain,
+            baseUrl: source.baseUrl,
+            status: 'SUCCESS' as const,
+            path,
+            requestParams,
+            rowCount: rows.length,
+            payloadKind: this.getPayloadKind(payload),
+            fieldKeys: this.extractFieldKeys(rows),
+            summary: this.extractEndpointProfileSummary(payload),
+            payloadPreview: this.sanitizeEndpointProfilePayload(
+              endpoint,
+              payload,
+            ),
+            errorMessage: null,
+          };
+        } catch (error) {
+          return {
+            id: source.id,
+            name: source.name,
+            domain: source.domain,
+            baseUrl: source.baseUrl,
+            status: 'FAILED' as const,
+            path,
+            requestParams,
+            rowCount: 0,
+            payloadKind: 'empty' as const,
+            fieldKeys: [],
+            summary: null,
+            payloadPreview: null,
+            errorMessage:
+              error instanceof Error
+                ? error.message
+                : `Unknown Langame ${path} profile diagnostics error`,
+          };
+        }
+      }),
+    );
+
+    return {
+      checkedAt,
+      endpoint,
+      sources: diagnostics,
+    };
+  }
+
   async searchGuestDiagnostics(
     user: AuthenticatedUser,
     dto: LangameGuestSearchQuery,
@@ -498,6 +786,134 @@ export class LangameSettingsService {
       payloadPreview: this.sanitizeServicePayload(payload),
       errorMessage: null,
     };
+  }
+
+  private buildEndpointProfilePath(
+    endpoint: LangameEndpointProfileDefinition,
+    dto: LangameEndpointProfileQuery,
+  ) {
+    if (endpoint.paramMode !== 'guest_id') {
+      return endpoint.path;
+    }
+
+    const guestId = dto.guestId?.trim();
+
+    if (!guestId) {
+      throw new BadRequestException(
+        'guestId is required for selected Langame endpoint',
+      );
+    }
+
+    return endpoint.path.replace('{guest_id}', encodeURIComponent(guestId));
+  }
+
+  private buildEndpointProfileParams(
+    endpoint: LangameEndpointProfileDefinition,
+    dto: LangameEndpointProfileQuery,
+  ) {
+    const params: Record<string, string> = {};
+    const page = this.normalizePositiveInt(dto.page, 1, 1, 1000);
+    const pageLimit = this.normalizePositiveInt(dto.pageLimit, 20, 1, 50);
+    const today = new Date().toISOString().slice(0, 10);
+    const dateFrom = dto.dateFrom?.trim() || today;
+    const dateTo = dto.dateTo?.trim() || dateFrom;
+    const clubId = dto.clubId?.trim();
+
+    if (
+      endpoint.requiredParams.includes('clubId') &&
+      (!clubId || !/^\d+$/.test(clubId))
+    ) {
+      throw new BadRequestException(
+        'clubId is required for selected Langame endpoint',
+      );
+    }
+
+    if (endpoint.requiredParams.includes('dateFrom') && !dateFrom) {
+      throw new BadRequestException(
+        'dateFrom is required for selected Langame endpoint',
+      );
+    }
+
+    if (endpoint.requiredParams.includes('dateTo') && !dateTo) {
+      throw new BadRequestException(
+        'dateTo is required for selected Langame endpoint',
+      );
+    }
+
+    if (
+      endpoint.paramMode === 'page' ||
+      endpoint.paramMode === 'date_page' ||
+      endpoint.paramMode === 'club_page'
+    ) {
+      params.page = String(page);
+      params.page_limit = String(pageLimit);
+    }
+
+    if (
+      endpoint.paramMode === 'date' ||
+      endpoint.paramMode === 'date_page' ||
+      endpoint.paramMode === 'club_date'
+    ) {
+      params.date_from = dateFrom;
+      params.date_to = dateTo;
+    }
+
+    if (
+      endpoint.paramMode === 'club' ||
+      endpoint.paramMode === 'club_page' ||
+      endpoint.paramMode === 'club_date'
+    ) {
+      params.club_id = clubId ?? '';
+    }
+
+    return params;
+  }
+
+  private normalizePositiveInt(
+    value: number | string | undefined,
+    fallback: number,
+    min: number,
+    max: number,
+  ) {
+    const parsed =
+      typeof value === 'number'
+        ? value
+        : typeof value === 'string'
+          ? Number.parseInt(value, 10)
+          : Number.NaN;
+
+    if (!Number.isFinite(parsed)) {
+      return fallback;
+    }
+
+    return Math.min(Math.max(Math.trunc(parsed), min), max);
+  }
+
+  private extractEndpointProfileSummary(payload: unknown) {
+    if (this.isPlainObject(payload)) {
+      const message = this.scalarToString(payload.message);
+
+      if (message) {
+        return this.compactSummary(message);
+      }
+
+      const status = this.scalarToString(payload.status);
+
+      if (status) {
+        return `status: ${status}`;
+      }
+    }
+
+    return null;
+  }
+
+  private sanitizeEndpointProfilePayload(
+    endpoint: LangameEndpointProfileDefinition,
+    payload: unknown,
+  ) {
+    return endpoint.group === 'guests' || endpoint.group === 'staff'
+      ? this.sanitizeGuestSearchPayload(payload)
+      : this.sanitizeServicePayload(payload);
   }
 
   private getPayloadKind(

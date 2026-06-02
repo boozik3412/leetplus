@@ -348,6 +348,83 @@ describe('LangameSettingsService', () => {
     expect(JSON.stringify(result)).not.toContain('also-hidden');
   });
 
+  it('profiles selected Langame GET endpoint with params and masked personal preview', async () => {
+    prisma.integrationCredential.findFirst.mockResolvedValue({
+      id: 'credential-1',
+      apiKeyEncrypted: 'encrypted:secret-key',
+    });
+    langameClient.getDiagnosticEndpoint.mockResolvedValue({
+      status: true,
+      data: [
+        {
+          guest_id: 123,
+          phone: '+7 999 123-45-67',
+          fio: 'Иван Петров',
+          date_start: '2026-06-01 10:00:00',
+        },
+      ],
+    });
+
+    const result = await service.getEndpointProfileDiagnostics(user, {
+      endpointKey: 'guestSessions',
+      dateFrom: '2026-06-01',
+      dateTo: '2026-06-02',
+      page: 2,
+      pageLimit: 99,
+    });
+
+    expect(result.endpoint).toMatchObject({
+      key: 'guestSessions',
+      path: '/guests/sessions',
+    });
+    expect(result.sources[0]).toMatchObject({
+      domain: '443.langame.ru',
+      status: 'SUCCESS',
+      path: '/guests/sessions',
+      requestParams: {
+        page: '2',
+        page_limit: '50',
+        date_from: '2026-06-01',
+        date_to: '2026-06-02',
+      },
+      rowCount: 1,
+      payloadKind: 'object',
+    });
+    expect(result.sources[0].fieldKeys).toEqual(
+      expect.arrayContaining(['guest_id', 'phone', 'fio', 'date_start']),
+    );
+    expect(JSON.stringify(result)).not.toContain('+7 999 123-45-67');
+    expect(JSON.stringify(result)).not.toContain('Иван Петров');
+    expect(langameClient.getDiagnosticEndpoint).toHaveBeenCalledWith(
+      'https://443.langame.ru/public_api',
+      'secret-key',
+      '/guests/sessions',
+      {
+        page: '2',
+        page_limit: '50',
+        date_from: '2026-06-01',
+        date_to: '2026-06-02',
+      },
+    );
+  });
+
+  it('requires club id before profiling club-scoped Langame endpoints', async () => {
+    prisma.integrationCredential.findFirst.mockResolvedValue({
+      id: 'credential-1',
+      apiKeyEncrypted: 'encrypted:secret-key',
+    });
+    langameClient.getDiagnosticEndpoint.mockClear();
+
+    await expect(
+      service.getEndpointProfileDiagnostics(user, {
+        endpointKey: 'cashTransactions',
+        dateFrom: '2026-06-01',
+        dateTo: '2026-06-02',
+      }),
+    ).rejects.toThrow('clubId is required');
+    expect(langameClient.getDiagnosticEndpoint).not.toHaveBeenCalled();
+  });
+
   it('runs masked guest search diagnostics for active Langame sources', async () => {
     prisma.integrationCredential.findFirst.mockResolvedValue({
       id: 'credential-1',

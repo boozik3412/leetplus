@@ -24,6 +24,10 @@ type PrismaMock = {
     findFirst: jest.Mock;
     findMany: jest.Mock;
   };
+  langameEndpointProfileRun: {
+    createMany: jest.Mock;
+    findMany: jest.Mock;
+  };
 };
 
 type TenantContextMock = {
@@ -81,6 +85,10 @@ function createPrismaMock(): PrismaMock {
       findFirst: jest.fn(),
       findMany: jest.fn(),
     },
+    langameEndpointProfileRun: {
+      createMany: jest.fn(),
+      findMany: jest.fn(),
+    },
   };
 }
 
@@ -132,6 +140,8 @@ describe('LangameSettingsService', () => {
     ]);
     prisma.integrationSyncJob.findFirst.mockResolvedValue(null);
     prisma.integrationSyncJob.findMany.mockResolvedValue([]);
+    prisma.langameEndpointProfileRun.findMany.mockResolvedValue([]);
+    prisma.langameEndpointProfileRun.createMany.mockResolvedValue({ count: 1 });
     service = new LangameSettingsService(
       prisma as unknown as PrismaService,
       tenantContext as unknown as TenantContextService,
@@ -203,6 +213,54 @@ describe('LangameSettingsService', () => {
           baseUrl: 'https://443.langame.ru/public_api',
           isActive: true,
           lastSyncedAt: null,
+        },
+      ],
+    });
+  });
+
+  it('returns latest endpoint profile quality summaries in settings', async () => {
+    prisma.langameEndpointProfileRun.findMany.mockResolvedValue([
+      {
+        id: 'profile-1',
+        domain: '443.langame.ru',
+        endpointKey: 'guestSessions',
+        endpointPath: '/guests/sessions',
+        group: 'guests',
+        status: 'SUCCESS',
+        checkedAt: new Date('2026-06-02T08:00:00.000Z'),
+        dateFrom: new Date('2026-06-01T00:00:00.000Z'),
+        dateTo: new Date('2026-06-02T00:00:00.000Z'),
+        requestParams: {
+          page: '1',
+          page_limit: '20',
+        },
+        rowCount: 20,
+        payloadKind: 'object',
+        fieldKeys: ['guest_id', 'date_start'],
+        profile: {
+          summary: 'events=visit:20',
+        },
+        errorMessage: null,
+      },
+    ]);
+
+    await expect(service.getSettings(user)).resolves.toMatchObject({
+      endpointProfiles: [
+        {
+          id: 'profile-1',
+          domain: '443.langame.ru',
+          endpointKey: 'guestSessions',
+          endpointPath: '/guests/sessions',
+          group: 'guests',
+          status: 'SUCCESS',
+          checkedAt: '2026-06-02T08:00:00.000Z',
+          dateFrom: '2026-06-01T00:00:00.000Z',
+          dateTo: '2026-06-02T00:00:00.000Z',
+          rowCount: 20,
+          payloadKind: 'object',
+          fieldKeys: ['guest_id', 'date_start'],
+          summary: 'events=visit:20',
+          errorMessage: null,
         },
       ],
     });
@@ -406,6 +464,26 @@ describe('LangameSettingsService', () => {
         date_to: '2026-06-02',
       },
     );
+    expect(prisma.langameEndpointProfileRun.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          tenantId: 'tenant-1',
+          integrationSourceId: 'source-1',
+          provider: IntegrationProvider.LANGAME,
+          domain: '443.langame.ru',
+          endpointKey: 'guestSessions',
+          endpointPath: '/guests/sessions',
+          group: 'guests',
+          status: 'SUCCESS',
+          dateFrom: new Date('2026-06-01T00:00:00.000Z'),
+          dateTo: new Date('2026-06-02T00:00:00.000Z'),
+          rowCount: 1,
+          payloadKind: 'object',
+          fieldKeys: ['guest_id', 'phone', 'fio', 'date_start'],
+          errorMessage: null,
+        }),
+      ],
+    });
   });
 
   it('requires club id before profiling club-scoped Langame endpoints', async () => {

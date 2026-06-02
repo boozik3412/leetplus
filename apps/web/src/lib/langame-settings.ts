@@ -17,6 +17,25 @@ export type LangameSettings = {
   sources: LangameSourceSettings[];
   syncJobs: LangameSyncJob[];
   latestSuccessfulSyncJob: LangameSyncJob | null;
+  endpointProfiles: LangameEndpointProfileRunSummary[];
+};
+
+export type LangameEndpointProfileRunSummary = {
+  id: string;
+  domain: string;
+  endpointKey: string;
+  endpointPath: string;
+  group: string;
+  status: string;
+  checkedAt: string;
+  dateFrom: string | null;
+  dateTo: string | null;
+  requestParams: unknown;
+  rowCount: number;
+  payloadKind: string | null;
+  fieldKeys: string[];
+  summary: string | null;
+  errorMessage: string | null;
 };
 
 export type LangameSyncJob = {

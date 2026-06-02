@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { IntegrationProvider } from '@prisma/client';
+import { IntegrationProvider, Prisma } from '@prisma/client';
 import { readFile } from 'node:fs/promises';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
@@ -9,7 +9,9 @@ import { SecretEncryptionService } from './secret-encryption.service';
 import type {
   LangameEndpointProfileDefinition,
   LangameEndpointProfileDiagnosticsResult,
+  LangameEndpointProfileDiagnosticsSource,
   LangameEndpointProfileQuery,
+  LangameEndpointProfileRunSummary,
   LangameGuestSearchDiagnosticsResult,
   LangameGuestSearchField,
   LangameGuestSearchQuery,
@@ -262,37 +264,51 @@ export class LangameSettingsService {
 
   async getSettings(user: AuthenticatedUser) {
     const { tenantId } = await this.tenantContextService.resolve(user);
-    const [tenant, credential, sources, syncJobs, latestSuccessfulSyncJob] =
-      await Promise.all([
-        this.prisma.tenant.findUnique({
-          where: { id: tenantId },
-          select: { name: true },
-        }),
-        this.findCredential(tenantId),
-        this.prisma.integrationSource.findMany({
-          where: {
-            tenantId,
-            provider: IntegrationProvider.LANGAME,
-          },
-          orderBy: { domain: 'asc' },
-        }),
-        this.prisma.integrationSyncJob.findMany({
-          where: {
-            tenantId,
-            provider: IntegrationProvider.LANGAME,
-          },
-          orderBy: { startedAt: 'desc' },
-          take: 10,
-        }),
-        this.prisma.integrationSyncJob.findFirst({
-          where: {
-            tenantId,
-            provider: IntegrationProvider.LANGAME,
-            status: 'SUCCESS',
-          },
-          orderBy: { startedAt: 'desc' },
-        }),
-      ]);
+    const [
+      tenant,
+      credential,
+      sources,
+      syncJobs,
+      latestSuccessfulSyncJob,
+      latestEndpointProfileRuns,
+    ] = await Promise.all([
+      this.prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { name: true },
+      }),
+      this.findCredential(tenantId),
+      this.prisma.integrationSource.findMany({
+        where: {
+          tenantId,
+          provider: IntegrationProvider.LANGAME,
+        },
+        orderBy: { domain: 'asc' },
+      }),
+      this.prisma.integrationSyncJob.findMany({
+        where: {
+          tenantId,
+          provider: IntegrationProvider.LANGAME,
+        },
+        orderBy: { startedAt: 'desc' },
+        take: 10,
+      }),
+      this.prisma.integrationSyncJob.findFirst({
+        where: {
+          tenantId,
+          provider: IntegrationProvider.LANGAME,
+          status: 'SUCCESS',
+        },
+        orderBy: { startedAt: 'desc' },
+      }),
+      this.prisma.langameEndpointProfileRun.findMany({
+        where: {
+          tenantId,
+          provider: IntegrationProvider.LANGAME,
+        },
+        orderBy: { checkedAt: 'desc' },
+        take: 100,
+      }),
+    ]);
     const mapSyncJob = (job: (typeof syncJobs)[number]) => ({
       id: job.id,
       domain: job.domain,
@@ -327,6 +343,9 @@ export class LangameSettingsService {
       latestSuccessfulSyncJob: latestSuccessfulSyncJob
         ? mapSyncJob(latestSuccessfulSyncJob)
         : null,
+      endpointProfiles: this.toEndpointProfileSummaries(
+        latestEndpointProfileRuns,
+      ),
     };
   }
 
@@ -674,6 +693,12 @@ export class LangameSettingsService {
         }
       }),
     );
+    await this.persistEndpointProfileRuns(
+      tenantId,
+      endpoint,
+      checkedAt,
+      diagnostics,
+    );
 
     return {
       checkedAt,
@@ -805,6 +830,123 @@ export class LangameSettingsService {
     }
 
     return endpoint.path.replace('{guest_id}', encodeURIComponent(guestId));
+  }
+
+  private async persistEndpointProfileRuns(
+    tenantId: string,
+    endpoint: LangameEndpointProfileDefinition,
+    checkedAt: string,
+    sources: LangameEndpointProfileDiagnosticsSource[],
+  ) {
+    if (sources.length === 0) {
+      return;
+    }
+
+    await this.prisma.langameEndpointProfileRun.createMany({
+      data: sources.map((source) => ({
+        tenantId,
+        integrationSourceId: source.id,
+        provider: IntegrationProvider.LANGAME,
+        domain: source.domain,
+        endpointKey: endpoint.key,
+        endpointPath: source.path,
+        group: endpoint.group,
+        status: source.status,
+        checkedAt: new Date(checkedAt),
+        dateFrom: this.dateParamToDate(source.requestParams.date_from),
+        dateTo: this.dateParamToDate(source.requestParams.date_to),
+        requestParams: this.toInputJson(source.requestParams),
+        rowCount: source.rowCount,
+        payloadKind: source.payloadKind,
+        fieldKeys: this.toInputJson(source.fieldKeys),
+        profile: this.toInputJson({
+          summary: source.summary,
+          payloadPreview: source.payloadPreview,
+        }),
+        errorMessage: source.errorMessage,
+      })),
+    });
+  }
+
+  private toEndpointProfileSummaries(
+    runs: Array<{
+      id: string;
+      domain: string;
+      endpointKey: string;
+      endpointPath: string;
+      group: string;
+      status: string;
+      checkedAt: Date;
+      dateFrom: Date | null;
+      dateTo: Date | null;
+      requestParams: Prisma.JsonValue | null;
+      rowCount: number;
+      payloadKind: string | null;
+      fieldKeys: Prisma.JsonValue | null;
+      profile: Prisma.JsonValue | null;
+      errorMessage: string | null;
+    }>,
+  ): LangameEndpointProfileRunSummary[] {
+    const seen = new Set<string>();
+    const latestRuns: typeof runs = [];
+
+    for (const run of runs) {
+      const key = `${run.endpointKey}:${run.domain}`;
+
+      if (seen.has(key)) {
+        continue;
+      }
+
+      seen.add(key);
+      latestRuns.push(run);
+    }
+
+    return latestRuns.map((run) => ({
+      id: run.id,
+      domain: run.domain,
+      endpointKey: run.endpointKey,
+      endpointPath: run.endpointPath,
+      group: run.group,
+      status: run.status,
+      checkedAt: run.checkedAt.toISOString(),
+      dateFrom: run.dateFrom?.toISOString() ?? null,
+      dateTo: run.dateTo?.toISOString() ?? null,
+      requestParams: run.requestParams,
+      rowCount: run.rowCount,
+      payloadKind: run.payloadKind,
+      fieldKeys: this.jsonArrayToStrings(run.fieldKeys),
+      summary: this.profileSummary(run.profile),
+      errorMessage: run.errorMessage,
+    }));
+  }
+
+  private dateParamToDate(value?: string) {
+    if (!value) {
+      return null;
+    }
+
+    const normalized = /^\d{4}-\d{2}-\d{2}$/.test(value)
+      ? `${value}T00:00:00.000Z`
+      : value;
+    const date = new Date(normalized);
+
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  private toInputJson(value: unknown): Prisma.InputJsonValue {
+    return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+  }
+
+  private jsonArrayToStrings(value: Prisma.JsonValue | null) {
+    return Array.isArray(value)
+      ? value.filter((item): item is string => typeof item === 'string')
+      : [];
+  }
+
+  private profileSummary(value: Prisma.JsonValue | null) {
+    return this.isPlainObject(value) && typeof value.summary === 'string'
+      ? value.summary
+      : null;
   }
 
   private buildEndpointProfileParams(

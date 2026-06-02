@@ -1118,6 +1118,7 @@ export function LangameSyncPanel({
 
       setEndpointProfileResult(data as EndpointProfileDiagnosticsResult);
       setEndpointProfileStatus("success");
+      await refreshSettings();
     } catch (profileError) {
       setEndpointProfileStatus("error");
       setEndpointProfileError(
@@ -1931,6 +1932,9 @@ function EndpointProfileDiagnosticsPanel({
     result?.sources.filter((source) => source.status === "FAILED") ?? [];
   const successfulSources =
     result?.sources.filter((source) => source.status === "SUCCESS") ?? [];
+  const latestProfiles = (settings.endpointProfiles ?? []).filter(
+    (profile) => profile.endpointKey === selectedEndpoint.key,
+  );
 
   return (
     <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
@@ -2091,6 +2095,11 @@ function EndpointProfileDiagnosticsPanel({
           : "Период для этого endpoint не нужен."}
       </div>
 
+      <LatestEndpointProfiles
+        profiles={latestProfiles}
+        selectedEndpoint={selectedEndpoint}
+      />
+
       {profileError ? (
         <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-200">
           {profileError}
@@ -2176,6 +2185,87 @@ function EndpointProfileDiagnosticsPanel({
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function LatestEndpointProfiles({
+  profiles,
+  selectedEndpoint,
+}: {
+  profiles: LangameSettings["endpointProfiles"];
+  selectedEndpoint: EndpointProfileOption;
+}) {
+  if (profiles.length === 0) {
+    return (
+      <div className="mt-3 rounded-md border border-dashed border-zinc-300 px-3 py-3 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+        Для {selectedEndpoint.title} сохраненных production-профилей пока нет.
+        Запустите ручную проверку, чтобы зафиксировать свежесть и качество
+        данных перед подключением к расчетам.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/50">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+          Последние сохраненные профили
+        </p>
+        <span className="text-xs text-zinc-500 dark:text-zinc-400">
+          {profiles.length} источн.
+        </span>
+      </div>
+      <div className="mt-3 grid gap-2 lg:grid-cols-3">
+        {profiles.map((profile) => (
+          <div
+            key={profile.id}
+            className="rounded-md border border-zinc-200 bg-white px-3 py-3 text-xs dark:border-zinc-800 dark:bg-zinc-950"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <p className="font-semibold text-zinc-950 dark:text-zinc-50">
+                  {profile.domain}
+                </p>
+                <p className="mt-1 text-zinc-500 dark:text-zinc-400">
+                  {formatDateTime(profile.checkedAt)}
+                </p>
+              </div>
+              <span
+                className={[
+                  "rounded-full px-2 py-0.5 text-[11px] font-semibold",
+                  profile.status === "SUCCESS"
+                    ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200"
+                    : "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-200",
+                ].join(" ")}
+              >
+                {profile.status === "SUCCESS" ? "OK" : "ошибка"}
+              </span>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1.5 text-zinc-500 dark:text-zinc-400">
+              <span className="rounded-full bg-zinc-100 px-2 py-1 dark:bg-zinc-900">
+                строк: {profile.rowCount}
+              </span>
+              {profile.payloadKind ? (
+                <span className="rounded-full bg-zinc-100 px-2 py-1 dark:bg-zinc-900">
+                  {profile.payloadKind}
+                </span>
+              ) : null}
+            </div>
+            {profile.fieldKeys.length > 0 ? (
+              <p className="mt-2 leading-5 text-zinc-500 dark:text-zinc-400">
+                Поля: {profile.fieldKeys.slice(0, 10).join(", ")}
+                {profile.fieldKeys.length > 10 ? "..." : ""}
+              </p>
+            ) : null}
+            {profile.errorMessage ? (
+              <p className="mt-2 break-words text-red-600 dark:text-red-300">
+                {compactEndpointError(profile.errorMessage)}
+              </p>
+            ) : null}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

@@ -1,7 +1,9 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffTeamChatWorkspace } from "@/components/staff-team-chat-workspace";
 import { requireCurrentUser } from "@/lib/auth";
+import { can } from "@/lib/permissions";
 import {
   getStaffTeamChatReport,
   type StaffTeamChatFilters,
@@ -27,7 +29,12 @@ export default async function StaffTeamChatPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  const user = await requireCurrentUser();
+
+  if (!can(user, "view_staff")) {
+    redirect("/dashboard");
+  }
+
   const params = await searchParams;
   const report = await getStaffTeamChatReport(resolveFilters(params));
 

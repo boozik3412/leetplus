@@ -56,6 +56,9 @@ export default async function CommunicationsPage() {
     ...(canViewStaff ? staffCards : []),
     ...(canViewGuests ? guestCards : []),
   ];
+  const primaryAction = canViewStaff
+    ? { href: "/staff/team-chat", label: "Перейти в чат" }
+    : { href: "/guests/crm/tasks", label: "Открыть CRM-задачи" };
 
   if (cards.length === 0) {
     redirect("/dashboard");
@@ -134,10 +137,10 @@ export default async function CommunicationsPage() {
               </h2>
             </div>
             <Link
-              href="/staff/team-chat"
+              href={primaryAction.href}
               className="inline-flex h-10 items-center justify-center rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
             >
-              Перейти в чат
+              {primaryAction.label}
             </Link>
           </div>
           <div className="mt-4 grid gap-3 lg:grid-cols-3">

@@ -214,6 +214,12 @@ export default async function GuestCrmTasksPage({
               Скачать CSV
             </Link>
             <Link
+              href="/communications"
+              className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+            >
+              Коммуникации
+            </Link>
+            <Link
               href="/guests/crm"
               className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
             >

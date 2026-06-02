@@ -1,7 +1,9 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffNotificationsWorkspace } from "@/components/staff-notifications-workspace";
 import { requireCurrentUser } from "@/lib/auth";
+import { can } from "@/lib/permissions";
 import {
   getStaffNotificationsReport,
   type StaffNotificationsFilters,
@@ -37,7 +39,12 @@ export default async function StaffNotificationsPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  const user = await requireCurrentUser();
+
+  if (!can(user, "view_staff")) {
+    redirect("/dashboard");
+  }
+
   const params = await searchParams;
   const report = await getStaffNotificationsReport(resolveFilters(params));
 

@@ -32,6 +32,8 @@ const sourceLabels: Record<StaffNotificationSourceType, string> = {
   OPERATIONS_DASHBOARD: "Опер. дашборд",
 };
 
+const NOTIFICATION_DISPLAY_TIME_ZONE = "Asia/Yekaterinburg";
+
 export function StaffNotificationsWorkspace({
   report,
 }: {
@@ -405,5 +407,6 @@ function formatDateTime(value: string) {
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: NOTIFICATION_DISPLAY_TIME_ZONE,
   }).format(new Date(value));
 }

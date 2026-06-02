@@ -796,6 +796,19 @@ MVP, который нужно делать первым:
 
 Диагностика `/public_api/routes` на активных production-источниках Langame подтвердила 32 доступных маршрута: 30 `GET` и 2 `POST`. Все новые подключения должны идти через единый сценарий синхронизации, без скрытых тяжелых догрузок при входе, открытии дашборда или переходе между разделами.
 
+### План распределения данных по разделам
+
+- `Главная / выручка`: использовать `all_operations_log/list`, `transactions/list`, `balances/list`, `log_cash_transaction/list`, `working_shifts/list` и `products/expense` для сценарной модели денег: общая выручка сети, клубная выручка, онлайн-пополнения, бар/товары, кассовые операции и сверка источников.
+- `Гости / CRM`: использовать `guests/list`, `guests/{guest_id}`, `guests/groups`, `guests/balance`, `guests/bonus_balance`, `guests/sessions`, `guests/logs` и точечный `POST guests/search` для профиля гостя, сегментов, балансов, retention, churn, LTV, ручного сопоставления гостя и будущего логина по телефону.
+- `Геймификация гостей`: использовать `guests/sessions`, `guests/logs`, `guests/groups`, `guests/balance`, `guests/bonus_balance`, `transactions/list`, `products/expense` и тарифные справочники для лутбоксов при старте сессии, миссий, квестов, battle pass, бюджетов наград и anti-fraud правил.
+- `Ассортимент / склад`: использовать `clubs/list`, `products/list`, `goods/list`, `products/expense`, `products/arrival`, `global/types_of_pc_in_clubs/list` и `global/linking_pc_by_type/list` для остатков, продаж, списаний, приходов, новинок, no-sales, supplier scorecard, движения товаров, загрузки и сверки промо-наборов.
+- `Маркетинг / промо-наборы`: использовать `tariffs/by_days/list`, `tariffs/groups/list`, `tariffs/time_period/list`, `tariffs/types_groups/list`, `guests/sessions`, `guests/groups` и `products/expense` для условий промо, тихих часов, тарифных окон, промо-наборов, миссий, battle pass и расчета эффекта без автоматической выдачи наград в Langame.
+- `Персонал`: использовать `users/list`, `working_shifts/list`, `log_cash_transaction/list`, `all_operations_log/list` и данные кассы/смен для справочника операторов Langame, связки со `StaffMember`, контроля администраторов, рейтингов, смен, кассовых рисков, зарплаты, предупреждений и штрафов.
+- `Администрирование / диагностика`: использовать `routes`, `config/list`, `puf/profiles/list`, `ver/get_adminconsole`, `ver/get_po` и `ver/get_terminal` для контроля доступности Langame, версий, модулей, PUF-профилей, расхождений между клубами и качества источников без попадания этих данных в бизнес-KPI.
+- `Будущий write-контур`: `POST guests/search` разрешен только как безопасный точечный поиск/сопоставление, а `POST pc/manage` относится к отдельному будущему контуру управления ПК с ролями, dry-run, audit trail и явным подтверждением пользователя.
+
+Очередность подключения: сначала профилировать endpoint на production в `/sync`, затем сохранить snapshot/диагностику качества данных, затем подключить бизнес-сценарий в нужном разделе, и только после этого выводить управленческое действие в интерфейс. Рабочие страницы не должны напрямую дергать Langame при открытии.
+
 ### Сводный дашборд и выручка
 
 - Готово: в `/dashboard/revenue-diagnostics` источники `all_operations_log/list`, `transactions/list`, `balances/list`, `log_cash_transaction/list`, `products/expense` и `working_shifts/list` сведены в сценарную модель выручки сети с правилом включения в KPI.

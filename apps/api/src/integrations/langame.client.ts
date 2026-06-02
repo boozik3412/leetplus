@@ -259,15 +259,15 @@ export class LangameClient {
   }
 
   async getRoutes(baseUrl: string, apiKey: string) {
-    const response = await fetch(
-      new URL(`${this.normalizeBaseUrl(baseUrl)}/routes`),
-      {
-        method: 'GET',
-        headers: {
-          'X-API-KEY': apiKey,
-        },
+    const url = new URL(`${this.normalizeBaseUrl(baseUrl)}/routes`);
+    url.searchParams.set('api_key', apiKey);
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'X-API-KEY': apiKey,
       },
-    );
+    });
 
     if (!response.ok) {
       const errorDetails = await this.readErrorDetails(response);

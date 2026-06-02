@@ -10,6 +10,7 @@ import {
   TenantLifecycleStatus,
 } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { LangameSettingsService } from '../integrations/langame-settings.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 type TenantLifecycleAction = 'ACTIVATE' | 'SUSPEND' | 'ARCHIVE';
@@ -97,7 +98,10 @@ const lifecycleStatusByAction: Record<
 
 @Injectable()
 export class AdminService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly langameSettingsService: LangameSettingsService,
+  ) {}
 
   async getOverview() {
     const failedSince = new Date(Date.now() - STALE_SYNC_THRESHOLD_MS);
@@ -378,6 +382,29 @@ export class AdminService {
       fileName: `leetplus-platform-audit-${from}-${to}.csv`,
       contentType: 'text/csv; charset=utf-8',
       buffer: Buffer.from(this.toCsv(rows), 'utf8'),
+    };
+  }
+
+  async getTenantLangameServiceDiagnostics(tenantId: string) {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+      },
+    });
+
+    if (!tenant) {
+      throw new NotFoundException('Tenant was not found');
+    }
+
+    return {
+      tenant,
+      diagnostics:
+        await this.langameSettingsService.getServiceDiagnosticsForTenant(
+          tenant.id,
+        ),
     };
   }
 

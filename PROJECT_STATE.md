@@ -76,6 +76,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Exposed the Langame service profile in `/administration` for platform admins: each tenant card can manually check active Langame sources for service endpoint availability, empty/error responses, and version/summary discrepancies without automatic background calls.
 - Added manual Langame service diagnostics on `/sync`: `config/list`, `puf/profiles/list`, `ver/get_adminconsole`, `ver/get_po`, and `ver/get_terminal` now show endpoint status, row counts, payload kind, fields, compact summaries, and sanitized previews without entering business KPI calculations.
 - Added safe `guests/search` diagnostics on `/sync`: backend `/integrations/langame/guests/search-diagnostics`, web proxy, explicit search field selection, masked guest identifiers, no persistence, and no mass Langame sync.
 - Added revenue diagnostics scenarios on `/dashboard/revenue-diagnostics`: current network KPI, club-allocated revenue, balance-spend revenue, bar/goods, shift cash, topups as cash flow, plus source inclusion rules for Langame endpoints.

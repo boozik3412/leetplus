@@ -12,6 +12,37 @@ type Tenant = AdminOverview["tenants"][number];
 type LangameSource = Tenant["langameSources"][number];
 type LifecycleAction = "ACTIVATE" | "SUSPEND" | "ARCHIVE";
 type SourceSupportAction = "DISABLE" | "ENABLE" | "MARK_FOR_REVIEW";
+type ServiceDiagnosticsStatus = "idle" | "loading" | "success" | "error";
+
+type ServiceEndpointDiagnostics = {
+  key: string;
+  title: string;
+  path: string;
+  status: "SUCCESS" | "FAILED";
+  rowCount: number;
+  payloadKind: "array" | "object" | "scalar" | "empty";
+  fieldKeys: string[];
+  summary: string | null;
+  errorMessage: string | null;
+};
+
+type ServiceDiagnosticsSource = {
+  domain: string;
+  status: "SUCCESS" | "PARTIAL" | "FAILED";
+  endpoints: ServiceEndpointDiagnostics[];
+};
+
+type TenantServiceDiagnosticsResult = {
+  tenant: {
+    id: string;
+    name: string;
+    slug: string;
+  };
+  diagnostics: {
+    checkedAt: string;
+    sources: ServiceDiagnosticsSource[];
+  };
+};
 
 type TenantFormState = {
   action: LifecycleAction;
@@ -163,6 +194,193 @@ async function readError(response: Response) {
   }
 }
 
+function TenantServiceDiagnosticsView({
+  result,
+}: {
+  result: TenantServiceDiagnosticsResult;
+}) {
+  const sources = result.diagnostics.sources;
+  const endpoints = sources.flatMap((source) => source.endpoints);
+  const failedEndpoints = endpoints.filter(
+    (endpoint) => endpoint.status === "FAILED",
+  );
+  const emptyEndpoints = endpoints.filter(
+    (endpoint) => endpoint.status === "SUCCESS" && endpoint.rowCount === 0,
+  );
+  const discrepancies = findServiceDiscrepancies(sources);
+
+  return (
+    <div className="mt-3 rounded-lg border border-zinc-200 bg-white p-3 text-xs dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="font-semibold text-zinc-950 dark:text-zinc-50">
+          {formatDate(result.diagnostics.checkedAt)}
+        </p>
+        <span className="text-zinc-500">
+          источников: {formatNumber(sources.length)}
+        </span>
+      </div>
+
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        <DiagnosticTinyMetric
+          label="Ошибки"
+          tone={failedEndpoints.length > 0 ? "danger" : "neutral"}
+          value={failedEndpoints.length}
+        />
+        <DiagnosticTinyMetric
+          label="Пусто"
+          tone={emptyEndpoints.length > 0 ? "warning" : "neutral"}
+          value={emptyEndpoints.length}
+        />
+        <DiagnosticTinyMetric
+          label="Расхожд."
+          tone={discrepancies.length > 0 ? "warning" : "neutral"}
+          value={discrepancies.length}
+        />
+      </div>
+
+      {discrepancies.length > 0 ? (
+        <div className="mt-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-amber-800 dark:text-amber-100">
+          <p className="font-semibold">Расхождения версий</p>
+          <ul className="mt-1 space-y-1">
+            {discrepancies.map((item) => (
+              <li key={item.title}>
+                {item.title}: {item.values.join("; ")}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <p className="mt-3 text-zinc-500">Расхождений версий не найдено.</p>
+      )}
+
+      <div className="mt-3 space-y-2">
+        {sources.map((source) => (
+          <div
+            key={source.domain}
+            className="rounded-md border border-zinc-200 bg-zinc-50 p-2 dark:border-zinc-800 dark:bg-zinc-900/50"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-semibold text-zinc-950 dark:text-zinc-50">
+                {source.domain}
+              </span>
+              <span className={serviceSourceStatusClass(source.status)}>
+                {serviceSourceStatusLabel(source.status)}
+              </span>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {source.endpoints.map((endpoint) => (
+                <span
+                  key={`${source.domain}-${endpoint.key}`}
+                  className={[
+                    "rounded-full border px-2 py-1",
+                    endpoint.status === "SUCCESS"
+                      ? "border-zinc-200 bg-white text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300"
+                      : "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-200",
+                  ].join(" ")}
+                  title={
+                    endpoint.errorMessage ??
+                    `${endpoint.path}; поля: ${endpoint.fieldKeys.join(", ") || "нет"}`
+                  }
+                >
+                  {endpoint.title}:{" "}
+                  {endpoint.status === "SUCCESS"
+                    ? endpoint.summary ?? `${endpoint.rowCount} строк`
+                    : "ошибка"}
+                </span>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DiagnosticTinyMetric({
+  label,
+  value,
+  tone = "neutral",
+}: {
+  label: string;
+  value: number;
+  tone?: "neutral" | "warning" | "danger";
+}) {
+  return (
+    <div
+      className={[
+        "rounded-md border px-2 py-1.5",
+        tone === "danger"
+          ? "border-red-500/30 bg-red-500/10"
+          : tone === "warning"
+            ? "border-amber-500/30 bg-amber-500/10"
+            : "border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/50",
+      ].join(" ")}
+    >
+      <p className="text-[11px] uppercase text-zinc-500">{label}</p>
+      <p className="font-semibold tabular-nums">{formatNumber(value)}</p>
+    </div>
+  );
+}
+
+function findServiceDiscrepancies(sources: ServiceDiagnosticsSource[]) {
+  const byEndpoint = new Map<
+    string,
+    { title: string; values: Map<string, string[]> }
+  >();
+
+  sources.forEach((source) => {
+    source.endpoints.forEach((endpoint) => {
+      if (endpoint.status !== "SUCCESS" || !endpoint.summary) {
+        return;
+      }
+
+      const current = byEndpoint.get(endpoint.key) ?? {
+        title: endpoint.title,
+        values: new Map<string, string[]>(),
+      };
+      const domains = current.values.get(endpoint.summary) ?? [];
+      domains.push(source.domain);
+      current.values.set(endpoint.summary, domains);
+      byEndpoint.set(endpoint.key, current);
+    });
+  });
+
+  return Array.from(byEndpoint.values())
+    .filter((item) => item.values.size > 1)
+    .map((item) => ({
+      title: item.title,
+      values: Array.from(item.values.entries()).map(
+        ([value, domains]) => `${value}: ${domains.join(", ")}`,
+      ),
+    }));
+}
+
+function serviceSourceStatusLabel(status: ServiceDiagnosticsSource["status"]) {
+  if (status === "SUCCESS") {
+    return "OK";
+  }
+
+  if (status === "PARTIAL") {
+    return "Частично";
+  }
+
+  return "Ошибка";
+}
+
+function serviceSourceStatusClass(status: ServiceDiagnosticsSource["status"]) {
+  const base = "rounded-full px-2 py-0.5 font-semibold";
+
+  if (status === "SUCCESS") {
+    return `${base} bg-emerald-500/10 text-emerald-700 dark:text-emerald-200`;
+  }
+
+  if (status === "PARTIAL") {
+    return `${base} bg-amber-500/10 text-amber-700 dark:text-amber-200`;
+  }
+
+  return `${base} bg-red-500/10 text-red-700 dark:text-red-200`;
+}
+
 export function PlatformAdministrationWorkspace({
   overview,
 }: {
@@ -194,6 +412,13 @@ export function PlatformAdministrationWorkspace({
   const [auditCount, setAuditCount] = useState(overview.auditEvents.length);
   const [isAuditLoading, setIsAuditLoading] = useState(false);
   const [auditError, setAuditError] = useState<string | null>(null);
+  const [serviceDiagnosticsByTenant, setServiceDiagnosticsByTenant] = useState<
+    Record<string, TenantServiceDiagnosticsResult>
+  >({});
+  const [serviceDiagnosticsStatusByTenant, setServiceDiagnosticsStatusByTenant] =
+    useState<Record<string, ServiceDiagnosticsStatus>>({});
+  const [serviceDiagnosticsErrorsByTenant, setServiceDiagnosticsErrorsByTenant] =
+    useState<Record<string, string | null>>({});
   const targetTypeOptions = Array.from(
     new Set([
       ...baseTargetTypeOptions,
@@ -398,6 +623,48 @@ export function PlatformAdministrationWorkspace({
     startTransition(() => router.refresh());
   }
 
+  async function loadTenantServiceDiagnostics(tenant: Tenant) {
+    setServiceDiagnosticsStatusByTenant((current) => ({
+      ...current,
+      [tenant.id]: "loading",
+    }));
+    setServiceDiagnosticsErrorsByTenant((current) => ({
+      ...current,
+      [tenant.id]: null,
+    }));
+
+    const response = await fetch(
+      `/api/admin/tenants/${tenant.id}/langame/service-diagnostics`,
+      {
+        cache: "no-store",
+      },
+    );
+
+    if (!response.ok) {
+      const readErrorMessage = await readError(response);
+
+      setServiceDiagnosticsStatusByTenant((current) => ({
+        ...current,
+        [tenant.id]: "error",
+      }));
+      setServiceDiagnosticsErrorsByTenant((current) => ({
+        ...current,
+        [tenant.id]: readErrorMessage,
+      }));
+      return;
+    }
+
+    const data = (await response.json()) as TenantServiceDiagnosticsResult;
+    setServiceDiagnosticsByTenant((current) => ({
+      ...current,
+      [tenant.id]: data,
+    }));
+    setServiceDiagnosticsStatusByTenant((current) => ({
+      ...current,
+      [tenant.id]: "success",
+    }));
+  }
+
   const auditExportHref = `/api/admin/audit-events/export?${buildAuditSearchParams().toString()}`;
 
   return (
@@ -458,7 +725,15 @@ export function PlatformAdministrationWorkspace({
             </div>
           </div>
           <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {overview.tenants.map((tenant) => (
+            {overview.tenants.map((tenant) => {
+              const serviceStatus =
+                serviceDiagnosticsStatusByTenant[tenant.id] ?? "idle";
+              const serviceDiagnostics =
+                serviceDiagnosticsByTenant[tenant.id] ?? null;
+              const serviceError =
+                serviceDiagnosticsErrorsByTenant[tenant.id] ?? null;
+
+              return (
               <div
                 key={tenant.id}
                 className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40"
@@ -520,8 +795,42 @@ export function PlatformAdministrationWorkspace({
                     Критичных сигналов нет.
                   </p>
                 )}
+                <div className="mt-4 border-t border-zinc-200 pt-3 dark:border-zinc-800">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-xs font-semibold uppercase text-zinc-500">
+                        Service profile
+                      </p>
+                      <p className="mt-1 text-xs leading-5 text-zinc-500">
+                        Config, PUF и версии без бизнес-KPI.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void loadTenantServiceDiagnostics(tenant)}
+                      disabled={
+                        serviceStatus === "loading" ||
+                        tenant.diagnostics.activeLangameSources === 0
+                      }
+                      className="rounded-full border border-zinc-300 px-3 py-1.5 text-xs font-semibold transition hover:border-zinc-950 hover:bg-zinc-950 hover:text-white disabled:cursor-not-allowed disabled:border-zinc-200 disabled:text-zinc-400 dark:border-zinc-700 dark:hover:border-emerald-400 dark:hover:bg-emerald-400 dark:hover:text-zinc-950"
+                    >
+                      {serviceStatus === "loading"
+                        ? "Проверяем..."
+                        : "Проверить"}
+                    </button>
+                  </div>
+                  {serviceError ? (
+                    <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-700 dark:text-red-200">
+                      {serviceError}
+                    </p>
+                  ) : null}
+                  {serviceDiagnostics ? (
+                    <TenantServiceDiagnosticsView result={serviceDiagnostics} />
+                  ) : null}
+                </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </section>
 

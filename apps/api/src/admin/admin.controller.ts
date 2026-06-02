@@ -45,6 +45,11 @@ export class AdminController {
     });
   }
 
+  @Get('tenants/:tenantId/langame/service-diagnostics')
+  getTenantLangameServiceDiagnostics(@Param('tenantId') tenantId: string) {
+    return this.adminService.getTenantLangameServiceDiagnostics(tenantId);
+  }
+
   @Post('tenants/:tenantId/lifecycle')
   updateTenantLifecycle(
     @CurrentUser() user: AuthenticatedUser,

@@ -329,6 +329,12 @@ export class LangameSettingsService {
     user: AuthenticatedUser,
   ): Promise<LangameServiceDiagnosticsResult> {
     const { tenantId } = await this.tenantContextService.resolve(user);
+    return this.getServiceDiagnosticsForTenant(tenantId);
+  }
+
+  async getServiceDiagnosticsForTenant(
+    tenantId: string,
+  ): Promise<LangameServiceDiagnosticsResult> {
     const { apiKey, sources } = await this.resolveTenantAccess(tenantId);
     const checkedAt = new Date().toISOString();
     const diagnostics = await Promise.all(

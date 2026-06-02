@@ -53,6 +53,7 @@ export type UserRoleOption = {
   role: UserRole;
   label: string;
   description: string;
+  permissions: Capability[];
 };
 
 export type CapabilityOption = {

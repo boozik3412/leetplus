@@ -15,6 +15,7 @@ import type {
   UserAccountsResponse,
   UserAccountStore,
   UserInvite,
+  UserRoleOption,
 } from "@/lib/users";
 
 type AccountFormMode = "account" | "invite";
@@ -199,6 +200,15 @@ export function UserAccountsPanel({
       return haystack.includes(normalizedQuery);
     });
   }, [query, users]);
+  const capabilityLabels = useMemo(
+    () =>
+      new Map(
+        initialData.capabilityOptions.map(
+          (capability) => [capability.key, capability.label] as const,
+        ),
+      ),
+    [initialData.capabilityOptions],
+  );
 
   function startCreate() {
     setSelectedId(null);
@@ -261,6 +271,16 @@ export function UserAccountsPanel({
   function startCreateRole() {
     setSelectedRoleId(null);
     setRoleForm(createEmptyRoleForm());
+    setRoleStatus({ type: "idle", message: "" });
+  }
+
+  function startCreateRoleFromSystem(role: UserRoleOption) {
+    setSelectedRoleId(null);
+    setRoleForm({
+      name: `${role.label} - копия`,
+      description: role.description,
+      permissions: [...role.permissions],
+    });
     setRoleStatus({ type: "idle", message: "" });
   }
 
@@ -866,45 +886,106 @@ export function UserAccountsPanel({
           </button>
         </div>
 
-        <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(16rem,0.8fr)_minmax(0,1.2fr)]">
-          <div className="space-y-2">
-            {customRoles.map((role) => (
-              <button
-                key={role.id}
-                type="button"
-                onClick={() => startEditRole(role)}
-                className={[
-                  "w-full rounded-lg border p-3 text-left transition hover:-translate-y-0.5 hover:border-emerald-500/70 hover:bg-emerald-500/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50",
-                  selectedRoleId === role.id
-                    ? "border-emerald-500 bg-emerald-500/10"
-                    : "border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/60",
-                ].join(" ")}
-              >
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-semibold">{role.name}</p>
-                    <p className="mt-1 text-xs text-zinc-500">
-                      {role.permissions.length} доступов
-                    </p>
-                  </div>
-                  <span className="rounded-full bg-zinc-200/70 px-2 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-                    Роль клуба
-                  </span>
-                </div>
-                {role.description ? (
-                  <p className="mt-2 line-clamp-2 text-xs leading-5 text-zinc-500">
-                    {role.description}
-                  </p>
-                ) : null}
-              </button>
-            ))}
-
-            {customRoles.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-zinc-300 p-5 text-sm text-zinc-500 dark:border-zinc-800">
-                Кастомных ролей пока нет. Создайте первую роль и назначьте ее
-                пользователю выше.
+        <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(19rem,0.9fr)_minmax(0,1.1fr)]">
+          <div className="space-y-5">
+            <div>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs font-bold uppercase text-zinc-500">
+                  Системные роли
+                </p>
+                <span className="rounded-full bg-zinc-200/70 px-2 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                  {roleOptions.length}
+                </span>
               </div>
-            ) : null}
+              <div className="mt-2 space-y-2">
+                {roleOptions.map((role) => (
+                  <div
+                    key={role.role}
+                    className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm transition hover:border-emerald-500/60 hover:bg-emerald-500/5 dark:border-zinc-800 dark:bg-zinc-900/60"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <p className="font-semibold">{role.label}</p>
+                        <p className="mt-1 text-xs text-zinc-500">
+                          {role.permissions.length} доступов
+                        </p>
+                      </div>
+                      <span className="rounded-full bg-zinc-200/70 px-2 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                        Базовая
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs leading-5 text-zinc-500">
+                      {role.description}
+                    </p>
+                    <PermissionChips
+                      labels={capabilityLabels}
+                      permissions={role.permissions}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => startCreateRoleFromSystem(role)}
+                      className="mt-3 inline-flex h-9 items-center justify-center rounded-md border border-zinc-300 px-3 text-xs font-semibold text-zinc-700 transition hover:border-emerald-500/70 hover:bg-emerald-500/10 dark:border-zinc-700 dark:text-zinc-200"
+                    >
+                      Создать на основе
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs font-bold uppercase text-zinc-500">
+                  Роли клуба
+                </p>
+                <span className="rounded-full bg-zinc-200/70 px-2 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                  {customRoles.length}
+                </span>
+              </div>
+              <div className="mt-2 space-y-2">
+                {customRoles.map((role) => (
+                  <button
+                    key={role.id}
+                    type="button"
+                    onClick={() => startEditRole(role)}
+                    className={[
+                      "w-full rounded-lg border p-3 text-left text-sm transition hover:-translate-y-0.5 hover:border-emerald-500/70 hover:bg-emerald-500/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50",
+                      selectedRoleId === role.id
+                        ? "border-emerald-500 bg-emerald-500/10"
+                        : "border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/60",
+                    ].join(" ")}
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <p className="font-semibold">{role.name}</p>
+                        <p className="mt-1 text-xs text-zinc-500">
+                          {role.permissions.length} доступов
+                        </p>
+                      </div>
+                      <span className="rounded-full bg-zinc-200/70 px-2 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                        Редактируемая
+                      </span>
+                    </div>
+                    {role.description ? (
+                      <p className="mt-2 line-clamp-2 text-xs leading-5 text-zinc-500">
+                        {role.description}
+                      </p>
+                    ) : null}
+                    <PermissionChips
+                      labels={capabilityLabels}
+                      permissions={role.permissions}
+                    />
+                  </button>
+                ))}
+
+                {customRoles.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-zinc-300 p-4 text-sm text-zinc-500 dark:border-zinc-800">
+                    Клубных ролей пока нет. Создайте новую роль или возьмите
+                    системную роль за основу.
+                  </div>
+                ) : null}
+              </div>
+            </div>
           </div>
 
           <form
@@ -1055,5 +1136,42 @@ function StoreCheckbox({
         className="h-4 w-4 rounded border-zinc-300 text-emerald-500 focus:ring-emerald-500"
       />
     </label>
+  );
+}
+
+function PermissionChips({
+  labels,
+  permissions,
+}: {
+  labels: ReadonlyMap<Capability, string>;
+  permissions: Capability[];
+}) {
+  const visiblePermissions = permissions.slice(0, 4);
+  const hiddenCount = Math.max(permissions.length - visiblePermissions.length, 0);
+
+  if (permissions.length === 0) {
+    return (
+      <div className="mt-3 text-xs font-semibold text-zinc-500">
+        Доступов нет
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 flex flex-wrap gap-1.5">
+      {visiblePermissions.map((permission) => (
+        <span
+          key={permission}
+          className="rounded-full bg-emerald-500/10 px-2 py-1 text-xs font-semibold text-emerald-700 dark:text-emerald-200"
+        >
+          {labels.get(permission) ?? permission}
+        </span>
+      ))}
+      {hiddenCount > 0 ? (
+        <span className="rounded-full bg-zinc-200/70 px-2 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+          +{hiddenCount}
+        </span>
+      ) : null}
+    </div>
   );
 }

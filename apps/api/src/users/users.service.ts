@@ -13,6 +13,7 @@ import {
   accessCapabilityCatalog,
   hasCapability,
   normalizeCapabilities,
+  roleCapabilities,
   resolveUserCapabilities,
   type AccessCapability,
 } from '../auth/capabilities';
@@ -55,53 +56,63 @@ const roleOptions = [
     role: UserRole.OWNER,
     label: 'Владелец',
     description: 'Полный доступ к сети, настройкам, ролям и финансам.',
+    permissions: roleCapabilities[UserRole.OWNER],
   },
   {
     role: UserRole.ADMIN,
     label: 'Администратор системы',
     description: 'Операционное администрирование LeetPlus без смены владельца.',
+    permissions: roleCapabilities[UserRole.ADMIN],
   },
   {
     role: UserRole.MANAGER,
     label: 'Управляющий сетью',
     description:
       'Дашборды, гости, маркетинг, персонал и ассортиментные отчеты.',
+    permissions: roleCapabilities[UserRole.MANAGER],
   },
   {
     role: UserRole.CLUB_MANAGER,
     label: 'Управляющий клубом',
     description: 'Операционная работа по выбранным клубам и персоналу.',
+    permissions: roleCapabilities[UserRole.CLUB_MANAGER],
   },
   {
     role: UserRole.MARKETER,
     label: 'Маркетолог',
     description: 'Маркетинг, CRM-группы, кампании и промо-наборы.',
+    permissions: roleCapabilities[UserRole.MARKETER],
   },
   {
     role: UserRole.STANDARDS_MANAGER,
     label: 'Менеджер по стандартам',
     description:
       'Обучение, подбор администраторов, регламенты, чек-листы, стандарты работы, контроль администраторов и аттестации.',
+    permissions: roleCapabilities[UserRole.STANDARDS_MANAGER],
   },
   {
     role: UserRole.BUYER,
     label: 'Закупщик',
     description: 'Ассортимент, товары, поставщики и коммерческие отчеты.',
+    permissions: roleCapabilities[UserRole.BUYER],
   },
   {
     role: UserRole.SENIOR_ADMINISTRATOR,
     label: 'Старший администратор',
     description: 'Задачи персонала, чеклисты смены и контроль выполнения.',
+    permissions: roleCapabilities[UserRole.SENIOR_ADMINISTRATOR],
   },
   {
     role: UserRole.CLUB_ADMINISTRATOR,
     label: 'Администратор клуба',
     description: 'Сменные задачи и чеклисты без лишних управленческих данных.',
+    permissions: roleCapabilities[UserRole.CLUB_ADMINISTRATOR],
   },
 ] satisfies Array<{
   role: UserRole;
   label: string;
   description: string;
+  permissions: AccessCapability[];
 }>;
 
 const userAccountInclude = {

@@ -67,8 +67,368 @@ type SourceSyncHealth = {
   latestJob: LangameSyncJob | null;
 };
 
+type EndpointUsageStatus =
+  | "IN_USE"
+  | "PLANNED"
+  | "NEEDS_PARAMETERS"
+  | "WRITE_DECISION";
+
+type EndpointGroup =
+  | "dashboard"
+  | "guests"
+  | "assortment"
+  | "marketing"
+  | "staff"
+  | "service";
+
+type EndpointMethod = "GET" | "POST";
+
+type RouteDiagnosticsStatus = "idle" | "loading" | "success" | "error";
+
+type RouteDiagnosticsSource = {
+  domain: string;
+  status: "SUCCESS" | "FAILED";
+  routesCount: number;
+  routes: {
+    method: string | null;
+    path: string | null;
+  }[];
+  errorMessage: string | null;
+};
+
+type RouteDiagnosticsResult = {
+  checkedAt: string;
+  sources: RouteDiagnosticsSource[];
+};
+
+type EndpointMapItem = {
+  method: EndpointMethod;
+  path: string;
+  group: EndpointGroup;
+  title: string;
+  description: string;
+  usageStatus: EndpointUsageStatus;
+  freshnessSource: "assortment" | "guests" | "routes" | "planned" | "write";
+};
+
 const guestSyncPollIntervalMs = 4000;
 const guestSyncPollAttempts = 75;
+
+const endpointGroupOrder: EndpointGroup[] = [
+  "dashboard",
+  "guests",
+  "assortment",
+  "marketing",
+  "staff",
+  "service",
+];
+
+const endpointGroupLabels: Record<EndpointGroup, string> = {
+  dashboard: "Сводный дашборд и выручка",
+  guests: "Гости, CRM и геймификация",
+  assortment: "Ассортимент и склад",
+  marketing: "Маркетинг и тарифы",
+  staff: "Персонал и операции",
+  service: "Сервисные данные",
+};
+
+const endpointStatusLabels: Record<EndpointUsageStatus, string> = {
+  IN_USE: "используется",
+  PLANNED: "запланирован",
+  NEEDS_PARAMETERS: "нужны параметры",
+  WRITE_DECISION: "write-решение",
+};
+
+const langameEndpointMap: EndpointMapItem[] = [
+  {
+    method: "GET",
+    path: "/public_api/all_operations_log/list",
+    group: "dashboard",
+    title: "Операции и игровые списания",
+    description: "База для общей выручки, онлайн-пополнений и сетевой сверки.",
+    usageStatus: "IN_USE",
+    freshnessSource: "guests",
+  },
+  {
+    method: "GET",
+    path: "/public_api/transactions/list",
+    group: "dashboard",
+    title: "Транзакции гостей",
+    description: "Пополнения, движения баланса и гостевой слой отчетности.",
+    usageStatus: "IN_USE",
+    freshnessSource: "guests",
+  },
+  {
+    method: "GET",
+    path: "/public_api/balances/list",
+    group: "dashboard",
+    title: "Состояние балансов",
+    description: "Планируемый источник для сверки денег на балансах гостей.",
+    usageStatus: "PLANNED",
+    freshnessSource: "planned",
+  },
+  {
+    method: "GET",
+    path: "/public_api/log_cash_transaction/list",
+    group: "dashboard",
+    title: "Кассовые операции",
+    description: "Операционный контроль смен и денежной дисциплины.",
+    usageStatus: "IN_USE",
+    freshnessSource: "guests",
+  },
+  {
+    method: "GET",
+    path: "/public_api/working_shifts/list",
+    group: "dashboard",
+    title: "Рабочие смены",
+    description: "Связь выручки, администраторов и сменных итогов.",
+    usageStatus: "IN_USE",
+    freshnessSource: "guests",
+  },
+  {
+    method: "GET",
+    path: "/public_api/guests/list",
+    group: "guests",
+    title: "Справочник гостей",
+    description: "Основной read-only источник для CRM и сегментов гостей.",
+    usageStatus: "IN_USE",
+    freshnessSource: "guests",
+  },
+  {
+    method: "GET",
+    path: "/public_api/guests/{guest_id}",
+    group: "guests",
+    title: "Карточка гостя",
+    description: "План для точечного обновления профиля, телефона и статусов.",
+    usageStatus: "PLANNED",
+    freshnessSource: "planned",
+  },
+  {
+    method: "GET",
+    path: "/public_api/guests/balance",
+    group: "guests",
+    title: "Баланс гостя",
+    description: "Деньги на балансе для CRM, рисков и будущего гостевого логина.",
+    usageStatus: "IN_USE",
+    freshnessSource: "guests",
+  },
+  {
+    method: "GET",
+    path: "/public_api/guests/bonus_balance",
+    group: "guests",
+    title: "Бонусный баланс",
+    description: "Бонусы, промо-эффект и будущие награды миссий.",
+    usageStatus: "IN_USE",
+    freshnessSource: "guests",
+  },
+  {
+    method: "GET",
+    path: "/public_api/guests/groups",
+    group: "guests",
+    title: "Группы гостей",
+    description: "Сегменты CRM, механики маркетинга и правила лутбоксов.",
+    usageStatus: "IN_USE",
+    freshnessSource: "guests",
+  },
+  {
+    method: "GET",
+    path: "/public_api/guests/logs",
+    group: "guests",
+    title: "Логи гостей",
+    description: "Нужна проверка типов событий для миссий, квестов и anti-fraud.",
+    usageStatus: "NEEDS_PARAMETERS",
+    freshnessSource: "guests",
+  },
+  {
+    method: "GET",
+    path: "/public_api/guests/sessions",
+    group: "guests",
+    title: "Игровые сессии",
+    description: "Основа для активности, стартов сессий и будущих лутбоксов.",
+    usageStatus: "IN_USE",
+    freshnessSource: "guests",
+  },
+  {
+    method: "POST",
+    path: "/public_api/guests/search",
+    group: "guests",
+    title: "Точечный поиск гостя",
+    description: "План для ручного поиска, связки телефона и messenger-профиля.",
+    usageStatus: "PLANNED",
+    freshnessSource: "planned",
+  },
+  {
+    method: "GET",
+    path: "/public_api/clubs/list",
+    group: "assortment",
+    title: "Клубы сети",
+    description: "Справочник клубов для всех отчетов, ролей и фильтров.",
+    usageStatus: "IN_USE",
+    freshnessSource: "assortment",
+  },
+  {
+    method: "GET",
+    path: "/public_api/products/list",
+    group: "assortment",
+    title: "Товары Langame",
+    description: "Справочник позиций бара и товарных отчетов.",
+    usageStatus: "IN_USE",
+    freshnessSource: "assortment",
+  },
+  {
+    method: "GET",
+    path: "/public_api/goods/list",
+    group: "assortment",
+    title: "Номенклатура",
+    description: "Связь товарных карточек, себестоимости и ассортимента.",
+    usageStatus: "IN_USE",
+    freshnessSource: "assortment",
+  },
+  {
+    method: "GET",
+    path: "/public_api/products/expense",
+    group: "assortment",
+    title: "Списания и продажи",
+    description: "Факты бара, списаний и расхода товаров по клубам.",
+    usageStatus: "IN_USE",
+    freshnessSource: "assortment",
+  },
+  {
+    method: "GET",
+    path: "/public_api/products/arrival",
+    group: "assortment",
+    title: "Приходы товаров",
+    description: "Следующий источник для поставок, новинок и движения склада.",
+    usageStatus: "PLANNED",
+    freshnessSource: "planned",
+  },
+  {
+    method: "GET",
+    path: "/public_api/global/types_of_pc_in_clubs/list",
+    group: "assortment",
+    title: "Типы ПК в клубах",
+    description: "Карта компьютерных мест для загрузки и тарифных условий.",
+    usageStatus: "IN_USE",
+    freshnessSource: "guests",
+  },
+  {
+    method: "GET",
+    path: "/public_api/global/linking_pc_by_type/list",
+    group: "assortment",
+    title: "Привязка ПК к типам",
+    description: "Связь машин, типов ПК и игровой загрузки по клубам.",
+    usageStatus: "IN_USE",
+    freshnessSource: "guests",
+  },
+  {
+    method: "GET",
+    path: "/public_api/tariffs/by_days/list",
+    group: "marketing",
+    title: "Тарифы по дням",
+    description: "План для условий миссий, промо-наборов и battle pass.",
+    usageStatus: "PLANNED",
+    freshnessSource: "planned",
+  },
+  {
+    method: "GET",
+    path: "/public_api/tariffs/groups/list",
+    group: "marketing",
+    title: "Группы тарифов",
+    description: "Справочник тарифных сегментов для маркетинговых механик.",
+    usageStatus: "PLANNED",
+    freshnessSource: "planned",
+  },
+  {
+    method: "GET",
+    path: "/public_api/tariffs/time_period/list",
+    group: "marketing",
+    title: "Периоды тарифов",
+    description: "Тихие часы, будни, вечерние окна и условия офферов.",
+    usageStatus: "PLANNED",
+    freshnessSource: "planned",
+  },
+  {
+    method: "GET",
+    path: "/public_api/tariffs/types_groups/list",
+    group: "marketing",
+    title: "Типы тарифных групп",
+    description: "Нормализация тарифных правил для конструктора маркетинга.",
+    usageStatus: "PLANNED",
+    freshnessSource: "planned",
+  },
+  {
+    method: "GET",
+    path: "/public_api/users/list",
+    group: "staff",
+    title: "Операторы Langame",
+    description: "План для сверки администраторов, смен и действий.",
+    usageStatus: "PLANNED",
+    freshnessSource: "planned",
+  },
+  {
+    method: "POST",
+    path: "/public_api/pc/manage",
+    group: "staff",
+    title: "Управление ПК",
+    description: "Только будущий write-контур с ролями, audit trail и dry-run.",
+    usageStatus: "WRITE_DECISION",
+    freshnessSource: "write",
+  },
+  {
+    method: "GET",
+    path: "/public_api/config/list",
+    group: "service",
+    title: "Конфигурация Langame",
+    description: "Планируемая сверка настроек источника и доступных модулей.",
+    usageStatus: "PLANNED",
+    freshnessSource: "planned",
+  },
+  {
+    method: "GET",
+    path: "/public_api/puf/profiles/list",
+    group: "service",
+    title: "PUF-профили",
+    description: "План для будущей связки оборудования и профилей клубов.",
+    usageStatus: "PLANNED",
+    freshnessSource: "planned",
+  },
+  {
+    method: "GET",
+    path: "/public_api/routes",
+    group: "service",
+    title: "Карта маршрутов",
+    description: "Диагностика доступности Langame endpoints без раскрытия API key.",
+    usageStatus: "IN_USE",
+    freshnessSource: "routes",
+  },
+  {
+    method: "GET",
+    path: "/public_api/ver/get_adminconsole",
+    group: "service",
+    title: "Версия Admin Console",
+    description: "План для диагностики окружения Langame.",
+    usageStatus: "PLANNED",
+    freshnessSource: "planned",
+  },
+  {
+    method: "GET",
+    path: "/public_api/ver/get_po",
+    group: "service",
+    title: "Версия ПО",
+    description: "План для проверки совместимости источников.",
+    usageStatus: "PLANNED",
+    freshnessSource: "planned",
+  },
+  {
+    method: "GET",
+    path: "/public_api/ver/get_terminal",
+    group: "service",
+    title: "Версия терминала",
+    description: "План для диагностики платежных и терминальных сценариев.",
+    usageStatus: "PLANNED",
+    freshnessSource: "planned",
+  },
+];
 
 const syncPeriodOptions: { value: SyncPeriod; label: string; caption: string }[] = [
   {
@@ -125,6 +485,12 @@ export function LangameSyncPanel({
   const [success, setSuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [routeDiagnostics, setRouteDiagnostics] =
+    useState<RouteDiagnosticsResult | null>(null);
+  const [routeDiagnosticsStatus, setRouteDiagnosticsStatus] =
+    useState<RouteDiagnosticsStatus>("idle");
+  const [routeDiagnosticsError, setRouteDiagnosticsError] =
+    useState<string | null>(null);
 
   useEffect(() => {
     let ignore = false;
@@ -230,6 +596,35 @@ export function LangameSyncPanel({
 
     if (response.ok) {
       setSettings((await response.json()) as LangameSettings);
+    }
+  }
+
+  async function checkRouteDiagnostics() {
+    setRouteDiagnosticsStatus("loading");
+    setRouteDiagnosticsError(null);
+
+    try {
+      const response = await fetch(
+        "/api/integrations/langame/routes-diagnostics",
+        {
+          cache: "no-store",
+        },
+      );
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(getErrorMessage(data));
+      }
+
+      setRouteDiagnostics(data as RouteDiagnosticsResult);
+      setRouteDiagnosticsStatus("success");
+    } catch (routeError) {
+      setRouteDiagnosticsStatus("error");
+      setRouteDiagnosticsError(
+        routeError instanceof Error
+          ? routeError.message
+          : "Не удалось проверить карту маршрутов Langame",
+      );
     }
   }
 
@@ -345,6 +740,14 @@ export function LangameSyncPanel({
 
       <SyncHealthSummary
         latestGuestStatus={latestGuestStatus}
+        settings={settings}
+      />
+      <EndpointMapPanel
+        diagnostics={routeDiagnostics}
+        diagnosticsError={routeDiagnosticsError}
+        diagnosticsStatus={routeDiagnosticsStatus}
+        latestGuestStatus={latestGuestStatus}
+        onCheckDiagnostics={checkRouteDiagnostics}
         settings={settings}
       />
       <LatestGuestDiagnostics status={latestGuestStatus} />
@@ -644,6 +1047,227 @@ function SyncHealthSummary({
   );
 }
 
+function EndpointMapPanel({
+  settings,
+  latestGuestStatus,
+  diagnostics,
+  diagnosticsStatus,
+  diagnosticsError,
+  onCheckDiagnostics,
+}: {
+  settings: LangameSettings;
+  latestGuestStatus: GuestSyncStatus | null;
+  diagnostics: RouteDiagnosticsResult | null;
+  diagnosticsStatus: RouteDiagnosticsStatus;
+  diagnosticsError: string | null;
+  onCheckDiagnostics: () => void;
+}) {
+  const availableRouteKeys = getAvailableRouteKeys(diagnostics);
+  const endpointsByGroup = endpointGroupOrder.map((group) => ({
+    group,
+    endpoints: langameEndpointMap.filter((endpoint) => endpoint.group === group),
+  }));
+  const inUseCount = langameEndpointMap.filter(
+    (endpoint) => endpoint.usageStatus === "IN_USE",
+  ).length;
+  const plannedCount = langameEndpointMap.filter(
+    (endpoint) =>
+      endpoint.usageStatus === "PLANNED" ||
+      endpoint.usageStatus === "NEEDS_PARAMETERS",
+  ).length;
+  const writeCount = langameEndpointMap.filter(
+    (endpoint) => endpoint.usageStatus === "WRITE_DECISION",
+  ).length;
+  const availableCount = diagnostics
+    ? langameEndpointMap.filter((endpoint) =>
+        availableRouteKeys.has(routeKey(endpoint.method, endpoint.path)),
+      ).length
+    : null;
+  const latestAssortmentJob = settings.latestSuccessfulSyncJob;
+  const latestGuestRun = latestGuestStatus?.latestRun ?? null;
+  const successfulDiagnosticSources =
+    diagnostics?.sources.filter((source) => source.status === "SUCCESS") ?? [];
+  const failedDiagnosticSources =
+    diagnostics?.sources.filter((source) => source.status === "FAILED") ?? [];
+
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300">
+            Карта Langame API
+          </p>
+          <h2 className="mt-1 text-lg font-semibold text-zinc-950 dark:text-zinc-50">
+            Endpoints, свежесть данных и статус включения
+          </h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-500 dark:text-zinc-400">
+            Раздел показывает, какие маршруты уже используются в LeetPlus, какие
+            запланированы для CRM, маркетинга, ассортимента и персонала, а какие
+            требуют отдельного write-решения.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onCheckDiagnostics}
+          disabled={diagnosticsStatus === "loading" || !settings.hasApiKey}
+          className="rounded-full border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-900 transition hover:border-zinc-950 hover:bg-zinc-950 hover:text-white disabled:cursor-not-allowed disabled:border-zinc-200 disabled:text-zinc-400 dark:border-zinc-700 dark:text-zinc-100 dark:hover:border-emerald-400 dark:hover:bg-emerald-400 dark:hover:text-zinc-950 dark:disabled:border-zinc-800 dark:disabled:text-zinc-500"
+        >
+          {diagnosticsStatus === "loading"
+            ? "Проверяем маршруты..."
+            : "Проверить доступность маршрутов"}
+        </button>
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <SyncHealthMetric
+          detail="из подтвержденной карты Langame API"
+          label="Endpoints"
+          value={langameEndpointMap.length}
+        />
+        <SyncHealthMetric
+          detail="уже входят в текущий sync-контур"
+          label="Используются"
+          value={inUseCount}
+        />
+        <SyncHealthMetric
+          detail="следующие источники для развития модулей"
+          label="В плане"
+          value={plannedCount}
+        />
+        <SyncHealthMetric
+          detail="требует ролей, аудита и отдельного включения"
+          label="Write"
+          tone="warning"
+          value={writeCount}
+        />
+        <SyncHealthMetric
+          detail={
+            diagnostics
+              ? `успешных источников: ${successfulDiagnosticSources.length}`
+              : "нажмите проверку маршрутов"
+          }
+          label="Доступно"
+          value={availableCount === null ? "не проверено" : availableCount}
+        />
+      </div>
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-3">
+        <EndpointFreshnessCard
+          detail={
+            latestAssortmentJob
+              ? latestAssortmentJob.domain
+              : "успешного запуска пока нет"
+          }
+          label="Ассортимент"
+          value={
+            latestAssortmentJob
+              ? formatDateTime(getSyncJobTime(latestAssortmentJob))
+              : "не обновлялся"
+          }
+        />
+        <EndpointFreshnessCard
+          detail={
+            latestGuestRun
+              ? `${latestGuestRun.domain}, ${syncStatusLabel(latestGuestRun.status)}`
+              : "гостевого запуска пока нет"
+          }
+          label="Гости и операции"
+          value={
+            latestGuestRun
+              ? formatDateTime(latestGuestRun.finishedAt ?? latestGuestRun.startedAt)
+              : "не обновлялись"
+          }
+        />
+        <EndpointFreshnessCard
+          detail={
+            diagnostics
+              ? `источников: ${diagnostics.sources.length}, ошибок: ${failedDiagnosticSources.length}`
+              : "проверка выполняется вручную"
+          }
+          label="Маршруты"
+          tone={failedDiagnosticSources.length > 0 ? "warning" : "neutral"}
+          value={diagnostics ? formatDateTime(diagnostics.checkedAt) : "не проверялись"}
+        />
+      </div>
+
+      {diagnosticsError ? (
+        <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-200">
+          {diagnosticsError}
+        </p>
+      ) : null}
+
+      <div className="mt-4 space-y-4">
+        {endpointsByGroup.map(({ group, endpoints }) => (
+          <div
+            key={group}
+            className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+                {endpointGroupLabels[group]}
+              </h3>
+              <span className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-zinc-500 dark:bg-zinc-950 dark:text-zinc-400">
+                {endpoints.length} endpoints
+              </span>
+            </div>
+
+            <div className="mt-3 grid gap-2 xl:grid-cols-2">
+              {endpoints.map((endpoint) => {
+                const availability = getEndpointAvailability(
+                  endpoint,
+                  availableRouteKeys,
+                  diagnostics,
+                );
+
+                return (
+                  <div
+                    key={`${endpoint.method}-${endpoint.path}`}
+                    className="rounded-md border border-zinc-200 bg-white px-3 py-3 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span
+                            className={[
+                              "rounded-full px-2 py-0.5 text-[11px] font-semibold",
+                              endpoint.method === "GET"
+                                ? "bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-200"
+                                : "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-200",
+                            ].join(" ")}
+                          >
+                            {endpoint.method}
+                          </span>
+                          <p className="font-medium text-zinc-950 dark:text-zinc-50">
+                            {endpoint.title}
+                          </p>
+                        </div>
+                        <p className="mt-1 break-all font-mono text-xs text-zinc-500 dark:text-zinc-400">
+                          {endpoint.path}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap justify-end gap-1.5">
+                        <span className={endpointStatusBadgeClass(endpoint.usageStatus)}>
+                          {endpointStatusLabels[endpoint.usageStatus]}
+                        </span>
+                        <span className={availabilityBadgeClass(availability)}>
+                          {availabilityLabel(availability)}
+                        </span>
+                      </div>
+                    </div>
+                    <p className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                      {endpoint.description}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function LatestGuestDiagnostics({
   status,
 }: {
@@ -928,6 +1552,135 @@ function GuestSyncHistory({ status }: { status: GuestSyncStatus | null }) {
       )}
     </div>
   );
+}
+
+type EndpointAvailability = "available" | "missing" | "unchecked";
+
+function EndpointFreshnessCard({
+  label,
+  value,
+  detail,
+  tone = "neutral",
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  tone?: "neutral" | "warning";
+}) {
+  return (
+    <div
+      className={[
+        "rounded-md border bg-zinc-50 px-3 py-3 text-sm dark:bg-zinc-900/50",
+        tone === "warning"
+          ? "border-amber-200 dark:border-amber-900/70"
+          : "border-zinc-200 dark:border-zinc-800",
+      ].join(" ")}
+    >
+      <p className="text-xs font-medium uppercase text-zinc-500 dark:text-zinc-400">
+        {label}
+      </p>
+      <p className="mt-1 font-semibold text-zinc-950 dark:text-zinc-50">
+        {value}
+      </p>
+      <p className="mt-1 truncate text-xs text-zinc-500 dark:text-zinc-400" title={detail}>
+        {detail}
+      </p>
+    </div>
+  );
+}
+
+function getAvailableRouteKeys(diagnostics: RouteDiagnosticsResult | null) {
+  const keys = new Set<string>();
+
+  diagnostics?.sources.forEach((source) => {
+    if (source.status !== "SUCCESS") {
+      return;
+    }
+
+    source.routes.forEach((route) => {
+      const method = route.method?.toUpperCase();
+
+      if ((method !== "GET" && method !== "POST") || !route.path) {
+        return;
+      }
+
+      keys.add(routeKey(method, route.path));
+    });
+  });
+
+  return keys;
+}
+
+function getEndpointAvailability(
+  endpoint: EndpointMapItem,
+  availableRouteKeys: Set<string>,
+  diagnostics: RouteDiagnosticsResult | null,
+): EndpointAvailability {
+  if (!diagnostics) {
+    return "unchecked";
+  }
+
+  return availableRouteKeys.has(routeKey(endpoint.method, endpoint.path))
+    ? "available"
+    : "missing";
+}
+
+function routeKey(method: EndpointMethod, path: string) {
+  return `${method}:${normalizeRoutePath(path)}`;
+}
+
+function normalizeRoutePath(path: string) {
+  const normalized = path
+    .trim()
+    .replace(/^https?:\/\/[^/]+/i, "")
+    .replace(/^\/public_api/i, "")
+    .replace(/\{([^}:]+):[^}]+\}/g, "{$1}");
+
+  return normalized.startsWith("/") ? normalized : `/${normalized}`;
+}
+
+function endpointStatusBadgeClass(status: EndpointUsageStatus) {
+  const base = "rounded-full px-2 py-0.5 text-[11px] font-medium";
+
+  if (status === "IN_USE") {
+    return `${base} bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200`;
+  }
+
+  if (status === "NEEDS_PARAMETERS") {
+    return `${base} bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-200`;
+  }
+
+  if (status === "WRITE_DECISION") {
+    return `${base} bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-200`;
+  }
+
+  return `${base} bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300`;
+}
+
+function availabilityBadgeClass(availability: EndpointAvailability) {
+  const base = "rounded-full px-2 py-0.5 text-[11px] font-medium";
+
+  if (availability === "available") {
+    return `${base} bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200`;
+  }
+
+  if (availability === "missing") {
+    return `${base} bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-200`;
+  }
+
+  return `${base} bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300`;
+}
+
+function availabilityLabel(availability: EndpointAvailability) {
+  if (availability === "available") {
+    return "доступен";
+  }
+
+  if (availability === "missing") {
+    return "не найден";
+  }
+
+  return "не проверен";
 }
 
 function getLatestSyncJobsByDomain(jobs: LangameSettings["syncJobs"]) {

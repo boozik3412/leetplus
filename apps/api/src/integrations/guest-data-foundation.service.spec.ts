@@ -566,6 +566,61 @@ describe('GuestDataFoundationService', () => {
     expect(prisma.guestLog.upsert).toHaveBeenCalledTimes(1);
   });
 
+  it('returns guest log diagnostics in sync status', async () => {
+    const latestRun = {
+      domain: 'club.example',
+      status: 'SUCCESS',
+      startedAt: new Date('2026-05-20T10:00:00.000Z'),
+      finishedAt: new Date('2026-05-20T10:05:00.000Z'),
+      dateFrom: new Date('2026-05-01T00:00:00.000Z'),
+      dateTo: new Date('2026-05-01T23:59:59.999Z'),
+      guestsCount: 1,
+      sessionsCount: 1,
+      transactionsCount: 1,
+      productSalesLinked: 1,
+      errorMessage: null,
+      profile: {
+        endpointErrors: {},
+        guestLogs: {
+          total: 3,
+          withoutGuestId: 1,
+          invalidDates: 1,
+          typeCounts: {
+            login: 2,
+            bonus: 1,
+          },
+        },
+        pcTypesInClubs: {
+          total: 0,
+          fieldCounts: {},
+          candidateFields: {},
+        },
+        pcTypeLinks: {
+          total: 0,
+          fieldCounts: {},
+          candidateFields: {},
+        },
+      },
+    };
+
+    prisma.guestDataProfileRun.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(latestRun);
+    prisma.guestDataProfileRun.findMany.mockResolvedValue([latestRun]);
+
+    const status = await service.getTenantSyncStatus(user);
+
+    expect(status.latestRun?.diagnostics.guestLogs).toEqual({
+      total: 3,
+      withoutGuestId: 1,
+      invalidDates: 1,
+      typeCounts: {
+        login: 2,
+        bonus: 1,
+      },
+    });
+  });
+
   it('rejects profiling periods longer than ninety days', async () => {
     await expect(
       service.syncTenant(user, {

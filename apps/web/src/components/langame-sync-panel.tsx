@@ -37,9 +37,17 @@ type GuestSyncRun = {
   errorMessage: string | null;
   diagnostics: {
     endpointErrors: Record<string, string>;
+    guestLogs: GuestLogDiagnostics;
     pcTypesInClubs: FieldDiagnostics;
     pcTypeLinks: FieldDiagnostics;
   };
+};
+
+type GuestLogDiagnostics = {
+  total: number;
+  withoutGuestId: number;
+  invalidDates: number;
+  typeCounts: Record<string, number>;
 };
 
 type FieldDiagnostics = {
@@ -476,6 +484,7 @@ export function LangameSyncPanel({
   const [syncPeriod, setSyncPeriod] = useState<SyncPeriod>("last7");
   const [syncDateFrom, setSyncDateFrom] = useState(shiftDateInput(today, -6));
   const [syncDateTo, setSyncDateTo] = useState(today);
+  const [includeGuestLogs, setIncludeGuestLogs] = useState(false);
   const [syncResult, setSyncResult] = useState<CombinedSyncResult | null>(null);
   const [latestGuestStatus, setLatestGuestStatus] =
     useState<GuestSyncStatus | null>(null);
@@ -536,7 +545,7 @@ export function LangameSyncPanel({
     try {
       const [assortmentResult, guestResult] = await Promise.allSettled([
         syncAssortmentData(syncDateFrom, syncDateTo),
-        syncGuestFoundation(syncDateFrom, syncDateTo),
+        syncGuestFoundation(syncDateFrom, syncDateTo, includeGuestLogs),
       ]);
       const assortment =
         assortmentResult.status === "fulfilled" ? assortmentResult.value : null;
@@ -714,6 +723,25 @@ export function LangameSyncPanel({
             </label>
           </div>
         </div>
+
+        <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm transition hover:border-zinc-300 hover:bg-white dark:border-zinc-800 dark:bg-zinc-900/60 dark:hover:border-zinc-700 dark:hover:bg-zinc-900">
+          <input
+            type="checkbox"
+            checked={includeGuestLogs}
+            onChange={(event) => setIncludeGuestLogs(event.target.checked)}
+            className="mt-1 h-4 w-4 rounded border-zinc-300 text-emerald-600 focus:ring-emerald-500 dark:border-zinc-700"
+          />
+          <span>
+            <span className="block font-semibold text-zinc-950 dark:text-zinc-50">
+              Проверить `guests/logs` для геймификации
+            </span>
+            <span className="mt-1 block leading-5 text-zinc-600 dark:text-zinc-400">
+              Опционально загрузит типы событий гостя за выбранный период для
+              миссий, лутбоксов, battle pass и anti-fraud. Обычная
+              синхронизация остается легче, если флаг выключен.
+            </span>
+          </span>
+        </label>
 
         {isSyncing ? (
           <SyncProgress
@@ -1318,30 +1346,54 @@ function PcDiagnostics({
   const endpointErrors = Object.entries(diagnostics.endpointErrors);
   const pcTypeFields = Object.keys(diagnostics.pcTypesInClubs.fieldCounts);
   const pcLinkFields = Object.keys(diagnostics.pcTypeLinks.fieldCounts);
+  const guestLogTypes = formatTypeCounts(diagnostics.guestLogs.typeCounts);
 
   return (
     <div className={className}>
-      <div className="grid gap-3 md:grid-cols-3">
-      <DiagnosticCard
-        title="Типы ПК в клубах"
-        value={diagnostics.pcTypesInClubs.total}
-        details={pcTypeFields.length > 0 ? pcTypeFields.slice(0, 6).join(", ") : "полей нет"}
-      />
-      <DiagnosticCard
-        title="Связи ПК с типами"
-        value={diagnostics.pcTypeLinks.total}
-        details={pcLinkFields.length > 0 ? pcLinkFields.slice(0, 6).join(", ") : "полей нет"}
-      />
-      <DiagnosticCard
-        title="Ошибки endpoints"
-        value={endpointErrors.length}
-        details={
-          endpointErrors.length > 0
-            ? endpointErrors.map(([key]) => key).slice(0, 3).join(", ")
-            : "ошибок нет"
-        }
-        tone={endpointErrors.length > 0 ? "danger" : "neutral"}
-      />
+      <div className="grid gap-3 md:grid-cols-4">
+        <DiagnosticCard
+          title="Типы ПК в клубах"
+          value={diagnostics.pcTypesInClubs.total}
+          details={
+            pcTypeFields.length > 0
+              ? pcTypeFields.slice(0, 6).join(", ")
+              : "полей нет"
+          }
+        />
+        <DiagnosticCard
+          title="Связи ПК с типами"
+          value={diagnostics.pcTypeLinks.total}
+          details={
+            pcLinkFields.length > 0
+              ? pcLinkFields.slice(0, 6).join(", ")
+              : "полей нет"
+          }
+        />
+        <DiagnosticCard
+          title="Логи гостей"
+          value={diagnostics.guestLogs.total}
+          details={
+            guestLogTypes.length > 0
+              ? guestLogTypes
+              : "выключены или событий нет"
+          }
+          tone={
+            diagnostics.guestLogs.invalidDates > 0 ||
+            diagnostics.guestLogs.withoutGuestId > 0
+              ? "danger"
+              : "neutral"
+          }
+        />
+        <DiagnosticCard
+          title="Ошибки endpoints"
+          value={endpointErrors.length}
+          details={
+            endpointErrors.length > 0
+              ? endpointErrors.map(([key]) => key).slice(0, 3).join(", ")
+              : "ошибок нет"
+          }
+          tone={endpointErrors.length > 0 ? "danger" : "neutral"}
+        />
       </div>
       {endpointErrors.length > 0 ? (
         <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-3 text-xs text-red-800 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-100">
@@ -1370,6 +1422,14 @@ function PcDiagnostics({
       ) : null}
     </div>
   );
+}
+
+function formatTypeCounts(typeCounts: Record<string, number>) {
+  return Object.entries(typeCounts)
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 5)
+    .map(([type, count]) => `${type}: ${count}`)
+    .join(", ");
 }
 
 function compactEndpointError(message: string) {
@@ -1873,7 +1933,11 @@ async function syncAssortmentData(dateFrom: string, dateTo: string) {
   return data as SyncResult;
 }
 
-async function syncGuestFoundation(dateFrom: string, dateTo: string) {
+async function syncGuestFoundation(
+  dateFrom: string,
+  dateTo: string,
+  includeGuestLogs: boolean,
+) {
   const response = await fetch(
     "/api/integrations/langame/guests/foundation/sync/start",
     {
@@ -1884,6 +1948,7 @@ async function syncGuestFoundation(dateFrom: string, dateTo: string) {
       body: JSON.stringify({
         dateFrom,
         dateTo,
+        includeGuestLogs,
       }),
     },
   );

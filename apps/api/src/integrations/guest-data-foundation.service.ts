@@ -86,6 +86,7 @@ export type GuestDataFoundationStatusResult = {
     errorMessage: string | null;
     diagnostics: {
       endpointErrors: Record<string, string>;
+      guestLogs: GuestLogDiagnostics;
       pcTypesInClubs: FieldDiagnostics;
       pcTypeLinks: FieldDiagnostics;
     };
@@ -107,6 +108,7 @@ type GuestDataFoundationRunStatus = {
   errorMessage: string | null;
   diagnostics: {
     endpointErrors: Record<string, string>;
+    guestLogs: GuestLogDiagnostics;
     pcTypesInClubs: FieldDiagnostics;
     pcTypeLinks: FieldDiagnostics;
   };
@@ -151,6 +153,13 @@ type FieldDiagnostics = {
   total: number;
   fieldCounts: Record<string, number>;
   candidateFields: Record<string, number>;
+};
+
+type GuestLogDiagnostics = {
+  total: number;
+  withoutGuestId: number;
+  invalidDates: number;
+  typeCounts: Record<string, number>;
 };
 
 type StaffOperatorHint = {
@@ -527,10 +536,22 @@ export class GuestDataFoundationService {
 
     return {
       endpointErrors: this.stringRecord(profileRecord.endpointErrors),
+      guestLogs: this.guestLogDiagnosticsFromProfile(profileRecord.guestLogs),
       pcTypesInClubs: this.fieldDiagnosticsFromProfile(
         profileRecord.pcTypesInClubs,
       ),
       pcTypeLinks: this.fieldDiagnosticsFromProfile(profileRecord.pcTypeLinks),
+    };
+  }
+
+  private guestLogDiagnosticsFromProfile(value: unknown): GuestLogDiagnostics {
+    const record = this.jsonRecord(value);
+
+    return {
+      total: this.numberFromProfile(record.total),
+      withoutGuestId: this.numberFromProfile(record.withoutGuestId),
+      invalidDates: this.numberFromProfile(record.invalidDates),
+      typeCounts: this.numberRecord(record.typeCounts),
     };
   }
 

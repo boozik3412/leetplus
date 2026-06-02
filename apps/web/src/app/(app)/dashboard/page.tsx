@@ -10,7 +10,7 @@ import {
   type GuestCrmTaskReport,
   type GuestsSummary,
 } from "@/lib/guests";
-import { getOperationalReport } from "@/lib/reports";
+import { getOperationalReport, type OperationalReport } from "@/lib/reports";
 import { getStores } from "@/lib/stores";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -212,6 +212,68 @@ type BusinessSignalGroup = {
   signals: BusinessSignal[];
 };
 
+type DashboardGuestsSummary = Pick<
+  GuestsSummary,
+  | "activeGuests"
+  | "newGuests"
+  | "repeatGuests"
+  | "riskGuests"
+  | "playHours"
+  | "computerCount"
+  | "playCapacityHours"
+  | "loadPercent"
+  | "transactionAmount"
+  | "barRevenue"
+>;
+
+type DashboardCrmTaskReport = Pick<GuestCrmTaskReport, "summary">;
+
+type DashboardOperationalReport = Pick<
+  OperationalReport,
+  "outOfStockRiskProducts" | "productsWithoutSales"
+>;
+
+const emptyGuestsSummary: DashboardGuestsSummary = {
+  activeGuests: 0,
+  newGuests: 0,
+  repeatGuests: 0,
+  riskGuests: 0,
+  playHours: 0,
+  computerCount: null,
+  playCapacityHours: null,
+  loadPercent: null,
+  transactionAmount: 0,
+  barRevenue: 0,
+};
+
+const emptyCrmTaskReport: DashboardCrmTaskReport = {
+  summary: {
+    open: 0,
+    inProgress: 0,
+    done: 0,
+    canceled: 0,
+    overdue: 0,
+    withAssignee: 0,
+    withoutAssignee: 0,
+  },
+};
+
+const emptyOperationalReport: DashboardOperationalReport = {
+  outOfStockRiskProducts: [],
+  productsWithoutSales: [],
+};
+
+async function safeDashboardValue<T>(
+  promise: Promise<T>,
+  fallback: T,
+): Promise<T> {
+  try {
+    return await promise;
+  } catch {
+    return fallback;
+  }
+}
+
 function dashboardScopedParams(
   summary: Awaited<ReturnType<typeof getDashboardSummary>>,
 ) {
@@ -255,8 +317,8 @@ function buildBusinessSignalGroups({
   productRevenueShare,
 }: {
   summary: Awaited<ReturnType<typeof getDashboardSummary>>;
-  guestsSummary: GuestsSummary;
-  crmTaskReport: GuestCrmTaskReport;
+  guestsSummary: DashboardGuestsSummary;
+  crmTaskReport: DashboardCrmTaskReport;
   latestTrend: { noSalesSkuCount14: number } | null;
   assortmentRiskAmount: number;
   assortmentRiskSkuCount: number;
@@ -416,26 +478,38 @@ export default async function DashboardPage({
     guestsSummary,
     crmTaskReport,
   ] = await Promise.all([
-    getOperationalReport({
-      from: summary.periodFrom,
-      to: summary.periodTo,
-      storeId: operationalStoreId,
-    }),
-    getOperationalReport({
-      ...lastFullDaysRange(21),
-      storeId: operationalStoreId,
-    }),
-    getGuestsSummary({
-      dateFrom: summary.periodFrom,
-      dateTo: summary.periodTo,
-      storeId: operationalStoreId,
-    }),
-    getGuestCrmTaskReport({
-      status: "all",
-      sort: "dueAt",
-      direction: "asc",
-      pageSize: "50",
-    }),
+    safeDashboardValue(
+      getOperationalReport({
+        from: summary.periodFrom,
+        to: summary.periodTo,
+        storeId: operationalStoreId,
+      }),
+      emptyOperationalReport,
+    ),
+    safeDashboardValue(
+      getOperationalReport({
+        ...lastFullDaysRange(21),
+        storeId: operationalStoreId,
+      }),
+      emptyOperationalReport,
+    ),
+    safeDashboardValue(
+      getGuestsSummary({
+        dateFrom: summary.periodFrom,
+        dateTo: summary.periodTo,
+        storeId: operationalStoreId,
+      }),
+      emptyGuestsSummary,
+    ),
+    safeDashboardValue(
+      getGuestCrmTaskReport({
+        status: "all",
+        sort: "dueAt",
+        direction: "asc",
+        pageSize: "50",
+      }),
+      emptyCrmTaskReport,
+    ),
   ]);
   const assortmentRisk = buildAssortmentRiskSummary({
     oosRows: periodOperationalReport.outOfStockRiskProducts,
@@ -541,7 +615,7 @@ function ExecutiveOverviewPanel({
   productRevenueShare,
 }: {
   summary: Awaited<ReturnType<typeof getDashboardSummary>>;
-  guestsSummary: GuestsSummary;
+  guestsSummary: DashboardGuestsSummary;
   assortmentRiskAmount: number;
   assortmentRiskSkuCount: number;
   productRevenueShare: number | null;

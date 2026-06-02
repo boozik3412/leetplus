@@ -236,6 +236,24 @@ type EndpointProfileDiagnosticsResult = {
   sources: EndpointProfileDiagnosticsSource[];
 };
 
+type EndpointProfileHealthStatus =
+  | "ready"
+  | "partial"
+  | "stale"
+  | "failed"
+  | "unchecked";
+
+type EndpointProfileHealth = {
+  endpoint: EndpointProfileOption;
+  status: EndpointProfileHealthStatus;
+  checkedCount: number;
+  expectedCount: number;
+  successCount: number;
+  errorCount: number;
+  latestCheckedAt: string | null;
+  rowCount: number;
+};
+
 type EndpointMapItem = {
   method: EndpointMethod;
   path: string;
@@ -254,6 +272,7 @@ type EndpointMapItem = {
 
 const guestSyncPollIntervalMs = 4000;
 const guestSyncPollAttempts = 75;
+const endpointProfileFreshMs = 24 * 60 * 60 * 1000;
 
 const endpointGroupOrder: EndpointGroup[] = [
   "dashboard",
@@ -1316,6 +1335,11 @@ export function LangameSyncPanel({
         onCheckDiagnostics={checkRouteDiagnostics}
         settings={settings}
       />
+      <EndpointProfileQualityOverview
+        selectedProfileKey={endpointProfileKey}
+        settings={settings}
+        onSelectProfileKey={setEndpointProfileKey}
+      />
       <EndpointProfileDiagnosticsPanel
         clubId={endpointProfileClubId}
         dateFrom={syncDateFrom}
@@ -1863,6 +1887,137 @@ function EndpointMapPanel({
                       {endpoint.description}
                     </p>
                   </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function EndpointProfileQualityOverview({
+  settings,
+  selectedProfileKey,
+  onSelectProfileKey,
+}: {
+  settings: LangameSettings;
+  selectedProfileKey: EndpointProfileKey;
+  onSelectProfileKey: (key: EndpointProfileKey) => void;
+}) {
+  const profiles = buildEndpointProfileHealth(settings);
+  const checkedProfiles = profiles.filter(
+    (profile) => profile.status !== "unchecked",
+  );
+  const readyProfiles = profiles.filter((profile) => profile.status === "ready");
+  const staleProfiles = profiles.filter((profile) => profile.status === "stale");
+  const problemProfiles = profiles.filter(
+    (profile) =>
+      profile.status === "partial" || profile.status === "failed",
+  );
+  const profilesByGroup = endpointGroupOrder
+    .map((group) => ({
+      group,
+      profiles: profiles.filter((profile) => profile.endpoint.group === group),
+    }))
+    .filter(({ profiles: groupProfiles }) => groupProfiles.length > 0);
+
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300">
+            Качество данных Langame
+          </p>
+          <h2 className="mt-1 text-lg font-semibold text-zinc-950 dark:text-zinc-50">
+            Production-профили endpoint
+          </h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-500 dark:text-zinc-400">
+            Это сохраненные результаты ручных проверок, а не живой запрос при
+            открытии страницы. Их используем как gate перед переносом endpoint
+            в snapshot-джобы и бизнес-расчеты.
+          </p>
+        </div>
+        <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+          профиль: {checkedProfiles.length}/{profiles.length}
+        </span>
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <SyncHealthMetric
+          detail="endpoint с сохраненным production-профилем"
+          label="Проверено"
+          value={checkedProfiles.length}
+        />
+        <SyncHealthMetric
+          detail="все активные источники успешны и профиль свежий"
+          label="Готово к snapshot"
+          value={readyProfiles.length}
+        />
+        <SyncHealthMetric
+          detail="профиль старше 24 часов, нужна перепроверка"
+          label="Устарело"
+          tone={staleProfiles.length > 0 ? "warning" : "neutral"}
+          value={staleProfiles.length}
+        />
+        <SyncHealthMetric
+          detail="есть ошибки или проверены не все активные источники"
+          label="Проблемы"
+          tone={problemProfiles.length > 0 ? "danger" : "neutral"}
+          value={problemProfiles.length}
+        />
+      </div>
+
+      <div className="mt-4 grid gap-3 xl:grid-cols-2">
+        {profilesByGroup.map(({ group, profiles: groupProfiles }) => (
+          <div
+            key={group}
+            className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+                {endpointGroupLabels[group]}
+              </h3>
+              <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                {groupProfiles.filter((profile) => profile.status !== "unchecked").length}/
+                {groupProfiles.length}
+              </span>
+            </div>
+
+            <div className="mt-3 space-y-2">
+              {groupProfiles.map((profile) => {
+                const isSelected = profile.endpoint.key === selectedProfileKey;
+
+                return (
+                  <button
+                    key={profile.endpoint.key}
+                    type="button"
+                    onClick={() => onSelectProfileKey(profile.endpoint.key)}
+                    className={[
+                      "w-full rounded-md border px-3 py-2 text-left text-sm transition",
+                      isSelected
+                        ? "border-emerald-500 bg-emerald-50 dark:border-emerald-500/80 dark:bg-emerald-950/30"
+                        : "border-zinc-200 bg-white hover:border-zinc-300 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-zinc-700 dark:hover:bg-zinc-900",
+                    ].join(" ")}
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <p className="font-medium text-zinc-950 dark:text-zinc-50">
+                          {profile.endpoint.title}
+                        </p>
+                        <p className="mt-1 break-all font-mono text-xs text-zinc-500 dark:text-zinc-400">
+                          {profile.endpoint.path}
+                        </p>
+                      </div>
+                      <span className={endpointProfileHealthBadgeClass(profile.status)}>
+                        {endpointProfileHealthLabel(profile.status)}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                      {endpointProfileHealthDetail(profile)}
+                    </p>
+                  </button>
                 );
               })}
             </div>
@@ -3001,6 +3156,130 @@ function EndpointFreshnessCard({
       </p>
     </div>
   );
+}
+
+function buildEndpointProfileHealth(
+  settings: LangameSettings,
+): EndpointProfileHealth[] {
+  const activeSourceCount = settings.sources.filter(
+    (source) => source.isActive,
+  ).length;
+  const now = Date.now();
+
+  return endpointProfileOptions.map((endpoint) => {
+    const profiles = settings.endpointProfiles.filter(
+      (profile) => profile.endpointKey === endpoint.key,
+    );
+    const checkedCount = profiles.length;
+    const expectedCount = Math.max(activeSourceCount, checkedCount);
+    const successCount = profiles.filter(
+      (profile) => profile.status === "SUCCESS",
+    ).length;
+    const errorCount = profiles.filter(
+      (profile) => profile.status !== "SUCCESS",
+    ).length;
+    const latestTime = profiles.reduce((latest, profile) => {
+      const time = new Date(profile.checkedAt).getTime();
+
+      return Number.isNaN(time) ? latest : Math.max(latest, time);
+    }, 0);
+    const latestCheckedAt =
+      latestTime > 0 ? new Date(latestTime).toISOString() : null;
+    const rowCount = profiles.reduce(
+      (sum, profile) => sum + profile.rowCount,
+      0,
+    );
+    let status: EndpointProfileHealthStatus = "ready";
+
+    if (checkedCount === 0) {
+      status = "unchecked";
+    } else if (successCount === 0) {
+      status = "failed";
+    } else if (
+      errorCount > 0 ||
+      (expectedCount > 0 && successCount < expectedCount)
+    ) {
+      status = "partial";
+    } else if (latestTime > 0 && now - latestTime > endpointProfileFreshMs) {
+      status = "stale";
+    }
+
+    return {
+      endpoint,
+      status,
+      checkedCount,
+      expectedCount,
+      successCount,
+      errorCount,
+      latestCheckedAt,
+      rowCount,
+    };
+  });
+}
+
+function endpointProfileHealthBadgeClass(status: EndpointProfileHealthStatus) {
+  const base = "rounded-full px-2 py-0.5 text-[11px] font-medium";
+
+  if (status === "ready") {
+    return `${base} bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200`;
+  }
+
+  if (status === "partial" || status === "stale") {
+    return `${base} bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-200`;
+  }
+
+  if (status === "failed") {
+    return `${base} bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-200`;
+  }
+
+  return `${base} bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300`;
+}
+
+function endpointProfileHealthLabel(status: EndpointProfileHealthStatus) {
+  if (status === "ready") {
+    return "готов";
+  }
+
+  if (status === "partial") {
+    return "частично";
+  }
+
+  if (status === "stale") {
+    return "устарел";
+  }
+
+  if (status === "failed") {
+    return "ошибка";
+  }
+
+  return "не проверен";
+}
+
+function endpointProfileHealthDetail(profile: EndpointProfileHealth) {
+  if (profile.status === "unchecked") {
+    return "Production-профиля пока нет. Выберите endpoint и запустите ручную проверку.";
+  }
+
+  const expectedCount = profile.expectedCount || profile.checkedCount;
+  const checkedAt = profile.latestCheckedAt
+    ? formatDateTime(profile.latestCheckedAt)
+    : "без даты";
+  const sourceText = `источники: ${profile.successCount}/${expectedCount}`;
+  const rowsText = `строк: ${profile.rowCount}`;
+
+  if (profile.status === "failed") {
+    return `${sourceText}, ошибок: ${profile.errorCount}, ${checkedAt}`;
+  }
+
+  if (profile.status === "partial") {
+    return `${sourceText}, ошибок: ${profile.errorCount}, ${rowsText}, ${checkedAt}`;
+  }
+
+  if (profile.status === "stale") {
+    return `${sourceText}, ${rowsText}, старше 24 часов - нужна перепроверка`;
+  }
+
+  return `${sourceText}, ${rowsText}, ${checkedAt}`;
 }
 
 function getAvailableRouteKeys(diagnostics: RouteDiagnosticsResult | null) {

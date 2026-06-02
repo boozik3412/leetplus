@@ -77,6 +77,7 @@ Connected production Langame sources:
 ## Recent Work
 
 - Added persisted Langame endpoint quality profiles: manual GET endpoint profiling on `/sync` now saves tenant-scoped source/endpoint/profile runs with request params, freshness, row count, payload kind, field keys, summary, and errors, and `/sync` shows the latest saved profiles before a source is promoted into snapshot jobs.
+- Added the `/sync` endpoint quality overview: saved production profiles are grouped by business area and show checked, ready for snapshot, stale, partial, failed, and unchecked states without extra Langame calls on page open.
 - Added manual Langame endpoint profiling on `/sync`: users can choose one GET endpoint, source, date period, page/page_limit, `club_id` or `guest_id`, then see status, row count, payload kind, field keys, request params, sanitized preview, and per-source errors without background data loading.
 - Exposed the Langame service profile in `/administration` for platform admins: each tenant card can manually check active Langame sources for service endpoint availability, empty/error responses, and version/summary discrepancies without automatic background calls.
 - Added manual Langame service diagnostics on `/sync`: `config/list`, `puf/profiles/list`, `ver/get_adminconsole`, `ver/get_po`, and `ver/get_terminal` now show endpoint status, row counts, payload kind, fields, compact summaries, and sanitized previews without entering business KPI calculations.

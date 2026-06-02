@@ -76,6 +76,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added backend Langame endpoint snapshot candidates: `/integrations/langame/settings` now returns readiness statuses `READY`/`PARTIAL`/`STALE`/`FAILED`/`UNPROFILED`, source counts, latest check, row count, and next action for each profiled GET endpoint, and `/sync` uses that backend gate before future snapshot jobs instead of recalculating readiness on the client.
 - Added persisted Langame endpoint quality profiles: manual GET endpoint profiling on `/sync` now saves tenant-scoped source/endpoint/profile runs with request params, freshness, row count, payload kind, field keys, summary, and errors, and `/sync` shows the latest saved profiles before a source is promoted into snapshot jobs.
 - Added the `/sync` endpoint quality overview: saved production profiles are grouped by business area and show checked, ready for snapshot, stale, partial, failed, and unchecked states without extra Langame calls on page open.
 - Added manual Langame endpoint profiling on `/sync`: users can choose one GET endpoint, source, date period, page/page_limit, `club_id` or `guest_id`, then see status, row count, payload kind, field keys, request params, sanitized preview, and per-source errors without background data loading.

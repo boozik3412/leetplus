@@ -356,6 +356,28 @@ export type LangameEndpointProfileRunSummary = {
   errorMessage: string | null;
 };
 
+export type LangameEndpointSnapshotCandidateStatus =
+  | 'READY'
+  | 'PARTIAL'
+  | 'STALE'
+  | 'FAILED'
+  | 'UNPROFILED';
+
+export type LangameEndpointSnapshotCandidate = {
+  endpointKey: string;
+  endpointPath: string;
+  title: string;
+  group: string;
+  status: LangameEndpointSnapshotCandidateStatus;
+  activeSourcesCount: number;
+  checkedSourcesCount: number;
+  successfulSourcesCount: number;
+  failedSourcesCount: number;
+  latestCheckedAt: string | null;
+  rowCount: number;
+  nextAction: string;
+};
+
 export type LangameSyncQuery = {
   dateFrom?: string;
   dateTo?: string;

@@ -18,6 +18,7 @@ export type LangameSettings = {
   syncJobs: LangameSyncJob[];
   latestSuccessfulSyncJob: LangameSyncJob | null;
   endpointProfiles: LangameEndpointProfileRunSummary[];
+  endpointSnapshotCandidates: LangameEndpointSnapshotCandidate[];
 };
 
 export type LangameEndpointProfileRunSummary = {
@@ -36,6 +37,28 @@ export type LangameEndpointProfileRunSummary = {
   fieldKeys: string[];
   summary: string | null;
   errorMessage: string | null;
+};
+
+export type LangameEndpointSnapshotCandidateStatus =
+  | "READY"
+  | "PARTIAL"
+  | "STALE"
+  | "FAILED"
+  | "UNPROFILED";
+
+export type LangameEndpointSnapshotCandidate = {
+  endpointKey: string;
+  endpointPath: string;
+  title: string;
+  group: string;
+  status: LangameEndpointSnapshotCandidateStatus;
+  activeSourcesCount: number;
+  checkedSourcesCount: number;
+  successfulSourcesCount: number;
+  failedSourcesCount: number;
+  latestCheckedAt: string | null;
+  rowCount: number;
+  nextAction: string;
 };
 
 export type LangameSyncJob = {

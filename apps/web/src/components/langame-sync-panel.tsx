@@ -252,6 +252,7 @@ type EndpointProfileHealth = {
   errorCount: number;
   latestCheckedAt: string | null;
   rowCount: number;
+  nextAction: string;
 };
 
 type EndpointMapItem = {
@@ -272,7 +273,6 @@ type EndpointMapItem = {
 
 const guestSyncPollIntervalMs = 4000;
 const guestSyncPollAttempts = 75;
-const endpointProfileFreshMs = 24 * 60 * 60 * 1000;
 
 const endpointGroupOrder: EndpointGroup[] = [
   "dashboard",
@@ -2017,6 +2017,9 @@ function EndpointProfileQualityOverview({
                     <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
                       {endpointProfileHealthDetail(profile)}
                     </p>
+                    <p className="mt-1 text-xs font-medium text-zinc-600 dark:text-zinc-300">
+                      {profile.nextAction}
+                    </p>
                   </button>
                 );
               })}
@@ -3161,60 +3164,60 @@ function EndpointFreshnessCard({
 function buildEndpointProfileHealth(
   settings: LangameSettings,
 ): EndpointProfileHealth[] {
+  const candidatesByKey = new Map(
+    (settings.endpointSnapshotCandidates ?? []).map((candidate) => [
+      candidate.endpointKey,
+      candidate,
+    ]),
+  );
   const activeSourceCount = settings.sources.filter(
     (source) => source.isActive,
   ).length;
-  const now = Date.now();
 
   return endpointProfileOptions.map((endpoint) => {
-    const profiles = settings.endpointProfiles.filter(
-      (profile) => profile.endpointKey === endpoint.key,
+    const candidate = candidatesByKey.get(endpoint.key);
+    const checkedCount = candidate?.checkedSourcesCount ?? 0;
+    const expectedCount = Math.max(
+      candidate?.activeSourcesCount ?? activeSourceCount,
+      checkedCount,
     );
-    const checkedCount = profiles.length;
-    const expectedCount = Math.max(activeSourceCount, checkedCount);
-    const successCount = profiles.filter(
-      (profile) => profile.status === "SUCCESS",
-    ).length;
-    const errorCount = profiles.filter(
-      (profile) => profile.status !== "SUCCESS",
-    ).length;
-    const latestTime = profiles.reduce((latest, profile) => {
-      const time = new Date(profile.checkedAt).getTime();
-
-      return Number.isNaN(time) ? latest : Math.max(latest, time);
-    }, 0);
-    const latestCheckedAt =
-      latestTime > 0 ? new Date(latestTime).toISOString() : null;
-    const rowCount = profiles.reduce(
-      (sum, profile) => sum + profile.rowCount,
-      0,
-    );
-    let status: EndpointProfileHealthStatus = "ready";
-
-    if (checkedCount === 0) {
-      status = "unchecked";
-    } else if (successCount === 0) {
-      status = "failed";
-    } else if (
-      errorCount > 0 ||
-      (expectedCount > 0 && successCount < expectedCount)
-    ) {
-      status = "partial";
-    } else if (latestTime > 0 && now - latestTime > endpointProfileFreshMs) {
-      status = "stale";
-    }
 
     return {
       endpoint,
-      status,
+      status: mapEndpointSnapshotCandidateStatus(candidate?.status),
       checkedCount,
       expectedCount,
-      successCount,
-      errorCount,
-      latestCheckedAt,
-      rowCount,
+      successCount: candidate?.successfulSourcesCount ?? 0,
+      errorCount: candidate?.failedSourcesCount ?? 0,
+      latestCheckedAt: candidate?.latestCheckedAt ?? null,
+      rowCount: candidate?.rowCount ?? 0,
+      nextAction:
+        candidate?.nextAction ??
+        "Запустить ручное профилирование endpoint в /sync.",
     };
   });
+}
+
+function mapEndpointSnapshotCandidateStatus(
+  status?: LangameSettings["endpointSnapshotCandidates"][number]["status"],
+): EndpointProfileHealthStatus {
+  if (status === "READY") {
+    return "ready";
+  }
+
+  if (status === "PARTIAL") {
+    return "partial";
+  }
+
+  if (status === "STALE") {
+    return "stale";
+  }
+
+  if (status === "FAILED") {
+    return "failed";
+  }
+
+  return "unchecked";
 }
 
 function endpointProfileHealthBadgeClass(status: EndpointProfileHealthStatus) {

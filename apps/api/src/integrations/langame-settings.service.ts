@@ -12,6 +12,8 @@ import type {
   LangameEndpointProfileDiagnosticsSource,
   LangameEndpointProfileQuery,
   LangameEndpointProfileRunSummary,
+  LangameEndpointSnapshotCandidate,
+  LangameEndpointSnapshotCandidateStatus,
   LangameGuestSearchDiagnosticsResult,
   LangameGuestSearchField,
   LangameGuestSearchQuery,
@@ -23,6 +25,7 @@ import type {
 } from './langame.types';
 
 const CREDENTIAL_NAME = 'Langame API key';
+const ENDPOINT_PROFILE_FRESH_MS = 24 * 60 * 60 * 1000;
 
 const SERVICE_DIAGNOSTIC_ENDPOINTS: LangameServiceEndpointDefinition[] = [
   {
@@ -324,6 +327,13 @@ export class LangameSettingsService {
       errorMessage: job.errorMessage,
     });
 
+    const endpointProfiles = this.toEndpointProfileSummaries(
+      latestEndpointProfileRuns,
+    );
+    const activeSourcesCount = sources.filter(
+      (source) => source.isActive,
+    ).length;
+
     return {
       tenantName: tenant?.name ?? '',
       hasApiKey: Boolean(credential?.apiKeyEncrypted),
@@ -343,8 +353,10 @@ export class LangameSettingsService {
       latestSuccessfulSyncJob: latestSuccessfulSyncJob
         ? mapSyncJob(latestSuccessfulSyncJob)
         : null,
-      endpointProfiles: this.toEndpointProfileSummaries(
-        latestEndpointProfileRuns,
+      endpointProfiles,
+      endpointSnapshotCandidates: this.toEndpointSnapshotCandidates(
+        endpointProfiles,
+        activeSourcesCount,
       ),
     };
   }
@@ -918,6 +930,129 @@ export class LangameSettingsService {
       summary: this.profileSummary(run.profile),
       errorMessage: run.errorMessage,
     }));
+  }
+
+  private toEndpointSnapshotCandidates(
+    profiles: LangameEndpointProfileRunSummary[],
+    activeSourcesCount: number,
+  ): LangameEndpointSnapshotCandidate[] {
+    const now = Date.now();
+
+    return PROFILE_DIAGNOSTIC_ENDPOINTS.map((endpoint) => {
+      const endpointProfiles = profiles.filter(
+        (profile) => profile.endpointKey === endpoint.key,
+      );
+      const checkedSourcesCount = endpointProfiles.length;
+      const successfulSourcesCount = endpointProfiles.filter(
+        (profile) => profile.status === 'SUCCESS',
+      ).length;
+      const failedSourcesCount = endpointProfiles.filter(
+        (profile) => profile.status !== 'SUCCESS',
+      ).length;
+      const latestCheckedTime = endpointProfiles.reduce((latest, profile) => {
+        const time = new Date(profile.checkedAt).getTime();
+
+        return Number.isNaN(time) ? latest : Math.max(latest, time);
+      }, 0);
+      const expectedSourcesCount = Math.max(
+        activeSourcesCount,
+        checkedSourcesCount,
+      );
+      const rowCount = endpointProfiles.reduce(
+        (sum, profile) => sum + profile.rowCount,
+        0,
+      );
+      const latestCheckedAt =
+        latestCheckedTime > 0
+          ? new Date(latestCheckedTime).toISOString()
+          : null;
+      const status = this.endpointSnapshotCandidateStatus({
+        checkedSourcesCount,
+        successfulSourcesCount,
+        failedSourcesCount,
+        expectedSourcesCount,
+        latestCheckedTime,
+        now,
+      });
+
+      return {
+        endpointKey: endpoint.key,
+        endpointPath: endpoint.path,
+        title: endpoint.title,
+        group: endpoint.group,
+        status,
+        activeSourcesCount,
+        checkedSourcesCount,
+        successfulSourcesCount,
+        failedSourcesCount,
+        latestCheckedAt,
+        rowCount,
+        nextAction: this.endpointSnapshotCandidateNextAction(status),
+      };
+    });
+  }
+
+  private endpointSnapshotCandidateStatus({
+    checkedSourcesCount,
+    successfulSourcesCount,
+    failedSourcesCount,
+    expectedSourcesCount,
+    latestCheckedTime,
+    now,
+  }: {
+    checkedSourcesCount: number;
+    successfulSourcesCount: number;
+    failedSourcesCount: number;
+    expectedSourcesCount: number;
+    latestCheckedTime: number;
+    now: number;
+  }): LangameEndpointSnapshotCandidateStatus {
+    if (checkedSourcesCount === 0) {
+      return 'UNPROFILED';
+    }
+
+    if (successfulSourcesCount === 0) {
+      return 'FAILED';
+    }
+
+    if (
+      failedSourcesCount > 0 ||
+      (expectedSourcesCount > 0 &&
+        successfulSourcesCount < expectedSourcesCount)
+    ) {
+      return 'PARTIAL';
+    }
+
+    if (
+      latestCheckedTime > 0 &&
+      now - latestCheckedTime > ENDPOINT_PROFILE_FRESH_MS
+    ) {
+      return 'STALE';
+    }
+
+    return 'READY';
+  }
+
+  private endpointSnapshotCandidateNextAction(
+    status: LangameEndpointSnapshotCandidateStatus,
+  ) {
+    if (status === 'READY') {
+      return 'Можно переводить в snapshot-джобу без живого запроса на рабочих страницах.';
+    }
+
+    if (status === 'PARTIAL') {
+      return 'Перепроверить проблемные или отсутствующие Langame-источники.';
+    }
+
+    if (status === 'STALE') {
+      return 'Повторить production-профилирование перед подключением к расчетам.';
+    }
+
+    if (status === 'FAILED') {
+      return 'Разобрать ошибку endpoint до включения в бизнес-сценарий.';
+    }
+
+    return 'Запустить ручное профилирование endpoint в /sync.';
   }
 
   private dateParamToDate(value?: string) {

@@ -219,6 +219,8 @@ describe('LangameSettingsService', () => {
   });
 
   it('returns latest endpoint profile quality summaries in settings', async () => {
+    const checkedAt = new Date();
+
     prisma.langameEndpointProfileRun.findMany.mockResolvedValue([
       {
         id: 'profile-1',
@@ -227,7 +229,7 @@ describe('LangameSettingsService', () => {
         endpointPath: '/guests/sessions',
         group: 'guests',
         status: 'SUCCESS',
-        checkedAt: new Date('2026-06-02T08:00:00.000Z'),
+        checkedAt,
         dateFrom: new Date('2026-06-01T00:00:00.000Z'),
         dateTo: new Date('2026-06-02T00:00:00.000Z'),
         requestParams: {
@@ -244,7 +246,9 @@ describe('LangameSettingsService', () => {
       },
     ]);
 
-    await expect(service.getSettings(user)).resolves.toMatchObject({
+    const result = await service.getSettings(user);
+
+    expect(result).toMatchObject({
       endpointProfiles: [
         {
           id: 'profile-1',
@@ -253,7 +257,7 @@ describe('LangameSettingsService', () => {
           endpointPath: '/guests/sessions',
           group: 'guests',
           status: 'SUCCESS',
-          checkedAt: '2026-06-02T08:00:00.000Z',
+          checkedAt: checkedAt.toISOString(),
           dateFrom: '2026-06-01T00:00:00.000Z',
           dateTo: '2026-06-02T00:00:00.000Z',
           rowCount: 20,
@@ -264,6 +268,22 @@ describe('LangameSettingsService', () => {
         },
       ],
     });
+    expect(result.endpointSnapshotCandidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          endpointKey: 'guestSessions',
+          endpointPath: '/guests/sessions',
+          group: 'guests',
+          status: 'READY',
+          activeSourcesCount: 1,
+          checkedSourcesCount: 1,
+          successfulSourcesCount: 1,
+          failedSourcesCount: 0,
+          latestCheckedAt: checkedAt.toISOString(),
+          rowCount: 20,
+        }),
+      ]),
+    );
   });
 
   it('returns sanitized routes diagnostics without leaking credentials', async () => {

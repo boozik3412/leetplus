@@ -37,6 +37,7 @@ type EncryptionMock = {
 
 type LangameClientMock = {
   getRoutes: jest.Mock;
+  searchGuests: jest.Mock;
 };
 
 type CredentialUpsertCall = [
@@ -103,6 +104,7 @@ describe('LangameSettingsService', () => {
     };
     langameClient = {
       getRoutes: jest.fn(),
+      searchGuests: jest.fn(),
     };
     prisma.tenant.findUnique.mockResolvedValue({
       name: 'Demo Cyber Club',
@@ -250,5 +252,65 @@ describe('LangameSettingsService', () => {
       'https://443.langame.ru/public_api',
       'secret-key',
     );
+  });
+
+  it('runs masked guest search diagnostics for active Langame sources', async () => {
+    prisma.integrationCredential.findFirst.mockResolvedValue({
+      id: 'credential-1',
+      apiKeyEncrypted: 'encrypted:secret-key',
+    });
+    langameClient.searchGuests.mockResolvedValue({
+      status: true,
+      data: [
+        {
+          guest_id: 123,
+          guest_type_id: 5,
+          phone: '+7 999 123-45-67',
+          email: 'guest@example.com',
+          fio: 'Иван Петров',
+          bonus_program_number: '9988776655',
+          date_last_activity: '2026-06-01',
+        },
+      ],
+    });
+
+    const result = await service.searchGuestDiagnostics(user, {
+      query: '+7 999 123-45-67',
+      field: 'phone',
+    });
+
+    expect(result).toMatchObject({
+      queryField: 'phone',
+      sources: [
+        {
+          domain: '443.langame.ru',
+          status: 'SUCCESS',
+          requestKeys: ['search', 'phone'],
+          resultsCount: 1,
+          results: [
+            {
+              externalGuestId: '123',
+              guestTypeId: '5',
+              phoneMasked: '***4567',
+              emailMasked: 'g***@example.com',
+              fullNameMasked: 'Ив***',
+              bonusProgramNumberMasked: '***6655',
+              dateLastActivity: '2026-06-01',
+            },
+          ],
+        },
+      ],
+    });
+    expect(langameClient.searchGuests).toHaveBeenCalledWith(
+      'https://443.langame.ru/public_api',
+      'secret-key',
+      {
+        search: '+7 999 123-45-67',
+        phone: '79991234567',
+      },
+    );
+    expect(JSON.stringify(result)).not.toContain('+7 999 123-45-67');
+    expect(JSON.stringify(result)).not.toContain('guest@example.com');
+    expect(JSON.stringify(result)).not.toContain('Иван Петров');
   });
 });

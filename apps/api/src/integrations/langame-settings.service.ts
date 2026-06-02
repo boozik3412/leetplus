@@ -7,6 +7,9 @@ import { TenantContextService } from '../tenancy/tenant-context.service';
 import { LangameClient } from './langame.client';
 import { SecretEncryptionService } from './secret-encryption.service';
 import type {
+  LangameGuestSearchDiagnosticsResult,
+  LangameGuestSearchField,
+  LangameGuestSearchQuery,
   LangameRouteSummary,
   LangameRoutesDiagnosticsResult,
 } from './langame.types';
@@ -289,6 +292,342 @@ export class LangameSettingsService {
       checkedAt,
       sources: diagnostics,
     };
+  }
+
+  async searchGuestDiagnostics(
+    user: AuthenticatedUser,
+    dto: LangameGuestSearchQuery,
+  ): Promise<LangameGuestSearchDiagnosticsResult> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { apiKey, sources } = await this.resolveTenantAccess(tenantId);
+    const query = dto.query?.trim();
+
+    if (!query || query.length < 2) {
+      throw new BadRequestException(
+        'Укажите минимум 2 символа для точечного поиска гостя',
+      );
+    }
+
+    const selectedField = this.normalizeGuestSearchField(dto.field);
+    const queryField =
+      selectedField === 'auto'
+        ? this.detectGuestSearchField(query)
+        : selectedField;
+    const requestPayload = this.buildGuestSearchPayload(query, queryField);
+    const filteredSources = sources.filter((source) => {
+      if (dto.sourceId) {
+        return source.id === dto.sourceId;
+      }
+
+      if (dto.sourceDomain) {
+        return source.domain === dto.sourceDomain;
+      }
+
+      return true;
+    });
+
+    if (filteredSources.length === 0) {
+      throw new BadRequestException('Langame source for search is not found');
+    }
+
+    const checkedAt = new Date().toISOString();
+    const diagnostics = await Promise.all(
+      filteredSources.map(async (source) => {
+        try {
+          const payload = await this.langameClient.searchGuests(
+            source.baseUrl,
+            apiKey,
+            requestPayload,
+          );
+          const rows = this.extractGuestSearchRows(payload);
+
+          return {
+            id: source.id,
+            name: source.name,
+            domain: source.domain,
+            baseUrl: source.baseUrl,
+            status: 'SUCCESS' as const,
+            requestKeys: Object.keys(requestPayload),
+            resultsCount: rows.length,
+            results: rows
+              .slice(0, 10)
+              .map((row) => this.toGuestSearchResultItem(row)),
+            payloadPreview: this.sanitizeGuestSearchPayload(payload),
+            errorMessage: null,
+          };
+        } catch (error) {
+          return {
+            id: source.id,
+            name: source.name,
+            domain: source.domain,
+            baseUrl: source.baseUrl,
+            status: 'FAILED' as const,
+            requestKeys: Object.keys(requestPayload),
+            resultsCount: 0,
+            results: [],
+            payloadPreview: null,
+            errorMessage:
+              error instanceof Error
+                ? error.message
+                : 'Unknown Langame guests/search diagnostics error',
+          };
+        }
+      }),
+    );
+
+    return {
+      checkedAt,
+      queryField,
+      sources: diagnostics,
+    };
+  }
+
+  private normalizeGuestSearchField(
+    field?: LangameGuestSearchField,
+  ): LangameGuestSearchField {
+    const allowed: LangameGuestSearchField[] = [
+      'auto',
+      'phone',
+      'email',
+      'guest_id',
+      'fio',
+      'bonus_program_number',
+    ];
+
+    return field && allowed.includes(field) ? field : 'auto';
+  }
+
+  private detectGuestSearchField(query: string): LangameGuestSearchField {
+    const normalized = query.trim();
+
+    if (normalized.includes('@')) {
+      return 'email';
+    }
+
+    const digits = normalized.replace(/\D/g, '');
+
+    if (digits.length >= 7) {
+      return 'phone';
+    }
+
+    if (/^\d+$/.test(normalized)) {
+      return 'guest_id';
+    }
+
+    return 'fio';
+  }
+
+  private buildGuestSearchPayload(
+    query: string,
+    field: LangameGuestSearchField,
+  ) {
+    const normalizedQuery = query.trim();
+    const payload: Record<string, string> = {
+      search: normalizedQuery,
+    };
+
+    if (field === 'phone') {
+      payload.phone = normalizedQuery.replace(/\D/g, '') || normalizedQuery;
+    } else if (field === 'email') {
+      payload.email = normalizedQuery;
+    } else if (field === 'guest_id') {
+      payload.guest_id = normalizedQuery;
+    } else if (field === 'fio') {
+      payload.fio = normalizedQuery;
+    } else if (field === 'bonus_program_number') {
+      payload.bonus_program_number = normalizedQuery;
+    }
+
+    return payload;
+  }
+
+  private extractGuestSearchRows(payload: unknown): Record<string, unknown>[] {
+    if (Array.isArray(payload)) {
+      return payload.filter((item) => this.isPlainObject(item));
+    }
+
+    if (!this.isPlainObject(payload)) {
+      return [];
+    }
+
+    if (this.looksLikeGuestRow(payload)) {
+      return [payload];
+    }
+
+    const rowKeys = ['data', 'guests', 'items', 'results', 'result'];
+
+    for (const key of rowKeys) {
+      const value = payload[key];
+
+      if (Array.isArray(value)) {
+        return value.filter((item) => this.isPlainObject(item));
+      }
+
+      if (this.isPlainObject(value) && this.looksLikeGuestRow(value)) {
+        return [value];
+      }
+    }
+
+    return [];
+  }
+
+  private looksLikeGuestRow(row: Record<string, unknown>) {
+    return Boolean(
+      row.guest_id ??
+      row.id ??
+      row.real_guest_id ??
+      row.phone ??
+      row.email ??
+      row.fio,
+    );
+  }
+
+  private toGuestSearchResultItem(row: Record<string, unknown>) {
+    return {
+      externalGuestId: this.firstValueString(row, [
+        'guest_id',
+        'real_guest_id',
+        'id',
+      ]),
+      guestTypeId: this.firstValueString(row, ['guest_type_id', 'type_id']),
+      phoneMasked: this.maskPhone(this.firstValueString(row, ['phone'])),
+      emailMasked: this.maskEmail(this.firstValueString(row, ['email'])),
+      fullNameMasked: this.maskName(
+        this.firstValueString(row, ['fio', 'full_name', 'name']),
+      ),
+      bonusProgramNumberMasked: this.maskGeneric(
+        this.firstValueString(row, ['bonus_program_number']),
+      ),
+      dateLastActivity: this.firstValueString(row, [
+        'date_last_activity',
+        'last_activity_at',
+        'updated_at',
+      ]),
+      rawKeys: Object.keys(row).slice(0, 30),
+    };
+  }
+
+  private sanitizeGuestSearchPayload(value: unknown, depth = 0): unknown {
+    if (depth > 5) {
+      return '[depth-limit]';
+    }
+
+    if (Array.isArray(value)) {
+      return value
+        .slice(0, 5)
+        .map((item) => this.sanitizeGuestSearchPayload(item, depth + 1));
+    }
+
+    if (!this.isPlainObject(value)) {
+      return value;
+    }
+
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        this.isGuestSensitiveField(key)
+          ? this.maskSensitiveValue(key, entry)
+          : this.sanitizeGuestSearchPayload(entry, depth + 1),
+      ]),
+    );
+  }
+
+  private firstValueString(payload: Record<string, unknown>, keys: string[]) {
+    for (const key of keys) {
+      const value = payload[key];
+      const stringValue = this.scalarToString(value);
+
+      if (stringValue) {
+        return stringValue;
+      }
+    }
+
+    return null;
+  }
+
+  private maskSensitiveValue(field: string, value: unknown) {
+    const stringValue = this.scalarToString(value);
+
+    if (!stringValue) {
+      return null;
+    }
+
+    if (/phone/i.test(field)) {
+      return this.maskPhone(stringValue);
+    }
+
+    if (/email/i.test(field)) {
+      return this.maskEmail(stringValue);
+    }
+
+    if (/fio|name/i.test(field)) {
+      return this.maskName(stringValue);
+    }
+
+    return this.maskGeneric(stringValue);
+  }
+
+  private scalarToString(value: unknown) {
+    if (
+      typeof value === 'string' ||
+      typeof value === 'number' ||
+      typeof value === 'boolean'
+    ) {
+      return String(value).trim();
+    }
+
+    return null;
+  }
+
+  private maskPhone(value: string | null) {
+    if (!value) {
+      return null;
+    }
+
+    const digits = value.replace(/\D/g, '');
+    const tail = digits.slice(-4);
+
+    return tail ? `***${tail}` : '***';
+  }
+
+  private maskEmail(value: string | null) {
+    if (!value) {
+      return null;
+    }
+
+    const [localPart, domain] = value.split('@');
+
+    if (!domain) {
+      return this.maskGeneric(value);
+    }
+
+    return `${localPart.slice(0, 1)}***@${domain}`;
+  }
+
+  private maskName(value: string | null) {
+    if (!value) {
+      return null;
+    }
+
+    return `${value.slice(0, 2)}***`;
+  }
+
+  private maskGeneric(value: string | null) {
+    if (!value) {
+      return null;
+    }
+
+    if (value.length <= 4) {
+      return '***';
+    }
+
+    return `***${value.slice(-4)}`;
+  }
+
+  private isGuestSensitiveField(field: string) {
+    return /phone|email|fio|full[_-]?name|name|birthday|document|passport|identity|bonus[_-]?program/i.test(
+      field,
+    );
   }
 
   private findCredential(tenantId: string) {

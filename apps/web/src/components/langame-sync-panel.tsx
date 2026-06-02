@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import type { LangameSettings } from "@/lib/langame-settings";
 
 type SyncPeriod = "today" | "last7" | "last30" | "custom";
@@ -109,6 +109,42 @@ type RouteDiagnosticsResult = {
   sources: RouteDiagnosticsSource[];
 };
 
+type GuestSearchField =
+  | "auto"
+  | "phone"
+  | "email"
+  | "guest_id"
+  | "fio"
+  | "bonus_program_number";
+
+type GuestSearchStatus = "idle" | "loading" | "success" | "error";
+
+type GuestSearchResultItem = {
+  externalGuestId: string | null;
+  guestTypeId: string | null;
+  phoneMasked: string | null;
+  emailMasked: string | null;
+  fullNameMasked: string | null;
+  bonusProgramNumberMasked: string | null;
+  dateLastActivity: string | null;
+  rawKeys: string[];
+};
+
+type GuestSearchDiagnosticsSource = {
+  domain: string;
+  status: "SUCCESS" | "FAILED";
+  requestKeys: string[];
+  resultsCount: number;
+  results: GuestSearchResultItem[];
+  errorMessage: string | null;
+};
+
+type GuestSearchDiagnosticsResult = {
+  checkedAt: string;
+  queryField: GuestSearchField;
+  sources: GuestSearchDiagnosticsSource[];
+};
+
 type EndpointMapItem = {
   method: EndpointMethod;
   path: string;
@@ -145,6 +181,15 @@ const endpointStatusLabels: Record<EndpointUsageStatus, string> = {
   PLANNED: "запланирован",
   NEEDS_PARAMETERS: "нужны параметры",
   WRITE_DECISION: "write-решение",
+};
+
+const guestSearchFieldLabels: Record<GuestSearchField, string> = {
+  auto: "Авто",
+  phone: "Телефон",
+  email: "Email",
+  guest_id: "ID гостя",
+  fio: "ФИО",
+  bonus_program_number: "Бонусная карта",
 };
 
 const langameEndpointMap: EndpointMapItem[] = [
@@ -261,8 +306,8 @@ const langameEndpointMap: EndpointMapItem[] = [
     path: "/public_api/guests/search",
     group: "guests",
     title: "Точечный поиск гостя",
-    description: "План для ручного поиска, связки телефона и messenger-профиля.",
-    usageStatus: "PLANNED",
+    description: "Диагностика для ручного поиска, связки телефона и messenger-профиля.",
+    usageStatus: "NEEDS_PARAMETERS",
     freshnessSource: "planned",
   },
   {
@@ -500,6 +545,14 @@ export function LangameSyncPanel({
     useState<RouteDiagnosticsStatus>("idle");
   const [routeDiagnosticsError, setRouteDiagnosticsError] =
     useState<string | null>(null);
+  const [guestSearchQuery, setGuestSearchQuery] = useState("");
+  const [guestSearchField, setGuestSearchField] =
+    useState<GuestSearchField>("auto");
+  const [guestSearchResult, setGuestSearchResult] =
+    useState<GuestSearchDiagnosticsResult | null>(null);
+  const [guestSearchStatus, setGuestSearchStatus] =
+    useState<GuestSearchStatus>("idle");
+  const [guestSearchError, setGuestSearchError] = useState<string | null>(null);
 
   useEffect(() => {
     let ignore = false;
@@ -633,6 +686,52 @@ export function LangameSyncPanel({
         routeError instanceof Error
           ? routeError.message
           : "Не удалось проверить карту маршрутов Langame",
+      );
+    }
+  }
+
+  async function searchGuestDiagnostics(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!guestSearchQuery.trim()) {
+      setGuestSearchError("Введите телефон, email, ID или ФИО гостя");
+      setGuestSearchStatus("error");
+      return;
+    }
+
+    setGuestSearchStatus("loading");
+    setGuestSearchError(null);
+    setGuestSearchResult(null);
+
+    try {
+      const response = await fetch(
+        "/api/integrations/langame/guests/search-diagnostics",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            query: guestSearchQuery.trim(),
+            field: guestSearchField,
+          }),
+          cache: "no-store",
+        },
+      );
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(getErrorMessage(data));
+      }
+
+      setGuestSearchResult(data as GuestSearchDiagnosticsResult);
+      setGuestSearchStatus("success");
+    } catch (searchError) {
+      setGuestSearchStatus("error");
+      setGuestSearchError(
+        searchError instanceof Error
+          ? searchError.message
+          : "Не удалось проверить guests/search",
       );
     }
   }
@@ -777,6 +876,17 @@ export function LangameSyncPanel({
         latestGuestStatus={latestGuestStatus}
         onCheckDiagnostics={checkRouteDiagnostics}
         settings={settings}
+      />
+      <GuestSearchDiagnosticsPanel
+        field={guestSearchField}
+        query={guestSearchQuery}
+        result={guestSearchResult}
+        searchError={guestSearchError}
+        searchStatus={guestSearchStatus}
+        settings={settings}
+        onFieldChange={setGuestSearchField}
+        onQueryChange={setGuestSearchQuery}
+        onSubmit={searchGuestDiagnostics}
       />
       <LatestGuestDiagnostics status={latestGuestStatus} />
       <div className="grid gap-6 xl:grid-cols-2">
@@ -1292,6 +1402,205 @@ function EndpointMapPanel({
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function GuestSearchDiagnosticsPanel({
+  settings,
+  query,
+  field,
+  result,
+  searchStatus,
+  searchError,
+  onQueryChange,
+  onFieldChange,
+  onSubmit,
+}: {
+  settings: LangameSettings;
+  query: string;
+  field: GuestSearchField;
+  result: GuestSearchDiagnosticsResult | null;
+  searchStatus: GuestSearchStatus;
+  searchError: string | null;
+  onQueryChange: (query: string) => void;
+  onFieldChange: (field: GuestSearchField) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  const failedSources =
+    result?.sources.filter((source) => source.status === "FAILED") ?? [];
+  const successfulSources =
+    result?.sources.filter((source) => source.status === "SUCCESS") ?? [];
+
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300">
+            Точечный поиск гостя
+          </p>
+          <h2 className="mt-1 text-lg font-semibold text-zinc-950 dark:text-zinc-50">
+            Диагностика `POST /guests/search`
+          </h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-500 dark:text-zinc-400">
+            Проверьте один телефон, email, ID, ФИО или бонусную карту по
+            активным Langame-источникам. LeetPlus не сохраняет результат и
+            показывает только маскированные персональные данные.
+          </p>
+        </div>
+        {result ? (
+          <span
+            className={[
+              "rounded-full px-2.5 py-1 text-xs font-medium",
+              failedSources.length > 0
+                ? "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-200"
+                : "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200",
+            ].join(" ")}
+          >
+            {successfulSources.length} источников, ошибок {failedSources.length}
+          </span>
+        ) : null}
+      </div>
+
+      <form
+        onSubmit={onSubmit}
+        className="mt-4 grid gap-3 lg:grid-cols-[220px_1fr_auto]"
+      >
+        <label className="block">
+          <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+            Тип поиска
+          </span>
+          <select
+            value={field}
+            onChange={(event) =>
+              onFieldChange(event.target.value as GuestSearchField)
+            }
+            className="mt-2 block w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+          >
+            {Object.entries(guestSearchFieldLabels).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+            Значение
+          </span>
+          <input
+            value={query}
+            onChange={(event) => onQueryChange(event.target.value)}
+            placeholder="Телефон, email, ID, ФИО или бонусная карта"
+            className="mt-2 block w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+          />
+        </label>
+        <button
+          type="submit"
+          disabled={
+            searchStatus === "loading" || !settings.hasApiKey || !query.trim()
+          }
+          className="mt-6 rounded-full bg-zinc-950 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
+        >
+          {searchStatus === "loading" ? "Ищем..." : "Проверить"}
+        </button>
+      </form>
+
+      <div className="mt-3 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-400">
+        Сценарий нужен для будущей привязки гостя к Telegram/MAX, ручного
+        сопоставления CRM-лида и гостевого логина по телефону. Это не массовая
+        синхронизация и не write-действие в Langame.
+      </div>
+
+      {searchError ? (
+        <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-200">
+          {searchError}
+        </p>
+      ) : null}
+
+      {result ? (
+        <div className="mt-4 space-y-3">
+          <div className="flex flex-wrap gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+            <span>Проверено: {formatDateTime(result.checkedAt)}</span>
+            <span>Поле: {guestSearchFieldLabels[result.queryField]}</span>
+          </div>
+          <div className="grid gap-3 xl:grid-cols-3">
+            {result.sources.map((source) => (
+              <div
+                key={source.domain}
+                className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <p className="font-medium text-zinc-950 dark:text-zinc-50">
+                      {source.domain}
+                    </p>
+                    <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                      payload: {source.requestKeys.join(", ")}
+                    </p>
+                  </div>
+                  <span
+                    className={[
+                      "rounded-full px-2 py-0.5 text-[11px] font-semibold",
+                      source.status === "SUCCESS"
+                        ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200"
+                        : "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-200",
+                    ].join(" ")}
+                  >
+                    {source.status === "SUCCESS" ? "успех" : "ошибка"}
+                  </span>
+                </div>
+
+                {source.errorMessage ? (
+                  <p className="mt-3 break-words rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-200">
+                    {compactEndpointError(source.errorMessage)}
+                  </p>
+                ) : source.results.length > 0 ? (
+                  <div className="mt-3 space-y-2">
+                    {source.results.map((guest, index) => (
+                      <div
+                        key={`${source.domain}-${guest.externalGuestId ?? index}`}
+                        className="rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="font-medium text-zinc-950 dark:text-zinc-50">
+                            ID {guest.externalGuestId ?? "не указан"}
+                          </p>
+                          <span className="text-xs text-zinc-500">
+                            {guest.dateLastActivity ?? "активность неизвестна"}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                          {[
+                            guest.fullNameMasked,
+                            guest.phoneMasked,
+                            guest.emailMasked,
+                            guest.bonusProgramNumberMasked
+                              ? `карта ${guest.bonusProgramNumberMasked}`
+                              : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ") || "персональные поля не вернулись"}
+                        </p>
+                      </div>
+                    ))}
+                    {source.resultsCount > source.results.length ? (
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                        Показано {source.results.length} из{" "}
+                        {source.resultsCount} строк.
+                      </p>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="mt-3 rounded-md border border-zinc-200 bg-white px-3 py-3 text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
+                    Совпадений нет или Langame вернул другой формат ответа.
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

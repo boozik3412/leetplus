@@ -22,7 +22,10 @@ import {
   type LangameSettingsDto,
 } from './langame-settings.service';
 import { LangameSyncService } from './langame-sync.service';
-import type { LangameSyncQuery } from './langame.types';
+import type {
+  LangameGuestSearchQuery,
+  LangameSyncQuery,
+} from './langame.types';
 
 @Controller('integrations/langame')
 @Roles(UserRole.OWNER, UserRole.ADMIN)
@@ -42,6 +45,14 @@ export class LangameController {
   @Get('routes-diagnostics')
   getRoutesDiagnostics(@CurrentUser() user: AuthenticatedUser) {
     return this.langameSettingsService.getRoutesDiagnostics(user);
+  }
+
+  @Post('guests/search-diagnostics')
+  searchGuestDiagnostics(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() query: LangameGuestSearchQuery,
+  ) {
+    return this.langameSettingsService.searchGuestDiagnostics(user, query);
   }
 
   @Put('settings')

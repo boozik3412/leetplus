@@ -284,6 +284,48 @@ export class LangameClient {
     return this.readJsonOrText(response);
   }
 
+  async searchGuests(
+    baseUrl: string,
+    apiKey: string,
+    payload: Record<string, string>,
+  ) {
+    const path = '/guests/search';
+    const url = new URL(`${this.normalizeBaseUrl(baseUrl)}${path}`);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-KEY': apiKey,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorDetails = await this.readErrorDetails(response);
+      throw new BadRequestException(
+        [
+          `Langame ${path} failed: ${response.status} ${response.statusText}`,
+          errorDetails,
+        ]
+          .filter(Boolean)
+          .join(' - '),
+      );
+    }
+
+    const result = await this.readJsonOrText(response);
+
+    if (this.isPlainObject(result) && result.status === false) {
+      throw new BadRequestException(
+        this.hasStringField(result, 'message')
+          ? `Langame ${path} returned an error: ${result.message}`
+          : `Langame ${path} returned an error`,
+      );
+    }
+
+    return result;
+  }
+
   private async getList<T>(
     baseUrl: string,
     path: string,
@@ -454,6 +496,10 @@ export class LangameClient {
       field in payload &&
       typeof (payload as Record<string, unknown>)[field] === 'string'
     );
+  }
+
+  private isPlainObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 
   private normalizeBaseUrl(baseUrl: string) {

@@ -168,6 +168,51 @@ export type LangameRoutesDiagnosticsResult = {
   sources: LangameRoutesDiagnosticsSource[];
 };
 
+export type LangameGuestSearchField =
+  | 'auto'
+  | 'phone'
+  | 'email'
+  | 'guest_id'
+  | 'fio'
+  | 'bonus_program_number';
+
+export type LangameGuestSearchQuery = {
+  query?: string;
+  field?: LangameGuestSearchField;
+  sourceId?: string;
+  sourceDomain?: string;
+};
+
+export type LangameGuestSearchResultItem = {
+  externalGuestId: string | null;
+  guestTypeId: string | null;
+  phoneMasked: string | null;
+  emailMasked: string | null;
+  fullNameMasked: string | null;
+  bonusProgramNumberMasked: string | null;
+  dateLastActivity: string | null;
+  rawKeys: string[];
+};
+
+export type LangameGuestSearchDiagnosticsSource = {
+  id: string;
+  name: string;
+  domain: string;
+  baseUrl: string;
+  status: 'SUCCESS' | 'FAILED';
+  requestKeys: string[];
+  resultsCount: number;
+  results: LangameGuestSearchResultItem[];
+  payloadPreview: unknown;
+  errorMessage: string | null;
+};
+
+export type LangameGuestSearchDiagnosticsResult = {
+  checkedAt: string;
+  queryField: LangameGuestSearchField;
+  sources: LangameGuestSearchDiagnosticsSource[];
+};
+
 export type LangameSyncQuery = {
   dateFrom?: string;
   dateTo?: string;

@@ -38,14 +38,14 @@ export default async function StaffTeamChatPage({
           current="Командный чат"
           items={[
             { href: "/dashboard", label: "Дашборд" },
-            { href: "/staff/tasks", label: "Персонал" },
+            { href: "/communications", label: "Коммуникации" },
           ]}
         />
 
         <div className="mt-4 flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-sm font-bold uppercase text-emerald-700 dark:text-emerald-300">
-              Персонал
+              Коммуникации
             </p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight">
               Командный чат
@@ -57,10 +57,10 @@ export default async function StaffTeamChatPage({
           </div>
           <div className="flex flex-wrap gap-2">
             <Link
-              href="/staff/tasks"
+              href="/communications"
               className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold transition hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-800 dark:hover:border-emerald-500 dark:hover:text-emerald-200"
             >
-              Задачи
+              Обзор коммуникаций
             </Link>
             <Link
               href="/staff/checklists"

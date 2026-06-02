@@ -48,14 +48,14 @@ export default async function StaffNotificationsPage({
           current="Уведомления"
           items={[
             { href: "/dashboard", label: "Дашборд" },
-            { href: "/staff/tasks", label: "Персонал" },
+            { href: "/communications", label: "Коммуникации" },
           ]}
         />
 
         <div className="mt-4 flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-sm font-bold uppercase text-emerald-700 dark:text-emerald-300">
-              Персонал
+              Коммуникации
             </p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight">
               Уведомления и критические сигналы
@@ -68,10 +68,10 @@ export default async function StaffNotificationsPage({
           </div>
           <div className="flex flex-wrap gap-2">
             <Link
-              href="/staff/operations-dashboard"
+              href="/communications"
               className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold transition hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-800 dark:hover:border-emerald-500 dark:hover:text-emerald-200"
             >
-              Операционная дисциплина
+              Обзор коммуникаций
             </Link>
             <Link
               href="/staff/team-chat"

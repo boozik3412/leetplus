@@ -224,6 +224,10 @@ export function canAccessPath(user: AuthUser | null, href: string) {
     return Boolean(user && canManageUserAccess(user.role));
   }
 
+  if (href === "/communications" || href.startsWith("/communications/")) {
+    return can(user, "view_staff") || can(user, "view_guests");
+  }
+
   if (href.startsWith("/staff") || href.startsWith("/guests/staff-control")) {
     return can(user, "view_staff");
   }

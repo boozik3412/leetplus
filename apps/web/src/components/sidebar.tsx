@@ -24,6 +24,7 @@ type NavGroup = {
   title: string;
   icon:
     | "guests"
+    | "communications"
     | "staff"
     | "marketing"
     | "assortment"
@@ -54,32 +55,27 @@ const navGroups: NavGroup[] = [
     ],
   },
   {
+    title: "Коммуникации",
+    icon: "communications",
+    items: [
+      { href: "/communications", label: "Обзор коммуникаций" },
+      { href: "/staff/team-chat", label: "Командный чат" },
+      { href: "/staff/notifications", label: "Уведомления" },
+      { href: "/guests/crm/tasks", label: "CRM-задачи контакта" },
+    ],
+  },
+  {
     title: "Персонал",
     icon: "staff",
     items: [
-      { href: "/staff/directory", label: "Сотрудники" },
-      { href: "/staff/tasks", label: "Задачи персонала" },
-      { href: "/staff/task-templates", label: "Шаблоны задач" },
-      { href: "/staff/task-rules", label: "Регулярные задачи" },
-      { href: "/staff/notifications", label: "Уведомления" },
-      { href: "/staff/ai-assistant", label: "AI-помощник" },
-      { href: "/staff/team-chat", label: "Командный чат" },
+      { href: "/staff", label: "Обзор персонала" },
       { href: "/staff/operations-dashboard", label: "Операционная дисциплина" },
-      { href: "/staff/administrator-ratings", label: "Рейтинг администраторов" },
-      { href: "/staff/discipline", label: "Предупреждения и штрафы" },
-      { href: "/staff/salary", label: "Зарплата" },
-      { href: "/staff/knowledge-base", label: "База знаний" },
-      { href: "/staff/training-courses", label: "Курсы обучения" },
-      { href: "/staff/training-profiles", label: "Профили обучения" },
-      { href: "/staff/readiness-report", label: "Готовность к сменам" },
-      { href: "/staff/assessments", label: "Аттестации" },
-      { href: "/staff/onboarding", label: "Онбординг" },
-      { href: "/staff/shift-regulations", label: "Регламенты смены" },
-      { href: "/staff/checklist-templates", label: "Шаблоны чеклистов" },
-      { href: "/staff/checklists", label: "Чеклисты смены" },
-      { href: "/staff/checklists/report", label: "Отчет по чеклистам" },
-      { href: "/guests/staff-control", label: "Контроль персонала" },
-      { href: "/guests/staff-control/operators", label: "Администраторы" },
+      { href: "/staff/tasks", label: "Задачи и правила" },
+      { href: "/staff/shift-regulations", label: "Регламенты и чек-листы" },
+      { href: "/staff/training-courses", label: "Обучение и аттестации" },
+      { href: "/staff/administrator-ratings", label: "Контроль и мотивация" },
+      { href: "/staff/directory", label: "Сотрудники" },
+      { href: "/guests/staff-control", label: "Смены и администраторы" },
     ],
   },
   {
@@ -399,6 +395,17 @@ function SectionIcon({ icon }: { icon: NavGroup["icon"] }) {
     );
   }
 
+  if (icon === "communications") {
+    return (
+      <svg {...common}>
+        <path d="M5 6.5A3.5 3.5 0 0 1 8.5 3h7A3.5 3.5 0 0 1 19 6.5v5A3.5 3.5 0 0 1 15.5 15H12l-4 3v-3.2A3.5 3.5 0 0 1 5 11.5z" />
+        <path d="M9 8h6" />
+        <path d="M9 11h4" />
+        <path d="M18.5 11.5A3.5 3.5 0 0 1 21 15v4l-3-2h-4" />
+      </svg>
+    );
+  }
+
   if (icon === "management") {
     return (
       <svg {...common}>
@@ -540,6 +547,14 @@ function resolveCurrentProductArea(pathname: string): ProductArea {
 
   if (isDashboardPath(currentPathname)) {
     return "Главная";
+  }
+
+  if (
+    currentPathname.startsWith("/communications") ||
+    currentPathname.startsWith("/staff/team-chat") ||
+    currentPathname.startsWith("/staff/notifications")
+  ) {
+    return "Коммуникации";
   }
 
   if (

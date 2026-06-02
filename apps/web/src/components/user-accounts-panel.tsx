@@ -19,6 +19,7 @@ import type {
 } from "@/lib/users";
 
 type AccountFormMode = "account" | "invite";
+type RoleEditorMode = "idle" | "new" | "system" | "custom";
 
 type FormState = {
   email: string;
@@ -139,6 +140,11 @@ export function UserAccountsPanel({
     createEmptyRoleForm,
   );
   const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null);
+  const [selectedSystemRole, setSelectedSystemRole] = useState<UserRole | null>(
+    null,
+  );
+  const [roleEditorMode, setRoleEditorMode] =
+    useState<RoleEditorMode>("idle");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<{
@@ -167,6 +173,10 @@ export function UserAccountsPanel({
   const roleAssignmentValue = form.customRoleId
     ? `custom:${form.customRoleId}`
     : `system:${form.role}`;
+  const selectedSystemRoleOption = selectedSystemRole
+    ? roleOptions.find((option) => option.role === selectedSystemRole) ?? null
+    : null;
+  const isRoleEditorOpen = roleEditorMode !== "idle";
 
   if (
     selectedRoleOption &&
@@ -198,16 +208,6 @@ export function UserAccountsPanel({
       return haystack.includes(normalizedQuery);
     });
   }, [query, users]);
-  const capabilityLabels = useMemo(
-    () =>
-      new Map(
-        initialData.capabilityOptions.map(
-          (capability) => [capability.key, capability.label] as const,
-        ),
-      ),
-    [initialData.capabilityOptions],
-  );
-
   function startCreate() {
     setSelectedId(null);
     setAccountFormMode("account");
@@ -268,12 +268,16 @@ export function UserAccountsPanel({
 
   function startCreateRole() {
     setSelectedRoleId(null);
+    setSelectedSystemRole(null);
+    setRoleEditorMode("new");
     setRoleForm(createEmptyRoleForm());
     setRoleStatus({ type: "idle", message: "" });
   }
 
   function startCreateRoleFromSystem(role: UserRoleOption) {
     setSelectedRoleId(null);
+    setSelectedSystemRole(role.role);
+    setRoleEditorMode("system");
     setRoleForm({
       name: `${role.label} - копия`,
       description: role.description,
@@ -284,6 +288,8 @@ export function UserAccountsPanel({
 
   function startEditRole(role: UserAccessRole) {
     setSelectedRoleId(role.id);
+    setSelectedSystemRole(null);
+    setRoleEditorMode("custom");
     setRoleForm(roleFormFromCustomRole(role));
     setRoleStatus({ type: "idle", message: "" });
   }
@@ -302,6 +308,7 @@ export function UserAccountsPanel({
     setIsRoleSaving(true);
     setRoleStatus({ type: "idle", message: "" });
 
+    const isUpdatingRole = Boolean(selectedRoleId);
     const endpoint = selectedRoleId
       ? `/api/users/roles/${selectedRoleId}`
       : "/api/users/roles";
@@ -346,10 +353,12 @@ export function UserAccountsPanel({
       ),
     );
     setSelectedRoleId(saved.id);
+    setSelectedSystemRole(null);
+    setRoleEditorMode("custom");
     setRoleForm(roleFormFromCustomRole(saved));
     setRoleStatus({
       type: "success",
-      message: selectedRoleId ? "Роль обновлена" : "Роль создана",
+      message: isUpdatingRole ? "Роль обновлена" : "Роль создана",
     });
     setIsRoleSaving(false);
   }
@@ -883,8 +892,8 @@ export function UserAccountsPanel({
           </button>
         </div>
 
-        <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(19rem,0.9fr)_minmax(0,1.1fr)]">
-          <div className="space-y-5">
+        <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(18rem,0.85fr)_minmax(0,1.15fr)]">
+          <div className="space-y-4">
             <div>
               <div className="flex items-center justify-between gap-3">
                 <p className="text-xs font-bold uppercase text-zinc-500">
@@ -896,36 +905,30 @@ export function UserAccountsPanel({
               </div>
               <div className="mt-2 space-y-2">
                 {roleOptions.map((role) => (
-                  <div
+                  <button
                     key={role.role}
-                    className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm transition hover:border-emerald-500/60 hover:bg-emerald-500/5 dark:border-zinc-800 dark:bg-zinc-900/60"
+                    type="button"
+                    onClick={() => startCreateRoleFromSystem(role)}
+                    className={[
+                      "w-full rounded-md border px-3 py-2 text-left text-sm transition hover:-translate-y-0.5 hover:border-emerald-500/70 hover:bg-emerald-500/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50",
+                      roleEditorMode === "system" &&
+                      selectedSystemRole === role.role
+                        ? "border-emerald-500 bg-emerald-500/10"
+                        : "border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/60",
+                    ].join(" ")}
                   >
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div>
-                        <p className="font-semibold">{role.label}</p>
-                        <p className="mt-1 text-xs text-zinc-500">
-                          {role.permissions.length} доступов
-                        </p>
-                      </div>
-                      <span className="rounded-full bg-zinc-200/70 px-2 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-                        Базовая
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="min-w-0 truncate font-semibold">
+                        {role.label}
+                      </p>
+                      <span className="shrink-0 rounded-full bg-zinc-200/70 px-2 py-0.5 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                        {role.permissions.length}
                       </span>
                     </div>
-                    <p className="mt-2 text-xs leading-5 text-zinc-500">
+                    <p className="mt-1 line-clamp-1 text-xs leading-5 text-zinc-500">
                       {role.description}
                     </p>
-                    <PermissionChips
-                      labels={capabilityLabels}
-                      permissions={role.permissions}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => startCreateRoleFromSystem(role)}
-                      className="mt-3 inline-flex h-9 items-center justify-center rounded-md border border-zinc-300 px-3 text-xs font-semibold text-zinc-700 transition hover:border-emerald-500/70 hover:bg-emerald-500/10 dark:border-zinc-700 dark:text-zinc-200"
-                    >
-                      Создать на основе
-                    </button>
-                  </div>
+                  </button>
                 ))}
               </div>
             </div>
@@ -939,44 +942,37 @@ export function UserAccountsPanel({
                   {customRoles.length}
                 </span>
               </div>
-              <div className="mt-2 space-y-2">
+              <div className="mt-2 max-h-[28rem] space-y-2 overflow-y-auto pr-1">
                 {customRoles.map((role) => (
                   <button
                     key={role.id}
                     type="button"
                     onClick={() => startEditRole(role)}
                     className={[
-                      "w-full rounded-lg border p-3 text-left text-sm transition hover:-translate-y-0.5 hover:border-emerald-500/70 hover:bg-emerald-500/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50",
+                      "w-full rounded-md border px-3 py-2 text-left text-sm transition hover:-translate-y-0.5 hover:border-emerald-500/70 hover:bg-emerald-500/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50",
                       selectedRoleId === role.id
                         ? "border-emerald-500 bg-emerald-500/10"
                         : "border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/60",
                     ].join(" ")}
                   >
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div>
-                        <p className="font-semibold">{role.name}</p>
-                        <p className="mt-1 text-xs text-zinc-500">
-                          {role.permissions.length} доступов
-                        </p>
-                      </div>
-                      <span className="rounded-full bg-zinc-200/70 px-2 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-                        Редактируемая
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="min-w-0 truncate font-semibold">
+                        {role.name}
+                      </p>
+                      <span className="shrink-0 rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:text-emerald-200">
+                        {role.permissions.length}
                       </span>
                     </div>
                     {role.description ? (
-                      <p className="mt-2 line-clamp-2 text-xs leading-5 text-zinc-500">
+                      <p className="mt-1 line-clamp-1 text-xs leading-5 text-zinc-500">
                         {role.description}
                       </p>
                     ) : null}
-                    <PermissionChips
-                      labels={capabilityLabels}
-                      permissions={role.permissions}
-                    />
                   </button>
                 ))}
 
                 {customRoles.length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-zinc-300 p-4 text-sm text-zinc-500 dark:border-zinc-800">
+                  <div className="rounded-md border border-dashed border-zinc-300 p-3 text-sm text-zinc-500 dark:border-zinc-800">
                     Клубных ролей пока нет. Создайте новую роль или возьмите
                     системную роль за основу.
                   </div>
@@ -985,117 +981,172 @@ export function UserAccountsPanel({
             </div>
           </div>
 
-          <form
-            onSubmit={saveAccessRole}
-            className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60"
-          >
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="space-y-1">
-                <span className="text-xs font-bold uppercase text-zinc-500">
-                  Название роли
+          {isRoleEditorOpen ? (
+            <form
+              onSubmit={saveAccessRole}
+              className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60"
+            >
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+                    {roleEditorMode === "custom"
+                      ? "Изменение роли"
+                      : roleEditorMode === "system"
+                        ? "На основе системной роли"
+                        : "Новая роль"}
+                  </p>
+                  <h3 className="mt-1 text-lg font-semibold">
+                    {selectedRoleId ? "Редактирование доступов" : "Создание роли"}
+                  </h3>
+                  <p className="mt-1 max-w-2xl text-sm leading-6 text-zinc-500">
+                    {roleEditorMode === "custom"
+                      ? "Измените название, описание и набор доступов. Сохранение обновит эту роль у назначенных пользователей."
+                      : roleEditorMode === "system" && selectedSystemRoleOption
+                        ? `Основа: ${selectedSystemRoleOption.label}. Измените доступы и сохраните как роль клуба.`
+                        : "Задайте название, описание и отметьте только нужные доступы."}
+                  </p>
+                </div>
+                <span className="inline-flex h-8 shrink-0 items-center rounded-full bg-zinc-200/70 px-3 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                  {roleForm.permissions.length} доступов
                 </span>
-                <input
-                  required
-                  value={roleForm.name}
-                  onChange={(event) =>
-                    setRoleForm((current) => ({
-                      ...current,
-                      name: event.target.value,
-                    }))
-                  }
-                  placeholder="Например: Управляющий сменой"
-                  className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
-                />
-              </label>
+              </div>
 
-              <label className="space-y-1">
-                <span className="text-xs font-bold uppercase text-zinc-500">
-                  Описание
-                </span>
-                <input
-                  value={roleForm.description}
-                  onChange={(event) =>
-                    setRoleForm((current) => ({
-                      ...current,
-                      description: event.target.value,
-                    }))
-                  }
-                  placeholder="Коротко: зона ответственности"
-                  className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
-                />
-              </label>
-            </div>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <label className="space-y-1">
+                  <span className="text-xs font-bold uppercase text-zinc-500">
+                    Название роли
+                  </span>
+                  <input
+                    required
+                    value={roleForm.name}
+                    onChange={(event) =>
+                      setRoleForm((current) => ({
+                        ...current,
+                        name: event.target.value,
+                      }))
+                    }
+                    placeholder="Например: Управляющий сменой"
+                    className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+                  />
+                </label>
 
-            <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-              {initialData.capabilityOptions.map((capability) => (
-                <label
-                  key={capability.key}
+                <label className="space-y-1">
+                  <span className="text-xs font-bold uppercase text-zinc-500">
+                    Описание
+                  </span>
+                  <input
+                    value={roleForm.description}
+                    onChange={(event) =>
+                      setRoleForm((current) => ({
+                        ...current,
+                        description: event.target.value,
+                      }))
+                    }
+                    placeholder="Коротко: зона ответственности"
+                    className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+                  />
+                </label>
+              </div>
+
+              <div className="mt-4 rounded-md border border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950">
+                <p className="text-xs font-bold uppercase text-zinc-500">
+                  Доступы роли
+                </p>
+                <p className="mt-1 text-sm text-zinc-500">
+                  Ставьте и снимайте галочки: изменения применятся после сохранения.
+                </p>
+              </div>
+
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                {initialData.capabilityOptions.map((capability) => (
+                  <label
+                    key={capability.key}
+                    className={[
+                      "flex min-h-[5.25rem] cursor-pointer items-start gap-3 rounded-md border px-3 py-2 text-sm transition hover:border-emerald-500/70 hover:bg-emerald-500/5",
+                      roleForm.permissions.includes(capability.key)
+                        ? "border-emerald-500 bg-emerald-500/10"
+                        : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950",
+                    ].join(" ")}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={roleForm.permissions.includes(capability.key)}
+                      onChange={(event) =>
+                        updateRolePermission(
+                          capability.key,
+                          event.target.checked,
+                        )
+                      }
+                      className="mt-1 h-4 w-4 rounded border-zinc-300 text-emerald-500 focus:ring-emerald-500"
+                    />
+                    <span className="min-w-0">
+                      <span className="block font-semibold">
+                        {capability.label}
+                      </span>
+                      <span className="mt-1 line-clamp-2 block text-xs leading-5 text-zinc-500">
+                        {capability.description}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+
+              {roleStatus.type !== "idle" ? (
+                <div
                   className={[
-                    "flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm transition hover:border-emerald-500/70 hover:bg-emerald-500/5",
-                    roleForm.permissions.includes(capability.key)
-                      ? "border-emerald-500 bg-emerald-500/10"
-                      : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950",
+                    "mt-4 rounded-md border px-3 py-2 text-sm",
+                    roleStatus.type === "success"
+                      ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200"
+                      : "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-200",
                   ].join(" ")}
                 >
-                  <input
-                    type="checkbox"
-                    checked={roleForm.permissions.includes(capability.key)}
-                    onChange={(event) =>
-                      updateRolePermission(
-                        capability.key,
-                        event.target.checked,
-                      )
-                    }
-                    className="mt-1 h-4 w-4 rounded border-zinc-300 text-emerald-500 focus:ring-emerald-500"
-                  />
-                  <span>
-                    <span className="block font-semibold">
-                      {capability.label}
-                    </span>
-                    <span className="mt-1 block text-xs leading-5 text-zinc-500">
-                      {capability.description}
-                    </span>
-                  </span>
-                </label>
-              ))}
-            </div>
+                  {roleStatus.message}
+                </div>
+              ) : null}
 
-            {roleStatus.type !== "idle" ? (
-              <div
-                className={[
-                  "mt-4 rounded-md border px-3 py-2 text-sm",
-                  roleStatus.type === "success"
-                    ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200"
-                    : "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-200",
-                ].join(" ")}
-              >
-                {roleStatus.message}
-              </div>
-            ) : null}
-
-            <div className="mt-4 flex flex-wrap gap-2">
-              <button
-                type="submit"
-                disabled={isRoleSaving}
-                className="inline-flex h-11 items-center justify-center rounded-md bg-zinc-950 px-5 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
-              >
-                {isRoleSaving
-                  ? "Сохраняем..."
-                  : selectedRoleId
-                    ? "Сохранить роль"
-                    : "Создать роль"}
-              </button>
-              {selectedRoleId ? (
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="submit"
+                  disabled={isRoleSaving}
+                  className="inline-flex h-11 items-center justify-center rounded-md bg-zinc-950 px-5 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
+                >
+                  {isRoleSaving
+                    ? "Сохраняем..."
+                    : selectedRoleId
+                      ? "Изменить роль"
+                      : "Создать роль"}
+                </button>
                 <button
                   type="button"
                   onClick={startCreateRole}
                   className="inline-flex h-11 items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
                 >
-                  Сбросить форму
+                  Новая роль
                 </button>
-              ) : null}
+              </div>
+            </form>
+          ) : (
+            <div className="flex min-h-[20rem] flex-col justify-center rounded-lg border border-dashed border-zinc-300 bg-zinc-50 p-5 dark:border-zinc-800 dark:bg-zinc-900/40">
+              <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+                Редактор роли
+              </p>
+              <h3 className="mt-2 text-lg font-semibold">
+                Выберите карточку слева
+              </h3>
+              <p className="mt-2 max-w-xl text-sm leading-6 text-zinc-500">
+                Доступы, чекбоксы и форма изменения появятся здесь после выбора
+                системной или клубной роли. Для чистого сценария нажмите
+                «Новая роль».
+              </p>
+              <button
+                type="button"
+                onClick={startCreateRole}
+                className="mt-4 inline-flex h-10 w-fit items-center justify-center rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
+              >
+                Создать роль
+              </button>
             </div>
-          </form>
+          )}
         </div>
       </section>
     </div>
@@ -1133,42 +1184,5 @@ function StoreCheckbox({
         className="h-4 w-4 rounded border-zinc-300 text-emerald-500 focus:ring-emerald-500"
       />
     </label>
-  );
-}
-
-function PermissionChips({
-  labels,
-  permissions,
-}: {
-  labels: ReadonlyMap<Capability, string>;
-  permissions: Capability[];
-}) {
-  const visiblePermissions = permissions.slice(0, 4);
-  const hiddenCount = Math.max(permissions.length - visiblePermissions.length, 0);
-
-  if (permissions.length === 0) {
-    return (
-      <div className="mt-3 text-xs font-semibold text-zinc-500">
-        Доступов нет
-      </div>
-    );
-  }
-
-  return (
-    <div className="mt-3 flex flex-wrap gap-1.5">
-      {visiblePermissions.map((permission) => (
-        <span
-          key={permission}
-          className="rounded-full bg-emerald-500/10 px-2 py-1 text-xs font-semibold text-emerald-700 dark:text-emerald-200"
-        >
-          {labels.get(permission) ?? permission}
-        </span>
-      ))}
-      {hiddenCount > 0 ? (
-        <span className="rounded-full bg-zinc-200/70 px-2 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-          +{hiddenCount}
-        </span>
-      ) : null}
-    </div>
   );
 }

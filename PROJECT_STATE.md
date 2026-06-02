@@ -76,6 +76,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Refined `/users` role-management UX: role cards are now compact summaries, permission checkboxes open only in the right-side editor after selecting a system/custom role or starting a new role, and the submit action switches between create and edit modes.
 - Added the first manual Langame endpoint snapshot journal: `/sync` can create a snapshot only for a `READY` GET endpoint, backend stores tenant/source-scoped `LangameEndpointSnapshotRun` metadata with params, status, row count, payload kind, fields, sanitized preview/summary, and errors, and settings show latest snapshots next to production profiles.
 - Added backend Langame endpoint snapshot candidates: `/integrations/langame/settings` now returns readiness statuses `READY`/`PARTIAL`/`STALE`/`FAILED`/`UNPROFILED`, source counts, latest check, row count, and next action for each profiled GET endpoint, and `/sync` uses that backend gate before future snapshot jobs instead of recalculating readiness on the client.
 - Added persisted Langame endpoint quality profiles: manual GET endpoint profiling on `/sync` now saves tenant-scoped source/endpoint/profile runs with request params, freshness, row count, payload kind, field keys, summary, and errors, and `/sync` shows the latest saved profiles before a source is promoted into snapshot jobs.

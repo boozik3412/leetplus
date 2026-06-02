@@ -305,6 +305,7 @@ function CompactNavSection({
         aria-label={group.title}
         aria-expanded={isOpen}
         aria-haspopup="menu"
+        aria-current={isActive ? "page" : undefined}
         onClick={onOpen}
         className={compactGroupButtonClass({ isActive, isOpen })}
       >

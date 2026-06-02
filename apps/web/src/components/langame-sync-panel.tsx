@@ -93,6 +93,8 @@ type EndpointMethod = "GET" | "POST";
 
 type RouteDiagnosticsStatus = "idle" | "loading" | "success" | "error";
 
+type ServiceDiagnosticsStatus = "idle" | "loading" | "success" | "error";
+
 type RouteDiagnosticsSource = {
   domain: string;
   status: "SUCCESS" | "FAILED";
@@ -107,6 +109,29 @@ type RouteDiagnosticsSource = {
 type RouteDiagnosticsResult = {
   checkedAt: string;
   sources: RouteDiagnosticsSource[];
+};
+
+type ServiceEndpointDiagnostics = {
+  key: string;
+  title: string;
+  path: string;
+  status: "SUCCESS" | "FAILED";
+  rowCount: number;
+  payloadKind: "array" | "object" | "scalar" | "empty";
+  fieldKeys: string[];
+  summary: string | null;
+  errorMessage: string | null;
+};
+
+type ServiceDiagnosticsSource = {
+  domain: string;
+  status: "SUCCESS" | "PARTIAL" | "FAILED";
+  endpoints: ServiceEndpointDiagnostics[];
+};
+
+type ServiceDiagnosticsResult = {
+  checkedAt: string;
+  sources: ServiceDiagnosticsSource[];
 };
 
 type GuestSearchField =
@@ -152,7 +177,13 @@ type EndpointMapItem = {
   title: string;
   description: string;
   usageStatus: EndpointUsageStatus;
-  freshnessSource: "assortment" | "guests" | "routes" | "planned" | "write";
+  freshnessSource:
+    | "assortment"
+    | "guests"
+    | "routes"
+    | "service"
+    | "planned"
+    | "write";
 };
 
 const guestSyncPollIntervalMs = 4000;
@@ -432,18 +463,18 @@ const langameEndpointMap: EndpointMapItem[] = [
     path: "/public_api/config/list",
     group: "service",
     title: "Конфигурация Langame",
-    description: "Планируемая сверка настроек источника и доступных модулей.",
-    usageStatus: "PLANNED",
-    freshnessSource: "planned",
+    description: "Диагностика настроек источника и доступных модулей без KPI.",
+    usageStatus: "IN_USE",
+    freshnessSource: "service",
   },
   {
     method: "GET",
     path: "/public_api/puf/profiles/list",
     group: "service",
     title: "PUF-профили",
-    description: "План для будущей связки оборудования и профилей клубов.",
-    usageStatus: "PLANNED",
-    freshnessSource: "planned",
+    description: "Диагностика профилей оборудования и различий между клубами.",
+    usageStatus: "IN_USE",
+    freshnessSource: "service",
   },
   {
     method: "GET",
@@ -459,27 +490,27 @@ const langameEndpointMap: EndpointMapItem[] = [
     path: "/public_api/ver/get_adminconsole",
     group: "service",
     title: "Версия Admin Console",
-    description: "План для диагностики окружения Langame.",
-    usageStatus: "PLANNED",
-    freshnessSource: "planned",
+    description: "Диагностика версии Admin Console по каждому источнику.",
+    usageStatus: "IN_USE",
+    freshnessSource: "service",
   },
   {
     method: "GET",
     path: "/public_api/ver/get_po",
     group: "service",
     title: "Версия ПО",
-    description: "План для проверки совместимости источников.",
-    usageStatus: "PLANNED",
-    freshnessSource: "planned",
+    description: "Диагностика версии ПО и совместимости источников.",
+    usageStatus: "IN_USE",
+    freshnessSource: "service",
   },
   {
     method: "GET",
     path: "/public_api/ver/get_terminal",
     group: "service",
     title: "Версия терминала",
-    description: "План для диагностики платежных и терминальных сценариев.",
-    usageStatus: "PLANNED",
-    freshnessSource: "planned",
+    description: "Диагностика терминального контура без бизнес-расчетов.",
+    usageStatus: "IN_USE",
+    freshnessSource: "service",
   },
 ];
 
@@ -544,6 +575,12 @@ export function LangameSyncPanel({
   const [routeDiagnosticsStatus, setRouteDiagnosticsStatus] =
     useState<RouteDiagnosticsStatus>("idle");
   const [routeDiagnosticsError, setRouteDiagnosticsError] =
+    useState<string | null>(null);
+  const [serviceDiagnostics, setServiceDiagnostics] =
+    useState<ServiceDiagnosticsResult | null>(null);
+  const [serviceDiagnosticsStatus, setServiceDiagnosticsStatus] =
+    useState<ServiceDiagnosticsStatus>("idle");
+  const [serviceDiagnosticsError, setServiceDiagnosticsError] =
     useState<string | null>(null);
   const [guestSearchQuery, setGuestSearchQuery] = useState("");
   const [guestSearchField, setGuestSearchField] =
@@ -686,6 +723,35 @@ export function LangameSyncPanel({
         routeError instanceof Error
           ? routeError.message
           : "Не удалось проверить карту маршрутов Langame",
+      );
+    }
+  }
+
+  async function checkServiceDiagnostics() {
+    setServiceDiagnosticsStatus("loading");
+    setServiceDiagnosticsError(null);
+
+    try {
+      const response = await fetch(
+        "/api/integrations/langame/service-diagnostics",
+        {
+          cache: "no-store",
+        },
+      );
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(getErrorMessage(data));
+      }
+
+      setServiceDiagnostics(data as ServiceDiagnosticsResult);
+      setServiceDiagnosticsStatus("success");
+    } catch (serviceError) {
+      setServiceDiagnosticsStatus("error");
+      setServiceDiagnosticsError(
+        serviceError instanceof Error
+          ? serviceError.message
+          : "Не удалось проверить сервисные endpoints Langame",
       );
     }
   }
@@ -875,6 +941,13 @@ export function LangameSyncPanel({
         diagnosticsStatus={routeDiagnosticsStatus}
         latestGuestStatus={latestGuestStatus}
         onCheckDiagnostics={checkRouteDiagnostics}
+        settings={settings}
+      />
+      <ServiceDiagnosticsPanel
+        diagnostics={serviceDiagnostics}
+        diagnosticsError={serviceDiagnosticsError}
+        diagnosticsStatus={serviceDiagnosticsStatus}
+        onCheckDiagnostics={checkServiceDiagnostics}
         settings={settings}
       />
       <GuestSearchDiagnosticsPanel
@@ -1402,6 +1475,187 @@ function EndpointMapPanel({
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function ServiceDiagnosticsPanel({
+  settings,
+  diagnostics,
+  diagnosticsStatus,
+  diagnosticsError,
+  onCheckDiagnostics,
+}: {
+  settings: LangameSettings;
+  diagnostics: ServiceDiagnosticsResult | null;
+  diagnosticsStatus: ServiceDiagnosticsStatus;
+  diagnosticsError: string | null;
+  onCheckDiagnostics: () => void;
+}) {
+  const sources = diagnostics?.sources ?? [];
+  const successfulSources = sources.filter((source) => source.status === "SUCCESS");
+  const partialSources = sources.filter((source) => source.status === "PARTIAL");
+  const failedSources = sources.filter((source) => source.status === "FAILED");
+  const endpoints = sources.flatMap((source) => source.endpoints);
+  const successfulEndpoints = endpoints.filter(
+    (endpoint) => endpoint.status === "SUCCESS",
+  );
+  const failedEndpoints = endpoints.filter(
+    (endpoint) => endpoint.status === "FAILED",
+  );
+
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300">
+            Сервисная диагностика
+          </p>
+          <h2 className="mt-1 text-lg font-semibold text-zinc-950 dark:text-zinc-50">
+            Конфигурация, PUF-профили и версии Langame
+          </h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-500 dark:text-zinc-400">
+            Ручная проверка сервисного окружения по активным источникам. Эти
+            данные помогают увидеть расхождения версий и модулей, но не
+            попадают в расчеты выручки, гостей, ассортимента или персонала.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onCheckDiagnostics}
+          disabled={diagnosticsStatus === "loading" || !settings.hasApiKey}
+          className="rounded-full border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-900 transition hover:border-zinc-950 hover:bg-zinc-950 hover:text-white disabled:cursor-not-allowed disabled:border-zinc-200 disabled:text-zinc-400 dark:border-zinc-700 dark:text-zinc-100 dark:hover:border-emerald-400 dark:hover:bg-emerald-400 dark:hover:text-zinc-950 dark:disabled:border-zinc-800 dark:disabled:text-zinc-500"
+        >
+          {diagnosticsStatus === "loading"
+            ? "Проверяем сервис..."
+            : "Проверить сервисные endpoints"}
+        </button>
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <SyncHealthMetric
+          detail="config, PUF и версии"
+          label="Endpoints"
+          value={diagnostics ? successfulEndpoints.length + failedEndpoints.length : 5}
+        />
+        <SyncHealthMetric
+          detail="ответили без ошибок"
+          label="Успешно"
+          value={diagnostics ? successfulEndpoints.length : "не проверено"}
+        />
+        <SyncHealthMetric
+          detail="нужна проверка источника или прав"
+          label="Ошибки"
+          tone={failedEndpoints.length > 0 ? "warning" : "neutral"}
+          value={diagnostics ? failedEndpoints.length : "не проверено"}
+        />
+        <SyncHealthMetric
+          detail={
+            diagnostics
+              ? `${successfulSources.length} OK, ${partialSources.length} частично, ${failedSources.length} ошибок`
+              : "проверка выполняется вручную"
+          }
+          label="Источники"
+          tone={failedSources.length > 0 || partialSources.length > 0 ? "warning" : "neutral"}
+          value={diagnostics ? sources.length : settings.sources.length}
+        />
+      </div>
+
+      {diagnostics ? (
+        <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
+          Последняя проверка: {formatDateTime(diagnostics.checkedAt)}
+        </p>
+      ) : null}
+
+      {diagnosticsError ? (
+        <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-200">
+          {diagnosticsError}
+        </p>
+      ) : null}
+
+      {diagnostics ? (
+        <div className="mt-4 space-y-3">
+          {sources.map((source) => (
+            <div
+              key={source.domain}
+              className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+                    {source.domain}
+                  </h3>
+                  <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                    Сервисные данные показываются отдельно от бизнес-KPI.
+                  </p>
+                </div>
+                <span className={serviceSourceStatusClass(source.status)}>
+                  {serviceSourceStatusLabel(source.status)}
+                </span>
+              </div>
+
+              <div className="mt-3 grid gap-2 lg:grid-cols-2">
+                {source.endpoints.map((endpoint) => (
+                  <div
+                    key={`${source.domain}-${endpoint.key}`}
+                    className="rounded-md border border-zinc-200 bg-white px-3 py-3 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <p className="font-medium text-zinc-950 dark:text-zinc-50">
+                          {endpoint.title}
+                        </p>
+                        <p className="mt-1 break-all font-mono text-xs text-zinc-500 dark:text-zinc-400">
+                          {endpoint.path}
+                        </p>
+                      </div>
+                      <span
+                        className={
+                          endpoint.status === "SUCCESS"
+                            ? "rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200"
+                            : "rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-950/40 dark:text-red-200"
+                        }
+                      >
+                        {endpoint.status === "SUCCESS" ? "OK" : "Ошибка"}
+                      </span>
+                    </div>
+
+                    {endpoint.status === "SUCCESS" ? (
+                      <div className="mt-3 grid gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+                        <div className="flex flex-wrap gap-2">
+                          <span className="rounded-full bg-zinc-100 px-2 py-1 dark:bg-zinc-900">
+                            {endpoint.payloadKind}
+                          </span>
+                          <span className="rounded-full bg-zinc-100 px-2 py-1 dark:bg-zinc-900">
+                            строк: {endpoint.rowCount}
+                          </span>
+                          {endpoint.summary ? (
+                            <span className="rounded-full bg-zinc-100 px-2 py-1 dark:bg-zinc-900">
+                              {endpoint.summary}
+                            </span>
+                          ) : null}
+                        </div>
+                        {endpoint.fieldKeys.length > 0 ? (
+                          <p className="leading-5">
+                            Поля: {endpoint.fieldKeys.slice(0, 12).join(", ")}
+                            {endpoint.fieldKeys.length > 12 ? "..." : ""}
+                          </p>
+                        ) : (
+                          <p>Поля не обнаружены или endpoint вернул scalar.</p>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="mt-3 text-xs leading-5 text-red-600 dark:text-red-300">
+                        {endpoint.errorMessage ?? "Endpoint не ответил"}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -2050,6 +2304,32 @@ function availabilityLabel(availability: EndpointAvailability) {
   }
 
   return "не проверен";
+}
+
+function serviceSourceStatusLabel(status: ServiceDiagnosticsSource["status"]) {
+  if (status === "SUCCESS") {
+    return "OK";
+  }
+
+  if (status === "PARTIAL") {
+    return "Частично";
+  }
+
+  return "Ошибка";
+}
+
+function serviceSourceStatusClass(status: ServiceDiagnosticsSource["status"]) {
+  const base = "rounded-full px-2.5 py-1 text-xs font-medium";
+
+  if (status === "SUCCESS") {
+    return `${base} bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200`;
+  }
+
+  if (status === "PARTIAL") {
+    return `${base} bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-200`;
+  }
+
+  return `${base} bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-200`;
 }
 
 function getLatestSyncJobsByDomain(jobs: LangameSettings["syncJobs"]) {

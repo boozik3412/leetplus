@@ -12,9 +12,40 @@ import type {
   LangameGuestSearchQuery,
   LangameRouteSummary,
   LangameRoutesDiagnosticsResult,
+  LangameServiceDiagnosticsResult,
+  LangameServiceEndpointDefinition,
+  LangameServiceEndpointDiagnostics,
 } from './langame.types';
 
 const CREDENTIAL_NAME = 'Langame API key';
+
+const SERVICE_DIAGNOSTIC_ENDPOINTS: LangameServiceEndpointDefinition[] = [
+  {
+    key: 'config',
+    title: 'Конфигурация Langame',
+    path: '/config/list',
+  },
+  {
+    key: 'pufProfiles',
+    title: 'PUF-профили',
+    path: '/puf/profiles/list',
+  },
+  {
+    key: 'adminConsoleVersion',
+    title: 'Версия Admin Console',
+    path: '/ver/get_adminconsole',
+  },
+  {
+    key: 'softwareVersion',
+    title: 'Версия ПО',
+    path: '/ver/get_po',
+  },
+  {
+    key: 'terminalVersion',
+    title: 'Версия терминала',
+    path: '/ver/get_terminal',
+  },
+];
 
 export type LangameSettingsDto = {
   tenantName?: string;
@@ -294,6 +325,69 @@ export class LangameSettingsService {
     };
   }
 
+  async getServiceDiagnostics(
+    user: AuthenticatedUser,
+  ): Promise<LangameServiceDiagnosticsResult> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const { apiKey, sources } = await this.resolveTenantAccess(tenantId);
+    const checkedAt = new Date().toISOString();
+    const diagnostics = await Promise.all(
+      sources.map(async (source) => {
+        const endpoints = await Promise.all(
+          SERVICE_DIAGNOSTIC_ENDPOINTS.map(async (endpoint) => {
+            try {
+              const payload = await this.langameClient.getDiagnosticEndpoint(
+                source.baseUrl,
+                apiKey,
+                endpoint.path,
+              );
+
+              return this.toServiceEndpointDiagnostics(endpoint, payload);
+            } catch (error) {
+              return {
+                ...endpoint,
+                status: 'FAILED' as const,
+                rowCount: 0,
+                payloadKind: 'empty' as const,
+                fieldKeys: [],
+                summary: null,
+                payloadPreview: null,
+                errorMessage:
+                  error instanceof Error
+                    ? error.message
+                    : `Unknown Langame ${endpoint.path} diagnostics error`,
+              };
+            }
+          }),
+        );
+        const successCount = endpoints.filter(
+          (endpoint) => endpoint.status === 'SUCCESS',
+        ).length;
+        const status =
+          successCount === endpoints.length
+            ? ('SUCCESS' as const)
+            : successCount > 0
+              ? ('PARTIAL' as const)
+              : ('FAILED' as const);
+
+        return {
+          id: source.id,
+          name: source.name,
+          domain: source.domain,
+          baseUrl: source.baseUrl,
+          status,
+          endpoints,
+        };
+      }),
+    );
+
+    return {
+      checkedAt,
+      endpoints: SERVICE_DIAGNOSTIC_ENDPOINTS,
+      sources: diagnostics,
+    };
+  }
+
   async searchGuestDiagnostics(
     user: AuthenticatedUser,
     dto: LangameGuestSearchQuery,
@@ -380,6 +474,155 @@ export class LangameSettingsService {
       queryField,
       sources: diagnostics,
     };
+  }
+
+  private toServiceEndpointDiagnostics(
+    endpoint: LangameServiceEndpointDefinition,
+    payload: unknown,
+  ): LangameServiceEndpointDiagnostics {
+    const rows = this.extractDiagnosticRows(payload);
+
+    return {
+      ...endpoint,
+      status: 'SUCCESS',
+      rowCount: rows.length,
+      payloadKind: this.getPayloadKind(payload),
+      fieldKeys: this.extractFieldKeys(rows),
+      summary: this.extractServiceSummary(payload),
+      payloadPreview: this.sanitizeServicePayload(payload),
+      errorMessage: null,
+    };
+  }
+
+  private getPayloadKind(
+    payload: unknown,
+  ): LangameServiceEndpointDiagnostics['payloadKind'] {
+    if (payload === null || payload === undefined || payload === '') {
+      return 'empty';
+    }
+
+    if (Array.isArray(payload)) {
+      return 'array';
+    }
+
+    if (this.isPlainObject(payload)) {
+      return 'object';
+    }
+
+    return 'scalar';
+  }
+
+  private extractDiagnosticRows(payload: unknown): Record<string, unknown>[] {
+    if (Array.isArray(payload)) {
+      return payload.filter((item) => this.isPlainObject(item));
+    }
+
+    if (!this.isPlainObject(payload)) {
+      return [];
+    }
+
+    const rowKeys = ['data', 'items', 'result', 'results', 'profiles'];
+
+    for (const key of rowKeys) {
+      const value = payload[key];
+
+      if (Array.isArray(value)) {
+        return value.filter((item) => this.isPlainObject(item));
+      }
+
+      if (this.isPlainObject(value)) {
+        return [value];
+      }
+    }
+
+    return [payload];
+  }
+
+  private extractFieldKeys(rows: Record<string, unknown>[]) {
+    const fields = new Set<string>();
+
+    rows.slice(0, 20).forEach((row) => {
+      Object.keys(row).forEach((key) => fields.add(key));
+    });
+
+    return Array.from(fields).slice(0, 30);
+  }
+
+  private extractServiceSummary(payload: unknown, depth = 0): string | null {
+    const scalarValue = this.scalarToString(payload);
+
+    if (scalarValue) {
+      return this.compactSummary(scalarValue);
+    }
+
+    if (depth > 3) {
+      return null;
+    }
+
+    if (Array.isArray(payload)) {
+      return this.extractServiceSummary(payload[0], depth + 1);
+    }
+
+    if (!this.isPlainObject(payload)) {
+      return null;
+    }
+
+    const summaryKeys = [
+      'version',
+      'ver',
+      'data',
+      'result',
+      'value',
+      'name',
+      'title',
+      'po',
+      'terminal',
+      'adminconsole',
+    ];
+
+    for (const key of summaryKeys) {
+      if (this.isSensitiveField(key)) {
+        continue;
+      }
+
+      const value = payload[key];
+      const summary = this.extractServiceSummary(value, depth + 1);
+
+      if (summary) {
+        return summary;
+      }
+    }
+
+    return null;
+  }
+
+  private compactSummary(value: string) {
+    return value.length > 120 ? `${value.slice(0, 117)}...` : value;
+  }
+
+  private sanitizeServicePayload(value: unknown, depth = 0): unknown {
+    if (depth > 5) {
+      return '[depth-limit]';
+    }
+
+    if (Array.isArray(value)) {
+      return value
+        .slice(0, 5)
+        .map((item) => this.sanitizeServicePayload(item, depth + 1));
+    }
+
+    if (!this.isPlainObject(value)) {
+      return value;
+    }
+
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        this.isSensitiveField(key)
+          ? '[hidden]'
+          : this.sanitizeServicePayload(entry, depth + 1),
+      ]),
+    );
   }
 
   private normalizeGuestSearchField(

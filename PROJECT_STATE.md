@@ -76,6 +76,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added manual Langame service diagnostics on `/sync`: `config/list`, `puf/profiles/list`, `ver/get_adminconsole`, `ver/get_po`, and `ver/get_terminal` now show endpoint status, row counts, payload kind, fields, compact summaries, and sanitized previews without entering business KPI calculations.
 - Added safe `guests/search` diagnostics on `/sync`: backend `/integrations/langame/guests/search-diagnostics`, web proxy, explicit search field selection, masked guest identifiers, no persistence, and no mass Langame sync.
 - Added revenue diagnostics scenarios on `/dashboard/revenue-diagnostics`: current network KPI, club-allocated revenue, balance-spend revenue, bar/goods, shift cash, topups as cash flow, plus source inclusion rules for Langame endpoints.
 - Added explicit `guests/logs` profiling on `/sync`: the optional Data Foundation run now loads guest event logs only when requested and surfaces row count, event types, missing `guest_id`, and invalid dates for future missions, loot boxes, battle pass, and anti-fraud rules.

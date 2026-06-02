@@ -37,6 +37,7 @@ type EncryptionMock = {
 
 type LangameClientMock = {
   getRoutes: jest.Mock;
+  getDiagnosticEndpoint: jest.Mock;
   searchGuests: jest.Mock;
 };
 
@@ -104,6 +105,7 @@ describe('LangameSettingsService', () => {
     };
     langameClient = {
       getRoutes: jest.fn(),
+      getDiagnosticEndpoint: jest.fn(),
       searchGuests: jest.fn(),
     };
     prisma.tenant.findUnique.mockResolvedValue({
@@ -252,6 +254,98 @@ describe('LangameSettingsService', () => {
       'https://443.langame.ru/public_api',
       'secret-key',
     );
+  });
+
+  it('profiles service diagnostics without leaking secret config fields', async () => {
+    prisma.integrationCredential.findFirst.mockResolvedValue({
+      id: 'credential-1',
+      apiKeyEncrypted: 'encrypted:secret-key',
+    });
+    langameClient.getDiagnosticEndpoint.mockImplementation(
+      (_baseUrl: string, _apiKey: string, path: string) => {
+        if (path === '/config/list') {
+          return Promise.resolve({
+            status: true,
+            data: [
+              {
+                module: 'terminal',
+                enabled: true,
+                api_key: 'must-not-leak',
+                password: 'also-hidden',
+              },
+            ],
+          });
+        }
+
+        if (path === '/ver/get_po') {
+          return Promise.resolve({
+            status: true,
+            data: {
+              version: '2.3.4',
+            },
+          });
+        }
+
+        return Promise.resolve({
+          status: true,
+          data: [],
+        });
+      },
+    );
+
+    const result = await service.getServiceDiagnostics(user);
+
+    expect(result.endpoints).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: 'config',
+          path: '/config/list',
+        }),
+        expect.objectContaining({
+          key: 'softwareVersion',
+          path: '/ver/get_po',
+        }),
+      ]),
+    );
+    expect(result.sources[0]).toMatchObject({
+      domain: '443.langame.ru',
+      status: 'SUCCESS',
+    });
+    const configEndpoint = result.sources[0].endpoints.find(
+      (endpoint) => endpoint.key === 'config',
+    );
+    const softwareVersionEndpoint = result.sources[0].endpoints.find(
+      (endpoint) => endpoint.key === 'softwareVersion',
+    );
+
+    expect(configEndpoint).toMatchObject({
+      key: 'config',
+      status: 'SUCCESS',
+      rowCount: 1,
+      payloadKind: 'object',
+      payloadPreview: {
+        status: true,
+        data: [
+          {
+            module: 'terminal',
+            enabled: true,
+            api_key: '[hidden]',
+            password: '[hidden]',
+          },
+        ],
+      },
+    });
+    expect(configEndpoint?.fieldKeys).toEqual(
+      expect.arrayContaining(['module', 'enabled', 'api_key', 'password']),
+    );
+    expect(softwareVersionEndpoint).toMatchObject({
+      key: 'softwareVersion',
+      status: 'SUCCESS',
+      summary: '2.3.4',
+    });
+    expect(langameClient.getDiagnosticEndpoint).toHaveBeenCalledTimes(5);
+    expect(JSON.stringify(result)).not.toContain('must-not-leak');
+    expect(JSON.stringify(result)).not.toContain('also-hidden');
   });
 
   it('runs masked guest search diagnostics for active Langame sources', async () => {

@@ -168,6 +168,45 @@ export type LangameRoutesDiagnosticsResult = {
   sources: LangameRoutesDiagnosticsSource[];
 };
 
+export type LangameServiceEndpointKey =
+  | 'config'
+  | 'pufProfiles'
+  | 'adminConsoleVersion'
+  | 'softwareVersion'
+  | 'terminalVersion';
+
+export type LangameServiceEndpointDefinition = {
+  key: LangameServiceEndpointKey;
+  title: string;
+  path: string;
+};
+
+export type LangameServiceEndpointDiagnostics =
+  LangameServiceEndpointDefinition & {
+    status: 'SUCCESS' | 'FAILED';
+    rowCount: number;
+    payloadKind: 'array' | 'object' | 'scalar' | 'empty';
+    fieldKeys: string[];
+    summary: string | null;
+    payloadPreview: unknown;
+    errorMessage: string | null;
+  };
+
+export type LangameServiceDiagnosticsSource = {
+  id: string;
+  name: string;
+  domain: string;
+  baseUrl: string;
+  status: 'SUCCESS' | 'PARTIAL' | 'FAILED';
+  endpoints: LangameServiceEndpointDiagnostics[];
+};
+
+export type LangameServiceDiagnosticsResult = {
+  checkedAt: string;
+  endpoints: LangameServiceEndpointDefinition[];
+  sources: LangameServiceDiagnosticsSource[];
+};
+
 export type LangameGuestSearchField =
   | 'auto'
   | 'phone'

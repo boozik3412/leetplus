@@ -133,6 +133,38 @@ describe('LangameClient', () => {
       phone: '79991234567',
     });
   });
+
+  it('loads diagnostic GET endpoints without putting the API key into the URL', async () => {
+    const fetchMock = jest.fn().mockResolvedValueOnce(
+      responseWithBody({
+        status: true,
+        data: { version: '1.2.3' },
+      }),
+    );
+    global.fetch = fetchMock as typeof fetch;
+
+    const payload = await client.getDiagnosticEndpoint(
+      'https://443.langame.ru/public_api',
+      'test-key',
+      '/ver/get_po',
+    );
+
+    expect(payload).toEqual({
+      status: true,
+      data: { version: '1.2.3' },
+    });
+
+    const calls = fetchMock.mock.calls as Array<[string, RequestInit?]>;
+    const url = new URL(calls[0][0]);
+    const init = calls[0][1];
+
+    expect(url.toString()).toBe('https://443.langame.ru/public_api/ver/get_po');
+    expect(url.searchParams.get('api_key')).toBeNull();
+    expect(init?.method).toBe('GET');
+    expect(init?.headers).toMatchObject({
+      'X-API-KEY': 'test-key',
+    });
+  });
 });
 
 function responseWithRows(rows: unknown[]) {

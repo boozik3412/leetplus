@@ -284,6 +284,42 @@ export class LangameClient {
     return this.readJsonOrText(response);
   }
 
+  async getDiagnosticEndpoint(baseUrl: string, apiKey: string, path: string) {
+    const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+    const url = new URL(`${this.normalizeBaseUrl(baseUrl)}${normalizedPath}`);
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'X-API-KEY': apiKey,
+      },
+    });
+
+    if (!response.ok) {
+      const errorDetails = await this.readErrorDetails(response);
+      throw new BadRequestException(
+        [
+          `Langame ${normalizedPath} failed: ${response.status} ${response.statusText}`,
+          errorDetails,
+        ]
+          .filter(Boolean)
+          .join(' - '),
+      );
+    }
+
+    const result = await this.readJsonOrText(response);
+
+    if (this.isPlainObject(result) && result.status === false) {
+      throw new BadRequestException(
+        this.hasStringField(result, 'message')
+          ? `Langame ${normalizedPath} returned an error: ${result.message}`
+          : `Langame ${normalizedPath} returned an error`,
+      );
+    }
+
+    return result;
+  }
+
   async searchGuests(
     baseUrl: string,
     apiKey: string,

@@ -187,6 +187,47 @@ export type GuestGameEvent = {
   createdBy: GuestGameUser | null;
 };
 
+export type GuestGameDryRunRule = {
+  id: string;
+  kind: "LOOT_BOX" | "MISSION" | "SEASON";
+  name: string;
+  status: string;
+  eligible: boolean;
+  rewardType: string | null;
+  rewardAmount: number | null;
+  rewardLabel: string | null;
+  selectedRewardLabel: string | null;
+  xpDelta: number;
+  budgetAmount: number | null;
+  reasons: string[];
+  blockers: string[];
+};
+
+export type GuestGameDryRunResult = {
+  dryRun: true;
+  eventType: string;
+  occurredAt: string;
+  profile: Pick<
+    GuestGameProfile,
+    "id" | "displayName" | "contactMasked" | "xp" | "level" | "status"
+  > | null;
+  guest: GuestGameProfile["guest"];
+  store: { id: string; name: string } | null;
+  input: {
+    sessionMinutes: number;
+    spendAmount: number;
+  };
+  summary: {
+    checkedRules: number;
+    eligibleRules: number;
+    blockedRules: number;
+    estimatedRewardAmount: number;
+    projectedXpDelta: number;
+  };
+  rules: GuestGameDryRunRule[];
+  note: string;
+};
+
 export type GuestGamificationSummary = {
   profilesCount: number;
   totalXp: number;

@@ -471,6 +471,57 @@ export type GuestGameEventDto = {
   note?: string | null;
 };
 
+export type GuestGameDryRunDto = {
+  profileId?: string | null;
+  guestId?: string | null;
+  storeId?: string | null;
+  eventType?: string | null;
+  occurredAt?: string | null;
+  sessionMinutes?: number | string | null;
+  spendAmount?: number | string | null;
+};
+
+export type GuestGameDryRunRule = {
+  id: string;
+  kind: 'LOOT_BOX' | 'MISSION' | 'SEASON';
+  name: string;
+  status: string;
+  eligible: boolean;
+  rewardType: string | null;
+  rewardAmount: number | null;
+  rewardLabel: string | null;
+  selectedRewardLabel: string | null;
+  xpDelta: number;
+  budgetAmount: number | null;
+  reasons: string[];
+  blockers: string[];
+};
+
+export type GuestGameDryRunResult = {
+  dryRun: true;
+  eventType: string;
+  occurredAt: string;
+  profile: Pick<
+    GuestGameProfile,
+    'id' | 'displayName' | 'contactMasked' | 'xp' | 'level' | 'status'
+  > | null;
+  guest: GuestGameProfile['guest'];
+  store: { id: string; name: string } | null;
+  input: {
+    sessionMinutes: number;
+    spendAmount: number;
+  };
+  summary: {
+    checkedRules: number;
+    eligibleRules: number;
+    blockedRules: number;
+    estimatedRewardAmount: number;
+    projectedXpDelta: number;
+  };
+  rules: GuestGameDryRunRule[];
+  note: string;
+};
+
 @Injectable()
 export class GuestGamificationService {
   constructor(private readonly prisma: PrismaService) {}
@@ -786,6 +837,118 @@ export class GuestGamificationService {
     }
 
     return mapEvent(row);
+  }
+
+  async dryRun(
+    user: AuthenticatedUser,
+    dto: GuestGameDryRunDto,
+  ): Promise<GuestGameDryRunResult> {
+    const eventType = stringValue(dto.eventType) ?? 'SESSION_START';
+    const occurredAt = dateValue(dto.occurredAt) ?? new Date();
+    const sessionMinutes = Math.max(0, intValue(dto.sessionMinutes) ?? 120);
+    const spendAmount = Math.max(0, dryRunNumber(dto.spendAmount, 0));
+    const [profile, lootBoxes, missions, seasons, rewards] = await Promise.all([
+      this.resolveDryRunProfile(user, dto),
+      this.getLootBoxes(user),
+      this.getMissions(user),
+      this.getSeasons(user),
+      this.getDryRunRewards(user),
+    ]);
+    const guest =
+      profile?.guest ??
+      (dto.guestId
+        ? dryRunGuestSummary(await this.getTenantGuest(user, dto.guestId))
+        : null);
+    const store = dto.storeId
+      ? await this.assertStore(user, dto.storeId)
+      : null;
+    const context: DryRunContext = {
+      eventType,
+      occurredAt,
+      profile,
+      guest,
+      storeId: store?.id ?? null,
+      sessionMinutes,
+      spendAmount,
+      rewards,
+    };
+    const rules = [
+      ...lootBoxes.map((item) => evaluateLootBoxDryRun(item, context)),
+      ...missions.map((item) => evaluateMissionDryRun(item, context)),
+      ...seasons.map((item) => evaluateSeasonDryRun(item, context)),
+    ];
+    const eligibleRules = rules.filter((rule) => rule.eligible);
+
+    return {
+      dryRun: true,
+      eventType,
+      occurredAt: occurredAt.toISOString(),
+      profile: profile
+        ? {
+            id: profile.id,
+            displayName: profile.displayName,
+            contactMasked: profile.contactMasked,
+            xp: profile.xp,
+            level: profile.level,
+            status: profile.status,
+          }
+        : null,
+      guest,
+      store: store ? { id: store.id, name: store.name } : null,
+      input: { sessionMinutes, spendAmount },
+      summary: {
+        checkedRules: rules.length,
+        eligibleRules: eligibleRules.length,
+        blockedRules: rules.length - eligibleRules.length,
+        estimatedRewardAmount: sum(
+          eligibleRules.map((rule) => rule.rewardAmount ?? 0),
+        ),
+        projectedXpDelta: sum(eligibleRules.map((rule) => rule.xpDelta)),
+      },
+      rules,
+      note: 'Dry-run only: rewards, events and Langame writes are not created.',
+    };
+  }
+
+  private async resolveDryRunProfile(
+    user: AuthenticatedUser,
+    dto: GuestGameDryRunDto,
+  ): Promise<GuestGameProfile | null> {
+    if (!dto.profileId && !dto.guestId) {
+      return null;
+    }
+
+    const row = await this.prisma.guestGameProfile.findFirst({
+      where: {
+        tenantId: user.tenantId,
+        ...(dto.profileId
+          ? { id: dto.profileId }
+          : { guestId: dto.guestId ?? undefined }),
+      },
+      include: gameProfileInclude,
+    });
+
+    if (!row && dto.profileId) {
+      throw new NotFoundException('Игровой профиль не найден');
+    }
+
+    return row ? mapProfile(row) : null;
+  }
+
+  private async getDryRunRewards(
+    user: AuthenticatedUser,
+  ): Promise<GuestGameReward[]> {
+    const rows = await this.prisma.guestGameReward.findMany({
+      where: {
+        tenantId: user.tenantId,
+        status: { in: ['PENDING', 'APPROVED', 'PAID'] },
+      },
+      include: rewardInclude,
+      orderBy: [{ qualifiedAt: 'desc' }, { createdAt: 'desc' }],
+      take: 1000,
+    });
+
+    return rows.map(mapReward);
   }
 
   private buildSummary(
@@ -1539,6 +1702,662 @@ function mapProfileSummary(
     xp: row.xp,
     level: row.level,
   };
+}
+
+type DryRunContext = {
+  eventType: string;
+  occurredAt: Date;
+  profile: GuestGameProfile | null;
+  guest: GuestGameProfile['guest'];
+  storeId: string | null;
+  sessionMinutes: number;
+  spendAmount: number;
+  rewards: GuestGameReward[];
+};
+
+function evaluateLootBoxDryRun(
+  rule: GuestGameLootBox,
+  context: DryRunContext,
+): GuestGameDryRunRule {
+  const reasons: string[] = [];
+  const blockers: string[] = [];
+  const ruleRewards = dryRunRewardsForRule(context.rewards, 'lootBox', rule.id);
+  const selectedRewardLabel =
+    dryRunWeightedReward(rule.probabilityRules) ??
+    rule.rewardLabel ??
+    rule.name;
+
+  appendDryRunProfileCheck(context, blockers, reasons);
+  appendDryRunStatusCheck(rule.status, blockers, reasons);
+  appendDryRunTriggerCheck(rule.triggerKind, context.eventType, blockers);
+  appendDryRunStoreCheck(rule.storeIds, context.storeId, blockers, reasons);
+  appendDryRunPeriodRules(
+    rule.periodRules,
+    context.occurredAt,
+    blockers,
+    reasons,
+  );
+  appendDryRunBudgetCheck(
+    rule.budgetAmount,
+    rule.rewardAmount ?? 0,
+    ruleRewards,
+    blockers,
+    reasons,
+  );
+  appendDryRunLootBoxLimits(rule, context, ruleRewards, blockers, reasons);
+
+  if (rule.audience) {
+    reasons.push(`Аудитория: ${rule.audience.name}`);
+  }
+  if (rule.segment) {
+    reasons.push(`Сегмент: ${rule.segment}`);
+  }
+  if (rule.manualApprovalRequired) {
+    reasons.push('Выдача требует подтверждения сотрудником');
+  }
+
+  return dryRunRuleResult({
+    id: rule.id,
+    kind: 'LOOT_BOX',
+    name: rule.name,
+    status: rule.status,
+    rewardType: rule.rewardType,
+    rewardAmount: rule.rewardAmount,
+    rewardLabel: rule.rewardLabel,
+    selectedRewardLabel,
+    xpDelta: 0,
+    budgetAmount: rule.budgetAmount,
+    reasons,
+    blockers,
+  });
+}
+
+function evaluateMissionDryRun(
+  rule: GuestGameMission,
+  context: DryRunContext,
+): GuestGameDryRunRule {
+  const reasons: string[] = [];
+  const blockers: string[] = [];
+  const ruleRewards = dryRunRewardsForRule(context.rewards, 'mission', rule.id);
+
+  appendDryRunProfileCheck(context, blockers, reasons);
+  appendDryRunStatusCheck(rule.status, blockers, reasons);
+  appendDryRunTriggerCheck(rule.triggerKind, context.eventType, blockers);
+  appendDryRunStoreCheck(rule.storeIds, context.storeId, blockers, reasons);
+  appendDryRunDateBounds(
+    rule.periodFrom,
+    rule.periodTo,
+    context.occurredAt,
+    blockers,
+    reasons,
+  );
+  appendDryRunMissionConditions(rule, context, blockers, reasons);
+  appendDryRunBudgetCheck(
+    rule.budgetAmount,
+    rule.rewardAmount ?? 0,
+    ruleRewards,
+    blockers,
+    reasons,
+  );
+  appendDryRunMissionLimits(rule, context, ruleRewards, blockers, reasons);
+
+  if (rule.audience) {
+    reasons.push(`Аудитория: ${rule.audience.name}`);
+  }
+  if (rule.manualApprovalRequired) {
+    reasons.push('Выдача требует подтверждения сотрудником');
+  }
+
+  return dryRunRuleResult({
+    id: rule.id,
+    kind: 'MISSION',
+    name: rule.name,
+    status: rule.status,
+    rewardType: rule.rewardType,
+    rewardAmount: rule.rewardAmount,
+    rewardLabel: rule.rewardLabel,
+    selectedRewardLabel: rule.rewardLabel ?? rule.name,
+    xpDelta: rule.xpReward,
+    budgetAmount: rule.budgetAmount,
+    reasons,
+    blockers,
+  });
+}
+
+function evaluateSeasonDryRun(
+  rule: GuestGameSeason,
+  context: DryRunContext,
+): GuestGameDryRunRule {
+  const reasons: string[] = [];
+  const blockers: string[] = [];
+  const ruleRewards = dryRunRewardsForRule(context.rewards, 'season', rule.id);
+  const xpDelta = dryRunSeasonXp(rule.xpRules, context);
+  const selectedRewardLabel = dryRunSeasonRewardLabel(rule, context, xpDelta);
+
+  appendDryRunProfileCheck(context, blockers, reasons);
+  appendDryRunStatusCheck(rule.status, blockers, reasons);
+  appendDryRunDateBounds(
+    rule.periodFrom,
+    rule.periodTo,
+    context.occurredAt,
+    blockers,
+    reasons,
+  );
+  appendDryRunBudgetCheck(rule.budgetAmount, 0, ruleRewards, blockers, reasons);
+
+  if (rule.audience) {
+    reasons.push(`Аудитория: ${rule.audience.name}`);
+  }
+  if (rule.premiumEnabled) {
+    reasons.push('Есть premium-дорожка');
+  }
+  if (rule.manualApprovalRequired) {
+    reasons.push('Награды сезона требуют подтверждения сотрудником');
+  }
+
+  return dryRunRuleResult({
+    id: rule.id,
+    kind: 'SEASON',
+    name: rule.name,
+    status: rule.status,
+    rewardType: selectedRewardLabel ? 'BATTLE_PASS_REWARD' : null,
+    rewardAmount: 0,
+    rewardLabel: selectedRewardLabel,
+    selectedRewardLabel,
+    xpDelta,
+    budgetAmount: rule.budgetAmount,
+    reasons,
+    blockers,
+  });
+}
+
+function dryRunRuleResult(input: Omit<GuestGameDryRunRule, 'eligible'>) {
+  return {
+    ...input,
+    eligible: input.blockers.length === 0,
+  };
+}
+
+function appendDryRunStatusCheck(
+  status: string,
+  blockers: string[],
+  reasons: string[],
+) {
+  if (status === 'ACTIVE') {
+    reasons.push('Правило активно');
+    return;
+  }
+  if (status === 'DRAFT') {
+    reasons.push('Черновик проверяется в тестовом режиме');
+    return;
+  }
+
+  blockers.push(`Статус правила не позволяет запуск: ${status}`);
+}
+
+function appendDryRunProfileCheck(
+  context: DryRunContext,
+  blockers: string[],
+  reasons: string[],
+) {
+  if (!context.profile && !context.guest) {
+    reasons.push('Гость не выбран: проверяются только общие условия');
+    return;
+  }
+  if (context.profile?.status && context.profile.status !== 'ACTIVE') {
+    blockers.push(`Профиль гостя не активен: ${context.profile.status}`);
+    return;
+  }
+
+  reasons.push('Гость выбран для проверки');
+}
+
+function appendDryRunTriggerCheck(
+  triggerKind: string,
+  eventType: string,
+  blockers: string[],
+) {
+  const expected = triggerKind.trim().toUpperCase();
+  const actual = eventType.trim().toUpperCase();
+
+  if (
+    !expected ||
+    expected === actual ||
+    (expected === 'VISIT' && actual === 'SESSION_START')
+  ) {
+    return;
+  }
+
+  blockers.push(`Триггер ${triggerKind} не совпадает с событием ${eventType}`);
+}
+
+function appendDryRunStoreCheck(
+  storeIds: string[],
+  storeId: string | null,
+  blockers: string[],
+  reasons: string[],
+) {
+  if (!storeIds.length) {
+    reasons.push('Доступно для всей сети');
+    return;
+  }
+  if (!storeId) {
+    reasons.push(
+      'Правило ограничено клубами, выберите клуб для точной проверки',
+    );
+    return;
+  }
+  if (!storeIds.includes(storeId)) {
+    blockers.push('Выбранный клуб не входит в область правила');
+    return;
+  }
+
+  reasons.push('Выбранный клуб входит в область правила');
+}
+
+function appendDryRunPeriodRules(
+  value: unknown,
+  occurredAt: Date,
+  blockers: string[],
+  reasons: string[],
+) {
+  const rules = dryRunRecord(value);
+  const weekdays = dryRunNumberArray(rules.weekdays);
+  const weekday = occurredAt.getDay();
+  const weekdaysOnly = rules.weekdaysOnly === true;
+
+  if (weekdays.length && !weekdays.includes(weekday)) {
+    blockers.push('День недели не входит в период правила');
+  } else if (weekdaysOnly && (weekday === 0 || weekday === 6)) {
+    blockers.push('Правило доступно только по будням');
+  } else if (weekdays.length || weekdaysOnly) {
+    reasons.push('День недели подходит');
+  }
+
+  const hours = dryRunStringArray(rules.hours);
+  if (!hours.length) {
+    return;
+  }
+
+  if (hours.some((window) => dryRunIsWithinTimeWindow(occurredAt, window))) {
+    reasons.push(`Время входит в окно ${hours.join(', ')}`);
+  } else {
+    blockers.push(`Время не входит в окно ${hours.join(', ')}`);
+  }
+}
+
+function appendDryRunDateBounds(
+  periodFrom: string | null,
+  periodTo: string | null,
+  occurredAt: Date,
+  blockers: string[],
+  reasons: string[],
+) {
+  const from = periodFrom ? new Date(periodFrom) : null;
+  const to = periodTo ? new Date(periodTo) : null;
+
+  if (from && occurredAt < from) {
+    blockers.push('Событие раньше периода действия');
+  }
+  if (to && occurredAt > to) {
+    blockers.push('Событие позже периода действия');
+  }
+  if (from || to) {
+    reasons.push('Период действия проверен');
+  }
+}
+
+function appendDryRunMissionConditions(
+  rule: GuestGameMission,
+  context: DryRunContext,
+  blockers: string[],
+  reasons: string[],
+) {
+  const conditions = dryRunRecord(rule.conditions);
+  const minSessionMinutes = dryRunOptionalNumber(conditions.minSessionMinutes);
+  const minSpendAmount = dryRunOptionalNumber(conditions.minSpendAmount);
+  const windowDays = dryRunOptionalNumber(conditions.windowDays);
+
+  if (minSessionMinutes != null && context.sessionMinutes < minSessionMinutes) {
+    blockers.push(
+      `Сессия короче условия: ${context.sessionMinutes}/${minSessionMinutes} мин`,
+    );
+  } else if (minSessionMinutes != null) {
+    reasons.push(`Длительность сессии подходит: ${context.sessionMinutes} мин`);
+  }
+
+  if (minSpendAmount != null && context.spendAmount < minSpendAmount) {
+    blockers.push(
+      `Сумма покупки ниже условия: ${context.spendAmount}/${minSpendAmount} руб`,
+    );
+  } else if (minSpendAmount != null) {
+    reasons.push(`Сумма покупки подходит: ${context.spendAmount} руб`);
+  }
+
+  if (
+    conditions.weekdaysOnly === true &&
+    [0, 6].includes(context.occurredAt.getDay())
+  ) {
+    blockers.push('Миссия доступна только по будням');
+  }
+  if (conditions.requiresLangameFact === true) {
+    reasons.push('Факт Langame обязателен для боевого подтверждения');
+  }
+  if (windowDays != null) {
+    reasons.push(`Окно выполнения: ${windowDays} дн.`);
+  }
+}
+
+function appendDryRunBudgetCheck(
+  budgetAmount: number | null,
+  projectedAmount: number,
+  rewards: GuestGameReward[],
+  blockers: string[],
+  reasons: string[],
+) {
+  if (budgetAmount == null) {
+    reasons.push('Бюджет не задан');
+    return;
+  }
+
+  const spent = sum(rewards.map((reward) => reward.rewardAmount));
+  const projected = spent + projectedAmount;
+  reasons.push(`Бюджет: ${spent}/${budgetAmount} руб`);
+
+  if (spent >= budgetAmount) {
+    blockers.push('Бюджет правила уже исчерпан');
+  } else if (projectedAmount > 0 && projected > budgetAmount) {
+    blockers.push('Награда превысит бюджет правила');
+  }
+}
+
+function appendDryRunLootBoxLimits(
+  rule: GuestGameLootBox,
+  context: DryRunContext,
+  rewards: GuestGameReward[],
+  blockers: string[],
+  reasons: string[],
+) {
+  const limits = dryRunRecord(rule.limits);
+  const perGuestPerWeek = dryRunOptionalNumber(limits.perGuestPerWeek);
+  const totalPerDay = dryRunOptionalNumber(limits.totalPerDay);
+
+  if (perGuestPerWeek != null) {
+    const guestRewards = rewards.filter((reward) =>
+      dryRunRewardMatchesGuest(reward, context),
+    );
+    const weeklyCount = guestRewards.filter((reward) =>
+      dryRunIsWithinLastDays(reward.qualifiedAt, context.occurredAt, 7),
+    ).length;
+
+    if (!context.profile && !context.guest) {
+      blockers.push('Для проверки лимита на гостя выберите профиль или гостя');
+    } else if (weeklyCount >= perGuestPerWeek) {
+      blockers.push(
+        `Лимит на гостя за неделю исчерпан: ${weeklyCount}/${perGuestPerWeek}`,
+      );
+    } else {
+      reasons.push(
+        `Лимит на гостя за неделю: ${weeklyCount}/${perGuestPerWeek}`,
+      );
+    }
+  }
+
+  if (totalPerDay != null) {
+    const dayCount = rewards.filter((reward) =>
+      dryRunIsSameDay(reward.qualifiedAt, context.occurredAt),
+    ).length;
+
+    if (dayCount >= totalPerDay) {
+      blockers.push(
+        `Дневной лимит лутбокса исчерпан: ${dayCount}/${totalPerDay}`,
+      );
+    } else {
+      reasons.push(`Дневной лимит лутбокса: ${dayCount}/${totalPerDay}`);
+    }
+  }
+}
+
+function appendDryRunMissionLimits(
+  rule: GuestGameMission,
+  context: DryRunContext,
+  rewards: GuestGameReward[],
+  blockers: string[],
+  reasons: string[],
+) {
+  if (rule.perGuestLimit != null) {
+    const guestCount = rewards.filter((reward) =>
+      dryRunRewardMatchesGuest(reward, context),
+    ).length;
+
+    if (!context.profile && !context.guest) {
+      blockers.push('Для проверки лимита на гостя выберите профиль или гостя');
+    } else if (guestCount >= rule.perGuestLimit) {
+      blockers.push(
+        `Лимит миссии на гостя исчерпан: ${guestCount}/${rule.perGuestLimit}`,
+      );
+    } else {
+      reasons.push(
+        `Лимит миссии на гостя: ${guestCount}/${rule.perGuestLimit}`,
+      );
+    }
+  }
+
+  if (rule.totalRewardLimit != null) {
+    if (rewards.length >= rule.totalRewardLimit) {
+      blockers.push(
+        `Общий лимит наград миссии исчерпан: ${rewards.length}/${rule.totalRewardLimit}`,
+      );
+    } else {
+      reasons.push(
+        `Общий лимит наград миссии: ${rewards.length}/${rule.totalRewardLimit}`,
+      );
+    }
+  }
+}
+
+function dryRunRewardsForRule(
+  rewards: GuestGameReward[],
+  kind: 'lootBox' | 'mission' | 'season',
+  id: string,
+) {
+  return rewards.filter((reward) => {
+    if (kind === 'lootBox') {
+      return reward.lootBox?.id === id;
+    }
+    if (kind === 'mission') {
+      return reward.mission?.id === id;
+    }
+    return reward.season?.id === id;
+  });
+}
+
+function dryRunRewardMatchesGuest(
+  reward: GuestGameReward,
+  context: DryRunContext,
+) {
+  return (
+    (context.profile && reward.profile?.id === context.profile.id) ||
+    (context.guest && reward.guest?.id === context.guest.id)
+  );
+}
+
+function dryRunSeasonXp(value: unknown, context: DryRunContext) {
+  const rules = dryRunRecord(value);
+  const eventType = context.eventType.toUpperCase();
+
+  if (eventType === 'PLAY_HOUR' || eventType === 'SESSION_STOP') {
+    return Math.round(
+      dryRunNumber(rules.playHour, 0) *
+        Math.max(1, context.sessionMinutes / 60),
+    );
+  }
+  if (eventType === 'BAR_PURCHASE' || eventType === 'PRODUCT_PURCHASE') {
+    return Math.round(dryRunNumber(rules.barPurchase, 0));
+  }
+  if (eventType === 'MISSION_COMPLETED') {
+    return Math.round(dryRunNumber(rules.missionCompletion, 0));
+  }
+  if (eventType === 'SESSION_START' || eventType === 'VISIT') {
+    return Math.round(dryRunNumber(rules.visit, 0));
+  }
+
+  return 0;
+}
+
+function dryRunSeasonRewardLabel(
+  rule: GuestGameSeason,
+  context: DryRunContext,
+  xpDelta: number,
+) {
+  const levels = Array.isArray(rule.levels) ? rule.levels : [];
+  const currentXp = context.profile?.xp ?? 0;
+  const nextXp = currentXp + xpDelta;
+  const nextLevel = levels
+    .map((item) => dryRunRecord(item))
+    .map((item) => ({
+      level: dryRunNumber(item.level, 0),
+      xp: dryRunNumber(item.xp, 0),
+      freeReward: dryRunString(item.freeReward),
+      premiumReward: dryRunString(item.premiumReward),
+    }))
+    .filter((item) => item.xp > currentXp && item.xp <= nextXp)
+    .sort((left, right) => left.xp - right.xp)[0];
+
+  if (!nextLevel) {
+    return null;
+  }
+
+  return [nextLevel.freeReward, nextLevel.premiumReward]
+    .filter(Boolean)
+    .join(' + ');
+}
+
+function dryRunWeightedReward(value: unknown) {
+  const items = dryRunArray(dryRunRecord(value).items)
+    .map((item) => dryRunRecord(item))
+    .map((item) => ({
+      label: dryRunString(item.label),
+      weight: dryRunNumber(item.weight, 0),
+    }))
+    .filter((item) => item.label);
+
+  if (!items.length) {
+    return null;
+  }
+
+  return items.sort((left, right) => right.weight - left.weight)[0].label;
+}
+
+function dryRunGuestSummary(row: {
+  id: string;
+  externalDomain: string | null;
+  externalGuestId: string;
+  fullNameMasked: string | null;
+  phoneMasked: string | null;
+  emailMasked: string | null;
+}): GuestGameProfile['guest'] {
+  return {
+    id: row.id,
+    externalDomain: row.externalDomain,
+    externalGuestId: row.externalGuestId,
+    displayName: row.fullNameMasked ?? row.externalGuestId,
+    contact: row.phoneMasked ?? row.emailMasked ?? 'нет контакта',
+  };
+}
+
+function dryRunRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function dryRunArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function dryRunStringArray(value: unknown) {
+  return dryRunArray(value).filter(
+    (item): item is string =>
+      typeof item === 'string' && item.trim().length > 0,
+  );
+}
+
+function dryRunNumberArray(value: unknown) {
+  return dryRunArray(value)
+    .map((item) => Number(item))
+    .filter((item) => Number.isFinite(item));
+}
+
+function dryRunString(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function dryRunOptionalNumber(
+  value: unknown,
+  fallback?: number,
+): number | null {
+  if (value === null || value === undefined || value === '') {
+    return fallback ?? null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : (fallback ?? null);
+}
+
+function dryRunNumber(value: unknown, fallback: number) {
+  return dryRunOptionalNumber(value, fallback) ?? fallback;
+}
+
+function dryRunIsWithinTimeWindow(date: Date, window: string) {
+  const [from, to] = window.split('-').map((part) => part.trim());
+  const fromMinutes = dryRunTimeToMinutes(from);
+  const toMinutes = dryRunTimeToMinutes(to);
+
+  if (fromMinutes == null || toMinutes == null) {
+    return true;
+  }
+
+  const currentMinutes = date.getHours() * 60 + date.getMinutes();
+
+  if (fromMinutes <= toMinutes) {
+    return currentMinutes >= fromMinutes && currentMinutes <= toMinutes;
+  }
+
+  return currentMinutes >= fromMinutes || currentMinutes <= toMinutes;
+}
+
+function dryRunTimeToMinutes(value: string | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const [hours, minutes] = value.split(':').map((item) => Number(item));
+
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) {
+    return null;
+  }
+
+  return hours * 60 + minutes;
+}
+
+function dryRunIsSameDay(value: string, reference: Date) {
+  const date = new Date(value);
+
+  return (
+    date.getFullYear() === reference.getFullYear() &&
+    date.getMonth() === reference.getMonth() &&
+    date.getDate() === reference.getDate()
+  );
+}
+
+function dryRunIsWithinLastDays(value: string, reference: Date, days: number) {
+  const date = new Date(value);
+  const diff = reference.getTime() - date.getTime();
+
+  return diff >= 0 && diff <= days * 24 * 60 * 60 * 1000;
 }
 
 function clean<T extends Record<string, unknown>>(value: T): T {

@@ -1,9 +1,16 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import {
+  useMemo,
+  useState,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+} from "react";
 import type { GuestAudience, GuestCrmLead, GuestDashboardRow } from "@/lib/guests";
 import type {
   GuestGameEvent,
+  GuestGameDryRunResult,
   GuestGameLootBox,
   GuestGameMission,
   GuestGameProfile,
@@ -31,7 +38,8 @@ type TabId =
   | "lootBoxes"
   | "missions"
   | "seasons"
-  | "rewards";
+  | "rewards"
+  | "testRun";
 
 type ProfileForm = {
   guestId: string;
@@ -162,13 +170,33 @@ type EventForm = {
   payloadText: string;
 };
 
+type DryRunForm = {
+  profileId: string;
+  guestId: string;
+  storeId: string;
+  eventType: string;
+  occurredAt: string;
+  sessionMinutes: string;
+  spendAmount: string;
+};
+
 const tabs: Array<{ id: TabId; label: string }> = [
   { id: "overview", label: "Обзор" },
   { id: "profiles", label: "Профили" },
   { id: "lootBoxes", label: "Лутбоксы" },
   { id: "missions", label: "Миссии" },
   { id: "seasons", label: "Battle Pass" },
+  { id: "testRun", label: "Тест запуска" },
   { id: "rewards", label: "Кошелек" },
+];
+
+const dryRunEventOptions = [
+  { value: "SESSION_START", label: "Старт сессии" },
+  { value: "VISIT", label: "Визит" },
+  { value: "PLAY_HOUR", label: "Час игры" },
+  { value: "BAR_PURCHASE", label: "Покупка бара" },
+  { value: "REPEAT_VISIT", label: "Повторный визит" },
+  { value: "MISSION_COMPLETED", label: "Миссия выполнена" },
 ];
 
 const statusLabels: Record<GuestGameStatus, string> = {
@@ -396,6 +424,16 @@ const defaultEventForm: EventForm = {
   }),
 };
 
+const defaultDryRunForm: DryRunForm = {
+  profileId: "",
+  guestId: "",
+  storeId: "",
+  eventType: "SESSION_START",
+  occurredAt: "",
+  sessionMinutes: "120",
+  spendAmount: "0",
+};
+
 export function GuestGamificationPanel({
   initialWorkspace,
   audiences,
@@ -415,6 +453,10 @@ export function GuestGamificationPanel({
   const [seasonForm, setSeasonForm] = useState<SeasonForm>(defaultSeasonForm);
   const [rewardForm, setRewardForm] = useState<RewardForm>(defaultRewardForm);
   const [eventForm, setEventForm] = useState<EventForm>(defaultEventForm);
+  const [dryRunForm, setDryRunForm] =
+    useState<DryRunForm>(defaultDryRunForm);
+  const [dryRunResult, setDryRunResult] =
+    useState<GuestGameDryRunResult | null>(null);
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
   const [editingLootBoxId, setEditingLootBoxId] = useState<string | null>(null);
   const [editingMissionId, setEditingMissionId] = useState<string | null>(null);
@@ -713,6 +755,25 @@ export function GuestGamificationPanel({
     });
   }
 
+  async function runDryRun() {
+    await saveAction("dryRun", async () => {
+      const result = await postJson<GuestGameDryRunResult>(
+        "/api/guests/gamification/dry-run",
+        {
+          profileId: nullable(dryRunForm.profileId),
+          guestId: nullable(dryRunForm.guestId),
+          storeId: nullable(dryRunForm.storeId),
+          eventType: dryRunForm.eventType,
+          occurredAt: nullable(dryRunForm.occurredAt),
+          sessionMinutes: dryRunForm.sessionMinutes,
+          spendAmount: dryRunForm.spendAmount,
+        },
+      );
+
+      setDryRunResult(result);
+    });
+  }
+
   async function updateRewardStatus(
     reward: GuestGameReward,
     status: GuestGameRewardStatus,
@@ -902,7 +963,331 @@ export function GuestGamificationPanel({
           saving={saving}
         />
       ) : null}
+
+      {activeTab === "testRun" ? (
+        <DryRunTab
+          form={dryRunForm}
+          setForm={setDryRunForm}
+          result={dryRunResult}
+          profiles={workspace.profiles}
+          guests={guests}
+          stores={stores}
+          onRun={runDryRun}
+          saving={saving}
+        />
+      ) : null}
     </div>
+  );
+}
+
+function DryRunTab({
+  form,
+  setForm,
+  result,
+  profiles,
+  guests,
+  stores,
+  onRun,
+  saving,
+}: {
+  form: DryRunForm;
+  setForm: Dispatch<SetStateAction<DryRunForm>>;
+  result: GuestGameDryRunResult | null;
+  profiles: GuestGameProfile[];
+  guests: GuestDashboardRow[];
+  stores: Store[];
+  onRun: () => Promise<void>;
+  saving: string | null;
+}) {
+  const isRunning = saving === "dryRun";
+
+  function update<K extends keyof DryRunForm>(key: K, value: DryRunForm[K]) {
+    setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  return (
+    <div className="space-y-5">
+      <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <SectionTitle title="Тест запуска" />
+            <p className="mt-2 max-w-3xl text-sm text-zinc-500 dark:text-zinc-400">
+              Проверьте, что произойдет при событии гостя: какие лутбоксы,
+              миссии и Battle Pass сработают, где есть блокировки, сколько XP и
+              рублей попадет в очередь выдачи.
+            </p>
+          </div>
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-100">
+            Награды, события и записи в Langame не создаются
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-3 lg:grid-cols-3">
+          <label className="space-y-1 text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+            Профиль гостя
+            <select
+              className={fieldClass}
+              value={form.profileId}
+              onChange={(event) => {
+                update("profileId", event.target.value);
+                update("guestId", "");
+              }}
+            >
+              <option value="">Не выбран</option>
+              {profiles.map((profile) => (
+                <option key={profile.id} value={profile.id}>
+                  {profile.displayName} · ур. {profile.level}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="space-y-1 text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+            Гость Langame
+            <select
+              className={fieldClass}
+              value={form.guestId}
+              onChange={(event) => {
+                update("guestId", event.target.value);
+                update("profileId", "");
+              }}
+            >
+              <option value="">Не выбран</option>
+              {guests.slice(0, 150).map((guest) => (
+                <option key={guest.id} value={guest.id}>
+                  {guest.displayName} · {guest.contact}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="space-y-1 text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+            Клуб
+            <select
+              className={fieldClass}
+              value={form.storeId}
+              onChange={(event) => update("storeId", event.target.value)}
+            >
+              <option value="">Вся сеть / не выбран</option>
+              {stores.map((store) => (
+                <option key={store.id} value={store.id}>
+                  {store.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="space-y-1 text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+            Событие
+            <select
+              className={fieldClass}
+              value={form.eventType}
+              onChange={(event) => update("eventType", event.target.value)}
+            >
+              {dryRunEventOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="space-y-1 text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+            Дата и время
+            <input
+              className={fieldClass}
+              type="datetime-local"
+              value={form.occurredAt}
+              onChange={(event) => update("occurredAt", event.target.value)}
+            />
+          </label>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="space-y-1 text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+              Минуты сессии
+              <input
+                className={fieldClass}
+                type="number"
+                min="0"
+                value={form.sessionMinutes}
+                onChange={(event) => update("sessionMinutes", event.target.value)}
+              />
+            </label>
+            <label className="space-y-1 text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+              Покупка, руб
+              <input
+                className={fieldClass}
+                type="number"
+                min="0"
+                value={form.spendAmount}
+                onChange={(event) => update("spendAmount", event.target.value)}
+              />
+            </label>
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <button
+            className={primaryButtonClass}
+            type="button"
+            disabled={isRunning}
+            onClick={onRun}
+          >
+            {isRunning ? "Проверяем..." : "Проверить сценарий"}
+          </button>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            Если дата не задана, API проверит сценарий на текущий момент.
+          </p>
+        </div>
+      </section>
+
+      {result ? (
+        <section className="space-y-4 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <SectionTitle title="Результат проверки" />
+              <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+                {result.profile?.displayName ??
+                  result.guest?.displayName ??
+                  "Гость не выбран"}{" "}
+                · {result.store?.name ?? "вся сеть"} · {result.eventType}
+              </p>
+            </div>
+            <div className="rounded-lg border border-zinc-200 px-3 py-2 text-xs font-semibold text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+              {new Date(result.occurredAt).toLocaleString("ru-RU")}
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-5">
+            <StatusMetric
+              label="Проверено"
+              value={result.summary.checkedRules}
+              hint="правил"
+            />
+            <StatusMetric
+              label="Сработает"
+              value={result.summary.eligibleRules}
+              hint="без блокировок"
+            />
+            <StatusMetric
+              label="Блок"
+              value={result.summary.blockedRules}
+              hint="нужны правки"
+            />
+            <StatusMetric
+              label="XP"
+              value={`+${result.summary.projectedXpDelta}`}
+              hint={`${result.input.sessionMinutes} мин`}
+            />
+            <StatusMetric
+              label="Награды"
+              value={formatMoney(result.summary.estimatedRewardAmount)}
+              hint={`${result.input.spendAmount} руб чек`}
+            />
+          </div>
+
+          <div className="grid gap-3 xl:grid-cols-2">
+            {result.rules.length ? (
+              result.rules.map((rule) => (
+                <DryRunRuleCard key={`${rule.kind}-${rule.id}`} rule={rule} />
+              ))
+            ) : (
+              <EmptyState text="Правил для проверки пока нет" />
+            )}
+          </div>
+        </section>
+      ) : (
+        <EmptyState text="Запустите проверку, чтобы увидеть допуск, награды, XP и причины блокировки." />
+      )}
+    </div>
+  );
+}
+
+function DryRunRuleCard({ rule }: { rule: GuestGameDryRunResult["rules"][number] }) {
+  const kindLabel =
+    rule.kind === "LOOT_BOX"
+      ? "Лутбокс"
+      : rule.kind === "MISSION"
+        ? "Миссия"
+        : "Battle Pass";
+
+  return (
+    <article
+      className={[
+        "rounded-lg border p-4 transition",
+        rule.eligible
+          ? "border-emerald-200 bg-emerald-50/70 dark:border-emerald-900/60 dark:bg-emerald-950/20"
+          : "border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/60",
+      ].join(" ")}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+            {kindLabel}
+          </p>
+          <h3 className="mt-1 text-base font-bold text-zinc-950 dark:text-white">
+            {rule.name}
+          </h3>
+        </div>
+        <span
+          className={[
+            "rounded-full px-2 py-1 text-xs font-bold",
+            rule.eligible
+              ? "bg-emerald-500 text-white"
+              : "bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200",
+          ].join(" ")}
+        >
+          {rule.eligible ? "сработает" : "блок"}
+        </span>
+      </div>
+
+      <div className="mt-3 grid gap-2 text-sm text-zinc-600 sm:grid-cols-3 dark:text-zinc-300">
+        <div>
+          <span className="block text-xs font-semibold uppercase text-zinc-400">
+            Награда
+          </span>
+          {rule.selectedRewardLabel ?? rule.rewardLabel ?? "не задана"}
+        </div>
+        <div>
+          <span className="block text-xs font-semibold uppercase text-zinc-400">
+            Сумма
+          </span>
+          {formatMoney(rule.rewardAmount ?? 0)}
+        </div>
+        <div>
+          <span className="block text-xs font-semibold uppercase text-zinc-400">
+            XP
+          </span>
+          +{rule.xpDelta}
+        </div>
+      </div>
+
+      {rule.blockers.length ? (
+        <div className="mt-3 space-y-1">
+          {rule.blockers.map((blocker) => (
+            <p
+              key={blocker}
+              className="rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs font-semibold text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
+            >
+              {blocker}
+            </p>
+          ))}
+        </div>
+      ) : null}
+
+      {rule.reasons.length ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {rule.reasons.slice(0, 6).map((reason) => (
+            <span
+              key={reason}
+              className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-zinc-500 ring-1 ring-zinc-200 dark:bg-zinc-950 dark:text-zinc-400 dark:ring-zinc-800"
+            >
+              {reason}
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </article>
   );
 }
 
@@ -3070,7 +3455,7 @@ function StatusMetric({
   hint,
 }: {
   label: string;
-  value: number;
+  value: ReactNode;
   hint: string;
 }) {
   return (
@@ -3302,16 +3687,16 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-function postJson(url: string, body: unknown) {
-  return fetchJson(url, {
+function postJson<T = unknown>(url: string, body: unknown) {
+  return fetchJson<T>(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
 }
 
-function patchJson(url: string, body: unknown) {
-  return fetchJson(url, {
+function patchJson<T = unknown>(url: string, body: unknown) {
+  return fetchJson<T>(url, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

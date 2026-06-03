@@ -78,6 +78,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added a safe dry-run layer for Guest Game Hub: `POST /guests/gamification/dry-run` and the `/guests/gamification` `Тест запуска` tab simulate guest events across loot boxes, missions, and battle pass, showing eligibility, blockers, XP, estimated rewards, and budget impact without creating rewards/events or writing to Langame.
 - Replaced the first raw JSON editing layer in `/guests/gamification` with business controls for loot boxes, missions, and battle pass: quiet-hour windows, weekday flags, per-guest and daily limits, weighted rewards, anti-fraud switches, mission eligibility fields, XP rules, and generated free/premium reward tracks are saved into the existing compatible rule payloads.
 - Expanded the internal Guest Game Hub: `/guests/gamification` now lets LeetPlus users open existing game profiles, loot boxes, missions, battle pass seasons, and rewards for editing instead of creating duplicates, update statuses, and use club-specific public guest portal links from the same workspace.
 - Added the first public guest portal: `/guest/[tenantSlug]/[storeId]` is available outside the internal LeetPlus app layout, uses a separate guest OTP/token flow, and shows club loyalty data from Langame snapshots plus LeetPlus gamification blocks for XP, levels, loot boxes, missions, battle pass, and rewards without exposing internal sections.

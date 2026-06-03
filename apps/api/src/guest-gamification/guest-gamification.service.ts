@@ -4,7 +4,12 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { IntegrationProvider, Prisma } from '@prisma/client';
+import {
+  IntegrationProvider,
+  Prisma,
+  TenantLifecycleStatus,
+  UserRole,
+} from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -675,6 +680,11 @@ export type GuestGamePipelineRunDto = {
   dryRunOnly?: boolean | string | null;
 };
 
+export type GuestGameScheduledPipelineRunDto = GuestGamePipelineRunDto & {
+  tenantId?: string | null;
+  tenantSlug?: string | null;
+};
+
 export type GuestGamePipelineFactStatus =
   | 'DRY_RUN'
   | 'PROCESSED'
@@ -711,6 +721,48 @@ export type GuestGamePipelineRunResult = {
   facts: GuestGamePipelineFactResult[];
   note: string;
 };
+
+export type GuestGameScheduledPipelineTenantResult = {
+  tenantId: string;
+  tenantSlug: string;
+  status: 'PROCESSED' | 'SKIPPED' | 'ERROR';
+  reason: string | null;
+  result: GuestGamePipelineRunResult | null;
+};
+
+export type GuestGameScheduledPipelineRunResult = {
+  dryRunOnly: boolean;
+  langameWrite: false;
+  checkedTenants: number;
+  processedTenants: number;
+  skippedTenants: number;
+  erroredTenants: number;
+  availableFacts: number;
+  checkedFacts: number;
+  processedFacts: number;
+  skippedFacts: number;
+  duplicateFacts: number;
+  erroredFacts: number;
+  appliedXpDelta: number;
+  queuedRewards: number;
+  queuedRewardAmount: number;
+  tenants: GuestGameScheduledPipelineTenantResult[];
+  note: string;
+};
+
+const scheduledPipelineActorRoles = [
+  UserRole.OWNER,
+  UserRole.ADMIN,
+  UserRole.MANAGER,
+] as const;
+
+function scheduledPipelineRoleRank(role: UserRole) {
+  const index = scheduledPipelineActorRoles.findIndex(
+    (value) => value === role,
+  );
+
+  return index >= 0 ? index : scheduledPipelineActorRoles.length;
+}
 
 @Injectable()
 export class GuestGamificationService {
@@ -929,6 +981,107 @@ export class GuestGamificationService {
         ? 'Предпросмотр batch: события, XP, награды и Langame-записи не создавались.'
         : 'Batch обработал только сохраненные snapshot-факты внутри LeetPlus. Запись в Langame не выполнялась.',
     };
+  }
+
+  async runSnapshotPipelineScheduled(
+    dto: GuestGameScheduledPipelineRunDto = {},
+  ): Promise<GuestGameScheduledPipelineRunResult> {
+    const tenantId = nullableString(dto.tenantId);
+    const tenantSlug = nullableString(dto.tenantSlug);
+    const tenants = await this.prisma.tenant.findMany({
+      where: clean({
+        id: tenantId,
+        slug: tenantSlug,
+      }) as Prisma.TenantWhereInput,
+      select: {
+        id: true,
+        slug: true,
+        status: true,
+        users: {
+          where: {
+            isActive: true,
+            role: { in: [...scheduledPipelineActorRoles] },
+          },
+          select: {
+            id: true,
+            email: true,
+            fullName: true,
+            role: true,
+            customRoleId: true,
+            isPlatformAdmin: true,
+          },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+      orderBy: { slug: 'asc' },
+    });
+    const tenantResults: GuestGameScheduledPipelineTenantResult[] = [];
+
+    for (const tenant of tenants) {
+      if (tenant.status !== TenantLifecycleStatus.ACTIVE) {
+        tenantResults.push({
+          tenantId: tenant.id,
+          tenantSlug: tenant.slug,
+          status: 'SKIPPED',
+          reason:
+            'Tenant is not active; scheduled Guest Game pipeline skipped.',
+          result: null,
+        });
+        continue;
+      }
+
+      const actor = this.pickScheduledPipelineActor(tenant.users);
+
+      if (!actor) {
+        tenantResults.push({
+          tenantId: tenant.id,
+          tenantSlug: tenant.slug,
+          status: 'SKIPPED',
+          reason:
+            'No active owner, system administrator or network manager user found for audit-safe run.',
+          result: null,
+        });
+        continue;
+      }
+
+      try {
+        const result = await this.runSnapshotPipeline(
+          {
+            id: actor.id,
+            email: actor.email,
+            fullName: actor.fullName,
+            role: actor.role,
+            customRoleId: actor.customRoleId,
+            isPlatformAdmin: actor.isPlatformAdmin,
+            tenantId: tenant.id,
+            tenantSlug: tenant.slug,
+            tenantStatus: tenant.status,
+          },
+          dto,
+        );
+
+        tenantResults.push({
+          tenantId: tenant.id,
+          tenantSlug: tenant.slug,
+          status: 'PROCESSED',
+          reason: null,
+          result,
+        });
+      } catch (error) {
+        tenantResults.push({
+          tenantId: tenant.id,
+          tenantSlug: tenant.slug,
+          status: 'ERROR',
+          reason: pipelineErrorMessage(error),
+          result: null,
+        });
+      }
+    }
+
+    return this.buildScheduledPipelineSummary(
+      booleanValue(dto.dryRunOnly),
+      tenantResults,
+    );
   }
 
   async getProfiles(user: AuthenticatedUser): Promise<GuestGameProfile[]> {
@@ -1528,6 +1681,61 @@ export class GuestGamificationService {
     });
 
     return rows.map(mapReward);
+  }
+
+  private pickScheduledPipelineActor(
+    users: Array<{
+      id: string;
+      email: string;
+      fullName: string | null;
+      role: UserRole;
+      customRoleId: string | null;
+      isPlatformAdmin: boolean;
+    }>,
+  ) {
+    return [...users].sort(
+      (left, right) =>
+        scheduledPipelineRoleRank(left.role) -
+        scheduledPipelineRoleRank(right.role),
+    )[0];
+  }
+
+  private buildScheduledPipelineSummary(
+    dryRunOnly: boolean,
+    tenants: GuestGameScheduledPipelineTenantResult[],
+  ): GuestGameScheduledPipelineRunResult {
+    const processed = tenants.filter((tenant) => tenant.status === 'PROCESSED');
+    const results = processed
+      .map((tenant) => tenant.result)
+      .filter((result): result is GuestGamePipelineRunResult =>
+        Boolean(result),
+      );
+
+    return {
+      dryRunOnly,
+      langameWrite: false,
+      checkedTenants: tenants.length,
+      processedTenants: processed.length,
+      skippedTenants: tenants.filter((tenant) => tenant.status === 'SKIPPED')
+        .length,
+      erroredTenants: tenants.filter((tenant) => tenant.status === 'ERROR')
+        .length,
+      availableFacts: sum(results.map((result) => result.availableFacts)),
+      checkedFacts: sum(results.map((result) => result.checkedFacts)),
+      processedFacts: sum(results.map((result) => result.processedFacts)),
+      skippedFacts: sum(results.map((result) => result.skippedFacts)),
+      duplicateFacts: sum(results.map((result) => result.duplicateFacts)),
+      erroredFacts: sum(results.map((result) => result.erroredFacts)),
+      appliedXpDelta: sum(results.map((result) => result.appliedXpDelta)),
+      queuedRewards: sum(results.map((result) => result.queuedRewards)),
+      queuedRewardAmount: sum(
+        results.map((result) => result.queuedRewardAmount),
+      ),
+      tenants,
+      note: dryRunOnly
+        ? 'Scheduled Guest Game pipeline preview finished without creating events, rewards or Langame writes.'
+        : 'Scheduled Guest Game pipeline processed prepared snapshot facts inside LeetPlus only. Langame writes are not performed.',
+    };
   }
 
   private buildSummary(

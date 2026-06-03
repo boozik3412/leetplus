@@ -643,6 +643,7 @@ export function GuestGamificationPanel({
           workspace={workspace}
           pendingRewards={pendingRewards}
           onRewardStatus={updateRewardStatus}
+          onOpenTab={setActiveTab}
           saving={saving}
         />
       ) : null}
@@ -727,6 +728,7 @@ function OverviewTab({
   workspace,
   pendingRewards,
   onRewardStatus,
+  onOpenTab,
   saving,
 }: {
   workspace: GuestGamificationWorkspace;
@@ -735,59 +737,200 @@ function OverviewTab({
     reward: GuestGameReward,
     status: GuestGameRewardStatus,
   ) => Promise<void>;
+  onOpenTab: (tab: TabId) => void;
   saving: string | null;
 }) {
   return (
-    <div className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
-      <section className="space-y-3">
-        <SectionTitle title="Активные контуры" />
-        <div className="grid gap-3 md:grid-cols-3">
-          <StatusMetric
-            label="Лутбоксы"
-            value={workspace.summary.activeLootBoxes}
-            hint={`${workspace.lootBoxes.length} всего`}
-          />
-          <StatusMetric
-            label="Миссии"
-            value={workspace.summary.activeMissions}
-            hint={`${workspace.missions.length} всего`}
-          />
-          <StatusMetric
-            label="Сезоны"
-            value={workspace.summary.activeSeasons}
-            hint={`${workspace.seasons.length} всего`}
-          />
+    <div className="space-y-5">
+      <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <SectionTitle title="Старт игрового контура" />
+            <p className="mt-2 max-w-3xl text-sm text-zinc-500 dark:text-zinc-400">
+              Соберите экономику от профиля гостя до ручной выдачи награды. Каждый
+              блок можно настроить отдельно, а затем связать в единый сценарий.
+            </p>
+          </div>
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-100">
+            Safe-mode: без автоматической записи в Langame
+          </div>
         </div>
 
-        <SectionTitle title="Последние события" />
-        <div className="space-y-2">
-          {workspace.events.length ? (
-            workspace.events.slice(0, 8).map((event) => (
-              <EventRow key={event.id} event={event} />
-            ))
-          ) : (
-            <EmptyState text="Событий пока нет" />
-          )}
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+          <ScenarioStepCard
+            step="1"
+            title="Игровые профили"
+            text="Связать гостя, контакт и будущие каналы Telegram/MAX."
+            metric={`${workspace.summary.profilesCount} профилей`}
+            action="Открыть профили"
+            onClick={() => onOpenTab("profiles")}
+          />
+          <ScenarioStepCard
+            step="2"
+            title="Лутбокс"
+            text="Настроить открытие при старте сессии, клубы, лимиты и призы."
+            metric={`${workspace.summary.activeLootBoxes} активных`}
+            action="Настроить"
+            onClick={() => onOpenTab("lootBoxes")}
+          />
+          <ScenarioStepCard
+            step="3"
+            title="Миссии"
+            text="Задать квесты по визитам, часам, бару или реактивации."
+            metric={`${workspace.summary.activeMissions} активных`}
+            action="Собрать"
+            onClick={() => onOpenTab("missions")}
+          />
+          <ScenarioStepCard
+            step="4"
+            title="Battle Pass"
+            text="Создать сезон, уровни, free/premium дорожки и XP-правила."
+            metric={`${workspace.summary.activeSeasons} сезонов`}
+            action="Открыть"
+            onClick={() => onOpenTab("seasons")}
+          />
+          <ScenarioStepCard
+            step="5"
+            title="Выдача"
+            text="Проверить очередь, согласовать награду и закрыть статус."
+            metric={`${workspace.summary.pendingRewards} к выдаче`}
+            action="К кошельку"
+            onClick={() => onOpenTab("rewards")}
+          />
         </div>
       </section>
 
-      <section className="space-y-3">
-        <SectionTitle title="Очередь выдач" />
-        <div className="space-y-2">
-          {pendingRewards.length ? (
-            pendingRewards.slice(0, 8).map((reward) => (
-              <RewardRow
-                key={reward.id}
-                reward={reward}
-                onStatus={onRewardStatus}
-                saving={saving}
-              />
-            ))
-          ) : (
-            <EmptyState text="Нет наград к выдаче" />
-          )}
-        </div>
-      </section>
+      <div className="grid gap-3 md:grid-cols-3">
+        <SafetyNoteCard
+          title="Langame"
+          value="только факты"
+          text="Правила используют подготовленные события и не пишут бонусы обратно без отдельного write-сценария."
+        />
+        <SafetyNoteCard
+          title="Экономика"
+          value={formatMoney(workspace.summary.plannedBudget)}
+          text="Бюджеты и лимиты держат стоимость призов под контролем до запуска автоматизации."
+        />
+        <SafetyNoteCard
+          title="Выдача"
+          value={formatMoney(workspace.summary.pendingRewardAmount)}
+          text="Награды проходят через очередь, код или кассира, чтобы исключить двойную выдачу."
+        />
+      </div>
+
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
+        <section className="space-y-3">
+          <SectionTitle title="Активные контуры" />
+          <div className="grid gap-3 md:grid-cols-3">
+            <StatusMetric
+              label="Лутбоксы"
+              value={workspace.summary.activeLootBoxes}
+              hint={`${workspace.lootBoxes.length} всего`}
+            />
+            <StatusMetric
+              label="Миссии"
+              value={workspace.summary.activeMissions}
+              hint={`${workspace.missions.length} всего`}
+            />
+            <StatusMetric
+              label="Сезоны"
+              value={workspace.summary.activeSeasons}
+              hint={`${workspace.seasons.length} всего`}
+            />
+          </div>
+
+          <SectionTitle title="Последние события" />
+          <div className="space-y-2">
+            {workspace.events.length ? (
+              workspace.events.slice(0, 8).map((event) => (
+                <EventRow key={event.id} event={event} />
+              ))
+            ) : (
+              <EmptyState text="Событий пока нет" />
+            )}
+          </div>
+        </section>
+
+        <section className="space-y-3">
+          <SectionTitle title="Очередь выдач" />
+          <div className="space-y-2">
+            {pendingRewards.length ? (
+              pendingRewards.slice(0, 8).map((reward) => (
+                <RewardRow
+                  key={reward.id}
+                  reward={reward}
+                  onStatus={onRewardStatus}
+                  saving={saving}
+                />
+              ))
+            ) : (
+              <EmptyState text="Нет наград к выдаче" />
+            )}
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function ScenarioStepCard({
+  step,
+  title,
+  text,
+  metric,
+  action,
+  onClick,
+}: {
+  step: string;
+  title: string;
+  text: string;
+  metric: string;
+  action: string;
+  onClick: () => void;
+}) {
+  return (
+    <div className="flex min-h-56 flex-col rounded-lg border border-zinc-200 bg-zinc-50 p-4 transition hover:border-emerald-300 hover:bg-white hover:shadow-sm dark:border-zinc-800 dark:bg-zinc-900/60 dark:hover:border-emerald-800 dark:hover:bg-zinc-950">
+      <div className="flex items-center justify-between gap-3">
+        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-100 text-sm font-bold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
+          {step}
+        </span>
+        <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-zinc-500 dark:bg-zinc-950 dark:text-zinc-400">
+          {metric}
+        </span>
+      </div>
+      <h3 className="mt-4 text-base font-bold text-zinc-950 dark:text-white">
+        {title}
+      </h3>
+      <p className="mt-2 flex-1 text-sm leading-6 text-zinc-500 dark:text-zinc-400">
+        {text}
+      </p>
+      <button type="button" className={`${smallButtonClass} mt-4`} onClick={onClick}>
+        {action}
+      </button>
+    </div>
+  );
+}
+
+function SafetyNoteCard({
+  title,
+  value,
+  text,
+}: {
+  title: string;
+  value: ReactNode;
+  text: string;
+}) {
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <p className="text-xs font-bold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+        {title}
+      </p>
+      <p className="mt-2 text-lg font-bold text-zinc-950 dark:text-white">
+        {value}
+      </p>
+      <p className="mt-2 text-sm leading-6 text-zinc-500 dark:text-zinc-400">
+        {text}
+      </p>
     </div>
   );
 }

@@ -1,0 +1,997 @@
+"use client";
+
+import type { FormEvent, ReactNode } from "react";
+import { useEffect, useState } from "react";
+import type {
+  GuestPortalOtpStartResponse,
+  GuestPortalOtpVerifyResponse,
+  GuestPortalPayload,
+  GuestPortalPublicConfig,
+} from "@/lib/guest-portal";
+
+type GuestPortalClientProps = {
+  tenantSlug: string;
+  storeId: string;
+};
+
+type LoadState = "loading" | "ready" | "error";
+
+export function GuestPortalClient({
+  tenantSlug,
+  storeId,
+}: GuestPortalClientProps) {
+  const [config, setConfig] = useState<GuestPortalPublicConfig | null>(null);
+  const [portal, setPortal] = useState<GuestPortalPayload | null>(null);
+  const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [phone, setPhone] = useState("");
+  const [code, setCode] = useState("");
+  const [challenge, setChallenge] =
+    useState<GuestPortalOtpStartResponse | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [isSubmitting, setSubmitting] = useState(false);
+
+  const basePath = `/api/guest-portal/${encodeURIComponent(
+    tenantSlug,
+  )}/${encodeURIComponent(storeId)}`;
+
+  useEffect(() => {
+    let isActive = true;
+
+    async function load() {
+      try {
+        const [configResponse, sessionResponse] = await Promise.all([
+          fetch(`${basePath}/public-config`, { cache: "no-store" }),
+          fetch("/api/guest-portal/session", { cache: "no-store" }),
+        ]);
+
+        if (!isActive) {
+          return;
+        }
+
+        if (!configResponse.ok) {
+          throw new Error(await readMessage(configResponse));
+        }
+
+        setConfig((await configResponse.json()) as GuestPortalPublicConfig);
+
+        if (sessionResponse.ok) {
+          setPortal((await sessionResponse.json()) as GuestPortalPayload);
+        }
+
+        setLoadState("ready");
+      } catch (error) {
+        if (!isActive) {
+          return;
+        }
+
+        setMessage(
+          error instanceof Error
+            ? error.message
+            : "Гостевая ссылка недоступна.",
+        );
+        setLoadState("error");
+      }
+    }
+
+    void load();
+
+    return () => {
+      isActive = false;
+    };
+  }, [basePath]);
+
+  async function submitPhone(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitting(true);
+    setMessage(null);
+
+    try {
+      const response = await fetch(`${basePath}/otp/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone }),
+      });
+
+      if (!response.ok) {
+        throw new Error(await readMessage(response));
+      }
+
+      const data = (await response.json()) as GuestPortalOtpStartResponse;
+      setChallenge(data);
+      setCode("");
+      setMessage(
+        data.delivery.status === "DEV_CODE"
+          ? "Код создан. В demo-режиме он показан ниже."
+          : "Канал доставки OTP пока не подключен. Попросите администратора включить SMS, Telegram или MAX.",
+      );
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "Не удалось создать код.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function submitCode(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!challenge) {
+      return;
+    }
+
+    setSubmitting(true);
+    setMessage(null);
+
+    try {
+      const response = await fetch(`${basePath}/otp/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          challengeId: challenge.challengeId,
+          code,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(await readMessage(response));
+      }
+
+      const data = (await response.json()) as GuestPortalOtpVerifyResponse;
+      setPortal(data.portal);
+      setMessage("Профиль подтвержден.");
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "Не удалось проверить код.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const pageTitle = portal?.store.name ?? config?.store.name ?? "Клуб";
+  const tenantName = portal?.tenant.name ?? config?.tenant.name ?? "LeetPlus";
+
+  return (
+    <main className="min-h-screen bg-[#05080d] text-slate-100">
+      <div className="pointer-events-none fixed inset-0 bg-[linear-gradient(135deg,rgba(13,148,136,0.14),transparent_34%,rgba(14,165,233,0.08)_68%,transparent)]" />
+      <div className="relative mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-5 sm:px-6 lg:px-8">
+        <header className="flex items-center justify-between gap-4 border-b border-white/10 pb-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex size-11 shrink-0 items-center justify-center rounded-lg border border-emerald-300/40 bg-emerald-400/[0.12] text-sm font-black text-emerald-200">
+              LP
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-bold uppercase text-emerald-300">
+                Гостевой портал
+              </p>
+              <h1 className="truncate text-xl font-black text-white sm:text-2xl">
+                {pageTitle}
+              </h1>
+            </div>
+          </div>
+          <div className="hidden text-right sm:block">
+            <p className="text-xs uppercase text-slate-500">Сеть</p>
+            <p className="max-w-64 truncate text-sm font-semibold text-slate-200">
+              {tenantName}
+            </p>
+          </div>
+        </header>
+
+        {loadState === "loading" ? (
+          <LoadingState />
+        ) : loadState === "error" || !config ? (
+          <ErrorState message={message ?? "Гостевая ссылка недоступна."} />
+        ) : portal ? (
+          <VerifiedPortal portal={portal} />
+        ) : (
+          <VerificationLanding
+            config={config}
+            phone={phone}
+            code={code}
+            challenge={challenge}
+            message={message}
+            isSubmitting={isSubmitting}
+            onPhoneChange={setPhone}
+            onCodeChange={setCode}
+            onSubmitPhone={submitPhone}
+            onSubmitCode={submitCode}
+          />
+        )}
+      </div>
+    </main>
+  );
+}
+
+function VerificationLanding({
+  config,
+  phone,
+  code,
+  challenge,
+  message,
+  isSubmitting,
+  onPhoneChange,
+  onCodeChange,
+  onSubmitPhone,
+  onSubmitCode,
+}: {
+  config: GuestPortalPublicConfig;
+  phone: string;
+  code: string;
+  challenge: GuestPortalOtpStartResponse | null;
+  message: string | null;
+  isSubmitting: boolean;
+  onPhoneChange: (value: string) => void;
+  onCodeChange: (value: string) => void;
+  onSubmitPhone: (event: FormEvent<HTMLFormElement>) => void;
+  onSubmitCode: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <section className="grid flex-1 items-center gap-6 py-8 lg:grid-cols-[1.08fr_0.92fr] lg:py-10">
+      <div className="space-y-6">
+        <div className="max-w-2xl space-y-5">
+          <div className="inline-flex items-center gap-2 rounded-lg border border-cyan-300/20 bg-cyan-300/[0.08] px-3 py-2 text-sm font-semibold text-cyan-100">
+            <SparkIcon />
+            Лояльность, миссии и награды в одном экране
+          </div>
+          <div className="space-y-4">
+            <h2 className="text-4xl font-black leading-tight text-white sm:text-5xl">
+              Ваш клубный прогресс уже здесь
+            </h2>
+            <p className="max-w-xl text-lg leading-8 text-slate-300">
+              Подтвердите телефон, чтобы увидеть текущую группу Langame,
+              бонусы, доступные лутбоксы, миссии, награды и сезонный battle
+              pass без входа во внутренние разделы LeetPlus.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-3">
+          <FeatureBadge
+            icon={<ShieldIcon />}
+            title="Безопасно"
+            text="Только гостевой токен, без доступа к админке."
+          />
+          <FeatureBadge
+            icon={<LootIcon />}
+            title="Лутбоксы"
+            text="Награды при старте сессии и клубных событиях."
+          />
+          <FeatureBadge
+            icon={<PassIcon />}
+            title="Battle pass"
+            text="Уровни, XP, бесплатные и premium-награды."
+          />
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-white/10 bg-[#0b111c] p-4 shadow-2xl shadow-black/30 sm:p-5">
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-bold uppercase text-emerald-300">
+              Верификация
+            </p>
+            <h3 className="mt-1 text-2xl font-black text-white">
+              Вход для гостей
+            </h3>
+            <p className="mt-2 text-sm leading-6 text-slate-400">
+              {config.store.name}
+              {config.store.address ? `, ${config.store.address}` : ""}
+            </p>
+          </div>
+          <ProfileFrame frame="starter" size="sm" />
+        </div>
+
+        <form className="space-y-4" onSubmit={onSubmitPhone}>
+          <label className="block">
+            <span className="text-xs font-bold uppercase text-slate-400">
+              Телефон
+            </span>
+            <input
+              value={phone}
+              onChange={(event) => onPhoneChange(event.target.value)}
+              placeholder="+7 999 000-00-00"
+              className="mt-2 w-full rounded-lg border border-white/10 bg-[#070b12] px-4 py-3 text-base font-semibold text-white outline-none transition hover:border-emerald-300/50 focus:border-emerald-300"
+              inputMode="tel"
+              autoComplete="tel"
+            />
+          </label>
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-400 px-4 py-3 text-base font-black text-[#02120d] transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <KeyIcon />
+            Получить код
+          </button>
+        </form>
+
+        {challenge ? (
+          <form
+            className="mt-5 space-y-4 border-t border-white/10 pt-5"
+            onSubmit={onSubmitCode}
+          >
+            <div className="rounded-lg border border-emerald-300/20 bg-emerald-300/[0.08] p-3 text-sm text-emerald-50">
+              Код отправлен на {challenge.phoneMasked}. Действует до{" "}
+              {formatTime(challenge.expiresAt)}.
+              {challenge.delivery.devCode ? (
+                <span className="mt-2 block font-black text-emerald-200">
+                  Demo-код: {challenge.delivery.devCode}
+                </span>
+              ) : null}
+            </div>
+            <label className="block">
+              <span className="text-xs font-bold uppercase text-slate-400">
+                Код подтверждения
+              </span>
+              <input
+                value={code}
+                onChange={(event) => onCodeChange(event.target.value)}
+                placeholder="000000"
+                className="mt-2 w-full rounded-lg border border-white/10 bg-[#070b12] px-4 py-3 text-center text-2xl font-black text-white outline-none transition hover:border-cyan-300/50 focus:border-cyan-300"
+                inputMode="numeric"
+                maxLength={6}
+              />
+            </label>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="flex w-full items-center justify-center gap-2 rounded-lg border border-cyan-300/30 bg-cyan-300/10 px-4 py-3 text-base font-black text-cyan-100 transition hover:bg-cyan-300/[0.18] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <CheckIcon />
+              Подтвердить профиль
+            </button>
+          </form>
+        ) : null}
+
+        {message ? (
+          <p
+            className="mt-4 rounded-lg border border-white/10 bg-white/5 p-3 text-sm leading-6 text-slate-300"
+            aria-live="polite"
+          >
+            {message}
+          </p>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function VerifiedPortal({ portal }: { portal: GuestPortalPayload }) {
+  return (
+    <div className="space-y-5 py-6">
+      {!portal.guestFound ? (
+        <div className="rounded-lg border border-amber-300/30 bg-amber-300/[0.08] p-4 text-sm leading-6 text-amber-50">
+          Профиль не найден в синхронизированной базе гостей. Проверьте номер у
+          администратора клуба: после синхронизации Langame здесь появятся
+          группа лояльности, бонусы и игровой прогресс.
+        </div>
+      ) : null}
+
+      <section className="grid gap-5 lg:grid-cols-[0.95fr_1.05fr]">
+        <div className="rounded-lg border border-white/10 bg-[#0b111c] p-5">
+          <div className="flex items-start gap-4">
+            <ProfileFrame frame={portal.profile.frame} />
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-bold uppercase text-emerald-300">
+                Профиль гостя
+              </p>
+              <h2 className="mt-1 truncate text-3xl font-black text-white">
+                {portal.profile.displayName}
+              </h2>
+              <p className="mt-2 text-sm text-slate-400">
+                {portal.profile.contactMasked ?? "Контакт подтвержден"}
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-6 grid grid-cols-3 gap-3">
+            <Metric label="Уровень" value={portal.profile.level.toString()} />
+            <Metric label="XP" value={formatNumber(portal.profile.xp)} />
+            <Metric
+              label="До уровня"
+              value={formatNumber(portal.profile.nextLevelXp)}
+            />
+          </div>
+
+          <ProgressBar
+            label="Прогресс игрового уровня"
+            value={portal.profile.levelProgressPercent}
+            tone="cyan"
+          />
+        </div>
+
+        <LoyaltyPanel portal={portal} />
+      </section>
+
+      <section className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
+        <BattlePassPanel portal={portal} />
+        <RewardsPanel portal={portal} />
+      </section>
+
+      <section className="grid gap-5 lg:grid-cols-2">
+        <MissionsPanel portal={portal} />
+        <LootBoxesPanel portal={portal} />
+      </section>
+    </div>
+  );
+}
+
+function LoyaltyPanel({ portal }: { portal: GuestPortalPayload }) {
+  const loyalty = portal.loyalty;
+
+  return (
+    <div className="rounded-lg border border-amber-200/20 bg-[#111018] p-5">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-bold uppercase text-amber-200">
+            Система лояльности клуба
+          </p>
+          <h3 className="mt-1 text-2xl font-black text-white">
+            {loyalty.groupName ?? "Группа уточняется"}
+          </h3>
+          <p className="mt-2 text-sm leading-6 text-slate-300">
+            Уровень гостя берется из сохраненных данных Langame и не смешивается
+            с игровым XP LeetPlus.
+          </p>
+        </div>
+        <LoyaltyIcon />
+      </div>
+
+      <div className="mt-5 grid gap-3 sm:grid-cols-3">
+        <Metric
+          label="Скидка"
+          value={
+            loyalty.discountPercent == null
+              ? "-"
+              : `${formatNumber(loyalty.discountPercent)}%`
+          }
+        />
+        <Metric
+          label="Часы"
+          value={
+            loyalty.currentHours == null
+              ? "-"
+              : formatNumber(Math.round(loyalty.currentHours))
+          }
+        />
+        <Metric
+          label="Бонусы"
+          value={
+            loyalty.bonusBalance == null
+              ? "-"
+              : `${formatNumber(loyalty.bonusBalance)}`
+          }
+        />
+      </div>
+
+      <ProgressBar
+        label={
+          loyalty.nextGroupName
+            ? `До группы ${loyalty.nextGroupName}`
+            : "Текущий уровень лояльности"
+        }
+        value={loyalty.progressPercent}
+        tone="gold"
+      />
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <InfoLine
+          label="Баланс"
+          value={
+            loyalty.balance == null ? "-" : `${formatNumber(loyalty.balance)} руб`
+          }
+        />
+        <InfoLine
+          label="Данные обновлены"
+          value={
+            loyalty.lastSyncedAt ? formatDate(loyalty.lastSyncedAt) : "нет данных"
+          }
+        />
+      </div>
+    </div>
+  );
+}
+
+function BattlePassPanel({ portal }: { portal: GuestPortalPayload }) {
+  const season = portal.gamification.seasons[0] ?? null;
+  const levels = season?.levels.length ? season.levels : fallbackBattlePass();
+
+  return (
+    <div className="rounded-lg border border-white/10 bg-[#0b111c] p-5">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-bold uppercase text-cyan-200">
+            Battle pass
+          </p>
+          <h3 className="mt-1 text-2xl font-black text-white">
+            {season?.name ?? "Клубный сезон"}
+          </h3>
+          <p className="mt-2 text-sm leading-6 text-slate-400">
+            Бесплатная дорожка и premium-награды отображаются отдельно. Выдача
+            наград проходит через LeetPlus, без автоматической записи в Langame.
+          </p>
+        </div>
+        <PassIcon />
+      </div>
+
+      <div className="mt-5 grid gap-3 sm:grid-cols-4">
+        {levels.slice(0, 8).map((level) => (
+          <div
+            key={`${level.level}-${level.xp}`}
+            className={`rounded-lg border p-3 transition ${
+              level.reached
+                ? "border-emerald-300/40 bg-emerald-300/10"
+                : "border-white/10 bg-[#070b12]"
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-bold uppercase text-slate-400">
+                LVL {level.level}
+              </span>
+              {level.reached ? <CheckIcon /> : <LockIcon />}
+            </div>
+            <p className="mt-2 text-sm font-black text-white">
+              {formatNumber(level.xp)} XP
+            </p>
+            <p className="mt-2 min-h-10 text-xs leading-5 text-slate-400">
+              {level.freeReward ?? "Награда сезона"}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RewardsPanel({ portal }: { portal: GuestPortalPayload }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-[#0b111c] p-5">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-bold uppercase text-emerald-300">
+            Награды
+          </p>
+          <h3 className="mt-1 text-2xl font-black text-white">
+            Кошелек гостя
+          </h3>
+        </div>
+        <WalletIcon />
+      </div>
+
+      <div className="mt-5 space-y-3">
+        {portal.gamification.rewards.length ? (
+          portal.gamification.rewards.slice(0, 5).map((reward) => (
+            <div
+              key={reward.id}
+              className="rounded-lg border border-white/10 bg-[#070b12] p-3"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-black text-white">{reward.rewardLabel}</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {formatDate(reward.qualifiedAt)}
+                  </p>
+                </div>
+                <span className="rounded-lg bg-emerald-300/10 px-2 py-1 text-xs font-black text-emerald-200">
+                  {reward.status}
+                </span>
+              </div>
+              {reward.rewardCode ? (
+                <p className="mt-3 rounded-lg border border-dashed border-cyan-300/30 px-3 py-2 text-sm font-black text-cyan-100">
+                  Код: {reward.rewardCode}
+                </p>
+              ) : null}
+            </div>
+          ))
+        ) : (
+          <EmptyBlock text="Награды появятся после миссий, лутбоксов или ручного подтверждения администратором." />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MissionsPanel({ portal }: { portal: GuestPortalPayload }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-[#0b111c] p-5">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-bold uppercase text-cyan-200">Миссии</p>
+          <h3 className="mt-1 text-2xl font-black text-white">
+            Доступные задания
+          </h3>
+        </div>
+        <MissionIcon />
+      </div>
+      <div className="mt-5 space-y-3">
+        {portal.gamification.missions.length ? (
+          portal.gamification.missions.map((mission) => (
+            <div
+              key={mission.id}
+              className="rounded-lg border border-white/10 bg-[#070b12] p-4 transition hover:border-cyan-300/35"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-black text-white">{mission.name}</p>
+                  <p className="mt-1 text-sm text-slate-400">
+                    {mission.rewardLabel ?? "Награда после подтверждения"}
+                  </p>
+                </div>
+                <span className="rounded-lg bg-cyan-300/10 px-2 py-1 text-xs font-black text-cyan-100">
+                  +{mission.xpReward} XP
+                </span>
+              </div>
+              <ProgressBar
+                label={
+                  mission.progressTarget
+                    ? `Цель: ${mission.progressTarget} ${mission.progressUnit ?? ""}`
+                    : "Прогресс миссии"
+                }
+                value={mission.progressPercent}
+                tone="cyan"
+              />
+            </div>
+          ))
+        ) : (
+          <EmptyBlock text="Активные миссии для этого клуба пока не настроены." />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function LootBoxesPanel({ portal }: { portal: GuestPortalPayload }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-[#0b111c] p-5">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-bold uppercase text-emerald-300">
+            Лутбоксы
+          </p>
+          <h3 className="mt-1 text-2xl font-black text-white">
+            Событийные награды
+          </h3>
+        </div>
+        <LootIcon />
+      </div>
+      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+        {portal.gamification.lootBoxes.length ? (
+          portal.gamification.lootBoxes.map((lootBox) => (
+            <div
+              key={lootBox.id}
+              className="rounded-lg border border-white/10 bg-[#070b12] p-4 transition hover:border-emerald-300/40"
+            >
+              <p className="font-black text-white">{lootBox.name}</p>
+              <p className="mt-2 text-sm leading-6 text-slate-400">
+                {lootBox.rewardLabel ??
+                  "Награда определяется правилами лутбокса."}
+              </p>
+              <div className="mt-3 inline-flex rounded-lg bg-emerald-300/10 px-2 py-1 text-xs font-black text-emerald-200">
+                {lootBox.triggerKind}
+              </div>
+            </div>
+          ))
+        ) : (
+          <EmptyBlock text="Лутбоксы появятся после настройки правил старта сессии или клубных событий." />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FeatureBadge({
+  icon,
+  title,
+  text,
+}: {
+  icon: ReactNode;
+  title: string;
+  text: string;
+}) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+      <div className="mb-3 text-emerald-200">{icon}</div>
+      <p className="font-black text-white">{title}</p>
+      <p className="mt-1 text-sm leading-6 text-slate-400">{text}</p>
+    </div>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-white/[0.04] p-3">
+      <p className="text-xs font-bold uppercase text-slate-500">{label}</p>
+      <p className="mt-1 truncate text-xl font-black text-white">{value}</p>
+    </div>
+  );
+}
+
+function InfoLine({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm">
+      <span className="text-slate-400">{label}</span>
+      <span className="truncate font-bold text-white">{value}</span>
+    </div>
+  );
+}
+
+function ProgressBar({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: "cyan" | "gold";
+}) {
+  const normalized = Math.max(0, Math.min(100, value));
+  const color = tone === "gold" ? "bg-amber-300" : "bg-cyan-300";
+
+  return (
+    <div className="mt-5">
+      <div className="mb-2 flex items-center justify-between gap-3 text-xs font-bold uppercase text-slate-400">
+        <span>{label}</span>
+        <span>{normalized}%</span>
+      </div>
+      <div className="h-3 overflow-hidden rounded-lg bg-white/[0.08]">
+        <div
+          className={`h-full rounded-lg ${color}`}
+          style={{ width: `${normalized}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function ProfileFrame({
+  frame,
+  size = "md",
+}: {
+  frame: GuestPortalPayload["profile"]["frame"];
+  size?: "sm" | "md";
+}) {
+  const palette = {
+    starter: "border-slate-400/40 bg-slate-400/10 text-slate-200",
+    bronze: "border-orange-300/50 bg-orange-300/10 text-orange-100",
+    silver: "border-cyan-200/50 bg-cyan-200/10 text-cyan-100",
+    gold: "border-amber-200/60 bg-amber-200/[0.12] text-amber-100",
+    diamond: "border-emerald-200/60 bg-emerald-200/[0.12] text-emerald-100",
+  }[frame];
+  const className =
+    size === "sm"
+      ? "size-14 text-lg"
+      : "size-20 text-2xl sm:size-24 sm:text-3xl";
+
+  return (
+    <div
+      className={`${className} relative flex shrink-0 items-center justify-center rounded-lg border-2 ${palette} font-black`}
+    >
+      <span>LP</span>
+      <span className="absolute -right-1 -top-1 size-3 rounded-full bg-emerald-300" />
+      <span className="absolute -bottom-1 -left-1 size-3 rounded-full bg-cyan-300" />
+    </div>
+  );
+}
+
+function EmptyBlock({ text }: { text: string }) {
+  return (
+    <div className="rounded-lg border border-dashed border-white/[0.14] bg-white/[0.03] p-4 text-sm leading-6 text-slate-400">
+      {text}
+    </div>
+  );
+}
+
+function LoadingState() {
+  return (
+    <div className="flex flex-1 items-center justify-center py-20">
+      <div className="rounded-lg border border-white/10 bg-white/[0.04] px-5 py-4 text-sm font-semibold text-slate-300">
+        Загружаем гостевой портал...
+      </div>
+    </div>
+  );
+}
+
+function ErrorState({ message }: { message: string }) {
+  return (
+    <div className="flex flex-1 items-center justify-center py-20">
+      <div className="max-w-xl rounded-lg border border-red-300/30 bg-red-300/[0.08] p-5">
+        <p className="text-xl font-black text-white">Страница недоступна</p>
+        <p className="mt-2 text-sm leading-6 text-red-100">{message}</p>
+      </div>
+    </div>
+  );
+}
+
+function fallbackBattlePass() {
+  return [
+    {
+      level: 1,
+      xp: 0,
+      freeReward: "Старт сезона",
+      premiumReward: null,
+      reached: true,
+    },
+    {
+      level: 2,
+      xp: 250,
+      freeReward: "Промокод бара",
+      premiumReward: "Усиленная награда",
+      reached: false,
+    },
+    {
+      level: 3,
+      xp: 500,
+      freeReward: "Бонус визита",
+      premiumReward: "Лутбокс",
+      reached: false,
+    },
+    {
+      level: 4,
+      xp: 900,
+      freeReward: "Часы игры",
+      premiumReward: "Премиум-приз",
+      reached: false,
+    },
+  ];
+}
+
+async function readMessage(response: Response) {
+  try {
+    const data = (await response.json()) as { message?: unknown };
+    return typeof data.message === "string" ? data.message : "Ошибка запроса";
+  } catch {
+    return "Ошибка запроса";
+  }
+}
+
+function formatNumber(value: number) {
+  return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 }).format(
+    value,
+  );
+}
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(new Date(value));
+}
+
+function formatTime(value: string) {
+  return new Intl.DateTimeFormat("ru-RU", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function SparkIcon() {
+  return (
+    <svg className="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M12 2l1.7 6.1L20 10l-6.3 1.9L12 18l-1.7-6.1L4 10l6.3-1.9L12 2z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function ShieldIcon() {
+  return (
+    <svg className="size-7" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M12 3l7 3v5.6c0 4.2-2.9 7.4-7 8.4-4.1-1-7-4.2-7-8.4V6l7-3z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <path d="M9 12l2 2 4-5" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function LootIcon() {
+  return (
+    <svg className="size-8" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M4 8l8-4 8 4v9l-8 4-8-4V8z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path d="M4 8l8 4 8-4M12 12v9" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M9 6.5l6 3" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function PassIcon() {
+  return (
+    <svg className="size-8" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M5 5h14v14H5V5z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path d="M8 9h8M8 13h5M8 17h7" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function MissionIcon() {
+  return (
+    <svg className="size-8" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M7 4h10l2 4-7 12L5 8l2-4z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path d="M8 9h8" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function LoyaltyIcon() {
+  return (
+    <svg className="size-10 text-amber-200" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M12 3l2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9L12 3z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function WalletIcon() {
+  return (
+    <svg className="size-8 text-emerald-200" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M4 7h16v13H4V7z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path d="M7 7l10-3 1 3" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M16 14h3" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function KeyIcon() {
+  return (
+    <svg className="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M9 14a4 4 0 1 1 3-1.3L21 4l2 2-2 2-2-2-2 2 2 2-2 2-2-2-2.7 2.7A4 4 0 0 1 9 14z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg className="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M5 12l4 4L19 6" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  );
+}
+
+function LockIcon() {
+  return (
+    <svg className="size-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M7 10V8a5 5 0 0 1 10 0v2M6 10h12v10H6V10z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+    </svg>
+  );
+}

@@ -8,6 +8,7 @@ const publicPathPrefixes = [
   "/login",
   "/register",
   "/verify-email",
+  "/guest",
   "/favicon.ico",
   "/robots.txt",
   "/sitemap.xml",

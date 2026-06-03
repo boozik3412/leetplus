@@ -158,6 +158,7 @@ model Tenant {
   guestGameSeasons                     GuestGameSeason[]
   guestGameRewards                     GuestGameReward[]
   guestGameEvents                      GuestGameEvent[]
+  guestPortalOtpChallenges             GuestPortalOtpChallenge[]
   marketingCampaigns                   MarketingCampaign[]
   marketingPromoBundles                MarketingPromoBundle[]
   marketingPromoBundleLaunches         MarketingPromoBundleLaunch[]
@@ -448,6 +449,7 @@ model Store {
   marketingPromoBundleUsages   MarketingPromoBundleUsage[]
   marketingMissionRewards      MarketingMissionReward[]
   guestGameRewards             GuestGameReward[]
+  guestPortalOtpChallenges     GuestPortalOtpChallenge[]
   staffTasks                   StaffTask[]
   staffTaskTemplates           StaffTaskTemplate[]
   staffTaskRecurringRules      StaffTaskRecurringRule[]
@@ -975,6 +977,7 @@ model Guest {
   gameProfiles          GuestGameProfile[]
   gameRewards           GuestGameReward[]
   gameEvents            GuestGameEvent[]
+  guestPortalOtpChallenges GuestPortalOtpChallenge[]
 
   @@unique([tenantId, externalProvider, externalDomain, externalGuestId])
   @@index([tenantId])
@@ -1332,6 +1335,7 @@ model GuestGameProfile {
   createdByUser User?           @relation("GuestGameProfileCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   rewards       GuestGameReward[]
   events        GuestGameEvent[]
+  portalOtpChallenges GuestPortalOtpChallenge[]
 
   @@unique([tenantId, guestId], map: "guest_game_profile_guest_uidx")
   @@unique([tenantId, leadId], map: "guest_game_profile_lead_uidx")
@@ -1538,6 +1542,36 @@ model GuestGameEvent {
   @@index([missionId], map: "guest_game_event_mission_idx")
   @@index([seasonId], map: "guest_game_event_season_idx")
   @@index([createdByUserId], map: "guest_game_event_created_by_idx")
+}
+
+model GuestPortalOtpChallenge {
+  id              String    @id @default(uuid())
+  tenantId        String
+  storeId         String
+  phoneHash       String
+  phoneMasked     String?
+  guestId         String?
+  profileId       String?
+  codeHash        String
+  status          String    @default("PENDING")
+  deliveryChannel String    @default("DEV")
+  attempts        Int       @default(0)
+  expiresAt       DateTime
+  deliveredAt     DateTime?
+  verifiedAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  tenant  Tenant            @relation(fields: [tenantId], references: [id])
+  store   Store             @relation(fields: [storeId], references: [id])
+  guest   Guest?            @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  profile GuestGameProfile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, storeId, status, createdAt], map: "guest_portal_otp_scope_idx")
+  @@index([tenantId, phoneHash, createdAt], map: "guest_portal_otp_phone_idx")
+  @@index([expiresAt], map: "guest_portal_otp_expires_idx")
+  @@index([guestId], map: "guest_portal_otp_guest_idx")
+  @@index([profileId], map: "guest_portal_otp_profile_idx")
 }
 
 model GuestGroup {

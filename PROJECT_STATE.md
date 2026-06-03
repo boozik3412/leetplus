@@ -1,6 +1,6 @@
 # LeetPlus Project State
 
-Last updated: 2026-06-02
+Last updated: 2026-06-03
 
 ## Current Workflow
 
@@ -78,6 +78,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added the first public guest portal: `/guest/[tenantSlug]/[storeId]` is available outside the internal LeetPlus app layout, uses a separate guest OTP/token flow, and shows club loyalty data from Langame snapshots plus LeetPlus gamification blocks for XP, levels, loot boxes, missions, battle pass, and rewards without exposing internal sections.
 - Tightened communications access UX: `/communications` now chooses its primary action by the user's actual staff/CRM permissions, `/guests/crm/tasks` links back to the communications hub, and direct `/staff/team-chat` plus `/staff/notifications` page loads redirect away for users without `view_staff` instead of surfacing staff-only API errors.
 - Completed Stage 2 of the UI/UX navigation refactor: old guest, CRM, assortment, commercial management, platform administration, sync, import, directory, and utility pages now use the shared breadcrumbs component, while `/dashboard` remains the standalone main entry and `/admin` remains a redirect.
 - Added the first UI/UX navigation refactor for communications: sidebar now has a separate `Коммуникации` block, `/communications` is a lightweight hub, `/staff` is a personnel hub from overview to details, and the staff popover is reduced to major staff workflows while existing URLs stay stable.

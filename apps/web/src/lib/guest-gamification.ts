@@ -228,6 +228,22 @@ export type GuestGameDryRunResult = {
   note: string;
 };
 
+export type GuestGameProcessEventResult = {
+  processed: true;
+  dryRun: GuestGameDryRunResult;
+  event: GuestGameEvent;
+  rewards: GuestGameReward[];
+  summary: {
+    profileCreated: boolean;
+    appliedXpDelta: number;
+    createdRewards: number;
+    queuedRewardAmount: number;
+    idempotencyKey: string | null;
+    langameWrite: false;
+  };
+  note: string;
+};
+
 export type GuestGameSnapshotFact = {
   id: string;
   source:

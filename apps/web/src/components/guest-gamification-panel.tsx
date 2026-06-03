@@ -18,6 +18,7 @@ import type {
   GuestGameReward,
   GuestGameRewardStatus,
   GuestGameSeason,
+  GuestGameProcessEventResult,
   GuestGameSnapshotFact,
   GuestGameSnapshotFactsResult,
   GuestGameStatus,
@@ -180,6 +181,11 @@ type DryRunForm = {
   occurredAt: string;
   sessionMinutes: string;
   spendAmount: string;
+  sourceFactId: string;
+  sourceFactKind: string;
+  externalProvider: string;
+  externalDomain: string;
+  externalId: string;
 };
 
 const tabs: Array<{ id: TabId; label: string }> = [
@@ -428,6 +434,14 @@ const defaultEventForm: EventForm = {
   }),
 };
 
+const emptyDryRunSource = {
+  sourceFactId: "",
+  sourceFactKind: "",
+  externalProvider: "",
+  externalDomain: "",
+  externalId: "",
+};
+
 const defaultDryRunForm: DryRunForm = {
   profileId: "",
   guestId: "",
@@ -436,6 +450,7 @@ const defaultDryRunForm: DryRunForm = {
   occurredAt: "",
   sessionMinutes: "120",
   spendAmount: "0",
+  ...emptyDryRunSource,
 };
 
 export function GuestGamificationPanel({
@@ -461,6 +476,8 @@ export function GuestGamificationPanel({
     useState<DryRunForm>(defaultDryRunForm);
   const [dryRunResult, setDryRunResult] =
     useState<GuestGameDryRunResult | null>(null);
+  const [processEventResult, setProcessEventResult] =
+    useState<GuestGameProcessEventResult | null>(null);
   const [snapshotFacts, setSnapshotFacts] =
     useState<GuestGameSnapshotFactsResult | null>(null);
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
@@ -777,6 +794,33 @@ export function GuestGamificationPanel({
       );
 
       setDryRunResult(result);
+      setProcessEventResult(null);
+    });
+  }
+
+  async function processDryRunEvent() {
+    await saveAction("processEvent", async () => {
+      const result = await postJson<GuestGameProcessEventResult>(
+        "/api/guests/gamification/process-event",
+        {
+          profileId: nullable(dryRunForm.profileId),
+          guestId: nullable(dryRunForm.guestId),
+          storeId: nullable(dryRunForm.storeId),
+          eventType: dryRunForm.eventType,
+          occurredAt: nullable(dryRunForm.occurredAt),
+          sessionMinutes: dryRunForm.sessionMinutes,
+          spendAmount: dryRunForm.spendAmount,
+          sourceFactId: nullable(dryRunForm.sourceFactId),
+          sourceFactKind: nullable(dryRunForm.sourceFactKind),
+          externalProvider: nullable(dryRunForm.externalProvider),
+          externalDomain: nullable(dryRunForm.externalDomain),
+          externalId: nullable(dryRunForm.externalId),
+        },
+      );
+
+      setDryRunResult(result.dryRun);
+      setProcessEventResult(result);
+      await reloadWorkspace();
     });
   }
 
@@ -803,8 +847,14 @@ export function GuestGamificationPanel({
           : String(fact.sessionMinutes),
       spendAmount:
         fact.spendAmount == null ? current.spendAmount : String(fact.spendAmount),
+      sourceFactId: fact.id,
+      sourceFactKind: fact.source,
+      externalProvider: fact.externalProvider ?? "",
+      externalDomain: fact.externalDomain ?? "",
+      externalId: fact.externalId ?? "",
     }));
     setDryRunResult(null);
+    setProcessEventResult(null);
   }
 
   async function updateRewardStatus(
@@ -1002,11 +1052,13 @@ export function GuestGamificationPanel({
           form={dryRunForm}
           setForm={setDryRunForm}
           result={dryRunResult}
+          processResult={processEventResult}
           profiles={workspace.profiles}
           guests={guests}
           stores={stores}
           snapshotFacts={snapshotFacts}
           onRun={runDryRun}
+          onProcess={processDryRunEvent}
           onLoadFacts={loadSnapshotFacts}
           onApplyFact={applySnapshotFact}
           saving={saving}
@@ -1020,11 +1072,13 @@ function DryRunTab({
   form,
   setForm,
   result,
+  processResult,
   profiles,
   guests,
   stores,
   snapshotFacts,
   onRun,
+  onProcess,
   onLoadFacts,
   onApplyFact,
   saving,
@@ -1032,20 +1086,32 @@ function DryRunTab({
   form: DryRunForm;
   setForm: Dispatch<SetStateAction<DryRunForm>>;
   result: GuestGameDryRunResult | null;
+  processResult: GuestGameProcessEventResult | null;
   profiles: GuestGameProfile[];
   guests: GuestDashboardRow[];
   stores: Store[];
   snapshotFacts: GuestGameSnapshotFactsResult | null;
   onRun: () => Promise<void>;
+  onProcess: () => Promise<void>;
   onLoadFacts: () => Promise<void>;
   onApplyFact: (fact: GuestGameSnapshotFact) => void;
   saving: string | null;
 }) {
   const isRunning = saving === "dryRun";
   const isLoadingFacts = saving === "facts";
+  const isProcessing = saving === "processEvent";
+  const canProcess =
+    Boolean(result) &&
+    Boolean(form.profileId || form.guestId || result?.profile || result?.guest) &&
+    ((result?.summary.eligibleRules ?? 0) > 0 ||
+      (result?.summary.projectedXpDelta ?? 0) > 0);
 
   function update<K extends keyof DryRunForm>(key: K, value: DryRunForm[K]) {
-    setForm((current) => ({ ...current, [key]: value }));
+    setForm((current) => ({
+      ...current,
+      [key]: value,
+      ...emptyDryRunSource,
+    }));
   }
 
   return (
@@ -1236,10 +1302,28 @@ function DryRunTab({
           >
             {isRunning ? "Проверяем..." : "Проверить сценарий"}
           </button>
+          <button
+            className={smallButtonClass}
+            type="button"
+            disabled={!canProcess || isProcessing}
+            onClick={onProcess}
+          >
+            {isProcessing
+              ? "Записываем..."
+              : "Создать событие и награды"}
+          </button>
           <p className="text-xs text-zinc-500 dark:text-zinc-400">
             Если дата не задана, API проверит сценарий на текущий момент.
           </p>
         </div>
+
+        {form.sourceFactId ? (
+          <p className="mt-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+            Выбран snapshot-факт: {form.sourceFactKind} ·{" "}
+            {form.externalDomain || "без домена"} ·{" "}
+            {form.externalId || form.sourceFactId}
+          </p>
+        ) : null}
       </section>
 
       {result ? (
@@ -1286,6 +1370,70 @@ function DryRunTab({
               hint={`${result.input.spendAmount} руб чек`}
             />
           </div>
+
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-4 dark:border-emerald-900/60 dark:bg-emerald-950/20">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="text-sm font-bold text-emerald-900 dark:text-emerald-100">
+                  Подтвержденный запуск в LeetPlus
+                </p>
+                <p className="mt-1 text-sm text-emerald-800/80 dark:text-emerald-100/80">
+                  API заново пересчитает сценарий, создаст событие, начислит XP
+                  и положит награды в очередь. Записи в Langame нет.
+                </p>
+              </div>
+              <button
+                className={primaryButtonClass}
+                type="button"
+                disabled={!canProcess || isProcessing}
+                onClick={onProcess}
+              >
+                {isProcessing ? "Запускаем..." : "Записать в LeetPlus"}
+              </button>
+            </div>
+            {!canProcess ? (
+              <p className="mt-3 text-xs font-semibold text-amber-700 dark:text-amber-200">
+                Для записи нужен гость и хотя бы одно сработавшее правило или
+                XP.
+              </p>
+            ) : null}
+          </div>
+
+          {processResult ? (
+            <div className="rounded-lg border border-cyan-200 bg-cyan-50/70 p-4 dark:border-cyan-900/60 dark:bg-cyan-950/20">
+              <div className="grid gap-3 md:grid-cols-4">
+                <StatusMetric
+                  label="событие"
+                  value={processResult.event.eventType}
+                  hint={formatDate(processResult.event.occurredAt)}
+                />
+                <StatusMetric
+                  label="XP применено"
+                  value={`+${processResult.summary.appliedXpDelta}`}
+                  hint={
+                    processResult.summary.profileCreated
+                      ? "профиль создан"
+                      : "профиль обновлен"
+                  }
+                />
+                <StatusMetric
+                  label="наград в очереди"
+                  value={processResult.summary.createdRewards}
+                  hint={formatMoney(processResult.summary.queuedRewardAmount)}
+                />
+                <StatusMetric
+                  label="Langame"
+                  value="нет"
+                  hint="write API не использовался"
+                />
+              </div>
+              {processResult.summary.idempotencyKey ? (
+                <p className="mt-3 break-all text-xs text-cyan-800 dark:text-cyan-100">
+                  Idempotency: {processResult.summary.idempotencyKey}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="grid gap-3 xl:grid-cols-2">
             {result.rules.length ? (

@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -565,6 +566,15 @@ export type GuestGameDryRunDto = {
   spendAmount?: number | string | null;
 };
 
+export type GuestGameProcessEventDto = GuestGameDryRunDto & {
+  sourceFactId?: string | null;
+  sourceFactKind?: string | null;
+  externalProvider?: string | null;
+  externalDomain?: string | null;
+  externalId?: string | null;
+  note?: string | null;
+};
+
 export type GuestGameDryRunRule = {
   id: string;
   kind: 'LOOT_BOX' | 'MISSION' | 'SEASON';
@@ -603,6 +613,22 @@ export type GuestGameDryRunResult = {
     projectedXpDelta: number;
   };
   rules: GuestGameDryRunRule[];
+  note: string;
+};
+
+export type GuestGameProcessEventResult = {
+  processed: true;
+  dryRun: GuestGameDryRunResult;
+  event: GuestGameEvent;
+  rewards: GuestGameReward[];
+  summary: {
+    profileCreated: boolean;
+    appliedXpDelta: number;
+    createdRewards: number;
+    queuedRewardAmount: number;
+    idempotencyKey: string | null;
+    langameWrite: false;
+  };
   note: string;
 };
 
@@ -1078,6 +1104,210 @@ export class GuestGamificationService {
       rules,
       note: 'Dry-run only: rewards, events and Langame writes are not created.',
     };
+  }
+
+  async processEvent(
+    user: AuthenticatedUser,
+    dto: GuestGameProcessEventDto,
+  ): Promise<GuestGameProcessEventResult> {
+    const { profile, profileCreated } = await this.ensureProcessProfile(
+      user,
+      dto,
+    );
+    const dryRun = await this.dryRun(user, {
+      ...dto,
+      profileId: profile.id,
+      guestId: null,
+    });
+    const eventReference = buildProcessExternalReference(dto, dryRun.eventType);
+    const processPayload = buildProcessPayload(dto, dryRun);
+    const event = await this.createProcessEvent(user, {
+      profileId: profile.id,
+      guestId: profile.guest?.id ?? dryRun.guest?.id ?? null,
+      eventType: dryRun.eventType,
+      source: 'API_IMPORT',
+      externalProvider: eventReference?.externalProvider ?? null,
+      externalDomain: eventReference?.externalDomain ?? null,
+      externalId: eventReference?.externalId ?? null,
+      xpDelta: dryRun.summary.projectedXpDelta,
+      occurredAt: dryRun.occurredAt,
+      payload: processPayload,
+      note:
+        nullableString(dto.note) ??
+        'Подтвержденный запуск события геймификации в LeetPlus.',
+    });
+    const rewards = await this.createProcessRewards(
+      user,
+      dto,
+      dryRun,
+      profile.id,
+      eventReference,
+    );
+
+    return {
+      processed: true,
+      dryRun,
+      event,
+      rewards,
+      summary: {
+        profileCreated,
+        appliedXpDelta: dryRun.summary.projectedXpDelta,
+        createdRewards: rewards.length,
+        queuedRewardAmount: sum(rewards.map((reward) => reward.rewardAmount)),
+        idempotencyKey: eventReference?.externalId ?? null,
+        langameWrite: false,
+      },
+      note: 'Событие и очередь наград созданы внутри LeetPlus. Запись в Langame не выполнялась.',
+    };
+  }
+
+  private async createProcessEvent(
+    user: AuthenticatedUser,
+    dto: GuestGameEventDto,
+  ): Promise<GuestGameEvent> {
+    try {
+      return await this.createEvent(user, dto);
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        throw new ConflictException(
+          'Это событие snapshot уже обработано. Обновите список событий или выберите другой факт.',
+        );
+      }
+
+      throw error;
+    }
+  }
+
+  private async createProcessRewards(
+    user: AuthenticatedUser,
+    dto: GuestGameProcessEventDto,
+    dryRun: GuestGameDryRunResult,
+    profileId: string,
+    eventReference: ProcessExternalReference | null,
+  ): Promise<GuestGameReward[]> {
+    const guestId = dryRun.guest?.id ?? null;
+    const guestExternalId = dryRun.guest?.externalGuestId ?? null;
+    const eligibleRules = dryRun.rules.filter(shouldQueueProcessReward);
+    const rewards: GuestGameReward[] = [];
+
+    for (const rule of eligibleRules) {
+      const link = rewardRuleLink(rule);
+      const externalId = eventReference
+        ? `${eventReference.externalId}:reward:${rule.kind}:${rule.id}`
+        : null;
+
+      try {
+        const reward = await this.createReward(user, {
+          profileId,
+          guestId,
+          storeId: nullableId(dto.storeId),
+          status: 'PENDING',
+          source: 'API_IMPORT',
+          externalProvider: eventReference?.externalProvider ?? null,
+          externalDomain: eventReference?.externalDomain ?? null,
+          externalId,
+          guestExternalId,
+          rewardType:
+            rule.rewardType ??
+            (rule.kind === 'SEASON' ? 'BATTLE_PASS_REWARD' : 'PROMOCODE'),
+          rewardAmount: rule.rewardAmount ?? 0,
+          rewardLabel:
+            rule.selectedRewardLabel ??
+            rule.rewardLabel ??
+            `${processRuleKindLabel(rule.kind)}: ${rule.name}`,
+          qualifiedAt: dryRun.occurredAt,
+          note: 'Создано подтвержденным запуском события геймификации.',
+          evidence: {
+            source: 'guest_gamification_process_event',
+            langameWrite: false,
+            sourceFactId: nullableString(dto.sourceFactId),
+            sourceFactKind: nullableString(dto.sourceFactKind),
+            eventType: dryRun.eventType,
+            occurredAt: dryRun.occurredAt,
+            input: dryRun.input,
+            rule,
+          },
+          ...link,
+        });
+        rewards.push(reward);
+      } catch (error) {
+        if (isUniqueConstraintError(error)) {
+          throw new ConflictException(
+            'Одна из наград по этому snapshot уже создана. Обновите очередь наград.',
+          );
+        }
+
+        throw error;
+      }
+    }
+
+    return rewards;
+  }
+
+  private async ensureProcessProfile(
+    user: AuthenticatedUser,
+    dto: GuestGameProcessEventDto,
+  ): Promise<{ profile: GuestGameProfile; profileCreated: boolean }> {
+    if (dto.profileId) {
+      const profile = await this.resolveDryRunProfile(user, dto);
+
+      if (!profile) {
+        throw new NotFoundException('Игровой профиль не найден');
+      }
+
+      return { profile, profileCreated: false };
+    }
+
+    if (!dto.guestId) {
+      throw new BadRequestException(
+        'Для подтвержденного запуска выберите игровой профиль или гостя Langame.',
+      );
+    }
+
+    const guest = await this.getTenantGuest(user, dto.guestId);
+    const existing = await this.resolveDryRunProfile(user, {
+      guestId: guest.id,
+    });
+
+    if (existing) {
+      return { profile: existing, profileCreated: false };
+    }
+
+    try {
+      const data = (await this.buildProfileData(
+        user,
+        { guestId: guest.id },
+        true,
+      )) as Prisma.GuestGameProfileUncheckedCreateInput;
+      const row = await this.prisma.guestGameProfile.create({
+        data,
+        include: gameProfileInclude,
+      });
+
+      await this.createSystemEvent(user, {
+        profileId: row.id,
+        guestId: row.guestId,
+        eventType: 'PROFILE_CREATED',
+        xpDelta: 0,
+        note: 'Игровой профиль создан подтвержденным запуском события.',
+      });
+
+      return { profile: mapProfile(row), profileCreated: true };
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) {
+        throw error;
+      }
+
+      const profile = await this.resolveDryRunProfile(user, {
+        guestId: guest.id,
+      });
+
+      if (!profile) {
+        throw error;
+      }
+
+      return { profile, profileCreated: false };
+    }
   }
 
   private async resolveDryRunProfile(
@@ -2082,6 +2312,125 @@ function isTopUpFactType(type: string | null) {
 
 function normalizeSnapshotType(value: string | null) {
   return (value ?? '').trim().toLowerCase();
+}
+
+type ProcessExternalReference = {
+  externalProvider: IntegrationProvider;
+  externalDomain: string;
+  externalId: string;
+};
+
+function buildProcessExternalReference(
+  dto: GuestGameProcessEventDto,
+  eventType: string,
+): ProcessExternalReference | null {
+  const sourceFactId = nullableString(dto.sourceFactId);
+  const externalId = nullableString(dto.externalId);
+  const baseId = externalId ?? sourceFactId;
+
+  if (!baseId) {
+    return null;
+  }
+
+  return {
+    externalProvider:
+      integrationProviderValue(dto.externalProvider) ??
+      IntegrationProvider.LANGAME,
+    externalDomain:
+      nullableString(dto.externalDomain) ?? 'guest-gamification-snapshot',
+    externalId: [
+      'guest-game',
+      nullableString(dto.sourceFactKind) ?? 'snapshot',
+      eventType,
+      baseId,
+    ].join(':'),
+  };
+}
+
+function buildProcessPayload(
+  dto: GuestGameProcessEventDto,
+  dryRun: GuestGameDryRunResult,
+): Prisma.InputJsonObject {
+  return {
+    source: 'guest_gamification_process_event',
+    langameWrite: false,
+    sourceFactId: nullableString(dto.sourceFactId),
+    sourceFactKind: nullableString(dto.sourceFactKind),
+    externalProvider: nullableString(dto.externalProvider),
+    externalDomain: nullableString(dto.externalDomain),
+    externalId: nullableString(dto.externalId),
+    store: dryRun.store,
+    input: dryRun.input,
+    summary: dryRun.summary,
+    rules: dryRun.rules.map((rule) => ({
+      id: rule.id,
+      kind: rule.kind,
+      name: rule.name,
+      eligible: rule.eligible,
+      rewardType: rule.rewardType,
+      rewardAmount: rule.rewardAmount,
+      rewardLabel: rule.rewardLabel,
+      selectedRewardLabel: rule.selectedRewardLabel,
+      xpDelta: rule.xpDelta,
+      blockers: rule.blockers,
+    })),
+  };
+}
+
+function shouldQueueProcessReward(rule: GuestGameDryRunRule) {
+  if (!rule.eligible) {
+    return false;
+  }
+
+  if (rule.kind === 'MISSION') {
+    return Boolean(rule.rewardLabel || (rule.rewardAmount ?? 0) > 0);
+  }
+
+  if (rule.kind === 'SEASON') {
+    return Boolean(
+      rule.selectedRewardLabel ||
+      rule.rewardLabel ||
+      (rule.rewardAmount ?? 0) > 0,
+    );
+  }
+
+  return Boolean(
+    rule.rewardType ||
+    rule.rewardLabel ||
+    rule.selectedRewardLabel ||
+    (rule.rewardAmount ?? 0) > 0,
+  );
+}
+
+function rewardRuleLink(rule: GuestGameDryRunRule) {
+  if (rule.kind === 'LOOT_BOX') {
+    return { lootBoxId: rule.id };
+  }
+
+  if (rule.kind === 'MISSION') {
+    return { missionId: rule.id };
+  }
+
+  return { seasonId: rule.id };
+}
+
+function processRuleKindLabel(kind: GuestGameDryRunRule['kind']) {
+  if (kind === 'LOOT_BOX') {
+    return 'Лутбокс';
+  }
+
+  if (kind === 'MISSION') {
+    return 'Миссия';
+  }
+
+  return 'Battle Pass';
+}
+
+function isUniqueConstraintError(error: unknown) {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === 'P2002'
+  );
 }
 
 function mapUser(

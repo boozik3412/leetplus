@@ -19,6 +19,8 @@ import {
   type GuestGameEventDto,
   type GuestGameDryRunDto,
   type GuestGameDryRunResult,
+  type GuestGameProcessEventDto,
+  type GuestGameProcessEventResult,
   type GuestGameLootBox,
   type GuestGameLootBoxDto,
   type GuestGameLootBoxUpdateDto,
@@ -70,6 +72,14 @@ export class GuestGamificationController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<GuestGameSnapshotFactsResult> {
     return this.gamificationService.getSnapshotFacts(user);
+  }
+
+  @Post('process-event')
+  processEvent(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: GuestGameProcessEventDto,
+  ): Promise<GuestGameProcessEventResult> {
+    return this.gamificationService.processEvent(user, dto);
   }
 
   @Get('profiles')

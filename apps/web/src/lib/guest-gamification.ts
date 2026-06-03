@@ -228,6 +228,37 @@ export type GuestGameDryRunResult = {
   note: string;
 };
 
+export type GuestGameSnapshotFact = {
+  id: string;
+  source:
+    | "GUEST_SESSION"
+    | "GUEST_LOG"
+    | "GUEST_TRANSACTION"
+    | "GUEST_OPERATION_LOG";
+  eventType: string;
+  occurredAt: string;
+  externalProvider: string | null;
+  externalDomain: string | null;
+  externalId: string | null;
+  guest: GuestGameProfile["guest"];
+  store: { id: string; name: string } | null;
+  sessionMinutes: number | null;
+  spendAmount: number | null;
+  label: string;
+  details: string | null;
+};
+
+export type GuestGameSnapshotFactsResult = {
+  facts: GuestGameSnapshotFact[];
+  summary: {
+    sessions: number;
+    logs: number;
+    transactions: number;
+    operationLogs: number;
+    latestAt: string | null;
+  };
+};
+
 export type GuestGamificationSummary = {
   profilesCount: number;
   totalXp: number;

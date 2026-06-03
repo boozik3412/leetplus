@@ -18,6 +18,8 @@ import type {
   GuestGameReward,
   GuestGameRewardStatus,
   GuestGameSeason,
+  GuestGameSnapshotFact,
+  GuestGameSnapshotFactsResult,
   GuestGameStatus,
   GuestGamificationWorkspace,
 } from "@/lib/guest-gamification";
@@ -195,6 +197,8 @@ const dryRunEventOptions = [
   { value: "VISIT", label: "Визит" },
   { value: "PLAY_HOUR", label: "Час игры" },
   { value: "BAR_PURCHASE", label: "Покупка бара" },
+  { value: "BALANCE_TOPUP", label: "Пополнение баланса" },
+  { value: "GUEST_LOG", label: "Лог гостя" },
   { value: "REPEAT_VISIT", label: "Повторный визит" },
   { value: "MISSION_COMPLETED", label: "Миссия выполнена" },
 ];
@@ -457,6 +461,8 @@ export function GuestGamificationPanel({
     useState<DryRunForm>(defaultDryRunForm);
   const [dryRunResult, setDryRunResult] =
     useState<GuestGameDryRunResult | null>(null);
+  const [snapshotFacts, setSnapshotFacts] =
+    useState<GuestGameSnapshotFactsResult | null>(null);
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
   const [editingLootBoxId, setEditingLootBoxId] = useState<string | null>(null);
   const [editingMissionId, setEditingMissionId] = useState<string | null>(null);
@@ -774,6 +780,33 @@ export function GuestGamificationPanel({
     });
   }
 
+  async function loadSnapshotFacts() {
+    await saveAction("facts", async () => {
+      const result = await fetchJson<GuestGameSnapshotFactsResult>(
+        "/api/guests/gamification/facts",
+      );
+      setSnapshotFacts(result);
+    });
+  }
+
+  function applySnapshotFact(fact: GuestGameSnapshotFact) {
+    setDryRunForm((current) => ({
+      ...current,
+      profileId: "",
+      guestId: fact.guest?.id ?? current.guestId,
+      storeId: fact.store?.id ?? current.storeId,
+      eventType: fact.eventType,
+      occurredAt: dateInputValue(fact.occurredAt),
+      sessionMinutes:
+        fact.sessionMinutes == null
+          ? current.sessionMinutes
+          : String(fact.sessionMinutes),
+      spendAmount:
+        fact.spendAmount == null ? current.spendAmount : String(fact.spendAmount),
+    }));
+    setDryRunResult(null);
+  }
+
   async function updateRewardStatus(
     reward: GuestGameReward,
     status: GuestGameRewardStatus,
@@ -972,7 +1005,10 @@ export function GuestGamificationPanel({
           profiles={workspace.profiles}
           guests={guests}
           stores={stores}
+          snapshotFacts={snapshotFacts}
           onRun={runDryRun}
+          onLoadFacts={loadSnapshotFacts}
+          onApplyFact={applySnapshotFact}
           saving={saving}
         />
       ) : null}
@@ -987,7 +1023,10 @@ function DryRunTab({
   profiles,
   guests,
   stores,
+  snapshotFacts,
   onRun,
+  onLoadFacts,
+  onApplyFact,
   saving,
 }: {
   form: DryRunForm;
@@ -996,10 +1035,14 @@ function DryRunTab({
   profiles: GuestGameProfile[];
   guests: GuestDashboardRow[];
   stores: Store[];
+  snapshotFacts: GuestGameSnapshotFactsResult | null;
   onRun: () => Promise<void>;
+  onLoadFacts: () => Promise<void>;
+  onApplyFact: (fact: GuestGameSnapshotFact) => void;
   saving: string | null;
 }) {
   const isRunning = saving === "dryRun";
+  const isLoadingFacts = saving === "facts";
 
   function update<K extends keyof DryRunForm>(key: K, value: DryRunForm[K]) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -1020,6 +1063,64 @@ function DryRunTab({
           <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-100">
             Награды, события и записи в Langame не создаются
           </div>
+        </div>
+
+        <div className="mt-5 rounded-lg border border-zinc-200 bg-zinc-50/70 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
+                Факты Langame snapshot
+              </p>
+              <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+                Загрузите последние сохраненные сессии, покупки и логи, затем выберите факт как основу проверки правил.
+              </p>
+            </div>
+            <button
+              className={smallButtonClass}
+              type="button"
+              disabled={isLoadingFacts}
+              onClick={onLoadFacts}
+            >
+              {isLoadingFacts ? "Загружаем..." : "Загрузить факты"}
+            </button>
+          </div>
+
+          {snapshotFacts ? (
+            <div className="mt-3 space-y-3">
+              <div className="grid gap-2 text-xs sm:grid-cols-5">
+                <MiniMetric
+                  label="сессии"
+                  value={snapshotFacts.summary.sessions}
+                />
+                <MiniMetric label="логи" value={snapshotFacts.summary.logs} />
+                <MiniMetric
+                  label="транзакции"
+                  value={snapshotFacts.summary.transactions}
+                />
+                <MiniMetric
+                  label="операции"
+                  value={snapshotFacts.summary.operationLogs}
+                />
+                <MiniMetric
+                  label="последний факт"
+                  value={formatDate(snapshotFacts.summary.latestAt)}
+                />
+              </div>
+              {snapshotFacts.facts.length ? (
+                <div className="max-h-72 divide-y divide-zinc-200 overflow-auto rounded-lg border border-zinc-200 bg-white dark:divide-zinc-800 dark:border-zinc-800 dark:bg-zinc-950">
+                  {snapshotFacts.facts.map((fact) => (
+                    <SnapshotFactRow
+                      key={fact.id}
+                      fact={fact}
+                      onApply={onApplyFact}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <EmptyState text="Snapshot-фактов пока нет. Запустите синхронизацию гостевых данных на странице синхронизации." />
+              )}
+            </div>
+          ) : null}
         </div>
 
         <div className="mt-5 grid gap-3 lg:grid-cols-3">
@@ -1200,6 +1301,70 @@ function DryRunTab({
         <EmptyState text="Запустите проверку, чтобы увидеть допуск, награды, XP и причины блокировки." />
       )}
     </div>
+  );
+}
+
+function SnapshotFactRow({
+  fact,
+  onApply,
+}: {
+  fact: GuestGameSnapshotFact;
+  onApply: (fact: GuestGameSnapshotFact) => void;
+}) {
+  const sourceLabel: Record<GuestGameSnapshotFact["source"], string> = {
+    GUEST_SESSION: "сессия",
+    GUEST_LOG: "лог",
+    GUEST_TRANSACTION: "транзакция",
+    GUEST_OPERATION_LOG: "операция",
+  };
+  const eventLabel =
+    dryRunEventOptions.find((option) => option.value === fact.eventType)
+      ?.label ?? fact.eventType;
+
+  return (
+    <button
+      className="grid w-full gap-2 px-3 py-3 text-left transition hover:bg-emerald-50/70 focus:bg-emerald-50/70 focus:outline-none dark:hover:bg-emerald-950/20 dark:focus:bg-emerald-950/20 md:grid-cols-[1fr_auto]"
+      type="button"
+      onClick={() => onApply(fact)}
+    >
+      <span className="min-w-0">
+        <span className="flex flex-wrap items-center gap-2">
+          <span className="truncate text-sm font-bold text-zinc-950 dark:text-white">
+            {fact.label}
+          </span>
+          <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
+            {sourceLabel[fact.source]}
+          </span>
+          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
+            {eventLabel}
+          </span>
+        </span>
+        <span className="mt-1 block text-xs text-zinc-500 dark:text-zinc-400">
+          {formatDate(fact.occurredAt)} · {fact.store?.name ?? "вся сеть"} ·{" "}
+          {fact.guest?.contact ?? "гость не привязан"}
+        </span>
+        {fact.details ? (
+          <span className="mt-1 block truncate text-xs text-zinc-400">
+            {fact.details}
+          </span>
+        ) : null}
+      </span>
+      <span className="flex flex-wrap items-center gap-2 md:justify-end">
+        {fact.sessionMinutes != null ? (
+          <span className="rounded-full bg-zinc-100 px-2 py-1 text-xs font-bold text-zinc-700 dark:bg-zinc-900 dark:text-zinc-200">
+            {fact.sessionMinutes} мин
+          </span>
+        ) : null}
+        {fact.spendAmount != null && fact.spendAmount > 0 ? (
+          <span className="rounded-full bg-zinc-100 px-2 py-1 text-xs font-bold text-zinc-700 dark:bg-zinc-900 dark:text-zinc-200">
+            {formatMoney(fact.spendAmount)}
+          </span>
+        ) : null}
+        <span className="rounded-lg border border-zinc-200 px-2 py-1 text-xs font-bold text-zinc-700 dark:border-zinc-800 dark:text-zinc-200">
+          Взять в тест
+        </span>
+      </span>
+    </button>
   );
 }
 

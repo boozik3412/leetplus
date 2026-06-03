@@ -34,6 +34,7 @@ import {
   type GuestGameSeason,
   type GuestGameSeasonDto,
   type GuestGameSeasonUpdateDto,
+  type GuestGameSnapshotFactsResult,
   type GuestGamificationWorkspace,
 } from './guest-gamification.service';
 
@@ -62,6 +63,13 @@ export class GuestGamificationController {
     @Body() dto: GuestGameDryRunDto,
   ): Promise<GuestGameDryRunResult> {
     return this.gamificationService.dryRun(user, dto);
+  }
+
+  @Get('facts')
+  getSnapshotFacts(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<GuestGameSnapshotFactsResult> {
+    return this.gamificationService.getSnapshotFacts(user);
   }
 
   @Get('profiles')

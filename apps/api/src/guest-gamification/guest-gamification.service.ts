@@ -135,6 +135,75 @@ const eventInclude = {
   createdByUser: { select: creatorSelect },
 } satisfies Prisma.GuestGameEventInclude;
 
+const snapshotGuestSelect = {
+  id: true,
+  externalDomain: true,
+  externalGuestId: true,
+  fullNameMasked: true,
+  phoneMasked: true,
+  emailMasked: true,
+} satisfies Prisma.GuestSelect;
+
+const snapshotStoreSelect = {
+  id: true,
+  name: true,
+} satisfies Prisma.StoreSelect;
+
+const snapshotSessionSelect = {
+  id: true,
+  externalProvider: true,
+  externalDomain: true,
+  externalSessionId: true,
+  externalGuestId: true,
+  startedAt: true,
+  stoppedAt: true,
+  durationMinutes: true,
+  normalStop: true,
+  packet: true,
+  guest: { select: snapshotGuestSelect },
+  store: { select: snapshotStoreSelect },
+} satisfies Prisma.GuestSessionSelect;
+
+const snapshotLogSelect = {
+  id: true,
+  externalProvider: true,
+  externalDomain: true,
+  sourceKey: true,
+  externalGuestId: true,
+  type: true,
+  happenedAt: true,
+  guest: { select: snapshotGuestSelect },
+} satisfies Prisma.GuestLogSelect;
+
+const snapshotTransactionSelect = {
+  id: true,
+  externalProvider: true,
+  externalDomain: true,
+  externalTransactionId: true,
+  externalGuestId: true,
+  type: true,
+  happenedAt: true,
+  amount: true,
+  balance: true,
+  bonusBalance: true,
+  guest: { select: snapshotGuestSelect },
+  store: { select: snapshotStoreSelect },
+} satisfies Prisma.GuestTransactionSelect;
+
+const snapshotOperationLogSelect = {
+  id: true,
+  externalProvider: true,
+  externalDomain: true,
+  sourceKey: true,
+  type: true,
+  operationName: true,
+  operationSource: true,
+  operationForm: true,
+  happenedAt: true,
+  amount: true,
+  store: { select: snapshotStoreSelect },
+} satisfies Prisma.GuestOperationLogSelect;
+
 type ProfileRow = Prisma.GuestGameProfileGetPayload<{
   include: typeof gameProfileInclude;
 }>;
@@ -152,6 +221,21 @@ type RewardRow = Prisma.GuestGameRewardGetPayload<{
 }>;
 type EventRow = Prisma.GuestGameEventGetPayload<{
   include: typeof eventInclude;
+}>;
+type SnapshotGuestRow = Prisma.GuestGetPayload<{
+  select: typeof snapshotGuestSelect;
+}>;
+type SnapshotSessionRow = Prisma.GuestSessionGetPayload<{
+  select: typeof snapshotSessionSelect;
+}>;
+type SnapshotLogRow = Prisma.GuestLogGetPayload<{
+  select: typeof snapshotLogSelect;
+}>;
+type SnapshotTransactionRow = Prisma.GuestTransactionGetPayload<{
+  select: typeof snapshotTransactionSelect;
+}>;
+type SnapshotOperationLogRow = Prisma.GuestOperationLogGetPayload<{
+  select: typeof snapshotOperationLogSelect;
 }>;
 
 export type GuestGameUser = {
@@ -522,6 +606,37 @@ export type GuestGameDryRunResult = {
   note: string;
 };
 
+export type GuestGameSnapshotFact = {
+  id: string;
+  source:
+    | 'GUEST_SESSION'
+    | 'GUEST_LOG'
+    | 'GUEST_TRANSACTION'
+    | 'GUEST_OPERATION_LOG';
+  eventType: string;
+  occurredAt: string;
+  externalProvider: string | null;
+  externalDomain: string | null;
+  externalId: string | null;
+  guest: GuestGameProfile['guest'];
+  store: { id: string; name: string } | null;
+  sessionMinutes: number | null;
+  spendAmount: number | null;
+  label: string;
+  details: string | null;
+};
+
+export type GuestGameSnapshotFactsResult = {
+  facts: GuestGameSnapshotFact[];
+  summary: {
+    sessions: number;
+    logs: number;
+    transactions: number;
+    operationLogs: number;
+    latestAt: string | null;
+  };
+};
+
 @Injectable()
 export class GuestGamificationService {
   constructor(private readonly prisma: PrismaService) {}
@@ -553,6 +668,61 @@ export class GuestGamificationService {
       seasons,
       rewards,
       events,
+    };
+  }
+
+  async getSnapshotFacts(
+    user: AuthenticatedUser,
+  ): Promise<GuestGameSnapshotFactsResult> {
+    const [sessions, logs, transactions, operationLogs] = await Promise.all([
+      this.prisma.guestSession.findMany({
+        where: { tenantId: user.tenantId, startedAt: { not: null } },
+        select: snapshotSessionSelect,
+        orderBy: [{ startedAt: 'desc' }, { createdAt: 'desc' }],
+        take: 30,
+      }),
+      this.prisma.guestLog.findMany({
+        where: { tenantId: user.tenantId, happenedAt: { not: null } },
+        select: snapshotLogSelect,
+        orderBy: [{ happenedAt: 'desc' }, { createdAt: 'desc' }],
+        take: 20,
+      }),
+      this.prisma.guestTransaction.findMany({
+        where: { tenantId: user.tenantId, happenedAt: { not: null } },
+        select: snapshotTransactionSelect,
+        orderBy: [{ happenedAt: 'desc' }, { createdAt: 'desc' }],
+        take: 30,
+      }),
+      this.prisma.guestOperationLog.findMany({
+        where: { tenantId: user.tenantId, happenedAt: { not: null } },
+        select: snapshotOperationLogSelect,
+        orderBy: [{ happenedAt: 'desc' }, { createdAt: 'desc' }],
+        take: 30,
+      }),
+    ]);
+
+    const facts = [
+      ...sessions.flatMap(mapSessionFacts),
+      ...logs.flatMap(mapLogFact),
+      ...transactions.flatMap(mapTransactionFact),
+      ...operationLogs.flatMap(mapOperationLogFact),
+    ]
+      .sort(
+        (left, right) =>
+          new Date(right.occurredAt).getTime() -
+          new Date(left.occurredAt).getTime(),
+      )
+      .slice(0, 60);
+
+    return {
+      facts,
+      summary: {
+        sessions: sessions.length,
+        logs: logs.length,
+        transactions: transactions.length,
+        operationLogs: operationLogs.length,
+        latestAt: facts[0]?.occurredAt ?? null,
+      },
     };
   }
 
@@ -1652,6 +1822,266 @@ function mapEvent(row: EventRow): GuestGameEvent {
     season: row.season,
     createdBy: mapUser(row.createdByUser),
   };
+}
+
+function mapSessionFacts(row: SnapshotSessionRow): GuestGameSnapshotFact[] {
+  if (!row.startedAt) {
+    return [];
+  }
+
+  const sessionMinutes =
+    row.durationMinutes ??
+    durationMinutes(row.startedAt, row.stoppedAt) ??
+    null;
+  const guestName = snapshotGuestName(row.guest, row.externalGuestId);
+  const facts: GuestGameSnapshotFact[] = [
+    {
+      id: `session:${row.id}:start`,
+      source: 'GUEST_SESSION',
+      eventType: 'SESSION_START',
+      occurredAt: row.startedAt.toISOString(),
+      externalProvider: row.externalProvider,
+      externalDomain: row.externalDomain,
+      externalId: row.externalSessionId,
+      guest: mapSnapshotGuest(row.guest, row.externalGuestId),
+      store: mapSnapshotStore(row.store),
+      sessionMinutes,
+      spendAmount: null,
+      label: `Старт сессии: ${guestName}`,
+      details: [
+        row.store?.name,
+        sessionMinutes ? `${sessionMinutes} мин` : null,
+        row.packet ? 'пакет' : null,
+        row.normalStop === false ? 'нестандартное завершение' : null,
+      ]
+        .filter(Boolean)
+        .join(' · '),
+    },
+  ];
+
+  if (sessionMinutes && sessionMinutes >= 30) {
+    facts.push({
+      id: `session:${row.id}:play`,
+      source: 'GUEST_SESSION',
+      eventType: 'PLAY_HOUR',
+      occurredAt: row.stoppedAt?.toISOString() ?? row.startedAt.toISOString(),
+      externalProvider: row.externalProvider,
+      externalDomain: row.externalDomain,
+      externalId: row.externalSessionId,
+      guest: mapSnapshotGuest(row.guest, row.externalGuestId),
+      store: mapSnapshotStore(row.store),
+      sessionMinutes,
+      spendAmount: null,
+      label: `Игровое время: ${guestName}`,
+      details: [
+        row.store?.name,
+        `${Math.round((sessionMinutes / 60) * 10) / 10} ч`,
+      ]
+        .filter(Boolean)
+        .join(' · '),
+    });
+  }
+
+  return facts;
+}
+
+function mapLogFact(row: SnapshotLogRow): GuestGameSnapshotFact[] {
+  if (!row.happenedAt) {
+    return [];
+  }
+
+  const eventType = guestLogEventType(row.type);
+
+  return [
+    {
+      id: `log:${row.id}`,
+      source: 'GUEST_LOG',
+      eventType,
+      occurredAt: row.happenedAt.toISOString(),
+      externalProvider: row.externalProvider,
+      externalDomain: row.externalDomain,
+      externalId: row.sourceKey,
+      guest: mapSnapshotGuest(row.guest, row.externalGuestId),
+      store: null,
+      sessionMinutes: null,
+      spendAmount: null,
+      label: `Лог гостя: ${snapshotGuestName(row.guest, row.externalGuestId)}`,
+      details: row.type ?? 'тип не указан',
+    },
+  ];
+}
+
+function mapTransactionFact(
+  row: SnapshotTransactionRow,
+): GuestGameSnapshotFact[] {
+  if (!row.happenedAt) {
+    return [];
+  }
+
+  const amount = numberOrNull(row.amount) ?? 0;
+  const eventType = isTopUpFactType(row.type)
+    ? 'BALANCE_TOPUP'
+    : 'BAR_PURCHASE';
+
+  return [
+    {
+      id: `transaction:${row.id}`,
+      source: 'GUEST_TRANSACTION',
+      eventType,
+      occurredAt: row.happenedAt.toISOString(),
+      externalProvider: row.externalProvider,
+      externalDomain: row.externalDomain,
+      externalId: row.externalTransactionId,
+      guest: mapSnapshotGuest(row.guest, row.externalGuestId),
+      store: mapSnapshotStore(row.store),
+      sessionMinutes: null,
+      spendAmount: Math.abs(amount),
+      label: `${eventType === 'BALANCE_TOPUP' ? 'Пополнение баланса' : 'Покупка/списание'}: ${snapshotGuestName(
+        row.guest,
+        row.externalGuestId,
+      )}`,
+      details: [
+        row.type,
+        amount ? `${Math.abs(amount)} руб` : null,
+        row.store?.name,
+        row.balance ? `баланс ${numberValue(row.balance)} руб` : null,
+        row.bonusBalance ? `бонусы ${numberValue(row.bonusBalance)} руб` : null,
+      ]
+        .filter(Boolean)
+        .join(' · '),
+    },
+  ];
+}
+
+function mapOperationLogFact(
+  row: SnapshotOperationLogRow,
+): GuestGameSnapshotFact[] {
+  if (!row.happenedAt) {
+    return [];
+  }
+
+  const amount = numberOrNull(row.amount) ?? 0;
+  const eventType = isTopUpFactType(row.type)
+    ? 'BALANCE_TOPUP'
+    : 'BAR_PURCHASE';
+
+  return [
+    {
+      id: `operation:${row.id}`,
+      source: 'GUEST_OPERATION_LOG',
+      eventType,
+      occurredAt: row.happenedAt.toISOString(),
+      externalProvider: row.externalProvider,
+      externalDomain: row.externalDomain,
+      externalId: row.sourceKey,
+      guest: null,
+      store: mapSnapshotStore(row.store),
+      sessionMinutes: null,
+      spendAmount: Math.abs(amount),
+      label:
+        row.operationName ??
+        (eventType === 'BALANCE_TOPUP'
+          ? 'Операция пополнения'
+          : 'Операция покупки/списания'),
+      details: [
+        row.type,
+        row.operationSource,
+        row.operationForm,
+        amount ? `${Math.abs(amount)} руб` : null,
+        row.store?.name,
+      ]
+        .filter(Boolean)
+        .join(' · '),
+    },
+  ];
+}
+
+function mapSnapshotGuest(
+  row: SnapshotGuestRow | null,
+  externalGuestId: string | null,
+): GuestGameProfile['guest'] {
+  if (!row && !externalGuestId) {
+    return null;
+  }
+
+  if (!row) {
+    const guestId = externalGuestId ?? 'unknown';
+
+    return {
+      id: '',
+      externalDomain: null,
+      externalGuestId: guestId,
+      displayName: guestId,
+      contact: 'нет контакта',
+    };
+  }
+
+  return {
+    id: row.id,
+    externalDomain: row.externalDomain,
+    externalGuestId: row.externalGuestId,
+    displayName: row.fullNameMasked ?? row.externalGuestId,
+    contact: row.phoneMasked ?? row.emailMasked ?? 'нет контакта',
+  };
+}
+
+function mapSnapshotStore(
+  row: { id: string; name: string } | null,
+): { id: string; name: string } | null {
+  return row ? { id: row.id, name: row.name } : null;
+}
+
+function snapshotGuestName(
+  row: SnapshotGuestRow | null,
+  externalGuestId: string | null,
+) {
+  return row?.fullNameMasked ?? externalGuestId ?? 'гость без профиля';
+}
+
+function durationMinutes(startedAt: Date | null, stoppedAt: Date | null) {
+  if (!startedAt || !stoppedAt) {
+    return null;
+  }
+
+  const minutes = Math.round(
+    (stoppedAt.getTime() - startedAt.getTime()) / 60_000,
+  );
+
+  return Number.isFinite(minutes) && minutes > 0 ? minutes : null;
+}
+
+function guestLogEventType(type: string | null) {
+  const normalized = normalizeSnapshotType(type);
+
+  if (
+    normalized.includes('session') ||
+    normalized.includes('visit') ||
+    normalized.includes('login') ||
+    normalized.includes('вход') ||
+    normalized.includes('визит')
+  ) {
+    return 'VISIT';
+  }
+
+  return 'GUEST_LOG';
+}
+
+function isTopUpFactType(type: string | null) {
+  const normalized = normalizeSnapshotType(type);
+
+  return (
+    normalized === 'plus' ||
+    normalized.includes('deposit') ||
+    normalized.includes('topup') ||
+    normalized.includes('top_up') ||
+    normalized.includes('balance_add') ||
+    normalized.includes('пополн') ||
+    normalized.includes('зачисл')
+  );
+}
+
+function normalizeSnapshotType(value: string | null) {
+  return (value ?? '').trim().toLowerCase();
 }
 
 function mapUser(

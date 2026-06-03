@@ -56,6 +56,17 @@ type LootBoxForm = {
   segment: string;
   sessionType: string;
   storeIds: string[];
+  quietHoursEnabled: boolean;
+  weekdaysOnly: boolean;
+  hourFrom: string;
+  hourTo: string;
+  perGuestPerWeek: string;
+  totalPerDay: string;
+  probabilityXpWeight: string;
+  probabilityPromoWeight: string;
+  probabilityMissionWeight: string;
+  requireCashierConfirmation: boolean;
+  oneDevicePerGuest: boolean;
   periodRulesText: string;
   limitsText: string;
   probabilityRulesText: string;
@@ -83,6 +94,13 @@ type MissionForm = {
   budgetAmount: string;
   perGuestLimit: string;
   totalRewardLimit: string;
+  windowDays: string;
+  weekdaysOnly: boolean;
+  minSessionMinutes: string;
+  minSpendAmount: string;
+  requireLangameFact: boolean;
+  denySameDayRepeat: boolean;
+  requireCashierConfirmation: boolean;
   conditionsText: string;
   antiFraudText: string;
   manualApprovalRequired: boolean;
@@ -96,6 +114,16 @@ type SeasonForm = {
   audienceId: string;
   periodFrom: string;
   periodTo: string;
+  xpVisit: string;
+  xpPlayHour: string;
+  xpBarPurchase: string;
+  xpMissionCompletion: string;
+  levelCount: string;
+  xpPerLevel: string;
+  freeRewardEvery: string;
+  premiumRewardEvery: string;
+  freeRewardLabel: string;
+  premiumRewardLabel: string;
   xpRulesText: string;
   levelsText: string;
   freeRewardsText: string;
@@ -219,6 +247,17 @@ const defaultLootBoxForm: LootBoxForm = {
   segment: "quiet_hours",
   sessionType: "weekday_day",
   storeIds: [],
+  quietHoursEnabled: true,
+  weekdaysOnly: true,
+  hourFrom: "10:00",
+  hourTo: "16:00",
+  perGuestPerWeek: "1",
+  totalPerDay: "30",
+  probabilityXpWeight: "50",
+  probabilityPromoWeight: "30",
+  probabilityMissionWeight: "20",
+  requireCashierConfirmation: true,
+  oneDevicePerGuest: true,
   periodRulesText: jsonText({
     weekdays: [1, 2, 3, 4, 5],
     hours: ["10:00-16:00"],
@@ -262,6 +301,13 @@ const defaultMissionForm: MissionForm = {
   budgetAmount: "7000",
   perGuestLimit: "1",
   totalRewardLimit: "100",
+  windowDays: "7",
+  weekdaysOnly: true,
+  minSessionMinutes: "90",
+  minSpendAmount: "0",
+  requireLangameFact: true,
+  denySameDayRepeat: true,
+  requireCashierConfirmation: true,
   conditionsText: jsonText({
     windowDays: 7,
     weekdaysOnly: true,
@@ -282,6 +328,16 @@ const defaultSeasonForm: SeasonForm = {
   audienceId: "",
   periodFrom: "",
   periodTo: "",
+  xpVisit: "20",
+  xpPlayHour: "10",
+  xpBarPurchase: "25",
+  xpMissionCompletion: "50",
+  levelCount: "4",
+  xpPerLevel: "250",
+  freeRewardEvery: "2",
+  premiumRewardEvery: "2",
+  freeRewardLabel: "Промокод бара",
+  premiumRewardLabel: "Усиленный промокод",
   xpRulesText: jsonText({
     visit: 20,
     playHour: 10,
@@ -511,15 +567,11 @@ export function GuestGamificationPanel({
         segment: nullable(lootBoxForm.segment),
         sessionType: nullable(lootBoxForm.sessionType),
         storeIds: lootBoxForm.storeIds,
-        periodRules: parseJson(lootBoxForm.periodRulesText, "период лутбокса"),
-        limits: parseJson(lootBoxForm.limitsText, "лимиты лутбокса"),
-        probabilityRules: parseJson(
-          lootBoxForm.probabilityRulesText,
-          "вероятности лутбокса",
-          false,
-        ),
+        periodRules: buildLootBoxPeriodRules(lootBoxForm),
+        limits: buildLootBoxLimits(lootBoxForm),
+        probabilityRules: buildLootBoxProbabilityRules(lootBoxForm),
         budgetAmount: lootBoxForm.budgetAmount,
-        antiFraudRules: parseJson(lootBoxForm.antiFraudText, "антифрод"),
+        antiFraudRules: buildLootBoxAntiFraudRules(lootBoxForm),
         manualApprovalRequired: lootBoxForm.manualApprovalRequired,
         note: nullable(lootBoxForm.note),
       };
@@ -558,8 +610,8 @@ export function GuestGamificationPanel({
         budgetAmount: missionForm.budgetAmount,
         perGuestLimit: missionForm.perGuestLimit,
         totalRewardLimit: missionForm.totalRewardLimit,
-        conditions: parseJson(missionForm.conditionsText, "условия миссии", false),
-        antiFraudRules: parseJson(missionForm.antiFraudText, "антифрод"),
+        conditions: buildMissionConditions(missionForm),
+        antiFraudRules: buildMissionAntiFraudRules(missionForm),
         manualApprovalRequired: missionForm.manualApprovalRequired,
         note: nullable(missionForm.note),
       };
@@ -587,13 +639,10 @@ export function GuestGamificationPanel({
         audienceId: nullable(seasonForm.audienceId),
         periodFrom: nullable(seasonForm.periodFrom),
         periodTo: nullable(seasonForm.periodTo),
-        xpRules: parseJson(seasonForm.xpRulesText, "правила XP", false),
-        levels: parseJson(seasonForm.levelsText, "уровни сезона", false),
-        freeRewards: parseJson(seasonForm.freeRewardsText, "free rewards"),
-        premiumRewards: parseJson(
-          seasonForm.premiumRewardsText,
-          "premium rewards",
-        ),
+        xpRules: buildSeasonXpRules(seasonForm),
+        levels: buildSeasonLevels(seasonForm),
+        freeRewards: buildSeasonRewards(seasonForm, "free"),
+        premiumRewards: buildSeasonRewards(seasonForm, "premium"),
         premiumEnabled: seasonForm.premiumEnabled,
         premiumUpgradeMode: nullable(seasonForm.premiumUpgradeMode),
         budgetAmount: seasonForm.budgetAmount,
@@ -1502,29 +1551,9 @@ function LootBoxesTab({
             value={form.storeIds}
             onChange={(storeIds) => setForm({ ...form, storeIds })}
           />
-          <JsonField
-            label="Период"
-            value={form.periodRulesText}
-            onChange={(periodRulesText) =>
-              setForm({ ...form, periodRulesText })
-            }
-          />
-          <JsonField
-            label="Лимиты"
-            value={form.limitsText}
-            onChange={(limitsText) => setForm({ ...form, limitsText })}
-          />
-          <JsonField
-            label="Вероятности"
-            value={form.probabilityRulesText}
-            onChange={(probabilityRulesText) =>
-              setForm({ ...form, probabilityRulesText })
-            }
-          />
-          <JsonField
-            label="Антифрод"
-            value={form.antiFraudText}
-            onChange={(antiFraudText) => setForm({ ...form, antiFraudText })}
+          <LootBoxBusinessRules
+            form={form}
+            onChange={(patch) => setForm({ ...form, ...patch })}
           />
           <button
             type="button"
@@ -1710,15 +1739,9 @@ function MissionsTab({
               />
             </Field>
           </div>
-          <JsonField
-            label="Условия"
-            value={form.conditionsText}
-            onChange={(conditionsText) => setForm({ ...form, conditionsText })}
-          />
-          <JsonField
-            label="Антифрод"
-            value={form.antiFraudText}
-            onChange={(antiFraudText) => setForm({ ...form, antiFraudText })}
+          <MissionBusinessRules
+            form={form}
+            onChange={(patch) => setForm({ ...form, ...patch })}
           />
           <button
             type="button"
@@ -1844,29 +1867,9 @@ function SeasonsTab({
               />
             </Field>
           </div>
-          <JsonField
-            label="Правила XP"
-            value={form.xpRulesText}
-            onChange={(xpRulesText) => setForm({ ...form, xpRulesText })}
-          />
-          <JsonField
-            label="Уровни"
-            value={form.levelsText}
-            onChange={(levelsText) => setForm({ ...form, levelsText })}
-          />
-          <JsonField
-            label="Free rewards"
-            value={form.freeRewardsText}
-            onChange={(freeRewardsText) =>
-              setForm({ ...form, freeRewardsText })
-            }
-          />
-          <JsonField
-            label="Premium rewards"
-            value={form.premiumRewardsText}
-            onChange={(premiumRewardsText) =>
-              setForm({ ...form, premiumRewardsText })
-            }
+          <SeasonBusinessRules
+            form={form}
+            onChange={(patch) => setForm({ ...form, ...patch })}
           />
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Premium">
@@ -2204,6 +2207,361 @@ function RewardsTab({
         </div>
       </section>
     </div>
+  );
+}
+
+function LootBoxBusinessRules({
+  form,
+  onChange,
+}: {
+  form: LootBoxForm;
+  onChange: (patch: Partial<LootBoxForm>) => void;
+}) {
+  return (
+    <BusinessRuleSection
+      title="Правила запуска"
+      description="Настройте, когда лутбокс открывается, сколько раз его можно получить и как распределяются награды."
+    >
+      <div className="grid gap-3 sm:grid-cols-2">
+        <ToggleField
+          label="Только тихие часы"
+          checked={form.quietHoursEnabled}
+          onChange={(quietHoursEnabled) => onChange({ quietHoursEnabled })}
+        />
+        <ToggleField
+          label="Только будни"
+          checked={form.weekdaysOnly}
+          onChange={(weekdaysOnly) => onChange({ weekdaysOnly })}
+        />
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Начало окна">
+          <input
+            className={fieldClass}
+            type="time"
+            value={form.hourFrom}
+            onChange={(event) => onChange({ hourFrom: event.target.value })}
+          />
+        </Field>
+        <Field label="Конец окна">
+          <input
+            className={fieldClass}
+            type="time"
+            value={form.hourTo}
+            onChange={(event) => onChange({ hourTo: event.target.value })}
+          />
+        </Field>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Раз в неделю на гостя">
+          <input
+            className={fieldClass}
+            type="number"
+            min="0"
+            value={form.perGuestPerWeek}
+            onChange={(event) =>
+              onChange({ perGuestPerWeek: event.target.value })
+            }
+          />
+        </Field>
+        <Field label="Открытий в день">
+          <input
+            className={fieldClass}
+            type="number"
+            min="0"
+            value={form.totalPerDay}
+            onChange={(event) => onChange({ totalPerDay: event.target.value })}
+          />
+        </Field>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Field label="Вес XP">
+          <input
+            className={fieldClass}
+            type="number"
+            min="0"
+            value={form.probabilityXpWeight}
+            onChange={(event) =>
+              onChange({ probabilityXpWeight: event.target.value })
+            }
+          />
+        </Field>
+        <Field label="Вес промокода">
+          <input
+            className={fieldClass}
+            type="number"
+            min="0"
+            value={form.probabilityPromoWeight}
+            onChange={(event) =>
+              onChange({ probabilityPromoWeight: event.target.value })
+            }
+          />
+        </Field>
+        <Field label="Вес миссии">
+          <input
+            className={fieldClass}
+            type="number"
+            min="0"
+            value={form.probabilityMissionWeight}
+            onChange={(event) =>
+              onChange({ probabilityMissionWeight: event.target.value })
+            }
+          />
+        </Field>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <ToggleField
+          label="Подтверждает кассир"
+          checked={form.requireCashierConfirmation}
+          onChange={(requireCashierConfirmation) =>
+            onChange({ requireCashierConfirmation })
+          }
+        />
+        <ToggleField
+          label="Один девайс на гостя"
+          checked={form.oneDevicePerGuest}
+          onChange={(oneDevicePerGuest) => onChange({ oneDevicePerGuest })}
+        />
+      </div>
+    </BusinessRuleSection>
+  );
+}
+
+function MissionBusinessRules({
+  form,
+  onChange,
+}: {
+  form: MissionForm;
+  onChange: (patch: Partial<MissionForm>) => void;
+}) {
+  return (
+    <BusinessRuleSection
+      title="Условия выполнения"
+      description="Опишите проверяемое поведение гостя простыми правилами. Факты берутся из подготовленных данных Langame."
+    >
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Окно выполнения, дней">
+          <input
+            className={fieldClass}
+            type="number"
+            min="1"
+            value={form.windowDays}
+            onChange={(event) => onChange({ windowDays: event.target.value })}
+          />
+        </Field>
+        <Field label="Минут в сессии">
+          <input
+            className={fieldClass}
+            type="number"
+            min="0"
+            value={form.minSessionMinutes}
+            onChange={(event) =>
+              onChange({ minSessionMinutes: event.target.value })
+            }
+          />
+        </Field>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Минимальная покупка, руб">
+          <input
+            className={fieldClass}
+            type="number"
+            min="0"
+            value={form.minSpendAmount}
+            onChange={(event) =>
+              onChange({ minSpendAmount: event.target.value })
+            }
+          />
+        </Field>
+        <ToggleField
+          label="Только будни"
+          checked={form.weekdaysOnly}
+          onChange={(weekdaysOnly) => onChange({ weekdaysOnly })}
+        />
+      </div>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <ToggleField
+          label="Нужен факт Langame"
+          checked={form.requireLangameFact}
+          onChange={(requireLangameFact) => onChange({ requireLangameFact })}
+        />
+        <ToggleField
+          label="Без повтора в тот же день"
+          checked={form.denySameDayRepeat}
+          onChange={(denySameDayRepeat) => onChange({ denySameDayRepeat })}
+        />
+        <ToggleField
+          label="Подтверждает кассир"
+          checked={form.requireCashierConfirmation}
+          onChange={(requireCashierConfirmation) =>
+            onChange({ requireCashierConfirmation })
+          }
+        />
+      </div>
+    </BusinessRuleSection>
+  );
+}
+
+function SeasonBusinessRules({
+  form,
+  onChange,
+}: {
+  form: SeasonForm;
+  onChange: (patch: Partial<SeasonForm>) => void;
+}) {
+  return (
+    <BusinessRuleSection
+      title="Лестница Battle Pass"
+      description="Задайте XP за действия, количество уровней и частоту наград. Система соберет free и premium дорожки сама."
+    >
+      <div className="grid gap-3 sm:grid-cols-4">
+        <Field label="XP за визит">
+          <input
+            className={fieldClass}
+            type="number"
+            min="0"
+            value={form.xpVisit}
+            onChange={(event) => onChange({ xpVisit: event.target.value })}
+          />
+        </Field>
+        <Field label="XP за час">
+          <input
+            className={fieldClass}
+            type="number"
+            min="0"
+            value={form.xpPlayHour}
+            onChange={(event) => onChange({ xpPlayHour: event.target.value })}
+          />
+        </Field>
+        <Field label="XP за бар">
+          <input
+            className={fieldClass}
+            type="number"
+            min="0"
+            value={form.xpBarPurchase}
+            onChange={(event) =>
+              onChange({ xpBarPurchase: event.target.value })
+            }
+          />
+        </Field>
+        <Field label="XP за миссию">
+          <input
+            className={fieldClass}
+            type="number"
+            min="0"
+            value={form.xpMissionCompletion}
+            onChange={(event) =>
+              onChange({ xpMissionCompletion: event.target.value })
+            }
+          />
+        </Field>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-4">
+        <Field label="Уровней">
+          <input
+            className={fieldClass}
+            type="number"
+            min="1"
+            value={form.levelCount}
+            onChange={(event) => onChange({ levelCount: event.target.value })}
+          />
+        </Field>
+        <Field label="XP на уровень">
+          <input
+            className={fieldClass}
+            type="number"
+            min="1"
+            value={form.xpPerLevel}
+            onChange={(event) => onChange({ xpPerLevel: event.target.value })}
+          />
+        </Field>
+        <Field label="Free каждые N уровней">
+          <input
+            className={fieldClass}
+            type="number"
+            min="0"
+            value={form.freeRewardEvery}
+            onChange={(event) =>
+              onChange({ freeRewardEvery: event.target.value })
+            }
+          />
+        </Field>
+        <Field label="Premium каждые N уровней">
+          <input
+            className={fieldClass}
+            type="number"
+            min="0"
+            value={form.premiumRewardEvery}
+            onChange={(event) =>
+              onChange({ premiumRewardEvery: event.target.value })
+            }
+          />
+        </Field>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Free награда">
+          <input
+            className={fieldClass}
+            value={form.freeRewardLabel}
+            onChange={(event) =>
+              onChange({ freeRewardLabel: event.target.value })
+            }
+          />
+        </Field>
+        <Field label="Premium награда">
+          <input
+            className={fieldClass}
+            value={form.premiumRewardLabel}
+            onChange={(event) =>
+              onChange({ premiumRewardLabel: event.target.value })
+            }
+          />
+        </Field>
+      </div>
+    </BusinessRuleSection>
+  );
+}
+
+function BusinessRuleSection({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children: ReactNode;
+}) {
+  return (
+    <fieldset className="space-y-3 rounded-lg border border-emerald-500/25 bg-emerald-500/[0.04] p-3">
+      <legend className="px-1 text-xs font-bold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">
+        {title}
+      </legend>
+      <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+        {description}
+      </p>
+      {children}
+    </fieldset>
+  );
+}
+
+function ToggleField({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="flex min-h-10 items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
+      <span>{label}</span>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+    </label>
   );
 }
 
@@ -2783,6 +3141,37 @@ function lootBoxToForm(lootBox: GuestGameLootBox): LootBoxForm {
     segment: lootBox.segment ?? "",
     sessionType: lootBox.sessionType ?? "",
     storeIds: lootBox.storeIds,
+    quietHoursEnabled: booleanRule(lootBox.periodRules, "quietHoursEnabled", true),
+    weekdaysOnly: booleanRule(lootBox.periodRules, "weekdaysOnly", true),
+    hourFrom: timeWindowPart(lootBox.periodRules, 0, "10:00"),
+    hourTo: timeWindowPart(lootBox.periodRules, 1, "16:00"),
+    perGuestPerWeek: numberRule(lootBox.limits, "perGuestPerWeek", "1"),
+    totalPerDay: numberRule(lootBox.limits, "totalPerDay", "30"),
+    probabilityXpWeight: probabilityWeight(
+      lootBox.probabilityRules,
+      "XP Battle Pass",
+      "50",
+    ),
+    probabilityPromoWeight: probabilityWeight(
+      lootBox.probabilityRules,
+      "Промокод бара",
+      "30",
+    ),
+    probabilityMissionWeight: probabilityWeight(
+      lootBox.probabilityRules,
+      "Миссия на повторный визит",
+      "20",
+    ),
+    requireCashierConfirmation: booleanRule(
+      lootBox.antiFraudRules,
+      "requiresCashierConfirmation",
+      true,
+    ),
+    oneDevicePerGuest: booleanRule(
+      lootBox.antiFraudRules,
+      "oneDevicePerGuest",
+      true,
+    ),
     periodRulesText: jsonFormValue(lootBox.periodRules),
     limitsText: jsonFormValue(lootBox.limits),
     probabilityRulesText: jsonFormValue(
@@ -2817,6 +3206,25 @@ function missionToForm(mission: GuestGameMission): MissionForm {
     totalRewardLimit: mission.totalRewardLimit
       ? String(mission.totalRewardLimit)
       : "",
+    windowDays: numberRule(mission.conditions, "windowDays", "7"),
+    weekdaysOnly: booleanRule(mission.conditions, "weekdaysOnly", true),
+    minSessionMinutes: numberRule(mission.conditions, "minSessionMinutes", "90"),
+    minSpendAmount: numberRule(mission.conditions, "minSpendAmount", "0"),
+    requireLangameFact: booleanRule(
+      mission.conditions,
+      "requiresLangameFact",
+      true,
+    ),
+    denySameDayRepeat: booleanRule(
+      mission.antiFraudRules,
+      "denySameDayRepeat",
+      true,
+    ),
+    requireCashierConfirmation: booleanRule(
+      mission.antiFraudRules,
+      "requiresCashierConfirmation",
+      true,
+    ),
     conditionsText: jsonFormValue(
       mission.conditions,
       defaultMissionForm.conditionsText,
@@ -2835,6 +3243,20 @@ function seasonToForm(season: GuestGameSeason): SeasonForm {
     audienceId: season.audience?.id ?? "",
     periodFrom: dateInputValue(season.periodFrom),
     periodTo: dateInputValue(season.periodTo),
+    xpVisit: numberRule(season.xpRules, "visit", "20"),
+    xpPlayHour: numberRule(season.xpRules, "playHour", "10"),
+    xpBarPurchase: numberRule(season.xpRules, "barPurchase", "25"),
+    xpMissionCompletion: numberRule(
+      season.xpRules,
+      "missionCompletion",
+      "50",
+    ),
+    levelCount: String(arrayRule(season.levels).length || 4),
+    xpPerLevel: seasonLevelStep(season.levels, "250"),
+    freeRewardEvery: rewardFrequency(season.freeRewards, "2"),
+    premiumRewardEvery: rewardFrequency(season.premiumRewards, "2"),
+    freeRewardLabel: rewardLabel(season.freeRewards, "Промокод бара"),
+    premiumRewardLabel: rewardLabel(season.premiumRewards, "Усиленный промокод"),
     xpRulesText: jsonFormValue(season.xpRules, defaultSeasonForm.xpRulesText),
     levelsText: jsonFormValue(season.levels, defaultSeasonForm.levelsText),
     freeRewardsText: jsonFormValue(season.freeRewards),
@@ -2898,6 +3320,239 @@ function patchJson(url: string, body: unknown) {
 
 function nullable(value: string) {
   return value.trim() ? value.trim() : null;
+}
+
+function buildLootBoxPeriodRules(form: LootBoxForm) {
+  const start = form.hourFrom || "00:00";
+  const end = form.hourTo || "23:59";
+
+  return {
+    source: "business_controls",
+    quietHoursEnabled: form.quietHoursEnabled,
+    weekdaysOnly: form.weekdaysOnly,
+    weekdays: form.weekdaysOnly ? [1, 2, 3, 4, 5] : [0, 1, 2, 3, 4, 5, 6],
+    hours: form.quietHoursEnabled ? [`${start}-${end}`] : [],
+  };
+}
+
+function buildLootBoxLimits(form: LootBoxForm) {
+  return {
+    source: "business_controls",
+    perGuestPerWeek: optionalNumber(form.perGuestPerWeek),
+    totalPerDay: optionalNumber(form.totalPerDay),
+  };
+}
+
+function buildLootBoxProbabilityRules(form: LootBoxForm) {
+  return {
+    type: "weighted",
+    source: "business_controls",
+    items: [
+      {
+        label: "XP Battle Pass",
+        weight: numeric(form.probabilityXpWeight, 0),
+      },
+      {
+        label: form.rewardLabel || "Промокод бара",
+        weight: numeric(form.probabilityPromoWeight, 0),
+      },
+      {
+        label: "Миссия на повторный визит",
+        weight: numeric(form.probabilityMissionWeight, 0),
+      },
+    ],
+  };
+}
+
+function buildLootBoxAntiFraudRules(form: LootBoxForm) {
+  return {
+    source: "business_controls",
+    requiresCashierConfirmation: form.requireCashierConfirmation,
+    oneDevicePerGuest: form.oneDevicePerGuest,
+  };
+}
+
+function buildMissionConditions(form: MissionForm) {
+  return {
+    source: "business_controls",
+    windowDays: optionalNumber(form.windowDays),
+    weekdaysOnly: form.weekdaysOnly,
+    minSessionMinutes: optionalNumber(form.minSessionMinutes),
+    minSpendAmount: optionalNumber(form.minSpendAmount),
+    requiresLangameFact: form.requireLangameFact,
+    progressTarget: optionalNumber(form.progressTarget),
+    progressUnit: nullable(form.progressUnit),
+  };
+}
+
+function buildMissionAntiFraudRules(form: MissionForm) {
+  return {
+    source: "business_controls",
+    denySameDayRepeat: form.denySameDayRepeat,
+    requiresCashierConfirmation: form.requireCashierConfirmation,
+    perGuestLimit: optionalNumber(form.perGuestLimit),
+    totalRewardLimit: optionalNumber(form.totalRewardLimit),
+  };
+}
+
+function buildSeasonXpRules(form: SeasonForm) {
+  return {
+    source: "business_controls",
+    visit: numeric(form.xpVisit, 0),
+    playHour: numeric(form.xpPlayHour, 0),
+    barPurchase: numeric(form.xpBarPurchase, 0),
+    missionCompletion: numeric(form.xpMissionCompletion, 0),
+  };
+}
+
+function buildSeasonLevels(form: SeasonForm) {
+  const levelCount = Math.max(1, numeric(form.levelCount, 1));
+  const xpPerLevel = Math.max(1, numeric(form.xpPerLevel, 1));
+
+  return Array.from({ length: levelCount }, (_, index) => {
+    const level = index + 1;
+    return {
+      level,
+      xp: index * xpPerLevel,
+      freeReward: levelRewardLabel(level, form.freeRewardEvery, form.freeRewardLabel),
+      premiumReward: levelRewardLabel(
+        level,
+        form.premiumRewardEvery,
+        form.premiumRewardLabel,
+      ),
+    };
+  });
+}
+
+function buildSeasonRewards(form: SeasonForm, track: "free" | "premium") {
+  const levelCount = Math.max(1, numeric(form.levelCount, 1));
+  const every = numeric(
+    track === "free" ? form.freeRewardEvery : form.premiumRewardEvery,
+    0,
+  );
+  const label =
+    track === "free" ? form.freeRewardLabel : form.premiumRewardLabel;
+
+  if (!every || !label.trim()) {
+    return [];
+  }
+
+  return Array.from({ length: levelCount }, (_, index) => index + 1)
+    .filter((level) => level % every === 0)
+    .map((level) => ({ level, reward: label.trim(), track }));
+}
+
+function levelRewardLabel(level: number, everyValue: string, label: string) {
+  const every = numeric(everyValue, 0);
+  return every && label.trim() && level % every === 0 ? label.trim() : null;
+}
+
+function numeric(value: string, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function optionalNumber(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function arrayRule(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function numberRule(value: unknown, key: string, fallback: string) {
+  const raw = asRecord(value)[key];
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return String(raw);
+  }
+  if (typeof raw === "string" && raw.trim()) {
+    return raw;
+  }
+  return fallback;
+}
+
+function booleanRule(value: unknown, key: string, fallback: boolean) {
+  const raw = asRecord(value)[key];
+  return typeof raw === "boolean" ? raw : fallback;
+}
+
+function timeWindowPart(value: unknown, part: 0 | 1, fallback: string) {
+  const hours = asRecord(value).hours;
+  if (Array.isArray(hours) && typeof hours[0] === "string") {
+    return hours[0].split("-")[part]?.trim() || fallback;
+  }
+
+  return fallback;
+}
+
+function probabilityWeight(
+  value: unknown,
+  label: string,
+  fallback: string,
+) {
+  const items = asRecord(value).items;
+  if (!Array.isArray(items)) {
+    return fallback;
+  }
+
+  const matched = items.find((item) => {
+    const record = asRecord(item);
+    return String(record.label ?? "")
+      .toLowerCase()
+      .includes(label.toLowerCase());
+  });
+  const weight = asRecord(matched).weight;
+
+  return typeof weight === "number" && Number.isFinite(weight)
+    ? String(weight)
+    : fallback;
+}
+
+function seasonLevelStep(value: unknown, fallback: string) {
+  const levels = arrayRule(value)
+    .map((item) => asRecord(item))
+    .filter((item) => typeof item.xp === "number") as Array<{
+    xp: number;
+  }>;
+
+  if (levels.length < 2) {
+    return fallback;
+  }
+
+  const step = levels[1].xp - levels[0].xp;
+  return step > 0 ? String(step) : fallback;
+}
+
+function rewardFrequency(value: unknown, fallback: string) {
+  const first = arrayRule(value)
+    .map((item) => asRecord(item))
+    .find((item) => typeof item.level === "number");
+
+  return typeof first?.level === "number" ? String(first.level) : fallback;
+}
+
+function rewardLabel(value: unknown, fallback: string) {
+  const first = arrayRule(value)
+    .map((item) => asRecord(item))
+    .find((item) => typeof item.reward === "string");
+
+  return typeof first?.reward === "string" && first.reward.trim()
+    ? first.reward
+    : fallback;
 }
 
 function parseJson(text: string, label: string, allowEmpty = true) {

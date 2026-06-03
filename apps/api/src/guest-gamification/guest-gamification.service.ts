@@ -40,12 +40,45 @@ const snapshotFactSources = [
   'GUEST_LOYALTY_GROUP',
   'PRODUCT_EXPENSE',
 ] as const;
+const tariffSnapshotFreshMs = 24 * 60 * 60 * 1000;
+const tariffSnapshotDefinitions = [
+  {
+    endpointKey: 'tariffsByDays',
+    endpointPath: '/tariffs/by_days/list',
+    title: 'Тарифы по дням',
+    description: 'Дни недели и ограничения периода для миссий и loot box.',
+  },
+  {
+    endpointKey: 'tariffsGroups',
+    endpointPath: '/tariffs/groups/list',
+    title: 'Группы тарифов',
+    description: 'Группы тарифов и пакетов для условий сессий.',
+  },
+  {
+    endpointKey: 'tariffsTimePeriod',
+    endpointPath: '/tariffs/time_period/list',
+    title: 'Тарифные периоды',
+    description: 'Окна тихих часов, ночных пакетов и специальных периодов.',
+  },
+  {
+    endpointKey: 'tariffsTypesGroups',
+    endpointPath: '/tariffs/types_groups/list',
+    title: 'Типы тарифных групп',
+    description: 'Типы тарифов для разделения обычной игры и пакетов часов.',
+  },
+] as const;
 
 type StatusValue = (typeof statusValues)[number];
 type ProfileStatus = (typeof profileStatuses)[number];
 type RewardStatus = (typeof rewardStatuses)[number];
 type RewardSource = (typeof rewardSources)[number];
 type EventSource = (typeof eventSources)[number];
+type GuestGameTariffSnapshotStatus =
+  | 'READY'
+  | 'PARTIAL'
+  | 'STALE'
+  | 'FAILED'
+  | 'UNPROFILED';
 
 const gameProfileInclude = {
   guest: {
@@ -507,6 +540,35 @@ export type GuestGameEvent = {
   createdBy: GuestGameUser | null;
 };
 
+export type GuestGameTariffSnapshotSource = {
+  id: string;
+  domain: string;
+  status: string;
+  rowCount: number;
+  startedAt: string;
+  finishedAt: string | null;
+  payloadKind: string | null;
+  fieldKeys: string[];
+  summary: string | null;
+  errorMessage: string | null;
+};
+
+export type GuestGameTariffSnapshotEndpoint = {
+  endpointKey: string;
+  endpointPath: string;
+  title: string;
+  description: string;
+  status: GuestGameTariffSnapshotStatus;
+  totalSources: number;
+  readySources: number;
+  failedSources: number;
+  rowCount: number;
+  latestAt: string | null;
+  fieldKeys: string[];
+  nextAction: string;
+  sources: GuestGameTariffSnapshotSource[];
+};
+
 export type GuestGamificationSummary = {
   profilesCount: number;
   totalXp: number;
@@ -531,6 +593,7 @@ export type GuestGamificationWorkspace = {
   seasons: GuestGameSeason[];
   rewards: GuestGameReward[];
   events: GuestGameEvent[];
+  tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
 };
 
 export type GuestGameProfileDto = {
@@ -870,6 +933,76 @@ function scheduledPipelineRoleRank(role: UserRole) {
   return index >= 0 ? index : scheduledPipelineActorRoles.length;
 }
 
+function tariffSnapshotStatus({
+  totalSources,
+  checkedSources,
+  readySources,
+  failedSources,
+  latestTime,
+}: {
+  totalSources: number;
+  checkedSources: number;
+  readySources: number;
+  failedSources: number;
+  latestTime: number;
+}): GuestGameTariffSnapshotStatus {
+  if (checkedSources === 0) {
+    return 'UNPROFILED';
+  }
+
+  if (readySources === 0) {
+    return 'FAILED';
+  }
+
+  if (failedSources > 0 || (totalSources > 0 && readySources < totalSources)) {
+    return 'PARTIAL';
+  }
+
+  if (latestTime > 0 && Date.now() - latestTime > tariffSnapshotFreshMs) {
+    return 'STALE';
+  }
+
+  return 'READY';
+}
+
+function tariffSnapshotNextAction(status: GuestGameTariffSnapshotStatus) {
+  switch (status) {
+    case 'READY':
+      return 'Источник готов: можно использовать как проверенный тарифный контекст для правил.';
+    case 'PARTIAL':
+      return 'Часть клубов еще не дала успешный snapshot. Обновите endpoint в /sync перед точным запуском.';
+    case 'STALE':
+      return 'Snapshot устарел старше суток. Перед запуском правил обновите тарифные endpoints в /sync.';
+    case 'FAILED':
+      return 'Последний snapshot неуспешен. Сначала разберите ошибку endpoint в /sync.';
+    case 'UNPROFILED':
+    default:
+      return 'Snapshot еще не создан. Сначала профилируйте и сохраните endpoint в /sync.';
+  }
+}
+
+function jsonStringArray(value: Prisma.JsonValue | null): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((item): item is string => typeof item === 'string');
+}
+
+function snapshotSummary(value: Prisma.JsonValue | null): string | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const summary = (value as Record<string, unknown>).summary;
+
+  return typeof summary === 'string' ? summary : null;
+}
+
+function uniqueStrings(values: string[]) {
+  return [...new Set(values)].slice(0, 16);
+}
+
 @Injectable()
 export class GuestGamificationService {
   constructor(private readonly prisma: PrismaService) {}
@@ -877,15 +1010,23 @@ export class GuestGamificationService {
   async getWorkspace(
     user: AuthenticatedUser,
   ): Promise<GuestGamificationWorkspace> {
-    const [profiles, lootBoxes, missions, seasons, rewards, events] =
-      await Promise.all([
-        this.getProfiles(user),
-        this.getLootBoxes(user),
-        this.getMissions(user),
-        this.getSeasons(user),
-        this.getRewards(user),
-        this.getEvents(user),
-      ]);
+    const [
+      profiles,
+      lootBoxes,
+      missions,
+      seasons,
+      rewards,
+      events,
+      tariffSnapshots,
+    ] = await Promise.all([
+      this.getProfiles(user),
+      this.getLootBoxes(user),
+      this.getMissions(user),
+      this.getSeasons(user),
+      this.getRewards(user),
+      this.getEvents(user),
+      this.getTariffSnapshots(user),
+    ]);
 
     return {
       summary: this.buildSummary(
@@ -901,7 +1042,111 @@ export class GuestGamificationService {
       seasons,
       rewards,
       events,
+      tariffSnapshots,
     };
+  }
+
+  private async getTariffSnapshots(
+    user: AuthenticatedUser,
+  ): Promise<GuestGameTariffSnapshotEndpoint[]> {
+    const endpointKeys = tariffSnapshotDefinitions.map(
+      (definition) => definition.endpointKey,
+    );
+    const [activeSourcesCount, runs] = await Promise.all([
+      this.prisma.integrationSource.count({
+        where: {
+          tenantId: user.tenantId,
+          provider: IntegrationProvider.LANGAME,
+          isActive: true,
+        },
+      }),
+      this.prisma.langameEndpointSnapshotRun.findMany({
+        where: {
+          tenantId: user.tenantId,
+          provider: IntegrationProvider.LANGAME,
+          endpointKey: { in: [...endpointKeys] },
+        },
+        select: {
+          id: true,
+          domain: true,
+          endpointKey: true,
+          status: true,
+          startedAt: true,
+          finishedAt: true,
+          rowCount: true,
+          payloadKind: true,
+          fieldKeys: true,
+          snapshot: true,
+          errorMessage: true,
+        },
+        orderBy: [{ startedAt: 'desc' }, { createdAt: 'desc' }],
+        take: 80,
+      }),
+    ]);
+    const latestRuns: typeof runs = [];
+    const seen = new Set<string>();
+
+    for (const run of runs) {
+      const key = `${run.endpointKey}:${run.domain}`;
+
+      if (seen.has(key)) {
+        continue;
+      }
+
+      seen.add(key);
+      latestRuns.push(run);
+    }
+
+    return tariffSnapshotDefinitions.map((definition) => {
+      const endpointRuns = latestRuns.filter(
+        (run) => run.endpointKey === definition.endpointKey,
+      );
+      const readySources = endpointRuns.filter(
+        (run) => run.status === 'SUCCESS',
+      ).length;
+      const failedSources = endpointRuns.filter(
+        (run) => run.status !== 'SUCCESS',
+      ).length;
+      const totalSources = Math.max(activeSourcesCount, endpointRuns.length);
+      const latestTime = endpointRuns.reduce((latest, run) => {
+        const time = run.finishedAt?.getTime() ?? run.startedAt.getTime();
+
+        return Number.isNaN(time) ? latest : Math.max(latest, time);
+      }, 0);
+      const status = tariffSnapshotStatus({
+        totalSources,
+        checkedSources: endpointRuns.length,
+        readySources,
+        failedSources,
+        latestTime,
+      });
+
+      return {
+        ...definition,
+        status,
+        totalSources,
+        readySources,
+        failedSources,
+        rowCount: endpointRuns.reduce((sum, run) => sum + run.rowCount, 0),
+        latestAt: latestTime > 0 ? new Date(latestTime).toISOString() : null,
+        fieldKeys: uniqueStrings(
+          endpointRuns.flatMap((run) => jsonStringArray(run.fieldKeys)),
+        ),
+        nextAction: tariffSnapshotNextAction(status),
+        sources: endpointRuns.map((run) => ({
+          id: run.id,
+          domain: run.domain,
+          status: run.status,
+          rowCount: run.rowCount,
+          startedAt: run.startedAt.toISOString(),
+          finishedAt: run.finishedAt?.toISOString() ?? null,
+          payloadKind: run.payloadKind,
+          fieldKeys: jsonStringArray(run.fieldKeys),
+          summary: snapshotSummary(run.snapshot),
+          errorMessage: run.errorMessage,
+        })),
+      };
+    });
   }
 
   async getSnapshotFacts(

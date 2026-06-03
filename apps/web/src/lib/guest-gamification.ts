@@ -340,6 +340,42 @@ export type GuestGamificationSummary = {
   paidRewardAmount: number;
 };
 
+export type GuestGameTariffSnapshotStatus =
+  | "READY"
+  | "PARTIAL"
+  | "STALE"
+  | "FAILED"
+  | "UNPROFILED";
+
+export type GuestGameTariffSnapshotSource = {
+  id: string;
+  domain: string;
+  status: string;
+  rowCount: number;
+  startedAt: string;
+  finishedAt: string | null;
+  payloadKind: string | null;
+  fieldKeys: string[];
+  summary: string | null;
+  errorMessage: string | null;
+};
+
+export type GuestGameTariffSnapshotEndpoint = {
+  endpointKey: string;
+  endpointPath: string;
+  title: string;
+  description: string;
+  status: GuestGameTariffSnapshotStatus;
+  totalSources: number;
+  readySources: number;
+  failedSources: number;
+  rowCount: number;
+  latestAt: string | null;
+  fieldKeys: string[];
+  nextAction: string;
+  sources: GuestGameTariffSnapshotSource[];
+};
+
 export type GuestGamificationWorkspace = {
   summary: GuestGamificationSummary;
   profiles: GuestGameProfile[];
@@ -348,6 +384,7 @@ export type GuestGamificationWorkspace = {
   seasons: GuestGameSeason[];
   rewards: GuestGameReward[];
   events: GuestGameEvent[];
+  tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
 };
 
 export async function getGuestGamificationWorkspace(): Promise<GuestGamificationWorkspace> {

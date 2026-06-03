@@ -52,6 +52,7 @@ const emptyWorkspace: GuestGamificationWorkspace = {
   seasons: [],
   rewards: [],
   events: [],
+  tariffSnapshots: [],
 };
 
 export default async function GuestGamificationPage() {

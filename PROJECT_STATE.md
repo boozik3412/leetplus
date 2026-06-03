@@ -78,6 +78,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Surfaced prepared tariff endpoint readiness in Guest Game Hub: `/guests/gamification` now reads `LangameEndpointSnapshotRun` for `tariffs/by_days/list`, `tariffs/groups/list`, `tariffs/time_period/list`, and `tariffs/types_groups/list`, shows `READY/PARTIAL/STALE/FAILED/UNPROFILED`, source coverage, row counts, fields, and next `/sync` action without live Langame reads or pretending the generic preview is a full tariff catalog.
 - Added the first tariff-aware Guest Game Hub condition layer from prepared session snapshots: `GuestSession.packet` is exposed as `sessionType`/`sessionPacket` in facts, dry-run, confirmed processing, and batch pipeline; `/guests/gamification` can restrict loot boxes, missions, and battle pass to regular sessions or hour packages and add packet-session XP bonuses without live Langame reads.
 - Connected prepared `products/expense` sales to the Guest Game Hub event pipeline: `SalesFact` rows now appear as `PRODUCT_EXPENSE` snapshot facts with `PRODUCT_PURCHASE` events, product/category/store/revenue context, and existing guest linkage when available, without live Langame reads.
 - Expanded the Guest Game Hub snapshot pipeline: `GET /guests/gamification/facts` now includes saved Langame loyalty group, balance, and bonus balance facts as `LOYALTY_GROUP_SNAPSHOT`, `BALANCE_SNAPSHOT`, and `BONUS_BALANCE_SNAPSHOT`; the `/guests/gamification` test-run tab shows these sources and can feed them into dry-run/batch without live Langame reads.

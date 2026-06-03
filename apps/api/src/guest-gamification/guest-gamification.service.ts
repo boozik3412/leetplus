@@ -38,6 +38,7 @@ const snapshotFactSources = [
   'GUEST_BALANCE',
   'GUEST_BONUS_BALANCE',
   'GUEST_LOYALTY_GROUP',
+  'PRODUCT_EXPENSE',
 ] as const;
 
 type StatusValue = (typeof statusValues)[number];
@@ -164,6 +165,14 @@ const snapshotStoreSelect = {
   name: true,
 } satisfies Prisma.StoreSelect;
 
+const snapshotProductSelect = {
+  id: true,
+  article: true,
+  name: true,
+  category: { select: { name: true } },
+  supplier: { select: { name: true } },
+} satisfies Prisma.ProductSelect;
+
 const snapshotSessionSelect = {
   id: true,
   externalProvider: true,
@@ -266,6 +275,24 @@ const snapshotGuestGroupSelect = {
   lastSyncedAt: true,
 } satisfies Prisma.GuestGroupSelect;
 
+const snapshotProductExpenseSelect = {
+  id: true,
+  externalProvider: true,
+  externalDomain: true,
+  externalSaleId: true,
+  externalProductId: true,
+  externalGuestId: true,
+  saleDate: true,
+  quantity: true,
+  revenue: true,
+  cost: true,
+  productNameAtSale: true,
+  storeNameAtSale: true,
+  guest: { select: snapshotGuestSelect },
+  store: { select: snapshotStoreSelect },
+  product: { select: snapshotProductSelect },
+} satisfies Prisma.SalesFactSelect;
+
 type ProfileRow = Prisma.GuestGameProfileGetPayload<{
   include: typeof gameProfileInclude;
 }>;
@@ -310,6 +337,9 @@ type SnapshotLoyaltyGuestRow = Prisma.GuestGetPayload<{
 }>;
 type SnapshotGuestGroupRow = Prisma.GuestGroupGetPayload<{
   select: typeof snapshotGuestGroupSelect;
+}>;
+type SnapshotProductExpenseRow = Prisma.SalesFactGetPayload<{
+  select: typeof snapshotProductExpenseSelect;
 }>;
 
 export type GuestGameUser = {
@@ -714,7 +744,8 @@ export type GuestGameSnapshotFact = {
     | 'GUEST_OPERATION_LOG'
     | 'GUEST_BALANCE'
     | 'GUEST_BONUS_BALANCE'
-    | 'GUEST_LOYALTY_GROUP';
+    | 'GUEST_LOYALTY_GROUP'
+    | 'PRODUCT_EXPENSE';
   eventType: string;
   occurredAt: string;
   externalProvider: string | null;
@@ -738,6 +769,7 @@ export type GuestGameSnapshotFactsResult = {
     balances: number;
     bonusBalances: number;
     loyaltyGroups: number;
+    productExpenses: number;
     latestAt: string | null;
   };
 };
@@ -878,6 +910,7 @@ export class GuestGamificationService {
       bonusBalances,
       loyaltyGuests,
       guestGroups,
+      productExpenses,
     ] = await Promise.all([
       this.prisma.guestSession.findMany({
         where: { tenantId: user.tenantId, startedAt: { not: null } },
@@ -925,6 +958,12 @@ export class GuestGamificationService {
         where: { tenantId: user.tenantId },
         select: snapshotGuestGroupSelect,
       }),
+      this.prisma.salesFact.findMany({
+        where: { tenantId: user.tenantId, isCanceled: false },
+        select: snapshotProductExpenseSelect,
+        orderBy: [{ saleDate: 'desc' }, { createdAt: 'desc' }],
+        take: 30,
+      }),
     ]);
     const guestGroupMap = new Map(
       guestGroups.map((group) => [snapshotGroupKey(group), group]),
@@ -951,6 +990,7 @@ export class GuestGamificationService {
             : null,
         ),
       ),
+      ...productExpenses.flatMap(mapProductExpenseFact),
     ]
       .sort(
         (left, right) =>
@@ -969,6 +1009,7 @@ export class GuestGamificationService {
         balances: balances.length,
         bonusBalances: bonusBalances.length,
         loyaltyGroups: loyaltyGuests.length,
+        productExpenses: productExpenses.length,
         latestAt: facts[0]?.occurredAt ?? null,
       },
     };
@@ -2830,6 +2871,45 @@ function mapLoyaltyGroupFact(
   ];
 }
 
+function mapProductExpenseFact(
+  row: SnapshotProductExpenseRow,
+): GuestGameSnapshotFact[] {
+  const revenue = numberValue(row.revenue);
+  const cost = numberValue(row.cost);
+  const quantity = numberValue(row.quantity);
+  const productName =
+    row.productNameAtSale ?? row.product?.name ?? row.externalProductId;
+  const guestName = snapshotGuestName(row.guest, row.externalGuestId);
+
+  return [
+    {
+      id: `product-expense:${row.id}`,
+      source: 'PRODUCT_EXPENSE',
+      eventType: 'PRODUCT_PURCHASE',
+      occurredAt: row.saleDate.toISOString(),
+      externalProvider: row.externalProvider,
+      externalDomain: row.externalDomain,
+      externalId: row.externalSaleId,
+      guest: mapSnapshotGuest(row.guest, row.externalGuestId),
+      store: mapSnapshotStore(row.store),
+      sessionMinutes: null,
+      spendAmount: Math.abs(revenue),
+      label: `Товарная покупка: ${productName ?? 'товар'} · ${guestName}`,
+      details: [
+        row.storeNameAtSale ?? row.store?.name,
+        productName,
+        row.product?.category?.name,
+        row.product?.supplier?.name,
+        quantity ? `${quantity} шт` : null,
+        revenue ? `${Math.abs(revenue)} руб` : null,
+        cost ? `себестоимость ${Math.abs(cost)} руб` : null,
+      ]
+        .filter(Boolean)
+        .join(' · '),
+    },
+  ];
+}
+
 function mapSnapshotGuest(
   row: SnapshotGuestRow | null,
   externalGuestId: string | null,
@@ -3391,7 +3471,9 @@ function appendDryRunTriggerCheck(
   if (
     !expected ||
     expected === actual ||
-    (expected === 'VISIT' && actual === 'SESSION_START')
+    (expected === 'VISIT' && actual === 'SESSION_START') ||
+    (expected === 'BAR_PURCHASE' && actual === 'PRODUCT_PURCHASE') ||
+    (expected === 'PRODUCT_PURCHASE' && actual === 'BAR_PURCHASE')
   ) {
     return;
   }

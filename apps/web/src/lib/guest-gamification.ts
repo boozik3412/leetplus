@@ -253,7 +253,8 @@ export type GuestGameSnapshotFact = {
     | "GUEST_OPERATION_LOG"
     | "GUEST_BALANCE"
     | "GUEST_BONUS_BALANCE"
-    | "GUEST_LOYALTY_GROUP";
+    | "GUEST_LOYALTY_GROUP"
+    | "PRODUCT_EXPENSE";
   eventType: string;
   occurredAt: string;
   externalProvider: string | null;
@@ -277,6 +278,7 @@ export type GuestGameSnapshotFactsResult = {
     balances: number;
     bonusBalances: number;
     loyaltyGroups: number;
+    productExpenses: number;
     latestAt: string | null;
   };
 };

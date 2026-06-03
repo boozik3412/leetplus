@@ -204,6 +204,7 @@ const dryRunEventOptions = [
   { value: "VISIT", label: "Визит" },
   { value: "PLAY_HOUR", label: "Час игры" },
   { value: "BAR_PURCHASE", label: "Покупка бара" },
+  { value: "PRODUCT_PURCHASE", label: "Товарная покупка" },
   { value: "BALANCE_TOPUP", label: "Пополнение баланса" },
   { value: "GUEST_LOG", label: "Лог гостя" },
   { value: "REPEAT_VISIT", label: "Повторный визит" },
@@ -1169,7 +1170,7 @@ function DryRunTab({
                 Факты Langame snapshot
               </p>
               <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-                Загрузите последние сохраненные сессии, покупки, логи, балансы и группы лояльности, затем выберите факт как основу проверки правил.
+                Загрузите последние сохраненные сессии, покупки, товарные продажи, логи, балансы и группы лояльности, затем выберите факт как основу проверки правил.
               </p>
             </div>
             <button
@@ -1217,7 +1218,7 @@ function DryRunTab({
 
           {snapshotFacts ? (
             <div className="mt-3 space-y-3">
-              <div className="grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+              <div className="grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-5 2xl:grid-cols-9">
                 <MiniMetric
                   label="сессии"
                   value={snapshotFacts.summary.sessions}
@@ -1242,6 +1243,10 @@ function DryRunTab({
                 <MiniMetric
                   label="группы"
                   value={snapshotFacts.summary.loyaltyGroups}
+                />
+                <MiniMetric
+                  label="товары"
+                  value={snapshotFacts.summary.productExpenses}
                 />
                 <MiniMetric
                   label="последний факт"
@@ -1630,6 +1635,7 @@ function SnapshotFactRow({
     GUEST_BALANCE: "баланс",
     GUEST_BONUS_BALANCE: "бонусы",
     GUEST_LOYALTY_GROUP: "группа",
+    PRODUCT_EXPENSE: "товары",
   };
   const eventLabel =
     dryRunEventOptions.find((option) => option.value === fact.eventType)

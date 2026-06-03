@@ -78,6 +78,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Connected prepared `products/expense` sales to the Guest Game Hub event pipeline: `SalesFact` rows now appear as `PRODUCT_EXPENSE` snapshot facts with `PRODUCT_PURCHASE` events, product/category/store/revenue context, and existing guest linkage when available, without live Langame reads.
 - Expanded the Guest Game Hub snapshot pipeline: `GET /guests/gamification/facts` now includes saved Langame loyalty group, balance, and bonus balance facts as `LOYALTY_GROUP_SNAPSHOT`, `BALANCE_SNAPSHOT`, and `BONUS_BALANCE_SNAPSHOT`; the `/guests/gamification` test-run tab shows these sources and can feed them into dry-run/batch without live Langame reads.
 - Added a protected scheduled Guest Game Hub pipeline endpoint: `POST /guests/gamification/scheduled/pipeline/run` uses `SYNC_SERVICE_TOKEN`, processes active tenants or a selected tenant through the existing saved snapshot batch pipeline with a real active owner/admin/manager as audit actor, aggregates facts/XP/rewards by tenant, and still performs no live Langame reads or Langame write API calls.
 - Added the first Guest Game Hub batch pipeline: `POST /guests/gamification/pipeline/run` can preview or safely process the latest saved Langame snapshot facts inside LeetPlus, skips facts without a linked guest, duplicates, and non-`ACTIVE` rules, creates `GuestGameEvent`, XP updates, and queued `GuestGameReward` rows without live Langame reads or Langame write API calls, and the `/guests/gamification` `Тест запуска` tab shows a compact batch summary.

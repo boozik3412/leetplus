@@ -22,6 +22,7 @@ type Props = {
   stores: Store[];
   guests: GuestDashboardRow[];
   leads: GuestCrmLead[];
+  tenantSlug: string;
 };
 
 type TabId =
@@ -345,6 +346,7 @@ export function GuestGamificationPanel({
   stores,
   guests,
   leads,
+  tenantSlug,
 }: Props) {
   const [workspace, setWorkspace] = useState(initialWorkspace);
   const [activeTab, setActiveTab] = useState<TabId>("overview");
@@ -357,6 +359,11 @@ export function GuestGamificationPanel({
   const [seasonForm, setSeasonForm] = useState<SeasonForm>(defaultSeasonForm);
   const [rewardForm, setRewardForm] = useState<RewardForm>(defaultRewardForm);
   const [eventForm, setEventForm] = useState<EventForm>(defaultEventForm);
+  const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
+  const [editingLootBoxId, setEditingLootBoxId] = useState<string | null>(null);
+  const [editingMissionId, setEditingMissionId] = useState<string | null>(null);
+  const [editingSeasonId, setEditingSeasonId] = useState<string | null>(null);
+  const [editingRewardId, setEditingRewardId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [saving, setSaving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -389,6 +396,61 @@ export function GuestGamificationPanel({
     [workspace.rewards],
   );
 
+  function editProfile(profile: GuestGameProfile) {
+    setProfileForm(profileToForm(profile));
+    setEditingProfileId(profile.id);
+    setActiveTab("profiles");
+  }
+
+  function resetProfileForm() {
+    setProfileForm(defaultProfileForm);
+    setEditingProfileId(null);
+  }
+
+  function editLootBox(lootBox: GuestGameLootBox) {
+    setLootBoxForm(lootBoxToForm(lootBox));
+    setEditingLootBoxId(lootBox.id);
+    setActiveTab("lootBoxes");
+  }
+
+  function resetLootBoxForm() {
+    setLootBoxForm(defaultLootBoxForm);
+    setEditingLootBoxId(null);
+  }
+
+  function editMission(mission: GuestGameMission) {
+    setMissionForm(missionToForm(mission));
+    setEditingMissionId(mission.id);
+    setActiveTab("missions");
+  }
+
+  function resetMissionForm() {
+    setMissionForm(defaultMissionForm);
+    setEditingMissionId(null);
+  }
+
+  function editSeason(season: GuestGameSeason) {
+    setSeasonForm(seasonToForm(season));
+    setEditingSeasonId(season.id);
+    setActiveTab("seasons");
+  }
+
+  function resetSeasonForm() {
+    setSeasonForm(defaultSeasonForm);
+    setEditingSeasonId(null);
+  }
+
+  function editReward(reward: GuestGameReward) {
+    setRewardForm(rewardToForm(reward));
+    setEditingRewardId(reward.id);
+    setActiveTab("rewards");
+  }
+
+  function resetRewardForm() {
+    setRewardForm(defaultRewardForm);
+    setEditingRewardId(null);
+  }
+
   async function reloadWorkspace() {
     const next = await fetchJson<GuestGamificationWorkspace>(
       "/api/guests/gamification/workspace",
@@ -398,7 +460,7 @@ export function GuestGamificationPanel({
 
   async function saveProfile() {
     await saveAction("profile", async () => {
-      await postJson("/api/guests/gamification/profiles", {
+      const payload = {
         guestId: nullable(profileForm.guestId),
         leadId: nullable(profileForm.leadId),
         displayName: nullable(profileForm.displayName),
@@ -408,8 +470,18 @@ export function GuestGamificationPanel({
         xp: profileForm.xp,
         level: profileForm.level,
         status: profileForm.status,
-      });
-      setProfileForm(defaultProfileForm);
+      };
+
+      if (editingProfileId) {
+        await patchJson(
+          `/api/guests/gamification/profiles/${editingProfileId}`,
+          payload,
+        );
+      } else {
+        await postJson("/api/guests/gamification/profiles", payload);
+      }
+
+      resetProfileForm();
       await reloadWorkspace();
     });
   }
@@ -428,7 +500,7 @@ export function GuestGamificationPanel({
 
   async function saveLootBox() {
     await saveAction("lootBox", async () => {
-      await postJson("/api/guests/gamification/loot-boxes", {
+      const payload = {
         name: lootBoxForm.name,
         status: lootBoxForm.status,
         triggerKind: lootBoxForm.triggerKind,
@@ -450,14 +522,25 @@ export function GuestGamificationPanel({
         antiFraudRules: parseJson(lootBoxForm.antiFraudText, "антифрод"),
         manualApprovalRequired: lootBoxForm.manualApprovalRequired,
         note: nullable(lootBoxForm.note),
-      });
+      };
+
+      if (editingLootBoxId) {
+        await patchJson(
+          `/api/guests/gamification/loot-boxes/${editingLootBoxId}`,
+          payload,
+        );
+      } else {
+        await postJson("/api/guests/gamification/loot-boxes", payload);
+      }
+
+      resetLootBoxForm();
       await reloadWorkspace();
     });
   }
 
   async function saveMission() {
     await saveAction("mission", async () => {
-      await postJson("/api/guests/gamification/missions", {
+      const payload = {
         name: missionForm.name,
         status: missionForm.status,
         missionType: missionForm.missionType,
@@ -479,14 +562,25 @@ export function GuestGamificationPanel({
         antiFraudRules: parseJson(missionForm.antiFraudText, "антифрод"),
         manualApprovalRequired: missionForm.manualApprovalRequired,
         note: nullable(missionForm.note),
-      });
+      };
+
+      if (editingMissionId) {
+        await patchJson(
+          `/api/guests/gamification/missions/${editingMissionId}`,
+          payload,
+        );
+      } else {
+        await postJson("/api/guests/gamification/missions", payload);
+      }
+
+      resetMissionForm();
       await reloadWorkspace();
     });
   }
 
   async function saveSeason() {
     await saveAction("season", async () => {
-      await postJson("/api/guests/gamification/seasons", {
+      const payload = {
         name: seasonForm.name,
         status: seasonForm.status,
         seasonType: seasonForm.seasonType,
@@ -505,14 +599,25 @@ export function GuestGamificationPanel({
         budgetAmount: seasonForm.budgetAmount,
         manualApprovalRequired: seasonForm.manualApprovalRequired,
         note: nullable(seasonForm.note),
-      });
+      };
+
+      if (editingSeasonId) {
+        await patchJson(
+          `/api/guests/gamification/seasons/${editingSeasonId}`,
+          payload,
+        );
+      } else {
+        await postJson("/api/guests/gamification/seasons", payload);
+      }
+
+      resetSeasonForm();
       await reloadWorkspace();
     });
   }
 
   async function saveReward() {
     await saveAction("reward", async () => {
-      await postJson("/api/guests/gamification/rewards", {
+      const payload = {
         profileId: nullable(rewardForm.profileId),
         guestId: nullable(rewardForm.guestId),
         lootBoxId: nullable(rewardForm.lootBoxId),
@@ -528,8 +633,18 @@ export function GuestGamificationPanel({
         expiresAt: nullable(rewardForm.expiresAt),
         note: nullable(rewardForm.note),
         evidence: parseJson(rewardForm.evidenceText, "доказательства"),
-      });
-      setRewardForm(defaultRewardForm);
+      };
+
+      if (editingRewardId) {
+        await patchJson(
+          `/api/guests/gamification/rewards/${editingRewardId}`,
+          payload,
+        );
+      } else {
+        await postJson("/api/guests/gamification/rewards", payload);
+      }
+
+      resetRewardForm();
       await reloadWorkspace();
     });
   }
@@ -643,8 +758,11 @@ export function GuestGamificationPanel({
           workspace={workspace}
           pendingRewards={pendingRewards}
           onRewardStatus={updateRewardStatus}
+          onEditReward={editReward}
           onOpenTab={setActiveTab}
           saving={saving}
+          tenantSlug={tenantSlug}
+          stores={stores}
         />
       ) : null}
 
@@ -659,7 +777,10 @@ export function GuestGamificationPanel({
           setQuery={setQuery}
           eventForm={eventForm}
           setEventForm={setEventForm}
+          editingProfileId={editingProfileId}
           onSaveProfile={saveProfile}
+          onEditProfile={editProfile}
+          onResetProfile={resetProfileForm}
           onSaveEvent={saveEvent}
           onProfileStatus={updateProfileStatus}
           saving={saving}
@@ -673,7 +794,10 @@ export function GuestGamificationPanel({
           lootBoxes={workspace.lootBoxes}
           audiences={audiences}
           stores={stores}
+          editingId={editingLootBoxId}
           onSave={saveLootBox}
+          onEdit={editLootBox}
+          onReset={resetLootBoxForm}
           onStatus={updateRuleStatus}
           saving={saving}
         />
@@ -686,7 +810,10 @@ export function GuestGamificationPanel({
           missions={workspace.missions}
           audiences={audiences}
           stores={stores}
+          editingId={editingMissionId}
           onSave={saveMission}
+          onEdit={editMission}
+          onReset={resetMissionForm}
           onStatus={updateRuleStatus}
           saving={saving}
         />
@@ -698,7 +825,10 @@ export function GuestGamificationPanel({
           setForm={setSeasonForm}
           seasons={workspace.seasons}
           audiences={audiences}
+          editingId={editingSeasonId}
           onSave={saveSeason}
+          onEdit={editSeason}
+          onReset={resetSeasonForm}
           onStatus={updateRuleStatus}
           saving={saving}
         />
@@ -715,7 +845,10 @@ export function GuestGamificationPanel({
           lootBoxes={workspace.lootBoxes}
           missions={workspace.missions}
           seasons={workspace.seasons}
+          editingId={editingRewardId}
           onSave={saveReward}
+          onEdit={editReward}
+          onReset={resetRewardForm}
           onStatus={updateRewardStatus}
           saving={saving}
         />
@@ -728,8 +861,11 @@ function OverviewTab({
   workspace,
   pendingRewards,
   onRewardStatus,
+  onEditReward,
   onOpenTab,
   saving,
+  tenantSlug,
+  stores,
 }: {
   workspace: GuestGamificationWorkspace;
   pendingRewards: GuestGameReward[];
@@ -737,8 +873,11 @@ function OverviewTab({
     reward: GuestGameReward,
     status: GuestGameRewardStatus,
   ) => Promise<void>;
+  onEditReward: (reward: GuestGameReward) => void;
   onOpenTab: (tab: TabId) => void;
   saving: string | null;
+  tenantSlug: string;
+  stores: Store[];
 }) {
   return (
     <div className="space-y-5">
@@ -818,6 +957,8 @@ function OverviewTab({
         />
       </div>
 
+      <PortalLinksCard tenantSlug={tenantSlug} stores={stores} />
+
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
         <section className="space-y-3">
           <SectionTitle title="Активные контуры" />
@@ -860,6 +1001,7 @@ function OverviewTab({
                   key={reward.id}
                   reward={reward}
                   onStatus={onRewardStatus}
+                  onEdit={onEditReward}
                   saving={saving}
                 />
               ))
@@ -935,6 +1077,68 @@ function SafetyNoteCard({
   );
 }
 
+function PortalLinksCard({
+  tenantSlug,
+  stores,
+}: {
+  tenantSlug: string;
+  stores: Store[];
+}) {
+  const activeStores = stores.filter((store) => store.isActive);
+
+  return (
+    <section className="rounded-lg border border-cyan-200 bg-cyan-50/70 p-4 shadow-sm dark:border-cyan-900/60 dark:bg-cyan-950/20">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wide text-cyan-700 dark:text-cyan-300">
+            Гостевой кабинет
+          </p>
+          <h2 className="mt-2 text-lg font-bold text-zinc-950 dark:text-white">
+            Публичные ссылки для клубов
+          </h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+            По этим ссылкам гости проходят OTP-вход и видят свой уровень
+            лояльности Langame, XP, миссии, лутбоксы, battle pass и кошелек
+            наград без доступа к внутренним разделам LeetPlus.
+          </p>
+        </div>
+        <span className="rounded-full border border-cyan-300 px-3 py-1 text-xs font-bold text-cyan-800 dark:border-cyan-800 dark:text-cyan-200">
+          {activeStores.length} клубов
+        </span>
+      </div>
+
+      <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+        {activeStores.length ? (
+          activeStores.map((store) => {
+            const href = `/guest/${encodeURIComponent(tenantSlug)}/${encodeURIComponent(
+              store.id,
+            )}`;
+
+            return (
+              <a
+                key={store.id}
+                href={href}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-lg border border-cyan-200 bg-white px-3 py-3 text-sm transition hover:border-cyan-400 hover:bg-cyan-50 dark:border-cyan-900/70 dark:bg-zinc-950 dark:hover:border-cyan-600 dark:hover:bg-cyan-950/30"
+              >
+                <span className="block font-bold text-zinc-950 dark:text-white">
+                  {store.name}
+                </span>
+                <span className="mt-1 block truncate text-xs text-zinc-500 dark:text-zinc-400">
+                  {href}
+                </span>
+              </a>
+            );
+          })
+        ) : (
+          <EmptyState text="Активных клубов пока нет" />
+        )}
+      </div>
+    </section>
+  );
+}
+
 function ProfilesTab({
   form,
   setForm,
@@ -945,7 +1149,10 @@ function ProfilesTab({
   setQuery,
   eventForm,
   setEventForm,
+  editingProfileId,
   onSaveProfile,
+  onEditProfile,
+  onResetProfile,
   onSaveEvent,
   onProfileStatus,
   saving,
@@ -959,7 +1166,10 @@ function ProfilesTab({
   setQuery: (value: string) => void;
   eventForm: EventForm;
   setEventForm: (form: EventForm) => void;
+  editingProfileId: string | null;
   onSaveProfile: () => Promise<void>;
+  onEditProfile: (profile: GuestGameProfile) => void;
+  onResetProfile: () => void;
   onSaveEvent: () => Promise<void>;
   onProfileStatus: (
     profile: GuestGameProfile,
@@ -970,7 +1180,13 @@ function ProfilesTab({
   return (
     <div className="grid gap-5 xl:grid-cols-[380px_minmax(0,1fr)]">
       <section className="space-y-4">
-        <Panel title="Новый игровой профиль">
+        <Panel
+          title={
+            editingProfileId
+              ? "Редактирование игрового профиля"
+              : "Новый игровой профиль"
+          }
+        >
           <div className="space-y-3">
             <Field label="Гость из Langame">
               <select
@@ -1090,8 +1306,17 @@ function ProfilesTab({
               disabled={saving === "profile"}
               onClick={onSaveProfile}
             >
-              Создать профиль
+              {editingProfileId ? "Изменить профиль" : "Создать профиль"}
             </button>
+            {editingProfileId ? (
+              <button
+                type="button"
+                className={smallButtonClass}
+                onClick={onResetProfile}
+              >
+                Сбросить выбор
+              </button>
+            ) : null}
           </div>
         </Panel>
 
@@ -1180,6 +1405,7 @@ function ProfilesTab({
               <ProfileCard
                 key={profile.id}
                 profile={profile}
+                onEdit={onEditProfile}
                 onStatus={onProfileStatus}
                 saving={saving}
               />
@@ -1199,7 +1425,10 @@ function LootBoxesTab({
   lootBoxes,
   audiences,
   stores,
+  editingId,
   onSave,
+  onEdit,
+  onReset,
   onStatus,
   saving,
 }: {
@@ -1208,7 +1437,10 @@ function LootBoxesTab({
   lootBoxes: GuestGameLootBox[];
   audiences: GuestAudience[];
   stores: Store[];
+  editingId: string | null;
   onSave: () => Promise<void>;
+  onEdit: (lootBox: GuestGameLootBox) => void;
+  onReset: () => void;
   onStatus: (
     type: "loot-boxes" | "missions" | "seasons",
     id: string,
@@ -1218,7 +1450,9 @@ function LootBoxesTab({
 }) {
   return (
     <RulesLayout
-      formTitle="Настройка лутбокса"
+      formTitle={
+        editingId ? "Редактирование лутбокса" : "Настройка лутбокса"
+      }
       form={
         <div className="space-y-3">
           <RuleCommonFields
@@ -1298,8 +1532,13 @@ function LootBoxesTab({
             disabled={saving === "lootBox"}
             onClick={onSave}
           >
-            Сохранить лутбокс
+            {editingId ? "Изменить лутбокс" : "Создать лутбокс"}
           </button>
+          {editingId ? (
+            <button type="button" className={smallButtonClass} onClick={onReset}>
+              Сбросить выбор
+            </button>
+          ) : null}
         </div>
       }
       listTitle="Лутбоксы"
@@ -1315,6 +1554,7 @@ function LootBoxesTab({
             item.segment ?? "без сегмента",
             formatMoney(item.budgetAmount ?? 0),
           ]}
+          onEdit={() => onEdit(item)}
           onStatus={(status) => onStatus("loot-boxes", item.id, status)}
           saving={saving === `loot-boxes-${item.id}`}
         />
@@ -1329,7 +1569,10 @@ function MissionsTab({
   missions,
   audiences,
   stores,
+  editingId,
   onSave,
+  onEdit,
+  onReset,
   onStatus,
   saving,
 }: {
@@ -1338,7 +1581,10 @@ function MissionsTab({
   missions: GuestGameMission[];
   audiences: GuestAudience[];
   stores: Store[];
+  editingId: string | null;
   onSave: () => Promise<void>;
+  onEdit: (mission: GuestGameMission) => void;
+  onReset: () => void;
   onStatus: (
     type: "loot-boxes" | "missions" | "seasons",
     id: string,
@@ -1348,7 +1594,7 @@ function MissionsTab({
 }) {
   return (
     <RulesLayout
-      formTitle="Конструктор миссии"
+      formTitle={editingId ? "Редактирование миссии" : "Конструктор миссии"}
       form={
         <div className="space-y-3">
           <RuleCommonFields
@@ -1480,8 +1726,13 @@ function MissionsTab({
             disabled={saving === "mission"}
             onClick={onSave}
           >
-            Сохранить миссию
+            {editingId ? "Изменить миссию" : "Создать миссию"}
           </button>
+          {editingId ? (
+            <button type="button" className={smallButtonClass} onClick={onReset}>
+              Сбросить выбор
+            </button>
+          ) : null}
         </div>
       }
       listTitle="Миссии"
@@ -1497,6 +1748,7 @@ function MissionsTab({
             `${item.progressTarget ?? 1} ${item.progressUnit ?? "шаг"}`,
             formatMoney(item.budgetAmount ?? 0),
           ]}
+          onEdit={() => onEdit(item)}
           onStatus={(status) => onStatus("missions", item.id, status)}
           saving={saving === `missions-${item.id}`}
         />
@@ -1510,7 +1762,10 @@ function SeasonsTab({
   setForm,
   seasons,
   audiences,
+  editingId,
   onSave,
+  onEdit,
+  onReset,
   onStatus,
   saving,
 }: {
@@ -1518,7 +1773,10 @@ function SeasonsTab({
   setForm: (form: SeasonForm) => void;
   seasons: GuestGameSeason[];
   audiences: GuestAudience[];
+  editingId: string | null;
   onSave: () => Promise<void>;
+  onEdit: (season: GuestGameSeason) => void;
+  onReset: () => void;
   onStatus: (
     type: "loot-boxes" | "missions" | "seasons",
     id: string,
@@ -1528,7 +1786,7 @@ function SeasonsTab({
 }) {
   return (
     <RulesLayout
-      formTitle="Сезон и Battle Pass"
+      formTitle={editingId ? "Редактирование Battle Pass" : "Сезон и Battle Pass"}
       form={
         <div className="space-y-3">
           <div className="grid gap-3 sm:grid-cols-2">
@@ -1675,8 +1933,13 @@ function SeasonsTab({
             disabled={saving === "season"}
             onClick={onSave}
           >
-            Сохранить сезон
+            {editingId ? "Изменить сезон" : "Создать сезон"}
           </button>
+          {editingId ? (
+            <button type="button" className={smallButtonClass} onClick={onReset}>
+              Сбросить выбор
+            </button>
+          ) : null}
         </div>
       }
       listTitle="Сезоны"
@@ -1692,6 +1955,7 @@ function SeasonsTab({
             formatDate(item.periodFrom),
             formatMoney(item.budgetAmount ?? 0),
           ]}
+          onEdit={() => onEdit(item)}
           onStatus={(status) => onStatus("seasons", item.id, status)}
           saving={saving === `seasons-${item.id}`}
         />
@@ -1710,7 +1974,10 @@ function RewardsTab({
   lootBoxes,
   missions,
   seasons,
+  editingId,
   onSave,
+  onEdit,
+  onReset,
   onStatus,
   saving,
 }: {
@@ -1723,7 +1990,10 @@ function RewardsTab({
   lootBoxes: GuestGameLootBox[];
   missions: GuestGameMission[];
   seasons: GuestGameSeason[];
+  editingId: string | null;
   onSave: () => Promise<void>;
+  onEdit: (reward: GuestGameReward) => void;
+  onReset: () => void;
   onStatus: (
     reward: GuestGameReward,
     status: GuestGameRewardStatus,
@@ -1732,7 +2002,7 @@ function RewardsTab({
 }) {
   return (
     <div className="grid gap-5 xl:grid-cols-[380px_minmax(0,1fr)]">
-      <Panel title="Ручная награда">
+      <Panel title={editingId ? "Редактирование награды" : "Ручная награда"}>
         <div className="space-y-3">
           <Field label="Профиль">
             <select
@@ -1905,8 +2175,13 @@ function RewardsTab({
             disabled={saving === "reward"}
             onClick={onSave}
           >
-            Поставить в кошелек
+            {editingId ? "Изменить награду" : "Поставить в кошелек"}
           </button>
+          {editingId ? (
+            <button type="button" className={smallButtonClass} onClick={onReset}>
+              Сбросить выбор
+            </button>
+          ) : null}
         </div>
       </Panel>
 
@@ -1919,6 +2194,7 @@ function RewardsTab({
                 key={reward.id}
                 reward={reward}
                 onStatus={onStatus}
+                onEdit={onEdit}
                 saving={saving}
               />
             ))
@@ -2062,10 +2338,12 @@ function RulesLayout<T>({
 
 function ProfileCard({
   profile,
+  onEdit,
   onStatus,
   saving,
 }: {
   profile: GuestGameProfile;
+  onEdit: (profile: GuestGameProfile) => void;
   onStatus: (
     profile: GuestGameProfile,
     status: GuestGameProfileStatus,
@@ -2091,6 +2369,13 @@ function ProfileCard({
         <MiniMetric label="Канал" value={profile.telegramIdentity ? "TG" : profile.maxIdentity ? "MAX" : "-"} />
       </div>
       <div className="mt-4 flex flex-wrap gap-2">
+        <button
+          type="button"
+          className={smallButtonClass}
+          onClick={() => onEdit(profile)}
+        >
+          Редактировать
+        </button>
         {profileStatusOptions.map((status) => (
           <button
             key={status}
@@ -2112,6 +2397,7 @@ function RuleCard({
   status,
   subtitle,
   meta,
+  onEdit,
   onStatus,
   saving,
 }: {
@@ -2119,6 +2405,7 @@ function RuleCard({
   status: GuestGameStatus;
   subtitle: string;
   meta: string[];
+  onEdit: () => void;
   onStatus: (status: GuestGameStatus) => Promise<void>;
   saving: boolean;
 }) {
@@ -2146,6 +2433,9 @@ function RuleCard({
         ))}
       </div>
       <div className="mt-4 flex flex-wrap gap-2">
+        <button type="button" className={smallButtonClass} onClick={onEdit}>
+          Редактировать
+        </button>
         {statusOptions.map((nextStatus) => (
           <button
             key={nextStatus}
@@ -2165,6 +2455,7 @@ function RuleCard({
 function RewardRow({
   reward,
   onStatus,
+  onEdit,
   saving,
 }: {
   reward: GuestGameReward;
@@ -2172,6 +2463,7 @@ function RewardRow({
     reward: GuestGameReward,
     status: GuestGameRewardStatus,
   ) => Promise<void>;
+  onEdit: (reward: GuestGameReward) => void;
   saving: string | null;
 }) {
   return (
@@ -2196,6 +2488,13 @@ function RewardRow({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className={smallButtonClass}
+            onClick={() => onEdit(reward)}
+          >
+            Редактировать
+          </button>
           {rewardStatusOptions.map((status) => (
             <button
               key={status}
@@ -2458,6 +2757,116 @@ function EmptyState({ text }: { text: string }) {
   );
 }
 
+function profileToForm(profile: GuestGameProfile): ProfileForm {
+  return {
+    guestId: profile.guest?.id ?? "",
+    leadId: profile.lead?.id ?? "",
+    displayName: profile.displayName,
+    contactMasked: profile.contactMasked ?? "",
+    telegramIdentity: profile.telegramIdentity ?? "",
+    maxIdentity: profile.maxIdentity ?? "",
+    xp: String(profile.xp),
+    level: String(profile.level),
+    status: profile.status,
+  };
+}
+
+function lootBoxToForm(lootBox: GuestGameLootBox): LootBoxForm {
+  return {
+    name: lootBox.name,
+    status: lootBox.status,
+    triggerKind: lootBox.triggerKind,
+    rewardType: lootBox.rewardType,
+    rewardAmount: moneyFormValue(lootBox.rewardAmount),
+    rewardLabel: lootBox.rewardLabel ?? "",
+    audienceId: lootBox.audience?.id ?? "",
+    segment: lootBox.segment ?? "",
+    sessionType: lootBox.sessionType ?? "",
+    storeIds: lootBox.storeIds,
+    periodRulesText: jsonFormValue(lootBox.periodRules),
+    limitsText: jsonFormValue(lootBox.limits),
+    probabilityRulesText: jsonFormValue(
+      lootBox.probabilityRules,
+      defaultLootBoxForm.probabilityRulesText,
+    ),
+    budgetAmount: moneyFormValue(lootBox.budgetAmount),
+    antiFraudText: jsonFormValue(lootBox.antiFraudRules),
+    manualApprovalRequired: lootBox.manualApprovalRequired,
+    note: lootBox.note ?? "",
+  };
+}
+
+function missionToForm(mission: GuestGameMission): MissionForm {
+  return {
+    name: mission.name,
+    status: mission.status,
+    missionType: mission.missionType,
+    triggerKind: mission.triggerKind,
+    rewardType: mission.rewardType,
+    rewardAmount: moneyFormValue(mission.rewardAmount),
+    rewardLabel: mission.rewardLabel ?? "",
+    xpReward: String(mission.xpReward),
+    progressTarget: mission.progressTarget ? String(mission.progressTarget) : "",
+    progressUnit: mission.progressUnit ?? "",
+    audienceId: mission.audience?.id ?? "",
+    storeIds: mission.storeIds,
+    periodFrom: dateInputValue(mission.periodFrom),
+    periodTo: dateInputValue(mission.periodTo),
+    budgetAmount: moneyFormValue(mission.budgetAmount),
+    perGuestLimit: mission.perGuestLimit ? String(mission.perGuestLimit) : "",
+    totalRewardLimit: mission.totalRewardLimit
+      ? String(mission.totalRewardLimit)
+      : "",
+    conditionsText: jsonFormValue(
+      mission.conditions,
+      defaultMissionForm.conditionsText,
+    ),
+    antiFraudText: jsonFormValue(mission.antiFraudRules),
+    manualApprovalRequired: mission.manualApprovalRequired,
+    note: mission.note ?? "",
+  };
+}
+
+function seasonToForm(season: GuestGameSeason): SeasonForm {
+  return {
+    name: season.name,
+    status: season.status,
+    seasonType: season.seasonType,
+    audienceId: season.audience?.id ?? "",
+    periodFrom: dateInputValue(season.periodFrom),
+    periodTo: dateInputValue(season.periodTo),
+    xpRulesText: jsonFormValue(season.xpRules, defaultSeasonForm.xpRulesText),
+    levelsText: jsonFormValue(season.levels, defaultSeasonForm.levelsText),
+    freeRewardsText: jsonFormValue(season.freeRewards),
+    premiumRewardsText: jsonFormValue(season.premiumRewards),
+    premiumEnabled: season.premiumEnabled,
+    premiumUpgradeMode: season.premiumUpgradeMode ?? "",
+    budgetAmount: moneyFormValue(season.budgetAmount),
+    manualApprovalRequired: season.manualApprovalRequired,
+    note: season.note ?? "",
+  };
+}
+
+function rewardToForm(reward: GuestGameReward): RewardForm {
+  return {
+    profileId: reward.profile?.id ?? "",
+    guestId: reward.guest?.id ?? "",
+    lootBoxId: reward.lootBox?.id ?? "",
+    missionId: reward.mission?.id ?? "",
+    seasonId: reward.season?.id ?? "",
+    storeId: reward.store?.id ?? "",
+    status: reward.status,
+    source: reward.source,
+    rewardType: reward.rewardType,
+    rewardAmount: String(reward.rewardAmount),
+    rewardLabel: reward.rewardLabel,
+    rewardCode: reward.rewardCode ?? "",
+    expiresAt: dateInputValue(reward.expiresAt),
+    note: reward.note ?? "",
+    evidenceText: jsonFormValue(reward.evidence),
+  };
+}
+
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { cache: "no-store", ...init });
 
@@ -2511,6 +2920,39 @@ function parseJson(text: string, label: string, allowEmpty = true) {
 
 function jsonText(value: unknown) {
   return JSON.stringify(value, null, 2);
+}
+
+function jsonFormValue(value: unknown, fallback = "") {
+  if (value == null) {
+    return fallback;
+  }
+
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return fallback;
+  }
+}
+
+function moneyFormValue(value: number | null) {
+  return value == null ? "" : String(value);
+}
+
+function dateInputValue(value: string | null) {
+  if (!value) {
+    return "";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  const offset = date.getTimezoneOffset();
+  const local = new Date(date.getTime() - offset * 60_000);
+
+  return local.toISOString().slice(0, 16);
 }
 
 function formatMoney(value: number) {

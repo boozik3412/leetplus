@@ -55,7 +55,7 @@ const emptyWorkspace: GuestGamificationWorkspace = {
 };
 
 export default async function GuestGamificationPage() {
-  await requireCurrentUser();
+  const user = await requireCurrentUser();
 
   const [workspace, audiences, stores, guestsResponse, leads] =
     await Promise.all([
@@ -85,6 +85,7 @@ export default async function GuestGamificationPage() {
           stores={stores}
           guests={guests}
           leads={leads}
+          tenantSlug={user.tenantSlug}
         />
       </div>
     </main>

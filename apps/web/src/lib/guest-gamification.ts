@@ -218,6 +218,9 @@ export type GuestGameDryRunResult = {
     sessionPacket: boolean | null;
     sessionMinutes: number;
     spendAmount: number;
+    tariffGroupId: string | null;
+    tariffPeriodId: string | null;
+    tariffTypeId: string | null;
   };
   summary: {
     checkedRules: number;
@@ -268,6 +271,9 @@ export type GuestGameSnapshotFact = {
   sessionPacket: boolean | null;
   sessionMinutes: number | null;
   spendAmount: number | null;
+  tariffGroupId: string | null;
+  tariffPeriodId: string | null;
+  tariffTypeId: string | null;
   label: string;
   details: string | null;
 };

@@ -1,6 +1,6 @@
 # LeetPlus Project State
 
-Last updated: 2026-06-03
+Last updated: 2026-06-04
 
 ## Current Workflow
 
@@ -78,6 +78,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Connected typed Langame tariff snapshot items to Guest Game Hub rule construction: loot boxes, missions, Battle Pass, and the dry-run/process-event form can select tariff group, tariff period, and tariff type from saved snapshot catalogs; these conditions are stored in rule JSON and checked in dry-run, confirmed processing, and batch pipeline without live Langame reads.
 - Added typed tariff snapshot storage for Guest Game Hub: successful manual snapshots of `tariffs/by_days/list`, `tariffs/groups/list`, `tariffs/time_period/list`, and `tariffs/types_groups/list` now populate `LangameTariffSnapshotItem` with domain, endpoint, external id, readable label/name, kind, field keys, and sanitized raw payload; `/guests/gamification` surfaces typed item counts and examples without live Langame reads.
 - Surfaced prepared tariff endpoint readiness in Guest Game Hub: `/guests/gamification` now reads `LangameEndpointSnapshotRun` for `tariffs/by_days/list`, `tariffs/groups/list`, `tariffs/time_period/list`, and `tariffs/types_groups/list`, shows `READY/PARTIAL/STALE/FAILED/UNPROFILED`, source coverage, row counts, fields, and next `/sync` action without live Langame reads or pretending the generic preview is a full tariff catalog.
 - Added the first tariff-aware Guest Game Hub condition layer from prepared session snapshots: `GuestSession.packet` is exposed as `sessionType`/`sessionPacket` in facts, dry-run, confirmed processing, and batch pipeline; `/guests/gamification` can restrict loot boxes, missions, and battle pass to regular sessions or hour packages and add packet-session XP bonuses without live Langame reads.

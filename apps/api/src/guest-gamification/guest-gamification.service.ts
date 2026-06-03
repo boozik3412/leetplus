@@ -745,6 +745,9 @@ export type GuestGameDryRunDto = {
   sessionPacket?: boolean | string | null;
   sessionMinutes?: number | string | null;
   spendAmount?: number | string | null;
+  tariffGroupId?: string | null;
+  tariffPeriodId?: string | null;
+  tariffTypeId?: string | null;
 };
 
 export type GuestGameProcessEventDto = GuestGameDryRunDto & {
@@ -787,6 +790,9 @@ export type GuestGameDryRunResult = {
     sessionPacket: boolean | null;
     sessionMinutes: number;
     spendAmount: number;
+    tariffGroupId: string | null;
+    tariffPeriodId: string | null;
+    tariffTypeId: string | null;
   };
   summary: {
     checkedRules: number;
@@ -837,6 +843,9 @@ export type GuestGameSnapshotFact = {
   sessionPacket: boolean | null;
   sessionMinutes: number | null;
   spendAmount: number | null;
+  tariffGroupId: string | null;
+  tariffPeriodId: string | null;
+  tariffTypeId: string | null;
   label: string;
   details: string | null;
 };
@@ -1128,7 +1137,7 @@ export class GuestGamificationService {
             { startedAt: 'desc' },
             { createdAt: 'desc' },
           ],
-          take: 240,
+          take: 400,
         }),
       ]);
     const latestRuns: typeof runs = [];
@@ -1171,9 +1180,33 @@ export class GuestGamificationService {
         failedSources,
         latestTime,
       });
-      const endpointTypedItems = typedItems
-        .filter((item) => item.endpointKey === definition.endpointKey)
-        .slice(0, 6);
+      const endpointTypedItems: typeof typedItems = [];
+      const typedItemKeys = new Set<string>();
+
+      for (const item of typedItems) {
+        if (item.endpointKey !== definition.endpointKey) {
+          continue;
+        }
+
+        const typedKey = [
+          item.endpointKey,
+          item.domain,
+          item.externalId ?? '',
+          item.label ?? item.name ?? '',
+          item.kind ?? '',
+        ].join(':');
+
+        if (typedItemKeys.has(typedKey)) {
+          continue;
+        }
+
+        typedItemKeys.add(typedKey);
+        endpointTypedItems.push(item);
+
+        if (endpointTypedItems.length >= 60) {
+          break;
+        }
+      }
 
       return {
         ...definition,
@@ -1857,6 +1890,9 @@ export class GuestGamificationService {
     const sessionPacket = nullableBooleanValue(dto.sessionPacket);
     const sessionMinutes = Math.max(0, intValue(dto.sessionMinutes) ?? 120);
     const spendAmount = Math.max(0, dryRunNumber(dto.spendAmount, 0));
+    const tariffGroupId = nullableString(dto.tariffGroupId) ?? null;
+    const tariffPeriodId = nullableString(dto.tariffPeriodId) ?? null;
+    const tariffTypeId = nullableString(dto.tariffTypeId) ?? null;
     const [profile, lootBoxes, missions, seasons, rewards] = await Promise.all([
       this.resolveDryRunProfile(user, dto),
       this.getLootBoxes(user),
@@ -1882,6 +1918,9 @@ export class GuestGamificationService {
       sessionPacket,
       sessionMinutes,
       spendAmount,
+      tariffGroupId,
+      tariffPeriodId,
+      tariffTypeId,
       rewards,
     };
     const rules = [
@@ -1907,7 +1946,15 @@ export class GuestGamificationService {
         : null,
       guest,
       store: store ? { id: store.id, name: store.name } : null,
-      input: { sessionType, sessionPacket, sessionMinutes, spendAmount },
+      input: {
+        sessionType,
+        sessionPacket,
+        sessionMinutes,
+        spendAmount,
+        tariffGroupId,
+        tariffPeriodId,
+        tariffTypeId,
+      },
       summary: {
         checkedRules: rules.length,
         eligibleRules: eligibleRules.length,
@@ -2952,6 +2999,9 @@ function mapSessionFacts(row: SnapshotSessionRow): GuestGameSnapshotFact[] {
       sessionPacket,
       sessionMinutes,
       spendAmount: null,
+      tariffGroupId: null,
+      tariffPeriodId: null,
+      tariffTypeId: null,
       label: `Старт сессии: ${guestName}`,
       details: [
         row.store?.name,
@@ -2979,6 +3029,9 @@ function mapSessionFacts(row: SnapshotSessionRow): GuestGameSnapshotFact[] {
       sessionPacket,
       sessionMinutes,
       spendAmount: null,
+      tariffGroupId: null,
+      tariffPeriodId: null,
+      tariffTypeId: null,
       label: `Игровое время: ${guestName}`,
       details: [
         row.store?.name,
@@ -3014,6 +3067,9 @@ function mapLogFact(row: SnapshotLogRow): GuestGameSnapshotFact[] {
       sessionPacket: null,
       sessionMinutes: null,
       spendAmount: null,
+      tariffGroupId: null,
+      tariffPeriodId: null,
+      tariffTypeId: null,
       label: `Лог гостя: ${snapshotGuestName(row.guest, row.externalGuestId)}`,
       details: row.type ?? 'тип не указан',
     },
@@ -3047,6 +3103,9 @@ function mapTransactionFact(
       sessionPacket: null,
       sessionMinutes: null,
       spendAmount: Math.abs(amount),
+      tariffGroupId: null,
+      tariffPeriodId: null,
+      tariffTypeId: null,
       label: `${eventType === 'BALANCE_TOPUP' ? 'Пополнение баланса' : 'Покупка/списание'}: ${snapshotGuestName(
         row.guest,
         row.externalGuestId,
@@ -3091,6 +3150,9 @@ function mapOperationLogFact(
       sessionPacket: null,
       sessionMinutes: null,
       spendAmount: Math.abs(amount),
+      tariffGroupId: null,
+      tariffPeriodId: null,
+      tariffTypeId: null,
       label:
         row.operationName ??
         (eventType === 'BALANCE_TOPUP'
@@ -3127,6 +3189,9 @@ function mapBalanceFact(row: SnapshotBalanceRow): GuestGameSnapshotFact[] {
       sessionPacket: null,
       sessionMinutes: null,
       spendAmount: null,
+      tariffGroupId: null,
+      tariffPeriodId: null,
+      tariffTypeId: null,
       label: `Баланс гостя: ${snapshotGuestName(row.guest, row.externalGuestId)}`,
       details: `Баланс ${balance} руб`,
     },
@@ -3153,6 +3218,9 @@ function mapBonusBalanceFact(
       sessionPacket: null,
       sessionMinutes: null,
       spendAmount: null,
+      tariffGroupId: null,
+      tariffPeriodId: null,
+      tariffTypeId: null,
       label: `Бонусный баланс: ${snapshotGuestName(row.guest, row.externalGuestId)}`,
       details: `Бонусы ${bonusBalance} руб`,
     },
@@ -3193,6 +3261,9 @@ function mapLoyaltyGroupFact(
       sessionPacket: null,
       sessionMinutes: null,
       spendAmount: null,
+      tariffGroupId: null,
+      tariffPeriodId: null,
+      tariffTypeId: null,
       label: `Группа лояльности: ${groupName}`,
       details: [
         snapshotGuestName(row, row.externalGuestId),
@@ -3236,6 +3307,9 @@ function mapProductExpenseFact(
       sessionPacket: null,
       sessionMinutes: null,
       spendAmount: Math.abs(revenue),
+      tariffGroupId: null,
+      tariffPeriodId: null,
+      tariffTypeId: null,
       label: `Товарная покупка: ${productName ?? 'товар'} · ${guestName}`,
       details: [
         row.storeNameAtSale ?? row.store?.name,
@@ -3434,6 +3508,9 @@ function pipelineProcessDtoFromFact(
     sessionPacket: fact.sessionPacket,
     sessionMinutes: fact.sessionMinutes,
     spendAmount: fact.spendAmount,
+    tariffGroupId: fact.tariffGroupId,
+    tariffPeriodId: fact.tariffPeriodId,
+    tariffTypeId: fact.tariffTypeId,
     sourceFactId: fact.id,
     sourceFactKind: fact.source,
     externalProvider: fact.externalProvider,
@@ -3617,6 +3694,9 @@ type DryRunContext = {
   sessionPacket: boolean | null;
   sessionMinutes: number;
   spendAmount: number;
+  tariffGroupId: string | null;
+  tariffPeriodId: string | null;
+  tariffTypeId: string | null;
   rewards: GuestGameReward[];
 };
 
@@ -3645,6 +3725,12 @@ function evaluateLootBoxDryRun(
   appendDryRunSessionConditionCheck(
     rule.sessionType,
     dryRunRecord(rule.periodRules).packetMode,
+    context,
+    blockers,
+    reasons,
+  );
+  appendDryRunTariffConditionCheck(
+    rule.periodRules,
     context,
     blockers,
     reasons,
@@ -3954,6 +4040,63 @@ function appendDryRunSessionConditionCheck(
   }
 }
 
+function appendDryRunTariffConditionCheck(
+  value: unknown,
+  context: DryRunContext,
+  blockers: string[],
+  reasons: string[],
+) {
+  const rules = dryRunRecord(value);
+
+  appendDryRunTariffSingleCheck(
+    'Тарифная группа',
+    dryRunStringValues(rules.tariffGroupIds, rules.tariffGroupId),
+    context.tariffGroupId,
+    blockers,
+    reasons,
+  );
+  appendDryRunTariffSingleCheck(
+    'Тарифный период',
+    dryRunStringValues(rules.tariffPeriodIds, rules.tariffPeriodId),
+    context.tariffPeriodId,
+    blockers,
+    reasons,
+  );
+  appendDryRunTariffSingleCheck(
+    'Тип тарифа',
+    dryRunStringValues(rules.tariffTypeIds, rules.tariffTypeId),
+    context.tariffTypeId,
+    blockers,
+    reasons,
+  );
+}
+
+function appendDryRunTariffSingleCheck(
+  label: string,
+  expectedValues: string[],
+  actualValue: string | null,
+  blockers: string[],
+  reasons: string[],
+) {
+  const uniqueExpected = Array.from(new Set(expectedValues));
+
+  if (!uniqueExpected.length) {
+    return;
+  }
+
+  if (!actualValue) {
+    blockers.push(`${label}: значение не указано для проверки правила`);
+    return;
+  }
+
+  if (!uniqueExpected.includes(actualValue)) {
+    blockers.push(`${label} не подходит: нужен ${uniqueExpected.join(', ')}`);
+    return;
+  }
+
+  reasons.push(`${label} подходит`);
+}
+
 function appendDryRunDateBounds(
   periodFrom: string | null,
   periodTo: string | null,
@@ -3993,6 +4136,7 @@ function appendDryRunMissionConditions(
     blockers,
     reasons,
   );
+  appendDryRunTariffConditionCheck(conditions, context, blockers, reasons);
 
   if (minSessionMinutes != null && context.sessionMinutes < minSessionMinutes) {
     blockers.push(
@@ -4039,6 +4183,7 @@ function appendDryRunSeasonXpRules(
     blockers,
     reasons,
   );
+  appendDryRunTariffConditionCheck(rules, context, blockers, reasons);
 
   if (dryRunOptionalNumber(rules.packetSessionBonus) != null) {
     reasons.push('Battle Pass учитывает бонус за пакет часов');
@@ -4285,6 +4430,17 @@ function dryRunStringArray(value: unknown) {
     (item): item is string =>
       typeof item === 'string' && item.trim().length > 0,
   );
+}
+
+function dryRunStringValues(...values: unknown[]) {
+  return values.flatMap((value) => {
+    if (Array.isArray(value)) {
+      return dryRunStringArray(value);
+    }
+
+    const stringValue = dryRunString(value);
+    return stringValue ? [stringValue] : [];
+  });
 }
 
 function dryRunNumberArray(value: unknown) {

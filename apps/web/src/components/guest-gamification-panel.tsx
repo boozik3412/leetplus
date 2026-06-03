@@ -70,6 +70,9 @@ type LootBoxForm = {
   segment: string;
   sessionType: string;
   packetMode: string;
+  tariffGroupId: string;
+  tariffPeriodId: string;
+  tariffTypeId: string;
   storeIds: string[];
   quietHoursEnabled: boolean;
   weekdaysOnly: boolean;
@@ -111,6 +114,9 @@ type MissionForm = {
   totalRewardLimit: string;
   sessionType: string;
   packetMode: string;
+  tariffGroupId: string;
+  tariffPeriodId: string;
+  tariffTypeId: string;
   windowDays: string;
   weekdaysOnly: boolean;
   minSessionMinutes: string;
@@ -138,6 +144,9 @@ type SeasonForm = {
   xpPacketSessionBonus: string;
   sessionType: string;
   packetMode: string;
+  tariffGroupId: string;
+  tariffPeriodId: string;
+  tariffTypeId: string;
   levelCount: string;
   xpPerLevel: string;
   freeRewardEvery: string;
@@ -190,6 +199,9 @@ type DryRunForm = {
   occurredAt: string;
   sessionType: string;
   sessionPacket: string;
+  tariffGroupId: string;
+  tariffPeriodId: string;
+  tariffTypeId: string;
   sessionMinutes: string;
   spendAmount: string;
   sourceFactId: string;
@@ -315,6 +327,9 @@ const defaultLootBoxForm: LootBoxForm = {
   segment: "quiet_hours",
   sessionType: "",
   packetMode: "ANY",
+  tariffGroupId: "",
+  tariffPeriodId: "",
+  tariffTypeId: "",
   storeIds: [],
   quietHoursEnabled: true,
   weekdaysOnly: true,
@@ -373,6 +388,9 @@ const defaultMissionForm: MissionForm = {
   totalRewardLimit: "100",
   sessionType: "",
   packetMode: "ANY",
+  tariffGroupId: "",
+  tariffPeriodId: "",
+  tariffTypeId: "",
   windowDays: "7",
   weekdaysOnly: true,
   minSessionMinutes: "90",
@@ -408,6 +426,9 @@ const defaultSeasonForm: SeasonForm = {
   xpPacketSessionBonus: "15",
   sessionType: "",
   packetMode: "ANY",
+  tariffGroupId: "",
+  tariffPeriodId: "",
+  tariffTypeId: "",
   levelCount: "4",
   xpPerLevel: "250",
   freeRewardEvery: "2",
@@ -490,6 +511,9 @@ const defaultDryRunForm: DryRunForm = {
   occurredAt: "",
   sessionType: "",
   sessionPacket: "",
+  tariffGroupId: "",
+  tariffPeriodId: "",
+  tariffTypeId: "",
   sessionMinutes: "120",
   spendAmount: "0",
   ...emptyDryRunSource,
@@ -834,6 +858,9 @@ export function GuestGamificationPanel({
           occurredAt: nullable(dryRunForm.occurredAt),
           sessionType: nullable(dryRunForm.sessionType),
           sessionPacket: nullable(dryRunForm.sessionPacket),
+          tariffGroupId: nullable(dryRunForm.tariffGroupId),
+          tariffPeriodId: nullable(dryRunForm.tariffPeriodId),
+          tariffTypeId: nullable(dryRunForm.tariffTypeId),
           sessionMinutes: dryRunForm.sessionMinutes,
           spendAmount: dryRunForm.spendAmount,
         },
@@ -856,6 +883,9 @@ export function GuestGamificationPanel({
           occurredAt: nullable(dryRunForm.occurredAt),
           sessionType: nullable(dryRunForm.sessionType),
           sessionPacket: nullable(dryRunForm.sessionPacket),
+          tariffGroupId: nullable(dryRunForm.tariffGroupId),
+          tariffPeriodId: nullable(dryRunForm.tariffPeriodId),
+          tariffTypeId: nullable(dryRunForm.tariffTypeId),
           sessionMinutes: dryRunForm.sessionMinutes,
           spendAmount: dryRunForm.spendAmount,
           sourceFactId: nullable(dryRunForm.sourceFactId),
@@ -911,6 +941,9 @@ export function GuestGamificationPanel({
       sessionType: fact.sessionType ?? current.sessionType,
       sessionPacket:
         fact.sessionPacket == null ? current.sessionPacket : String(fact.sessionPacket),
+      tariffGroupId: fact.tariffGroupId ?? current.tariffGroupId,
+      tariffPeriodId: fact.tariffPeriodId ?? current.tariffPeriodId,
+      tariffTypeId: fact.tariffTypeId ?? current.tariffTypeId,
       sessionMinutes:
         fact.sessionMinutes == null
           ? current.sessionMinutes
@@ -1058,6 +1091,7 @@ export function GuestGamificationPanel({
           lootBoxes={workspace.lootBoxes}
           audiences={audiences}
           stores={stores}
+          tariffSnapshots={workspace.tariffSnapshots}
           editingId={editingLootBoxId}
           onSave={saveLootBox}
           onEdit={editLootBox}
@@ -1074,6 +1108,7 @@ export function GuestGamificationPanel({
           missions={workspace.missions}
           audiences={audiences}
           stores={stores}
+          tariffSnapshots={workspace.tariffSnapshots}
           editingId={editingMissionId}
           onSave={saveMission}
           onEdit={editMission}
@@ -1089,6 +1124,7 @@ export function GuestGamificationPanel({
           setForm={setSeasonForm}
           seasons={workspace.seasons}
           audiences={audiences}
+          tariffSnapshots={workspace.tariffSnapshots}
           editingId={editingSeasonId}
           onSave={saveSeason}
           onEdit={editSeason}
@@ -1127,6 +1163,7 @@ export function GuestGamificationPanel({
           profiles={workspace.profiles}
           guests={guests}
           stores={stores}
+          tariffSnapshots={workspace.tariffSnapshots}
           snapshotFacts={snapshotFacts}
           pipelineResult={pipelineResult}
           onRun={runDryRun}
@@ -1149,6 +1186,7 @@ function DryRunTab({
   profiles,
   guests,
   stores,
+  tariffSnapshots,
   snapshotFacts,
   pipelineResult,
   onRun,
@@ -1165,6 +1203,7 @@ function DryRunTab({
   profiles: GuestGameProfile[];
   guests: GuestDashboardRow[];
   stores: Store[];
+  tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
   snapshotFacts: GuestGameSnapshotFactsResult | null;
   pipelineResult: GuestGamePipelineRunResult | null;
   onRun: () => Promise<void>;
@@ -1426,6 +1465,22 @@ function DryRunTab({
                 ))}
               </select>
             </label>
+          </div>
+
+          <div className="lg:col-span-3">
+            <TariffConditionFields
+              snapshots={tariffSnapshots}
+              tariffGroupId={form.tariffGroupId}
+              tariffPeriodId={form.tariffPeriodId}
+              tariffTypeId={form.tariffTypeId}
+              onChange={(patch) =>
+                setForm((current) => ({
+                  ...current,
+                  ...patch,
+                  ...emptyDryRunSource,
+                }))
+              }
+            />
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
@@ -2572,6 +2627,7 @@ function LootBoxesTab({
   lootBoxes,
   audiences,
   stores,
+  tariffSnapshots,
   editingId,
   onSave,
   onEdit,
@@ -2584,6 +2640,7 @@ function LootBoxesTab({
   lootBoxes: GuestGameLootBox[];
   audiences: GuestAudience[];
   stores: Store[];
+  tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
   editingId: string | null;
   onSave: () => Promise<void>;
   onEdit: (lootBox: GuestGameLootBox) => void;
@@ -2674,6 +2731,7 @@ function LootBoxesTab({
           />
           <LootBoxBusinessRules
             form={form}
+            tariffSnapshots={tariffSnapshots}
             onChange={(patch) => setForm({ ...form, ...patch })}
           />
           <button
@@ -2703,6 +2761,7 @@ function LootBoxesTab({
             item.audience?.name ?? "все гости",
             item.segment ?? "без сегмента",
             packetModeLabel(stringRule(item.periodRules, "packetMode", "ANY")),
+            tariffRuleSummary(item.periodRules),
             formatMoney(item.budgetAmount ?? 0),
           ]}
           onEdit={() => onEdit(item)}
@@ -2720,6 +2779,7 @@ function MissionsTab({
   missions,
   audiences,
   stores,
+  tariffSnapshots,
   editingId,
   onSave,
   onEdit,
@@ -2732,6 +2792,7 @@ function MissionsTab({
   missions: GuestGameMission[];
   audiences: GuestAudience[];
   stores: Store[];
+  tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
   editingId: string | null;
   onSave: () => Promise<void>;
   onEdit: (mission: GuestGameMission) => void;
@@ -2863,6 +2924,7 @@ function MissionsTab({
           </div>
           <MissionBusinessRules
             form={form}
+            tariffSnapshots={tariffSnapshots}
             onChange={(patch) => setForm({ ...form, ...patch })}
           />
           <button
@@ -2891,6 +2953,7 @@ function MissionsTab({
           meta={[
             item.audience?.name ?? "все гости",
             packetModeLabel(stringRule(item.conditions, "packetMode", "ANY")),
+            tariffRuleSummary(item.conditions),
             `${item.progressTarget ?? 1} ${item.progressUnit ?? "шаг"}`,
             formatMoney(item.budgetAmount ?? 0),
           ]}
@@ -2908,6 +2971,7 @@ function SeasonsTab({
   setForm,
   seasons,
   audiences,
+  tariffSnapshots,
   editingId,
   onSave,
   onEdit,
@@ -2919,6 +2983,7 @@ function SeasonsTab({
   setForm: (form: SeasonForm) => void;
   seasons: GuestGameSeason[];
   audiences: GuestAudience[];
+  tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
   editingId: string | null;
   onSave: () => Promise<void>;
   onEdit: (season: GuestGameSeason) => void;
@@ -2992,6 +3057,7 @@ function SeasonsTab({
           </div>
           <SeasonBusinessRules
             form={form}
+            tariffSnapshots={tariffSnapshots}
             onChange={(patch) => setForm({ ...form, ...patch })}
           />
           <div className="grid gap-3 sm:grid-cols-2">
@@ -3079,6 +3145,7 @@ function SeasonsTab({
           meta={[
             item.audience?.name ?? "все гости",
             packetModeLabel(stringRule(item.xpRules, "packetMode", "ANY")),
+            tariffRuleSummary(item.xpRules),
             formatDate(item.periodFrom),
             formatMoney(item.budgetAmount ?? 0),
           ]}
@@ -3336,9 +3403,11 @@ function RewardsTab({
 
 function LootBoxBusinessRules({
   form,
+  tariffSnapshots,
   onChange,
 }: {
   form: LootBoxForm;
+  tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
   onChange: (patch: Partial<LootBoxForm>) => void;
 }) {
   return (
@@ -3376,6 +3445,13 @@ function LootBoxBusinessRules({
           />
         </Field>
       </div>
+      <TariffConditionFields
+        snapshots={tariffSnapshots}
+        tariffGroupId={form.tariffGroupId}
+        tariffPeriodId={form.tariffPeriodId}
+        tariffTypeId={form.tariffTypeId}
+        onChange={onChange}
+      />
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Раз в неделю на гостя">
           <input
@@ -3453,9 +3529,11 @@ function LootBoxBusinessRules({
 
 function MissionBusinessRules({
   form,
+  tariffSnapshots,
   onChange,
 }: {
   form: MissionForm;
+  tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
   onChange: (patch: Partial<MissionForm>) => void;
 }) {
   return (
@@ -3491,6 +3569,13 @@ function MissionBusinessRules({
           </select>
         </Field>
       </div>
+      <TariffConditionFields
+        snapshots={tariffSnapshots}
+        tariffGroupId={form.tariffGroupId}
+        tariffPeriodId={form.tariffPeriodId}
+        tariffTypeId={form.tariffTypeId}
+        onChange={onChange}
+      />
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Окно выполнения, дней">
           <input
@@ -3556,9 +3641,11 @@ function MissionBusinessRules({
 
 function SeasonBusinessRules({
   form,
+  tariffSnapshots,
   onChange,
 }: {
   form: SeasonForm;
+  tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
   onChange: (patch: Partial<SeasonForm>) => void;
 }) {
   return (
@@ -3647,6 +3734,13 @@ function SeasonBusinessRules({
           />
         </Field>
       </div>
+      <TariffConditionFields
+        snapshots={tariffSnapshots}
+        tariffGroupId={form.tariffGroupId}
+        tariffPeriodId={form.tariffPeriodId}
+        tariffTypeId={form.tariffTypeId}
+        onChange={onChange}
+      />
       <div className="grid gap-3 sm:grid-cols-4">
         <Field label="Уровней">
           <input
@@ -4167,6 +4261,100 @@ function StoreSelect({
   );
 }
 
+type TariffConditionPatch = {
+  tariffGroupId?: string;
+  tariffPeriodId?: string;
+  tariffTypeId?: string;
+};
+
+function TariffConditionFields({
+  snapshots,
+  tariffGroupId,
+  tariffPeriodId,
+  tariffTypeId,
+  onChange,
+}: {
+  snapshots: GuestGameTariffSnapshotEndpoint[];
+  tariffGroupId: string;
+  tariffPeriodId: string;
+  tariffTypeId: string;
+  onChange: (patch: TariffConditionPatch) => void;
+}) {
+  const groupItems = tariffItemsByEndpoint(snapshots, "tariffsGroups");
+  const periodItems = tariffItemsByEndpoint(snapshots, "tariffsTimePeriod");
+  const typeItems = tariffItemsByEndpoint(snapshots, "tariffsTypesGroups");
+  const hasItems = groupItems.length || periodItems.length || typeItems.length;
+
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-xs font-bold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">
+          Тарифные условия Langame
+        </p>
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">
+          {hasItems
+            ? "Выберите только те условия, которые должны ограничивать правило."
+            : "Справочники тарифов пока не заполнены snapshot-синхронизацией."}
+        </p>
+      </div>
+      <div className="mt-3 grid gap-3 lg:grid-cols-3">
+        <TariffConditionSelect
+          label="Группа тарифа"
+          emptyLabel="Любая группа"
+          items={groupItems}
+          value={tariffGroupId}
+          onChange={(value) => onChange({ tariffGroupId: value })}
+        />
+        <TariffConditionSelect
+          label="Период тарифа"
+          emptyLabel="Любой период"
+          items={periodItems}
+          value={tariffPeriodId}
+          onChange={(value) => onChange({ tariffPeriodId: value })}
+        />
+        <TariffConditionSelect
+          label="Тип тарифа"
+          emptyLabel="Любой тип"
+          items={typeItems}
+          value={tariffTypeId}
+          onChange={(value) => onChange({ tariffTypeId: value })}
+        />
+      </div>
+    </div>
+  );
+}
+
+function TariffConditionSelect({
+  label,
+  emptyLabel,
+  items,
+  value,
+  onChange,
+}: {
+  label: string;
+  emptyLabel: string;
+  items: GuestGameTariffSnapshotEndpoint["typedItems"];
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <Field label={label}>
+      <select
+        className={fieldClass}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        <option value="">{emptyLabel}</option>
+        {items.map((item) => (
+          <option key={`${item.domain}-${tariffItemValue(item)}`} value={tariffItemValue(item)}>
+            {tariffItemLabel(item)}
+          </option>
+        ))}
+      </select>
+    </Field>
+  );
+}
+
 function LinkSelect<T extends { id: string; name: string }>({
   label,
   value,
@@ -4332,6 +4520,9 @@ function lootBoxToForm(lootBox: GuestGameLootBox): LootBoxForm {
     segment: lootBox.segment ?? "",
     sessionType: lootBox.sessionType ?? "",
     packetMode: stringRule(lootBox.periodRules, "packetMode", "ANY"),
+    tariffGroupId: stringRule(lootBox.periodRules, "tariffGroupId", ""),
+    tariffPeriodId: stringRule(lootBox.periodRules, "tariffPeriodId", ""),
+    tariffTypeId: stringRule(lootBox.periodRules, "tariffTypeId", ""),
     storeIds: lootBox.storeIds,
     quietHoursEnabled: booleanRule(lootBox.periodRules, "quietHoursEnabled", true),
     weekdaysOnly: booleanRule(lootBox.periodRules, "weekdaysOnly", true),
@@ -4400,6 +4591,9 @@ function missionToForm(mission: GuestGameMission): MissionForm {
       : "",
     sessionType: stringRule(mission.conditions, "sessionType", ""),
     packetMode: stringRule(mission.conditions, "packetMode", "ANY"),
+    tariffGroupId: stringRule(mission.conditions, "tariffGroupId", ""),
+    tariffPeriodId: stringRule(mission.conditions, "tariffPeriodId", ""),
+    tariffTypeId: stringRule(mission.conditions, "tariffTypeId", ""),
     windowDays: numberRule(mission.conditions, "windowDays", "7"),
     weekdaysOnly: booleanRule(mission.conditions, "weekdaysOnly", true),
     minSessionMinutes: numberRule(mission.conditions, "minSessionMinutes", "90"),
@@ -4452,6 +4646,9 @@ function seasonToForm(season: GuestGameSeason): SeasonForm {
     ),
     sessionType: stringRule(season.xpRules, "sessionType", ""),
     packetMode: stringRule(season.xpRules, "packetMode", "ANY"),
+    tariffGroupId: stringRule(season.xpRules, "tariffGroupId", ""),
+    tariffPeriodId: stringRule(season.xpRules, "tariffPeriodId", ""),
+    tariffTypeId: stringRule(season.xpRules, "tariffTypeId", ""),
     levelCount: String(arrayRule(season.levels).length || 4),
     xpPerLevel: seasonLevelStep(season.levels, "250"),
     freeRewardEvery: rewardFrequency(season.freeRewards, "2"),
@@ -4534,6 +4731,9 @@ function buildLootBoxPeriodRules(form: LootBoxForm) {
     weekdays: form.weekdaysOnly ? [1, 2, 3, 4, 5] : [0, 1, 2, 3, 4, 5, 6],
     hours: form.quietHoursEnabled ? [`${start}-${end}`] : [],
     packetMode: form.packetMode,
+    tariffGroupId: nullable(form.tariffGroupId),
+    tariffPeriodId: nullable(form.tariffPeriodId),
+    tariffTypeId: nullable(form.tariffTypeId),
   };
 }
 
@@ -4581,6 +4781,9 @@ function buildMissionConditions(form: MissionForm) {
     weekdaysOnly: form.weekdaysOnly,
     sessionType: nullable(form.sessionType),
     packetMode: form.packetMode,
+    tariffGroupId: nullable(form.tariffGroupId),
+    tariffPeriodId: nullable(form.tariffPeriodId),
+    tariffTypeId: nullable(form.tariffTypeId),
     minSessionMinutes: optionalNumber(form.minSessionMinutes),
     minSpendAmount: optionalNumber(form.minSpendAmount),
     requiresLangameFact: form.requireLangameFact,
@@ -4609,6 +4812,9 @@ function buildSeasonXpRules(form: SeasonForm) {
     packetSessionBonus: numeric(form.xpPacketSessionBonus, 0),
     sessionType: nullable(form.sessionType),
     packetMode: form.packetMode,
+    tariffGroupId: nullable(form.tariffGroupId),
+    tariffPeriodId: nullable(form.tariffPeriodId),
+    tariffTypeId: nullable(form.tariffTypeId),
   };
 }
 
@@ -4695,6 +4901,40 @@ function numberRule(value: unknown, key: string, fallback: string) {
 function stringRule(value: unknown, key: string, fallback: string) {
   const raw = asRecord(value)[key];
   return typeof raw === "string" && raw.trim() ? raw : fallback;
+}
+
+function tariffItemsByEndpoint(
+  snapshots: GuestGameTariffSnapshotEndpoint[],
+  endpointKey: string,
+) {
+  return (
+    snapshots.find((snapshot) => snapshot.endpointKey === endpointKey)
+      ?.typedItems ?? []
+  );
+}
+
+function tariffItemValue(
+  item: GuestGameTariffSnapshotEndpoint["typedItems"][number],
+) {
+  return item.externalId ?? item.id;
+}
+
+function tariffItemLabel(
+  item: GuestGameTariffSnapshotEndpoint["typedItems"][number],
+) {
+  const label = item.label ?? item.name ?? item.externalId ?? item.id;
+  return item.domain ? `${label} · ${item.domain}` : label;
+}
+
+function tariffRuleSummary(value: unknown) {
+  const record = asRecord(value);
+  const count = [
+    record.tariffGroupId,
+    record.tariffPeriodId,
+    record.tariffTypeId,
+  ].filter((item) => typeof item === "string" && item.trim()).length;
+
+  return count ? `тарифы: ${count}` : "любой тариф";
 }
 
 function booleanRule(value: unknown, key: string, fallback: boolean) {

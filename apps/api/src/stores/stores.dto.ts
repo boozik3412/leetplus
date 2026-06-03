@@ -1,5 +1,6 @@
 export type CreateStoreDto = {
   name: string;
+  publicSlug?: string | null;
   address?: string | null;
 };
 

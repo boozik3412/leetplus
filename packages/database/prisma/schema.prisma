@@ -426,6 +426,7 @@ model Store {
   id                    String               @id @default(uuid())
   tenantId              String
   name                  String
+  publicSlug            String?
   address               String?
   isActive              Boolean              @default(true)
   externalProvider      IntegrationProvider?
@@ -472,6 +473,7 @@ model Store {
   userAccesses                 UserStoreAccess[]
 
   @@unique([tenantId, externalProvider, externalDomain, externalClubId])
+  @@unique([tenantId, publicSlug], map: "store_tenant_public_slug_uidx")
   @@index([tenantId])
   @@index([integrationSourceId])
 }

@@ -52,7 +52,7 @@ export function StoreCreateForm() {
       className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm"
     >
       <h2 className="text-base font-semibold">Новая торговая точка</h2>
-      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
         <StoreInputs />
       </div>
 
@@ -98,7 +98,7 @@ export function StoreEditForm({ store }: { store: Store }) {
 
   return (
     <form onSubmit={handleSubmit} className="grid min-w-[420px] gap-2">
-      <div className="grid gap-2 md:grid-cols-2">
+      <div className="grid gap-2 md:grid-cols-3">
         <StoreInputs store={store} />
       </div>
       <div className="flex items-center gap-3">
@@ -159,6 +159,14 @@ function StoreInputs({ store }: { store?: Store }) {
         placeholder="Адрес"
         className="rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
       />
+      <input
+        name="publicSlug"
+        defaultValue={store?.publicSlug ?? ""}
+        placeholder="Публичный slug"
+        pattern="[a-z0-9-]+"
+        title="Только латинские буквы, цифры и дефисы"
+        className="rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+      />
     </>
   );
 }
@@ -178,6 +186,7 @@ async function submitStoreForm(
     body: JSON.stringify({
       name: String(formData.get("name") ?? "").trim(),
       address: optionalString(formData.get("address")) ?? null,
+      publicSlug: optionalString(formData.get("publicSlug")) ?? null,
     }),
   });
 }

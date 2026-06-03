@@ -2301,7 +2301,9 @@ function PortalLinksCard({
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
             По этим ссылкам гости проходят OTP-вход и видят свой уровень
             лояльности Langame, XP, миссии, лутбоксы, battle pass и кошелек
-            наград без доступа к внутренним разделам LeetPlus.
+            наград без доступа к внутренним разделам LeetPlus. Ссылки
+            используют публичный slug клуба, старые URL с внутренним ID
+            продолжают работать.
           </p>
         </div>
         <span className="rounded-full border border-cyan-300 px-3 py-1 text-xs font-bold text-cyan-800 dark:border-cyan-800 dark:text-cyan-200">
@@ -2312,8 +2314,9 @@ function PortalLinksCard({
       <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
         {activeStores.length ? (
           activeStores.map((store) => {
+            const publicKey = store.publicSlug ?? store.id;
             const href = `/guest/${encodeURIComponent(tenantSlug)}/${encodeURIComponent(
-              store.id,
+              publicKey,
             )}`;
 
             return (
@@ -2330,6 +2333,11 @@ function PortalLinksCard({
                 <span className="mt-1 block truncate text-xs text-zinc-500 dark:text-zinc-400">
                   {href}
                 </span>
+                {store.publicSlug ? null : (
+                  <span className="mt-2 block text-[11px] text-amber-700 dark:text-amber-300">
+                    Slug еще не задан, используется технический ID.
+                  </span>
+                )}
               </a>
             );
           })

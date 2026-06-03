@@ -40,10 +40,11 @@ export default async function StoresPage() {
             <h2 className="text-base font-semibold">Список точек</h2>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[820px] text-left text-sm">
+            <table className="w-full min-w-[960px] text-left text-sm">
               <thead className="bg-zinc-100 text-xs uppercase text-zinc-500">
                 <tr>
                   <th className="px-5 py-3 font-medium">Название и адрес</th>
+                  <th className="px-5 py-3 font-medium">Гостевая ссылка</th>
                   <th className="px-5 py-3 font-medium">Статус</th>
                   {canEditStores ? (
                     <th className="px-5 py-3 text-right font-medium">
@@ -68,6 +69,11 @@ export default async function StoresPage() {
                           </p>
                         </div>
                       )}
+                    </td>
+                    <td className="px-5 py-4 text-zinc-700">
+                      <span className="font-mono text-xs">
+                        /guest/{user.tenantSlug}/{store.publicSlug ?? store.id}
+                      </span>
                     </td>
                     <td className="px-5 py-4 text-zinc-700">
                       {store.isActive ? "Активна" : "Архив"}

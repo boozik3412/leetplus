@@ -546,12 +546,14 @@ async function main() {
       {
         tenantId: tenant.id,
         name: "LeetPlus Arena Центр",
+        publicSlug: "arena-center",
         address: "Демо-адрес, центральный клуб",
         isActive: true,
       },
       {
         tenantId: tenant.id,
         name: "LeetPlus Arena Север",
+        publicSlug: "arena-north",
         address: "Демо-адрес, северный клуб",
         isActive: true,
       },

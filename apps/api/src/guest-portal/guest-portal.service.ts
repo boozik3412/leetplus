@@ -39,6 +39,7 @@ type TenantStoreContext = {
   };
   store: {
     id: string;
+    publicSlug: string | null;
     name: string;
     address: string | null;
   };
@@ -51,6 +52,7 @@ export type GuestPortalPublicConfig = {
   };
   store: {
     id: string;
+    publicSlug: string | null;
     name: string;
     address: string | null;
   };
@@ -691,11 +693,12 @@ export class GuestPortalService {
         slug: true,
         stores: {
           where: {
-            id: storeId,
+            OR: [{ id: storeId }, { publicSlug: storeId }],
             isActive: true,
           },
           select: {
             id: true,
+            publicSlug: true,
             name: true,
             address: true,
           },
@@ -740,6 +743,7 @@ export class GuestPortalService {
           },
           select: {
             id: true,
+            publicSlug: true,
             name: true,
             address: true,
           },

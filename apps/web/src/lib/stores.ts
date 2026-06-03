@@ -2,6 +2,7 @@ import { getApiUrl, getAuthHeaders } from "./api";
 
 export type Store = {
   id: string;
+  publicSlug: string | null;
   name: string;
   address: string | null;
   externalDomain?: string | null;

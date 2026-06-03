@@ -7,6 +7,7 @@ export type GuestPortalPublicConfig = {
   };
   store: {
     id: string;
+    publicSlug: string | null;
     name: string;
     address: string | null;
   };

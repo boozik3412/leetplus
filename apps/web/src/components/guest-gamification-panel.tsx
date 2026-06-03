@@ -15,6 +15,7 @@ import type {
   GuestGameMission,
   GuestGameProfile,
   GuestGameProfileStatus,
+  GuestGamePipelineRunResult,
   GuestGameReward,
   GuestGameRewardStatus,
   GuestGameSeason,
@@ -480,6 +481,8 @@ export function GuestGamificationPanel({
     useState<GuestGameProcessEventResult | null>(null);
   const [snapshotFacts, setSnapshotFacts] =
     useState<GuestGameSnapshotFactsResult | null>(null);
+  const [pipelineResult, setPipelineResult] =
+    useState<GuestGamePipelineRunResult | null>(null);
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
   const [editingLootBoxId, setEditingLootBoxId] = useState<string | null>(null);
   const [editingMissionId, setEditingMissionId] = useState<string | null>(null);
@@ -833,6 +836,25 @@ export function GuestGamificationPanel({
     });
   }
 
+  async function runSnapshotPipeline(dryRunOnly: boolean) {
+    await saveAction(dryRunOnly ? "pipelinePreview" : "pipelineRun", async () => {
+      const result = await postJson<GuestGamePipelineRunResult>(
+        "/api/guests/gamification/pipeline/run",
+        {
+          limit: 20,
+          dryRunOnly,
+        },
+      );
+
+      setPipelineResult(result);
+      setProcessEventResult(null);
+
+      if (!dryRunOnly) {
+        await reloadWorkspace();
+      }
+    });
+  }
+
   function applySnapshotFact(fact: GuestGameSnapshotFact) {
     setDryRunForm((current) => ({
       ...current,
@@ -855,6 +877,7 @@ export function GuestGamificationPanel({
     }));
     setDryRunResult(null);
     setProcessEventResult(null);
+    setPipelineResult(null);
   }
 
   async function updateRewardStatus(
@@ -1057,10 +1080,12 @@ export function GuestGamificationPanel({
           guests={guests}
           stores={stores}
           snapshotFacts={snapshotFacts}
+          pipelineResult={pipelineResult}
           onRun={runDryRun}
           onProcess={processDryRunEvent}
           onLoadFacts={loadSnapshotFacts}
           onApplyFact={applySnapshotFact}
+          onPipelineRun={runSnapshotPipeline}
           saving={saving}
         />
       ) : null}
@@ -1077,10 +1102,12 @@ function DryRunTab({
   guests,
   stores,
   snapshotFacts,
+  pipelineResult,
   onRun,
   onProcess,
   onLoadFacts,
   onApplyFact,
+  onPipelineRun,
   saving,
 }: {
   form: DryRunForm;
@@ -1091,15 +1118,19 @@ function DryRunTab({
   guests: GuestDashboardRow[];
   stores: Store[];
   snapshotFacts: GuestGameSnapshotFactsResult | null;
+  pipelineResult: GuestGamePipelineRunResult | null;
   onRun: () => Promise<void>;
   onProcess: () => Promise<void>;
   onLoadFacts: () => Promise<void>;
   onApplyFact: (fact: GuestGameSnapshotFact) => void;
+  onPipelineRun: (dryRunOnly: boolean) => Promise<void>;
   saving: string | null;
 }) {
   const isRunning = saving === "dryRun";
   const isLoadingFacts = saving === "facts";
   const isProcessing = saving === "processEvent";
+  const isPipelinePreview = saving === "pipelinePreview";
+  const isPipelineRunning = saving === "pipelineRun";
   const canProcess =
     Boolean(result) &&
     Boolean(form.profileId || form.guestId || result?.profile || result?.guest) &&
@@ -1150,6 +1181,39 @@ function DryRunTab({
               {isLoadingFacts ? "Загружаем..." : "Загрузить факты"}
             </button>
           </div>
+
+          <div className="mt-3 flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-sm font-bold text-zinc-950 dark:text-white">
+                Batch pipeline snapshot-фактов
+              </p>
+              <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                Обрабатывает до 20 последних сохраненных фактов: сначала проверяет правила,
+                пропускает дубли и факты без гостя, затем пишет только события, XP и очередь
+                наград внутри LeetPlus.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                className={smallButtonClass}
+                type="button"
+                disabled={isPipelinePreview || isPipelineRunning}
+                onClick={() => onPipelineRun(true)}
+              >
+                {isPipelinePreview ? "Смотрим..." : "Предпросмотр batch"}
+              </button>
+              <button
+                className={primaryButtonClass}
+                type="button"
+                disabled={isPipelinePreview || isPipelineRunning}
+                onClick={() => onPipelineRun(false)}
+              >
+                {isPipelineRunning ? "Обрабатываем..." : "Обработать batch"}
+              </button>
+            </div>
+          </div>
+
+          {pipelineResult ? <PipelineResultPanel result={pipelineResult} /> : null}
 
           {snapshotFacts ? (
             <div className="mt-3 space-y-3">
@@ -1447,6 +1511,93 @@ function DryRunTab({
         </section>
       ) : (
         <EmptyState text="Запустите проверку, чтобы увидеть допуск, награды, XP и причины блокировки." />
+      )}
+    </div>
+  );
+}
+
+function PipelineResultPanel({ result }: { result: GuestGamePipelineRunResult }) {
+  const modeLabel = result.dryRunOnly ? "предпросмотр" : "запуск";
+  const statusLabel: Record<string, string> = {
+    DRY_RUN: "проверено",
+    PROCESSED: "обработано",
+    SKIPPED: "пропуск",
+    DUPLICATE: "дубль",
+    ERROR: "ошибка",
+  };
+  const statusClass: Record<string, string> = {
+    DRY_RUN:
+      "bg-cyan-100 text-cyan-800 dark:bg-cyan-950 dark:text-cyan-200",
+    PROCESSED:
+      "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200",
+    SKIPPED:
+      "bg-zinc-100 text-zinc-700 dark:bg-zinc-900 dark:text-zinc-200",
+    DUPLICATE:
+      "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
+    ERROR: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200",
+  };
+
+  return (
+    <div className="mt-3 space-y-3 rounded-lg border border-cyan-200 bg-cyan-50/60 p-3 dark:border-cyan-900/60 dark:bg-cyan-950/20">
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-sm font-bold text-cyan-950 dark:text-cyan-100">
+            Batch pipeline: {modeLabel}
+          </p>
+          <p className="mt-1 text-xs leading-5 text-cyan-900/75 dark:text-cyan-100/75">
+            {result.note}
+          </p>
+        </div>
+        <span className="rounded-full border border-cyan-300 px-3 py-1 text-xs font-bold text-cyan-800 dark:border-cyan-800 dark:text-cyan-200">
+          Langame write: нет
+        </span>
+      </div>
+
+      <div className="grid gap-2 text-xs sm:grid-cols-4 lg:grid-cols-8">
+        <MiniMetric label="доступно" value={result.availableFacts} />
+        <MiniMetric label="проверено" value={result.checkedFacts} />
+        <MiniMetric label="обработано" value={result.processedFacts} />
+        <MiniMetric label="пропуск" value={result.skippedFacts} />
+        <MiniMetric label="дубли" value={result.duplicateFacts} />
+        <MiniMetric label="ошибки" value={result.erroredFacts} />
+        <MiniMetric label="XP" value={`+${result.appliedXpDelta}`} />
+        <MiniMetric label="награды" value={result.queuedRewards} />
+      </div>
+
+      {result.facts.length ? (
+        <div className="divide-y divide-cyan-200/70 overflow-hidden rounded-lg border border-cyan-200/70 bg-white dark:divide-cyan-900/60 dark:border-cyan-900/60 dark:bg-zinc-950">
+          {result.facts.slice(0, 8).map((fact) => (
+            <div
+              key={`${fact.factId}-${fact.status}`}
+              className="grid gap-2 px-3 py-2 text-xs md:grid-cols-[1fr_auto]"
+            >
+              <div className="min-w-0">
+                <p className="truncate font-bold text-zinc-950 dark:text-white">
+                  {fact.label}
+                </p>
+                <p className="mt-1 text-zinc-500 dark:text-zinc-400">
+                  {formatDate(fact.occurredAt)} ·{" "}
+                  {fact.store?.name ?? "вся сеть"} · {fact.eventType}
+                </p>
+                {fact.reason ? (
+                  <p className="mt-1 text-zinc-500 dark:text-zinc-400">
+                    {fact.reason}
+                  </p>
+                ) : null}
+              </div>
+              <span
+                className={[
+                  "self-start rounded-full px-2 py-1 text-[11px] font-bold uppercase tracking-wide",
+                  statusClass[fact.status],
+                ].join(" ")}
+              >
+                {statusLabel[fact.status] ?? fact.status}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <EmptyState text="Подходящих snapshot-фактов для batch пока нет." />
       )}
     </div>
   );

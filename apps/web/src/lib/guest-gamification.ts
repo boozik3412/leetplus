@@ -275,6 +275,43 @@ export type GuestGameSnapshotFactsResult = {
   };
 };
 
+export type GuestGamePipelineFactStatus =
+  | "DRY_RUN"
+  | "PROCESSED"
+  | "SKIPPED"
+  | "DUPLICATE"
+  | "ERROR";
+
+export type GuestGamePipelineFactResult = {
+  factId: string;
+  source: GuestGameSnapshotFact["source"];
+  label: string;
+  eventType: string;
+  occurredAt: string;
+  guest: GuestGameProfile["guest"];
+  store: { id: string; name: string } | null;
+  status: GuestGamePipelineFactStatus;
+  reason: string | null;
+  dryRun: GuestGameDryRunResult | null;
+  process: GuestGameProcessEventResult | null;
+};
+
+export type GuestGamePipelineRunResult = {
+  dryRunOnly: boolean;
+  langameWrite: false;
+  availableFacts: number;
+  checkedFacts: number;
+  processedFacts: number;
+  skippedFacts: number;
+  duplicateFacts: number;
+  erroredFacts: number;
+  appliedXpDelta: number;
+  queuedRewards: number;
+  queuedRewardAmount: number;
+  facts: GuestGamePipelineFactResult[];
+  note: string;
+};
+
 export type GuestGamificationSummary = {
   profilesCount: number;
   totalXp: number;

@@ -19,6 +19,8 @@ import {
   type GuestGameEventDto,
   type GuestGameDryRunDto,
   type GuestGameDryRunResult,
+  type GuestGamePipelineRunDto,
+  type GuestGamePipelineRunResult,
   type GuestGameProcessEventDto,
   type GuestGameProcessEventResult,
   type GuestGameLootBox,
@@ -80,6 +82,14 @@ export class GuestGamificationController {
     @Body() dto: GuestGameProcessEventDto,
   ): Promise<GuestGameProcessEventResult> {
     return this.gamificationService.processEvent(user, dto);
+  }
+
+  @Post('pipeline/run')
+  runSnapshotPipeline(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: GuestGamePipelineRunDto,
+  ): Promise<GuestGamePipelineRunResult> {
+    return this.gamificationService.runSnapshotPipeline(user, dto);
   }
 
   @Get('profiles')

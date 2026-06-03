@@ -25,6 +25,12 @@ const rewardStatuses = [
 ] as const;
 const rewardSources = ['MANUAL', 'LANGAME', 'API_IMPORT', 'CASHIER'] as const;
 const eventSources = ['MANUAL', 'LANGAME', 'API_IMPORT', 'SYSTEM'] as const;
+const snapshotFactSources = [
+  'GUEST_SESSION',
+  'GUEST_LOG',
+  'GUEST_TRANSACTION',
+  'GUEST_OPERATION_LOG',
+] as const;
 
 type StatusValue = (typeof statusValues)[number];
 type ProfileStatus = (typeof profileStatuses)[number];
@@ -663,6 +669,49 @@ export type GuestGameSnapshotFactsResult = {
   };
 };
 
+export type GuestGamePipelineRunDto = {
+  limit?: number | string | null;
+  source?: string | null;
+  dryRunOnly?: boolean | string | null;
+};
+
+export type GuestGamePipelineFactStatus =
+  | 'DRY_RUN'
+  | 'PROCESSED'
+  | 'SKIPPED'
+  | 'DUPLICATE'
+  | 'ERROR';
+
+export type GuestGamePipelineFactResult = {
+  factId: string;
+  source: GuestGameSnapshotFact['source'];
+  label: string;
+  eventType: string;
+  occurredAt: string;
+  guest: GuestGameProfile['guest'];
+  store: { id: string; name: string } | null;
+  status: GuestGamePipelineFactStatus;
+  reason: string | null;
+  dryRun: GuestGameDryRunResult | null;
+  process: GuestGameProcessEventResult | null;
+};
+
+export type GuestGamePipelineRunResult = {
+  dryRunOnly: boolean;
+  langameWrite: false;
+  availableFacts: number;
+  checkedFacts: number;
+  processedFacts: number;
+  skippedFacts: number;
+  duplicateFacts: number;
+  erroredFacts: number;
+  appliedXpDelta: number;
+  queuedRewards: number;
+  queuedRewardAmount: number;
+  facts: GuestGamePipelineFactResult[];
+  note: string;
+};
+
 @Injectable()
 export class GuestGamificationService {
   constructor(private readonly prisma: PrismaService) {}
@@ -749,6 +798,136 @@ export class GuestGamificationService {
         operationLogs: operationLogs.length,
         latestAt: facts[0]?.occurredAt ?? null,
       },
+    };
+  }
+
+  async runSnapshotPipeline(
+    user: AuthenticatedUser,
+    dto: GuestGamePipelineRunDto,
+  ): Promise<GuestGamePipelineRunResult> {
+    const source = pipelineSourceValue(dto.source);
+    const limit = Math.min(30, Math.max(1, intValue(dto.limit) ?? 20));
+    const dryRunOnly = booleanValue(dto.dryRunOnly);
+    const factsResult = await this.getSnapshotFacts(user);
+    const candidates = factsResult.facts
+      .filter((fact) => !source || fact.source === source)
+      .slice(0, limit);
+    const facts: GuestGamePipelineFactResult[] = [];
+
+    for (const fact of candidates) {
+      if (!fact.guest?.id) {
+        facts.push({
+          ...pipelineFactBase(fact),
+          status: 'SKIPPED',
+          reason:
+            'Факт не привязан к гостю Langame, автоматический запуск пропущен.',
+          dryRun: null,
+          process: null,
+        });
+        continue;
+      }
+
+      const processDto = pipelineProcessDtoFromFact(fact);
+
+      try {
+        const dryRun = await this.dryRun(user, processDto);
+        const eligibleRules = dryRun.rules.filter((rule) => rule.eligible);
+        const activeEligibleRules = eligibleRules.filter(
+          (rule) => rule.status === 'ACTIVE',
+        );
+        const nonActiveEligibleRules = eligibleRules.filter(
+          (rule) => rule.status !== 'ACTIVE',
+        );
+        const activeXpDelta = sum(
+          activeEligibleRules.map((rule) => rule.xpDelta),
+        );
+
+        if (dryRunOnly) {
+          facts.push({
+            ...pipelineFactBase(fact),
+            status: 'DRY_RUN',
+            reason: `${activeEligibleRules.length} активных правил сработает, ${dryRun.summary.blockedRules} правил заблокировано.`,
+            dryRun,
+            process: null,
+          });
+          continue;
+        }
+
+        if (!activeEligibleRules.length && activeXpDelta === 0) {
+          facts.push({
+            ...pipelineFactBase(fact),
+            status: 'SKIPPED',
+            reason:
+              'Нет активных сработавших правил или XP для записи события.',
+            dryRun,
+            process: null,
+          });
+          continue;
+        }
+
+        if (nonActiveEligibleRules.length) {
+          facts.push({
+            ...pipelineFactBase(fact),
+            status: 'SKIPPED',
+            reason:
+              'Есть сработавшие правила не в ACTIVE-статусе. Подтвердите такой факт вручную в тестовом запуске.',
+            dryRun,
+            process: null,
+          });
+          continue;
+        }
+
+        const process = await this.processEvent(user, {
+          ...processDto,
+          note: 'Автоматический batch pipeline обработал сохраненный Langame snapshot-факт внутри LeetPlus. Запись в Langame не выполнялась.',
+        });
+
+        facts.push({
+          ...pipelineFactBase(fact),
+          status: 'PROCESSED',
+          reason: `${process.summary.createdRewards} наград в очереди, XP ${process.summary.appliedXpDelta}.`,
+          dryRun: process.dryRun,
+          process,
+        });
+      } catch (error) {
+        facts.push({
+          ...pipelineFactBase(fact),
+          status: error instanceof ConflictException ? 'DUPLICATE' : 'ERROR',
+          reason:
+            error instanceof ConflictException
+              ? 'Snapshot-факт уже был обработан ранее.'
+              : pipelineErrorMessage(error),
+          dryRun: null,
+          process: null,
+        });
+      }
+    }
+
+    const processed = facts.filter((fact) => fact.status === 'PROCESSED');
+
+    return {
+      dryRunOnly,
+      langameWrite: false,
+      availableFacts: factsResult.facts.length,
+      checkedFacts: candidates.length,
+      processedFacts: processed.length,
+      skippedFacts: facts.filter((fact) => fact.status === 'SKIPPED').length,
+      duplicateFacts: facts.filter((fact) => fact.status === 'DUPLICATE')
+        .length,
+      erroredFacts: facts.filter((fact) => fact.status === 'ERROR').length,
+      appliedXpDelta: sum(
+        processed.map((fact) => fact.process?.summary.appliedXpDelta ?? 0),
+      ),
+      queuedRewards: sum(
+        processed.map((fact) => fact.process?.summary.createdRewards ?? 0),
+      ),
+      queuedRewardAmount: sum(
+        processed.map((fact) => fact.process?.summary.queuedRewardAmount ?? 0),
+      ),
+      facts,
+      note: dryRunOnly
+        ? 'Предпросмотр batch: события, XP, награды и Langame-записи не создавались.'
+        : 'Batch обработал только сохраненные snapshot-факты внутри LeetPlus. Запись в Langame не выполнялась.',
     };
   }
 
@@ -2345,6 +2524,79 @@ function buildProcessExternalReference(
       baseId,
     ].join(':'),
   };
+}
+
+function pipelineSourceValue(value: unknown) {
+  const parsed = nullableString(value);
+
+  if (!parsed || parsed === 'ALL') {
+    return null;
+  }
+
+  if (
+    !snapshotFactSources.includes(parsed as GuestGameSnapshotFact['source'])
+  ) {
+    throw new BadRequestException(
+      `Недопустимый источник snapshot-фактов: ${parsed}`,
+    );
+  }
+
+  return parsed as GuestGameSnapshotFact['source'];
+}
+
+function booleanValue(value: unknown) {
+  if (value === true || value === 'true' || value === '1') {
+    return true;
+  }
+
+  return false;
+}
+
+function pipelineProcessDtoFromFact(
+  fact: GuestGameSnapshotFact,
+): GuestGameProcessEventDto {
+  return {
+    guestId: fact.guest?.id ?? null,
+    storeId: fact.store?.id ?? null,
+    eventType: fact.eventType,
+    occurredAt: fact.occurredAt,
+    sessionMinutes: fact.sessionMinutes,
+    spendAmount: fact.spendAmount,
+    sourceFactId: fact.id,
+    sourceFactKind: fact.source,
+    externalProvider: fact.externalProvider,
+    externalDomain: fact.externalDomain,
+    externalId: fact.externalId,
+  };
+}
+
+function pipelineFactBase(fact: GuestGameSnapshotFact) {
+  return {
+    factId: fact.id,
+    source: fact.source,
+    label: fact.label,
+    eventType: fact.eventType,
+    occurredAt: fact.occurredAt,
+    guest: fact.guest,
+    store: fact.store,
+  } satisfies Pick<
+    GuestGamePipelineFactResult,
+    | 'factId'
+    | 'source'
+    | 'label'
+    | 'eventType'
+    | 'occurredAt'
+    | 'guest'
+    | 'store'
+  >;
+}
+
+function pipelineErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  return 'Не удалось обработать snapshot-факт.';
 }
 
 function buildProcessPayload(

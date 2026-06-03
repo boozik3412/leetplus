@@ -553,6 +553,17 @@ export type GuestGameTariffSnapshotSource = {
   errorMessage: string | null;
 };
 
+export type GuestGameTariffSnapshotItem = {
+  id: string;
+  domain: string;
+  externalId: string | null;
+  name: string | null;
+  label: string | null;
+  kind: string | null;
+  fieldKeys: string[];
+  startedAt: string;
+};
+
 export type GuestGameTariffSnapshotEndpoint = {
   endpointKey: string;
   endpointPath: string;
@@ -565,6 +576,8 @@ export type GuestGameTariffSnapshotEndpoint = {
   rowCount: number;
   latestAt: string | null;
   fieldKeys: string[];
+  typedItemsCount: number;
+  typedItems: GuestGameTariffSnapshotItem[];
   nextAction: string;
   sources: GuestGameTariffSnapshotSource[];
 };
@@ -1052,39 +1065,77 @@ export class GuestGamificationService {
     const endpointKeys = tariffSnapshotDefinitions.map(
       (definition) => definition.endpointKey,
     );
-    const [activeSourcesCount, runs] = await Promise.all([
-      this.prisma.integrationSource.count({
-        where: {
-          tenantId: user.tenantId,
-          provider: IntegrationProvider.LANGAME,
-          isActive: true,
-        },
-      }),
-      this.prisma.langameEndpointSnapshotRun.findMany({
-        where: {
-          tenantId: user.tenantId,
-          provider: IntegrationProvider.LANGAME,
-          endpointKey: { in: [...endpointKeys] },
-        },
-        select: {
-          id: true,
-          domain: true,
-          endpointKey: true,
-          status: true,
-          startedAt: true,
-          finishedAt: true,
-          rowCount: true,
-          payloadKind: true,
-          fieldKeys: true,
-          snapshot: true,
-          errorMessage: true,
-        },
-        orderBy: [{ startedAt: 'desc' }, { createdAt: 'desc' }],
-        take: 80,
-      }),
-    ]);
+    const [activeSourcesCount, runs, typedItemCounts, typedItems] =
+      await Promise.all([
+        this.prisma.integrationSource.count({
+          where: {
+            tenantId: user.tenantId,
+            provider: IntegrationProvider.LANGAME,
+            isActive: true,
+          },
+        }),
+        this.prisma.langameEndpointSnapshotRun.findMany({
+          where: {
+            tenantId: user.tenantId,
+            provider: IntegrationProvider.LANGAME,
+            endpointKey: { in: [...endpointKeys] },
+          },
+          select: {
+            id: true,
+            domain: true,
+            endpointKey: true,
+            status: true,
+            startedAt: true,
+            finishedAt: true,
+            rowCount: true,
+            payloadKind: true,
+            fieldKeys: true,
+            snapshot: true,
+            errorMessage: true,
+          },
+          orderBy: [{ startedAt: 'desc' }, { createdAt: 'desc' }],
+          take: 80,
+        }),
+        this.prisma.langameTariffSnapshotItem.groupBy({
+          by: ['endpointKey'],
+          where: {
+            tenantId: user.tenantId,
+            provider: IntegrationProvider.LANGAME,
+            endpointKey: { in: [...endpointKeys] },
+          },
+          _count: { _all: true },
+        }),
+        this.prisma.langameTariffSnapshotItem.findMany({
+          where: {
+            tenantId: user.tenantId,
+            provider: IntegrationProvider.LANGAME,
+            endpointKey: { in: [...endpointKeys] },
+          },
+          select: {
+            id: true,
+            domain: true,
+            endpointKey: true,
+            externalId: true,
+            name: true,
+            label: true,
+            kind: true,
+            fieldKeys: true,
+            startedAt: true,
+            createdAt: true,
+          },
+          orderBy: [
+            { endpointKey: 'asc' },
+            { startedAt: 'desc' },
+            { createdAt: 'desc' },
+          ],
+          take: 240,
+        }),
+      ]);
     const latestRuns: typeof runs = [];
     const seen = new Set<string>();
+    const typedCountByEndpoint = new Map(
+      typedItemCounts.map((item) => [item.endpointKey, item._count._all]),
+    );
 
     for (const run of runs) {
       const key = `${run.endpointKey}:${run.domain}`;
@@ -1120,6 +1171,9 @@ export class GuestGamificationService {
         failedSources,
         latestTime,
       });
+      const endpointTypedItems = typedItems
+        .filter((item) => item.endpointKey === definition.endpointKey)
+        .slice(0, 6);
 
       return {
         ...definition,
@@ -1132,6 +1186,19 @@ export class GuestGamificationService {
         fieldKeys: uniqueStrings(
           endpointRuns.flatMap((run) => jsonStringArray(run.fieldKeys)),
         ),
+        typedItemsCount:
+          typedCountByEndpoint.get(definition.endpointKey) ??
+          endpointTypedItems.length,
+        typedItems: endpointTypedItems.map((item) => ({
+          id: item.id,
+          domain: item.domain,
+          externalId: item.externalId,
+          name: item.name,
+          label: item.label,
+          kind: item.kind,
+          fieldKeys: jsonStringArray(item.fieldKeys),
+          startedAt: item.startedAt.toISOString(),
+        })),
         nextAction: tariffSnapshotNextAction(status),
         sources: endpointRuns.map((run) => ({
           id: run.id,

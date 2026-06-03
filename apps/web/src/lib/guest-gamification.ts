@@ -360,6 +360,17 @@ export type GuestGameTariffSnapshotSource = {
   errorMessage: string | null;
 };
 
+export type GuestGameTariffSnapshotItem = {
+  id: string;
+  domain: string;
+  externalId: string | null;
+  name: string | null;
+  label: string | null;
+  kind: string | null;
+  fieldKeys: string[];
+  startedAt: string;
+};
+
 export type GuestGameTariffSnapshotEndpoint = {
   endpointKey: string;
   endpointPath: string;
@@ -372,6 +383,8 @@ export type GuestGameTariffSnapshotEndpoint = {
   rowCount: number;
   latestAt: string | null;
   fieldKeys: string[];
+  typedItemsCount: number;
+  typedItems: GuestGameTariffSnapshotItem[];
   nextAction: string;
   sources: GuestGameTariffSnapshotSource[];
 };

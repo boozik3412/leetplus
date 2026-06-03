@@ -138,6 +138,7 @@ model Tenant {
   integrationSyncJobs                  IntegrationSyncJob[]
   langameEndpointProfileRuns           LangameEndpointProfileRun[]
   langameEndpointSnapshotRuns          LangameEndpointSnapshotRun[]
+  langameTariffSnapshotItems           LangameTariffSnapshotItem[]
   guests                               Guest[]
   guestGroups                          GuestGroup[]
   guestBalanceSnapshots                GuestBalanceSnapshot[]
@@ -797,6 +798,7 @@ model IntegrationSource {
   guestDataProfileRuns GuestDataProfileRun[]
   endpointProfileRuns  LangameEndpointProfileRun[]
   endpointSnapshotRuns LangameEndpointSnapshotRun[]
+  tariffSnapshotItems  LangameTariffSnapshotItem[]
 
   @@unique([tenantId, provider, domain])
   @@index([tenantId])
@@ -884,10 +886,39 @@ model LangameEndpointSnapshotRun {
 
   tenant            Tenant             @relation(fields: [tenantId], references: [id])
   integrationSource IntegrationSource? @relation(fields: [integrationSourceId], references: [id], onDelete: SetNull)
+  tariffItems       LangameTariffSnapshotItem[]
 
   @@index([tenantId, endpointKey, startedAt])
   @@index([integrationSourceId, startedAt])
   @@index([status])
+}
+
+model LangameTariffSnapshotItem {
+  id                  String              @id @default(uuid())
+  tenantId            String
+  integrationSourceId String?
+  snapshotRunId       String?
+  provider            IntegrationProvider
+  domain              String
+  endpointKey         String
+  endpointPath        String
+  externalId          String?
+  name                String?
+  label               String?
+  kind                String?
+  raw                 Json
+  fieldKeys           Json?
+  startedAt           DateTime
+  createdAt           DateTime            @default(now())
+
+  tenant              Tenant                      @relation(fields: [tenantId], references: [id])
+  integrationSource   IntegrationSource?          @relation(fields: [integrationSourceId], references: [id], onDelete: SetNull)
+  endpointSnapshotRun LangameEndpointSnapshotRun? @relation(fields: [snapshotRunId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, endpointKey, domain])
+  @@index([tenantId, endpointKey, startedAt])
+  @@index([integrationSourceId, startedAt])
+  @@index([snapshotRunId])
 }
 
 model StockMovement {

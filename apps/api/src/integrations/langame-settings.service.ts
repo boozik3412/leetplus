@@ -10,6 +10,7 @@ import type {
   LangameEndpointProfileDefinition,
   LangameEndpointProfileDiagnosticsResult,
   LangameEndpointProfileDiagnosticsSource,
+  LangameEndpointProfileKey,
   LangameEndpointProfileQuery,
   LangameEndpointProfileRunSummary,
   LangameEndpointSnapshotCandidate,
@@ -264,7 +265,15 @@ type EndpointSnapshotSourceDraft = Omit<
   'snapshotRunId'
 > & {
   payloadPreview: unknown;
+  rows: Record<string, unknown>[];
 };
+
+const tariffSnapshotEndpointKeys = new Set<LangameEndpointProfileKey>([
+  'tariffsByDays',
+  'tariffsGroups',
+  'tariffsTimePeriod',
+  'tariffsTypesGroups',
+]);
 
 @Injectable()
 export class LangameSettingsService {
@@ -802,6 +811,7 @@ export class LangameSettingsService {
               endpoint,
               payload,
             ),
+            rows,
             errorMessage: null,
           };
         } catch (error) {
@@ -818,6 +828,7 @@ export class LangameSettingsService {
             fieldKeys: [],
             summary: null,
             payloadPreview: null,
+            rows: [],
             errorMessage:
               error instanceof Error
                 ? error.message
@@ -833,6 +844,13 @@ export class LangameSettingsService {
       startedAt,
       finishedAt,
       snapshotSources,
+    );
+    await this.persistTariffSnapshotItems(
+      tenantId,
+      endpoint,
+      startedAt,
+      snapshotSources,
+      persisted,
     );
 
     return {
@@ -1095,6 +1113,64 @@ export class LangameSettingsService {
     return new Map(
       created.map((run, index) => [sources[index].id, run.id] as const),
     );
+  }
+
+  private async persistTariffSnapshotItems(
+    tenantId: string,
+    endpoint: LangameEndpointProfileDefinition,
+    startedAt: string,
+    sources: EndpointSnapshotSourceDraft[],
+    snapshotRunIds: Map<string, string>,
+  ) {
+    if (!tariffSnapshotEndpointKeys.has(endpoint.key)) {
+      return;
+    }
+
+    const successfulSources = sources.filter(
+      (source) => source.status === 'SUCCESS',
+    );
+
+    if (successfulSources.length === 0) {
+      return;
+    }
+
+    await this.prisma.langameTariffSnapshotItem.deleteMany({
+      where: {
+        tenantId,
+        provider: IntegrationProvider.LANGAME,
+        endpointKey: endpoint.key,
+        domain: { in: successfulSources.map((source) => source.domain) },
+      },
+    });
+
+    const data = successfulSources.flatMap((source) =>
+      source.rows.slice(0, 5000).map((row) => {
+        const fieldKeys = Object.keys(row).slice(0, 30);
+
+        return {
+          tenantId,
+          integrationSourceId: source.id,
+          snapshotRunId: snapshotRunIds.get(source.id) ?? null,
+          provider: IntegrationProvider.LANGAME,
+          domain: source.domain,
+          endpointKey: endpoint.key,
+          endpointPath: source.path,
+          externalId: this.extractTariffRowId(row),
+          name: this.extractTariffRowName(row),
+          label: this.extractTariffRowLabel(row),
+          kind: this.tariffSnapshotKind(endpoint.key),
+          raw: this.toInputJson(this.sanitizeServicePayload(row)),
+          fieldKeys: this.toInputJson(fieldKeys),
+          startedAt: new Date(startedAt),
+        };
+      }),
+    );
+
+    if (data.length === 0) {
+      return;
+    }
+
+    await this.prisma.langameTariffSnapshotItem.createMany({ data });
   }
 
   private toEndpointProfileSummaries(
@@ -1516,6 +1592,95 @@ export class LangameSettingsService {
     });
 
     return Array.from(fields).slice(0, 30);
+  }
+
+  private extractTariffRowId(row: Record<string, unknown>) {
+    return this.extractFirstScalar(row, [
+      'id',
+      'tariff_id',
+      'tariffId',
+      'group_id',
+      'groupId',
+      'type_id',
+      'typeId',
+      'period_id',
+      'periodId',
+      'day_id',
+      'dayId',
+      'guid',
+      'uuid',
+      'code',
+    ]);
+  }
+
+  private extractTariffRowName(row: Record<string, unknown>) {
+    return this.extractFirstScalar(row, [
+      'name',
+      'title',
+      'caption',
+      'label',
+      'tariff_name',
+      'tariffName',
+      'group_name',
+      'groupName',
+      'type_name',
+      'typeName',
+      'period_name',
+      'periodName',
+      'day_name',
+      'dayName',
+    ]);
+  }
+
+  private extractTariffRowLabel(row: Record<string, unknown>) {
+    const explicitLabel =
+      this.extractTariffRowName(row) ?? this.extractTariffRowId(row);
+
+    if (explicitLabel) {
+      return explicitLabel;
+    }
+
+    for (const [key, value] of Object.entries(row)) {
+      if (this.isSensitiveField(key) || this.isGuestSensitiveField(key)) {
+        continue;
+      }
+
+      const scalar = this.scalarToString(value);
+
+      if (scalar) {
+        return scalar;
+      }
+    }
+
+    return null;
+  }
+
+  private extractFirstScalar(row: Record<string, unknown>, keys: string[]) {
+    for (const key of keys) {
+      const value = row[key];
+      const scalar = this.scalarToString(value);
+
+      if (scalar) {
+        return scalar;
+      }
+    }
+
+    return null;
+  }
+
+  private tariffSnapshotKind(endpointKey: LangameEndpointProfileKey) {
+    switch (endpointKey) {
+      case 'tariffsByDays':
+        return 'days';
+      case 'tariffsGroups':
+        return 'groups';
+      case 'tariffsTimePeriod':
+        return 'time_periods';
+      case 'tariffsTypesGroups':
+        return 'group_types';
+      default:
+        return 'tariffs';
+    }
   }
 
   private extractServiceSummary(payload: unknown, depth = 0): string | null {

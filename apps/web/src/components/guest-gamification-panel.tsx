@@ -2157,7 +2157,7 @@ function TariffSnapshotReadinessCard({
               {snapshot.description}
             </p>
 
-            <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+            <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
               <div className="rounded-md bg-white px-2 py-1.5 dark:bg-zinc-950">
                 <span className="block text-zinc-400">Источники</span>
                 <span className="font-semibold text-zinc-900 dark:text-white">
@@ -2168,6 +2168,12 @@ function TariffSnapshotReadinessCard({
                 <span className="block text-zinc-400">Строки</span>
                 <span className="font-semibold text-zinc-900 dark:text-white">
                   {snapshot.rowCount}
+                </span>
+              </div>
+              <div className="rounded-md bg-white px-2 py-1.5 dark:bg-zinc-950">
+                <span className="block text-zinc-400">Typed</span>
+                <span className="font-semibold text-zinc-900 dark:text-white">
+                  {snapshot.typedItemsCount}
                 </span>
               </div>
             </div>
@@ -2182,6 +2188,29 @@ function TariffSnapshotReadinessCard({
                     {field}
                   </span>
                 ))}
+              </div>
+            ) : null}
+
+            {snapshot.typedItems.length ? (
+              <div className="mt-3 rounded-md border border-emerald-100 bg-emerald-50/60 p-2 dark:border-emerald-950 dark:bg-emerald-950/20">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+                  Подготовленные строки
+                </p>
+                <div className="mt-2 space-y-1">
+                  {snapshot.typedItems.slice(0, 3).map((item) => (
+                    <div
+                      key={item.id}
+                      className="flex items-center justify-between gap-2 text-xs"
+                    >
+                      <span className="truncate font-semibold text-zinc-800 dark:text-zinc-100">
+                        {item.label ?? item.name ?? item.externalId ?? "Строка тарифа"}
+                      </span>
+                      <span className="shrink-0 text-[11px] text-zinc-400">
+                        {item.domain}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
             ) : null}
 

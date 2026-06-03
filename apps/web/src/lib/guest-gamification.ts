@@ -214,6 +214,8 @@ export type GuestGameDryRunResult = {
   guest: GuestGameProfile["guest"];
   store: { id: string; name: string } | null;
   input: {
+    sessionType: string | null;
+    sessionPacket: boolean | null;
     sessionMinutes: number;
     spendAmount: number;
   };
@@ -262,6 +264,8 @@ export type GuestGameSnapshotFact = {
   externalId: string | null;
   guest: GuestGameProfile["guest"];
   store: { id: string; name: string } | null;
+  sessionType: string | null;
+  sessionPacket: boolean | null;
   sessionMinutes: number | null;
   spendAmount: number | null;
   label: string;

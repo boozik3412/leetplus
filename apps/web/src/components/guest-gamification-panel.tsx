@@ -67,6 +67,7 @@ type LootBoxForm = {
   audienceId: string;
   segment: string;
   sessionType: string;
+  packetMode: string;
   storeIds: string[];
   quietHoursEnabled: boolean;
   weekdaysOnly: boolean;
@@ -106,6 +107,8 @@ type MissionForm = {
   budgetAmount: string;
   perGuestLimit: string;
   totalRewardLimit: string;
+  sessionType: string;
+  packetMode: string;
   windowDays: string;
   weekdaysOnly: boolean;
   minSessionMinutes: string;
@@ -130,6 +133,9 @@ type SeasonForm = {
   xpPlayHour: string;
   xpBarPurchase: string;
   xpMissionCompletion: string;
+  xpPacketSessionBonus: string;
+  sessionType: string;
+  packetMode: string;
   levelCount: string;
   xpPerLevel: string;
   freeRewardEvery: string;
@@ -180,6 +186,8 @@ type DryRunForm = {
   storeId: string;
   eventType: string;
   occurredAt: string;
+  sessionType: string;
+  sessionPacket: string;
   sessionMinutes: string;
   spendAmount: string;
   sourceFactId: string;
@@ -209,6 +217,24 @@ const dryRunEventOptions = [
   { value: "GUEST_LOG", label: "Лог гостя" },
   { value: "REPEAT_VISIT", label: "Повторный визит" },
   { value: "MISSION_COMPLETED", label: "Миссия выполнена" },
+];
+
+const sessionTypeOptions = [
+  { value: "", label: "любой тип" },
+  { value: "regular_session", label: "обычная сессия" },
+  { value: "packet_hours", label: "пакет часов" },
+];
+
+const packetModeOptions = [
+  { value: "ANY", label: "любой формат" },
+  { value: "PACKET_ONLY", label: "только пакет часов" },
+  { value: "NON_PACKET_ONLY", label: "только обычная сессия" },
+];
+
+const dryRunPacketOptions = [
+  { value: "", label: "не указано" },
+  { value: "true", label: "пакет часов" },
+  { value: "false", label: "обычная сессия" },
 ];
 
 const statusLabels: Record<GuestGameStatus, string> = {
@@ -285,7 +311,8 @@ const defaultLootBoxForm: LootBoxForm = {
   rewardLabel: "Промокод бара",
   audienceId: "",
   segment: "quiet_hours",
-  sessionType: "weekday_day",
+  sessionType: "",
+  packetMode: "ANY",
   storeIds: [],
   quietHoursEnabled: true,
   weekdaysOnly: true,
@@ -301,6 +328,7 @@ const defaultLootBoxForm: LootBoxForm = {
   periodRulesText: jsonText({
     weekdays: [1, 2, 3, 4, 5],
     hours: ["10:00-16:00"],
+    packetMode: "ANY",
   }),
   limitsText: jsonText({
     perGuestPerWeek: 1,
@@ -341,6 +369,8 @@ const defaultMissionForm: MissionForm = {
   budgetAmount: "7000",
   perGuestLimit: "1",
   totalRewardLimit: "100",
+  sessionType: "",
+  packetMode: "ANY",
   windowDays: "7",
   weekdaysOnly: true,
   minSessionMinutes: "90",
@@ -351,6 +381,7 @@ const defaultMissionForm: MissionForm = {
   conditionsText: jsonText({
     windowDays: 7,
     weekdaysOnly: true,
+    packetMode: "ANY",
     requiresLangameFact: true,
   }),
   antiFraudText: jsonText({
@@ -372,6 +403,9 @@ const defaultSeasonForm: SeasonForm = {
   xpPlayHour: "10",
   xpBarPurchase: "25",
   xpMissionCompletion: "50",
+  xpPacketSessionBonus: "15",
+  sessionType: "",
+  packetMode: "ANY",
   levelCount: "4",
   xpPerLevel: "250",
   freeRewardEvery: "2",
@@ -383,6 +417,8 @@ const defaultSeasonForm: SeasonForm = {
     playHour: 10,
     barPurchase: 25,
     missionCompletion: 50,
+    packetSessionBonus: 15,
+    packetMode: "ANY",
   }),
   levelsText: jsonText([
     { level: 1, xp: 0, freeReward: "Старт сезона" },
@@ -450,6 +486,8 @@ const defaultDryRunForm: DryRunForm = {
   storeId: "",
   eventType: "SESSION_START",
   occurredAt: "",
+  sessionType: "",
+  sessionPacket: "",
   sessionMinutes: "120",
   spendAmount: "0",
   ...emptyDryRunSource,
@@ -792,6 +830,8 @@ export function GuestGamificationPanel({
           storeId: nullable(dryRunForm.storeId),
           eventType: dryRunForm.eventType,
           occurredAt: nullable(dryRunForm.occurredAt),
+          sessionType: nullable(dryRunForm.sessionType),
+          sessionPacket: nullable(dryRunForm.sessionPacket),
           sessionMinutes: dryRunForm.sessionMinutes,
           spendAmount: dryRunForm.spendAmount,
         },
@@ -812,6 +852,8 @@ export function GuestGamificationPanel({
           storeId: nullable(dryRunForm.storeId),
           eventType: dryRunForm.eventType,
           occurredAt: nullable(dryRunForm.occurredAt),
+          sessionType: nullable(dryRunForm.sessionType),
+          sessionPacket: nullable(dryRunForm.sessionPacket),
           sessionMinutes: dryRunForm.sessionMinutes,
           spendAmount: dryRunForm.spendAmount,
           sourceFactId: nullable(dryRunForm.sourceFactId),
@@ -864,6 +906,9 @@ export function GuestGamificationPanel({
       storeId: fact.store?.id ?? current.storeId,
       eventType: fact.eventType,
       occurredAt: dateInputValue(fact.occurredAt),
+      sessionType: fact.sessionType ?? current.sessionType,
+      sessionPacket:
+        fact.sessionPacket == null ? current.sessionPacket : String(fact.sessionPacket),
       sessionMinutes:
         fact.sessionMinutes == null
           ? current.sessionMinutes
@@ -1352,6 +1397,37 @@ function DryRunTab({
 
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="space-y-1 text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+              Тип сессии
+              <select
+                className={fieldClass}
+                value={form.sessionType}
+                onChange={(event) => update("sessionType", event.target.value)}
+              >
+                {sessionTypeOptions.map((option) => (
+                  <option key={option.value || "any"} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-1 text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+              Пакет часов
+              <select
+                className={fieldClass}
+                value={form.sessionPacket}
+                onChange={(event) => update("sessionPacket", event.target.value)}
+              >
+                {dryRunPacketOptions.map((option) => (
+                  <option key={option.value || "unknown"} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="space-y-1 text-sm font-semibold text-zinc-700 dark:text-zinc-200">
               Минуты сессии
               <input
                 className={fieldClass}
@@ -1424,7 +1500,7 @@ function DryRunTab({
             </div>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-5">
+          <div className="grid gap-3 md:grid-cols-6">
             <StatusMetric
               label="Проверено"
               value={result.summary.checkedRules}
@@ -1444,6 +1520,11 @@ function DryRunTab({
               label="XP"
               value={`+${result.summary.projectedXpDelta}`}
               hint={`${result.input.sessionMinutes} мин`}
+            />
+            <StatusMetric
+              label="Сессия"
+              value={sessionTypeLabel(result.input.sessionType)}
+              hint={packetStateLabel(result.input.sessionPacket)}
             />
             <StatusMetric
               label="Награды"
@@ -1673,6 +1754,13 @@ function SnapshotFactRow({
         {fact.sessionMinutes != null ? (
           <span className="rounded-full bg-zinc-100 px-2 py-1 text-xs font-bold text-zinc-700 dark:bg-zinc-900 dark:text-zinc-200">
             {fact.sessionMinutes} мин
+          </span>
+        ) : null}
+        {fact.sessionPacket != null || fact.sessionType ? (
+          <span className="rounded-full bg-cyan-100 px-2 py-1 text-xs font-bold text-cyan-800 dark:bg-cyan-950 dark:text-cyan-200">
+            {fact.sessionPacket == null
+              ? sessionTypeLabel(fact.sessionType)
+              : packetStateLabel(fact.sessionPacket)}
           </span>
         ) : null}
         {fact.spendAmount != null && fact.spendAmount > 0 ? (
@@ -2407,15 +2495,38 @@ function LootBoxesTab({
               />
             </Field>
           </div>
-          <Field label="Тип сессии">
-            <input
-              className={fieldClass}
-              value={form.sessionType}
-              onChange={(event) =>
-                setForm({ ...form, sessionType: event.target.value })
-              }
-            />
-          </Field>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Тип сессии">
+              <select
+                className={fieldClass}
+                value={form.sessionType}
+                onChange={(event) =>
+                  setForm({ ...form, sessionType: event.target.value })
+                }
+              >
+                {sessionTypeOptions.map((option) => (
+                  <option key={option.value || "any"} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Пакет часов">
+              <select
+                className={fieldClass}
+                value={form.packetMode}
+                onChange={(event) =>
+                  setForm({ ...form, packetMode: event.target.value })
+                }
+              >
+                {packetModeOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
           <StoreSelect
             stores={stores}
             value={form.storeIds}
@@ -2451,6 +2562,7 @@ function LootBoxesTab({
           meta={[
             item.audience?.name ?? "все гости",
             item.segment ?? "без сегмента",
+            packetModeLabel(stringRule(item.periodRules, "packetMode", "ANY")),
             formatMoney(item.budgetAmount ?? 0),
           ]}
           onEdit={() => onEdit(item)}
@@ -2638,6 +2750,7 @@ function MissionsTab({
           subtitle={`${item.missionType} · ${item.xpReward} XP`}
           meta={[
             item.audience?.name ?? "все гости",
+            packetModeLabel(stringRule(item.conditions, "packetMode", "ANY")),
             `${item.progressTarget ?? 1} ${item.progressUnit ?? "шаг"}`,
             formatMoney(item.budgetAmount ?? 0),
           ]}
@@ -2825,6 +2938,7 @@ function SeasonsTab({
           subtitle={`${item.seasonType} · ${item.premiumEnabled ? "premium" : "free"}`}
           meta={[
             item.audience?.name ?? "все гости",
+            packetModeLabel(stringRule(item.xpRules, "packetMode", "ANY")),
             formatDate(item.periodFrom),
             formatMoney(item.budgetAmount ?? 0),
           ]}
@@ -3210,6 +3324,34 @@ function MissionBusinessRules({
       description="Опишите проверяемое поведение гостя простыми правилами. Факты берутся из подготовленных данных Langame."
     >
       <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Тип сессии">
+          <select
+            className={fieldClass}
+            value={form.sessionType}
+            onChange={(event) => onChange({ sessionType: event.target.value })}
+          >
+            {sessionTypeOptions.map((option) => (
+              <option key={option.value || "any"} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Пакет часов">
+          <select
+            className={fieldClass}
+            value={form.packetMode}
+            onChange={(event) => onChange({ packetMode: event.target.value })}
+          >
+            {packetModeOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Окно выполнения, дней">
           <input
             className={fieldClass}
@@ -3322,6 +3464,45 @@ function SeasonBusinessRules({
             value={form.xpMissionCompletion}
             onChange={(event) =>
               onChange({ xpMissionCompletion: event.target.value })
+            }
+          />
+        </Field>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Field label="Тип сессии">
+          <select
+            className={fieldClass}
+            value={form.sessionType}
+            onChange={(event) => onChange({ sessionType: event.target.value })}
+          >
+            {sessionTypeOptions.map((option) => (
+              <option key={option.value || "any"} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Пакет часов">
+          <select
+            className={fieldClass}
+            value={form.packetMode}
+            onChange={(event) => onChange({ packetMode: event.target.value })}
+          >
+            {packetModeOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Бонус XP за пакет">
+          <input
+            className={fieldClass}
+            type="number"
+            min="0"
+            value={form.xpPacketSessionBonus}
+            onChange={(event) =>
+              onChange({ xpPacketSessionBonus: event.target.value })
             }
           />
         </Field>
@@ -4010,6 +4191,7 @@ function lootBoxToForm(lootBox: GuestGameLootBox): LootBoxForm {
     audienceId: lootBox.audience?.id ?? "",
     segment: lootBox.segment ?? "",
     sessionType: lootBox.sessionType ?? "",
+    packetMode: stringRule(lootBox.periodRules, "packetMode", "ANY"),
     storeIds: lootBox.storeIds,
     quietHoursEnabled: booleanRule(lootBox.periodRules, "quietHoursEnabled", true),
     weekdaysOnly: booleanRule(lootBox.periodRules, "weekdaysOnly", true),
@@ -4076,6 +4258,8 @@ function missionToForm(mission: GuestGameMission): MissionForm {
     totalRewardLimit: mission.totalRewardLimit
       ? String(mission.totalRewardLimit)
       : "",
+    sessionType: stringRule(mission.conditions, "sessionType", ""),
+    packetMode: stringRule(mission.conditions, "packetMode", "ANY"),
     windowDays: numberRule(mission.conditions, "windowDays", "7"),
     weekdaysOnly: booleanRule(mission.conditions, "weekdaysOnly", true),
     minSessionMinutes: numberRule(mission.conditions, "minSessionMinutes", "90"),
@@ -4121,6 +4305,13 @@ function seasonToForm(season: GuestGameSeason): SeasonForm {
       "missionCompletion",
       "50",
     ),
+    xpPacketSessionBonus: numberRule(
+      season.xpRules,
+      "packetSessionBonus",
+      "15",
+    ),
+    sessionType: stringRule(season.xpRules, "sessionType", ""),
+    packetMode: stringRule(season.xpRules, "packetMode", "ANY"),
     levelCount: String(arrayRule(season.levels).length || 4),
     xpPerLevel: seasonLevelStep(season.levels, "250"),
     freeRewardEvery: rewardFrequency(season.freeRewards, "2"),
@@ -4202,6 +4393,7 @@ function buildLootBoxPeriodRules(form: LootBoxForm) {
     weekdaysOnly: form.weekdaysOnly,
     weekdays: form.weekdaysOnly ? [1, 2, 3, 4, 5] : [0, 1, 2, 3, 4, 5, 6],
     hours: form.quietHoursEnabled ? [`${start}-${end}`] : [],
+    packetMode: form.packetMode,
   };
 }
 
@@ -4247,6 +4439,8 @@ function buildMissionConditions(form: MissionForm) {
     source: "business_controls",
     windowDays: optionalNumber(form.windowDays),
     weekdaysOnly: form.weekdaysOnly,
+    sessionType: nullable(form.sessionType),
+    packetMode: form.packetMode,
     minSessionMinutes: optionalNumber(form.minSessionMinutes),
     minSpendAmount: optionalNumber(form.minSpendAmount),
     requiresLangameFact: form.requireLangameFact,
@@ -4272,6 +4466,9 @@ function buildSeasonXpRules(form: SeasonForm) {
     playHour: numeric(form.xpPlayHour, 0),
     barPurchase: numeric(form.xpBarPurchase, 0),
     missionCompletion: numeric(form.xpMissionCompletion, 0),
+    packetSessionBonus: numeric(form.xpPacketSessionBonus, 0),
+    sessionType: nullable(form.sessionType),
+    packetMode: form.packetMode,
   };
 }
 
@@ -4353,6 +4550,11 @@ function numberRule(value: unknown, key: string, fallback: string) {
     return raw;
   }
   return fallback;
+}
+
+function stringRule(value: unknown, key: string, fallback: string) {
+  const raw = asRecord(value)[key];
+  return typeof raw === "string" && raw.trim() ? raw : fallback;
 }
 
 function booleanRule(value: unknown, key: string, fallback: boolean) {
@@ -4486,6 +4688,33 @@ function formatMoney(value: number) {
     currency: "RUB",
     maximumFractionDigits: 0,
   }).format(value);
+}
+
+function sessionTypeLabel(value: string | null) {
+  return (
+    sessionTypeOptions.find((option) => option.value === (value ?? ""))?.label ??
+    value ??
+    "любой тип"
+  );
+}
+
+function packetModeLabel(value: string | null) {
+  return (
+    packetModeOptions.find((option) => option.value === (value ?? "ANY"))
+      ?.label ??
+    value ??
+    "любой формат"
+  );
+}
+
+function packetStateLabel(value: boolean | null) {
+  if (value === true) {
+    return "пакет часов";
+  }
+  if (value === false) {
+    return "обычная";
+  }
+  return "не указано";
 }
 
 function formatDate(value: string | null) {

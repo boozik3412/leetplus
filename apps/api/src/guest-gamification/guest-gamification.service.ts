@@ -665,6 +665,8 @@ export type GuestGameDryRunDto = {
   storeId?: string | null;
   eventType?: string | null;
   occurredAt?: string | null;
+  sessionType?: string | null;
+  sessionPacket?: boolean | string | null;
   sessionMinutes?: number | string | null;
   spendAmount?: number | string | null;
 };
@@ -705,6 +707,8 @@ export type GuestGameDryRunResult = {
   guest: GuestGameProfile['guest'];
   store: { id: string; name: string } | null;
   input: {
+    sessionType: string | null;
+    sessionPacket: boolean | null;
     sessionMinutes: number;
     spendAmount: number;
   };
@@ -753,6 +757,8 @@ export type GuestGameSnapshotFact = {
   externalId: string | null;
   guest: GuestGameProfile['guest'];
   store: { id: string; name: string } | null;
+  sessionType: string | null;
+  sessionPacket: boolean | null;
   sessionMinutes: number | null;
   spendAmount: number | null;
   label: string;
@@ -1535,6 +1541,8 @@ export class GuestGamificationService {
   ): Promise<GuestGameDryRunResult> {
     const eventType = stringValue(dto.eventType) ?? 'SESSION_START';
     const occurredAt = dateValue(dto.occurredAt) ?? new Date();
+    const sessionType = nullableString(dto.sessionType) ?? null;
+    const sessionPacket = nullableBooleanValue(dto.sessionPacket);
     const sessionMinutes = Math.max(0, intValue(dto.sessionMinutes) ?? 120);
     const spendAmount = Math.max(0, dryRunNumber(dto.spendAmount, 0));
     const [profile, lootBoxes, missions, seasons, rewards] = await Promise.all([
@@ -1558,6 +1566,8 @@ export class GuestGamificationService {
       profile,
       guest,
       storeId: store?.id ?? null,
+      sessionType,
+      sessionPacket,
       sessionMinutes,
       spendAmount,
       rewards,
@@ -1585,7 +1595,7 @@ export class GuestGamificationService {
         : null,
       guest,
       store: store ? { id: store.id, name: store.name } : null,
-      input: { sessionMinutes, spendAmount },
+      input: { sessionType, sessionPacket, sessionMinutes, spendAmount },
       summary: {
         checkedRules: rules.length,
         eligibleRules: eligibleRules.length,
@@ -2612,6 +2622,8 @@ function mapSessionFacts(row: SnapshotSessionRow): GuestGameSnapshotFact[] {
     row.durationMinutes ??
     durationMinutes(row.startedAt, row.stoppedAt) ??
     null;
+  const sessionPacket = row.packet ?? null;
+  const sessionType = sessionPacket ? 'packet_hours' : 'regular_session';
   const guestName = snapshotGuestName(row.guest, row.externalGuestId);
   const facts: GuestGameSnapshotFact[] = [
     {
@@ -2624,6 +2636,8 @@ function mapSessionFacts(row: SnapshotSessionRow): GuestGameSnapshotFact[] {
       externalId: row.externalSessionId,
       guest: mapSnapshotGuest(row.guest, row.externalGuestId),
       store: mapSnapshotStore(row.store),
+      sessionType,
+      sessionPacket,
       sessionMinutes,
       spendAmount: null,
       label: `Старт сессии: ${guestName}`,
@@ -2649,6 +2663,8 @@ function mapSessionFacts(row: SnapshotSessionRow): GuestGameSnapshotFact[] {
       externalId: row.externalSessionId,
       guest: mapSnapshotGuest(row.guest, row.externalGuestId),
       store: mapSnapshotStore(row.store),
+      sessionType,
+      sessionPacket,
       sessionMinutes,
       spendAmount: null,
       label: `Игровое время: ${guestName}`,
@@ -2682,6 +2698,8 @@ function mapLogFact(row: SnapshotLogRow): GuestGameSnapshotFact[] {
       externalId: row.sourceKey,
       guest: mapSnapshotGuest(row.guest, row.externalGuestId),
       store: null,
+      sessionType: null,
+      sessionPacket: null,
       sessionMinutes: null,
       spendAmount: null,
       label: `Лог гостя: ${snapshotGuestName(row.guest, row.externalGuestId)}`,
@@ -2713,6 +2731,8 @@ function mapTransactionFact(
       externalId: row.externalTransactionId,
       guest: mapSnapshotGuest(row.guest, row.externalGuestId),
       store: mapSnapshotStore(row.store),
+      sessionType: null,
+      sessionPacket: null,
       sessionMinutes: null,
       spendAmount: Math.abs(amount),
       label: `${eventType === 'BALANCE_TOPUP' ? 'Пополнение баланса' : 'Покупка/списание'}: ${snapshotGuestName(
@@ -2755,6 +2775,8 @@ function mapOperationLogFact(
       externalId: row.sourceKey,
       guest: null,
       store: mapSnapshotStore(row.store),
+      sessionType: null,
+      sessionPacket: null,
       sessionMinutes: null,
       spendAmount: Math.abs(amount),
       label:
@@ -2789,6 +2811,8 @@ function mapBalanceFact(row: SnapshotBalanceRow): GuestGameSnapshotFact[] {
       externalId: `${row.externalGuestId}:${row.snapshotDate.toISOString()}`,
       guest: mapSnapshotGuest(row.guest, row.externalGuestId),
       store: null,
+      sessionType: null,
+      sessionPacket: null,
       sessionMinutes: null,
       spendAmount: null,
       label: `Баланс гостя: ${snapshotGuestName(row.guest, row.externalGuestId)}`,
@@ -2813,6 +2837,8 @@ function mapBonusBalanceFact(
       externalId: `${row.externalGuestId}:${row.snapshotDate.toISOString()}`,
       guest: mapSnapshotGuest(row.guest, row.externalGuestId),
       store: null,
+      sessionType: null,
+      sessionPacket: null,
       sessionMinutes: null,
       spendAmount: null,
       label: `Бонусный баланс: ${snapshotGuestName(row.guest, row.externalGuestId)}`,
@@ -2851,6 +2877,8 @@ function mapLoyaltyGroupFact(
       externalId: `${row.externalGuestId}:group:${row.externalGuestTypeId}`,
       guest: mapSnapshotGuest(row, row.externalGuestId),
       store: null,
+      sessionType: null,
+      sessionPacket: null,
       sessionMinutes: null,
       spendAmount: null,
       label: `Группа лояльности: ${groupName}`,
@@ -2892,6 +2920,8 @@ function mapProductExpenseFact(
       externalId: row.externalSaleId,
       guest: mapSnapshotGuest(row.guest, row.externalGuestId),
       store: mapSnapshotStore(row.store),
+      sessionType: null,
+      sessionPacket: null,
       sessionMinutes: null,
       spendAmount: Math.abs(revenue),
       label: `Товарная покупка: ${productName ?? 'товар'} · ${guestName}`,
@@ -3069,6 +3099,17 @@ function booleanValue(value: unknown) {
   return false;
 }
 
+function nullableBooleanValue(value: unknown): boolean | null {
+  if (value === true || value === 'true' || value === '1') {
+    return true;
+  }
+  if (value === false || value === 'false' || value === '0') {
+    return false;
+  }
+
+  return null;
+}
+
 function pipelineProcessDtoFromFact(
   fact: GuestGameSnapshotFact,
 ): GuestGameProcessEventDto {
@@ -3077,6 +3118,8 @@ function pipelineProcessDtoFromFact(
     storeId: fact.store?.id ?? null,
     eventType: fact.eventType,
     occurredAt: fact.occurredAt,
+    sessionType: fact.sessionType,
+    sessionPacket: fact.sessionPacket,
     sessionMinutes: fact.sessionMinutes,
     spendAmount: fact.spendAmount,
     sourceFactId: fact.id,
@@ -3258,6 +3301,8 @@ type DryRunContext = {
   profile: GuestGameProfile | null;
   guest: GuestGameProfile['guest'];
   storeId: string | null;
+  sessionType: string | null;
+  sessionPacket: boolean | null;
   sessionMinutes: number;
   spendAmount: number;
   rewards: GuestGameReward[];
@@ -3282,6 +3327,13 @@ function evaluateLootBoxDryRun(
   appendDryRunPeriodRules(
     rule.periodRules,
     context.occurredAt,
+    blockers,
+    reasons,
+  );
+  appendDryRunSessionConditionCheck(
+    rule.sessionType,
+    dryRunRecord(rule.periodRules).packetMode,
+    context,
     blockers,
     reasons,
   );
@@ -3391,6 +3443,7 @@ function evaluateSeasonDryRun(
     blockers,
     reasons,
   );
+  appendDryRunSeasonXpRules(rule.xpRules, context, blockers, reasons);
   appendDryRunBudgetCheck(rule.budgetAmount, 0, ruleRewards, blockers, reasons);
 
   if (rule.audience) {
@@ -3536,6 +3589,59 @@ function appendDryRunPeriodRules(
   }
 }
 
+function appendDryRunSessionConditionCheck(
+  sessionTypeValue: unknown,
+  packetModeValue: unknown,
+  context: DryRunContext,
+  blockers: string[],
+  reasons: string[],
+) {
+  const expectedType = dryRunString(sessionTypeValue);
+  const actualType = context.sessionType;
+
+  if (expectedType && isActionableSessionType(expectedType)) {
+    if (!actualType) {
+      blockers.push('Тип сессии не указан для проверки правила');
+    } else if (
+      normalizeSessionType(expectedType) !== normalizeSessionType(actualType)
+    ) {
+      blockers.push(`Тип сессии не подходит: нужен ${expectedType}`);
+    } else {
+      reasons.push(`Тип сессии подходит: ${actualType}`);
+    }
+  } else if (expectedType) {
+    reasons.push(`Тип сессии правила: ${expectedType}`);
+  }
+
+  const packetMode = dryRunString(packetModeValue)?.toUpperCase() ?? 'ANY';
+  if (packetMode === 'ANY' || packetMode === 'ALL') {
+    reasons.push('Пакет часов не ограничен');
+    return;
+  }
+
+  if (context.sessionPacket == null) {
+    blockers.push('Факт сессии не содержит признак пакета часов');
+    return;
+  }
+
+  if (packetMode === 'PACKET_ONLY') {
+    if (context.sessionPacket) {
+      reasons.push('Сессия проходит по пакету часов');
+    } else {
+      blockers.push('Правило доступно только для пакетов часов');
+    }
+    return;
+  }
+
+  if (packetMode === 'NON_PACKET_ONLY') {
+    if (!context.sessionPacket) {
+      reasons.push('Сессия обычная, без пакета часов');
+    } else {
+      blockers.push('Правило доступно только для обычных сессий');
+    }
+  }
+}
+
 function appendDryRunDateBounds(
   periodFrom: string | null,
   periodTo: string | null,
@@ -3568,6 +3674,14 @@ function appendDryRunMissionConditions(
   const minSpendAmount = dryRunOptionalNumber(conditions.minSpendAmount);
   const windowDays = dryRunOptionalNumber(conditions.windowDays);
 
+  appendDryRunSessionConditionCheck(
+    conditions.sessionType,
+    conditions.packetMode,
+    context,
+    blockers,
+    reasons,
+  );
+
   if (minSessionMinutes != null && context.sessionMinutes < minSessionMinutes) {
     blockers.push(
       `Сессия короче условия: ${context.sessionMinutes}/${minSessionMinutes} мин`,
@@ -3595,6 +3709,27 @@ function appendDryRunMissionConditions(
   }
   if (windowDays != null) {
     reasons.push(`Окно выполнения: ${windowDays} дн.`);
+  }
+}
+
+function appendDryRunSeasonXpRules(
+  value: unknown,
+  context: DryRunContext,
+  blockers: string[],
+  reasons: string[],
+) {
+  const rules = dryRunRecord(value);
+
+  appendDryRunSessionConditionCheck(
+    rules.sessionType,
+    rules.packetMode,
+    context,
+    blockers,
+    reasons,
+  );
+
+  if (dryRunOptionalNumber(rules.packetSessionBonus) != null) {
+    reasons.push('Battle Pass учитывает бонус за пакет часов');
   }
 }
 
@@ -3735,11 +3870,16 @@ function dryRunRewardMatchesGuest(
 function dryRunSeasonXp(value: unknown, context: DryRunContext) {
   const rules = dryRunRecord(value);
   const eventType = context.eventType.toUpperCase();
+  const packetBonus =
+    context.sessionPacket === true
+      ? dryRunNumber(rules.packetSessionBonus, 0)
+      : 0;
 
   if (eventType === 'PLAY_HOUR' || eventType === 'SESSION_STOP') {
     return Math.round(
       dryRunNumber(rules.playHour, 0) *
-        Math.max(1, context.sessionMinutes / 60),
+        Math.max(1, context.sessionMinutes / 60) +
+        packetBonus,
     );
   }
   if (eventType === 'BAR_PURCHASE' || eventType === 'PRODUCT_PURCHASE') {
@@ -3749,7 +3889,7 @@ function dryRunSeasonXp(value: unknown, context: DryRunContext) {
     return Math.round(dryRunNumber(rules.missionCompletion, 0));
   }
   if (eventType === 'SESSION_START' || eventType === 'VISIT') {
-    return Math.round(dryRunNumber(rules.visit, 0));
+    return Math.round(dryRunNumber(rules.visit, 0) + packetBonus);
   }
 
   return 0;
@@ -3843,6 +3983,16 @@ function dryRunNumberArray(value: unknown) {
 
 function dryRunString(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function isActionableSessionType(value: string) {
+  return ['regular_session', 'packet_hours'].includes(
+    normalizeSessionType(value),
+  );
+}
+
+function normalizeSessionType(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, '_');
 }
 
 function dryRunOptionalNumber(

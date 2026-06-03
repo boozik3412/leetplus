@@ -1169,7 +1169,7 @@ function DryRunTab({
                 Факты Langame snapshot
               </p>
               <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-                Загрузите последние сохраненные сессии, покупки и логи, затем выберите факт как основу проверки правил.
+                Загрузите последние сохраненные сессии, покупки, логи, балансы и группы лояльности, затем выберите факт как основу проверки правил.
               </p>
             </div>
             <button
@@ -1217,7 +1217,7 @@ function DryRunTab({
 
           {snapshotFacts ? (
             <div className="mt-3 space-y-3">
-              <div className="grid gap-2 text-xs sm:grid-cols-5">
+              <div className="grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
                 <MiniMetric
                   label="сессии"
                   value={snapshotFacts.summary.sessions}
@@ -1230,6 +1230,18 @@ function DryRunTab({
                 <MiniMetric
                   label="операции"
                   value={snapshotFacts.summary.operationLogs}
+                />
+                <MiniMetric
+                  label="баланс"
+                  value={snapshotFacts.summary.balances}
+                />
+                <MiniMetric
+                  label="бонусы"
+                  value={snapshotFacts.summary.bonusBalances}
+                />
+                <MiniMetric
+                  label="группы"
+                  value={snapshotFacts.summary.loyaltyGroups}
                 />
                 <MiniMetric
                   label="последний факт"
@@ -1615,6 +1627,9 @@ function SnapshotFactRow({
     GUEST_LOG: "лог",
     GUEST_TRANSACTION: "транзакция",
     GUEST_OPERATION_LOG: "операция",
+    GUEST_BALANCE: "баланс",
+    GUEST_BONUS_BALANCE: "бонусы",
+    GUEST_LOYALTY_GROUP: "группа",
   };
   const eventLabel =
     dryRunEventOptions.find((option) => option.value === fact.eventType)

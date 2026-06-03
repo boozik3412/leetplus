@@ -35,6 +35,9 @@ const snapshotFactSources = [
   'GUEST_LOG',
   'GUEST_TRANSACTION',
   'GUEST_OPERATION_LOG',
+  'GUEST_BALANCE',
+  'GUEST_BONUS_BALANCE',
+  'GUEST_LOYALTY_GROUP',
 ] as const;
 
 type StatusValue = (typeof statusValues)[number];
@@ -216,6 +219,53 @@ const snapshotOperationLogSelect = {
   store: { select: snapshotStoreSelect },
 } satisfies Prisma.GuestOperationLogSelect;
 
+const snapshotBalanceSelect = {
+  id: true,
+  externalProvider: true,
+  externalDomain: true,
+  externalGuestId: true,
+  snapshotDate: true,
+  balance: true,
+  guest: { select: snapshotGuestSelect },
+} satisfies Prisma.GuestBalanceSnapshotSelect;
+
+const snapshotBonusBalanceSelect = {
+  id: true,
+  externalProvider: true,
+  externalDomain: true,
+  externalGuestId: true,
+  snapshotDate: true,
+  bonusBalance: true,
+  guest: { select: snapshotGuestSelect },
+} satisfies Prisma.GuestBonusBalanceSnapshotSelect;
+
+const snapshotLoyaltyGuestSelect = {
+  id: true,
+  externalProvider: true,
+  externalDomain: true,
+  externalGuestId: true,
+  externalGuestTypeId: true,
+  fullNameMasked: true,
+  phoneMasked: true,
+  emailMasked: true,
+  currentCountHours: true,
+  insertedAt: true,
+  lastActivityAt: true,
+  updatedAt: true,
+} satisfies Prisma.GuestSelect;
+
+const snapshotGuestGroupSelect = {
+  externalProvider: true,
+  externalDomain: true,
+  externalGroupId: true,
+  name: true,
+  percent: true,
+  countHoursFrom: true,
+  countHoursTo: true,
+  bonusBirthday: true,
+  lastSyncedAt: true,
+} satisfies Prisma.GuestGroupSelect;
+
 type ProfileRow = Prisma.GuestGameProfileGetPayload<{
   include: typeof gameProfileInclude;
 }>;
@@ -248,6 +298,18 @@ type SnapshotTransactionRow = Prisma.GuestTransactionGetPayload<{
 }>;
 type SnapshotOperationLogRow = Prisma.GuestOperationLogGetPayload<{
   select: typeof snapshotOperationLogSelect;
+}>;
+type SnapshotBalanceRow = Prisma.GuestBalanceSnapshotGetPayload<{
+  select: typeof snapshotBalanceSelect;
+}>;
+type SnapshotBonusBalanceRow = Prisma.GuestBonusBalanceSnapshotGetPayload<{
+  select: typeof snapshotBonusBalanceSelect;
+}>;
+type SnapshotLoyaltyGuestRow = Prisma.GuestGetPayload<{
+  select: typeof snapshotLoyaltyGuestSelect;
+}>;
+type SnapshotGuestGroupRow = Prisma.GuestGroupGetPayload<{
+  select: typeof snapshotGuestGroupSelect;
 }>;
 
 export type GuestGameUser = {
@@ -649,7 +711,10 @@ export type GuestGameSnapshotFact = {
     | 'GUEST_SESSION'
     | 'GUEST_LOG'
     | 'GUEST_TRANSACTION'
-    | 'GUEST_OPERATION_LOG';
+    | 'GUEST_OPERATION_LOG'
+    | 'GUEST_BALANCE'
+    | 'GUEST_BONUS_BALANCE'
+    | 'GUEST_LOYALTY_GROUP';
   eventType: string;
   occurredAt: string;
   externalProvider: string | null;
@@ -670,6 +735,9 @@ export type GuestGameSnapshotFactsResult = {
     logs: number;
     transactions: number;
     operationLogs: number;
+    balances: number;
+    bonusBalances: number;
+    loyaltyGroups: number;
     latestAt: string | null;
   };
 };
@@ -801,7 +869,16 @@ export class GuestGamificationService {
   async getSnapshotFacts(
     user: AuthenticatedUser,
   ): Promise<GuestGameSnapshotFactsResult> {
-    const [sessions, logs, transactions, operationLogs] = await Promise.all([
+    const [
+      sessions,
+      logs,
+      transactions,
+      operationLogs,
+      balances,
+      bonusBalances,
+      loyaltyGuests,
+      guestGroups,
+    ] = await Promise.all([
       this.prisma.guestSession.findMany({
         where: { tenantId: user.tenantId, startedAt: { not: null } },
         select: snapshotSessionSelect,
@@ -826,20 +903,61 @@ export class GuestGamificationService {
         orderBy: [{ happenedAt: 'desc' }, { createdAt: 'desc' }],
         take: 30,
       }),
+      this.prisma.guestBalanceSnapshot.findMany({
+        where: { tenantId: user.tenantId },
+        select: snapshotBalanceSelect,
+        orderBy: [{ snapshotDate: 'desc' }, { createdAt: 'desc' }],
+        take: 25,
+      }),
+      this.prisma.guestBonusBalanceSnapshot.findMany({
+        where: { tenantId: user.tenantId },
+        select: snapshotBonusBalanceSelect,
+        orderBy: [{ snapshotDate: 'desc' }, { createdAt: 'desc' }],
+        take: 25,
+      }),
+      this.prisma.guest.findMany({
+        where: { tenantId: user.tenantId, externalGuestTypeId: { not: null } },
+        select: snapshotLoyaltyGuestSelect,
+        orderBy: [{ updatedAt: 'desc' }],
+        take: 25,
+      }),
+      this.prisma.guestGroup.findMany({
+        where: { tenantId: user.tenantId },
+        select: snapshotGuestGroupSelect,
+      }),
     ]);
+    const guestGroupMap = new Map(
+      guestGroups.map((group) => [snapshotGroupKey(group), group]),
+    );
 
     const facts = [
       ...sessions.flatMap(mapSessionFacts),
       ...logs.flatMap(mapLogFact),
       ...transactions.flatMap(mapTransactionFact),
       ...operationLogs.flatMap(mapOperationLogFact),
+      ...balances.flatMap(mapBalanceFact),
+      ...bonusBalances.flatMap(mapBonusBalanceFact),
+      ...loyaltyGuests.flatMap((guest) =>
+        mapLoyaltyGroupFact(
+          guest,
+          guest.externalGuestTypeId
+            ? (guestGroupMap.get(
+                snapshotGroupKey({
+                  externalProvider: guest.externalProvider,
+                  externalDomain: guest.externalDomain,
+                  externalGroupId: guest.externalGuestTypeId,
+                }),
+              ) ?? null)
+            : null,
+        ),
+      ),
     ]
       .sort(
         (left, right) =>
           new Date(right.occurredAt).getTime() -
           new Date(left.occurredAt).getTime(),
       )
-      .slice(0, 60);
+      .slice(0, 90);
 
     return {
       facts,
@@ -848,6 +966,9 @@ export class GuestGamificationService {
         logs: logs.length,
         transactions: transactions.length,
         operationLogs: operationLogs.length,
+        balances: balances.length,
+        bonusBalances: bonusBalances.length,
+        loyaltyGroups: loyaltyGuests.length,
         latestAt: facts[0]?.occurredAt ?? null,
       },
     };
@@ -2613,6 +2734,102 @@ function mapOperationLogFact(
   ];
 }
 
+function mapBalanceFact(row: SnapshotBalanceRow): GuestGameSnapshotFact[] {
+  const balance = numberValue(row.balance);
+
+  return [
+    {
+      id: `balance:${row.id}`,
+      source: 'GUEST_BALANCE',
+      eventType: 'BALANCE_SNAPSHOT',
+      occurredAt: row.snapshotDate.toISOString(),
+      externalProvider: row.externalProvider,
+      externalDomain: row.externalDomain,
+      externalId: `${row.externalGuestId}:${row.snapshotDate.toISOString()}`,
+      guest: mapSnapshotGuest(row.guest, row.externalGuestId),
+      store: null,
+      sessionMinutes: null,
+      spendAmount: null,
+      label: `Баланс гостя: ${snapshotGuestName(row.guest, row.externalGuestId)}`,
+      details: `Баланс ${balance} руб`,
+    },
+  ];
+}
+
+function mapBonusBalanceFact(
+  row: SnapshotBonusBalanceRow,
+): GuestGameSnapshotFact[] {
+  const bonusBalance = numberValue(row.bonusBalance);
+
+  return [
+    {
+      id: `bonus-balance:${row.id}`,
+      source: 'GUEST_BONUS_BALANCE',
+      eventType: 'BONUS_BALANCE_SNAPSHOT',
+      occurredAt: row.snapshotDate.toISOString(),
+      externalProvider: row.externalProvider,
+      externalDomain: row.externalDomain,
+      externalId: `${row.externalGuestId}:${row.snapshotDate.toISOString()}`,
+      guest: mapSnapshotGuest(row.guest, row.externalGuestId),
+      store: null,
+      sessionMinutes: null,
+      spendAmount: null,
+      label: `Бонусный баланс: ${snapshotGuestName(row.guest, row.externalGuestId)}`,
+      details: `Бонусы ${bonusBalance} руб`,
+    },
+  ];
+}
+
+function mapLoyaltyGroupFact(
+  row: SnapshotLoyaltyGuestRow,
+  group: SnapshotGuestGroupRow | null,
+): GuestGameSnapshotFact[] {
+  if (!row.externalGuestTypeId) {
+    return [];
+  }
+
+  const occurredAt = row.lastActivityAt ?? row.updatedAt ?? row.insertedAt;
+  const groupName = group?.name ?? row.externalGuestTypeId;
+  const percent = group?.percent ? numberValue(group.percent) : null;
+  const hoursFrom = group?.countHoursFrom
+    ? numberValue(group.countHoursFrom)
+    : null;
+  const hoursTo = group?.countHoursTo ? numberValue(group.countHoursTo) : null;
+  const currentHours = row.currentCountHours
+    ? numberValue(row.currentCountHours)
+    : null;
+
+  return [
+    {
+      id: `loyalty-group:${row.id}:${row.externalGuestTypeId}`,
+      source: 'GUEST_LOYALTY_GROUP',
+      eventType: 'LOYALTY_GROUP_SNAPSHOT',
+      occurredAt: occurredAt.toISOString(),
+      externalProvider: row.externalProvider,
+      externalDomain: row.externalDomain,
+      externalId: `${row.externalGuestId}:group:${row.externalGuestTypeId}`,
+      guest: mapSnapshotGuest(row, row.externalGuestId),
+      store: null,
+      sessionMinutes: null,
+      spendAmount: null,
+      label: `Группа лояльности: ${groupName}`,
+      details: [
+        snapshotGuestName(row, row.externalGuestId),
+        percent != null ? `скидка ${percent}%` : null,
+        currentHours != null ? `${currentHours} ч у гостя` : null,
+        hoursFrom != null || hoursTo != null
+          ? `диапазон ${hoursFrom ?? 0}-${hoursTo ?? '∞'} ч`
+          : null,
+        group?.lastSyncedAt
+          ? `группа обновлена ${group.lastSyncedAt.toISOString()}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(' · '),
+    },
+  ];
+}
+
 function mapSnapshotGuest(
   row: SnapshotGuestRow | null,
   externalGuestId: string | null,
@@ -2653,6 +2870,18 @@ function snapshotGuestName(
   externalGuestId: string | null,
 ) {
   return row?.fullNameMasked ?? externalGuestId ?? 'гость без профиля';
+}
+
+function snapshotGroupKey(row: {
+  externalProvider: IntegrationProvider | null;
+  externalDomain: string | null;
+  externalGroupId: string;
+}) {
+  return [
+    row.externalProvider ?? '',
+    row.externalDomain ?? '',
+    row.externalGroupId,
+  ].join(':');
 }
 
 function durationMinutes(startedAt: Date | null, stoppedAt: Date | null) {

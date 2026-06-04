@@ -291,6 +291,13 @@ export type GuestPortalCommunicationPreferenceResponse = {
   message: string;
 };
 
+export type GuestPortalMessengerChannel = "TELEGRAM" | "MAX";
+
+export type GuestPortalMessengerUpdateResponse = {
+  portal: GuestPortalPayload;
+  message: string;
+};
+
 export type GuestPortalLangameMatchResponse = {
   checkedAt: string;
   queryField: "phone";

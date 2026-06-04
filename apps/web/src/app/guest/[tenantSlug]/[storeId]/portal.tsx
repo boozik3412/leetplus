@@ -6,6 +6,8 @@ import type {
   GuestPortalCommunicationPreferenceAction,
   GuestPortalCommunicationPreferenceResponse,
   GuestPortalLangameMatchResponse,
+  GuestPortalMessengerChannel,
+  GuestPortalMessengerUpdateResponse,
   GuestPortalOtpStartResponse,
   GuestPortalOtpVerifyResponse,
   GuestPortalPayload,
@@ -42,6 +44,8 @@ export function GuestPortalClient({
     string | null
   >(null);
   const [isUpdatingCommunication, setUpdatingCommunication] = useState(false);
+  const [messengerMessage, setMessengerMessage] = useState<string | null>(null);
+  const [isUpdatingMessenger, setUpdatingMessenger] = useState(false);
 
   const basePath = `/api/guest-portal/${encodeURIComponent(
     tenantSlug,
@@ -114,6 +118,7 @@ export function GuestPortalClient({
       setCode("");
       setLangameMatch(null);
       setLangameMatchMessage(null);
+      setMessengerMessage(null);
       setMessage(
         data.delivery.status === "DEV_CODE"
           ? "Код создан. В demo-режиме он показан ниже."
@@ -156,6 +161,7 @@ export function GuestPortalClient({
       setPortal(data.portal);
       setLangameMatch(null);
       setLangameMatchMessage(null);
+      setMessengerMessage(null);
       setMessage("Профиль подтвержден.");
     } catch (error) {
       setMessage(
@@ -239,6 +245,42 @@ export function GuestPortalClient({
     }
   }
 
+  async function updateMessengerChannel(
+    channel: GuestPortalMessengerChannel,
+    identity: string,
+  ) {
+    setUpdatingMessenger(true);
+    setMessengerMessage(null);
+
+    try {
+      const response = await fetch(
+        "/api/guest-portal/session/communications/messenger",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ channel, identity }),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(await readMessage(response));
+      }
+
+      const data =
+        (await response.json()) as GuestPortalMessengerUpdateResponse;
+      setPortal(data.portal);
+      setMessengerMessage(data.message);
+    } catch (error) {
+      setMessengerMessage(
+        error instanceof Error
+          ? error.message
+          : "Не удалось сохранить мессенджер.",
+      );
+    } finally {
+      setUpdatingMessenger(false);
+    }
+  }
+
   const pageTitle = portal?.store.name ?? config?.store.name ?? "Клуб";
   const tenantName = portal?.tenant.name ?? config?.tenant.name ?? "LeetPlus";
 
@@ -281,9 +323,12 @@ export function GuestPortalClient({
             isMatchingLangame={isMatchingLangame}
             communicationMessage={communicationMessage}
             isUpdatingCommunication={isUpdatingCommunication}
+            messengerMessage={messengerMessage}
+            isUpdatingMessenger={isUpdatingMessenger}
             onPhoneChange={setPhone}
             onCheckLangameMatch={checkLangameMatch}
             onUpdateCommunicationPreference={updateCommunicationPreference}
+            onUpdateMessenger={updateMessengerChannel}
           />
         ) : (
           <VerificationLanding
@@ -466,9 +511,12 @@ function VerifiedPortal({
   isMatchingLangame,
   communicationMessage,
   isUpdatingCommunication,
+  messengerMessage,
+  isUpdatingMessenger,
   onPhoneChange,
   onCheckLangameMatch,
   onUpdateCommunicationPreference,
+  onUpdateMessenger,
 }: {
   portal: GuestPortalPayload;
   phone: string;
@@ -477,10 +525,16 @@ function VerifiedPortal({
   isMatchingLangame: boolean;
   communicationMessage: string | null;
   isUpdatingCommunication: boolean;
+  messengerMessage: string | null;
+  isUpdatingMessenger: boolean;
   onPhoneChange: (value: string) => void;
   onCheckLangameMatch: (event: FormEvent<HTMLFormElement>) => void;
   onUpdateCommunicationPreference: (
     action: GuestPortalCommunicationPreferenceAction,
+  ) => void;
+  onUpdateMessenger: (
+    channel: GuestPortalMessengerChannel,
+    identity: string,
   ) => void;
 }) {
   return (
@@ -508,7 +562,10 @@ function VerifiedPortal({
         portal={portal}
         message={communicationMessage}
         isUpdating={isUpdatingCommunication}
+        messengerMessage={messengerMessage}
+        isUpdatingMessenger={isUpdatingMessenger}
         onUpdatePreference={onUpdateCommunicationPreference}
+        onUpdateMessenger={onUpdateMessenger}
       />
 
       <section className="grid gap-5 lg:grid-cols-[0.95fr_1.05fr]">
@@ -568,13 +625,25 @@ function CommunicationPanel({
   portal,
   message,
   isUpdating,
+  messengerMessage,
+  isUpdatingMessenger,
   onUpdatePreference,
+  onUpdateMessenger,
 }: {
   portal: GuestPortalPayload;
   message: string | null;
   isUpdating: boolean;
+  messengerMessage: string | null;
+  isUpdatingMessenger: boolean;
   onUpdatePreference: (action: GuestPortalCommunicationPreferenceAction) => void;
+  onUpdateMessenger: (
+    channel: GuestPortalMessengerChannel,
+    identity: string,
+  ) => void;
 }) {
+  const [messengerChannel, setMessengerChannel] =
+    useState<GuestPortalMessengerChannel>("TELEGRAM");
+  const [messengerIdentity, setMessengerIdentity] = useState("");
   const communications = portal.communications;
   const consentStatus = communications.phone.consentStatus;
   const communicationHistory = (communications.history ?? []).slice(0, 4);
@@ -706,6 +775,70 @@ function CommunicationPanel({
           </p>
         ) : null}
       </div>
+
+      <form
+        className="mt-4 rounded-lg border border-white/10 bg-white/[0.035] p-4"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onUpdateMessenger(messengerChannel, messengerIdentity);
+        }}
+      >
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="max-w-2xl">
+            <p className="text-sm font-black text-white">
+              Привязка Telegram/MAX
+            </p>
+            <p className="mt-1 text-sm leading-6 text-slate-400">
+              Укажите публичный alias. LeetPlus сохранит его в гостевом
+              профиле, но не отправит сообщений до подключения бота и
+              подтвержденного согласия.
+            </p>
+          </div>
+          <div className="flex rounded-lg border border-white/10 bg-black/20 p-1">
+            {(["TELEGRAM", "MAX"] as const).map((channel) => (
+              <button
+                key={channel}
+                type="button"
+                disabled={isUpdatingMessenger}
+                onClick={() => setMessengerChannel(channel)}
+                className={`rounded-md px-3 py-2 text-xs font-black transition ${
+                  messengerChannel === channel
+                    ? "bg-cyan-300 text-[#021018]"
+                    : "text-slate-300 hover:bg-white/[0.08]"
+                } disabled:cursor-not-allowed disabled:opacity-60`}
+              >
+                {channel === "TELEGRAM" ? "Telegram" : "MAX"}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]">
+          <input
+            value={messengerIdentity}
+            onChange={(event) => setMessengerIdentity(event.target.value)}
+            placeholder="@nickname"
+            disabled={Boolean(disabledReason) || isUpdatingMessenger}
+            className="rounded-lg border border-white/10 bg-[#070b12] px-4 py-3 text-sm font-semibold text-white outline-none transition hover:border-cyan-300/50 focus:border-cyan-300 disabled:cursor-not-allowed disabled:opacity-60"
+            maxLength={80}
+          />
+          <button
+            type="submit"
+            disabled={
+              Boolean(disabledReason) ||
+              isUpdatingMessenger ||
+              !messengerIdentity.trim()
+            }
+            className="rounded-lg border border-cyan-300/30 bg-cyan-300/10 px-4 py-3 text-sm font-black text-cyan-100 transition hover:bg-cyan-300/[0.18] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isUpdatingMessenger ? "Сохраняем..." : "Сохранить канал"}
+          </button>
+        </div>
+        {messengerMessage ? (
+          <p className="mt-3 rounded-lg border border-cyan-300/20 bg-cyan-300/[0.06] px-3 py-2 text-sm leading-6 text-cyan-50">
+            {messengerMessage}
+          </p>
+        ) : null}
+      </form>
 
       <div className="mt-5 grid gap-3 lg:grid-cols-3">
         {channels.map((channel) => (

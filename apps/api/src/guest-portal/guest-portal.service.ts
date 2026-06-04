@@ -104,6 +104,13 @@ export type GuestPortalCommunicationPreferenceResponse = {
   message: string;
 };
 
+export type GuestPortalMessengerChannel = 'TELEGRAM' | 'MAX';
+
+export type GuestPortalMessengerUpdateResponse = {
+  portal: GuestPortalPayload;
+  message: string;
+};
+
 export type GuestPortalPayload = {
   tenant: GuestPortalPublicConfig['tenant'];
   store: GuestPortalPublicConfig['store'];
@@ -662,6 +669,69 @@ export class GuestPortalService {
         guestId: guest.id,
       }),
       message: communicationPreferenceMessage(action),
+    };
+  }
+
+  async updateMessengerChannel(
+    authorization: string | undefined,
+    dto: { channel?: unknown; identity?: unknown },
+  ): Promise<GuestPortalMessengerUpdateResponse> {
+    const payload = await this.verifyGuestToken(authorization);
+    const channel = messengerChannel(dto.channel);
+    const identity = messengerIdentity(channel, dto.identity);
+    const guest = await this.findGuest(payload);
+    const existingProfile = await this.findProfile(payload, guest?.id ?? null);
+
+    if (!guest && !existingProfile) {
+      throw new BadRequestException(
+        'Профиль гостя еще не найден в синхронизированной базе. Привязка Telegram/MAX станет доступна после сопоставления с Langame.',
+      );
+    }
+
+    const field =
+      channel === 'TELEGRAM'
+        ? ({ telegramIdentity: identity } as const)
+        : ({ maxIdentity: identity } as const);
+
+    const profile = existingProfile
+      ? await this.prisma.guestGameProfile.update({
+          where: { id: existingProfile.id },
+          data: {
+            ...field,
+            phoneHash: existingProfile.phoneHash ?? payload.phoneHash,
+            status: 'ACTIVE',
+          },
+        })
+      : await this.prisma.guestGameProfile.create({
+          data: {
+            tenantId: payload.tenantId,
+            guestId: guest?.id,
+            displayName:
+              guest?.fullNameMasked ?? guest?.externalGuestId ?? 'Гость клуба',
+            contactMasked: guest?.phoneMasked ?? guest?.emailMasked ?? null,
+            phoneHash: payload.phoneHash,
+            ...field,
+          },
+        });
+
+    if (guest) {
+      await this.prisma.guestCrmEvent.create({
+        data: {
+          tenantId: payload.tenantId,
+          guestId: guest.id,
+          status: guest.crmStatus,
+          note: messengerEventNote(channel),
+        },
+      });
+    }
+
+    return {
+      portal: await this.buildPortalPayload({
+        ...payload,
+        guestId: guest?.id ?? payload.guestId,
+        profileId: profile.id,
+      }),
+      message: messengerMessage(channel),
     };
   }
 
@@ -2216,6 +2286,50 @@ function communicationPreferenceEventNote(
   } satisfies Record<GuestPortalCommunicationPreferenceAction, string>;
 
   return `${COMMUNICATION_PREFERENCE_EVENT_PREFIX}${action}: ${notes[action]}`;
+}
+
+function messengerChannel(value: unknown): GuestPortalMessengerChannel {
+  if (value === 'TELEGRAM' || value === 'MAX') {
+    return value;
+  }
+
+  throw new BadRequestException('Выберите Telegram или MAX.');
+}
+
+function messengerIdentity(
+  channel: GuestPortalMessengerChannel,
+  value: unknown,
+) {
+  if (typeof value !== 'string') {
+    throw new BadRequestException('Укажите публичный alias мессенджера.');
+  }
+
+  const trimmed = value.trim();
+  const withoutUrl = trimmed
+    .replace(/^https?:\/\/(www\.)?t\.me\//i, '')
+    .replace(/^https?:\/\/(www\.)?telegram\.me\//i, '')
+    .replace(/^https?:\/\/(www\.)?max\.ru\//i, '')
+    .replace(/^max:\/\//i, '')
+    .trim();
+  const normalized = withoutUrl.startsWith('@') ? withoutUrl : `@${withoutUrl}`;
+
+  if (!/^@[A-Za-z0-9_.-]{3,64}$/.test(normalized)) {
+    throw new BadRequestException(
+      `${channel === 'TELEGRAM' ? 'Telegram' : 'MAX'} alias должен содержать 3-64 символа: латиница, цифры, _, . или -.`,
+    );
+  }
+
+  return normalized;
+}
+
+function messengerMessage(channel: GuestPortalMessengerChannel) {
+  return `${
+    channel === 'TELEGRAM' ? 'Telegram' : 'MAX'
+  } сохранен в гостевом профиле. Реальная отправка сообщений включается отдельно после подключения бота.`;
+}
+
+function messengerEventNote(channel: GuestPortalMessengerChannel) {
+  return `guest_portal:messenger_link:${channel.toLowerCase()}`;
 }
 
 function communicationPreferenceHistoryLabel(

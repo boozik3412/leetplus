@@ -108,6 +108,7 @@ export type GuestPortalPayload = {
     lastSyncedAt: string | null;
   };
   gamification: {
+    nextActions: GuestPortalNextAction[];
     lootBoxes: GuestPortalLootBox[];
     missions: GuestPortalMission[];
     seasons: GuestPortalSeason[];
@@ -124,7 +125,24 @@ export type GuestPortalPayload = {
       lastActivityAt: string | null;
     };
     timeline: GuestPortalActivityItem[];
+    xpHistory: GuestPortalXpHistoryItem[];
   };
+};
+
+export type GuestPortalNextAction = {
+  id: string;
+  kind:
+    | 'CLAIM_REWARD'
+    | 'OPEN_LOOT_BOX'
+    | 'FINISH_MISSION'
+    | 'BATTLE_PASS'
+    | 'MATCH_LANGAME';
+  title: string;
+  description: string;
+  priority: 'HIGH' | 'MEDIUM' | 'LOW';
+  statusLabel: string;
+  progressPercent: number | null;
+  anchor: 'rewards' | 'lootBoxes' | 'missions' | 'battlePass' | 'profile';
 };
 
 export type GuestPortalLootBox = {
@@ -239,6 +257,16 @@ export type GuestPortalActivityItem = {
   storeName: string | null;
   amount: number | null;
   xpDelta: number | null;
+};
+
+export type GuestPortalXpHistoryItem = {
+  id: string;
+  eventType: string;
+  title: string;
+  description: string | null;
+  xpDelta: number;
+  occurredAt: string;
+  sourceLabel: string | null;
 };
 
 export type GuestPortalLangameMatchResponse = {
@@ -703,6 +731,24 @@ export class GuestPortalService {
       visibleMissions,
     );
     const portalRewards = rewards.map(mapReward).sort(comparePortalRewards);
+    const portalLootBoxes = lootBoxes
+      .filter((item) => matchesStore(item.storeIds, context.store.id))
+      .slice(0, 6)
+      .map((item) => mapLootBox(item, rewards));
+    const portalMissions = visibleMissions.map((item) =>
+      mapMission(item, missionProgress.get(item.id)),
+    );
+    const portalSeasons = seasons
+      .filter((item) => activePeriod(item.periodFrom, item.periodTo))
+      .slice(0, 2)
+      .map((item) => mapSeason(item, xp, rewards));
+    const nextActions = buildNextActions({
+      guestFound: Boolean(guest || profile),
+      lootBoxes: portalLootBoxes,
+      missions: portalMissions,
+      seasons: portalSeasons,
+      rewards: portalRewards,
+    });
 
     return {
       tenant: {
@@ -731,17 +777,10 @@ export class GuestPortalService {
       },
       loyalty,
       gamification: {
-        lootBoxes: lootBoxes
-          .filter((item) => matchesStore(item.storeIds, context.store.id))
-          .slice(0, 6)
-          .map((item) => mapLootBox(item, rewards)),
-        missions: visibleMissions.map((item) =>
-          mapMission(item, missionProgress.get(item.id)),
-        ),
-        seasons: seasons
-          .filter((item) => activePeriod(item.periodFrom, item.periodTo))
-          .slice(0, 2)
-          .map((item) => mapSeason(item, xp, rewards)),
+        nextActions,
+        lootBoxes: portalLootBoxes,
+        missions: portalMissions,
+        seasons: portalSeasons,
         rewardSummary: buildRewardSummary(portalRewards),
         rewards: portalRewards,
       },
@@ -972,6 +1011,10 @@ export class GuestPortalService {
           new Date(left.occurredAt).getTime(),
       )
       .slice(0, 12);
+    const xpHistory = gameEventRows
+      .filter((row) => row.xpDelta !== 0)
+      .map((row) => mapXpHistory(row))
+      .slice(0, 6);
 
     const lastActivityAt =
       newestDate([
@@ -991,6 +1034,7 @@ export class GuestPortalService {
         lastActivityAt: iso(lastActivityAt),
       },
       timeline,
+      xpHistory,
     };
   }
 
@@ -1539,6 +1583,125 @@ function buildRewardSummary(
   };
 }
 
+function buildNextActions(input: {
+  guestFound: boolean;
+  lootBoxes: GuestPortalLootBox[];
+  missions: GuestPortalMission[];
+  seasons: GuestPortalSeason[];
+  rewards: GuestPortalReward[];
+}): GuestPortalNextAction[] {
+  const actions: GuestPortalNextAction[] = [];
+  const readyReward = input.rewards.find(
+    (reward) => reward.walletState === 'READY',
+  );
+  const latestLootBox = input.lootBoxes.find((lootBox) => lootBox.latestReward);
+  const closestMission = input.missions
+    .filter((mission) => mission.progressPercent < 100)
+    .sort((left, right) => right.progressPercent - left.progressPercent)[0];
+  const waitingMission = input.missions.find(
+    (mission) =>
+      mission.progressPercent >= 100 && mission.manualApprovalRequired,
+  );
+  const season = input.seasons[0] ?? null;
+
+  if (readyReward) {
+    actions.push({
+      id: `claim:${readyReward.id}`,
+      kind: 'CLAIM_REWARD',
+      title: 'Заберите готовую награду',
+      description: readyReward.sourceLabel
+        ? `${readyReward.rewardLabel} из сценария "${readyReward.sourceLabel}".`
+        : readyReward.rewardLabel,
+      priority: 'HIGH',
+      statusLabel: readyReward.expiresAt ? 'есть срок действия' : 'готово',
+      progressPercent: 100,
+      anchor: 'rewards',
+    });
+  }
+
+  if (latestLootBox?.latestReward) {
+    actions.push({
+      id: `loot-box:${latestLootBox.id}`,
+      kind: 'OPEN_LOOT_BOX',
+      title: 'Откройте последний лутбокс',
+      description:
+        latestLootBox.latestReward.walletState === 'READY'
+          ? 'Внутри уже есть награда, которую можно показать администратору.'
+          : 'Результат уже сохранен в LeetPlus и ожидает проверки клуба.',
+      priority: readyReward ? 'MEDIUM' : 'HIGH',
+      statusLabel:
+        latestLootBox.latestReward.walletState === 'READY'
+          ? 'можно забрать'
+          : 'на проверке',
+      progressPercent: 100,
+      anchor: 'lootBoxes',
+    });
+  }
+
+  if (closestMission) {
+    const target = closestMission.progressTarget ?? 1;
+    const unit = closestMission.progressUnit
+      ? ` ${closestMission.progressUnit}`
+      : '';
+    actions.push({
+      id: `mission:${closestMission.id}`,
+      kind: 'FINISH_MISSION',
+      title: 'Добейте ближайшую миссию',
+      description: `${closestMission.name}: ${closestMission.progressCurrent}/${target}${unit}.`,
+      priority: actions.length ? 'MEDIUM' : 'HIGH',
+      statusLabel: `${Math.round(closestMission.progressPercent)}%`,
+      progressPercent: closestMission.progressPercent,
+      anchor: 'missions',
+    });
+  } else if (waitingMission) {
+    actions.push({
+      id: `mission-waiting:${waitingMission.id}`,
+      kind: 'FINISH_MISSION',
+      title: 'Миссия выполнена',
+      description:
+        'Клуб проверяет результат и подготовит награду в кошельке гостя.',
+      priority: 'MEDIUM',
+      statusLabel: 'ожидает проверки',
+      progressPercent: 100,
+      anchor: 'missions',
+    });
+  }
+
+  if (season?.nextLevel) {
+    actions.push({
+      id: `battle-pass:${season.id}`,
+      kind: 'BATTLE_PASS',
+      title: `Дойдите до уровня ${season.nextLevel}`,
+      description:
+        season.nextRewardLabel ??
+        'Следующая награда появится после набора XP в текущем сезоне.',
+      priority: actions.length ? 'LOW' : 'MEDIUM',
+      statusLabel:
+        season.xpToNextLevel == null
+          ? 'сезон завершен'
+          : `${season.xpToNextLevel} XP`,
+      progressPercent: season.progressPercent,
+      anchor: 'battlePass',
+    });
+  }
+
+  if (!input.guestFound) {
+    actions.push({
+      id: 'match-langame',
+      kind: 'MATCH_LANGAME',
+      title: 'Проверьте профиль Langame',
+      description:
+        'Если телефон есть в Langame, кабинет сможет связать гостя с локальными snapshot-данными.',
+      priority: 'HIGH',
+      statusLabel: 'нужна проверка',
+      progressPercent: null,
+      anchor: 'profile',
+    });
+  }
+
+  return actions.slice(0, 4);
+}
+
 function comparePortalRewards(
   left: GuestPortalReward,
   right: GuestPortalReward,
@@ -1614,6 +1777,7 @@ function emptyActivity(): GuestPortalPayload['activity'] {
       lastActivityAt: null,
     },
     timeline: [],
+    xpHistory: [],
   };
 }
 
@@ -1715,6 +1879,31 @@ function mapGameEventActivity(row: {
     storeName: null,
     amount: null,
     xpDelta: row.xpDelta,
+  };
+}
+
+function mapXpHistory(row: {
+  id: string;
+  eventType: string;
+  xpDelta: number;
+  occurredAt: Date;
+  lootBox: { name: string } | null;
+  mission: { name: string } | null;
+  season: { name: string } | null;
+}): GuestPortalXpHistoryItem {
+  const sourceLabel =
+    row.mission?.name ?? row.lootBox?.name ?? row.season?.name;
+
+  return {
+    id: `xp:${row.id}`,
+    eventType: row.eventType,
+    title: row.xpDelta > 0 ? 'XP начислен' : 'XP скорректирован',
+    description: sourceLabel
+      ? `${sourceLabel}: ${row.eventType}`
+      : row.eventType,
+    xpDelta: row.xpDelta,
+    occurredAt: row.occurredAt.toISOString(),
+    sourceLabel: sourceLabel ?? null,
   };
 }
 

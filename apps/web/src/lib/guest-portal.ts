@@ -56,6 +56,21 @@ export type GuestPortalPayload = {
     lastSyncedAt: string | null;
   };
   gamification: {
+    nextActions: Array<{
+      id: string;
+      kind:
+        | "CLAIM_REWARD"
+        | "OPEN_LOOT_BOX"
+        | "FINISH_MISSION"
+        | "BATTLE_PASS"
+        | "MATCH_LANGAME";
+      title: string;
+      description: string;
+      priority: "HIGH" | "MEDIUM" | "LOW";
+      statusLabel: string;
+      progressPercent: number | null;
+      anchor: "rewards" | "lootBoxes" | "missions" | "battlePass" | "profile";
+    }>;
     lootBoxes: Array<{
       id: string;
       name: string;
@@ -171,6 +186,15 @@ export type GuestPortalPayload = {
       storeName: string | null;
       amount: number | null;
       xpDelta: number | null;
+    }>;
+    xpHistory: Array<{
+      id: string;
+      eventType: string;
+      title: string;
+      description: string | null;
+      xpDelta: number;
+      occurredAt: string;
+      sourceLabel: string | null;
     }>;
   };
 };

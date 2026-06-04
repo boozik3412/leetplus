@@ -450,6 +450,8 @@ function VerifiedPortal({
         onSubmit={onCheckLangameMatch}
       />
 
+      <NextActionsPanel portal={portal} />
+
       <section className="grid gap-5 lg:grid-cols-[0.95fr_1.05fr]">
         <div className="rounded-lg border border-white/10 bg-[#0b111c] p-5">
           <div className="flex items-start gap-4">
@@ -498,6 +500,77 @@ function VerifiedPortal({
         <LootBoxesPanel portal={portal} />
       </section>
     </div>
+  );
+}
+
+function NextActionsPanel({ portal }: { portal: GuestPortalPayload }) {
+  const actions = portal.gamification.nextActions;
+
+  if (!actions.length) {
+    return null;
+  }
+
+  return (
+    <section className="rounded-lg border border-emerald-300/20 bg-[#08130f] p-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-bold uppercase text-emerald-300">
+            Что сделать сейчас
+          </p>
+          <h3 className="mt-1 text-2xl font-black text-white">
+            Следующие игровые действия
+          </h3>
+        </div>
+        <span className="rounded-lg border border-emerald-200/20 bg-emerald-300/10 px-3 py-2 text-sm font-bold text-emerald-100">
+          {actions.length} в фокусе
+        </span>
+      </div>
+
+      <div className="mt-5 grid gap-3 lg:grid-cols-4">
+        {actions.map((action) => (
+          <article
+            key={action.id}
+            className={`rounded-lg border p-4 transition hover:-translate-y-0.5 hover:border-emerald-200/45 ${nextActionPriorityClass(
+              action.priority,
+            )}`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.06] text-lg font-black text-white">
+                {nextActionIcon(action.kind)}
+              </div>
+              <span className="rounded-full bg-black/20 px-2 py-1 text-[10px] font-black uppercase text-emerald-50">
+                {action.statusLabel}
+              </span>
+            </div>
+            <p className="mt-3 text-base font-black text-white">
+              {action.title}
+            </p>
+            <p className="mt-2 min-h-14 text-sm leading-6 text-slate-300">
+              {action.description}
+            </p>
+            <div className="mt-3 flex items-center justify-between gap-3 text-xs font-bold uppercase text-slate-400">
+              <span>{nextActionAnchorLabel(action.anchor)}</span>
+              {action.progressPercent == null ? null : (
+                <span>{Math.round(action.progressPercent)}%</span>
+              )}
+            </div>
+            {action.progressPercent == null ? null : (
+              <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/[0.10]">
+                <div
+                  className="h-full rounded-full bg-emerald-300"
+                  style={{
+                    width: `${Math.max(
+                      0,
+                      Math.min(100, action.progressPercent),
+                    )}%`,
+                  }}
+                />
+              </div>
+            )}
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -738,6 +811,7 @@ function LoyaltyPanel({ portal }: { portal: GuestPortalPayload }) {
 function ActivityPanel({ portal }: { portal: GuestPortalPayload }) {
   const summary = portal.activity.summary;
   const timeline = portal.activity.timeline;
+  const xpHistory = portal.activity.xpHistory;
 
   return (
     <section className="rounded-lg border border-cyan-200/20 bg-[#09121b] p-5">
@@ -771,6 +845,40 @@ function ActivityPanel({ portal }: { portal: GuestPortalPayload }) {
         <Metric label="Баланс" value={formatNumber(summary.transactionsCount)} />
         <Metric label="XP-события" value={formatNumber(summary.gameEventsCount)} />
       </div>
+
+      {xpHistory.length ? (
+        <div className="mt-5">
+          <p className="text-xs font-bold uppercase text-slate-500">
+            Последние начисления XP
+          </p>
+          <div className="mt-2 grid gap-3 md:grid-cols-3">
+            {xpHistory.slice(0, 3).map((item) => (
+              <div
+                key={item.id}
+                className="rounded-lg border border-emerald-300/20 bg-emerald-300/[0.06] p-3"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-black text-white">
+                      {item.title}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-400">
+                      {formatDate(item.occurredAt)} {formatTime(item.occurredAt)}
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-emerald-300/15 px-2 py-1 text-xs font-black text-emerald-100">
+                    {item.xpDelta > 0 ? "+" : ""}
+                    {item.xpDelta} XP
+                  </span>
+                </div>
+                <p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-300">
+                  {item.description ?? item.eventType}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       <div className="mt-5">
         <p className="text-xs font-bold uppercase text-slate-500">
@@ -1462,6 +1570,55 @@ function walletStateHint(
   >;
 
   return hints[state];
+}
+
+function nextActionIcon(
+  kind: GuestPortalPayload["gamification"]["nextActions"][number]["kind"],
+) {
+  const labels = {
+    CLAIM_REWARD: "₽",
+    OPEN_LOOT_BOX: "LB",
+    FINISH_MISSION: "M",
+    BATTLE_PASS: "BP",
+    MATCH_LANGAME: "L",
+  } satisfies Record<
+    GuestPortalPayload["gamification"]["nextActions"][number]["kind"],
+    string
+  >;
+
+  return labels[kind];
+}
+
+function nextActionPriorityClass(
+  priority: GuestPortalPayload["gamification"]["nextActions"][number]["priority"],
+) {
+  const classes = {
+    HIGH: "border-emerald-300/40 bg-emerald-300/[0.10]",
+    MEDIUM: "border-cyan-300/25 bg-cyan-300/[0.07]",
+    LOW: "border-white/10 bg-[#070b12]",
+  } satisfies Record<
+    GuestPortalPayload["gamification"]["nextActions"][number]["priority"],
+    string
+  >;
+
+  return classes[priority];
+}
+
+function nextActionAnchorLabel(
+  anchor: GuestPortalPayload["gamification"]["nextActions"][number]["anchor"],
+) {
+  const labels = {
+    rewards: "Кошелек",
+    lootBoxes: "Лутбоксы",
+    missions: "Миссии",
+    battlePass: "Battle pass",
+    profile: "Профиль",
+  } satisfies Record<
+    GuestPortalPayload["gamification"]["nextActions"][number]["anchor"],
+    string
+  >;
+
+  return labels[anchor];
 }
 
 function LoadingState() {

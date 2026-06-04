@@ -24,9 +24,13 @@ export type GuestPortalOtpStartResponse = {
   expiresAt: string;
   resendAfterSeconds: number;
   delivery: {
-    channel: "DEV";
-    status: "DEV_CODE" | "NOT_CONFIGURED";
+    channel: "DEV" | "SMS" | "TELEGRAM" | "MAX";
+    status: "DEV_CODE" | "SENT" | "NOT_CONFIGURED" | "BLOCKED" | "FAILED";
     devCode?: string;
+    message: string;
+    note?: string;
+    identityMasked?: string | null;
+    requiredEnv?: string[];
   };
 };
 

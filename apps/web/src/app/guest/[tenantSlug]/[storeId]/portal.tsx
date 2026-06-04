@@ -137,11 +137,7 @@ export function GuestPortalClient({
       setMessengerMessage(null);
       setTelegramLink(null);
       setTelegramLinkMessage(null);
-      setMessage(
-        data.delivery.status === "DEV_CODE"
-          ? "Код создан. В demo-режиме он показан ниже."
-          : "Канал доставки OTP пока не подключен. Попросите администратора включить SMS, Telegram или MAX.",
-      );
+      setMessage(data.delivery.message);
     } catch (error) {
       setMessage(
         error instanceof Error ? error.message : "Не удалось создать код.",
@@ -464,6 +460,10 @@ function VerificationLanding({
   onSubmitPhone: (event: FormEvent<HTMLFormElement>) => void;
   onSubmitCode: (event: FormEvent<HTMLFormElement>) => void;
 }) {
+  const canEnterOtpCode =
+    challenge?.delivery.status === "DEV_CODE" ||
+    challenge?.delivery.status === "SENT";
+
   return (
     <section className="grid flex-1 items-center gap-6 py-8 lg:grid-cols-[1.08fr_0.92fr] lg:py-10">
       <div className="space-y-6">
@@ -549,9 +549,31 @@ function VerificationLanding({
             className="mt-5 space-y-4 border-t border-white/10 pt-5"
             onSubmit={onSubmitCode}
           >
-            <div className="rounded-lg border border-emerald-300/20 bg-emerald-300/[0.08] p-3 text-sm text-emerald-50">
-              Код отправлен на {challenge.phoneMasked}. Действует до{" "}
-              {formatTime(challenge.expiresAt)}.
+            <div className="rounded-lg border border-emerald-300/20 bg-emerald-300/[0.08] p-3 text-sm leading-6 text-emerald-50">
+              <span className="block font-bold">
+                {challenge.delivery.message}
+              </span>
+              <span className="mt-1 block text-emerald-100/80">
+                Канал: {otpDeliveryChannelLabel(challenge.delivery.channel)} ·
+                статус: {otpDeliveryStatusLabel(challenge.delivery.status)} ·
+                действует до {formatTime(challenge.expiresAt)}.
+              </span>
+              {challenge.delivery.identityMasked ? (
+                <span className="mt-1 block text-emerald-100/80">
+                  Получатель: {challenge.delivery.identityMasked}
+                </span>
+              ) : null}
+              {challenge.delivery.note ? (
+                <span className="mt-1 block text-emerald-100/80">
+                  {challenge.delivery.note}
+                </span>
+              ) : null}
+              {challenge.delivery.requiredEnv?.length ? (
+                <span className="mt-1 block text-emerald-100/70">
+                  Требуются настройки:{" "}
+                  {challenge.delivery.requiredEnv.join(", ")}
+                </span>
+              ) : null}
               {challenge.delivery.devCode ? (
                 <span className="mt-2 block font-black text-emerald-200">
                   Demo-код: {challenge.delivery.devCode}
@@ -569,11 +591,12 @@ function VerificationLanding({
                 className="mt-2 w-full rounded-lg border border-white/10 bg-[#070b12] px-4 py-3 text-center text-2xl font-black text-white outline-none transition hover:border-cyan-300/50 focus:border-cyan-300"
                 inputMode="numeric"
                 maxLength={6}
+                disabled={!canEnterOtpCode}
               />
             </label>
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={isSubmitting || !canEnterOtpCode}
               className="flex w-full items-center justify-center gap-2 rounded-lg border border-cyan-300/30 bg-cyan-300/10 px-4 py-3 text-base font-black text-cyan-100 transition hover:bg-cyan-300/[0.18] disabled:cursor-not-allowed disabled:opacity-60"
             >
               <CheckIcon />
@@ -2616,6 +2639,33 @@ function communicationChannelLabel(
     GuestPortalPayload["communications"]["telegram"]["status"],
     string
   >;
+
+  return labels[status];
+}
+
+function otpDeliveryChannelLabel(
+  channel: GuestPortalOtpStartResponse["delivery"]["channel"],
+) {
+  const labels = {
+    DEV: "demo",
+    SMS: "SMS",
+    TELEGRAM: "Telegram",
+    MAX: "MAX",
+  } satisfies Record<GuestPortalOtpStartResponse["delivery"]["channel"], string>;
+
+  return labels[channel];
+}
+
+function otpDeliveryStatusLabel(
+  status: GuestPortalOtpStartResponse["delivery"]["status"],
+) {
+  const labels = {
+    DEV_CODE: "demo-код",
+    SENT: "отправлен",
+    NOT_CONFIGURED: "не настроено",
+    BLOCKED: "заблокировано",
+    FAILED: "ошибка отправки",
+  } satisfies Record<GuestPortalOtpStartResponse["delivery"]["status"], string>;
 
   return labels[status];
 }

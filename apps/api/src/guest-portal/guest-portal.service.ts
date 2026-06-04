@@ -37,6 +37,28 @@ const COMMUNICATION_PREFERENCE_EVENT_PREFIX =
   'guest_portal:communication_preference:';
 const TELEGRAM_LINK_EVENT_PREFIX = 'guest_portal:telegram_bot_link:';
 type JwtExpiresIn = NonNullable<JwtSignOptions['expiresIn']>;
+type GuestPortalOtpDeliveryChannel = 'DEV' | 'SMS' | 'TELEGRAM' | 'MAX';
+type GuestPortalOtpDeliveryStatus =
+  | 'DEV_CODE'
+  | 'SENT'
+  | 'NOT_CONFIGURED'
+  | 'BLOCKED'
+  | 'FAILED';
+type GuestPortalOtpDeliveryResult = {
+  channel: GuestPortalOtpDeliveryChannel;
+  status: GuestPortalOtpDeliveryStatus;
+  deliveredAt: Date | null;
+  devCode?: string;
+  message: string;
+  note?: string;
+  identityMasked?: string | null;
+  requiredEnv?: string[];
+};
+type GuestPortalPhoneIdentity = {
+  normalized: string;
+  hash: string;
+  masked: string;
+};
 
 type GuestPortalTokenPayload = {
   sub: string;
@@ -86,9 +108,13 @@ export type GuestPortalOtpStartResponse = {
   expiresAt: string;
   resendAfterSeconds: number;
   delivery: {
-    channel: 'DEV';
-    status: 'DEV_CODE' | 'NOT_CONFIGURED';
+    channel: GuestPortalOtpDeliveryChannel;
+    status: GuestPortalOtpDeliveryStatus;
     devCode?: string;
+    message: string;
+    note?: string;
+    identityMasked?: string | null;
+    requiredEnv?: string[];
   };
 };
 
@@ -557,7 +583,11 @@ export class GuestPortalService {
           isDisabled: false,
         },
         orderBy: [{ lastActivityAt: 'desc' }, { updatedAt: 'desc' }],
-        select: { id: true },
+        select: {
+          id: true,
+          phoneConsentStatus: true,
+          unsubscribedAt: true,
+        },
       }),
       this.prisma.guestGameProfile.findFirst({
         where: {
@@ -566,7 +596,7 @@ export class GuestPortalService {
           status: 'ACTIVE',
         },
         orderBy: { updatedAt: 'desc' },
-        select: { id: true },
+        select: { id: true, telegramIdentity: true, maxIdentity: true },
       }),
     ]);
 
@@ -578,14 +608,20 @@ export class GuestPortalService {
             status: 'ACTIVE',
           },
           orderBy: { updatedAt: 'desc' },
-          select: { id: true },
+          select: { id: true, telegramIdentity: true, maxIdentity: true },
         })
       : profileByPhone;
 
     const id = randomUUID();
     const code = this.generateOtp();
     const expiresAt = new Date(now.getTime() + OTP_TTL_MINUTES * 60 * 1000);
-    const devCodeEnabled = this.isDevOtpEnabled();
+    const delivery = await this.deliverOtpCode({
+      code,
+      context,
+      phone,
+      profile,
+      guest,
+    });
 
     await this.prisma.guestPortalOtpChallenge.create({
       data: {
@@ -597,10 +633,10 @@ export class GuestPortalService {
         guestId: guest?.id ?? null,
         profileId: profile?.id ?? null,
         codeHash: this.hashOtpCode(id, code),
-        status: 'PENDING',
-        deliveryChannel: 'DEV',
+        status: otpChallengeStatus(delivery.status),
+        deliveryChannel: delivery.channel,
         expiresAt,
-        deliveredAt: devCodeEnabled ? now : null,
+        deliveredAt: delivery.deliveredAt,
       },
     });
 
@@ -610,9 +646,17 @@ export class GuestPortalService {
       expiresAt: expiresAt.toISOString(),
       resendAfterSeconds: OTP_RESEND_SECONDS,
       delivery: {
-        channel: 'DEV',
-        status: devCodeEnabled ? 'DEV_CODE' : 'NOT_CONFIGURED',
-        ...(devCodeEnabled ? { devCode: code } : {}),
+        channel: delivery.channel,
+        status: delivery.status,
+        ...(delivery.devCode ? { devCode: delivery.devCode } : {}),
+        message: delivery.message,
+        ...(delivery.note ? { note: delivery.note } : {}),
+        ...(delivery.identityMasked
+          ? { identityMasked: delivery.identityMasked }
+          : {}),
+        ...(delivery.requiredEnv?.length
+          ? { requiredEnv: delivery.requiredEnv }
+          : {}),
       },
     };
   }
@@ -2156,7 +2200,7 @@ export class GuestPortalService {
     };
   }
 
-  private phoneIdentity(value: unknown) {
+  private phoneIdentity(value: unknown): GuestPortalPhoneIdentity {
     const raw = this.requiredString(value, 'Телефон');
     const normalized = raw.replace(/\D/g, '');
 
@@ -2236,6 +2280,203 @@ export class GuestPortalService {
     );
   }
 
+  private async deliverOtpCode(input: {
+    code: string;
+    context: TenantStoreContext;
+    phone: GuestPortalPhoneIdentity;
+    profile: {
+      id: string;
+      telegramIdentity: string | null;
+      maxIdentity: string | null;
+    } | null;
+    guest: {
+      id: string;
+      phoneConsentStatus: GuestCommunicationConsentStatus;
+      unsubscribedAt: Date | null;
+    } | null;
+  }): Promise<GuestPortalOtpDeliveryResult> {
+    if (this.isDevOtpEnabled()) {
+      return {
+        channel: 'DEV',
+        status: 'DEV_CODE',
+        deliveredAt: new Date(),
+        devCode: input.code,
+        message:
+          'Demo-код показан на странице, потому что включен dev/demo OTP-режим.',
+      };
+    }
+
+    const config = guestPortalOtpDeliveryConfig(this.configService);
+
+    if (!config.realSendEnabled) {
+      return {
+        channel: 'DEV',
+        status: 'NOT_CONFIGURED',
+        deliveredAt: null,
+        message:
+          'OTP-доставка в production не включена. Нужен SMS/Telegram/MAX provider.',
+        requiredEnv: ['GUEST_PORTAL_OTP_REAL_SEND_ENABLED'],
+      };
+    }
+
+    if (config.sms.enabled) {
+      if (config.sms.endpoint && config.sms.token) {
+        try {
+          const payload = await sendHttpOtpDelivery({
+            endpoint: config.sms.endpoint,
+            token: config.sms.token,
+            body: {
+              channel: 'SMS',
+              phone: input.phone.normalized,
+              phoneMasked: input.phone.masked,
+              text: otpMessage(input.code, input.context),
+              purpose: 'guest_portal_otp',
+            },
+          });
+
+          return {
+            channel: 'SMS',
+            status: 'SENT',
+            deliveredAt: new Date(),
+            message: `Код отправлен по SMS на ${input.phone.masked}.`,
+            note: deliveryProviderNote(payload),
+          };
+        } catch (error) {
+          return failedOtpDelivery('SMS', error);
+        }
+      }
+
+      return {
+        channel: 'SMS',
+        status: 'NOT_CONFIGURED',
+        deliveredAt: null,
+        message: 'SMS OTP включен, но endpoint или token не настроены.',
+        requiredEnv: [
+          'GUEST_PORTAL_OTP_SMS_ENDPOINT',
+          'GUEST_PORTAL_OTP_SMS_TOKEN',
+        ],
+      };
+    }
+
+    const telegramChatId = telegramChatIdFromIdentity(
+      input.profile?.telegramIdentity ?? null,
+    );
+
+    if (config.telegram.enabled) {
+      if (input.guest?.unsubscribedAt) {
+        return {
+          channel: 'TELEGRAM',
+          status: 'BLOCKED',
+          deliveredAt: null,
+          message:
+            'Гость отписан от коммуникаций; OTP через Telegram заблокирован.',
+          note: 'Для входа нужен SMS-provider или ручная проверка в клубе.',
+        };
+      }
+
+      if (config.telegram.token && telegramChatId) {
+        try {
+          const payload = await sendTelegramOtpDelivery({
+            token: config.telegram.token,
+            chatId: telegramChatId,
+            text: otpMessage(input.code, input.context),
+          });
+
+          return {
+            channel: 'TELEGRAM',
+            status: 'SENT',
+            deliveredAt: new Date(),
+            message: 'Код отправлен в подтвержденный Telegram-чат гостя.',
+            identityMasked: maskExternalIdentity(
+              input.profile?.telegramIdentity ?? null,
+            ),
+            note: deliveryProviderNote(payload),
+          };
+        } catch (error) {
+          return failedOtpDelivery('TELEGRAM', error);
+        }
+      }
+
+      return {
+        channel: 'TELEGRAM',
+        status: 'BLOCKED',
+        deliveredAt: null,
+        message:
+          'Telegram OTP включен, но у гостя нет подтвержденного numeric chat_id.',
+        note: 'Гость должен один раз привязать Telegram-бота через гостевой кабинет.',
+        requiredEnv: ['GUEST_GAME_TELEGRAM_BOT_TOKEN'],
+      };
+    }
+
+    if (config.max.enabled) {
+      if (input.guest?.unsubscribedAt) {
+        return {
+          channel: 'MAX',
+          status: 'BLOCKED',
+          deliveredAt: null,
+          message: 'Гость отписан от коммуникаций; OTP через MAX заблокирован.',
+          note: 'Для входа нужен SMS-provider или ручная проверка в клубе.',
+        };
+      }
+
+      if (
+        config.max.endpoint &&
+        config.max.token &&
+        input.profile?.maxIdentity
+      ) {
+        try {
+          const payload = await sendHttpOtpDelivery({
+            endpoint: config.max.endpoint,
+            token: config.max.token,
+            body: {
+              channel: 'MAX',
+              identity: input.profile.maxIdentity,
+              identityMasked: maskExternalIdentity(input.profile.maxIdentity),
+              text: otpMessage(input.code, input.context),
+              purpose: 'guest_portal_otp',
+            },
+          });
+
+          return {
+            channel: 'MAX',
+            status: 'SENT',
+            deliveredAt: new Date(),
+            message: 'Код отправлен в подтвержденный MAX-канал гостя.',
+            identityMasked: maskExternalIdentity(input.profile.maxIdentity),
+            note: deliveryProviderNote(payload),
+          };
+        } catch (error) {
+          return failedOtpDelivery('MAX', error);
+        }
+      }
+
+      return {
+        channel: 'MAX',
+        status: 'NOT_CONFIGURED',
+        deliveredAt: null,
+        message:
+          'MAX OTP включен, но нет подтвержденного identity или provider-настроек.',
+        requiredEnv: [
+          'GUEST_PORTAL_OTP_MAX_ENDPOINT',
+          'GUEST_PORTAL_OTP_MAX_TOKEN',
+        ],
+      };
+    }
+
+    return {
+      channel: 'DEV',
+      status: 'NOT_CONFIGURED',
+      deliveredAt: null,
+      message:
+        'OTP-доставка не настроена: включите SMS, Telegram или MAX provider.',
+      requiredEnv: [
+        'GUEST_PORTAL_OTP_SMS_ENABLED',
+        'GUEST_PORTAL_OTP_TELEGRAM_ENABLED',
+        'GUEST_PORTAL_OTP_MAX_ENABLED',
+      ],
+    };
+  }
+
   private piiSecret() {
     const secret =
       this.configService.get<string>('APP_ENCRYPTION_KEY')?.trim() ||
@@ -2247,6 +2488,222 @@ export class GuestPortalService {
 
     return secret;
   }
+}
+
+function otpChallengeStatus(status: GuestPortalOtpDeliveryStatus) {
+  if (status === 'DEV_CODE' || status === 'SENT') {
+    return 'PENDING';
+  }
+
+  return `DELIVERY_${status}`;
+}
+
+function guestPortalOtpDeliveryConfig(configService: ConfigService) {
+  return {
+    realSendEnabled: configFlag(
+      configService,
+      'GUEST_PORTAL_OTP_REAL_SEND_ENABLED',
+    ),
+    sms: {
+      enabled: configFlag(configService, 'GUEST_PORTAL_OTP_SMS_ENABLED'),
+      endpoint: configString(configService, 'GUEST_PORTAL_OTP_SMS_ENDPOINT'),
+      token: configString(configService, 'GUEST_PORTAL_OTP_SMS_TOKEN'),
+    },
+    telegram: {
+      enabled: configFlag(configService, 'GUEST_PORTAL_OTP_TELEGRAM_ENABLED'),
+      token: configString(
+        configService,
+        'GUEST_PORTAL_TELEGRAM_BOT_TOKEN',
+        'GUEST_GAME_TELEGRAM_BOT_TOKEN',
+        'TELEGRAM_BOT_TOKEN',
+      ),
+    },
+    max: {
+      enabled: configFlag(configService, 'GUEST_PORTAL_OTP_MAX_ENABLED'),
+      endpoint: configString(configService, 'GUEST_PORTAL_OTP_MAX_ENDPOINT'),
+      token: configString(configService, 'GUEST_PORTAL_OTP_MAX_TOKEN'),
+    },
+  };
+}
+
+function configFlag(configService: ConfigService, key: string) {
+  return configService.get<string>(key)?.trim().toLowerCase() === 'true';
+}
+
+function configString(configService: ConfigService, ...keys: string[]) {
+  for (const key of keys) {
+    const value = configService.get<string>(key)?.trim();
+
+    if (value) {
+      return value;
+    }
+  }
+
+  return '';
+}
+
+function otpMessage(code: string, context: TenantStoreContext) {
+  return [
+    `Код LeetPlus: ${code}`,
+    `Клуб: ${context.store.name}`,
+    `Действует ${OTP_TTL_MINUTES} минут. Если вы не запрашивали вход, просто проигнорируйте сообщение.`,
+  ].join('\n');
+}
+
+function failedOtpDelivery(
+  channel: GuestPortalOtpDeliveryChannel,
+  error: unknown,
+): GuestPortalOtpDeliveryResult {
+  return {
+    channel,
+    status: 'FAILED',
+    deliveredAt: null,
+    message: `${channel} provider не смог отправить OTP-код.`,
+    note: safeDeliveryErrorMessage(error),
+  };
+}
+
+async function sendHttpOtpDelivery({
+  endpoint,
+  token,
+  body,
+}: {
+  endpoint: string;
+  token: string;
+  body: Record<string, unknown>;
+}) {
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+  const payload = await safeJson(response);
+
+  if (!response.ok) {
+    throw new Error(
+      `OTP provider failed: ${response.status} ${providerErrorText(payload)}`,
+    );
+  }
+
+  return payload;
+}
+
+async function sendTelegramOtpDelivery({
+  token,
+  chatId,
+  text,
+}: {
+  token: string;
+  chatId: string;
+  text: string;
+}) {
+  const response = await fetch(
+    `https://api.telegram.org/bot${encodeURIComponent(token)}/sendMessage`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        disable_web_page_preview: true,
+      }),
+    },
+  );
+  const payload = await safeJson(response);
+  const ok =
+    payload && typeof payload === 'object' && 'ok' in payload
+      ? Boolean((payload as { ok?: unknown }).ok)
+      : response.ok;
+
+  if (!response.ok || !ok) {
+    throw new Error(
+      `Telegram OTP failed: ${providerErrorText(payload) || response.status}`,
+    );
+  }
+
+  return payload;
+}
+
+async function safeJson(response: Response) {
+  try {
+    return (await response.json()) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+function providerErrorText(payload: unknown) {
+  if (!payload || typeof payload !== 'object') {
+    return '';
+  }
+
+  const record = payload as Record<string, unknown>;
+  const text =
+    typeof record.description === 'string'
+      ? record.description
+      : typeof record.error === 'string'
+        ? record.error
+        : typeof record.message === 'string'
+          ? record.message
+          : '';
+
+  return text.slice(0, 160);
+}
+
+function deliveryProviderNote(payload: unknown) {
+  if (!payload || typeof payload !== 'object') {
+    return 'Provider принял запрос без подробного ответа.';
+  }
+
+  const record = payload as Record<string, unknown>;
+  const result =
+    record.result && typeof record.result === 'object'
+      ? (record.result as Record<string, unknown>)
+      : null;
+  const id =
+    stringFromUnknown(record.id) ??
+    stringFromUnknown(record.message_id) ??
+    stringFromUnknown(record.messageId) ??
+    stringFromUnknown(result?.message_id) ??
+    stringFromUnknown(result?.messageId);
+
+  return id
+    ? `Provider принял запрос, message id: ${maskIdentifier(id)}.`
+    : 'Provider принял запрос.';
+}
+
+function safeDeliveryErrorMessage(error: unknown) {
+  const message =
+    error instanceof Error ? error.message : 'OTP delivery provider error';
+
+  return message.slice(0, 300);
+}
+
+function telegramChatIdFromIdentity(value: string | null) {
+  const identity = value?.trim() ?? '';
+
+  if (!identity.toLowerCase().startsWith('chat:')) {
+    return null;
+  }
+
+  const normalized = identity.slice('chat:'.length).trim();
+
+  return /^-?\d{5,32}$/.test(normalized) ? normalized : null;
+}
+
+function stringFromUnknown(value: unknown) {
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim();
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+
+  return null;
 }
 
 function externalGuestKey(domain: string | null, externalGuestId: string) {

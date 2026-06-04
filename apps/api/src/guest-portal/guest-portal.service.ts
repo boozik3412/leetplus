@@ -115,6 +115,7 @@ export type GuestPortalPayload = {
   tenant: GuestPortalPublicConfig['tenant'];
   store: GuestPortalPublicConfig['store'];
   guestFound: boolean;
+  crmLead: GuestPortalCrmLead;
   profile: {
     id: string | null;
     displayName: string;
@@ -158,6 +159,18 @@ export type GuestPortalPayload = {
     xpHistory: GuestPortalXpHistoryItem[];
   };
   communications: GuestPortalCommunications;
+};
+
+export type GuestPortalCrmLead = {
+  found: boolean;
+  displayName: string | null;
+  contactMasked: string | null;
+  source: string | null;
+  eventName: string | null;
+  crmStatus: GuestCrmStatus | null;
+  nextContactAt: string | null;
+  matchedGuestFound: boolean;
+  matchedAt: string | null;
 };
 
 export type GuestPortalGuestSnapshot = {
@@ -616,15 +629,21 @@ export class GuestPortalService {
     const payload = await this.verifyGuestToken(authorization);
     const action = communicationPreferenceAction(dto.action);
     const guest = await this.findGuest(payload);
+    const existingProfile = await this.findProfile(payload, guest?.id ?? null);
+    const crmLead = await this.findCrmLead(
+      payload,
+      existingProfile?.leadId ?? null,
+      guest?.id ?? null,
+    );
 
-    if (!guest) {
+    if (!guest && !crmLead) {
       throw new BadRequestException(
-        'Профиль гостя еще не найден в синхронизированной базе. Согласие можно сохранить после сопоставления с Langame.',
+        'Профиль гостя или CRM-заявка еще не найдены. Согласие можно сохранить после сопоставления с Langame или CRM-лидом.',
       );
     }
 
     const now = new Date();
-    const data =
+    const consentData =
       action === 'GRANT'
         ? {
             phoneConsentStatus: GuestCommunicationConsentStatus.GRANTED,
@@ -644,29 +663,54 @@ export class GuestPortalService {
               phoneConsentSource: 'guest_portal',
               phoneConsentAt: null,
               unsubscribedAt: now,
-              crmStatus: GuestCrmStatus.DO_NOT_CONTACT,
-              crmUpdatedAt: now,
             };
+    const guestData =
+      action === 'UNSUBSCRIBE'
+        ? {
+            ...consentData,
+            crmStatus: GuestCrmStatus.DO_NOT_CONTACT,
+            crmUpdatedAt: now,
+          }
+        : consentData;
+    const leadData =
+      action === 'UNSUBSCRIBE'
+        ? {
+            ...consentData,
+            crmStatus: GuestCrmStatus.DO_NOT_CONTACT,
+          }
+        : consentData;
 
     await this.prisma.$transaction([
-      this.prisma.guest.update({
-        where: { id: guest.id },
-        data,
-      }),
-      this.prisma.guestCrmEvent.create({
-        data: {
-          tenantId: payload.tenantId,
-          guestId: guest.id,
-          status: communicationPreferenceCrmStatus(action),
-          note: communicationPreferenceEventNote(action),
-        },
-      }),
+      ...(guest
+        ? [
+            this.prisma.guest.update({
+              where: { id: guest.id },
+              data: guestData,
+            }),
+            this.prisma.guestCrmEvent.create({
+              data: {
+                tenantId: payload.tenantId,
+                guestId: guest.id,
+                status: communicationPreferenceCrmStatus(action),
+                note: communicationPreferenceEventNote(action),
+              },
+            }),
+          ]
+        : []),
+      ...(crmLead
+        ? [
+            this.prisma.guestCrmLead.update({
+              where: { id: crmLead.id },
+              data: leadData,
+            }),
+          ]
+        : []),
     ]);
 
     return {
       portal: await this.buildPortalPayload({
         ...payload,
-        guestId: guest.id,
+        guestId: guest?.id ?? payload.guestId,
       }),
       message: communicationPreferenceMessage(action),
     };
@@ -680,11 +724,22 @@ export class GuestPortalService {
     const channel = messengerChannel(dto.channel);
     const identity = messengerIdentity(channel, dto.identity);
     const guest = await this.findGuest(payload);
-    const existingProfile = await this.findProfile(payload, guest?.id ?? null);
+    let existingProfile = await this.findProfile(payload, guest?.id ?? null);
+    const crmLead = await this.findCrmLead(
+      payload,
+      existingProfile?.leadId ?? null,
+      guest?.id ?? null,
+    );
+    if (!existingProfile && crmLead) {
+      existingProfile = await this.findProfileByLead(
+        payload.tenantId,
+        crmLead.id,
+      );
+    }
 
-    if (!guest && !existingProfile) {
+    if (!guest && !existingProfile && !crmLead) {
       throw new BadRequestException(
-        'Профиль гостя еще не найден в синхронизированной базе. Привязка Telegram/MAX станет доступна после сопоставления с Langame.',
+        'Профиль гостя или CRM-заявка еще не найдены. Привязка Telegram/MAX станет доступна после сопоставления с Langame или CRM-лидом.',
       );
     }
 
@@ -706,9 +761,19 @@ export class GuestPortalService {
           data: {
             tenantId: payload.tenantId,
             guestId: guest?.id,
+            leadId: crmLead?.id,
             displayName:
-              guest?.fullNameMasked ?? guest?.externalGuestId ?? 'Гость клуба',
-            contactMasked: guest?.phoneMasked ?? guest?.emailMasked ?? null,
+              guest?.fullNameMasked ??
+              guest?.externalGuestId ??
+              crmLead?.fullNameMasked ??
+              crmLead?.phoneMasked ??
+              'Гость клуба',
+            contactMasked:
+              guest?.phoneMasked ??
+              guest?.emailMasked ??
+              crmLead?.phoneMasked ??
+              crmLead?.emailMasked ??
+              null,
             phoneHash: payload.phoneHash,
             ...field,
           },
@@ -846,7 +911,15 @@ export class GuestPortalService {
       tokenPayload.storeId,
     );
     const guest = await this.findGuest(tokenPayload);
-    const profile = await this.findProfile(tokenPayload, guest?.id ?? null);
+    let profile = await this.findProfile(tokenPayload, guest?.id ?? null);
+    const crmLead = await this.findCrmLead(
+      tokenPayload,
+      profile?.leadId ?? null,
+      guest?.id ?? null,
+    );
+    if (!profile && crmLead) {
+      profile = await this.findProfileByLead(context.tenant.id, crmLead.id);
+    }
     const [
       groups,
       balanceSnapshot,
@@ -996,18 +1069,23 @@ export class GuestPortalService {
         slug: context.tenant.slug,
       },
       store: context.store,
-      guestFound: Boolean(guest || profile),
+      guestFound: Boolean(guest || profile || crmLead),
+      crmLead: buildCrmLead(crmLead),
       profile: {
         id: profile?.id ?? null,
         displayName:
           profile?.displayName ??
           guest?.fullNameMasked ??
           guest?.externalGuestId ??
+          crmLead?.fullNameMasked ??
+          crmLead?.phoneMasked ??
           'Гость клуба',
         contactMasked:
           profile?.contactMasked ??
           guest?.phoneMasked ??
           guest?.emailMasked ??
+          crmLead?.phoneMasked ??
+          crmLead?.emailMasked ??
           null,
         xp,
         level,
@@ -1026,7 +1104,12 @@ export class GuestPortalService {
         rewards: portalRewards,
       },
       activity,
-      communications: buildCommunications(guest, profile, communicationEvents),
+      communications: buildCommunications(
+        guest,
+        profile,
+        communicationEvents,
+        crmLead,
+      ),
     };
   }
 
@@ -1417,6 +1500,35 @@ export class GuestPortalService {
         ],
       },
       orderBy: { updatedAt: 'desc' },
+    });
+  }
+
+  private async findProfileByLead(tenantId: string, leadId: string) {
+    return this.prisma.guestGameProfile.findFirst({
+      where: {
+        tenantId,
+        leadId,
+        status: 'ACTIVE',
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+  }
+
+  private async findCrmLead(
+    payload: GuestPortalTokenPayload,
+    leadId: string | null,
+    guestId: string | null,
+  ) {
+    return this.prisma.guestCrmLead.findFirst({
+      where: {
+        tenantId: payload.tenantId,
+        OR: [
+          ...(leadId ? [{ id: leadId }] : []),
+          ...(guestId ? [{ matchedGuestId: guestId }] : []),
+          { phoneHash: payload.phoneHash },
+        ],
+      },
+      orderBy: [{ matchedAt: 'desc' }, { updatedAt: 'desc' }],
     });
   }
 
@@ -2006,6 +2118,46 @@ function buildNextActions(input: {
   return actions.slice(0, 4);
 }
 
+function buildCrmLead(
+  lead: {
+    fullNameMasked: string | null;
+    phoneMasked: string | null;
+    emailMasked: string | null;
+    source: string | null;
+    eventName: string | null;
+    crmStatus: GuestCrmStatus;
+    nextContactAt: Date | null;
+    matchedGuestId: string | null;
+    matchedAt: Date | null;
+  } | null,
+): GuestPortalCrmLead {
+  if (!lead) {
+    return {
+      found: false,
+      displayName: null,
+      contactMasked: null,
+      source: null,
+      eventName: null,
+      crmStatus: null,
+      nextContactAt: null,
+      matchedGuestFound: false,
+      matchedAt: null,
+    };
+  }
+
+  return {
+    found: true,
+    displayName: lead.fullNameMasked ?? lead.phoneMasked ?? 'CRM-гость',
+    contactMasked: lead.phoneMasked ?? lead.emailMasked ?? null,
+    source: lead.source,
+    eventName: lead.eventName,
+    crmStatus: lead.crmStatus,
+    nextContactAt: iso(lead.nextContactAt),
+    matchedGuestFound: Boolean(lead.matchedGuestId),
+    matchedAt: iso(lead.matchedAt),
+  };
+}
+
 function buildGuestSnapshot(
   guest: {
     externalProvider: IntegrationProvider | null;
@@ -2395,19 +2547,31 @@ function buildCommunications(
     note: string | null;
     createdAt: Date;
   }>,
+  lead?: {
+    phoneMasked: string | null;
+    phoneConsentStatus: 'UNKNOWN' | 'GRANTED' | 'DENIED' | 'UNSUBSCRIBED';
+    phoneConsentSource: string | null;
+    phoneConsentAt: Date | null;
+    unsubscribedAt: Date | null;
+  } | null,
 ): GuestPortalCommunications {
-  const consentStatus = guest?.unsubscribedAt
+  const consentSource = guest ?? lead ?? null;
+  const consentStatus = consentSource?.unsubscribedAt
     ? 'UNSUBSCRIBED'
-    : (guest?.phoneConsentStatus ?? 'UNKNOWN');
+    : (consentSource?.phoneConsentStatus ?? 'UNKNOWN');
   const consentGranted = consentStatus === 'GRANTED';
 
   return {
     phone: {
-      masked: guest?.phoneMasked ?? profile?.contactMasked ?? null,
+      masked:
+        guest?.phoneMasked ??
+        lead?.phoneMasked ??
+        profile?.contactMasked ??
+        null,
       consentStatus,
-      consentSource: guest?.phoneConsentSource ?? null,
-      consentAt: iso(guest?.phoneConsentAt ?? null),
-      unsubscribedAt: iso(guest?.unsubscribedAt ?? null),
+      consentSource: consentSource?.phoneConsentSource ?? null,
+      consentAt: iso(consentSource?.phoneConsentAt ?? null),
+      unsubscribedAt: iso(consentSource?.unsubscribedAt ?? null),
       otpVerified: true,
       otpDeliveryReady: false,
     },

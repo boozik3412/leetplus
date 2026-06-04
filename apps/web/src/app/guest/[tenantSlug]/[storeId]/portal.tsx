@@ -547,6 +547,8 @@ function VerifiedPortal({
         </div>
       ) : null}
 
+      <CrmLeadPanel portal={portal} />
+
       <LangameMatchPanel
         phone={phone}
         result={langameMatch}
@@ -1128,6 +1130,59 @@ function NextActionsPanel({ portal }: { portal: GuestPortalPayload }) {
             )}
           </article>
         ))}
+      </div>
+    </section>
+  );
+}
+
+function CrmLeadPanel({ portal }: { portal: GuestPortalPayload }) {
+  const lead = portal.crmLead;
+
+  if (!lead.found) {
+    return null;
+  }
+
+  return (
+    <section className="rounded-lg border border-emerald-300/20 bg-emerald-300/[0.06] p-4">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="max-w-3xl">
+          <p className="text-xs font-bold uppercase text-emerald-200">
+            CRM-заявка
+          </p>
+          <h3 className="mt-2 text-xl font-black text-white">
+            LeetPlus уже знает этот контакт
+          </h3>
+          <p className="mt-2 text-sm leading-6 text-slate-300">
+            Мы нашли сохраненную CRM-заявку по подтвержденному телефону.
+            Геймификация и каналы связи могут готовиться уже сейчас, а
+            лояльность Langame появится после синхронизации или ручного
+            сопоставления профиля.
+          </p>
+        </div>
+        <span className="rounded-lg border border-emerald-300/20 bg-emerald-300/10 px-3 py-2 text-xs font-black uppercase text-emerald-100">
+          {crmLeadStatusLabel(lead.crmStatus)}
+        </span>
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <InfoLine
+          label="Контакт"
+          value={lead.displayName ?? lead.contactMasked ?? "CRM-гость"}
+        />
+        <InfoLine
+          label="Источник"
+          value={lead.source ?? lead.eventName ?? "не указан"}
+        />
+        <InfoLine
+          label="Следующий контакт"
+          value={
+            lead.nextContactAt ? formatDate(lead.nextContactAt) : "не назначен"
+          }
+        />
+        <InfoLine
+          label="Langame"
+          value={lead.matchedGuestFound ? "сопоставлен" : "нужно сопоставить"}
+        />
       </div>
     </section>
   );
@@ -2410,6 +2465,27 @@ function langameMatchStatusLabel(
     NOT_FOUND: "не найдено",
     FAILED: "ошибка проверки",
   } satisfies Record<GuestPortalLangameMatchResponse["status"], string>;
+
+  return labels[status];
+}
+
+function crmLeadStatusLabel(
+  status: GuestPortalPayload["crmLead"]["crmStatus"],
+) {
+  if (!status) {
+    return "CRM";
+  }
+
+  const labels = {
+    NONE: "без статуса",
+    CONTACT: "контакт",
+    IN_PROGRESS: "в работе",
+    DONE: "закрыто",
+    DO_NOT_CONTACT: "не писать",
+  } satisfies Record<
+    NonNullable<GuestPortalPayload["crmLead"]["crmStatus"]>,
+    string
+  >;
 
   return labels[status];
 }

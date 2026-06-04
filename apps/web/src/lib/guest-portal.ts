@@ -34,6 +34,23 @@ export type GuestPortalPayload = {
   tenant: GuestPortalPublicConfig["tenant"];
   store: GuestPortalPublicConfig["store"];
   guestFound: boolean;
+  crmLead: {
+    found: boolean;
+    displayName: string | null;
+    contactMasked: string | null;
+    source: string | null;
+    eventName: string | null;
+    crmStatus:
+      | "NONE"
+      | "CONTACT"
+      | "IN_PROGRESS"
+      | "DONE"
+      | "DO_NOT_CONTACT"
+      | null;
+    nextContactAt: string | null;
+    matchedGuestFound: boolean;
+    matchedAt: string | null;
+  };
   profile: {
     id: string | null;
     displayName: string;

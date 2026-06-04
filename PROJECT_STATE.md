@@ -79,6 +79,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added CRM-lead matching to the public guest portal: verified guest sessions now find a safe `GuestCrmLead` by `phoneHash` when a Langame `Guest` is not yet synced, show a masked lead card, can prepare a `GuestGameProfile` linked by `leadId`, and can save communication consent plus Telegram/MAX alias for lead-only profiles without live Langame reads or external sends.
 - Added guest self-service Telegram/MAX alias linking to the public guest portal: `/guest/[tenantSlug]/[storeId]` now lets a verified guest save a public messenger alias through a guest-token-only endpoint, stores it on `GuestGameProfile`, refreshes channel readiness in the portal, and still sends no external messages without a separately configured bot/provider and consent.
 - Clarified the empty `guests/logs` production path in Guest Game Hub: the current production audit found `GuestLog` empty, so `/guests/gamification` now points managers from the empty catalog and rule picker to `/sync` for the extended guest-log sync before real event-type presets can be confirmed.
 - Added a manager CSV export for the Guest Game Hub `guests/logs` catalog: `/guests/gamification/guest-log-catalog/export` now exports raw and normalized event types, source domains/providers, log counts, and tenant-level mappings/presets without guest personal data, live Langame reads, or Langame writes.

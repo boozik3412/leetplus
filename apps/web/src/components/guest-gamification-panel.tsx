@@ -16,6 +16,8 @@ import type {
   GuestGameGuestLogMappingPreset,
   GuestGameGuestLogCatalog,
   GuestGameGuestLogTypeMapping,
+  GuestGameDelivery,
+  GuestGameDeliveryStatus,
   GuestGameLootBox,
   GuestGameMission,
   GuestGameProfile,
@@ -1121,6 +1123,38 @@ export function GuestGamificationPanel({
     });
   }
 
+  async function prepareDeliveryOutbox() {
+    await saveAction("deliveries-prepare", async () => {
+      assertCan(
+        access.canApproveRewards,
+        "Для подготовки outbox выдачи нужно право `Геймификация: награды`.",
+      );
+
+      await postJson("/api/guests/gamification/deliveries/prepare", {
+        includeBlocked: true,
+        limit: 50,
+      });
+      await reloadWorkspace();
+    });
+  }
+
+  async function updateDeliveryStatus(
+    delivery: GuestGameDelivery,
+    status: GuestGameDeliveryStatus,
+  ) {
+    await saveAction(`delivery-${delivery.id}`, async () => {
+      assertCan(
+        access.canApproveRewards,
+        "Для изменения статуса outbox нужно право `Геймификация: награды`.",
+      );
+
+      await patchJson(`/api/guests/gamification/deliveries/${delivery.id}`, {
+        status,
+      });
+      await reloadWorkspace();
+    });
+  }
+
   async function redeemReward() {
     await saveAction("rewardRedeem", async () => {
       assertCan(
@@ -1289,6 +1323,8 @@ export function GuestGamificationPanel({
           stores={stores}
           canApproveRewards={access.canApproveRewards}
           canManageRules={access.canManageRules}
+          onPrepareOutbox={prepareDeliveryOutbox}
+          onUpdateDeliveryStatus={updateDeliveryStatus}
           onSaveGuestLogMapping={saveGuestLogTypeMapping}
           onDeleteGuestLogMapping={deleteGuestLogTypeMapping}
         />
@@ -2220,6 +2256,8 @@ function OverviewTab({
   stores,
   canApproveRewards,
   canManageRules,
+  onPrepareOutbox,
+  onUpdateDeliveryStatus,
   onSaveGuestLogMapping,
   onDeleteGuestLogMapping,
 }: {
@@ -2236,6 +2274,11 @@ function OverviewTab({
   stores: Store[];
   canApproveRewards: boolean;
   canManageRules: boolean;
+  onPrepareOutbox: () => void;
+  onUpdateDeliveryStatus: (
+    delivery: GuestGameDelivery,
+    status: GuestGameDeliveryStatus,
+  ) => void;
   onSaveGuestLogMapping: (payload: GuestLogMappingPayload) => Promise<void>;
   onDeleteGuestLogMapping: (
     mapping: GuestGameGuestLogTypeMapping,
@@ -2323,7 +2366,12 @@ function OverviewTab({
       <EffectControlCard effect={workspace.effect} />
       <CommunicationQueueCard
         queue={workspace.communicationQueue}
+        outbox={workspace.deliveryOutbox}
+        saving={saving}
+        canApproveRewards={canApproveRewards}
         onOpenRewards={() => onOpenTab("rewards")}
+        onPrepareOutbox={onPrepareOutbox}
+        onUpdateDeliveryStatus={onUpdateDeliveryStatus}
       />
 
       <TariffSnapshotReadinessCard snapshots={workspace.tariffSnapshots} />
@@ -2653,12 +2701,26 @@ function EffectControlCard({
 
 function CommunicationQueueCard({
   queue,
+  outbox,
+  saving,
+  canApproveRewards,
   onOpenRewards,
+  onPrepareOutbox,
+  onUpdateDeliveryStatus,
 }: {
   queue: GuestGamificationWorkspace["communicationQueue"];
+  outbox: GuestGamificationWorkspace["deliveryOutbox"];
+  saving: string | null;
+  canApproveRewards: boolean;
   onOpenRewards: () => void;
+  onPrepareOutbox: () => void;
+  onUpdateDeliveryStatus: (
+    delivery: GuestGameDelivery,
+    status: GuestGameDeliveryStatus,
+  ) => void;
 }) {
   const visibleItems = queue.items.slice(0, 6);
+  const visibleDeliveries = outbox.items.slice(0, 5);
 
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
@@ -2676,9 +2738,19 @@ function CommunicationQueueCard({
             канала или подтверждения. Внешних отправок здесь нет.
           </p>
         </div>
-        <button className={smallButtonClass} type="button" onClick={onOpenRewards}>
-          Открыть кошелек
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button className={smallButtonClass} type="button" onClick={onOpenRewards}>
+            Открыть кошелек
+          </button>
+          <button
+            className={primaryButtonClass}
+            type="button"
+            disabled={!canApproveRewards || saving === "deliveries-prepare"}
+            onClick={onPrepareOutbox}
+          >
+            {saving === "deliveries-prepare" ? "Готовим..." : "Подготовить outbox"}
+          </button>
+        </div>
       </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -2702,6 +2774,106 @@ function CommunicationQueueCard({
 
       <div className="mt-4 rounded-lg border border-violet-200 bg-violet-50/70 px-3 py-2 text-xs leading-5 text-violet-900 dark:border-violet-900/60 dark:bg-violet-950/25 dark:text-violet-100">
         {queue.note}
+      </div>
+
+      <div className="mt-4 rounded-lg border border-cyan-200 bg-cyan-50/70 p-3 dark:border-cyan-900/60 dark:bg-cyan-950/25">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700 dark:text-cyan-200">
+              Outbox выдачи
+            </p>
+            <p className="mt-1 text-sm leading-6 text-cyan-950 dark:text-cyan-100">
+              {outbox.note}
+            </p>
+          </div>
+          <Link className={smallButtonClass} href="/api/guests/gamification/deliveries/export">
+            CSV
+          </Link>
+        </div>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+          <MiniMetric label="готово" value={outbox.summary.ready} />
+          <MiniMetric label="нужно действие" value={outbox.summary.blocked} />
+          <MiniMetric label="выдано" value={outbox.summary.sent} />
+          <MiniMetric label="Telegram/MAX" value={outbox.summary.telegram + outbox.summary.max} />
+          <MiniMetric label="кассир/ручной" value={outbox.summary.cashier + outbox.summary.manual} />
+        </div>
+        <div className="mt-3 space-y-2">
+          {visibleDeliveries.length ? (
+            visibleDeliveries.map((delivery) => (
+              <div
+                key={delivery.id}
+                className="rounded-lg border border-cyan-200 bg-white p-3 dark:border-cyan-900/60 dark:bg-zinc-950"
+              >
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap gap-2">
+                      <span className="rounded-full bg-cyan-100 px-2 py-1 text-[11px] font-bold text-cyan-800 dark:bg-cyan-950 dark:text-cyan-100">
+                        {delivery.statusLabel}
+                      </span>
+                      <span className="rounded-full bg-zinc-200 px-2 py-1 text-[11px] font-bold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
+                        {delivery.channelLabel}
+                      </span>
+                      <span
+                        className={[
+                          "rounded-full px-2 py-1 text-[11px] font-bold",
+                          communicationQueueStatusClass(delivery.readinessStatus),
+                        ].join(" ")}
+                      >
+                        {delivery.readinessStatusLabel}
+                      </span>
+                    </div>
+                    <h3 className="mt-2 truncate text-sm font-bold text-zinc-950 dark:text-white">
+                      {delivery.messageTitle}
+                    </h3>
+                    <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                      {delivery.profile?.displayName ??
+                        delivery.guest?.displayName ??
+                        delivery.reward.guestExternalId ??
+                        "Гость"}
+                      {delivery.store ? ` · ${delivery.store.name}` : ""}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {delivery.status !== "SENT" ? (
+                      <button
+                        type="button"
+                        className={smallButtonClass}
+                        disabled={saving === `delivery-${delivery.id}`}
+                        onClick={() => onUpdateDeliveryStatus(delivery, "SENT")}
+                      >
+                        Отметить выдано
+                      </button>
+                    ) : null}
+                    {delivery.status !== "CANCELED" ? (
+                      <button
+                        type="button"
+                        className={smallButtonClass}
+                        disabled={saving === `delivery-${delivery.id}`}
+                        onClick={() => onUpdateDeliveryStatus(delivery, "CANCELED")}
+                      >
+                        Отменить
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+                {delivery.blockers.length ? (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {delivery.blockers.slice(0, 3).map((blocker) => (
+                      <span
+                        key={blocker}
+                        className="rounded-full bg-cyan-50 px-2 py-1 text-[11px] font-semibold text-cyan-800 dark:bg-cyan-950/40 dark:text-cyan-100"
+                      >
+                        {blocker}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ))
+          ) : (
+            <EmptyState text="Outbox пока пуст. Подготовьте его из текущей очереди выдачи, когда награды и согласия будут готовы к обработке." />
+          )}
+        </div>
       </div>
 
       <div className="mt-4 space-y-2">

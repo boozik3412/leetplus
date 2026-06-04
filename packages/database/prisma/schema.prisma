@@ -158,6 +158,8 @@ model Tenant {
   guestGameMissions                    GuestGameMission[]
   guestGameSeasons                     GuestGameSeason[]
   guestGameRewards                     GuestGameReward[]
+  guestGameDeliveries                  GuestGameDelivery[]
+  guestGameDeliveryEvents              GuestGameDeliveryEvent[]
   guestGameEvents                      GuestGameEvent[]
   guestGameLogTypeMappings             GuestGameLogTypeMapping[]
   guestPortalOtpChallenges             GuestPortalOtpChallenge[]
@@ -248,6 +250,8 @@ model User {
   createdGuestGameSeasons              GuestGameSeason[]                     @relation("GuestGameSeasonCreatedBy")
   createdGuestGameRewards              GuestGameReward[]                     @relation("GuestGameRewardCreatedBy")
   approvedGuestGameRewards             GuestGameReward[]                     @relation("GuestGameRewardApprovedBy")
+  createdGuestGameDeliveries           GuestGameDelivery[]                   @relation("GuestGameDeliveryCreatedBy")
+  guestGameDeliveryEvents              GuestGameDeliveryEvent[]              @relation("GuestGameDeliveryEventActor")
   createdGuestGameEvents               GuestGameEvent[]                      @relation("GuestGameEventCreatedBy")
   createdGuestGameLogTypeMappings      GuestGameLogTypeMapping[]             @relation("GuestGameLogTypeMappingCreatedBy")
   updatedGuestGameLogTypeMappings      GuestGameLogTypeMapping[]             @relation("GuestGameLogTypeMappingUpdatedBy")
@@ -454,6 +458,7 @@ model Store {
   marketingPromoBundleUsages   MarketingPromoBundleUsage[]
   marketingMissionRewards      MarketingMissionReward[]
   guestGameRewards             GuestGameReward[]
+  guestGameDeliveries          GuestGameDelivery[]
   guestPortalOtpChallenges     GuestPortalOtpChallenge[]
   staffTasks                   StaffTask[]
   staffTaskTemplates           StaffTaskTemplate[]
@@ -1012,6 +1017,7 @@ model Guest {
   marketingMissionRewards MarketingMissionReward[]
   gameProfiles          GuestGameProfile[]
   gameRewards           GuestGameReward[]
+  gameDeliveries        GuestGameDelivery[]
   gameEvents            GuestGameEvent[]
   guestPortalOtpChallenges GuestPortalOtpChallenge[]
 
@@ -1370,6 +1376,7 @@ model GuestGameProfile {
   lead          GuestCrmLead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
   createdByUser User?           @relation("GuestGameProfileCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   rewards       GuestGameReward[]
+  deliveries    GuestGameDelivery[]
   events        GuestGameEvent[]
   portalOtpChallenges GuestPortalOtpChallenge[]
 
@@ -1529,6 +1536,8 @@ model GuestGameReward {
   store          Store?            @relation(fields: [storeId], references: [id], onDelete: SetNull)
   createdByUser  User?             @relation("GuestGameRewardCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   approvedByUser User?             @relation("GuestGameRewardApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+  deliveries     GuestGameDelivery[]
+  deliveryEvents GuestGameDeliveryEvent[]
 
   @@unique([tenantId, source, externalProvider, externalDomain, externalId], map: "guest_game_reward_external_uidx")
   @@index([tenantId, status, qualifiedAt], map: "guest_game_reward_status_idx")
@@ -1540,6 +1549,74 @@ model GuestGameReward {
   @@index([storeId], map: "guest_game_reward_store_idx")
   @@index([createdByUserId], map: "guest_game_reward_created_by_idx")
   @@index([approvedByUserId], map: "guest_game_reward_approved_by_idx")
+}
+
+model GuestGameDelivery {
+  id                    String    @id @default(uuid())
+  tenantId              String
+  rewardId              String
+  profileId             String?
+  guestId               String?
+  storeId               String?
+  createdByUserId       String?
+  channel               String    @default("MANUAL")
+  status                String    @default("READY")
+  readinessStatus       String
+  recipientMasked       String?
+  channelIdentityMasked String?
+  messageTitle          String
+  messageBody           String
+  blockers              Json?
+  metadata              Json?
+  preparedAt            DateTime  @default(now())
+  sentAt                DateTime?
+  failedAt              DateTime?
+  canceledAt            DateTime?
+  note                  String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  tenant        Tenant                   @relation(fields: [tenantId], references: [id])
+  reward        GuestGameReward          @relation(fields: [rewardId], references: [id], onDelete: Cascade)
+  profile       GuestGameProfile?        @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  guest         Guest?                   @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  store         Store?                   @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  createdByUser User?                   @relation("GuestGameDeliveryCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  events        GuestGameDeliveryEvent[]
+
+  @@unique([tenantId, rewardId, channel], map: "guest_game_delivery_reward_channel_uidx")
+  @@index([tenantId, status, preparedAt], map: "guest_game_delivery_status_idx")
+  @@index([tenantId, readinessStatus], map: "guest_game_delivery_readiness_idx")
+  @@index([rewardId], map: "guest_game_delivery_reward_idx")
+  @@index([profileId], map: "guest_game_delivery_profile_idx")
+  @@index([guestId], map: "guest_game_delivery_guest_idx")
+  @@index([storeId], map: "guest_game_delivery_store_idx")
+  @@index([createdByUserId], map: "guest_game_delivery_created_by_idx")
+}
+
+model GuestGameDeliveryEvent {
+  id          String   @id @default(uuid())
+  tenantId    String
+  deliveryId  String
+  rewardId    String
+  actorUserId String?
+  eventType   String
+  fromStatus  String?
+  toStatus    String?
+  channel     String?
+  note        String?
+  payload     Json?
+  createdAt   DateTime @default(now())
+
+  tenant    Tenant            @relation(fields: [tenantId], references: [id])
+  delivery  GuestGameDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  reward    GuestGameReward   @relation(fields: [rewardId], references: [id], onDelete: Cascade)
+  actorUser User?             @relation("GuestGameDeliveryEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, eventType, createdAt], map: "guest_game_delivery_event_type_idx")
+  @@index([deliveryId], map: "guest_game_delivery_event_delivery_idx")
+  @@index([rewardId], map: "guest_game_delivery_event_reward_idx")
+  @@index([actorUserId], map: "guest_game_delivery_event_actor_idx")
 }
 
 model GuestGameEvent {

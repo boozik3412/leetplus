@@ -31,6 +31,14 @@ const rewardStatuses = [
 ] as const;
 const rewardSources = ['MANUAL', 'LANGAME', 'API_IMPORT', 'CASHIER'] as const;
 const eventSources = ['MANUAL', 'LANGAME', 'API_IMPORT', 'SYSTEM'] as const;
+const deliveryChannels = ['TELEGRAM', 'MAX', 'CASHIER', 'MANUAL'] as const;
+const deliveryStatuses = [
+  'READY',
+  'BLOCKED',
+  'SENT',
+  'FAILED',
+  'CANCELED',
+] as const;
 const guestLogMappingPresets = [
   'visit_or_session_start',
   'session_finish',
@@ -179,6 +187,42 @@ const rewardInclude = {
   createdByUser: { select: creatorSelect },
   approvedByUser: { select: creatorSelect },
 } satisfies Prisma.GuestGameRewardInclude;
+
+const deliveryEventInclude = {
+  actorUser: { select: creatorSelect },
+} satisfies Prisma.GuestGameDeliveryEventInclude;
+
+const deliveryInclude = {
+  reward: { include: rewardInclude },
+  profile: {
+    select: {
+      id: true,
+      displayName: true,
+      contactMasked: true,
+      telegramIdentity: true,
+      maxIdentity: true,
+      xp: true,
+      level: true,
+    },
+  },
+  guest: {
+    select: {
+      id: true,
+      externalDomain: true,
+      externalGuestId: true,
+      fullNameMasked: true,
+      phoneMasked: true,
+      emailMasked: true,
+    },
+  },
+  store: { select: { id: true, name: true } },
+  createdByUser: { select: creatorSelect },
+  events: {
+    include: deliveryEventInclude,
+    orderBy: { createdAt: 'desc' as const },
+    take: 6,
+  },
+} satisfies Prisma.GuestGameDeliveryInclude;
 
 const eventInclude = {
   profile: {
@@ -366,6 +410,12 @@ type SeasonRow = Prisma.GuestGameSeasonGetPayload<{
 }>;
 type RewardRow = Prisma.GuestGameRewardGetPayload<{
   include: typeof rewardInclude;
+}>;
+type DeliveryRow = Prisma.GuestGameDeliveryGetPayload<{
+  include: typeof deliveryInclude;
+}>;
+type DeliveryEventRow = Prisma.GuestGameDeliveryEventGetPayload<{
+  include: typeof deliveryEventInclude;
 }>;
 type EventRow = Prisma.GuestGameEventGetPayload<{
   include: typeof eventInclude;
@@ -844,11 +894,85 @@ export type GuestGameCommunicationQueue = {
   note: string;
 };
 
+export type GuestGameDeliveryStatus = (typeof deliveryStatuses)[number];
+export type GuestGameDeliveryChannel = (typeof deliveryChannels)[number];
+
+export type GuestGameDeliveryEvent = {
+  id: string;
+  eventType: string;
+  fromStatus: string | null;
+  toStatus: string | null;
+  channel: GuestGameDeliveryChannel | null;
+  note: string | null;
+  payload: Prisma.JsonValue | null;
+  createdAt: string;
+  actor: GuestGameUser | null;
+};
+
+export type GuestGameDelivery = {
+  id: string;
+  rewardId: string;
+  profileId: string | null;
+  guestId: string | null;
+  storeId: string | null;
+  channel: GuestGameDeliveryChannel;
+  channelLabel: string;
+  status: GuestGameDeliveryStatus;
+  statusLabel: string;
+  readinessStatus: GuestGameCommunicationQueueStatus;
+  readinessStatusLabel: string;
+  recipientMasked: string | null;
+  channelIdentityMasked: string | null;
+  messageTitle: string;
+  messageBody: string;
+  blockers: string[];
+  metadata: Prisma.JsonValue | null;
+  preparedAt: string;
+  sentAt: string | null;
+  failedAt: string | null;
+  canceledAt: string | null;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+  reward: GuestGameReward;
+  profile: {
+    id: string;
+    displayName: string | null;
+    contactMasked: string | null;
+    telegramIdentity: string | null;
+    maxIdentity: string | null;
+    xp: number;
+    level: number;
+  } | null;
+  guest: GuestGameProfile['guest'];
+  store: { id: string; name: string } | null;
+  createdBy: GuestGameUser | null;
+  events: GuestGameDeliveryEvent[];
+};
+
+export type GuestGameDeliveryOutbox = {
+  summary: {
+    total: number;
+    ready: number;
+    blocked: number;
+    sent: number;
+    failed: number;
+    canceled: number;
+    telegram: number;
+    max: number;
+    cashier: number;
+    manual: number;
+  };
+  items: GuestGameDelivery[];
+  note: string;
+};
+
 export type GuestGamificationWorkspace = {
   summary: GuestGamificationSummary;
   economy: GuestGameEconomy;
   effect: GuestGameEffect;
   communicationQueue: GuestGameCommunicationQueue;
+  deliveryOutbox: GuestGameDeliveryOutbox;
   profiles: GuestGameProfile[];
   lootBoxes: GuestGameLootBox[];
   missions: GuestGameMission[];
@@ -974,6 +1098,24 @@ export type GuestGameRewardRedeemDto = {
   rewardCode?: string | null;
   storeId?: string | null;
   note?: string | null;
+};
+
+export type GuestGameDeliveryPrepareDto = {
+  rewardIds?: string[] | null;
+  includeBlocked?: boolean | string | null;
+  limit?: number | string | null;
+};
+
+export type GuestGameDeliveryUpdateDto = {
+  status?: string | null;
+  note?: string | null;
+};
+
+export type GuestGameDeliveryPrepareResult = {
+  created: number;
+  updated: number;
+  skipped: number;
+  deliveries: GuestGameDelivery[];
 };
 
 export type GuestGameEventDto = {
@@ -1311,6 +1453,7 @@ export class GuestGamificationService {
       missions,
       seasons,
       rewards,
+      deliveries,
       events,
       tariffSnapshots,
       guestLogCatalog,
@@ -1320,6 +1463,7 @@ export class GuestGamificationService {
       this.getMissions(user),
       this.getSeasons(user),
       this.getRewards(user),
+      this.getDeliveries(user),
       this.getEvents(user),
       this.getTariffSnapshots(user),
       this.getGuestLogCatalog(user),
@@ -1344,6 +1488,7 @@ export class GuestGamificationService {
       economy: this.buildEconomy(lootBoxes, missions, seasons, rewards, events),
       effect,
       communicationQueue: this.buildCommunicationQueue(profiles, rewards),
+      deliveryOutbox: this.buildDeliveryOutbox(deliveries),
       profiles,
       lootBoxes,
       missions,
@@ -2386,6 +2531,262 @@ export class GuestGamificationService {
     ].join('\n');
   }
 
+  async getDeliveries(
+    user: AuthenticatedUser,
+    options: { take?: number | null } = {},
+  ): Promise<GuestGameDelivery[]> {
+    const take = options.take === null ? undefined : (options.take ?? 100);
+    const rows = await this.prisma.guestGameDelivery.findMany({
+      where: { tenantId: user.tenantId },
+      include: deliveryInclude,
+      orderBy: [{ preparedAt: 'desc' }, { createdAt: 'desc' }],
+      ...(take ? { take } : {}),
+    });
+
+    return rows.map(mapDelivery);
+  }
+
+  async prepareDeliveries(
+    user: AuthenticatedUser,
+    dto: GuestGameDeliveryPrepareDto = {},
+  ): Promise<GuestGameDeliveryPrepareResult> {
+    const [profiles, rewards] = await Promise.all([
+      this.getProfiles(user),
+      this.getRewards(user, { take: null }),
+    ]);
+    const rewardById = new Map(rewards.map((reward) => [reward.id, reward]));
+    const profileById = new Map(
+      profiles.map((profile) => [profile.id, profile]),
+    );
+    const requestedRewardIds = Array.isArray(dto.rewardIds)
+      ? new Set(dto.rewardIds.filter((item): item is string => !!item))
+      : null;
+    const includeBlocked =
+      dto.includeBlocked === undefined
+        ? true
+        : booleanValue(dto.includeBlocked);
+    const limit = Math.min(100, Math.max(1, intValue(dto.limit) ?? 50));
+    const queue = this.buildCommunicationQueue(profiles, rewards, null);
+    const items = queue.items
+      .filter((item) =>
+        requestedRewardIds ? requestedRewardIds.has(item.rewardId) : true,
+      )
+      .filter(
+        (item) =>
+          includeBlocked || isReadyDeliveryQueueStatus(item.queueStatus),
+      )
+      .slice(0, limit);
+    const deliveries: GuestGameDelivery[] = [];
+    let created = 0;
+    let updated = 0;
+    let skipped = 0;
+
+    for (const item of items) {
+      const reward = rewardById.get(item.rewardId);
+
+      if (!reward) {
+        skipped += 1;
+        continue;
+      }
+
+      const profile =
+        item.profileId !== null
+          ? (profileById.get(item.profileId) ?? null)
+          : null;
+      const status = deliveryStatusFromQueueStatus(item.queueStatus);
+      const now = new Date();
+      const existing = await this.prisma.guestGameDelivery.findFirst({
+        where: {
+          tenantId: user.tenantId,
+          rewardId: item.rewardId,
+          channel: item.channel,
+        },
+        include: deliveryInclude,
+      });
+      const baseData = clean({
+        profileId: item.profileId,
+        guestId: reward.guest?.id ?? null,
+        storeId: item.store?.id ?? null,
+        createdByUserId: user.id,
+        channel: item.channel,
+        status,
+        readinessStatus: item.queueStatus,
+        recipientMasked: item.contactMasked,
+        channelIdentityMasked: deliveryChannelIdentityMasked(
+          item.channel,
+          profile,
+        ),
+        messageTitle: buildDeliveryMessageTitle(item),
+        messageBody: buildDeliveryMessageBody(item),
+        blockers: item.blockers,
+        metadata: deliveryMetadata(item),
+        preparedAt: now,
+        sentAt: status === 'SENT' ? now : null,
+        failedAt: status === 'FAILED' ? now : null,
+        canceledAt: status === 'CANCELED' ? now : null,
+        note: item.nextAction,
+      });
+
+      const row = existing
+        ? await this.prisma.guestGameDelivery.update({
+            where: { id: existing.id },
+            data: baseData,
+            include: deliveryInclude,
+          })
+        : await this.prisma.guestGameDelivery.create({
+            data: {
+              tenantId: user.tenantId,
+              rewardId: item.rewardId,
+              ...baseData,
+            },
+            include: deliveryInclude,
+          });
+
+      await this.createDeliveryEvent(user, row.id, row.rewardId, {
+        eventType: existing ? 'DELIVERY_REFRESHED' : 'DELIVERY_PREPARED',
+        fromStatus: existing?.status ?? null,
+        toStatus: row.status,
+        channel: row.channel,
+        note: item.nextAction,
+        payload: deliveryMetadata(item),
+      });
+
+      if (existing) {
+        updated += 1;
+      } else {
+        created += 1;
+      }
+
+      deliveries.push(mapDelivery(row));
+    }
+
+    return { created, updated, skipped, deliveries };
+  }
+
+  async updateDelivery(
+    user: AuthenticatedUser,
+    id: string,
+    dto: GuestGameDeliveryUpdateDto,
+  ): Promise<GuestGameDelivery> {
+    const current = await this.assertDelivery(user, id);
+    const nextStatus = enumValue(
+      dto.status,
+      deliveryStatuses,
+      deliveryStatusValue(current.status),
+    );
+    const now = new Date();
+    const data = clean({
+      status: nextStatus,
+      note: nullableString(dto.note),
+      sentAt: nextStatus === 'SENT' ? (current.sentAt ?? now) : current.sentAt,
+      failedAt:
+        nextStatus === 'FAILED' ? (current.failedAt ?? now) : current.failedAt,
+      canceledAt:
+        nextStatus === 'CANCELED'
+          ? (current.canceledAt ?? now)
+          : current.canceledAt,
+    });
+    const row = await this.prisma.guestGameDelivery.update({
+      where: { id },
+      data,
+      include: deliveryInclude,
+    });
+
+    if (nextStatus !== current.status || dto.note !== undefined) {
+      await this.createDeliveryEvent(user, row.id, row.rewardId, {
+        eventType: 'DELIVERY_STATUS_UPDATED',
+        fromStatus: current.status,
+        toStatus: row.status,
+        channel: row.channel,
+        note: nullableString(dto.note),
+      });
+    }
+
+    return mapDelivery(row);
+  }
+
+  async exportDeliveriesCsv(user: AuthenticatedUser): Promise<string> {
+    const deliveries = await this.getDeliveries(user, { take: null });
+    const header = [
+      'РЎС‚Р°С‚СѓСЃ outbox',
+      'Р“РѕС‚РѕРІРЅРѕСЃС‚СЊ',
+      'РљР°РЅР°Р»',
+      'Р“РѕСЃС‚СЊ',
+      'РљРѕРЅС‚Р°РєС‚',
+      'РљР»СѓР±',
+      'РќР°РіСЂР°РґР°',
+      'РЎСѓРјРјР°',
+      'Р‘Р»РѕРєРёСЂРѕРІРєРё',
+      'РџРѕРґРіРѕС‚РѕРІР»РµРЅРѕ',
+      'РћС‚РїСЂР°РІР»РµРЅРѕ',
+      'Р—Р°РјРµС‚РєР°',
+    ];
+    const rows = deliveries.map((delivery) => [
+      delivery.statusLabel,
+      delivery.readinessStatusLabel,
+      delivery.channelLabel,
+      delivery.profile?.displayName ??
+        delivery.guest?.displayName ??
+        delivery.reward.guestExternalId ??
+        '',
+      delivery.recipientMasked ?? '',
+      delivery.store?.name ?? '',
+      delivery.reward.rewardLabel,
+      delivery.reward.rewardAmount,
+      delivery.blockers.join('; '),
+      delivery.preparedAt,
+      delivery.sentAt ?? '',
+      delivery.note ?? '',
+    ]);
+
+    return [
+      '\uFEFF' + header.map(csvCell).join(','),
+      ...rows.map((row) => row.map(csvCell).join(',')),
+    ].join('\n');
+  }
+
+  private async assertDelivery(user: AuthenticatedUser, id: string) {
+    const delivery = await this.prisma.guestGameDelivery.findFirst({
+      where: { id, tenantId: user.tenantId },
+      include: deliveryInclude,
+    });
+
+    if (!delivery) {
+      throw new NotFoundException('Р—Р°РїРёСЃСЊ outbox РЅРµ РЅР°Р№РґРµРЅР°');
+    }
+
+    return delivery;
+  }
+
+  private async createDeliveryEvent(
+    user: AuthenticatedUser,
+    deliveryId: string,
+    rewardId: string,
+    data: {
+      eventType: string;
+      fromStatus?: string | null;
+      toStatus?: string | null;
+      channel?: string | null;
+      note?: string | null;
+      payload?: Prisma.InputJsonValue | null;
+    },
+  ) {
+    await this.prisma.guestGameDeliveryEvent.create({
+      data: {
+        tenantId: user.tenantId,
+        deliveryId,
+        rewardId,
+        actorUserId: user.id,
+        eventType: data.eventType,
+        fromStatus: data.fromStatus ?? null,
+        toStatus: data.toStatus ?? null,
+        channel: data.channel ?? null,
+        note: data.note ?? null,
+        payload: data.payload ?? Prisma.JsonNull,
+      },
+    });
+  }
+
   async exportOverviewCsv(user: AuthenticatedUser): Promise<string> {
     const [lootBoxes, missions, seasons, rewards, events] = await Promise.all([
       this.getLootBoxes(user),
@@ -3198,6 +3599,7 @@ export class GuestGamificationService {
   private buildCommunicationQueue(
     profiles: GuestGameProfile[],
     rewards: GuestGameReward[],
+    limit: number | null = 24,
   ): GuestGameCommunicationQueue {
     const profileById = new Map(
       profiles.map((profile) => [profile.id, profile]),
@@ -3227,7 +3629,7 @@ export class GuestGamificationService {
           new Date(left.qualifiedAt).getTime()
         );
       })
-      .slice(0, 24);
+      .slice(0, limit ?? undefined);
 
     const approvedRewards = queueRewards.filter(
       (reward) => reward.walletState === 'READY',
@@ -3278,6 +3680,29 @@ export class GuestGamificationService {
       },
       items,
       note: 'Это внутренняя готовность LeetPlus: Telegram/MAX, SMS и Langame write API здесь не вызываются. После подключения бота этот слой можно использовать как безопасную очередь отправки и выдачи.',
+    };
+  }
+
+  private buildDeliveryOutbox(
+    deliveries: GuestGameDelivery[],
+  ): GuestGameDeliveryOutbox {
+    return {
+      summary: {
+        total: deliveries.length,
+        ready: deliveries.filter((item) => item.status === 'READY').length,
+        blocked: deliveries.filter((item) => item.status === 'BLOCKED').length,
+        sent: deliveries.filter((item) => item.status === 'SENT').length,
+        failed: deliveries.filter((item) => item.status === 'FAILED').length,
+        canceled: deliveries.filter((item) => item.status === 'CANCELED')
+          .length,
+        telegram: deliveries.filter((item) => item.channel === 'TELEGRAM')
+          .length,
+        max: deliveries.filter((item) => item.channel === 'MAX').length,
+        cashier: deliveries.filter((item) => item.channel === 'CASHIER').length,
+        manual: deliveries.filter((item) => item.channel === 'MANUAL').length,
+      },
+      items: deliveries.slice(0, 12),
+      note: 'Outbox хранит подготовленные снимки выдачи наград. Внешний Telegram/MAX-бот пока не отправляет эти сообщения.',
     };
   }
 
@@ -4518,6 +4943,78 @@ function mapReward(row: RewardRow): GuestGameReward {
   };
 }
 
+function mapDeliveryEvent(row: DeliveryEventRow): GuestGameDeliveryEvent {
+  return {
+    id: row.id,
+    eventType: row.eventType,
+    fromStatus: row.fromStatus,
+    toStatus: row.toStatus,
+    channel: deliveryChannelValue(row.channel, null),
+    note: row.note,
+    payload: row.payload,
+    createdAt: row.createdAt.toISOString(),
+    actor: mapUser(row.actorUser),
+  };
+}
+
+function mapDelivery(row: DeliveryRow): GuestGameDelivery {
+  const readinessStatus = communicationQueueStatusValue(row.readinessStatus);
+  const channel = deliveryChannelValue(row.channel, 'MANUAL') ?? 'MANUAL';
+  const status = deliveryStatusValue(row.status);
+
+  return {
+    id: row.id,
+    rewardId: row.rewardId,
+    profileId: row.profileId,
+    guestId: row.guestId,
+    storeId: row.storeId,
+    channel,
+    channelLabel: communicationQueueChannelLabel(channel),
+    status,
+    statusLabel: deliveryStatusLabel(status),
+    readinessStatus,
+    readinessStatusLabel: communicationQueueStatusLabel(readinessStatus),
+    recipientMasked: row.recipientMasked,
+    channelIdentityMasked: row.channelIdentityMasked,
+    messageTitle: row.messageTitle,
+    messageBody: row.messageBody,
+    blockers: stringArray(row.blockers),
+    metadata: row.metadata,
+    preparedAt: row.preparedAt.toISOString(),
+    sentAt: iso(row.sentAt),
+    failedAt: iso(row.failedAt),
+    canceledAt: iso(row.canceledAt),
+    note: row.note,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+    reward: mapReward(row.reward),
+    profile: row.profile
+      ? {
+          id: row.profile.id,
+          displayName: row.profile.displayName,
+          contactMasked: row.profile.contactMasked,
+          telegramIdentity: row.profile.telegramIdentity,
+          maxIdentity: row.profile.maxIdentity,
+          xp: row.profile.xp,
+          level: row.profile.level,
+        }
+      : null,
+    guest: row.guest
+      ? {
+          id: row.guest.id,
+          externalDomain: row.guest.externalDomain,
+          externalGuestId: row.guest.externalGuestId,
+          displayName: row.guest.fullNameMasked ?? row.guest.externalGuestId,
+          contact:
+            row.guest.phoneMasked ?? row.guest.emailMasked ?? 'нет контакта',
+        }
+      : null,
+    store: row.store,
+    createdBy: mapUser(row.createdByUser),
+    events: row.events.map(mapDeliveryEvent),
+  };
+}
+
 function rewardWalletState(
   status: string,
   expiresAt: Date | null,
@@ -4778,6 +5275,130 @@ function communicationQueueSourceLabel(reward: GuestGameReward) {
   }
 
   return 'Ручная награда';
+}
+
+function communicationQueueStatusValue(
+  status: string,
+): GuestGameCommunicationQueueStatus {
+  const values: GuestGameCommunicationQueueStatus[] = [
+    'READY_FOR_BOT',
+    'READY_FOR_CASHIER',
+    'NEEDS_APPROVAL',
+    'NEEDS_CONSENT',
+    'NEEDS_CHANNEL',
+    'UNSUBSCRIBED',
+    'EXPIRED',
+    'REDEEMED',
+    'CANCELED',
+  ];
+
+  return values.includes(status as GuestGameCommunicationQueueStatus)
+    ? (status as GuestGameCommunicationQueueStatus)
+    : 'NEEDS_APPROVAL';
+}
+
+function isReadyDeliveryQueueStatus(status: GuestGameCommunicationQueueStatus) {
+  return status === 'READY_FOR_BOT' || status === 'READY_FOR_CASHIER';
+}
+
+function deliveryStatusFromQueueStatus(
+  status: GuestGameCommunicationQueueStatus,
+): GuestGameDeliveryStatus {
+  if (status === 'REDEEMED') {
+    return 'SENT';
+  }
+
+  if (status === 'CANCELED') {
+    return 'CANCELED';
+  }
+
+  return isReadyDeliveryQueueStatus(status) ? 'READY' : 'BLOCKED';
+}
+
+function deliveryStatusValue(status: string): GuestGameDeliveryStatus {
+  return deliveryStatuses.includes(status as GuestGameDeliveryStatus)
+    ? (status as GuestGameDeliveryStatus)
+    : 'BLOCKED';
+}
+
+function deliveryChannelValue(
+  channel: string | null,
+  fallback: GuestGameDeliveryChannel | null,
+): GuestGameDeliveryChannel | null {
+  if (deliveryChannels.includes(channel as GuestGameDeliveryChannel)) {
+    return channel as GuestGameDeliveryChannel;
+  }
+
+  return fallback;
+}
+
+function deliveryStatusLabel(status: GuestGameDeliveryStatus) {
+  const labels: Record<GuestGameDeliveryStatus, string> = {
+    READY: 'готово',
+    BLOCKED: 'нужно действие',
+    SENT: 'отправлено/выдано',
+    FAILED: 'ошибка',
+    CANCELED: 'отменено',
+  };
+
+  return labels[status];
+}
+
+function deliveryMetadata(
+  item: GuestGameCommunicationQueueItem,
+): Prisma.InputJsonValue {
+  return {
+    queueStatus: item.queueStatus,
+    queueStatusLabel: item.queueStatusLabel,
+    walletState: item.walletState,
+    sourceLabel: item.sourceLabel,
+    nextAction: item.nextAction,
+    rewardCodeReady: item.rewardCodeReady,
+    botDeliveryEnabled: item.botDeliveryEnabled,
+  };
+}
+
+function buildDeliveryMessageTitle(item: GuestGameCommunicationQueueItem) {
+  return `Ваша награда: ${item.rewardLabel}`;
+}
+
+function buildDeliveryMessageBody(item: GuestGameCommunicationQueueItem) {
+  const amount = item.rewardAmount > 0 ? ` на ${item.rewardAmount} руб.` : '';
+  const club = item.store ? ` в клубе ${item.store.name}` : '';
+  const expires = item.expiresAt
+    ? ` Действует до ${new Date(item.expiresAt).toLocaleDateString('ru-RU')}.`
+    : '';
+
+  return `В LeetPlus для вас подготовлена награда${amount}${club}: ${item.rewardLabel}.${expires} Покажите код кассиру или откройте личный кабинет гостя.`;
+}
+
+function deliveryChannelIdentityMasked(
+  channel: GuestGameDeliveryChannel,
+  profile: GuestGameProfile | null,
+) {
+  if (channel === 'TELEGRAM') {
+    return maskAlias(profile?.telegramIdentity ?? null);
+  }
+
+  if (channel === 'MAX') {
+    return maskAlias(profile?.maxIdentity ?? null);
+  }
+
+  return null;
+}
+
+function maskAlias(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+
+  if (trimmed.length <= 4) {
+    return `${trimmed[0] ?? '*'}***`;
+  }
+
+  return `${trimmed.slice(0, 2)}***${trimmed.slice(-2)}`;
 }
 
 function rewardStatusEventType(status: string) {

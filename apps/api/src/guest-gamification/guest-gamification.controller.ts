@@ -40,6 +40,10 @@ import {
   type GuestGameRewardDto,
   type GuestGameRewardRedeemDto,
   type GuestGameRewardUpdateDto,
+  type GuestGameDelivery,
+  type GuestGameDeliveryPrepareDto,
+  type GuestGameDeliveryPrepareResult,
+  type GuestGameDeliveryUpdateDto,
   type GuestGameSeason,
   type GuestGameSeasonDto,
   type GuestGameSeasonUpdateDto,
@@ -271,6 +275,40 @@ export class GuestGamificationController {
     @Body() dto: GuestGameRewardUpdateDto,
   ): Promise<GuestGameReward> {
     return this.gamificationService.updateReward(user, id, dto);
+  }
+
+  @Get('deliveries')
+  getDeliveries(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<GuestGameDelivery[]> {
+    return this.gamificationService.getDeliveries(user);
+  }
+
+  @Get('deliveries/export')
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  @Header(
+    'Content-Disposition',
+    'attachment; filename="guest-game-deliveries.csv"',
+  )
+  exportDeliveries(@CurrentUser() user: AuthenticatedUser): Promise<string> {
+    return this.gamificationService.exportDeliveriesCsv(user);
+  }
+
+  @Post('deliveries/prepare')
+  prepareDeliveries(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: GuestGameDeliveryPrepareDto,
+  ): Promise<GuestGameDeliveryPrepareResult> {
+    return this.gamificationService.prepareDeliveries(user, dto);
+  }
+
+  @Patch('deliveries/:id')
+  updateDelivery(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: GuestGameDeliveryUpdateDto,
+  ): Promise<GuestGameDelivery> {
+    return this.gamificationService.updateDelivery(user, id, dto);
   }
 
   @Get('events')

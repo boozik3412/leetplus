@@ -501,6 +501,85 @@ export type GuestGameCommunicationQueue = {
   note: string;
 };
 
+export type GuestGameDeliveryStatus =
+  | "READY"
+  | "BLOCKED"
+  | "SENT"
+  | "FAILED"
+  | "CANCELED";
+
+export type GuestGameDeliveryChannel = "TELEGRAM" | "MAX" | "CASHIER" | "MANUAL";
+
+export type GuestGameDeliveryEvent = {
+  id: string;
+  eventType: string;
+  fromStatus: string | null;
+  toStatus: string | null;
+  channel: GuestGameDeliveryChannel | null;
+  note: string | null;
+  payload: unknown;
+  createdAt: string;
+  actor: { id: string; fullName: string | null; email: string } | null;
+};
+
+export type GuestGameDelivery = {
+  id: string;
+  rewardId: string;
+  profileId: string | null;
+  guestId: string | null;
+  storeId: string | null;
+  channel: GuestGameDeliveryChannel;
+  channelLabel: string;
+  status: GuestGameDeliveryStatus;
+  statusLabel: string;
+  readinessStatus: GuestGameCommunicationQueueStatus;
+  readinessStatusLabel: string;
+  recipientMasked: string | null;
+  channelIdentityMasked: string | null;
+  messageTitle: string;
+  messageBody: string;
+  blockers: string[];
+  metadata: unknown;
+  preparedAt: string;
+  sentAt: string | null;
+  failedAt: string | null;
+  canceledAt: string | null;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+  reward: GuestGameReward;
+  profile: {
+    id: string;
+    displayName: string | null;
+    contactMasked: string | null;
+    telegramIdentity: string | null;
+    maxIdentity: string | null;
+    xp: number;
+    level: number;
+  } | null;
+  guest: GuestGameProfile["guest"];
+  store: { id: string; name: string } | null;
+  createdBy: { id: string; fullName: string | null; email: string } | null;
+  events: GuestGameDeliveryEvent[];
+};
+
+export type GuestGameDeliveryOutbox = {
+  summary: {
+    total: number;
+    ready: number;
+    blocked: number;
+    sent: number;
+    failed: number;
+    canceled: number;
+    telegram: number;
+    max: number;
+    cashier: number;
+    manual: number;
+  };
+  items: GuestGameDelivery[];
+  note: string;
+};
+
 export type GuestGameTariffSnapshotStatus =
   | "READY"
   | "PARTIAL"
@@ -606,6 +685,7 @@ export type GuestGamificationWorkspace = {
   economy: GuestGameEconomy;
   effect: GuestGameEffect;
   communicationQueue: GuestGameCommunicationQueue;
+  deliveryOutbox: GuestGameDeliveryOutbox;
   profiles: GuestGameProfile[];
   lootBoxes: GuestGameLootBox[];
   missions: GuestGameMission[];

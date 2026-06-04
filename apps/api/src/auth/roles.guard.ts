@@ -86,6 +86,10 @@ export class RolesGuard implements CanActivate {
       return 'view_staff';
     }
 
+    if (path.startsWith('/guests/gamification')) {
+      return this.resolveGuestGamificationCapability(path, method);
+    }
+
     if (path.startsWith('/guests')) {
       return 'view_guests';
     }
@@ -99,6 +103,32 @@ export class RolesGuard implements CanActivate {
     }
 
     return null;
+  }
+
+  private resolveGuestGamificationCapability(
+    path: string,
+    method: string,
+  ): AccessCapability {
+    if (method === 'GET') {
+      if (path.startsWith('/guests/gamification/rewards/export')) {
+        return 'approve_guest_game_rewards';
+      }
+
+      return 'view_guest_gamification';
+    }
+
+    if (path.startsWith('/guests/gamification/rewards')) {
+      return 'approve_guest_game_rewards';
+    }
+
+    if (
+      path.startsWith('/guests/gamification/dry-run') ||
+      path.startsWith('/guests/gamification/facts')
+    ) {
+      return 'view_guest_gamification';
+    }
+
+    return 'manage_guest_game_rules';
   }
 
   private normalizePath(request: AuthenticatedRequest) {

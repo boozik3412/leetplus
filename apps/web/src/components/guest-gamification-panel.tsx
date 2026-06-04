@@ -36,6 +36,11 @@ type Props = {
   guests: GuestDashboardRow[];
   leads: GuestCrmLead[];
   tenantSlug: string;
+  access: {
+    canManageRules: boolean;
+    canApproveRewards: boolean;
+    canViewGuestPii: boolean;
+  };
 };
 
 type TabId =
@@ -546,6 +551,7 @@ export function GuestGamificationPanel({
   guests,
   leads,
   tenantSlug,
+  access,
 }: Props) {
   const [workspace, setWorkspace] = useState(initialWorkspace);
   const [activeTab, setActiveTab] = useState<TabId>("overview");
@@ -673,6 +679,11 @@ export function GuestGamificationPanel({
 
   async function saveProfile() {
     await saveAction("profile", async () => {
+      assertCan(
+        access.canManageRules,
+        "Для изменения игровых профилей нужно право `Геймификация: правила`.",
+      );
+
       const payload = {
         guestId: nullable(profileForm.guestId),
         leadId: nullable(profileForm.leadId),
@@ -704,6 +715,11 @@ export function GuestGamificationPanel({
     status: GuestGameProfileStatus,
   ) {
     await saveAction(`profile-${profile.id}`, async () => {
+      assertCan(
+        access.canManageRules,
+        "Для изменения статуса профиля нужно право `Геймификация: правила`.",
+      );
+
       await patchJson(`/api/guests/gamification/profiles/${profile.id}`, {
         status,
       });
@@ -713,6 +729,11 @@ export function GuestGamificationPanel({
 
   async function saveLootBox() {
     await saveAction("lootBox", async () => {
+      assertCan(
+        access.canManageRules,
+        "Для изменения лутбоксов нужно право `Геймификация: правила`.",
+      );
+
       const payload = {
         name: lootBoxForm.name,
         status: lootBoxForm.status,
@@ -749,6 +770,11 @@ export function GuestGamificationPanel({
 
   async function saveMission() {
     await saveAction("mission", async () => {
+      assertCan(
+        access.canManageRules,
+        "Для изменения миссий нужно право `Геймификация: правила`.",
+      );
+
       const payload = {
         name: missionForm.name,
         status: missionForm.status,
@@ -789,6 +815,11 @@ export function GuestGamificationPanel({
 
   async function saveSeason() {
     await saveAction("season", async () => {
+      assertCan(
+        access.canManageRules,
+        "Для изменения Battle Pass нужно право `Геймификация: правила`.",
+      );
+
       const payload = {
         name: seasonForm.name,
         status: seasonForm.status,
@@ -823,6 +854,11 @@ export function GuestGamificationPanel({
 
   async function saveReward() {
     await saveAction("reward", async () => {
+      assertCan(
+        access.canApproveRewards,
+        "Для изменения наград нужно право `Геймификация: награды`.",
+      );
+
       const payload = {
         profileId: nullable(rewardForm.profileId),
         guestId: nullable(rewardForm.guestId),
@@ -857,6 +893,11 @@ export function GuestGamificationPanel({
 
   async function saveEvent() {
     await saveAction("event", async () => {
+      assertCan(
+        access.canManageRules,
+        "Для ручного создания игровых событий нужно право `Геймификация: правила`.",
+      );
+
       await postJson("/api/guests/gamification/events", {
         profileId: nullable(eventForm.profileId),
         eventType: eventForm.eventType,
@@ -897,6 +938,11 @@ export function GuestGamificationPanel({
 
   async function processDryRunEvent() {
     await saveAction("processEvent", async () => {
+      assertCan(
+        access.canManageRules,
+        "Для подтвержденного запуска события нужно право `Геймификация: правила`.",
+      );
+
       const result = await postJson<GuestGameProcessEventResult>(
         "/api/guests/gamification/process-event",
         {
@@ -937,6 +983,13 @@ export function GuestGamificationPanel({
 
   async function runSnapshotPipeline(dryRunOnly: boolean) {
     await saveAction(dryRunOnly ? "pipelinePreview" : "pipelineRun", async () => {
+      if (!dryRunOnly) {
+        assertCan(
+          access.canManageRules,
+          "Для batch-обработки snapshot-фактов нужно право `Геймификация: правила`.",
+        );
+      }
+
       const result = await postJson<GuestGamePipelineRunResult>(
         "/api/guests/gamification/pipeline/run",
         {
@@ -990,6 +1043,11 @@ export function GuestGamificationPanel({
     status: GuestGameRewardStatus,
   ) {
     await saveAction(`reward-${reward.id}`, async () => {
+      assertCan(
+        access.canApproveRewards,
+        "Для изменения статуса награды нужно право `Геймификация: награды`.",
+      );
+
       await patchJson(`/api/guests/gamification/rewards/${reward.id}`, {
         status,
       });
@@ -999,6 +1057,11 @@ export function GuestGamificationPanel({
 
   async function redeemReward() {
     await saveAction("rewardRedeem", async () => {
+      assertCan(
+        access.canApproveRewards,
+        "Для кассирского погашения награды нужно право `Геймификация: награды`.",
+      );
+
       const reward = await postJson<GuestGameReward>(
         "/api/guests/gamification/rewards/redeem",
         {
@@ -1023,6 +1086,11 @@ export function GuestGamificationPanel({
     status: GuestGameStatus,
   ) {
     await saveAction(`${type}-${id}`, async () => {
+      assertCan(
+        access.canManageRules,
+        "Для изменения статуса правила нужно право `Геймификация: правила`.",
+      );
+
       await patchJson(`/api/guests/gamification/${type}/${id}`, { status });
       await reloadWorkspace();
     });
@@ -1072,6 +1140,20 @@ export function GuestGamificationPanel({
         {error ? (
           <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
             {error}
+          </div>
+        ) : null}
+
+        {!access.canManageRules || !access.canApproveRewards ? (
+          <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-300">
+            Ваш доступ ограничен:{" "}
+            {!access.canManageRules
+              ? "редактирование правил и подтвержденные запуски недоступны"
+              : "правила доступны"}
+            ,{" "}
+            {!access.canApproveRewards
+              ? "выдача и погашение наград недоступны"
+              : "награды доступны"}
+            . Просмотр и безопасный dry-run остаются доступными.
           </div>
         ) : null}
       </section>
@@ -1224,6 +1306,12 @@ export function GuestGamificationPanel({
       ) : null}
     </div>
   );
+}
+
+function assertCan(allowed: boolean, message: string) {
+  if (!allowed) {
+    throw new Error(message);
+  }
 }
 
 function DryRunTab({

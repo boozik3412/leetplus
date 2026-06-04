@@ -12,6 +12,7 @@ import {
   getGuestGamificationWorkspace,
   type GuestGamificationWorkspace,
 } from "@/lib/guest-gamification";
+import { can } from "@/lib/permissions";
 import { getStores, type Store } from "@/lib/stores";
 
 async function safeValue<T>(promise: Promise<T>, fallback: T): Promise<T> {
@@ -58,6 +59,33 @@ const emptyWorkspace: GuestGamificationWorkspace = {
 export default async function GuestGamificationPage() {
   const user = await requireCurrentUser();
 
+  if (!can(user, "view_guest_gamification")) {
+    return (
+      <main className="px-4 py-6 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-3xl rounded-lg border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+          <ReportBreadcrumbs
+            current="Геймификация"
+            items={[
+              { href: "/dashboard", label: "Дашборд" },
+              { href: "/guests", label: "Гости" },
+            ]}
+          />
+          <p className="text-sm font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+            Геймификация гостей
+          </p>
+          <h1 className="mt-2 text-2xl font-semibold text-zinc-950 dark:text-white">
+            Нет доступа
+          </h1>
+          <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+            Для открытия Guest Game Hub нужна роль с доступом
+            `Геймификация: просмотр`. Управление правилами и выдача наград
+            настраиваются отдельными правами.
+          </p>
+        </div>
+      </main>
+    );
+  }
+
   const [workspace, audiences, stores, guestsResponse, leads] =
     await Promise.all([
       safeValue(getGuestGamificationWorkspace(), emptyWorkspace),
@@ -87,6 +115,11 @@ export default async function GuestGamificationPage() {
           guests={guests}
           leads={leads}
           tenantSlug={user.tenantSlug}
+          access={{
+            canManageRules: can(user, "manage_guest_game_rules"),
+            canApproveRewards: can(user, "approve_guest_game_rewards"),
+            canViewGuestPii: can(user, "view_guest_game_pii"),
+          }}
         />
       </div>
     </main>

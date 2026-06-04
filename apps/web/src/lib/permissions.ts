@@ -5,6 +5,10 @@ export type Capability =
   | "view_dashboard"
   | "view_reports"
   | "view_guests"
+  | "view_guest_gamification"
+  | "manage_guest_game_rules"
+  | "approve_guest_game_rewards"
+  | "view_guest_game_pii"
   | "view_marketing"
   | "view_staff"
   | "edit_staff_knowledge"
@@ -42,6 +46,30 @@ export const capabilityOptions: CapabilityOption[] = [
     label: "Гости и CRM",
     description:
       "Гостевая аналитика, CRM, группы, задачи контакта и карточки гостей.",
+  },
+  {
+    key: "view_guest_gamification",
+    label: "Геймификация: просмотр",
+    description:
+      "Просмотр Guest Game Hub, профилей, правил, событий и очереди наград.",
+  },
+  {
+    key: "manage_guest_game_rules",
+    label: "Геймификация: правила",
+    description:
+      "Создание и изменение лутбоксов, миссий, Battle Pass и запуск внутренних событий.",
+  },
+  {
+    key: "approve_guest_game_rewards",
+    label: "Геймификация: награды",
+    description:
+      "Создание, подтверждение, экспорт и кассирское погашение наград гостей.",
+  },
+  {
+    key: "view_guest_game_pii",
+    label: "Геймификация: ПДн",
+    description:
+      "Доступ к чувствительным данным гостя в игровых сценариях, когда они появятся в интерфейсе.",
   },
   {
     key: "view_marketing",
@@ -120,6 +148,10 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "view_dashboard",
     "view_reports",
     "view_guests",
+    "view_guest_gamification",
+    "manage_guest_game_rules",
+    "approve_guest_game_rewards",
+    "view_guest_game_pii",
     "view_marketing",
     "view_staff",
     "edit_staff_knowledge",
@@ -138,6 +170,10 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "view_dashboard",
     "view_reports",
     "view_guests",
+    "view_guest_gamification",
+    "manage_guest_game_rules",
+    "approve_guest_game_rewards",
+    "view_guest_game_pii",
     "view_marketing",
     "view_staff",
     "edit_staff_knowledge",
@@ -156,6 +192,10 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "view_dashboard",
     "view_reports",
     "view_guests",
+    "view_guest_gamification",
+    "manage_guest_game_rules",
+    "approve_guest_game_rewards",
+    "view_guest_game_pii",
     "view_marketing",
     "view_staff",
     "edit_staff_knowledge",
@@ -172,12 +212,19 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "view_dashboard",
     "view_reports",
     "view_guests",
+    "view_guest_gamification",
+    "manage_guest_game_rules",
+    "approve_guest_game_rewards",
     "view_marketing",
   ],
   CLUB_MANAGER: [
     "view_dashboard",
     "view_reports",
     "view_guests",
+    "view_guest_gamification",
+    "manage_guest_game_rules",
+    "approve_guest_game_rewards",
+    "view_guest_game_pii",
     "view_marketing",
     "view_staff",
     "edit_staff_knowledge",
@@ -226,6 +273,10 @@ export function canAccessPath(user: AuthUser | null, href: string) {
 
   if (href === "/communications" || href.startsWith("/communications/")) {
     return can(user, "view_staff") || can(user, "view_guests");
+  }
+
+  if (href.startsWith("/guests/gamification")) {
+    return can(user, "view_guest_gamification");
   }
 
   if (href.startsWith("/staff") || href.startsWith("/guests/staff-control")) {

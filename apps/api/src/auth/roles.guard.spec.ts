@@ -91,6 +91,53 @@ describe('RolesGuard', () => {
     ).toThrow(ForbiddenException);
   });
 
+  it('allows custom role to view Guest Game Hub without full guest CRM access', () => {
+    reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
+
+    expect(
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/guests/gamification/workspace',
+          user: {
+            role: UserRole.CLUB_ADMINISTRATOR,
+            permissions: ['view_guest_gamification'],
+          },
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it('keeps Guest Game Hub reward redemption behind reward approval permission', () => {
+    reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
+
+    expect(
+      guard.canActivate(
+        createContext({
+          method: 'POST',
+          path: '/guests/gamification/rewards/redeem',
+          user: {
+            role: UserRole.CLUB_ADMINISTRATOR,
+            permissions: ['approve_guest_game_rewards'],
+          },
+        }),
+      ),
+    ).toBe(true);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'POST',
+          path: '/guests/gamification/rewards/redeem',
+          user: {
+            role: UserRole.CLUB_ADMINISTRATOR,
+            permissions: ['view_guest_gamification'],
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
   it('allows managers when user access route metadata includes them', () => {
     reflector.getAllAndOverride.mockReturnValue([
       UserRole.OWNER,

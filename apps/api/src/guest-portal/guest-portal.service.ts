@@ -127,6 +127,28 @@ export type GuestPortalPayload = {
     timeline: GuestPortalActivityItem[];
     xpHistory: GuestPortalXpHistoryItem[];
   };
+  communications: GuestPortalCommunications;
+};
+
+export type GuestPortalCommunications = {
+  phone: {
+    masked: string | null;
+    consentStatus: 'UNKNOWN' | 'GRANTED' | 'DENIED' | 'UNSUBSCRIBED';
+    consentSource: string | null;
+    consentAt: string | null;
+    unsubscribedAt: string | null;
+    otpVerified: boolean;
+    otpDeliveryReady: boolean;
+  };
+  telegram: GuestPortalCommunicationChannel;
+  max: GuestPortalCommunicationChannel;
+};
+
+export type GuestPortalCommunicationChannel = {
+  connected: boolean;
+  identityMasked: string | null;
+  readyForRewards: boolean;
+  status: 'READY' | 'CONNECTED_NO_CONSENT' | 'NOT_CONNECTED' | 'UNSUBSCRIBED';
 };
 
 export type GuestPortalNextAction = {
@@ -795,6 +817,7 @@ export class GuestPortalService {
         rewards: portalRewards,
       },
       activity,
+      communications: buildCommunications(guest, profile),
     };
   }
 
@@ -1836,6 +1859,97 @@ function rewardSource(row: {
     sourceKind: 'MANUAL',
     sourceLabel: null,
   };
+}
+
+function buildCommunications(
+  guest: {
+    phoneMasked: string | null;
+    phoneConsentStatus: 'UNKNOWN' | 'GRANTED' | 'DENIED' | 'UNSUBSCRIBED';
+    phoneConsentSource: string | null;
+    phoneConsentAt: Date | null;
+    unsubscribedAt: Date | null;
+  } | null,
+  profile: {
+    contactMasked: string | null;
+    telegramIdentity: string | null;
+    maxIdentity: string | null;
+  } | null,
+): GuestPortalCommunications {
+  const consentStatus = guest?.unsubscribedAt
+    ? 'UNSUBSCRIBED'
+    : (guest?.phoneConsentStatus ?? 'UNKNOWN');
+  const consentGranted = consentStatus === 'GRANTED';
+
+  return {
+    phone: {
+      masked: guest?.phoneMasked ?? profile?.contactMasked ?? null,
+      consentStatus,
+      consentSource: guest?.phoneConsentSource ?? null,
+      consentAt: iso(guest?.phoneConsentAt ?? null),
+      unsubscribedAt: iso(guest?.unsubscribedAt ?? null),
+      otpVerified: true,
+      otpDeliveryReady: false,
+    },
+    telegram: communicationChannel(
+      profile?.telegramIdentity ?? null,
+      consentGranted,
+      consentStatus,
+    ),
+    max: communicationChannel(
+      profile?.maxIdentity ?? null,
+      consentGranted,
+      consentStatus,
+    ),
+  };
+}
+
+function communicationChannel(
+  identity: string | null,
+  consentGranted: boolean,
+  consentStatus: GuestPortalCommunications['phone']['consentStatus'],
+): GuestPortalCommunicationChannel {
+  const normalized = identity?.trim() || null;
+
+  if (consentStatus === 'UNSUBSCRIBED') {
+    return {
+      connected: Boolean(normalized),
+      identityMasked: maskExternalIdentity(normalized),
+      readyForRewards: false,
+      status: 'UNSUBSCRIBED',
+    };
+  }
+
+  if (!normalized) {
+    return {
+      connected: false,
+      identityMasked: null,
+      readyForRewards: false,
+      status: 'NOT_CONNECTED',
+    };
+  }
+
+  return {
+    connected: true,
+    identityMasked: maskExternalIdentity(normalized),
+    readyForRewards: consentGranted,
+    status: consentGranted ? 'READY' : 'CONNECTED_NO_CONSENT',
+  };
+}
+
+function maskExternalIdentity(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  if (value.length <= 4) {
+    return '****';
+  }
+
+  if (value.startsWith('@')) {
+    return `${value.slice(0, 3)}...${value.slice(-2)}`;
+  }
+
+  return `${value.slice(0, 2)}...${value.slice(-2)}`;
 }
 
 function emptyActivity(): GuestPortalPayload['activity'] {

@@ -452,6 +452,8 @@ function VerifiedPortal({
 
       <NextActionsPanel portal={portal} />
 
+      <CommunicationPanel portal={portal} />
+
       <section className="grid gap-5 lg:grid-cols-[0.95fr_1.05fr]">
         <div className="rounded-lg border border-white/10 bg-[#0b111c] p-5">
           <div className="flex items-start gap-4">
@@ -500,6 +502,118 @@ function VerifiedPortal({
         <LootBoxesPanel portal={portal} />
       </section>
     </div>
+  );
+}
+
+function CommunicationPanel({ portal }: { portal: GuestPortalPayload }) {
+  const communications = portal.communications;
+  const channels = [
+    {
+      id: "phone",
+      title: "Телефон и OTP",
+      meta: communications.phone.masked ?? "номер скрыт",
+      status: communications.phone.otpVerified
+        ? "Вход подтвержден"
+        : "Нужна проверка",
+      description: communications.phone.otpDeliveryReady
+        ? "Канал готов для входа и сервисных уведомлений."
+        : "Гостевая сессия подтверждена, но реальная доставка OTP через SMS, Telegram или MAX еще не подключена.",
+      tone: "emerald" as const,
+    },
+    {
+      id: "telegram",
+      title: "Telegram",
+      meta: communications.telegram.identityMasked ?? "не привязан",
+      status: communicationChannelLabel(communications.telegram.status),
+      description: communicationChannelHint(
+        "Telegram",
+        communications.telegram.status,
+      ),
+      tone: "cyan" as const,
+    },
+    {
+      id: "max",
+      title: "MAX",
+      meta: communications.max.identityMasked ?? "не привязан",
+      status: communicationChannelLabel(communications.max.status),
+      description: communicationChannelHint("MAX", communications.max.status),
+      tone: "amber" as const,
+    },
+  ];
+
+  return (
+    <section className="rounded-lg border border-white/10 bg-[#0b111c] p-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-bold uppercase text-cyan-200">
+            Каналы связи
+          </p>
+          <h3 className="mt-1 text-2xl font-black text-white">
+            Как клуб сможет присылать награды
+          </h3>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
+            Здесь показана готовность контактов для будущих уведомлений,
+            лутбоксов и наград. Сообщения во внешние каналы не отправляются без
+            отдельного подключения и согласия.
+          </p>
+        </div>
+        <div className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-slate-300">
+          <span className="font-bold text-white">Согласие:</span>{" "}
+          {communicationConsentLabel(communications.phone.consentStatus)}
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-3 lg:grid-cols-3">
+        {channels.map((channel) => (
+          <article
+            key={channel.id}
+            className={`rounded-lg border p-4 transition hover:-translate-y-0.5 ${communicationToneClass(
+              channel.tone,
+            )}`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs font-bold uppercase text-slate-500">
+                  {channel.title}
+                </p>
+                <p className="mt-1 truncate text-lg font-black text-white">
+                  {channel.meta}
+                </p>
+              </div>
+              <span className="shrink-0 rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-xs font-black text-white">
+                {channel.status}
+              </span>
+            </div>
+            <p className="mt-3 min-h-16 text-sm leading-6 text-slate-300">
+              {channel.description}
+            </p>
+          </article>
+        ))}
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <InfoLine
+          label="Источник согласия"
+          value={communications.phone.consentSource ?? "не указан"}
+        />
+        <InfoLine
+          label="Дата согласия"
+          value={
+            communications.phone.consentAt
+              ? formatDate(communications.phone.consentAt)
+              : "нет данных"
+          }
+        />
+        <InfoLine
+          label="Отписка"
+          value={
+            communications.phone.unsubscribedAt
+              ? formatDate(communications.phone.unsubscribedAt)
+              : "не зафиксирована"
+          }
+        />
+      </div>
+    </section>
   );
 }
 
@@ -1548,6 +1662,67 @@ function RewardClaimBadge({ payload }: { payload: string }) {
       ))}
     </div>
   );
+}
+
+function communicationConsentLabel(
+  status: GuestPortalPayload["communications"]["phone"]["consentStatus"],
+) {
+  const labels = {
+    UNKNOWN: "не уточнено",
+    GRANTED: "получено",
+    DENIED: "не получено",
+    UNSUBSCRIBED: "отписка",
+  } satisfies Record<
+    GuestPortalPayload["communications"]["phone"]["consentStatus"],
+    string
+  >;
+
+  return labels[status];
+}
+
+function communicationChannelLabel(
+  status: GuestPortalPayload["communications"]["telegram"]["status"],
+) {
+  const labels = {
+    READY: "готов",
+    CONNECTED_NO_CONSENT: "нужно согласие",
+    NOT_CONNECTED: "не привязан",
+    UNSUBSCRIBED: "отписка",
+  } satisfies Record<
+    GuestPortalPayload["communications"]["telegram"]["status"],
+    string
+  >;
+
+  return labels[status];
+}
+
+function communicationChannelHint(
+  channel: "Telegram" | "MAX",
+  status: GuestPortalPayload["communications"]["telegram"]["status"],
+) {
+  const labels = {
+    READY: `${channel} привязан и может использоваться для будущих уведомлений после подключения бота.`,
+    CONNECTED_NO_CONSENT: `${channel} привязан, но для игровых сообщений нужно подтвердить согласие на коммуникации.`,
+    NOT_CONNECTED: `${channel} пока не связан с гостевым профилем. После подключения бот сможет показывать миссии, лутбоксы и коды наград.`,
+    UNSUBSCRIBED: `Гость отписался от коммуникаций. ${channel} нельзя использовать для игровых сообщений без нового согласия.`,
+  } satisfies Record<
+    GuestPortalPayload["communications"]["telegram"]["status"],
+    string
+  >;
+
+  return labels[status];
+}
+
+function communicationToneClass(tone: "emerald" | "cyan" | "amber") {
+  const classes = {
+    emerald:
+      "border-emerald-300/25 bg-emerald-300/[0.06] hover:border-emerald-300/45",
+    cyan: "border-cyan-300/25 bg-cyan-300/[0.06] hover:border-cyan-300/45",
+    amber:
+      "border-amber-300/25 bg-amber-300/[0.06] hover:border-amber-300/45",
+  } satisfies Record<"emerald" | "cyan" | "amber", string>;
+
+  return classes[tone];
 }
 
 function walletStateLabel(

@@ -205,6 +205,37 @@ export type GuestPortalPayload = {
       sourceLabel: string | null;
     }>;
   };
+  communications: {
+    phone: {
+      masked: string | null;
+      consentStatus: "UNKNOWN" | "GRANTED" | "DENIED" | "UNSUBSCRIBED";
+      consentSource: string | null;
+      consentAt: string | null;
+      unsubscribedAt: string | null;
+      otpVerified: boolean;
+      otpDeliveryReady: boolean;
+    };
+    telegram: {
+      connected: boolean;
+      identityMasked: string | null;
+      readyForRewards: boolean;
+      status:
+        | "READY"
+        | "CONNECTED_NO_CONSENT"
+        | "NOT_CONNECTED"
+        | "UNSUBSCRIBED";
+    };
+    max: {
+      connected: boolean;
+      identityMasked: string | null;
+      readyForRewards: boolean;
+      status:
+        | "READY"
+        | "CONNECTED_NO_CONSENT"
+        | "NOT_CONNECTED"
+        | "UNSUBSCRIBED";
+    };
+  };
 };
 
 export type GuestPortalOtpVerifyResponse = {

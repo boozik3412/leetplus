@@ -79,6 +79,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added a guest communication-readiness layer to the public guest portal: `/guest/[tenantSlug]/[storeId]` now returns and renders masked phone, consent/unsubscribe state, Telegram/MAX identity readiness, and explains that external messages are not sent until SMS/Telegram/MAX providers and consent flows are configured.
 - Repaired production guest portal deployment: the VDS `.next` build was partially root-owned/incomplete after an OOM-killed parallel build, so `/guest/[tenantSlug]/[storeId]` returned 500. The server was rebuilt sequentially, ownership was restored to `admin:admin`, services were restarted, and the deploy script now builds API and Web sequentially to avoid repeating the issue.
 - Added mission quest chains to Guest Game Hub: `/guests/gamification` can save 2-3 guest-facing mission steps in `conditions.questSteps`, and `/guest/[tenantSlug]/[storeId]` renders them as `current/next/done` progress on top of saved LeetPlus mission events without live Langame reads or Langame writes.
 - Added a next-action layer and XP history to the public guest portal: `/guest/[tenantSlug]/[storeId]` now prioritizes ready rewards, latest loot boxes, closest missions, Battle Pass progress, and Langame matching as guest-facing actions, and shows recent XP deltas from saved `GuestGameEvent` rows without live Langame reads.

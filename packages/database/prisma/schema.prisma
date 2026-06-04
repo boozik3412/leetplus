@@ -162,6 +162,7 @@ model Tenant {
   guestGameDeliveryEvents              GuestGameDeliveryEvent[]
   guestGameEvents                      GuestGameEvent[]
   guestGameLogTypeMappings             GuestGameLogTypeMapping[]
+  guestGameTelegramLinkChallenges      GuestGameTelegramLinkChallenge[]
   guestPortalOtpChallenges             GuestPortalOtpChallenge[]
   marketingCampaigns                   MarketingCampaign[]
   marketingPromoBundles                MarketingPromoBundle[]
@@ -459,6 +460,7 @@ model Store {
   marketingMissionRewards      MarketingMissionReward[]
   guestGameRewards             GuestGameReward[]
   guestGameDeliveries          GuestGameDelivery[]
+  guestGameTelegramLinkChallenges GuestGameTelegramLinkChallenge[]
   guestPortalOtpChallenges     GuestPortalOtpChallenge[]
   staffTasks                   StaffTask[]
   staffTaskTemplates           StaffTaskTemplate[]
@@ -1019,6 +1021,7 @@ model Guest {
   gameRewards           GuestGameReward[]
   gameDeliveries        GuestGameDelivery[]
   gameEvents            GuestGameEvent[]
+  gameTelegramLinkChallenges GuestGameTelegramLinkChallenge[]
   guestPortalOtpChallenges GuestPortalOtpChallenge[]
 
   @@unique([tenantId, externalProvider, externalDomain, externalGuestId])
@@ -1378,6 +1381,7 @@ model GuestGameProfile {
   rewards       GuestGameReward[]
   deliveries    GuestGameDelivery[]
   events        GuestGameEvent[]
+  telegramLinkChallenges GuestGameTelegramLinkChallenge[]
   portalOtpChallenges GuestPortalOtpChallenge[]
 
   @@unique([tenantId, guestId], map: "guest_game_profile_guest_uidx")
@@ -1679,6 +1683,34 @@ model GuestGameLogTypeMapping {
   @@index([tenantId, preset], map: "guest_game_log_type_mapping_preset_idx")
   @@index([createdByUserId], map: "guest_game_log_type_mapping_created_by_idx")
   @@index([updatedByUserId], map: "guest_game_log_type_mapping_updated_by_idx")
+}
+
+model GuestGameTelegramLinkChallenge {
+  id                   String    @id @default(uuid())
+  tenantId             String
+  storeId              String
+  profileId            String
+  guestId              String?
+  phoneHash            String?
+  codeHash             String
+  status               String    @default("PENDING")
+  expiresAt            DateTime
+  consumedAt           DateTime?
+  telegramChatIdMasked String?
+  telegramUsername     String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  tenant  Tenant           @relation(fields: [tenantId], references: [id])
+  store   Store            @relation(fields: [storeId], references: [id])
+  profile GuestGameProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  guest   Guest?           @relation(fields: [guestId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, storeId, status, createdAt], map: "guest_game_telegram_link_scope_idx")
+  @@index([codeHash, status], map: "guest_game_telegram_link_code_idx")
+  @@index([profileId], map: "guest_game_telegram_link_profile_idx")
+  @@index([guestId], map: "guest_game_telegram_link_guest_idx")
+  @@index([expiresAt], map: "guest_game_telegram_link_expires_idx")
 }
 
 model GuestPortalOtpChallenge {

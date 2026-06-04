@@ -13,6 +13,7 @@ import type {
   GuestPortalOtpVerifyResponse,
   GuestPortalPayload,
   GuestPortalPublicConfig,
+  GuestPortalTelegramLinkStartResponse,
 } from "@/lib/guest-portal";
 
 type GuestPortalClientProps = {
@@ -53,6 +54,12 @@ export function GuestPortalClient({
   const [isUpdatingCommunication, setUpdatingCommunication] = useState(false);
   const [messengerMessage, setMessengerMessage] = useState<string | null>(null);
   const [isUpdatingMessenger, setUpdatingMessenger] = useState(false);
+  const [telegramLink, setTelegramLink] =
+    useState<GuestPortalTelegramLinkStartResponse | null>(null);
+  const [telegramLinkMessage, setTelegramLinkMessage] = useState<string | null>(
+    null,
+  );
+  const [isStartingTelegramLink, setStartingTelegramLink] = useState(false);
 
   const basePath = `/api/guest-portal/${encodeURIComponent(
     tenantSlug,
@@ -128,6 +135,8 @@ export function GuestPortalClient({
       setLangameDetails(null);
       setLangameDetailsMessage(null);
       setMessengerMessage(null);
+      setTelegramLink(null);
+      setTelegramLinkMessage(null);
       setMessage(
         data.delivery.status === "DEV_CODE"
           ? "Код создан. В demo-режиме он показан ниже."
@@ -173,6 +182,8 @@ export function GuestPortalClient({
       setLangameDetails(null);
       setLangameDetailsMessage(null);
       setMessengerMessage(null);
+      setTelegramLink(null);
+      setTelegramLinkMessage(null);
       setMessage("Профиль подтвержден.");
     } catch (error) {
       setMessage(
@@ -323,6 +334,37 @@ export function GuestPortalClient({
     }
   }
 
+  async function startTelegramLink() {
+    setStartingTelegramLink(true);
+    setTelegramLinkMessage(null);
+
+    try {
+      const response = await fetch(
+        "/api/guest-portal/session/communications/telegram-link/start",
+        {
+          method: "POST",
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(await readMessage(response));
+      }
+
+      const data =
+        (await response.json()) as GuestPortalTelegramLinkStartResponse;
+      setTelegramLink(data);
+      setTelegramLinkMessage(data.message);
+    } catch (error) {
+      setTelegramLinkMessage(
+        error instanceof Error
+          ? error.message
+          : "Не удалось создать код для Telegram-бота.",
+      );
+    } finally {
+      setStartingTelegramLink(false);
+    }
+  }
+
   const pageTitle = portal?.store.name ?? config?.store.name ?? "Клуб";
   const tenantName = portal?.tenant.name ?? config?.tenant.name ?? "LeetPlus";
 
@@ -370,11 +412,15 @@ export function GuestPortalClient({
             isUpdatingCommunication={isUpdatingCommunication}
             messengerMessage={messengerMessage}
             isUpdatingMessenger={isUpdatingMessenger}
+            telegramLink={telegramLink}
+            telegramLinkMessage={telegramLinkMessage}
+            isStartingTelegramLink={isStartingTelegramLink}
             onPhoneChange={setPhone}
             onCheckLangameMatch={checkLangameMatch}
             onCheckLangameDetails={checkLangameDetails}
             onUpdateCommunicationPreference={updateCommunicationPreference}
             onUpdateMessenger={updateMessengerChannel}
+            onStartTelegramLink={startTelegramLink}
           />
         ) : (
           <VerificationLanding
@@ -562,11 +608,15 @@ function VerifiedPortal({
   isUpdatingCommunication,
   messengerMessage,
   isUpdatingMessenger,
+  telegramLink,
+  telegramLinkMessage,
+  isStartingTelegramLink,
   onPhoneChange,
   onCheckLangameMatch,
   onCheckLangameDetails,
   onUpdateCommunicationPreference,
   onUpdateMessenger,
+  onStartTelegramLink,
 }: {
   portal: GuestPortalPayload;
   phone: string;
@@ -580,6 +630,9 @@ function VerifiedPortal({
   isUpdatingCommunication: boolean;
   messengerMessage: string | null;
   isUpdatingMessenger: boolean;
+  telegramLink: GuestPortalTelegramLinkStartResponse | null;
+  telegramLinkMessage: string | null;
+  isStartingTelegramLink: boolean;
   onPhoneChange: (value: string) => void;
   onCheckLangameMatch: (event: FormEvent<HTMLFormElement>) => void;
   onCheckLangameDetails: () => void;
@@ -590,6 +643,7 @@ function VerifiedPortal({
     channel: GuestPortalMessengerChannel,
     identity: string,
   ) => void;
+  onStartTelegramLink: () => void;
 }) {
   return (
     <div className="space-y-5 py-6">
@@ -628,8 +682,12 @@ function VerifiedPortal({
         isUpdating={isUpdatingCommunication}
         messengerMessage={messengerMessage}
         isUpdatingMessenger={isUpdatingMessenger}
+        telegramLink={telegramLink}
+        telegramLinkMessage={telegramLinkMessage}
+        isStartingTelegramLink={isStartingTelegramLink}
         onUpdatePreference={onUpdateCommunicationPreference}
         onUpdateMessenger={onUpdateMessenger}
+        onStartTelegramLink={onStartTelegramLink}
       />
 
       <section className="grid gap-5 lg:grid-cols-[0.95fr_1.05fr]">
@@ -691,19 +749,27 @@ function CommunicationPanel({
   isUpdating,
   messengerMessage,
   isUpdatingMessenger,
+  telegramLink,
+  telegramLinkMessage,
+  isStartingTelegramLink,
   onUpdatePreference,
   onUpdateMessenger,
+  onStartTelegramLink,
 }: {
   portal: GuestPortalPayload;
   message: string | null;
   isUpdating: boolean;
   messengerMessage: string | null;
   isUpdatingMessenger: boolean;
+  telegramLink: GuestPortalTelegramLinkStartResponse | null;
+  telegramLinkMessage: string | null;
+  isStartingTelegramLink: boolean;
   onUpdatePreference: (action: GuestPortalCommunicationPreferenceAction) => void;
   onUpdateMessenger: (
     channel: GuestPortalMessengerChannel,
     identity: string,
   ) => void;
+  onStartTelegramLink: () => void;
 }) {
   const [messengerChannel, setMessengerChannel] =
     useState<GuestPortalMessengerChannel>("TELEGRAM");
@@ -765,8 +831,9 @@ function CommunicationPanel({
       description: "Полная отписка от игровых коммуникаций.",
     },
   ];
-  const disabledReason = !portal.guestFound
-    ? "Сначала профиль должен появиться в синхронизированной базе гостей."
+  const canUseMessenger = portal.guestFound || portal.crmLead.found || Boolean(portal.profile.id);
+  const disabledReason = !canUseMessenger
+    ? "Сначала профиль должен появиться в базе гостей, CRM-заявке или игровом профиле."
     : null;
 
   return (
@@ -836,6 +903,64 @@ function CommunicationPanel({
         ) : disabledReason ? (
           <p className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/[0.06] px-3 py-2 text-sm leading-6 text-amber-50">
             {disabledReason}
+          </p>
+        ) : null}
+      </div>
+
+      <div className="mt-4 rounded-lg border border-cyan-300/20 bg-cyan-300/[0.055] p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="max-w-2xl">
+            <p className="text-sm font-black text-white">Telegram-бот</p>
+            <p className="mt-1 text-sm leading-6 text-slate-300">
+              Создайте одноразовый код и откройте бота. После подтверждения бот
+              сохранит numeric chat_id, а не публичный alias, поэтому игровые
+              награды смогут уходить через защищенный outbox.
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={Boolean(disabledReason) || isStartingTelegramLink}
+            title={disabledReason ?? "Создать одноразовый код для Telegram"}
+            onClick={onStartTelegramLink}
+            className="rounded-lg border border-cyan-300/30 bg-cyan-300/10 px-4 py-3 text-sm font-black text-cyan-100 transition hover:bg-cyan-300/[0.18] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isStartingTelegramLink ? "Создаем..." : "Получить код"}
+          </button>
+        </div>
+        {telegramLink ? (
+          <div className="mt-3 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+            <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+              <p className="text-xs font-bold uppercase text-slate-500">
+                Код для бота
+              </p>
+              <p className="mt-1 font-mono text-2xl font-black tracking-wide text-white">
+                {telegramLink.code}
+              </p>
+              <p className="mt-2 text-xs leading-5 text-slate-400">
+                Действует до {formatDate(telegramLink.expiresAt)}. В базе
+                хранится только hash кода, а сам код показывается один раз.
+              </p>
+            </div>
+            {telegramLink.botDeepLink ? (
+              <a
+                href={telegramLink.botDeepLink}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center justify-center rounded-lg bg-cyan-300 px-4 py-3 text-sm font-black text-[#021018] transition hover:bg-cyan-200"
+              >
+                Открыть Telegram
+              </a>
+            ) : (
+              <div className="rounded-lg border border-amber-300/20 bg-amber-300/[0.08] p-3 text-sm leading-6 text-amber-50">
+                Username бота еще не настроен. Код можно будет использовать
+                после подключения Telegram-бота.
+              </div>
+            )}
+          </div>
+        ) : null}
+        {telegramLinkMessage ? (
+          <p className="mt-3 rounded-lg border border-cyan-300/20 bg-black/20 px-3 py-2 text-sm leading-6 text-cyan-50">
+            {telegramLinkMessage}
           </p>
         ) : null}
       </div>

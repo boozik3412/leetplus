@@ -338,6 +338,16 @@ export type GuestPortalMessengerUpdateResponse = {
   message: string;
 };
 
+export type GuestPortalTelegramLinkStartResponse = {
+  code: string;
+  codeMasked: string;
+  expiresAt: string;
+  botUsername: string | null;
+  botDeepLink: string | null;
+  status: "READY" | "BOT_NOT_CONFIGURED";
+  message: string;
+};
+
 export type GuestPortalLangameMatchResponse = {
   checkedAt: string;
   queryField: "phone";

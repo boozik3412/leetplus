@@ -13,7 +13,13 @@ import {
   Prisma,
   TenantLifecycleStatus,
 } from '@prisma/client';
-import { createHash, createHmac, randomInt, randomUUID } from 'node:crypto';
+import {
+  createHash,
+  createHmac,
+  randomBytes,
+  randomInt,
+  randomUUID,
+} from 'node:crypto';
 import { LangameSettingsService } from '../integrations/langame-settings.service';
 import type {
   LangameGuestDetailsPortalResult,
@@ -26,8 +32,10 @@ const OTP_MAX_ATTEMPTS = 5;
 const OTP_RESEND_SECONDS = 60;
 const GUEST_TOKEN_EXPIRES_IN = '7d';
 const GUEST_PORTAL_PURPOSE = 'guest_portal';
+const TELEGRAM_LINK_TTL_MINUTES = 15;
 const COMMUNICATION_PREFERENCE_EVENT_PREFIX =
   'guest_portal:communication_preference:';
+const TELEGRAM_LINK_EVENT_PREFIX = 'guest_portal:telegram_bot_link:';
 type JwtExpiresIn = NonNullable<JwtSignOptions['expiresIn']>;
 
 type GuestPortalTokenPayload = {
@@ -111,6 +119,24 @@ export type GuestPortalMessengerChannel = 'TELEGRAM' | 'MAX';
 
 export type GuestPortalMessengerUpdateResponse = {
   portal: GuestPortalPayload;
+  message: string;
+};
+
+export type GuestPortalTelegramLinkStartResponse = {
+  code: string;
+  codeMasked: string;
+  expiresAt: string;
+  botUsername: string | null;
+  botDeepLink: string | null;
+  status: 'READY' | 'BOT_NOT_CONFIGURED';
+  message: string;
+};
+
+export type GuestPortalTelegramLinkConfirmResponse = {
+  status: 'CONFIRMED';
+  tenantId: string;
+  profileId: string;
+  telegramIdentityMasked: string | null;
   message: string;
 };
 
@@ -837,6 +863,195 @@ export class GuestPortalService {
         profileId: profile.id,
       }),
       message: messengerMessage(channel),
+    };
+  }
+
+  async startTelegramLink(
+    authorization: string | undefined,
+  ): Promise<GuestPortalTelegramLinkStartResponse> {
+    const payload = await this.verifyGuestToken(authorization);
+    const guest = await this.findGuest(payload);
+    let existingProfile = await this.findProfile(payload, guest?.id ?? null);
+    const crmLead = await this.findCrmLead(
+      payload,
+      existingProfile?.leadId ?? null,
+      guest?.id ?? null,
+    );
+    if (!existingProfile && crmLead) {
+      existingProfile = await this.findProfileByLead(
+        payload.tenantId,
+        crmLead.id,
+      );
+    }
+
+    if (!guest && !existingProfile && !crmLead) {
+      throw new BadRequestException(
+        'Профиль гостя или CRM-заявка еще не найдены. Telegram-бот можно привязать после сопоставления с Langame или CRM-лидом.',
+      );
+    }
+
+    const profile = existingProfile
+      ? await this.prisma.guestGameProfile.update({
+          where: { id: existingProfile.id },
+          data: {
+            phoneHash: existingProfile.phoneHash ?? payload.phoneHash,
+            status: 'ACTIVE',
+          },
+        })
+      : await this.prisma.guestGameProfile.create({
+          data: {
+            tenantId: payload.tenantId,
+            guestId: guest?.id,
+            leadId: crmLead?.id,
+            displayName:
+              guest?.fullNameMasked ??
+              guest?.externalGuestId ??
+              crmLead?.fullNameMasked ??
+              crmLead?.phoneMasked ??
+              'Гость клуба',
+            contactMasked:
+              guest?.phoneMasked ??
+              guest?.emailMasked ??
+              crmLead?.phoneMasked ??
+              crmLead?.emailMasked ??
+              null,
+            phoneHash: payload.phoneHash,
+          },
+        });
+
+    const now = new Date();
+    const expiresAt = new Date(
+      now.getTime() + TELEGRAM_LINK_TTL_MINUTES * 60 * 1000,
+    );
+    const code = this.generateTelegramLinkCode();
+    const botUsername = this.telegramBotUsername();
+
+    await this.prisma.$transaction([
+      this.prisma.guestGameTelegramLinkChallenge.updateMany({
+        where: {
+          tenantId: payload.tenantId,
+          profileId: profile.id,
+          status: 'PENDING',
+        },
+        data: { status: 'EXPIRED' },
+      }),
+      this.prisma.guestGameTelegramLinkChallenge.create({
+        data: {
+          tenantId: payload.tenantId,
+          storeId: payload.storeId,
+          profileId: profile.id,
+          guestId: guest?.id ?? null,
+          phoneHash: payload.phoneHash,
+          codeHash: this.hashTelegramLinkCode(code),
+          status: 'PENDING',
+          expiresAt,
+        },
+      }),
+    ]);
+
+    return {
+      code,
+      codeMasked: maskTelegramLinkCode(code),
+      expiresAt: expiresAt.toISOString(),
+      botUsername,
+      botDeepLink: botUsername
+        ? `https://t.me/${botUsername}?start=${encodeURIComponent(
+            telegramStartPayload(code),
+          )}`
+        : null,
+      status: botUsername ? 'READY' : 'BOT_NOT_CONFIGURED',
+      message: botUsername
+        ? 'Код создан. Откройте Telegram-бота по ссылке и подтвердите привязку.'
+        : 'Код создан. Username Telegram-бота еще не настроен, поэтому код можно использовать после подключения бота.',
+    };
+  }
+
+  async confirmTelegramLink(
+    secret: string | undefined,
+    dto: {
+      code?: unknown;
+      telegramChatId?: unknown;
+      telegramUsername?: unknown;
+    },
+  ): Promise<GuestPortalTelegramLinkConfirmResponse> {
+    this.assertTelegramLinkSecret(secret);
+    const code = telegramLinkCode(dto.code);
+    const chatId = telegramChatId(dto.telegramChatId);
+    const username = telegramUsername(dto.telegramUsername);
+    const now = new Date();
+
+    const challenge =
+      await this.prisma.guestGameTelegramLinkChallenge.findFirst({
+        where: {
+          codeHash: this.hashTelegramLinkCode(code),
+          status: 'PENDING',
+        },
+        orderBy: { createdAt: 'desc' },
+        include: {
+          profile: true,
+          guest: {
+            select: {
+              id: true,
+              crmStatus: true,
+            },
+          },
+        },
+      });
+
+    if (!challenge) {
+      throw new BadRequestException('Telegram link code is not active.');
+    }
+
+    if (challenge.expiresAt.getTime() <= now.getTime()) {
+      await this.prisma.guestGameTelegramLinkChallenge.update({
+        where: { id: challenge.id },
+        data: { status: 'EXPIRED' },
+      });
+      throw new BadRequestException('Telegram link code has expired.');
+    }
+
+    const telegramIdentity = `chat:${chatId}`;
+    const telegramChatIdMasked = maskTelegramChatId(chatId);
+
+    await this.prisma.$transaction([
+      this.prisma.guestGameProfile.update({
+        where: { id: challenge.profileId },
+        data: {
+          telegramIdentity,
+          phoneHash: challenge.profile.phoneHash ?? challenge.phoneHash,
+          status: 'ACTIVE',
+        },
+      }),
+      this.prisma.guestGameTelegramLinkChallenge.update({
+        where: { id: challenge.id },
+        data: {
+          status: 'CONSUMED',
+          consumedAt: now,
+          telegramChatIdMasked,
+          telegramUsername: username,
+        },
+      }),
+      ...(challenge.guest
+        ? [
+            this.prisma.guestCrmEvent.create({
+              data: {
+                tenantId: challenge.tenantId,
+                guestId: challenge.guest.id,
+                status: challenge.guest.crmStatus,
+                note: `${TELEGRAM_LINK_EVENT_PREFIX}confirmed`,
+              },
+            }),
+          ]
+        : []),
+    ]);
+
+    return {
+      status: 'CONFIRMED',
+      tenantId: challenge.tenantId,
+      profileId: challenge.profileId,
+      telegramIdentityMasked: maskExternalIdentity(telegramIdentity),
+      message:
+        'Telegram chat_id подтвержден и сохранен в гостевом игровом профиле. Внешние отправки включаются отдельно через dispatcher-настройки.',
     };
   }
 
@@ -1760,10 +1975,46 @@ export class GuestPortalService {
     return randomInt(0, 1_000_000).toString().padStart(6, '0');
   }
 
+  private generateTelegramLinkCode() {
+    const raw = randomBytes(5).toString('hex').toUpperCase();
+    return `LP-${raw.slice(0, 4)}-${raw.slice(4)}`;
+  }
+
   private hashOtpCode(challengeId: string, code: string) {
     return createHash('sha256')
       .update(`${this.piiSecret()}:${challengeId}:${code}`)
       .digest('hex');
+  }
+
+  private hashTelegramLinkCode(code: string) {
+    return createHmac('sha256', this.piiSecret())
+      .update(`telegram-link:${normalizeTelegramLinkCode(code)}`)
+      .digest('hex');
+  }
+
+  private telegramBotUsername() {
+    return normalizeTelegramBotUsername(
+      this.configService.get<string>('GUEST_GAME_TELEGRAM_BOT_USERNAME') ??
+        this.configService.get<string>('TELEGRAM_BOT_USERNAME') ??
+        null,
+    );
+  }
+
+  private assertTelegramLinkSecret(secret: string | undefined) {
+    const configured =
+      this.configService.get<string>('GUEST_GAME_TELEGRAM_LINK_SECRET') ??
+      this.configService.get<string>('GUEST_GAME_TELEGRAM_WEBHOOK_SECRET');
+    const expected = configured?.trim();
+
+    if (!expected) {
+      throw new UnauthorizedException(
+        'GUEST_GAME_TELEGRAM_LINK_SECRET is not configured',
+      );
+    }
+
+    if (!secret || secret.trim() !== expected) {
+      throw new UnauthorizedException('Invalid Telegram link secret');
+    }
   }
 
   private isDevOtpEnabled() {
@@ -1788,6 +2039,94 @@ export class GuestPortalService {
 
 function externalGuestKey(domain: string | null, externalGuestId: string) {
   return `${domain ?? ''}:${externalGuestId}`;
+}
+
+function normalizeTelegramLinkCode(value: string) {
+  return value
+    .trim()
+    .replace(/^\/start\s+/i, '')
+    .replace(/^lp[_-]?/i, '')
+    .replace(/[^a-z0-9]/gi, '')
+    .toUpperCase();
+}
+
+function telegramLinkCode(value: unknown) {
+  if (typeof value !== 'string') {
+    throw new BadRequestException('Telegram link code is required.');
+  }
+
+  const normalized = normalizeTelegramLinkCode(value);
+  if (!/^[A-F0-9]{10}$/.test(normalized)) {
+    throw new BadRequestException('Telegram link code is invalid.');
+  }
+
+  return `LP-${normalized.slice(0, 4)}-${normalized.slice(4)}`;
+}
+
+function telegramStartPayload(code: string) {
+  return `lp_${normalizeTelegramLinkCode(code)}`;
+}
+
+function maskTelegramLinkCode(code: string) {
+  const normalized = normalizeTelegramLinkCode(code);
+  return `LP-${normalized.slice(0, 2)}**-**${normalized.slice(-2)}`;
+}
+
+function telegramChatId(value: unknown) {
+  if (typeof value !== 'string' && typeof value !== 'number') {
+    throw new BadRequestException('Telegram chat_id is required.');
+  }
+
+  const normalized = String(value).trim();
+  if (!/^-?\d{5,32}$/.test(normalized)) {
+    throw new BadRequestException(
+      'Telegram chat_id must be a numeric Telegram chat identifier.',
+    );
+  }
+
+  return normalized;
+}
+
+function maskTelegramChatId(value: string) {
+  const sign = value.startsWith('-') ? '-' : '';
+  const raw = sign ? value.slice(1) : value;
+
+  if (raw.length <= 4) {
+    return `${sign}****`;
+  }
+
+  return `${sign}${raw.slice(0, 2)}***${raw.slice(-2)}`;
+}
+
+function telegramUsername(value: unknown) {
+  if (value === undefined || value === null || value === '') {
+    return null;
+  }
+
+  if (typeof value !== 'string') {
+    throw new BadRequestException('Telegram username must be a string.');
+  }
+
+  const normalized = value.trim().replace(/^@/, '');
+  if (!normalized) {
+    return null;
+  }
+
+  if (!/^[A-Za-z0-9_]{3,64}$/.test(normalized)) {
+    throw new BadRequestException('Telegram username is invalid.');
+  }
+
+  return `@${normalized}`;
+}
+
+function normalizeTelegramBotUsername(value: string | null) {
+  const normalized = value?.trim().replace(/^@/, '') ?? '';
+
+  if (!normalized || !/^[A-Za-z0-9_]{3,64}$/.test(normalized)) {
+    return null;
+  }
+
+  return normalized;
 }
 
 function guestPortalLangameMatchNextAction(
@@ -2549,8 +2888,8 @@ function buildGuestReadiness(
       label: 'Telegram/MAX',
       status: hasMessenger ? 'READY' : 'ATTENTION',
       note: hasMessenger
-        ? 'Alias сохранен, отправка включается только после настройки бота.'
-        : 'Можно привязать alias для будущих игровых уведомлений.',
+        ? 'Канал сохранен, отправка включается только после настройки бота.'
+        : 'Можно привязать Telegram-бота или alias для будущих игровых уведомлений.',
     },
   ];
 }

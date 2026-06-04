@@ -9,6 +9,8 @@ import {
   type GuestPortalOtpVerifyResponse,
   type GuestPortalPayload,
   type GuestPortalPublicConfig,
+  type GuestPortalTelegramLinkConfirmResponse,
+  type GuestPortalTelegramLinkStartResponse,
 } from './guest-portal.service';
 
 @Controller('guest-portal')
@@ -80,5 +82,25 @@ export class GuestPortalController {
     @Body() dto: { channel?: unknown; identity?: unknown },
   ): Promise<GuestPortalMessengerUpdateResponse> {
     return this.guestPortalService.updateMessengerChannel(authorization, dto);
+  }
+
+  @Post('session/communications/telegram-link/start')
+  startTelegramLink(
+    @Headers('authorization') authorization: string | undefined,
+  ): Promise<GuestPortalTelegramLinkStartResponse> {
+    return this.guestPortalService.startTelegramLink(authorization);
+  }
+
+  @Post('telegram/link/confirm')
+  confirmTelegramLink(
+    @Headers('x-guest-game-telegram-secret') secret: string | undefined,
+    @Body()
+    dto: {
+      code?: unknown;
+      telegramChatId?: unknown;
+      telegramUsername?: unknown;
+    },
+  ): Promise<GuestPortalTelegramLinkConfirmResponse> {
+    return this.guestPortalService.confirmTelegramLink(secret, dto);
   }
 }

@@ -78,6 +78,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added mission quest chains to Guest Game Hub: `/guests/gamification` can save 2-3 guest-facing mission steps in `conditions.questSteps`, and `/guest/[tenantSlug]/[storeId]` renders them as `current/next/done` progress on top of saved LeetPlus mission events without live Langame reads or Langame writes.
 - Added a next-action layer and XP history to the public guest portal: `/guest/[tenantSlug]/[storeId]` now prioritizes ready rewards, latest loot boxes, closest missions, Battle Pass progress, and Langame matching as guest-facing actions, and shows recent XP deltas from saved `GuestGameEvent` rows without live Langame reads.
 - Added a loot box reveal layer to the public guest portal: `/guest/[tenantSlug]/[storeId]` now shows per-loot-box trigger counts and the latest wallet reward, lets the guest reveal the last loot box result, and only exposes cashier claim codes for already-created READY LeetPlus rewards without new Langame writes.
 - Added personalized Battle Pass progress to the public guest portal: `/guest/[tenantSlug]/[storeId]` now shows the current season level, next level, XP remaining, progress percent, next free/premium rewards, and wallet reward counts from saved LeetPlus facts without live Langame reads.

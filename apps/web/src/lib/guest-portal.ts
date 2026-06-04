@@ -108,6 +108,14 @@ export type GuestPortalPayload = {
       progressTarget: number | null;
       progressUnit: string | null;
       progressPercent: number;
+      questSteps: Array<{
+        id: string;
+        title: string;
+        target: number;
+        progressCurrent: number;
+        completed: boolean;
+        current: boolean;
+      }>;
       periodTo: string | null;
       manualApprovalRequired: boolean;
     }>;

@@ -1212,6 +1212,7 @@ function MissionsPanel({ portal }: { portal: GuestPortalPayload }) {
               mission.progressPercent >= 100
                 ? `Выполнено: ${mission.progressCurrent}/${progressTarget}${progressUnit}`
                 : `Прогресс: ${mission.progressCurrent}/${progressTarget}${progressUnit}`;
+            const questSteps = mission.questSteps ?? [];
 
             return (
               <div
@@ -1234,6 +1235,50 @@ function MissionsPanel({ portal }: { portal: GuestPortalPayload }) {
                   value={mission.progressPercent}
                   tone="cyan"
                 />
+                {questSteps.length ? (
+                  <div className="mt-4 grid gap-2">
+                    {questSteps.map((step, index) => {
+                      const stateLabel = step.completed
+                        ? "готово"
+                        : step.current
+                          ? "сейчас"
+                          : "далее";
+
+                      return (
+                        <div
+                          key={step.id}
+                          className={`flex items-center gap-3 rounded-lg border px-3 py-2 ${
+                            step.completed
+                              ? "border-emerald-300/30 bg-emerald-300/[0.07]"
+                              : step.current
+                                ? "border-cyan-300/35 bg-cyan-300/[0.07]"
+                                : "border-white/10 bg-white/[0.03]"
+                          }`}
+                        >
+                          <span
+                            className={`grid h-7 w-7 shrink-0 place-items-center rounded-full text-xs font-black ${
+                              step.completed
+                                ? "bg-emerald-300 text-emerald-950"
+                                : step.current
+                                  ? "bg-cyan-300 text-cyan-950"
+                                  : "bg-white/10 text-slate-300"
+                            }`}
+                          >
+                            {index + 1}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-bold text-white">
+                              {step.title}
+                            </p>
+                            <p className="text-xs font-semibold uppercase text-slate-500">
+                              {stateLabel}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
               </div>
             );
           })

@@ -185,8 +185,18 @@ export type GuestPortalMission = {
   progressTarget: number | null;
   progressUnit: string | null;
   progressPercent: number;
+  questSteps: GuestPortalMissionStep[];
   periodTo: string | null;
   manualApprovalRequired: boolean;
+};
+
+export type GuestPortalMissionStep = {
+  id: string;
+  title: string;
+  target: number;
+  progressCurrent: number;
+  completed: boolean;
+  current: boolean;
 };
 
 export type GuestPortalSeason = {
@@ -1473,24 +1483,86 @@ function mapMission(
     xpReward: number;
     progressTarget: number | null;
     progressUnit: string | null;
+    conditions: Prisma.JsonValue;
     periodTo: Date | null;
     manualApprovalRequired: boolean;
   },
   progress?: GuestPortalMissionProgress,
 ): GuestPortalMission {
+  const progressCurrent = progress?.current ?? 0;
+  const questSteps = missionQuestSteps(row.conditions, progressCurrent);
+  const progressTarget = questSteps.length
+    ? (questSteps[questSteps.length - 1]?.target ?? questSteps.length)
+    : row.progressTarget;
+  const progressPercent = questSteps.length
+    ? percent(progressCurrent, progressTarget ?? questSteps.length)
+    : (progress?.percent ?? 0);
+
   return {
     id: row.id,
     name: row.name,
     missionType: row.missionType,
     rewardLabel: row.rewardLabel,
     xpReward: row.xpReward,
-    progressCurrent: progress?.current ?? 0,
-    progressTarget: row.progressTarget,
+    progressCurrent,
+    progressTarget,
     progressUnit: row.progressUnit,
-    progressPercent: progress?.percent ?? 0,
+    progressPercent,
+    questSteps,
     periodTo: iso(row.periodTo),
     manualApprovalRequired: row.manualApprovalRequired,
   };
+}
+
+function missionQuestSteps(
+  value: Prisma.JsonValue,
+  progressCurrent: number,
+): GuestPortalMissionStep[] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return [];
+  }
+
+  const steps = (value as Record<string, unknown>).questSteps;
+  if (!Array.isArray(steps)) {
+    return [];
+  }
+
+  let lastTarget = 0;
+  let openStepMarked = false;
+
+  return steps
+    .map((item, index) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        return null;
+      }
+
+      const row = item as Record<string, unknown>;
+      const title = stringField(row.title);
+      if (!title) {
+        return null;
+      }
+
+      const rawTarget = numberField(row.target);
+      const target = Math.max(lastTarget + 1, rawTarget ?? index + 1);
+      lastTarget = target;
+
+      const completed = progressCurrent >= target;
+      const current = !completed && !openStepMarked;
+      if (current) {
+        openStepMarked = true;
+      }
+
+      return {
+        id: stringField(row.id) ?? `step-${index + 1}`,
+        title,
+        target,
+        progressCurrent: Math.min(progressCurrent, target),
+        completed,
+        current,
+      };
+    })
+    .filter((item): item is GuestPortalMissionStep => Boolean(item))
+    .slice(0, 5);
 }
 
 function mapSeason(

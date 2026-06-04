@@ -143,6 +143,10 @@ type MissionForm = {
   weekdaysOnly: boolean;
   minSessionMinutes: string;
   minSpendAmount: string;
+  questEnabled: boolean;
+  questStepOne: string;
+  questStepTwo: string;
+  questStepThree: string;
   requireLangameFact: boolean;
   denySameDayRepeat: boolean;
   requireCashierConfirmation: boolean;
@@ -439,6 +443,10 @@ const defaultMissionForm: MissionForm = {
   weekdaysOnly: true,
   minSessionMinutes: "90",
   minSpendAmount: "0",
+  questEnabled: false,
+  questStepOne: "Сыграть сессию от 90 минут",
+  questStepTwo: "Купить напиток или снек",
+  questStepThree: "Вернуться в будний день",
   requireLangameFact: true,
   denySameDayRepeat: true,
   requireCashierConfirmation: true,
@@ -3580,6 +3588,7 @@ function MissionsTab({
             packetModeLabel(stringRule(item.conditions, "packetMode", "ANY")),
             tariffRuleSummary(item.conditions),
             guestLogRuleSummary(item.conditions, item.antiFraudRules),
+            questRuleSummary(item.conditions),
             `${item.progressTarget ?? 1} ${item.progressUnit ?? "шаг"}`,
             formatMoney(item.budgetAmount ?? 0),
           ]}
@@ -4388,6 +4397,55 @@ function MissionBusinessRules({
           checked={form.weekdaysOnly}
           onChange={(weekdaysOnly) => onChange({ weekdaysOnly })}
         />
+      </div>
+      <div className="rounded-lg border border-zinc-200 bg-white/70 p-3 dark:border-zinc-800 dark:bg-zinc-950/60">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-zinc-950 dark:text-white">
+              Квестовая цепочка
+            </p>
+            <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+              Разбейте миссию на понятные гостю шаги. В публичном кабинете они
+              будут показаны от первого шага к награде.
+            </p>
+          </div>
+          <ToggleField
+            label="Включить цепочку"
+            checked={form.questEnabled}
+            onChange={(questEnabled) => onChange({ questEnabled })}
+          />
+        </div>
+        {form.questEnabled ? (
+          <div className="mt-3 grid gap-3 lg:grid-cols-3">
+            <Field label="Шаг 1">
+              <input
+                className={fieldClass}
+                value={form.questStepOne}
+                onChange={(event) =>
+                  onChange({ questStepOne: event.target.value })
+                }
+              />
+            </Field>
+            <Field label="Шаг 2">
+              <input
+                className={fieldClass}
+                value={form.questStepTwo}
+                onChange={(event) =>
+                  onChange({ questStepTwo: event.target.value })
+                }
+              />
+            </Field>
+            <Field label="Шаг 3">
+              <input
+                className={fieldClass}
+                value={form.questStepThree}
+                onChange={(event) =>
+                  onChange({ questStepThree: event.target.value })
+                }
+              />
+            </Field>
+          </div>
+        ) : null}
       </div>
       <div className="grid gap-3 sm:grid-cols-3">
         <ToggleField
@@ -5836,6 +5894,22 @@ function missionToForm(mission: GuestGameMission): MissionForm {
     weekdaysOnly: booleanRule(mission.conditions, "weekdaysOnly", true),
     minSessionMinutes: numberRule(mission.conditions, "minSessionMinutes", "90"),
     minSpendAmount: numberRule(mission.conditions, "minSpendAmount", "0"),
+    questEnabled: missionQuestEnabled(mission.conditions),
+    questStepOne: missionQuestStepTitle(
+      mission.conditions,
+      0,
+      defaultMissionForm.questStepOne,
+    ),
+    questStepTwo: missionQuestStepTitle(
+      mission.conditions,
+      1,
+      defaultMissionForm.questStepTwo,
+    ),
+    questStepThree: missionQuestStepTitle(
+      mission.conditions,
+      2,
+      defaultMissionForm.questStepThree,
+    ),
     requireLangameFact: booleanRule(
       mission.conditions,
       "requiresLangameFact",
@@ -6067,6 +6141,8 @@ function buildLootBoxAntiFraudRules(form: LootBoxForm) {
 }
 
 function buildMissionConditions(form: MissionForm) {
+  const questSteps = buildMissionQuestSteps(form);
+
   return {
     source: "business_controls",
     windowDays: optionalNumber(form.windowDays),
@@ -6082,7 +6158,27 @@ function buildMissionConditions(form: MissionForm) {
     requiresLangameFact: form.requireLangameFact,
     progressTarget: optionalNumber(form.progressTarget),
     progressUnit: nullable(form.progressUnit),
+    questEnabled: form.questEnabled && questSteps.length > 0,
+    questMode: form.questEnabled && questSteps.length > 0 ? "CHAIN" : "SINGLE",
+    questSteps,
   };
+}
+
+function buildMissionQuestSteps(form: MissionForm) {
+  if (!form.questEnabled) {
+    return [];
+  }
+
+  const unit = nullable(form.progressUnit) ?? "шаг";
+
+  return [form.questStepOne, form.questStepTwo, form.questStepThree]
+    .map((title, index) => ({
+      id: `step-${index + 1}`,
+      title: title.trim(),
+      target: index + 1,
+      unit,
+    }))
+    .filter((step) => step.title.length > 0);
 }
 
 function buildMissionAntiFraudRules(form: MissionForm) {
@@ -6266,6 +6362,40 @@ function guestLogRuleSummary(conditions: unknown, antiFraud?: unknown) {
     return `anti-fraud logs: ${blockedCount}`;
   }
   return "любой log";
+}
+
+function missionQuestSteps(value: unknown) {
+  const steps = asRecord(value).questSteps;
+  if (!Array.isArray(steps)) {
+    return [];
+  }
+
+  return steps
+    .map((item) => {
+      const record = asRecord(item);
+      const title = typeof record.title === "string" ? record.title.trim() : "";
+      const id =
+        typeof record.id === "string" && record.id.trim()
+          ? record.id
+          : title;
+
+      return title ? { id, title } : null;
+    })
+    .filter((item): item is { id: string; title: string } => Boolean(item))
+    .slice(0, 3);
+}
+
+function missionQuestEnabled(value: unknown) {
+  return booleanRule(value, "questEnabled", missionQuestSteps(value).length > 0);
+}
+
+function missionQuestStepTitle(value: unknown, index: number, fallback: string) {
+  return missionQuestSteps(value)[index]?.title ?? fallback;
+}
+
+function questRuleSummary(value: unknown) {
+  const steps = missionQuestSteps(value);
+  return steps.length ? `квест: ${steps.length} шага` : "один шаг";
 }
 
 function booleanRule(value: unknown, key: string, fallback: boolean) {

@@ -963,6 +963,73 @@ export class LangameSettingsService {
     };
   }
 
+  async searchGuestByPhoneForPortal(
+    tenantId: string,
+    phone: string,
+  ): Promise<LangameGuestSearchDiagnosticsResult> {
+    const { apiKey, sources } = await this.resolveTenantAccess(tenantId);
+    const query = phone.trim();
+
+    if (query.replace(/\D/g, '').length < 6) {
+      throw new BadRequestException(
+        'Введите корректный телефон для точечной проверки гостя',
+      );
+    }
+
+    const queryField: LangameGuestSearchField = 'phone';
+    const requestPayload = this.buildGuestSearchPayload(query, queryField);
+    const checkedAt = new Date().toISOString();
+    const diagnostics = await Promise.all(
+      sources.map(async (source) => {
+        try {
+          const payload = await this.langameClient.searchGuests(
+            source.baseUrl,
+            apiKey,
+            requestPayload,
+          );
+          const rows = this.extractGuestSearchRows(payload);
+
+          return {
+            id: source.id,
+            name: source.name,
+            domain: source.domain,
+            baseUrl: source.baseUrl,
+            status: 'SUCCESS' as const,
+            requestKeys: Object.keys(requestPayload),
+            resultsCount: rows.length,
+            results: rows
+              .slice(0, 10)
+              .map((row) => this.toGuestSearchResultItem(row)),
+            payloadPreview: null,
+            errorMessage: null,
+          };
+        } catch (error) {
+          return {
+            id: source.id,
+            name: source.name,
+            domain: source.domain,
+            baseUrl: source.baseUrl,
+            status: 'FAILED' as const,
+            requestKeys: Object.keys(requestPayload),
+            resultsCount: 0,
+            results: [],
+            payloadPreview: null,
+            errorMessage:
+              error instanceof Error
+                ? error.message
+                : 'Unknown Langame guests/search portal error',
+          };
+        }
+      }),
+    );
+
+    return {
+      checkedAt,
+      queryField,
+      sources: diagnostics,
+    };
+  }
+
   private toServiceEndpointDiagnostics(
     endpoint: LangameServiceEndpointDefinition,
     payload: unknown,

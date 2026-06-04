@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Headers, Param, Post } from '@nestjs/common';
 import {
   GuestPortalService,
+  type GuestPortalLangameMatchResponse,
   type GuestPortalOtpStartResponse,
   type GuestPortalOtpVerifyResponse,
   type GuestPortalPayload,
@@ -42,5 +43,13 @@ export class GuestPortalController {
     @Headers('authorization') authorization: string | undefined,
   ): Promise<GuestPortalPayload> {
     return this.guestPortalService.getSession(authorization);
+  }
+
+  @Post('session/langame-match')
+  matchLangameGuest(
+    @Headers('authorization') authorization: string | undefined,
+    @Body() dto: { phone?: unknown },
+  ): Promise<GuestPortalLangameMatchResponse> {
+    return this.guestPortalService.matchLangameGuest(authorization, dto);
   }
 }

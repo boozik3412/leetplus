@@ -51,9 +51,27 @@ export async function GET(request: Request, { params }: RouteContext) {
 export async function POST(request: Request, { params }: RouteContext) {
   const { path } = await params;
   const body = await request.text();
+  const headers: Record<string, string> = body
+    ? { "Content-Type": "application/json" }
+    : {};
+
+  if (path.length === 2 && path[0] === "session") {
+    const cookieStore = await cookies();
+    const token = cookieStore.get(GUEST_AUTH_COOKIE_NAME)?.value ?? null;
+
+    if (!token) {
+      return NextResponse.json(
+        { message: "Гостевая сессия не найдена" },
+        { status: 401 },
+      );
+    }
+
+    headers.Authorization = `Bearer ${token}`;
+  }
+
   const response = await fetch(`${getApiUrl()}${guestPortalPath(path)}`, {
     method: "POST",
-    headers: body ? { "Content-Type": "application/json" } : {},
+    headers,
     body,
   });
 
@@ -77,7 +95,7 @@ export async function POST(request: Request, { params }: RouteContext) {
       httpOnly: true,
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production",
-      path: "/guest",
+      path: "/",
       maxAge: 60 * 60 * 24 * 7,
     });
   }

@@ -146,3 +146,34 @@ export type GuestPortalOtpVerifyResponse = {
   token: string;
   portal: GuestPortalPayload;
 };
+
+export type GuestPortalLangameMatchResponse = {
+  checkedAt: string;
+  queryField: "phone";
+  phoneMasked: string;
+  status: "MATCHED_LOCAL" | "FOUND_IN_LANGAME" | "NOT_FOUND" | "FAILED";
+  localGuestFound: boolean;
+  localGuestId: string | null;
+  profileId: string | null;
+  nextAction: string;
+  sources: Array<{
+    id: string;
+    name: string;
+    domain: string;
+    status: "SUCCESS" | "FAILED";
+    resultsCount: number;
+    errorMessage: string | null;
+    results: Array<{
+      externalGuestId: string | null;
+      guestTypeId: string | null;
+      phoneMasked: string | null;
+      emailMasked: string | null;
+      fullNameMasked: string | null;
+      bonusProgramNumberMasked: string | null;
+      dateLastActivity: string | null;
+      rawKeys: string[];
+      localGuestKnown: boolean;
+      localGuestId: string | null;
+    }>;
+  }>;
+};

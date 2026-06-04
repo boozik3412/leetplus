@@ -12,6 +12,8 @@ import {
   TenantLifecycleStatus,
 } from '@prisma/client';
 import { createHash, createHmac, randomInt, randomUUID } from 'node:crypto';
+import { LangameSettingsService } from '../integrations/langame-settings.service';
+import type { LangameGuestSearchResultItem } from '../integrations/langame.types';
 import { PrismaService } from '../prisma/prisma.service';
 
 const OTP_TTL_MINUTES = 10;
@@ -204,6 +206,31 @@ export type GuestPortalActivityItem = {
   xpDelta: number | null;
 };
 
+export type GuestPortalLangameMatchResponse = {
+  checkedAt: string;
+  queryField: 'phone';
+  phoneMasked: string;
+  status: 'MATCHED_LOCAL' | 'FOUND_IN_LANGAME' | 'NOT_FOUND' | 'FAILED';
+  localGuestFound: boolean;
+  localGuestId: string | null;
+  profileId: string | null;
+  nextAction: string;
+  sources: Array<{
+    id: string;
+    name: string;
+    domain: string;
+    status: 'SUCCESS' | 'FAILED';
+    resultsCount: number;
+    errorMessage: string | null;
+    results: Array<
+      LangameGuestSearchResultItem & {
+        localGuestKnown: boolean;
+        localGuestId: string | null;
+      }
+    >;
+  }>;
+};
+
 type GuestPortalMissionProgress = {
   current: number;
   percent: number;
@@ -215,6 +242,7 @@ export class GuestPortalService {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     private readonly jwtService: JwtService,
+    private readonly langameSettingsService: LangameSettingsService,
   ) {}
 
   async getPublicConfig(
@@ -421,6 +449,109 @@ export class GuestPortalService {
   async getSession(authorization: string | undefined) {
     const payload = await this.verifyGuestToken(authorization);
     return this.buildPortalPayload(payload);
+  }
+
+  async matchLangameGuest(
+    authorization: string | undefined,
+    dto: { phone?: unknown },
+  ): Promise<GuestPortalLangameMatchResponse> {
+    const payload = await this.verifyGuestToken(authorization);
+    const phone = this.phoneIdentity(dto.phone);
+
+    if (phone.hash !== payload.phoneHash) {
+      throw new BadRequestException(
+        'Телефон не совпадает с подтвержденной гостевой сессией.',
+      );
+    }
+
+    const [diagnostics, localGuest, localProfile] = await Promise.all([
+      this.langameSettingsService.searchGuestByPhoneForPortal(
+        payload.tenantId,
+        phone.normalized,
+      ),
+      this.findGuest(payload),
+      this.findProfile(payload, payload.guestId),
+    ]);
+    const externalPairs = diagnostics.sources.flatMap((source) =>
+      source.results
+        .filter((result) => result.externalGuestId)
+        .map((result) => ({
+          domain: source.domain,
+          externalGuestId: result.externalGuestId as string,
+        })),
+    );
+    const localGuestsByExternalId =
+      externalPairs.length > 0
+        ? await this.prisma.guest.findMany({
+            where: {
+              tenantId: payload.tenantId,
+              externalProvider: IntegrationProvider.LANGAME,
+              OR: externalPairs.map((pair) => ({
+                externalDomain: pair.domain,
+                externalGuestId: pair.externalGuestId,
+              })),
+            },
+            select: {
+              id: true,
+              externalDomain: true,
+              externalGuestId: true,
+            },
+          })
+        : [];
+    const localGuestMap = new Map(
+      localGuestsByExternalId.map((guest) => [
+        externalGuestKey(guest.externalDomain, guest.externalGuestId),
+        guest.id,
+      ]),
+    );
+    const sources = diagnostics.sources.map((source) => ({
+      id: source.id,
+      name: source.name,
+      domain: source.domain,
+      status: source.status,
+      resultsCount: source.resultsCount,
+      errorMessage: source.errorMessage,
+      results: source.results.map((result) => {
+        const mappedGuestId = result.externalGuestId
+          ? (localGuestMap.get(
+              externalGuestKey(source.domain, result.externalGuestId),
+            ) ?? null)
+          : null;
+
+        return {
+          ...result,
+          localGuestKnown: Boolean(mappedGuestId),
+          localGuestId: mappedGuestId,
+        };
+      }),
+    }));
+    const firstMappedGuestId =
+      sources
+        .flatMap((source) => source.results)
+        .find((result) => result.localGuestId)?.localGuestId ?? null;
+    const localGuestId = localGuest?.id ?? firstMappedGuestId;
+    const localGuestFound = Boolean(localGuestId);
+    const foundInLangame = sources.some((source) => source.resultsCount > 0);
+    const anySuccess = sources.some((source) => source.status === 'SUCCESS');
+    const status: GuestPortalLangameMatchResponse['status'] = localGuestFound
+      ? 'MATCHED_LOCAL'
+      : foundInLangame
+        ? 'FOUND_IN_LANGAME'
+        : anySuccess
+          ? 'NOT_FOUND'
+          : 'FAILED';
+
+    return {
+      checkedAt: diagnostics.checkedAt,
+      queryField: 'phone',
+      phoneMasked: phone.masked,
+      status,
+      localGuestFound,
+      localGuestId,
+      profileId: localProfile?.id ?? payload.profileId,
+      nextAction: guestPortalLangameMatchNextAction(status),
+      sources,
+    };
   }
 
   private async buildPortalPayload(
@@ -1094,6 +1225,7 @@ export class GuestPortalService {
     }
 
     return {
+      normalized,
       hash: createHmac('sha256', this.piiSecret())
         .update(normalized)
         .digest('hex'),
@@ -1137,6 +1269,28 @@ export class GuestPortalService {
 
     return secret;
   }
+}
+
+function externalGuestKey(domain: string | null, externalGuestId: string) {
+  return `${domain ?? ''}:${externalGuestId}`;
+}
+
+function guestPortalLangameMatchNextAction(
+  status: GuestPortalLangameMatchResponse['status'],
+) {
+  if (status === 'MATCHED_LOCAL') {
+    return 'Профиль уже найден в LeetPlus. Данные лояльности и геймификации обновятся после обычной синхронизации Langame.';
+  }
+
+  if (status === 'FOUND_IN_LANGAME') {
+    return 'Langame нашел профиль по подтвержденному телефону. После ближайшей синхронизации или ручного сопоставления он появится в гостевом кабинете.';
+  }
+
+  if (status === 'NOT_FOUND') {
+    return 'Langame не вернул гостя по этому телефону. Проверьте номер у администратора клуба или попробуйте другой номер.';
+  }
+
+  return 'Не удалось проверить Langame по активным источникам. Попробуйте позже или обратитесь к администратору клуба.';
 }
 
 function mapLootBox(row: {

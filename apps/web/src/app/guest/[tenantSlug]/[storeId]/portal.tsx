@@ -3,6 +3,7 @@
 import type { FormEvent, ReactNode } from "react";
 import { useEffect, useState } from "react";
 import type {
+  GuestPortalLangameMatchResponse,
   GuestPortalOtpStartResponse,
   GuestPortalOtpVerifyResponse,
   GuestPortalPayload,
@@ -29,6 +30,12 @@ export function GuestPortalClient({
     useState<GuestPortalOtpStartResponse | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [isSubmitting, setSubmitting] = useState(false);
+  const [langameMatch, setLangameMatch] =
+    useState<GuestPortalLangameMatchResponse | null>(null);
+  const [langameMatchMessage, setLangameMatchMessage] = useState<string | null>(
+    null,
+  );
+  const [isMatchingLangame, setMatchingLangame] = useState(false);
 
   const basePath = `/api/guest-portal/${encodeURIComponent(
     tenantSlug,
@@ -99,6 +106,8 @@ export function GuestPortalClient({
       const data = (await response.json()) as GuestPortalOtpStartResponse;
       setChallenge(data);
       setCode("");
+      setLangameMatch(null);
+      setLangameMatchMessage(null);
       setMessage(
         data.delivery.status === "DEV_CODE"
           ? "Код создан. В demo-режиме он показан ниже."
@@ -139,6 +148,8 @@ export function GuestPortalClient({
 
       const data = (await response.json()) as GuestPortalOtpVerifyResponse;
       setPortal(data.portal);
+      setLangameMatch(null);
+      setLangameMatchMessage(null);
       setMessage("Профиль подтвержден.");
     } catch (error) {
       setMessage(
@@ -146,6 +157,44 @@ export function GuestPortalClient({
       );
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function checkLangameMatch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!phone.trim()) {
+      setLangameMatchMessage("Введите подтвержденный телефон для проверки.");
+      return;
+    }
+
+    setMatchingLangame(true);
+    setLangameMatchMessage(null);
+    setLangameMatch(null);
+
+    try {
+      const response = await fetch("/api/guest-portal/session/langame-match", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone }),
+      });
+
+      if (!response.ok) {
+        throw new Error(await readMessage(response));
+      }
+
+      const data =
+        (await response.json()) as GuestPortalLangameMatchResponse;
+      setLangameMatch(data);
+      setLangameMatchMessage(data.nextAction);
+    } catch (error) {
+      setLangameMatchMessage(
+        error instanceof Error
+          ? error.message
+          : "Не удалось проверить профиль в Langame.",
+      );
+    } finally {
+      setMatchingLangame(false);
     }
   }
 
@@ -183,7 +232,15 @@ export function GuestPortalClient({
         ) : loadState === "error" || !config ? (
           <ErrorState message={message ?? "Гостевая ссылка недоступна."} />
         ) : portal ? (
-          <VerifiedPortal portal={portal} />
+          <VerifiedPortal
+            portal={portal}
+            phone={phone}
+            langameMatch={langameMatch}
+            langameMatchMessage={langameMatchMessage}
+            isMatchingLangame={isMatchingLangame}
+            onPhoneChange={setPhone}
+            onCheckLangameMatch={checkLangameMatch}
+          />
         ) : (
           <VerificationLanding
             config={config}
@@ -357,7 +414,23 @@ function VerificationLanding({
   );
 }
 
-function VerifiedPortal({ portal }: { portal: GuestPortalPayload }) {
+function VerifiedPortal({
+  portal,
+  phone,
+  langameMatch,
+  langameMatchMessage,
+  isMatchingLangame,
+  onPhoneChange,
+  onCheckLangameMatch,
+}: {
+  portal: GuestPortalPayload;
+  phone: string;
+  langameMatch: GuestPortalLangameMatchResponse | null;
+  langameMatchMessage: string | null;
+  isMatchingLangame: boolean;
+  onPhoneChange: (value: string) => void;
+  onCheckLangameMatch: (event: FormEvent<HTMLFormElement>) => void;
+}) {
   return (
     <div className="space-y-5 py-6">
       {!portal.guestFound ? (
@@ -367,6 +440,15 @@ function VerifiedPortal({ portal }: { portal: GuestPortalPayload }) {
           группа лояльности, бонусы и игровой прогресс.
         </div>
       ) : null}
+
+      <LangameMatchPanel
+        phone={phone}
+        result={langameMatch}
+        message={langameMatchMessage}
+        isLoading={isMatchingLangame}
+        onPhoneChange={onPhoneChange}
+        onSubmit={onCheckLangameMatch}
+      />
 
       <section className="grid gap-5 lg:grid-cols-[0.95fr_1.05fr]">
         <div className="rounded-lg border border-white/10 bg-[#0b111c] p-5">
@@ -416,6 +498,164 @@ function VerifiedPortal({ portal }: { portal: GuestPortalPayload }) {
         <LootBoxesPanel portal={portal} />
       </section>
     </div>
+  );
+}
+
+function LangameMatchPanel({
+  phone,
+  result,
+  message,
+  isLoading,
+  onPhoneChange,
+  onSubmit,
+}: {
+  phone: string;
+  result: GuestPortalLangameMatchResponse | null;
+  message: string | null;
+  isLoading: boolean;
+  onPhoneChange: (value: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  const totalResults =
+    result?.sources.reduce((sum, source) => sum + source.resultsCount, 0) ?? 0;
+
+  return (
+    <section className="rounded-lg border border-cyan-300/20 bg-cyan-300/[0.06] p-4">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="max-w-3xl">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-xs font-bold uppercase text-cyan-200">
+              Langame
+            </p>
+            <span className="rounded-lg border border-white/10 bg-white/[0.06] px-2 py-1 text-xs font-bold text-slate-300">
+              ручная проверка
+            </span>
+          </div>
+          <h3 className="mt-2 text-xl font-black text-white">
+            Сопоставить профиль гостя
+          </h3>
+          <p className="mt-2 text-sm leading-6 text-slate-300">
+            Если профиль еще не найден в сохраненной базе, можно точечно
+            проверить подтвержденный телефон в Langame. Запрос выполняется
+            только по кнопке, результат маскируется и не сохраняет сырой
+            телефон.
+          </p>
+        </div>
+
+        <form
+          className="grid min-w-0 gap-2 sm:grid-cols-[minmax(220px,1fr)_auto] lg:w-[520px]"
+          onSubmit={onSubmit}
+        >
+          <label className="min-w-0">
+            <span className="sr-only">Телефон</span>
+            <input
+              value={phone}
+              onChange={(event) => onPhoneChange(event.target.value)}
+              placeholder="+7 999 000-00-00"
+              className="w-full rounded-lg border border-white/10 bg-[#070b12] px-4 py-3 text-sm font-semibold text-white outline-none transition hover:border-cyan-300/50 focus:border-cyan-300"
+              inputMode="tel"
+              autoComplete="tel"
+            />
+          </label>
+          <button
+            type="submit"
+            disabled={isLoading}
+            className="rounded-lg border border-cyan-300/30 bg-cyan-300/10 px-4 py-3 text-sm font-black text-cyan-100 transition hover:bg-cyan-300/[0.18] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isLoading ? "Проверяем..." : "Проверить"}
+          </button>
+        </form>
+      </div>
+
+      {message ? (
+        <p className="mt-4 rounded-lg border border-white/10 bg-white/[0.05] p-3 text-sm leading-6 text-slate-200">
+          {message}
+        </p>
+      ) : null}
+
+      {result ? (
+        <div className="mt-4 space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              className={`rounded-lg px-3 py-1 text-xs font-black uppercase ${langameMatchStatusClass(
+                result.status,
+              )}`}
+            >
+              {langameMatchStatusLabel(result.status)}
+            </span>
+            <span className="text-sm text-slate-400">
+              {result.phoneMasked} · {totalResults} совпадений ·{" "}
+              {formatTime(result.checkedAt)}
+            </span>
+          </div>
+
+          <div className="grid gap-3 lg:grid-cols-3">
+            {result.sources.map((source) => (
+              <div
+                key={source.id}
+                className="rounded-lg border border-white/10 bg-[#080d15] p-3"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-black text-white">
+                      {source.name}
+                    </p>
+                    <p className="truncate text-xs text-slate-500">
+                      {source.domain}
+                    </p>
+                  </div>
+                  <span
+                    className={`shrink-0 rounded-lg px-2 py-1 text-[11px] font-black uppercase ${langameSourceStatusClass(
+                      source.status,
+                    )}`}
+                  >
+                    {source.status === "SUCCESS" ? "ok" : "error"}
+                  </span>
+                </div>
+
+                {source.errorMessage ? (
+                  <p className="mt-3 text-xs leading-5 text-rose-100">
+                    {source.errorMessage}
+                  </p>
+                ) : source.results.length === 0 ? (
+                  <p className="mt-3 text-xs leading-5 text-slate-500">
+                    Совпадений по источнику нет.
+                  </p>
+                ) : (
+                  <div className="mt-3 space-y-2">
+                    {source.results.slice(0, 3).map((item, index) => (
+                      <div
+                        key={`${source.id}-${item.externalGuestId ?? index}`}
+                        className="rounded-lg border border-white/[0.08] bg-white/[0.03] p-2 text-xs leading-5 text-slate-300"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-bold text-slate-100">
+                            {item.fullNameMasked ??
+                              item.phoneMasked ??
+                              item.externalGuestId ??
+                              "Гость Langame"}
+                          </span>
+                          {item.localGuestKnown ? (
+                            <span className="rounded-lg bg-emerald-300/10 px-2 py-0.5 font-bold text-emerald-200">
+                              в LeetPlus
+                            </span>
+                          ) : null}
+                        </div>
+                        <p className="mt-1 text-slate-400">
+                          {[item.phoneMasked, item.emailMasked]
+                            .filter(Boolean)
+                            .join(" · ") || "Контакты скрыты"}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -1113,6 +1353,38 @@ function formatMinutes(value: number) {
   }
 
   return `${formatNumber(value / 60)} ч`;
+}
+
+function langameMatchStatusLabel(
+  status: GuestPortalLangameMatchResponse["status"],
+) {
+  const labels = {
+    MATCHED_LOCAL: "найдено в LeetPlus",
+    FOUND_IN_LANGAME: "найдено в Langame",
+    NOT_FOUND: "не найдено",
+    FAILED: "ошибка проверки",
+  } satisfies Record<GuestPortalLangameMatchResponse["status"], string>;
+
+  return labels[status];
+}
+
+function langameMatchStatusClass(
+  status: GuestPortalLangameMatchResponse["status"],
+) {
+  const classes = {
+    MATCHED_LOCAL: "bg-emerald-300/10 text-emerald-200",
+    FOUND_IN_LANGAME: "bg-cyan-300/10 text-cyan-100",
+    NOT_FOUND: "bg-amber-300/10 text-amber-100",
+    FAILED: "bg-rose-300/10 text-rose-100",
+  } satisfies Record<GuestPortalLangameMatchResponse["status"], string>;
+
+  return classes[status];
+}
+
+function langameSourceStatusClass(status: "SUCCESS" | "FAILED") {
+  return status === "SUCCESS"
+    ? "bg-emerald-300/10 text-emerald-200"
+    : "bg-rose-300/10 text-rose-100";
 }
 
 function activityKindLabel(

@@ -35,6 +35,7 @@ import {
   type GuestGameProfileUpdateDto,
   type GuestGameReward,
   type GuestGameRewardDto,
+  type GuestGameRewardRedeemDto,
   type GuestGameRewardUpdateDto,
   type GuestGameSeason,
   type GuestGameSeasonDto,
@@ -204,6 +205,14 @@ export class GuestGamificationController {
   )
   exportRewards(@CurrentUser() user: AuthenticatedUser): Promise<string> {
     return this.gamificationService.exportRewardsCsv(user);
+  }
+
+  @Post('rewards/redeem')
+  redeemReward(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: GuestGameRewardRedeemDto,
+  ): Promise<GuestGameReward> {
+    return this.gamificationService.redeemReward(user, dto);
   }
 
   @Post('rewards')

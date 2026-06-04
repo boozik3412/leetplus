@@ -726,6 +726,14 @@ export type GuestGameRewardDto = {
 
 export type GuestGameRewardUpdateDto = Partial<GuestGameRewardDto>;
 
+export type GuestGameRewardRedeemDto = {
+  claim?: string | null;
+  claimPayload?: string | null;
+  rewardCode?: string | null;
+  storeId?: string | null;
+  note?: string | null;
+};
+
 export type GuestGameEventDto = {
   profileId?: string | null;
   guestId?: string | null;
@@ -1912,6 +1920,112 @@ export class GuestGamificationService {
     return mapReward(row);
   }
 
+  async redeemReward(
+    user: AuthenticatedUser,
+    dto: GuestGameRewardRedeemDto,
+  ): Promise<GuestGameReward> {
+    const claim = parseRewardClaimInput(dto);
+
+    if (!claim.code) {
+      throw new BadRequestException('Укажите код награды или QR payload');
+    }
+
+    if (dto.storeId) {
+      await this.assertStore(user, dto.storeId);
+    }
+
+    const row = await this.prisma.guestGameReward.findFirst({
+      where: clean({
+        tenantId: user.tenantId,
+        id: claim.rewardId ?? undefined,
+        rewardCode: { in: rewardCodeVariants(claim.code) },
+      }),
+      include: rewardInclude,
+      orderBy: [{ qualifiedAt: 'desc' }, { createdAt: 'desc' }],
+    });
+
+    if (!row) {
+      throw new NotFoundException('Награда с таким кодом не найдена');
+    }
+
+    if (dto.storeId && row.storeId && row.storeId !== dto.storeId) {
+      throw new BadRequestException('Эта награда привязана к другому клубу');
+    }
+
+    if (row.status === 'PENDING') {
+      throw new BadRequestException('Награда еще не согласована');
+    }
+
+    if (row.status === 'PAID') {
+      throw new ConflictException('Награда уже погашена');
+    }
+
+    if (row.status === 'CANCELED') {
+      throw new BadRequestException('Награда отменена');
+    }
+
+    if (
+      row.status === 'EXPIRED' ||
+      (row.expiresAt && row.expiresAt.getTime() < Date.now())
+    ) {
+      if (row.status !== 'EXPIRED') {
+        await this.prisma.guestGameReward.update({
+          where: { id: row.id },
+          data: { status: 'EXPIRED' },
+        });
+        await this.createSystemEvent(user, {
+          profileId: row.profileId,
+          guestId: row.guestId,
+          lootBoxId: row.lootBoxId,
+          missionId: row.missionId,
+          seasonId: row.seasonId,
+          eventType: 'REWARD_EXPIRED',
+          xpDelta: 0,
+          note: row.rewardLabel,
+        });
+      }
+
+      throw new BadRequestException('Срок действия награды истек');
+    }
+
+    if (row.status !== 'APPROVED') {
+      throw new BadRequestException(
+        'Погасить можно только согласованную награду',
+      );
+    }
+
+    const redeemedAt = new Date();
+    const redeemed = await this.prisma.guestGameReward.update({
+      where: { id: row.id },
+      data: {
+        status: 'PAID',
+        paidAt: redeemedAt,
+        approvedByUserId: row.approvedByUserId ?? user.id,
+        evidence: buildRewardRedeemEvidence(
+          row.evidence,
+          dto,
+          claim,
+          redeemedAt,
+          user.id,
+        ),
+      },
+      include: rewardInclude,
+    });
+
+    await this.createSystemEvent(user, {
+      profileId: redeemed.profileId,
+      guestId: redeemed.guestId,
+      lootBoxId: redeemed.lootBoxId,
+      missionId: redeemed.missionId,
+      seasonId: redeemed.seasonId,
+      eventType: 'REWARD_PAID',
+      xpDelta: 0,
+      note: `${redeemed.rewardLabel} · ${redeemed.rewardCode ?? claim.code}`,
+    });
+
+    return mapReward(redeemed);
+  }
+
   async getEvents(user: AuthenticatedUser): Promise<GuestGameEvent[]> {
     const rows = await this.prisma.guestGameEvent.findMany({
       where: { tenantId: user.tenantId },
@@ -3065,6 +3179,58 @@ function rewardStatusEventType(status: string) {
 
 function buildRewardClaimPayload(rewardId: string, rewardCode: string) {
   return `LEETPLUS_REWARD:${rewardId}:${rewardCode}`;
+}
+
+function parseRewardClaimInput(dto: GuestGameRewardRedeemDto) {
+  const raw =
+    [dto.claimPayload, dto.claim, dto.rewardCode]
+      .find((value) => typeof value === 'string' && value.trim().length > 0)
+      ?.trim() ?? '';
+  const prefix = 'LEETPLUS_REWARD:';
+
+  if (raw.slice(0, prefix.length).toUpperCase() === prefix) {
+    const [rewardId, ...codeParts] = raw.slice(prefix.length).split(':');
+
+    return {
+      raw,
+      rewardId: rewardId?.trim() || null,
+      code: codeParts.join(':').trim() || null,
+    };
+  }
+
+  return {
+    raw,
+    rewardId: null,
+    code: raw.trim() || null,
+  };
+}
+
+function rewardCodeVariants(code: string) {
+  return [...new Set([code.trim(), code.trim().toUpperCase()])].filter(
+    (value) => value.length > 0,
+  );
+}
+
+function buildRewardRedeemEvidence(
+  previous: Prisma.JsonValue | null,
+  dto: GuestGameRewardRedeemDto,
+  claim: ReturnType<typeof parseRewardClaimInput>,
+  redeemedAt: Date,
+  redeemedByUserId: string,
+) {
+  const note = nullableString(dto.note);
+  const storeId = nullableId(dto.storeId);
+
+  return clean({
+    source: 'cashier_redeem',
+    redeemedAt: redeemedAt.toISOString(),
+    redeemedByUserId,
+    storeId,
+    claim: claim.raw,
+    rewardCode: claim.code,
+    note,
+    previousEvidence: previous ?? undefined,
+  }) as Prisma.InputJsonValue;
 }
 
 function generateRewardCode() {

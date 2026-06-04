@@ -182,6 +182,12 @@ type RewardForm = {
   evidenceText: string;
 };
 
+type RewardRedeemForm = {
+  claim: string;
+  storeId: string;
+  note: string;
+};
+
 type EventForm = {
   profileId: string;
   eventType: string;
@@ -492,6 +498,12 @@ const defaultRewardForm: RewardForm = {
   }),
 };
 
+const defaultRewardRedeemForm: RewardRedeemForm = {
+  claim: "",
+  storeId: "",
+  note: "",
+};
+
 const defaultEventForm: EventForm = {
   profileId: "",
   eventType: "MANUAL_XP",
@@ -545,6 +557,8 @@ export function GuestGamificationPanel({
     useState<MissionForm>(defaultMissionForm);
   const [seasonForm, setSeasonForm] = useState<SeasonForm>(defaultSeasonForm);
   const [rewardForm, setRewardForm] = useState<RewardForm>(defaultRewardForm);
+  const [rewardRedeemForm, setRewardRedeemForm] =
+    useState<RewardRedeemForm>(defaultRewardRedeemForm);
   const [eventForm, setEventForm] = useState<EventForm>(defaultEventForm);
   const [dryRunForm, setDryRunForm] =
     useState<DryRunForm>(defaultDryRunForm);
@@ -556,6 +570,8 @@ export function GuestGamificationPanel({
     useState<GuestGameSnapshotFactsResult | null>(null);
   const [pipelineResult, setPipelineResult] =
     useState<GuestGamePipelineRunResult | null>(null);
+  const [redeemedReward, setRedeemedReward] =
+    useState<GuestGameReward | null>(null);
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
   const [editingLootBoxId, setEditingLootBoxId] = useState<string | null>(null);
   const [editingMissionId, setEditingMissionId] = useState<string | null>(null);
@@ -981,6 +997,26 @@ export function GuestGamificationPanel({
     });
   }
 
+  async function redeemReward() {
+    await saveAction("rewardRedeem", async () => {
+      const reward = await postJson<GuestGameReward>(
+        "/api/guests/gamification/rewards/redeem",
+        {
+          claim: nullable(rewardRedeemForm.claim),
+          storeId: nullable(rewardRedeemForm.storeId),
+          note: nullable(rewardRedeemForm.note),
+        },
+      );
+
+      setRedeemedReward(reward);
+      setRewardRedeemForm((current) => ({
+        ...defaultRewardRedeemForm,
+        storeId: current.storeId,
+      }));
+      await reloadWorkspace();
+    });
+  }
+
   async function updateRuleStatus(
     type: "loot-boxes" | "missions" | "seasons",
     id: string,
@@ -1146,6 +1182,9 @@ export function GuestGamificationPanel({
         <RewardsTab
           form={rewardForm}
           setForm={setRewardForm}
+          redeemForm={rewardRedeemForm}
+          setRedeemForm={setRewardRedeemForm}
+          redeemedReward={redeemedReward}
           rewards={workspace.rewards}
           profiles={workspace.profiles}
           guests={guests}
@@ -1158,6 +1197,7 @@ export function GuestGamificationPanel({
           onEdit={editReward}
           onReset={resetRewardForm}
           onStatus={updateRewardStatus}
+          onRedeem={redeemReward}
           saving={saving}
         />
       ) : null}
@@ -3177,6 +3217,9 @@ function SeasonsTab({
 function RewardsTab({
   form,
   setForm,
+  redeemForm,
+  setRedeemForm,
+  redeemedReward,
   rewards,
   profiles,
   guests,
@@ -3189,10 +3232,14 @@ function RewardsTab({
   onEdit,
   onReset,
   onStatus,
+  onRedeem,
   saving,
 }: {
   form: RewardForm;
   setForm: (form: RewardForm) => void;
+  redeemForm: RewardRedeemForm;
+  setRedeemForm: Dispatch<SetStateAction<RewardRedeemForm>>;
+  redeemedReward: GuestGameReward | null;
   rewards: GuestGameReward[];
   profiles: GuestGameProfile[];
   guests: GuestDashboardRow[];
@@ -3208,6 +3255,7 @@ function RewardsTab({
     reward: GuestGameReward,
     status: GuestGameRewardStatus,
   ) => Promise<void>;
+  onRedeem: () => Promise<void>;
   saving: string | null;
 }) {
   return (
@@ -3405,6 +3453,90 @@ function RewardsTab({
           >
             Экспорт CSV
           </a>
+        </div>
+        <div className="rounded-lg border border-cyan-200 bg-cyan-50/70 p-4 dark:border-cyan-900/60 dark:bg-cyan-950/20">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-zinc-950 dark:text-white">
+                Погашение кода
+              </p>
+              <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
+                Вставьте код с гостевой страницы или весь QR payload. Награда
+                перейдет в статус “выдано”.
+              </p>
+            </div>
+            <div className="grid flex-1 gap-2 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+              <input
+                className={fieldClass}
+                value={redeemForm.claim}
+                placeholder="LP-... или LEETPLUS_REWARD:..."
+                onChange={(event) =>
+                  setRedeemForm((current) => ({
+                    ...current,
+                    claim: event.target.value,
+                  }))
+                }
+              />
+              <select
+                className={fieldClass}
+                value={redeemForm.storeId}
+                onChange={(event) =>
+                  setRedeemForm((current) => ({
+                    ...current,
+                    storeId: event.target.value,
+                  }))
+                }
+              >
+                <option value="">Клуб не проверять</option>
+                {stores.map((store) => (
+                  <option key={store.id} value={store.id}>
+                    {store.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button
+              type="button"
+              className={primaryButtonClass}
+              disabled={saving === "rewardRedeem"}
+              onClick={onRedeem}
+            >
+              Погасить
+            </button>
+          </div>
+          <div className="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+            <input
+              className={fieldClass}
+              value={redeemForm.note}
+              placeholder="Заметка кассира, если нужна"
+              onChange={(event) =>
+                setRedeemForm((current) => ({
+                  ...current,
+                  note: event.target.value,
+                }))
+              }
+            />
+            {redeemedReward ? (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-100">
+                Погашено:{" "}
+                <span className="font-bold">{redeemedReward.rewardLabel}</span>
+                {" · "}
+                {redeemedReward.profile?.displayName ??
+                  redeemedReward.guest?.displayName ??
+                  redeemedReward.guestExternalId ??
+                  "гость"}
+                {" · "}
+                <span className="font-mono">
+                  {redeemedReward.rewardCode ?? "без кода"}
+                </span>
+              </div>
+            ) : (
+              <div className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
+                Кассирский сценарий работает внутри LeetPlus: проверка кода,
+                защита от повторной выдачи и системное событие в истории.
+              </div>
+            )}
+          </div>
         </div>
         <div className="space-y-2">
           {rewards.length ? (

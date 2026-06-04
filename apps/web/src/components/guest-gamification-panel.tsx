@@ -3138,10 +3138,19 @@ function GuestLogCatalogCard({
           ) : null}
         </>
       ) : (
-        <p className="mt-4 rounded-lg border border-dashed border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-400">
-          Типы появятся после расширенной синхронизации `guests/logs` на
-          странице `/sync`.
-        </p>
+        <div className="mt-4 rounded-lg border border-dashed border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/50">
+          <p className="text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+            Каталог пока пуст
+          </p>
+          <p className="mt-1 text-sm leading-6 text-zinc-500 dark:text-zinc-400">
+            На production еще нет сохраненных `guests/logs`. Запустите
+            расширенную синхронизацию гостевых логов на странице синхронизации,
+            после этого здесь появятся реальные типы событий и CSV-каталог.
+          </p>
+          <Link className={`${smallButtonClass} mt-3 inline-flex`} href="/sync">
+            Открыть синхронизацию
+          </Link>
+        </div>
       )}
     </section>
   );
@@ -5750,11 +5759,19 @@ function GuestLogConditionFields({
         <p className="text-xs font-bold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">
           Типы событий guests/logs
         </p>
-        <p className="text-xs text-zinc-500 dark:text-zinc-400">
-          {catalog.summary.types
-            ? `${catalog.summary.types} типов · ${catalog.summary.logs} логов · ${catalog.summary.domains} источников`
-            : "Каталог пока пуст: включите расширенную синхронизацию guests/logs."}
-        </p>
+        {catalog.summary.types ? (
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            {catalog.summary.types} типов · {catalog.summary.logs} логов ·{" "}
+            {catalog.summary.domains} источников
+          </p>
+        ) : (
+          <Link
+            href="/sync"
+            className="text-xs font-semibold text-emerald-700 underline-offset-4 hover:underline dark:text-emerald-300"
+          >
+            Загрузить guests/logs в синхронизации
+          </Link>
+        )}
       </div>
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <Field label="Разрешенные типы">

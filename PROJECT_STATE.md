@@ -79,6 +79,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Clarified the empty `guests/logs` production path in Guest Game Hub: the current production audit found `GuestLog` empty, so `/guests/gamification` now points managers from the empty catalog and rule picker to `/sync` for the extended guest-log sync before real event-type presets can be confirmed.
 - Added a manager CSV export for the Guest Game Hub `guests/logs` catalog: `/guests/gamification/guest-log-catalog/export` now exports raw and normalized event types, source domains/providers, log counts, and tenant-level mappings/presets without guest personal data, live Langame reads, or Langame writes.
 - Fixed standards-manager access to staff-control: `/guests/staff-control` and related staff-control report pages now use a dedicated `/guests/staff-control/filter-options` endpoint protected by staff access, so `STANDARDS_MANAGER` can open visible shift/administrator reports without receiving full guest CRM access.
 - Added a manager CSV export for Guest Game Hub economy and effect: `/guests/gamification/overview/export` now exports aggregate budgets, reward backlog, XP, return sessions, play minutes, product/bar revenue, and top-ups across tenant scenarios without guest personal data, live Langame reads, or Langame writes.

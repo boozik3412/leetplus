@@ -1286,7 +1286,9 @@ export class GuestGamificationService {
 
   private async getGuestLogCatalog(
     user: AuthenticatedUser,
+    options: { limit?: number | null } = {},
   ): Promise<GuestGameGuestLogCatalog> {
+    const limit = options.limit === null ? null : (options.limit ?? 80);
     const [rows, mappings] = await Promise.all([
       this.prisma.guestLog.groupBy({
         by: ['type', 'externalDomain', 'externalProvider'],
@@ -1348,32 +1350,30 @@ export class GuestGamificationService {
       itemMap.set(normalizedType, existing);
     }
 
-    const items = [...itemMap.values()]
-      .sort((left, right) => {
-        if (right.count !== left.count) {
-          return right.count - left.count;
-        }
+    const sortedItems = [...itemMap.values()].sort((left, right) => {
+      if (right.count !== left.count) {
+        return right.count - left.count;
+      }
 
-        return (
-          (right.latestAt?.getTime() ?? 0) - (left.latestAt?.getTime() ?? 0)
-        );
-      })
-      .slice(0, 80)
-      .map((item) => ({
-        type: item.type,
-        normalizedType: item.normalizedType,
-        count: item.count,
-        latestAt: item.latestAt?.toISOString() ?? null,
-        domains: [...item.domains.values()]
-          .sort((left, right) => right.count - left.count)
-          .map((domain) => ({
-            domain: domain.domain,
-            provider: domain.provider,
-            count: domain.count,
-            latestAt: domain.latestAt?.toISOString() ?? null,
-          })),
-        mapping: mappingByType.get(item.normalizedType) ?? null,
-      }));
+      return (right.latestAt?.getTime() ?? 0) - (left.latestAt?.getTime() ?? 0);
+    });
+    const visibleItems =
+      limit === null ? sortedItems : sortedItems.slice(0, limit);
+    const items = visibleItems.map((item) => ({
+      type: item.type,
+      normalizedType: item.normalizedType,
+      count: item.count,
+      latestAt: item.latestAt?.toISOString() ?? null,
+      domains: [...item.domains.values()]
+        .sort((left, right) => right.count - left.count)
+        .map((domain) => ({
+          domain: domain.domain,
+          provider: domain.provider,
+          count: domain.count,
+          latestAt: domain.latestAt?.toISOString() ?? null,
+        })),
+      mapping: mappingByType.get(item.normalizedType) ?? null,
+    }));
     const latestAt = items.reduce<Date | null>((latest, item) => {
       const value = item.latestAt ? new Date(item.latestAt) : null;
 
@@ -1393,6 +1393,86 @@ export class GuestGamificationService {
         latestAt: latestAt?.toISOString() ?? null,
       },
     };
+  }
+
+  async exportGuestLogCatalogCsv(user: AuthenticatedUser): Promise<string> {
+    const catalog = await this.getGuestLogCatalog(user, { limit: null });
+    const header = [
+      'Раздел',
+      'Raw тип guests/logs',
+      'Нормализованный тип',
+      'Название в LeetPlus',
+      'Бизнес-пресет',
+      'Применение',
+      'Логи всего',
+      'Домен',
+      'Провайдер',
+      'Логи в источнике',
+      'Последняя активность',
+      'Заметка',
+      'Маппинг обновлен',
+    ];
+    const rows: unknown[][] = [];
+    const exportedTypes = new Set<string>();
+
+    for (const item of catalog.items) {
+      exportedTypes.add(item.normalizedType);
+      const domains = item.domains.length
+        ? item.domains
+        : [
+            {
+              domain: '',
+              provider: null,
+              count: 0,
+              latestAt: null,
+            },
+          ];
+
+      for (const domain of domains) {
+        rows.push([
+          'Факт guests/logs',
+          item.type,
+          item.normalizedType,
+          item.mapping?.label ?? '',
+          guestLogMappingPresetLabel(item.mapping?.preset),
+          guestLogMappingIntentLabel(item.mapping?.intent),
+          item.count,
+          domain.domain,
+          domain.provider ?? '',
+          domain.count,
+          domain.latestAt ?? item.latestAt ?? '',
+          item.mapping?.note ?? '',
+          item.mapping?.updatedAt ?? '',
+        ]);
+      }
+    }
+
+    for (const mapping of catalog.mappings) {
+      if (exportedTypes.has(mapping.normalizedType)) {
+        continue;
+      }
+
+      rows.push([
+        'Маппинг без факта',
+        mapping.rawType,
+        mapping.normalizedType,
+        mapping.label,
+        guestLogMappingPresetLabel(mapping.preset),
+        guestLogMappingIntentLabel(mapping.intent),
+        0,
+        '',
+        '',
+        0,
+        '',
+        mapping.note ?? '',
+        mapping.updatedAt,
+      ]);
+    }
+
+    return [
+      '\uFEFF' + header.map(csvCell).join(','),
+      ...rows.map((row) => row.map(csvCell).join(',')),
+    ].join('\n');
   }
 
   async upsertGuestLogTypeMapping(
@@ -4379,6 +4459,40 @@ function gameScenarioStatusLabel(status: StatusValue | 'ACTIVE') {
       return 'Архив';
     default:
       return status;
+  }
+}
+
+function guestLogMappingPresetLabel(
+  preset: GuestLogMappingPreset | null | undefined,
+) {
+  switch (preset) {
+    case 'visit_or_session_start':
+      return 'Визит или старт сессии';
+    case 'session_finish':
+      return 'Завершение сессии';
+    case 'events_and_tournaments':
+      return 'События и турниры';
+    case 'balance_and_payment':
+      return 'Баланс и оплаты';
+    case 'manual_or_risk':
+      return 'Ручные или риск-события';
+    case 'custom':
+      return 'Кастомный тип';
+    default:
+      return '';
+  }
+}
+
+function guestLogMappingIntentLabel(
+  intent: GuestLogMappingIntent | null | undefined,
+) {
+  switch (intent) {
+    case 'allow':
+      return 'Можно использовать в правилах';
+    case 'block':
+      return 'Блокировать как anti-fraud';
+    default:
+      return '';
   }
 }
 

@@ -2914,30 +2914,39 @@ function GuestLogCatalogCard({
             страницы не делает live-запросов в Langame.
           </p>
         </div>
-        <div className="grid grid-cols-4 overflow-hidden rounded-lg border border-zinc-200 bg-zinc-50 text-center text-xs dark:border-zinc-800 dark:bg-zinc-900/60">
-          <div className="px-3 py-2">
-            <span className="block text-zinc-400">Типы</span>
-            <span className="font-bold text-zinc-900 dark:text-white">
-              {catalog.summary.types}
-            </span>
-          </div>
-          <div className="border-x border-zinc-200 px-3 py-2 dark:border-zinc-800">
-            <span className="block text-zinc-400">Логи</span>
-            <span className="font-bold text-zinc-900 dark:text-white">
-              {catalog.summary.logs}
-            </span>
-          </div>
-          <div className="px-3 py-2">
-            <span className="block text-zinc-400">Источники</span>
-            <span className="font-bold text-zinc-900 dark:text-white">
-              {catalog.summary.domains}
-            </span>
-          </div>
-          <div className="border-l border-zinc-200 px-3 py-2 dark:border-zinc-800">
-            <span className="block text-zinc-400">Словарь</span>
-            <span className="font-bold text-zinc-900 dark:text-white">
-              {catalog.mappings.length}
-            </span>
+        <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+          <a
+            className={smallButtonClass}
+            href="/api/guests/gamification/guest-log-catalog/export"
+            download
+          >
+            CSV каталога
+          </a>
+          <div className="grid grid-cols-4 overflow-hidden rounded-lg border border-zinc-200 bg-zinc-50 text-center text-xs dark:border-zinc-800 dark:bg-zinc-900/60">
+            <div className="px-3 py-2">
+              <span className="block text-zinc-400">Типы</span>
+              <span className="font-bold text-zinc-900 dark:text-white">
+                {catalog.summary.types}
+              </span>
+            </div>
+            <div className="border-x border-zinc-200 px-3 py-2 dark:border-zinc-800">
+              <span className="block text-zinc-400">Логи</span>
+              <span className="font-bold text-zinc-900 dark:text-white">
+                {catalog.summary.logs}
+              </span>
+            </div>
+            <div className="px-3 py-2">
+              <span className="block text-zinc-400">Источники</span>
+              <span className="font-bold text-zinc-900 dark:text-white">
+                {catalog.summary.domains}
+              </span>
+            </div>
+            <div className="border-l border-zinc-200 px-3 py-2 dark:border-zinc-800">
+              <span className="block text-zinc-400">Словарь</span>
+              <span className="font-bold text-zinc-900 dark:text-white">
+                {catalog.mappings.length}
+              </span>
+            </div>
           </div>
         </div>
       </div>

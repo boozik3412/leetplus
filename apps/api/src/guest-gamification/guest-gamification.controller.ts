@@ -113,6 +113,18 @@ export class GuestGamificationController {
     return this.gamificationService.deleteGuestLogTypeMapping(user, id);
   }
 
+  @Get('guest-log-catalog/export')
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  @Header(
+    'Content-Disposition',
+    'attachment; filename="guest-game-guest-log-catalog.csv"',
+  )
+  exportGuestLogCatalog(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<string> {
+    return this.gamificationService.exportGuestLogCatalogCsv(user);
+  }
+
   @Get('profiles')
   getProfiles(
     @CurrentUser() user: AuthenticatedUser,

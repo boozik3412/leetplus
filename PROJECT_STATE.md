@@ -79,6 +79,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added a manager CSV export for the Guest Game Hub `guests/logs` catalog: `/guests/gamification/guest-log-catalog/export` now exports raw and normalized event types, source domains/providers, log counts, and tenant-level mappings/presets without guest personal data, live Langame reads, or Langame writes.
 - Fixed standards-manager access to staff-control: `/guests/staff-control` and related staff-control report pages now use a dedicated `/guests/staff-control/filter-options` endpoint protected by staff access, so `STANDARDS_MANAGER` can open visible shift/administrator reports without receiving full guest CRM access.
 - Added a manager CSV export for Guest Game Hub economy and effect: `/guests/gamification/overview/export` now exports aggregate budgets, reward backlog, XP, return sessions, play minutes, product/bar revenue, and top-ups across tenant scenarios without guest personal data, live Langame reads, or Langame writes.
 - Added post-event effect measurement to Guest Game Hub: `/guests/gamification` now derives 14-day return guests, post-event sessions, play minutes, product/bar revenue, balance top-ups, and scenario recommendations from saved LeetPlus snapshots after loot box, mission, Battle Pass, and manual XP events without live Langame reads or Langame writes.

@@ -79,6 +79,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Guest Game Hub теперь разделяет готовность гостевого OTP на общий вход и отдельные SMS/Telegram/MAX provider-карточки: `/guests/gamification` показывает required env и следующий шаг по каждому каналу без раскрытия секретов, а `.env.example` содержит переменные гостевого OTP и MAX delivery для настройки VDS.
 - Добавлен безопасный контур канальной OTP-доставки для публичного гостевого портала: `/guest/[tenantSlug]/[storeId]` теперь получает от API фактический канал и статус доставки, production без env не показывает код, SMS/MAX готовятся через явные provider endpoint/token, а Telegram может отправить OTP в уже подтвержденный numeric `chat_id` только при включенных `GUEST_PORTAL_OTP_REAL_SEND_ENABLED`, `GUEST_PORTAL_OTP_TELEGRAM_ENABLED` и bot token, без live-запросов к Langame и без записи в Langame.
 - Fixed the guest portal public-route boundary in the web proxy: `/guest` and `/guest/...` remain public for the guest portal, while internal `/guests/*` pages are protected again and unauthenticated requests redirect to `/login` instead of reaching server render without an employee user.
 - Added an integration-readiness layer to Guest Game Hub: `/guests/gamification` now shows a safe manager checklist for the public guest portal, OTP mode, Telegram deep link, Telegram webhook, Telegram delivery provider, MAX adapter, and disabled Langame write API, including required env names and next actions without exposing secret values, sending external messages, live Langame reads, or Langame writes.

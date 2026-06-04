@@ -978,6 +978,9 @@ export type GuestGameIntegrationReadinessItem = {
   key:
     | 'PUBLIC_PORTAL'
     | 'OTP'
+    | 'OTP_SMS'
+    | 'OTP_TELEGRAM'
+    | 'OTP_MAX'
     | 'TELEGRAM_LINK'
     | 'TELEGRAM_WEBHOOK'
     | 'TELEGRAM_DELIVERY'
@@ -1630,7 +1633,7 @@ export class GuestGamificationService {
     const maxProvider = dispatcher.providers.find(
       (provider) => provider.channel === 'MAX',
     );
-    const devOtpEnabled = envFlag('GUEST_PORTAL_DEV_OTP_ENABLED');
+    const otp = guestPortalOtpReadiness();
     const telegramBotUsername = envString('GUEST_GAME_TELEGRAM_BOT_USERNAME');
     const telegramLinkSecret =
       envString('GUEST_GAME_TELEGRAM_LINK_SECRET') ??
@@ -1670,17 +1673,50 @@ export class GuestGamificationService {
       {
         key: 'OTP',
         title: 'OTP-вход гостя',
-        status: devOtpEnabled ? 'PARTIAL' : 'BLOCKED',
-        statusLabel: devOtpEnabled ? 'demo-код' : 'нужен provider',
-        ready: false,
-        configured: devOtpEnabled,
-        enabled: devOtpEnabled,
-        requiredEnv: ['GUEST_PORTAL_DEV_OTP_ENABLED'],
-        note: devOtpEnabled
-          ? 'Включен dev/demo OTP: подходит для теста, но не для production-верификации гостей.'
-          : 'Реальная SMS/Telegram/MAX-доставка OTP еще не подключена; без dev/demo-кода гостевой вход не пройдет.',
-        nextAction:
-          'Согласовать провайдера OTP и consent-сценарий; demo-код включать только для тестов.',
+        status: otp.status,
+        statusLabel: otp.statusLabel,
+        ready: otp.ready,
+        configured: otp.configured,
+        enabled: otp.enabled,
+        requiredEnv: otp.requiredEnv,
+        note: otp.note,
+        nextAction: otp.nextAction,
+      },
+      {
+        key: 'OTP_SMS',
+        title: 'SMS OTP provider',
+        status: otp.sms.status,
+        statusLabel: otp.sms.statusLabel,
+        ready: otp.sms.ready,
+        configured: otp.sms.configured,
+        enabled: otp.sms.enabled,
+        requiredEnv: otp.sms.requiredEnv,
+        note: otp.sms.note,
+        nextAction: otp.sms.nextAction,
+      },
+      {
+        key: 'OTP_TELEGRAM',
+        title: 'Telegram OTP provider',
+        status: otp.telegram.status,
+        statusLabel: otp.telegram.statusLabel,
+        ready: otp.telegram.ready,
+        configured: otp.telegram.configured,
+        enabled: otp.telegram.enabled,
+        requiredEnv: otp.telegram.requiredEnv,
+        note: otp.telegram.note,
+        nextAction: otp.telegram.nextAction,
+      },
+      {
+        key: 'OTP_MAX',
+        title: 'MAX OTP provider',
+        status: otp.max.status,
+        statusLabel: otp.max.statusLabel,
+        ready: otp.max.ready,
+        configured: otp.max.configured,
+        enabled: otp.max.enabled,
+        requiredEnv: otp.max.requiredEnv,
+        note: otp.max.note,
+        nextAction: otp.max.nextAction,
       },
       {
         key: 'TELEGRAM_LINK',
@@ -6131,6 +6167,195 @@ function deliveryChannelIdentityMasked(
   }
 
   return null;
+}
+
+type GuestPortalOtpProviderReadiness = {
+  status: GuestGameIntegrationReadinessStatus;
+  statusLabel: string;
+  ready: boolean;
+  configured: boolean;
+  enabled: boolean;
+  requiredEnv: string[];
+  note: string;
+  nextAction: string;
+};
+
+type GuestPortalOtpReadiness = GuestPortalOtpProviderReadiness & {
+  sms: GuestPortalOtpProviderReadiness;
+  telegram: GuestPortalOtpProviderReadiness;
+  max: GuestPortalOtpProviderReadiness;
+};
+
+function guestPortalOtpReadiness(): GuestPortalOtpReadiness {
+  const devEnabled = envFlag('GUEST_PORTAL_DEV_OTP_ENABLED');
+  const realSendEnabled = envFlag('GUEST_PORTAL_OTP_REAL_SEND_ENABLED');
+  const smsEnabled = envFlag('GUEST_PORTAL_OTP_SMS_ENABLED');
+  const smsConfigured = Boolean(
+    envString('GUEST_PORTAL_OTP_SMS_ENDPOINT') &&
+    envString('GUEST_PORTAL_OTP_SMS_TOKEN'),
+  );
+  const telegramEnabled = envFlag('GUEST_PORTAL_OTP_TELEGRAM_ENABLED');
+  const telegramConfigured = Boolean(
+    envString('GUEST_PORTAL_TELEGRAM_BOT_TOKEN') ??
+    envString('GUEST_GAME_TELEGRAM_BOT_TOKEN') ??
+    envString('TELEGRAM_BOT_TOKEN'),
+  );
+  const maxEnabled = envFlag('GUEST_PORTAL_OTP_MAX_ENABLED');
+  const maxConfigured = Boolean(
+    envString('GUEST_PORTAL_OTP_MAX_ENDPOINT') &&
+    envString('GUEST_PORTAL_OTP_MAX_TOKEN'),
+  );
+
+  const sms = guestPortalOtpProviderReadiness({
+    channelLabel: 'SMS',
+    realSendEnabled,
+    channelEnabled: smsEnabled,
+    configured: smsConfigured,
+    requiredEnv: [
+      'GUEST_PORTAL_OTP_REAL_SEND_ENABLED',
+      'GUEST_PORTAL_OTP_SMS_ENABLED',
+      'GUEST_PORTAL_OTP_SMS_ENDPOINT',
+      'GUEST_PORTAL_OTP_SMS_TOKEN',
+    ],
+    configuredNote:
+      'SMS provider имеет endpoint и token; внешний вызов включится только при общем флаге реальной отправки.',
+    blockedNote:
+      'SMS OTP не готов: нужен provider endpoint, token и явное включение канала.',
+    nextAction:
+      'После выбора SMS-провайдера задать endpoint/token на VDS, включить канал на тестовом госте и проверить audit без раскрытия кода.',
+  });
+  const telegram = guestPortalOtpProviderReadiness({
+    channelLabel: 'Telegram',
+    realSendEnabled,
+    channelEnabled: telegramEnabled,
+    configured: telegramConfigured,
+    requiredEnv: [
+      'GUEST_PORTAL_OTP_REAL_SEND_ENABLED',
+      'GUEST_PORTAL_OTP_TELEGRAM_ENABLED',
+      'GUEST_PORTAL_TELEGRAM_BOT_TOKEN',
+      'GUEST_GAME_TELEGRAM_BOT_TOKEN',
+      'TELEGRAM_BOT_TOKEN',
+    ],
+    configuredNote:
+      'Telegram token найден; OTP можно отправить только гостю с уже подтвержденным numeric chat_id.',
+    blockedNote:
+      'Telegram OTP не готов: нужен bot token, включенный канал и заранее привязанный гостем Telegram.',
+    nextAction:
+      'Сначала проверить deep link и webhook привязки бота, затем включать OTP только для профилей с сохраненным chat:<id>.',
+  });
+  const max = guestPortalOtpProviderReadiness({
+    channelLabel: 'MAX',
+    realSendEnabled,
+    channelEnabled: maxEnabled,
+    configured: maxConfigured,
+    requiredEnv: [
+      'GUEST_PORTAL_OTP_REAL_SEND_ENABLED',
+      'GUEST_PORTAL_OTP_MAX_ENABLED',
+      'GUEST_PORTAL_OTP_MAX_ENDPOINT',
+      'GUEST_PORTAL_OTP_MAX_TOKEN',
+    ],
+    configuredNote:
+      'MAX provider имеет endpoint и token, но канал остается вторым адаптером до подтвержденного production-контракта.',
+    blockedNote:
+      'MAX OTP не готов: нужен подтвержденный provider endpoint/token, юридическая схема и отписки.',
+    nextAction:
+      'MAX включать только после утверждения API-контракта, consent-сценария, обработки отписок и теста на отдельном госте.',
+  });
+  const providers = [sms, telegram, max];
+  const readyProviders = providers.filter((provider) => provider.ready);
+  const partialProviders = providers.filter(
+    (provider) => provider.status === 'PARTIAL',
+  );
+  const ready = readyProviders.length > 0;
+  const readyProviderLabels = readyProviders
+    .map((provider) => provider.statusLabel.replace(' готов', ''))
+    .join(', ');
+  const hasAnyProviderSignal =
+    partialProviders.length > 0 ||
+    providers.some((provider) => provider.configured || provider.enabled);
+  const status: GuestGameIntegrationReadinessStatus = ready
+    ? 'READY'
+    : devEnabled || hasAnyProviderSignal || realSendEnabled
+      ? 'PARTIAL'
+      : 'BLOCKED';
+
+  return {
+    status,
+    statusLabel: ready
+      ? 'provider готов'
+      : devEnabled
+        ? 'demo-код'
+        : status === 'PARTIAL'
+          ? 'частично'
+          : 'нужен provider',
+    ready,
+    configured: devEnabled || providers.some((provider) => provider.configured),
+    enabled: devEnabled || providers.some((provider) => provider.enabled),
+    requiredEnv: [
+      'GUEST_PORTAL_DEV_OTP_ENABLED',
+      'GUEST_PORTAL_OTP_REAL_SEND_ENABLED',
+      'GUEST_PORTAL_OTP_SMS_ENABLED',
+      'GUEST_PORTAL_OTP_TELEGRAM_ENABLED',
+      'GUEST_PORTAL_OTP_MAX_ENABLED',
+    ],
+    note: ready
+      ? `Production OTP имеет готовый канал: ${readyProviderLabels}. Гостевой портал не показывает код и использует безопасный guest-token.`
+      : devEnabled
+        ? 'Включен dev/demo OTP: подходит для теста, но не для production-верификации гостей.'
+        : 'Реальная SMS/Telegram/MAX-доставка OTP еще не подключена; без dev/demo-кода гостевой вход не пройдет.',
+    nextAction: ready
+      ? 'Проверить один тестовый вход гостя и delivery audit по выбранному каналу, не включая массовые коммуникации.'
+      : 'Согласовать OTP-провайдера и consent-сценарий; demo-код включать только для тестов, production запускать по одному каналу.',
+    sms,
+    telegram,
+    max,
+  };
+}
+
+function guestPortalOtpProviderReadiness({
+  channelLabel,
+  realSendEnabled,
+  channelEnabled,
+  configured,
+  requiredEnv,
+  configuredNote,
+  blockedNote,
+  nextAction,
+}: {
+  channelLabel: string;
+  realSendEnabled: boolean;
+  channelEnabled: boolean;
+  configured: boolean;
+  requiredEnv: string[];
+  configuredNote: string;
+  blockedNote: string;
+  nextAction: string;
+}): GuestPortalOtpProviderReadiness {
+  const ready = realSendEnabled && channelEnabled && configured;
+  const status: GuestGameIntegrationReadinessStatus = ready
+    ? 'READY'
+    : realSendEnabled || channelEnabled || configured
+      ? 'PARTIAL'
+      : 'BLOCKED';
+
+  return {
+    status,
+    statusLabel: ready
+      ? `${channelLabel} готов`
+      : status === 'PARTIAL'
+        ? 'частично'
+        : 'не настроено',
+    ready,
+    configured,
+    enabled: realSendEnabled && channelEnabled,
+    requiredEnv,
+    note: ready
+      ? configuredNote
+      : status === 'PARTIAL'
+        ? `${channelLabel} OTP настроен частично: проверьте общий флаг реальной отправки, флаг канала и provider-секреты.`
+        : blockedNote,
+    nextAction,
+  };
 }
 
 type DeliveryProviderConfig = {

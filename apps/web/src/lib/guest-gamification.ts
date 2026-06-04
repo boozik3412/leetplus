@@ -631,6 +631,9 @@ export type GuestGameIntegrationReadinessItem = {
   key:
     | "PUBLIC_PORTAL"
     | "OTP"
+    | "OTP_SMS"
+    | "OTP_TELEGRAM"
+    | "OTP_MAX"
     | "TELEGRAM_LINK"
     | "TELEGRAM_WEBHOOK"
     | "TELEGRAM_DELIVERY"

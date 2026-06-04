@@ -2481,7 +2481,7 @@ function IntegrationReadinessCard({
 }: {
   readiness: GuestGamificationWorkspace["integrationReadiness"];
 }) {
-  const visibleItems = readiness.items.slice(0, 7);
+  const visibleItems = readiness.items;
 
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">

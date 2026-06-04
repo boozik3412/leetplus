@@ -45,18 +45,18 @@ const guestCards: HubCard[] = [
 const nextSteps = [
   "Telegram/MAX-боты для внешней связи с гостями после настройки согласий.",
   "Шаблоны объявлений и регламенты реакции для клубных каналов.",
-  "Отдельный доступ view_communications после стабилизации матрицы ролей.",
+  "Тонкая матрица каналов: какие роли видят объявления, поддержку, клубные и CRM-коммуникации.",
 ];
 
 export default async function CommunicationsPage() {
   const user = await requireCurrentUser();
-  const canViewStaff = can(user, "view_staff");
+  const canViewCommunications = can(user, "view_communications");
   const canViewGuests = can(user, "view_guests");
   const cards = [
-    ...(canViewStaff ? staffCards : []),
+    ...(canViewCommunications ? staffCards : []),
     ...(canViewGuests ? guestCards : []),
   ];
-  const primaryAction = canViewStaff
+  const primaryAction = canViewCommunications
     ? { href: "/staff/team-chat", label: "Перейти в чат" }
     : { href: "/guests/crm/tasks", label: "Открыть CRM-задачи" };
 

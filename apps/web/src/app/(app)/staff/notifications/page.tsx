@@ -41,7 +41,7 @@ export default async function StaffNotificationsPage({
 }) {
   const user = await requireCurrentUser();
 
-  if (!can(user, "view_staff")) {
+  if (!can(user, "view_communications")) {
     redirect("/dashboard");
   }
 

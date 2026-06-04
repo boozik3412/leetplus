@@ -31,9 +31,10 @@ export default async function StaffTeamChatPage({
 }) {
   const user = await requireCurrentUser();
 
-  if (!can(user, "view_staff")) {
+  if (!can(user, "view_communications")) {
     redirect("/dashboard");
   }
+  const canViewStaff = can(user, "view_staff");
 
   const params = await searchParams;
   const report = await getStaffTeamChatReport(resolveFilters(params));
@@ -69,12 +70,14 @@ export default async function StaffTeamChatPage({
             >
               Обзор коммуникаций
             </Link>
-            <Link
-              href="/staff/checklists"
-              className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold transition hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-800 dark:hover:border-emerald-500 dark:hover:text-emerald-200"
-            >
-              Чеклисты
-            </Link>
+            {canViewStaff ? (
+              <Link
+                href="/staff/checklists"
+                className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-semibold transition hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-800 dark:hover:border-emerald-500 dark:hover:text-emerald-200"
+              >
+                Чеклисты
+              </Link>
+            ) : null}
           </div>
         </div>
 

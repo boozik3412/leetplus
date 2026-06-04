@@ -10,6 +10,7 @@ export type Capability =
   | "approve_guest_game_rewards"
   | "view_guest_game_pii"
   | "view_marketing"
+  | "view_communications"
   | "view_staff"
   | "edit_staff_knowledge"
   | "review_staff_knowledge"
@@ -75,6 +76,12 @@ export const capabilityOptions: CapabilityOption[] = [
     key: "view_marketing",
     label: "Маркетинг",
     description: "Кампании, промо-механики, промо-наборы и оценка эффекта.",
+  },
+  {
+    key: "view_communications",
+    label: "Коммуникации",
+    description:
+      "Обзор коммуникаций, командный чат и внутренние уведомления без общего доступа к персоналу.",
   },
   {
     key: "view_staff",
@@ -153,6 +160,7 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "approve_guest_game_rewards",
     "view_guest_game_pii",
     "view_marketing",
+    "view_communications",
     "view_staff",
     "edit_staff_knowledge",
     "review_staff_knowledge",
@@ -175,6 +183,7 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "approve_guest_game_rewards",
     "view_guest_game_pii",
     "view_marketing",
+    "view_communications",
     "view_staff",
     "edit_staff_knowledge",
     "review_staff_knowledge",
@@ -197,6 +206,7 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "approve_guest_game_rewards",
     "view_guest_game_pii",
     "view_marketing",
+    "view_communications",
     "view_staff",
     "edit_staff_knowledge",
     "review_staff_knowledge",
@@ -226,6 +236,7 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "approve_guest_game_rewards",
     "view_guest_game_pii",
     "view_marketing",
+    "view_communications",
     "view_staff",
     "edit_staff_knowledge",
     "review_staff_knowledge",
@@ -233,13 +244,22 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
   ],
   STANDARDS_MANAGER: [
     "view_dashboard",
+    "view_communications",
     "view_staff",
     "edit_staff_knowledge",
     "review_staff_knowledge",
     "publish_staff_knowledge",
   ],
-  SENIOR_ADMINISTRATOR: ["view_dashboard", "view_staff"],
-  CLUB_ADMINISTRATOR: ["view_dashboard", "view_staff"],
+  SENIOR_ADMINISTRATOR: [
+    "view_dashboard",
+    "view_communications",
+    "view_staff",
+  ],
+  CLUB_ADMINISTRATOR: [
+    "view_dashboard",
+    "view_communications",
+    "view_staff",
+  ],
 };
 
 export function can(user: AuthUser | null, capability: Capability) {
@@ -272,11 +292,18 @@ export function canAccessPath(user: AuthUser | null, href: string) {
   }
 
   if (href === "/communications" || href.startsWith("/communications/")) {
-    return can(user, "view_staff") || can(user, "view_guests");
+    return can(user, "view_communications") || can(user, "view_guests");
   }
 
   if (href.startsWith("/guests/gamification")) {
     return can(user, "view_guest_gamification");
+  }
+
+  if (
+    href.startsWith("/staff/team-chat") ||
+    href.startsWith("/staff/notifications")
+  ) {
+    return can(user, "view_communications");
   }
 
   if (href.startsWith("/staff") || href.startsWith("/guests/staff-control")) {

@@ -82,12 +82,12 @@ export class RolesGuard implements CanActivate {
       return method === 'GET' ? 'view_reports' : 'edit_stores';
     }
 
-    if (path.startsWith('/guests/staff-control')) {
-      return 'view_staff';
-    }
-
     if (path.startsWith('/guests/gamification')) {
       return this.resolveGuestGamificationCapability(path, method);
+    }
+
+    if (path.startsWith('/guests/staff-control')) {
+      return 'view_staff';
     }
 
     if (path.startsWith('/guests')) {
@@ -96,6 +96,13 @@ export class RolesGuard implements CanActivate {
 
     if (path.startsWith('/marketing')) {
       return 'view_marketing';
+    }
+
+    if (
+      path.startsWith('/staff/team-chat') ||
+      path.startsWith('/staff/notifications')
+    ) {
+      return 'view_communications';
     }
 
     if (path.startsWith('/staff')) {

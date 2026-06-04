@@ -142,6 +142,70 @@ describe('RolesGuard', () => {
     ).toBe(true);
   });
 
+  it('allows communications access without full staff access', () => {
+    reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
+
+    expect(
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/staff/team-chat',
+          user: {
+            role: UserRole.MARKETER,
+            permissions: ['view_communications'],
+          },
+        }),
+      ),
+    ).toBe(true);
+
+    expect(
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/staff/notifications',
+          user: {
+            role: UserRole.MARKETER,
+            permissions: ['view_communications'],
+          },
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it('keeps other staff pages behind staff access', () => {
+    reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/staff/tasks',
+          user: {
+            role: UserRole.MARKETER,
+            permissions: ['view_communications'],
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('keeps CRM contact tasks behind guest access', () => {
+    reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/guests/crm/tasks',
+          user: {
+            role: UserRole.CLUB_ADMINISTRATOR,
+            permissions: ['view_communications'],
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
   it('keeps Guest Game Hub reward redemption behind reward approval permission', () => {
     reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
 

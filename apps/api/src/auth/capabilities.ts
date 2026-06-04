@@ -48,6 +48,12 @@ export const accessCapabilityCatalog = [
     description: 'Кампании, промо-механики, промо-наборы и оценка эффекта.',
   },
   {
+    key: 'view_communications',
+    label: 'Коммуникации',
+    description:
+      'Обзор коммуникаций, командный чат и внутренние уведомления без общего доступа к персоналу.',
+  },
+  {
     key: 'view_staff',
     label: 'Персонал',
     description: 'Задачи, регламенты, чек-листы и контроль администраторов.',
@@ -130,6 +136,7 @@ export const roleCapabilities: Record<UserRole, AccessCapability[]> = {
     'approve_guest_game_rewards',
     'view_guest_game_pii',
     'view_marketing',
+    'view_communications',
     'view_staff',
     'edit_staff_knowledge',
     'review_staff_knowledge',
@@ -152,6 +159,7 @@ export const roleCapabilities: Record<UserRole, AccessCapability[]> = {
     'approve_guest_game_rewards',
     'view_guest_game_pii',
     'view_marketing',
+    'view_communications',
     'view_staff',
     'edit_staff_knowledge',
     'review_staff_knowledge',
@@ -174,6 +182,7 @@ export const roleCapabilities: Record<UserRole, AccessCapability[]> = {
     'approve_guest_game_rewards',
     'view_guest_game_pii',
     'view_marketing',
+    'view_communications',
     'view_staff',
     'edit_staff_knowledge',
     'review_staff_knowledge',
@@ -208,6 +217,7 @@ export const roleCapabilities: Record<UserRole, AccessCapability[]> = {
     'approve_guest_game_rewards',
     'view_guest_game_pii',
     'view_marketing',
+    'view_communications',
     'view_staff',
     'edit_staff_knowledge',
     'review_staff_knowledge',
@@ -215,13 +225,22 @@ export const roleCapabilities: Record<UserRole, AccessCapability[]> = {
   ],
   [UserRole.STANDARDS_MANAGER]: [
     'view_dashboard',
+    'view_communications',
     'view_staff',
     'edit_staff_knowledge',
     'review_staff_knowledge',
     'publish_staff_knowledge',
   ],
-  [UserRole.SENIOR_ADMINISTRATOR]: ['view_dashboard', 'view_staff'],
-  [UserRole.CLUB_ADMINISTRATOR]: ['view_dashboard', 'view_staff'],
+  [UserRole.SENIOR_ADMINISTRATOR]: [
+    'view_dashboard',
+    'view_communications',
+    'view_staff',
+  ],
+  [UserRole.CLUB_ADMINISTRATOR]: [
+    'view_dashboard',
+    'view_communications',
+    'view_staff',
+  ],
 };
 
 export function normalizeCapabilities(

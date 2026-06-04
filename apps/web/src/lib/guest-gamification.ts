@@ -355,6 +355,54 @@ export type GuestGamificationSummary = {
   paidRewardAmount: number;
 };
 
+export type GuestGameEconomyScenario = {
+  kind: "LOOT_BOX" | "MISSION" | "SEASON" | "MANUAL";
+  id: string;
+  name: string;
+  status: GuestGameStatus | "ACTIVE";
+  plannedBudget: number | null;
+  budgetUsedCost: number;
+  pendingCost: number;
+  approvedCost: number;
+  paidCost: number;
+  expiredCost: number;
+  canceledCost: number;
+  rewardCount: number;
+  pendingRewards: number;
+  approvedRewards: number;
+  paidRewards: number;
+  expiredRewards: number;
+  canceledRewards: number;
+  eventsCount: number;
+  uniqueGuests: number;
+  xpIssued: number;
+  budgetUsagePercent: number | null;
+  averageRewardCost: number;
+  recommendation: string;
+};
+
+export type GuestGameEconomy = {
+  summary: {
+    plannedBudget: number;
+    budgetUsedCost: number;
+    pendingCost: number;
+    approvedCost: number;
+    paidCost: number;
+    expiredCost: number;
+    canceledCost: number;
+    rewardCount: number;
+    rewardBacklog: number;
+    paidRewards: number;
+    eventsCount: number;
+    uniqueGuests: number;
+    xpIssued: number;
+    rulesWithoutBudget: number;
+    budgetUsagePercent: number | null;
+    averageRewardCost: number;
+  };
+  scenarios: GuestGameEconomyScenario[];
+};
+
 export type GuestGameTariffSnapshotStatus =
   | "READY"
   | "PARTIAL"
@@ -457,6 +505,7 @@ export type GuestGameGuestLogCatalog = {
 
 export type GuestGamificationWorkspace = {
   summary: GuestGamificationSummary;
+  economy: GuestGameEconomy;
   profiles: GuestGameProfile[];
   lootBoxes: GuestGameLootBox[];
   missions: GuestGameMission[];

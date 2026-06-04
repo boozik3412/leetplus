@@ -689,8 +689,57 @@ export type GuestGamificationSummary = {
   paidRewardAmount: number;
 };
 
+export type GuestGameEconomyScenario = {
+  kind: 'LOOT_BOX' | 'MISSION' | 'SEASON' | 'MANUAL';
+  id: string;
+  name: string;
+  status: StatusValue | 'ACTIVE';
+  plannedBudget: number | null;
+  budgetUsedCost: number;
+  pendingCost: number;
+  approvedCost: number;
+  paidCost: number;
+  expiredCost: number;
+  canceledCost: number;
+  rewardCount: number;
+  pendingRewards: number;
+  approvedRewards: number;
+  paidRewards: number;
+  expiredRewards: number;
+  canceledRewards: number;
+  eventsCount: number;
+  uniqueGuests: number;
+  xpIssued: number;
+  budgetUsagePercent: number | null;
+  averageRewardCost: number;
+  recommendation: string;
+};
+
+export type GuestGameEconomy = {
+  summary: {
+    plannedBudget: number;
+    budgetUsedCost: number;
+    pendingCost: number;
+    approvedCost: number;
+    paidCost: number;
+    expiredCost: number;
+    canceledCost: number;
+    rewardCount: number;
+    rewardBacklog: number;
+    paidRewards: number;
+    eventsCount: number;
+    uniqueGuests: number;
+    xpIssued: number;
+    rulesWithoutBudget: number;
+    budgetUsagePercent: number | null;
+    averageRewardCost: number;
+  };
+  scenarios: GuestGameEconomyScenario[];
+};
+
 export type GuestGamificationWorkspace = {
   summary: GuestGamificationSummary;
+  economy: GuestGameEconomy;
   profiles: GuestGameProfile[];
   lootBoxes: GuestGameLootBox[];
   missions: GuestGameMission[];
@@ -1175,6 +1224,7 @@ export class GuestGamificationService {
         seasons,
         rewards,
       ),
+      economy: this.buildEconomy(lootBoxes, missions, seasons, rewards, events),
       profiles,
       lootBoxes,
       missions,
@@ -2775,6 +2825,242 @@ export class GuestGamificationService {
         pendingRewards.map((reward) => reward.rewardAmount),
       ),
       paidRewardAmount: sum(paidRewards.map((reward) => reward.rewardAmount)),
+    };
+  }
+
+  private buildEconomy(
+    lootBoxes: GuestGameLootBox[],
+    missions: GuestGameMission[],
+    seasons: GuestGameSeason[],
+    rewards: GuestGameReward[],
+    events: GuestGameEvent[],
+  ): GuestGameEconomy {
+    const scenarios: GuestGameEconomyScenario[] = [
+      ...lootBoxes.map((item) =>
+        this.buildEconomyScenario({
+          kind: 'LOOT_BOX',
+          id: item.id,
+          name: item.name,
+          status: item.status,
+          plannedBudget: item.budgetAmount,
+          rewards: rewards.filter((reward) => reward.lootBox?.id === item.id),
+          events: events.filter((event) => event.lootBox?.id === item.id),
+        }),
+      ),
+      ...missions.map((item) =>
+        this.buildEconomyScenario({
+          kind: 'MISSION',
+          id: item.id,
+          name: item.name,
+          status: item.status,
+          plannedBudget: item.budgetAmount,
+          rewards: rewards.filter((reward) => reward.mission?.id === item.id),
+          events: events.filter((event) => event.mission?.id === item.id),
+        }),
+      ),
+      ...seasons.map((item) =>
+        this.buildEconomyScenario({
+          kind: 'SEASON',
+          id: item.id,
+          name: item.name,
+          status: item.status,
+          plannedBudget: item.budgetAmount,
+          rewards: rewards.filter((reward) => reward.season?.id === item.id),
+          events: events.filter((event) => event.season?.id === item.id),
+        }),
+      ),
+    ];
+    const manualRewards = rewards.filter(
+      (reward) => !reward.lootBox && !reward.mission && !reward.season,
+    );
+    const manualEvents = events.filter(
+      (event) => !event.lootBox && !event.mission && !event.season,
+    );
+
+    if (manualRewards.length || manualEvents.length) {
+      scenarios.push(
+        this.buildEconomyScenario({
+          kind: 'MANUAL',
+          id: 'manual',
+          name: 'Ручные награды и события',
+          status: 'ACTIVE',
+          plannedBudget: null,
+          rewards: manualRewards,
+          events: manualEvents,
+        }),
+      );
+    }
+
+    const plannedBudget = sum(
+      scenarios.map((scenario) => scenario.plannedBudget ?? 0),
+    );
+    const budgetUsedCost = sum(
+      scenarios.map((scenario) => scenario.budgetUsedCost),
+    );
+    const rewardCount = sum(scenarios.map((scenario) => scenario.rewardCount));
+    const uniqueGuests = new Set<string>();
+
+    for (const reward of rewards) {
+      const key = gameEconomyGuestKey(reward);
+
+      if (key) {
+        uniqueGuests.add(key);
+      }
+    }
+
+    for (const event of events) {
+      const key = gameEconomyGuestKey(event);
+
+      if (key) {
+        uniqueGuests.add(key);
+      }
+    }
+
+    return {
+      summary: {
+        plannedBudget,
+        budgetUsedCost,
+        pendingCost: sum(scenarios.map((scenario) => scenario.pendingCost)),
+        approvedCost: sum(scenarios.map((scenario) => scenario.approvedCost)),
+        paidCost: sum(scenarios.map((scenario) => scenario.paidCost)),
+        expiredCost: sum(scenarios.map((scenario) => scenario.expiredCost)),
+        canceledCost: sum(scenarios.map((scenario) => scenario.canceledCost)),
+        rewardCount,
+        rewardBacklog: sum(
+          scenarios.map(
+            (scenario) => scenario.pendingRewards + scenario.approvedRewards,
+          ),
+        ),
+        paidRewards: sum(scenarios.map((scenario) => scenario.paidRewards)),
+        eventsCount: events.length,
+        uniqueGuests: uniqueGuests.size,
+        xpIssued: sum(events.map((event) => event.xpDelta)),
+        rulesWithoutBudget: scenarios.filter(
+          (scenario) =>
+            scenario.kind !== 'MANUAL' &&
+            scenario.status === 'ACTIVE' &&
+            !scenario.plannedBudget,
+        ).length,
+        budgetUsagePercent: percentOrNull(budgetUsedCost, plannedBudget),
+        averageRewardCost: rewardCount
+          ? Math.round(budgetUsedCost / rewardCount)
+          : 0,
+      },
+      scenarios: scenarios
+        .sort((left, right) => {
+          const activeWeight =
+            Number(right.status === 'ACTIVE') -
+            Number(left.status === 'ACTIVE');
+
+          if (activeWeight !== 0) {
+            return activeWeight;
+          }
+
+          if (right.budgetUsedCost !== left.budgetUsedCost) {
+            return right.budgetUsedCost - left.budgetUsedCost;
+          }
+
+          return right.eventsCount - left.eventsCount;
+        })
+        .slice(0, 12),
+    };
+  }
+
+  private buildEconomyScenario({
+    kind,
+    id,
+    name,
+    status,
+    plannedBudget,
+    rewards,
+    events,
+  }: {
+    kind: GuestGameEconomyScenario['kind'];
+    id: string;
+    name: string;
+    status: GuestGameEconomyScenario['status'];
+    plannedBudget: number | null;
+    rewards: GuestGameReward[];
+    events: GuestGameEvent[];
+  }): GuestGameEconomyScenario {
+    const pendingRewards = rewards.filter(
+      (reward) => reward.status === 'PENDING',
+    );
+    const approvedRewards = rewards.filter(
+      (reward) => reward.status === 'APPROVED',
+    );
+    const paidRewards = rewards.filter((reward) => reward.status === 'PAID');
+    const expiredRewards = rewards.filter(
+      (reward) => reward.status === 'EXPIRED',
+    );
+    const canceledRewards = rewards.filter(
+      (reward) => reward.status === 'CANCELED',
+    );
+    const pendingCost = sum(
+      pendingRewards.map((reward) => reward.rewardAmount),
+    );
+    const approvedCost = sum(
+      approvedRewards.map((reward) => reward.rewardAmount),
+    );
+    const paidCost = sum(paidRewards.map((reward) => reward.rewardAmount));
+    const expiredCost = sum(
+      expiredRewards.map((reward) => reward.rewardAmount),
+    );
+    const canceledCost = sum(
+      canceledRewards.map((reward) => reward.rewardAmount),
+    );
+    const budgetUsedCost = pendingCost + approvedCost + paidCost;
+    const guests = new Set<string>();
+
+    for (const reward of rewards) {
+      const key = gameEconomyGuestKey(reward);
+
+      if (key) {
+        guests.add(key);
+      }
+    }
+
+    for (const event of events) {
+      const key = gameEconomyGuestKey(event);
+
+      if (key) {
+        guests.add(key);
+      }
+    }
+
+    return {
+      kind,
+      id,
+      name,
+      status,
+      plannedBudget,
+      budgetUsedCost,
+      pendingCost,
+      approvedCost,
+      paidCost,
+      expiredCost,
+      canceledCost,
+      rewardCount: rewards.length,
+      pendingRewards: pendingRewards.length,
+      approvedRewards: approvedRewards.length,
+      paidRewards: paidRewards.length,
+      expiredRewards: expiredRewards.length,
+      canceledRewards: canceledRewards.length,
+      eventsCount: events.length,
+      uniqueGuests: guests.size,
+      xpIssued: sum(events.map((event) => event.xpDelta)),
+      budgetUsagePercent: percentOrNull(budgetUsedCost, plannedBudget ?? 0),
+      averageRewardCost: rewards.length
+        ? Math.round(budgetUsedCost / rewards.length)
+        : 0,
+      recommendation: economyRecommendation({
+        status,
+        plannedBudget,
+        budgetUsagePercent: percentOrNull(budgetUsedCost, plannedBudget ?? 0),
+        backlog: pendingRewards.length + approvedRewards.length,
+        eventsCount: events.length,
+        paidRewards: paidRewards.length,
+      }),
     };
   }
 
@@ -5402,6 +5688,68 @@ function stringArray(value: Prisma.JsonValue | null) {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === 'string')
     : [];
+}
+
+function percentOrNull(value: number, total: number) {
+  if (total <= 0) {
+    return null;
+  }
+
+  return Math.round((value / total) * 1000) / 10;
+}
+
+function gameEconomyGuestKey(row: GuestGameReward | GuestGameEvent) {
+  if (row.profile?.id) {
+    return `profile:${row.profile.id}`;
+  }
+
+  if (row.guest?.id) {
+    return `guest:${row.guest.id}`;
+  }
+
+  if ('guestExternalId' in row && row.guestExternalId) {
+    return `external:${row.guestExternalId}`;
+  }
+
+  return null;
+}
+
+function economyRecommendation({
+  status,
+  plannedBudget,
+  budgetUsagePercent,
+  backlog,
+  eventsCount,
+  paidRewards,
+}: {
+  status: GuestGameEconomyScenario['status'];
+  plannedBudget: number | null;
+  budgetUsagePercent: number | null;
+  backlog: number;
+  eventsCount: number;
+  paidRewards: number;
+}) {
+  if (status === 'ACTIVE' && !plannedBudget) {
+    return 'Задайте бюджет до масштабного запуска, чтобы контролировать стоимость наград.';
+  }
+
+  if (budgetUsagePercent !== null && budgetUsagePercent >= 90) {
+    return 'Бюджет почти выбран: проверьте лимиты, период действия и очередь выдач.';
+  }
+
+  if (backlog >= 10) {
+    return 'В очереди накопились награды: проверьте подтверждения и кассирскую выдачу.';
+  }
+
+  if (status === 'ACTIVE' && eventsCount === 0) {
+    return 'Активный сценарий еще не дал событий: запустите dry-run или batch по snapshot-фактам.';
+  }
+
+  if (paidRewards > 0) {
+    return 'Есть погашенные награды: можно сверить фактический эффект с визитами и выручкой.';
+  }
+
+  return 'Контур под контролем: следите за бюджетом, очередью и XP-событиями.';
 }
 
 function sum(values: number[]) {

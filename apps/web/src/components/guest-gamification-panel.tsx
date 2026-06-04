@@ -2319,6 +2319,8 @@ function OverviewTab({
         />
       </div>
 
+      <EconomyControlCard economy={workspace.economy} />
+
       <TariffSnapshotReadinessCard snapshots={workspace.tariffSnapshots} />
 
       <GuestLogCatalogCard
@@ -2385,6 +2387,138 @@ function OverviewTab({
         </section>
       </div>
     </div>
+  );
+}
+
+function EconomyControlCard({
+  economy,
+}: {
+  economy: GuestGamificationWorkspace["economy"];
+}) {
+  const usage = economy.summary.budgetUsagePercent ?? 0;
+  const usageWidth = Math.max(0, Math.min(100, usage));
+  const visibleScenarios = economy.scenarios.slice(0, 6);
+
+  return (
+    <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">
+            Коммерческая экономика
+          </p>
+          <h2 className="mt-1 text-lg font-bold text-zinc-950 dark:text-white">
+            Бюджет, очередь и фактическая выдача
+          </h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+            Слой считает стоимость наград и XP по уже сохраненным правилам,
+            событиям и кошельку LeetPlus. Live-запросы и запись в Langame здесь
+            не выполняются.
+          </p>
+        </div>
+        <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
+          {economy.summary.rulesWithoutBudget
+            ? `${economy.summary.rulesWithoutBudget} активн. сценариев без бюджета`
+            : "Активные сценарии с бюджетом под контролем"}
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <MiniMetric
+          label="использовано бюджета"
+          value={formatMoney(economy.summary.budgetUsedCost)}
+        />
+        <MiniMetric
+          label="очередь выдачи"
+          value={formatMoney(
+            economy.summary.pendingCost + economy.summary.approvedCost,
+          )}
+        />
+        <MiniMetric
+          label="погашено"
+          value={formatMoney(economy.summary.paidCost)}
+        />
+        <MiniMetric
+          label="гости / XP"
+          value={`${economy.summary.uniqueGuests} / +${economy.summary.xpIssued}`}
+        />
+      </div>
+
+      <div className="mt-4">
+        <div className="flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+          <span>Плановый бюджет</span>
+          <span>
+            {economy.summary.budgetUsagePercent === null
+              ? "лимит не задан"
+              : `${formatPercent(economy.summary.budgetUsagePercent)} · ${formatMoney(
+                  economy.summary.plannedBudget,
+                )}`}
+          </span>
+        </div>
+        <div className="mt-2 h-2 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-900">
+          <div
+            className={[
+              "h-full rounded-full transition-all",
+              economyUsageClass(economy.summary.budgetUsagePercent),
+            ].join(" ")}
+            style={{ width: `${usageWidth}%` }}
+          />
+        </div>
+      </div>
+
+      <div className="mt-4 space-y-2">
+        {visibleScenarios.length ? (
+          visibleScenarios.map((scenario) => (
+            <div
+              key={`${scenario.kind}:${scenario.id}`}
+              className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/50"
+            >
+              <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-full bg-emerald-100 px-2 py-1 text-[11px] font-bold uppercase text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
+                      {economyKindLabel(scenario.kind)}
+                    </span>
+                    <span className="rounded-full bg-zinc-200 px-2 py-1 text-[11px] font-bold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
+                      {economyStatusLabel(scenario.status)}
+                    </span>
+                  </div>
+                  <h3 className="mt-2 truncate text-sm font-bold text-zinc-950 dark:text-white">
+                    {scenario.name}
+                  </h3>
+                  <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                    {scenario.recommendation}
+                  </p>
+                </div>
+                <div className="grid min-w-0 gap-2 text-xs sm:grid-cols-4 lg:min-w-[520px]">
+                  <MiniMetric
+                    label="стоимость"
+                    value={formatMoney(scenario.budgetUsedCost)}
+                  />
+                  <MiniMetric
+                    label="очередь"
+                    value={`${scenario.pendingRewards + scenario.approvedRewards} · ${formatMoney(
+                      scenario.pendingCost + scenario.approvedCost,
+                    )}`}
+                  />
+                  <MiniMetric
+                    label="выдано"
+                    value={`${scenario.paidRewards} · ${formatMoney(
+                      scenario.paidCost,
+                    )}`}
+                  />
+                  <MiniMetric
+                    label="события"
+                    value={`${scenario.eventsCount} · +${scenario.xpIssued} XP`}
+                  />
+                </div>
+              </div>
+            </div>
+          ))
+        ) : (
+          <EmptyState text="Экономика появится после создания лутбокса, миссии, Battle Pass или награды." />
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -6529,6 +6663,50 @@ function formatMoney(value: number) {
     currency: "RUB",
     maximumFractionDigits: 0,
   }).format(value);
+}
+
+function formatPercent(value: number) {
+  return `${new Intl.NumberFormat("ru-RU", {
+    maximumFractionDigits: 1,
+  }).format(value)}%`;
+}
+
+function economyKindLabel(
+  kind: GuestGamificationWorkspace["economy"]["scenarios"][number]["kind"],
+) {
+  switch (kind) {
+    case "LOOT_BOX":
+      return "Лутбокс";
+    case "MISSION":
+      return "Миссия";
+    case "SEASON":
+      return "Battle Pass";
+    case "MANUAL":
+    default:
+      return "Ручное";
+  }
+}
+
+function economyStatusLabel(
+  status: GuestGamificationWorkspace["economy"]["scenarios"][number]["status"],
+) {
+  return statusLabels[status as GuestGameStatus] ?? status;
+}
+
+function economyUsageClass(value: number | null) {
+  if (value === null) {
+    return "bg-zinc-300 dark:bg-zinc-700";
+  }
+
+  if (value >= 90) {
+    return "bg-red-500";
+  }
+
+  if (value >= 70) {
+    return "bg-amber-400";
+  }
+
+  return "bg-emerald-500";
 }
 
 function sessionTypeLabel(value: string | null) {

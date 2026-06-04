@@ -252,6 +252,36 @@ export type LangameGuestSearchDiagnosticsResult = {
   sources: LangameGuestSearchDiagnosticsSource[];
 };
 
+export type LangameGuestDetailsPortalResult = {
+  checkedAt: string;
+  externalGuestId: string;
+  source: {
+    id: string;
+    name: string;
+    domain: string;
+    status: 'SUCCESS' | 'FAILED';
+    path: string;
+    payloadKind: 'array' | 'object' | 'scalar' | 'empty';
+    fieldKeys: string[];
+    summary: string | null;
+    payloadPreview: unknown;
+    errorMessage: string | null;
+  };
+  details: {
+    externalGuestId: string | null;
+    guestTypeId: string | null;
+    phoneMasked: string | null;
+    emailMasked: string | null;
+    fullNameMasked: string | null;
+    bonusProgramNumberMasked: string | null;
+    registeredAt: string | null;
+    dateLastActivity: string | null;
+    currentCountHours: string | null;
+    statusLabels: string[];
+    rawKeys: string[];
+  } | null;
+};
+
 export type LangameEndpointProfileKey =
   | 'allOperationsLog'
   | 'transactions'

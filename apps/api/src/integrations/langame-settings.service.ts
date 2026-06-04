@@ -21,6 +21,7 @@ import type {
   LangameGuestSearchDiagnosticsResult,
   LangameGuestSearchField,
   LangameGuestSearchQuery,
+  LangameGuestDetailsPortalResult,
   LangameRouteSummary,
   LangameRoutesDiagnosticsResult,
   LangameServiceDiagnosticsResult,
@@ -1030,6 +1031,86 @@ export class LangameSettingsService {
     };
   }
 
+  async getGuestDetailsForPortal(
+    tenantId: string,
+    sourceDomain: string,
+    externalGuestId: string,
+  ): Promise<LangameGuestDetailsPortalResult> {
+    const { apiKey, sources } = await this.resolveTenantAccess(tenantId);
+    const endpoint = PROFILE_DIAGNOSTIC_ENDPOINTS.find(
+      (item) => item.key === 'guestDetails',
+    );
+    const source = sources.find((item) => item.domain === sourceDomain);
+    const guestId = externalGuestId.trim();
+
+    if (!endpoint) {
+      throw new BadRequestException('Langame guest details endpoint not found');
+    }
+
+    if (!source) {
+      throw new BadRequestException('Langame source for guest is not found');
+    }
+
+    if (!guestId) {
+      throw new BadRequestException('Guest id is required');
+    }
+
+    const path = this.buildEndpointProfilePath(endpoint, { guestId });
+    const checkedAt = new Date().toISOString();
+
+    try {
+      const payload = await this.langameClient.getDiagnosticEndpoint(
+        source.baseUrl,
+        apiKey,
+        path,
+      );
+      const rows = this.extractGuestSearchRows(payload);
+      const firstRow = rows[0] ?? null;
+
+      return {
+        checkedAt,
+        externalGuestId: guestId,
+        source: {
+          id: source.id,
+          name: source.name,
+          domain: source.domain,
+          status: 'SUCCESS',
+          path,
+          payloadKind: this.getPayloadKind(payload),
+          fieldKeys: this.extractFieldKeys(rows),
+          summary: this.extractEndpointProfileSummary(payload),
+          payloadPreview: this.sanitizeEndpointProfilePayload(
+            endpoint,
+            payload,
+          ),
+          errorMessage: null,
+        },
+        details: firstRow ? this.toGuestDetailsPortalItem(firstRow) : null,
+      };
+    } catch (error) {
+      return {
+        checkedAt,
+        externalGuestId: guestId,
+        source: {
+          id: source.id,
+          name: source.name,
+          domain: source.domain,
+          status: 'FAILED',
+          path,
+          payloadKind: 'empty',
+          fieldKeys: [],
+          summary: null,
+          payloadPreview: null,
+          errorMessage:
+            error instanceof Error
+              ? error.message
+              : 'Unknown Langame guest details portal error',
+        },
+        details: null,
+      };
+    }
+  }
+
   private toServiceEndpointDiagnostics(
     endpoint: LangameServiceEndpointDefinition,
     payload: unknown,
@@ -1952,6 +2033,72 @@ export class LangameSettingsService {
       ]),
       rawKeys: Object.keys(row).slice(0, 30),
     };
+  }
+
+  private toGuestDetailsPortalItem(row: Record<string, unknown>) {
+    return {
+      externalGuestId: this.firstValueString(row, [
+        'guest_id',
+        'real_guest_id',
+        'id',
+      ]),
+      guestTypeId: this.firstValueString(row, ['guest_type_id', 'type_id']),
+      phoneMasked: this.maskPhone(this.firstValueString(row, ['phone'])),
+      emailMasked: this.maskEmail(this.firstValueString(row, ['email'])),
+      fullNameMasked: this.maskName(
+        this.firstValueString(row, ['fio', 'full_name', 'name']),
+      ),
+      bonusProgramNumberMasked: this.maskGeneric(
+        this.firstValueString(row, ['bonus_program_number']),
+      ),
+      registeredAt: this.firstValueString(row, [
+        'date_insert',
+        'registered_at',
+        'created_at',
+      ]),
+      dateLastActivity: this.firstValueString(row, [
+        'date_last_activity',
+        'last_activity_at',
+        'updated_at',
+      ]),
+      currentCountHours: this.firstValueString(row, ['current_count_hours']),
+      statusLabels: this.guestDetailsStatusLabels(row),
+      rawKeys: Object.keys(row).slice(0, 30),
+    };
+  }
+
+  private guestDetailsStatusLabels(row: Record<string, unknown>) {
+    const labels = [
+      this.truthyLangameValue(row.confirm) ? 'Профиль подтвержден' : null,
+      this.truthyLangameValue(row.mobile_reg) ? 'Мобильная регистрация' : null,
+      this.truthyLangameValue(row.simple_reg) ? 'Упрощенная регистрация' : null,
+      this.truthyLangameValue(row.temp_guest) ? 'Временный гость' : null,
+      this.truthyLangameValue(row.virtual) ? 'Виртуальный профиль' : null,
+      this.truthyLangameValue(row.disabled) ? 'Отключен' : null,
+      this.truthyLangameValue(row.identity_document) ||
+      this.truthyLangameValue(row.identity_document_data)
+        ? 'Документ указан'
+        : null,
+    ].filter((item): item is string => Boolean(item));
+
+    return labels.length ? labels : ['Без особых статусов'];
+  }
+
+  private truthyLangameValue(value: unknown) {
+    if (typeof value === 'boolean') {
+      return value;
+    }
+
+    if (typeof value === 'number') {
+      return value !== 0;
+    }
+
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      return ['1', 'true', 'yes', 'y', 'да'].includes(normalized);
+    }
+
+    return Boolean(value);
   }
 
   private sanitizeGuestSearchPayload(value: unknown, depth = 0): unknown {

@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import type {
   GuestPortalCommunicationPreferenceAction,
   GuestPortalCommunicationPreferenceResponse,
+  GuestPortalLangameDetailsResponse,
   GuestPortalLangameMatchResponse,
   GuestPortalMessengerChannel,
   GuestPortalMessengerUpdateResponse,
@@ -40,6 +41,12 @@ export function GuestPortalClient({
     null,
   );
   const [isMatchingLangame, setMatchingLangame] = useState(false);
+  const [langameDetails, setLangameDetails] =
+    useState<GuestPortalLangameDetailsResponse | null>(null);
+  const [langameDetailsMessage, setLangameDetailsMessage] = useState<
+    string | null
+  >(null);
+  const [isCheckingLangameDetails, setCheckingLangameDetails] = useState(false);
   const [communicationMessage, setCommunicationMessage] = useState<
     string | null
   >(null);
@@ -118,6 +125,8 @@ export function GuestPortalClient({
       setCode("");
       setLangameMatch(null);
       setLangameMatchMessage(null);
+      setLangameDetails(null);
+      setLangameDetailsMessage(null);
       setMessengerMessage(null);
       setMessage(
         data.delivery.status === "DEV_CODE"
@@ -161,6 +170,8 @@ export function GuestPortalClient({
       setPortal(data.portal);
       setLangameMatch(null);
       setLangameMatchMessage(null);
+      setLangameDetails(null);
+      setLangameDetailsMessage(null);
       setMessengerMessage(null);
       setMessage("Профиль подтвержден.");
     } catch (error) {
@@ -199,6 +210,8 @@ export function GuestPortalClient({
         (await response.json()) as GuestPortalLangameMatchResponse;
       setLangameMatch(data);
       setLangameMatchMessage(data.nextAction);
+      setLangameDetails(null);
+      setLangameDetailsMessage(null);
     } catch (error) {
       setLangameMatchMessage(
         error instanceof Error
@@ -207,6 +220,35 @@ export function GuestPortalClient({
       );
     } finally {
       setMatchingLangame(false);
+    }
+  }
+
+  async function checkLangameDetails() {
+    setCheckingLangameDetails(true);
+    setLangameDetailsMessage(null);
+    setLangameDetails(null);
+
+    try {
+      const response = await fetch("/api/guest-portal/session/langame-details", {
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        throw new Error(await readMessage(response));
+      }
+
+      const data =
+        (await response.json()) as GuestPortalLangameDetailsResponse;
+      setLangameDetails(data);
+      setLangameDetailsMessage(data.nextAction);
+    } catch (error) {
+      setLangameDetailsMessage(
+        error instanceof Error
+          ? error.message
+          : "Не удалось проверить карточку Langame.",
+      );
+    } finally {
+      setCheckingLangameDetails(false);
     }
   }
 
@@ -321,12 +363,16 @@ export function GuestPortalClient({
             langameMatch={langameMatch}
             langameMatchMessage={langameMatchMessage}
             isMatchingLangame={isMatchingLangame}
+            langameDetails={langameDetails}
+            langameDetailsMessage={langameDetailsMessage}
+            isCheckingLangameDetails={isCheckingLangameDetails}
             communicationMessage={communicationMessage}
             isUpdatingCommunication={isUpdatingCommunication}
             messengerMessage={messengerMessage}
             isUpdatingMessenger={isUpdatingMessenger}
             onPhoneChange={setPhone}
             onCheckLangameMatch={checkLangameMatch}
+            onCheckLangameDetails={checkLangameDetails}
             onUpdateCommunicationPreference={updateCommunicationPreference}
             onUpdateMessenger={updateMessengerChannel}
           />
@@ -509,12 +555,16 @@ function VerifiedPortal({
   langameMatch,
   langameMatchMessage,
   isMatchingLangame,
+  langameDetails,
+  langameDetailsMessage,
+  isCheckingLangameDetails,
   communicationMessage,
   isUpdatingCommunication,
   messengerMessage,
   isUpdatingMessenger,
   onPhoneChange,
   onCheckLangameMatch,
+  onCheckLangameDetails,
   onUpdateCommunicationPreference,
   onUpdateMessenger,
 }: {
@@ -523,12 +573,16 @@ function VerifiedPortal({
   langameMatch: GuestPortalLangameMatchResponse | null;
   langameMatchMessage: string | null;
   isMatchingLangame: boolean;
+  langameDetails: GuestPortalLangameDetailsResponse | null;
+  langameDetailsMessage: string | null;
+  isCheckingLangameDetails: boolean;
   communicationMessage: string | null;
   isUpdatingCommunication: boolean;
   messengerMessage: string | null;
   isUpdatingMessenger: boolean;
   onPhoneChange: (value: string) => void;
   onCheckLangameMatch: (event: FormEvent<HTMLFormElement>) => void;
+  onCheckLangameDetails: () => void;
   onUpdateCommunicationPreference: (
     action: GuestPortalCommunicationPreferenceAction,
   ) => void;
@@ -556,6 +610,14 @@ function VerifiedPortal({
         isLoading={isMatchingLangame}
         onPhoneChange={onPhoneChange}
         onSubmit={onCheckLangameMatch}
+      />
+
+      <LangameDetailsPanel
+        portal={portal}
+        result={langameDetails}
+        message={langameDetailsMessage}
+        isLoading={isCheckingLangameDetails}
+        onCheck={onCheckLangameDetails}
       />
 
       <NextActionsPanel portal={portal} />
@@ -1410,6 +1472,173 @@ function LangameMatchPanel({
               </div>
             ))}
           </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function LangameDetailsPanel({
+  portal,
+  result,
+  message,
+  isLoading,
+  onCheck,
+}: {
+  portal: GuestPortalPayload;
+  result: GuestPortalLangameDetailsResponse | null;
+  message: string | null;
+  isLoading: boolean;
+  onCheck: () => void;
+}) {
+  const details = result?.langame?.details ?? null;
+  const source = result?.langame?.source ?? null;
+
+  return (
+    <section className="rounded-lg border border-white/10 bg-[#0b111c] p-4">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="max-w-3xl">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-xs font-bold uppercase text-slate-400">
+              Карточка Langame
+            </p>
+            <span className="rounded-lg border border-white/10 bg-white/[0.06] px-2 py-1 text-xs font-bold text-slate-300">
+              только по кнопке
+            </span>
+          </div>
+          <h3 className="mt-2 text-xl font-black text-white">
+            Проверить актуальную карточку
+          </h3>
+          <p className="mt-2 text-sm leading-6 text-slate-400">
+            Проверка использует сохраненную связку гостя с Langame и показывает
+            только маскированные поля. Сырой ответ не сохраняется и не
+            раскрывается в кабинете.
+          </p>
+        </div>
+        <button
+          type="button"
+          disabled={isLoading}
+          onClick={onCheck}
+          className="rounded-lg border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-black text-white transition hover:border-cyan-300/45 hover:bg-cyan-300/[0.10] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isLoading ? "Проверяем..." : "Проверить карточку"}
+        </button>
+      </div>
+
+      {message ? (
+        <p className="mt-4 rounded-lg border border-white/10 bg-white/[0.04] p-3 text-sm leading-6 text-slate-300">
+          {message}
+        </p>
+      ) : null}
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <InfoLine
+          label="Snapshot"
+          value={
+            portal.guestSnapshot.source.lastSyncedAt
+              ? formatDate(portal.guestSnapshot.source.lastSyncedAt)
+              : "нет данных"
+          }
+        />
+        <InfoLine
+          label="Источник"
+          value={
+            source
+              ? `${source.name} · ${source.domain}`
+              : portal.guestSnapshot.source.domain ?? "не сопоставлен"
+          }
+        />
+        <InfoLine
+          label="Статус проверки"
+          value={result ? langameDetailsStatusLabel(result.status) : "не запускалась"}
+        />
+        <InfoLine
+          label="Проверено"
+          value={result ? formatDateTimeOrRaw(result.checkedAt) : "нет данных"}
+        />
+      </div>
+
+      {result ? (
+        <div className="mt-4 rounded-lg border border-white/10 bg-[#070b12] p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span
+              className={`rounded-lg px-3 py-1 text-xs font-black uppercase ${langameDetailsStatusClass(
+                result.status,
+              )}`}
+            >
+              {langameDetailsStatusLabel(result.status)}
+            </span>
+            {source ? (
+              <span className="text-xs font-semibold text-slate-500">
+                {source.payloadKind} · {source.fieldKeys.length} полей
+              </span>
+            ) : null}
+          </div>
+
+          {!details ? (
+            <p className="mt-3 text-sm leading-6 text-slate-400">
+              Детали не получены. Если профиль уже есть в LeetPlus, кабинет
+              продолжит работать по сохраненному snapshot.
+            </p>
+          ) : (
+            <>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <Metric
+                  label="Контакт"
+                  value={
+                    details.phoneMasked ??
+                    details.emailMasked ??
+                    details.fullNameMasked ??
+                    "скрыт"
+                  }
+                />
+                <Metric
+                  label="Тип гостя"
+                  value={
+                    details.guestTypeId ? `#${details.guestTypeId}` : "нет"
+                  }
+                />
+                <Metric
+                  label="Часы"
+                  value={details.currentCountHours ?? "нет данных"}
+                />
+                <Metric
+                  label="Бонусная карта"
+                  value={details.bonusProgramNumberMasked ?? "нет"}
+                />
+              </div>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <InfoLine
+                  label="Регистрация Langame"
+                  value={
+                    details.registeredAt
+                      ? formatDateTimeOrRaw(details.registeredAt)
+                      : "нет данных"
+                  }
+                />
+                <InfoLine
+                  label="Последняя активность Langame"
+                  value={
+                    details.dateLastActivity
+                      ? formatDateTimeOrRaw(details.dateLastActivity)
+                      : "нет данных"
+                  }
+                />
+              </div>
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                {details.statusLabels.map((label) => (
+                  <span
+                    key={label}
+                    className="rounded-lg border border-cyan-300/15 bg-cyan-300/[0.08] px-3 py-1 text-xs font-bold text-cyan-100"
+                  >
+                    {label}
+                  </span>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       ) : null}
     </section>
@@ -2539,6 +2768,18 @@ function langameMatchStatusLabel(
   return labels[status];
 }
 
+function langameDetailsStatusLabel(
+  status: GuestPortalLangameDetailsResponse["status"],
+) {
+  const labels = {
+    SUCCESS: "карточка получена",
+    FAILED: "ошибка Langame",
+    NOT_LINKED: "не сопоставлен",
+  } satisfies Record<GuestPortalLangameDetailsResponse["status"], string>;
+
+  return labels[status];
+}
+
 function crmLeadStatusLabel(
   status: GuestPortalPayload["crmLead"]["crmStatus"],
 ) {
@@ -2603,6 +2844,18 @@ function langameMatchStatusClass(
   return classes[status];
 }
 
+function langameDetailsStatusClass(
+  status: GuestPortalLangameDetailsResponse["status"],
+) {
+  const classes = {
+    SUCCESS: "bg-emerald-300/10 text-emerald-200",
+    FAILED: "bg-rose-300/10 text-rose-100",
+    NOT_LINKED: "bg-amber-300/10 text-amber-100",
+  } satisfies Record<GuestPortalLangameDetailsResponse["status"], string>;
+
+  return classes[status];
+}
+
 function langameSourceStatusClass(status: "SUCCESS" | "FAILED") {
   return status === "SUCCESS"
     ? "bg-emerald-300/10 text-emerald-200"
@@ -2638,6 +2891,22 @@ function formatTime(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
+}
+
+function formatDateTimeOrRaw(value: string) {
+  const time = Date.parse(value);
+
+  if (Number.isNaN(time)) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(time));
 }
 
 function SparkIcon() {

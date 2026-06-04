@@ -15,7 +15,10 @@ import {
 } from '@prisma/client';
 import { createHash, createHmac, randomInt, randomUUID } from 'node:crypto';
 import { LangameSettingsService } from '../integrations/langame-settings.service';
-import type { LangameGuestSearchResultItem } from '../integrations/langame.types';
+import type {
+  LangameGuestDetailsPortalResult,
+  LangameGuestSearchResultItem,
+} from '../integrations/langame.types';
 import { PrismaService } from '../prisma/prisma.service';
 
 const OTP_TTL_MINUTES = 10;
@@ -425,6 +428,18 @@ export type GuestPortalLangameMatchResponse = {
       }
     >;
   }>;
+};
+
+export type GuestPortalLangameDetailsResponse = {
+  checkedAt: string;
+  status: 'SUCCESS' | 'FAILED' | 'NOT_LINKED';
+  nextAction: string;
+  localSnapshot: {
+    sourceDomain: string | null;
+    externalGuestId: string | null;
+    lastSyncedAt: string | null;
+  };
+  langame: LangameGuestDetailsPortalResult | null;
 };
 
 type GuestPortalMissionProgress = {
@@ -925,6 +940,48 @@ export class GuestPortalService {
       profileId: localProfile?.id ?? payload.profileId,
       nextAction: guestPortalLangameMatchNextAction(status),
       sources,
+    };
+  }
+
+  async getLangameGuestDetails(
+    authorization: string | undefined,
+  ): Promise<GuestPortalLangameDetailsResponse> {
+    const payload = await this.verifyGuestToken(authorization);
+    const guest = await this.findGuest(payload);
+    const checkedAt = new Date().toISOString();
+    const localSnapshot = {
+      sourceDomain: guest?.externalDomain ?? null,
+      externalGuestId: guest?.externalGuestId ?? null,
+      lastSyncedAt: iso(guest?.lastSyncedAt ?? null),
+    };
+
+    if (!guest?.externalDomain || !guest.externalGuestId) {
+      return {
+        checkedAt,
+        status: 'NOT_LINKED',
+        nextAction:
+          'Сначала сопоставьте гостя с Langame через проверку профиля или дождитесь синхронизации клуба.',
+        localSnapshot,
+        langame: null,
+      };
+    }
+
+    const langame = await this.langameSettingsService.getGuestDetailsForPortal(
+      payload.tenantId,
+      guest.externalDomain,
+      guest.externalGuestId,
+    );
+    const status = langame.source.status;
+
+    return {
+      checkedAt: langame.checkedAt,
+      status,
+      nextAction:
+        status === 'SUCCESS'
+          ? 'Карточка Langame проверена вручную. Данные показаны в безопасном виде и не сохранены как raw payload.'
+          : 'Langame сейчас не вернул карточку гостя. Используйте сохраненный snapshot и повторите проверку позже.',
+      localSnapshot,
+      langame,
     };
   }
 

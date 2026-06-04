@@ -79,6 +79,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added manual Langame guest-card verification to the public guest portal: a verified guest can request a one-click safe `GET /public_api/guests/{guest_id}` check only for the locally linked Langame guest, with masked fields, dates, hours, status labels, and field keys returned without accepting guest ids from the browser, saving raw payloads, or making live reads on page load.
 - Added a guest-profile readiness layer to the public guest portal: the saved Langame/LeetPlus snapshot, CRM lead, and game profile now produce a guest-facing status for Langame linkage, guest type, registration channel, verification, loyalty readiness, game-profile readiness, and Telegram/MAX readiness without live Langame reads or raw PII exposure.
 - Added CRM-lead matching to the public guest portal: verified guest sessions now find a safe `GuestCrmLead` by `phoneHash` when a Langame `Guest` is not yet synced, show a masked lead card, can prepare a `GuestGameProfile` linked by `leadId`, and can save communication consent plus Telegram/MAX alias for lead-only profiles without live Langame reads or external sends.
 - Added guest self-service Telegram/MAX alias linking to the public guest portal: `/guest/[tenantSlug]/[storeId]` now lets a verified guest save a public messenger alias through a guest-token-only endpoint, stores it on `GuestGameProfile`, refreshes channel readiness in the portal, and still sends no external messages without a separately configured bot/provider and consent.

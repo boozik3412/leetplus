@@ -12,7 +12,10 @@ import type { GuestAudience, GuestCrmLead, GuestDashboardRow } from "@/lib/guest
 import type {
   GuestGameEvent,
   GuestGameDryRunResult,
+  GuestGameGuestLogMappingIntent,
+  GuestGameGuestLogMappingPreset,
   GuestGameGuestLogCatalog,
+  GuestGameGuestLogTypeMapping,
   GuestGameLootBox,
   GuestGameMission,
   GuestGameProfile,
@@ -53,6 +56,14 @@ type TabId =
   | "seasons"
   | "rewards"
   | "testRun";
+
+type GuestLogMappingPayload = {
+  rawType: string;
+  label: string;
+  preset: GuestGameGuestLogMappingPreset;
+  intent: GuestGameGuestLogMappingIntent;
+  note: string;
+};
 
 type ProfileForm = {
   guestId: string;
@@ -1027,6 +1038,32 @@ export function GuestGamificationPanel({
     });
   }
 
+  async function saveGuestLogTypeMapping(payload: GuestLogMappingPayload) {
+    await saveAction("guestLogMapping", async () => {
+      assertCan(
+        access.canManageRules,
+        "Для настройки типов guests/logs нужно право `Геймификация: правила`.",
+      );
+
+      await postJson("/api/guests/gamification/guest-log-mappings", payload);
+      await reloadWorkspace();
+    });
+  }
+
+  async function deleteGuestLogTypeMapping(
+    mapping: GuestGameGuestLogTypeMapping,
+  ) {
+    await saveAction("guestLogMapping", async () => {
+      assertCan(
+        access.canManageRules,
+        "Для настройки типов guests/logs нужно право `Геймификация: правила`.",
+      );
+
+      await deleteJson(`/api/guests/gamification/guest-log-mappings/${mapping.id}`);
+      await reloadWorkspace();
+    });
+  }
+
   function applySnapshotFact(fact: GuestGameSnapshotFact) {
     setDryRunForm((current) => ({
       ...current,
@@ -1243,6 +1280,9 @@ export function GuestGamificationPanel({
           tenantSlug={tenantSlug}
           stores={stores}
           canApproveRewards={access.canApproveRewards}
+          canManageRules={access.canManageRules}
+          onSaveGuestLogMapping={saveGuestLogTypeMapping}
+          onDeleteGuestLogMapping={deleteGuestLogTypeMapping}
         />
       ) : null}
 
@@ -2171,6 +2211,9 @@ function OverviewTab({
   tenantSlug,
   stores,
   canApproveRewards,
+  canManageRules,
+  onSaveGuestLogMapping,
+  onDeleteGuestLogMapping,
 }: {
   workspace: GuestGamificationWorkspace;
   pendingRewards: GuestGameReward[];
@@ -2184,6 +2227,11 @@ function OverviewTab({
   tenantSlug: string;
   stores: Store[];
   canApproveRewards: boolean;
+  canManageRules: boolean;
+  onSaveGuestLogMapping: (payload: GuestLogMappingPayload) => Promise<void>;
+  onDeleteGuestLogMapping: (
+    mapping: GuestGameGuestLogTypeMapping,
+  ) => Promise<void>;
 }) {
   return (
     <div className="space-y-5">
@@ -2265,7 +2313,13 @@ function OverviewTab({
 
       <TariffSnapshotReadinessCard snapshots={workspace.tariffSnapshots} />
 
-      <GuestLogCatalogCard catalog={workspace.guestLogCatalog} />
+      <GuestLogCatalogCard
+        catalog={workspace.guestLogCatalog}
+        saving={saving}
+        canManage={canManageRules}
+        onSaveMapping={onSaveGuestLogMapping}
+        onDeleteMapping={onDeleteGuestLogMapping}
+      />
 
       <PortalLinksCard tenantSlug={tenantSlug} stores={stores} />
 
@@ -2526,11 +2580,61 @@ function TariffSnapshotReadinessCard({
 
 function GuestLogCatalogCard({
   catalog,
+  saving,
+  canManage,
+  onSaveMapping,
+  onDeleteMapping,
 }: {
   catalog: GuestGameGuestLogCatalog;
+  saving: string | null;
+  canManage: boolean;
+  onSaveMapping: (payload: GuestLogMappingPayload) => Promise<void>;
+  onDeleteMapping: (mapping: GuestGameGuestLogTypeMapping) => Promise<void>;
 }) {
   const topItems = catalog.items.slice(0, 8);
+  const initialItem = topItems[0] ?? catalog.items[0] ?? null;
+  const [selectedType, setSelectedType] = useState(
+    initialItem?.normalizedType ?? "",
+  );
+  const [draft, setDraft] = useState<GuestLogMappingPayload>(() =>
+    guestLogMappingDraftFromItem(initialItem),
+  );
+  const selectedItem =
+    catalog.items.find((item) => item.normalizedType === selectedType) ??
+    initialItem;
+  const selectedMapping = selectedItem?.mapping ?? null;
   const businessPresets = guestLogBusinessPresets(catalog.items).slice(0, 5);
+  const isSaving = saving === "guestLogMapping";
+  const selectItem = (item: GuestGameGuestLogCatalog["items"][number]) => {
+    setSelectedType(item.normalizedType);
+    setDraft(guestLogMappingDraftFromItem(item));
+  };
+  const saveMapping = async () => {
+    if (!selectedItem) {
+      return;
+    }
+
+    await onSaveMapping({
+      ...draft,
+      rawType: selectedItem.type,
+      label: draft.label.trim() || selectedItem.type,
+      note: draft.note.trim(),
+    });
+  };
+  const resetMapping = async () => {
+    if (!selectedItem?.mapping) {
+      return;
+    }
+
+    await onDeleteMapping(selectedItem.mapping);
+    setDraft({
+      rawType: selectedItem.type,
+      label: selectedItem.type,
+      preset: "custom",
+      intent: "allow",
+      note: "",
+    });
+  };
 
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
@@ -2543,7 +2647,7 @@ function GuestLogCatalogCard({
             страницы не делает live-запросов в Langame.
           </p>
         </div>
-        <div className="grid grid-cols-3 overflow-hidden rounded-lg border border-zinc-200 bg-zinc-50 text-center text-xs dark:border-zinc-800 dark:bg-zinc-900/60">
+        <div className="grid grid-cols-4 overflow-hidden rounded-lg border border-zinc-200 bg-zinc-50 text-center text-xs dark:border-zinc-800 dark:bg-zinc-900/60">
           <div className="px-3 py-2">
             <span className="block text-zinc-400">Типы</span>
             <span className="font-bold text-zinc-900 dark:text-white">
@@ -2562,29 +2666,182 @@ function GuestLogCatalogCard({
               {catalog.summary.domains}
             </span>
           </div>
+          <div className="border-l border-zinc-200 px-3 py-2 dark:border-zinc-800">
+            <span className="block text-zinc-400">Словарь</span>
+            <span className="font-bold text-zinc-900 dark:text-white">
+              {catalog.mappings.length}
+            </span>
+          </div>
         </div>
       </div>
 
       {topItems.length ? (
         <>
-          <div className="mt-4 flex flex-wrap gap-2">
-            {topItems.map((item) => (
-              <span
-                key={item.normalizedType}
-                className="rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-900 ring-1 ring-emerald-100 dark:bg-emerald-950/30 dark:text-emerald-100 dark:ring-emerald-900/70"
-                title={item.domains
-                  .map((domain) => `${domain.domain}: ${domain.count}`)
-                  .join(", ")}
-              >
-                {item.type} · {item.count}
-              </span>
-            ))}
-            {catalog.summary.latestAt ? (
-              <span className="rounded-full bg-zinc-100 px-3 py-1.5 text-xs font-semibold text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
-                последний: {formatDate(catalog.summary.latestAt)}
-              </span>
-            ) : null}
+          <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.9fr)]">
+            <div className="grid gap-2 sm:grid-cols-2">
+              {topItems.map((item) => {
+                const isSelected =
+                  selectedItem?.normalizedType === item.normalizedType;
+
+                return (
+                  <button
+                    key={item.normalizedType}
+                    type="button"
+                    onClick={() => selectItem(item)}
+                    className={[
+                      "rounded-lg border p-3 text-left transition hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-sm dark:hover:border-emerald-800",
+                      isSelected
+                        ? "border-emerald-500 bg-emerald-50/70 dark:border-emerald-700 dark:bg-emerald-950/30"
+                        : "border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/50",
+                    ].join(" ")}
+                    title={item.domains
+                      .map((domain) => `${domain.domain}: ${domain.count}`)
+                      .join(", ")}
+                  >
+                    <span className="block truncate text-sm font-bold text-zinc-900 dark:text-white">
+                      {item.mapping?.label ?? item.type}
+                    </span>
+                    <span className="mt-1 block truncate text-xs text-zinc-500 dark:text-zinc-400">
+                      {item.type}
+                    </span>
+                    <span className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-semibold">
+                      <span className="rounded-full bg-white px-2 py-1 text-zinc-500 ring-1 ring-zinc-200 dark:bg-zinc-950 dark:ring-zinc-800">
+                        {item.count} логов
+                      </span>
+                      {item.mapping ? (
+                        <span className="rounded-full bg-emerald-100 px-2 py-1 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-100">
+                          настроено
+                        </span>
+                      ) : (
+                        <span className="rounded-full bg-zinc-100 px-2 py-1 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-300">
+                          авто
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/50">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                Сопоставление типа
+              </p>
+              <h3 className="mt-1 truncate text-base font-bold text-zinc-950 dark:text-white">
+                {selectedItem?.type ?? "Тип не выбран"}
+              </h3>
+              <div className="mt-3 grid gap-3">
+                <Field label="Название для менеджера">
+                  <input
+                    className={fieldClass}
+                    value={draft.label}
+                    disabled={!canManage || !selectedItem}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        label: event.target.value,
+                      }))
+                    }
+                  />
+                </Field>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Бизнес-пресет">
+                    <select
+                      className={fieldClass}
+                      value={draft.preset}
+                      disabled={!canManage || !selectedItem}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          preset: event.target
+                            .value as GuestGameGuestLogMappingPreset,
+                        }))
+                      }
+                    >
+                      {guestLogMappingPresetOptions.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Применение">
+                    <select
+                      className={fieldClass}
+                      value={draft.intent}
+                      disabled={!canManage || !selectedItem}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          intent: event.target
+                            .value as GuestGameGuestLogMappingIntent,
+                        }))
+                      }
+                    >
+                      <option value="allow">Разрешенное условие</option>
+                      <option value="block">Anti-fraud запрет</option>
+                    </select>
+                  </Field>
+                </div>
+                <Field label="Заметка">
+                  <textarea
+                    className={`${fieldClass} min-h-20 resize-y`}
+                    value={draft.note}
+                    disabled={!canManage || !selectedItem}
+                    placeholder="Например: срабатывает при старте оплаченной игровой сессии"
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        note: event.target.value,
+                      }))
+                    }
+                  />
+                </Field>
+              </div>
+
+              {selectedMapping ? (
+                <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
+                  Сохранено: {formatDate(selectedMapping.updatedAt)}
+                  {selectedMapping.updatedBy
+                    ? ` · ${selectedMapping.updatedBy.displayName}`
+                    : ""}
+                </p>
+              ) : (
+                <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
+                  Пока используется автоподбор по словам. Сохраните смысл, если
+                  raw-тип нужно трактовать стабильнее.
+                </p>
+              )}
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={saveMapping}
+                  disabled={!canManage || !selectedItem || isSaving}
+                  className="rounded-lg bg-emerald-500 px-3 py-2 text-sm font-bold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isSaving ? "Сохраняем..." : "Сохранить смысл"}
+                </button>
+                {selectedMapping ? (
+                  <button
+                    type="button"
+                    onClick={resetMapping}
+                    disabled={!canManage || isSaving}
+                    className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-bold text-zinc-700 transition hover:border-zinc-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-800 dark:text-zinc-200 dark:hover:border-zinc-700 dark:hover:bg-zinc-950"
+                  >
+                    Сбросить
+                  </button>
+                ) : null}
+              </div>
+            </div>
           </div>
+
+          {catalog.summary.latestAt ? (
+            <p className="mt-3 text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+              Последний лог: {formatDate(catalog.summary.latestAt)}
+            </p>
+          ) : null}
+
           {businessPresets.length ? (
             <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/50">
               <p className="text-[11px] font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
@@ -5032,6 +5289,29 @@ const guestLogBusinessPresetDefinitions: Array<
   },
 ];
 
+const guestLogMappingPresetOptions: Array<{
+  id: GuestGameGuestLogMappingPreset;
+  label: string;
+}> = [
+  ...guestLogBusinessPresetDefinitions.map((definition) => ({
+    id: definition.id as GuestGameGuestLogMappingPreset,
+    label: definition.label,
+  })),
+  { id: "custom", label: "Свой смысл" },
+];
+
+function guestLogMappingDraftFromItem(
+  item: GuestGameGuestLogCatalog["items"][number] | null,
+): GuestLogMappingPayload {
+  return {
+    rawType: item?.type ?? "",
+    label: item?.mapping?.label ?? item?.type ?? "",
+    preset: item?.mapping?.preset ?? "custom",
+    intent: item?.mapping?.intent ?? "allow",
+    note: item?.mapping?.note ?? "",
+  };
+}
+
 function guestLogBusinessPresets(
   items: GuestGameGuestLogCatalog["items"],
 ): GuestLogBusinessPreset[] {
@@ -5039,18 +5319,56 @@ function guestLogBusinessPresets(
     return [];
   }
 
-  return guestLogBusinessPresetDefinitions
-    .map((definition) => {
-      const types = items
-        .filter((item) => guestLogTypeMatchesPreset(item, definition.tokens))
-        .map((item) => item.type);
+  const mappedPresets = new Map<string, GuestLogBusinessPreset>();
 
-      return {
-        ...definition,
-        types: Array.from(new Set(types)),
-      };
-    })
+  for (const item of items) {
+    if (!item.mapping) {
+      continue;
+    }
+
+    const definition = guestLogBusinessPresetDefinitions.find(
+      (preset) => preset.id === item.mapping?.preset,
+    );
+    const id = `mapped:${item.mapping.preset}:${item.mapping.intent}`;
+    const existing = mappedPresets.get(id) ?? {
+      id,
+      label:
+        item.mapping.preset === "custom"
+          ? item.mapping.label
+          : definition?.label ?? item.mapping.label,
+      description:
+        item.mapping.note ??
+        definition?.description ??
+        "Сохраненное сопоставление raw-типа guests/logs.",
+      intent: item.mapping.intent,
+      tokens: [],
+      types: [],
+    };
+
+    if (!existing.types.includes(item.type)) {
+      existing.types.push(item.type);
+    }
+
+    mappedPresets.set(id, existing);
+  }
+
+  const autoPresets = guestLogBusinessPresetDefinitions
+    .map((definition) => ({
+      ...definition,
+      types: Array.from(
+        new Set(
+          items
+            .filter(
+              (item) =>
+                !item.mapping && guestLogTypeMatchesPreset(item, definition.tokens),
+            )
+            .map((item) => item.type),
+        ),
+      ),
+    }))
     .filter((preset) => preset.types.length);
+
+  return [...mappedPresets.values(), ...autoPresets];
 }
 
 function guestLogTypeMatchesPreset(
@@ -5639,6 +5957,12 @@ function patchJson<T = unknown>(url: string, body: unknown) {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+  });
+}
+
+function deleteJson<T = unknown>(url: string) {
+  return fetchJson<T>(url, {
+    method: "DELETE",
   });
 }
 

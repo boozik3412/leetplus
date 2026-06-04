@@ -411,16 +411,42 @@ export type GuestGameGuestLogCatalogDomain = {
   latestAt: string | null;
 };
 
+export type GuestGameGuestLogMappingPreset =
+  | "visit_or_session_start"
+  | "session_finish"
+  | "events_and_tournaments"
+  | "balance_and_payment"
+  | "manual_or_risk"
+  | "custom";
+
+export type GuestGameGuestLogMappingIntent = "allow" | "block";
+
+export type GuestGameGuestLogTypeMapping = {
+  id: string;
+  rawType: string;
+  normalizedType: string;
+  label: string;
+  preset: GuestGameGuestLogMappingPreset;
+  intent: GuestGameGuestLogMappingIntent;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: GuestGameUser | null;
+  updatedBy: GuestGameUser | null;
+};
+
 export type GuestGameGuestLogCatalogItem = {
   type: string;
   normalizedType: string;
   count: number;
   latestAt: string | null;
   domains: GuestGameGuestLogCatalogDomain[];
+  mapping: GuestGameGuestLogTypeMapping | null;
 };
 
 export type GuestGameGuestLogCatalog = {
   items: GuestGameGuestLogCatalogItem[];
+  mappings: GuestGameGuestLogTypeMapping[];
   summary: {
     types: number;
     logs: number;

@@ -159,6 +159,7 @@ model Tenant {
   guestGameSeasons                     GuestGameSeason[]
   guestGameRewards                     GuestGameReward[]
   guestGameEvents                      GuestGameEvent[]
+  guestGameLogTypeMappings             GuestGameLogTypeMapping[]
   guestPortalOtpChallenges             GuestPortalOtpChallenge[]
   marketingCampaigns                   MarketingCampaign[]
   marketingPromoBundles                MarketingPromoBundle[]
@@ -248,6 +249,8 @@ model User {
   createdGuestGameRewards              GuestGameReward[]                     @relation("GuestGameRewardCreatedBy")
   approvedGuestGameRewards             GuestGameReward[]                     @relation("GuestGameRewardApprovedBy")
   createdGuestGameEvents               GuestGameEvent[]                      @relation("GuestGameEventCreatedBy")
+  createdGuestGameLogTypeMappings      GuestGameLogTypeMapping[]             @relation("GuestGameLogTypeMappingCreatedBy")
+  updatedGuestGameLogTypeMappings      GuestGameLogTypeMapping[]             @relation("GuestGameLogTypeMappingUpdatedBy")
   guestStaffIdentityMappings           GuestStaffIdentityMapping[]
   staffMember                          StaffMember?                          @relation("StaffMemberUser")
   createdStaffMembers                  StaffMember[]                         @relation("StaffMemberCreatedBy")
@@ -1575,6 +1578,30 @@ model GuestGameEvent {
   @@index([missionId], map: "guest_game_event_mission_idx")
   @@index([seasonId], map: "guest_game_event_season_idx")
   @@index([createdByUserId], map: "guest_game_event_created_by_idx")
+}
+
+model GuestGameLogTypeMapping {
+  id              String   @id @default(uuid())
+  tenantId        String
+  createdByUserId String?
+  updatedByUserId String?
+  rawType         String
+  normalizedType  String
+  label           String
+  preset          String   @default("custom")
+  intent          String   @default("allow")
+  note            String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant        Tenant @relation(fields: [tenantId], references: [id])
+  createdByUser User?  @relation("GuestGameLogTypeMappingCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedByUser User?  @relation("GuestGameLogTypeMappingUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, normalizedType], map: "guest_game_log_type_mapping_uidx")
+  @@index([tenantId, preset], map: "guest_game_log_type_mapping_preset_idx")
+  @@index([createdByUserId], map: "guest_game_log_type_mapping_created_by_idx")
+  @@index([updatedByUserId], map: "guest_game_log_type_mapping_updated_by_idx")
 }
 
 model GuestPortalOtpChallenge {

@@ -56,6 +56,7 @@ const emptyWorkspace: GuestGamificationWorkspace = {
   tariffSnapshots: [],
   guestLogCatalog: {
     items: [],
+    mappings: [],
     summary: {
       types: 0,
       logs: 0,

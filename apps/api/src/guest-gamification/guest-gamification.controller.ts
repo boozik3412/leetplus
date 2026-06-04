@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Header,
   Param,
@@ -27,6 +28,8 @@ import {
   type GuestGameLootBox,
   type GuestGameLootBoxDto,
   type GuestGameLootBoxUpdateDto,
+  type GuestGameGuestLogTypeMapping,
+  type GuestGameGuestLogTypeMappingDto,
   type GuestGameMission,
   type GuestGameMissionDto,
   type GuestGameMissionUpdateDto,
@@ -92,6 +95,22 @@ export class GuestGamificationController {
     @Body() dto: GuestGamePipelineRunDto,
   ): Promise<GuestGamePipelineRunResult> {
     return this.gamificationService.runSnapshotPipeline(user, dto);
+  }
+
+  @Post('guest-log-mappings')
+  upsertGuestLogTypeMapping(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: GuestGameGuestLogTypeMappingDto,
+  ): Promise<GuestGameGuestLogTypeMapping> {
+    return this.gamificationService.upsertGuestLogTypeMapping(user, dto);
+  }
+
+  @Delete('guest-log-mappings/:id')
+  deleteGuestLogTypeMapping(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<{ deleted: true }> {
+    return this.gamificationService.deleteGuestLogTypeMapping(user, id);
   }
 
   @Get('profiles')

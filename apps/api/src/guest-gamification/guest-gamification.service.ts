@@ -31,6 +31,15 @@ const rewardStatuses = [
 ] as const;
 const rewardSources = ['MANUAL', 'LANGAME', 'API_IMPORT', 'CASHIER'] as const;
 const eventSources = ['MANUAL', 'LANGAME', 'API_IMPORT', 'SYSTEM'] as const;
+const guestLogMappingPresets = [
+  'visit_or_session_start',
+  'session_finish',
+  'events_and_tournaments',
+  'balance_and_payment',
+  'manual_or_risk',
+  'custom',
+] as const;
+const guestLogMappingIntents = ['allow', 'block'] as const;
 const snapshotFactSources = [
   'GUEST_SESSION',
   'GUEST_LOG',
@@ -74,6 +83,8 @@ type ProfileStatus = (typeof profileStatuses)[number];
 type RewardStatus = (typeof rewardStatuses)[number];
 type RewardSource = (typeof rewardSources)[number];
 type EventSource = (typeof eventSources)[number];
+type GuestLogMappingPreset = (typeof guestLogMappingPresets)[number];
+type GuestLogMappingIntent = (typeof guestLogMappingIntents)[number];
 type GuestGameTariffSnapshotStatus =
   | 'READY'
   | 'PARTIAL'
@@ -184,6 +195,11 @@ const eventInclude = {
   season: { select: { id: true, name: true } },
   createdByUser: { select: creatorSelect },
 } satisfies Prisma.GuestGameEventInclude;
+
+const guestLogTypeMappingInclude = {
+  createdByUser: { select: creatorSelect },
+  updatedByUser: { select: creatorSelect },
+} satisfies Prisma.GuestGameLogTypeMappingInclude;
 
 const snapshotGuestSelect = {
   id: true,
@@ -344,6 +360,9 @@ type RewardRow = Prisma.GuestGameRewardGetPayload<{
 }>;
 type EventRow = Prisma.GuestGameEventGetPayload<{
   include: typeof eventInclude;
+}>;
+type GuestLogTypeMappingRow = Prisma.GuestGameLogTypeMappingGetPayload<{
+  include: typeof guestLogTypeMappingInclude;
 }>;
 type SnapshotGuestRow = Prisma.GuestGetPayload<{
   select: typeof snapshotGuestSelect;
@@ -603,16 +622,40 @@ export type GuestGameGuestLogCatalogItem = {
   count: number;
   latestAt: string | null;
   domains: GuestGameGuestLogCatalogDomain[];
+  mapping: GuestGameGuestLogTypeMapping | null;
+};
+
+export type GuestGameGuestLogTypeMapping = {
+  id: string;
+  rawType: string;
+  normalizedType: string;
+  label: string;
+  preset: GuestLogMappingPreset;
+  intent: GuestLogMappingIntent;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: GuestGameUser | null;
+  updatedBy: GuestGameUser | null;
 };
 
 export type GuestGameGuestLogCatalog = {
   items: GuestGameGuestLogCatalogItem[];
+  mappings: GuestGameGuestLogTypeMapping[];
   summary: {
     types: number;
     logs: number;
     domains: number;
     latestAt: string | null;
   };
+};
+
+export type GuestGameGuestLogTypeMappingDto = {
+  rawType?: string | null;
+  label?: string | null;
+  preset?: string | null;
+  intent?: string | null;
+  note?: string | null;
 };
 
 type GuestLogCatalogDomainAccumulator = {
@@ -1146,18 +1189,29 @@ export class GuestGamificationService {
   private async getGuestLogCatalog(
     user: AuthenticatedUser,
   ): Promise<GuestGameGuestLogCatalog> {
-    const rows = await this.prisma.guestLog.groupBy({
-      by: ['type', 'externalDomain', 'externalProvider'],
-      where: {
-        tenantId: user.tenantId,
-        type: { not: null },
-      },
-      _count: { _all: true },
-      _max: {
-        happenedAt: true,
-        createdAt: true,
-      },
-    });
+    const [rows, mappings] = await Promise.all([
+      this.prisma.guestLog.groupBy({
+        by: ['type', 'externalDomain', 'externalProvider'],
+        where: {
+          tenantId: user.tenantId,
+          type: { not: null },
+        },
+        _count: { _all: true },
+        _max: {
+          happenedAt: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.guestGameLogTypeMapping.findMany({
+        where: { tenantId: user.tenantId },
+        include: guestLogTypeMappingInclude,
+        orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+      }),
+    ]);
+    const mappedMappings = mappings.map(mapGuestLogTypeMapping);
+    const mappingByType = new Map(
+      mappedMappings.map((mapping) => [mapping.normalizedType, mapping]),
+    );
     const itemMap = new Map<string, GuestLogCatalogItemAccumulator>();
 
     for (const row of rows) {
@@ -1220,6 +1274,7 @@ export class GuestGamificationService {
             count: domain.count,
             latestAt: domain.latestAt?.toISOString() ?? null,
           })),
+        mapping: mappingByType.get(item.normalizedType) ?? null,
       }));
     const latestAt = items.reduce<Date | null>((latest, item) => {
       const value = item.latestAt ? new Date(item.latestAt) : null;
@@ -1232,6 +1287,7 @@ export class GuestGamificationService {
 
     return {
       items,
+      mappings: mappedMappings,
       summary: {
         types: items.length,
         logs: items.reduce((sum, item) => sum + item.count, 0),
@@ -1239,6 +1295,73 @@ export class GuestGamificationService {
         latestAt: latestAt?.toISOString() ?? null,
       },
     };
+  }
+
+  async upsertGuestLogTypeMapping(
+    user: AuthenticatedUser,
+    dto: GuestGameGuestLogTypeMappingDto,
+  ): Promise<GuestGameGuestLogTypeMapping> {
+    const rawType = stringValue(dto.rawType);
+
+    if (!rawType) {
+      throw new BadRequestException('Укажите raw-тип события guests/logs');
+    }
+
+    const normalizedType = normalizeGuestLogType(rawType);
+
+    if (!normalizedType) {
+      throw new BadRequestException('Не удалось нормализовать тип события');
+    }
+
+    const label = stringValue(dto.label) ?? rawType;
+    const row = await this.prisma.guestGameLogTypeMapping.upsert({
+      where: {
+        tenantId_normalizedType: {
+          tenantId: user.tenantId,
+          normalizedType,
+        },
+      },
+      create: {
+        tenantId: user.tenantId,
+        createdByUserId: user.id,
+        updatedByUserId: user.id,
+        rawType,
+        normalizedType,
+        label,
+        preset: normalizeGuestLogMappingPreset(dto.preset),
+        intent: normalizeGuestLogMappingIntent(dto.intent),
+        note: nullableString(dto.note),
+      },
+      update: {
+        rawType,
+        label,
+        preset: normalizeGuestLogMappingPreset(dto.preset),
+        intent: normalizeGuestLogMappingIntent(dto.intent),
+        note: nullableString(dto.note),
+        updatedByUserId: user.id,
+      },
+      include: guestLogTypeMappingInclude,
+    });
+
+    return mapGuestLogTypeMapping(row);
+  }
+
+  async deleteGuestLogTypeMapping(
+    user: AuthenticatedUser,
+    id: string,
+  ): Promise<{ deleted: true }> {
+    const existing = await this.prisma.guestGameLogTypeMapping.findFirst({
+      where: { id, tenantId: user.tenantId },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Сопоставление типа события не найдено');
+    }
+
+    await this.prisma.guestGameLogTypeMapping.delete({ where: { id } });
+
+    return { deleted: true };
   }
 
   private async getTariffSnapshots(
@@ -4120,6 +4243,24 @@ function mapUser(
   };
 }
 
+function mapGuestLogTypeMapping(
+  row: GuestLogTypeMappingRow,
+): GuestGameGuestLogTypeMapping {
+  return {
+    id: row.id,
+    rawType: row.rawType,
+    normalizedType: row.normalizedType,
+    label: row.label,
+    preset: normalizeGuestLogMappingPreset(row.preset),
+    intent: normalizeGuestLogMappingIntent(row.intent),
+    note: row.note,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+    createdBy: mapUser(row.createdByUser),
+    updatedBy: mapUser(row.updatedByUser),
+  };
+}
+
 function mapAudience(
   row: {
     id: string;
@@ -5101,6 +5242,32 @@ function requiredString(value: unknown, label: string, required: boolean) {
 
 function stringValue(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function normalizeGuestLogMappingPreset(value: unknown): GuestLogMappingPreset {
+  const parsed = stringValue(value)?.toLowerCase();
+
+  if (
+    parsed &&
+    guestLogMappingPresets.includes(parsed as GuestLogMappingPreset)
+  ) {
+    return parsed as GuestLogMappingPreset;
+  }
+
+  return 'custom';
+}
+
+function normalizeGuestLogMappingIntent(value: unknown): GuestLogMappingIntent {
+  const parsed = stringValue(value)?.toLowerCase();
+
+  if (
+    parsed &&
+    guestLogMappingIntents.includes(parsed as GuestLogMappingIntent)
+  ) {
+    return parsed as GuestLogMappingIntent;
+  }
+
+  return 'allow';
 }
 
 function nullableString(value: unknown) {

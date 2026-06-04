@@ -65,3 +65,9 @@ export async function PATCH(request: Request, { params }: RouteContext) {
 
   return proxyJsonRequest(request, gamificationPath(path), "PATCH");
 }
+
+export async function DELETE(request: Request, { params }: RouteContext) {
+  const { path } = await params;
+
+  return proxyJsonRequest(request, gamificationPath(path), "DELETE");
+}

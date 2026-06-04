@@ -2,8 +2,8 @@ import Link from "next/link";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
 import {
-  getGuestFilterOptions,
   getStaffControl,
+  getStaffControlFilterOptions,
   type GuestsSummaryFilters,
   type StaffControlAnomalyType,
   type StaffControlReport,
@@ -207,7 +207,7 @@ export default async function StaffControlPage({
   const staffControls = resolveStaffTableControls(params);
   const [report, options] = await Promise.all([
     getStaffControl(filters),
-    getGuestFilterOptions(),
+    getStaffControlFilterOptions(),
   ]);
 
   return (

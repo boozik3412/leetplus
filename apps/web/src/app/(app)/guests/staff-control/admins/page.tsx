@@ -2,8 +2,8 @@ import Link from "next/link";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
 import {
-  getGuestFilterOptions,
   getStaffControl,
+  getStaffControlFilterOptions,
   type GuestsSummaryFilters,
   type StaffControlReport,
 } from "@/lib/guests";
@@ -162,7 +162,7 @@ export default async function StaffAdminsReportPage({
     directionParam === "asc" ? "asc" : "desc";
   const [report, options] = await Promise.all([
     getStaffControl(filters),
-    getGuestFilterOptions(),
+    getStaffControlFilterOptions(),
   ]);
   const allRows = getRows(report);
   const groupOptions = Array.from(

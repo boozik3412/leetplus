@@ -91,6 +91,40 @@ describe('RolesGuard', () => {
     ).toThrow(ForbiddenException);
   });
 
+  it('allows staff-control filter options through staff access only', () => {
+    reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
+
+    expect(
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/guests/staff-control/filter-options',
+          user: {
+            role: UserRole.CLUB_ADMINISTRATOR,
+            permissions: ['view_staff'],
+          },
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it('keeps general guest filter options behind guest access', () => {
+    reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/guests/filter-options',
+          user: {
+            role: UserRole.CLUB_ADMINISTRATOR,
+            permissions: ['view_staff'],
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
   it('allows custom role to view Guest Game Hub without full guest CRM access', () => {
     reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
 

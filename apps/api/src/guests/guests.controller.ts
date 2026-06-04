@@ -74,6 +74,14 @@ const staffControlAccessRoles = [
 export class GuestsController {
   constructor(private readonly guestsService: GuestsService) {}
 
+  @Roles(...staffControlAccessRoles)
+  @Get('staff-control/filter-options')
+  getStaffControlFilterOptions(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<GuestFilterOptions> {
+    return this.guestsService.getFilterOptions(user);
+  }
+
   @Get('filter-options')
   getFilterOptions(
     @CurrentUser() user: AuthenticatedUser,

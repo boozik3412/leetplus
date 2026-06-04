@@ -4,8 +4,8 @@ import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffIdentityMappingForm } from "@/components/staff-identity-mapping-form";
 import { requireCurrentUser } from "@/lib/auth";
 import {
-  getGuestFilterOptions,
   getStaffOperators,
+  getStaffControlFilterOptions,
   type StaffControlAnomalyType,
   type StaffOperatorFilters,
   type StaffOperatorReport,
@@ -231,7 +231,7 @@ export default async function StaffOperatorsPage({
   const isFullView = searchParam(params.view) === "full";
   const [report, options] = await Promise.all([
     getStaffOperators(filters),
-    getGuestFilterOptions(),
+    getStaffControlFilterOptions(),
   ]);
   const activeStoreName =
     report.storeId && options.stores.find((store) => store.id === report.storeId)

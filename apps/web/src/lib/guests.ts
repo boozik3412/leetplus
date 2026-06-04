@@ -685,6 +685,22 @@ export async function getGuestFilterOptions(): Promise<GuestFilterOptions> {
   return response.json() as Promise<GuestFilterOptions>;
 }
 
+export async function getStaffControlFilterOptions(): Promise<GuestFilterOptions> {
+  const response = await fetch(
+    `${getApiUrl()}/guests/staff-control/filter-options`,
+    {
+      cache: "no-store",
+      headers: await getAuthHeaders(),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch staff control filter options");
+  }
+
+  return response.json() as Promise<GuestFilterOptions>;
+}
+
 export async function getGuestsSummary(
   filters: GuestsSummaryFilters = {},
 ): Promise<GuestsSummary> {

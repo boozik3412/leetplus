@@ -933,6 +933,7 @@ function CommunicationPanel({
 
 function GuestSnapshotPanel({ portal }: { portal: GuestPortalPayload }) {
   const snapshot = portal.guestSnapshot;
+  const participation = snapshot.participation;
   const completed = snapshot.profileCompleteness.completed.slice(0, 4);
   const missing = snapshot.profileCompleteness.missing.slice(0, 4);
 
@@ -974,6 +975,22 @@ function GuestSnapshotPanel({ portal }: { portal: GuestPortalPayload }) {
               label="Бонусная карта"
               value={snapshot.identity.bonusProgramNumberMasked ?? "нет"}
             />
+            <Metric
+              label="Тип гостя"
+              value={
+                participation.guestTypeId
+                  ? `#${participation.guestTypeId}`
+                  : "нет данных"
+              }
+            />
+            <Metric
+              label="Статус"
+              value={participation.accountStateLabel}
+            />
+            <Metric
+              label="Пол"
+              value={participation.genderLabel ?? "не указан"}
+            />
           </div>
 
           <ProgressBar
@@ -1011,6 +1028,14 @@ function GuestSnapshotPanel({ portal }: { portal: GuestPortalPayload }) {
               label="Дата рождения"
               value={snapshot.identity.birthdayProvided ? "указана" : "не указана"}
             />
+            <InfoLine
+              label="Канал регистрации"
+              value={participation.registrationChannel}
+            />
+            <InfoLine
+              label="Проверка профиля"
+              value={participation.verificationLabel}
+            />
           </div>
         </div>
 
@@ -1027,6 +1052,51 @@ function GuestSnapshotPanel({ portal }: { portal: GuestPortalPayload }) {
                 >
                   {label}
                 </span>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-cyan-300/15 bg-cyan-300/[0.04] p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold uppercase text-cyan-200">
+                  Готовность к геймификации
+                </p>
+                <p className="mt-1 text-sm text-slate-400">
+                  Что уже можно использовать для миссий, лутбоксов и наград.
+                </p>
+              </div>
+              <span className="rounded-lg border border-cyan-200/20 bg-cyan-300/10 px-3 py-1 text-sm font-bold text-cyan-100">
+                {participation.readinessPercent}%
+              </span>
+            </div>
+            <ProgressBar
+              label="Готовность профиля"
+              value={participation.readinessPercent}
+              tone="cyan"
+            />
+            <div className="mt-4 grid gap-2">
+              {participation.readiness.map((item) => (
+                <div
+                  key={item.id}
+                  className="rounded-lg border border-white/10 bg-black/20 p-3"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-bold text-white">
+                      {item.label}
+                    </p>
+                    <span
+                      className={`rounded-lg px-2 py-1 text-xs font-bold ${readinessStatusClass(
+                        item.status,
+                      )}`}
+                    >
+                      {readinessStatusLabel(item.status)}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-sm leading-5 text-slate-400">
+                    {item.note}
+                  </p>
+                </div>
               ))}
             </div>
           </div>
@@ -2488,6 +2558,36 @@ function crmLeadStatusLabel(
   >;
 
   return labels[status];
+}
+
+function readinessStatusLabel(
+  status: GuestPortalPayload["guestSnapshot"]["participation"]["readiness"][number]["status"],
+) {
+  const labels = {
+    READY: "готово",
+    ATTENTION: "проверить",
+    MISSING: "нет данных",
+  } satisfies Record<
+    GuestPortalPayload["guestSnapshot"]["participation"]["readiness"][number]["status"],
+    string
+  >;
+
+  return labels[status];
+}
+
+function readinessStatusClass(
+  status: GuestPortalPayload["guestSnapshot"]["participation"]["readiness"][number]["status"],
+) {
+  const classes = {
+    READY: "bg-emerald-300/10 text-emerald-200",
+    ATTENTION: "bg-amber-300/10 text-amber-100",
+    MISSING: "bg-slate-300/10 text-slate-300",
+  } satisfies Record<
+    GuestPortalPayload["guestSnapshot"]["participation"]["readiness"][number]["status"],
+    string
+  >;
+
+  return classes[status];
 }
 
 function langameMatchStatusClass(

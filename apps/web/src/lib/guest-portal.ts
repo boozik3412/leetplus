@@ -101,6 +101,29 @@ export type GuestPortalPayload = {
       completed: string[];
       missing: string[];
     };
+    participation: {
+      accountState:
+        | "LANGAME_SYNCED"
+        | "CRM_LEAD"
+        | "GAME_PROFILE"
+        | "DISABLED"
+        | "TEMPORARY"
+        | "VIRTUAL"
+        | "NOT_MATCHED";
+      accountStateLabel: string;
+      guestTypeId: string | null;
+      genderLabel: string | null;
+      registrationChannel: string;
+      verificationLabel: string;
+      loyaltyCardStatus: "LINKED" | "MISSING" | "UNKNOWN";
+      readinessPercent: number;
+      readiness: Array<{
+        id: string;
+        label: string;
+        status: "READY" | "ATTENTION" | "MISSING";
+        note: string;
+      }>;
+    };
     statusLabels: string[];
   };
   gamification: {

@@ -202,7 +202,32 @@ export type GuestPortalGuestSnapshot = {
     completed: string[];
     missing: string[];
   };
+  participation: {
+    accountState:
+      | 'LANGAME_SYNCED'
+      | 'CRM_LEAD'
+      | 'GAME_PROFILE'
+      | 'DISABLED'
+      | 'TEMPORARY'
+      | 'VIRTUAL'
+      | 'NOT_MATCHED';
+    accountStateLabel: string;
+    guestTypeId: string | null;
+    genderLabel: string | null;
+    registrationChannel: string;
+    verificationLabel: string;
+    loyaltyCardStatus: 'LINKED' | 'MISSING' | 'UNKNOWN';
+    readinessPercent: number;
+    readiness: GuestPortalProfileReadinessItem[];
+  };
   statusLabels: string[];
+};
+
+export type GuestPortalProfileReadinessItem = {
+  id: string;
+  label: string;
+  status: 'READY' | 'ATTENTION' | 'MISSING';
+  note: string;
 };
 
 export type GuestPortalCommunications = {
@@ -1094,7 +1119,7 @@ export class GuestPortalService {
         frame: frameForLevel(level),
       },
       loyalty,
-      guestSnapshot: buildGuestSnapshot(guest),
+      guestSnapshot: buildGuestSnapshot(guest, crmLead, profile),
       gamification: {
         nextActions,
         lootBoxes: portalLootBoxes,
@@ -2162,6 +2187,7 @@ function buildGuestSnapshot(
   guest: {
     externalProvider: IntegrationProvider | null;
     externalDomain: string | null;
+    externalGuestTypeId: string | null;
     phoneHash: string | null;
     phoneMasked: string | null;
     emailHash: string | null;
@@ -2171,6 +2197,7 @@ function buildGuestSnapshot(
     birthYear: number | null;
     birthMonth: number | null;
     birthDay: number | null;
+    gender: string | null;
     insertedAt: Date | null;
     lastActivityAt: Date | null;
     isVirtual: boolean;
@@ -2181,20 +2208,37 @@ function buildGuestSnapshot(
     isMobileRegistration: boolean;
     identityDocumentPresent: boolean;
     bonusProgramNumber: string | null;
+    currentCountHours: Prisma.Decimal | null;
     lastSyncedAt: Date | null;
+  } | null,
+  lead: {
+    phoneMasked: string | null;
+    emailMasked: string | null;
+    fullNameMasked: string | null;
+    matchedGuestId: string | null;
+    matchedAt: Date | null;
+  } | null,
+  profile: {
+    id: string;
+    phoneHash: string | null;
+    contactMasked: string | null;
+    telegramIdentity: string | null;
+    maxIdentity: string | null;
   } | null,
 ): GuestPortalGuestSnapshot {
   if (!guest) {
+    const participation = buildGuestParticipation(null, lead, profile, 0);
+
     return {
       source: {
-        provider: 'LeetPlus',
+        provider: lead ? 'LeetPlus CRM' : 'LeetPlus',
         domain: null,
         lastSyncedAt: null,
       },
       identity: {
-        phoneMasked: null,
-        emailMasked: null,
-        fullNameMasked: null,
+        phoneMasked: lead?.phoneMasked ?? profile?.contactMasked ?? null,
+        emailMasked: lead?.emailMasked ?? null,
+        fullNameMasked: lead?.fullNameMasked ?? null,
         birthdayProvided: false,
         documentPresent: false,
         bonusProgramNumberMasked: null,
@@ -2212,9 +2256,18 @@ function buildGuestSnapshot(
       profileCompleteness: {
         percent: 0,
         completed: [],
-        missing: ['Синхронизированный профиль Langame'],
+        missing: [
+          lead || profile
+            ? 'Синхронизированный профиль Langame'
+            : 'Подтвержденный профиль гостя',
+        ],
       },
-      statusLabels: ['Профиль появится после синхронизации клуба'],
+      participation,
+      statusLabels: lead
+        ? ['Найдена CRM-заявка', 'Langame-профиль нужно сопоставить']
+        : profile
+          ? ['Есть игровой профиль LeetPlus', 'Langame-профиль нужно найти']
+          : ['Профиль появится после синхронизации клуба'],
     };
   }
 
@@ -2286,8 +2339,258 @@ function buildGuestSnapshot(
       completed,
       missing,
     },
+    participation: buildGuestParticipation(
+      guest,
+      lead,
+      profile,
+      percent(completed.length, completenessItems.length),
+    ),
     statusLabels: buildGuestStatusLabels(guest),
   };
+}
+
+function buildGuestParticipation(
+  guest: {
+    externalGuestTypeId: string | null;
+    phoneHash: string | null;
+    phoneMasked: string | null;
+    gender: string | null;
+    isVirtual: boolean;
+    isTemporary: boolean;
+    isDisabled: boolean;
+    isSimpleRegistration: boolean;
+    isConfirmed: boolean;
+    isMobileRegistration: boolean;
+    identityDocumentPresent: boolean;
+    bonusProgramNumber: string | null;
+    currentCountHours: Prisma.Decimal | null;
+  } | null,
+  lead: {
+    phoneMasked: string | null;
+    emailMasked: string | null;
+    fullNameMasked: string | null;
+    matchedGuestId: string | null;
+    matchedAt: Date | null;
+  } | null,
+  profile: {
+    id: string;
+    phoneHash: string | null;
+    contactMasked: string | null;
+    telegramIdentity: string | null;
+    maxIdentity: string | null;
+  } | null,
+  completenessPercent: number,
+): GuestPortalGuestSnapshot['participation'] {
+  const accountState = guest?.isDisabled
+    ? 'DISABLED'
+    : guest?.isTemporary
+      ? 'TEMPORARY'
+      : guest?.isVirtual
+        ? 'VIRTUAL'
+        : guest
+          ? 'LANGAME_SYNCED'
+          : lead
+            ? 'CRM_LEAD'
+            : profile
+              ? 'GAME_PROFILE'
+              : 'NOT_MATCHED';
+  const readiness = buildGuestReadiness(guest, lead, profile);
+
+  return {
+    accountState,
+    accountStateLabel: guestAccountStateLabel(accountState),
+    guestTypeId: guest?.externalGuestTypeId ?? null,
+    genderLabel: guestGenderLabel(guest?.gender ?? null),
+    registrationChannel: guestRegistrationChannel(guest, lead, profile),
+    verificationLabel: guestVerificationLabel(guest, lead, profile),
+    loyaltyCardStatus: guest
+      ? guest.bonusProgramNumber
+        ? 'LINKED'
+        : 'MISSING'
+      : 'UNKNOWN',
+    readinessPercent: Math.max(
+      completenessPercent,
+      percent(
+        readiness.filter((item) => item.status === 'READY').length,
+        readiness.length,
+      ),
+    ),
+    readiness,
+  };
+}
+
+function buildGuestReadiness(
+  guest: {
+    externalGuestTypeId: string | null;
+    phoneHash: string | null;
+    phoneMasked: string | null;
+    isConfirmed: boolean;
+    identityDocumentPresent: boolean;
+    bonusProgramNumber: string | null;
+    currentCountHours: Prisma.Decimal | null;
+  } | null,
+  lead: { phoneMasked: string | null; matchedGuestId: string | null } | null,
+  profile: {
+    id: string;
+    phoneHash: string | null;
+    contactMasked: string | null;
+    telegramIdentity: string | null;
+    maxIdentity: string | null;
+  } | null,
+): GuestPortalProfileReadinessItem[] {
+  const hasPhone = Boolean(
+    guest?.phoneHash ||
+    guest?.phoneMasked ||
+    lead?.phoneMasked ||
+    profile?.phoneHash ||
+    profile?.contactMasked,
+  );
+  const hasMessenger = Boolean(
+    profile?.telegramIdentity || profile?.maxIdentity,
+  );
+  const hasLoyalty = Boolean(
+    guest?.externalGuestTypeId ||
+    guest?.bonusProgramNumber ||
+    guest?.currentCountHours,
+  );
+
+  return [
+    {
+      id: 'phone',
+      label: 'Телефон',
+      status: hasPhone ? 'READY' : 'MISSING',
+      note: hasPhone
+        ? 'Контакт подтвержден OTP и подходит для гостевого кабинета.'
+        : 'Нужен подтвержденный телефон для личного кабинета.',
+    },
+    {
+      id: 'langame',
+      label: 'Профиль Langame',
+      status: guest ? 'READY' : lead || profile ? 'ATTENTION' : 'MISSING',
+      note: guest
+        ? 'Профиль найден в сохраненном snapshot Langame.'
+        : 'Профиль нужно сопоставить через синхронизацию или точечную проверку.',
+    },
+    {
+      id: 'loyalty',
+      label: 'Лояльность клуба',
+      status: hasLoyalty ? 'READY' : guest ? 'ATTENTION' : 'MISSING',
+      note: hasLoyalty
+        ? 'Есть база для группы, часов или бонусной карты.'
+        : 'Группа и часы появятся после данных Langame.',
+    },
+    {
+      id: 'game_profile',
+      label: 'Игровой профиль',
+      status: profile ? 'READY' : guest || lead ? 'ATTENTION' : 'MISSING',
+      note: profile
+        ? 'XP, уровни и игровые награды связаны с профилем LeetPlus.'
+        : 'Игровой профиль будет создан при первом игровом событии или привязке канала.',
+    },
+    {
+      id: 'messenger',
+      label: 'Telegram/MAX',
+      status: hasMessenger ? 'READY' : 'ATTENTION',
+      note: hasMessenger
+        ? 'Alias сохранен, отправка включается только после настройки бота.'
+        : 'Можно привязать alias для будущих игровых уведомлений.',
+    },
+  ];
+}
+
+function guestAccountStateLabel(
+  state: GuestPortalGuestSnapshot['participation']['accountState'],
+) {
+  const labels = {
+    LANGAME_SYNCED: 'Синхронизирован с Langame',
+    CRM_LEAD: 'CRM-заявка без Langame-профиля',
+    GAME_PROFILE: 'Игровой профиль LeetPlus',
+    DISABLED: 'Отключен в Langame',
+    TEMPORARY: 'Временный гость',
+    VIRTUAL: 'Виртуальный профиль',
+    NOT_MATCHED: 'Профиль не найден',
+  } satisfies Record<
+    GuestPortalGuestSnapshot['participation']['accountState'],
+    string
+  >;
+
+  return labels[state];
+}
+
+function guestRegistrationChannel(
+  guest: {
+    isMobileRegistration: boolean;
+    isSimpleRegistration: boolean;
+  } | null,
+  lead: unknown,
+  profile: unknown,
+) {
+  if (guest?.isMobileRegistration) {
+    return 'Мобильная регистрация Langame';
+  }
+
+  if (guest?.isSimpleRegistration) {
+    return 'Упрощенная регистрация Langame';
+  }
+
+  if (guest) {
+    return 'Стандартная регистрация Langame';
+  }
+
+  if (lead) {
+    return 'CRM-заявка LeetPlus';
+  }
+
+  if (profile) {
+    return 'Игровой профиль LeetPlus';
+  }
+
+  return 'Не определен';
+}
+
+function guestVerificationLabel(
+  guest: {
+    isConfirmed: boolean;
+    identityDocumentPresent: boolean;
+  } | null,
+  lead: unknown,
+  profile: unknown,
+) {
+  if (guest?.identityDocumentPresent) {
+    return 'Документ указан в Langame';
+  }
+
+  if (guest?.isConfirmed) {
+    return 'Профиль подтвержден в Langame';
+  }
+
+  if (guest) {
+    return 'Есть Langame-профиль, подтверждение не отмечено';
+  }
+
+  if (lead || profile) {
+    return 'Телефон подтвержден в гостевом портале';
+  }
+
+  return 'Ожидает подтверждения телефона';
+}
+
+function guestGenderLabel(value: string | null) {
+  const normalized = value?.trim().toLowerCase();
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (['m', 'male', 'man', 'м', 'муж', 'мужской'].includes(normalized)) {
+    return 'мужской';
+  }
+
+  if (['f', 'female', 'woman', 'ж', 'жен', 'женский'].includes(normalized)) {
+    return 'женский';
+  }
+
+  return value;
 }
 
 function buildGuestStatusLabels(guest: {

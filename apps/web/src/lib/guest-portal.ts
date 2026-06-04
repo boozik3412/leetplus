@@ -274,6 +274,16 @@ export type GuestPortalOtpVerifyResponse = {
   portal: GuestPortalPayload;
 };
 
+export type GuestPortalCommunicationPreferenceAction =
+  | "GRANT"
+  | "DENY"
+  | "UNSUBSCRIBE";
+
+export type GuestPortalCommunicationPreferenceResponse = {
+  portal: GuestPortalPayload;
+  message: string;
+};
+
 export type GuestPortalLangameMatchResponse = {
   checkedAt: string;
   queryField: "phone";

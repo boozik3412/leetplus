@@ -3,6 +3,8 @@
 import type { FormEvent, ReactNode } from "react";
 import { useEffect, useState } from "react";
 import type {
+  GuestPortalCommunicationPreferenceAction,
+  GuestPortalCommunicationPreferenceResponse,
   GuestPortalLangameMatchResponse,
   GuestPortalOtpStartResponse,
   GuestPortalOtpVerifyResponse,
@@ -36,6 +38,10 @@ export function GuestPortalClient({
     null,
   );
   const [isMatchingLangame, setMatchingLangame] = useState(false);
+  const [communicationMessage, setCommunicationMessage] = useState<
+    string | null
+  >(null);
+  const [isUpdatingCommunication, setUpdatingCommunication] = useState(false);
 
   const basePath = `/api/guest-portal/${encodeURIComponent(
     tenantSlug,
@@ -198,6 +204,41 @@ export function GuestPortalClient({
     }
   }
 
+  async function updateCommunicationPreference(
+    action: GuestPortalCommunicationPreferenceAction,
+  ) {
+    setUpdatingCommunication(true);
+    setCommunicationMessage(null);
+
+    try {
+      const response = await fetch(
+        "/api/guest-portal/session/communications/preferences",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action }),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(await readMessage(response));
+      }
+
+      const data =
+        (await response.json()) as GuestPortalCommunicationPreferenceResponse;
+      setPortal(data.portal);
+      setCommunicationMessage(data.message);
+    } catch (error) {
+      setCommunicationMessage(
+        error instanceof Error
+          ? error.message
+          : "Не удалось сохранить настройку коммуникаций.",
+      );
+    } finally {
+      setUpdatingCommunication(false);
+    }
+  }
+
   const pageTitle = portal?.store.name ?? config?.store.name ?? "Клуб";
   const tenantName = portal?.tenant.name ?? config?.tenant.name ?? "LeetPlus";
 
@@ -238,8 +279,11 @@ export function GuestPortalClient({
             langameMatch={langameMatch}
             langameMatchMessage={langameMatchMessage}
             isMatchingLangame={isMatchingLangame}
+            communicationMessage={communicationMessage}
+            isUpdatingCommunication={isUpdatingCommunication}
             onPhoneChange={setPhone}
             onCheckLangameMatch={checkLangameMatch}
+            onUpdateCommunicationPreference={updateCommunicationPreference}
           />
         ) : (
           <VerificationLanding
@@ -420,16 +464,24 @@ function VerifiedPortal({
   langameMatch,
   langameMatchMessage,
   isMatchingLangame,
+  communicationMessage,
+  isUpdatingCommunication,
   onPhoneChange,
   onCheckLangameMatch,
+  onUpdateCommunicationPreference,
 }: {
   portal: GuestPortalPayload;
   phone: string;
   langameMatch: GuestPortalLangameMatchResponse | null;
   langameMatchMessage: string | null;
   isMatchingLangame: boolean;
+  communicationMessage: string | null;
+  isUpdatingCommunication: boolean;
   onPhoneChange: (value: string) => void;
   onCheckLangameMatch: (event: FormEvent<HTMLFormElement>) => void;
+  onUpdateCommunicationPreference: (
+    action: GuestPortalCommunicationPreferenceAction,
+  ) => void;
 }) {
   return (
     <div className="space-y-5 py-6">
@@ -452,7 +504,12 @@ function VerifiedPortal({
 
       <NextActionsPanel portal={portal} />
 
-      <CommunicationPanel portal={portal} />
+      <CommunicationPanel
+        portal={portal}
+        message={communicationMessage}
+        isUpdating={isUpdatingCommunication}
+        onUpdatePreference={onUpdateCommunicationPreference}
+      />
 
       <section className="grid gap-5 lg:grid-cols-[0.95fr_1.05fr]">
         <div className="rounded-lg border border-white/10 bg-[#0b111c] p-5">
@@ -507,8 +564,19 @@ function VerifiedPortal({
   );
 }
 
-function CommunicationPanel({ portal }: { portal: GuestPortalPayload }) {
+function CommunicationPanel({
+  portal,
+  message,
+  isUpdating,
+  onUpdatePreference,
+}: {
+  portal: GuestPortalPayload;
+  message: string | null;
+  isUpdating: boolean;
+  onUpdatePreference: (action: GuestPortalCommunicationPreferenceAction) => void;
+}) {
   const communications = portal.communications;
+  const consentStatus = communications.phone.consentStatus;
   const channels = [
     {
       id: "phone",
@@ -542,6 +610,30 @@ function CommunicationPanel({ portal }: { portal: GuestPortalPayload }) {
       tone: "amber" as const,
     },
   ];
+  const preferenceActions: Array<{
+    action: GuestPortalCommunicationPreferenceAction;
+    label: string;
+    description: string;
+  }> = [
+    {
+      action: "GRANT",
+      label: "Разрешить",
+      description: "Можно будет присылать игровые награды после подключения каналов.",
+    },
+    {
+      action: "DENY",
+      label: "Не присылать",
+      description: "Клуб не будет использовать номер для игровых сообщений.",
+    },
+    {
+      action: "UNSUBSCRIBE",
+      label: "Отписаться",
+      description: "Полная отписка от игровых коммуникаций.",
+    },
+  ];
+  const disabledReason = !portal.guestFound
+    ? "Сначала профиль должен появиться в синхронизированной базе гостей."
+    : null;
 
   return (
     <section className="rounded-lg border border-white/10 bg-[#0b111c] p-5">
@@ -561,8 +653,57 @@ function CommunicationPanel({ portal }: { portal: GuestPortalPayload }) {
         </div>
         <div className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-slate-300">
           <span className="font-bold text-white">Согласие:</span>{" "}
-          {communicationConsentLabel(communications.phone.consentStatus)}
+          {communicationConsentLabel(consentStatus)}
         </div>
+      </div>
+
+      <div className="mt-4 rounded-lg border border-white/10 bg-white/[0.035] p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="max-w-2xl">
+            <p className="text-sm font-black text-white">
+              Управление игровыми сообщениями
+            </p>
+            <p className="mt-1 text-sm leading-6 text-slate-400">
+              Выберите, можно ли использовать подтвержденный телефон и будущие
+              Telegram/MAX-каналы для игровых уведомлений, наград и отписки.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {preferenceActions.map((action) => {
+              const isActive =
+                (action.action === "GRANT" && consentStatus === "GRANTED") ||
+                (action.action === "DENY" && consentStatus === "DENIED") ||
+                (action.action === "UNSUBSCRIBE" &&
+                  consentStatus === "UNSUBSCRIBED");
+
+              return (
+                <button
+                  key={action.action}
+                  type="button"
+                  aria-pressed={isActive}
+                  disabled={Boolean(disabledReason) || isUpdating || isActive}
+                  title={disabledReason ?? action.description}
+                  onClick={() => onUpdatePreference(action.action)}
+                  className={communicationPreferenceButtonClass(
+                    action.action,
+                    isActive,
+                  )}
+                >
+                  {isUpdating ? "Сохраняем..." : action.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        {message ? (
+          <p className="mt-3 rounded-lg border border-cyan-300/20 bg-cyan-300/[0.06] px-3 py-2 text-sm leading-6 text-cyan-50">
+            {message}
+          </p>
+        ) : disabledReason ? (
+          <p className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/[0.06] px-3 py-2 text-sm leading-6 text-amber-50">
+            {disabledReason}
+          </p>
+        ) : null}
       </div>
 
       <div className="mt-5 grid gap-3 lg:grid-cols-3">
@@ -1858,6 +1999,28 @@ function communicationToneClass(tone: "emerald" | "cyan" | "amber") {
   } satisfies Record<"emerald" | "cyan" | "amber", string>;
 
   return classes[tone];
+}
+
+function communicationPreferenceButtonClass(
+  action: GuestPortalCommunicationPreferenceAction,
+  isActive: boolean,
+) {
+  const base =
+    "rounded-lg border px-4 py-2 text-sm font-black transition disabled:cursor-not-allowed disabled:opacity-60";
+
+  if (isActive) {
+    return `${base} border-emerald-300/40 bg-emerald-300/20 text-emerald-50`;
+  }
+
+  const classes = {
+    GRANT:
+      "border-emerald-300/25 bg-emerald-300/[0.08] text-emerald-100 hover:border-emerald-300/50 hover:bg-emerald-300/[0.14]",
+    DENY: "border-white/10 bg-white/[0.04] text-slate-100 hover:border-white/25 hover:bg-white/[0.08]",
+    UNSUBSCRIBE:
+      "border-amber-300/25 bg-amber-300/[0.08] text-amber-100 hover:border-amber-300/50 hover:bg-amber-300/[0.14]",
+  } satisfies Record<GuestPortalCommunicationPreferenceAction, string>;
+
+  return `${base} ${classes[action]}`;
 }
 
 function walletStateLabel(

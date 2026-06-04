@@ -7,6 +7,8 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { JwtService, type JwtSignOptions } from '@nestjs/jwt';
 import {
+  GuestCommunicationConsentStatus,
+  GuestCrmStatus,
   IntegrationProvider,
   Prisma,
   TenantLifecycleStatus,
@@ -80,6 +82,16 @@ export type GuestPortalOtpStartResponse = {
 export type GuestPortalOtpVerifyResponse = {
   token: string;
   portal: GuestPortalPayload;
+};
+
+export type GuestPortalCommunicationPreferenceAction =
+  | 'GRANT'
+  | 'DENY'
+  | 'UNSUBSCRIBE';
+
+export type GuestPortalCommunicationPreferenceResponse = {
+  portal: GuestPortalPayload;
+  message: string;
 };
 
 export type GuestPortalPayload = {
@@ -577,6 +589,59 @@ export class GuestPortalService {
   async getSession(authorization: string | undefined) {
     const payload = await this.verifyGuestToken(authorization);
     return this.buildPortalPayload(payload);
+  }
+
+  async updateCommunicationPreferences(
+    authorization: string | undefined,
+    dto: { action?: unknown },
+  ): Promise<GuestPortalCommunicationPreferenceResponse> {
+    const payload = await this.verifyGuestToken(authorization);
+    const action = communicationPreferenceAction(dto.action);
+    const guest = await this.findGuest(payload);
+
+    if (!guest) {
+      throw new BadRequestException(
+        'Профиль гостя еще не найден в синхронизированной базе. Согласие можно сохранить после сопоставления с Langame.',
+      );
+    }
+
+    const now = new Date();
+    const data =
+      action === 'GRANT'
+        ? {
+            phoneConsentStatus: GuestCommunicationConsentStatus.GRANTED,
+            phoneConsentSource: 'guest_portal',
+            phoneConsentAt: now,
+            unsubscribedAt: null,
+          }
+        : action === 'DENY'
+          ? {
+              phoneConsentStatus: GuestCommunicationConsentStatus.DENIED,
+              phoneConsentSource: 'guest_portal',
+              phoneConsentAt: null,
+              unsubscribedAt: null,
+            }
+          : {
+              phoneConsentStatus: GuestCommunicationConsentStatus.UNSUBSCRIBED,
+              phoneConsentSource: 'guest_portal',
+              phoneConsentAt: null,
+              unsubscribedAt: now,
+              crmStatus: GuestCrmStatus.DO_NOT_CONTACT,
+              crmUpdatedAt: now,
+            };
+
+    await this.prisma.guest.update({
+      where: { id: guest.id },
+      data,
+    });
+
+    return {
+      portal: await this.buildPortalPayload({
+        ...payload,
+        guestId: guest.id,
+      }),
+      message: communicationPreferenceMessage(action),
+    };
   }
 
   async matchLangameGuest(
@@ -2047,6 +2112,32 @@ function rewardSource(row: {
     sourceKind: 'MANUAL',
     sourceLabel: null,
   };
+}
+
+function communicationPreferenceAction(
+  value: unknown,
+): GuestPortalCommunicationPreferenceAction {
+  if (value === 'GRANT' || value === 'DENY' || value === 'UNSUBSCRIBE') {
+    return value;
+  }
+
+  throw new BadRequestException(
+    'Неизвестное действие для настройки коммуникаций.',
+  );
+}
+
+function communicationPreferenceMessage(
+  action: GuestPortalCommunicationPreferenceAction,
+) {
+  const messages = {
+    GRANT:
+      'Согласие сохранено. Игровые уведомления можно будет включить после подключения Telegram/MAX или SMS.',
+    DENY: 'Отказ сохранен. Игровые сообщения не будут отправляться без нового согласия.',
+    UNSUBSCRIBE:
+      'Отписка сохранена. Каналы нельзя использовать для игровых сообщений без нового согласия.',
+  } satisfies Record<GuestPortalCommunicationPreferenceAction, string>;
+
+  return messages[action];
 }
 
 function buildCommunications(

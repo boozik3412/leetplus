@@ -55,7 +55,7 @@ export async function POST(request: Request, { params }: RouteContext) {
     ? { "Content-Type": "application/json" }
     : {};
 
-  if (path.length === 2 && path[0] === "session") {
+  if (path.length >= 1 && path[0] === "session") {
     const cookieStore = await cookies();
     const token = cookieStore.get(GUEST_AUTH_COOKIE_NAME)?.value ?? null;
 

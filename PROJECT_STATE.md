@@ -79,6 +79,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added post-event effect measurement to Guest Game Hub: `/guests/gamification` now derives 14-day return guests, post-event sessions, play minutes, product/bar revenue, balance top-ups, and scenario recommendations from saved LeetPlus snapshots after loot box, mission, Battle Pass, and manual XP events without live Langame reads or Langame writes.
 - Added a commercial economy layer to Guest Game Hub: `/guests/gamification` now derives budget usage, reward backlog cost, redeemed rewards, XP issued, reached guests, and scenario recommendations for loot boxes, missions, Battle Pass, and manual rewards from saved LeetPlus events/rewards without live Langame reads or Langame writes.
 - Added communication-preference history to the public guest portal: every guest consent, denial, or unsubscribe now records a safe tenant-scoped `GuestCrmEvent` with a `guest_portal:communication_preference:*` prefix, and `/guest/[tenantSlug]/[storeId]` shows only that public decision history without exposing internal CRM notes, live Langame reads, or external message sends.
 - Added guest self-service communication preferences to the public guest portal: `/guest/[tenantSlug]/[storeId]` can now save guest consent, denial, or unsubscribe through a guest-token-only endpoint, marks the source as `guest_portal`, and sets unsubscribed guests to `DO_NOT_CONTACT` without sending external messages, live Langame reads, or Langame writes.

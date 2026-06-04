@@ -2530,6 +2530,7 @@ function GuestLogCatalogCard({
   catalog: GuestGameGuestLogCatalog;
 }) {
   const topItems = catalog.items.slice(0, 8);
+  const businessPresets = guestLogBusinessPresets(catalog.items).slice(0, 5);
 
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
@@ -2565,24 +2566,44 @@ function GuestLogCatalogCard({
       </div>
 
       {topItems.length ? (
-        <div className="mt-4 flex flex-wrap gap-2">
-          {topItems.map((item) => (
-            <span
-              key={item.normalizedType}
-              className="rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-900 ring-1 ring-emerald-100 dark:bg-emerald-950/30 dark:text-emerald-100 dark:ring-emerald-900/70"
-              title={item.domains
-                .map((domain) => `${domain.domain}: ${domain.count}`)
-                .join(", ")}
-            >
-              {item.type} · {item.count}
-            </span>
-          ))}
-          {catalog.summary.latestAt ? (
-            <span className="rounded-full bg-zinc-100 px-3 py-1.5 text-xs font-semibold text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
-              последний: {formatDate(catalog.summary.latestAt)}
-            </span>
+        <>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {topItems.map((item) => (
+              <span
+                key={item.normalizedType}
+                className="rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-900 ring-1 ring-emerald-100 dark:bg-emerald-950/30 dark:text-emerald-100 dark:ring-emerald-900/70"
+                title={item.domains
+                  .map((domain) => `${domain.domain}: ${domain.count}`)
+                  .join(", ")}
+              >
+                {item.type} · {item.count}
+              </span>
+            ))}
+            {catalog.summary.latestAt ? (
+              <span className="rounded-full bg-zinc-100 px-3 py-1.5 text-xs font-semibold text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
+                последний: {formatDate(catalog.summary.latestAt)}
+              </span>
+            ) : null}
+          </div>
+          {businessPresets.length ? (
+            <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/50">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                Бизнес-пресеты из найденных типов
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {businessPresets.map((preset) => (
+                  <span
+                    key={preset.id}
+                    className="rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200 dark:bg-zinc-950 dark:text-zinc-200 dark:ring-zinc-800"
+                    title={preset.description}
+                  >
+                    {preset.label} · {preset.types.length}
+                  </span>
+                ))}
+              </div>
+            </div>
           ) : null}
-        </div>
+        </>
       ) : (
         <p className="mt-4 rounded-lg border border-dashed border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-400">
           Типы появятся после расширенной синхронизации `guests/logs` на
@@ -4892,6 +4913,155 @@ function TariffConditionFields({
   );
 }
 
+type GuestLogBusinessPreset = {
+  id: string;
+  label: string;
+  description: string;
+  intent: "allow" | "block";
+  tokens: string[];
+  types: string[];
+};
+
+const guestLogBusinessPresetDefinitions: Array<
+  Omit<GuestLogBusinessPreset, "types">
+> = [
+  {
+    id: "visit_or_session_start",
+    label: "Старт визита или сессии",
+    description: "Подходит для лутбокса при начале игры или миссии на визит.",
+    intent: "allow",
+    tokens: [
+      "start",
+      "visit",
+      "login",
+      "session",
+      "play",
+      "старт",
+      "визит",
+      "вход",
+      "начал",
+      "начало",
+      "сесс",
+      "сеанс",
+      "игр",
+    ],
+  },
+  {
+    id: "session_finish",
+    label: "Завершение сессии",
+    description: "Полезно для миссий на отыгранную сессию или итоговый XP.",
+    intent: "allow",
+    tokens: [
+      "finish",
+      "finished",
+      "end",
+      "stop",
+      "logout",
+      "close",
+      "заверш",
+      "оконч",
+      "выход",
+      "стоп",
+    ],
+  },
+  {
+    id: "events_and_tournaments",
+    label: "Турниры и события",
+    description: "Подходит для квестов за участие в турнирах и клубных событиях.",
+    intent: "allow",
+    tokens: [
+      "tournament",
+      "event",
+      "quest",
+      "mission",
+      "challenge",
+      "турнир",
+      "событ",
+      "ивент",
+      "квест",
+      "мисси",
+      "челлендж",
+    ],
+  },
+  {
+    id: "balance_and_payment",
+    label: "Баланс и оплата",
+    description: "Подходит для миссий или XP за пополнение, оплату или бонусы.",
+    intent: "allow",
+    tokens: [
+      "balance",
+      "payment",
+      "pay",
+      "deposit",
+      "bonus",
+      "topup",
+      "transaction",
+      "cash",
+      "плат",
+      "баланс",
+      "пополн",
+      "бонус",
+      "депозит",
+      "касс",
+    ],
+  },
+  {
+    id: "manual_or_risk",
+    label: "Ручные и рискованные события",
+    description: "Лучше добавлять в запрет anti-fraud, чтобы исключить тесты и корректировки.",
+    intent: "block",
+    tokens: [
+      "manual",
+      "cancel",
+      "rollback",
+      "refund",
+      "delete",
+      "edit",
+      "test",
+      "debug",
+      "admin",
+      "коррект",
+      "отмен",
+      "возврат",
+      "тест",
+      "удал",
+      "ручн",
+      "админ",
+      "ошиб",
+    ],
+  },
+];
+
+function guestLogBusinessPresets(
+  items: GuestGameGuestLogCatalog["items"],
+): GuestLogBusinessPreset[] {
+  if (!items.length) {
+    return [];
+  }
+
+  return guestLogBusinessPresetDefinitions
+    .map((definition) => {
+      const types = items
+        .filter((item) => guestLogTypeMatchesPreset(item, definition.tokens))
+        .map((item) => item.type);
+
+      return {
+        ...definition,
+        types: Array.from(new Set(types)),
+      };
+    })
+    .filter((preset) => preset.types.length);
+}
+
+function guestLogTypeMatchesPreset(
+  item: GuestGameGuestLogCatalog["items"][number],
+  tokens: string[],
+) {
+  const searchable = `${item.type} ${item.normalizedType}`.toLowerCase();
+
+  return tokens.some((token) => searchable.includes(token.toLowerCase()));
+}
+
 type GuestLogConditionPatch = {
   guestLogTypes?: string;
   blockedGuestLogTypes?: string;
@@ -4909,12 +5079,26 @@ function GuestLogConditionFields({
   onChange: (patch: GuestLogConditionPatch) => void;
 }) {
   const suggestedTypes = catalog.items.slice(0, 14);
+  const businessPresets = guestLogBusinessPresets(catalog.items);
   const addAllowedType = (type: string) =>
     onChange({ guestLogTypes: appendCsvToken(guestLogTypes, type) });
   const addBlockedType = (type: string) =>
     onChange({
       blockedGuestLogTypes: appendCsvToken(blockedGuestLogTypes, type),
     });
+  const applyPreset = (preset: GuestLogBusinessPreset) => {
+    if (preset.intent === "block") {
+      onChange({
+        blockedGuestLogTypes: appendCsvTokens(
+          blockedGuestLogTypes,
+          preset.types,
+        ),
+      });
+      return;
+    }
+
+    onChange({ guestLogTypes: appendCsvTokens(guestLogTypes, preset.types) });
+  };
 
   return (
     <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
@@ -4948,6 +5132,52 @@ function GuestLogConditionFields({
           />
         </Field>
       </div>
+      {businessPresets.length ? (
+        <div className="mt-3 rounded-lg border border-cyan-100 bg-cyan-50/70 p-3 dark:border-cyan-950 dark:bg-cyan-950/20">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-cyan-700 dark:text-cyan-300">
+              Бизнес-пресеты
+            </p>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              Система группирует raw-типы по смыслу, сами значения сохраняются
+              в правило.
+            </p>
+          </div>
+          <div className="mt-2 grid gap-2 md:grid-cols-2">
+            {businessPresets.map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                className="rounded-lg border border-cyan-200 bg-white p-3 text-left transition hover:border-cyan-400 hover:bg-cyan-50 dark:border-cyan-900/70 dark:bg-zinc-950 dark:hover:border-cyan-600 dark:hover:bg-cyan-950/30"
+                onClick={() => applyPreset(preset)}
+              >
+                <span className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-bold text-zinc-950 dark:text-white">
+                    {preset.label}
+                  </span>
+                  <span
+                    className={[
+                      "shrink-0 rounded-full px-2 py-1 text-[11px] font-bold uppercase",
+                      preset.intent === "block"
+                        ? "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-200"
+                        : "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-100",
+                    ].join(" ")}
+                  >
+                    {preset.intent === "block" ? "запрет" : "допуск"}
+                  </span>
+                </span>
+                <span className="mt-1 block text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                  {preset.description}
+                </span>
+                <span className="mt-2 block truncate text-[11px] font-semibold text-cyan-700 dark:text-cyan-300">
+                  {preset.types.slice(0, 4).join(", ")}
+                  {preset.types.length > 4 ? ` +${preset.types.length - 4}` : ""}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
       {suggestedTypes.length ? (
         <div className="mt-3 rounded-lg border border-emerald-100 bg-emerald-50/60 p-3 dark:border-emerald-950 dark:bg-emerald-950/20">
           <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
@@ -5428,20 +5658,32 @@ function csvList(value: string) {
 }
 
 function appendCsvToken(current: string, token: string) {
-  const normalizedToken = token.trim();
+  return appendCsvTokens(current, [token]);
+}
 
-  if (!normalizedToken) {
-    return current;
-  }
-
+function appendCsvTokens(current: string, tokens: string[]) {
   const values = csvList(current);
   const existing = new Set(values.map((value) => value.toLowerCase()));
+  const nextValues = [...values];
 
-  if (existing.has(normalizedToken.toLowerCase())) {
-    return current;
+  for (const token of tokens) {
+    const normalizedToken = token.trim();
+
+    if (!normalizedToken) {
+      continue;
+    }
+
+    const key = normalizedToken.toLowerCase();
+
+    if (existing.has(key)) {
+      continue;
+    }
+
+    existing.add(key);
+    nextValues.push(normalizedToken);
   }
 
-  return [...values, normalizedToken].join(", ");
+  return nextValues.join(", ");
 }
 
 function buildLootBoxPeriodRules(form: LootBoxForm) {

@@ -6,6 +6,8 @@ import {
   getMarketingPromoBundleReconciliation,
   getMarketingPromoBundles,
   getMarketingPromoBundleUsages,
+  getMarketingTariffConditions,
+  type MarketingTariffConditions,
 } from "@/lib/marketing";
 import { getProducts } from "@/lib/products";
 import { getStores } from "@/lib/stores";
@@ -18,6 +20,21 @@ async function safeList<T>(promise: Promise<T[]>): Promise<T[]> {
   }
 }
 
+async function safeValue<T>(promise: Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await promise;
+  } catch {
+    return fallback;
+  }
+}
+
+const emptyMarketingTariffConditions: MarketingTariffConditions = {
+  groups: [],
+  periods: [],
+  types: [],
+  summary: { groups: 0, periods: 0, types: 0, latestAt: null },
+};
+
 export default async function MarketingPromoBundlesPage() {
   await requireCurrentUser();
 
@@ -27,6 +44,7 @@ export default async function MarketingPromoBundlesPage() {
     promoBundleLaunches,
     promoBundleUsages,
     promoBundleReconciliation,
+    tariffConditions,
     stores,
   ] = await Promise.all([
     safeList(getMarketingPromoBundles()),
@@ -34,6 +52,7 @@ export default async function MarketingPromoBundlesPage() {
     safeList(getMarketingPromoBundleLaunches()),
     safeList(getMarketingPromoBundleUsages()),
     safeList(getMarketingPromoBundleReconciliation()),
+    safeValue(getMarketingTariffConditions(), emptyMarketingTariffConditions),
     safeList(getStores()),
   ]);
 
@@ -54,6 +73,7 @@ export default async function MarketingPromoBundlesPage() {
           promoBundleLaunches={promoBundleLaunches}
           promoBundleUsages={promoBundleUsages}
           promoBundleReconciliation={promoBundleReconciliation}
+          tariffConditions={tariffConditions}
           stores={stores}
         />
       </div>

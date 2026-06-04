@@ -34,6 +34,7 @@ import {
   type MarketingPromoBundleUsageImportDto,
   type MarketingPromoBundleUsageImportResult,
   type MarketingPromoBundleUsageUpdateDto,
+  type MarketingTariffConditions,
   type MarketingMission,
   type MarketingMissionDto,
   type MarketingMissionReward,
@@ -60,6 +61,13 @@ export class MarketingController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<MarketingCampaign[]> {
     return this.marketingService.getCampaigns(user);
+  }
+
+  @Get('tariff-conditions')
+  getTariffConditions(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<MarketingTariffConditions> {
+    return this.marketingService.getTariffConditions(user);
   }
 
   @Get('promo-bundles')

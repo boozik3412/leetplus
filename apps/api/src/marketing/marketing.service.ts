@@ -93,6 +93,27 @@ type MarketingPromoBundleUsageRow = Prisma.MarketingPromoBundleUsageGetPayload<{
   include: typeof marketingPromoBundleUsageInclude;
 }>;
 
+const marketingTariffConditionEndpointKeys = [
+  'tariffsGroups',
+  'tariffsTimePeriod',
+  'tariffsTypesGroups',
+] as const;
+
+type MarketingTariffConditionEndpointKey =
+  (typeof marketingTariffConditionEndpointKeys)[number];
+
+type MarketingTariffSnapshotRow = {
+  id: string;
+  endpointKey: string;
+  domain: string;
+  externalId: string | null;
+  name: string | null;
+  label: string | null;
+  kind: string | null;
+  fieldKeys: Prisma.JsonValue | null;
+  startedAt: Date;
+};
+
 const marketingMissionInclude = {
   audience: {
     select: { id: true, name: true, description: true, guestsCount: true },
@@ -423,6 +444,31 @@ export type MarketingCampaignConsentCoverage = {
   exclusionReason: string | null;
 };
 
+export type MarketingTariffConditionItem = {
+  id: string;
+  value: string;
+  domain: string;
+  externalId: string | null;
+  name: string | null;
+  label: string | null;
+  kind: string | null;
+  fieldKeys: string[];
+  startedAt: string;
+  displayName: string;
+};
+
+export type MarketingTariffConditions = {
+  groups: MarketingTariffConditionItem[];
+  periods: MarketingTariffConditionItem[];
+  types: MarketingTariffConditionItem[];
+  summary: {
+    groups: number;
+    periods: number;
+    types: number;
+    latestAt: string | null;
+  };
+};
+
 export type MarketingPromoBundleStructure = {
   composition: {
     typeLabel: string;
@@ -450,6 +496,12 @@ export type MarketingPromoBundleStructure = {
     onePerGuest: boolean;
     requiresApproval: boolean;
     noStacking: boolean;
+  };
+  conditions: {
+    tariffGroupId: string | null;
+    tariffPeriodId: string | null;
+    tariffTypeId: string | null;
+    tariffSummary: string;
   };
   accounting: {
     readiness:
@@ -953,6 +1005,51 @@ type MarketingCampaignExportContactEvent = {
 @Injectable()
 export class MarketingService {
   constructor(private readonly prisma: PrismaService) {}
+
+  async getTariffConditions(
+    user: AuthenticatedUser,
+  ): Promise<MarketingTariffConditions> {
+    const rows = await this.prisma.langameTariffSnapshotItem.findMany({
+      where: {
+        tenantId: user.tenantId,
+        provider: IntegrationProvider.LANGAME,
+        endpointKey: { in: [...marketingTariffConditionEndpointKeys] },
+      },
+      select: {
+        id: true,
+        endpointKey: true,
+        domain: true,
+        externalId: true,
+        name: true,
+        label: true,
+        kind: true,
+        fieldKeys: true,
+        startedAt: true,
+      },
+      orderBy: [{ startedAt: 'desc' }, { createdAt: 'desc' }],
+      take: 600,
+    });
+    const groups = marketingTariffConditionItems(rows, 'tariffsGroups');
+    const periods = marketingTariffConditionItems(rows, 'tariffsTimePeriod');
+    const types = marketingTariffConditionItems(rows, 'tariffsTypesGroups');
+    const latestAt =
+      rows
+        .map((row) => row.startedAt)
+        .sort((a, b) => b.getTime() - a.getTime())[0]
+        ?.toISOString() ?? null;
+
+    return {
+      groups,
+      periods,
+      types,
+      summary: {
+        groups: groups.length,
+        periods: periods.length,
+        types: types.length,
+        latestAt,
+      },
+    };
+  }
 
   async getCampaigns(user: AuthenticatedUser): Promise<MarketingCampaign[]> {
     const rows = await this.prisma.marketingCampaign.findMany({
@@ -5508,6 +5605,7 @@ function buildPromoBundleStructure(
   const bundle = getRecordField(config, 'bundle');
   const economics = getRecordField(config, 'economics');
   const accounting = getRecordField(config, 'accounting');
+  const conditions = getRecordField(config, 'conditions');
   const firstRef = normalizeAccountingRef(
     getRecordField(accounting, 'first'),
     bundleType === 'product_product' ? 'PRODUCT' : 'SERVICE',
@@ -5522,6 +5620,25 @@ function buildPromoBundleStructure(
     getStringField(accounting, 'writeOffRule'),
   );
   const accountingNote = normalizeText(accounting?.note, 300);
+  const tariffGroupId = normalizeText(
+    conditions?.tariffGroupId ?? config.tariffGroupId,
+    160,
+  );
+  const tariffPeriodId = normalizeText(
+    conditions?.tariffPeriodId ?? config.tariffPeriodId,
+    160,
+  );
+  const tariffTypeId = normalizeText(
+    conditions?.tariffTypeId ?? config.tariffTypeId,
+    160,
+  );
+  const tariffSummary =
+    normalizeText(conditions?.tariffSummary, 300) ??
+    promoBundleTariffSummaryFromIds({
+      tariffGroupId,
+      tariffPeriodId,
+      tariffTypeId,
+    });
   const firstItem = normalizeText(composition?.first, 160);
   const secondItem = normalizeText(composition?.second, 160);
   const extraCondition = normalizeText(composition?.extraCondition, 180);
@@ -5613,6 +5730,12 @@ function buildPromoBundleStructure(
       requiresApproval: getBooleanField(bundle, 'requiresApproval', true),
       noStacking: getBooleanField(bundle, 'noStacking', true),
     },
+    conditions: {
+      tariffGroupId,
+      tariffPeriodId,
+      tariffTypeId,
+      tariffSummary,
+    },
     accounting: {
       readiness,
       label: readinessLabel,
@@ -5629,6 +5752,90 @@ function buildPromoBundleStructure(
       note: accountingNote,
     },
   };
+}
+
+function marketingTariffConditionItems(
+  rows: MarketingTariffSnapshotRow[],
+  endpointKey: MarketingTariffConditionEndpointKey,
+) {
+  const seen = new Set<string>();
+  const items: MarketingTariffConditionItem[] = [];
+
+  for (const row of rows) {
+    if (row.endpointKey !== endpointKey) {
+      continue;
+    }
+
+    const value = row.externalId ?? row.id;
+    const key = `${endpointKey}:${value}`;
+
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    items.push(toMarketingTariffConditionItem(row, value));
+
+    if (items.length >= 80) {
+      break;
+    }
+  }
+
+  return items;
+}
+
+function toMarketingTariffConditionItem(
+  row: MarketingTariffSnapshotRow,
+  value: string,
+): MarketingTariffConditionItem {
+  const displayName = marketingTariffDisplayName(row);
+
+  return {
+    id: row.id,
+    value,
+    domain: row.domain,
+    externalId: row.externalId,
+    name: row.name,
+    label: row.label,
+    kind: row.kind,
+    fieldKeys: parseTariffFieldKeys(row.fieldKeys),
+    startedAt: row.startedAt.toISOString(),
+    displayName,
+  };
+}
+
+function marketingTariffDisplayName(row: MarketingTariffSnapshotRow) {
+  const label = row.label ?? row.name ?? row.externalId ?? row.id;
+
+  return row.domain ? `${label} · ${row.domain}` : label;
+}
+
+function parseTariffFieldKeys(value: Prisma.JsonValue | null) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .slice(0, 20);
+}
+
+function promoBundleTariffSummaryFromIds({
+  tariffGroupId,
+  tariffPeriodId,
+  tariffTypeId,
+}: {
+  tariffGroupId: string | null;
+  tariffPeriodId: string | null;
+  tariffTypeId: string | null;
+}) {
+  const parts = [
+    tariffGroupId ? `группа ${tariffGroupId}` : null,
+    tariffPeriodId ? `период ${tariffPeriodId}` : null,
+    tariffTypeId ? `тип ${tariffTypeId}` : null,
+  ].filter((item): item is string => Boolean(item));
+
+  return parts.length > 0 ? parts.join(' · ') : 'любой тариф';
 }
 
 function parseOptionalDate(value: unknown) {

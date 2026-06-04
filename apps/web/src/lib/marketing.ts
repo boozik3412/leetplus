@@ -105,6 +105,12 @@ export type MarketingPromoBundleStructure = {
     requiresApproval: boolean;
     noStacking: boolean;
   };
+  conditions: {
+    tariffGroupId: string | null;
+    tariffPeriodId: string | null;
+    tariffTypeId: string | null;
+    tariffSummary: string;
+  };
   accounting: {
     readiness:
       | "READY"
@@ -129,6 +135,31 @@ export type MarketingPromoBundleStructure = {
     writeOffRule: "ON_REDEEM" | "ON_SALE" | "MANUAL";
     writeOffLabel: string;
     note: string | null;
+  };
+};
+
+export type MarketingTariffConditionItem = {
+  id: string;
+  value: string;
+  domain: string;
+  externalId: string | null;
+  name: string | null;
+  label: string | null;
+  kind: string | null;
+  fieldKeys: string[];
+  startedAt: string;
+  displayName: string;
+};
+
+export type MarketingTariffConditions = {
+  groups: MarketingTariffConditionItem[];
+  periods: MarketingTariffConditionItem[];
+  types: MarketingTariffConditionItem[];
+  summary: {
+    groups: number;
+    periods: number;
+    types: number;
+    latestAt: string | null;
   };
 };
 
@@ -614,6 +645,19 @@ export async function getMarketingPromoBundles(): Promise<
   }
 
   return response.json() as Promise<MarketingPromoBundle[]>;
+}
+
+export async function getMarketingTariffConditions(): Promise<MarketingTariffConditions> {
+  const response = await fetch(`${getApiUrl()}/marketing/tariff-conditions`, {
+    cache: "no-store",
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch marketing tariff conditions");
+  }
+
+  return response.json() as Promise<MarketingTariffConditions>;
 }
 
 export async function getMarketingPromoBundleLaunches(): Promise<

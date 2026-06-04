@@ -24,6 +24,8 @@ import type {
   MarketingPromoBundleUsage,
   MarketingPromoBundleUsageSource,
   MarketingPromoBundleUsageStatus,
+  MarketingTariffConditionItem,
+  MarketingTariffConditions,
 } from "@/lib/marketing";
 import type { Product } from "@/lib/products";
 import type { Store } from "@/lib/stores";
@@ -114,6 +116,9 @@ type PromoBundleDraft = {
   onePerGuest: boolean;
   requiresApproval: boolean;
   noStacking: boolean;
+  tariffGroupId: string;
+  tariffPeriodId: string;
+  tariffTypeId: string;
   firstAccountingKind: PromoBundleAccountingKind;
   firstAccountingProductId: string;
   firstAccountingReference: string;
@@ -520,6 +525,9 @@ const emptyBundleDraft: PromoBundleDraft = {
   onePerGuest: true,
   requiresApproval: true,
   noStacking: true,
+  tariffGroupId: "",
+  tariffPeriodId: "",
+  tariffTypeId: "",
   firstAccountingKind: "SERVICE",
   firstAccountingProductId: "",
   firstAccountingReference: "",
@@ -528,6 +536,13 @@ const emptyBundleDraft: PromoBundleDraft = {
   secondAccountingReference: "",
   writeOffRule: "ON_REDEEM",
   accountingNote: "",
+};
+
+const emptyMarketingTariffConditions: MarketingTariffConditions = {
+  groups: [],
+  periods: [],
+  types: [],
+  summary: { groups: 0, periods: 0, types: 0, latestAt: null },
 };
 
 const bundleFieldHints = {
@@ -597,6 +612,7 @@ export function MarketingCampaignsPanel({
   users,
   promoBundles,
   promoBundleLaunches,
+  tariffConditions = emptyMarketingTariffConditions,
   stores,
 }: {
   campaigns: MarketingCampaign[];
@@ -604,6 +620,7 @@ export function MarketingCampaignsPanel({
   users: GuestCrmUser[];
   promoBundles: MarketingPromoBundle[];
   promoBundleLaunches: MarketingPromoBundleLaunch[];
+  tariffConditions?: MarketingTariffConditions;
   stores: Store[];
 }) {
   const [rows, setRows] = useState(campaigns);
@@ -762,12 +779,19 @@ export function MarketingCampaignsPanel({
 
     setIsSavingBundle(true);
     setError(null);
-    const note = buildPromoBundleNote(bundleDraft, bundleEconomics);
+    const note = buildPromoBundleNote(
+      bundleDraft,
+      bundleEconomics,
+      [],
+      tariffConditions,
+    );
     const bundleType = getPromoBundleTypeOption(bundleDraft.bundleType);
     const mechanicConfig = buildPromoBundleConfig(
       bundleDraft,
       bundleEconomics,
       bundleVerdict,
+      [],
+      tariffConditions,
     );
     const response = await fetch("/api/marketing/promo-bundles", {
       method: "POST",
@@ -825,7 +849,9 @@ export function MarketingCampaignsPanel({
     const draft = promoBundleToDraft(promoBundle);
     const economics = buildPromoBundleEconomics(draft);
     const verdict = buildPromoBundleVerdict(draft, economics);
-    const note = promoBundle.note ?? buildPromoBundleNote(draft, economics);
+    const note =
+      promoBundle.note ??
+      buildPromoBundleNote(draft, economics, [], tariffConditions);
     const bundleType = getPromoBundleTypeOption(draft.bundleType);
     const mechanicConfig = isRecord(promoBundle.mechanicConfig)
       ? {
@@ -833,7 +859,13 @@ export function MarketingCampaignsPanel({
           promoBundleId: promoBundle.id,
         }
       : {
-          ...buildPromoBundleConfig(draft, economics, verdict),
+          ...buildPromoBundleConfig(
+            draft,
+            economics,
+            verdict,
+            [],
+            tariffConditions,
+          ),
           promoBundleId: promoBundle.id,
         };
 
@@ -1031,6 +1063,7 @@ export function MarketingCampaignsPanel({
         selectedTemplate={selectedTemplate}
         selectedTemplateId={selectedTemplateId}
         promoBundles={savedPromoBundles}
+        tariffConditions={tariffConditions}
         bundleDraft={bundleDraft}
         bundleEconomics={bundleEconomics}
         bundleVerdict={bundleVerdict}
@@ -1499,6 +1532,7 @@ export function MarketingPromoBundlesWorkspace({
   promoBundleUsages = [],
   promoBundleReconciliation = [],
   productOptions = [],
+  tariffConditions = emptyMarketingTariffConditions,
   stores = [],
 }: {
   promoBundles: MarketingPromoBundle[];
@@ -1506,6 +1540,7 @@ export function MarketingPromoBundlesWorkspace({
   promoBundleUsages?: MarketingPromoBundleUsage[];
   promoBundleReconciliation?: MarketingPromoBundleReconciliation[];
   productOptions?: Product[];
+  tariffConditions?: MarketingTariffConditions;
   stores?: Store[];
 }) {
   const [savedPromoBundles, setSavedPromoBundles] = useState(promoBundles);
@@ -1551,6 +1586,7 @@ export function MarketingPromoBundlesWorkspace({
       bundleDraft,
       bundleEconomics,
       productOptions,
+      tariffConditions,
     );
     const bundleType = getPromoBundleTypeOption(bundleDraft.bundleType);
     const mechanicConfig = buildPromoBundleConfig(
@@ -1558,6 +1594,7 @@ export function MarketingPromoBundlesWorkspace({
       bundleEconomics,
       bundleVerdict,
       productOptions,
+      tariffConditions,
     );
     const endpoint = selectedBundle
       ? `/api/marketing/promo-bundles/${selectedBundle.id}`
@@ -1790,6 +1827,7 @@ export function MarketingPromoBundlesWorkspace({
         mode="catalog"
         showCatalogChooser={false}
         productOptions={productOptions}
+        tariffConditions={tariffConditions}
         bundleActionLabel={
           isEditingBundle ? "Сохранить изменения" : "Создать промо-набор"
         }
@@ -2901,6 +2939,7 @@ function PromoBundleCatalogRow({
     structure.pricing.marginPercent === null
       ? "маржа не рассчитана"
       : `маржа ${formatPercent(structure.pricing.marginPercent)}`;
+  const tariffSummary = structure.conditions?.tariffSummary ?? "любой тариф";
 
   return (
     <article
@@ -2927,6 +2966,7 @@ function PromoBundleCatalogRow({
           <span>{formatRubles(structure.pricing.promoPrice)}</span>
           <span>{margin}</span>
           <span>{formatNumber(structure.limits.expectedUses)} исп.</span>
+          {tariffSummary !== "любой тариф" ? <span>{tariffSummary}</span> : null}
           <span>{structure.accounting.label}</span>
           <span>обновлен {formatDate(bundle.updatedAt)}</span>
         </div>
@@ -2947,6 +2987,7 @@ function PromoMechanicsBuilder({
   showCatalogChooser = true,
   bundleActionLabel,
   productOptions = [],
+  tariffConditions = emptyMarketingTariffConditions,
   selectedTemplate,
   selectedTemplateId,
   promoBundles,
@@ -2966,6 +3007,7 @@ function PromoMechanicsBuilder({
   showCatalogChooser?: boolean;
   bundleActionLabel?: string;
   productOptions?: Product[];
+  tariffConditions?: MarketingTariffConditions;
   selectedTemplate: PromoMechanicTemplate;
   selectedTemplateId: string;
   promoBundles: MarketingPromoBundle[];
@@ -2986,11 +3028,13 @@ function PromoMechanicsBuilder({
     bundleDraft,
     bundleEconomics,
     productOptions,
+    tariffConditions,
   );
   const bundleStructure = promoBundleStructureFromDraft(
     bundleDraft,
     bundleEconomics,
     productOptions,
+    tariffConditions,
   );
   const [activeBundlePart, setActiveBundlePart] =
     useState<PromoBundlePart>("first");
@@ -3582,6 +3626,12 @@ function PromoMechanicsBuilder({
               />
             </div>
           </div>
+
+          <PromoBundleTariffConditionsPanel
+            draft={bundleDraft}
+            tariffConditions={tariffConditions}
+            onChange={onBundleDraftChange}
+          />
 
           <PromoBundleAccountingPanel
             bundleType={bundleType}
@@ -4273,6 +4323,109 @@ function PromoBundlePartCard({
   );
 }
 
+function PromoBundleTariffConditionsPanel({
+  draft,
+  tariffConditions,
+  onChange,
+}: {
+  draft: PromoBundleDraft;
+  tariffConditions: MarketingTariffConditions;
+  onChange: (draft: PromoBundleDraft) => void;
+}) {
+  const totalOptions =
+    tariffConditions.groups.length +
+    tariffConditions.periods.length +
+    tariffConditions.types.length;
+  const summary = promoBundleTariffRuleSummary(draft, tariffConditions);
+
+  return (
+    <div className="mt-4 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wide text-emerald-500">
+            Тарифные условия
+          </p>
+          <h4 className="mt-1 text-base font-semibold text-zinc-950 dark:text-white">
+            Где действует набор
+          </h4>
+        </div>
+        <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
+          {summary}
+        </span>
+      </div>
+      <div className="mt-3 grid gap-3 md:grid-cols-3">
+        <MarketingTariffSelect
+          label="Группа тарифов"
+          value={draft.tariffGroupId}
+          options={tariffConditions.groups}
+          emptyLabel="Любая группа"
+          onChange={(value) => onChange({ ...draft, tariffGroupId: value })}
+        />
+        <MarketingTariffSelect
+          label="Период"
+          value={draft.tariffPeriodId}
+          options={tariffConditions.periods}
+          emptyLabel="Любой период"
+          onChange={(value) => onChange({ ...draft, tariffPeriodId: value })}
+        />
+        <MarketingTariffSelect
+          label="Тип тарифа"
+          value={draft.tariffTypeId}
+          options={tariffConditions.types}
+          emptyLabel="Любой тип"
+          onChange={(value) => onChange({ ...draft, tariffTypeId: value })}
+        />
+      </div>
+      {totalOptions === 0 ? (
+        <p className="mt-3 rounded-lg border border-dashed border-zinc-300 px-3 py-2 text-sm leading-6 text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+          Сохраненных тарифных snapshot-строк пока нет. Обновите тарифные
+          endpoints в разделе синхронизации, затем вернитесь к набору.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function MarketingTariffSelect({
+  label,
+  value,
+  options,
+  emptyLabel,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: MarketingTariffConditionItem[];
+  emptyLabel: string;
+  onChange: (value: string) => void;
+}) {
+  const hasSelectedOption =
+    !value || options.some((option) => marketingTariffItemValue(option) === value);
+
+  return (
+    <label className="block">
+      <span className="text-xs font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+        {label}
+      </span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-1 h-11 w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 text-sm font-semibold text-zinc-950 transition hover:border-emerald-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-800 dark:bg-zinc-900 dark:text-white"
+      >
+        <option value="">{emptyLabel}</option>
+        {!hasSelectedOption ? (
+          <option value={value}>{value} · сохранено ранее</option>
+        ) : null}
+        {options.map((option) => (
+          <option key={option.id} value={marketingTariffItemValue(option)}>
+            {marketingTariffItemLabel(option)}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 function PromoBundleCatalogItem({
   bundle,
   isActive,
@@ -4288,10 +4441,9 @@ function PromoBundleCatalogItem({
 }) {
   const draft = promoBundleToDraft(bundle);
   const economics = buildPromoBundleEconomics(draft);
-  const composition = [draft.gameItem, draft.barItems]
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .join(" + ");
+  const structure = promoBundleStructureFromBundle(bundle);
+  const composition = structure.composition.summary;
+  const tariffSummary = structure.conditions?.tariffSummary ?? "любой тариф";
   const margin =
     economics.marginPercent === null
       ? "маржа не рассчитана"
@@ -4322,6 +4474,7 @@ function PromoBundleCatalogItem({
           <span>{formatRubles(economics.promoPrice)}</span>
           <span>{margin}</span>
           <span>{formatNumber(economics.expectedUses)} исп.</span>
+          {tariffSummary !== "любой тариф" ? <span>{tariffSummary}</span> : null}
         </div>
       </div>
       <div className="flex flex-wrap gap-2 md:justify-end">
@@ -5332,6 +5485,88 @@ function writeOffRuleLabel(rule: PromoBundleWriteOffRule) {
   return labels[rule];
 }
 
+function marketingTariffItemValue(item: MarketingTariffConditionItem) {
+  return item.value || item.externalId || item.id;
+}
+
+function marketingTariffItemLabel(item: MarketingTariffConditionItem) {
+  return (
+    item.displayName ||
+    [item.label ?? item.name ?? item.externalId ?? item.id, item.domain]
+      .filter(Boolean)
+      .join(" · ")
+  );
+}
+
+function findMarketingTariffItem(
+  items: MarketingTariffConditionItem[],
+  value: string,
+) {
+  if (!value) {
+    return null;
+  }
+
+  return (
+    items.find((item) => marketingTariffItemValue(item) === value) ?? null
+  );
+}
+
+function promoBundleTariffRuleSummary(
+  draft: PromoBundleDraft,
+  tariffConditions: MarketingTariffConditions = emptyMarketingTariffConditions,
+) {
+  const parts = [
+    promoBundleTariffPartLabel(
+      "группа",
+      draft.tariffGroupId,
+      tariffConditions.groups,
+    ),
+    promoBundleTariffPartLabel(
+      "период",
+      draft.tariffPeriodId,
+      tariffConditions.periods,
+    ),
+    promoBundleTariffPartLabel("тип", draft.tariffTypeId, tariffConditions.types),
+  ].filter((item): item is string => Boolean(item));
+
+  return parts.length > 0 ? parts.join(" · ") : "любой тариф";
+}
+
+function promoBundleTariffPartLabel(
+  prefix: string,
+  value: string,
+  options: MarketingTariffConditionItem[],
+) {
+  if (!value) {
+    return null;
+  }
+
+  const item = findMarketingTariffItem(options, value);
+
+  return `${prefix}: ${item ? marketingTariffItemLabel(item) : value}`;
+}
+
+function promoBundleTariffConditionLabels(
+  draft: PromoBundleDraft,
+  tariffConditions: MarketingTariffConditions = emptyMarketingTariffConditions,
+) {
+  const group = findMarketingTariffItem(
+    tariffConditions.groups,
+    draft.tariffGroupId,
+  );
+  const period = findMarketingTariffItem(
+    tariffConditions.periods,
+    draft.tariffPeriodId,
+  );
+  const type = findMarketingTariffItem(tariffConditions.types, draft.tariffTypeId);
+
+  return {
+    group: group ? marketingTariffItemLabel(group) : null,
+    period: period ? marketingTariffItemLabel(period) : null,
+    type: type ? marketingTariffItemLabel(type) : null,
+  };
+}
+
 function promoBundleToDraft(bundle: MarketingPromoBundle): PromoBundleDraft {
   const config = isRecord(bundle.mechanicConfig) ? bundle.mechanicConfig : {};
   const bundleType = resolvePromoBundleType(
@@ -5341,6 +5576,7 @@ function promoBundleToDraft(bundle: MarketingPromoBundle): PromoBundleDraft {
   const composition = isRecord(config.composition) ? config.composition : {};
   const bundleValues = isRecord(config.bundle) ? config.bundle : {};
   const accounting = isRecord(config.accounting) ? config.accounting : {};
+  const conditions = isRecord(config.conditions) ? config.conditions : {};
   const firstAccounting = isRecord(accounting.first) ? accounting.first : {};
   const secondAccounting = isRecord(accounting.second) ? accounting.second : {};
   const accountingDefaults = defaultAccountingForBundleType(bundleType);
@@ -5381,6 +5617,18 @@ function promoBundleToDraft(bundle: MarketingPromoBundle): PromoBundleDraft {
       bundleValues.noStacking,
       emptyBundleDraft.noStacking,
     ),
+    tariffGroupId: optionalText(
+      conditions.tariffGroupId ?? config.tariffGroupId,
+      "",
+    ),
+    tariffPeriodId: optionalText(
+      conditions.tariffPeriodId ?? config.tariffPeriodId,
+      "",
+    ),
+    tariffTypeId: optionalText(
+      conditions.tariffTypeId ?? config.tariffTypeId,
+      "",
+    ),
     firstAccountingKind: optionalAccountingKind(
       firstAccounting.kind,
       accountingDefaults.firstAccountingKind,
@@ -5416,6 +5664,7 @@ function promoBundleStructureFromDraft(
   draft: PromoBundleDraft,
   economics: PromoBundleEconomics,
   productOptions: Product[] = [],
+  tariffConditions: MarketingTariffConditions = emptyMarketingTariffConditions,
 ): MarketingPromoBundleStructure {
   const option = getPromoBundleTypeOption(draft.bundleType);
   const firstItem = draft.gameItem.trim() || null;
@@ -5427,6 +5676,7 @@ function promoBundleStructureFromDraft(
   const validityDays = Math.max(0, Math.round(parseMoney(draft.validityDays)));
   const firstRef = buildAccountingRefFromDraft("first", draft, productOptions);
   const secondRef = buildAccountingRefFromDraft("second", draft, productOptions);
+  const tariffSummary = promoBundleTariffRuleSummary(draft, tariffConditions);
   const missingFields = [
     firstItem ? null : option.firstLabel,
     secondItem ? null : option.secondLabel,
@@ -5483,6 +5733,12 @@ function promoBundleStructureFromDraft(
       onePerGuest: draft.onePerGuest,
       requiresApproval: draft.requiresApproval,
       noStacking: draft.noStacking,
+    },
+    conditions: {
+      tariffGroupId: draft.tariffGroupId.trim() || null,
+      tariffPeriodId: draft.tariffPeriodId.trim() || null,
+      tariffTypeId: draft.tariffTypeId.trim() || null,
+      tariffSummary,
     },
     accounting: {
       readiness,
@@ -5600,12 +5856,14 @@ function buildPromoBundleNote(
   draft: PromoBundleDraft,
   economics: PromoBundleEconomics,
   productOptions: Product[] = [],
+  tariffConditions: MarketingTariffConditions = emptyMarketingTariffConditions,
 ) {
   const bundleType = getPromoBundleTypeOption(draft.bundleType);
   const structure = promoBundleStructureFromDraft(
     draft,
     economics,
     productOptions,
+    tariffConditions,
   );
   const composition = [
     `${bundleType.firstLabel.toLowerCase()}: ${
@@ -5645,6 +5903,7 @@ function buildPromoBundleNote(
     )}. Срок действия: ${formatNumber(
       Math.round(parseMoney(draft.validityDays)),
     )} дней.`,
+    `Тарифные условия: ${structure.conditions.tariffSummary}.`,
     `Ограничения: ${
       draft.onePerGuest ? "один набор на гостя" : "повторное использование разрешено"
     }, только выбранные клубы и период, ${
@@ -5672,16 +5931,24 @@ function buildPromoBundleConfig(
   economics: PromoBundleEconomics,
   verdict: PromoBundleVerdict,
   productOptions: Product[] = [],
+  tariffConditions: MarketingTariffConditions = emptyMarketingTariffConditions,
 ): MarketingMechanicConfig {
   const structure = promoBundleStructureFromDraft(
     draft,
     economics,
     productOptions,
+    tariffConditions,
   );
+  const tariffGroupId = draft.tariffGroupId.trim() || null;
+  const tariffPeriodId = draft.tariffPeriodId.trim() || null;
+  const tariffTypeId = draft.tariffTypeId.trim() || null;
 
   return {
     kind: "promo_bundle",
     bundleType: draft.bundleType,
+    tariffGroupId,
+    tariffPeriodId,
+    tariffTypeId,
     composition: {
       first: draft.gameItem.trim(),
       second: draft.barItems.trim(),
@@ -5699,6 +5966,13 @@ function buildPromoBundleConfig(
       onePerGuest: draft.onePerGuest,
       requiresApproval: draft.requiresApproval,
       noStacking: draft.noStacking,
+    },
+    conditions: {
+      tariffGroupId,
+      tariffPeriodId,
+      tariffTypeId,
+      tariffSummary: structure.conditions.tariffSummary,
+      tariffLabels: promoBundleTariffConditionLabels(draft, tariffConditions),
     },
     accounting: {
       first: structure.accounting.firstRef,

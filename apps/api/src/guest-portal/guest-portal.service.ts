@@ -141,9 +141,11 @@ export type GuestPortalTelegramLinkConfirmResponse = {
 };
 
 export type GuestPortalTelegramWebhookResponse = {
-  status: 'CONFIRMED' | 'IGNORED' | 'FAILED';
-  action: 'LINK_CODE' | 'UNKNOWN';
+  status: 'CONFIRMED' | 'UNSUBSCRIBED' | 'IGNORED' | 'FAILED';
+  action: 'LINK_CODE' | 'UNSUBSCRIBE' | 'UNKNOWN';
   profileId: string | null;
+  profilesAffected?: number;
+  deliveriesBlocked?: number;
   telegramIdentityMasked: string | null;
   message: string;
 };
@@ -1069,10 +1071,18 @@ export class GuestPortalService {
   ): Promise<GuestPortalTelegramWebhookResponse> {
     this.assertTelegramLinkSecret(secret);
     const update = telegramWebhookUpdate(dto);
-    const code = telegramWebhookLinkCode(update.text);
     const telegramIdentityMasked = maskExternalIdentity(
       `chat:${update.telegramChatId}`,
     );
+
+    if (telegramWebhookUnsubscribeCommand(update.text)) {
+      return this.unsubscribeTelegramWebhookProfile(
+        update.telegramChatId,
+        telegramIdentityMasked,
+      );
+    }
+
+    const code = telegramWebhookLinkCode(update.text);
 
     if (!code) {
       return {
@@ -1112,6 +1122,147 @@ export class GuestPortalService {
             : 'Telegram webhook не смог подтвердить код.',
       };
     }
+  }
+
+  private async unsubscribeTelegramWebhookProfile(
+    telegramChatIdValue: string,
+    telegramIdentityMasked: string | null,
+  ): Promise<GuestPortalTelegramWebhookResponse> {
+    const telegramIdentity = `chat:${telegramChatIdValue}`;
+    const profiles = await this.prisma.guestGameProfile.findMany({
+      where: {
+        telegramIdentity,
+        status: 'ACTIVE',
+      },
+      select: {
+        id: true,
+        tenantId: true,
+        guestId: true,
+        leadId: true,
+      },
+    });
+
+    if (profiles.length === 0) {
+      return {
+        status: 'IGNORED',
+        action: 'UNSUBSCRIBE',
+        profileId: null,
+        profilesAffected: 0,
+        deliveriesBlocked: 0,
+        telegramIdentityMasked,
+        message:
+          'Telegram unsubscribe command received, but no active LeetPlus guest profile is linked to this chat_id.',
+      };
+    }
+
+    const now = new Date();
+    const profileIds = uniqueStrings(profiles.map((profile) => profile.id));
+    const guestIds = uniqueStrings(profiles.map((profile) => profile.guestId));
+    const leadIds = uniqueStrings(profiles.map((profile) => profile.leadId));
+    const preferenceNote = `${COMMUNICATION_PREFERENCE_EVENT_PREFIX}UNSUBSCRIBE: Telegram bot stop command.`;
+    const deliveryNote =
+      'Guest unsubscribed from Telegram bot through webhook stop command.';
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      if (guestIds.length > 0) {
+        await tx.guest.updateMany({
+          where: { id: { in: guestIds } },
+          data: {
+            phoneConsentStatus: GuestCommunicationConsentStatus.UNSUBSCRIBED,
+            phoneConsentSource: 'telegram_bot',
+            phoneConsentAt: null,
+            unsubscribedAt: now,
+            crmStatus: GuestCrmStatus.DO_NOT_CONTACT,
+            crmUpdatedAt: now,
+          },
+        });
+        await tx.guestCrmEvent.createMany({
+          data: guestIds.map((guestId) => ({
+            tenantId:
+              profiles.find((profile) => profile.guestId === guestId)
+                ?.tenantId ?? profiles[0].tenantId,
+            guestId,
+            status: GuestCrmStatus.DO_NOT_CONTACT,
+            note: preferenceNote,
+            createdAt: now,
+          })),
+        });
+      }
+
+      if (leadIds.length > 0) {
+        await tx.guestCrmLead.updateMany({
+          where: { id: { in: leadIds } },
+          data: {
+            phoneConsentStatus: GuestCommunicationConsentStatus.UNSUBSCRIBED,
+            phoneConsentSource: 'telegram_bot',
+            phoneConsentAt: null,
+            unsubscribedAt: now,
+            crmStatus: GuestCrmStatus.DO_NOT_CONTACT,
+          },
+        });
+      }
+
+      const pendingDeliveries = await tx.guestGameDelivery.findMany({
+        where: {
+          profileId: { in: profileIds },
+          channel: 'TELEGRAM',
+          status: 'READY',
+          readinessStatus: 'READY_FOR_BOT',
+        },
+        select: {
+          id: true,
+          tenantId: true,
+          rewardId: true,
+          status: true,
+        },
+      });
+
+      if (pendingDeliveries.length > 0) {
+        await tx.guestGameDelivery.updateMany({
+          where: {
+            id: { in: pendingDeliveries.map((delivery) => delivery.id) },
+          },
+          data: {
+            status: 'BLOCKED',
+            readinessStatus: 'UNSUBSCRIBED',
+            blockers: [
+              'Guest unsubscribed from Telegram bot.',
+            ] satisfies Prisma.InputJsonValue,
+            note: deliveryNote,
+          },
+        });
+        await tx.guestGameDeliveryEvent.createMany({
+          data: pendingDeliveries.map((delivery) => ({
+            tenantId: delivery.tenantId,
+            deliveryId: delivery.id,
+            rewardId: delivery.rewardId,
+            eventType: 'DELIVERY_UNSUBSCRIBED',
+            fromStatus: delivery.status,
+            toStatus: 'BLOCKED',
+            channel: 'TELEGRAM',
+            note: deliveryNote,
+            payload: {
+              source: 'telegram_webhook',
+              readinessStatus: 'UNSUBSCRIBED',
+            } satisfies Prisma.InputJsonValue,
+            createdAt: now,
+          })),
+        });
+      }
+
+      return { deliveriesBlocked: pendingDeliveries.length };
+    });
+
+    return {
+      status: 'UNSUBSCRIBED',
+      action: 'UNSUBSCRIBE',
+      profileId: profiles.length === 1 ? profiles[0].id : null,
+      profilesAffected: profiles.length,
+      deliveriesBlocked: result.deliveriesBlocked,
+      telegramIdentityMasked,
+      message:
+        'Telegram unsubscribe command processed. Guest communication consent is now UNSUBSCRIBED and pending Telegram deliveries are blocked.',
+    };
   }
 
   async matchLangameGuest(
@@ -2162,10 +2313,34 @@ function telegramWebhookLinkCode(text: string | null) {
   }
 }
 
+function telegramWebhookUnsubscribeCommand(text: string | null) {
+  if (!text) {
+    return false;
+  }
+
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  const [command] = trimmed.split(/\s+/);
+  return (
+    /^\/(stop|unsubscribe|cancel|отписаться|стоп)(@[A-Za-z0-9_]{3,64})?$/i.test(
+      command,
+    ) || /^(stop|unsubscribe|cancel|отписаться|стоп|отписка)$/i.test(trimmed)
+  );
+}
+
 function objectRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+}
+
+function uniqueStrings(values: Array<string | null | undefined>) {
+  return [
+    ...new Set(values.filter((value): value is string => Boolean(value))),
+  ];
 }
 
 function normalizeTelegramLinkCode(value: string) {

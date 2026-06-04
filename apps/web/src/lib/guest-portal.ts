@@ -266,6 +266,13 @@ export type GuestPortalPayload = {
         | "NOT_CONNECTED"
         | "UNSUBSCRIBED";
     };
+    history: Array<{
+      id: string;
+      action: GuestPortalCommunicationPreferenceAction;
+      label: string;
+      note: string;
+      createdAt: string;
+    }>;
   };
 };
 

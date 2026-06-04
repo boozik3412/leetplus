@@ -23,6 +23,8 @@ const OTP_MAX_ATTEMPTS = 5;
 const OTP_RESEND_SECONDS = 60;
 const GUEST_TOKEN_EXPIRES_IN = '7d';
 const GUEST_PORTAL_PURPOSE = 'guest_portal';
+const COMMUNICATION_PREFERENCE_EVENT_PREFIX =
+  'guest_portal:communication_preference:';
 type JwtExpiresIn = NonNullable<JwtSignOptions['expiresIn']>;
 
 type GuestPortalTokenPayload = {
@@ -88,6 +90,14 @@ export type GuestPortalCommunicationPreferenceAction =
   | 'GRANT'
   | 'DENY'
   | 'UNSUBSCRIBE';
+
+export type GuestPortalCommunicationHistoryItem = {
+  id: string;
+  action: GuestPortalCommunicationPreferenceAction;
+  label: string;
+  note: string;
+  createdAt: string;
+};
 
 export type GuestPortalCommunicationPreferenceResponse = {
   portal: GuestPortalPayload;
@@ -187,6 +197,7 @@ export type GuestPortalCommunications = {
   };
   telegram: GuestPortalCommunicationChannel;
   max: GuestPortalCommunicationChannel;
+  history: GuestPortalCommunicationHistoryItem[];
 };
 
 export type GuestPortalCommunicationChannel = {
@@ -630,10 +641,20 @@ export class GuestPortalService {
               crmUpdatedAt: now,
             };
 
-    await this.prisma.guest.update({
-      where: { id: guest.id },
-      data,
-    });
+    await this.prisma.$transaction([
+      this.prisma.guest.update({
+        where: { id: guest.id },
+        data,
+      }),
+      this.prisma.guestCrmEvent.create({
+        data: {
+          tenantId: payload.tenantId,
+          guestId: guest.id,
+          status: communicationPreferenceCrmStatus(action),
+          note: communicationPreferenceEventNote(action),
+        },
+      }),
+    ]);
 
     return {
       portal: await this.buildPortalPayload({
@@ -764,6 +785,7 @@ export class GuestPortalService {
       missions,
       seasons,
       rewards,
+      communicationEvents,
       activity,
     ] = await Promise.all([
       this.prisma.guestGroup.findMany({
@@ -832,6 +854,24 @@ export class GuestPortalService {
             },
             orderBy: [{ qualifiedAt: 'desc' }, { createdAt: 'desc' }],
             take: 20,
+          })
+        : [],
+      guest
+        ? this.prisma.guestCrmEvent.findMany({
+            where: {
+              tenantId: context.tenant.id,
+              guestId: guest.id,
+              note: {
+                startsWith: COMMUNICATION_PREFERENCE_EVENT_PREFIX,
+              },
+            },
+            select: {
+              id: true,
+              note: true,
+              createdAt: true,
+            },
+            orderBy: { createdAt: 'desc' },
+            take: 5,
           })
         : [],
       this.buildActivity(context.tenant.id, context.store.id, guest, profile),
@@ -916,7 +956,7 @@ export class GuestPortalService {
         rewards: portalRewards,
       },
       activity,
-      communications: buildCommunications(guest, profile),
+      communications: buildCommunications(guest, profile, communicationEvents),
     };
   }
 
@@ -2117,13 +2157,24 @@ function rewardSource(row: {
 function communicationPreferenceAction(
   value: unknown,
 ): GuestPortalCommunicationPreferenceAction {
-  if (value === 'GRANT' || value === 'DENY' || value === 'UNSUBSCRIBE') {
-    return value;
+  const action = communicationPreferenceActionOrNull(value);
+  if (action) {
+    return action;
   }
 
   throw new BadRequestException(
     'Неизвестное действие для настройки коммуникаций.',
   );
+}
+
+function communicationPreferenceActionOrNull(
+  value: unknown,
+): GuestPortalCommunicationPreferenceAction | null {
+  if (value === 'GRANT' || value === 'DENY' || value === 'UNSUBSCRIBE') {
+    return value;
+  }
+
+  return null;
 }
 
 function communicationPreferenceMessage(
@@ -2140,6 +2191,78 @@ function communicationPreferenceMessage(
   return messages[action];
 }
 
+function communicationPreferenceCrmStatus(
+  action: GuestPortalCommunicationPreferenceAction,
+) {
+  if (action === 'GRANT') {
+    return GuestCrmStatus.CONTACT;
+  }
+
+  if (action === 'UNSUBSCRIBE') {
+    return GuestCrmStatus.DO_NOT_CONTACT;
+  }
+
+  return GuestCrmStatus.NONE;
+}
+
+function communicationPreferenceEventNote(
+  action: GuestPortalCommunicationPreferenceAction,
+) {
+  const notes = {
+    GRANT: 'Гость разрешил игровые коммуникации через гостевой портал.',
+    DENY: 'Гость отказался от игровых коммуникаций через гостевой портал.',
+    UNSUBSCRIBE:
+      'Гость отписался от игровых коммуникаций через гостевой портал.',
+  } satisfies Record<GuestPortalCommunicationPreferenceAction, string>;
+
+  return `${COMMUNICATION_PREFERENCE_EVENT_PREFIX}${action}: ${notes[action]}`;
+}
+
+function communicationPreferenceHistoryLabel(
+  action: GuestPortalCommunicationPreferenceAction,
+) {
+  const labels = {
+    GRANT: 'Согласие',
+    DENY: 'Отказ',
+    UNSUBSCRIBE: 'Отписка',
+  } satisfies Record<GuestPortalCommunicationPreferenceAction, string>;
+
+  return labels[action];
+}
+
+function mapCommunicationPreferenceHistory(
+  rows: Array<{
+    id: string;
+    note: string | null;
+    createdAt: Date;
+  }>,
+): GuestPortalCommunicationHistoryItem[] {
+  return rows.flatMap((row) => {
+    const note = row.note ?? '';
+    const [, rest] = note.split(COMMUNICATION_PREFERENCE_EVENT_PREFIX);
+    if (!rest) {
+      return [];
+    }
+
+    const [rawAction, ...messageParts] = rest.split(': ');
+    const action = communicationPreferenceActionOrNull(rawAction);
+    if (!action) {
+      return [];
+    }
+    const cleanNote = messageParts.join(': ').trim();
+
+    return [
+      {
+        id: row.id,
+        action,
+        label: communicationPreferenceHistoryLabel(action),
+        note: cleanNote || communicationPreferenceMessage(action),
+        createdAt: row.createdAt.toISOString(),
+      },
+    ];
+  });
+}
+
 function buildCommunications(
   guest: {
     phoneMasked: string | null;
@@ -2153,6 +2276,11 @@ function buildCommunications(
     telegramIdentity: string | null;
     maxIdentity: string | null;
   } | null,
+  communicationEvents: Array<{
+    id: string;
+    note: string | null;
+    createdAt: Date;
+  }>,
 ): GuestPortalCommunications {
   const consentStatus = guest?.unsubscribedAt
     ? 'UNSUBSCRIBED'
@@ -2179,6 +2307,7 @@ function buildCommunications(
       consentGranted,
       consentStatus,
     ),
+    history: mapCommunicationPreferenceHistory(communicationEvents),
   };
 }
 

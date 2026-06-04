@@ -79,6 +79,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added communication-preference history to the public guest portal: every guest consent, denial, or unsubscribe now records a safe tenant-scoped `GuestCrmEvent` with a `guest_portal:communication_preference:*` prefix, and `/guest/[tenantSlug]/[storeId]` shows only that public decision history without exposing internal CRM notes, live Langame reads, or external message sends.
 - Added guest self-service communication preferences to the public guest portal: `/guest/[tenantSlug]/[storeId]` can now save guest consent, denial, or unsubscribe through a guest-token-only endpoint, marks the source as `guest_portal`, and sets unsubscribed guests to `DO_NOT_CONTACT` without sending external messages, live Langame reads, or Langame writes.
 - Added a safe guest snapshot passport to the public guest portal: `/guest/[tenantSlug]/[storeId]` now derives source, sync date, masked contacts, bonus card, registration, latest activity, profile flags, and profile completeness from saved Langame/LeetPlus data without live Langame reads or raw external IDs.
 - Added a guest communication-readiness layer to the public guest portal: `/guest/[tenantSlug]/[storeId]` now returns and renders masked phone, consent/unsubscribe state, Telegram/MAX identity readiness, and explains that external messages are not sent until SMS/Telegram/MAX providers and consent flows are configured.

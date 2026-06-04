@@ -490,6 +490,8 @@ function VerifiedPortal({
         <LoyaltyPanel portal={portal} />
       </section>
 
+      <GuestSnapshotPanel portal={portal} />
+
       <ActivityPanel portal={portal} />
 
       <section className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
@@ -612,6 +614,139 @@ function CommunicationPanel({ portal }: { portal: GuestPortalPayload }) {
               : "не зафиксирована"
           }
         />
+      </div>
+    </section>
+  );
+}
+
+function GuestSnapshotPanel({ portal }: { portal: GuestPortalPayload }) {
+  const snapshot = portal.guestSnapshot;
+  const completed = snapshot.profileCompleteness.completed.slice(0, 4);
+  const missing = snapshot.profileCompleteness.missing.slice(0, 4);
+
+  return (
+    <section className="rounded-lg border border-white/10 bg-[#0b111c] p-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-bold uppercase text-emerald-300">
+            Паспорт гостя
+          </p>
+          <h3 className="mt-1 text-2xl font-black text-white">
+            Что клуб знает о профиле
+          </h3>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
+            Эти данные берутся из сохраненного snapshot Langame и LeetPlus.
+            Здесь нет внутренних разделов клуба и нет live-запроса к Langame при
+            открытии кабинета.
+          </p>
+        </div>
+        <div className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-slate-300">
+          <span className="font-bold text-white">Источник:</span>{" "}
+          {snapshot.source.provider}
+          {snapshot.source.domain ? ` - ${snapshot.source.domain}` : ""}
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-4 lg:grid-cols-[0.95fr_1.05fr]">
+        <div className="rounded-lg border border-white/10 bg-[#070b12] p-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <Metric
+              label="Телефон"
+              value={snapshot.identity.phoneMasked ?? "не указан"}
+            />
+            <Metric
+              label="Email"
+              value={snapshot.identity.emailMasked ?? "не указан"}
+            />
+            <Metric
+              label="Бонусная карта"
+              value={snapshot.identity.bonusProgramNumberMasked ?? "нет"}
+            />
+          </div>
+
+          <ProgressBar
+            label="Заполненность профиля"
+            value={snapshot.profileCompleteness.percent}
+            tone="cyan"
+          />
+
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+            <InfoLine
+              label="Регистрация"
+              value={
+                snapshot.registration.registeredAt
+                  ? formatDate(snapshot.registration.registeredAt)
+                  : "нет данных"
+              }
+            />
+            <InfoLine
+              label="Последняя активность"
+              value={
+                snapshot.registration.lastActivityAt
+                  ? formatDate(snapshot.registration.lastActivityAt)
+                  : "нет данных"
+              }
+            />
+            <InfoLine
+              label="Последняя синхронизация"
+              value={
+                snapshot.source.lastSyncedAt
+                  ? formatDate(snapshot.source.lastSyncedAt)
+                  : "нет данных"
+              }
+            />
+            <InfoLine
+              label="Дата рождения"
+              value={snapshot.identity.birthdayProvided ? "указана" : "не указана"}
+            />
+          </div>
+        </div>
+
+        <div className="grid gap-4">
+          <div className="rounded-lg border border-white/10 bg-[#070b12] p-4">
+            <p className="text-xs font-bold uppercase text-slate-500">
+              Статус профиля
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {snapshot.statusLabels.map((label) => (
+                <span
+                  key={label}
+                  className="rounded-lg border border-emerald-300/20 bg-emerald-300/[0.08] px-3 py-1 text-xs font-bold text-emerald-100"
+                >
+                  {label}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+              <p className="text-xs font-bold uppercase text-emerald-300">
+                Уже заполнено
+              </p>
+              <ul className="mt-3 space-y-2 text-sm text-slate-300">
+                {completed.length ? (
+                  completed.map((item) => <li key={item}>- {item}</li>)
+                ) : (
+                  <li>Пока нет подтвержденных полей</li>
+                )}
+              </ul>
+            </div>
+
+            <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+              <p className="text-xs font-bold uppercase text-amber-200">
+                Можно уточнить
+              </p>
+              <ul className="mt-3 space-y-2 text-sm text-slate-300">
+                {missing.length ? (
+                  missing.map((item) => <li key={item}>- {item}</li>)
+                ) : (
+                  <li>Профиль выглядит заполненным</li>
+                )}
+              </ul>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
   );

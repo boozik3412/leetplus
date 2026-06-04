@@ -107,6 +107,7 @@ export type GuestPortalPayload = {
     bonusBalance: number | null;
     lastSyncedAt: string | null;
   };
+  guestSnapshot: GuestPortalGuestSnapshot;
   gamification: {
     nextActions: GuestPortalNextAction[];
     lootBoxes: GuestPortalLootBox[];
@@ -128,6 +129,38 @@ export type GuestPortalPayload = {
     xpHistory: GuestPortalXpHistoryItem[];
   };
   communications: GuestPortalCommunications;
+};
+
+export type GuestPortalGuestSnapshot = {
+  source: {
+    provider: string;
+    domain: string | null;
+    lastSyncedAt: string | null;
+  };
+  identity: {
+    phoneMasked: string | null;
+    emailMasked: string | null;
+    fullNameMasked: string | null;
+    birthdayProvided: boolean;
+    documentPresent: boolean;
+    bonusProgramNumberMasked: string | null;
+  };
+  registration: {
+    registeredAt: string | null;
+    lastActivityAt: string | null;
+    confirmed: boolean;
+    mobileRegistration: boolean;
+    simpleRegistration: boolean;
+    temporary: boolean;
+    virtual: boolean;
+    disabled: boolean;
+  };
+  profileCompleteness: {
+    percent: number;
+    completed: string[];
+    missing: string[];
+  };
+  statusLabels: string[];
 };
 
 export type GuestPortalCommunications = {
@@ -808,6 +841,7 @@ export class GuestPortalService {
         frame: frameForLevel(level),
       },
       loyalty,
+      guestSnapshot: buildGuestSnapshot(guest),
       gamification: {
         nextActions,
         lootBoxes: portalLootBoxes,
@@ -1797,6 +1831,160 @@ function buildNextActions(input: {
   return actions.slice(0, 4);
 }
 
+function buildGuestSnapshot(
+  guest: {
+    externalProvider: IntegrationProvider | null;
+    externalDomain: string | null;
+    phoneHash: string | null;
+    phoneMasked: string | null;
+    emailHash: string | null;
+    emailMasked: string | null;
+    fullNameHash: string | null;
+    fullNameMasked: string | null;
+    birthYear: number | null;
+    birthMonth: number | null;
+    birthDay: number | null;
+    insertedAt: Date | null;
+    lastActivityAt: Date | null;
+    isVirtual: boolean;
+    isTemporary: boolean;
+    isDisabled: boolean;
+    isSimpleRegistration: boolean;
+    isConfirmed: boolean;
+    isMobileRegistration: boolean;
+    identityDocumentPresent: boolean;
+    bonusProgramNumber: string | null;
+    lastSyncedAt: Date | null;
+  } | null,
+): GuestPortalGuestSnapshot {
+  if (!guest) {
+    return {
+      source: {
+        provider: 'LeetPlus',
+        domain: null,
+        lastSyncedAt: null,
+      },
+      identity: {
+        phoneMasked: null,
+        emailMasked: null,
+        fullNameMasked: null,
+        birthdayProvided: false,
+        documentPresent: false,
+        bonusProgramNumberMasked: null,
+      },
+      registration: {
+        registeredAt: null,
+        lastActivityAt: null,
+        confirmed: false,
+        mobileRegistration: false,
+        simpleRegistration: false,
+        temporary: false,
+        virtual: false,
+        disabled: false,
+      },
+      profileCompleteness: {
+        percent: 0,
+        completed: [],
+        missing: ['Синхронизированный профиль Langame'],
+      },
+      statusLabels: ['Профиль появится после синхронизации клуба'],
+    };
+  }
+
+  const birthdayProvided = Boolean(
+    guest.birthYear || guest.birthMonth || guest.birthDay,
+  );
+  const completenessItems = [
+    {
+      label: 'Телефон',
+      done: Boolean(guest.phoneHash || guest.phoneMasked),
+    },
+    {
+      label: 'Email',
+      done: Boolean(guest.emailHash || guest.emailMasked),
+    },
+    {
+      label: 'Имя',
+      done: Boolean(guest.fullNameHash || guest.fullNameMasked),
+    },
+    {
+      label: 'Дата рождения',
+      done: birthdayProvided,
+    },
+    {
+      label: 'Подтверждение профиля',
+      done: guest.isConfirmed,
+    },
+    {
+      label: 'Карта/номер бонусной программы',
+      done: Boolean(guest.bonusProgramNumber),
+    },
+  ];
+  const completed = completenessItems
+    .filter((item) => item.done)
+    .map((item) => item.label);
+  const missing = completenessItems
+    .filter((item) => !item.done)
+    .map((item) => item.label);
+
+  return {
+    source: {
+      provider:
+        guest.externalProvider === IntegrationProvider.LANGAME
+          ? 'Langame'
+          : (guest.externalProvider ?? 'LeetPlus'),
+      domain: guest.externalDomain ?? null,
+      lastSyncedAt: iso(guest.lastSyncedAt),
+    },
+    identity: {
+      phoneMasked: guest.phoneMasked,
+      emailMasked: guest.emailMasked,
+      fullNameMasked: guest.fullNameMasked,
+      birthdayProvided,
+      documentPresent: guest.identityDocumentPresent,
+      bonusProgramNumberMasked: maskIdentifier(guest.bonusProgramNumber),
+    },
+    registration: {
+      registeredAt: iso(guest.insertedAt),
+      lastActivityAt: iso(guest.lastActivityAt),
+      confirmed: guest.isConfirmed,
+      mobileRegistration: guest.isMobileRegistration,
+      simpleRegistration: guest.isSimpleRegistration,
+      temporary: guest.isTemporary,
+      virtual: guest.isVirtual,
+      disabled: guest.isDisabled,
+    },
+    profileCompleteness: {
+      percent: percent(completed.length, completenessItems.length),
+      completed,
+      missing,
+    },
+    statusLabels: buildGuestStatusLabels(guest),
+  };
+}
+
+function buildGuestStatusLabels(guest: {
+  isConfirmed: boolean;
+  isMobileRegistration: boolean;
+  isSimpleRegistration: boolean;
+  isTemporary: boolean;
+  isVirtual: boolean;
+  isDisabled: boolean;
+  identityDocumentPresent: boolean;
+}) {
+  const labels = [
+    guest.isConfirmed ? 'Профиль подтвержден' : 'Профиль не подтвержден',
+    guest.isMobileRegistration ? 'Мобильная регистрация' : null,
+    guest.isSimpleRegistration ? 'Упрощенная регистрация' : null,
+    guest.isTemporary ? 'Временный гость' : null,
+    guest.isVirtual ? 'Виртуальный профиль' : null,
+    guest.isDisabled ? 'Профиль отключен' : null,
+    guest.identityDocumentPresent ? 'Документ указан в Langame' : null,
+  ].filter((item): item is string => Boolean(item));
+
+  return labels.length ? labels : ['Обычный профиль гостя'];
+}
+
 function comparePortalRewards(
   left: GuestPortalReward,
   right: GuestPortalReward,
@@ -1950,6 +2138,20 @@ function maskExternalIdentity(value: string | null) {
   }
 
   return `${value.slice(0, 2)}...${value.slice(-2)}`;
+}
+
+function maskIdentifier(value: string | null) {
+  const normalized = value?.trim() ?? '';
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized.length <= 4) {
+    return '****';
+  }
+
+  return `${normalized.slice(0, 2)}...${normalized.slice(-2)}`;
 }
 
 function emptyActivity(): GuestPortalPayload['activity'] {

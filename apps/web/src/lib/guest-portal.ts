@@ -55,6 +55,37 @@ export type GuestPortalPayload = {
     bonusBalance: number | null;
     lastSyncedAt: string | null;
   };
+  guestSnapshot: {
+    source: {
+      provider: string;
+      domain: string | null;
+      lastSyncedAt: string | null;
+    };
+    identity: {
+      phoneMasked: string | null;
+      emailMasked: string | null;
+      fullNameMasked: string | null;
+      birthdayProvided: boolean;
+      documentPresent: boolean;
+      bonusProgramNumberMasked: string | null;
+    };
+    registration: {
+      registeredAt: string | null;
+      lastActivityAt: string | null;
+      confirmed: boolean;
+      mobileRegistration: boolean;
+      simpleRegistration: boolean;
+      temporary: boolean;
+      virtual: boolean;
+      disabled: boolean;
+    };
+    profileCompleteness: {
+      percent: number;
+      completed: string[];
+      missing: string[];
+    };
+    statusLabels: string[];
+  };
   gamification: {
     nextActions: Array<{
       id: string;

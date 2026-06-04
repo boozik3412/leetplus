@@ -968,10 +968,49 @@ export type GuestGameDeliveryOutbox = {
   note: string;
 };
 
+export type GuestGameIntegrationReadinessStatus =
+  | 'READY'
+  | 'PARTIAL'
+  | 'BLOCKED'
+  | 'MANUAL_ONLY';
+
+export type GuestGameIntegrationReadinessItem = {
+  key:
+    | 'PUBLIC_PORTAL'
+    | 'OTP'
+    | 'TELEGRAM_LINK'
+    | 'TELEGRAM_WEBHOOK'
+    | 'TELEGRAM_DELIVERY'
+    | 'MAX_DELIVERY'
+    | 'LANGAME_WRITE_API';
+  title: string;
+  status: GuestGameIntegrationReadinessStatus;
+  statusLabel: string;
+  ready: boolean;
+  configured: boolean;
+  enabled: boolean;
+  requiredEnv: string[];
+  note: string;
+  nextAction: string;
+};
+
+export type GuestGameIntegrationReadiness = {
+  summary: {
+    total: number;
+    ready: number;
+    partial: number;
+    blocked: number;
+    manualOnly: number;
+  };
+  items: GuestGameIntegrationReadinessItem[];
+  note: string;
+};
+
 export type GuestGamificationWorkspace = {
   summary: GuestGamificationSummary;
   economy: GuestGameEconomy;
   effect: GuestGameEffect;
+  integrationReadiness: GuestGameIntegrationReadiness;
   communicationQueue: GuestGameCommunicationQueue;
   deliveryOutbox: GuestGameDeliveryOutbox;
   profiles: GuestGameProfile[];
@@ -1566,6 +1605,7 @@ export class GuestGamificationService {
       ),
       economy: this.buildEconomy(lootBoxes, missions, seasons, rewards, events),
       effect,
+      integrationReadiness: this.buildIntegrationReadiness(deliveries),
       communicationQueue: this.buildCommunicationQueue(profiles, rewards),
       deliveryOutbox: this.buildDeliveryOutbox(deliveries),
       profiles,
@@ -1576,6 +1616,182 @@ export class GuestGamificationService {
       events,
       tariffSnapshots,
       guestLogCatalog,
+    };
+  }
+
+  private buildIntegrationReadiness(
+    deliveries: GuestGameDelivery[],
+  ): GuestGameIntegrationReadiness {
+    const deliveryConfig = deliveryProviderConfig();
+    const dispatcher = this.buildDeliveryDispatcherStatus(deliveries);
+    const telegramProvider = dispatcher.providers.find(
+      (provider) => provider.channel === 'TELEGRAM',
+    );
+    const maxProvider = dispatcher.providers.find(
+      (provider) => provider.channel === 'MAX',
+    );
+    const devOtpEnabled = envFlag('GUEST_PORTAL_DEV_OTP_ENABLED');
+    const telegramBotUsername = envString('GUEST_GAME_TELEGRAM_BOT_USERNAME');
+    const telegramLinkSecret =
+      envString('GUEST_GAME_TELEGRAM_LINK_SECRET') ??
+      envString('GUEST_GAME_TELEGRAM_WEBHOOK_SECRET');
+    const telegramWebhookSecret =
+      envString('GUEST_GAME_TELEGRAM_WEBHOOK_SECRET') ??
+      envString('GUEST_GAME_TELEGRAM_LINK_SECRET');
+    const publicApiUrl =
+      envString('PUBLIC_API_URL') ??
+      envString('NEXT_PUBLIC_API_URL') ??
+      envString('API_PUBLIC_URL') ??
+      'https://api.leetplus.ru';
+    const telegramLinkConfigured = Boolean(
+      telegramBotUsername && telegramLinkSecret,
+    );
+    const telegramWebhookConfigured = Boolean(telegramWebhookSecret);
+    const telegramDeliveryConfigured = Boolean(
+      telegramProvider?.configured && telegramProvider.enabledByEnv,
+    );
+    const maxDeliveryConfigured = Boolean(
+      maxProvider?.configured && maxProvider.enabledByEnv,
+    );
+    const items: GuestGameIntegrationReadinessItem[] = [
+      {
+        key: 'PUBLIC_PORTAL',
+        title: 'Публичный гостевой кабинет',
+        status: 'READY',
+        statusLabel: 'готов',
+        ready: true,
+        configured: true,
+        enabled: true,
+        requiredEnv: [],
+        note: 'Маршрут /guest/[tenantSlug]/[storeId] работает отдельно от внутреннего кабинета и использует guest-token.',
+        nextAction:
+          'Проверяйте гостевые ссылки по клубам из блока публичных ссылок ниже.',
+      },
+      {
+        key: 'OTP',
+        title: 'OTP-вход гостя',
+        status: devOtpEnabled ? 'PARTIAL' : 'BLOCKED',
+        statusLabel: devOtpEnabled ? 'demo-код' : 'нужен provider',
+        ready: false,
+        configured: devOtpEnabled,
+        enabled: devOtpEnabled,
+        requiredEnv: ['GUEST_PORTAL_DEV_OTP_ENABLED'],
+        note: devOtpEnabled
+          ? 'Включен dev/demo OTP: подходит для теста, но не для production-верификации гостей.'
+          : 'Реальная SMS/Telegram/MAX-доставка OTP еще не подключена; без dev/demo-кода гостевой вход не пройдет.',
+        nextAction:
+          'Согласовать провайдера OTP и consent-сценарий; demo-код включать только для тестов.',
+      },
+      {
+        key: 'TELEGRAM_LINK',
+        title: 'Привязка Telegram-бота',
+        status: telegramLinkConfigured
+          ? 'READY'
+          : telegramBotUsername || telegramLinkSecret
+            ? 'PARTIAL'
+            : 'BLOCKED',
+        statusLabel: telegramLinkConfigured
+          ? 'готово'
+          : telegramBotUsername || telegramLinkSecret
+            ? 'частично'
+            : 'не настроено',
+        ready: telegramLinkConfigured,
+        configured: telegramLinkConfigured,
+        enabled: Boolean(telegramBotUsername || telegramLinkSecret),
+        requiredEnv: [
+          'GUEST_GAME_TELEGRAM_BOT_USERNAME',
+          'GUEST_GAME_TELEGRAM_LINK_SECRET',
+        ],
+        note: 'Гость после OTP может создать одноразовый link-code и открыть deep link бота; LeetPlus хранит только chat:<id>.',
+        nextAction: telegramLinkConfigured
+          ? 'Проверить deep link в гостевом кабинете и webhook consumer.'
+          : 'Настроить username бота и link secret до публичного запуска привязки.',
+      },
+      {
+        key: 'TELEGRAM_WEBHOOK',
+        title: 'Telegram webhook consumer',
+        status: telegramWebhookConfigured ? 'READY' : 'BLOCKED',
+        statusLabel: telegramWebhookConfigured ? 'секрет есть' : 'секрет нужен',
+        ready: telegramWebhookConfigured,
+        configured: telegramWebhookConfigured,
+        enabled: telegramWebhookConfigured,
+        requiredEnv: ['GUEST_GAME_TELEGRAM_WEBHOOK_SECRET'],
+        note: 'Webhook принимает /start link-code и команды отписки, не хранит raw update и не отправляет внешние ответы.',
+        nextAction: telegramWebhookConfigured
+          ? `Убедиться, что webhook бота указывает на ${publicApiUrl.replace(/\/$/, '')}/guest-portal/telegram/webhook.`
+          : 'Задать webhook secret и только потом подключать внешний бот к production webhook.',
+      },
+      {
+        key: 'TELEGRAM_DELIVERY',
+        title: 'Отправка наград в Telegram',
+        status: telegramDeliveryConfigured
+          ? 'READY'
+          : deliveryConfig.realSendEnabled || telegramProvider?.configured
+            ? 'PARTIAL'
+            : 'BLOCKED',
+        statusLabel: telegramDeliveryConfigured
+          ? 'provider готов'
+          : deliveryConfig.realSendEnabled || telegramProvider?.configured
+            ? 'частично'
+            : 'dry-run',
+        ready: telegramDeliveryConfigured,
+        configured: Boolean(telegramProvider?.configured),
+        enabled: Boolean(telegramProvider?.enabledByEnv),
+        requiredEnv: telegramProvider?.requiredEnv ?? [
+          'GUEST_GAME_DELIVERY_REAL_SEND_ENABLED',
+          'GUEST_GAME_TELEGRAM_DELIVERY_ENABLED',
+          'GUEST_GAME_TELEGRAM_BOT_TOKEN',
+        ],
+        note:
+          telegramProvider?.note ??
+          'Telegram delivery provider еще не настроен; dispatcher работает безопасно.',
+        nextAction:
+          'Включать реальную отправку только после согласий, numeric chat_id, bot token и production-аудита outbox.',
+      },
+      {
+        key: 'MAX_DELIVERY',
+        title: 'MAX bot / Mini App',
+        status: maxDeliveryConfigured ? 'MANUAL_ONLY' : 'BLOCKED',
+        statusLabel: maxDeliveryConfigured ? 'ожидает API' : 'не настроено',
+        ready: false,
+        configured: Boolean(maxProvider?.configured),
+        enabled: Boolean(maxProvider?.enabledByEnv),
+        requiredEnv: maxProvider?.requiredEnv ?? [
+          'GUEST_GAME_DELIVERY_REAL_SEND_ENABLED',
+          'GUEST_GAME_MAX_DELIVERY_ENABLED',
+          'GUEST_GAME_MAX_BOT_TOKEN',
+          'GUEST_GAME_MAX_DELIVERY_ENDPOINT',
+        ],
+        note: 'MAX остается вторым адаптером: нужна юридическая подготовка и подтвержденный API-контракт.',
+        nextAction:
+          'Не включать автоматизацию MAX до утвержденного endpoint, токена, согласий и обработки отписок.',
+      },
+      {
+        key: 'LANGAME_WRITE_API',
+        title: 'Запись наград в Langame',
+        status: 'MANUAL_ONLY',
+        statusLabel: 'выключено',
+        ready: false,
+        configured: false,
+        enabled: false,
+        requiredEnv: [],
+        note: 'Награды, XP и события остаются внутри LeetPlus до подтвержденного write API, идемпотентности, аудита и rollback.',
+        nextAction:
+          'Продолжать через очередь, кассира и безопасные claim-коды; Langame write API не включать без отдельного согласования.',
+      },
+    ];
+
+    return {
+      summary: {
+        total: items.length,
+        ready: items.filter((item) => item.status === 'READY').length,
+        partial: items.filter((item) => item.status === 'PARTIAL').length,
+        blocked: items.filter((item) => item.status === 'BLOCKED').length,
+        manualOnly: items.filter((item) => item.status === 'MANUAL_ONLY')
+          .length,
+      },
+      items,
+      note: 'Готовность интеграций показывает, что уже можно тестировать, а что требует внешнего провайдера, секрета, согласий или подтвержденного API. Значения секретов не раскрываются.',
     };
   }
 

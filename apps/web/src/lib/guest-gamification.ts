@@ -621,6 +621,44 @@ export type GuestGameDeliveryOutbox = {
   note: string;
 };
 
+export type GuestGameIntegrationReadinessStatus =
+  | "READY"
+  | "PARTIAL"
+  | "BLOCKED"
+  | "MANUAL_ONLY";
+
+export type GuestGameIntegrationReadinessItem = {
+  key:
+    | "PUBLIC_PORTAL"
+    | "OTP"
+    | "TELEGRAM_LINK"
+    | "TELEGRAM_WEBHOOK"
+    | "TELEGRAM_DELIVERY"
+    | "MAX_DELIVERY"
+    | "LANGAME_WRITE_API";
+  title: string;
+  status: GuestGameIntegrationReadinessStatus;
+  statusLabel: string;
+  ready: boolean;
+  configured: boolean;
+  enabled: boolean;
+  requiredEnv: string[];
+  note: string;
+  nextAction: string;
+};
+
+export type GuestGameIntegrationReadiness = {
+  summary: {
+    total: number;
+    ready: number;
+    partial: number;
+    blocked: number;
+    manualOnly: number;
+  };
+  items: GuestGameIntegrationReadinessItem[];
+  note: string;
+};
+
 export type GuestGameTariffSnapshotStatus =
   | "READY"
   | "PARTIAL"
@@ -725,6 +763,7 @@ export type GuestGamificationWorkspace = {
   summary: GuestGamificationSummary;
   economy: GuestGameEconomy;
   effect: GuestGameEffect;
+  integrationReadiness: GuestGameIntegrationReadiness;
   communicationQueue: GuestGameCommunicationQueue;
   deliveryOutbox: GuestGameDeliveryOutbox;
   profiles: GuestGameProfile[];

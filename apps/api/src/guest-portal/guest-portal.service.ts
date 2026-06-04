@@ -135,6 +135,26 @@ export type GuestPortalLootBox = {
   rewardType: string;
   manualApprovalRequired: boolean;
   note: string | null;
+  openedCount: number;
+  readyRewards: number;
+  waitingApprovalRewards: number;
+  redeemedRewards: number;
+  latestReward: GuestPortalLootBoxReward | null;
+};
+
+export type GuestPortalLootBoxReward = {
+  id: string;
+  walletState:
+    | 'WAITING_APPROVAL'
+    | 'READY'
+    | 'REDEEMED'
+    | 'CANCELED'
+    | 'EXPIRED';
+  rewardLabel: string;
+  rewardCode: string | null;
+  claimPayload: string | null;
+  qualifiedAt: string;
+  expiresAt: string | null;
 };
 
 export type GuestPortalMission = {
@@ -714,7 +734,7 @@ export class GuestPortalService {
         lootBoxes: lootBoxes
           .filter((item) => matchesStore(item.storeIds, context.store.id))
           .slice(0, 6)
-          .map(mapLootBox),
+          .map((item) => mapLootBox(item, rewards)),
         missions: visibleMissions.map((item) =>
           mapMission(item, missionProgress.get(item.id)),
         ),
@@ -1308,15 +1328,28 @@ function guestPortalLangameMatchNextAction(
   return 'Не удалось проверить Langame по активным источникам. Попробуйте позже или обратитесь к администратору клуба.';
 }
 
-function mapLootBox(row: {
-  id: string;
-  name: string;
-  triggerKind: string;
-  rewardLabel: string | null;
-  rewardType: string;
-  manualApprovalRequired: boolean;
-  note: string | null;
-}): GuestPortalLootBox {
+function mapLootBox(
+  row: {
+    id: string;
+    name: string;
+    triggerKind: string;
+    rewardLabel: string | null;
+    rewardType: string;
+    manualApprovalRequired: boolean;
+    note: string | null;
+  },
+  rewards: Array<{
+    id: string;
+    lootBoxId: string | null;
+    status: string;
+    rewardLabel: string;
+    rewardCode: string | null;
+    qualifiedAt: Date;
+    expiresAt: Date | null;
+  }>,
+): GuestPortalLootBox {
+  const rewardState = buildLootBoxRewardState(row.id, rewards);
+
   return {
     id: row.id,
     name: row.name,
@@ -1325,6 +1358,65 @@ function mapLootBox(row: {
     rewardType: row.rewardType,
     manualApprovalRequired: row.manualApprovalRequired,
     note: row.note,
+    ...rewardState,
+  };
+}
+
+function buildLootBoxRewardState(
+  lootBoxId: string,
+  rewards: Array<{
+    id: string;
+    lootBoxId: string | null;
+    status: string;
+    rewardLabel: string;
+    rewardCode: string | null;
+    qualifiedAt: Date;
+    expiresAt: Date | null;
+  }>,
+): Pick<
+  GuestPortalLootBox,
+  | 'openedCount'
+  | 'readyRewards'
+  | 'waitingApprovalRewards'
+  | 'redeemedRewards'
+  | 'latestReward'
+> {
+  const lootBoxRewards = rewards
+    .filter((reward) => reward.lootBoxId === lootBoxId)
+    .sort(
+      (left, right) => right.qualifiedAt.getTime() - left.qualifiedAt.getTime(),
+    );
+  const mappedStates = lootBoxRewards.map((reward) =>
+    rewardWalletState(reward.status, reward.expiresAt),
+  );
+  const latest = lootBoxRewards[0] ?? null;
+  const latestState = latest
+    ? rewardWalletState(latest.status, latest.expiresAt)
+    : null;
+
+  return {
+    openedCount: lootBoxRewards.length,
+    readyRewards: mappedStates.filter((state) => state === 'READY').length,
+    waitingApprovalRewards: mappedStates.filter(
+      (state) => state === 'WAITING_APPROVAL',
+    ).length,
+    redeemedRewards: mappedStates.filter((state) => state === 'REDEEMED')
+      .length,
+    latestReward:
+      latest && latestState
+        ? {
+            id: latest.id,
+            walletState: latestState,
+            rewardLabel: latest.rewardLabel,
+            rewardCode: latest.rewardCode,
+            claimPayload:
+              latest.rewardCode && latestState === 'READY'
+                ? buildRewardClaimPayload(latest.id, latest.rewardCode)
+                : null,
+            qualifiedAt: latest.qualifiedAt.toISOString(),
+            expiresAt: iso(latest.expiresAt),
+          }
+        : null,
   };
 }
 

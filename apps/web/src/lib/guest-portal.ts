@@ -64,6 +64,24 @@ export type GuestPortalPayload = {
       rewardType: string;
       manualApprovalRequired: boolean;
       note: string | null;
+      openedCount: number;
+      readyRewards: number;
+      waitingApprovalRewards: number;
+      redeemedRewards: number;
+      latestReward: {
+        id: string;
+        walletState:
+          | "WAITING_APPROVAL"
+          | "READY"
+          | "REDEEMED"
+          | "CANCELED"
+          | "EXPIRED";
+        rewardLabel: string;
+        rewardCode: string | null;
+        claimPayload: string | null;
+        qualifiedAt: string;
+        expiresAt: string | null;
+      } | null;
     }>;
     missions: Array<{
       id: string;

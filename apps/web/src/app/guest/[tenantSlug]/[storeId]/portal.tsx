@@ -1138,6 +1138,9 @@ function MissionsPanel({ portal }: { portal: GuestPortalPayload }) {
 }
 
 function LootBoxesPanel({ portal }: { portal: GuestPortalPayload }) {
+  const [openedLootBoxId, setOpenedLootBoxId] = useState<string | null>(null);
+  const lootBoxes = portal.gamification.lootBoxes;
+
   return (
     <div className="rounded-lg border border-white/10 bg-[#0b111c] p-5">
       <div className="flex items-start justify-between gap-4">
@@ -1152,22 +1155,116 @@ function LootBoxesPanel({ portal }: { portal: GuestPortalPayload }) {
         <LootIcon />
       </div>
       <div className="mt-5 grid gap-3 sm:grid-cols-2">
-        {portal.gamification.lootBoxes.length ? (
-          portal.gamification.lootBoxes.map((lootBox) => (
-            <div
-              key={lootBox.id}
-              className="rounded-lg border border-white/10 bg-[#070b12] p-4 transition hover:border-emerald-300/40"
-            >
-              <p className="font-black text-white">{lootBox.name}</p>
-              <p className="mt-2 text-sm leading-6 text-slate-400">
-                {lootBox.rewardLabel ??
-                  "Награда определяется правилами лутбокса."}
-              </p>
-              <div className="mt-3 inline-flex rounded-lg bg-emerald-300/10 px-2 py-1 text-xs font-black text-emerald-200">
-                {lootBox.triggerKind}
+        {lootBoxes.length ? (
+          lootBoxes.map((lootBox) => {
+            const latestReward = lootBox.latestReward;
+            const isOpened = openedLootBoxId === lootBox.id;
+
+            return (
+              <div
+                key={lootBox.id}
+                className={`rounded-lg border p-4 transition hover:border-emerald-300/40 ${
+                  latestReward
+                    ? "border-emerald-300/30 bg-emerald-300/[0.07]"
+                    : "border-white/10 bg-[#070b12]"
+                }`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-black text-white">{lootBox.name}</p>
+                    <p className="mt-2 text-sm leading-6 text-slate-400">
+                      {lootBox.rewardLabel ??
+                        "Награда определяется правилами лутбокса."}
+                    </p>
+                  </div>
+                  <span className="rounded-lg bg-emerald-300/10 px-2 py-1 text-xs font-black text-emerald-200">
+                    {lootBox.triggerKind}
+                  </span>
+                </div>
+
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  <Metric
+                    label="Сработал"
+                    value={formatNumber(lootBox.openedCount)}
+                  />
+                  <Metric
+                    label="К выдаче"
+                    value={formatNumber(lootBox.readyRewards)}
+                  />
+                  <Metric
+                    label="Получено"
+                    value={formatNumber(lootBox.redeemedRewards)}
+                  />
+                </div>
+
+                {latestReward ? (
+                  <div className="mt-3 rounded-lg border border-emerald-300/25 bg-[#06120d] p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="text-xs font-bold uppercase text-emerald-200">
+                          Последний лутбокс
+                        </p>
+                        <p className="mt-1 text-xs text-slate-400">
+                          {formatDate(latestReward.qualifiedAt)}
+                        </p>
+                      </div>
+                      <span
+                        className={`rounded-lg px-2 py-1 text-xs font-black ${walletStateClass(
+                          latestReward.walletState,
+                        )}`}
+                      >
+                        {walletStateLabel(latestReward.walletState)}
+                      </span>
+                    </div>
+
+                    {!isOpened ? (
+                      <button
+                        type="button"
+                        className="mt-3 w-full rounded-lg bg-emerald-400 px-3 py-2 text-sm font-black text-[#03110a] transition hover:bg-emerald-300"
+                        onClick={() => setOpenedLootBoxId(lootBox.id)}
+                        aria-expanded={false}
+                      >
+                        Открыть лутбокс
+                      </button>
+                    ) : (
+                      <div className="mt-3 rounded-lg border border-emerald-200/25 bg-emerald-300/[0.08] p-3">
+                        <p className="text-xs font-bold uppercase text-emerald-200">
+                          Выпала награда
+                        </p>
+                        <p className="mt-1 text-lg font-black text-white">
+                          {latestReward.rewardLabel}
+                        </p>
+                        <p className="mt-2 text-xs leading-5 text-slate-300">
+                          {walletStateHint(latestReward.walletState)}
+                          {latestReward.expiresAt
+                            ? ` До ${formatDate(latestReward.expiresAt)}.`
+                            : ""}
+                        </p>
+                        {latestReward.rewardCode &&
+                        latestReward.walletState === "READY" ? (
+                          <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_88px]">
+                            <p className="rounded-lg border border-dashed border-emerald-200/50 px-3 py-2 text-sm font-black text-emerald-50">
+                              Код кассиру: {latestReward.rewardCode}
+                            </p>
+                            {latestReward.claimPayload ? (
+                              <RewardClaimBadge
+                                payload={latestReward.claimPayload}
+                              />
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <p className="mt-3 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs leading-5 text-slate-400">
+                    Лутбокс откроется после подходящего события: старта сессии,
+                    миссии или другого правила, заданного клубом.
+                  </p>
+                )}
               </div>
-            </div>
-          ))
+            );
+          })
         ) : (
           <EmptyBlock text="Лутбоксы появятся после настройки правил старта сессии или клубных событий." />
         )}

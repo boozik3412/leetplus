@@ -78,6 +78,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added a loot box reveal layer to the public guest portal: `/guest/[tenantSlug]/[storeId]` now shows per-loot-box trigger counts and the latest wallet reward, lets the guest reveal the last loot box result, and only exposes cashier claim codes for already-created READY LeetPlus rewards without new Langame writes.
 - Added personalized Battle Pass progress to the public guest portal: `/guest/[tenantSlug]/[storeId]` now shows the current season level, next level, XP remaining, progress percent, next free/premium rewards, and wallet reward counts from saved LeetPlus facts without live Langame reads.
 - Added manual post-OTP Langame matching to the public guest portal: `/guest/[tenantSlug]/[storeId]` can now check the confirmed phone through `POST /public_api/guests/search` only after a guest action, verifies the phone hash against `leetplus_guest_token`, returns masked source results plus local match hints, and does not store the raw phone or Langame payload.
 - Added editable tenant-level mappings for saved `guests/logs` types in Guest Game Hub: `/guests/gamification` can now assign a manager-facing label, business preset, allow/block intent, and note to a raw Langame event type, stores the mapping in Prisma, returns it through the workspace catalog, and uses it before auto-token presets when building loot box, mission, and Battle Pass conditions without live Langame reads.

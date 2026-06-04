@@ -30,7 +30,7 @@ export default async function MarketingMissionsPage() {
     <main className="px-4 py-6 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl">
         <ReportBreadcrumbs
-          current="Миссии"
+          current="Промо-сценарии"
           items={[
             { href: "/dashboard", label: "Дашборд" },
             { href: "/marketing", label: "Маркетинг" },

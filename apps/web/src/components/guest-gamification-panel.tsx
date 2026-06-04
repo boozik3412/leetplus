@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   useMemo,
   useState,
@@ -1118,13 +1119,48 @@ export function GuestGamificationPanel({
               Геймификация гостей
             </p>
             <h1 className="mt-2 text-3xl font-bold tracking-tight text-zinc-950 dark:text-white">
-              Профили, миссии, лутбоксы и кошелек наград
+              Guest Game Hub: XP, миссии, лутбоксы и кошелек
             </h1>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+              Здесь живет постоянная игровая экономика гостя: профиль, уровень,
+              прогресс, правила, Battle Pass и награды. Разовые маркетинговые
+              офферы и промо-эффект кампаний настраиваются отдельно.
+            </p>
           </div>
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
             Автоматическая запись наград в Langame выключена: выдача идет через
             ручное подтверждение, код или кассира.
           </div>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-4">
+            <p className="text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-300">
+              Здесь: игровая экономика
+            </p>
+            <h2 className="mt-1 font-semibold text-zinc-950 dark:text-white">
+              Долгий прогресс гостя
+            </h2>
+            <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+              XP, уровни, лутбоксы, игровые миссии, Battle Pass, кошелек
+              наград, safe dry-run и batch по подготовленным snapshot-фактам.
+            </p>
+          </div>
+          <Link
+            href="/marketing/missions"
+            className="rounded-lg border border-zinc-200 p-4 transition hover:border-emerald-500/70 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
+          >
+            <p className="text-xs font-semibold uppercase text-zinc-500 dark:text-zinc-400">
+              Маркетинг
+            </p>
+            <h2 className="mt-1 font-semibold text-zinc-950 dark:text-white">
+              Промо-сценарии кампаний
+            </h2>
+            <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+              Тихие часы, повторный визит, бар, события, аудитории, бюджеты
+              и ручная очередь выдачи для измеримого промо-эффекта.
+            </p>
+          </Link>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">

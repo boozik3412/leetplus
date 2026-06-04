@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState, type ReactNode } from "react";
 import type {
   MarketingMission,
@@ -93,7 +94,7 @@ const missionTypeOptions: Array<{
   },
   {
     value: "CUSTOM",
-    label: "Своя миссия",
+    label: "Свой сценарий",
     description: "Любое условие с ручным подтверждением факта.",
   },
 ];
@@ -366,11 +367,12 @@ export function MarketingMissionsPanel({
               Маркетинг
             </p>
             <h1 className="mt-1 text-3xl font-semibold tracking-normal text-zinc-950 dark:text-white">
-              Миссии и ручные награды
+              Промо-сценарии маркетинга
             </h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-              Настраивайте условия по данным Langame, лимиты, бюджет и очередь
-              ручной выдачи. Автоматических начислений в Langame здесь нет.
+              Планируйте краткосрочные промо-условия для кампаний: аудитория,
+              клубы, период, бюджет, лимиты и очередь ручной выдачи. Постоянные
+              XP, уровни, лутбоксы, Battle Pass и кошелек наград живут в Guest Game Hub.
             </p>
           </div>
           <button
@@ -378,8 +380,38 @@ export function MarketingMissionsPanel({
             onClick={() => startNewMission()}
             className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
           >
-            Новая миссия
+            Новый сценарий
           </button>
+        </div>
+
+        <div className="mt-5 grid gap-3 md:grid-cols-2">
+          <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-4">
+            <p className="text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-300">
+              Здесь: маркетинг
+            </p>
+            <h2 className="mt-1 font-semibold text-zinc-950 dark:text-white">
+              Разовый спрос и промо-эффект
+            </h2>
+            <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+              Сценарии для кампаний, сегментов, тихих часов, бара, событий и
+              ручной выдачи до подтвержденного write API Langame.
+            </p>
+          </div>
+          <Link
+            href="/guests/gamification"
+            className="rounded-lg border border-zinc-200 p-4 transition hover:border-emerald-500/70 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
+          >
+            <p className="text-xs font-semibold uppercase text-zinc-500 dark:text-zinc-400">
+              Guest Game Hub
+            </p>
+            <h2 className="mt-1 font-semibold text-zinc-950 dark:text-white">
+              Постоянная игровая экономика
+            </h2>
+            <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+              Игровые профили, XP, уровни, лутбоксы, миссии, Battle Pass,
+              кошелек наград и safe dry-run по snapshot-фактам.
+            </p>
+          </Link>
         </div>
       </section>
 
@@ -397,7 +429,7 @@ export function MarketingMissionsPanel({
                 Каталог
               </p>
               <h2 className="text-xl font-semibold text-zinc-950 dark:text-white">
-                Существующие миссии
+                Существующие сценарии
               </h2>
             </div>
             <span className="rounded-full border border-zinc-200 px-3 py-1 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
@@ -415,7 +447,7 @@ export function MarketingMissionsPanel({
           <div className="mt-4 space-y-3">
             {filteredMissions.length === 0 ? (
               <div className="rounded-lg border border-dashed border-zinc-300 p-4 text-sm text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
-                Миссий пока нет. Выберите шаблон справа и сохраните первый
+                Сценариев пока нет. Выберите шаблон справа и сохраните первый
                 сценарий.
               </div>
             ) : (
@@ -464,7 +496,7 @@ export function MarketingMissionsPanel({
                 Конструктор
               </p>
               <h2 className="text-xl font-semibold text-zinc-950 dark:text-white">
-                {form.id ? "Редактирование миссии" : "Новая миссия"}
+                {form.id ? "Редактирование сценария" : "Новый сценарий"}
               </h2>
             </div>
             <select
@@ -728,7 +760,7 @@ export function MarketingMissionsPanel({
               disabled={saving}
               className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:opacity-60"
             >
-              {form.id ? "Сохранить изменения" : "Создать миссию"}
+              {form.id ? "Сохранить изменения" : "Создать сценарий"}
             </button>
             <button
               type="button"
@@ -748,7 +780,7 @@ export function MarketingMissionsPanel({
               Очередь
             </p>
             <h2 className="text-xl font-semibold text-zinc-950 dark:text-white">
-              Ручные награды
+                Очередь ручной выдачи
             </h2>
           </div>
           <select
@@ -762,7 +794,7 @@ export function MarketingMissionsPanel({
             }}
             className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900"
           >
-            <option value="">Выберите миссию</option>
+            <option value="">Выберите сценарий</option>
             {missions.map((mission) => (
               <option key={mission.id} value={mission.id}>
                 {mission.name}
@@ -868,7 +900,7 @@ export function MarketingMissionsPanel({
             <thead className="text-xs uppercase text-zinc-500 dark:text-zinc-400">
               <tr>
                 <th className="py-2 pr-4">Гость</th>
-                <th className="py-2 pr-4">Миссия</th>
+                <th className="py-2 pr-4">Сценарий</th>
                 <th className="py-2 pr-4">Награда</th>
                 <th className="py-2 pr-4">Статус</th>
                 <th className="py-2 pr-4">Дата</th>
@@ -882,7 +914,7 @@ export function MarketingMissionsPanel({
                     colSpan={6}
                     className="py-6 text-center text-zinc-500 dark:text-zinc-400"
                   >
-                    В очереди пока нет наград по выбранной миссии.
+                    В очереди пока нет наград по выбранному сценарию.
                   </td>
                 </tr>
               ) : (

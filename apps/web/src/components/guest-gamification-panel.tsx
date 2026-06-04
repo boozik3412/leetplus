@@ -1186,6 +1186,7 @@ export function GuestGamificationPanel({
           saving={saving}
           tenantSlug={tenantSlug}
           stores={stores}
+          canApproveRewards={access.canApproveRewards}
         />
       ) : null}
 
@@ -1207,6 +1208,7 @@ export function GuestGamificationPanel({
           onSaveEvent={saveEvent}
           onProfileStatus={updateProfileStatus}
           saving={saving}
+          canManage={access.canManageRules}
         />
       ) : null}
 
@@ -1224,6 +1226,7 @@ export function GuestGamificationPanel({
           onReset={resetLootBoxForm}
           onStatus={updateRuleStatus}
           saving={saving}
+          canManage={access.canManageRules}
         />
       ) : null}
 
@@ -1241,6 +1244,7 @@ export function GuestGamificationPanel({
           onReset={resetMissionForm}
           onStatus={updateRuleStatus}
           saving={saving}
+          canManage={access.canManageRules}
         />
       ) : null}
 
@@ -1257,6 +1261,7 @@ export function GuestGamificationPanel({
           onReset={resetSeasonForm}
           onStatus={updateRuleStatus}
           saving={saving}
+          canManage={access.canManageRules}
         />
       ) : null}
 
@@ -1281,6 +1286,7 @@ export function GuestGamificationPanel({
           onStatus={updateRewardStatus}
           onRedeem={redeemReward}
           saving={saving}
+          canApprove={access.canApproveRewards}
         />
       ) : null}
 
@@ -1302,6 +1308,7 @@ export function GuestGamificationPanel({
           onApplyFact={applySnapshotFact}
           onPipelineRun={runSnapshotPipeline}
           saving={saving}
+          canManage={access.canManageRules}
         />
       ) : null}
     </div>
@@ -1331,6 +1338,7 @@ function DryRunTab({
   onApplyFact,
   onPipelineRun,
   saving,
+  canManage,
 }: {
   form: DryRunForm;
   setForm: Dispatch<SetStateAction<DryRunForm>>;
@@ -1348,6 +1356,7 @@ function DryRunTab({
   onApplyFact: (fact: GuestGameSnapshotFact) => void;
   onPipelineRun: (dryRunOnly: boolean) => Promise<void>;
   saving: string | null;
+  canManage: boolean;
 }) {
   const isRunning = saving === "dryRun";
   const isLoadingFacts = saving === "facts";
@@ -1425,14 +1434,16 @@ function DryRunTab({
               >
                 {isPipelinePreview ? "Смотрим..." : "Предпросмотр batch"}
               </button>
-              <button
-                className={primaryButtonClass}
-                type="button"
-                disabled={isPipelinePreview || isPipelineRunning}
-                onClick={() => onPipelineRun(false)}
-              >
-                {isPipelineRunning ? "Обрабатываем..." : "Обработать batch"}
-              </button>
+              {canManage ? (
+                <button
+                  className={primaryButtonClass}
+                  type="button"
+                  disabled={isPipelinePreview || isPipelineRunning}
+                  onClick={() => onPipelineRun(false)}
+                >
+                  {isPipelineRunning ? "Обрабатываем..." : "Обработать batch"}
+                </button>
+              ) : null}
             </div>
           </div>
 
@@ -1652,16 +1663,18 @@ function DryRunTab({
           >
             {isRunning ? "Проверяем..." : "Проверить сценарий"}
           </button>
-          <button
-            className={smallButtonClass}
-            type="button"
-            disabled={!canProcess || isProcessing}
-            onClick={onProcess}
-          >
-            {isProcessing
-              ? "Записываем..."
-              : "Создать событие и награды"}
-          </button>
+          {canManage ? (
+            <button
+              className={smallButtonClass}
+              type="button"
+              disabled={!canProcess || isProcessing}
+              onClick={onProcess}
+            >
+              {isProcessing
+                ? "Записываем..."
+                : "Создать событие и награды"}
+            </button>
+          ) : null}
           <p className="text-xs text-zinc-500 dark:text-zinc-400">
             Если дата не задана, API проверит сценарий на текущий момент.
           </p>
@@ -1726,6 +1739,7 @@ function DryRunTab({
             />
           </div>
 
+          {canManage ? (
           <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-4 dark:border-emerald-900/60 dark:bg-emerald-950/20">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
@@ -1753,6 +1767,13 @@ function DryRunTab({
               </p>
             ) : null}
           </div>
+          ) : (
+            <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-300">
+              У вас read-only доступ: сценарий можно проверять и разбирать, но
+              запись события, начисление XP и постановка наград в очередь
+              недоступны.
+            </div>
+          )}
 
           {processResult ? (
             <div className="rounded-lg border border-cyan-200 bg-cyan-50/70 p-4 dark:border-cyan-900/60 dark:bg-cyan-950/20">
@@ -2066,6 +2087,7 @@ function OverviewTab({
   saving,
   tenantSlug,
   stores,
+  canApproveRewards,
 }: {
   workspace: GuestGamificationWorkspace;
   pendingRewards: GuestGameReward[];
@@ -2078,6 +2100,7 @@ function OverviewTab({
   saving: string | null;
   tenantSlug: string;
   stores: Store[];
+  canApproveRewards: boolean;
 }) {
   return (
     <div className="space-y-5">
@@ -2205,6 +2228,7 @@ function OverviewTab({
                   onStatus={onRewardStatus}
                   onEdit={onEditReward}
                   saving={saving}
+                  canApprove={canApproveRewards}
                 />
               ))
             ) : (
@@ -2502,6 +2526,7 @@ function ProfilesTab({
   onSaveEvent,
   onProfileStatus,
   saving,
+  canManage,
 }: {
   form: ProfileForm;
   setForm: (form: ProfileForm) => void;
@@ -2522,9 +2547,17 @@ function ProfilesTab({
     status: GuestGameProfileStatus,
   ) => Promise<void>;
   saving: string | null;
+  canManage: boolean;
 }) {
   return (
-    <div className="grid gap-5 xl:grid-cols-[380px_minmax(0,1fr)]">
+    <div
+      className={
+        canManage
+          ? "grid gap-5 xl:grid-cols-[380px_minmax(0,1fr)]"
+          : "grid gap-5"
+      }
+    >
+      {canManage ? (
       <section className="space-y-4">
         <Panel
           title={
@@ -2734,6 +2767,7 @@ function ProfilesTab({
           </div>
         </Panel>
       </section>
+      ) : null}
 
       <section className="space-y-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -2754,6 +2788,7 @@ function ProfilesTab({
                 onEdit={onEditProfile}
                 onStatus={onProfileStatus}
                 saving={saving}
+                canManage={canManage}
               />
             ))
           ) : (
@@ -2778,6 +2813,7 @@ function LootBoxesTab({
   onReset,
   onStatus,
   saving,
+  canManage,
 }: {
   form: LootBoxForm;
   setForm: (form: LootBoxForm) => void;
@@ -2795,9 +2831,11 @@ function LootBoxesTab({
     status: GuestGameStatus,
   ) => Promise<void>;
   saving: string | null;
+  canManage: boolean;
 }) {
   return (
     <RulesLayout
+      canManage={canManage}
       formTitle={
         editingId ? "Редактирование лутбокса" : "Настройка лутбокса"
       }
@@ -2911,6 +2949,7 @@ function LootBoxesTab({
           onEdit={() => onEdit(item)}
           onStatus={(status) => onStatus("loot-boxes", item.id, status)}
           saving={saving === `loot-boxes-${item.id}`}
+          canManage={canManage}
         />
       )}
     />
@@ -2930,6 +2969,7 @@ function MissionsTab({
   onReset,
   onStatus,
   saving,
+  canManage,
 }: {
   form: MissionForm;
   setForm: (form: MissionForm) => void;
@@ -2947,9 +2987,11 @@ function MissionsTab({
     status: GuestGameStatus,
   ) => Promise<void>;
   saving: string | null;
+  canManage: boolean;
 }) {
   return (
     <RulesLayout
+      canManage={canManage}
       formTitle={editingId ? "Редактирование миссии" : "Конструктор миссии"}
       form={
         <div className="space-y-3">
@@ -3104,6 +3146,7 @@ function MissionsTab({
           onEdit={() => onEdit(item)}
           onStatus={(status) => onStatus("missions", item.id, status)}
           saving={saving === `missions-${item.id}`}
+          canManage={canManage}
         />
       )}
     />
@@ -3122,6 +3165,7 @@ function SeasonsTab({
   onReset,
   onStatus,
   saving,
+  canManage,
 }: {
   form: SeasonForm;
   setForm: (form: SeasonForm) => void;
@@ -3138,9 +3182,11 @@ function SeasonsTab({
     status: GuestGameStatus,
   ) => Promise<void>;
   saving: string | null;
+  canManage: boolean;
 }) {
   return (
     <RulesLayout
+      canManage={canManage}
       formTitle={editingId ? "Редактирование Battle Pass" : "Сезон и Battle Pass"}
       form={
         <div className="space-y-3">
@@ -3296,6 +3342,7 @@ function SeasonsTab({
           onEdit={() => onEdit(item)}
           onStatus={(status) => onStatus("seasons", item.id, status)}
           saving={saving === `seasons-${item.id}`}
+          canManage={canManage}
         />
       )}
     />
@@ -3322,6 +3369,7 @@ function RewardsTab({
   onStatus,
   onRedeem,
   saving,
+  canApprove,
 }: {
   form: RewardForm;
   setForm: (form: RewardForm) => void;
@@ -3345,9 +3393,17 @@ function RewardsTab({
   ) => Promise<void>;
   onRedeem: () => Promise<void>;
   saving: string | null;
+  canApprove: boolean;
 }) {
   return (
-    <div className="grid gap-5 xl:grid-cols-[380px_minmax(0,1fr)]">
+    <div
+      className={
+        canApprove
+          ? "grid gap-5 xl:grid-cols-[380px_minmax(0,1fr)]"
+          : "grid gap-5"
+      }
+    >
+      {canApprove ? (
       <Panel title={editingId ? "Редактирование награды" : "Ручная награда"}>
         <div className="space-y-3">
           <Field label="Профиль">
@@ -3530,10 +3586,12 @@ function RewardsTab({
           ) : null}
         </div>
       </Panel>
+      ) : null}
 
       <section className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <SectionTitle title="Кошелек наград" />
+          {canApprove ? (
           <a
             className={smallButtonClass}
             href="/api/guests/gamification/rewards/export"
@@ -3541,7 +3599,9 @@ function RewardsTab({
           >
             Экспорт CSV
           </a>
+          ) : null}
         </div>
+        {canApprove ? (
         <div className="rounded-lg border border-cyan-200 bg-cyan-50/70 p-4 dark:border-cyan-900/60 dark:bg-cyan-950/20">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
             <div className="min-w-0 flex-1">
@@ -3626,6 +3686,13 @@ function RewardsTab({
             )}
           </div>
         </div>
+        ) : (
+          <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-300">
+            У вас read-only доступ к кошельку наград: можно смотреть очередь,
+            статусы, коды и историю, но ручная выдача, экспорт, изменение
+            статусов и кассирское погашение недоступны.
+          </div>
+        )}
         <div className="space-y-2">
           {rewards.length ? (
             rewards.map((reward) => (
@@ -3635,6 +3702,7 @@ function RewardsTab({
                 onStatus={onStatus}
                 onEdit={onEdit}
                 saving={saving}
+                canApprove={canApprove}
               />
             ))
           ) : (
@@ -4195,12 +4263,14 @@ function RuleCommonFields({
 }
 
 function RulesLayout<T>({
+  canManage,
   formTitle,
   form,
   listTitle,
   items,
   renderItem,
 }: {
+  canManage: boolean;
   formTitle: string;
   form: ReactNode;
   listTitle: string;
@@ -4208,8 +4278,14 @@ function RulesLayout<T>({
   renderItem: (item: T) => ReactNode;
 }) {
   return (
-    <div className="grid gap-5 xl:grid-cols-[420px_minmax(0,1fr)]">
-      <Panel title={formTitle}>{form}</Panel>
+    <div
+      className={
+        canManage
+          ? "grid gap-5 xl:grid-cols-[420px_minmax(0,1fr)]"
+          : "grid gap-5"
+      }
+    >
+      {canManage ? <Panel title={formTitle}>{form}</Panel> : null}
       <section className="space-y-3">
         <SectionTitle title={listTitle} />
         <div className="grid gap-3 lg:grid-cols-2">
@@ -4229,6 +4305,7 @@ function ProfileCard({
   onEdit,
   onStatus,
   saving,
+  canManage,
 }: {
   profile: GuestGameProfile;
   onEdit: (profile: GuestGameProfile) => void;
@@ -4237,6 +4314,7 @@ function ProfileCard({
     status: GuestGameProfileStatus,
   ) => Promise<void>;
   saving: string | null;
+  canManage: boolean;
 }) {
   return (
     <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
@@ -4256,6 +4334,7 @@ function ProfileCard({
         <MiniMetric label="Уровень" value={profile.level} />
         <MiniMetric label="Канал" value={profile.telegramIdentity ? "TG" : profile.maxIdentity ? "MAX" : "-"} />
       </div>
+      {canManage ? (
       <div className="mt-4 flex flex-wrap gap-2">
         <button
           type="button"
@@ -4276,6 +4355,11 @@ function ProfileCard({
           </button>
         ))}
       </div>
+      ) : (
+        <p className="mt-4 text-xs font-medium text-zinc-500 dark:text-zinc-400">
+          Только просмотр профиля: изменение XP и статуса недоступно.
+        </p>
+      )}
     </div>
   );
 }
@@ -4288,6 +4372,7 @@ function RuleCard({
   onEdit,
   onStatus,
   saving,
+  canManage,
 }: {
   title: string;
   status: GuestGameStatus;
@@ -4296,6 +4381,7 @@ function RuleCard({
   onEdit: () => void;
   onStatus: (status: GuestGameStatus) => Promise<void>;
   saving: boolean;
+  canManage: boolean;
 }) {
   return (
     <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
@@ -4320,6 +4406,7 @@ function RuleCard({
           </span>
         ))}
       </div>
+      {canManage ? (
       <div className="mt-4 flex flex-wrap gap-2">
         <button type="button" className={smallButtonClass} onClick={onEdit}>
           Редактировать
@@ -4336,6 +4423,11 @@ function RuleCard({
           </button>
         ))}
       </div>
+      ) : (
+        <p className="mt-4 text-xs font-medium text-zinc-500 dark:text-zinc-400">
+          Только просмотр правила: редактирование и смена статуса недоступны.
+        </p>
+      )}
     </div>
   );
 }
@@ -4345,6 +4437,7 @@ function RewardRow({
   onStatus,
   onEdit,
   saving,
+  canApprove,
 }: {
   reward: GuestGameReward;
   onStatus: (
@@ -4353,6 +4446,7 @@ function RewardRow({
   ) => Promise<void>;
   onEdit: (reward: GuestGameReward) => void;
   saving: string | null;
+  canApprove: boolean;
 }) {
   return (
     <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
@@ -4399,6 +4493,7 @@ function RewardRow({
             </p>
           ) : null}
         </div>
+        {canApprove ? (
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
@@ -4419,6 +4514,11 @@ function RewardRow({
             </button>
           ))}
         </div>
+        ) : (
+          <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400 sm:text-right">
+            Только просмотр награды
+          </p>
+        )}
       </div>
     </div>
   );

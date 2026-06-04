@@ -135,6 +135,12 @@ export type GuestGameSeason = {
 export type GuestGameReward = {
   id: string;
   status: GuestGameRewardStatus;
+  walletState:
+    | "WAITING_APPROVAL"
+    | "READY"
+    | "REDEEMED"
+    | "CANCELED"
+    | "EXPIRED";
   source: string;
   externalProvider: string | null;
   externalDomain: string | null;
@@ -144,6 +150,7 @@ export type GuestGameReward = {
   rewardAmount: number;
   rewardLabel: string;
   rewardCode: string | null;
+  claimPayload: string | null;
   qualifiedAt: string;
   expiresAt: string | null;
   paidAt: string | null;

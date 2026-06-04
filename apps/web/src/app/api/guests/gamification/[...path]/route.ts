@@ -37,7 +37,21 @@ export async function GET(request: Request, { params }: RouteContext) {
     );
   }
 
-  return NextResponse.json(await response.json());
+  const contentType = response.headers.get("content-type") ?? "";
+
+  if (contentType.includes("application/json")) {
+    return NextResponse.json(await response.json());
+  }
+
+  return new NextResponse(await response.text(), {
+    status: response.status,
+    headers: {
+      "content-type": contentType || "text/plain; charset=utf-8",
+      ...(response.headers.get("content-disposition")
+        ? { "content-disposition": response.headers.get("content-disposition")! }
+        : {}),
+    },
+  });
 }
 
 export async function POST(request: Request, { params }: RouteContext) {

@@ -94,10 +94,17 @@ export type GuestPortalPayload = {
     rewards: Array<{
       id: string;
       status: string;
+      walletState:
+        | "WAITING_APPROVAL"
+        | "READY"
+        | "REDEEMED"
+        | "CANCELED"
+        | "EXPIRED";
       rewardType: string;
       rewardAmount: number;
       rewardLabel: string;
       rewardCode: string | null;
+      claimPayload: string | null;
       qualifiedAt: string;
       expiresAt: string | null;
     }>;

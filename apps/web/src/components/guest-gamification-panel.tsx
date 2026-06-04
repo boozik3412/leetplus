@@ -273,6 +273,14 @@ const rewardStatusLabels: Record<GuestGameRewardStatus, string> = {
   EXPIRED: "сгорело",
 };
 
+const rewardWalletStateLabels: Record<GuestGameReward["walletState"], string> = {
+  WAITING_APPROVAL: "ожидает подтверждения",
+  READY: "можно выдать",
+  REDEEMED: "погашено",
+  CANCELED: "отменено",
+  EXPIRED: "срок истек",
+};
+
 const fieldClass =
   "w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-950 outline-none transition focus:border-emerald-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-white";
 
@@ -3388,7 +3396,16 @@ function RewardsTab({
       </Panel>
 
       <section className="space-y-3">
-        <SectionTitle title="Кошелек наград" />
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <SectionTitle title="Кошелек наград" />
+          <a
+            className={smallButtonClass}
+            href="/api/guests/gamification/rewards/export"
+            download
+          >
+            Экспорт CSV
+          </a>
+        </div>
         <div className="space-y-2">
           {rewards.length ? (
             rewards.map((reward) => (
@@ -4126,6 +4143,7 @@ function RewardRow({
               {reward.rewardLabel}
             </h3>
             <StatusPill label={rewardStatusLabels[reward.status]} />
+            <StatusPill label={rewardWalletStateLabels[reward.walletState]} />
           </div>
           <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
             {reward.profile?.displayName ??
@@ -4137,6 +4155,29 @@ function RewardRow({
           <p className="mt-1 text-xs text-zinc-400">
             {reward.store?.name ?? "любой клуб"} · {formatDate(reward.qualifiedAt)}
           </p>
+          <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+            <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/60">
+              <span className="block font-semibold uppercase text-zinc-400">
+                Код кассиру
+              </span>
+              <span className="mt-1 block font-mono text-sm font-bold text-zinc-900 dark:text-white">
+                {reward.rewardCode ?? "будет создан при согласовании"}
+              </span>
+            </div>
+            <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/60">
+              <span className="block font-semibold uppercase text-zinc-400">
+                Срок
+              </span>
+              <span className="mt-1 block text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+                {reward.expiresAt ? formatDate(reward.expiresAt) : "без срока"}
+              </span>
+            </div>
+          </div>
+          {reward.claimPayload ? (
+            <p className="mt-2 break-all rounded-lg border border-dashed border-cyan-300/40 px-3 py-2 font-mono text-xs text-cyan-700 dark:text-cyan-200">
+              QR payload: {reward.claimPayload}
+            </p>
+          ) : null}
         </div>
         <div className="flex flex-wrap gap-2">
           <button

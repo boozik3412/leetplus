@@ -154,10 +154,17 @@ export type GuestPortalSeason = {
 export type GuestPortalReward = {
   id: string;
   status: string;
+  walletState:
+    | 'WAITING_APPROVAL'
+    | 'READY'
+    | 'REDEEMED'
+    | 'CANCELED'
+    | 'EXPIRED';
   rewardType: string;
   rewardAmount: number;
   rewardLabel: string;
   rewardCode: string | null;
+  claimPayload: string | null;
   qualifiedAt: string;
   expiresAt: string | null;
 };
@@ -898,16 +905,53 @@ function mapReward(row: {
   qualifiedAt: Date;
   expiresAt: Date | null;
 }): GuestPortalReward {
+  const walletState = rewardWalletState(row.status, row.expiresAt);
+
   return {
     id: row.id,
     status: row.status,
+    walletState,
     rewardType: row.rewardType,
     rewardAmount: Number(row.rewardAmount),
     rewardLabel: row.rewardLabel,
     rewardCode: row.rewardCode,
+    claimPayload:
+      row.rewardCode && walletState !== 'REDEEMED'
+        ? buildRewardClaimPayload(row.id, row.rewardCode)
+        : null,
     qualifiedAt: row.qualifiedAt.toISOString(),
     expiresAt: iso(row.expiresAt),
   };
+}
+
+function rewardWalletState(
+  status: string,
+  expiresAt: Date | null,
+): GuestPortalReward['walletState'] {
+  if (status === 'PAID') {
+    return 'REDEEMED';
+  }
+
+  if (status === 'CANCELED') {
+    return 'CANCELED';
+  }
+
+  if (
+    status === 'EXPIRED' ||
+    (expiresAt !== null && expiresAt.getTime() < Date.now())
+  ) {
+    return 'EXPIRED';
+  }
+
+  if (status === 'APPROVED') {
+    return 'READY';
+  }
+
+  return 'WAITING_APPROVAL';
+}
+
+function buildRewardClaimPayload(rewardId: string, rewardCode: string) {
+  return `LEETPLUS_REWARD:${rewardId}:${rewardCode}`;
 }
 
 function seasonLevels(value: Prisma.JsonValue, xp: number) {

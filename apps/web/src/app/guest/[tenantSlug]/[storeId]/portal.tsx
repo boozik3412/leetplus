@@ -574,13 +574,22 @@ function RewardsPanel({ portal }: { portal: GuestPortalPayload }) {
                   </p>
                 </div>
                 <span className="rounded-lg bg-emerald-300/10 px-2 py-1 text-xs font-black text-emerald-200">
-                  {reward.status}
+                  {walletStateLabel(reward.walletState)}
                 </span>
               </div>
+              <p className="mt-2 text-xs leading-5 text-slate-400">
+                {walletStateHint(reward.walletState)}
+                {reward.expiresAt ? ` До ${formatDate(reward.expiresAt)}.` : ""}
+              </p>
               {reward.rewardCode ? (
-                <p className="mt-3 rounded-lg border border-dashed border-cyan-300/30 px-3 py-2 text-sm font-black text-cyan-100">
-                  Код: {reward.rewardCode}
-                </p>
+                <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_88px]">
+                  <p className="rounded-lg border border-dashed border-cyan-300/30 px-3 py-2 text-sm font-black text-cyan-100">
+                    Код кассиру: {reward.rewardCode}
+                  </p>
+                  {reward.claimPayload ? (
+                    <RewardClaimBadge payload={reward.claimPayload} />
+                  ) : null}
+                </div>
               ) : null}
             </div>
           ))
@@ -780,6 +789,62 @@ function EmptyBlock({ text }: { text: string }) {
       {text}
     </div>
   );
+}
+
+function RewardClaimBadge({ payload }: { payload: string }) {
+  const cells = Array.from({ length: 25 }, (_, index) => {
+    const charCode = payload.charCodeAt(index % payload.length);
+    return (charCode + index * 7) % 3 !== 0;
+  });
+
+  return (
+    <div
+      className="grid size-[88px] grid-cols-5 gap-1 rounded-lg border border-cyan-300/30 bg-cyan-300/10 p-2"
+      title={payload}
+      aria-label="Данные для проверки награды кассиром"
+    >
+      {cells.map((active, index) => (
+        <span
+          key={`${payload}-${index}`}
+          className={`rounded-[2px] ${active ? "bg-cyan-100" : "bg-transparent"}`}
+        />
+      ))}
+    </div>
+  );
+}
+
+function walletStateLabel(
+  state: GuestPortalPayload["gamification"]["rewards"][number]["walletState"],
+) {
+  const labels = {
+    WAITING_APPROVAL: "Ждет подтверждения",
+    READY: "Готово к выдаче",
+    REDEEMED: "Выдано",
+    CANCELED: "Отменено",
+    EXPIRED: "Сгорело",
+  } satisfies Record<
+    GuestPortalPayload["gamification"]["rewards"][number]["walletState"],
+    string
+  >;
+
+  return labels[state];
+}
+
+function walletStateHint(
+  state: GuestPortalPayload["gamification"]["rewards"][number]["walletState"],
+) {
+  const hints = {
+    WAITING_APPROVAL: "Сотрудник клуба проверит награду и подготовит выдачу.",
+    READY: "Покажите код кассиру в клубе, чтобы получить награду.",
+    REDEEMED: "Награда уже выдана и отмечена в LeetPlus.",
+    CANCELED: "Награда отменена сотрудником клуба.",
+    EXPIRED: "Срок действия награды закончился.",
+  } satisfies Record<
+    GuestPortalPayload["gamification"]["rewards"][number]["walletState"],
+    string
+  >;
+
+  return hints[state];
 }
 
 function LoadingState() {

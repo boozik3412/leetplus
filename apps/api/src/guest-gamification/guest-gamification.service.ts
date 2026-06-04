@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { randomBytes } from 'crypto';
 import {
   IntegrationProvider,
   Prisma,
@@ -483,6 +484,12 @@ export type GuestGameSeason = {
 export type GuestGameReward = {
   id: string;
   status: RewardStatus;
+  walletState:
+    | 'WAITING_APPROVAL'
+    | 'READY'
+    | 'REDEEMED'
+    | 'CANCELED'
+    | 'EXPIRED';
   source: RewardSource;
   externalProvider: string | null;
   externalDomain: string | null;
@@ -492,6 +499,7 @@ export type GuestGameReward = {
   rewardAmount: number;
   rewardLabel: string;
   rewardCode: string | null;
+  claimPayload: string | null;
   qualifiedAt: string;
   expiresAt: string | null;
   paidAt: string | null;
@@ -1789,6 +1797,54 @@ export class GuestGamificationService {
     return rows.map(mapReward);
   }
 
+  async exportRewardsCsv(user: AuthenticatedUser): Promise<string> {
+    const rewards = await this.getRewards(user);
+    const header = [
+      'Статус',
+      'Состояние кошелька',
+      'Гость',
+      'Контакт',
+      'Клуб',
+      'Тип награды',
+      'Название награды',
+      'Сумма',
+      'Код',
+      'QR payload',
+      'Создано',
+      'Сгорает',
+      'Выдано',
+      'Источник',
+      'Связанный сценарий',
+      'Заметка',
+    ];
+    const rows = rewards.map((reward) => [
+      reward.status,
+      reward.walletState,
+      reward.profile?.displayName ??
+        reward.guest?.displayName ??
+        reward.guestExternalId ??
+        '',
+      reward.profile?.contactMasked ?? reward.guest?.contact ?? '',
+      reward.store?.name ?? '',
+      reward.rewardType,
+      reward.rewardLabel,
+      reward.rewardAmount,
+      reward.rewardCode ?? '',
+      reward.claimPayload ?? '',
+      reward.qualifiedAt,
+      reward.expiresAt ?? '',
+      reward.paidAt ?? '',
+      reward.source,
+      reward.lootBox?.name ?? reward.mission?.name ?? reward.season?.name ?? '',
+      reward.note ?? '',
+    ]);
+
+    return [
+      '\uFEFF' + header.map(csvCell).join(','),
+      ...rows.map((row) => row.map(csvCell).join(',')),
+    ].join('\n');
+  }
+
   async createReward(
     user: AuthenticatedUser,
     dto: GuestGameRewardDto,
@@ -1822,22 +1878,32 @@ export class GuestGamificationService {
     id: string,
     dto: GuestGameRewardUpdateDto,
   ): Promise<GuestGameReward> {
-    await this.assertReward(user, id);
+    const current = await this.assertReward(user, id);
     const data = await this.buildRewardData(user, dto, false);
+    const nextStatus = dto.status;
+
+    if (
+      (nextStatus === 'APPROVED' || nextStatus === 'PAID') &&
+      !current.rewardCode &&
+      !('rewardCode' in data)
+    ) {
+      data.rewardCode = generateRewardCode();
+    }
+
     const row = await this.prisma.guestGameReward.update({
       where: { id },
       data,
       include: rewardInclude,
     });
 
-    if (dto.status === 'PAID') {
+    if (dto.status) {
       await this.createSystemEvent(user, {
         profileId: row.profileId,
         guestId: row.guestId,
         lootBoxId: row.lootBoxId,
         missionId: row.missionId,
         seasonId: row.seasonId,
-        eventType: 'REWARD_PAID',
+        eventType: rewardStatusEventType(dto.status),
         xpDelta: 0,
         note: row.rewardLabel,
       });
@@ -2561,7 +2627,9 @@ export class GuestGamificationService {
         'Название награды',
         isCreate,
       ),
-      rewardCode: nullableString(dto.rewardCode),
+      rewardCode:
+        nullableString(dto.rewardCode) ??
+        (isCreate ? generateRewardCode() : undefined),
       qualifiedAt:
         dateValue(dto.qualifiedAt) ?? (isCreate ? new Date() : undefined),
       expiresAt: dateValue(dto.expiresAt),
@@ -2903,9 +2971,12 @@ function mapSeason(row: SeasonRow): GuestGameSeason {
 }
 
 function mapReward(row: RewardRow): GuestGameReward {
+  const walletState = rewardWalletState(row.status, row.expiresAt);
+
   return {
     id: row.id,
     status: row.status as RewardStatus,
+    walletState,
     source: row.source as RewardSource,
     externalProvider: row.externalProvider,
     externalDomain: row.externalDomain,
@@ -2915,6 +2986,10 @@ function mapReward(row: RewardRow): GuestGameReward {
     rewardAmount: numberValue(row.rewardAmount),
     rewardLabel: row.rewardLabel,
     rewardCode: row.rewardCode,
+    claimPayload:
+      row.rewardCode && walletState !== 'REDEEMED'
+        ? buildRewardClaimPayload(row.id, row.rewardCode)
+        : null,
     qualifiedAt: row.qualifiedAt.toISOString(),
     expiresAt: iso(row.expiresAt),
     paidAt: iso(row.paidAt),
@@ -2940,6 +3015,74 @@ function mapReward(row: RewardRow): GuestGameReward {
     createdBy: mapUser(row.createdByUser),
     approvedBy: mapUser(row.approvedByUser),
   };
+}
+
+function rewardWalletState(
+  status: string,
+  expiresAt: Date | null,
+): GuestGameReward['walletState'] {
+  if (status === 'PAID') {
+    return 'REDEEMED';
+  }
+
+  if (status === 'CANCELED') {
+    return 'CANCELED';
+  }
+
+  if (
+    status === 'EXPIRED' ||
+    (expiresAt !== null && expiresAt.getTime() < Date.now())
+  ) {
+    return 'EXPIRED';
+  }
+
+  if (status === 'APPROVED') {
+    return 'READY';
+  }
+
+  return 'WAITING_APPROVAL';
+}
+
+function rewardStatusEventType(status: string) {
+  if (status === 'APPROVED') {
+    return 'REWARD_APPROVED';
+  }
+
+  if (status === 'PAID') {
+    return 'REWARD_PAID';
+  }
+
+  if (status === 'CANCELED') {
+    return 'REWARD_CANCELED';
+  }
+
+  if (status === 'EXPIRED') {
+    return 'REWARD_EXPIRED';
+  }
+
+  return 'REWARD_STATUS_CHANGED';
+}
+
+function buildRewardClaimPayload(rewardId: string, rewardCode: string) {
+  return `LEETPLUS_REWARD:${rewardId}:${rewardCode}`;
+}
+
+function generateRewardCode() {
+  return `LP-${randomBytes(4).toString('hex').toUpperCase()}`;
+}
+
+function csvCell(value: unknown) {
+  const text =
+    value == null
+      ? ''
+      : typeof value === 'string' ||
+          typeof value === 'number' ||
+          typeof value === 'boolean' ||
+          typeof value === 'bigint'
+        ? String(value)
+        : (JSON.stringify(value) ?? '');
+
+  return `"${text.replace(/"/g, '""')}"`;
 }
 
 function mapEvent(row: EventRow): GuestGameEvent {

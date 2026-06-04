@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Header,
   Param,
   Patch,
   Post,
@@ -193,6 +194,16 @@ export class GuestGamificationController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<GuestGameReward[]> {
     return this.gamificationService.getRewards(user);
+  }
+
+  @Get('rewards/export')
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  @Header(
+    'Content-Disposition',
+    'attachment; filename="guest-game-rewards.csv"',
+  )
+  exportRewards(@CurrentUser() user: AuthenticatedUser): Promise<string> {
+    return this.gamificationService.exportRewardsCsv(user);
   }
 
   @Post('rewards')

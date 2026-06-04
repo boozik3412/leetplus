@@ -404,6 +404,8 @@ function VerifiedPortal({ portal }: { portal: GuestPortalPayload }) {
         <LoyaltyPanel portal={portal} />
       </section>
 
+      <ActivityPanel portal={portal} />
+
       <section className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
         <BattlePassPanel portal={portal} />
         <RewardsPanel portal={portal} />
@@ -490,6 +492,101 @@ function LoyaltyPanel({ portal }: { portal: GuestPortalPayload }) {
         />
       </div>
     </div>
+  );
+}
+
+function ActivityPanel({ portal }: { portal: GuestPortalPayload }) {
+  const summary = portal.activity.summary;
+  const timeline = portal.activity.timeline;
+
+  return (
+    <section className="rounded-lg border border-cyan-200/20 bg-[#09121b] p-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-bold uppercase text-cyan-200">
+            Активность в клубе
+          </p>
+          <h3 className="mt-1 text-2xl font-black text-white">
+            История прогресса
+          </h3>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">
+            Сессии, операции и игровые события берутся из сохраненных snapshot
+            данных. Страница не делает живые запросы в Langame при открытии.
+          </p>
+        </div>
+        <div className="rounded-lg border border-cyan-200/20 bg-cyan-200/10 px-3 py-2 text-right text-sm">
+          <p className="font-bold text-cyan-100">Последнее событие</p>
+          <p className="text-slate-300">
+            {summary.lastActivityAt
+              ? `${formatDate(summary.lastActivityAt)} ${formatTime(summary.lastActivityAt)}`
+              : "нет данных"}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <Metric label="Сессии" value={formatNumber(summary.sessionsCount)} />
+        <Metric label="Игровое время" value={formatMinutes(summary.playMinutes)} />
+        <Metric label="События" value={formatNumber(summary.logsCount)} />
+        <Metric label="Баланс" value={formatNumber(summary.transactionsCount)} />
+        <Metric label="XP-события" value={formatNumber(summary.gameEventsCount)} />
+      </div>
+
+      <div className="mt-5">
+        <p className="text-xs font-bold uppercase text-slate-500">
+          Последние события
+        </p>
+        {timeline.length ? (
+          <div className="mt-2 divide-y divide-white/10 rounded-lg border border-white/10">
+            {timeline.map((item) => (
+              <div
+                key={item.id}
+                className="grid gap-3 px-4 py-3 sm:grid-cols-[150px_1fr_auto]"
+              >
+                <div>
+                  <p className="text-sm font-bold text-white">
+                    {formatDate(item.occurredAt)}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {formatTime(item.occurredAt)}
+                  </p>
+                </div>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-full bg-cyan-200/10 px-2 py-1 text-xs font-bold uppercase text-cyan-100">
+                      {activityKindLabel(item.kind)}
+                    </span>
+                    <p className="font-bold text-white">{item.title}</p>
+                  </div>
+                  <p className="mt-1 text-sm leading-6 text-slate-400">
+                    {[item.description, item.storeName]
+                      .filter(Boolean)
+                      .join(" · ") || "Событие сохранено в истории гостя"}
+                  </p>
+                </div>
+                <div className="flex items-start gap-2 sm:justify-end">
+                  {item.xpDelta ? (
+                    <span className="rounded-full bg-emerald-300/10 px-2 py-1 text-xs font-bold text-emerald-100">
+                      {item.xpDelta > 0 ? "+" : ""}
+                      {item.xpDelta} XP
+                    </span>
+                  ) : null}
+                  {item.amount != null ? (
+                    <span className="rounded-full bg-amber-300/10 px-2 py-1 text-xs font-bold text-amber-100">
+                      {formatNumber(item.amount)} руб
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="mt-2">
+            <EmptyBlock text="История появится после синхронизации сессий, логов, операций баланса и игровых событий гостя." />
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -914,6 +1011,30 @@ function formatNumber(value: number) {
   return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 }).format(
     value,
   );
+}
+
+function formatMinutes(value: number) {
+  if (value < 60) {
+    return `${formatNumber(value)} мин`;
+  }
+
+  return `${formatNumber(value / 60)} ч`;
+}
+
+function activityKindLabel(
+  kind: GuestPortalPayload["activity"]["timeline"][number]["kind"],
+) {
+  const labels = {
+    SESSION: "сессия",
+    LOG: "история",
+    TRANSACTION: "баланс",
+    GAME_EVENT: "игра",
+  } satisfies Record<
+    GuestPortalPayload["activity"]["timeline"][number]["kind"],
+    string
+  >;
+
+  return labels[kind];
 }
 
 function formatDate(value: string) {

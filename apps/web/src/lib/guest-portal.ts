@@ -109,6 +109,26 @@ export type GuestPortalPayload = {
       expiresAt: string | null;
     }>;
   };
+  activity: {
+    summary: {
+      sessionsCount: number;
+      playMinutes: number;
+      logsCount: number;
+      transactionsCount: number;
+      gameEventsCount: number;
+      lastActivityAt: string | null;
+    };
+    timeline: Array<{
+      id: string;
+      kind: "SESSION" | "LOG" | "TRANSACTION" | "GAME_EVENT";
+      title: string;
+      description: string | null;
+      occurredAt: string;
+      storeName: string | null;
+      amount: number | null;
+      xpDelta: number | null;
+    }>;
+  };
 };
 
 export type GuestPortalOtpVerifyResponse = {

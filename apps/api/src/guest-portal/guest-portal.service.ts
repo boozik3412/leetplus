@@ -111,6 +111,17 @@ export type GuestPortalPayload = {
     seasons: GuestPortalSeason[];
     rewards: GuestPortalReward[];
   };
+  activity: {
+    summary: {
+      sessionsCount: number;
+      playMinutes: number;
+      logsCount: number;
+      transactionsCount: number;
+      gameEventsCount: number;
+      lastActivityAt: string | null;
+    };
+    timeline: GuestPortalActivityItem[];
+  };
 };
 
 export type GuestPortalLootBox = {
@@ -167,6 +178,17 @@ export type GuestPortalReward = {
   claimPayload: string | null;
   qualifiedAt: string;
   expiresAt: string | null;
+};
+
+export type GuestPortalActivityItem = {
+  id: string;
+  kind: 'SESSION' | 'LOG' | 'TRANSACTION' | 'GAME_EVENT';
+  title: string;
+  description: string | null;
+  occurredAt: string;
+  storeName: string | null;
+  amount: number | null;
+  xpDelta: number | null;
 };
 
 @Injectable()
@@ -400,6 +422,7 @@ export class GuestPortalService {
       missions,
       seasons,
       rewards,
+      activity,
     ] = await Promise.all([
       this.prisma.guestGroup.findMany({
         where: { tenantId: context.tenant.id },
@@ -457,6 +480,7 @@ export class GuestPortalService {
             take: 20,
           })
         : [],
+      this.buildActivity(context.tenant.id, context.store.id, guest, profile),
     ]);
 
     const xp = profile?.xp ?? 0;
@@ -515,6 +539,143 @@ export class GuestPortalService {
           .map((item) => mapSeason(item, xp)),
         rewards: rewards.map(mapReward),
       },
+      activity,
+    };
+  }
+
+  private async buildActivity(
+    tenantId: string,
+    storeId: string,
+    guest: { id: string } | null,
+    profile: { id: string } | null,
+  ): Promise<GuestPortalPayload['activity']> {
+    const empty = emptyActivity();
+
+    if (!guest && !profile) {
+      return empty;
+    }
+
+    const gameEventScope = [
+      ...(guest ? [{ guestId: guest.id }] : []),
+      ...(profile ? [{ profileId: profile.id }] : []),
+    ];
+
+    const [
+      sessionStats,
+      sessions,
+      logsCount,
+      logs,
+      transactionStats,
+      transactions,
+      gameEventStats,
+      gameEvents,
+    ] = await Promise.all([
+      guest
+        ? this.prisma.guestSession.aggregate({
+            where: { tenantId, guestId: guest.id, storeId },
+            _count: { id: true },
+            _sum: { durationMinutes: true },
+            _max: { startedAt: true },
+          })
+        : null,
+      guest
+        ? this.prisma.guestSession.findMany({
+            where: { tenantId, guestId: guest.id, storeId },
+            include: { store: { select: { name: true } } },
+            orderBy: [{ startedAt: 'desc' }, { createdAt: 'desc' }],
+            take: 8,
+          })
+        : [],
+      guest
+        ? this.prisma.guestLog.count({
+            where: { tenantId, guestId: guest.id },
+          })
+        : 0,
+      guest
+        ? this.prisma.guestLog.findMany({
+            where: { tenantId, guestId: guest.id },
+            orderBy: [{ happenedAt: 'desc' }, { createdAt: 'desc' }],
+            take: 8,
+          })
+        : [],
+      guest
+        ? this.prisma.guestTransaction.aggregate({
+            where: { tenantId, guestId: guest.id, storeId },
+            _count: { id: true },
+            _max: { happenedAt: true },
+          })
+        : null,
+      guest
+        ? this.prisma.guestTransaction.findMany({
+            where: { tenantId, guestId: guest.id, storeId },
+            include: { store: { select: { name: true } } },
+            orderBy: [{ happenedAt: 'desc' }, { createdAt: 'desc' }],
+            take: 8,
+          })
+        : [],
+      gameEventScope.length
+        ? this.prisma.guestGameEvent.aggregate({
+            where: { tenantId, OR: gameEventScope },
+            _count: { id: true },
+            _max: { occurredAt: true },
+          })
+        : null,
+      gameEventScope.length
+        ? this.prisma.guestGameEvent.findMany({
+            where: { tenantId, OR: gameEventScope },
+            include: {
+              lootBox: { select: { name: true } },
+              mission: { select: { name: true } },
+              season: { select: { name: true } },
+            },
+            orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
+            take: 8,
+          })
+        : [],
+    ]);
+
+    const sessionRows = sessions as Array<
+      Parameters<typeof mapSessionActivity>[0]
+    >;
+    const logRows = logs as Array<Parameters<typeof mapLogActivity>[0]>;
+    const transactionRows = transactions as Array<
+      Parameters<typeof mapTransactionActivity>[0]
+    >;
+    const gameEventRows = gameEvents as Array<
+      Parameters<typeof mapGameEventActivity>[0]
+    >;
+
+    const timeline: GuestPortalActivityItem[] = [
+      ...sessionRows.map((row) => mapSessionActivity(row)),
+      ...logRows.map((row) => mapLogActivity(row)),
+      ...transactionRows.map((row) => mapTransactionActivity(row)),
+      ...gameEventRows.map((row) => mapGameEventActivity(row)),
+    ]
+      .sort(
+        (left, right) =>
+          new Date(right.occurredAt).getTime() -
+          new Date(left.occurredAt).getTime(),
+      )
+      .slice(0, 12);
+
+    const lastActivityAt =
+      newestDate([
+        sessionStats?._max.startedAt ?? null,
+        transactionStats?._max.happenedAt ?? null,
+        gameEventStats?._max.occurredAt ?? null,
+        timeline[0] ? new Date(timeline[0].occurredAt) : null,
+      ]) ?? null;
+
+    return {
+      summary: {
+        sessionsCount: sessionStats?._count.id ?? 0,
+        playMinutes: sessionStats?._sum.durationMinutes ?? 0,
+        logsCount,
+        transactionsCount: transactionStats?._count.id ?? 0,
+        gameEventsCount: gameEventStats?._count.id ?? 0,
+        lastActivityAt: iso(lastActivityAt),
+      },
+      timeline,
     };
   }
 
@@ -921,6 +1082,121 @@ function mapReward(row: {
         : null,
     qualifiedAt: row.qualifiedAt.toISOString(),
     expiresAt: iso(row.expiresAt),
+  };
+}
+
+function emptyActivity(): GuestPortalPayload['activity'] {
+  return {
+    summary: {
+      sessionsCount: 0,
+      playMinutes: 0,
+      logsCount: 0,
+      transactionsCount: 0,
+      gameEventsCount: 0,
+      lastActivityAt: null,
+    },
+    timeline: [],
+  };
+}
+
+function mapSessionActivity(row: {
+  id: string;
+  startedAt: Date | null;
+  stoppedAt: Date | null;
+  durationMinutes: number | null;
+  normalStop: boolean | null;
+  packet: boolean | null;
+  createdAt: Date;
+  store: { name: string } | null;
+}): GuestPortalActivityItem {
+  const description = [
+    row.durationMinutes == null ? null : `${row.durationMinutes} мин`,
+    row.packet ? 'пакет часов' : 'обычная сессия',
+    row.normalStop === false ? 'завершена нестандартно' : null,
+  ]
+    .filter((item): item is string => Boolean(item))
+    .join(' · ');
+
+  return {
+    id: `session:${row.id}`,
+    kind: 'SESSION',
+    title: 'Игровая сессия',
+    description: description || null,
+    occurredAt: (row.startedAt ?? row.stoppedAt ?? row.createdAt).toISOString(),
+    storeName: row.store?.name ?? null,
+    amount: null,
+    xpDelta: null,
+  };
+}
+
+function mapLogActivity(row: {
+  id: string;
+  type: string | null;
+  happenedAt: Date | null;
+  createdAt: Date;
+}): GuestPortalActivityItem {
+  return {
+    id: `log:${row.id}`,
+    kind: 'LOG',
+    title: row.type ? `Событие: ${row.type}` : 'Событие профиля',
+    description: 'Сохранено из истории Langame',
+    occurredAt: (row.happenedAt ?? row.createdAt).toISOString(),
+    storeName: null,
+    amount: null,
+    xpDelta: null,
+  };
+}
+
+function mapTransactionActivity(row: {
+  id: string;
+  type: string | null;
+  happenedAt: Date | null;
+  amount: Prisma.Decimal | null;
+  createdAt: Date;
+  store: { name: string } | null;
+}): GuestPortalActivityItem {
+  const amount = decimalNumber(row.amount);
+
+  return {
+    id: `transaction:${row.id}`,
+    kind: 'TRANSACTION',
+    title: row.type ? `Операция: ${row.type}` : 'Операция баланса',
+    description:
+      amount == null
+        ? 'Обновление баланса гостя'
+        : `${amount >= 0 ? 'Пополнение' : 'Списание'} ${Math.abs(amount)} руб`,
+    occurredAt: (row.happenedAt ?? row.createdAt).toISOString(),
+    storeName: row.store?.name ?? null,
+    amount,
+    xpDelta: null,
+  };
+}
+
+function mapGameEventActivity(row: {
+  id: string;
+  eventType: string;
+  xpDelta: number;
+  occurredAt: Date;
+  lootBox: { name: string } | null;
+  mission: { name: string } | null;
+  season: { name: string } | null;
+}): GuestPortalActivityItem {
+  const sourceName = row.mission?.name ?? row.lootBox?.name ?? row.season?.name;
+  const xpLabel =
+    row.xpDelta === 0 ? null : `${row.xpDelta > 0 ? '+' : ''}${row.xpDelta} XP`;
+  const description = [sourceName, xpLabel]
+    .filter((item): item is string => Boolean(item))
+    .join(' · ');
+
+  return {
+    id: `game-event:${row.id}`,
+    kind: 'GAME_EVENT',
+    title: `Игровое событие: ${row.eventType}`,
+    description: description || null,
+    occurredAt: row.occurredAt.toISOString(),
+    storeName: null,
+    amount: null,
+    xpDelta: row.xpDelta,
   };
 }
 

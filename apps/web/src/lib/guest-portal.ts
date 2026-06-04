@@ -92,6 +92,14 @@ export type GuestPortalPayload = {
         reached: boolean;
       }>;
     }>;
+    rewardSummary: {
+      total: number;
+      ready: number;
+      waitingApproval: number;
+      redeemed: number;
+      expired: number;
+      nextExpiresAt: string | null;
+    };
     rewards: Array<{
       id: string;
       status: string;
@@ -104,6 +112,8 @@ export type GuestPortalPayload = {
       rewardType: string;
       rewardAmount: number;
       rewardLabel: string;
+      sourceKind: "LOOT_BOX" | "MISSION" | "BATTLE_PASS" | "MANUAL";
+      sourceLabel: string | null;
       rewardCode: string | null;
       claimPayload: string | null;
       qualifiedAt: string;

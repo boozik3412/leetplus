@@ -642,6 +642,11 @@ function BattlePassPanel({ portal }: { portal: GuestPortalPayload }) {
 }
 
 function RewardsPanel({ portal }: { portal: GuestPortalPayload }) {
+  const summary = portal.gamification.rewardSummary;
+  const rewards = portal.gamification.rewards;
+  const readyReward =
+    rewards.find((reward) => reward.walletState === "READY") ?? null;
+
   return (
     <div className="rounded-lg border border-white/10 bg-[#0b111c] p-5">
       <div className="flex items-start justify-between gap-4">
@@ -656,9 +661,50 @@ function RewardsPanel({ portal }: { portal: GuestPortalPayload }) {
         <WalletIcon />
       </div>
 
-      <div className="mt-5 space-y-3">
-        {portal.gamification.rewards.length ? (
-          portal.gamification.rewards.slice(0, 5).map((reward) => (
+      <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Metric label="Всего" value={formatNumber(summary.total)} />
+        <Metric label="Можно забрать" value={formatNumber(summary.ready)} />
+        <Metric label="На проверке" value={formatNumber(summary.waitingApproval)} />
+        <Metric label="Получено" value={formatNumber(summary.redeemed)} />
+      </div>
+
+      {readyReward ? (
+        <div className="mt-4 rounded-lg border border-emerald-300/35 bg-emerald-300/[0.10] p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-bold uppercase text-emerald-200">
+                Готово к выдаче
+              </p>
+              <p className="mt-1 text-lg font-black text-white">
+                {readyReward.rewardLabel}
+              </p>
+              <p className="mt-1 text-sm leading-6 text-emerald-50/80">
+                Покажите код администратору клуба. Награда доступна только в этом
+                клубе или как сетевая награда.
+              </p>
+            </div>
+            {readyReward.expiresAt ? (
+              <span className="rounded-lg border border-emerald-200/20 px-2 py-1 text-xs font-bold text-emerald-100">
+                До {formatDate(readyReward.expiresAt)}
+              </span>
+            ) : null}
+          </div>
+          {readyReward.rewardCode ? (
+            <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_88px]">
+              <p className="rounded-lg border border-dashed border-emerald-200/50 bg-[#06120d] px-3 py-2 text-sm font-black text-emerald-50">
+                Код кассиру: {readyReward.rewardCode}
+              </p>
+              {readyReward.claimPayload ? (
+                <RewardClaimBadge payload={readyReward.claimPayload} />
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className="mt-4 space-y-3">
+        {rewards.length ? (
+          rewards.slice(0, 5).map((reward) => (
             <div
               key={reward.id}
               className="rounded-lg border border-white/10 bg-[#070b12] p-3"
@@ -669,8 +715,16 @@ function RewardsPanel({ portal }: { portal: GuestPortalPayload }) {
                   <p className="mt-1 text-xs text-slate-500">
                     {formatDate(reward.qualifiedAt)}
                   </p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    {rewardSourceLabel(reward.sourceKind)}
+                    {reward.sourceLabel ? `: ${reward.sourceLabel}` : ""}
+                  </p>
                 </div>
-                <span className="rounded-lg bg-emerald-300/10 px-2 py-1 text-xs font-black text-emerald-200">
+                <span
+                  className={`rounded-lg px-2 py-1 text-xs font-black ${walletStateClass(
+                    reward.walletState,
+                  )}`}
+                >
                   {walletStateLabel(reward.walletState)}
                 </span>
               </div>
@@ -678,7 +732,7 @@ function RewardsPanel({ portal }: { portal: GuestPortalPayload }) {
                 {walletStateHint(reward.walletState)}
                 {reward.expiresAt ? ` До ${formatDate(reward.expiresAt)}.` : ""}
               </p>
-              {reward.rewardCode ? (
+              {reward.rewardCode && reward.walletState === "READY" ? (
                 <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_88px]">
                   <p className="rounded-lg border border-dashed border-cyan-300/30 px-3 py-2 text-sm font-black text-cyan-100">
                     Код кассиру: {reward.rewardCode}
@@ -932,6 +986,39 @@ function walletStateLabel(
   >;
 
   return labels[state];
+}
+
+function walletStateClass(
+  state: GuestPortalPayload["gamification"]["rewards"][number]["walletState"],
+) {
+  const classes = {
+    WAITING_APPROVAL: "bg-amber-300/10 text-amber-100",
+    READY: "bg-emerald-300/10 text-emerald-200",
+    REDEEMED: "bg-cyan-300/10 text-cyan-100",
+    CANCELED: "bg-slate-300/10 text-slate-300",
+    EXPIRED: "bg-rose-300/10 text-rose-100",
+  } satisfies Record<
+    GuestPortalPayload["gamification"]["rewards"][number]["walletState"],
+    string
+  >;
+
+  return classes[state];
+}
+
+function rewardSourceLabel(
+  sourceKind: GuestPortalPayload["gamification"]["rewards"][number]["sourceKind"],
+) {
+  const labels = {
+    LOOT_BOX: "Лутбокс",
+    MISSION: "Миссия",
+    BATTLE_PASS: "Battle pass",
+    MANUAL: "Ручная награда",
+  } satisfies Record<
+    GuestPortalPayload["gamification"]["rewards"][number]["sourceKind"],
+    string
+  >;
+
+  return labels[sourceKind];
 }
 
 function walletStateHint(

@@ -109,6 +109,7 @@ export type GuestPortalPayload = {
     lootBoxes: GuestPortalLootBox[];
     missions: GuestPortalMission[];
     seasons: GuestPortalSeason[];
+    rewardSummary: GuestPortalRewardSummary;
     rewards: GuestPortalReward[];
   };
   activity: {
@@ -175,10 +176,21 @@ export type GuestPortalReward = {
   rewardType: string;
   rewardAmount: number;
   rewardLabel: string;
+  sourceKind: 'LOOT_BOX' | 'MISSION' | 'BATTLE_PASS' | 'MANUAL';
+  sourceLabel: string | null;
   rewardCode: string | null;
   claimPayload: string | null;
   qualifiedAt: string;
   expiresAt: string | null;
+};
+
+export type GuestPortalRewardSummary = {
+  total: number;
+  ready: number;
+  waitingApproval: number;
+  redeemed: number;
+  expired: number;
+  nextExpiresAt: string | null;
 };
 
 export type GuestPortalActivityItem = {
@@ -477,10 +489,22 @@ export class GuestPortalService {
         ? this.prisma.guestGameReward.findMany({
             where: {
               tenantId: context.tenant.id,
-              OR: [
-                ...(guest ? [{ guestId: guest.id }] : []),
-                ...(profile ? [{ profileId: profile.id }] : []),
+              AND: [
+                {
+                  OR: [
+                    ...(guest ? [{ guestId: guest.id }] : []),
+                    ...(profile ? [{ profileId: profile.id }] : []),
+                  ],
+                },
+                {
+                  OR: [{ storeId: null }, { storeId: context.store.id }],
+                },
               ],
+            },
+            include: {
+              lootBox: { select: { name: true } },
+              mission: { select: { name: true } },
+              season: { select: { name: true } },
             },
             orderBy: [{ qualifiedAt: 'desc' }, { createdAt: 'desc' }],
             take: 20,
@@ -512,6 +536,7 @@ export class GuestPortalService {
       profile,
       visibleMissions,
     );
+    const portalRewards = rewards.map(mapReward).sort(comparePortalRewards);
 
     return {
       tenant: {
@@ -551,7 +576,8 @@ export class GuestPortalService {
           .filter((item) => activePeriod(item.periodFrom, item.periodTo))
           .slice(0, 2)
           .map((item) => mapSeason(item, xp)),
-        rewards: rewards.map(mapReward),
+        rewardSummary: buildRewardSummary(portalRewards),
+        rewards: portalRewards,
       },
       activity,
     };
@@ -1186,14 +1212,21 @@ function mapSeason(
 function mapReward(row: {
   id: string;
   status: string;
+  lootBoxId: string | null;
+  missionId: string | null;
+  seasonId: string | null;
   rewardType: string;
   rewardAmount: Prisma.Decimal;
   rewardLabel: string;
   rewardCode: string | null;
   qualifiedAt: Date;
   expiresAt: Date | null;
+  lootBox?: { name: string } | null;
+  mission?: { name: string } | null;
+  season?: { name: string } | null;
 }): GuestPortalReward {
   const walletState = rewardWalletState(row.status, row.expiresAt);
+  const source = rewardSource(row);
 
   return {
     id: row.id,
@@ -1202,13 +1235,101 @@ function mapReward(row: {
     rewardType: row.rewardType,
     rewardAmount: Number(row.rewardAmount),
     rewardLabel: row.rewardLabel,
+    sourceKind: source.sourceKind,
+    sourceLabel: source.sourceLabel,
     rewardCode: row.rewardCode,
     claimPayload:
-      row.rewardCode && walletState !== 'REDEEMED'
+      row.rewardCode && walletState === 'READY'
         ? buildRewardClaimPayload(row.id, row.rewardCode)
         : null,
     qualifiedAt: row.qualifiedAt.toISOString(),
     expiresAt: iso(row.expiresAt),
+  };
+}
+
+function buildRewardSummary(
+  rewards: GuestPortalReward[],
+): GuestPortalRewardSummary {
+  const nextExpiresAt = rewards
+    .filter((reward) => reward.walletState === 'READY' && reward.expiresAt)
+    .map((reward) => reward.expiresAt as string)
+    .sort()[0];
+
+  return {
+    total: rewards.length,
+    ready: rewards.filter((reward) => reward.walletState === 'READY').length,
+    waitingApproval: rewards.filter(
+      (reward) => reward.walletState === 'WAITING_APPROVAL',
+    ).length,
+    redeemed: rewards.filter((reward) => reward.walletState === 'REDEEMED')
+      .length,
+    expired: rewards.filter((reward) => reward.walletState === 'EXPIRED')
+      .length,
+    nextExpiresAt: nextExpiresAt ?? null,
+  };
+}
+
+function comparePortalRewards(
+  left: GuestPortalReward,
+  right: GuestPortalReward,
+) {
+  const leftRank = walletStateRank(left.walletState);
+  const rightRank = walletStateRank(right.walletState);
+
+  if (leftRank !== rightRank) {
+    return leftRank - rightRank;
+  }
+
+  return Date.parse(right.qualifiedAt) - Date.parse(left.qualifiedAt);
+}
+
+function walletStateRank(state: GuestPortalReward['walletState']) {
+  switch (state) {
+    case 'READY':
+      return 0;
+    case 'WAITING_APPROVAL':
+      return 1;
+    case 'REDEEMED':
+      return 2;
+    case 'EXPIRED':
+      return 3;
+    case 'CANCELED':
+      return 4;
+  }
+}
+
+function rewardSource(row: {
+  lootBoxId: string | null;
+  missionId: string | null;
+  seasonId: string | null;
+  lootBox?: { name: string } | null;
+  mission?: { name: string } | null;
+  season?: { name: string } | null;
+}): Pick<GuestPortalReward, 'sourceKind' | 'sourceLabel'> {
+  if (row.lootBoxId) {
+    return {
+      sourceKind: 'LOOT_BOX',
+      sourceLabel: row.lootBox?.name ?? null,
+    };
+  }
+
+  if (row.missionId) {
+    return {
+      sourceKind: 'MISSION',
+      sourceLabel: row.mission?.name ?? null,
+    };
+  }
+
+  if (row.seasonId) {
+    return {
+      sourceKind: 'BATTLE_PASS',
+      sourceLabel: row.season?.name ?? null,
+    };
+  }
+
+  return {
+    sourceKind: 'MANUAL',
+    sourceLabel: null,
   };
 }
 

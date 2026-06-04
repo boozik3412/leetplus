@@ -140,6 +140,7 @@ export type GuestPortalMission = {
   missionType: string;
   rewardLabel: string | null;
   xpReward: number;
+  progressCurrent: number;
   progressTarget: number | null;
   progressUnit: string | null;
   progressPercent: number;
@@ -189,6 +190,11 @@ export type GuestPortalActivityItem = {
   storeName: string | null;
   amount: number | null;
   xpDelta: number | null;
+};
+
+type GuestPortalMissionProgress = {
+  current: number;
+  percent: number;
 };
 
 @Injectable()
@@ -496,6 +502,16 @@ export class GuestPortalService {
       bonusBalanceSnapshot,
       currentHours,
     );
+    const visibleMissions = missions
+      .filter((item) => matchesStore(item.storeIds, context.store.id))
+      .filter((item) => activePeriod(item.periodFrom, item.periodTo))
+      .slice(0, 6);
+    const missionProgress = await this.buildMissionProgress(
+      context.tenant.id,
+      guest,
+      profile,
+      visibleMissions,
+    );
 
     return {
       tenant: {
@@ -528,11 +544,9 @@ export class GuestPortalService {
           .filter((item) => matchesStore(item.storeIds, context.store.id))
           .slice(0, 6)
           .map(mapLootBox),
-        missions: missions
-          .filter((item) => matchesStore(item.storeIds, context.store.id))
-          .filter((item) => activePeriod(item.periodFrom, item.periodTo))
-          .slice(0, 6)
-          .map(mapMission),
+        missions: visibleMissions.map((item) =>
+          mapMission(item, missionProgress.get(item.id)),
+        ),
         seasons: seasons
           .filter((item) => activePeriod(item.periodFrom, item.periodTo))
           .slice(0, 2)
@@ -541,6 +555,115 @@ export class GuestPortalService {
       },
       activity,
     };
+  }
+
+  private async buildMissionProgress(
+    tenantId: string,
+    guest: { id: string } | null,
+    profile: { id: string } | null,
+    missions: Array<{
+      id: string;
+      periodFrom: Date | null;
+      periodTo: Date | null;
+      progressTarget: number | null;
+    }>,
+  ): Promise<Map<string, GuestPortalMissionProgress>> {
+    if ((!guest && !profile) || missions.length === 0) {
+      return new Map();
+    }
+
+    const missionById = new Map(
+      missions.map((mission) => [mission.id, mission]),
+    );
+    const missionIds = [...missionById.keys()];
+    const eventScope: Prisma.GuestGameEventWhereInput[] = [
+      ...(guest ? [{ guestId: guest.id }] : []),
+      ...(profile ? [{ profileId: profile.id }] : []),
+    ];
+    const rewardScope: Prisma.GuestGameRewardWhereInput[] = [
+      ...(guest ? [{ guestId: guest.id }] : []),
+      ...(profile ? [{ profileId: profile.id }] : []),
+    ];
+
+    const [eventRows, rewardRows] = await Promise.all([
+      this.prisma.guestGameEvent.findMany({
+        where: {
+          tenantId,
+          missionId: { in: missionIds },
+          OR: eventScope,
+        },
+        select: {
+          missionId: true,
+          eventType: true,
+          source: true,
+          occurredAt: true,
+        },
+      }),
+      this.prisma.guestGameReward.findMany({
+        where: {
+          tenantId,
+          missionId: { in: missionIds },
+          OR: rewardScope,
+          status: { not: 'CANCELED' },
+        },
+        select: {
+          missionId: true,
+          qualifiedAt: true,
+        },
+      }),
+    ]);
+
+    const eventCounts = new Map<string, number>();
+    const rewardCounts = new Map<string, number>();
+
+    eventRows.forEach((row) => {
+      if (!row.missionId || !missionProgressEvent(row)) {
+        return;
+      }
+
+      const mission = missionById.get(row.missionId);
+      if (!mission || !dateWithinMission(row.occurredAt, mission)) {
+        return;
+      }
+
+      eventCounts.set(row.missionId, (eventCounts.get(row.missionId) ?? 0) + 1);
+    });
+
+    rewardRows.forEach((row) => {
+      if (!row.missionId) {
+        return;
+      }
+
+      const mission = missionById.get(row.missionId);
+      if (!mission || !dateWithinMission(row.qualifiedAt, mission)) {
+        return;
+      }
+
+      rewardCounts.set(
+        row.missionId,
+        (rewardCounts.get(row.missionId) ?? 0) + 1,
+      );
+    });
+
+    const progress = new Map<string, GuestPortalMissionProgress>();
+
+    missions.forEach((mission) => {
+      const target =
+        typeof mission.progressTarget === 'number' && mission.progressTarget > 0
+          ? mission.progressTarget
+          : 1;
+      const current = Math.max(
+        eventCounts.get(mission.id) ?? 0,
+        rewardCounts.get(mission.id) ?? 0,
+      );
+
+      progress.set(mission.id, {
+        current,
+        percent: percent(current, target),
+      });
+    });
+
+    return progress;
   }
 
   private async buildActivity(
@@ -1010,26 +1133,30 @@ function mapLootBox(row: {
   };
 }
 
-function mapMission(row: {
-  id: string;
-  name: string;
-  missionType: string;
-  rewardLabel: string | null;
-  xpReward: number;
-  progressTarget: number | null;
-  progressUnit: string | null;
-  periodTo: Date | null;
-  manualApprovalRequired: boolean;
-}): GuestPortalMission {
+function mapMission(
+  row: {
+    id: string;
+    name: string;
+    missionType: string;
+    rewardLabel: string | null;
+    xpReward: number;
+    progressTarget: number | null;
+    progressUnit: string | null;
+    periodTo: Date | null;
+    manualApprovalRequired: boolean;
+  },
+  progress?: GuestPortalMissionProgress,
+): GuestPortalMission {
   return {
     id: row.id,
     name: row.name,
     missionType: row.missionType,
     rewardLabel: row.rewardLabel,
     xpReward: row.xpReward,
+    progressCurrent: progress?.current ?? 0,
     progressTarget: row.progressTarget,
     progressUnit: row.progressUnit,
-    progressPercent: 0,
+    progressPercent: progress?.percent ?? 0,
     periodTo: iso(row.periodTo),
     manualApprovalRequired: row.manualApprovalRequired,
   };
@@ -1269,6 +1396,24 @@ function matchesStore(value: Prisma.JsonValue | null, storeId: string) {
 function activePeriod(from: Date | null, to: Date | null) {
   const now = Date.now();
   return (!from || from.getTime() <= now) && (!to || to.getTime() >= now);
+}
+
+function dateWithinMission(
+  value: Date,
+  mission: { periodFrom: Date | null; periodTo: Date | null },
+) {
+  return (
+    (!mission.periodFrom || value.getTime() >= mission.periodFrom.getTime()) &&
+    (!mission.periodTo || value.getTime() <= mission.periodTo.getTime())
+  );
+}
+
+function missionProgressEvent(row: { eventType: string; source: string }) {
+  return (
+    row.source !== 'SYSTEM' ||
+    row.eventType === 'MISSION_COMPLETED' ||
+    row.eventType === 'REWARD_QUALIFIED'
+  );
 }
 
 function stringArray(value: Prisma.JsonValue | null) {

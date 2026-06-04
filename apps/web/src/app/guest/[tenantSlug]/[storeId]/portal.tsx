@@ -712,33 +712,40 @@ function MissionsPanel({ portal }: { portal: GuestPortalPayload }) {
       </div>
       <div className="mt-5 space-y-3">
         {portal.gamification.missions.length ? (
-          portal.gamification.missions.map((mission) => (
-            <div
-              key={mission.id}
-              className="rounded-lg border border-white/10 bg-[#070b12] p-4 transition hover:border-cyan-300/35"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="font-black text-white">{mission.name}</p>
-                  <p className="mt-1 text-sm text-slate-400">
-                    {mission.rewardLabel ?? "Награда после подтверждения"}
-                  </p>
+          portal.gamification.missions.map((mission) => {
+            const progressTarget = mission.progressTarget ?? 1;
+            const progressUnit = mission.progressUnit
+              ? ` ${mission.progressUnit}`
+              : "";
+            const progressLabel =
+              mission.progressPercent >= 100
+                ? `Выполнено: ${mission.progressCurrent}/${progressTarget}${progressUnit}`
+                : `Прогресс: ${mission.progressCurrent}/${progressTarget}${progressUnit}`;
+
+            return (
+              <div
+                key={mission.id}
+                className="rounded-lg border border-white/10 bg-[#070b12] p-4 transition hover:border-cyan-300/35"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-black text-white">{mission.name}</p>
+                    <p className="mt-1 text-sm text-slate-400">
+                      {mission.rewardLabel ?? "Награда после подтверждения"}
+                    </p>
+                  </div>
+                  <span className="rounded-lg bg-cyan-300/10 px-2 py-1 text-xs font-black text-cyan-100">
+                    +{mission.xpReward} XP
+                  </span>
                 </div>
-                <span className="rounded-lg bg-cyan-300/10 px-2 py-1 text-xs font-black text-cyan-100">
-                  +{mission.xpReward} XP
-                </span>
+                <ProgressBar
+                  label={progressLabel}
+                  value={mission.progressPercent}
+                  tone="cyan"
+                />
               </div>
-              <ProgressBar
-                label={
-                  mission.progressTarget
-                    ? `Цель: ${mission.progressTarget} ${mission.progressUnit ?? ""}`
-                    : "Прогресс миссии"
-                }
-                value={mission.progressPercent}
-                tone="cyan"
-              />
-            </div>
-          ))
+            );
+          })
         ) : (
           <EmptyBlock text="Активные миссии для этого клуба пока не настроены." />
         )}

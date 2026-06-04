@@ -78,6 +78,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added personalized mission progress to the public guest portal: active missions on `/guest/[tenantSlug]/[storeId]` now show current counted steps versus target from guest/profile-linked `GuestGameEvent` and `GuestGameReward` rows inside the mission period, instead of always rendering zero progress.
 - Expanded the public guest portal with a safe activity layer: `/guest/[tenantSlug]/[storeId]` now returns and renders session count, play time, guest logs, balance operations, game-event counts, last activity, and a compact timeline from saved LeetPlus/Langame snapshot facts without external IDs, sensitive raw payloads, live Langame reads, or internal app navigation.
 - Clarified the UX boundary between marketing promo scenarios and Guest Game Hub: `/marketing/missions` is labeled and explained as campaign/promo-effect work, `/guests/gamification` is labeled as persistent game economy for XP, levels, loot boxes, Battle Pass, and reward wallet, and both pages cross-link without changing stable API models or URLs.
 - Polished the read-only UX for `/guests/gamification`: users with `view_guest_gamification` but without rule or reward management permissions now see catalogs, safe dry-run, snapshot facts, and history without profile/rule/reward editors, CSV export, cashier redemption, or status mutation controls.

@@ -71,6 +71,7 @@ export type GuestPortalPayload = {
       missionType: string;
       rewardLabel: string | null;
       xpReward: number;
+      progressCurrent: number;
       progressTarget: number | null;
       progressUnit: string | null;
       progressPercent: number;

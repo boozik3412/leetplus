@@ -963,6 +963,7 @@ export type GuestGameDeliveryOutbox = {
     cashier: number;
     manual: number;
   };
+  dispatcher: GuestGameDeliveryDispatcherStatus;
   items: GuestGameDelivery[];
   note: string;
 };
@@ -1116,6 +1117,84 @@ export type GuestGameDeliveryPrepareResult = {
   updated: number;
   skipped: number;
   deliveries: GuestGameDelivery[];
+};
+
+export type GuestGameDeliveryProviderStatus = {
+  channel: 'TELEGRAM' | 'MAX';
+  channelLabel: string;
+  pendingReady: number;
+  enabledByEnv: boolean;
+  configured: boolean;
+  canAttemptSend: boolean;
+  dryRunOnly: boolean;
+  requiredEnv: string[];
+  note: string;
+};
+
+export type GuestGameDeliveryDispatcherStatus = {
+  mode: 'DISABLED' | 'DRY_RUN' | 'READY';
+  modeLabel: string;
+  realSendEnabled: boolean;
+  providers: GuestGameDeliveryProviderStatus[];
+  note: string;
+};
+
+export type GuestGameDeliveryDispatchDto = {
+  channels?: string[] | string | null;
+  dryRun?: boolean | string | null;
+  limit?: number | string | null;
+};
+
+export type GuestGameDeliveryDispatchItem = {
+  deliveryId: string;
+  rewardId: string;
+  channel: GuestGameDeliveryChannel;
+  status: 'DRY_RUN' | 'SENT' | 'FAILED' | 'SKIPPED' | 'BLOCKED';
+  note: string;
+};
+
+export type GuestGameDeliveryDispatchResult = {
+  dryRun: boolean;
+  realSendEnabled: boolean;
+  checked: number;
+  sent: number;
+  failed: number;
+  skipped: number;
+  blocked: number;
+  items: GuestGameDeliveryDispatchItem[];
+  deliveries: GuestGameDelivery[];
+  dispatcher: GuestGameDeliveryDispatcherStatus;
+  note: string;
+};
+
+export type GuestGameScheduledDeliveryDispatchDto =
+  GuestGameDeliveryDispatchDto & {
+    tenantId?: string | null;
+    tenantSlug?: string | null;
+  };
+
+export type GuestGameScheduledDeliveryTenantResult = {
+  tenantId: string;
+  tenantSlug: string;
+  status: 'PROCESSED' | 'SKIPPED' | 'ERROR';
+  reason: string | null;
+  result: GuestGameDeliveryDispatchResult | null;
+};
+
+export type GuestGameScheduledDeliveryDispatchResult = {
+  dryRun: boolean;
+  realSendEnabled: boolean;
+  checkedTenants: number;
+  processedTenants: number;
+  skippedTenants: number;
+  erroredTenants: number;
+  checked: number;
+  sent: number;
+  failed: number;
+  skipped: number;
+  blocked: number;
+  tenants: GuestGameScheduledDeliveryTenantResult[];
+  note: string;
 };
 
 export type GuestGameEventDto = {
@@ -2287,6 +2366,112 @@ export class GuestGamificationService {
     );
   }
 
+  async runDeliveryDispatchScheduled(
+    dto: GuestGameScheduledDeliveryDispatchDto = {},
+  ): Promise<GuestGameScheduledDeliveryDispatchResult> {
+    const tenantId = nullableString(dto.tenantId);
+    const tenantSlug = nullableString(dto.tenantSlug);
+    const config = deliveryProviderConfig();
+    const dryRun =
+      dto.dryRun === undefined
+        ? true
+        : booleanValue(dto.dryRun) || !config.realSendEnabled;
+    const tenants = await this.prisma.tenant.findMany({
+      where: clean({
+        id: tenantId,
+        slug: tenantSlug,
+      }) as Prisma.TenantWhereInput,
+      select: {
+        id: true,
+        slug: true,
+        status: true,
+        users: {
+          where: {
+            isActive: true,
+            role: { in: [...scheduledPipelineActorRoles] },
+          },
+          select: {
+            id: true,
+            email: true,
+            fullName: true,
+            role: true,
+            customRoleId: true,
+            isPlatformAdmin: true,
+          },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+      orderBy: { slug: 'asc' },
+    });
+    const tenantResults: GuestGameScheduledDeliveryTenantResult[] = [];
+
+    for (const tenant of tenants) {
+      if (tenant.status !== TenantLifecycleStatus.ACTIVE) {
+        tenantResults.push({
+          tenantId: tenant.id,
+          tenantSlug: tenant.slug,
+          status: 'SKIPPED',
+          reason:
+            'Tenant is not active; scheduled delivery dispatcher skipped.',
+          result: null,
+        });
+        continue;
+      }
+
+      const actor = this.pickScheduledPipelineActor(tenant.users);
+
+      if (!actor) {
+        tenantResults.push({
+          tenantId: tenant.id,
+          tenantSlug: tenant.slug,
+          status: 'SKIPPED',
+          reason:
+            'No active owner, system administrator or network manager user found for audit-safe run.',
+          result: null,
+        });
+        continue;
+      }
+
+      try {
+        const result = await this.dispatchDeliveries(
+          {
+            id: actor.id,
+            email: actor.email,
+            fullName: actor.fullName,
+            role: actor.role,
+            customRoleId: actor.customRoleId,
+            isPlatformAdmin: actor.isPlatformAdmin,
+            tenantId: tenant.id,
+            tenantSlug: tenant.slug,
+            tenantStatus: tenant.status,
+          },
+          {
+            ...dto,
+            dryRun,
+          },
+        );
+
+        tenantResults.push({
+          tenantId: tenant.id,
+          tenantSlug: tenant.slug,
+          status: 'PROCESSED',
+          reason: null,
+          result,
+        });
+      } catch (error) {
+        tenantResults.push({
+          tenantId: tenant.id,
+          tenantSlug: tenant.slug,
+          status: 'ERROR',
+          reason: pipelineErrorMessage(error),
+          result: null,
+        });
+      }
+    }
+
+    return this.buildScheduledDeliveryDispatchSummary(dryRun, tenantResults);
+  }
+
   async getProfiles(user: AuthenticatedUser): Promise<GuestGameProfile[]> {
     const rows = await this.prisma.guestGameProfile.findMany({
       where: { tenantId: user.tenantId },
@@ -2546,6 +2731,262 @@ export class GuestGamificationService {
     return rows.map(mapDelivery);
   }
 
+  async getDeliveryDispatcherStatus(
+    user: AuthenticatedUser,
+  ): Promise<GuestGameDeliveryDispatcherStatus> {
+    const deliveries = await this.getDeliveries(user, { take: null });
+
+    return this.buildDeliveryDispatcherStatus(deliveries);
+  }
+
+  async dispatchDeliveries(
+    user: AuthenticatedUser,
+    dto: GuestGameDeliveryDispatchDto = {},
+  ): Promise<GuestGameDeliveryDispatchResult> {
+    const channels = deliveryDispatchChannels(dto.channels);
+    const limit = Math.min(100, Math.max(1, intValue(dto.limit) ?? 25));
+    const requestedDryRun =
+      dto.dryRun === undefined ? true : booleanValue(dto.dryRun);
+    const config = deliveryProviderConfig();
+    const dryRun = requestedDryRun || !config.realSendEnabled;
+    const rows = await this.prisma.guestGameDelivery.findMany({
+      where: {
+        tenantId: user.tenantId,
+        status: 'READY',
+        readinessStatus: 'READY_FOR_BOT',
+        channel: { in: channels },
+      },
+      include: deliveryInclude,
+      orderBy: [{ preparedAt: 'asc' }, { createdAt: 'asc' }],
+      take: limit,
+    });
+    const items: GuestGameDeliveryDispatchItem[] = [];
+    let sent = 0;
+    let failed = 0;
+    let skipped = 0;
+    let blocked = 0;
+
+    for (const row of rows) {
+      const channel = deliveryChannelValue(row.channel, null);
+
+      if (channel !== 'TELEGRAM' && channel !== 'MAX') {
+        skipped += 1;
+        items.push({
+          deliveryId: row.id,
+          rewardId: row.rewardId,
+          channel: channel ?? 'MANUAL',
+          status: 'SKIPPED',
+          note: 'Dispatcher обрабатывает только Telegram/MAX outbox.',
+        });
+        continue;
+      }
+
+      if (row.readinessStatus !== 'READY_FOR_BOT') {
+        const note =
+          'Delivery не готова к бот-доставке: сначала нужны согласие, канал и подтвержденная награда.';
+        blocked += 1;
+        items.push({
+          deliveryId: row.id,
+          rewardId: row.rewardId,
+          channel,
+          status: 'BLOCKED',
+          note,
+        });
+        await this.createDeliveryEvent(user, row.id, row.rewardId, {
+          eventType: 'DELIVERY_DISPATCH_BLOCKED',
+          fromStatus: row.status,
+          toStatus: row.status,
+          channel,
+          note,
+          payload: deliveryDispatchPayload({
+            dryRun,
+            providerConfigured: false,
+            reason: 'readiness_status',
+          }),
+        });
+        continue;
+      }
+
+      const provider = deliveryProviderForChannel(config, channel);
+      const chatId =
+        channel === 'TELEGRAM'
+          ? telegramChatIdFromIdentity(row.profile?.telegramIdentity ?? null)
+          : null;
+      const maxIdentity =
+        channel === 'MAX' ? nullableString(row.profile?.maxIdentity) : null;
+      const identityReady =
+        channel === 'TELEGRAM' ? chatId !== null : maxIdentity !== null;
+
+      if (!identityReady) {
+        const note = deliveryProviderBlockerNote(channel, provider, {
+          identityReady,
+        });
+        blocked += 1;
+        items.push({
+          deliveryId: row.id,
+          rewardId: row.rewardId,
+          channel,
+          status: 'BLOCKED',
+          note,
+        });
+        await this.createDeliveryEvent(user, row.id, row.rewardId, {
+          eventType: 'DELIVERY_DISPATCH_BLOCKED',
+          fromStatus: row.status,
+          toStatus: row.status,
+          channel,
+          note,
+          payload: deliveryDispatchPayload({
+            dryRun,
+            providerConfigured: provider.configured,
+            reason: 'identity_not_ready',
+          }),
+        });
+        continue;
+      }
+
+      if (dryRun) {
+        const note =
+          'Dry-run dispatcher: сообщение проверено, внешняя отправка не выполнялась.';
+        skipped += 1;
+        items.push({
+          deliveryId: row.id,
+          rewardId: row.rewardId,
+          channel,
+          status: 'DRY_RUN',
+          note,
+        });
+        await this.createDeliveryEvent(user, row.id, row.rewardId, {
+          eventType: 'DELIVERY_DISPATCH_DRY_RUN',
+          fromStatus: row.status,
+          toStatus: row.status,
+          channel,
+          note,
+          payload: deliveryDispatchPayload({
+            dryRun,
+            providerConfigured: provider.configured,
+            reason: 'dry_run',
+          }),
+        });
+        continue;
+      }
+
+      if (!provider.canAttemptSend) {
+        const note = deliveryProviderBlockerNote(channel, provider, {
+          identityReady,
+        });
+        blocked += 1;
+        items.push({
+          deliveryId: row.id,
+          rewardId: row.rewardId,
+          channel,
+          status: 'BLOCKED',
+          note,
+        });
+        await this.createDeliveryEvent(user, row.id, row.rewardId, {
+          eventType: 'DELIVERY_DISPATCH_BLOCKED',
+          fromStatus: row.status,
+          toStatus: row.status,
+          channel,
+          note,
+          payload: deliveryDispatchPayload({
+            dryRun,
+            providerConfigured: provider.configured,
+            reason: 'provider_not_ready',
+          }),
+        });
+        continue;
+      }
+
+      try {
+        const providerPayload =
+          channel === 'TELEGRAM'
+            ? await sendTelegramDelivery({
+                token: config.telegram.token,
+                chatId: chatId ?? '',
+                text: deliveryProviderMessage(row),
+              })
+            : await sendMaxDeliveryPlaceholder();
+        const now = new Date();
+        const updated = await this.prisma.guestGameDelivery.update({
+          where: { id: row.id },
+          data: {
+            status: 'SENT',
+            sentAt: now,
+            note: `${communicationQueueChannelLabel(channel)} dispatcher: отправлено.`,
+          },
+          include: deliveryInclude,
+        });
+        sent += 1;
+        items.push({
+          deliveryId: row.id,
+          rewardId: row.rewardId,
+          channel,
+          status: 'SENT',
+          note: 'Сообщение отправлено через настроенный provider.',
+        });
+        await this.createDeliveryEvent(user, updated.id, updated.rewardId, {
+          eventType: 'DELIVERY_SENT_BY_PROVIDER',
+          fromStatus: row.status,
+          toStatus: updated.status,
+          channel,
+          note: 'Сообщение отправлено через настроенный provider.',
+          payload: providerPayload,
+        });
+      } catch (error) {
+        const now = new Date();
+        const note = safeDeliveryErrorMessage(error);
+        const updated = await this.prisma.guestGameDelivery.update({
+          where: { id: row.id },
+          data: {
+            status: 'FAILED',
+            failedAt: now,
+            note,
+          },
+          include: deliveryInclude,
+        });
+        failed += 1;
+        items.push({
+          deliveryId: row.id,
+          rewardId: row.rewardId,
+          channel,
+          status: 'FAILED',
+          note,
+        });
+        await this.createDeliveryEvent(user, updated.id, updated.rewardId, {
+          eventType: 'DELIVERY_PROVIDER_FAILED',
+          fromStatus: row.status,
+          toStatus: updated.status,
+          channel,
+          note,
+          payload: deliveryDispatchPayload({
+            dryRun,
+            providerConfigured: provider.configured,
+            reason: 'provider_error',
+          }),
+        });
+      }
+    }
+
+    const deliveries = await this.getDeliveries(user);
+    const dispatcher = this.buildDeliveryDispatcherStatus(deliveries);
+
+    return {
+      dryRun,
+      realSendEnabled: config.realSendEnabled,
+      checked: rows.length,
+      sent,
+      failed,
+      skipped,
+      blocked,
+      items,
+      deliveries: deliveries.slice(0, 12),
+      dispatcher,
+      note: dryRun
+        ? 'Dispatcher запущен в безопасном dry-run: события записаны, внешних Telegram/MAX-отправок не было.'
+        : 'Dispatcher обработал готовые Telegram/MAX delivery через настроенные providers.',
+    };
+  }
+
   async prepareDeliveries(
     user: AuthenticatedUser,
     dto: GuestGameDeliveryPrepareDto = {},
@@ -2708,18 +3149,18 @@ export class GuestGamificationService {
   async exportDeliveriesCsv(user: AuthenticatedUser): Promise<string> {
     const deliveries = await this.getDeliveries(user, { take: null });
     const header = [
-      'РЎС‚Р°С‚СѓСЃ outbox',
-      'Р“РѕС‚РѕРІРЅРѕСЃС‚СЊ',
-      'РљР°РЅР°Р»',
-      'Р“РѕСЃС‚СЊ',
-      'РљРѕРЅС‚Р°РєС‚',
-      'РљР»СѓР±',
-      'РќР°РіСЂР°РґР°',
-      'РЎСѓРјРјР°',
-      'Р‘Р»РѕРєРёСЂРѕРІРєРё',
-      'РџРѕРґРіРѕС‚РѕРІР»РµРЅРѕ',
-      'РћС‚РїСЂР°РІР»РµРЅРѕ',
-      'Р—Р°РјРµС‚РєР°',
+      'Статус outbox',
+      'Готовность',
+      'Канал',
+      'Гость',
+      'Контакт',
+      'Клуб',
+      'Награда',
+      'Сумма',
+      'Блокировки',
+      'Подготовлено',
+      'Отправлено',
+      'Заметка',
     ];
     const rows = deliveries.map((delivery) => [
       delivery.statusLabel,
@@ -2752,7 +3193,7 @@ export class GuestGamificationService {
     });
 
     if (!delivery) {
-      throw new NotFoundException('Р—Р°РїРёСЃСЊ outbox РЅРµ РЅР°Р№РґРµРЅР°');
+      throw new NotFoundException('Запись outbox не найдена');
     }
 
     return delivery;
@@ -3550,6 +3991,39 @@ export class GuestGamificationService {
     };
   }
 
+  private buildScheduledDeliveryDispatchSummary(
+    dryRun: boolean,
+    tenants: GuestGameScheduledDeliveryTenantResult[],
+  ): GuestGameScheduledDeliveryDispatchResult {
+    const processed = tenants.filter((tenant) => tenant.status === 'PROCESSED');
+    const results = processed
+      .map((tenant) => tenant.result)
+      .filter((result): result is GuestGameDeliveryDispatchResult =>
+        Boolean(result),
+      );
+    const config = deliveryProviderConfig();
+
+    return {
+      dryRun,
+      realSendEnabled: config.realSendEnabled,
+      checkedTenants: tenants.length,
+      processedTenants: processed.length,
+      skippedTenants: tenants.filter((tenant) => tenant.status === 'SKIPPED')
+        .length,
+      erroredTenants: tenants.filter((tenant) => tenant.status === 'ERROR')
+        .length,
+      checked: sum(results.map((result) => result.checked)),
+      sent: sum(results.map((result) => result.sent)),
+      failed: sum(results.map((result) => result.failed)),
+      skipped: sum(results.map((result) => result.skipped)),
+      blocked: sum(results.map((result) => result.blocked)),
+      tenants,
+      note: dryRun
+        ? 'Scheduled delivery dispatcher ran in safe dry-run mode: audit events were recorded, external Telegram/MAX sends were not performed.'
+        : 'Scheduled delivery dispatcher processed ready Telegram/MAX deliveries through configured providers. Langame writes were not performed.',
+    };
+  }
+
   private buildSummary(
     profiles: GuestGameProfile[],
     lootBoxes: GuestGameLootBox[],
@@ -3701,8 +4175,64 @@ export class GuestGamificationService {
         cashier: deliveries.filter((item) => item.channel === 'CASHIER').length,
         manual: deliveries.filter((item) => item.channel === 'MANUAL').length,
       },
+      dispatcher: this.buildDeliveryDispatcherStatus(deliveries),
       items: deliveries.slice(0, 12),
       note: 'Outbox хранит подготовленные снимки выдачи наград. Внешний Telegram/MAX-бот пока не отправляет эти сообщения.',
+    };
+  }
+
+  private buildDeliveryDispatcherStatus(
+    deliveries: GuestGameDelivery[],
+  ): GuestGameDeliveryDispatcherStatus {
+    const config = deliveryProviderConfig();
+    const providers = [
+      deliveryProviderStatus(
+        config,
+        'TELEGRAM',
+        deliveries.filter(
+          (item) =>
+            item.status === 'READY' &&
+            item.readinessStatus === 'READY_FOR_BOT' &&
+            item.channel === 'TELEGRAM',
+        ).length,
+      ),
+      deliveryProviderStatus(
+        config,
+        'MAX',
+        deliveries.filter(
+          (item) =>
+            item.status === 'READY' &&
+            item.readinessStatus === 'READY_FOR_BOT' &&
+            item.channel === 'MAX',
+        ).length,
+      ),
+    ];
+    const hasReadyProvider = providers.some(
+      (provider) => provider.canAttemptSend,
+    );
+    const mode: GuestGameDeliveryDispatcherStatus['mode'] =
+      !config.realSendEnabled
+        ? 'DRY_RUN'
+        : hasReadyProvider
+          ? 'READY'
+          : 'DISABLED';
+
+    return {
+      mode,
+      modeLabel:
+        mode === 'READY'
+          ? 'готов к отправке'
+          : mode === 'DRY_RUN'
+            ? 'dry-run'
+            : 'отключен',
+      realSendEnabled: config.realSendEnabled,
+      providers,
+      note:
+        mode === 'READY'
+          ? 'Dispatcher может отправлять только готовые Telegram/MAX delivery с подтвержденным numeric chat_id или настроенным provider.'
+          : mode === 'DRY_RUN'
+            ? 'Безопасный режим: dispatcher проверяет outbox и пишет audit-события, но не отправляет внешние сообщения.'
+            : 'Внешние providers не готовы: включите env-флаги и настройте токены после юридической и технической подготовки.',
     };
   }
 
@@ -5385,6 +5915,246 @@ function deliveryChannelIdentityMasked(
   }
 
   return null;
+}
+
+type DeliveryProviderConfig = {
+  realSendEnabled: boolean;
+  telegram: {
+    enabled: boolean;
+    token: string;
+  };
+  max: {
+    enabled: boolean;
+    token: string;
+    endpoint: string;
+  };
+};
+
+function deliveryProviderConfig(): DeliveryProviderConfig {
+  return {
+    realSendEnabled: envFlag('GUEST_GAME_DELIVERY_REAL_SEND_ENABLED'),
+    telegram: {
+      enabled: envFlag('GUEST_GAME_TELEGRAM_DELIVERY_ENABLED'),
+      token:
+        envString('GUEST_GAME_TELEGRAM_BOT_TOKEN') ??
+        envString('TELEGRAM_BOT_TOKEN') ??
+        '',
+    },
+    max: {
+      enabled: envFlag('GUEST_GAME_MAX_DELIVERY_ENABLED'),
+      token:
+        envString('GUEST_GAME_MAX_BOT_TOKEN') ??
+        envString('MAX_BOT_TOKEN') ??
+        '',
+      endpoint: envString('GUEST_GAME_MAX_DELIVERY_ENDPOINT') ?? '',
+    },
+  };
+}
+
+function deliveryDispatchChannels(
+  value: GuestGameDeliveryDispatchDto['channels'],
+): Array<'TELEGRAM' | 'MAX'> {
+  const raw = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.split(',')
+      : ['TELEGRAM', 'MAX'];
+  const channels = raw
+    .map((item) => item.trim().toUpperCase())
+    .filter(
+      (item): item is 'TELEGRAM' | 'MAX' =>
+        item === 'TELEGRAM' || item === 'MAX',
+    );
+
+  return [...new Set(channels)].length
+    ? [...new Set(channels)]
+    : ['TELEGRAM', 'MAX'];
+}
+
+function deliveryProviderForChannel(
+  config: DeliveryProviderConfig,
+  channel: 'TELEGRAM' | 'MAX',
+): GuestGameDeliveryProviderStatus {
+  return deliveryProviderStatus(config, channel, 0);
+}
+
+function deliveryProviderStatus(
+  config: DeliveryProviderConfig,
+  channel: 'TELEGRAM' | 'MAX',
+  pendingReady: number,
+): GuestGameDeliveryProviderStatus {
+  if (channel === 'TELEGRAM') {
+    const enabledByEnv = config.realSendEnabled && config.telegram.enabled;
+    const configured = config.telegram.token.length > 0;
+    const canAttemptSend = enabledByEnv && configured;
+
+    return {
+      channel,
+      channelLabel: 'Telegram',
+      pendingReady,
+      enabledByEnv,
+      configured,
+      canAttemptSend,
+      dryRunOnly: !config.realSendEnabled,
+      requiredEnv: [
+        'GUEST_GAME_DELIVERY_REAL_SEND_ENABLED',
+        'GUEST_GAME_TELEGRAM_DELIVERY_ENABLED',
+        'GUEST_GAME_TELEGRAM_BOT_TOKEN',
+      ],
+      note: !config.realSendEnabled
+        ? 'Безопасный dry-run: включите GUEST_GAME_DELIVERY_REAL_SEND_ENABLED только после настройки согласий и бота.'
+        : !config.telegram.enabled
+          ? 'Telegram provider выключен env-флагом GUEST_GAME_TELEGRAM_DELIVERY_ENABLED.'
+          : !configured
+            ? 'Telegram bot token не настроен.'
+            : 'Telegram provider настроен; отправка требует подтвержденный numeric chat_id гостя.',
+    };
+  }
+
+  const enabledByEnv = config.realSendEnabled && config.max.enabled;
+  const configured =
+    config.max.token.length > 0 && config.max.endpoint.length > 0;
+
+  return {
+    channel,
+    channelLabel: 'MAX',
+    pendingReady,
+    enabledByEnv,
+    configured,
+    canAttemptSend: false,
+    dryRunOnly: true,
+    requiredEnv: [
+      'GUEST_GAME_DELIVERY_REAL_SEND_ENABLED',
+      'GUEST_GAME_MAX_DELIVERY_ENABLED',
+      'GUEST_GAME_MAX_BOT_TOKEN',
+      'GUEST_GAME_MAX_DELIVERY_ENDPOINT',
+    ],
+    note:
+      configured && enabledByEnv
+        ? 'MAX provider ожидает утвержденный API-контракт; автоматическая отправка пока заблокирована.'
+        : 'MAX provider не настроен или не включен; нужен подтвержденный endpoint и токен.',
+  };
+}
+
+function deliveryProviderBlockerNote(
+  channel: 'TELEGRAM' | 'MAX',
+  provider: GuestGameDeliveryProviderStatus,
+  options: { identityReady: boolean },
+) {
+  if (!options.identityReady) {
+    return channel === 'TELEGRAM'
+      ? 'Telegram alias не является numeric chat_id: гость должен открыть бота, чтобы LeetPlus получил безопасный chat_id.'
+      : 'MAX identity гостя еще не привязана к игровому профилю.';
+  }
+
+  if (provider.dryRunOnly) {
+    return 'Dispatcher работает в безопасном dry-run или provider пока не поддерживает реальную отправку.';
+  }
+
+  if (!provider.enabledByEnv) {
+    return `${provider.channelLabel} provider выключен env-настройками.`;
+  }
+
+  if (!provider.configured) {
+    return `${provider.channelLabel} provider не настроен токеном/endpoint.`;
+  }
+
+  return provider.note;
+}
+
+function telegramChatIdFromIdentity(value: string | null) {
+  const identity = nullableString(value);
+
+  if (!identity) {
+    return null;
+  }
+
+  const normalized = identity.replace(/^(chat:|tg:)/i, '').trim();
+
+  return /^-?\d{5,32}$/.test(normalized) ? normalized : null;
+}
+
+function deliveryDispatchPayload(data: {
+  dryRun: boolean;
+  providerConfigured: boolean;
+  reason: string;
+  providerMessageId?: string | null;
+}): Prisma.InputJsonValue {
+  return clean(data);
+}
+
+function deliveryProviderMessage(row: DeliveryRow) {
+  const code = row.reward.rewardCode ? `\nКод: ${row.reward.rewardCode}` : '';
+
+  return `${row.messageTitle}\n\n${row.messageBody}${code}\n\nLeetPlus`;
+}
+
+async function sendTelegramDelivery({
+  token,
+  chatId,
+  text,
+}: {
+  token: string;
+  chatId: string;
+  text: string;
+}): Promise<Prisma.InputJsonValue> {
+  const response = await fetch(
+    `https://api.telegram.org/bot${encodeURIComponent(token)}/sendMessage`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        disable_web_page_preview: true,
+      }),
+    },
+  );
+  const body = (await response.json().catch(() => null)) as {
+    ok?: boolean;
+    result?: { message_id?: number };
+    description?: string;
+  } | null;
+
+  if (!response.ok || body?.ok === false) {
+    throw new Error(
+      `Telegram sendMessage failed: ${body?.description ?? response.status}`,
+    );
+  }
+
+  return clean({
+    provider: 'TELEGRAM',
+    providerMessageId: body?.result?.message_id
+      ? String(body.result.message_id)
+      : null,
+  });
+}
+
+function sendMaxDeliveryPlaceholder(): Promise<Prisma.InputJsonValue> {
+  return Promise.reject(
+    new Error(
+      'MAX delivery provider is not implemented until confirmed API contract is configured.',
+    ),
+  );
+}
+
+function safeDeliveryErrorMessage(error: unknown) {
+  const message =
+    error instanceof Error ? error.message : 'Delivery provider error';
+
+  return message.slice(0, 300);
+}
+
+function envString(name: string) {
+  const value = process.env[name]?.trim();
+
+  return value ? value : null;
+}
+
+function envFlag(name: string) {
+  const value = envString(name)?.toLowerCase();
+
+  return value === '1' || value === 'true' || value === 'yes';
 }
 
 function maskAlias(value: string | null) {

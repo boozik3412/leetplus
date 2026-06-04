@@ -17,6 +17,7 @@ import type {
   GuestGameGuestLogCatalog,
   GuestGameGuestLogTypeMapping,
   GuestGameDelivery,
+  GuestGameDeliveryDispatchResult,
   GuestGameDeliveryStatus,
   GuestGameLootBox,
   GuestGameMission,
@@ -615,6 +616,8 @@ export function GuestGamificationPanel({
     useState<GuestGameSnapshotFactsResult | null>(null);
   const [pipelineResult, setPipelineResult] =
     useState<GuestGamePipelineRunResult | null>(null);
+  const [deliveryDispatchResult, setDeliveryDispatchResult] =
+    useState<GuestGameDeliveryDispatchResult | null>(null);
   const [redeemedReward, setRedeemedReward] =
     useState<GuestGameReward | null>(null);
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
@@ -1138,6 +1141,27 @@ export function GuestGamificationPanel({
     });
   }
 
+  async function dispatchDeliveryOutbox() {
+    await saveAction("deliveries-dispatch", async () => {
+      assertCan(
+        access.canApproveRewards,
+        "Для проверки dispatcher outbox нужно право `Геймификация: награды`.",
+      );
+
+      const result = await postJson<GuestGameDeliveryDispatchResult>(
+        "/api/guests/gamification/deliveries/dispatch",
+        {
+          channels: ["TELEGRAM", "MAX"],
+          dryRun: true,
+          limit: 25,
+        },
+      );
+
+      setDeliveryDispatchResult(result);
+      await reloadWorkspace();
+    });
+  }
+
   async function updateDeliveryStatus(
     delivery: GuestGameDelivery,
     status: GuestGameDeliveryStatus,
@@ -1324,6 +1348,8 @@ export function GuestGamificationPanel({
           canApproveRewards={access.canApproveRewards}
           canManageRules={access.canManageRules}
           onPrepareOutbox={prepareDeliveryOutbox}
+          onDispatchOutbox={dispatchDeliveryOutbox}
+          deliveryDispatchResult={deliveryDispatchResult}
           onUpdateDeliveryStatus={updateDeliveryStatus}
           onSaveGuestLogMapping={saveGuestLogTypeMapping}
           onDeleteGuestLogMapping={deleteGuestLogTypeMapping}
@@ -2257,6 +2283,8 @@ function OverviewTab({
   canApproveRewards,
   canManageRules,
   onPrepareOutbox,
+  onDispatchOutbox,
+  deliveryDispatchResult,
   onUpdateDeliveryStatus,
   onSaveGuestLogMapping,
   onDeleteGuestLogMapping,
@@ -2275,6 +2303,8 @@ function OverviewTab({
   canApproveRewards: boolean;
   canManageRules: boolean;
   onPrepareOutbox: () => void;
+  onDispatchOutbox: () => void;
+  deliveryDispatchResult: GuestGameDeliveryDispatchResult | null;
   onUpdateDeliveryStatus: (
     delivery: GuestGameDelivery,
     status: GuestGameDeliveryStatus,
@@ -2371,6 +2401,8 @@ function OverviewTab({
         canApproveRewards={canApproveRewards}
         onOpenRewards={() => onOpenTab("rewards")}
         onPrepareOutbox={onPrepareOutbox}
+        onDispatchOutbox={onDispatchOutbox}
+        deliveryDispatchResult={deliveryDispatchResult}
         onUpdateDeliveryStatus={onUpdateDeliveryStatus}
       />
 
@@ -2706,6 +2738,8 @@ function CommunicationQueueCard({
   canApproveRewards,
   onOpenRewards,
   onPrepareOutbox,
+  onDispatchOutbox,
+  deliveryDispatchResult,
   onUpdateDeliveryStatus,
 }: {
   queue: GuestGamificationWorkspace["communicationQueue"];
@@ -2714,6 +2748,8 @@ function CommunicationQueueCard({
   canApproveRewards: boolean;
   onOpenRewards: () => void;
   onPrepareOutbox: () => void;
+  onDispatchOutbox: () => void;
+  deliveryDispatchResult: GuestGameDeliveryDispatchResult | null;
   onUpdateDeliveryStatus: (
     delivery: GuestGameDelivery,
     status: GuestGameDeliveryStatus,
@@ -2721,6 +2757,10 @@ function CommunicationQueueCard({
 }) {
   const visibleItems = queue.items.slice(0, 6);
   const visibleDeliveries = outbox.items.slice(0, 5);
+  const botReadyDeliveryCount = outbox.dispatcher.providers.reduce(
+    (total, provider) => total + provider.pendingReady,
+    0,
+  );
 
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
@@ -2735,12 +2775,27 @@ function CommunicationQueueCard({
           <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
             Слой показывает, какие награды уже можно отдать вручную, какие
             готовы для будущего Telegram/MAX-бота, а где не хватает согласия,
-            канала или подтверждения. Внешних отправок здесь нет.
+            канала или подтверждения. Dispatcher по умолчанию работает в
+            dry-run; внешняя отправка включается только отдельными env-флагами.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button className={smallButtonClass} type="button" onClick={onOpenRewards}>
             Открыть кошелек
+          </button>
+          <button
+            className={smallButtonClass}
+            type="button"
+            disabled={
+              !canApproveRewards ||
+              saving === "deliveries-dispatch" ||
+              botReadyDeliveryCount === 0
+            }
+            onClick={onDispatchOutbox}
+          >
+            {saving === "deliveries-dispatch"
+              ? "Проверяем..."
+              : "Проверить доставку"}
           </button>
           <button
             className={primaryButtonClass}
@@ -2797,6 +2852,60 @@ function CommunicationQueueCard({
           <MiniMetric label="Telegram/MAX" value={outbox.summary.telegram + outbox.summary.max} />
           <MiniMetric label="кассир/ручной" value={outbox.summary.cashier + outbox.summary.manual} />
         </div>
+        <div className="mt-3 grid gap-2 lg:grid-cols-3">
+          <div className="rounded-lg border border-cyan-200 bg-cyan-100/60 p-3 text-xs leading-5 text-cyan-950 dark:border-cyan-900/60 dark:bg-cyan-950/40 dark:text-cyan-100">
+            <p className="font-bold uppercase tracking-wide">Dispatcher</p>
+            <p className="mt-1 text-sm font-semibold">{outbox.dispatcher.modeLabel}</p>
+            <p className="mt-1">{outbox.dispatcher.note}</p>
+          </div>
+          {outbox.dispatcher.providers.map((provider) => (
+            <div
+              key={provider.channel}
+              className="rounded-lg border border-cyan-200 bg-white p-3 text-xs leading-5 text-zinc-600 dark:border-cyan-900/60 dark:bg-zinc-950 dark:text-zinc-300"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="font-bold text-zinc-950 dark:text-white">
+                  {provider.channelLabel}
+                </p>
+                <span className="rounded-full bg-zinc-100 px-2 py-1 font-semibold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
+                  {provider.canAttemptSend
+                    ? "готов"
+                    : provider.dryRunOnly
+                      ? "dry-run"
+                      : "отключен"}
+                </span>
+              </div>
+              <p className="mt-1">
+                Готовых: {provider.pendingReady} · env{" "}
+                {provider.enabledByEnv ? "включен" : "выключен"} · config{" "}
+                {provider.configured ? "есть" : "нет"}
+              </p>
+              <p className="mt-1">{provider.note}</p>
+            </div>
+          ))}
+        </div>
+        {deliveryDispatchResult ? (
+          <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50/70 p-3 text-xs leading-5 text-emerald-950 dark:border-emerald-900/60 dark:bg-emerald-950/25 dark:text-emerald-100">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="font-bold uppercase tracking-wide">
+                  Последняя проверка dispatcher
+                </p>
+                <p className="mt-1">{deliveryDispatchResult.note}</p>
+              </div>
+              <span className="rounded-full bg-emerald-100 px-2 py-1 font-semibold text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-100">
+                {deliveryDispatchResult.dryRun ? "dry-run" : "real send"}
+              </span>
+            </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-5">
+              <MiniMetric label="проверено" value={deliveryDispatchResult.checked} />
+              <MiniMetric label="dry/skip" value={deliveryDispatchResult.skipped} />
+              <MiniMetric label="отправлено" value={deliveryDispatchResult.sent} />
+              <MiniMetric label="заблокировано" value={deliveryDispatchResult.blocked} />
+              <MiniMetric label="ошибки" value={deliveryDispatchResult.failed} />
+            </div>
+          </div>
+        ) : null}
         <div className="mt-3 space-y-2">
           {visibleDeliveries.length ? (
             visibleDeliveries.map((delivery) => (

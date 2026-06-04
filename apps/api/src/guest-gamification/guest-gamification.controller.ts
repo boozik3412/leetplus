@@ -41,6 +41,9 @@ import {
   type GuestGameRewardRedeemDto,
   type GuestGameRewardUpdateDto,
   type GuestGameDelivery,
+  type GuestGameDeliveryDispatchDto,
+  type GuestGameDeliveryDispatchResult,
+  type GuestGameDeliveryDispatcherStatus,
   type GuestGameDeliveryPrepareDto,
   type GuestGameDeliveryPrepareResult,
   type GuestGameDeliveryUpdateDto,
@@ -300,6 +303,21 @@ export class GuestGamificationController {
     @Body() dto: GuestGameDeliveryPrepareDto,
   ): Promise<GuestGameDeliveryPrepareResult> {
     return this.gamificationService.prepareDeliveries(user, dto);
+  }
+
+  @Get('deliveries/dispatcher')
+  getDeliveryDispatcherStatus(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<GuestGameDeliveryDispatcherStatus> {
+    return this.gamificationService.getDeliveryDispatcherStatus(user);
+  }
+
+  @Post('deliveries/dispatch')
+  dispatchDeliveries(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: GuestGameDeliveryDispatchDto,
+  ): Promise<GuestGameDeliveryDispatchResult> {
+    return this.gamificationService.dispatchDeliveries(user, dto);
   }
 
   @Patch('deliveries/:id')

@@ -510,6 +510,46 @@ export type GuestGameDeliveryStatus =
 
 export type GuestGameDeliveryChannel = "TELEGRAM" | "MAX" | "CASHIER" | "MANUAL";
 
+export type GuestGameDeliveryProviderStatus = {
+  channel: "TELEGRAM" | "MAX";
+  channelLabel: string;
+  pendingReady: number;
+  enabledByEnv: boolean;
+  configured: boolean;
+  canAttemptSend: boolean;
+  dryRunOnly: boolean;
+  requiredEnv: string[];
+  note: string;
+};
+
+export type GuestGameDeliveryDispatcherStatus = {
+  mode: "DISABLED" | "DRY_RUN" | "READY";
+  modeLabel: string;
+  realSendEnabled: boolean;
+  providers: GuestGameDeliveryProviderStatus[];
+  note: string;
+};
+
+export type GuestGameDeliveryDispatchResult = {
+  dryRun: boolean;
+  realSendEnabled: boolean;
+  checked: number;
+  sent: number;
+  failed: number;
+  skipped: number;
+  blocked: number;
+  items: Array<{
+    deliveryId: string;
+    rewardId: string;
+    channel: GuestGameDeliveryChannel;
+    status: "DRY_RUN" | "SENT" | "FAILED" | "SKIPPED" | "BLOCKED";
+    note: string;
+  }>;
+  deliveries: GuestGameDelivery[];
+  dispatcher: GuestGameDeliveryDispatcherStatus;
+  note: string;
+};
+
 export type GuestGameDeliveryEvent = {
   id: string;
   eventType: string;
@@ -576,6 +616,7 @@ export type GuestGameDeliveryOutbox = {
     cashier: number;
     manual: number;
   };
+  dispatcher: GuestGameDeliveryDispatcherStatus;
   items: GuestGameDelivery[];
   note: string;
 };

@@ -8,6 +8,8 @@ import {
 import { ConfigService } from '@nestjs/config';
 import {
   GuestGamificationService,
+  type GuestGameScheduledDeliveryDispatchDto,
+  type GuestGameScheduledDeliveryDispatchResult,
   type GuestGameScheduledPipelineRunDto,
   type GuestGameScheduledPipelineRunResult,
 } from './guest-gamification.service';
@@ -27,6 +29,16 @@ export class GuestGamificationScheduledController {
     this.assertToken(token);
 
     return this.gamificationService.runSnapshotPipelineScheduled(dto);
+  }
+
+  @Post('deliveries/dispatch')
+  runScheduledDeliveryDispatch(
+    @Headers('x-sync-service-token') token: string | undefined,
+    @Body() dto: GuestGameScheduledDeliveryDispatchDto,
+  ): Promise<GuestGameScheduledDeliveryDispatchResult> {
+    this.assertToken(token);
+
+    return this.gamificationService.runDeliveryDispatchScheduled(dto);
   }
 
   private assertToken(token: string | undefined) {

@@ -2321,6 +2321,10 @@ function OverviewTab({
 
       <EconomyControlCard economy={workspace.economy} />
       <EffectControlCard effect={workspace.effect} />
+      <CommunicationQueueCard
+        queue={workspace.communicationQueue}
+        onOpenRewards={() => onOpenTab("rewards")}
+      />
 
       <TariffSnapshotReadinessCard snapshots={workspace.tariffSnapshots} />
 
@@ -2641,6 +2645,131 @@ function EffectControlCard({
           ))
         ) : (
           <EmptyState text="Эффект появится после игровых событий с сопоставленными гостями и последующих сессий, продаж или пополнений." />
+        )}
+      </div>
+    </section>
+  );
+}
+
+function CommunicationQueueCard({
+  queue,
+  onOpenRewards,
+}: {
+  queue: GuestGamificationWorkspace["communicationQueue"];
+  onOpenRewards: () => void;
+}) {
+  const visibleItems = queue.items.slice(0, 6);
+
+  return (
+    <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-300">
+            Коммуникации и выдача
+          </p>
+          <h2 className="mt-1 text-lg font-bold text-zinc-950 dark:text-white">
+            Готовность Telegram/MAX, кассира и согласий
+          </h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+            Слой показывает, какие награды уже можно отдать вручную, какие
+            готовы для будущего Telegram/MAX-бота, а где не хватает согласия,
+            канала или подтверждения. Внешних отправок здесь нет.
+          </p>
+        </div>
+        <button className={smallButtonClass} type="button" onClick={onOpenRewards}>
+          Открыть кошелек
+        </button>
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <MiniMetric
+          label="готово к боту"
+          value={queue.summary.readyForBot}
+        />
+        <MiniMetric
+          label="готово кассиру"
+          value={queue.summary.readyForCashier}
+        />
+        <MiniMetric
+          label="нужно подтвердить"
+          value={queue.summary.needsApproval}
+        />
+        <MiniMetric
+          label="нет согласия / канала"
+          value={queue.summary.needsConsent + queue.summary.needsChannel}
+        />
+      </div>
+
+      <div className="mt-4 rounded-lg border border-violet-200 bg-violet-50/70 px-3 py-2 text-xs leading-5 text-violet-900 dark:border-violet-900/60 dark:bg-violet-950/25 dark:text-violet-100">
+        {queue.note}
+      </div>
+
+      <div className="mt-4 space-y-2">
+        {visibleItems.length ? (
+          visibleItems.map((item) => (
+            <div
+              key={item.id}
+              className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/50"
+            >
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span
+                      className={[
+                        "rounded-full px-2 py-1 text-[11px] font-bold uppercase",
+                        communicationQueueStatusClass(item.queueStatus),
+                      ].join(" ")}
+                    >
+                      {item.queueStatusLabel}
+                    </span>
+                    <span className="rounded-full bg-zinc-200 px-2 py-1 text-[11px] font-bold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
+                      {item.channelLabel}
+                    </span>
+                    {item.botDeliveryEnabled ? null : (
+                      <span className="rounded-full bg-amber-100 px-2 py-1 text-[11px] font-bold text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                        отправка выкл.
+                      </span>
+                    )}
+                  </div>
+                  <h3 className="mt-2 truncate text-sm font-bold text-zinc-950 dark:text-white">
+                    {item.guestLabel}
+                  </h3>
+                  <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                    {item.rewardLabel} · {item.sourceLabel}
+                    {item.store ? ` · ${item.store.name}` : ""}
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                    {item.nextAction}
+                  </p>
+                </div>
+                <div className="grid min-w-0 gap-2 text-xs sm:grid-cols-3 lg:min-w-[460px]">
+                  <MiniMetric label="сумма" value={formatMoney(item.rewardAmount)} />
+                  <MiniMetric
+                    label="контакт"
+                    value={item.contactMasked ?? "нет"}
+                  />
+                  <MiniMetric
+                    label="до"
+                    value={formatDate(item.expiresAt) || "без срока"}
+                  />
+                </div>
+              </div>
+              {item.blockers.length ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {item.blockers.slice(0, 3).map((blocker) => (
+                    <span
+                      key={blocker}
+                      className="rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-zinc-600 dark:bg-zinc-950 dark:text-zinc-300"
+                    >
+                      {blocker}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ))
+        ) : (
+          <EmptyState text="Коммуникационная очередь появится после создания наград в кошельке." />
         )}
       </div>
     </section>
@@ -6868,6 +6997,30 @@ function economyUsageClass(value: number | null) {
   }
 
   return "bg-emerald-500";
+}
+
+function communicationQueueStatusClass(
+  status: GuestGamificationWorkspace["communicationQueue"]["items"][number]["queueStatus"],
+) {
+  switch (status) {
+    case "READY_FOR_BOT":
+      return "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200";
+    case "READY_FOR_CASHIER":
+      return "bg-cyan-100 text-cyan-800 dark:bg-cyan-950 dark:text-cyan-200";
+    case "NEEDS_APPROVAL":
+      return "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200";
+    case "NEEDS_CONSENT":
+    case "NEEDS_CHANNEL":
+      return "bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-200";
+    case "UNSUBSCRIBED":
+      return "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200";
+    case "EXPIRED":
+    case "REDEEMED":
+    case "CANCELED":
+      return "bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200";
+    default:
+      return "bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200";
+  }
 }
 
 function sessionTypeLabel(value: string | null) {

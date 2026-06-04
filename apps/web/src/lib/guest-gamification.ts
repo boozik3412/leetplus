@@ -55,6 +55,15 @@ export type GuestGameProfile = {
     contact: string;
     matchedGuestId: string | null;
   } | null;
+  communication: {
+    phoneConsentStatus: "UNKNOWN" | "GRANTED" | "DENIED" | "UNSUBSCRIBED";
+    phoneConsentSource: string | null;
+    phoneConsentAt: string | null;
+    unsubscribedAt: string | null;
+    telegramReady: boolean;
+    maxReady: boolean;
+    botReady: boolean;
+  };
   createdBy: GuestGameUser | null;
 };
 
@@ -440,6 +449,58 @@ export type GuestGameEffect = {
   scenarios: GuestGameEffectScenario[];
 };
 
+export type GuestGameCommunicationQueueStatus =
+  | "READY_FOR_BOT"
+  | "READY_FOR_CASHIER"
+  | "NEEDS_APPROVAL"
+  | "NEEDS_CONSENT"
+  | "NEEDS_CHANNEL"
+  | "UNSUBSCRIBED"
+  | "EXPIRED"
+  | "REDEEMED"
+  | "CANCELED";
+
+export type GuestGameCommunicationQueueItem = {
+  id: string;
+  rewardId: string;
+  profileId: string | null;
+  guestLabel: string;
+  contactMasked: string | null;
+  rewardLabel: string;
+  rewardType: string;
+  rewardAmount: number;
+  walletState: GuestGameReward["walletState"];
+  queueStatus: GuestGameCommunicationQueueStatus;
+  queueStatusLabel: string;
+  channel: "TELEGRAM" | "MAX" | "CASHIER" | "MANUAL";
+  channelLabel: string;
+  sourceLabel: string;
+  store: { id: string; name: string } | null;
+  qualifiedAt: string;
+  expiresAt: string | null;
+  rewardCodeReady: boolean;
+  botDeliveryEnabled: false;
+  blockers: string[];
+  nextAction: string;
+};
+
+export type GuestGameCommunicationQueue = {
+  summary: {
+    total: number;
+    readyForBot: number;
+    readyForCashier: number;
+    needsApproval: number;
+    needsConsent: number;
+    needsChannel: number;
+    blockedByUnsubscribe: number;
+    expired: number;
+    redeemed: number;
+    canceled: number;
+  };
+  items: GuestGameCommunicationQueueItem[];
+  note: string;
+};
+
 export type GuestGameTariffSnapshotStatus =
   | "READY"
   | "PARTIAL"
@@ -544,6 +605,7 @@ export type GuestGamificationWorkspace = {
   summary: GuestGamificationSummary;
   economy: GuestGameEconomy;
   effect: GuestGameEffect;
+  communicationQueue: GuestGameCommunicationQueue;
   profiles: GuestGameProfile[];
   lootBoxes: GuestGameLootBox[];
   missions: GuestGameMission[];

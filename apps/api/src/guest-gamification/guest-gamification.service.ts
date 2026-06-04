@@ -102,6 +102,10 @@ const gameProfileInclude = {
       fullNameMasked: true,
       phoneMasked: true,
       emailMasked: true,
+      phoneConsentStatus: true,
+      phoneConsentSource: true,
+      phoneConsentAt: true,
+      unsubscribedAt: true,
     },
   },
   lead: {
@@ -111,6 +115,10 @@ const gameProfileInclude = {
       phoneMasked: true,
       emailMasked: true,
       matchedGuestId: true,
+      phoneConsentStatus: true,
+      phoneConsentSource: true,
+      phoneConsentAt: true,
+      unsubscribedAt: true,
     },
   },
   createdByUser: { select: { id: true, fullName: true, email: true } },
@@ -435,6 +443,15 @@ export type GuestGameProfile = {
     contact: string;
     matchedGuestId: string | null;
   } | null;
+  communication: {
+    phoneConsentStatus: 'UNKNOWN' | 'GRANTED' | 'DENIED' | 'UNSUBSCRIBED';
+    phoneConsentSource: string | null;
+    phoneConsentAt: string | null;
+    unsubscribedAt: string | null;
+    telegramReady: boolean;
+    maxReady: boolean;
+    botReady: boolean;
+  };
   createdBy: GuestGameUser | null;
 };
 
@@ -775,10 +792,63 @@ export type GuestGameEffect = {
   scenarios: GuestGameEffectScenario[];
 };
 
+export type GuestGameCommunicationQueueStatus =
+  | 'READY_FOR_BOT'
+  | 'READY_FOR_CASHIER'
+  | 'NEEDS_APPROVAL'
+  | 'NEEDS_CONSENT'
+  | 'NEEDS_CHANNEL'
+  | 'UNSUBSCRIBED'
+  | 'EXPIRED'
+  | 'REDEEMED'
+  | 'CANCELED';
+
+export type GuestGameCommunicationQueueItem = {
+  id: string;
+  rewardId: string;
+  profileId: string | null;
+  guestLabel: string;
+  contactMasked: string | null;
+  rewardLabel: string;
+  rewardType: string;
+  rewardAmount: number;
+  walletState: GuestGameReward['walletState'];
+  queueStatus: GuestGameCommunicationQueueStatus;
+  queueStatusLabel: string;
+  channel: 'TELEGRAM' | 'MAX' | 'CASHIER' | 'MANUAL';
+  channelLabel: string;
+  sourceLabel: string;
+  store: { id: string; name: string } | null;
+  qualifiedAt: string;
+  expiresAt: string | null;
+  rewardCodeReady: boolean;
+  botDeliveryEnabled: false;
+  blockers: string[];
+  nextAction: string;
+};
+
+export type GuestGameCommunicationQueue = {
+  summary: {
+    total: number;
+    readyForBot: number;
+    readyForCashier: number;
+    needsApproval: number;
+    needsConsent: number;
+    needsChannel: number;
+    blockedByUnsubscribe: number;
+    expired: number;
+    redeemed: number;
+    canceled: number;
+  };
+  items: GuestGameCommunicationQueueItem[];
+  note: string;
+};
+
 export type GuestGamificationWorkspace = {
   summary: GuestGamificationSummary;
   economy: GuestGameEconomy;
   effect: GuestGameEffect;
+  communicationQueue: GuestGameCommunicationQueue;
   profiles: GuestGameProfile[];
   lootBoxes: GuestGameLootBox[];
   missions: GuestGameMission[];
@@ -1273,6 +1343,7 @@ export class GuestGamificationService {
       ),
       economy: this.buildEconomy(lootBoxes, missions, seasons, rewards, events),
       effect,
+      communicationQueue: this.buildCommunicationQueue(profiles, rewards),
       profiles,
       lootBoxes,
       missions,
@@ -3124,6 +3195,92 @@ export class GuestGamificationService {
     };
   }
 
+  private buildCommunicationQueue(
+    profiles: GuestGameProfile[],
+    rewards: GuestGameReward[],
+  ): GuestGameCommunicationQueue {
+    const profileById = new Map(
+      profiles.map((profile) => [profile.id, profile]),
+    );
+    const queueRewards = rewards.filter((reward) =>
+      ['PENDING', 'APPROVED', 'PAID', 'CANCELED', 'EXPIRED'].includes(
+        reward.status,
+      ),
+    );
+    const items = queueRewards
+      .map((reward) => {
+        const profile = reward.profile?.id
+          ? (profileById.get(reward.profile.id) ?? null)
+          : null;
+        return buildCommunicationQueueItem(reward, profile);
+      })
+      .sort((left, right) => {
+        const statusRank =
+          communicationQueueStatusRank(left.queueStatus) -
+          communicationQueueStatusRank(right.queueStatus);
+        if (statusRank !== 0) {
+          return statusRank;
+        }
+
+        return (
+          new Date(right.qualifiedAt).getTime() -
+          new Date(left.qualifiedAt).getTime()
+        );
+      })
+      .slice(0, 24);
+
+    const approvedRewards = queueRewards.filter(
+      (reward) => reward.walletState === 'READY',
+    );
+    const approvedWithProfiles = approvedRewards.map((reward) => ({
+      reward,
+      profile: reward.profile?.id
+        ? (profileById.get(reward.profile.id) ?? null)
+        : null,
+    }));
+
+    return {
+      summary: {
+        total: queueRewards.length,
+        readyForBot: approvedWithProfiles.filter(
+          ({ profile }) => profile?.communication.botReady,
+        ).length,
+        readyForCashier: approvedRewards.filter(
+          (reward) => reward.rewardCode !== null,
+        ).length,
+        needsApproval: queueRewards.filter(
+          (reward) => reward.walletState === 'WAITING_APPROVAL',
+        ).length,
+        needsConsent: approvedWithProfiles.filter(
+          ({ profile }) =>
+            profile?.communication.phoneConsentStatus !== 'GRANTED' &&
+            profile?.communication.phoneConsentStatus !== 'UNSUBSCRIBED',
+        ).length,
+        needsChannel: approvedWithProfiles.filter(
+          ({ profile }) =>
+            profile?.communication.phoneConsentStatus === 'GRANTED' &&
+            !profile.communication.telegramReady &&
+            !profile.communication.maxReady,
+        ).length,
+        blockedByUnsubscribe: approvedWithProfiles.filter(
+          ({ profile }) =>
+            profile?.communication.phoneConsentStatus === 'UNSUBSCRIBED',
+        ).length,
+        expired: queueRewards.filter(
+          (reward) => reward.walletState === 'EXPIRED',
+        ).length,
+        redeemed: queueRewards.filter(
+          (reward) => reward.walletState === 'REDEEMED',
+        ).length,
+        canceled: queueRewards.filter(
+          (reward) => reward.walletState === 'CANCELED',
+        ).length,
+      },
+      items,
+      note: 'Это внутренняя готовность LeetPlus: Telegram/MAX, SMS и Langame write API здесь не вызываются. После подключения бота этот слой можно использовать как безопасную очередь отправки и выдачи.',
+    };
+  }
+
   private buildEconomy(
     lootBoxes: GuestGameLootBox[],
     missions: GuestGameMission[],
@@ -4137,6 +4294,8 @@ export class GuestGamificationService {
 }
 
 function mapProfile(row: ProfileRow): GuestGameProfile {
+  const communication = resolveProfileCommunication(row);
+
   return {
     id: row.id,
     displayName:
@@ -4180,7 +4339,55 @@ function mapProfile(row: ProfileRow): GuestGameProfile {
           matchedGuestId: row.lead.matchedGuestId,
         }
       : null,
+    communication: {
+      phoneConsentStatus: communication.phoneConsentStatus,
+      phoneConsentSource: communication.phoneConsentSource,
+      phoneConsentAt: iso(communication.phoneConsentAt),
+      unsubscribedAt: iso(communication.unsubscribedAt),
+      telegramReady: Boolean(row.telegramIdentity),
+      maxReady: Boolean(row.maxIdentity),
+      botReady:
+        communication.phoneConsentStatus === 'GRANTED' &&
+        Boolean(row.telegramIdentity || row.maxIdentity),
+    },
     createdBy: mapUser(row.createdByUser),
+  };
+}
+
+function resolveProfileCommunication(row: ProfileRow): {
+  phoneConsentStatus: 'UNKNOWN' | 'GRANTED' | 'DENIED' | 'UNSUBSCRIBED';
+  phoneConsentSource: string | null;
+  phoneConsentAt: Date | null;
+  unsubscribedAt: Date | null;
+} {
+  if (
+    row.guest &&
+    (row.guest.phoneConsentStatus !== 'UNKNOWN' ||
+      !row.lead ||
+      row.lead.phoneConsentStatus === 'UNKNOWN')
+  ) {
+    return {
+      phoneConsentStatus: row.guest.phoneConsentStatus,
+      phoneConsentSource: row.guest.phoneConsentSource,
+      phoneConsentAt: row.guest.phoneConsentAt,
+      unsubscribedAt: row.guest.unsubscribedAt,
+    };
+  }
+
+  if (row.lead) {
+    return {
+      phoneConsentStatus: row.lead.phoneConsentStatus,
+      phoneConsentSource: row.lead.phoneConsentSource,
+      phoneConsentAt: row.lead.phoneConsentAt,
+      unsubscribedAt: row.lead.unsubscribedAt,
+    };
+  }
+
+  return {
+    phoneConsentStatus: 'UNKNOWN',
+    phoneConsentSource: null,
+    phoneConsentAt: null,
+    unsubscribedAt: null,
   };
 }
 
@@ -4335,6 +4542,242 @@ function rewardWalletState(
   }
 
   return 'WAITING_APPROVAL';
+}
+
+function buildCommunicationQueueItem(
+  reward: GuestGameReward,
+  profile: GuestGameProfile | null,
+): GuestGameCommunicationQueueItem {
+  const consentStatus = profile?.communication.phoneConsentStatus ?? 'UNKNOWN';
+  const telegramReady = Boolean(profile?.communication.telegramReady);
+  const maxReady = Boolean(profile?.communication.maxReady);
+  const botReady = Boolean(profile?.communication.botReady);
+  const rewardCodeReady = Boolean(reward.rewardCode);
+  const blockers: string[] = [];
+
+  if (!profile) {
+    blockers.push('Нет связанного игрового профиля гостя.');
+  }
+
+  if (reward.walletState === 'WAITING_APPROVAL') {
+    blockers.push('Награду нужно подтвердить перед выдачей или уведомлением.');
+  }
+
+  if (reward.walletState === 'READY') {
+    if (consentStatus === 'UNSUBSCRIBED') {
+      blockers.push('Гость отписался от игровых коммуникаций.');
+    } else if (consentStatus === 'DENIED') {
+      blockers.push('Гость отказался от игровых коммуникаций.');
+    } else if (consentStatus !== 'GRANTED') {
+      blockers.push('Нет подтвержденного согласия на игровые коммуникации.');
+    }
+
+    if (!telegramReady && !maxReady) {
+      blockers.push('Telegram/MAX alias еще не привязан.');
+    }
+
+    if (!rewardCodeReady) {
+      blockers.push('Код кассира еще не создан для ручной выдачи.');
+    }
+  }
+
+  const queueStatus = communicationQueueStatus({
+    reward,
+    consentStatus,
+    botReady,
+    rewardCodeReady,
+  });
+  const channel = communicationQueueChannel({
+    telegramReady,
+    maxReady,
+    rewardCodeReady,
+  });
+
+  return {
+    id: `${reward.id}:${queueStatus}`,
+    rewardId: reward.id,
+    profileId: profile?.id ?? reward.profile?.id ?? null,
+    guestLabel:
+      profile?.displayName ??
+      reward.profile?.displayName ??
+      reward.guest?.displayName ??
+      reward.guestExternalId ??
+      'Гость',
+    contactMasked:
+      profile?.contactMasked ??
+      reward.profile?.contactMasked ??
+      reward.guest?.contact ??
+      null,
+    rewardLabel: reward.rewardLabel,
+    rewardType: reward.rewardType,
+    rewardAmount: reward.rewardAmount,
+    walletState: reward.walletState,
+    queueStatus,
+    queueStatusLabel: communicationQueueStatusLabel(queueStatus),
+    channel,
+    channelLabel: communicationQueueChannelLabel(channel),
+    sourceLabel: communicationQueueSourceLabel(reward),
+    store: reward.store,
+    qualifiedAt: reward.qualifiedAt,
+    expiresAt: reward.expiresAt,
+    rewardCodeReady,
+    botDeliveryEnabled: false,
+    blockers,
+    nextAction: communicationQueueNextAction(queueStatus),
+  };
+}
+
+function communicationQueueStatus({
+  reward,
+  consentStatus,
+  botReady,
+  rewardCodeReady,
+}: {
+  reward: GuestGameReward;
+  consentStatus: 'UNKNOWN' | 'GRANTED' | 'DENIED' | 'UNSUBSCRIBED';
+  botReady: boolean;
+  rewardCodeReady: boolean;
+}): GuestGameCommunicationQueueStatus {
+  if (reward.walletState === 'REDEEMED') {
+    return 'REDEEMED';
+  }
+
+  if (reward.walletState === 'CANCELED') {
+    return 'CANCELED';
+  }
+
+  if (reward.walletState === 'EXPIRED') {
+    return 'EXPIRED';
+  }
+
+  if (reward.walletState === 'WAITING_APPROVAL') {
+    return 'NEEDS_APPROVAL';
+  }
+
+  if (botReady) {
+    return 'READY_FOR_BOT';
+  }
+
+  if (consentStatus === 'UNSUBSCRIBED') {
+    return 'UNSUBSCRIBED';
+  }
+
+  if (consentStatus !== 'GRANTED') {
+    return 'NEEDS_CONSENT';
+  }
+
+  if (rewardCodeReady) {
+    return 'READY_FOR_CASHIER';
+  }
+
+  return 'NEEDS_CHANNEL';
+}
+
+function communicationQueueChannel({
+  telegramReady,
+  maxReady,
+  rewardCodeReady,
+}: {
+  telegramReady: boolean;
+  maxReady: boolean;
+  rewardCodeReady: boolean;
+}): GuestGameCommunicationQueueItem['channel'] {
+  if (telegramReady) {
+    return 'TELEGRAM';
+  }
+
+  if (maxReady) {
+    return 'MAX';
+  }
+
+  return rewardCodeReady ? 'CASHIER' : 'MANUAL';
+}
+
+function communicationQueueStatusLabel(
+  status: GuestGameCommunicationQueueStatus,
+) {
+  const labels: Record<GuestGameCommunicationQueueStatus, string> = {
+    READY_FOR_BOT: 'готово к боту',
+    READY_FOR_CASHIER: 'готово кассиру',
+    NEEDS_APPROVAL: 'нужно подтвердить',
+    NEEDS_CONSENT: 'нет согласия',
+    NEEDS_CHANNEL: 'нет канала',
+    UNSUBSCRIBED: 'отписался',
+    EXPIRED: 'срок истек',
+    REDEEMED: 'погашено',
+    CANCELED: 'отменено',
+  };
+
+  return labels[status];
+}
+
+function communicationQueueNextAction(
+  status: GuestGameCommunicationQueueStatus,
+) {
+  const actions: Record<GuestGameCommunicationQueueStatus, string> = {
+    READY_FOR_BOT:
+      'После подключения Telegram/MAX-бота можно отправить игровое уведомление.',
+    READY_FOR_CASHIER:
+      'Выдайте награду по коду кассира или попросите гостя привязать Telegram/MAX.',
+    NEEDS_APPROVAL: 'Подтвердите награду в кошельке.',
+    NEEDS_CONSENT:
+      'Получите согласие гостя в публичном кабинете или при ручном контакте.',
+    NEEDS_CHANNEL:
+      'Привяжите Telegram/MAX alias или выдайте награду через ручной код.',
+    UNSUBSCRIBED: 'Не отправляйте сообщения; доступна только ручная обработка.',
+    EXPIRED: 'Проверьте срок и при необходимости создайте новую награду.',
+    REDEEMED: 'Действий не требуется.',
+    CANCELED: 'Действий не требуется.',
+  };
+
+  return actions[status];
+}
+
+function communicationQueueChannelLabel(
+  channel: GuestGameCommunicationQueueItem['channel'],
+) {
+  const labels: Record<GuestGameCommunicationQueueItem['channel'], string> = {
+    TELEGRAM: 'Telegram',
+    MAX: 'MAX',
+    CASHIER: 'Кассир',
+    MANUAL: 'Ручная выдача',
+  };
+
+  return labels[channel];
+}
+
+function communicationQueueStatusRank(
+  status: GuestGameCommunicationQueueStatus,
+) {
+  const ranks: Record<GuestGameCommunicationQueueStatus, number> = {
+    READY_FOR_BOT: 0,
+    READY_FOR_CASHIER: 1,
+    NEEDS_APPROVAL: 2,
+    NEEDS_CONSENT: 3,
+    NEEDS_CHANNEL: 4,
+    UNSUBSCRIBED: 5,
+    EXPIRED: 6,
+    REDEEMED: 7,
+    CANCELED: 8,
+  };
+
+  return ranks[status];
+}
+
+function communicationQueueSourceLabel(reward: GuestGameReward) {
+  if (reward.lootBox) {
+    return `Лутбокс: ${reward.lootBox.name}`;
+  }
+
+  if (reward.mission) {
+    return `Миссия: ${reward.mission.name}`;
+  }
+
+  if (reward.season) {
+    return `Battle Pass: ${reward.season.name}`;
+  }
+
+  return 'Ручная награда';
 }
 
 function rewardStatusEventType(status: string) {

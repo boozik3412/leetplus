@@ -45,7 +45,11 @@ export const config = {
 };
 
 function isPublicPath(pathname: string) {
-  if (publicPathPrefixes.some((prefix) => pathname.startsWith(prefix))) {
+  if (
+    publicPathPrefixes.some(
+      (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+    )
+  ) {
     return true;
   }
 

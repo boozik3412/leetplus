@@ -226,6 +226,16 @@ export class GuestGamificationController {
     return this.gamificationService.exportRewardsCsv(user);
   }
 
+  @Get('overview/export')
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  @Header(
+    'Content-Disposition',
+    'attachment; filename="guest-game-overview.csv"',
+  )
+  exportOverview(@CurrentUser() user: AuthenticatedUser): Promise<string> {
+    return this.gamificationService.exportOverviewCsv(user);
+  }
+
   @Post('rewards/redeem')
   redeemReward(
     @CurrentUser() user: AuthenticatedUser,

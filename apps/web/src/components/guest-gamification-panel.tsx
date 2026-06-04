@@ -2416,10 +2416,19 @@ function EconomyControlCard({
             не выполняются.
           </p>
         </div>
-        <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
-          {economy.summary.rulesWithoutBudget
-            ? `${economy.summary.rulesWithoutBudget} активн. сценариев без бюджета`
-            : "Активные сценарии с бюджетом под контролем"}
+        <div className="flex flex-wrap items-center gap-2">
+          <a
+            className={smallButtonClass}
+            href="/api/guests/gamification/overview/export"
+            download
+          >
+            CSV экономики и эффекта
+          </a>
+          <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
+            {economy.summary.rulesWithoutBudget
+              ? `${economy.summary.rulesWithoutBudget} активн. сценариев без бюджета`
+              : "Активные сценарии с бюджетом под контролем"}
+          </div>
         </div>
       </div>
 

@@ -2172,12 +2172,16 @@ export class GuestGamificationService {
     return mapSeason(row);
   }
 
-  async getRewards(user: AuthenticatedUser): Promise<GuestGameReward[]> {
+  async getRewards(
+    user: AuthenticatedUser,
+    options: { take?: number | null } = {},
+  ): Promise<GuestGameReward[]> {
+    const take = options.take === null ? undefined : (options.take ?? 100);
     const rows = await this.prisma.guestGameReward.findMany({
       where: { tenantId: user.tenantId },
       include: rewardInclude,
       orderBy: [{ qualifiedAt: 'desc' }, { createdAt: 'desc' }],
-      take: 100,
+      ...(take ? { take } : {}),
     });
 
     return rows.map(mapReward);
@@ -2224,6 +2228,166 @@ export class GuestGamificationService {
       reward.lootBox?.name ?? reward.mission?.name ?? reward.season?.name ?? '',
       reward.note ?? '',
     ]);
+
+    return [
+      '\uFEFF' + header.map(csvCell).join(','),
+      ...rows.map((row) => row.map(csvCell).join(',')),
+    ].join('\n');
+  }
+
+  async exportOverviewCsv(user: AuthenticatedUser): Promise<string> {
+    const [lootBoxes, missions, seasons, rewards, events] = await Promise.all([
+      this.getLootBoxes(user),
+      this.getMissions(user),
+      this.getSeasons(user),
+      this.getRewards(user, { take: null }),
+      this.getEvents(user, { take: null }),
+    ]);
+    const [economy, effect] = await Promise.all([
+      Promise.resolve(
+        this.buildEconomy(lootBoxes, missions, seasons, rewards, events, null),
+      ),
+      this.buildEffect(user, lootBoxes, missions, seasons, events, null),
+    ]);
+    const header = [
+      'Раздел',
+      'Тип',
+      'Сценарий',
+      'Статус',
+      'События',
+      'Уникальные гости',
+      'Награды всего',
+      'Очередь наград',
+      'Плановый бюджет',
+      'Использовано бюджета',
+      'Использование бюджета, %',
+      'Погашено наград',
+      'Погашено, сумма',
+      'XP',
+      'Измеряемые события',
+      'Вернувшиеся гости',
+      'Возврат, %',
+      'Сессии после события',
+      'Игровые минуты после события',
+      'Бар/товары после события',
+      'Пополнения после события',
+      'Итого выручка после события',
+      'Средняя выручка на вернувшегося',
+      'Окно эффекта, дней',
+      'Рекомендация',
+    ];
+    const rows: unknown[][] = [
+      [
+        'Экономика',
+        'Сводка',
+        'Все сценарии',
+        '',
+        economy.summary.eventsCount,
+        economy.summary.uniqueGuests,
+        economy.summary.rewardCount,
+        economy.summary.rewardBacklog,
+        economy.summary.plannedBudget,
+        economy.summary.budgetUsedCost,
+        economy.summary.budgetUsagePercent ?? '',
+        economy.summary.paidRewards,
+        economy.summary.paidCost,
+        economy.summary.xpIssued,
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        economy.summary.rulesWithoutBudget
+          ? `Активных сценариев без бюджета: ${economy.summary.rulesWithoutBudget}`
+          : '',
+      ],
+      ...economy.scenarios.map((scenario) => [
+        'Экономика',
+        gameScenarioKindLabel(scenario.kind),
+        scenario.name,
+        gameScenarioStatusLabel(scenario.status),
+        scenario.eventsCount,
+        scenario.uniqueGuests,
+        scenario.rewardCount,
+        scenario.pendingRewards + scenario.approvedRewards,
+        scenario.plannedBudget ?? '',
+        scenario.budgetUsedCost,
+        scenario.budgetUsagePercent ?? '',
+        scenario.paidRewards,
+        scenario.paidCost,
+        scenario.xpIssued,
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        scenario.recommendation,
+      ]),
+      [
+        'Эффект',
+        'Сводка',
+        'Все сценарии',
+        '',
+        effect.summary.eventsCount,
+        effect.summary.reachedGuests,
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        effect.summary.measuredEvents,
+        effect.summary.returnedGuests,
+        effect.summary.returnRatePercent ?? '',
+        effect.summary.postSessions,
+        effect.summary.postPlayMinutes,
+        effect.summary.productRevenue,
+        effect.summary.balanceTopUps,
+        effect.summary.totalRevenue,
+        effect.summary.averageRevenuePerReturnedGuest,
+        effect.windowDays,
+        '',
+      ],
+      ...effect.scenarios.map((scenario) => [
+        'Эффект',
+        gameScenarioKindLabel(scenario.kind),
+        scenario.name,
+        gameScenarioStatusLabel(scenario.status),
+        scenario.eventsCount,
+        scenario.reachedGuests,
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        scenario.measuredEvents,
+        scenario.returnedGuests,
+        scenario.returnRatePercent ?? '',
+        scenario.postSessions,
+        scenario.postPlayMinutes,
+        scenario.productRevenue,
+        scenario.balanceTopUps,
+        scenario.totalRevenue,
+        scenario.averageRevenuePerReturnedGuest,
+        effect.windowDays,
+        scenario.recommendation,
+      ]),
+    ];
 
     return [
       '\uFEFF' + header.map(csvCell).join(','),
@@ -2404,12 +2568,16 @@ export class GuestGamificationService {
     return mapReward(redeemed);
   }
 
-  async getEvents(user: AuthenticatedUser): Promise<GuestGameEvent[]> {
+  async getEvents(
+    user: AuthenticatedUser,
+    options: { take?: number | null } = {},
+  ): Promise<GuestGameEvent[]> {
+    const take = options.take === null ? undefined : (options.take ?? 100);
     const rows = await this.prisma.guestGameEvent.findMany({
       where: { tenantId: user.tenantId },
       include: eventInclude,
       orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
-      take: 100,
+      ...(take ? { take } : {}),
     });
 
     return rows.map(mapEvent);
@@ -2882,6 +3050,7 @@ export class GuestGamificationService {
     seasons: GuestGameSeason[],
     rewards: GuestGameReward[],
     events: GuestGameEvent[],
+    scenarioLimit: number | null = 12,
   ): GuestGameEconomy {
     const scenarios: GuestGameEconomyScenario[] = [
       ...lootBoxes.map((item) =>
@@ -3010,7 +3179,7 @@ export class GuestGamificationService {
 
           return right.eventsCount - left.eventsCount;
         })
-        .slice(0, 12),
+        .slice(0, scenarioLimit ?? undefined),
     };
   }
 
@@ -3118,6 +3287,7 @@ export class GuestGamificationService {
     missions: GuestGameMission[],
     seasons: GuestGameSeason[],
     events: GuestGameEvent[],
+    scenarioLimit: number | null = 12,
   ): Promise<GuestGameEffect> {
     const measurableEvents = events
       .map((event) => ({
@@ -3284,7 +3454,7 @@ export class GuestGamificationService {
 
           return right.eventsCount - left.eventsCount;
         })
-        .slice(0, 12),
+        .slice(0, scenarioLimit ?? undefined),
     };
   }
 
@@ -4179,6 +4349,37 @@ function csvCell(value: unknown) {
         : (JSON.stringify(value) ?? '');
 
   return `"${text.replace(/"/g, '""')}"`;
+}
+
+function gameScenarioKindLabel(kind: GuestGameEconomyScenario['kind']) {
+  switch (kind) {
+    case 'LOOT_BOX':
+      return 'Лутбокс';
+    case 'MISSION':
+      return 'Миссия';
+    case 'SEASON':
+      return 'Battle Pass';
+    case 'MANUAL':
+    default:
+      return 'Ручное';
+  }
+}
+
+function gameScenarioStatusLabel(status: StatusValue | 'ACTIVE') {
+  switch (status) {
+    case 'DRAFT':
+      return 'Черновик';
+    case 'ACTIVE':
+      return 'Активно';
+    case 'PAUSED':
+      return 'Пауза';
+    case 'FINISHED':
+      return 'Завершено';
+    case 'ARCHIVED':
+      return 'Архив';
+    default:
+      return status;
+  }
 }
 
 function mapEvent(row: EventRow): GuestGameEvent {

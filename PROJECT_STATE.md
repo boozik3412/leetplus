@@ -78,6 +78,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Connected `guests/logs` event types to Guest Game Hub rules: `GuestLog.type` now flows into snapshot facts, dry-run, confirmed processing, and batch pipeline as `guestLogType`; `/guests/gamification` can allow or block specific log types for loot boxes, missions, and Battle Pass, and Battle Pass can award XP for `GUEST_LOG` events without live Langame reads.
 - Improved the public guest reward wallet: `/guest/[tenantSlug]/[storeId]` now scopes rewards to the selected club or network-wide rewards, prioritizes ready-to-claim rewards, shows reward source labels, and exposes cashier claim codes only for `READY` rewards.
 - Added personalized mission progress to the public guest portal: active missions on `/guest/[tenantSlug]/[storeId]` now show current counted steps versus target from guest/profile-linked `GuestGameEvent` and `GuestGameReward` rows inside the mission period, instead of always rendering zero progress.
 - Expanded the public guest portal with a safe activity layer: `/guest/[tenantSlug]/[storeId]` now returns and renders session count, play time, guest logs, balance operations, game-event counts, last activity, and a compact timeline from saved LeetPlus/Langame snapshot facts without external IDs, sensitive raw payloads, live Langame reads, or internal app navigation.

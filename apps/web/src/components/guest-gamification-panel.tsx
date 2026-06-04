@@ -79,6 +79,8 @@ type LootBoxForm = {
   tariffGroupId: string;
   tariffPeriodId: string;
   tariffTypeId: string;
+  guestLogTypes: string;
+  blockedGuestLogTypes: string;
   storeIds: string[];
   quietHoursEnabled: boolean;
   weekdaysOnly: boolean;
@@ -123,6 +125,8 @@ type MissionForm = {
   tariffGroupId: string;
   tariffPeriodId: string;
   tariffTypeId: string;
+  guestLogTypes: string;
+  blockedGuestLogTypes: string;
   windowDays: string;
   weekdaysOnly: boolean;
   minSessionMinutes: string;
@@ -148,11 +152,14 @@ type SeasonForm = {
   xpBarPurchase: string;
   xpMissionCompletion: string;
   xpPacketSessionBonus: string;
+  xpGuestLog: string;
   sessionType: string;
   packetMode: string;
   tariffGroupId: string;
   tariffPeriodId: string;
   tariffTypeId: string;
+  guestLogTypes: string;
+  blockedGuestLogTypes: string;
   levelCount: string;
   xpPerLevel: string;
   freeRewardEvery: string;
@@ -214,6 +221,7 @@ type DryRunForm = {
   tariffGroupId: string;
   tariffPeriodId: string;
   tariffTypeId: string;
+  guestLogType: string;
   sessionMinutes: string;
   spendAmount: string;
   sourceFactId: string;
@@ -350,6 +358,8 @@ const defaultLootBoxForm: LootBoxForm = {
   tariffGroupId: "",
   tariffPeriodId: "",
   tariffTypeId: "",
+  guestLogTypes: "",
+  blockedGuestLogTypes: "",
   storeIds: [],
   quietHoursEnabled: true,
   weekdaysOnly: true,
@@ -411,6 +421,8 @@ const defaultMissionForm: MissionForm = {
   tariffGroupId: "",
   tariffPeriodId: "",
   tariffTypeId: "",
+  guestLogTypes: "",
+  blockedGuestLogTypes: "",
   windowDays: "7",
   weekdaysOnly: true,
   minSessionMinutes: "90",
@@ -444,11 +456,14 @@ const defaultSeasonForm: SeasonForm = {
   xpBarPurchase: "25",
   xpMissionCompletion: "50",
   xpPacketSessionBonus: "15",
+  xpGuestLog: "5",
   sessionType: "",
   packetMode: "ANY",
   tariffGroupId: "",
   tariffPeriodId: "",
   tariffTypeId: "",
+  guestLogTypes: "",
+  blockedGuestLogTypes: "",
   levelCount: "4",
   xpPerLevel: "250",
   freeRewardEvery: "2",
@@ -540,6 +555,7 @@ const defaultDryRunForm: DryRunForm = {
   tariffGroupId: "",
   tariffPeriodId: "",
   tariffTypeId: "",
+  guestLogType: "",
   sessionMinutes: "120",
   spendAmount: "0",
   ...emptyDryRunSource,
@@ -927,6 +943,7 @@ export function GuestGamificationPanel({
           tariffGroupId: nullable(dryRunForm.tariffGroupId),
           tariffPeriodId: nullable(dryRunForm.tariffPeriodId),
           tariffTypeId: nullable(dryRunForm.tariffTypeId),
+          guestLogType: nullable(dryRunForm.guestLogType),
           sessionMinutes: dryRunForm.sessionMinutes,
           spendAmount: dryRunForm.spendAmount,
         },
@@ -957,6 +974,7 @@ export function GuestGamificationPanel({
           tariffGroupId: nullable(dryRunForm.tariffGroupId),
           tariffPeriodId: nullable(dryRunForm.tariffPeriodId),
           tariffTypeId: nullable(dryRunForm.tariffTypeId),
+          guestLogType: nullable(dryRunForm.guestLogType),
           sessionMinutes: dryRunForm.sessionMinutes,
           spendAmount: dryRunForm.spendAmount,
           sourceFactId: nullable(dryRunForm.sourceFactId),
@@ -1022,6 +1040,7 @@ export function GuestGamificationPanel({
       tariffGroupId: fact.tariffGroupId ?? current.tariffGroupId,
       tariffPeriodId: fact.tariffPeriodId ?? current.tariffPeriodId,
       tariffTypeId: fact.tariffTypeId ?? current.tariffTypeId,
+      guestLogType: fact.guestLogType ?? current.guestLogType,
       sessionMinutes:
         fact.sessionMinutes == null
           ? current.sessionMinutes
@@ -1619,6 +1638,16 @@ function DryRunTab({
             />
           </label>
 
+          <label className="space-y-1 text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+            Тип guests/logs
+            <input
+              className={fieldClass}
+              placeholder="visit, login, tournament"
+              value={form.guestLogType}
+              onChange={(event) => update("guestLogType", event.target.value)}
+            />
+          </label>
+
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="space-y-1 text-sm font-semibold text-zinc-700 dark:text-zinc-200">
               Тип сессии
@@ -2011,6 +2040,11 @@ function SnapshotFactRow({
             {fact.sessionPacket == null
               ? sessionTypeLabel(fact.sessionType)
               : packetStateLabel(fact.sessionPacket)}
+          </span>
+        ) : null}
+        {fact.guestLogType ? (
+          <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-bold text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+            logs: {fact.guestLogType}
           </span>
         ) : null}
         {fact.spendAmount != null && fact.spendAmount > 0 ? (
@@ -2980,6 +3014,7 @@ function LootBoxesTab({
             item.segment ?? "без сегмента",
             packetModeLabel(stringRule(item.periodRules, "packetMode", "ANY")),
             tariffRuleSummary(item.periodRules),
+            guestLogRuleSummary(item.periodRules),
             formatMoney(item.budgetAmount ?? 0),
           ]}
           onEdit={() => onEdit(item)}
@@ -3176,6 +3211,7 @@ function MissionsTab({
             item.audience?.name ?? "все гости",
             packetModeLabel(stringRule(item.conditions, "packetMode", "ANY")),
             tariffRuleSummary(item.conditions),
+            guestLogRuleSummary(item.conditions, item.antiFraudRules),
             `${item.progressTarget ?? 1} ${item.progressUnit ?? "шаг"}`,
             formatMoney(item.budgetAmount ?? 0),
           ]}
@@ -3372,6 +3408,7 @@ function SeasonsTab({
             item.audience?.name ?? "все гости",
             packetModeLabel(stringRule(item.xpRules, "packetMode", "ANY")),
             tariffRuleSummary(item.xpRules),
+            guestLogRuleSummary(item.xpRules),
             formatDate(item.periodFrom),
             formatMoney(item.budgetAmount ?? 0),
           ]}
@@ -3801,6 +3838,11 @@ function LootBoxBusinessRules({
         tariffTypeId={form.tariffTypeId}
         onChange={onChange}
       />
+      <GuestLogConditionFields
+        guestLogTypes={form.guestLogTypes}
+        blockedGuestLogTypes={form.blockedGuestLogTypes}
+        onChange={onChange}
+      />
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Раз в неделю на гостя">
           <input
@@ -3925,6 +3967,11 @@ function MissionBusinessRules({
         tariffTypeId={form.tariffTypeId}
         onChange={onChange}
       />
+      <GuestLogConditionFields
+        guestLogTypes={form.guestLogTypes}
+        blockedGuestLogTypes={form.blockedGuestLogTypes}
+        onChange={onChange}
+      />
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Окно выполнения, дней">
           <input
@@ -4002,7 +4049,7 @@ function SeasonBusinessRules({
       title="Лестница Battle Pass"
       description="Задайте XP за действия, количество уровней и частоту наград. Система соберет free и premium дорожки сама."
     >
-      <div className="grid gap-3 sm:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <Field label="XP за визит">
           <input
             className={fieldClass}
@@ -4041,6 +4088,15 @@ function SeasonBusinessRules({
             onChange={(event) =>
               onChange({ xpMissionCompletion: event.target.value })
             }
+          />
+        </Field>
+        <Field label="XP за guests/logs">
+          <input
+            className={fieldClass}
+            type="number"
+            min="0"
+            value={form.xpGuestLog}
+            onChange={(event) => onChange({ xpGuestLog: event.target.value })}
           />
         </Field>
       </div>
@@ -4088,6 +4144,11 @@ function SeasonBusinessRules({
         tariffGroupId={form.tariffGroupId}
         tariffPeriodId={form.tariffPeriodId}
         tariffTypeId={form.tariffTypeId}
+        onChange={onChange}
+      />
+      <GuestLogConditionFields
+        guestLogTypes={form.guestLogTypes}
+        blockedGuestLogTypes={form.blockedGuestLogTypes}
         onChange={onChange}
       />
       <div className="grid gap-3 sm:grid-cols-4">
@@ -4729,6 +4790,54 @@ function TariffConditionFields({
   );
 }
 
+type GuestLogConditionPatch = {
+  guestLogTypes?: string;
+  blockedGuestLogTypes?: string;
+};
+
+function GuestLogConditionFields({
+  guestLogTypes,
+  blockedGuestLogTypes,
+  onChange,
+}: {
+  guestLogTypes: string;
+  blockedGuestLogTypes: string;
+  onChange: (patch: GuestLogConditionPatch) => void;
+}) {
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-xs font-bold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">
+          Типы событий guests/logs
+        </p>
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">
+          Укажите значения через запятую, если правило должно реагировать только на конкретные логи Langame.
+        </p>
+      </div>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <Field label="Разрешенные типы">
+          <input
+            className={fieldClass}
+            placeholder="visit, login, tournament"
+            value={guestLogTypes}
+            onChange={(event) => onChange({ guestLogTypes: event.target.value })}
+          />
+        </Field>
+        <Field label="Запрещенные типы">
+          <input
+            className={fieldClass}
+            placeholder="manual_cancel, test"
+            value={blockedGuestLogTypes}
+            onChange={(event) =>
+              onChange({ blockedGuestLogTypes: event.target.value })
+            }
+          />
+        </Field>
+      </div>
+    </div>
+  );
+}
+
 function TariffConditionSelect({
   label,
   emptyLabel,
@@ -4928,6 +5037,11 @@ function lootBoxToForm(lootBox: GuestGameLootBox): LootBoxForm {
     tariffGroupId: stringRule(lootBox.periodRules, "tariffGroupId", ""),
     tariffPeriodId: stringRule(lootBox.periodRules, "tariffPeriodId", ""),
     tariffTypeId: stringRule(lootBox.periodRules, "tariffTypeId", ""),
+    guestLogTypes: stringListRule(lootBox.periodRules, "guestLogTypes"),
+    blockedGuestLogTypes: stringListRule(
+      lootBox.periodRules,
+      "blockedGuestLogTypes",
+    ),
     storeIds: lootBox.storeIds,
     quietHoursEnabled: booleanRule(lootBox.periodRules, "quietHoursEnabled", true),
     weekdaysOnly: booleanRule(lootBox.periodRules, "weekdaysOnly", true),
@@ -4999,6 +5113,11 @@ function missionToForm(mission: GuestGameMission): MissionForm {
     tariffGroupId: stringRule(mission.conditions, "tariffGroupId", ""),
     tariffPeriodId: stringRule(mission.conditions, "tariffPeriodId", ""),
     tariffTypeId: stringRule(mission.conditions, "tariffTypeId", ""),
+    guestLogTypes: stringListRule(mission.conditions, "guestLogTypes"),
+    blockedGuestLogTypes: stringListRule(
+      mission.antiFraudRules,
+      "blockedGuestLogTypes",
+    ),
     windowDays: numberRule(mission.conditions, "windowDays", "7"),
     weekdaysOnly: booleanRule(mission.conditions, "weekdaysOnly", true),
     minSessionMinutes: numberRule(mission.conditions, "minSessionMinutes", "90"),
@@ -5049,11 +5168,17 @@ function seasonToForm(season: GuestGameSeason): SeasonForm {
       "packetSessionBonus",
       "15",
     ),
+    xpGuestLog: numberRule(season.xpRules, "guestLog", "5"),
     sessionType: stringRule(season.xpRules, "sessionType", ""),
     packetMode: stringRule(season.xpRules, "packetMode", "ANY"),
     tariffGroupId: stringRule(season.xpRules, "tariffGroupId", ""),
     tariffPeriodId: stringRule(season.xpRules, "tariffPeriodId", ""),
     tariffTypeId: stringRule(season.xpRules, "tariffTypeId", ""),
+    guestLogTypes: stringListRule(season.xpRules, "guestLogTypes"),
+    blockedGuestLogTypes: stringListRule(
+      season.xpRules,
+      "blockedGuestLogTypes",
+    ),
     levelCount: String(arrayRule(season.levels).length || 4),
     xpPerLevel: seasonLevelStep(season.levels, "250"),
     freeRewardEvery: rewardFrequency(season.freeRewards, "2"),
@@ -5125,6 +5250,17 @@ function nullable(value: string) {
   return value.trim() ? value.trim() : null;
 }
 
+function csvList(value: string) {
+  return Array.from(
+    new Set(
+      value
+        .split(/[,;\n]/)
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
 function buildLootBoxPeriodRules(form: LootBoxForm) {
   const start = form.hourFrom || "00:00";
   const end = form.hourTo || "23:59";
@@ -5139,6 +5275,8 @@ function buildLootBoxPeriodRules(form: LootBoxForm) {
     tariffGroupId: nullable(form.tariffGroupId),
     tariffPeriodId: nullable(form.tariffPeriodId),
     tariffTypeId: nullable(form.tariffTypeId),
+    guestLogTypes: csvList(form.guestLogTypes),
+    blockedGuestLogTypes: csvList(form.blockedGuestLogTypes),
   };
 }
 
@@ -5189,6 +5327,7 @@ function buildMissionConditions(form: MissionForm) {
     tariffGroupId: nullable(form.tariffGroupId),
     tariffPeriodId: nullable(form.tariffPeriodId),
     tariffTypeId: nullable(form.tariffTypeId),
+    guestLogTypes: csvList(form.guestLogTypes),
     minSessionMinutes: optionalNumber(form.minSessionMinutes),
     minSpendAmount: optionalNumber(form.minSpendAmount),
     requiresLangameFact: form.requireLangameFact,
@@ -5202,6 +5341,7 @@ function buildMissionAntiFraudRules(form: MissionForm) {
     source: "business_controls",
     denySameDayRepeat: form.denySameDayRepeat,
     requiresCashierConfirmation: form.requireCashierConfirmation,
+    blockedGuestLogTypes: csvList(form.blockedGuestLogTypes),
     perGuestLimit: optionalNumber(form.perGuestLimit),
     totalRewardLimit: optionalNumber(form.totalRewardLimit),
   };
@@ -5215,11 +5355,14 @@ function buildSeasonXpRules(form: SeasonForm) {
     barPurchase: numeric(form.xpBarPurchase, 0),
     missionCompletion: numeric(form.xpMissionCompletion, 0),
     packetSessionBonus: numeric(form.xpPacketSessionBonus, 0),
+    guestLog: numeric(form.xpGuestLog, 0),
     sessionType: nullable(form.sessionType),
     packetMode: form.packetMode,
     tariffGroupId: nullable(form.tariffGroupId),
     tariffPeriodId: nullable(form.tariffPeriodId),
     tariffTypeId: nullable(form.tariffTypeId),
+    guestLogTypes: csvList(form.guestLogTypes),
+    blockedGuestLogTypes: csvList(form.blockedGuestLogTypes),
   };
 }
 
@@ -5308,6 +5451,17 @@ function stringRule(value: unknown, key: string, fallback: string) {
   return typeof raw === "string" && raw.trim() ? raw : fallback;
 }
 
+function stringListRule(value: unknown, key: string, fallback = "") {
+  const raw = asRecord(value)[key];
+  if (Array.isArray(raw)) {
+    return raw
+      .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+      .join(", ");
+  }
+
+  return typeof raw === "string" && raw.trim() ? raw : fallback;
+}
+
 function tariffItemsByEndpoint(
   snapshots: GuestGameTariffSnapshotEndpoint[],
   endpointKey: string,
@@ -5340,6 +5494,29 @@ function tariffRuleSummary(value: unknown) {
   ].filter((item) => typeof item === "string" && item.trim()).length;
 
   return count ? `тарифы: ${count}` : "любой тариф";
+}
+
+function guestLogRuleSummary(conditions: unknown, antiFraud?: unknown) {
+  const conditionRecord = asRecord(conditions);
+  const antiFraudRecord = asRecord(antiFraud);
+  const allowedCount = arrayRule(conditionRecord.guestLogTypes).filter(
+    (item) => typeof item === "string" && item.trim(),
+  ).length;
+  const blockedCount = [
+    ...arrayRule(conditionRecord.blockedGuestLogTypes),
+    ...arrayRule(antiFraudRecord.blockedGuestLogTypes),
+  ].filter((item) => typeof item === "string" && item.trim()).length;
+
+  if (allowedCount && blockedCount) {
+    return `logs: ${allowedCount} / anti-fraud ${blockedCount}`;
+  }
+  if (allowedCount) {
+    return `logs: ${allowedCount}`;
+  }
+  if (blockedCount) {
+    return `anti-fraud logs: ${blockedCount}`;
+  }
+  return "любой log";
 }
 
 function booleanRule(value: unknown, key: string, fallback: boolean) {

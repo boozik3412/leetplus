@@ -228,6 +228,7 @@ export type GuestGameDryRunResult = {
     tariffGroupId: string | null;
     tariffPeriodId: string | null;
     tariffTypeId: string | null;
+    guestLogType: string | null;
   };
   summary: {
     checkedRules: number;
@@ -281,6 +282,7 @@ export type GuestGameSnapshotFact = {
   tariffGroupId: string | null;
   tariffPeriodId: string | null;
   tariffTypeId: string | null;
+  guestLogType?: string | null;
   label: string;
   details: string | null;
 };

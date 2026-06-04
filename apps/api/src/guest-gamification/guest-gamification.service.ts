@@ -764,6 +764,7 @@ export type GuestGameDryRunDto = {
   tariffGroupId?: string | null;
   tariffPeriodId?: string | null;
   tariffTypeId?: string | null;
+  guestLogType?: string | null;
 };
 
 export type GuestGameProcessEventDto = GuestGameDryRunDto & {
@@ -809,6 +810,7 @@ export type GuestGameDryRunResult = {
     tariffGroupId: string | null;
     tariffPeriodId: string | null;
     tariffTypeId: string | null;
+    guestLogType: string | null;
   };
   summary: {
     checkedRules: number;
@@ -862,6 +864,7 @@ export type GuestGameSnapshotFact = {
   tariffGroupId: string | null;
   tariffPeriodId: string | null;
   tariffTypeId: string | null;
+  guestLogType?: string | null;
   label: string;
   details: string | null;
 };
@@ -2073,6 +2076,7 @@ export class GuestGamificationService {
     const tariffGroupId = nullableString(dto.tariffGroupId) ?? null;
     const tariffPeriodId = nullableString(dto.tariffPeriodId) ?? null;
     const tariffTypeId = nullableString(dto.tariffTypeId) ?? null;
+    const guestLogType = nullableString(dto.guestLogType) ?? null;
     const [profile, lootBoxes, missions, seasons, rewards] = await Promise.all([
       this.resolveDryRunProfile(user, dto),
       this.getLootBoxes(user),
@@ -2101,6 +2105,7 @@ export class GuestGamificationService {
       tariffGroupId,
       tariffPeriodId,
       tariffTypeId,
+      guestLogType,
       rewards,
     };
     const rules = [
@@ -2134,6 +2139,7 @@ export class GuestGamificationService {
         tariffGroupId,
         tariffPeriodId,
         tariffTypeId,
+        guestLogType,
       },
       summary: {
         checkedRules: rules.length,
@@ -3360,6 +3366,7 @@ function mapLogFact(row: SnapshotLogRow): GuestGameSnapshotFact[] {
   }
 
   const eventType = guestLogEventType(row.type);
+  const guestLogType = nullableString(row.type);
 
   return [
     {
@@ -3379,6 +3386,7 @@ function mapLogFact(row: SnapshotLogRow): GuestGameSnapshotFact[] {
       tariffGroupId: null,
       tariffPeriodId: null,
       tariffTypeId: null,
+      guestLogType,
       label: `Лог гостя: ${snapshotGuestName(row.guest, row.externalGuestId)}`,
       details: row.type ?? 'тип не указан',
     },
@@ -3820,6 +3828,7 @@ function pipelineProcessDtoFromFact(
     tariffGroupId: fact.tariffGroupId,
     tariffPeriodId: fact.tariffPeriodId,
     tariffTypeId: fact.tariffTypeId,
+    guestLogType: fact.guestLogType ?? null,
     sourceFactId: fact.id,
     sourceFactKind: fact.source,
     externalProvider: fact.externalProvider,
@@ -4006,6 +4015,7 @@ type DryRunContext = {
   tariffGroupId: string | null;
   tariffPeriodId: string | null;
   tariffTypeId: string | null;
+  guestLogType: string | null;
   rewards: GuestGameReward[];
 };
 
@@ -4044,6 +4054,7 @@ function evaluateLootBoxDryRun(
     blockers,
     reasons,
   );
+  appendDryRunGuestLogTypeCheck(rule.periodRules, context, blockers, reasons);
   appendDryRunBudgetCheck(
     rule.budgetAmount,
     rule.rewardAmount ?? 0,
@@ -4406,6 +4417,76 @@ function appendDryRunTariffSingleCheck(
   reasons.push(`${label} подходит`);
 }
 
+function appendDryRunGuestLogTypeCheck(
+  value: unknown,
+  context: DryRunContext,
+  blockers: string[],
+  reasons: string[],
+) {
+  const rules = dryRunRecord(value);
+  const allowedTypes = normalizedGuestLogTypes(
+    dryRunStringValues(
+      rules.guestLogTypes,
+      rules.guestLogType,
+      rules.logTypes,
+      rules.logType,
+    ),
+  );
+  const blockedTypes = normalizedGuestLogTypes(
+    dryRunStringValues(
+      rules.blockedGuestLogTypes,
+      rules.deniedGuestLogTypes,
+      rules.blockedLogTypes,
+      rules.deniedLogTypes,
+    ),
+  );
+
+  if (!allowedTypes.length && !blockedTypes.length) {
+    return;
+  }
+
+  const actualType = context.guestLogType
+    ? normalizeGuestLogType(context.guestLogType)
+    : null;
+
+  if (!actualType) {
+    blockers.push('Тип события guests/logs не указан для проверки правила');
+    return;
+  }
+
+  if (blockedTypes.includes(actualType)) {
+    blockers.push(
+      `Тип guests/logs заблокирован anti-fraud правилом: ${context.guestLogType}`,
+    );
+    return;
+  }
+
+  if (blockedTypes.length) {
+    reasons.push('Тип guests/logs не входит в anti-fraud блокировки');
+  }
+
+  if (!allowedTypes.length) {
+    return;
+  }
+
+  if (!allowedTypes.includes(actualType)) {
+    blockers.push(
+      `Тип guests/logs не подходит: нужен ${allowedTypes.join(', ')}`,
+    );
+    return;
+  }
+
+  reasons.push(`Тип guests/logs подходит: ${context.guestLogType}`);
+}
+
+function normalizedGuestLogTypes(values: string[]) {
+  return Array.from(new Set(values.map(normalizeGuestLogType).filter(Boolean)));
+}
+
+function normalizeGuestLogType(value: string) {
+  return value.trim().toLowerCase();
+}
+
 function appendDryRunDateBounds(
   periodFrom: string | null,
   periodTo: string | null,
@@ -4446,6 +4527,13 @@ function appendDryRunMissionConditions(
     reasons,
   );
   appendDryRunTariffConditionCheck(conditions, context, blockers, reasons);
+  appendDryRunGuestLogTypeCheck(conditions, context, blockers, reasons);
+  appendDryRunGuestLogTypeCheck(
+    rule.antiFraudRules,
+    context,
+    blockers,
+    reasons,
+  );
 
   if (minSessionMinutes != null && context.sessionMinutes < minSessionMinutes) {
     blockers.push(
@@ -4493,6 +4581,7 @@ function appendDryRunSeasonXpRules(
     reasons,
   );
   appendDryRunTariffConditionCheck(rules, context, blockers, reasons);
+  appendDryRunGuestLogTypeCheck(rules, context, blockers, reasons);
 
   if (dryRunOptionalNumber(rules.packetSessionBonus) != null) {
     reasons.push('Battle Pass учитывает бонус за пакет часов');
@@ -4656,6 +4745,9 @@ function dryRunSeasonXp(value: unknown, context: DryRunContext) {
   }
   if (eventType === 'SESSION_START' || eventType === 'VISIT') {
     return Math.round(dryRunNumber(rules.visit, 0) + packetBonus);
+  }
+  if (eventType === 'GUEST_LOG' && context.guestLogType) {
+    return Math.round(dryRunNumber(rules.guestLog, 0));
   }
 
   return 0;

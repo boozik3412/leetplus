@@ -12,6 +12,7 @@ import type { GuestAudience, GuestCrmLead, GuestDashboardRow } from "@/lib/guest
 import type {
   GuestGameEvent,
   GuestGameDryRunResult,
+  GuestGameGuestLogCatalog,
   GuestGameLootBox,
   GuestGameMission,
   GuestGameProfile,
@@ -1275,6 +1276,7 @@ export function GuestGamificationPanel({
           audiences={audiences}
           stores={stores}
           tariffSnapshots={workspace.tariffSnapshots}
+          guestLogCatalog={workspace.guestLogCatalog}
           editingId={editingLootBoxId}
           onSave={saveLootBox}
           onEdit={editLootBox}
@@ -1293,6 +1295,7 @@ export function GuestGamificationPanel({
           audiences={audiences}
           stores={stores}
           tariffSnapshots={workspace.tariffSnapshots}
+          guestLogCatalog={workspace.guestLogCatalog}
           editingId={editingMissionId}
           onSave={saveMission}
           onEdit={editMission}
@@ -1310,6 +1313,7 @@ export function GuestGamificationPanel({
           seasons={workspace.seasons}
           audiences={audiences}
           tariffSnapshots={workspace.tariffSnapshots}
+          guestLogCatalog={workspace.guestLogCatalog}
           editingId={editingSeasonId}
           onSave={saveSeason}
           onEdit={editSeason}
@@ -1355,6 +1359,7 @@ export function GuestGamificationPanel({
           guests={guests}
           stores={stores}
           tariffSnapshots={workspace.tariffSnapshots}
+          guestLogCatalog={workspace.guestLogCatalog}
           snapshotFacts={snapshotFacts}
           pipelineResult={pipelineResult}
           onRun={runDryRun}
@@ -1385,6 +1390,7 @@ function DryRunTab({
   guests,
   stores,
   tariffSnapshots,
+  guestLogCatalog,
   snapshotFacts,
   pipelineResult,
   onRun,
@@ -1403,6 +1409,7 @@ function DryRunTab({
   guests: GuestDashboardRow[];
   stores: Store[];
   tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
+  guestLogCatalog: GuestGameGuestLogCatalog;
   snapshotFacts: GuestGameSnapshotFactsResult | null;
   pipelineResult: GuestGamePipelineRunResult | null;
   onRun: () => Promise<void>;
@@ -1642,10 +1649,16 @@ function DryRunTab({
             Тип guests/logs
             <input
               className={fieldClass}
+              list="guest-log-type-options"
               placeholder="visit, login, tournament"
               value={form.guestLogType}
               onChange={(event) => update("guestLogType", event.target.value)}
             />
+            <datalist id="guest-log-type-options">
+              {guestLogCatalog.items.map((item) => (
+                <option key={item.normalizedType} value={item.type} />
+              ))}
+            </datalist>
           </label>
 
           <div className="grid gap-3 sm:grid-cols-2">
@@ -2252,6 +2265,8 @@ function OverviewTab({
 
       <TariffSnapshotReadinessCard snapshots={workspace.tariffSnapshots} />
 
+      <GuestLogCatalogCard catalog={workspace.guestLogCatalog} />
+
       <PortalLinksCard tenantSlug={tenantSlug} stores={stores} />
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
@@ -2505,6 +2520,75 @@ function TariffSnapshotReadinessCard({
           </article>
         ))}
       </div>
+    </section>
+  );
+}
+
+function GuestLogCatalogCard({
+  catalog,
+}: {
+  catalog: GuestGameGuestLogCatalog;
+}) {
+  const topItems = catalog.items.slice(0, 8);
+
+  return (
+    <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <SectionTitle title="Каталог событий guests/logs" />
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-500 dark:text-zinc-400">
+            Эти типы собраны из сохраненных фактов Langame и используются как
+            подсказки в правилах лутбоксов, миссий и Battle Pass. Открытие
+            страницы не делает live-запросов в Langame.
+          </p>
+        </div>
+        <div className="grid grid-cols-3 overflow-hidden rounded-lg border border-zinc-200 bg-zinc-50 text-center text-xs dark:border-zinc-800 dark:bg-zinc-900/60">
+          <div className="px-3 py-2">
+            <span className="block text-zinc-400">Типы</span>
+            <span className="font-bold text-zinc-900 dark:text-white">
+              {catalog.summary.types}
+            </span>
+          </div>
+          <div className="border-x border-zinc-200 px-3 py-2 dark:border-zinc-800">
+            <span className="block text-zinc-400">Логи</span>
+            <span className="font-bold text-zinc-900 dark:text-white">
+              {catalog.summary.logs}
+            </span>
+          </div>
+          <div className="px-3 py-2">
+            <span className="block text-zinc-400">Источники</span>
+            <span className="font-bold text-zinc-900 dark:text-white">
+              {catalog.summary.domains}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {topItems.length ? (
+        <div className="mt-4 flex flex-wrap gap-2">
+          {topItems.map((item) => (
+            <span
+              key={item.normalizedType}
+              className="rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-900 ring-1 ring-emerald-100 dark:bg-emerald-950/30 dark:text-emerald-100 dark:ring-emerald-900/70"
+              title={item.domains
+                .map((domain) => `${domain.domain}: ${domain.count}`)
+                .join(", ")}
+            >
+              {item.type} · {item.count}
+            </span>
+          ))}
+          {catalog.summary.latestAt ? (
+            <span className="rounded-full bg-zinc-100 px-3 py-1.5 text-xs font-semibold text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
+              последний: {formatDate(catalog.summary.latestAt)}
+            </span>
+          ) : null}
+        </div>
+      ) : (
+        <p className="mt-4 rounded-lg border border-dashed border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-400">
+          Типы появятся после расширенной синхронизации `guests/logs` на
+          странице `/sync`.
+        </p>
+      )}
     </section>
   );
 }
@@ -2877,6 +2961,7 @@ function LootBoxesTab({
   audiences,
   stores,
   tariffSnapshots,
+  guestLogCatalog,
   editingId,
   onSave,
   onEdit,
@@ -2891,6 +2976,7 @@ function LootBoxesTab({
   audiences: GuestAudience[];
   stores: Store[];
   tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
+  guestLogCatalog: GuestGameGuestLogCatalog;
   editingId: string | null;
   onSave: () => Promise<void>;
   onEdit: (lootBox: GuestGameLootBox) => void;
@@ -2984,6 +3070,7 @@ function LootBoxesTab({
           <LootBoxBusinessRules
             form={form}
             tariffSnapshots={tariffSnapshots}
+            guestLogCatalog={guestLogCatalog}
             onChange={(patch) => setForm({ ...form, ...patch })}
           />
           <button
@@ -3034,6 +3121,7 @@ function MissionsTab({
   audiences,
   stores,
   tariffSnapshots,
+  guestLogCatalog,
   editingId,
   onSave,
   onEdit,
@@ -3048,6 +3136,7 @@ function MissionsTab({
   audiences: GuestAudience[];
   stores: Store[];
   tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
+  guestLogCatalog: GuestGameGuestLogCatalog;
   editingId: string | null;
   onSave: () => Promise<void>;
   onEdit: (mission: GuestGameMission) => void;
@@ -3182,6 +3271,7 @@ function MissionsTab({
           <MissionBusinessRules
             form={form}
             tariffSnapshots={tariffSnapshots}
+            guestLogCatalog={guestLogCatalog}
             onChange={(patch) => setForm({ ...form, ...patch })}
           />
           <button
@@ -3231,6 +3321,7 @@ function SeasonsTab({
   seasons,
   audiences,
   tariffSnapshots,
+  guestLogCatalog,
   editingId,
   onSave,
   onEdit,
@@ -3244,6 +3335,7 @@ function SeasonsTab({
   seasons: GuestGameSeason[];
   audiences: GuestAudience[];
   tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
+  guestLogCatalog: GuestGameGuestLogCatalog;
   editingId: string | null;
   onSave: () => Promise<void>;
   onEdit: (season: GuestGameSeason) => void;
@@ -3320,6 +3412,7 @@ function SeasonsTab({
           <SeasonBusinessRules
             form={form}
             tariffSnapshots={tariffSnapshots}
+            guestLogCatalog={guestLogCatalog}
             onChange={(patch) => setForm({ ...form, ...patch })}
           />
           <div className="grid gap-3 sm:grid-cols-2">
@@ -3790,10 +3883,12 @@ function RewardsTab({
 function LootBoxBusinessRules({
   form,
   tariffSnapshots,
+  guestLogCatalog,
   onChange,
 }: {
   form: LootBoxForm;
   tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
+  guestLogCatalog: GuestGameGuestLogCatalog;
   onChange: (patch: Partial<LootBoxForm>) => void;
 }) {
   return (
@@ -3841,6 +3936,7 @@ function LootBoxBusinessRules({
       <GuestLogConditionFields
         guestLogTypes={form.guestLogTypes}
         blockedGuestLogTypes={form.blockedGuestLogTypes}
+        catalog={guestLogCatalog}
         onChange={onChange}
       />
       <div className="grid gap-3 sm:grid-cols-2">
@@ -3921,10 +4017,12 @@ function LootBoxBusinessRules({
 function MissionBusinessRules({
   form,
   tariffSnapshots,
+  guestLogCatalog,
   onChange,
 }: {
   form: MissionForm;
   tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
+  guestLogCatalog: GuestGameGuestLogCatalog;
   onChange: (patch: Partial<MissionForm>) => void;
 }) {
   return (
@@ -3970,6 +4068,7 @@ function MissionBusinessRules({
       <GuestLogConditionFields
         guestLogTypes={form.guestLogTypes}
         blockedGuestLogTypes={form.blockedGuestLogTypes}
+        catalog={guestLogCatalog}
         onChange={onChange}
       />
       <div className="grid gap-3 sm:grid-cols-2">
@@ -4038,10 +4137,12 @@ function MissionBusinessRules({
 function SeasonBusinessRules({
   form,
   tariffSnapshots,
+  guestLogCatalog,
   onChange,
 }: {
   form: SeasonForm;
   tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
+  guestLogCatalog: GuestGameGuestLogCatalog;
   onChange: (patch: Partial<SeasonForm>) => void;
 }) {
   return (
@@ -4149,6 +4250,7 @@ function SeasonBusinessRules({
       <GuestLogConditionFields
         guestLogTypes={form.guestLogTypes}
         blockedGuestLogTypes={form.blockedGuestLogTypes}
+        catalog={guestLogCatalog}
         onChange={onChange}
       />
       <div className="grid gap-3 sm:grid-cols-4">
@@ -4798,12 +4900,22 @@ type GuestLogConditionPatch = {
 function GuestLogConditionFields({
   guestLogTypes,
   blockedGuestLogTypes,
+  catalog,
   onChange,
 }: {
   guestLogTypes: string;
   blockedGuestLogTypes: string;
+  catalog: GuestGameGuestLogCatalog;
   onChange: (patch: GuestLogConditionPatch) => void;
 }) {
+  const suggestedTypes = catalog.items.slice(0, 14);
+  const addAllowedType = (type: string) =>
+    onChange({ guestLogTypes: appendCsvToken(guestLogTypes, type) });
+  const addBlockedType = (type: string) =>
+    onChange({
+      blockedGuestLogTypes: appendCsvToken(blockedGuestLogTypes, type),
+    });
+
   return (
     <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
       <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
@@ -4811,7 +4923,9 @@ function GuestLogConditionFields({
           Типы событий guests/logs
         </p>
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
-          Укажите значения через запятую, если правило должно реагировать только на конкретные логи Langame.
+          {catalog.summary.types
+            ? `${catalog.summary.types} типов · ${catalog.summary.logs} логов · ${catalog.summary.domains} источников`
+            : "Каталог пока пуст: включите расширенную синхронизацию guests/logs."}
         </p>
       </div>
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
@@ -4834,6 +4948,58 @@ function GuestLogConditionFields({
           />
         </Field>
       </div>
+      {suggestedTypes.length ? (
+        <div className="mt-3 rounded-lg border border-emerald-100 bg-emerald-50/60 p-3 dark:border-emerald-950 dark:bg-emerald-950/20">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+              Найденные типы Langame
+            </p>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              {catalog.summary.latestAt
+                ? `последний лог ${formatDate(catalog.summary.latestAt)}`
+                : "по сохраненным snapshot-фактам"}
+            </p>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {suggestedTypes.map((item) => {
+              const domainLabel = item.domains
+                .slice(0, 2)
+                .map((domain) => domain.domain)
+                .join(", ");
+
+              return (
+                <span
+                  key={item.normalizedType}
+                  className="inline-flex max-w-full items-center overflow-hidden rounded-full border border-emerald-200 bg-white text-xs shadow-sm dark:border-emerald-900/70 dark:bg-zinc-950"
+                  title={`${item.count} логов${domainLabel ? ` · ${domainLabel}` : ""}`}
+                >
+                  <button
+                    type="button"
+                    className="max-w-48 truncate px-2.5 py-1.5 font-semibold text-zinc-800 transition hover:bg-emerald-100 hover:text-emerald-900 dark:text-zinc-100 dark:hover:bg-emerald-950"
+                    onClick={() => addAllowedType(item.type)}
+                  >
+                    {item.type}
+                  </button>
+                  <span className="border-l border-emerald-100 px-2 py-1.5 font-semibold text-zinc-400 dark:border-emerald-900/70">
+                    {item.count}
+                  </span>
+                  <button
+                    type="button"
+                    className="border-l border-emerald-100 px-2 py-1.5 font-semibold text-zinc-500 transition hover:bg-red-50 hover:text-red-700 dark:border-emerald-900/70 dark:hover:bg-red-950/30 dark:hover:text-red-200"
+                    onClick={() => addBlockedType(item.type)}
+                  >
+                    запретить
+                  </button>
+                </span>
+              );
+            })}
+          </div>
+          <p className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+            Нажатие на название добавляет тип в разрешенные. Кнопка
+            `запретить` добавляет тип в anti-fraud список.
+          </p>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -5259,6 +5425,23 @@ function csvList(value: string) {
         .filter(Boolean),
     ),
   );
+}
+
+function appendCsvToken(current: string, token: string) {
+  const normalizedToken = token.trim();
+
+  if (!normalizedToken) {
+    return current;
+  }
+
+  const values = csvList(current);
+  const existing = new Set(values.map((value) => value.toLowerCase()));
+
+  if (existing.has(normalizedToken.toLowerCase())) {
+    return current;
+  }
+
+  return [...values, normalizedToken].join(", ");
 }
 
 function buildLootBoxPeriodRules(form: LootBoxForm) {

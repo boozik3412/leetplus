@@ -590,6 +590,46 @@ export type GuestGameTariffSnapshotEndpoint = {
   sources: GuestGameTariffSnapshotSource[];
 };
 
+export type GuestGameGuestLogCatalogDomain = {
+  domain: string;
+  provider: string | null;
+  count: number;
+  latestAt: string | null;
+};
+
+export type GuestGameGuestLogCatalogItem = {
+  type: string;
+  normalizedType: string;
+  count: number;
+  latestAt: string | null;
+  domains: GuestGameGuestLogCatalogDomain[];
+};
+
+export type GuestGameGuestLogCatalog = {
+  items: GuestGameGuestLogCatalogItem[];
+  summary: {
+    types: number;
+    logs: number;
+    domains: number;
+    latestAt: string | null;
+  };
+};
+
+type GuestLogCatalogDomainAccumulator = {
+  domain: string;
+  provider: string | null;
+  count: number;
+  latestAt: Date | null;
+};
+
+type GuestLogCatalogItemAccumulator = {
+  type: string;
+  normalizedType: string;
+  count: number;
+  latestAt: Date | null;
+  domains: Map<string, GuestLogCatalogDomainAccumulator>;
+};
+
 export type GuestGamificationSummary = {
   profilesCount: number;
   totalXp: number;
@@ -615,6 +655,7 @@ export type GuestGamificationWorkspace = {
   rewards: GuestGameReward[];
   events: GuestGameEvent[];
   tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
+  guestLogCatalog: GuestGameGuestLogCatalog;
 };
 
 export type GuestGameProfileDto = {
@@ -1044,6 +1085,18 @@ function uniqueStrings(values: string[]) {
   return [...new Set(values)].slice(0, 16);
 }
 
+function maxDate(left: Date | null, right: Date | null) {
+  if (!left) {
+    return right;
+  }
+
+  if (!right) {
+    return left;
+  }
+
+  return right.getTime() > left.getTime() ? right : left;
+}
+
 @Injectable()
 export class GuestGamificationService {
   constructor(private readonly prisma: PrismaService) {}
@@ -1059,6 +1112,7 @@ export class GuestGamificationService {
       rewards,
       events,
       tariffSnapshots,
+      guestLogCatalog,
     ] = await Promise.all([
       this.getProfiles(user),
       this.getLootBoxes(user),
@@ -1067,6 +1121,7 @@ export class GuestGamificationService {
       this.getRewards(user),
       this.getEvents(user),
       this.getTariffSnapshots(user),
+      this.getGuestLogCatalog(user),
     ]);
 
     return {
@@ -1084,6 +1139,105 @@ export class GuestGamificationService {
       rewards,
       events,
       tariffSnapshots,
+      guestLogCatalog,
+    };
+  }
+
+  private async getGuestLogCatalog(
+    user: AuthenticatedUser,
+  ): Promise<GuestGameGuestLogCatalog> {
+    const rows = await this.prisma.guestLog.groupBy({
+      by: ['type', 'externalDomain', 'externalProvider'],
+      where: {
+        tenantId: user.tenantId,
+        type: { not: null },
+      },
+      _count: { _all: true },
+      _max: {
+        happenedAt: true,
+        createdAt: true,
+      },
+    });
+    const itemMap = new Map<string, GuestLogCatalogItemAccumulator>();
+
+    for (const row of rows) {
+      const type = row.type?.trim();
+      const normalizedType = type ? normalizeGuestLogType(type) : '';
+
+      if (!type || !normalizedType) {
+        continue;
+      }
+
+      const count = row._count._all;
+      const latestAt = row._max.happenedAt ?? row._max.createdAt ?? null;
+      const existing = itemMap.get(normalizedType) ?? {
+        type,
+        normalizedType,
+        count: 0,
+        latestAt: null,
+        domains: new Map<string, GuestLogCatalogDomainAccumulator>(),
+      };
+
+      existing.count += count;
+      existing.latestAt = maxDate(existing.latestAt, latestAt);
+
+      const domain = row.externalDomain ?? 'unknown';
+      const domainKey = `${row.externalProvider ?? ''}:${domain}`;
+      const existingDomain = existing.domains.get(domainKey) ?? {
+        domain,
+        provider: row.externalProvider ?? null,
+        count: 0,
+        latestAt: null,
+      };
+
+      existingDomain.count += count;
+      existingDomain.latestAt = maxDate(existingDomain.latestAt, latestAt);
+      existing.domains.set(domainKey, existingDomain);
+      itemMap.set(normalizedType, existing);
+    }
+
+    const items = [...itemMap.values()]
+      .sort((left, right) => {
+        if (right.count !== left.count) {
+          return right.count - left.count;
+        }
+
+        return (
+          (right.latestAt?.getTime() ?? 0) - (left.latestAt?.getTime() ?? 0)
+        );
+      })
+      .slice(0, 80)
+      .map((item) => ({
+        type: item.type,
+        normalizedType: item.normalizedType,
+        count: item.count,
+        latestAt: item.latestAt?.toISOString() ?? null,
+        domains: [...item.domains.values()]
+          .sort((left, right) => right.count - left.count)
+          .map((domain) => ({
+            domain: domain.domain,
+            provider: domain.provider,
+            count: domain.count,
+            latestAt: domain.latestAt?.toISOString() ?? null,
+          })),
+      }));
+    const latestAt = items.reduce<Date | null>((latest, item) => {
+      const value = item.latestAt ? new Date(item.latestAt) : null;
+
+      return maxDate(latest, value);
+    }, null);
+    const domains = new Set(
+      items.flatMap((item) => item.domains.map((domain) => domain.domain)),
+    );
+
+    return {
+      items,
+      summary: {
+        types: items.length,
+        logs: items.reduce((sum, item) => sum + item.count, 0),
+        domains: domains.size,
+        latestAt: latestAt?.toISOString() ?? null,
+      },
     };
   }
 

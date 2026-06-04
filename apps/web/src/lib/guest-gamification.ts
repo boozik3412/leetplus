@@ -404,6 +404,31 @@ export type GuestGameTariffSnapshotEndpoint = {
   sources: GuestGameTariffSnapshotSource[];
 };
 
+export type GuestGameGuestLogCatalogDomain = {
+  domain: string;
+  provider: string | null;
+  count: number;
+  latestAt: string | null;
+};
+
+export type GuestGameGuestLogCatalogItem = {
+  type: string;
+  normalizedType: string;
+  count: number;
+  latestAt: string | null;
+  domains: GuestGameGuestLogCatalogDomain[];
+};
+
+export type GuestGameGuestLogCatalog = {
+  items: GuestGameGuestLogCatalogItem[];
+  summary: {
+    types: number;
+    logs: number;
+    domains: number;
+    latestAt: string | null;
+  };
+};
+
 export type GuestGamificationWorkspace = {
   summary: GuestGamificationSummary;
   profiles: GuestGameProfile[];
@@ -413,6 +438,7 @@ export type GuestGamificationWorkspace = {
   rewards: GuestGameReward[];
   events: GuestGameEvent[];
   tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
+  guestLogCatalog: GuestGameGuestLogCatalog;
 };
 
 export async function getGuestGamificationWorkspace(): Promise<GuestGamificationWorkspace> {

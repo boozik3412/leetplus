@@ -54,6 +54,15 @@ const emptyWorkspace: GuestGamificationWorkspace = {
   rewards: [],
   events: [],
   tariffSnapshots: [],
+  guestLogCatalog: {
+    items: [],
+    summary: {
+      types: 0,
+      logs: 0,
+      domains: 0,
+      latestAt: null,
+    },
+  },
 };
 
 export default async function GuestGamificationPage() {

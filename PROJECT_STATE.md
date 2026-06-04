@@ -78,6 +78,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added a saved `guests/logs` type catalog to Guest Game Hub: `/guests/gamification` now derives real `GuestLog.type` values from stored snapshot facts, shows counts/source coverage/latest activity, offers datalist suggestions in dry-run, and lets rule builders add allowed or blocked log types with one click without live Langame reads.
 - Connected `guests/logs` event types to Guest Game Hub rules: `GuestLog.type` now flows into snapshot facts, dry-run, confirmed processing, and batch pipeline as `guestLogType`; `/guests/gamification` can allow or block specific log types for loot boxes, missions, and Battle Pass, and Battle Pass can award XP for `GUEST_LOG` events without live Langame reads.
 - Improved the public guest reward wallet: `/guest/[tenantSlug]/[storeId]` now scopes rewards to the selected club or network-wide rewards, prioritizes ready-to-claim rewards, shows reward source labels, and exposes cashier claim codes only for `READY` rewards.
 - Added personalized mission progress to the public guest portal: active missions on `/guest/[tenantSlug]/[storeId]` now show current counted steps versus target from guest/profile-linked `GuestGameEvent` and `GuestGameReward` rows inside the mission period, instead of always rendering zero progress.

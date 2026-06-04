@@ -11,6 +11,7 @@ import {
   type GuestPortalPublicConfig,
   type GuestPortalTelegramLinkConfirmResponse,
   type GuestPortalTelegramLinkStartResponse,
+  type GuestPortalTelegramWebhookResponse,
 } from './guest-portal.service';
 
 @Controller('guest-portal')
@@ -102,5 +103,18 @@ export class GuestPortalController {
     },
   ): Promise<GuestPortalTelegramLinkConfirmResponse> {
     return this.guestPortalService.confirmTelegramLink(secret, dto);
+  }
+
+  @Post('telegram/webhook')
+  handleTelegramWebhook(
+    @Headers('x-telegram-bot-api-secret-token')
+    telegramSecret: string | undefined,
+    @Headers('x-guest-game-telegram-secret') linkSecret: string | undefined,
+    @Body() dto: unknown,
+  ): Promise<GuestPortalTelegramWebhookResponse> {
+    return this.guestPortalService.handleTelegramWebhook(
+      telegramSecret ?? linkSecret,
+      dto,
+    );
   }
 }

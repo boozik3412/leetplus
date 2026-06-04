@@ -140,6 +140,14 @@ export type GuestPortalTelegramLinkConfirmResponse = {
   message: string;
 };
 
+export type GuestPortalTelegramWebhookResponse = {
+  status: 'CONFIRMED' | 'IGNORED' | 'FAILED';
+  action: 'LINK_CODE' | 'UNKNOWN';
+  profileId: string | null;
+  telegramIdentityMasked: string | null;
+  message: string;
+};
+
 export type GuestPortalPayload = {
   tenant: GuestPortalPublicConfig['tenant'];
   store: GuestPortalPublicConfig['store'];
@@ -1053,6 +1061,57 @@ export class GuestPortalService {
       message:
         'Telegram chat_id подтвержден и сохранен в гостевом игровом профиле. Внешние отправки включаются отдельно через dispatcher-настройки.',
     };
+  }
+
+  async handleTelegramWebhook(
+    secret: string | undefined,
+    dto: unknown,
+  ): Promise<GuestPortalTelegramWebhookResponse> {
+    this.assertTelegramLinkSecret(secret);
+    const update = telegramWebhookUpdate(dto);
+    const code = telegramWebhookLinkCode(update.text);
+    const telegramIdentityMasked = maskExternalIdentity(
+      `chat:${update.telegramChatId}`,
+    );
+
+    if (!code) {
+      return {
+        status: 'IGNORED',
+        action: 'UNKNOWN',
+        profileId: null,
+        telegramIdentityMasked,
+        message:
+          'Telegram webhook получен, но команда привязки не найдена. Ожидается /start lp_CODE или /link CODE.',
+      };
+    }
+
+    try {
+      const result = await this.confirmTelegramLink(secret, {
+        code,
+        telegramChatId: update.telegramChatId,
+        telegramUsername: update.telegramUsername,
+      });
+
+      return {
+        status: 'CONFIRMED',
+        action: 'LINK_CODE',
+        profileId: result.profileId,
+        telegramIdentityMasked: result.telegramIdentityMasked,
+        message:
+          'Telegram webhook подтвердил код и сохранил chat_id гостя. Внешняя отправка наград остается под управлением delivery dispatcher.',
+      };
+    } catch (error) {
+      return {
+        status: 'FAILED',
+        action: 'LINK_CODE',
+        profileId: null,
+        telegramIdentityMasked,
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Telegram webhook не смог подтвердить код.',
+      };
+    }
   }
 
   async matchLangameGuest(
@@ -2001,18 +2060,20 @@ export class GuestPortalService {
   }
 
   private assertTelegramLinkSecret(secret: string | undefined) {
-    const configured =
-      this.configService.get<string>('GUEST_GAME_TELEGRAM_LINK_SECRET') ??
-      this.configService.get<string>('GUEST_GAME_TELEGRAM_WEBHOOK_SECRET');
-    const expected = configured?.trim();
+    const expected = [
+      this.configService.get<string>('GUEST_GAME_TELEGRAM_LINK_SECRET'),
+      this.configService.get<string>('GUEST_GAME_TELEGRAM_WEBHOOK_SECRET'),
+    ]
+      .map((value) => value?.trim())
+      .filter((value): value is string => Boolean(value));
 
-    if (!expected) {
+    if (expected.length === 0) {
       throw new UnauthorizedException(
-        'GUEST_GAME_TELEGRAM_LINK_SECRET is not configured',
+        'GUEST_GAME_TELEGRAM_LINK_SECRET or GUEST_GAME_TELEGRAM_WEBHOOK_SECRET is not configured',
       );
     }
 
-    if (!secret || secret.trim() !== expected) {
+    if (!secret || !expected.includes(secret.trim())) {
       throw new UnauthorizedException('Invalid Telegram link secret');
     }
   }
@@ -2039,6 +2100,72 @@ export class GuestPortalService {
 
 function externalGuestKey(domain: string | null, externalGuestId: string) {
   return `${domain ?? ''}:${externalGuestId}`;
+}
+
+function telegramWebhookUpdate(value: unknown) {
+  const update = objectRecord(value);
+  if (!update) {
+    throw new BadRequestException('Telegram webhook payload is invalid.');
+  }
+
+  const callbackQuery = objectRecord(update.callback_query);
+  const message =
+    objectRecord(update.message) ??
+    objectRecord(update.edited_message) ??
+    objectRecord(update.channel_post) ??
+    objectRecord(callbackQuery?.message);
+  if (!message) {
+    throw new BadRequestException('Telegram webhook message is missing.');
+  }
+
+  const chat = objectRecord(message.chat);
+  const from = objectRecord(message.from) ?? objectRecord(callbackQuery?.from);
+  const chatId = chat?.id ?? from?.id;
+  const text =
+    stringField(message.text) ??
+    stringField(message.caption) ??
+    stringField(callbackQuery?.data);
+  const username =
+    typeof from?.username === 'string'
+      ? from.username
+      : typeof chat?.username === 'string'
+        ? chat.username
+        : null;
+
+  return {
+    text,
+    telegramChatId: telegramChatId(chatId),
+    telegramUsername: username,
+  };
+}
+
+function telegramWebhookLinkCode(text: string | null) {
+  if (!text) {
+    return null;
+  }
+
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const [command, ...payloadParts] = trimmed.split(/\s+/);
+  const commandIsLink =
+    /^\/start(@[A-Za-z0-9_]{3,64})?$/i.test(command) ||
+    /^\/link(@[A-Za-z0-9_]{3,64})?$/i.test(command);
+  const candidate = commandIsLink ? payloadParts.join(' ') : trimmed;
+
+  try {
+    return telegramLinkCode(candidate);
+  } catch {
+    return null;
+  }
+}
+
+function objectRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 function normalizeTelegramLinkCode(value: string) {

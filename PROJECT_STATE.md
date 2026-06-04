@@ -79,6 +79,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Simplified the `/staff/team-chat` workspace UI into a calmer messenger-like feed: first-level KPI/search controls are hidden, pinned messages are collapsed into a compact disclosure, message cards use lighter backgrounds, and the composer keeps quick input/send visible while format, priority, and pin options open through a `+` control.
 - Added the dedicated `view_communications` access layer: `/communications` now shows internal chat/notification cards by `view_communications`, `/staff/team-chat` and `/staff/notifications` can open without full `view_staff`, and CRM contact tasks remain behind `view_guests`.
 - Added Langame tariff conditions to marketing promo bundles: `/marketing/promo-bundles` now loads saved tariff group, tariff period, and tariff type snapshot items, shows compact selectors in the bundle constructor, stores selected conditions in `mechanicConfig.conditions`, and displays the restriction in catalog cards without live Langame reads or automatic issuing.
 - Guest Game Hub теперь разделяет готовность гостевого OTP на общий вход и отдельные SMS/Telegram/MAX provider-карточки: `/guests/gamification` показывает required env и следующий шаг по каждому каналу без раскрытия секретов, а `.env.example` содержит переменные гостевого OTP и MAX delivery для настройки VDS.

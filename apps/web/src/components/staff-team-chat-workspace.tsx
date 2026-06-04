@@ -91,6 +91,7 @@ export function StaffTeamChatWorkspace({
   const [channelForm, setChannelForm] =
     useState<ChannelFormState>(emptyChannelForm);
   const [showChannelForm, setShowChannelForm] = useState(false);
+  const [showMessageOptions, setShowMessageOptions] = useState(false);
   const [taskDraft, setTaskDraft] = useState<TaskDraftState | null>(null);
   const [taskPendingMessageId, setTaskPendingMessageId] = useState<string | null>(
     null,
@@ -142,6 +143,7 @@ export function StaffTeamChatWorkspace({
     }
 
     setForm(emptyForm);
+    setShowMessageOptions(false);
     startTransition(() => router.refresh());
   }
 
@@ -544,7 +546,7 @@ export function StaffTeamChatWorkspace({
         ) : null}
       </aside>
 
-      <section className="min-w-0 rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <section className="min-w-0 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
         <div className="border-b border-zinc-200 p-4 dark:border-zinc-800 sm:p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -585,14 +587,14 @@ export function StaffTeamChatWorkspace({
             </div>
           </div>
 
-          <div className="mt-4 grid gap-2 text-sm sm:grid-cols-4">
+          <div className="hidden">
             <Metric label="Каналы" value={report.summary.channels} />
             <Metric label="Сообщения" value={report.summary.messages} />
             <Metric label="Закреплено" value={report.summary.pinned} />
             <Metric label="Непрочитано" value={report.summary.unread} />
           </div>
 
-          <form className="mt-4 flex flex-wrap gap-2" action="/staff/team-chat">
+          <form className="hidden" action="/staff/team-chat">
             {activeChannel ? (
               <input type="hidden" name="channelId" value={activeChannel.id} />
             ) : null}
@@ -635,11 +637,14 @@ export function StaffTeamChatWorkspace({
         ) : null}
 
         {pinnedMessages.length > 0 ? (
-          <div className="border-b border-zinc-200 p-4 dark:border-zinc-800 sm:p-5">
-            <p className="text-xs font-bold uppercase text-zinc-500">
-              Закреплено
-            </p>
-            <div className="mt-3 grid gap-2">
+          <details className="border-b border-zinc-200 px-4 py-3 dark:border-zinc-800 sm:px-5">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-zinc-600 transition hover:text-emerald-700 dark:text-zinc-300 dark:hover:text-emerald-200">
+              <span>Закреплено</span>
+              <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                {formatNumber(pinnedMessages.length)}
+              </span>
+            </summary>
+            <div className="mt-3 space-y-2">
               {pinnedMessages.map((message) => (
                 <MessageCard
                   key={`pinned-${message.id}`}
@@ -656,10 +661,10 @@ export function StaffTeamChatWorkspace({
                 />
               ))}
             </div>
-          </div>
+          </details>
         ) : null}
 
-        <div className="max-h-[620px] space-y-3 overflow-y-auto p-4 sm:p-5">
+        <div className="max-h-[650px] space-y-2 overflow-y-auto bg-zinc-50/50 p-4 dark:bg-zinc-950 sm:p-5">
           {report.messages.map((message) => (
             <MessageCard
               key={message.id}
@@ -683,17 +688,24 @@ export function StaffTeamChatWorkspace({
           ) : null}
         </div>
 
-        <div className="border-t border-zinc-200 p-4 dark:border-zinc-800 sm:p-5">
-          <div className="grid gap-3 lg:grid-cols-[1fr_180px_160px]">
+        <div className="border-t border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950 sm:p-5">
+          <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
             <textarea
               value={form.body}
               onChange={(event) =>
                 setForm((current) => ({ ...current, body: event.target.value }))
               }
-              className="min-h-24 rounded-lg border border-zinc-200 bg-white px-3 py-3 text-sm outline-none transition focus:border-emerald-500 dark:border-zinc-800 dark:bg-zinc-950"
+              className="min-h-16 rounded-lg border border-zinc-200 bg-white px-3 py-3 text-sm outline-none transition focus:border-emerald-500 dark:border-zinc-800 dark:bg-zinc-950"
               placeholder="Что нужно передать смене или управляющим?"
             />
-            <div className="space-y-2">
+            <div
+              id="message-format-options"
+              className={
+                showMessageOptions
+                  ? "order-3 grid gap-2 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40 sm:grid-cols-2 lg:col-span-2 lg:grid-cols-[180px_180px_1fr]"
+                  : "hidden"
+              }
+            >
               <select
                 value={form.kind}
                 onChange={(event) =>
@@ -729,9 +741,7 @@ export function StaffTeamChatWorkspace({
                   </option>
                 ))}
               </select>
-            </div>
-            <div className="space-y-2">
-              <label className="flex min-h-10 items-center gap-2 rounded-lg border border-zinc-200 px-3 text-sm dark:border-zinc-800">
+              <label className="flex min-h-10 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950">
                 <input
                   type="checkbox"
                   checked={form.isPinned}
@@ -744,11 +754,27 @@ export function StaffTeamChatWorkspace({
                 />
                 Закрепить
               </label>
+            </div>
+            <div className="flex flex-wrap items-start gap-2 lg:w-[260px]">
+              <button
+                type="button"
+                aria-controls="message-format-options"
+                aria-expanded={showMessageOptions}
+                onClick={() => setShowMessageOptions((value) => !value)}
+                className={[
+                  "flex h-10 w-10 items-center justify-center rounded-lg border text-xl font-semibold leading-none transition",
+                  showMessageOptions
+                    ? "border-emerald-500 bg-emerald-500 text-zinc-950"
+                    : "border-zinc-200 hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-800 dark:hover:border-emerald-500 dark:hover:text-emerald-200",
+                ].join(" ")}
+              >
+                +
+              </button>
               <button
                 type="button"
                 onClick={sendMessage}
                 disabled={isPending || !activeChannel}
-                className="w-full rounded-lg bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                className="h-10 flex-1 rounded-lg bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Отправить
               </button>
@@ -775,8 +801,8 @@ function ChannelLink({
       className={[
         "block rounded-lg border px-3 py-3 text-sm transition",
         active
-          ? "border-emerald-500 bg-emerald-500/10"
-          : "border-zinc-200 hover:border-emerald-400 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:border-emerald-500 dark:hover:bg-zinc-900/60",
+          ? "border-emerald-500 bg-white shadow-sm dark:bg-zinc-900/60"
+          : "border-zinc-200 hover:border-emerald-400 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:border-emerald-500 dark:hover:bg-zinc-900/40",
       ].join(" ")}
     >
       <div className="flex items-start justify-between gap-3">
@@ -831,12 +857,12 @@ function MessageCard({
   return (
     <article
       className={[
-        "rounded-lg border p-3",
+        "rounded-2xl border px-4 py-3 shadow-sm transition",
         message.priority === "URGENT"
-          ? "border-red-300 bg-red-50 dark:border-red-500/40 dark:bg-red-500/10"
+          ? "border-red-300 bg-white dark:border-red-500/40 dark:bg-zinc-900/70"
           : message.priority === "HIGH"
-            ? "border-amber-300 bg-amber-50 dark:border-amber-500/40 dark:bg-amber-500/10"
-            : "border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/60",
+            ? "border-amber-300 bg-white dark:border-amber-500/40 dark:bg-zinc-900/70"
+            : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/50",
       ].join(" ")}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -866,7 +892,7 @@ function MessageCard({
             <button
               type="button"
               onClick={() => onOpenTaskDraft(message)}
-              className="rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs font-semibold transition hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-700 dark:hover:border-emerald-500 dark:hover:text-emerald-200"
+              className="rounded-full border border-zinc-200 px-2.5 py-1 text-xs font-semibold text-zinc-500 transition hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-emerald-500 dark:hover:text-emerald-200"
             >
               Создать задачу
             </button>
@@ -874,7 +900,7 @@ function MessageCard({
           <button
             type="button"
             onClick={() => onTogglePinned(message)}
-            className="rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs font-semibold transition hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-700 dark:hover:border-emerald-500 dark:hover:text-emerald-200"
+            className="rounded-full border border-zinc-200 px-2.5 py-1 text-xs font-semibold text-zinc-500 transition hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-emerald-500 dark:hover:text-emerald-200"
           >
             {message.isPinned ? "Открепить" : "Закрепить"}
           </button>

@@ -833,6 +833,27 @@ function ActivityPanel({ portal }: { portal: GuestPortalPayload }) {
 function BattlePassPanel({ portal }: { portal: GuestPortalPayload }) {
   const season = portal.gamification.seasons[0] ?? null;
   const levels = season?.levels.length ? season.levels : fallbackBattlePass();
+  const reachedLevels =
+    season?.reachedLevels ?? levels.filter((level) => level.reached).length;
+  const totalLevels = season?.totalLevels ?? levels.length;
+  const currentLevel =
+    season?.currentLevel ??
+    levels.find((level) => level.current)?.level ??
+    lastReachedLevel(levels)?.level ??
+    1;
+  const nextLevel =
+    season?.nextLevel ?? levels.find((level) => !level.reached)?.level ?? null;
+  const progressPercent =
+    season?.progressPercent ?? portal.profile.levelProgressPercent;
+  const xpToNextLevel = season?.xpToNextLevel ?? null;
+  const nextRewardLabel =
+    season?.nextRewardLabel ??
+    levels.find((level) => !level.reached)?.freeReward ??
+    null;
+  const nextPremiumRewardLabel =
+    season?.nextPremiumRewardLabel ??
+    levels.find((level) => !level.reached)?.premiumReward ??
+    null;
 
   return (
     <div className="rounded-lg border border-white/10 bg-[#0b111c] p-5">
@@ -852,28 +873,96 @@ function BattlePassPanel({ portal }: { portal: GuestPortalPayload }) {
         <PassIcon />
       </div>
 
+      <div className="mt-5 rounded-lg border border-cyan-300/20 bg-cyan-300/[0.07] p-4">
+        <div className="grid gap-3 sm:grid-cols-4">
+          <Metric label="Текущий уровень" value={`LVL ${currentLevel}`} />
+          <Metric
+            label="Пройдено"
+            value={`${formatNumber(reachedLevels)}/${formatNumber(totalLevels)}`}
+          />
+          <Metric
+            label="До следующего"
+            value={
+              xpToNextLevel == null ? "Финиш" : `${formatNumber(xpToNextLevel)} XP`
+            }
+          />
+          <Metric
+            label="Награды сезона"
+            value={formatNumber(
+              (season?.readyRewards ?? 0) +
+                (season?.waitingApprovalRewards ?? 0) +
+                (season?.redeemedRewards ?? 0),
+            )}
+          />
+        </div>
+
+        <ProgressBar
+          label={
+            nextLevel
+              ? `До уровня ${nextLevel}`
+              : "Сезонный прогресс завершен"
+          }
+          value={progressPercent}
+          tone="cyan"
+        />
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <InfoLine
+            label="Следующая free-награда"
+            value={nextRewardLabel ?? "Награда появится в настройках сезона"}
+          />
+          <InfoLine
+            label="Следующая premium-награда"
+            value={
+              season?.premiumEnabled
+                ? nextPremiumRewardLabel ?? "Premium-награда не задана"
+                : "Premium-дорожка не включена"
+            }
+          />
+        </div>
+      </div>
+
       <div className="mt-5 grid gap-3 sm:grid-cols-4">
         {levels.slice(0, 8).map((level) => (
           <div
             key={`${level.level}-${level.xp}`}
             className={`rounded-lg border p-3 transition ${
-              level.reached
-                ? "border-emerald-300/40 bg-emerald-300/10"
-                : "border-white/10 bg-[#070b12]"
+              level.current
+                ? "border-cyan-300/50 bg-cyan-300/10"
+                : level.next
+                  ? "border-amber-300/40 bg-amber-300/10"
+                  : level.reached
+                    ? "border-emerald-300/40 bg-emerald-300/10"
+                    : "border-white/10 bg-[#070b12]"
             }`}
           >
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-bold uppercase text-slate-400">
                 LVL {level.level}
               </span>
-              {level.reached ? <CheckIcon /> : <LockIcon />}
+              {level.current ? (
+                <span className="rounded-full bg-cyan-300/15 px-2 py-1 text-[10px] font-black uppercase text-cyan-100">
+                  сейчас
+                </span>
+              ) : level.next ? (
+                <span className="rounded-full bg-amber-300/15 px-2 py-1 text-[10px] font-black uppercase text-amber-100">
+                  цель
+                </span>
+              ) : level.reached ? (
+                <CheckIcon />
+              ) : (
+                <LockIcon />
+              )}
             </div>
             <p className="mt-2 text-sm font-black text-white">
               {formatNumber(level.xp)} XP
             </p>
-            <p className="mt-2 min-h-10 text-xs leading-5 text-slate-400">
-              {level.freeReward ?? "Награда сезона"}
-            </p>
+            <div className="mt-2 min-h-16 space-y-1 text-xs leading-5 text-slate-400">
+              <p>{level.freeReward ?? "Награда сезона"}</p>
+              {season?.premiumEnabled && level.premiumReward ? (
+                <p className="text-amber-100/90">Premium: {level.premiumReward}</p>
+              ) : null}
+            </div>
           </div>
         ))}
       </div>
@@ -1299,7 +1388,10 @@ function ErrorState({ message }: { message: string }) {
   );
 }
 
-function fallbackBattlePass() {
+type BattlePassLevel =
+  GuestPortalPayload["gamification"]["seasons"][number]["levels"][number];
+
+function fallbackBattlePass(): BattlePassLevel[] {
   return [
     {
       level: 1,
@@ -1307,6 +1399,8 @@ function fallbackBattlePass() {
       freeReward: "Старт сезона",
       premiumReward: null,
       reached: true,
+      current: true,
+      next: false,
     },
     {
       level: 2,
@@ -1314,6 +1408,8 @@ function fallbackBattlePass() {
       freeReward: "Промокод бара",
       premiumReward: "Усиленная награда",
       reached: false,
+      current: false,
+      next: true,
     },
     {
       level: 3,
@@ -1321,6 +1417,8 @@ function fallbackBattlePass() {
       freeReward: "Бонус визита",
       premiumReward: "Лутбокс",
       reached: false,
+      current: false,
+      next: false,
     },
     {
       level: 4,
@@ -1328,8 +1426,15 @@ function fallbackBattlePass() {
       freeReward: "Часы игры",
       premiumReward: "Премиум-приз",
       reached: false,
+      current: false,
+      next: false,
     },
   ];
+}
+
+function lastReachedLevel(levels: BattlePassLevel[]) {
+  const reached = levels.filter((level) => level.reached);
+  return reached[reached.length - 1] ?? null;
 }
 
 async function readMessage(response: Response) {

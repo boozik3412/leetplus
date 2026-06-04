@@ -84,12 +84,27 @@ export type GuestPortalPayload = {
       seasonType: string;
       premiumEnabled: boolean;
       periodTo: string | null;
+      currentLevel: number;
+      nextLevel: number | null;
+      currentLevelXp: number;
+      nextLevelXp: number | null;
+      xpToNextLevel: number | null;
+      progressPercent: number;
+      reachedLevels: number;
+      totalLevels: number;
+      readyRewards: number;
+      waitingApprovalRewards: number;
+      redeemedRewards: number;
+      nextRewardLabel: string | null;
+      nextPremiumRewardLabel: string | null;
       levels: Array<{
         level: number;
         xp: number;
         freeReward: string | null;
         premiumReward: string | null;
         reached: boolean;
+        current: boolean;
+        next: boolean;
       }>;
     }>;
     rewardSummary: {

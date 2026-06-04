@@ -157,12 +157,27 @@ export type GuestPortalSeason = {
   seasonType: string;
   premiumEnabled: boolean;
   periodTo: string | null;
+  currentLevel: number;
+  nextLevel: number | null;
+  currentLevelXp: number;
+  nextLevelXp: number | null;
+  xpToNextLevel: number | null;
+  progressPercent: number;
+  reachedLevels: number;
+  totalLevels: number;
+  readyRewards: number;
+  waitingApprovalRewards: number;
+  redeemedRewards: number;
+  nextRewardLabel: string | null;
+  nextPremiumRewardLabel: string | null;
   levels: Array<{
     level: number;
     xp: number;
     freeReward: string | null;
     premiumReward: string | null;
     reached: boolean;
+    current: boolean;
+    next: boolean;
   }>;
 };
 
@@ -706,7 +721,7 @@ export class GuestPortalService {
         seasons: seasons
           .filter((item) => activePeriod(item.periodFrom, item.periodTo))
           .slice(0, 2)
-          .map((item) => mapSeason(item, xp)),
+          .map((item) => mapSeason(item, xp, rewards)),
         rewardSummary: buildRewardSummary(portalRewards),
         rewards: portalRewards,
       },
@@ -1352,14 +1367,23 @@ function mapSeason(
     levels: Prisma.JsonValue;
   },
   xp: number,
+  rewards: Array<{
+    seasonId: string | null;
+    status: string;
+    expiresAt: Date | null;
+  }>,
 ): GuestPortalSeason {
+  const levels = seasonLevels(row.levels, xp);
+  const progress = buildSeasonProgress(levels, xp, rewards, row.id);
+
   return {
     id: row.id,
     name: row.name,
     seasonType: row.seasonType,
     periodTo: iso(row.periodTo),
     premiumEnabled: row.premiumEnabled,
-    levels: seasonLevels(row.levels, xp),
+    ...progress,
+    levels,
   };
 }
 
@@ -1632,6 +1656,8 @@ function buildRewardClaimPayload(rewardId: string, rewardCode: string) {
   return `LEETPLUS_REWARD:${rewardId}:${rewardCode}`;
 }
 
+type GuestPortalSeasonLevel = GuestPortalSeason['levels'][number];
+
 function seasonLevels(value: Prisma.JsonValue, xp: number) {
   if (!Array.isArray(value)) {
     return [];
@@ -1657,10 +1683,69 @@ function seasonLevels(value: Prisma.JsonValue, xp: number) {
         freeReward: stringField(row.freeReward),
         premiumReward: stringField(row.premiumReward),
         reached: xp >= requiredXp,
+        current: false,
+        next: false,
       };
     })
     .filter((item): item is NonNullable<typeof item> => Boolean(item))
+    .sort((left, right) => left.xp - right.xp || left.level - right.level)
     .slice(0, 12);
+}
+
+function buildSeasonProgress(
+  levels: GuestPortalSeasonLevel[],
+  xp: number,
+  rewards: Array<{
+    seasonId: string | null;
+    status: string;
+    expiresAt: Date | null;
+  }>,
+  seasonId: string,
+): Omit<
+  GuestPortalSeason,
+  'id' | 'name' | 'seasonType' | 'premiumEnabled' | 'periodTo' | 'levels'
+> {
+  const reached = levels.filter((level) => level.reached);
+  const current = reached[reached.length - 1] ?? levels[0] ?? null;
+  const next = levels.find((level) => !level.reached) ?? null;
+  const currentLevelXp = current?.xp ?? 0;
+  const nextLevelXp = next?.xp ?? null;
+  const xpToNextLevel =
+    typeof nextLevelXp === 'number' ? Math.max(0, nextLevelXp - xp) : null;
+  const progressPercent =
+    typeof nextLevelXp === 'number'
+      ? percent(xp - currentLevelXp, Math.max(1, nextLevelXp - currentLevelXp))
+      : 100;
+  const seasonRewards = rewards.filter(
+    (reward) => reward.seasonId === seasonId,
+  );
+  const mappedRewards = seasonRewards.map((reward) =>
+    rewardWalletState(reward.status, reward.expiresAt),
+  );
+
+  levels.forEach((level) => {
+    level.current = current ? level.level === current.level : false;
+    level.next = next ? level.level === next.level : false;
+  });
+
+  return {
+    currentLevel: current?.level ?? 1,
+    nextLevel: next?.level ?? null,
+    currentLevelXp,
+    nextLevelXp,
+    xpToNextLevel,
+    progressPercent,
+    reachedLevels: reached.length,
+    totalLevels: levels.length,
+    readyRewards: mappedRewards.filter((state) => state === 'READY').length,
+    waitingApprovalRewards: mappedRewards.filter(
+      (state) => state === 'WAITING_APPROVAL',
+    ).length,
+    redeemedRewards: mappedRewards.filter((state) => state === 'REDEEMED')
+      .length,
+    nextRewardLabel: next?.freeReward ?? null,
+    nextPremiumRewardLabel: next?.premiumReward ?? null,
+  };
 }
 
 function matchesStore(value: Prisma.JsonValue | null, storeId: string) {

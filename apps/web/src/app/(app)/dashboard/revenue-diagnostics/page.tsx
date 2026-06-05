@@ -133,7 +133,7 @@ export default async function DashboardRevenueDiagnosticsPage({
   await requireCurrentUser();
 
   const filters = {
-    period: searchParam(params.period) ?? "day",
+    period: searchParam(params.period) ?? "full-day",
     dateFrom: searchParam(params.dateFrom),
     dateTo: searchParam(params.dateTo),
     storeIds: searchParamsArray(params.storeIds),

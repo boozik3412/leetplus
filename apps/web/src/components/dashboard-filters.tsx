@@ -123,7 +123,7 @@ export function DashboardFilters({
   const [isPending, startTransition] = useTransition();
   const [openPanel, setOpenPanel] = useState<OpenPanel>(null);
   const [selectedPeriod, setSelectedPeriod] = useState<DashboardPeriod>(
-    isPeriod(period) ? period : "day",
+    isPeriod(period) ? period : "full-day",
   );
   const [customFrom, setCustomFrom] = useState(dateFrom);
   const [customTo, setCustomTo] = useState(dateTo);

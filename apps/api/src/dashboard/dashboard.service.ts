@@ -953,9 +953,11 @@ export class DashboardService {
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
     );
     let fromDate = new Date(toDate);
-    const period = this.isDashboardPeriod(query.period) ? query.period : 'day';
+    const period = this.isDashboardPeriod(query.period)
+      ? query.period
+      : 'full-day';
     let trendPeriod = this.resolveBasePeriod(period);
-    let label = 'Текущие сутки';
+    let label = 'Полные сутки';
 
     if (period === 'day') {
       label = 'Текущие сутки';

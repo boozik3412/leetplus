@@ -100,6 +100,7 @@ describe('AuthService', () => {
       service.register({
         email: ' OWNER@CLUB-A.LEETPLUS.RU ',
         password: 'strong-password',
+        confirmPassword: 'strong-password',
         organizationName: 'Club A',
         tenantSlug: ' Club-A ',
         fullName: 'Owner',
@@ -150,6 +151,7 @@ describe('AuthService', () => {
       service.register({
         email: 'owner@example.com',
         password: 'strong-password',
+        confirmPassword: 'strong-password',
         organizationName: 'Club A',
         tenantSlug: 'club-a',
       }),
@@ -161,10 +163,25 @@ describe('AuthService', () => {
       service.register({
         email: 'owner@example.com',
         password: 'short',
+        confirmPassword: 'short',
         organizationName: 'Club A',
         tenantSlug: 'club-a',
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects password confirmation mismatch during registration', async () => {
+    await expect(
+      service.register({
+        email: 'owner@example.com',
+        password: 'strong-password',
+        confirmPassword: 'another-password',
+        organizationName: 'Club A',
+        tenantSlug: 'club-a',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
   });
 
   it('logs in with valid credentials', async () => {

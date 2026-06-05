@@ -260,6 +260,39 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
   ],
 };
 
+const shiftWorkspaceRoles = new Set<AuthUser["role"]>([
+  "SENIOR_ADMINISTRATOR",
+  "CLUB_ADMINISTRATOR",
+]);
+
+const shiftStaffAllowedPrefixes = [
+  "/staff/tasks",
+  "/staff/task-rules",
+  "/staff/shift-regulations",
+  "/staff/checklists",
+  "/staff/training-courses",
+  "/staff/assessments",
+  "/staff/knowledge-base",
+  "/staff/shift-workspace",
+  "/staff/team-chat",
+  "/staff/notifications",
+];
+
+const shiftStaffDeniedPrefixes = [
+  "/staff/checklists/report",
+  "/staff/checklist-templates",
+  "/staff/task-templates",
+  "/staff/training-profiles",
+  "/staff/readiness-report",
+  "/staff/operations-dashboard",
+  "/staff/administrator-ratings",
+  "/staff/discipline",
+  "/staff/salary",
+  "/staff/directory",
+  "/staff/onboarding",
+  "/staff/ai-assistant",
+];
+
 export function can(user: AuthUser | null, capability: Capability) {
   if (!user) {
     return false;
@@ -274,6 +307,24 @@ export function can(user: AuthUser | null, capability: Capability) {
   }
 
   return roleCapabilities[user.role].includes(capability);
+}
+
+function isShiftWorkspaceRole(user: AuthUser | null) {
+  return Boolean(user && shiftWorkspaceRoles.has(user.role));
+}
+
+function canAccessShiftStaffPath(href: string) {
+  const path = href.split("?")[0]?.split("#")[0] ?? href;
+
+  if (path === "/staff") {
+    return true;
+  }
+
+  if (shiftStaffDeniedPrefixes.some((prefix) => path.startsWith(prefix))) {
+    return false;
+  }
+
+  return shiftStaffAllowedPrefixes.some((prefix) => path.startsWith(prefix));
 }
 
 export function canAccessPath(user: AuthUser | null, href: string) {
@@ -305,6 +356,10 @@ export function canAccessPath(user: AuthUser | null, href: string) {
   }
 
   if (href.startsWith("/staff") || href.startsWith("/guests/staff-control")) {
+    if (isShiftWorkspaceRole(user) && href.startsWith("/staff")) {
+      return can(user, "view_staff") && canAccessShiftStaffPath(href);
+    }
+
     return can(user, "view_staff");
   }
 

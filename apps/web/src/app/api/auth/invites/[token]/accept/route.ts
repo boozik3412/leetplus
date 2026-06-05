@@ -17,6 +17,7 @@ export async function POST(
   const payload = (await request.json()) as {
     email?: string;
     password?: string;
+    confirmPassword?: string;
     fullName?: string;
   };
 

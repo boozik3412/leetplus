@@ -13,6 +13,7 @@ export async function POST(request: Request) {
   const payload = (await request.json()) as {
     email?: string;
     password?: string;
+    confirmPassword?: string;
     organizationName?: string;
     tenantSlug?: string;
     fullName?: string;

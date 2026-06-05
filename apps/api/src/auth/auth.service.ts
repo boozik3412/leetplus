@@ -81,6 +81,7 @@ export class AuthService {
 
     this.assertEmail(email);
     this.assertPassword(dto.password);
+    this.assertPasswordConfirmation(dto.password, dto.confirmPassword);
     this.assertTenantSlug(tenantSlug);
 
     if (!organizationName) {
@@ -190,6 +191,7 @@ export class AuthService {
     const fullName = this.resolveInviteFullName(invite.fullName, dto.fullName);
     const password = dto.password;
     this.assertPassword(password);
+    this.assertPasswordConfirmation(password, dto.confirmPassword);
 
     const [existingUser, storeIds] = await Promise.all([
       this.prisma.user.findUnique({ where: { email } }),
@@ -533,6 +535,15 @@ export class AuthService {
       throw new BadRequestException(
         'Password must contain at least 8 characters',
       );
+    }
+  }
+
+  private assertPasswordConfirmation(
+    password: unknown,
+    confirmPassword: unknown,
+  ) {
+    if (typeof confirmPassword !== 'string' || password !== confirmPassword) {
+      throw new BadRequestException('Passwords do not match');
     }
   }
 

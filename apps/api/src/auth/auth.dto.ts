@@ -1,6 +1,7 @@
 export type RegisterDto = {
   email: string;
   password: string;
+  confirmPassword?: string;
   organizationName: string;
   tenantSlug: string;
   fullName?: string;
@@ -9,6 +10,7 @@ export type RegisterDto = {
 export type AcceptUserInviteDto = {
   email?: string;
   password?: string;
+  confirmPassword?: string;
   fullName?: string;
 };
 

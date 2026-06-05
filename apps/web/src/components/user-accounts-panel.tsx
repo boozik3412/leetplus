@@ -64,6 +64,74 @@ type AccessRoleFormState = {
   permissions: Capability[];
 };
 
+type PermissionSectionDefinition = {
+  id: string;
+  title: string;
+  description: string;
+  permissions: Capability[];
+};
+
+const permissionSectionDefinitions: PermissionSectionDefinition[] = [
+  {
+    id: "overview",
+    title: "Общие экраны",
+    description: "Первый экран, сеть, показатели и сводные отчеты.",
+    permissions: ["view_dashboard", "view_reports"],
+  },
+  {
+    id: "guests",
+    title: "Гости, CRM и геймификация",
+    description: "Клиентская база, игровые механики, награды и ПДн.",
+    permissions: [
+      "view_guests",
+      "view_guest_gamification",
+      "manage_guest_game_rules",
+      "approve_guest_game_rewards",
+      "view_guest_game_pii",
+    ],
+  },
+  {
+    id: "marketing",
+    title: "Маркетинг и коммуникации",
+    description: "Кампании, промо-наборы, командный чат и уведомления.",
+    permissions: ["view_marketing", "view_communications"],
+  },
+  {
+    id: "staff",
+    title: "Персонал и стандарты",
+    description: "Регламенты, чек-листы, обучение и база знаний.",
+    permissions: [
+      "view_staff",
+      "edit_staff_knowledge",
+      "review_staff_knowledge",
+      "publish_staff_knowledge",
+    ],
+  },
+  {
+    id: "administration",
+    title: "Администрирование платформы",
+    description: "Пользователи, интеграции, синхронизация и импорт.",
+    permissions: [
+      "manage_users",
+      "manage_integrations",
+      "run_sync",
+      "import_data",
+      "use_utilities",
+    ],
+  },
+  {
+    id: "assortment",
+    title: "Ассортимент и справочники",
+    description: "Товары, каталог, клубы и операционные справочники.",
+    permissions: ["edit_products", "edit_catalog", "edit_stores"],
+  },
+];
+
+const defaultOpenPermissionSections: Record<string, boolean> = {
+  overview: true,
+  staff: true,
+};
+
 function createEmptyRoleForm(): AccessRoleFormState {
   return {
     name: "",
@@ -145,6 +213,9 @@ export function UserAccountsPanel({
   );
   const [roleEditorMode, setRoleEditorMode] =
     useState<RoleEditorMode>("idle");
+  const [openPermissionSections, setOpenPermissionSections] = useState<
+    Record<string, boolean>
+  >(defaultOpenPermissionSections);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<{
@@ -177,6 +248,46 @@ export function UserAccountsPanel({
     ? roleOptions.find((option) => option.role === selectedSystemRole) ?? null
     : null;
   const isRoleEditorOpen = roleEditorMode !== "idle";
+  const permissionSections = useMemo(() => {
+    const optionsByKey = new Map(
+      initialData.capabilityOptions.map((option) => [option.key, option]),
+    );
+    const usedKeys = new Set<Capability>();
+    const sections = permissionSectionDefinitions
+      .map((section) => {
+        const options = section.permissions
+          .map((key) => optionsByKey.get(key))
+          .filter((option): option is (typeof initialData.capabilityOptions)[number] =>
+            Boolean(option),
+          );
+
+        options.forEach((option) => usedKeys.add(option.key));
+
+        return {
+          ...section,
+          options,
+        };
+      })
+      .filter((section) => section.options.length > 0);
+    const remainingOptions = initialData.capabilityOptions.filter(
+      (option) => !usedKeys.has(option.key),
+    );
+
+    if (remainingOptions.length === 0) {
+      return sections;
+    }
+
+    return [
+      ...sections,
+      {
+        id: "other",
+        title: "Прочие доступы",
+        description: "Служебные доступы, которые еще не вынесены в разделы.",
+        permissions: remainingOptions.map((option) => option.key),
+        options: remainingOptions,
+      },
+    ];
+  }, [initialData]);
 
   if (
     selectedRoleOption &&
@@ -279,11 +390,18 @@ export function UserAccountsPanel({
     setSelectedSystemRole(role.role);
     setRoleEditorMode("system");
     setRoleForm({
-      name: `${role.label} - копия`,
+      name: "",
       description: role.description,
       permissions: [...role.permissions],
     });
     setRoleStatus({ type: "idle", message: "" });
+  }
+
+  function togglePermissionSection(sectionId: string) {
+    setOpenPermissionSections((current) => ({
+      ...current,
+      [sectionId]: !current[sectionId],
+    }));
   }
 
   function startEditRole(role: UserAccessRole) {
@@ -1053,42 +1171,93 @@ export function UserAccountsPanel({
                   Доступы роли
                 </p>
                 <p className="mt-1 text-sm text-zinc-500">
-                  Ставьте и снимайте галочки: изменения применятся после сохранения.
+                  Раскройте нужный раздел и отметьте, что сотрудник должен видеть
+                  или редактировать.
                 </p>
               </div>
 
-              <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                {initialData.capabilityOptions.map((capability) => (
-                  <label
-                    key={capability.key}
-                    className={[
-                      "flex min-h-[5.25rem] cursor-pointer items-start gap-3 rounded-md border px-3 py-2 text-sm transition hover:border-emerald-500/70 hover:bg-emerald-500/5",
-                      roleForm.permissions.includes(capability.key)
-                        ? "border-emerald-500 bg-emerald-500/10"
-                        : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950",
-                    ].join(" ")}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={roleForm.permissions.includes(capability.key)}
-                      onChange={(event) =>
-                        updateRolePermission(
-                          capability.key,
-                          event.target.checked,
-                        )
-                      }
-                      className="mt-1 h-4 w-4 rounded border-zinc-300 text-emerald-500 focus:ring-emerald-500"
-                    />
-                    <span className="min-w-0">
-                      <span className="block font-semibold">
-                        {capability.label}
-                      </span>
-                      <span className="mt-1 line-clamp-2 block text-xs leading-5 text-zinc-500">
-                        {capability.description}
-                      </span>
-                    </span>
-                  </label>
-                ))}
+              <div className="mt-3 space-y-2">
+                {permissionSections.map((section) => {
+                  const isOpen = openPermissionSections[section.id] ?? false;
+                  const selectedCount = section.options.filter((option) =>
+                    roleForm.permissions.includes(option.key),
+                  ).length;
+
+                  return (
+                    <section
+                      key={section.id}
+                      className="overflow-hidden rounded-md border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => togglePermissionSection(section.id)}
+                        aria-expanded={isOpen}
+                        className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left transition hover:bg-emerald-500/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40"
+                      >
+                        <span className="min-w-0">
+                          <span className="block text-sm font-semibold">
+                            {section.title}
+                          </span>
+                          <span className="mt-1 line-clamp-1 block text-xs leading-5 text-zinc-500">
+                            {section.description}
+                          </span>
+                        </span>
+                        <span className="flex shrink-0 items-center gap-2">
+                          <span className="rounded-full bg-zinc-200/70 px-2 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                            {selectedCount}/{section.options.length}
+                          </span>
+                          <span
+                            className={[
+                              "inline-block text-lg text-zinc-400 transition-transform",
+                              isOpen ? "rotate-90" : "",
+                            ].join(" ")}
+                            aria-hidden="true"
+                          >
+                            ›
+                          </span>
+                        </span>
+                      </button>
+
+                      {isOpen ? (
+                        <div className="grid gap-2 border-t border-zinc-200 p-3 dark:border-zinc-800 md:grid-cols-2">
+                          {section.options.map((capability) => (
+                            <label
+                              key={capability.key}
+                              className={[
+                                "flex min-h-[4.75rem] cursor-pointer items-start gap-3 rounded-md border px-3 py-2 text-sm transition hover:border-emerald-500/70 hover:bg-emerald-500/5",
+                                roleForm.permissions.includes(capability.key)
+                                  ? "border-emerald-500 bg-emerald-500/10"
+                                  : "border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/50",
+                              ].join(" ")}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={roleForm.permissions.includes(
+                                  capability.key,
+                                )}
+                                onChange={(event) =>
+                                  updateRolePermission(
+                                    capability.key,
+                                    event.target.checked,
+                                  )
+                                }
+                                className="mt-1 h-4 w-4 rounded border-zinc-300 text-emerald-500 focus:ring-emerald-500"
+                              />
+                              <span className="min-w-0">
+                                <span className="block font-semibold">
+                                  {capability.label}
+                                </span>
+                                <span className="mt-1 line-clamp-2 block text-xs leading-5 text-zinc-500">
+                                  {capability.description}
+                                </span>
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                      ) : null}
+                    </section>
+                  );
+                })}
               </div>
 
               {roleStatus.type !== "idle" ? (

@@ -28,6 +28,10 @@ export class RolesGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const role = request.user?.role;
 
+    if (role && this.isRestrictedShiftStaffPath(request, role)) {
+      throw new ForbiddenException('Insufficient role permissions');
+    }
+
     if (role && allowedRoles.includes(role)) {
       return true;
     }
@@ -136,6 +140,59 @@ export class RolesGuard implements CanActivate {
     }
 
     return 'manage_guest_game_rules';
+  }
+
+  private isRestrictedShiftStaffPath(
+    request: AuthenticatedRequest,
+    role: UserRole,
+  ) {
+    if (
+      role !== UserRole.SENIOR_ADMINISTRATOR &&
+      role !== UserRole.CLUB_ADMINISTRATOR
+    ) {
+      return false;
+    }
+
+    const path = this.normalizePath(request);
+
+    if (!path.startsWith('/staff')) {
+      return false;
+    }
+
+    const deniedPrefixes = [
+      '/staff/checklists/report',
+      '/staff/checklist-templates',
+      '/staff/task-templates',
+      '/staff/training-profiles',
+      '/staff/readiness-report',
+      '/staff/operations-dashboard',
+      '/staff/administrator-ratings',
+      '/staff/discipline',
+      '/staff/salary',
+      '/staff/directory',
+      '/staff/onboarding',
+      '/staff/ai-assistant',
+    ];
+
+    if (deniedPrefixes.some((prefix) => path.startsWith(prefix))) {
+      return true;
+    }
+
+    const allowedPrefixes = [
+      '/staff/tasks',
+      '/staff/task-rules',
+      '/staff/shift-regulations',
+      '/staff/checklists',
+      '/staff/training-courses',
+      '/staff/assessments',
+      '/staff/knowledge-base',
+      '/staff/shift-workspace',
+      '/staff/team-chat',
+      '/staff/notifications',
+      '/staff/attachments',
+    ];
+
+    return !allowedPrefixes.some((prefix) => path.startsWith(prefix));
   }
 
   private normalizePath(request: AuthenticatedRequest) {

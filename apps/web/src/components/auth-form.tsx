@@ -17,6 +17,7 @@ type AuthFormProps = {
 type FormState = {
   email: string;
   password: string;
+  confirmPassword: string;
   fullName: string;
   organizationName: string;
   tenantSlug: string;
@@ -25,6 +26,7 @@ type FormState = {
 const initialState: FormState = {
   email: "",
   password: "",
+  confirmPassword: "",
   fullName: "",
   organizationName: "",
   tenantSlug: "",
@@ -153,6 +155,12 @@ export function AuthForm({ mode, inviteToken }: AuthFormProps) {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
+
+    if (isRegister && form.password !== form.confirmPassword) {
+      setError("Пароли не совпадают.");
+      return;
+    }
+
     setIsSubmitting(true);
     let keepLoading = false;
 
@@ -165,12 +173,14 @@ export function AuthForm({ mode, inviteToken }: AuthFormProps) {
       ? {
           email: form.email,
           password: form.password,
+          confirmPassword: form.confirmPassword,
           fullName: form.fullName || undefined,
         }
       : isRegister
       ? {
           email: form.email,
           password: form.password,
+          confirmPassword: form.confirmPassword,
           fullName: form.fullName || undefined,
           organizationName: form.organizationName,
           tenantSlug: form.tenantSlug,
@@ -366,6 +376,29 @@ export function AuthForm({ mode, inviteToken }: AuthFormProps) {
           required
         />
       </label>
+
+      {isRegister ? (
+        <label className="block">
+          <span className="text-sm font-medium text-zinc-700">
+            Повторите пароль
+          </span>
+          <input
+            name="confirmPassword"
+            type="password"
+            autoComplete="new-password"
+            value={form.confirmPassword}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                confirmPassword: event.target.value,
+              }))
+            }
+            className="mt-1 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+            placeholder="Введите пароль еще раз"
+            required
+          />
+        </label>
+      ) : null}
 
       {!isRegister ? (
         <label className="flex items-start gap-3 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">

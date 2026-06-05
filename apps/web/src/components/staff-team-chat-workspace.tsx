@@ -887,8 +887,8 @@ export function StaffTeamChatWorkspace({
         </div>
 
         <div className="shrink-0 border-t border-zinc-200/60 bg-transparent p-3 dark:border-zinc-800/60 sm:p-4">
-          <div className="rounded-[28px] bg-zinc-100/90 p-2 shadow-sm ring-1 ring-zinc-200/70 dark:bg-zinc-900/70 dark:ring-zinc-800/70">
-            <div className="flex items-end gap-2">
+          <div className="rounded-[24px] bg-zinc-100/90 shadow-sm ring-1 ring-zinc-200/70 dark:bg-zinc-900/70 dark:ring-zinc-800/70">
+            <div className="flex h-11 items-center gap-2">
               <button
                 type="button"
                 aria-controls="message-format-options"
@@ -911,7 +911,7 @@ export function StaffTeamChatWorkspace({
                     body: event.target.value,
                   }))
                 }
-                className="min-h-11 flex-1 resize-none rounded-full border-0 bg-transparent px-2 py-3 text-sm leading-5 outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
+                className="h-11 min-h-11 flex-1 resize-none overflow-hidden rounded-full border-0 bg-transparent px-2 py-3 text-sm leading-5 outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
                 placeholder="Что нужно передать смене или управляющим?"
               />
               <button

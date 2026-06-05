@@ -664,7 +664,7 @@ export function StaffTeamChatWorkspace({
           </details>
         ) : null}
 
-        <div className="flex-1 space-y-0 overflow-y-auto bg-white dark:bg-zinc-950">
+        <div className="flex-1 space-y-0 overflow-y-auto">
           {report.messages.map((message) => (
             <MessageCard
               key={message.id}
@@ -860,12 +860,12 @@ function MessageCard({
   return (
     <article
       className={[
-        "border-b px-4 py-4 transition last:border-b-0 hover:bg-zinc-50/80 dark:hover:bg-zinc-900/40",
+        "border-b px-4 py-4 transition-colors last:border-b-0",
         message.priority === "URGENT"
-          ? "border-red-200 bg-red-50/40 dark:border-red-500/30 dark:bg-red-500/5"
+          ? "border-red-200 dark:border-red-500/30"
           : message.priority === "HIGH"
-            ? "border-amber-200 bg-amber-50/40 dark:border-amber-500/30 dark:bg-amber-500/5"
-            : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-transparent",
+            ? "border-amber-200 dark:border-amber-500/30"
+            : "border-zinc-200 dark:border-zinc-800",
       ].join(" ")}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -900,7 +900,7 @@ function MessageCard({
             <button
               type="button"
               onClick={() => onOpenTaskDraft(message)}
-              className="rounded-full border border-zinc-200 px-2.5 py-1 text-xs font-semibold text-zinc-500 transition hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-emerald-500 dark:hover:text-emerald-200"
+              className="rounded-full border border-zinc-200 px-2.5 py-1 text-xs font-semibold text-zinc-500 transition-colors hover:border-sky-300 hover:bg-sky-50 hover:text-sky-700 focus-visible:border-sky-400 focus-visible:bg-sky-50 focus-visible:text-sky-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/25 active:border-sky-400 active:bg-sky-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-sky-400/60 dark:hover:bg-sky-500/10 dark:hover:text-sky-200 dark:focus-visible:border-sky-400/70 dark:focus-visible:bg-sky-500/10 dark:focus-visible:text-sky-100 dark:active:bg-sky-500/15"
             >
               Создать задачу
             </button>
@@ -908,7 +908,7 @@ function MessageCard({
           <button
             type="button"
             onClick={() => onTogglePinned(message)}
-            className="rounded-full border border-zinc-200 px-2.5 py-1 text-xs font-semibold text-zinc-500 transition hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-emerald-500 dark:hover:text-emerald-200"
+            className="rounded-full border border-zinc-200 px-2.5 py-1 text-xs font-semibold text-zinc-500 transition-colors hover:border-amber-300 hover:bg-amber-50 hover:text-amber-700 focus-visible:border-amber-400 focus-visible:bg-amber-50 focus-visible:text-amber-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/25 active:border-amber-400 active:bg-amber-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-amber-400/60 dark:hover:bg-amber-500/10 dark:hover:text-amber-200 dark:focus-visible:border-amber-400/70 dark:focus-visible:bg-amber-500/10 dark:focus-visible:text-amber-100 dark:active:bg-amber-500/15"
           >
             {message.isPinned ? "Открепить" : "Закрепить"}
           </button>

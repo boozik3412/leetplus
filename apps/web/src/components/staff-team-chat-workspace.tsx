@@ -339,8 +339,8 @@ export function StaffTeamChatWorkspace({
   }
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
-      <aside className="space-y-4">
+    <div className="grid items-stretch gap-4 lg:min-h-[calc(100vh-15rem)] lg:grid-cols-[320px_minmax(0,1fr)] xl:min-h-[calc(100vh-13rem)]">
+      <aside className="space-y-4 lg:flex lg:flex-col">
         <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -546,8 +546,8 @@ export function StaffTeamChatWorkspace({
         ) : null}
       </aside>
 
-      <section className="min-w-0 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-        <div className="border-b border-zinc-200 p-4 dark:border-zinc-800 sm:p-5">
+      <section className="flex min-h-[620px] min-w-0 flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+        <div className="shrink-0 border-b border-zinc-200 bg-white/95 p-4 dark:border-zinc-800 dark:bg-zinc-950/95 sm:p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
@@ -622,13 +622,13 @@ export function StaffTeamChatWorkspace({
         </div>
 
         {error ? (
-          <div className="mx-4 mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200">
+          <div className="mx-4 mt-4 shrink-0 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200">
             {error}
           </div>
         ) : null}
 
         {success ? (
-          <div className="mx-4 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100">
+          <div className="mx-4 mt-4 flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100">
             <span>{success}</span>
             <Link className="font-semibold underline" href="/staff/tasks">
               Перейти к задачам
@@ -637,7 +637,7 @@ export function StaffTeamChatWorkspace({
         ) : null}
 
         {pinnedMessages.length > 0 ? (
-          <details className="border-b border-zinc-200 px-4 py-3 dark:border-zinc-800 sm:px-5">
+          <details className="shrink-0 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800 sm:px-5">
             <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-zinc-600 transition hover:text-emerald-700 dark:text-zinc-300 dark:hover:text-emerald-200">
               <span>Закреплено</span>
               <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
@@ -664,7 +664,7 @@ export function StaffTeamChatWorkspace({
           </details>
         ) : null}
 
-        <div className="max-h-[650px] space-y-2 overflow-y-auto bg-zinc-50/50 p-4 dark:bg-zinc-950 sm:p-5">
+        <div className="flex-1 space-y-0 overflow-y-auto bg-white dark:bg-zinc-950">
           {report.messages.map((message) => (
             <MessageCard
               key={message.id}
@@ -681,28 +681,28 @@ export function StaffTeamChatWorkspace({
           ))}
 
           {report.messages.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-zinc-300 p-6 text-sm text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+            <div className="m-4 rounded-lg border border-dashed border-zinc-300 p-6 text-sm text-zinc-500 dark:border-zinc-800 dark:text-zinc-400 sm:m-5">
               В этом канале пока нет сообщений. Напишите первое объявление,
               сменный комментарий или инцидент.
             </div>
           ) : null}
         </div>
 
-        <div className="border-t border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950 sm:p-5">
-          <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
+        <div className="shrink-0 border-t border-zinc-200 bg-white/95 p-3 dark:border-zinc-800 dark:bg-zinc-950/95 sm:p-4">
+          <div className="grid gap-2 rounded-2xl border border-zinc-200 bg-zinc-50 p-2 dark:border-zinc-800 dark:bg-zinc-900/40 lg:grid-cols-[1fr_auto]">
             <textarea
               value={form.body}
               onChange={(event) =>
                 setForm((current) => ({ ...current, body: event.target.value }))
               }
-              className="min-h-16 rounded-lg border border-zinc-200 bg-white px-3 py-3 text-sm outline-none transition focus:border-emerald-500 dark:border-zinc-800 dark:bg-zinc-950"
+              className="min-h-12 resize-none rounded-xl border border-transparent bg-transparent px-3 py-2 text-sm outline-none transition placeholder:text-zinc-400 focus:border-emerald-500 focus:bg-white dark:placeholder:text-zinc-500 dark:focus:bg-zinc-950"
               placeholder="Что нужно передать смене или управляющим?"
             />
             <div
               id="message-format-options"
               className={
                 showMessageOptions
-                  ? "order-3 grid gap-2 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40 sm:grid-cols-2 lg:col-span-2 lg:grid-cols-[180px_180px_1fr]"
+                  ? "order-3 grid gap-2 rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950 sm:grid-cols-2 lg:col-span-2 lg:grid-cols-[180px_180px_1fr]"
                   : "hidden"
               }
             >
@@ -755,14 +755,14 @@ export function StaffTeamChatWorkspace({
                 Закрепить
               </label>
             </div>
-            <div className="flex flex-wrap items-start gap-2 lg:w-[260px]">
+            <div className="flex flex-wrap items-start gap-2 lg:w-[230px]">
               <button
                 type="button"
                 aria-controls="message-format-options"
                 aria-expanded={showMessageOptions}
                 onClick={() => setShowMessageOptions((value) => !value)}
                 className={[
-                  "flex h-10 w-10 items-center justify-center rounded-lg border text-xl font-semibold leading-none transition",
+                  "flex h-10 w-10 items-center justify-center rounded-full border text-xl font-semibold leading-none transition",
                   showMessageOptions
                     ? "border-emerald-500 bg-emerald-500 text-zinc-950"
                     : "border-zinc-200 hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-800 dark:hover:border-emerald-500 dark:hover:text-emerald-200",
@@ -774,7 +774,7 @@ export function StaffTeamChatWorkspace({
                 type="button"
                 onClick={sendMessage}
                 disabled={isPending || !activeChannel}
-                className="h-10 flex-1 rounded-lg bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                className="h-10 flex-1 rounded-full bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Отправить
               </button>
@@ -853,20 +853,27 @@ function MessageCard({
 }) {
   const isTaskDraftOpen = taskDraft?.messageId === message.id && !compact;
   const isTaskPending = taskPendingMessageId === message.id;
+  const authorName =
+    message.authorUser?.fullName ?? message.authorUser?.email ?? "LeetPlus";
+  const authorInitial = authorName.trim().slice(0, 1).toUpperCase() || "L";
 
   return (
     <article
       className={[
-        "rounded-2xl border px-4 py-3 shadow-sm transition",
+        "border-b px-4 py-4 transition last:border-b-0 hover:bg-zinc-50/80 dark:hover:bg-zinc-900/40",
         message.priority === "URGENT"
-          ? "border-red-300 bg-white dark:border-red-500/40 dark:bg-zinc-900/70"
+          ? "border-red-200 bg-red-50/40 dark:border-red-500/30 dark:bg-red-500/5"
           : message.priority === "HIGH"
-            ? "border-amber-300 bg-white dark:border-amber-500/40 dark:bg-zinc-900/70"
-            : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/50",
+            ? "border-amber-200 bg-amber-50/40 dark:border-amber-500/30 dark:bg-amber-500/5"
+            : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-transparent",
       ].join(" ")}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-bold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-200">
+            {authorInitial}
+          </div>
+          <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-semibold">
               {message.authorUser?.fullName ??
@@ -886,6 +893,7 @@ function MessageCard({
             {formatDateTime(message.createdAt)}
             {message.store ? ` · ${message.store.name}` : ""}
           </p>
+          </div>
         </div>
         <div className="flex flex-wrap gap-2">
           {!compact ? (
@@ -909,7 +917,7 @@ function MessageCard({
       <p
         className={[
           "whitespace-pre-wrap text-sm leading-6 text-zinc-800 dark:text-zinc-100",
-          compact ? "mt-2 line-clamp-3" : "mt-3",
+          compact ? "mt-2 line-clamp-3" : "mt-3 sm:ml-12",
         ].join(" ")}
       >
         {message.body}

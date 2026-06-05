@@ -22,21 +22,22 @@ export function DashboardQuickSyncButton() {
     setIsSyncing(true);
 
     try {
-      const [assortmentResponse, guestsResponse] = await Promise.all([
-        fetch("/api/integrations/langame/sync", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            mode: "QUICK",
-            catchUp: true,
-          }),
+      const assortmentResponse = await fetch("/api/integrations/langame/sync", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          mode: "QUICK",
+          catchUp: true,
         }),
-        fetch("/api/integrations/langame/guests/foundation/sync/start", {
+      });
+      const guestsResponse = await fetch(
+        "/api/integrations/langame/guests/foundation/sync/start",
+        {
           method: "POST",
-        }),
-      ]);
+        },
+      );
 
       if (!assortmentResponse.ok && !guestsResponse.ok) {
         return;

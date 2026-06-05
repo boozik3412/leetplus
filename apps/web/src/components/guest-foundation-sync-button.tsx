@@ -13,6 +13,18 @@ type SyncButtonStatus =
 type GuestSyncStatus = {
   status: "IDLE" | "RUNNING" | "SUCCESS" | "FAILED";
   running: boolean;
+  freshness: {
+    status: "EMPTY" | "RUNNING" | "FRESH" | "STALE" | "FAILED";
+    ageHours: number | null;
+    latestSuccessfulFinishedAt: string | null;
+    counts: {
+      guests: number;
+      sessions: number;
+      transactions: number;
+      productSalesLinked: number;
+    };
+    nextAction: string;
+  };
   nextRun: {
     dateFrom: string;
     dateTo: string;
@@ -141,11 +153,11 @@ export function GuestFoundationSyncButton({
           : "Синхронизация завершена."
         : status === "error"
           ? latestRun?.errorMessage ?? "Не удалось запустить или завершить синхронизацию."
-          : latestRun
-            ? `Последняя синхронизация: ${formatDateTime(latestRun.finishedAt ?? latestRun.startedAt)} (${formatSyncStatus(latestRun.status)}). Следующий запуск: ${nextRun ? `${formatDateLabel(nextRun.dateFrom)} - ${formatDateLabel(nextRun.dateTo)}` : "период уточняется"}.`
-            : nextRun
-              ? `Следующий запуск: ${formatDateLabel(nextRun.dateFrom)} - ${formatDateLabel(nextRun.dateTo)}.`
-              : "Запустит фоновую синхронизацию гостей из Langame.";
+        : latestRun
+          ? `Последняя синхронизация: ${formatDateTime(latestRun.finishedAt ?? latestRun.startedAt)} (${formatSyncStatus(latestRun.status)}). ${nextRun ? `Следующий запуск: ${formatDateLabel(nextRun.dateFrom)} - ${formatDateLabel(nextRun.dateTo)}.` : "Период уточняется."}`
+          : nextRun
+            ? `Следующий запуск: ${formatDateLabel(nextRun.dateFrom)} - ${formatDateLabel(nextRun.dateTo)}.`
+            : "Запустит фоновую синхронизацию гостей из Langame.";
 
   return (
     <div

@@ -39,6 +39,7 @@ const MAX_OPERATION_LOG_PERIOD_DAYS = 31;
 const STALE_RUNNING_SYNC_MS = 2 * 60 * 60 * 1000;
 const STALE_RUNNING_SYNC_MESSAGE =
   'Синхронизация остановлена: не было завершения больше 2 часов. Запустите повторно.';
+const FRESH_GUEST_SYNC_MS = 24 * 60 * 60 * 1000;
 
 export type GuestDataFoundationSyncQuery = {
   dateFrom?: string;
@@ -57,12 +58,20 @@ export type GuestDataFoundationSyncResult = {
 };
 
 export type GuestDataFoundationStartResult = {
-  status: 'STARTED';
+  status: 'STARTED' | 'ALREADY_RUNNING';
   tenantId: string;
   sources: number;
   dateFrom: string;
   dateTo: string;
+  activeRun: GuestDataFoundationRunStatus | null;
 };
+
+export type GuestDataFoundationFreshnessStatus =
+  | 'EMPTY'
+  | 'RUNNING'
+  | 'FRESH'
+  | 'STALE'
+  | 'FAILED';
 
 export type GuestDataFoundationStatusResult = {
   status: 'IDLE' | 'RUNNING' | 'SUCCESS' | 'FAILED';
@@ -92,6 +101,23 @@ export type GuestDataFoundationStatusResult = {
     };
   } | null;
   recentRuns: GuestDataFoundationRunStatus[];
+  freshness: {
+    status: GuestDataFoundationFreshnessStatus;
+    checkedAt: string;
+    staleAfterHours: number;
+    latestSuccessfulFinishedAt: string | null;
+    ageHours: number | null;
+    lastStatus: string | null;
+    lastErrorMessage: string | null;
+    counts: {
+      guests: number;
+      sessions: number;
+      transactions: number;
+      productSalesLinked: number;
+    };
+    endpointErrorsCount: number;
+    nextAction: string;
+  };
 };
 
 type GuestDataFoundationRunStatus = {
@@ -112,6 +138,21 @@ type GuestDataFoundationRunStatus = {
     pcTypesInClubs: FieldDiagnostics;
     pcTypeLinks: FieldDiagnostics;
   };
+};
+
+type GuestDataFoundationRunStatusSource = {
+  domain: string;
+  status: string;
+  startedAt: Date;
+  finishedAt: Date | null;
+  dateFrom: Date | null;
+  dateTo: Date | null;
+  guestsCount: number;
+  sessionsCount: number;
+  transactionsCount: number;
+  productSalesLinked: number;
+  errorMessage: string | null;
+  profile: Prisma.JsonValue | null;
 };
 
 export type GuestDataFoundationSourceResult = {
@@ -235,6 +276,7 @@ type SourceProfile = {
 @Injectable()
 export class GuestDataFoundationService {
   private readonly logger = new Logger(GuestDataFoundationService.name);
+  private readonly activeBackgroundTenantSyncs = new Set<string>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -249,6 +291,7 @@ export class GuestDataFoundationService {
     query: GuestDataFoundationSyncQuery,
   ): Promise<GuestDataFoundationSyncResult> {
     const { tenantId } = await this.tenantContextService.resolve(user);
+    await this.failStaleRunningRuns(tenantId);
     const { apiKey, sources } =
       await this.langameSettingsService.resolveTenantAccess(tenantId);
     const period = await this.resolvePeriod(tenantId, query);
@@ -346,20 +389,38 @@ export class GuestDataFoundationService {
     const { sources } =
       await this.langameSettingsService.resolveTenantAccess(tenantId);
     const period = await this.resolvePeriod(tenantId, query);
+    const activeRun = await this.findRunningRun(tenantId);
+
+    if (activeRun || this.activeBackgroundTenantSyncs.has(tenantId)) {
+      return {
+        status: 'ALREADY_RUNNING',
+        tenantId,
+        sources: sources.length,
+        dateFrom: period.from,
+        dateTo: period.to,
+        activeRun: activeRun ? this.toProfileRunStatus(activeRun) : null,
+      };
+    }
+
     const syncQuery: GuestDataFoundationSyncQuery = {
       ...query,
       dateFrom: period.from,
       dateTo: period.to,
     };
 
+    this.activeBackgroundTenantSyncs.add(tenantId);
     setImmediate(() => {
-      void this.syncTenant(user, syncQuery).catch((error: unknown) => {
-        const message =
-          error instanceof Error
-            ? error.message
-            : 'Guest background sync failed';
-        this.logger.error(message);
-      });
+      void this.syncTenant(user, syncQuery)
+        .catch((error: unknown) => {
+          const message =
+            error instanceof Error
+              ? error.message
+              : 'Guest background sync failed';
+          this.logger.error(message);
+        })
+        .finally(() => {
+          this.activeBackgroundTenantSyncs.delete(tenantId);
+        });
     });
 
     return {
@@ -368,6 +429,7 @@ export class GuestDataFoundationService {
       sources: sources.length,
       dateFrom: period.from,
       dateTo: period.to,
+      activeRun: null,
     };
   }
 
@@ -377,34 +439,38 @@ export class GuestDataFoundationService {
     const { tenantId } = await this.tenantContextService.resolve(user);
     await this.failStaleRunningRuns(tenantId);
     const nextPeriod = await this.resolvePeriod(tenantId, {});
-    const [runningRun, latestRun, recentRuns] = await Promise.all([
-      this.prisma.guestDataProfileRun.findFirst({
-        where: {
-          tenantId,
-          provider: IntegrationProvider.LANGAME,
-          status: 'RUNNING',
-        },
-        orderBy: { startedAt: 'desc' },
-        select: this.profileRunStatusSelect(),
-      }),
-      this.prisma.guestDataProfileRun.findFirst({
-        where: {
-          tenantId,
-          provider: IntegrationProvider.LANGAME,
-        },
-        orderBy: { startedAt: 'desc' },
-        select: this.profileRunStatusSelect(),
-      }),
-      this.prisma.guestDataProfileRun.findMany({
-        where: {
-          tenantId,
-          provider: IntegrationProvider.LANGAME,
-        },
-        orderBy: { startedAt: 'desc' },
-        take: 10,
-        select: this.profileRunStatusSelect(),
-      }),
-    ]);
+    const checkedAt = new Date();
+    const [runningRun, latestRun, latestSuccessfulRun, recentRuns] =
+      await Promise.all([
+        this.findRunningRun(tenantId),
+        this.prisma.guestDataProfileRun.findFirst({
+          where: {
+            tenantId,
+            provider: IntegrationProvider.LANGAME,
+          },
+          orderBy: { startedAt: 'desc' },
+          select: this.profileRunStatusSelect(),
+        }),
+        this.prisma.guestDataProfileRun.findFirst({
+          where: {
+            tenantId,
+            provider: IntegrationProvider.LANGAME,
+            status: 'SUCCESS',
+            finishedAt: { not: null },
+          },
+          orderBy: { finishedAt: 'desc' },
+          select: this.profileRunStatusSelect(),
+        }),
+        this.prisma.guestDataProfileRun.findMany({
+          where: {
+            tenantId,
+            provider: IntegrationProvider.LANGAME,
+          },
+          orderBy: { startedAt: 'desc' },
+          take: 10,
+          select: this.profileRunStatusSelect(),
+        }),
+      ]);
     const run = runningRun ?? latestRun;
 
     if (!run) {
@@ -419,6 +485,12 @@ export class GuestDataFoundationService {
         },
         latestRun: null,
         recentRuns: [],
+        freshness: this.buildFreshnessStatus({
+          checkedAt,
+          runningRun: null,
+          latestRun: null,
+          latestSuccessfulRun: null,
+        }),
       };
     }
 
@@ -440,7 +512,25 @@ export class GuestDataFoundationService {
       recentRuns: recentRuns.map((recentRun) =>
         this.toProfileRunStatus(recentRun),
       ),
+      freshness: this.buildFreshnessStatus({
+        checkedAt,
+        runningRun,
+        latestRun,
+        latestSuccessfulRun,
+      }),
     };
+  }
+
+  private findRunningRun(tenantId: string) {
+    return this.prisma.guestDataProfileRun.findFirst({
+      where: {
+        tenantId,
+        provider: IntegrationProvider.LANGAME,
+        status: 'RUNNING',
+      },
+      orderBy: { startedAt: 'desc' },
+      select: this.profileRunStatusSelect(),
+    });
   }
 
   async syncComputerCountsForTenant(tenantId: string) {
@@ -542,6 +632,82 @@ export class GuestDataFoundationService {
       ),
       pcTypeLinks: this.fieldDiagnosticsFromProfile(profileRecord.pcTypeLinks),
     };
+  }
+
+  private buildFreshnessStatus({
+    checkedAt,
+    runningRun,
+    latestRun,
+    latestSuccessfulRun,
+  }: {
+    checkedAt: Date;
+    runningRun: GuestDataFoundationRunStatusSource | null;
+    latestRun: GuestDataFoundationRunStatusSource | null;
+    latestSuccessfulRun: GuestDataFoundationRunStatusSource | null;
+  }): GuestDataFoundationStatusResult['freshness'] {
+    const successfulFinishedAt = latestSuccessfulRun?.finishedAt ?? null;
+    const ageMs = successfulFinishedAt
+      ? checkedAt.getTime() - successfulFinishedAt.getTime()
+      : null;
+    const endpointErrors =
+      latestSuccessfulRun?.profile ?? latestRun?.profile ?? null;
+    const endpointErrorsCount = Object.keys(
+      this.statusDiagnosticsFromProfile(endpointErrors).endpointErrors,
+    ).length;
+    const status: GuestDataFoundationFreshnessStatus = runningRun
+      ? 'RUNNING'
+      : !latestRun
+        ? 'EMPTY'
+        : latestRun.status === 'FAILED' && !latestSuccessfulRun
+          ? 'FAILED'
+          : successfulFinishedAt &&
+              ageMs !== null &&
+              ageMs <= FRESH_GUEST_SYNC_MS
+            ? 'FRESH'
+            : successfulFinishedAt
+              ? 'STALE'
+              : latestRun.status === 'FAILED'
+                ? 'FAILED'
+                : 'EMPTY';
+
+    return {
+      status,
+      checkedAt: checkedAt.toISOString(),
+      staleAfterHours: Math.round(FRESH_GUEST_SYNC_MS / 3_600_000),
+      latestSuccessfulFinishedAt: successfulFinishedAt?.toISOString() ?? null,
+      ageHours:
+        ageMs === null ? null : Math.max(0, Math.round(ageMs / 3_600_000)),
+      lastStatus: latestRun?.status ?? null,
+      lastErrorMessage: latestRun?.errorMessage ?? null,
+      counts: {
+        guests: latestSuccessfulRun?.guestsCount ?? 0,
+        sessions: latestSuccessfulRun?.sessionsCount ?? 0,
+        transactions: latestSuccessfulRun?.transactionsCount ?? 0,
+        productSalesLinked: latestSuccessfulRun?.productSalesLinked ?? 0,
+      },
+      endpointErrorsCount,
+      nextAction: this.guestFreshnessNextAction(status),
+    };
+  }
+
+  private guestFreshnessNextAction(status: GuestDataFoundationFreshnessStatus) {
+    if (status === 'RUNNING') {
+      return 'Дождитесь завершения текущей гостевой синхронизации, новый запуск не создается.';
+    }
+
+    if (status === 'FRESH') {
+      return 'Гостевые CRM и геймификация могут работать по сохраненному snapshot.';
+    }
+
+    if (status === 'STALE') {
+      return 'Обновите гостей через /sync перед запуском точных CRM и игровых сценариев.';
+    }
+
+    if (status === 'FAILED') {
+      return 'Разберите ошибку последнего foundation-sync и запустите повторно.';
+    }
+
+    return 'Запустите гостевую foundation-синхронизацию, чтобы заполнить snapshot.';
   }
 
   private guestLogDiagnosticsFromProfile(value: unknown): GuestLogDiagnostics {

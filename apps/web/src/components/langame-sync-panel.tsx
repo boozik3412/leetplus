@@ -21,6 +21,25 @@ type GuestSyncStatus = {
   running: boolean;
   latestRun: GuestSyncRun | null;
   recentRuns: GuestSyncRun[];
+  freshness: GuestSyncFreshness;
+};
+
+type GuestSyncFreshness = {
+  status: "EMPTY" | "RUNNING" | "FRESH" | "STALE" | "FAILED";
+  checkedAt: string;
+  staleAfterHours: number;
+  latestSuccessfulFinishedAt: string | null;
+  ageHours: number | null;
+  lastStatus: string | null;
+  lastErrorMessage: string | null;
+  counts: {
+    guests: number;
+    sessions: number;
+    transactions: number;
+    productSalesLinked: number;
+  };
+  endpointErrorsCount: number;
+  nextAction: string;
 };
 
 type GuestSyncRun = {
@@ -968,20 +987,16 @@ export function LangameSyncPanel({
     setIsSyncing(true);
 
     try {
-      const [assortmentResult, guestResult] = await Promise.allSettled([
-        syncAssortmentData(syncDateFrom, syncDateTo),
-        syncGuestFoundation(syncDateFrom, syncDateTo, includeGuestLogs),
-      ]);
-      const assortment =
-        assortmentResult.status === "fulfilled" ? assortmentResult.value : null;
-      const guests =
-        guestResult.status === "fulfilled" ? guestResult.value : null;
-      const result = {
-        assortment,
-        guests,
-      };
-      setSyncResult(result);
-      setLatestGuestStatus(guests);
+      let assortment: SyncResult | null = null;
+      let guests: GuestSyncStatus | null = null;
+      let assortmentError: unknown = null;
+      let guestError: unknown = null;
+
+      try {
+        assortment = await syncAssortmentData(syncDateFrom, syncDateTo);
+      } catch (error) {
+        assortmentError = error;
+      }
 
       if (!assortment) {
         setAssortmentStatus("error");
@@ -991,6 +1006,23 @@ export function LangameSyncPanel({
         );
       }
 
+      try {
+        guests = await syncGuestFoundation(
+          syncDateFrom,
+          syncDateTo,
+          includeGuestLogs,
+        );
+      } catch (error) {
+        guestError = error;
+      }
+
+      const result = {
+        assortment,
+        guests,
+      };
+      setSyncResult(result);
+      setLatestGuestStatus(guests);
+
       if (guests?.status === "FAILED" || !guests) {
         setGuestStatus("error");
       } else {
@@ -998,12 +1030,10 @@ export function LangameSyncPanel({
       }
 
       if (!assortment || !guests) {
-        const failure = [assortmentResult, guestResult].find(
-          (item) => item.status === "rejected",
-        );
+        const failure = assortmentError ?? guestError;
         setError(
-          failure?.status === "rejected" && failure.reason instanceof Error
-            ? failure.reason.message
+          failure instanceof Error
+            ? failure.message
             : "Синхронизация завершилась не полностью. Проверьте детали ниже.",
         );
       } else if (guests.status === "FAILED") {
@@ -3122,6 +3152,43 @@ function LatestGuestDiagnostics({
           {syncStatusLabel(latestRun.status)}
         </span>
       </div>
+      {status?.freshness ? (
+        <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm dark:border-zinc-800 dark:bg-zinc-900/40">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase text-zinc-500">
+                Свежесть гостевого snapshot
+              </p>
+              <p className="mt-1 text-zinc-700 dark:text-zinc-300">
+                {status.freshness.nextAction}
+              </p>
+            </div>
+            <span
+              className={[
+                "inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold",
+                syncFreshnessTone(status.freshness.status),
+              ].join(" ")}
+            >
+              {syncFreshnessLabel(status.freshness.status)}
+              {status.freshness.ageHours !== null
+                ? ` · ${status.freshness.ageHours} ч`
+                : ""}
+            </span>
+          </div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-4">
+            <Metric label="Гости" value={status.freshness.counts.guests} />
+            <Metric label="Сессии" value={status.freshness.counts.sessions} />
+            <Metric
+              label="Транзакции"
+              value={status.freshness.counts.transactions}
+            />
+            <Metric
+              label="Связанные продажи"
+              value={status.freshness.counts.productSalesLinked}
+            />
+          </div>
+        </div>
+      ) : null}
       <PcDiagnostics diagnostics={latestRun.diagnostics} className="mt-4" />
     </div>
   );
@@ -3971,6 +4038,42 @@ function syncStatusLabel(value: string) {
   }
 
   return value;
+}
+
+function syncFreshnessLabel(value: GuestSyncFreshness["status"]) {
+  if (value === "FRESH") {
+    return "свежий";
+  }
+
+  if (value === "STALE") {
+    return "устарел";
+  }
+
+  if (value === "RUNNING") {
+    return "обновляется";
+  }
+
+  if (value === "FAILED") {
+    return "ошибка";
+  }
+
+  return "нет snapshot";
+}
+
+function syncFreshnessTone(value: GuestSyncFreshness["status"]) {
+  if (value === "FRESH") {
+    return "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200";
+  }
+
+  if (value === "RUNNING" || value === "STALE") {
+    return "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-200";
+  }
+
+  if (value === "FAILED") {
+    return "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200";
+  }
+
+  return "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300";
 }
 
 function getTodayInputValue() {

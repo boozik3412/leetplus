@@ -4,6 +4,10 @@ import { canManageUserAccess } from "./roles";
 export type Capability =
   | "view_dashboard"
   | "view_reports"
+  | "view_assortment_reports"
+  | "view_assortment_products"
+  | "view_assortment_catalog"
+  | "view_assortment_stores"
   | "view_guests"
   | "view_guest_gamification"
   | "manage_guest_game_rules"
@@ -12,6 +16,14 @@ export type Capability =
   | "view_marketing"
   | "view_communications"
   | "view_staff"
+  | "view_staff_shift_workspace"
+  | "view_staff_tasks"
+  | "view_staff_standards"
+  | "view_staff_training"
+  | "view_staff_knowledge"
+  | "view_staff_control"
+  | "view_staff_directory"
+  | "view_staff_salary"
   | "edit_staff_knowledge"
   | "review_staff_knowledge"
   | "publish_staff_knowledge"
@@ -30,6 +42,45 @@ export type CapabilityOption = {
   description: string;
 };
 
+export const staffSectionCapabilities: Capability[] = [
+  "view_staff_shift_workspace",
+  "view_staff_tasks",
+  "view_staff_standards",
+  "view_staff_training",
+  "view_staff_knowledge",
+  "view_staff_control",
+  "view_staff_directory",
+  "view_staff_salary",
+];
+
+export const assortmentSectionCapabilities: Capability[] = [
+  "view_assortment_reports",
+  "view_assortment_products",
+  "view_assortment_catalog",
+  "view_assortment_stores",
+];
+
+const staffKnowledgeWriteCapabilities: Capability[] = [
+  "edit_staff_knowledge",
+  "review_staff_knowledge",
+  "publish_staff_knowledge",
+];
+
+const productEditCapabilities: Capability[] = [
+  "edit_products",
+  "edit_catalog",
+  "edit_stores",
+];
+
+const parentCapabilityChildren: Partial<Record<Capability, Capability[]>> = {
+  view_reports: assortmentSectionCapabilities,
+  view_staff: staffSectionCapabilities,
+  view_staff_knowledge: staffKnowledgeWriteCapabilities,
+  view_assortment_products: ["edit_products"],
+  view_assortment_catalog: ["edit_catalog"],
+  view_assortment_stores: ["edit_stores"],
+};
+
 export const capabilityOptions: CapabilityOption[] = [
   {
     key: "view_dashboard",
@@ -38,9 +89,31 @@ export const capabilityOptions: CapabilityOption[] = [
   },
   {
     key: "view_reports",
-    label: "Отчеты и ассортимент",
+    label: "Отчеты и ассортимент: весь блок",
     description:
-      "Отчеты, ассортиментный блок, матрица, рекомендации и товарные таблицы.",
+      "Широкий доступ ко всем отчетам, ассортиментным сценариям и товарным таблицам.",
+  },
+  {
+    key: "view_assortment_reports",
+    label: "Коммерческие отчеты",
+    description:
+      "OOS, деньги в риске, рекомендации, матрица, план-факт и другие отчеты.",
+  },
+  {
+    key: "view_assortment_products",
+    label: "Товары и SKU",
+    description:
+      "Просмотр товарных карточек, остатков, продаж и ассортиментных связей.",
+  },
+  {
+    key: "view_assortment_catalog",
+    label: "Каталог и справочники",
+    description: "Просмотр категорий, поставщиков и справочников ассортимента.",
+  },
+  {
+    key: "view_assortment_stores",
+    label: "Клубы сети",
+    description: "Просмотр клубов, привязок и сетевого контура.",
   },
   {
     key: "view_guests",
@@ -85,8 +158,53 @@ export const capabilityOptions: CapabilityOption[] = [
   },
   {
     key: "view_staff",
-    label: "Персонал",
-    description: "Задачи, регламенты, чек-листы и контроль администраторов.",
+    label: "Персонал: весь блок",
+    description:
+      "Широкий доступ к задачам, стандартам, обучению, контролю и справочникам персонала.",
+  },
+  {
+    key: "view_staff_shift_workspace",
+    label: "Персонал: рабочее место смены",
+    description:
+      "Тайминг смены, сменные регламенты, личные задачи и рабочий экран администратора.",
+  },
+  {
+    key: "view_staff_tasks",
+    label: "Персонал: задачи и правила",
+    description: "Задачи персонала, правила повторения и шаблоны задач.",
+  },
+  {
+    key: "view_staff_standards",
+    label: "Персонал: регламенты и чек-листы",
+    description:
+      "Регламенты смен, чек-листы, шаблоны чек-листов и вложения стандартов.",
+  },
+  {
+    key: "view_staff_training",
+    label: "Персонал: обучение и аттестация",
+    description:
+      "Курсы, адаптация, аттестации, профили обучения и отчеты готовности.",
+  },
+  {
+    key: "view_staff_knowledge",
+    label: "Персонал: база знаний",
+    description: "Просмотр разрешенных материалов базы знаний.",
+  },
+  {
+    key: "view_staff_control",
+    label: "Персонал: контроль администраторов",
+    description:
+      "Операционный дашборд, рейтинги, предупреждения, штрафы и контроль выполнения.",
+  },
+  {
+    key: "view_staff_directory",
+    label: "Персонал: сотрудники",
+    description: "Справочник сотрудников и карточки администраторов.",
+  },
+  {
+    key: "view_staff_salary",
+    label: "Персонал: зарплата",
+    description: "Оклады, премии, штрафы и расчет выплат администраторам.",
   },
   {
     key: "edit_staff_knowledge",
@@ -140,20 +258,51 @@ export const capabilityOptions: CapabilityOption[] = [
   },
   {
     key: "edit_catalog",
-    label: "Справочники",
-    description: "Категории, поставщики и ассортиментные справочники.",
+    label: "Редактирование справочников",
+    description: "Создание и изменение категорий, поставщиков и справочников.",
   },
   {
     key: "edit_stores",
-    label: "Клубы",
+    label: "Редактирование клубов",
     description: "Создание и изменение клубов сети.",
   },
+];
+
+const validCapabilities = new Set<Capability>(
+  capabilityOptions.map((capability) => capability.key),
+);
+
+const ownerStaffCapabilities: Capability[] = [
+  "view_staff",
+  ...staffSectionCapabilities,
+  ...staffKnowledgeWriteCapabilities,
+];
+
+const shiftStaffCapabilities: Capability[] = [
+  "view_staff",
+  "view_staff_shift_workspace",
+  "view_staff_tasks",
+  "view_staff_standards",
+  "view_staff_training",
+  "view_staff_knowledge",
+];
+
+const standardsManagerStaffCapabilities: Capability[] = [
+  "view_staff",
+  "view_staff_tasks",
+  "view_staff_standards",
+  "view_staff_training",
+  "view_staff_knowledge",
+  "view_staff_control",
+  "view_staff_directory",
+  ...staffKnowledgeWriteCapabilities,
 ];
 
 const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
   OWNER: [
     "view_dashboard",
     "view_reports",
+    ...assortmentSectionCapabilities,
     "view_guests",
     "view_guest_gamification",
     "manage_guest_game_rules",
@@ -161,22 +310,18 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "view_guest_game_pii",
     "view_marketing",
     "view_communications",
-    "view_staff",
-    "edit_staff_knowledge",
-    "review_staff_knowledge",
-    "publish_staff_knowledge",
+    ...ownerStaffCapabilities,
     "manage_users",
     "manage_integrations",
     "run_sync",
     "import_data",
     "use_utilities",
-    "edit_products",
-    "edit_catalog",
-    "edit_stores",
+    ...productEditCapabilities,
   ],
   ADMIN: [
     "view_dashboard",
     "view_reports",
+    ...assortmentSectionCapabilities,
     "view_guests",
     "view_guest_gamification",
     "manage_guest_game_rules",
@@ -184,22 +329,18 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "view_guest_game_pii",
     "view_marketing",
     "view_communications",
-    "view_staff",
-    "edit_staff_knowledge",
-    "review_staff_knowledge",
-    "publish_staff_knowledge",
+    ...ownerStaffCapabilities,
     "manage_users",
     "manage_integrations",
     "run_sync",
     "import_data",
     "use_utilities",
-    "edit_products",
-    "edit_catalog",
-    "edit_stores",
+    ...productEditCapabilities,
   ],
   MANAGER: [
     "view_dashboard",
     "view_reports",
+    ...assortmentSectionCapabilities,
     "view_guests",
     "view_guest_gamification",
     "manage_guest_game_rules",
@@ -207,20 +348,24 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "view_guest_game_pii",
     "view_marketing",
     "view_communications",
-    "view_staff",
-    "edit_staff_knowledge",
-    "review_staff_knowledge",
-    "publish_staff_knowledge",
+    ...ownerStaffCapabilities,
     "import_data",
     "use_utilities",
-    "edit_products",
-    "edit_catalog",
-    "edit_stores",
+    ...productEditCapabilities,
   ],
-  BUYER: ["view_dashboard", "view_reports", "use_utilities", "edit_products"],
+  BUYER: [
+    "view_dashboard",
+    "view_reports",
+    "view_assortment_reports",
+    "view_assortment_products",
+    "view_assortment_catalog",
+    "use_utilities",
+    "edit_products",
+  ],
   MARKETER: [
     "view_dashboard",
     "view_reports",
+    "view_assortment_reports",
     "view_guests",
     "view_guest_gamification",
     "manage_guest_game_rules",
@@ -230,6 +375,7 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
   CLUB_MANAGER: [
     "view_dashboard",
     "view_reports",
+    ...assortmentSectionCapabilities,
     "view_guests",
     "view_guest_gamification",
     "manage_guest_game_rules",
@@ -237,27 +383,15 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "view_guest_game_pii",
     "view_marketing",
     "view_communications",
-    "view_staff",
-    "edit_staff_knowledge",
-    "review_staff_knowledge",
-    "publish_staff_knowledge",
+    ...ownerStaffCapabilities,
   ],
   STANDARDS_MANAGER: [
     "view_dashboard",
     "view_communications",
-    "view_staff",
-    "edit_staff_knowledge",
-    "review_staff_knowledge",
-    "publish_staff_knowledge",
+    ...standardsManagerStaffCapabilities,
   ],
-  SENIOR_ADMINISTRATOR: [
-    "view_communications",
-    "view_staff",
-  ],
-  CLUB_ADMINISTRATOR: [
-    "view_communications",
-    "view_staff",
-  ],
+  SENIOR_ADMINISTRATOR: ["view_communications", ...shiftStaffCapabilities],
+  CLUB_ADMINISTRATOR: ["view_communications", ...shiftStaffCapabilities],
 };
 
 const shiftWorkspaceRoles = new Set<AuthUser["role"]>([
@@ -293,20 +427,41 @@ const shiftStaffDeniedPrefixes = [
   "/staff/ai-assistant",
 ];
 
+function capabilityMatches(owned: Capability, requested: Capability) {
+  if (owned === requested) {
+    return true;
+  }
+
+  if (parentCapabilityChildren[owned]?.includes(requested)) {
+    return true;
+  }
+
+  if (parentCapabilityChildren[requested]?.includes(owned)) {
+    return true;
+  }
+
+  return false;
+}
+
+function getUserPermissions(user: AuthUser) {
+  if (user.permissions) {
+    return user.permissions.filter(
+      (permission): permission is Capability =>
+        validCapabilities.has(permission as Capability),
+    );
+  }
+
+  return roleCapabilities[user.role] ?? [];
+}
+
 export function can(user: AuthUser | null, capability: Capability) {
   if (!user) {
     return false;
   }
 
-  if (user.permissions?.includes(capability)) {
-    return true;
-  }
-
-  if (user.customRoleId) {
-    return false;
-  }
-
-  return roleCapabilities[user.role].includes(capability);
+  return getUserPermissions(user).some((permission) =>
+    capabilityMatches(permission, capability),
+  );
 }
 
 function isShiftWorkspaceRole(user: AuthUser | null) {
@@ -325,6 +480,72 @@ function canAccessShiftStaffPath(href: string) {
   }
 
   return shiftStaffAllowedPrefixes.some((prefix) => path.startsWith(prefix));
+}
+
+function resolveStaffPathCapability(href: string): Capability {
+  const path = href.split("?")[0]?.split("#")[0] ?? href;
+
+  if (path.startsWith("/guests/staff-control")) {
+    return "view_staff_control";
+  }
+
+  if (path.startsWith("/staff/team-chat") || path.startsWith("/staff/notifications")) {
+    return "view_communications";
+  }
+
+  if (path.startsWith("/staff/shift-workspace")) {
+    return "view_staff_shift_workspace";
+  }
+
+  if (
+    path.startsWith("/staff/tasks") ||
+    path.startsWith("/staff/task-rules") ||
+    path.startsWith("/staff/task-templates")
+  ) {
+    return "view_staff_tasks";
+  }
+
+  if (
+    path.startsWith("/staff/shift-regulations") ||
+    path.startsWith("/staff/checklists") ||
+    path.startsWith("/staff/checklist-templates") ||
+    path.startsWith("/staff/attachments")
+  ) {
+    return "view_staff_standards";
+  }
+
+  if (
+    path.startsWith("/staff/training-courses") ||
+    path.startsWith("/staff/training-profiles") ||
+    path.startsWith("/staff/readiness-report") ||
+    path.startsWith("/staff/onboarding") ||
+    path.startsWith("/staff/assessments")
+  ) {
+    return "view_staff_training";
+  }
+
+  if (path.startsWith("/staff/knowledge-base")) {
+    return "view_staff_knowledge";
+  }
+
+  if (
+    path.startsWith("/staff/operations-dashboard") ||
+    path.startsWith("/staff/administrator-ratings") ||
+    path.startsWith("/staff/discipline") ||
+    path.startsWith("/staff/ai-assistant")
+  ) {
+    return "view_staff_control";
+  }
+
+  if (path.startsWith("/staff/directory")) {
+    return "view_staff_directory";
+  }
+
+  if (path.startsWith("/staff/salary")) {
+    return "view_staff_salary";
+  }
+
+  return "view_staff";
 }
 
 export function canAccessPath(user: AuthUser | null, href: string) {
@@ -357,10 +578,10 @@ export function canAccessPath(user: AuthUser | null, href: string) {
 
   if (href.startsWith("/staff") || href.startsWith("/guests/staff-control")) {
     if (isShiftWorkspaceRole(user) && href.startsWith("/staff")) {
-      return can(user, "view_staff") && canAccessShiftStaffPath(href);
+      return can(user, resolveStaffPathCapability(href)) && canAccessShiftStaffPath(href);
     }
 
-    return can(user, "view_staff");
+    return can(user, resolveStaffPathCapability(href));
   }
 
   if (href.startsWith("/marketing")) {
@@ -372,20 +593,23 @@ export function canAccessPath(user: AuthUser | null, href: string) {
   }
 
   if (href.startsWith("/categories") || href.startsWith("/suppliers")) {
-    return can(user, "view_reports") || can(user, "edit_catalog");
+    return can(user, "view_assortment_catalog") || can(user, "edit_catalog");
   }
 
   if (href.startsWith("/stores")) {
-    return can(user, "view_reports") || can(user, "edit_stores");
+    return can(user, "view_assortment_stores") || can(user, "edit_stores");
   }
 
   if (href.startsWith("/products")) {
-    return can(user, "view_reports") || can(user, "edit_products");
+    return can(user, "view_assortment_products") || can(user, "edit_products");
   }
 
   if (href.startsWith("/assortment") || href.startsWith("/reports")) {
     return (
-      can(user, "view_reports") ||
+      can(user, "view_assortment_reports") ||
+      can(user, "view_assortment_products") ||
+      can(user, "view_assortment_catalog") ||
+      can(user, "view_assortment_stores") ||
       can(user, "edit_products") ||
       can(user, "edit_catalog") ||
       can(user, "edit_stores")

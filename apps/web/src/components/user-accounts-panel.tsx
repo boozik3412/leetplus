@@ -76,7 +76,23 @@ const permissionSectionDefinitions: PermissionSectionDefinition[] = [
     id: "overview",
     title: "Общие экраны",
     description: "Первый экран, сеть, показатели и сводные отчеты.",
-    permissions: ["view_dashboard", "view_reports"],
+    permissions: ["view_dashboard"],
+  },
+  {
+    id: "assortment",
+    title: "Отчеты и ассортимент",
+    description:
+      "От общего доступа к блоку до конкретных отчетов, товаров, справочников и клубов.",
+    permissions: [
+      "view_reports",
+      "view_assortment_reports",
+      "view_assortment_products",
+      "view_assortment_catalog",
+      "view_assortment_stores",
+      "edit_products",
+      "edit_catalog",
+      "edit_stores",
+    ],
   },
   {
     id: "guests",
@@ -92,16 +108,31 @@ const permissionSectionDefinitions: PermissionSectionDefinition[] = [
   },
   {
     id: "marketing",
-    title: "Маркетинг и коммуникации",
-    description: "Кампании, промо-наборы, командный чат и уведомления.",
-    permissions: ["view_marketing", "view_communications"],
+    title: "Маркетинг",
+    description: "Кампании, промо-наборы и оценка эффекта.",
+    permissions: ["view_marketing"],
+  },
+  {
+    id: "communications",
+    title: "Коммуникации",
+    description: "Командный чат, уведомления и обзор коммуникаций.",
+    permissions: ["view_communications"],
   },
   {
     id: "staff",
     title: "Персонал и стандарты",
-    description: "Регламенты, чек-листы, обучение и база знаний.",
+    description:
+      "Тонкая настройка рабочих мест, задач, стандартов, обучения, контроля и мотивации.",
     permissions: [
       "view_staff",
+      "view_staff_shift_workspace",
+      "view_staff_tasks",
+      "view_staff_standards",
+      "view_staff_training",
+      "view_staff_knowledge",
+      "view_staff_control",
+      "view_staff_directory",
+      "view_staff_salary",
       "edit_staff_knowledge",
       "review_staff_knowledge",
       "publish_staff_knowledge",
@@ -118,12 +149,6 @@ const permissionSectionDefinitions: PermissionSectionDefinition[] = [
       "import_data",
       "use_utilities",
     ],
-  },
-  {
-    id: "assortment",
-    title: "Ассортимент и справочники",
-    description: "Товары, каталог, клубы и операционные справочники.",
-    permissions: ["edit_products", "edit_catalog", "edit_stores"],
   },
 ];
 

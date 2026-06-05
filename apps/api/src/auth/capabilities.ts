@@ -8,9 +8,31 @@ export const accessCapabilityCatalog = [
   },
   {
     key: 'view_reports',
-    label: 'Отчеты и ассортимент',
+    label: 'Отчеты и ассортимент: весь блок',
     description:
-      'Отчеты, ассортиментный блок, матрица, рекомендации и товарные таблицы.',
+      'Широкий доступ ко всем отчетам, ассортиментным сценариям и товарным таблицам.',
+  },
+  {
+    key: 'view_assortment_reports',
+    label: 'Коммерческие отчеты',
+    description:
+      'OOS, деньги в риске, рекомендации, матрица, план-факт и другие отчеты.',
+  },
+  {
+    key: 'view_assortment_products',
+    label: 'Товары и SKU',
+    description:
+      'Просмотр товарных карточек, остатков, продаж и ассортиментных связей.',
+  },
+  {
+    key: 'view_assortment_catalog',
+    label: 'Каталог и справочники',
+    description: 'Просмотр категорий, поставщиков и справочников ассортимента.',
+  },
+  {
+    key: 'view_assortment_stores',
+    label: 'Клубы сети',
+    description: 'Просмотр клубов, привязок и сетевого контура.',
   },
   {
     key: 'view_guests',
@@ -55,8 +77,53 @@ export const accessCapabilityCatalog = [
   },
   {
     key: 'view_staff',
-    label: 'Персонал',
-    description: 'Задачи, регламенты, чек-листы и контроль администраторов.',
+    label: 'Персонал: весь блок',
+    description:
+      'Широкий доступ к задачам, стандартам, обучению, контролю и справочникам персонала.',
+  },
+  {
+    key: 'view_staff_shift_workspace',
+    label: 'Персонал: рабочее место смены',
+    description:
+      'Тайминг смены, сменные регламенты, личные задачи и рабочий экран администратора.',
+  },
+  {
+    key: 'view_staff_tasks',
+    label: 'Персонал: задачи и правила',
+    description: 'Задачи персонала, правила повторения и шаблоны задач.',
+  },
+  {
+    key: 'view_staff_standards',
+    label: 'Персонал: регламенты и чек-листы',
+    description:
+      'Регламенты смен, чек-листы, шаблоны чек-листов и вложения стандартов.',
+  },
+  {
+    key: 'view_staff_training',
+    label: 'Персонал: обучение и аттестация',
+    description:
+      'Курсы, адаптация, аттестации, профили обучения и отчеты готовности.',
+  },
+  {
+    key: 'view_staff_knowledge',
+    label: 'Персонал: база знаний',
+    description: 'Просмотр разрешенных материалов базы знаний.',
+  },
+  {
+    key: 'view_staff_control',
+    label: 'Персонал: контроль администраторов',
+    description:
+      'Операционный дашборд, рейтинги, предупреждения, штрафы и контроль выполнения.',
+  },
+  {
+    key: 'view_staff_directory',
+    label: 'Персонал: сотрудники',
+    description: 'Справочник сотрудников и карточки администраторов.',
+  },
+  {
+    key: 'view_staff_salary',
+    label: 'Персонал: зарплата',
+    description: 'Оклады, премии, штрафы и расчет выплат администраторам.',
   },
   {
     key: 'edit_staff_knowledge',
@@ -110,12 +177,12 @@ export const accessCapabilityCatalog = [
   },
   {
     key: 'edit_catalog',
-    label: 'Справочники',
-    description: 'Категории, поставщики и ассортиментные справочники.',
+    label: 'Редактирование справочников',
+    description: 'Создание и изменение категорий, поставщиков и справочников.',
   },
   {
     key: 'edit_stores',
-    label: 'Клубы',
+    label: 'Редактирование клубов',
     description: 'Создание и изменение клубов сети.',
   },
 ] as const;
@@ -126,10 +193,78 @@ const validCapabilities = new Set<string>(
   accessCapabilityCatalog.map((capability) => capability.key),
 );
 
+const staffSectionCapabilities: AccessCapability[] = [
+  'view_staff_shift_workspace',
+  'view_staff_tasks',
+  'view_staff_standards',
+  'view_staff_training',
+  'view_staff_knowledge',
+  'view_staff_control',
+  'view_staff_directory',
+  'view_staff_salary',
+];
+
+const assortmentSectionCapabilities: AccessCapability[] = [
+  'view_assortment_reports',
+  'view_assortment_products',
+  'view_assortment_catalog',
+  'view_assortment_stores',
+];
+
+const staffKnowledgeWriteCapabilities: AccessCapability[] = [
+  'edit_staff_knowledge',
+  'review_staff_knowledge',
+  'publish_staff_knowledge',
+];
+
+const productEditCapabilities: AccessCapability[] = [
+  'edit_products',
+  'edit_catalog',
+  'edit_stores',
+];
+
+const parentCapabilityChildren: Partial<
+  Record<AccessCapability, AccessCapability[]>
+> = {
+  view_reports: assortmentSectionCapabilities,
+  view_staff: staffSectionCapabilities,
+  view_staff_knowledge: staffKnowledgeWriteCapabilities,
+  view_assortment_products: ['edit_products'],
+  view_assortment_catalog: ['edit_catalog'],
+  view_assortment_stores: ['edit_stores'],
+};
+
+const ownerStaffCapabilities: AccessCapability[] = [
+  'view_staff',
+  ...staffSectionCapabilities,
+  ...staffKnowledgeWriteCapabilities,
+];
+
+const shiftStaffCapabilities: AccessCapability[] = [
+  'view_staff',
+  'view_staff_shift_workspace',
+  'view_staff_tasks',
+  'view_staff_standards',
+  'view_staff_training',
+  'view_staff_knowledge',
+];
+
+const standardsManagerStaffCapabilities: AccessCapability[] = [
+  'view_staff',
+  'view_staff_tasks',
+  'view_staff_standards',
+  'view_staff_training',
+  'view_staff_knowledge',
+  'view_staff_control',
+  'view_staff_directory',
+  ...staffKnowledgeWriteCapabilities,
+];
+
 export const roleCapabilities: Record<UserRole, AccessCapability[]> = {
   [UserRole.OWNER]: [
     'view_dashboard',
     'view_reports',
+    ...assortmentSectionCapabilities,
     'view_guests',
     'view_guest_gamification',
     'manage_guest_game_rules',
@@ -137,22 +272,18 @@ export const roleCapabilities: Record<UserRole, AccessCapability[]> = {
     'view_guest_game_pii',
     'view_marketing',
     'view_communications',
-    'view_staff',
-    'edit_staff_knowledge',
-    'review_staff_knowledge',
-    'publish_staff_knowledge',
+    ...ownerStaffCapabilities,
     'manage_users',
     'manage_integrations',
     'run_sync',
     'import_data',
     'use_utilities',
-    'edit_products',
-    'edit_catalog',
-    'edit_stores',
+    ...productEditCapabilities,
   ],
   [UserRole.ADMIN]: [
     'view_dashboard',
     'view_reports',
+    ...assortmentSectionCapabilities,
     'view_guests',
     'view_guest_gamification',
     'manage_guest_game_rules',
@@ -160,22 +291,18 @@ export const roleCapabilities: Record<UserRole, AccessCapability[]> = {
     'view_guest_game_pii',
     'view_marketing',
     'view_communications',
-    'view_staff',
-    'edit_staff_knowledge',
-    'review_staff_knowledge',
-    'publish_staff_knowledge',
+    ...ownerStaffCapabilities,
     'manage_users',
     'manage_integrations',
     'run_sync',
     'import_data',
     'use_utilities',
-    'edit_products',
-    'edit_catalog',
-    'edit_stores',
+    ...productEditCapabilities,
   ],
   [UserRole.MANAGER]: [
     'view_dashboard',
     'view_reports',
+    ...assortmentSectionCapabilities,
     'view_guests',
     'view_guest_gamification',
     'manage_guest_game_rules',
@@ -183,25 +310,24 @@ export const roleCapabilities: Record<UserRole, AccessCapability[]> = {
     'view_guest_game_pii',
     'view_marketing',
     'view_communications',
-    'view_staff',
-    'edit_staff_knowledge',
-    'review_staff_knowledge',
-    'publish_staff_knowledge',
+    ...ownerStaffCapabilities,
     'import_data',
     'use_utilities',
-    'edit_products',
-    'edit_catalog',
-    'edit_stores',
+    ...productEditCapabilities,
   ],
   [UserRole.BUYER]: [
     'view_dashboard',
     'view_reports',
+    'view_assortment_reports',
+    'view_assortment_products',
+    'view_assortment_catalog',
     'use_utilities',
     'edit_products',
   ],
   [UserRole.MARKETER]: [
     'view_dashboard',
     'view_reports',
+    'view_assortment_reports',
     'view_guests',
     'view_guest_gamification',
     'manage_guest_game_rules',
@@ -211,6 +337,7 @@ export const roleCapabilities: Record<UserRole, AccessCapability[]> = {
   [UserRole.CLUB_MANAGER]: [
     'view_dashboard',
     'view_reports',
+    ...assortmentSectionCapabilities,
     'view_guests',
     'view_guest_gamification',
     'manage_guest_game_rules',
@@ -218,21 +345,21 @@ export const roleCapabilities: Record<UserRole, AccessCapability[]> = {
     'view_guest_game_pii',
     'view_marketing',
     'view_communications',
-    'view_staff',
-    'edit_staff_knowledge',
-    'review_staff_knowledge',
-    'publish_staff_knowledge',
+    ...ownerStaffCapabilities,
   ],
   [UserRole.STANDARDS_MANAGER]: [
     'view_dashboard',
     'view_communications',
-    'view_staff',
-    'edit_staff_knowledge',
-    'review_staff_knowledge',
-    'publish_staff_knowledge',
+    ...standardsManagerStaffCapabilities,
   ],
-  [UserRole.SENIOR_ADMINISTRATOR]: ['view_communications', 'view_staff'],
-  [UserRole.CLUB_ADMINISTRATOR]: ['view_communications', 'view_staff'],
+  [UserRole.SENIOR_ADMINISTRATOR]: [
+    'view_communications',
+    ...shiftStaffCapabilities,
+  ],
+  [UserRole.CLUB_ADMINISTRATOR]: [
+    'view_communications',
+    ...shiftStaffCapabilities,
+  ],
 };
 
 export function normalizeCapabilities(
@@ -266,11 +393,34 @@ export function resolveUserCapabilities(input: {
   return roleCapabilities[input.role] ?? [];
 }
 
+function capabilityMatches(
+  owned: AccessCapability,
+  requested: AccessCapability,
+) {
+  if (owned === requested) {
+    return true;
+  }
+
+  if (parentCapabilityChildren[owned]?.includes(requested)) {
+    return true;
+  }
+
+  if (parentCapabilityChildren[requested]?.includes(owned)) {
+    return true;
+  }
+
+  return false;
+}
+
 export function hasCapability(
   user: { permissions?: AccessCapability[] } | null | undefined,
   capability: AccessCapability,
 ) {
-  return Boolean(user?.permissions?.includes(capability));
+  return Boolean(
+    user?.permissions?.some((permission) =>
+      capabilityMatches(permission, capability),
+    ),
+  );
 }
 
 export function hasAnyCapability(

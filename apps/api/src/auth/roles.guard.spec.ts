@@ -189,6 +189,66 @@ describe('RolesGuard', () => {
     ).toThrow(ForbiddenException);
   });
 
+  it('allows custom roles to open only selected staff subsections', () => {
+    reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
+
+    expect(
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/staff/tasks',
+          user: {
+            role: UserRole.CLUB_ADMINISTRATOR,
+            permissions: ['view_staff_tasks'],
+          },
+        }),
+      ),
+    ).toBe(true);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/staff/salary',
+          user: {
+            role: UserRole.CLUB_ADMINISTRATOR,
+            permissions: ['view_staff_tasks'],
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('maps assortment routes to granular report capabilities', () => {
+    reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
+
+    expect(
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/products',
+          user: {
+            role: UserRole.CLUB_ADMINISTRATOR,
+            permissions: ['view_assortment_products'],
+          },
+        }),
+      ),
+    ).toBe(true);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/reports/oos',
+          user: {
+            role: UserRole.CLUB_ADMINISTRATOR,
+            permissions: ['view_assortment_products'],
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
   it('keeps CRM contact tasks behind guest access', () => {
     reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
 

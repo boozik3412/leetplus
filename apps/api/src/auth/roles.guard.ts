@@ -71,19 +71,19 @@ export class RolesGuard implements CanActivate {
     }
 
     if (path.startsWith('/reports')) {
-      return 'view_reports';
+      return 'view_assortment_reports';
     }
 
     if (path.startsWith('/products')) {
-      return method === 'GET' ? 'view_reports' : 'edit_products';
+      return method === 'GET' ? 'view_assortment_products' : 'edit_products';
     }
 
     if (path.startsWith('/categories') || path.startsWith('/suppliers')) {
-      return method === 'GET' ? 'view_reports' : 'edit_catalog';
+      return method === 'GET' ? 'view_assortment_catalog' : 'edit_catalog';
     }
 
     if (path.startsWith('/stores')) {
-      return method === 'GET' ? 'view_reports' : 'edit_stores';
+      return method === 'GET' ? 'view_assortment_stores' : 'edit_stores';
     }
 
     if (path.startsWith('/guests/gamification')) {
@@ -91,7 +91,7 @@ export class RolesGuard implements CanActivate {
     }
 
     if (path.startsWith('/guests/staff-control')) {
-      return 'view_staff';
+      return 'view_staff_control';
     }
 
     if (path.startsWith('/guests')) {
@@ -110,10 +110,73 @@ export class RolesGuard implements CanActivate {
     }
 
     if (path.startsWith('/staff')) {
-      return 'view_staff';
+      return this.resolveStaffCapability(path);
     }
 
     return null;
+  }
+
+  private resolveStaffCapability(path: string): AccessCapability {
+    if (
+      path.startsWith('/staff/team-chat') ||
+      path.startsWith('/staff/notifications')
+    ) {
+      return 'view_communications';
+    }
+
+    if (path.startsWith('/staff/shift-workspace')) {
+      return 'view_staff_shift_workspace';
+    }
+
+    if (
+      path.startsWith('/staff/tasks') ||
+      path.startsWith('/staff/task-rules') ||
+      path.startsWith('/staff/task-templates')
+    ) {
+      return 'view_staff_tasks';
+    }
+
+    if (
+      path.startsWith('/staff/shift-regulations') ||
+      path.startsWith('/staff/checklists') ||
+      path.startsWith('/staff/checklist-templates') ||
+      path.startsWith('/staff/attachments')
+    ) {
+      return 'view_staff_standards';
+    }
+
+    if (
+      path.startsWith('/staff/training-courses') ||
+      path.startsWith('/staff/training-profiles') ||
+      path.startsWith('/staff/readiness-report') ||
+      path.startsWith('/staff/onboarding') ||
+      path.startsWith('/staff/assessments')
+    ) {
+      return 'view_staff_training';
+    }
+
+    if (path.startsWith('/staff/knowledge-base')) {
+      return 'view_staff_knowledge';
+    }
+
+    if (
+      path.startsWith('/staff/operations-dashboard') ||
+      path.startsWith('/staff/administrator-ratings') ||
+      path.startsWith('/staff/discipline') ||
+      path.startsWith('/staff/ai-assistant')
+    ) {
+      return 'view_staff_control';
+    }
+
+    if (path.startsWith('/staff/directory')) {
+      return 'view_staff_directory';
+    }
+
+    if (path.startsWith('/staff/salary')) {
+      return 'view_staff_salary';
+    }
+
+    return 'view_staff';
   }
 
   private resolveGuestGamificationCapability(

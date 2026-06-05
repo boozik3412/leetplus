@@ -1,6 +1,7 @@
 import { getApiUrl, getAuthHeaders } from "./api";
 import { redirect } from "next/navigation";
 import { getDefaultLandingPath } from "./landing";
+import { cache } from "react";
 
 export type AuthUser = {
   id: string;
@@ -30,7 +31,7 @@ export type AuthResponse = {
   user: AuthUser;
 };
 
-export async function getCurrentUser(): Promise<AuthUser | null> {
+async function fetchCurrentUser(): Promise<AuthUser | null> {
   const headers = await getAuthHeaders();
 
   if (!("Authorization" in headers)) {
@@ -49,8 +50,14 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
   return response.json() as Promise<AuthUser>;
 }
 
+export async function getCurrentUser(): Promise<AuthUser | null> {
+  return fetchCurrentUser();
+}
+
+export const getCurrentUserForRequest = cache(fetchCurrentUser);
+
 export async function redirectIfAuthenticated() {
-  const user = await getCurrentUser();
+  const user = await getCurrentUserForRequest();
 
   if (user) {
     redirect(getDefaultLandingPath(user));
@@ -58,7 +65,7 @@ export async function redirectIfAuthenticated() {
 }
 
 export async function requireCurrentUser() {
-  const user = await getCurrentUser();
+  const user = await getCurrentUserForRequest();
 
   if (!user) {
     redirect("/login");

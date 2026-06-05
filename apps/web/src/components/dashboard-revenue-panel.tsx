@@ -67,7 +67,7 @@ export function DashboardRevenuePanel({
           fullReportHref={fullReportHref}
         />
       ) : (
-        <div className="flex gap-3 overflow-x-auto pb-1 min-[1250px]:grid min-[1250px]:grid-cols-2 min-[1250px]:overflow-visible min-[1250px]:pb-0">
+        <div className="grid min-w-0 gap-3 sm:grid-cols-2">
           <HeroMetric
             label="Общая выручка"
             value={formatMoney(totalClubRevenue)}
@@ -367,7 +367,7 @@ function HeroMetric({
   return (
     <div
       className={[
-        "flex min-w-[220px] flex-1 flex-col rounded-3xl border p-5 min-[1250px]:min-w-0",
+        "flex min-w-0 flex-col rounded-2xl border p-4 sm:rounded-3xl sm:p-5",
         tone === "good"
           ? "border-emerald-200 bg-emerald-50 text-emerald-950 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-100"
           : tone === "warning"
@@ -376,7 +376,7 @@ function HeroMetric({
       ].join(" ")}
     >
       <p className="text-sm opacity-70">{label}</p>
-      <p className="mt-3 whitespace-nowrap text-2xl font-semibold tabular-nums min-[1250px]:text-3xl">
+      <p className="mt-3 text-2xl font-semibold tabular-nums min-[1250px]:text-3xl">
         {value}
       </p>
       <p className="mt-2 text-sm opacity-70">{caption}</p>

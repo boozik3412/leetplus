@@ -236,9 +236,9 @@ export function DashboardFilters({
     <section
       ref={rootRef}
       aria-busy={isPending}
-      className="relative z-30 inline-flex max-w-full"
+      className="relative z-30 flex w-full max-w-full lg:inline-flex lg:w-auto"
     >
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
         <FilterButton
           label="Период"
           value={selectedPeriodLabel}
@@ -398,7 +398,7 @@ function FilterButton({
       aria-label={`${label}: ${value}`}
       onClick={onClick}
       className={[
-        "inline-flex items-center justify-between gap-2 rounded-full border px-3 py-2 text-left text-sm transition-colors",
+        "inline-flex w-full min-w-0 items-center justify-between gap-2 rounded-full border px-3 py-2 text-left text-sm transition-colors sm:w-auto",
         isOpen
           ? "border-zinc-950 bg-zinc-950 text-white dark:border-emerald-400 dark:bg-emerald-400 dark:text-zinc-950"
           : "border-zinc-200 bg-zinc-50/80 text-zinc-950 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-50 dark:hover:bg-zinc-900",

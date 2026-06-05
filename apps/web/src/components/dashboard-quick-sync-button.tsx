@@ -55,14 +55,14 @@ export function DashboardQuickSyncButton() {
   }
 
   return (
-    <span className="relative inline-flex items-center gap-2">
+    <span className="relative inline-flex w-full items-center gap-2 lg:w-auto">
       <button
         type="button"
         onClick={quickSync}
         disabled={isSyncing}
         title={quickSyncTitle}
         aria-label={quickSyncTitle}
-        className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold leading-5 text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100 disabled:cursor-wait disabled:opacity-70 dark:border-emerald-900/70 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:border-emerald-800"
+        className="inline-flex w-full items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold leading-5 text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100 disabled:cursor-wait disabled:opacity-70 lg:w-auto dark:border-emerald-900/70 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:border-emerald-800"
       >
         {isSyncing ? "Обновление..." : "Обновить данные"}
       </button>

@@ -15,6 +15,7 @@ import { getOperationalReport, type OperationalReport } from "@/lib/reports";
 import { getStores } from "@/lib/stores";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
 
@@ -474,6 +475,80 @@ export default async function DashboardPage({
     getDashboardSummary(filters),
     getStores(),
   ]);
+  const highlightedPeriod = formatDashboardPeriodLabel(
+    summary.periodFrom,
+    summary.periodTo,
+  );
+  const totalClubRevenue = summary.clubRevenue;
+  const revenueByClubHref = dashboardRevenueByClubHref({
+    ...filters,
+    dateFrom: summary.periodFrom,
+    dateTo: summary.periodTo,
+  });
+
+  return (
+    <main className="px-4 py-5 text-zinc-950 sm:px-6 sm:py-8 dark:text-zinc-100">
+      <div className="mx-auto max-w-7xl">
+        <section className="overflow-visible rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="grid min-w-0 gap-5 p-4 min-[1250px]:grid-cols-[1.1fr_0.9fr] sm:p-5 lg:p-8">
+            <div className="min-w-0">
+              <div className="flex flex-col items-stretch gap-2 lg:flex-row lg:flex-wrap lg:items-center">
+                <DashboardFilters
+                  period={filters.period}
+                  dateFrom={summary.periodFrom}
+                  dateTo={summary.periodTo}
+                  stores={stores}
+                  selectedStoreIds={summary.selectedStoreIds}
+                />
+                <DashboardQuickSyncButton />
+              </div>
+              <h1 className="mt-4 max-w-3xl text-3xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50 min-[1250px]:text-4xl">
+                {summary.tenantName}: сводный дашборд сети
+              </h1>
+              <p className="mt-4 max-w-2xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+                Период -{" "}
+                <span className="font-semibold text-zinc-950 dark:text-zinc-50">
+                  {highlightedPeriod}
+                </span>
+                . Первый экран соединяет деньги, гостей, ассортимент и игровую
+                загрузку, чтобы быстро понять, где сеть зарабатывает и где теряет
+                потенциал.
+              </p>
+            </div>
+
+            <DashboardRevenuePanel
+              initialView={revenueView}
+              totalClubRevenue={totalClubRevenue}
+              unallocatedTopupRevenue={summary.unallocatedTopupRevenue}
+              adjustedGrossProfit={summary.adjustedGrossProfit}
+              grossProfit={summary.grossProfit}
+              adjustedMarginPercent={summary.adjustedMarginPercent}
+              fullDayRevenueDate={summary.fullDayRevenueDate}
+              fullDayRevenue={summary.fullDayRevenue}
+              fullDayRevenueToAveragePercent={
+                summary.fullDayRevenueToAveragePercent
+              }
+              writeOffRevenuePercent={summary.writeOffRevenuePercent}
+              writeOffRevenuePercentDelta={summary.writeOffRevenuePercentDelta}
+              storeRevenueBreakdown={summary.storeRevenueBreakdown}
+              fullReportHref={revenueByClubHref}
+            />
+          </div>
+        </section>
+
+        <Suspense fallback={<DashboardSecondaryPanelsSkeleton />}>
+          <DashboardSecondaryPanels summary={summary} />
+        </Suspense>
+      </div>
+    </main>
+  );
+}
+
+async function DashboardSecondaryPanels({
+  summary,
+}: {
+  summary: Awaited<ReturnType<typeof getDashboardSummary>>;
+}) {
   const operationalStoreId =
     summary.selectedStoreIds.length === 1
       ? summary.selectedStoreIds[0]
@@ -521,15 +596,10 @@ export default async function DashboardPage({
     oosRows: periodOperationalReport.outOfStockRiskProducts,
     noSalesRows: noSalesReport21.productsWithoutSales,
   });
-  const highlightedPeriod = formatDashboardPeriodLabel(
-    summary.periodFrom,
-    summary.periodTo,
-  );
   const latestTrend = summary.salesTrend.at(-1) ?? null;
-  const totalClubRevenue = summary.clubRevenue;
   const productRevenueShare = ratioPercent(
     summary.totalRevenue,
-    totalClubRevenue,
+    summary.clubRevenue,
   );
   const businessSignalGroups = buildBusinessSignalGroups({
     summary,
@@ -541,75 +611,57 @@ export default async function DashboardPage({
       assortmentRisk.oosSkuCount + assortmentRisk.noSalesSkuCount,
     productRevenueShare,
   });
-  const revenueByClubHref = dashboardRevenueByClubHref({
-    ...filters,
-    dateFrom: summary.periodFrom,
-    dateTo: summary.periodTo,
-  });
 
   return (
-    <main className="px-6 py-8 text-zinc-950 dark:text-zinc-100">
-      <div className="mx-auto max-w-7xl">
-        <section className="overflow-visible rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-          <div className="grid gap-6 p-5 min-[1250px]:grid-cols-[1.1fr_0.9fr] lg:p-8">
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <DashboardFilters
-                  period={filters.period}
-                  dateFrom={summary.periodFrom}
-                  dateTo={summary.periodTo}
-                  stores={stores}
-                  selectedStoreIds={summary.selectedStoreIds}
-                />
-                <DashboardQuickSyncButton />
-              </div>
-              <h1 className="mt-3 max-w-3xl text-3xl font-semibold tracking-tight text-zinc-950 dark:text-zinc-50 min-[1250px]:text-4xl">
-                {summary.tenantName}: сводный дашборд сети
-              </h1>
-              <p className="mt-4 max-w-2xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                Период -{" "}
-                <span className="font-semibold text-zinc-950 dark:text-zinc-50">
-                  {highlightedPeriod}
-                </span>
-                . Первый экран соединяет деньги, гостей, ассортимент и игровую
-                загрузку, чтобы быстро понять, где сеть зарабатывает и где теряет
-                потенциал.
+    <>
+      <ExecutiveOverviewPanel
+        summary={summary}
+        guestsSummary={guestsSummary}
+        assortmentRiskAmount={assortmentRisk.totalRiskAmount}
+        assortmentRiskSkuCount={
+          assortmentRisk.oosSkuCount + assortmentRisk.noSalesSkuCount
+        }
+        productRevenueShare={productRevenueShare}
+      />
+
+      <BusinessSignalPanel groups={businessSignalGroups} />
+    </>
+  );
+}
+
+function DashboardSecondaryPanelsSkeleton() {
+  return (
+    <>
+      <section className="mt-6 grid auto-rows-fr items-stretch gap-4 lg:grid-cols-3">
+        {["Клиентская база", "Маркетинг и загрузка", "Ассортимент"].map(
+          (label) => (
+            <div
+              key={label}
+              className="min-h-[172px] rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
+            >
+              <p className="text-xs font-semibold uppercase text-zinc-500">
+                {label}
               </p>
+              <div className="mt-5 h-8 w-28 rounded-full bg-zinc-100 dark:bg-zinc-900" />
+              <div className="mt-8 h-4 w-full max-w-xs rounded-full bg-zinc-100 dark:bg-zinc-900" />
             </div>
-
-            <DashboardRevenuePanel
-              initialView={revenueView}
-              totalClubRevenue={totalClubRevenue}
-              unallocatedTopupRevenue={summary.unallocatedTopupRevenue}
-              adjustedGrossProfit={summary.adjustedGrossProfit}
-              grossProfit={summary.grossProfit}
-              adjustedMarginPercent={summary.adjustedMarginPercent}
-              fullDayRevenueDate={summary.fullDayRevenueDate}
-              fullDayRevenue={summary.fullDayRevenue}
-              fullDayRevenueToAveragePercent={
-                summary.fullDayRevenueToAveragePercent
-              }
-              writeOffRevenuePercent={summary.writeOffRevenuePercent}
-              writeOffRevenuePercentDelta={summary.writeOffRevenuePercentDelta}
-              storeRevenueBreakdown={summary.storeRevenueBreakdown}
-              fullReportHref={revenueByClubHref}
+          ),
+        )}
+      </section>
+      <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+        <p className="text-xs font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
+          Рабочие сценарии
+        </p>
+        <div className="mt-4 grid gap-4 lg:grid-cols-3">
+          {[1, 2, 3].map((item) => (
+            <div
+              key={item}
+              className="h-44 rounded-lg border border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/40"
             />
-          </div>
-        </section>
-
-        <ExecutiveOverviewPanel
-          summary={summary}
-          guestsSummary={guestsSummary}
-          assortmentRiskAmount={assortmentRisk.totalRiskAmount}
-          assortmentRiskSkuCount={
-            assortmentRisk.oosSkuCount + assortmentRisk.noSalesSkuCount
-          }
-          productRevenueShare={productRevenueShare}
-        />
-
-        <BusinessSignalPanel groups={businessSignalGroups} />
-      </div>
-    </main>
+          ))}
+        </div>
+      </section>
+    </>
   );
 }
 

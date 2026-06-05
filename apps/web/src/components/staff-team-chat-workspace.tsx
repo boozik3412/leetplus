@@ -96,8 +96,10 @@ function getChannelReadSnapshot(channel: StaffChatChannel) {
 
 export function StaffTeamChatWorkspace({
   report,
+  requestedChannelId,
 }: {
   report: StaffTeamChatReport;
+  requestedChannelId: string | null;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -116,7 +118,7 @@ export function StaffTeamChatWorkspace({
     Record<string, string>
   >({});
   const autoReadSignatureRef = useRef<string | null>(null);
-  const selectedChannelId = report.filters.channelId;
+  const selectedChannelId = requestedChannelId;
   const activeChannel = useMemo(() => {
     if (!selectedChannelId) {
       return null;

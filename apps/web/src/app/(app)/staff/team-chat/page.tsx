@@ -37,6 +37,7 @@ export default async function StaffTeamChatPage({
   const canViewStaff = can(user, "view_staff");
 
   const params = await searchParams;
+  const requestedChannelId = searchParam(params.channelId) ?? null;
   const report = await getStaffTeamChatReport(resolveFilters(params));
 
   return (
@@ -82,7 +83,10 @@ export default async function StaffTeamChatPage({
         </div>
 
         <div className="mt-6">
-          <StaffTeamChatWorkspace report={report} />
+          <StaffTeamChatWorkspace
+            report={report}
+            requestedChannelId={requestedChannelId}
+          />
         </div>
       </div>
     </main>

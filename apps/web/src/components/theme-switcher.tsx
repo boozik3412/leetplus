@@ -20,6 +20,12 @@ export function ThemeSwitcher({
   const isCompact = variant === "compact";
   const activeLabel =
     themeOptions.find((option) => option.value === theme)?.label ?? "Тема";
+  const menuClassName = [
+    "absolute z-[90] w-44 overflow-hidden rounded-2xl border border-zinc-200 bg-white p-1 shadow-xl shadow-zinc-950/10 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/40",
+    isCompact
+      ? "bottom-[calc(100%+0.5rem)] left-0"
+      : "right-0 top-[calc(100%+0.5rem)]",
+  ].join(" ");
 
   useEffect(() => {
     if (!isOpen) {
@@ -69,7 +75,7 @@ export function ThemeSwitcher({
       </button>
 
       {isOpen ? (
-        <div className="absolute right-0 top-[calc(100%+0.5rem)] z-30 w-44 overflow-hidden rounded-2xl border border-zinc-200 bg-white p-1 shadow-xl shadow-zinc-950/10 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/40">
+        <div className={menuClassName}>
           {themeOptions.map((option) => {
             const isActive = theme === option.value;
 

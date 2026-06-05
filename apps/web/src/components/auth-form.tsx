@@ -219,14 +219,13 @@ export function AuthForm({ mode, inviteToken }: AuthFormProps) {
 
       keepLoading = true;
       setIsRedirecting(true);
-      router.push(
+      router.replace(
         isInviteRegister
           ? landingPath
           : isRegister
           ? `/verify-email?email=${encodeURIComponent(form.email)}`
           : landingPath,
       );
-      router.refresh();
     } catch {
       setError("Backend недоступен. Проверьте, что API запущен.");
     } finally {

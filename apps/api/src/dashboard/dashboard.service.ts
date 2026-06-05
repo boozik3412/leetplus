@@ -60,6 +60,49 @@ export type DashboardStoreRevenueMetric = {
   productRevenueSharePercent: number | null;
 };
 
+export type DashboardRevenueSource =
+  | 'SNAPSHOT'
+  | 'BALANCE_OPERATIONS'
+  | 'TRANSACTIONS'
+  | 'PRODUCTS'
+  | 'EMPTY';
+
+export type DashboardRevenueTrustLevel = 'HIGH' | 'MEDIUM' | 'LOW';
+
+export type DashboardRevenueBreakdown = {
+  networkRevenue: number;
+  allocatedClubRevenue: number;
+  productRevenue: number;
+  balanceOperationRevenue: number;
+  transactionSpendRevenue: number;
+  unallocatedTopupRevenue: number;
+  shiftCashRevenue: number;
+  primarySource: DashboardRevenueSource;
+  formula: string;
+  sourceCounts: {
+    productSales: number;
+    operationSpends: number;
+    operationTopups: number;
+    transactions: number;
+    workingShifts: number;
+  };
+};
+
+export type DashboardRevenueSnapshot = {
+  status: 'FRESH' | 'STALE' | 'MISSING' | 'FAILED';
+  generatedAt: string | null;
+  periodFrom: string | null;
+  periodTo: string | null;
+  networkRevenue: number | null;
+  sourceCounts: Record<string, number>;
+};
+
+export type DashboardRevenueDataQuality = {
+  level: DashboardRevenueTrustLevel;
+  title: string;
+  notes: string[];
+};
+
 type DashboardTrendGranularity = 'day' | 'week' | 'month' | 'quarter' | 'year';
 type DashboardTrendMode = DashboardTrendGranularity | 'custom';
 
@@ -111,6 +154,9 @@ export type DashboardSummary = {
   totalRevenue: number;
   clubRevenue: number;
   unallocatedTopupRevenue: number;
+  revenueBreakdown: DashboardRevenueBreakdown;
+  revenueSnapshot: DashboardRevenueSnapshot;
+  revenueDataQuality: DashboardRevenueDataQuality;
   fullDayRevenueDate: string;
   fullDayRevenue: number;
   averageDailyRevenue: number;
@@ -547,6 +593,63 @@ export class DashboardService {
       }),
     ]);
 
+    const [
+      periodGuestWorkingShifts,
+      exactRevenueSnapshot,
+      latestRevenueSnapshot,
+    ] = await Promise.all([
+      this.prisma.guestWorkingShift.findMany({
+        where: {
+          tenantId,
+          ...storeFilter,
+          startedAt: { lte: period.toDate },
+          OR: [{ stoppedAt: null }, { stoppedAt: { gte: period.fromDate } }],
+        },
+        select: {
+          cashAmount: true,
+          cashlessAmount: true,
+          mobilePay: true,
+          refundsCash: true,
+          refundsCashless: true,
+        },
+      }),
+      selectedStoreIds.length === 0
+        ? this.prisma.businessSnapshotRun.findFirst({
+            where: {
+              tenantId,
+              type: 'REVENUE',
+              status: { in: ['SUCCESS', 'EMPTY'] },
+              periodFrom: period.fromDate,
+              periodTo: period.toDate,
+            },
+            orderBy: { startedAt: 'desc' },
+            select: {
+              status: true,
+              finishedAt: true,
+              periodFrom: true,
+              periodTo: true,
+              sourceCounts: true,
+              summary: true,
+            },
+          })
+        : Promise.resolve(null),
+      this.prisma.businessSnapshotRun.findFirst({
+        where: {
+          tenantId,
+          type: 'REVENUE',
+        },
+        orderBy: { startedAt: 'desc' },
+        select: {
+          status: true,
+          finishedAt: true,
+          periodFrom: true,
+          periodTo: true,
+          sourceCounts: true,
+          summary: true,
+        },
+      }),
+    ]);
+
     let averageMarginPercent = 0;
     let averageFacing = 0;
 
@@ -667,16 +770,35 @@ export class DashboardService {
       fullDayRevenueFacts,
       fullDayPeriod,
     );
-    const confirmedBalanceSpendRevenue = Math.max(
-      this.guestOperationRevenueTotal(periodGuestOperationLogs),
-      this.guestTransactionTotal(periodGuestTransactions),
-    );
     const balanceTopupRevenue = this.guestOperationTopupTotal(
       periodGuestOperationLogs,
     );
-    const clubRevenue =
-      Math.max(totalRevenue, confirmedBalanceSpendRevenue) +
-      balanceTopupRevenue;
+    const revenueBreakdown = this.buildDashboardRevenueBreakdown({
+      productRevenue: totalRevenue,
+      balanceOperationRevenue: this.guestOperationRevenueTotal(
+        periodGuestOperationLogs,
+      ),
+      transactionSpendRevenue: this.guestTransactionTotal(
+        periodGuestTransactions,
+      ),
+      unallocatedTopupRevenue: balanceTopupRevenue,
+      shiftCashRevenue: this.shiftCashRevenueTotal(periodGuestWorkingShifts),
+      productSalesCount: salesFacts.length,
+      operationLogs: periodGuestOperationLogs,
+      transactions: periodGuestTransactions,
+      workingShifts: periodGuestWorkingShifts,
+      exactSnapshot: exactRevenueSnapshot,
+    });
+    const clubRevenue = revenueBreakdown.networkRevenue;
+    const revenueSnapshot = this.buildDashboardRevenueSnapshot(
+      exactRevenueSnapshot ?? latestRevenueSnapshot,
+      period.fromDate,
+      period.toDate,
+    );
+    const revenueDataQuality = this.buildDashboardRevenueDataQuality(
+      revenueBreakdown,
+      revenueSnapshot,
+    );
     const storeRevenueBreakdown = this.buildStoreRevenueBreakdown(
       storesForRevenue,
       salesFacts,
@@ -726,6 +848,9 @@ export class DashboardService {
       totalRevenue: this.round(totalRevenue),
       clubRevenue: this.round(clubRevenue),
       unallocatedTopupRevenue: this.round(balanceTopupRevenue),
+      revenueBreakdown,
+      revenueSnapshot,
+      revenueDataQuality,
       fullDayRevenueDate: this.toDateInputValue(fullDayPeriod.currentFromDate),
       fullDayRevenue: this.round(fullDayRevenue.current),
       averageDailyRevenue: this.round(averageDailyRevenue),
@@ -1342,6 +1467,261 @@ export class DashboardService {
     }
 
     return this.round((value / total) * 100);
+  }
+
+  private buildDashboardRevenueBreakdown(input: {
+    productRevenue: number;
+    balanceOperationRevenue: number;
+    transactionSpendRevenue: number;
+    unallocatedTopupRevenue: number;
+    shiftCashRevenue: number;
+    productSalesCount: number;
+    operationLogs: {
+      storeId: string | null;
+      externalClubId: string | null;
+      type: string | null;
+      operationSource?: string | null;
+      operationForm?: string | null;
+      amount: { toNumber: () => number } | null;
+    }[];
+    transactions: { amount: { toNumber: () => number } | null }[];
+    workingShifts: unknown[];
+    exactSnapshot: {
+      status: string;
+      sourceCounts: unknown;
+      summary: unknown;
+    } | null;
+  }): DashboardRevenueBreakdown {
+    const allocatedClubRevenue = Math.max(
+      input.productRevenue,
+      input.balanceOperationRevenue,
+      input.transactionSpendRevenue,
+    );
+    const liveNetworkRevenue =
+      allocatedClubRevenue + input.unallocatedTopupRevenue;
+    const snapshotNetworkRevenue = this.snapshotNumber(
+      input.exactSnapshot?.summary,
+      'dashboardNetworkRevenue',
+    );
+    const hasExactSnapshot =
+      input.exactSnapshot?.status === 'SUCCESS' ||
+      input.exactSnapshot?.status === 'EMPTY';
+    const networkRevenue =
+      hasExactSnapshot && snapshotNetworkRevenue !== null
+        ? snapshotNetworkRevenue
+        : liveNetworkRevenue;
+    const primarySource: DashboardRevenueSource =
+      hasExactSnapshot && snapshotNetworkRevenue !== null
+        ? 'SNAPSHOT'
+        : input.balanceOperationRevenue >= input.transactionSpendRevenue &&
+            input.balanceOperationRevenue >= input.productRevenue &&
+            input.balanceOperationRevenue > 0
+          ? 'BALANCE_OPERATIONS'
+          : input.transactionSpendRevenue >= input.productRevenue &&
+              input.transactionSpendRevenue > 0
+            ? 'TRANSACTIONS'
+            : input.productRevenue > 0
+              ? 'PRODUCTS'
+              : 'EMPTY';
+
+    const sourceCounts = {
+      productSales:
+        this.snapshotNumber(input.exactSnapshot?.sourceCounts, 'salesFacts') ??
+        input.productSalesCount,
+      operationSpends: input.operationLogs.filter((operationLog) =>
+        this.isBalanceSpendOperationType(operationLog.type),
+      ).length,
+      operationTopups: input.operationLogs.filter((operationLog) =>
+        this.isUnallocatedNetworkTopup(operationLog),
+      ).length,
+      transactions: input.transactions.length,
+      workingShifts: input.workingShifts.length,
+    };
+
+    return {
+      networkRevenue: this.round(networkRevenue),
+      allocatedClubRevenue: this.round(
+        this.snapshotNumber(
+          input.exactSnapshot?.summary,
+          'allocatedClubRevenue',
+        ) ?? allocatedClubRevenue,
+      ),
+      productRevenue: this.round(
+        this.snapshotNumber(input.exactSnapshot?.summary, 'productRevenue') ??
+          input.productRevenue,
+      ),
+      balanceOperationRevenue: this.round(
+        this.snapshotNumber(
+          input.exactSnapshot?.summary,
+          'balanceOperationSpendRevenue',
+        ) ?? input.balanceOperationRevenue,
+      ),
+      transactionSpendRevenue: this.round(
+        this.snapshotNumber(
+          input.exactSnapshot?.summary,
+          'transactionSpendRevenue',
+        ) ?? input.transactionSpendRevenue,
+      ),
+      unallocatedTopupRevenue: this.round(
+        this.snapshotNumber(
+          input.exactSnapshot?.summary,
+          'unallocatedTopupRevenue',
+        ) ?? input.unallocatedTopupRevenue,
+      ),
+      shiftCashRevenue: this.round(
+        this.snapshotNumber(input.exactSnapshot?.summary, 'shiftCashRevenue') ??
+          input.shiftCashRevenue,
+      ),
+      primarySource,
+      formula:
+        'max(products, balance_spend, transactions_spend) + unallocated_online_topups',
+      sourceCounts,
+    };
+  }
+
+  private buildDashboardRevenueSnapshot(
+    snapshot: {
+      status: string;
+      finishedAt: Date | null;
+      periodFrom: Date | null;
+      periodTo: Date | null;
+      sourceCounts: unknown;
+      summary: unknown;
+    } | null,
+    periodFrom: Date,
+    periodTo: Date,
+  ): DashboardRevenueSnapshot {
+    if (!snapshot) {
+      return {
+        status: 'MISSING',
+        generatedAt: null,
+        periodFrom: null,
+        periodTo: null,
+        networkRevenue: null,
+        sourceCounts: {},
+      };
+    }
+
+    const matchesPeriod =
+      snapshot.periodFrom?.getTime() === periodFrom.getTime() &&
+      snapshot.periodTo?.getTime() === periodTo.getTime();
+
+    return {
+      status:
+        snapshot.status === 'FAILED'
+          ? 'FAILED'
+          : matchesPeriod &&
+              (snapshot.status === 'SUCCESS' || snapshot.status === 'EMPTY')
+            ? 'FRESH'
+            : 'STALE',
+      generatedAt: snapshot.finishedAt?.toISOString() ?? null,
+      periodFrom: snapshot.periodFrom?.toISOString() ?? null,
+      periodTo: snapshot.periodTo?.toISOString() ?? null,
+      networkRevenue: this.snapshotNumber(
+        snapshot.summary,
+        'dashboardNetworkRevenue',
+      ),
+      sourceCounts: this.snapshotNumberRecord(snapshot.sourceCounts),
+    };
+  }
+
+  private buildDashboardRevenueDataQuality(
+    breakdown: DashboardRevenueBreakdown,
+    snapshot: DashboardRevenueSnapshot,
+  ): DashboardRevenueDataQuality {
+    if (breakdown.primarySource === 'SNAPSHOT' && snapshot.status === 'FRESH') {
+      return {
+        level: 'HIGH',
+        title: 'Fresh revenue snapshot',
+        notes: [
+          'Dashboard uses the prepared REVENUE snapshot for this exact period.',
+          'Formula separates club-recognized revenue and unallocated online top-ups.',
+        ],
+      };
+    }
+
+    if (
+      breakdown.primarySource === 'BALANCE_OPERATIONS' ||
+      breakdown.primarySource === 'TRANSACTIONS'
+    ) {
+      return {
+        level: 'MEDIUM',
+        title: 'Calculated from saved facts',
+        notes: [
+          'No exact prepared snapshot was found, so the dashboard calculated revenue from saved LeetPlus facts.',
+          'Open /sync to create a fresh REVENUE snapshot before final reconciliation.',
+        ],
+      };
+    }
+
+    if (breakdown.primarySource === 'PRODUCTS') {
+      return {
+        level: 'MEDIUM',
+        title: 'Product revenue only',
+        notes: [
+          'Only bar/goods revenue is available for this period.',
+          'Game and service spend facts are missing or empty, so the revenue KPI can be understated.',
+        ],
+      };
+    }
+
+    return {
+      level: 'LOW',
+      title: 'No revenue facts',
+      notes: [
+        'No product sales, balance spend, transaction spend, or revenue snapshot was found for the period.',
+        'Run sync and create typed snapshots before using this KPI.',
+      ],
+    };
+  }
+
+  private shiftCashRevenueTotal(
+    shifts: {
+      cashAmount: { toNumber: () => number } | null;
+      cashlessAmount: { toNumber: () => number } | null;
+      mobilePay: { toNumber: () => number } | null;
+      refundsCash: { toNumber: () => number } | null;
+      refundsCashless: { toNumber: () => number } | null;
+    }[],
+  ) {
+    return shifts.reduce((sum, shift) => {
+      const incoming =
+        (shift.cashAmount?.toNumber() ?? 0) +
+        (shift.cashlessAmount?.toNumber() ?? 0) +
+        (shift.mobilePay?.toNumber() ?? 0);
+      const refunds =
+        (shift.refundsCash?.toNumber() ?? 0) +
+        (shift.refundsCashless?.toNumber() ?? 0);
+
+      return sum + incoming - refunds;
+    }, 0);
+  }
+
+  private snapshotNumber(snapshot: unknown, key: string) {
+    if (!snapshot || typeof snapshot !== 'object' || !(key in snapshot)) {
+      return null;
+    }
+
+    const value = (snapshot as Record<string, unknown>)[key];
+
+    return typeof value === 'number' && Number.isFinite(value) ? value : null;
+  }
+
+  private snapshotNumberRecord(snapshot: unknown): Record<string, number> {
+    if (!snapshot || typeof snapshot !== 'object') {
+      return {};
+    }
+
+    return Object.entries(snapshot as Record<string, unknown>).reduce(
+      (acc, [key, value]) => {
+        if (typeof value === 'number' && Number.isFinite(value)) {
+          acc[key] = value;
+        }
+
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
   }
 
   private guestTransactionTotal(

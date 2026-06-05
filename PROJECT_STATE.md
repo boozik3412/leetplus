@@ -79,6 +79,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Unified the dashboard revenue formula and the `REVENUE` typed snapshot: the network KPI now uses `max(product/bar revenue, balance spend, transaction spend) + unallocated online top-ups`, stores the same formula in snapshot summary fields, and shows source/trust status plus product, game/service, top-up, and shift-cash reconciliation lines on the `/dashboard` revenue card.
 - Changed the default management dashboard period to the latest completed day: `/dashboard`, `/dashboard/revenue-by-club`, and `/dashboard/revenue-diagnostics` now use `full-day` when no explicit period is selected, while current-day analytics remain available through the period filter.
 - Improved the `/dashboard` first screen after login: mobile filters and the refresh button now stack without horizontal overflow, revenue KPI cards use a responsive grid instead of a mobile carousel, secondary CRM/OOS/no-sales panels stream through `Suspense`, and authenticated server renders reuse one cached `auth/me` result within the request.
 - Added the first business typed snapshot layer: `BusinessSnapshotRun` records revenue, guest, tariff, assortment arrival, and staff shift/cash snapshot readiness from already saved LeetPlus facts without live Langame requests; `/sync` now shows a business freshness traffic light, source counters, summaries, and a manual creation action for those typed snapshots.

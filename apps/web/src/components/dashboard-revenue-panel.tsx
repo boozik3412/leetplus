@@ -2,7 +2,12 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import type { DashboardStoreRevenueMetric } from "@/lib/dashboard-summary";
+import type {
+  DashboardRevenueBreakdown,
+  DashboardRevenueDataQuality,
+  DashboardRevenueSnapshot,
+  DashboardStoreRevenueMetric,
+} from "@/lib/dashboard-summary";
 
 type DashboardRevenueView = "summary" | "stores";
 type StoreChartMetric = "revenue" | "bar" | "guests";
@@ -11,6 +16,9 @@ type DashboardRevenuePanelProps = {
   initialView: DashboardRevenueView;
   totalClubRevenue: number;
   unallocatedTopupRevenue: number;
+  revenueBreakdown: DashboardRevenueBreakdown;
+  revenueSnapshot: DashboardRevenueSnapshot;
+  revenueDataQuality: DashboardRevenueDataQuality;
   adjustedGrossProfit: number;
   grossProfit: number;
   adjustedMarginPercent: number;
@@ -21,6 +29,7 @@ type DashboardRevenuePanelProps = {
   writeOffRevenuePercentDelta: number | null;
   storeRevenueBreakdown: DashboardStoreRevenueMetric[];
   fullReportHref: string;
+  diagnosticsHref: string;
 };
 
 function formatPercent(value: number) {
@@ -45,6 +54,9 @@ export function DashboardRevenuePanel({
   initialView,
   totalClubRevenue,
   unallocatedTopupRevenue,
+  revenueBreakdown,
+  revenueSnapshot,
+  revenueDataQuality,
   adjustedGrossProfit,
   grossProfit,
   adjustedMarginPercent,
@@ -55,6 +67,7 @@ export function DashboardRevenuePanel({
   writeOffRevenuePercentDelta,
   storeRevenueBreakdown,
   fullReportHref,
+  diagnosticsHref,
 }: DashboardRevenuePanelProps) {
   const [view, setView] = useState<DashboardRevenueView>(initialView);
 
@@ -81,6 +94,12 @@ export function DashboardRevenuePanel({
               date={fullDayRevenueDate}
               revenue={fullDayRevenue}
               deltaPercent={fullDayRevenueToAveragePercent}
+            />
+            <RevenueBreakdownDetails
+              breakdown={revenueBreakdown}
+              snapshot={revenueSnapshot}
+              quality={revenueDataQuality}
+              diagnosticsHref={diagnosticsHref}
             />
             <UnallocatedTopupRevenue revenue={unallocatedTopupRevenue} />
           </HeroMetric>
@@ -425,6 +444,111 @@ function FullDayRevenue({
       </div>
     </div>
   );
+}
+
+function RevenueBreakdownDetails({
+  breakdown,
+  snapshot,
+  quality,
+  diagnosticsHref,
+}: {
+  breakdown: DashboardRevenueBreakdown;
+  snapshot: DashboardRevenueSnapshot;
+  quality: DashboardRevenueDataQuality;
+  diagnosticsHref: string;
+}) {
+  const gameRevenue = Math.max(
+    breakdown.balanceOperationRevenue,
+    breakdown.transactionSpendRevenue,
+  );
+  const rows = [
+    {
+      label: "Клубная часть",
+      value: breakdown.allocatedClubRevenue,
+      visible: true,
+    },
+    {
+      label: "Игра и услуги",
+      value: gameRevenue,
+      visible: gameRevenue > 0,
+    },
+    {
+      label: "Товары и бар",
+      value: breakdown.productRevenue,
+      visible: breakdown.productRevenue > 0,
+    },
+    {
+      label: "Касса смен",
+      value: breakdown.shiftCashRevenue,
+      visible: breakdown.shiftCashRevenue > 0,
+    },
+  ].filter((row) => row.visible);
+
+  return (
+    <div className="mt-3 grid gap-2 rounded-2xl border border-zinc-200/70 p-3 text-xs dark:border-zinc-800/80">
+      {rows.map((row) => (
+        <div key={row.label} className="flex items-center justify-between gap-3">
+          <span className="text-zinc-500 dark:text-zinc-400">{row.label}</span>
+          <span className="font-semibold tabular-nums">
+            {formatMoney(row.value)}
+          </span>
+        </div>
+      ))}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-zinc-200/70 pt-2 dark:border-zinc-800/80">
+        <span
+          className={[
+            "rounded-full px-2 py-1 text-[11px] font-semibold",
+            quality.level === "HIGH"
+              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-200"
+              : quality.level === "MEDIUM"
+                ? "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-200"
+                : "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-200",
+          ].join(" ")}
+          title={quality.notes.join(" ")}
+        >
+          {revenueSourceLabel(breakdown.primarySource)} ·{" "}
+          {snapshotStatusLabel(snapshot.status)}
+        </span>
+        <Link
+          href={diagnosticsHref}
+          target="_blank"
+          rel="noreferrer"
+          className="font-semibold text-emerald-600 transition hover:text-emerald-500 dark:text-emerald-300 dark:hover:text-emerald-200"
+        >
+          Сверка
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+function revenueSourceLabel(source: DashboardRevenueBreakdown["primarySource"]) {
+  if (source === "SNAPSHOT") {
+    return "snapshot";
+  }
+  if (source === "BALANCE_OPERATIONS") {
+    return "списания";
+  }
+  if (source === "TRANSACTIONS") {
+    return "транзакции";
+  }
+  if (source === "PRODUCTS") {
+    return "товары";
+  }
+  return "нет данных";
+}
+
+function snapshotStatusLabel(status: DashboardRevenueSnapshot["status"]) {
+  if (status === "FRESH") {
+    return "свежий";
+  }
+  if (status === "STALE") {
+    return "устарел";
+  }
+  if (status === "FAILED") {
+    return "ошибка";
+  }
+  return "без snapshot";
 }
 
 function UnallocatedTopupRevenue({ revenue }: { revenue: number }) {

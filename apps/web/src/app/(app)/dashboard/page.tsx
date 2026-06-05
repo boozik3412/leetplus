@@ -69,6 +69,13 @@ function dashboardRevenueByClubHref(filters: DashboardHrefFilters) {
   return `/dashboard/revenue-by-club${query ? `?${query}` : ""}`;
 }
 
+function dashboardRevenueDiagnosticsHref(filters: DashboardHrefFilters) {
+  const params = dashboardQuery(filters);
+  const query = params.toString();
+
+  return `/dashboard/revenue-diagnostics${query ? `?${query}` : ""}`;
+}
+
 function dashboardCanonicalHref(params: {
   period?: string | string[];
   dateFrom?: string | string[];
@@ -485,6 +492,11 @@ export default async function DashboardPage({
     dateFrom: summary.periodFrom,
     dateTo: summary.periodTo,
   });
+  const revenueDiagnosticsHref = dashboardRevenueDiagnosticsHref({
+    ...filters,
+    dateFrom: summary.periodFrom,
+    dateTo: summary.periodTo,
+  });
 
   return (
     <main className="px-4 py-5 text-zinc-950 sm:px-6 sm:py-8 dark:text-zinc-100">
@@ -520,6 +532,9 @@ export default async function DashboardPage({
               initialView={revenueView}
               totalClubRevenue={totalClubRevenue}
               unallocatedTopupRevenue={summary.unallocatedTopupRevenue}
+              revenueBreakdown={summary.revenueBreakdown}
+              revenueSnapshot={summary.revenueSnapshot}
+              revenueDataQuality={summary.revenueDataQuality}
               adjustedGrossProfit={summary.adjustedGrossProfit}
               grossProfit={summary.grossProfit}
               adjustedMarginPercent={summary.adjustedMarginPercent}
@@ -532,6 +547,7 @@ export default async function DashboardPage({
               writeOffRevenuePercentDelta={summary.writeOffRevenuePercentDelta}
               storeRevenueBreakdown={summary.storeRevenueBreakdown}
               fullReportHref={revenueByClubHref}
+              diagnosticsHref={revenueDiagnosticsHref}
             />
           </div>
         </section>

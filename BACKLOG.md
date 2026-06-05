@@ -1057,3 +1057,4 @@ MVP, который нужно делать первым:
 
 - Продолжать полировать UX таблиц отчетов, фильтров, экспортов и мобильной верстки по результатам live review на `leetplus.ru`.
 - Поддерживать README, `PROJECT_STATE.md` и этот файл согласованными при изменениях workflow, правил данных, production setup или roadmap.
+- Готово: сводный `/dashboard` получил единую управленческую формулу выручки и расшифровку источников: `max(товары/бар, списания баланса, транзакционные списания) + нераспределенные online-пополнения`. `REVENUE` typed snapshot теперь сохраняет ту же формулу (`dashboardNetworkRevenue`, `allocatedClubRevenue`, `balanceOperationSpendRevenue`, `transactionSpendRevenue`, `unallocatedTopupRevenue`, `shiftCashRevenue`, `primarySource`), а карточка общей выручки показывает источник, статус snapshot, клубную часть, игру/услуги, товары/бар, сменную кассу и быстрый переход в `/dashboard/revenue-diagnostics`.

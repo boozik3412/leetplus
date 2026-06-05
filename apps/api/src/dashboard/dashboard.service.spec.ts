@@ -44,6 +44,9 @@ type DashboardPrismaMock = {
   guestWorkingShift: {
     findMany: jest.Mock;
   };
+  businessSnapshotRun: {
+    findFirst: jest.Mock;
+  };
 };
 
 type TenantContextMock = {
@@ -158,6 +161,9 @@ function createPrismaMock(): DashboardPrismaMock {
     guestWorkingShift: {
       findMany: jest.fn(),
     },
+    businessSnapshotRun: {
+      findFirst: jest.fn(),
+    },
   };
 }
 
@@ -188,6 +194,7 @@ describe('DashboardService', () => {
     prisma.guestTransaction.findMany.mockResolvedValue([]);
     prisma.guestOperationLog.findMany.mockResolvedValue([]);
     prisma.guestWorkingShift.findMany.mockResolvedValue([]);
+    prisma.businessSnapshotRun.findFirst.mockResolvedValue(null);
     service = new DashboardService(
       prisma as unknown as PrismaService,
       tenantContext as unknown as TenantContextService,
@@ -295,7 +302,7 @@ describe('DashboardService', () => {
       },
     ]);
 
-    const summary = await service.getSummary();
+    const summary = await service.getSummary(undefined, { period: 'day' });
 
     expect(summary).toMatchObject({
       tenantId: 'tenant-demo',
@@ -434,6 +441,16 @@ describe('DashboardService', () => {
     expect(summary.totalRevenue).toBe(0);
     expect(summary.clubRevenue).toBe(57200);
     expect(summary.unallocatedTopupRevenue).toBe(50000);
+    expect(summary.revenueBreakdown).toMatchObject({
+      networkRevenue: 57200,
+      allocatedClubRevenue: 7200,
+      balanceOperationRevenue: 2000,
+      transactionSpendRevenue: 7200,
+      unallocatedTopupRevenue: 50000,
+      primarySource: 'TRANSACTIONS',
+    });
+    expect(summary.revenueSnapshot.status).toBe('MISSING');
+    expect(summary.revenueDataQuality.level).toBe('MEDIUM');
     expect(summary.storeRevenueBreakdown[0]).toMatchObject({
       storeId: 'store-1',
       totalRevenue: 7200,

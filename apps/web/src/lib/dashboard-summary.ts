@@ -58,6 +58,45 @@ export type DashboardStoreRevenueMetric = {
   productRevenueSharePercent: number | null;
 };
 
+export type DashboardRevenueBreakdown = {
+  networkRevenue: number;
+  allocatedClubRevenue: number;
+  productRevenue: number;
+  balanceOperationRevenue: number;
+  transactionSpendRevenue: number;
+  unallocatedTopupRevenue: number;
+  shiftCashRevenue: number;
+  primarySource:
+    | "SNAPSHOT"
+    | "BALANCE_OPERATIONS"
+    | "TRANSACTIONS"
+    | "PRODUCTS"
+    | "EMPTY";
+  formula: string;
+  sourceCounts: {
+    productSales: number;
+    operationSpends: number;
+    operationTopups: number;
+    transactions: number;
+    workingShifts: number;
+  };
+};
+
+export type DashboardRevenueSnapshot = {
+  status: "FRESH" | "STALE" | "MISSING" | "FAILED";
+  generatedAt: string | null;
+  periodFrom: string | null;
+  periodTo: string | null;
+  networkRevenue: number | null;
+  sourceCounts: Record<string, number>;
+};
+
+export type DashboardRevenueDataQuality = {
+  level: "HIGH" | "MEDIUM" | "LOW";
+  title: string;
+  notes: string[];
+};
+
 export type DashboardSummaryFilters = {
   period?: string;
   dateFrom?: string;
@@ -84,6 +123,9 @@ export type DashboardSummary = {
   totalRevenue: number;
   clubRevenue: number;
   unallocatedTopupRevenue: number;
+  revenueBreakdown: DashboardRevenueBreakdown;
+  revenueSnapshot: DashboardRevenueSnapshot;
+  revenueDataQuality: DashboardRevenueDataQuality;
   fullDayRevenueDate: string;
   fullDayRevenue: number;
   averageDailyRevenue: number;

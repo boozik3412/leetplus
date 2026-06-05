@@ -259,23 +259,31 @@ export class BusinessSnapshotService {
           _sum: { totalRevenue: true },
           _max: { revenueDate: true },
         }),
-        this.prisma.guestOperationLog.aggregate({
+        this.prisma.guestOperationLog.findMany({
           where: {
             tenantId,
             happenedAt: { gte: period.dateFrom, lte: period.dateTo },
           },
-          _count: { _all: true },
-          _sum: { amount: true },
-          _max: { happenedAt: true },
+          select: {
+            storeId: true,
+            externalClubId: true,
+            type: true,
+            operationSource: true,
+            operationForm: true,
+            amount: true,
+            happenedAt: true,
+          },
         }),
-        this.prisma.guestTransaction.aggregate({
+        this.prisma.guestTransaction.findMany({
           where: {
             tenantId,
             happenedAt: { gte: period.dateFrom, lte: period.dateTo },
           },
-          _count: { _all: true },
-          _sum: { amount: true },
-          _max: { happenedAt: true },
+          select: {
+            type: true,
+            amount: true,
+            happenedAt: true,
+          },
         }),
         this.prisma.guestWorkingShift.aggregate({
           where: {
@@ -300,6 +308,20 @@ export class BusinessSnapshotService {
     const shiftRefunds =
       this.decimalToNumber(shifts._sum.refundsCash) +
       this.decimalToNumber(shifts._sum.refundsCashless);
+    const productRevenue = this.decimalToNumber(sales._sum.revenue);
+    const balanceOperationSpendRevenue =
+      this.guestOperationRevenueTotal(operations);
+    const transactionSpendRevenue = this.guestTransactionTotal(transactions);
+    const unallocatedTopupRevenue = this.guestOperationTopupTotal(operations);
+    const allocatedClubRevenue = Math.max(
+      productRevenue,
+      balanceOperationSpendRevenue,
+      transactionSpendRevenue,
+    );
+    const shiftCashRevenue =
+      shiftCash + shiftCashless + shiftMobilePay - shiftRefunds;
+    const dashboardNetworkRevenue =
+      allocatedClubRevenue + unallocatedTopupRevenue;
 
     return {
       periodFrom: period.dateFrom,
@@ -307,29 +329,59 @@ export class BusinessSnapshotService {
       rowCount:
         sales._count._all +
         clubRevenue._count._all +
-        operations._count._all +
-        transactions._count._all +
+        operations.length +
+        transactions.length +
         shifts._count._all,
       sourceCounts: {
         salesFacts: sales._count._all,
         clubRevenueFacts: clubRevenue._count._all,
-        operationLogs: operations._count._all,
-        guestTransactions: transactions._count._all,
+        operationLogs: operations.length,
+        operationSpends: operations.filter((operationLog) =>
+          this.isBalanceSpendOperationType(operationLog.type),
+        ).length,
+        unallocatedTopups: operations.filter((operationLog) =>
+          this.isUnallocatedNetworkTopup(operationLog),
+        ).length,
+        guestTransactions: transactions.length,
         workingShifts: shifts._count._all,
       },
       summary: {
-        productRevenue: this.decimalToNumber(sales._sum.revenue),
+        productRevenue,
         productCost: this.decimalToNumber(sales._sum.cost),
         clubRevenue: this.decimalToNumber(clubRevenue._sum.totalRevenue),
-        operationAmount: this.decimalToNumber(operations._sum.amount),
-        transactionAmount: this.decimalToNumber(transactions._sum.amount),
-        shiftCashRevenue:
-          shiftCash + shiftCashless + shiftMobilePay - shiftRefunds,
+        balanceOperationSpendRevenue,
+        transactionSpendRevenue,
+        unallocatedTopupRevenue,
+        allocatedClubRevenue,
+        dashboardNetworkRevenue,
+        shiftCashRevenue,
+        formula:
+          'max(products, balance_spend, transactions_spend) + unallocated_online_topups',
+        primarySource:
+          balanceOperationSpendRevenue >= transactionSpendRevenue &&
+          balanceOperationSpendRevenue >= productRevenue &&
+          balanceOperationSpendRevenue > 0
+            ? 'BALANCE_OPERATIONS'
+            : transactionSpendRevenue >= productRevenue &&
+                transactionSpendRevenue > 0
+              ? 'TRANSACTIONS'
+              : productRevenue > 0
+                ? 'PRODUCTS'
+                : 'EMPTY',
+        operationAmount: operations.reduce(
+          (sum, operationLog) =>
+            sum + this.decimalToNumber(operationLog.amount),
+          0,
+        ),
+        transactionAmount: transactions.reduce(
+          (sum, transaction) => sum + this.decimalToNumber(transaction.amount),
+          0,
+        ),
         latestFactAt: this.latestIso([
           sales._max.saleDate,
           clubRevenue._max.revenueDate,
-          operations._max.happenedAt,
-          transactions._max.happenedAt,
+          ...operations.map((operationLog) => operationLog.happenedAt),
+          ...transactions.map((transaction) => transaction.happenedAt),
           shifts._max.startedAt,
         ]),
       },
@@ -730,6 +782,151 @@ export class BusinessSnapshotService {
         999,
       ),
     );
+  }
+
+  private guestTransactionTotal(
+    transactions: {
+      type: string | null;
+      amount: Prisma.Decimal | null;
+    }[],
+  ) {
+    return transactions.reduce(
+      (sum, transaction) =>
+        sum +
+        this.confirmedTransactionSpendAmount(
+          transaction.type,
+          this.decimalToNumber(transaction.amount),
+        ),
+      0,
+    );
+  }
+
+  private guestOperationRevenueTotal(
+    operationLogs: {
+      type: string | null;
+      amount: Prisma.Decimal | null;
+    }[],
+  ) {
+    return operationLogs.reduce(
+      (sum, operationLog) =>
+        sum +
+        this.confirmedBalanceSpendAmount(
+          operationLog.type,
+          this.decimalToNumber(operationLog.amount),
+        ),
+      0,
+    );
+  }
+
+  private guestOperationTopupTotal(
+    operationLogs: {
+      storeId: string | null;
+      externalClubId: string | null;
+      type: string | null;
+      operationSource?: string | null;
+      operationForm?: string | null;
+      amount: Prisma.Decimal | null;
+    }[],
+  ) {
+    return operationLogs.reduce((sum, operationLog) => {
+      const amount = this.decimalToNumber(operationLog.amount);
+
+      if (!Number.isFinite(amount) || amount === 0) {
+        return sum;
+      }
+
+      return this.isUnallocatedNetworkTopup(operationLog)
+        ? sum + Math.abs(amount)
+        : sum;
+    }, 0);
+  }
+
+  private confirmedTransactionSpendAmount(type: string | null, amount: number) {
+    if (!Number.isFinite(amount) || amount === 0) {
+      return 0;
+    }
+
+    if (this.isBalanceSpendOperationType(type) || amount < 0) {
+      return Math.abs(amount);
+    }
+
+    return 0;
+  }
+
+  private confirmedBalanceSpendAmount(type: string | null, amount: number) {
+    if (!Number.isFinite(amount) || amount === 0) {
+      return 0;
+    }
+
+    return this.isBalanceSpendOperationType(type) ? Math.abs(amount) : 0;
+  }
+
+  private isUnallocatedNetworkTopup(operationLog: {
+    storeId?: string | null;
+    externalClubId?: string | null;
+    type: string | null;
+    operationSource?: string | null;
+    operationForm?: string | null;
+  }) {
+    if (!this.isBalanceTopUpOperationType(operationLog.type)) {
+      return false;
+    }
+
+    const externalClubId = operationLog.externalClubId?.trim();
+
+    if (operationLog.storeId || (externalClubId && externalClubId !== '0')) {
+      return false;
+    }
+
+    const source = this.normalizeOperationToken(operationLog.operationSource);
+    const form = this.normalizeOperationToken(operationLog.operationForm);
+
+    return (
+      !externalClubId ||
+      externalClubId === '0' ||
+      source.includes('app') ||
+      source.includes('mobile') ||
+      source.includes('online') ||
+      form.includes('app') ||
+      form.includes('mobile') ||
+      form.includes('online')
+    );
+  }
+
+  private isBalanceTopUpOperationType(type: string | null) {
+    const normalized = this.normalizeOperationToken(type);
+
+    return (
+      normalized === 'plus' ||
+      normalized.includes('popolnen') ||
+      normalized.includes('topup') ||
+      normalized.includes('deposit') ||
+      normalized.includes('zachislen') ||
+      normalized.includes('пополн') ||
+      normalized.includes('зачисл')
+    );
+  }
+
+  private isBalanceSpendOperationType(type: string | null) {
+    const normalized = this.normalizeOperationToken(type);
+
+    return (
+      normalized === 'minus' ||
+      normalized === 'spisanie' ||
+      normalized.includes('spisan') ||
+      normalized.includes('spend') ||
+      normalized.includes('expense') ||
+      normalized.includes('oplata') ||
+      normalized.includes('списан') ||
+      normalized.includes('оплат')
+    );
+  }
+
+  private normalizeOperationToken(value: string | null | undefined) {
+    return String(value ?? '')
+      .trim()
+      .toLowerCase()
+      .replace(/[\s-]+/g, '_');
   }
 
   private decimalToNumber(value: Prisma.Decimal | null | undefined) {

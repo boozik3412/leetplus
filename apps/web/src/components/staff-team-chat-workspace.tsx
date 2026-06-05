@@ -502,24 +502,24 @@ export function StaffTeamChatWorkspace({
         "grid items-stretch gap-4 lg:grid-cols-1",
         isChatOpen
           ? "lg:min-h-[calc(100vh-15rem)] xl:min-h-[calc(100vh-13rem)]"
-          : "max-w-2xl",
+          : "w-full max-w-6xl",
       ].join(" ")}
     >
       {!isChatOpen ? (
-        <aside className="space-y-4 lg:flex lg:flex-col">
-          <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-          <div className="flex items-center justify-between gap-3">
+        <aside className="space-y-5 lg:flex lg:flex-col">
+          <section>
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
                 Каналы
               </p>
-              <h2 className="mt-1 text-lg font-semibold">Оперативная связь</h2>
+              <h2 className="mt-1 text-xl font-semibold">Оперативная связь</h2>
             </div>
             <button
               type="button"
               onClick={() => setShowChannelForm((value) => !value)}
               className={[
-                "rounded-lg border border-zinc-200 px-3 py-2 text-sm font-semibold transition hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-800 dark:hover:border-emerald-500 dark:hover:text-emerald-200",
+                "rounded-full border border-zinc-200 px-4 py-2 text-sm font-semibold transition-colors hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-700 dark:border-zinc-800 dark:hover:border-emerald-500 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-200",
                 report.canManageChannels ? "" : "hidden",
               ].join(" ")}
             >
@@ -527,7 +527,7 @@ export function StaffTeamChatWorkspace({
             </button>
           </div>
 
-          <div className="mt-4 space-y-2">
+          <div className="mt-6 grid gap-x-8 gap-y-2 md:grid-cols-2 xl:grid-cols-3">
             {report.channels.map((channel) => (
               <ChannelLink
                 key={channel.id}
@@ -544,7 +544,7 @@ export function StaffTeamChatWorkspace({
           </div>
 
           {report.channels.length === 0 ? (
-            <p className="mt-4 rounded-lg border border-dashed border-zinc-300 p-4 text-sm text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+            <p className="mt-6 rounded-2xl border border-dashed border-zinc-300 p-4 text-sm text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
               Каналы появятся после первого открытия раздела.
             </p>
           ) : null}
@@ -887,20 +887,47 @@ export function StaffTeamChatWorkspace({
         </div>
 
         <div className="shrink-0 border-t border-zinc-200/60 bg-transparent p-3 dark:border-zinc-800/60 sm:p-4">
-          <div className="grid items-center gap-2 rounded-3xl bg-zinc-100/90 p-2 shadow-sm ring-1 ring-zinc-200/70 dark:bg-zinc-900/70 dark:ring-zinc-800/70 md:grid-cols-[1fr_auto]">
-            <textarea
-              value={form.body}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, body: event.target.value }))
-              }
-              className="min-h-11 resize-none rounded-2xl border-0 bg-transparent px-3 py-3 text-sm leading-5 outline-none transition-colors placeholder:text-zinc-400 focus:bg-white/60 dark:placeholder:text-zinc-500 dark:focus:bg-zinc-950/40"
-              placeholder="Что нужно передать смене или управляющим?"
-            />
+          <div className="rounded-[28px] bg-zinc-100/90 p-2 shadow-sm ring-1 ring-zinc-200/70 dark:bg-zinc-900/70 dark:ring-zinc-800/70">
+            <div className="flex items-end gap-2">
+              <button
+                type="button"
+                aria-controls="message-format-options"
+                aria-expanded={showMessageOptions}
+                onClick={() => setShowMessageOptions((value) => !value)}
+                className={[
+                  "flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-xl font-semibold leading-none transition-colors",
+                  showMessageOptions
+                    ? "bg-emerald-500 text-zinc-950"
+                    : "bg-white text-zinc-500 hover:bg-emerald-50 hover:text-emerald-700 dark:bg-zinc-950/70 dark:text-zinc-400 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-200",
+                ].join(" ")}
+              >
+                +
+              </button>
+              <textarea
+                value={form.body}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    body: event.target.value,
+                  }))
+                }
+                className="min-h-11 flex-1 resize-none rounded-full border-0 bg-transparent px-2 py-3 text-sm leading-5 outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
+                placeholder="Что нужно передать смене или управляющим?"
+              />
+              <button
+                type="button"
+                onClick={sendMessage}
+                disabled={isPending || !activeChannel}
+                className="h-11 shrink-0 rounded-full bg-emerald-500 px-6 text-sm font-semibold text-zinc-950 transition-colors hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Отправить
+              </button>
+            </div>
             <div
               id="message-format-options"
               className={
                 showMessageOptions
-                  ? "order-3 grid gap-2 rounded-2xl bg-white/70 p-3 dark:bg-zinc-950/50 sm:grid-cols-2 md:col-span-2 md:grid-cols-[180px_180px_1fr]"
+                  ? "mt-2 grid gap-2 rounded-2xl bg-white/70 p-3 dark:bg-zinc-950/50 sm:grid-cols-2 md:grid-cols-[180px_180px_1fr]"
                   : "hidden"
               }
             >
@@ -953,30 +980,6 @@ export function StaffTeamChatWorkspace({
                 Закрепить
               </label>
             </div>
-            <div className="flex items-center gap-2 md:w-[220px]">
-              <button
-                type="button"
-                aria-controls="message-format-options"
-                aria-expanded={showMessageOptions}
-                onClick={() => setShowMessageOptions((value) => !value)}
-                className={[
-                  "flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-xl font-semibold leading-none transition-colors",
-                  showMessageOptions
-                    ? "bg-emerald-500 text-zinc-950"
-                    : "bg-white text-zinc-500 hover:bg-emerald-50 hover:text-emerald-700 dark:bg-zinc-950/80 dark:text-zinc-400 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-200",
-                ].join(" ")}
-              >
-                +
-              </button>
-              <button
-                type="button"
-                onClick={sendMessage}
-                disabled={isPending || !activeChannel}
-                className="h-11 flex-1 rounded-full bg-emerald-500 px-6 text-sm font-semibold text-zinc-950 transition-colors hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60 md:flex-none"
-              >
-                Отправить
-              </button>
-            </div>
           </div>
         </div>
         </section>
@@ -1000,13 +1003,13 @@ function ChannelLink({
     <Link
       href={href}
       className={[
-        "group flex items-center gap-3 rounded-xl px-3 py-3 text-sm transition-colors",
+        "group flex min-h-20 items-center gap-3 rounded-2xl px-4 py-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70",
         active
           ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-100"
-          : "hover:bg-zinc-100/80 dark:hover:bg-zinc-900/70",
+          : "hover:bg-zinc-100/70 dark:hover:bg-zinc-900/55",
       ].join(" ")}
     >
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-bold text-zinc-600 ring-1 ring-zinc-200 transition-colors group-hover:bg-emerald-100 group-hover:text-emerald-700 group-hover:ring-emerald-200 dark:bg-zinc-900 dark:text-zinc-300 dark:ring-zinc-800 dark:group-hover:bg-emerald-500/15 dark:group-hover:text-emerald-200 dark:group-hover:ring-emerald-500/25">
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-bold text-zinc-600 ring-1 ring-zinc-200 transition-colors group-hover:bg-emerald-100 group-hover:text-emerald-700 group-hover:ring-emerald-200 dark:bg-zinc-900/70 dark:text-zinc-300 dark:ring-zinc-800/80 dark:group-hover:bg-emerald-500/15 dark:group-hover:text-emerald-200 dark:group-hover:ring-emerald-500/25">
         {getChannelInitial(channel)}
       </div>
       <div className="min-w-0 flex-1">

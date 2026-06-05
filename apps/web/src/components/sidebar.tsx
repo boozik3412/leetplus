@@ -866,7 +866,7 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
         ref={desktopSidebarRef}
         className="sticky top-0 z-[70] hidden h-dvh max-h-dvh w-20 shrink-0 flex-col border-r border-zinc-200/80 bg-white/80 shadow-[inset_-1px_0_0_rgb(255_255_255_/_0.5)] backdrop-blur-xl dark:border-zinc-800/80 dark:bg-zinc-950/75 md:flex"
       >
-        <div className="flex justify-center border-b border-zinc-200/80 px-3 py-4 dark:border-zinc-800">
+        <div className="flex border-b border-zinc-200/80 px-3 py-4 dark:border-zinc-800">
           <LogoLink href={homeHref} />
         </div>
         <nav className="min-h-0 flex-1 space-y-2 overflow-visible px-3 py-4">

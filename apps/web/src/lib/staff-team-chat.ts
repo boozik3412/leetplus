@@ -76,6 +76,7 @@ export type StaffTeamChatReport = {
   stores: StaffChatStore[];
   users: StaffChatUser[];
   roleScopes: Array<{ value: string; label: string }>;
+  canManageChannels: boolean;
 };
 
 export async function getStaffTeamChatReport(

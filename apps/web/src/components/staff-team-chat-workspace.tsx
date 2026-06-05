@@ -300,6 +300,11 @@ export function StaffTeamChatWorkspace({
     setError(null);
     setSuccess(null);
 
+    if (!report.canManageChannels) {
+      setError("Создание каналов недоступно для этой роли.");
+      return;
+    }
+
     if (!channelForm.name.trim()) {
       setError("Введите название канала.");
       return;
@@ -497,7 +502,10 @@ export function StaffTeamChatWorkspace({
             <button
               type="button"
               onClick={() => setShowChannelForm((value) => !value)}
-              className="rounded-lg border border-zinc-200 px-3 py-2 text-sm font-semibold transition hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-800 dark:hover:border-emerald-500 dark:hover:text-emerald-200"
+              className={[
+                "rounded-lg border border-zinc-200 px-3 py-2 text-sm font-semibold transition hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-800 dark:hover:border-emerald-500 dark:hover:text-emerald-200",
+                report.canManageChannels ? "" : "hidden",
+              ].join(" ")}
             >
               Новый
             </button>
@@ -526,7 +534,7 @@ export function StaffTeamChatWorkspace({
           ) : null}
         </section>
 
-        {showChannelForm ? (
+        {showChannelForm && report.canManageChannels ? (
           <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
             <p className="text-xs font-bold uppercase text-zinc-500">
               Новый канал

@@ -91,6 +91,7 @@ export type StaffTeamChatReport = {
   stores: Array<{ id: string; name: string; isActive: boolean }>;
   users: StaffChatUserResponse[];
   roleScopes: Array<{ value: StaffChatRoleScope; label: string }>;
+  canManageChannels: boolean;
 };
 
 export type StaffChatUserResponse = {
@@ -257,12 +258,18 @@ export class StaffTeamChatService {
         { value: 'CLUB_ADMINISTRATOR', label: 'Администраторы клуба' },
         { value: 'SENIOR_ADMINISTRATOR', label: 'Старшие администраторы' },
       ],
+      canManageChannels: this.canManageChannels(user.role),
     };
   }
 
   async createChannel(user: AuthenticatedUser, dto: StaffChatChannelDto) {
     const { tenantId } = await this.tenantContextService.resolve(user);
-    const data = await this.normalizeChannelData(tenantId, dto);
+
+    if (!this.canManageChannels(user.role)) {
+      throw new BadRequestException('Channel management is not allowed');
+    }
+
+    const data = await this.normalizeChannelData(tenantId, user, dto);
     const memberUserIds =
       data.scope === 'CUSTOM'
         ? await this.resolveChannelMemberUserIds(
@@ -683,6 +690,7 @@ export class StaffTeamChatService {
 
   private async normalizeChannelData(
     tenantId: string,
+    user: AuthenticatedUser,
     dto: StaffChatChannelDto,
   ): Promise<Omit<Prisma.StaffChatChannelUncheckedCreateInput, 'tenantId'>> {
     const name = this.normalizeRequiredString(dto.name, 'Channel name', 80);
@@ -690,7 +698,7 @@ export class StaffTeamChatService {
     const scope = this.resolveOne(dto.scope, channelScopes, 'NETWORK');
     const storeId =
       scope === 'STORE'
-        ? await this.resolveStoreId(tenantId, dto.storeId)
+        ? await this.resolveStoreIdForChannel(tenantId, user, dto.storeId)
         : null;
     const roleScope =
       scope === 'ROLE' ? this.resolveRoleScope(dto.roleScope) : null;
@@ -775,6 +783,26 @@ export class StaffTeamChatService {
     }
 
     return store.id;
+  }
+
+  private async resolveStoreIdForChannel(
+    tenantId: string,
+    user: AuthenticatedUser,
+    value?: string | null,
+  ) {
+    const storeId = await this.resolveStoreId(tenantId, value);
+
+    if (this.canSeeAllChannels(user.role)) {
+      return storeId;
+    }
+
+    const userStoreIds = await this.getUserStoreIds(user.id);
+
+    if (userStoreIds.length === 0 || userStoreIds.includes(storeId)) {
+      return storeId;
+    }
+
+    throw new BadRequestException('Store channel is not available for user');
   }
 
   private async resolveChannelMemberUserIds(
@@ -870,6 +898,18 @@ export class StaffTeamChatService {
         UserRole.OWNER,
         UserRole.ADMIN,
         UserRole.MANAGER,
+        UserRole.STANDARDS_MANAGER,
+      ] as UserRole[]
+    ).includes(role);
+  }
+
+  private canManageChannels(role: UserRole) {
+    return (
+      [
+        UserRole.OWNER,
+        UserRole.ADMIN,
+        UserRole.MANAGER,
+        UserRole.CLUB_MANAGER,
         UserRole.STANDARDS_MANAGER,
       ] as UserRole[]
     ).includes(role);

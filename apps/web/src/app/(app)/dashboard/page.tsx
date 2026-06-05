@@ -4,6 +4,7 @@ import { DashboardFilters } from "@/components/dashboard-filters";
 import { DashboardQuickSyncButton } from "@/components/dashboard-quick-sync-button";
 import { DashboardRevenuePanel } from "@/components/dashboard-revenue-panel";
 import { requireCurrentUser } from "@/lib/auth";
+import { isShiftWorkspaceRole, staffShiftWorkspaceHref } from "@/lib/landing";
 import {
   getGuestCrmTaskReport,
   getGuestsSummary,
@@ -455,7 +456,12 @@ export default async function DashboardPage({
     redirect(dashboardCanonicalHref(params));
   }
 
-  await requireCurrentUser();
+  const user = await requireCurrentUser();
+
+  if (isShiftWorkspaceRole(user.role)) {
+    redirect(staffShiftWorkspaceHref);
+  }
+
   const filters = {
     period: searchParam(params.period) ?? "day",
     dateFrom: searchParam(params.dateFrom),

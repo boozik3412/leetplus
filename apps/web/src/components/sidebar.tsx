@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import type { AuthUser } from "@/lib/auth";
+import { getDefaultLandingPath, isShiftWorkspaceRole } from "@/lib/landing";
 import { canAccessPath } from "@/lib/permissions";
 import { getRoleLabel } from "@/lib/roles";
 import { ThemeSwitcher } from "@/components/theme-switcher";
@@ -73,6 +74,7 @@ const navGroups: NavGroup[] = [
       { href: "/staff/tasks", label: "Задачи и правила" },
       { href: "/staff/shift-regulations", label: "Регламенты и чек-листы" },
       { href: "/staff/training-courses", label: "Обучение и аттестации" },
+      { href: "/staff/knowledge-base", label: "База знаний" },
       { href: "/staff/administrator-ratings", label: "Контроль и мотивация" },
       { href: "/staff/directory", label: "Сотрудники" },
       { href: "/guests/staff-control", label: "Смены и администраторы" },
@@ -130,6 +132,31 @@ const navGroups: NavGroup[] = [
     ],
   },
 ];
+
+const shiftWorkspaceNavHrefs = new Set([
+  "/staff/tasks",
+  "/staff/shift-regulations",
+  "/staff/training-courses",
+  "/staff/knowledge-base",
+]);
+
+function canShowNavItem(user: AuthUser | null, item: NavItem) {
+  if (!canAccessPath(user, item.href)) {
+    return false;
+  }
+
+  if (!user || !isShiftWorkspaceRole(user.role)) {
+    return true;
+  }
+
+  const hrefPath = normalizeNavigationPath(item.href);
+
+  if (hrefPath.startsWith("/staff") || hrefPath.startsWith("/guests/staff-control")) {
+    return shiftWorkspaceNavHrefs.has(hrefPath);
+  }
+
+  return true;
+}
 
 function NavLink({ href, label, onNavigate }: NavItem) {
   const pathname = usePathname();
@@ -470,10 +497,16 @@ function HomeIcon() {
   );
 }
 
-function LogoLink({ onNavigate }: { onNavigate?: () => void }) {
+function LogoLink({
+  href = "/dashboard",
+  onNavigate,
+}: {
+  href?: string;
+  onNavigate?: () => void;
+}) {
   return (
     <Link
-      href="/dashboard"
+      href={href}
       aria-label="Перейти на главную"
       onClick={onNavigate}
       className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-zinc-950 text-sm font-semibold text-white transition hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70 dark:bg-emerald-400 dark:text-zinc-950"
@@ -484,17 +517,21 @@ function LogoLink({ onNavigate }: { onNavigate?: () => void }) {
 }
 
 function CompactHomeLink({
+  href = "/dashboard",
   isActive,
+  title = "Главная: сводный дашборд сети",
   onNavigate,
 }: {
+  href?: string;
   isActive: boolean;
+  title?: string;
   onNavigate?: () => void;
 }) {
   return (
     <Link
-      href="/dashboard"
-      title="Главная: сводный дашборд сети"
-      aria-label="Главная: сводный дашборд сети"
+      href={href}
+      title={title}
+      aria-label={title}
       aria-current={isActive ? "page" : undefined}
       onClick={onNavigate}
       onFocus={onNavigate}
@@ -538,6 +575,10 @@ function isNavigationItemActive(pathname: string, href: string) {
 
   if (hrefPath === "/dashboard") {
     return isDashboardPath(currentPathname);
+  }
+
+  if (hrefPath === "/staff/shift-workspace") {
+    return currentPathname === hrefPath;
   }
 
   return currentPathname === hrefPath;
@@ -620,10 +661,17 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
   const allowedNavGroups = navGroups
     .map((group) => ({
       ...group,
-      items: group.items.filter((item) => canAccessPath(user, item.href)),
+      items: group.items.filter((item) => canShowNavItem(user, item)),
     }))
     .filter((group) => group.items.length > 0);
   const showHomeLink = Boolean(user);
+  const homeHref = user ? getDefaultLandingPath(user) : "/dashboard";
+  const homeLabel = homeHref === "/dashboard" ? "Главная" : "Моя смена";
+  const homeTitle =
+    homeHref === "/dashboard"
+      ? "Главная: сводный дашборд сети"
+      : "Моя смена: задачи, регламенты и текущая выручка";
+  const isHomeActive = isNavigationItemActive(pathname, homeHref);
   const isDashboardArea = isDashboardPath(pathname);
   const currentProductArea = resolveCurrentProductArea(pathname);
   const hasOpenNavGroup = Object.values(openNavGroups).some(Boolean);
@@ -720,7 +768,7 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
     <>
       <div className="sticky top-0 z-40 flex items-center justify-between border-b border-zinc-200/80 bg-white/90 px-4 py-3 shadow-sm backdrop-blur-xl dark:border-zinc-800 dark:bg-zinc-950/90 md:hidden">
         <div className="flex items-center gap-3">
-          <LogoLink />
+          <LogoLink href={homeHref} />
           <div className="min-w-0">
             <p className="truncate text-xs font-medium uppercase tracking-wide text-zinc-500">
               LeetPlus
@@ -757,7 +805,10 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
             <div className="border-b border-zinc-200/80 px-4 py-4 dark:border-zinc-800">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
-                  <LogoLink onNavigate={() => setIsMobileMenuOpen(false)} />
+                  <LogoLink
+                    href={homeHref}
+                    onNavigate={() => setIsMobileMenuOpen(false)}
+                  />
                   <div className="min-w-0">
                     <p className="truncate text-xs font-medium uppercase tracking-wide text-zinc-500">
                       LeetPlus
@@ -780,8 +831,8 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
             <nav className="flex-1 space-y-1 overflow-y-auto p-3">
               {showHomeLink ? (
                 <NavLink
-                  href="/dashboard"
-                  label="Главная"
+                  href={homeHref}
+                  label={homeLabel}
                   onNavigate={() => setIsMobileMenuOpen(false)}
                 />
               ) : null}
@@ -814,13 +865,15 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
         className="relative z-[70] hidden w-20 shrink-0 flex-col border-r border-zinc-200/80 bg-white/80 shadow-[inset_-1px_0_0_rgb(255_255_255_/_0.5)] backdrop-blur-xl dark:border-zinc-800/80 dark:bg-zinc-950/75 md:flex"
       >
         <div className="flex justify-center border-b border-zinc-200/80 px-3 py-4 dark:border-zinc-800">
-          <LogoLink />
+          <LogoLink href={homeHref} />
         </div>
         <nav className="flex-1 space-y-2 overflow-visible px-3 py-4">
           {showHomeLink ? (
             <>
               <CompactHomeLink
-                isActive={isDashboardArea}
+                href={homeHref}
+                isActive={isHomeActive}
+                title={homeTitle}
                 onNavigate={closeNavGroups}
               />
               {allowedNavGroups.length > 0 ? (
@@ -835,7 +888,7 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
             <CompactNavSection
               key={group.title}
               group={group}
-              isActive={!isDashboardArea && currentProductArea === group.title}
+              isActive={!isHomeActive && currentProductArea === group.title}
               isOpen={Boolean(openNavGroups[group.title])}
               onOpen={() => openNavGroup(group.title)}
               onClose={closeNavGroups}

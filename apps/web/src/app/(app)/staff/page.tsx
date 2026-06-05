@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
+import { isShiftWorkspaceRole, staffShiftWorkspaceHref } from "@/lib/landing";
 import { can } from "@/lib/permissions";
 import { canManageUserAccess } from "@/lib/roles";
 
@@ -77,6 +78,10 @@ const staffAreas: StaffArea[] = [
 
 export default async function StaffHubPage() {
   const user = await requireCurrentUser();
+
+  if (isShiftWorkspaceRole(user.role)) {
+    redirect(staffShiftWorkspaceHref);
+  }
 
   if (!can(user, "view_staff")) {
     redirect("/dashboard");

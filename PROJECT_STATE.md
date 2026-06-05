@@ -1,6 +1,6 @@
 # LeetPlus Project State
 
-Last updated: 2026-06-04
+Last updated: 2026-06-05
 
 ## Current Workflow
 
@@ -79,6 +79,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added the employee-facing shift workspace for `CLUB_ADMINISTRATOR` and `SENIOR_ADMINISTRATOR`: login, root, `/dashboard`, and `/staff` now route these roles to `/staff/shift-workspace`, where they see assigned staff tasks, shift checklists, notifications, Langame `working_shifts.user_id` linkage status, and current shift revenue from saved staff-control facts instead of executive network KPI. The sidebar home link is role-aware, and shift roles see a shorter staff menu focused on tasks, regulations/checklists, training/attestations, knowledge base, team chat, and notifications.
 - Simplified the `/staff/team-chat` workspace UI into a calmer messenger-like feed: first-level KPI/search controls are hidden, pinned messages are collapsed into a compact disclosure, message cards use lighter backgrounds, and the composer keeps quick input/send visible while format, priority, and pin options open through a `+` control.
 - Added the dedicated `view_communications` access layer: `/communications` now shows internal chat/notification cards by `view_communications`, `/staff/team-chat` and `/staff/notifications` can open without full `view_staff`, and CRM contact tasks remain behind `view_guests`.
 - Added Langame tariff conditions to marketing promo bundles: `/marketing/promo-bundles` now loads saved tariff group, tariff period, and tariff type snapshot items, shows compact selectors in the bundle constructor, stores selected conditions in `mechanicConfig.conditions`, and displays the restriction in catalog cards without live Langame reads or automatic issuing.

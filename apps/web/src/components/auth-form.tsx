@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
+import type { AuthUser } from "@/lib/auth";
+import { getDefaultLandingPath } from "@/lib/landing";
 import { getRoleLabel, type UserRole } from "@/lib/roles";
 
 type AuthMode = "login" | "register";
@@ -194,6 +196,9 @@ export function AuthForm({ mode, inviteToken }: AuthFormProps) {
         return;
       }
 
+      const data = (await response.json()) as { user?: AuthUser };
+      const landingPath = data.user ? getDefaultLandingPath(data.user) : "/dashboard";
+
       if (!isRegister) {
         if (rememberMe) {
           window.localStorage.setItem(REMEMBER_EMAIL_KEY, form.email);
@@ -206,10 +211,10 @@ export function AuthForm({ mode, inviteToken }: AuthFormProps) {
       setIsRedirecting(true);
       router.push(
         isInviteRegister
-          ? "/dashboard"
+          ? landingPath
           : isRegister
           ? `/verify-email?email=${encodeURIComponent(form.email)}`
-          : "/dashboard",
+          : landingPath,
       );
       router.refresh();
     } catch {

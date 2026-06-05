@@ -251,12 +251,10 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "publish_staff_knowledge",
   ],
   SENIOR_ADMINISTRATOR: [
-    "view_dashboard",
     "view_communications",
     "view_staff",
   ],
   CLUB_ADMINISTRATOR: [
-    "view_dashboard",
     "view_communications",
     "view_staff",
   ],

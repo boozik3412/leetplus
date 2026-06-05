@@ -231,16 +231,8 @@ export const roleCapabilities: Record<UserRole, AccessCapability[]> = {
     'review_staff_knowledge',
     'publish_staff_knowledge',
   ],
-  [UserRole.SENIOR_ADMINISTRATOR]: [
-    'view_dashboard',
-    'view_communications',
-    'view_staff',
-  ],
-  [UserRole.CLUB_ADMINISTRATOR]: [
-    'view_dashboard',
-    'view_communications',
-    'view_staff',
-  ],
+  [UserRole.SENIOR_ADMINISTRATOR]: ['view_communications', 'view_staff'],
+  [UserRole.CLUB_ADMINISTRATOR]: ['view_communications', 'view_staff'],
 };
 
 export function normalizeCapabilities(

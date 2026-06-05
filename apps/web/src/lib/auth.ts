@@ -1,5 +1,6 @@
 import { getApiUrl, getAuthHeaders } from "./api";
 import { redirect } from "next/navigation";
+import { getDefaultLandingPath } from "./landing";
 
 export type AuthUser = {
   id: string;
@@ -52,7 +53,7 @@ export async function redirectIfAuthenticated() {
   const user = await getCurrentUser();
 
   if (user) {
-    redirect("/dashboard");
+    redirect(getDefaultLandingPath(user));
   }
 }
 

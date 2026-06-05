@@ -140,6 +140,8 @@ const shiftWorkspaceNavHrefs = new Set([
   "/staff/knowledge-base",
 ]);
 
+const compactSidebarIconClassName = "h-5 w-5 shrink-0";
+
 function canShowNavItem(user: AuthUser | null, item: NavItem) {
   if (!canAccessPath(user, item.href)) {
     return false;
@@ -316,7 +318,7 @@ function CompactNavSection({
   return (
     <div
       ref={containerRef}
-      className="relative w-12"
+      className="relative w-12 shrink-0"
       onMouseEnter={onOpen}
       onMouseMove={onOpen}
       onMouseLeave={onClose}
@@ -379,7 +381,7 @@ function compactGroupButtonClass({
   isOpen?: boolean;
 }) {
   return [
-    "group relative flex h-12 w-12 items-center justify-center rounded-2xl border text-zinc-500 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70",
+    "group relative flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border text-zinc-500 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70",
     isActive
       ? "border-emerald-500/50 bg-emerald-500 text-zinc-950 shadow-sm"
       : isOpen
@@ -390,7 +392,7 @@ function compactGroupButtonClass({
 
 function SectionIcon({ icon }: { icon: NavGroup["icon"] }) {
   const common = {
-    className: "h-5 w-5",
+    className: compactSidebarIconClassName,
     viewBox: "0 0 24 24",
     fill: "none",
     stroke: "currentColor",
@@ -481,7 +483,7 @@ function SectionIcon({ icon }: { icon: NavGroup["icon"] }) {
 function HomeIcon() {
   return (
     <svg
-      className="h-5 w-5"
+      className={compactSidebarIconClassName}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -509,7 +511,7 @@ function LogoLink({
       href={href}
       aria-label="Перейти на главную"
       onClick={onNavigate}
-      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-zinc-950 text-sm font-semibold text-white transition hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70 dark:bg-emerald-400 dark:text-zinc-950"
+      className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-zinc-950 text-sm font-semibold text-white transition hover:bg-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
     >
       LP
     </Link>
@@ -984,7 +986,7 @@ function CompactUserPanel({
           className="flex h-12 w-12 items-center justify-center rounded-2xl border border-zinc-200 bg-white text-zinc-500 transition hover:border-zinc-300 hover:bg-zinc-100 hover:text-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-zinc-700 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
         >
           <svg
-            className="h-5 w-5"
+            className={compactSidebarIconClassName}
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -1010,7 +1012,7 @@ function CompactUserPanel({
       className="flex h-12 w-12 items-center justify-center rounded-2xl border border-zinc-200 bg-white text-zinc-500 transition hover:border-zinc-300 hover:bg-zinc-100 hover:text-zinc-950 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-zinc-700 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
     >
       <svg
-        className="h-5 w-5"
+        className={compactSidebarIconClassName}
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"

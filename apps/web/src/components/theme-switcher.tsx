@@ -67,11 +67,11 @@ export function ThemeSwitcher({
         aria-expanded={isOpen}
         onClick={() => setIsOpen((current) => !current)}
         className={[
-          "inline-flex items-center justify-center border border-zinc-200 bg-white/80 text-zinc-600 shadow-sm transition hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70 dark:border-zinc-800 dark:bg-zinc-950/70 dark:text-zinc-300 dark:hover:border-zinc-700 dark:hover:bg-zinc-900 dark:hover:text-zinc-50",
-          isCompact ? "h-8 w-8 rounded-xl" : "h-9 w-9 rounded-2xl",
+          "inline-flex shrink-0 items-center justify-center border border-zinc-200 bg-white/80 text-zinc-600 shadow-sm transition hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70 dark:border-zinc-800 dark:bg-zinc-950/70 dark:text-zinc-300 dark:hover:border-zinc-700 dark:hover:bg-zinc-900 dark:hover:text-zinc-50",
+          isCompact ? "h-12 w-12 rounded-2xl" : "h-9 w-9 rounded-2xl",
         ].join(" ")}
       >
-        <ThemeIcon mode={theme} />
+        <ThemeIcon mode={theme} className={isCompact ? "h-5 w-5" : "h-4 w-4"} />
       </button>
 
       {isOpen ? (
@@ -112,13 +112,19 @@ export function ThemeSwitcher({
   );
 }
 
-function ThemeIcon({ mode }: { mode: ThemeMode }) {
+function ThemeIcon({
+  mode,
+  className = "h-4 w-4",
+}: {
+  mode: ThemeMode;
+  className?: string;
+}) {
   if (mode === "light") {
     return (
       <svg
         aria-hidden="true"
         viewBox="0 0 24 24"
-        className="h-4 w-4"
+        className={className}
         fill="none"
         stroke="currentColor"
         strokeLinecap="round"
@@ -143,7 +149,7 @@ function ThemeIcon({ mode }: { mode: ThemeMode }) {
       <svg
         aria-hidden="true"
         viewBox="0 0 24 24"
-        className="h-4 w-4"
+        className={className}
         fill="none"
         stroke="currentColor"
         strokeLinecap="round"
@@ -159,7 +165,7 @@ function ThemeIcon({ mode }: { mode: ThemeMode }) {
     <svg
       aria-hidden="true"
       viewBox="0 0 24 24"
-      className="h-4 w-4"
+      className={className}
       fill="none"
       stroke="currentColor"
       strokeLinecap="round"

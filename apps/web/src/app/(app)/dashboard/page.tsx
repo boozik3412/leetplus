@@ -223,6 +223,7 @@ type BusinessSignalGroup = {
 
 type DashboardGuestsSummary = Pick<
   GuestsSummary,
+  | "totalGuests"
   | "activeGuests"
   | "newGuests"
   | "repeatGuests"
@@ -243,6 +244,7 @@ type DashboardOperationalReport = Pick<
 >;
 
 const emptyGuestsSummary: DashboardGuestsSummary = {
+  totalGuests: 0,
   activeGuests: 0,
   newGuests: 0,
   repeatGuests: 0,
@@ -698,7 +700,7 @@ function ExecutiveOverviewPanel({
     <section className="mt-6 grid auto-rows-fr items-stretch gap-4 lg:grid-cols-3">
       <ExecutiveMetricCard
         label="Клиентская база"
-        value={`${formatQuantity(guestsSummary.activeGuests)} гостей`}
+        value={`${formatQuantity(guestsSummary.totalGuests)} гостей`}
         description={`Новые: ${formatQuantity(guestsSummary.newGuests)}, повторные: ${formatQuantity(guestsSummary.repeatGuests)}, в риске: ${formatQuantity(guestsSummary.riskGuests)}.`}
         href="/guests/crm"
         tone={guestsSummary.riskGuests > guestsSummary.newGuests ? "warning" : "good"}

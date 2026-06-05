@@ -511,10 +511,18 @@ function LogoLink({
       href={href}
       aria-label="Перейти на главную"
       onClick={onNavigate}
-      className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-zinc-950 text-sm font-semibold text-white transition hover:bg-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
+      className="group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70"
     >
-      LP
+      <LogoMark />
     </Link>
+  );
+}
+
+function LogoMark() {
+  return (
+    <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-zinc-950 text-sm font-semibold text-white transition group-hover:bg-zinc-900 dark:bg-emerald-400 dark:text-zinc-950 dark:group-hover:bg-emerald-300">
+      LP
+    </span>
   );
 }
 
@@ -866,9 +874,18 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
         ref={desktopSidebarRef}
         className="sticky top-0 z-[70] hidden h-dvh max-h-dvh w-20 shrink-0 flex-col border-r border-zinc-200/80 bg-white/80 shadow-[inset_-1px_0_0_rgb(255_255_255_/_0.5)] backdrop-blur-xl dark:border-zinc-800/80 dark:bg-zinc-950/75 md:flex"
       >
-        <div className="flex border-b border-zinc-200/80 px-3 py-4 dark:border-zinc-800">
-          <LogoLink href={homeHref} />
-        </div>
+        <Link
+          href={homeHref}
+          title={homeTitle}
+          aria-label={homeTitle}
+          onClick={closeNavGroups}
+          onFocus={closeNavGroups}
+          onMouseEnter={closeNavGroups}
+          onPointerEnter={closeNavGroups}
+          className="group flex border-b border-zinc-200/80 px-3 py-4 transition-colors hover:bg-zinc-100/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-500/70 dark:border-zinc-800 dark:hover:bg-zinc-900/70"
+        >
+          <LogoMark />
+        </Link>
         <nav className="min-h-0 flex-1 space-y-2 overflow-visible px-3 py-4">
           {showHomeLink ? (
             <>

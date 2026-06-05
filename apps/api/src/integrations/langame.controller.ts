@@ -14,6 +14,10 @@ import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { UserRole } from '@prisma/client';
 import {
+  BusinessSnapshotService,
+  type BusinessSnapshotRunQuery,
+} from './business-snapshot.service';
+import {
   GuestDataFoundationService,
   type GuestDataFoundationSyncQuery,
 } from './guest-data-foundation.service';
@@ -36,6 +40,7 @@ export class LangameController {
     private readonly langameSettingsService: LangameSettingsService,
     private readonly langameSyncService: LangameSyncService,
     private readonly guestDataFoundationService: GuestDataFoundationService,
+    private readonly businessSnapshotService: BusinessSnapshotService,
   ) {}
 
   @Get('settings')
@@ -70,6 +75,19 @@ export class LangameController {
     @Body() query: LangameEndpointProfileQuery,
   ) {
     return this.langameSettingsService.runEndpointSnapshot(user, query);
+  }
+
+  @Get('business-snapshots/status')
+  getBusinessSnapshotStatus(@CurrentUser() user: AuthenticatedUser) {
+    return this.businessSnapshotService.getStatus(user);
+  }
+
+  @Post('business-snapshots/run')
+  runBusinessSnapshots(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() query: BusinessSnapshotRunQuery,
+  ) {
+    return this.businessSnapshotService.runSnapshots(user, query);
   }
 
   @Post('guests/search-diagnostics')

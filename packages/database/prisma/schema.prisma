@@ -136,6 +136,7 @@ model Tenant {
   integrationCredentials               IntegrationCredential[]
   integrationSources                   IntegrationSource[]
   integrationSyncJobs                  IntegrationSyncJob[]
+  businessSnapshotRuns                 BusinessSnapshotRun[]
   langameEndpointProfileRuns           LangameEndpointProfileRun[]
   langameEndpointSnapshotRuns          LangameEndpointSnapshotRun[]
   langameTariffSnapshotItems           LangameTariffSnapshotItem[]
@@ -843,6 +844,30 @@ model IntegrationSyncJob {
   @@index([tenantId, startedAt])
   @@index([integrationSourceId])
   @@index([status])
+}
+
+model BusinessSnapshotRun {
+  id             String   @id @default(uuid())
+  tenantId       String
+  type           String
+  status         String
+  startedAt      DateTime @default(now())
+  finishedAt     DateTime?
+  periodFrom     DateTime?
+  periodTo       DateTime?
+  staleAfterHours Int     @default(24)
+  rowCount       Int      @default(0)
+  sourceCounts   Json?
+  summary        Json?
+  freshness      Json?
+  errorMessage   String?
+  createdAt      DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, type, startedAt])
+  @@index([tenantId, status])
+  @@index([type, startedAt])
 }
 
 model LangameEndpointProfileRun {

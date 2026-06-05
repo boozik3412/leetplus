@@ -227,6 +227,61 @@ type EndpointProfileParamMode =
 
 type EndpointProfileStatus = "idle" | "loading" | "success" | "error";
 type EndpointSnapshotStatus = "idle" | "loading" | "success" | "error";
+type BusinessSnapshotStatus = "idle" | "loading" | "success" | "error";
+
+type BusinessSnapshotType =
+  | "REVENUE"
+  | "GUESTS"
+  | "TARIFFS"
+  | "ASSORTMENT_ARRIVALS"
+  | "STAFF_SHIFTS_CASH";
+
+type BusinessSnapshotFreshness = "EMPTY" | "FRESH" | "STALE" | "FAILED";
+
+type BusinessSnapshotRunSummary = {
+  id: string;
+  type: BusinessSnapshotType;
+  status: string;
+  startedAt: string;
+  finishedAt: string | null;
+  periodFrom: string | null;
+  periodTo: string | null;
+  staleAfterHours: number;
+  rowCount: number;
+  sourceCounts: Record<string, number>;
+  summary: Record<string, unknown>;
+  freshness: Record<string, unknown>;
+  errorMessage: string | null;
+};
+
+type BusinessSnapshotTypeStatus = {
+  type: BusinessSnapshotType;
+  title: string;
+  businessArea: string;
+  targetRoute: string;
+  status: BusinessSnapshotFreshness;
+  staleAfterHours: number;
+  latestRun: BusinessSnapshotRunSummary | null;
+  latestSuccessfulRun: BusinessSnapshotRunSummary | null;
+  ageHours: number | null;
+  rowCount: number;
+  sourceCounts: Record<string, number>;
+  summary: Record<string, unknown>;
+  nextAction: string;
+};
+
+type BusinessSnapshotStatusResult = {
+  checkedAt: string;
+  staleAfterHours: number;
+  snapshots: BusinessSnapshotTypeStatus[];
+};
+
+type BusinessSnapshotRunResult = {
+  startedAt: string;
+  finishedAt: string;
+  runs: BusinessSnapshotRunSummary[];
+  status: BusinessSnapshotStatusResult;
+};
 
 type EndpointProfileOption = {
   key: EndpointProfileKey;
@@ -944,15 +999,27 @@ export function LangameSyncPanel({
     useState<EndpointSnapshotStatus>("idle");
   const [endpointSnapshotError, setEndpointSnapshotError] =
     useState<string | null>(null);
+  const [businessSnapshots, setBusinessSnapshots] =
+    useState<BusinessSnapshotStatusResult | null>(null);
+  const [businessSnapshotStatus, setBusinessSnapshotStatus] =
+    useState<BusinessSnapshotStatus>("idle");
+  const [businessSnapshotError, setBusinessSnapshotError] =
+    useState<string | null>(null);
+  const [businessSnapshotRunResult, setBusinessSnapshotRunResult] =
+    useState<BusinessSnapshotRunResult | null>(null);
 
   useEffect(() => {
     let ignore = false;
 
     async function loadGuestStatus() {
-      const status = await fetchGuestSyncStatus();
+      const [status, snapshotStatus] = await Promise.all([
+        fetchGuestSyncStatus(),
+        fetchBusinessSnapshotStatus(),
+      ]);
 
       if (!ignore) {
         setLatestGuestStatus(status);
+        setBusinessSnapshots(snapshotStatus);
       }
     }
 
@@ -1045,6 +1112,7 @@ export function LangameSyncPanel({
         setSuccess("Общая синхронизация Langame завершена.");
       }
 
+      await refreshBusinessSnapshotStatus();
       await refreshSettings();
     } catch (syncError) {
       setError(syncError instanceof Error ? syncError.message : "API недоступен");
@@ -1060,6 +1128,58 @@ export function LangameSyncPanel({
 
     if (response.ok) {
       setSettings((await response.json()) as LangameSettings);
+    }
+  }
+
+  async function refreshBusinessSnapshotStatus() {
+    try {
+      const status = await fetchBusinessSnapshotStatus();
+      setBusinessSnapshots(status);
+    } catch {
+      setBusinessSnapshotStatus((current) =>
+        current === "loading" ? "error" : current,
+      );
+    }
+  }
+
+  async function runBusinessSnapshots() {
+    setBusinessSnapshotStatus("loading");
+    setBusinessSnapshotError(null);
+    setBusinessSnapshotRunResult(null);
+
+    try {
+      const response = await fetch(
+        "/api/integrations/langame/business-snapshots/run",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            type: "ALL",
+            dateFrom: syncDateFrom,
+            dateTo: syncDateTo,
+          }),
+          cache: "no-store",
+        },
+      );
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(getErrorMessage(data));
+      }
+
+      setBusinessSnapshotRunResult(data as BusinessSnapshotRunResult);
+      setBusinessSnapshots((data as BusinessSnapshotRunResult).status);
+      setBusinessSnapshotStatus("success");
+      await refreshSettings();
+    } catch (snapshotError) {
+      setBusinessSnapshotStatus("error");
+      setBusinessSnapshotError(
+        snapshotError instanceof Error
+          ? snapshotError.message
+          : "Не удалось создать typed snapshot-джобы",
+      );
     }
   }
 
@@ -1448,6 +1568,15 @@ export function LangameSyncPanel({
         latestGuestStatus={latestGuestStatus}
         settings={settings}
       />
+      <BusinessSnapshotPanel
+        dateFrom={syncDateFrom}
+        dateTo={syncDateTo}
+        error={businessSnapshotError}
+        result={businessSnapshotRunResult}
+        snapshots={businessSnapshots}
+        status={businessSnapshotStatus}
+        onRun={runBusinessSnapshots}
+      />
       <EndpointMapPanel
         diagnostics={routeDiagnostics}
         diagnosticsError={routeDiagnosticsError}
@@ -1797,6 +1926,229 @@ function SyncHealthSummary({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function BusinessSnapshotPanel({
+  snapshots,
+  status,
+  error,
+  result,
+  dateFrom,
+  dateTo,
+  onRun,
+}: {
+  snapshots: BusinessSnapshotStatusResult | null;
+  status: BusinessSnapshotStatus;
+  error: string | null;
+  result: BusinessSnapshotRunResult | null;
+  dateFrom: string;
+  dateTo: string;
+  onRun: () => void;
+}) {
+  const snapshotRows = snapshots?.snapshots ?? [];
+  const freshCount = snapshotRows.filter((item) => item.status === "FRESH").length;
+  const staleCount = snapshotRows.filter((item) => item.status === "STALE").length;
+  const problemCount = snapshotRows.filter(
+    (item) => item.status === "FAILED" || item.status === "EMPTY",
+  ).length;
+
+  return (
+    <div className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300">
+            Typed snapshot-джобы
+          </p>
+          <h2 className="mt-1 text-lg font-semibold text-zinc-950 dark:text-zinc-50">
+            Бизнес-снимки для рабочих разделов
+          </h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-500 dark:text-zinc-400">
+            Эти снимки собираются из уже сохраненных LeetPlus-фактов и не делают
+            live-запросов к Langame. Они показывают, готов ли слой данных для
+            дашборда, гостей, маркетинга, ассортимента и персонала.
+          </p>
+        </div>
+        <button
+          type="button"
+          disabled={status === "loading" || !dateFrom || !dateTo}
+          onClick={onRun}
+          className="rounded-full bg-zinc-950 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
+        >
+          {status === "loading" ? "Создаем..." : "Создать typed snapshots"}
+        </button>
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <SyncHealthMetric
+          detail="можно использовать без live Langame"
+          label="Свежие"
+          value={freshCount}
+        />
+        <SyncHealthMetric
+          detail="старше 24 часов"
+          label="Устарели"
+          tone={staleCount > 0 ? "warning" : "neutral"}
+          value={staleCount}
+        />
+        <SyncHealthMetric
+          detail="нет снимка или последняя ошибка"
+          label="Требуют внимания"
+          tone={problemCount > 0 ? "danger" : "neutral"}
+          value={problemCount}
+        />
+      </div>
+
+      <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
+        Период запуска: {formatDateLabel(dateFrom)} - {formatDateLabel(dateTo)}.
+        Последняя проверка:{" "}
+        {snapshots ? formatDateTime(snapshots.checkedAt) : "еще не загружено"}.
+      </p>
+
+      {error ? (
+        <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-200">
+          {error}
+        </p>
+      ) : null}
+
+      {result ? (
+        <p className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/30 dark:text-emerald-200">
+          Создано typed snapshot-джоб: {result.runs.length}. Завершено{" "}
+          {formatDateTime(result.finishedAt)}.
+        </p>
+      ) : null}
+
+      <div className="mt-4 grid gap-3 xl:grid-cols-2">
+        {snapshotRows.map((snapshot) => (
+          <div
+            key={snapshot.type}
+            className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <p className="text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+                  {businessSnapshotTypeLabel(snapshot.type)}
+                </p>
+                <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                  {snapshot.businessArea} ·{" "}
+                  <a
+                    href={snapshot.targetRoute}
+                    className="font-medium text-emerald-700 hover:text-emerald-600 dark:text-emerald-300"
+                  >
+                    {snapshot.targetRoute}
+                  </a>
+                </p>
+              </div>
+              <span className={businessSnapshotBadgeClass(snapshot.status)}>
+                {businessSnapshotStatusLabel(snapshot.status)}
+              </span>
+            </div>
+
+            <div className="mt-3 grid gap-2 sm:grid-cols-3">
+              <MiniSnapshotMetric label="строк" value={snapshot.rowCount} />
+              <MiniSnapshotMetric
+                label="возраст"
+                value={
+                  snapshot.ageHours === null
+                    ? "нет"
+                    : `${snapshot.ageHours} ч`
+                }
+              />
+              <MiniSnapshotMetric
+                label="последний"
+                value={
+                  snapshot.latestSuccessfulRun?.finishedAt
+                    ? formatDateTime(snapshot.latestSuccessfulRun.finishedAt)
+                    : "нет"
+                }
+              />
+            </div>
+
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <SnapshotKeyValues
+                title="Источники"
+                values={snapshot.sourceCounts}
+              />
+              <SnapshotKeyValues title="Сводка" values={snapshot.summary} />
+            </div>
+
+            <p className="mt-3 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+              {snapshot.nextAction}
+            </p>
+            {snapshot.latestRun?.errorMessage ? (
+              <p className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-200">
+                {snapshot.latestRun.errorMessage}
+              </p>
+            ) : null}
+          </div>
+        ))}
+      </div>
+
+      {!snapshotRows.length ? (
+        <p className="mt-4 rounded-md border border-dashed border-zinc-300 px-3 py-4 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+          Typed snapshot-статус еще не загружен. Обновите страницу или создайте
+          первый снимок после общей синхронизации.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function MiniSnapshotMetric({
+  label,
+  value,
+}: {
+  label: string;
+  value: number | string;
+}) {
+  return (
+    <div className="rounded-md border border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950">
+      <p className="text-[11px] font-medium uppercase text-zinc-500">
+        {label}
+      </p>
+      <p className="mt-1 truncate text-sm font-semibold text-zinc-950 dark:text-zinc-50">
+        {typeof value === "number" ? formatNumber(value) : value}
+      </p>
+    </div>
+  );
+}
+
+function SnapshotKeyValues({
+  title,
+  values,
+}: {
+  title: string;
+  values: Record<string, unknown>;
+}) {
+  const entries = Object.entries(values)
+    .filter(([, value]) => value !== null && value !== undefined && value !== "")
+    .slice(0, 6);
+
+  return (
+    <div className="rounded-md border border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950">
+      <p className="text-[11px] font-medium uppercase text-zinc-500">{title}</p>
+      {entries.length ? (
+        <div className="mt-2 space-y-1">
+          {entries.map(([key, value]) => (
+            <div
+              key={key}
+              className="flex items-center justify-between gap-3 text-xs"
+            >
+              <span className="truncate text-zinc-500 dark:text-zinc-400">
+                {snapshotKeyLabel(key)}
+              </span>
+              <span className="shrink-0 font-medium text-zinc-800 dark:text-zinc-200">
+                {snapshotValueLabel(value)}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+          данных пока нет
+        </p>
+      )}
     </div>
   );
 }
@@ -3588,6 +3940,126 @@ function endpointSnapshotCandidateStatusLabel(
   return "не профилировался";
 }
 
+function businessSnapshotTypeLabel(type: BusinessSnapshotType) {
+  if (type === "REVENUE") {
+    return "Revenue snapshot";
+  }
+
+  if (type === "GUESTS") {
+    return "Guest snapshot";
+  }
+
+  if (type === "TARIFFS") {
+    return "Tariff snapshot";
+  }
+
+  if (type === "ASSORTMENT_ARRIVALS") {
+    return "Arrival snapshot";
+  }
+
+  return "Staff shift/cash snapshot";
+}
+
+function businessSnapshotStatusLabel(status: BusinessSnapshotFreshness) {
+  if (status === "FRESH") {
+    return "свежий";
+  }
+
+  if (status === "STALE") {
+    return "устарел";
+  }
+
+  if (status === "FAILED") {
+    return "ошибка";
+  }
+
+  return "нет снимка";
+}
+
+function businessSnapshotBadgeClass(status: BusinessSnapshotFreshness) {
+  const base = "rounded-full px-2.5 py-1 text-xs font-semibold";
+
+  if (status === "FRESH") {
+    return `${base} bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200`;
+  }
+
+  if (status === "STALE") {
+    return `${base} bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-200`;
+  }
+
+  if (status === "FAILED") {
+    return `${base} bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-200`;
+  }
+
+  return `${base} bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300`;
+}
+
+function snapshotKeyLabel(key: string) {
+  const labels: Record<string, string> = {
+    salesFacts: "продажи",
+    clubRevenueFacts: "выручка клубов",
+    operationLogs: "операции",
+    guestTransactions: "транзакции",
+    workingShifts: "смены",
+    guests: "гости",
+    guestGroups: "группы",
+    sessions: "сессии",
+    logs: "логи",
+    transactions: "транзакции",
+    balances: "балансы",
+    bonusBalances: "бонусы",
+    inventorySnapshots: "остатки",
+    stockMovements: "движения",
+    products: "товары",
+    stores: "клубы",
+    staffMembers: "сотрудники",
+    staffMappings: "связки",
+    productRevenue: "товарная выручка",
+    productCost: "себестоимость",
+    clubRevenue: "клубная выручка",
+    operationAmount: "сумма операций",
+    transactionAmount: "сумма транзакций",
+    shiftCashRevenue: "сменная касса",
+    balanceTotal: "баланс",
+    bonusBalanceTotal: "бонусный баланс",
+    latestFactAt: "последний факт",
+    inventoryQuantity: "остаток, шт",
+    movementQuantity: "движения, шт",
+    movementAmount: "движения, руб",
+    shiftCashAmount: "наличные",
+    shiftCashlessAmount: "безнал",
+    shiftRefunds: "возвраты",
+    shiftNetCash: "касса нетто",
+    incassAmount: "инкассация",
+  };
+
+  return labels[key] ?? key;
+}
+
+function snapshotValueLabel(value: unknown) {
+  if (typeof value === "number") {
+    return formatNumber(Math.round(value * 100) / 100);
+  }
+
+  if (typeof value === "string") {
+    if (/^\d{4}-\d{2}-\d{2}T/.test(value)) {
+      return formatDateTime(value);
+    }
+
+    return value.length > 32 ? `${value.slice(0, 32)}...` : value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.slice(0, 3).join(", ") || "нет";
+  }
+
+  if (typeof value === "boolean") {
+    return value ? "да" : "нет";
+  }
+
+  return "нет";
+}
+
 function endpointProfileHealthBadgeClass(status: EndpointProfileHealthStatus) {
   const base = "rounded-full px-2 py-0.5 text-[11px] font-medium";
 
@@ -4004,6 +4476,19 @@ async function fetchGuestSyncStatus() {
   return response.json() as Promise<GuestSyncStatus>;
 }
 
+async function fetchBusinessSnapshotStatus() {
+  const response = await fetch(
+    "/api/integrations/langame/business-snapshots/status",
+    { cache: "no-store" },
+  );
+
+  if (!response.ok) {
+    return null;
+  }
+
+  return response.json() as Promise<BusinessSnapshotStatusResult>;
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
@@ -4111,4 +4596,8 @@ function formatDateTime(value: string) {
     dateStyle: "short",
     timeStyle: "short",
   }).format(new Date(value));
+}
+
+function formatNumber(value: number) {
+  return new Intl.NumberFormat("ru-RU").format(value);
 }

@@ -1,6 +1,14 @@
 "use client";
 
-import { useMemo, useState, useTransition, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+  type ReactNode,
+} from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type {
@@ -80,6 +88,12 @@ const emptyChannelForm: ChannelFormState = {
   memberUserIds: [],
 };
 
+const TEAM_CHAT_LIVE_REFRESH_MS = 12_000;
+
+function getChannelReadSnapshot(channel: StaffChatChannel) {
+  return `${channel.messagesCount}:${channel.lastMessageAt ?? ""}`;
+}
+
 export function StaffTeamChatWorkspace({
   report,
 }: {
@@ -98,6 +112,10 @@ export function StaffTeamChatWorkspace({
   );
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [locallyReadChannels, setLocallyReadChannels] = useState<
+    Record<string, string>
+  >({});
+  const autoReadSignatureRef = useRef<string | null>(null);
   const activeChannel = useMemo(
     () =>
       report.channels.find((channel) => channel.id === report.activeChannelId) ??
@@ -105,7 +123,138 @@ export function StaffTeamChatWorkspace({
       null,
     [report.activeChannelId, report.channels],
   );
+  const activeUnreadSignature = useMemo(() => {
+    if (!activeChannel) {
+      return null;
+    }
+
+    const unreadMessageIds = report.messages
+      .filter(
+        (message) =>
+          message.channelId === activeChannel.id && !message.isReadByMe,
+      )
+      .map((message) => message.id);
+
+    if (activeChannel.unreadCount === 0 && unreadMessageIds.length === 0) {
+      return null;
+    }
+
+    return [
+      activeChannel.id,
+      activeChannel.unreadCount,
+      unreadMessageIds.join(","),
+    ].join(":");
+  }, [activeChannel, report.messages]);
+  const markChannelLocallyRead = useCallback((channel: StaffChatChannel) => {
+    setLocallyReadChannels((current) => {
+      const snapshot = getChannelReadSnapshot(channel);
+
+      if (current[channel.id] === snapshot) {
+        return current;
+      }
+
+      return { ...current, [channel.id]: snapshot };
+    });
+  }, []);
+  const postChannelRead = useCallback(
+    async (channel: StaffChatChannel) => {
+      const response = await fetch("/api/staff/team-chat/read", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channelId: channel.id }),
+      });
+
+      if (response.ok) {
+        markChannelLocallyRead(channel);
+      }
+
+      return response;
+    },
+    [markChannelLocallyRead],
+  );
+  const activeChannelLocallyRead = activeChannel
+    ? locallyReadChannels[activeChannel.id] ===
+      getChannelReadSnapshot(activeChannel)
+    : false;
   const pinnedMessages = report.messages.filter((message) => message.isPinned);
+
+  useEffect(() => {
+    const refreshIfVisible = () => {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+
+      startTransition(() => router.refresh());
+    };
+
+    const intervalId = window.setInterval(
+      refreshIfVisible,
+      TEAM_CHAT_LIVE_REFRESH_MS,
+    );
+
+    window.addEventListener("focus", refreshIfVisible);
+    document.addEventListener("visibilitychange", refreshIfVisible);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", refreshIfVisible);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
+    };
+  }, [router, startTransition]);
+
+  useEffect(() => {
+    if (!activeChannel || !activeUnreadSignature) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const markVisibleChannelRead = async () => {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+
+      if (autoReadSignatureRef.current === activeUnreadSignature) {
+        return;
+      }
+
+      autoReadSignatureRef.current = activeUnreadSignature;
+
+      try {
+        const response = await postChannelRead(activeChannel);
+
+        if (cancelled) {
+          return;
+        }
+
+        if (response.ok) {
+          startTransition(() => router.refresh());
+        } else {
+          autoReadSignatureRef.current = null;
+        }
+      } catch {
+        if (!cancelled) {
+          autoReadSignatureRef.current = null;
+        }
+      }
+    };
+
+    void markVisibleChannelRead();
+    window.addEventListener("focus", markVisibleChannelRead);
+    document.addEventListener("visibilitychange", markVisibleChannelRead);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", markVisibleChannelRead);
+      document.removeEventListener("visibilitychange", markVisibleChannelRead);
+    };
+  }, [
+    activeChannel,
+    activeUnreadSignature,
+    postChannelRead,
+    router,
+    startTransition,
+  ]);
 
   async function sendMessage() {
     setError(null);
@@ -221,11 +370,7 @@ export function StaffTeamChatWorkspace({
 
     setError(null);
     setSuccess(null);
-    const response = await fetch("/api/staff/team-chat/read", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ channelId: activeChannel.id }),
-    });
+    const response = await postChannelRead(activeChannel);
 
     if (!response.ok) {
       const payload = (await response.json().catch(() => null)) as
@@ -364,6 +509,12 @@ export function StaffTeamChatWorkspace({
                 key={channel.id}
                 channel={channel}
                 active={channel.id === activeChannel?.id}
+                unreadCount={
+                  locallyReadChannels[channel.id] ===
+                  getChannelReadSnapshot(channel)
+                    ? 0
+                    : channel.unreadCount
+                }
               />
             ))}
           </div>
@@ -658,6 +809,10 @@ export function StaffTeamChatWorkspace({
                   onCancelTaskDraft={() => setTaskDraft(null)}
                   onTaskDraftChange={setTaskDraft}
                   onCreateTask={createTaskFromMessage}
+                  forceRead={
+                    activeChannelLocallyRead &&
+                    message.channelId === activeChannel?.id
+                  }
                 />
               ))}
             </div>
@@ -677,6 +832,10 @@ export function StaffTeamChatWorkspace({
               onCancelTaskDraft={() => setTaskDraft(null)}
               onTaskDraftChange={setTaskDraft}
               onCreateTask={createTaskFromMessage}
+              forceRead={
+                activeChannelLocallyRead &&
+                message.channelId === activeChannel?.id
+              }
             />
           ))}
 
@@ -789,9 +948,11 @@ export function StaffTeamChatWorkspace({
 function ChannelLink({
   channel,
   active,
+  unreadCount,
 }: {
   channel: StaffChatChannel;
   active: boolean;
+  unreadCount: number;
 }) {
   const href = `/staff/team-chat?channelId=${encodeURIComponent(channel.id)}`;
 
@@ -812,9 +973,9 @@ function ChannelLink({
             {channelScopeLabel(channel)}
           </p>
         </div>
-        {channel.unreadCount > 0 ? (
+        {unreadCount > 0 ? (
           <span className="rounded-full bg-emerald-500 px-2 py-0.5 text-xs font-bold text-zinc-950">
-            {formatNumber(channel.unreadCount)}
+            {formatNumber(unreadCount)}
           </span>
         ) : null}
       </div>
@@ -839,6 +1000,7 @@ function MessageCard({
   onCancelTaskDraft,
   onTaskDraftChange,
   onCreateTask,
+  forceRead = false,
 }: {
   message: StaffChatMessage;
   stores: StaffChatStore[];
@@ -850,6 +1012,7 @@ function MessageCard({
   onCancelTaskDraft: () => void;
   onTaskDraftChange: (draft: TaskDraftState) => void;
   onCreateTask: (message: StaffChatMessage) => void;
+  forceRead?: boolean;
 }) {
   const isTaskDraftOpen = taskDraft?.messageId === message.id && !compact;
   const isTaskPending = taskPendingMessageId === message.id;
@@ -887,7 +1050,9 @@ function MessageCard({
               </Badge>
             ) : null}
             {message.isPinned ? <Badge tone="emerald">Закреплено</Badge> : null}
-            {!message.isReadByMe ? <Badge tone="emerald">Новое</Badge> : null}
+            {!forceRead && !message.isReadByMe ? (
+              <Badge tone="emerald">Новое</Badge>
+            ) : null}
           </div>
           <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
             {formatDateTime(message.createdAt)}

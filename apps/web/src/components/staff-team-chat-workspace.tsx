@@ -886,21 +886,21 @@ export function StaffTeamChatWorkspace({
           ) : null}
         </div>
 
-        <div className="shrink-0 border-t border-zinc-200/70 bg-transparent p-3 dark:border-zinc-800/70 sm:p-4">
-          <div className="grid gap-2 md:grid-cols-[1fr_auto]">
+        <div className="shrink-0 border-t border-zinc-200/60 bg-transparent p-3 dark:border-zinc-800/60 sm:p-4">
+          <div className="grid items-center gap-2 rounded-3xl bg-zinc-100/90 p-2 shadow-sm ring-1 ring-zinc-200/70 dark:bg-zinc-900/70 dark:ring-zinc-800/70 md:grid-cols-[1fr_auto]">
             <textarea
               value={form.body}
               onChange={(event) =>
                 setForm((current) => ({ ...current, body: event.target.value }))
               }
-              className="min-h-12 resize-none rounded-none border-0 border-b border-zinc-200/80 bg-transparent px-1 py-2 text-sm outline-none transition-colors placeholder:text-zinc-400 focus:border-emerald-500 dark:border-zinc-800/80 dark:placeholder:text-zinc-500"
+              className="min-h-11 resize-none rounded-2xl border-0 bg-transparent px-3 py-3 text-sm leading-5 outline-none transition-colors placeholder:text-zinc-400 focus:bg-white/60 dark:placeholder:text-zinc-500 dark:focus:bg-zinc-950/40"
               placeholder="Что нужно передать смене или управляющим?"
             />
             <div
               id="message-format-options"
               className={
                 showMessageOptions
-                  ? "order-3 grid gap-2 border-t border-zinc-200/70 pt-3 dark:border-zinc-800/70 sm:grid-cols-2 md:col-span-2 md:grid-cols-[180px_180px_1fr]"
+                  ? "order-3 grid gap-2 rounded-2xl bg-white/70 p-3 dark:bg-zinc-950/50 sm:grid-cols-2 md:col-span-2 md:grid-cols-[180px_180px_1fr]"
                   : "hidden"
               }
             >
@@ -960,10 +960,10 @@ export function StaffTeamChatWorkspace({
                 aria-expanded={showMessageOptions}
                 onClick={() => setShowMessageOptions((value) => !value)}
                 className={[
-                  "flex h-10 w-10 shrink-0 items-center justify-center rounded-full border text-xl font-semibold leading-none transition-colors",
+                  "flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-xl font-semibold leading-none transition-colors",
                   showMessageOptions
-                    ? "border-emerald-500 bg-emerald-500 text-zinc-950"
-                    : "border-zinc-200 hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-800 dark:hover:border-emerald-500 dark:hover:text-emerald-200",
+                    ? "bg-emerald-500 text-zinc-950"
+                    : "bg-white text-zinc-500 hover:bg-emerald-50 hover:text-emerald-700 dark:bg-zinc-950/80 dark:text-zinc-400 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-200",
                 ].join(" ")}
               >
                 +
@@ -972,7 +972,7 @@ export function StaffTeamChatWorkspace({
                 type="button"
                 onClick={sendMessage}
                 disabled={isPending || !activeChannel}
-                className="h-10 flex-1 rounded-full bg-emerald-500 px-5 text-sm font-semibold text-zinc-950 transition-colors hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60 md:flex-none"
+                className="h-11 flex-1 rounded-full bg-emerald-500 px-6 text-sm font-semibold text-zinc-950 transition-colors hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60 md:flex-none"
               >
                 Отправить
               </button>

@@ -705,8 +705,8 @@ export function StaffTeamChatWorkspace({
         ) : null}
       </aside>
 
-      <section className="flex min-h-[620px] min-w-0 flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-        <div className="shrink-0 border-b border-zinc-200 bg-white/95 p-4 dark:border-zinc-800 dark:bg-zinc-950/95 sm:p-5">
+      <section className="flex min-h-[620px] min-w-0 flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800/80 dark:bg-zinc-950">
+        <div className="shrink-0 border-b border-zinc-200/70 p-4 dark:border-zinc-800/70 sm:p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
@@ -848,28 +848,28 @@ export function StaffTeamChatWorkspace({
           ))}
 
           {report.messages.length === 0 ? (
-            <div className="m-4 rounded-lg border border-dashed border-zinc-300 p-6 text-sm text-zinc-500 dark:border-zinc-800 dark:text-zinc-400 sm:m-5">
+            <div className="px-4 py-8 text-sm text-zinc-500 dark:text-zinc-400 sm:px-5">
               В этом канале пока нет сообщений. Напишите первое объявление,
               сменный комментарий или инцидент.
             </div>
           ) : null}
         </div>
 
-        <div className="shrink-0 border-t border-zinc-200 bg-white/95 p-3 dark:border-zinc-800 dark:bg-zinc-950/95 sm:p-4">
-          <div className="grid gap-2 rounded-2xl border border-zinc-200 bg-zinc-50 p-2 dark:border-zinc-800 dark:bg-zinc-900/40 lg:grid-cols-[1fr_auto]">
+        <div className="shrink-0 border-t border-zinc-200/70 bg-transparent p-3 dark:border-zinc-800/70 sm:p-4">
+          <div className="grid gap-2 md:grid-cols-[1fr_auto]">
             <textarea
               value={form.body}
               onChange={(event) =>
                 setForm((current) => ({ ...current, body: event.target.value }))
               }
-              className="min-h-12 resize-none rounded-xl border border-transparent bg-transparent px-3 py-2 text-sm outline-none transition placeholder:text-zinc-400 focus:border-emerald-500 focus:bg-white dark:placeholder:text-zinc-500 dark:focus:bg-zinc-950"
+              className="min-h-12 resize-none rounded-none border-0 border-b border-zinc-200/80 bg-transparent px-1 py-2 text-sm outline-none transition-colors placeholder:text-zinc-400 focus:border-emerald-500 dark:border-zinc-800/80 dark:placeholder:text-zinc-500"
               placeholder="Что нужно передать смене или управляющим?"
             />
             <div
               id="message-format-options"
               className={
                 showMessageOptions
-                  ? "order-3 grid gap-2 rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950 sm:grid-cols-2 lg:col-span-2 lg:grid-cols-[180px_180px_1fr]"
+                  ? "order-3 grid gap-2 border-t border-zinc-200/70 pt-3 dark:border-zinc-800/70 sm:grid-cols-2 md:col-span-2 md:grid-cols-[180px_180px_1fr]"
                   : "hidden"
               }
             >
@@ -884,7 +884,7 @@ export function StaffTeamChatWorkspace({
                       current.isPinned,
                   }))
                 }
-                className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-emerald-500 dark:border-zinc-800 dark:bg-zinc-950"
+                className="w-full rounded-lg border border-zinc-200/80 bg-transparent px-3 py-2 text-sm outline-none transition-colors focus:border-emerald-500 dark:border-zinc-800/80"
               >
                 {Object.entries(kindLabels).map(([value, label]) => (
                   <option key={value} value={value}>
@@ -900,7 +900,7 @@ export function StaffTeamChatWorkspace({
                     priority: event.target.value as StaffChatMessagePriority,
                   }))
                 }
-                className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-emerald-500 dark:border-zinc-800 dark:bg-zinc-950"
+                className="w-full rounded-lg border border-zinc-200/80 bg-transparent px-3 py-2 text-sm outline-none transition-colors focus:border-emerald-500 dark:border-zinc-800/80"
               >
                 {Object.entries(priorityLabels).map(([value, label]) => (
                   <option key={value} value={value}>
@@ -908,7 +908,7 @@ export function StaffTeamChatWorkspace({
                   </option>
                 ))}
               </select>
-              <label className="flex min-h-10 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950">
+              <label className="flex min-h-10 items-center gap-2 rounded-lg border border-zinc-200/80 bg-transparent px-3 text-sm dark:border-zinc-800/80">
                 <input
                   type="checkbox"
                   checked={form.isPinned}
@@ -922,14 +922,14 @@ export function StaffTeamChatWorkspace({
                 Закрепить
               </label>
             </div>
-            <div className="flex flex-wrap items-start gap-2 lg:w-[230px]">
+            <div className="flex items-center gap-2 md:w-[220px]">
               <button
                 type="button"
                 aria-controls="message-format-options"
                 aria-expanded={showMessageOptions}
                 onClick={() => setShowMessageOptions((value) => !value)}
                 className={[
-                  "flex h-10 w-10 items-center justify-center rounded-full border text-xl font-semibold leading-none transition",
+                  "flex h-10 w-10 shrink-0 items-center justify-center rounded-full border text-xl font-semibold leading-none transition-colors",
                   showMessageOptions
                     ? "border-emerald-500 bg-emerald-500 text-zinc-950"
                     : "border-zinc-200 hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-800 dark:hover:border-emerald-500 dark:hover:text-emerald-200",
@@ -941,7 +941,7 @@ export function StaffTeamChatWorkspace({
                 type="button"
                 onClick={sendMessage}
                 disabled={isPending || !activeChannel}
-                className="h-10 flex-1 rounded-full bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                className="h-10 flex-1 rounded-full bg-emerald-500 px-5 text-sm font-semibold text-zinc-950 transition-colors hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60 md:flex-none"
               >
                 Отправить
               </button>
@@ -1031,17 +1031,17 @@ function MessageCard({
   return (
     <article
       className={[
-        "border-b px-4 py-4 transition-colors last:border-b-0",
+        "border-b px-4 py-4 transition-colors last:border-b-0 hover:bg-zinc-50/60 dark:hover:bg-zinc-900/20",
         message.priority === "URGENT"
-          ? "border-red-200 dark:border-red-500/30"
+          ? "border-red-200/70 dark:border-red-500/25"
           : message.priority === "HIGH"
-            ? "border-amber-200 dark:border-amber-500/30"
-            : "border-zinc-200 dark:border-zinc-800",
+            ? "border-amber-200/70 dark:border-amber-500/25"
+            : "border-zinc-200/70 dark:border-zinc-900",
       ].join(" ")}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-bold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-200">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-zinc-100/80 text-xs font-bold text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
             {authorInitial}
           </div>
           <div className="min-w-0">
@@ -1073,7 +1073,7 @@ function MessageCard({
             <button
               type="button"
               onClick={() => onOpenTaskDraft(message)}
-              className="rounded-full border border-zinc-200 px-2.5 py-1 text-xs font-semibold text-zinc-500 transition-colors hover:border-sky-300 hover:bg-sky-50 hover:text-sky-700 focus-visible:border-sky-400 focus-visible:bg-sky-50 focus-visible:text-sky-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/25 active:border-sky-400 active:bg-sky-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-sky-400/60 dark:hover:bg-sky-500/10 dark:hover:text-sky-200 dark:focus-visible:border-sky-400/70 dark:focus-visible:bg-sky-500/10 dark:focus-visible:text-sky-100 dark:active:bg-sky-500/15"
+              className="rounded-full px-2.5 py-1 text-xs font-semibold text-zinc-500 transition-colors hover:bg-sky-50 hover:text-sky-700 focus-visible:bg-sky-50 focus-visible:text-sky-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/25 dark:text-zinc-400 dark:hover:bg-sky-500/10 dark:hover:text-sky-200 dark:focus-visible:bg-sky-500/10 dark:focus-visible:text-sky-100"
             >
               Создать задачу
             </button>
@@ -1081,7 +1081,7 @@ function MessageCard({
           <button
             type="button"
             onClick={() => onTogglePinned(message)}
-            className="rounded-full border border-zinc-200 px-2.5 py-1 text-xs font-semibold text-zinc-500 transition-colors hover:border-amber-300 hover:bg-amber-50 hover:text-amber-700 focus-visible:border-amber-400 focus-visible:bg-amber-50 focus-visible:text-amber-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/25 active:border-amber-400 active:bg-amber-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-amber-400/60 dark:hover:bg-amber-500/10 dark:hover:text-amber-200 dark:focus-visible:border-amber-400/70 dark:focus-visible:bg-amber-500/10 dark:focus-visible:text-amber-100 dark:active:bg-amber-500/15"
+            className="rounded-full px-2.5 py-1 text-xs font-semibold text-zinc-500 transition-colors hover:bg-amber-50 hover:text-amber-700 focus-visible:bg-amber-50 focus-visible:text-amber-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/25 dark:text-zinc-400 dark:hover:bg-amber-500/10 dark:hover:text-amber-200 dark:focus-visible:bg-amber-500/10 dark:focus-visible:text-amber-100"
           >
             {message.isPinned ? "Открепить" : "Закрепить"}
           </button>
@@ -1097,7 +1097,7 @@ function MessageCard({
       </p>
 
       {isTaskDraftOpen && taskDraft ? (
-        <div className="mt-3 rounded-lg border border-emerald-200 bg-white p-3 dark:border-emerald-500/30 dark:bg-zinc-950">
+        <div className="mt-3 rounded-lg border border-emerald-200/70 p-3 dark:border-emerald-500/25">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
@@ -1111,7 +1111,7 @@ function MessageCard({
             <button
               type="button"
               onClick={onCancelTaskDraft}
-              className="rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs font-semibold transition hover:border-zinc-400 dark:border-zinc-700"
+              className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
             >
               Закрыть
             </button>

@@ -6,6 +6,7 @@ import {
   getStaffOperators,
   type StaffOperatorReport,
   type StaffOperatorReportRow,
+  type StaffOperatorShiftDetail,
 } from "@/lib/guests";
 import { can } from "@/lib/permissions";
 import {
@@ -18,10 +19,6 @@ import {
   type StaffDirectoryMember,
   type StaffDirectoryReport,
 } from "@/lib/staff-directory";
-import {
-  getStaffNotificationsReport,
-  type StaffNotificationsReport,
-} from "@/lib/staff-notifications";
 import {
   getStaffTaskReport,
   type StaffTask,
@@ -93,31 +90,6 @@ const emptyChecklistReport: StaffChecklistReport = {
   checklistTemplates: [],
   stores: [],
   users: [],
-};
-
-const emptyNotificationsReport: StaffNotificationsReport = {
-  filters: {
-    status: "OPEN",
-    severity: "all",
-    sourceType: "all",
-    storeId: null,
-    search: null,
-    pageSize: 5,
-  },
-  summary: {
-    total: 0,
-    open: 0,
-    acknowledged: 0,
-    resolved: 0,
-    critical: 0,
-    warning: 0,
-    info: 0,
-  },
-  rows: [],
-  stores: [],
-  sourceTypes: [],
-  severities: [],
-  statuses: [],
 };
 
 const emptyDirectoryReport: StaffDirectoryReport = {
@@ -255,12 +227,156 @@ function findShiftRow(
   );
 }
 
-function shiftRevenue(row: StaffOperatorReportRow | null) {
+function timeValue(value: string | null) {
+  return value ? new Date(value).getTime() : 0;
+}
+
+function findCurrentShiftDetail(row: StaffOperatorReportRow | null) {
+  const details = row?.shiftDetails ?? [];
+
+  if (details.length === 0) {
+    return null;
+  }
+
+  const activeShift = details
+    .filter((shift) => !shift.stoppedAt)
+    .sort(
+      (first, second) =>
+        timeValue(second.startedAt) - timeValue(first.startedAt),
+    )[0];
+
+  if (activeShift) {
+    return activeShift;
+  }
+
+  return (
+    [...details].sort(
+      (first, second) =>
+        timeValue(second.stoppedAt ?? second.startedAt) -
+        timeValue(first.stoppedAt ?? first.startedAt),
+    )[0] ?? null
+  );
+}
+
+function currentShiftTotalRevenue(
+  row: StaffOperatorReportRow | null,
+  shift: StaffOperatorShiftDetail | null,
+) {
+  if (shift) {
+    return shift.paymentAmount - shift.refundAmount + shift.barRevenue;
+  }
+
   if (!row) {
     return null;
   }
 
-  return row.shiftPaymentAmount - row.shiftRefundAmount;
+  return row.shiftPaymentAmount - row.shiftRefundAmount + row.barRevenue;
+}
+
+function currentShiftBarRevenue(
+  row: StaffOperatorReportRow | null,
+  shift: StaffOperatorShiftDetail | null,
+) {
+  if (shift) {
+    return shift.barRevenue;
+  }
+
+  return row?.barRevenue ?? null;
+}
+
+function currentShiftGuests(
+  row: StaffOperatorReportRow | null,
+  shift: StaffOperatorShiftDetail | null,
+) {
+  if (shift) {
+    return {
+      unique: shift.uniqueGuestsCount,
+      visits: shift.guestVisitsCount,
+    };
+  }
+
+  if (!row) {
+    return null;
+  }
+
+  return {
+    unique: row.uniqueGuestsCount,
+    visits: row.guestVisitsCount,
+  };
+}
+
+function formatShiftWindow(shift: StaffOperatorShiftDetail | null) {
+  if (!shift?.startedAt) {
+    return "смена не найдена";
+  }
+
+  const started = formatDateTime(shift.startedAt);
+  const stopped = shift.stoppedAt ? formatDateTime(shift.stoppedAt) : "идет";
+
+  return `${started} -> ${stopped}`;
+}
+
+function formatShiftDuration(shift: StaffOperatorShiftDetail | null) {
+  if (!shift) {
+    return "нет данных";
+  }
+
+  return `${formatNumber(shift.durationHours)} ч`;
+}
+
+function activeChecklistRows(rows: StaffChecklistRun[], userId: string) {
+  return rows.filter(
+    (run) =>
+      run.status !== "ACCEPTED" &&
+      run.status !== "CANCELED" &&
+      (run.assignedToUser?.id === userId || !run.assignedToUser),
+  );
+}
+
+function findCurrentChecklistRun(
+  rows: StaffChecklistRun[],
+  shift: StaffOperatorShiftDetail | null,
+  userId: string,
+) {
+  const activeRows = activeChecklistRows(rows, userId);
+
+  if (shift?.externalShiftId) {
+    const byShift = activeRows.find(
+      (run) => run.shift?.externalShiftId === shift.externalShiftId,
+    );
+
+    if (byShift) {
+      return byShift;
+    }
+  }
+
+  return (
+    activeRows.sort(
+      (first, second) =>
+        timeValue(second.startedAt ?? second.scheduledAt) -
+        timeValue(first.startedAt ?? first.scheduledAt),
+    )[0] ?? null
+  );
+}
+
+function checklistProgress(run: StaffChecklistRun | null) {
+  if (!run) {
+    return { done: 0, total: 0, percent: 0 };
+  }
+
+  if (run.requiredItemsTotal <= 0) {
+    return {
+      done: run.requiredItemsDone,
+      total: run.requiredItemsTotal,
+      percent: run.status === "ACCEPTED" ? 100 : 0,
+    };
+  }
+
+  return {
+    done: run.requiredItemsDone,
+    total: run.requiredItemsTotal,
+    percent: Math.round((run.requiredItemsDone / run.requiredItemsTotal) * 100),
+  };
 }
 
 export default async function StaffShiftWorkspacePage() {
@@ -281,29 +397,12 @@ export default async function StaffShiftWorkspacePage() {
     }),
     emptyTaskReport,
   );
-  const todayTasksPromise = safeValue(
-    getStaffTaskReport({
-      view: "today",
-      status: "all",
-      sort: "dueAt",
-      direction: "asc",
-      pageSize: "8",
-    }),
-    emptyTaskReport,
-  );
   const checklistsPromise = safeValue(
     getStaffChecklistReport({
       status: "all",
       assignedToUserId: user.id,
     }),
     emptyChecklistReport,
-  );
-  const notificationsPromise = safeValue(
-    getStaffNotificationsReport({
-      status: "OPEN",
-      pageSize: "5",
-    }),
-    emptyNotificationsReport,
   );
   const directoryPromise = safeValue(
     getStaffDirectoryReport({
@@ -313,14 +412,11 @@ export default async function StaffShiftWorkspacePage() {
     emptyDirectoryReport,
   );
 
-  const [myTasks, todayTasks, checklists, notifications, directory] =
-    await Promise.all([
-      myTasksPromise,
-      todayTasksPromise,
-      checklistsPromise,
-      notificationsPromise,
-      directoryPromise,
-    ]);
+  const [myTasks, checklists, directory] = await Promise.all([
+    myTasksPromise,
+    checklistsPromise,
+    directoryPromise,
+  ]);
   const staffMember = findCurrentStaffMember(directory.rows, user);
   const shiftReport = staffMember?.externalUserId
     ? await safeValue(
@@ -336,9 +432,15 @@ export default async function StaffShiftWorkspacePage() {
       )
     : emptyOperatorReport;
   const shiftRow = findShiftRow(shiftReport.rows, staffMember);
-  const currentShiftRevenue = shiftRevenue(shiftRow);
-  const activeTaskCount =
-    myTasks.summary.open + myTasks.summary.inProgress + myTasks.summary.onReview;
+  const currentShift = findCurrentShiftDetail(shiftRow);
+  const currentTotalRevenue = currentShiftTotalRevenue(shiftRow, currentShift);
+  const currentBarRevenue = currentShiftBarRevenue(shiftRow, currentShift);
+  const currentGuests = currentShiftGuests(shiftRow, currentShift);
+  const currentClubName =
+    currentShift?.storeName ??
+    staffMember?.store?.name ??
+    shiftRow?.storeNames[0] ??
+    "клуб не привязан";
   const activeChecklistCount =
     checklists.summary.open +
     checklists.summary.inProgress +
@@ -348,14 +450,14 @@ export default async function StaffShiftWorkspacePage() {
   const nextTasks = myTasks.rows
     .filter((task) => task.status !== "DONE" && task.status !== "CANCELED")
     .slice(0, 5);
-  const nextChecklists = checklists.rows
-    .filter(
-      (run) =>
-        run.status !== "ACCEPTED" &&
-        run.status !== "CANCELED" &&
-        (run.assignedToUser?.id === user.id || !run.assignedToUser),
-    )
-    .slice(0, 3);
+  const activeChecklists = activeChecklistRows(checklists.rows, user.id);
+  const currentChecklist = findCurrentChecklistRun(
+    checklists.rows,
+    currentShift,
+    user.id,
+  );
+  const currentChecklistProgress = checklistProgress(currentChecklist);
+  const nextChecklists = activeChecklists.slice(0, 3);
 
   return (
     <main className="px-4 py-6 text-zinc-950 dark:text-zinc-100 sm:px-6 sm:py-8">
@@ -372,12 +474,12 @@ export default async function StaffShiftWorkspacePage() {
                 Персонал
               </p>
               <h1 className="mt-2 text-3xl font-semibold tracking-tight">
-                Моя смена
+                {currentClubName}: домашняя страница смены
               </h1>
               <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                Рабочий экран администратора: ближайшие задачи, регламенты,
-                чек-листы, обучение, связь и выручка текущей смены без
-                управленческих KPI сети.
+                Рабочий экран администратора и старшего администратора:
+                выручка, бар, гости, текущая смена, чек-лист и ближайшие
+                задачи без управленческих KPI сети.
               </p>
             </div>
             <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/50">
@@ -388,7 +490,7 @@ export default async function StaffShiftWorkspacePage() {
                 {staffMember?.displayName ?? user.fullName ?? user.email}
               </p>
               <p className="mt-1 text-sm text-zinc-500">
-                {staffMember?.store?.name ?? "клуб не привязан"} ·{" "}
+                {currentClubName} ·{" "}
                 {staffMember?.externalUserId
                   ? `Langame user_id ${staffMember.externalUserId}`
                   : "нет привязки к Langame"}
@@ -397,48 +499,61 @@ export default async function StaffShiftWorkspacePage() {
           </div>
         </header>
 
-        <section className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <section className="mt-5 grid gap-4 md:grid-cols-3">
           <MetricCard
-            label="Мои задачи"
-            value={formatNumber(activeTaskCount)}
-            hint={`${formatNumber(myTasks.summary.overdue)} просрочено`}
-            href="/staff/tasks?view=my&status=all&sort=dueAt&direction=asc"
-            tone={myTasks.summary.overdue > 0 ? "danger" : "good"}
-          />
-          <MetricCard
-            label="Сегодня по сменам"
-            value={formatNumber(todayTasks.summary.total)}
-            hint="общий тайминг задач"
-            href="/staff/tasks?view=today&status=all&sort=dueAt&direction=asc"
-          />
-          <MetricCard
-            label="Чек-листы"
-            value={formatNumber(activeChecklistCount)}
-            hint={`${formatNumber(checklists.summary.overdue)} просрочено`}
-            href="/staff/checklists"
-            tone={checklists.summary.overdue > 0 ? "danger" : "neutral"}
-          />
-          <MetricCard
-            label="Выручка смены"
+            label="Общая выручка смены"
             value={
-              currentShiftRevenue === null
+              currentTotalRevenue === null
                 ? "нет связки"
-                : formatMoney(currentShiftRevenue)
+                : formatMoney(currentTotalRevenue)
             }
             hint={
-              shiftRow
-                ? `${formatNumber(shiftRow.shiftsCount)} смен за день`
+              currentShift
+                ? "игровые списания и бар за смену"
                 : "нужна привязка Langame"
             }
-            href="/guests/staff-control"
-            tone={currentShiftRevenue === null ? "neutral" : "good"}
+            href="/staff/shift-workspace"
+            tone={currentTotalRevenue === null ? "neutral" : "good"}
           />
           <MetricCard
-            label="Уведомления"
-            value={formatNumber(notifications.summary.open)}
-            hint={`${formatNumber(notifications.summary.critical)} критичных`}
-            href="/staff/notifications"
-            tone={notifications.summary.critical > 0 ? "danger" : "neutral"}
+            label="Выручка бара"
+            value={
+              currentBarRevenue === null
+                ? "нет данных"
+                : formatMoney(currentBarRevenue)
+            }
+            hint={
+              currentShift
+                ? "продажи, попавшие в окно смены"
+                : "нет активной смены"
+            }
+            href="/staff/shift-workspace"
+            tone={
+              currentBarRevenue && currentBarRevenue > 0 ? "good" : "neutral"
+            }
+          />
+          <MetricCard
+            label="Гостей на смене"
+            value={
+              currentGuests === null
+                ? "нет данных"
+                : formatNumber(currentGuests.unique)
+            }
+            hint={
+              currentGuests === null
+                ? "нет смены или сессий"
+                : `${formatNumber(currentGuests.visits)} игровых сессий`
+            }
+            href="/staff/shift-workspace"
+          />
+        </section>
+
+        <section className="mt-5 grid gap-5 lg:grid-cols-2">
+          <CurrentShiftPanel shift={currentShift} shiftRow={shiftRow} />
+          <ChecklistProgressPanel
+            run={currentChecklist}
+            progress={currentChecklistProgress}
+            activeChecklistCount={activeChecklistCount}
           />
         </section>
 
@@ -506,25 +621,39 @@ export default async function StaffShiftWorkspacePage() {
               Выручка и смена
             </p>
             <h2 className="mt-2 text-xl font-semibold">
-              Деньги текущего оператора
+              Детализация текущей смены
             </h2>
-            {shiftRow ? (
+            {shiftRow || currentShift ? (
               <div className="mt-4 grid gap-3">
                 <ShiftMoneyRow
                   label="Оплаты"
-                  value={formatMoney(shiftRow.shiftPaymentAmount)}
+                  value={formatMoney(
+                    currentShift?.paymentAmount ??
+                      shiftRow?.shiftPaymentAmount ??
+                      0,
+                  )}
                 />
                 <ShiftMoneyRow
                   label="Возвраты"
-                  value={formatMoney(shiftRow.shiftRefundAmount)}
+                  value={formatMoney(
+                    currentShift?.refundAmount ??
+                      shiftRow?.shiftRefundAmount ??
+                      0,
+                  )}
                 />
                 <ShiftMoneyRow
                   label="Инкассация"
-                  value={formatMoney(shiftRow.shiftIncassAmount)}
+                  value={formatMoney(
+                    currentShift?.incassAmount ??
+                      shiftRow?.shiftIncassAmount ??
+                      0,
+                  )}
                 />
                 <ShiftMoneyRow
                   label="Бар"
-                  value={formatMoney(shiftRow.barRevenue)}
+                  value={formatMoney(
+                    currentShift?.barRevenue ?? shiftRow?.barRevenue ?? 0,
+                  )}
                 />
               </div>
             ) : (
@@ -534,12 +663,6 @@ export default async function StaffShiftWorkspacePage() {
                 персонала.
               </p>
             )}
-            <Link
-              href="/guests/staff-control"
-              className="mt-4 inline-flex rounded-md border border-zinc-200 px-3 py-2 text-sm font-semibold transition hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-800 dark:hover:border-emerald-500 dark:hover:text-emerald-200"
-            >
-              Открыть смены
-            </Link>
           </section>
         </section>
 
@@ -567,6 +690,140 @@ export default async function StaffShiftWorkspacePage() {
         </section>
       </div>
     </main>
+  );
+}
+
+function CurrentShiftPanel({
+  shift,
+  shiftRow,
+}: {
+  shift: StaffOperatorShiftDetail | null;
+  shiftRow: StaffOperatorReportRow | null;
+}) {
+  const storeName =
+    shift?.storeName ?? shiftRow?.storeNames[0] ?? "клуб не привязан";
+
+  return (
+    <section className="rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-bold uppercase text-zinc-500">
+            Текущая смена
+          </p>
+          <h2 className="mt-2 text-xl font-semibold">{storeName}</h2>
+        </div>
+        <span
+          className={[
+            "rounded-full px-3 py-1 text-xs font-semibold",
+            shift && !shift.stoppedAt
+              ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-200"
+              : "bg-zinc-100 text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300",
+          ].join(" ")}
+        >
+          {shift && !shift.stoppedAt ? "идет сейчас" : "последняя смена"}
+        </span>
+      </div>
+
+      <div className="mt-5 grid gap-3 sm:grid-cols-3">
+        <ShiftFact label="Окно смены" value={formatShiftWindow(shift)} />
+        <ShiftFact label="Длительность" value={formatShiftDuration(shift)} />
+        <ShiftFact
+          label="Смен за сутки"
+          value={formatNumber(shiftRow?.shiftsCount ?? 0)}
+        />
+      </div>
+
+      <p className="mt-4 text-sm leading-6 text-zinc-500">
+        Показатели считаются только по клубу и временному окну смены
+        администратора. Списки гостей и управленческие отчеты здесь не
+        раскрываются.
+      </p>
+    </section>
+  );
+}
+
+function ChecklistProgressPanel({
+  run,
+  progress,
+  activeChecklistCount,
+}: {
+  run: StaffChecklistRun | null;
+  progress: { done: number; total: number; percent: number };
+  activeChecklistCount: number;
+}) {
+  return (
+    <section className="rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-bold uppercase text-zinc-500">
+            Регламент и чек-лист
+          </p>
+          <h2 className="mt-2 text-xl font-semibold">
+            {run?.regulation?.title ??
+              run?.template?.title ??
+              run?.title ??
+              "Нет активного чек-листа"}
+          </h2>
+        </div>
+        <Link
+          href="/staff/checklists"
+          className="rounded-md border border-zinc-200 px-3 py-2 text-sm font-semibold transition hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-800 dark:hover:border-emerald-500 dark:hover:text-emerald-200"
+        >
+          Открыть
+        </Link>
+      </div>
+
+      {run ? (
+        <>
+          <div className="mt-5">
+            <div className="flex items-center justify-between gap-4 text-sm">
+              <span className="text-zinc-500">
+                {checklistStatusLabel(run.status)}
+              </span>
+              <span className="font-semibold tabular-nums">
+                {progress.percent}%
+              </span>
+            </div>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-900">
+              <div
+                className="h-full rounded-full bg-emerald-500"
+                style={{ width: `${Math.min(progress.percent, 100)}%` }}
+              />
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            <ShiftFact
+              label="Пункты"
+              value={`${formatNumber(progress.done)}/${formatNumber(progress.total)}`}
+            />
+            <ShiftFact
+              label="Проблемы"
+              value={formatNumber(run.blockingIssues.length)}
+            />
+            <ShiftFact
+              label="Активных"
+              value={formatNumber(activeChecklistCount)}
+            />
+          </div>
+        </>
+      ) : (
+        <p className="mt-5 rounded-lg border border-dashed border-zinc-200 px-4 py-5 text-sm leading-6 text-zinc-500 dark:border-zinc-800">
+          Для этой смены пока нет назначенного чек-листа. Если регламент должен
+          быть обязательным, его нужно назначить через раздел регламентов и
+          чек-листов.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function ShiftFact({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-800">
+      <p className="text-xs font-bold uppercase text-zinc-500">{label}</p>
+      <p className="mt-2 text-sm font-semibold tabular-nums">{value}</p>
+    </div>
   );
 }
 

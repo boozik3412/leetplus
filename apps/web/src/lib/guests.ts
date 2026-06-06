@@ -547,6 +547,8 @@ export type StaffOperatorShiftDetail = {
   middleCheck: number;
   barRevenue: number;
   hookahRevenue: number;
+  guestVisitsCount: number;
+  uniqueGuestsCount: number;
   signals: StaffControlAnomalyType[];
 };
 
@@ -567,6 +569,8 @@ export type StaffOperatorReportRow = {
   shiftIncassAmount: number;
   barRevenue: number;
   hookahRevenue: number;
+  guestVisitsCount: number;
+  uniqueGuestsCount: number;
   averageShiftMiddleCheck: number;
   shiftDetails: StaffOperatorShiftDetail[];
 };

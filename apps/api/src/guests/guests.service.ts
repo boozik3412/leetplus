@@ -709,6 +709,8 @@ export type StaffOperatorShiftDetail = {
   middleCheck: number;
   barRevenue: number;
   hookahRevenue: number;
+  guestVisitsCount: number;
+  uniqueGuestsCount: number;
   signals: StaffControlAnomalyType[];
 };
 
@@ -729,6 +731,8 @@ export type StaffOperatorReportRow = {
   shiftIncassAmount: number;
   barRevenue: number;
   hookahRevenue: number;
+  guestVisitsCount: number;
+  uniqueGuestsCount: number;
   averageShiftMiddleCheck: number;
   shiftDetails: StaffOperatorShiftDetail[];
 };
@@ -823,6 +827,8 @@ type StaffOperatorMetrics = StaffShiftMetrics & {
   linkedGuest: GuestDashboardRow | null;
   mappingId: string | null;
   mappingNote: string | null;
+  guestVisitsCount: number;
+  uniqueGuestKeys: Set<string>;
   shiftDetails: StaffOperatorShiftDetail[];
 };
 
@@ -3763,7 +3769,7 @@ export class GuestsService {
     period: Period,
     storeId: string | null,
   ): Promise<StaffOperatorReportRow[]> {
-    const [rows, mappings, groupsByKey, sales] = await Promise.all([
+    const [rows, mappings, groupsByKey, sales, sessions] = await Promise.all([
       this.prisma.guestWorkingShift.findMany({
         where: {
           tenantId,
@@ -3823,6 +3829,22 @@ export class GuestsService {
           },
         },
       }),
+      this.prisma.guestSession.findMany({
+        where: {
+          tenantId,
+          startedAt: { gte: period.fromDate, lte: period.toDate },
+          ...(storeId ? { storeId } : {}),
+        },
+        select: {
+          guestId: true,
+          storeId: true,
+          externalDomain: true,
+          externalGuestId: true,
+          externalSessionId: true,
+          startedAt: true,
+          stoppedAt: true,
+        },
+      }),
     ]);
     const mappingsByKey = new Map(
       mappings.map((mapping) => [
@@ -3835,6 +3857,7 @@ export class GuestsService {
     );
     const byOperator = new Map<string, StaffOperatorMetrics>();
     const shiftDetailsByKey = new Map<string, StaffOperatorShiftDetail>();
+    const shiftGuestKeysByKey = new Map<string, Set<string>>();
 
     for (const row of rows) {
       if (!row.externalUserId) {
@@ -3899,6 +3922,8 @@ export class GuestsService {
         middleCheck: this.round(middleCheck ?? 0, 2),
         barRevenue: 0,
         hookahRevenue: 0,
+        guestVisitsCount: 0,
+        uniqueGuestsCount: 0,
         signals: [],
       };
       const shiftKey = this.staffOperatorShiftKey({
@@ -3938,9 +3963,8 @@ export class GuestsService {
       const matchingShift = (shiftsByStoreId.get(saleStoreId) ?? []).find(
         (row) =>
           row.startedAt &&
-          row.stoppedAt &&
           sale.saleDate >= row.startedAt &&
-          sale.saleDate <= row.stoppedAt,
+          sale.saleDate <= (row.stoppedAt ?? period.toDate),
       );
       if (!matchingShift?.externalUserId) {
         continue;
@@ -3985,6 +4009,65 @@ export class GuestsService {
             shiftDetail.hookahRevenue + revenue,
             2,
           );
+        }
+      }
+    }
+
+    for (const session of sessions) {
+      const sessionStoreId = session.storeId;
+      const sessionAt = session.startedAt ?? session.stoppedAt;
+
+      if (!sessionStoreId || !sessionAt) {
+        continue;
+      }
+
+      const matchingShift = (shiftsByStoreId.get(sessionStoreId) ?? []).find(
+        (row) =>
+          row.startedAt &&
+          sessionAt >= row.startedAt &&
+          sessionAt <= (row.stoppedAt ?? period.toDate),
+      );
+      if (!matchingShift?.externalUserId) {
+        continue;
+      }
+
+      const key = this.staffOperatorKey(
+        matchingShift.externalDomain,
+        matchingShift.externalUserId,
+      );
+      const metrics = byOperator.get(key);
+      if (!metrics) {
+        continue;
+      }
+
+      const shiftKey = this.staffOperatorShiftKey({
+        externalDomain: matchingShift.externalDomain,
+        externalUserId: matchingShift.externalUserId,
+        externalShiftId: matchingShift.externalShiftId,
+        startedAt: matchingShift.startedAt,
+        storeId: matchingShift.storeId,
+      });
+      const shiftDetail = shiftDetailsByKey.get(shiftKey);
+      const guestKey =
+        session.guestId ??
+        (session.externalGuestId
+          ? `${session.externalDomain ?? ''}:${session.externalGuestId}`
+          : session.externalSessionId);
+
+      metrics.guestVisitsCount += 1;
+      if (guestKey) {
+        metrics.uniqueGuestKeys.add(guestKey);
+      }
+
+      if (shiftDetail) {
+        shiftDetail.guestVisitsCount += 1;
+
+        if (guestKey) {
+          const shiftGuestKeys =
+            shiftGuestKeysByKey.get(shiftKey) ?? new Set<string>();
+          shiftGuestKeys.add(guestKey);
+          shiftGuestKeysByKey.set(shiftKey, shiftGuestKeys);
+          shiftDetail.uniqueGuestsCount = shiftGuestKeys.size;
         }
       }
     }
@@ -4077,6 +4160,8 @@ export class GuestsService {
       linkedGuest,
       mappingId,
       mappingNote,
+      guestVisitsCount: 0,
+      uniqueGuestKeys: new Set<string>(),
       shiftDetails: [],
     };
   }
@@ -4133,6 +4218,8 @@ export class GuestsService {
       shiftIncassAmount: this.round(metrics.shiftIncassAmount, 2),
       barRevenue: this.round(metrics.barRevenue, 2),
       hookahRevenue: this.round(metrics.hookahRevenue, 2),
+      guestVisitsCount: metrics.guestVisitsCount,
+      uniqueGuestsCount: metrics.uniqueGuestKeys.size,
       averageShiftMiddleCheck:
         metrics.middleCheckCount > 0
           ? this.round(metrics.middleCheckSum / metrics.middleCheckCount, 2)

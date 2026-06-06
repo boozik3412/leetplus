@@ -74,6 +74,36 @@ describe('RolesGuard', () => {
     ).toBe(true);
   });
 
+  it('separates marketing view access from marketing write access', () => {
+    reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'POST',
+          path: '/marketing/campaigns',
+          user: {
+            role: UserRole.CLUB_ADMINISTRATOR,
+            permissions: ['view_marketing'],
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+
+    expect(
+      guard.canActivate(
+        createContext({
+          method: 'POST',
+          path: '/marketing/campaigns',
+          user: {
+            role: UserRole.CLUB_ADMINISTRATOR,
+            permissions: ['manage_marketing'],
+          },
+        }),
+      ),
+    ).toBe(true);
+  });
+
   it('rejects custom role without mapped route permission', () => {
     reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
 
@@ -219,6 +249,36 @@ describe('RolesGuard', () => {
     ).toThrow(ForbiddenException);
   });
 
+  it('separates staff task viewing from staff task mutation', () => {
+    reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'POST',
+          path: '/staff/tasks',
+          user: {
+            role: UserRole.CLUB_ADMINISTRATOR,
+            permissions: ['view_staff_tasks'],
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+
+    expect(
+      guard.canActivate(
+        createContext({
+          method: 'POST',
+          path: '/staff/tasks',
+          user: {
+            role: UserRole.CLUB_ADMINISTRATOR,
+            permissions: ['manage_staff_tasks'],
+          },
+        }),
+      ),
+    ).toBe(true);
+  });
+
   it('maps assortment routes to granular report capabilities', () => {
     reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
 
@@ -247,6 +307,36 @@ describe('RolesGuard', () => {
         }),
       ),
     ).toThrow(ForbiddenException);
+  });
+
+  it('separates report viewing from report export actions', () => {
+    reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'POST',
+          path: '/reports/export',
+          user: {
+            role: UserRole.CLUB_ADMINISTRATOR,
+            permissions: ['view_assortment_reports'],
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+
+    expect(
+      guard.canActivate(
+        createContext({
+          method: 'POST',
+          path: '/reports/export',
+          user: {
+            role: UserRole.CLUB_ADMINISTRATOR,
+            permissions: ['export_reports'],
+          },
+        }),
+      ),
+    ).toBe(true);
   });
 
   it('keeps CRM contact tasks behind guest access', () => {

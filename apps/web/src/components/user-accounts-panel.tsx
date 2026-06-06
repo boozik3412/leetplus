@@ -86,6 +86,8 @@ const permissionSectionDefinitions: PermissionSectionDefinition[] = [
     permissions: [
       "view_reports",
       "view_assortment_reports",
+      "export_reports",
+      "manage_assortment_reports",
       "view_assortment_products",
       "view_assortment_catalog",
       "view_assortment_stores",
@@ -100,6 +102,8 @@ const permissionSectionDefinitions: PermissionSectionDefinition[] = [
     description: "Клиентская база, игровые механики, награды и ПДн.",
     permissions: [
       "view_guests",
+      "export_guests",
+      "manage_guest_crm",
       "view_guest_gamification",
       "manage_guest_game_rules",
       "approve_guest_game_rewards",
@@ -110,13 +114,13 @@ const permissionSectionDefinitions: PermissionSectionDefinition[] = [
     id: "marketing",
     title: "Маркетинг",
     description: "Кампании, промо-наборы и оценка эффекта.",
-    permissions: ["view_marketing"],
+    permissions: ["view_marketing", "manage_marketing"],
   },
   {
     id: "communications",
     title: "Коммуникации",
     description: "Командный чат, уведомления и обзор коммуникаций.",
-    permissions: ["view_communications"],
+    permissions: ["view_communications", "manage_communications"],
   },
   {
     id: "staff",
@@ -127,12 +131,18 @@ const permissionSectionDefinitions: PermissionSectionDefinition[] = [
       "view_staff",
       "view_staff_shift_workspace",
       "view_staff_tasks",
+      "manage_staff_tasks",
       "view_staff_standards",
+      "manage_staff_standards",
       "view_staff_training",
+      "manage_staff_training",
       "view_staff_knowledge",
       "view_staff_control",
+      "manage_staff_control",
       "view_staff_directory",
+      "manage_staff_directory",
       "view_staff_salary",
+      "manage_staff_salary",
       "edit_staff_knowledge",
       "review_staff_knowledge",
       "publish_staff_knowledge",
@@ -273,6 +283,42 @@ export function UserAccountsPanel({
     ? roleOptions.find((option) => option.role === selectedSystemRole) ?? null
     : null;
   const isRoleEditorOpen = roleEditorMode !== "idle";
+  const roleEditorKicker =
+    roleEditorMode === "custom"
+      ? "Изменение клубной роли"
+      : roleEditorMode === "system"
+        ? "Шаблон системной роли"
+        : "Новая клубная роль";
+  const roleEditorTitle =
+    roleEditorMode === "custom"
+      ? "Сохранение изменений роли"
+      : roleEditorMode === "system"
+        ? "Создание роли из шаблона"
+        : "Создание роли с нуля";
+  const roleEditorDescription =
+    roleEditorMode === "custom"
+      ? "Вы редактируете уже существующую клубную роль. После сохранения новые доступы применятся ко всем пользователям, которым назначена эта роль, и ко всем будущим назначениям."
+      : roleEditorMode === "system" && selectedSystemRoleOption
+        ? `Системная роль "${selectedSystemRoleOption.label}" не меняется напрямую. Это шаблон: настройте доступы и сохраните отдельную клубную роль.`
+        : "Задайте название, описание и отметьте только те доступы, которые нужны сотруднику.";
+  const roleEditorPermissionsHint =
+    roleEditorMode === "custom"
+      ? "Снимайте и ставьте галочки: кнопка сохранения ниже изменит именно выбранную клубную роль."
+      : roleEditorMode === "system"
+        ? "Системный шаблон останется без изменений. Сохранение создаст новую клубную роль с выбранными доступами."
+        : "Раскройте нужный раздел и соберите новую роль с нуля.";
+  const roleEditorSubmitLabel =
+    roleEditorMode === "custom"
+      ? "Сохранить изменения"
+      : roleEditorMode === "system"
+        ? "Создать роль из шаблона"
+        : "Создать роль";
+  const roleEditorSavingLabel =
+    roleEditorMode === "custom"
+      ? "Сохраняем изменения..."
+      : roleEditorMode === "system"
+        ? "Создаем роль..."
+        : "Создаем роль...";
   const permissionSections = useMemo(() => {
     const optionsByKey = new Map(
       initialData.capabilityOptions.map((option) => [option.key, option]),
@@ -1031,7 +1077,7 @@ export function UserAccountsPanel({
             onClick={startCreateRole}
             className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
           >
-            Новая роль
+            Создать с нуля
           </button>
         </div>
 
@@ -1064,8 +1110,13 @@ export function UserAccountsPanel({
                       <p className="min-w-0 truncate font-semibold">
                         {role.label}
                       </p>
-                      <span className="shrink-0 rounded-full bg-zinc-200/70 px-2 py-0.5 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-                        {role.permissions.length}
+                      <span className="flex shrink-0 items-center gap-1">
+                        <span className="rounded-full bg-zinc-200/70 px-2 py-0.5 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                          шаблон
+                        </span>
+                        <span className="rounded-full bg-zinc-200/70 px-2 py-0.5 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                          {role.permissions.length}
+                        </span>
                       </span>
                     </div>
                     <p className="mt-1 line-clamp-1 text-xs leading-5 text-zinc-500">
@@ -1102,8 +1153,13 @@ export function UserAccountsPanel({
                       <p className="min-w-0 truncate font-semibold">
                         {role.name}
                       </p>
-                      <span className="shrink-0 rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:text-emerald-200">
-                        {role.permissions.length}
+                      <span className="flex shrink-0 items-center gap-1">
+                        <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold text-emerald-700 dark:text-emerald-200">
+                          изменить
+                        </span>
+                        <span className="rounded-full bg-zinc-200/70 px-2 py-0.5 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                          {role.permissions.length}
+                        </span>
                       </span>
                     </div>
                     {role.description ? (
@@ -1132,21 +1188,13 @@ export function UserAccountsPanel({
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
-                    {roleEditorMode === "custom"
-                      ? "Изменение роли"
-                      : roleEditorMode === "system"
-                        ? "На основе системной роли"
-                        : "Новая роль"}
+                    {roleEditorKicker}
                   </p>
                   <h3 className="mt-1 text-lg font-semibold">
-                    {selectedRoleId ? "Редактирование доступов" : "Создание роли"}
+                    {roleEditorTitle}
                   </h3>
                   <p className="mt-1 max-w-2xl text-sm leading-6 text-zinc-500">
-                    {roleEditorMode === "custom"
-                      ? "Измените название, описание и набор доступов. Сохранение обновит эту роль у назначенных пользователей."
-                      : roleEditorMode === "system" && selectedSystemRoleOption
-                        ? `Основа: ${selectedSystemRoleOption.label}. Измените доступы и сохраните как роль клуба.`
-                        : "Задайте название, описание и отметьте только нужные доступы."}
+                    {roleEditorDescription}
                   </p>
                 </div>
                 <span className="inline-flex h-8 shrink-0 items-center rounded-full bg-zinc-200/70 px-3 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
@@ -1196,8 +1244,7 @@ export function UserAccountsPanel({
                   Доступы роли
                 </p>
                 <p className="mt-1 text-sm text-zinc-500">
-                  Раскройте нужный раздел и отметьте, что сотрудник должен видеть
-                  или редактировать.
+                  {roleEditorPermissionsHint}
                 </p>
               </div>
 
@@ -1304,18 +1351,14 @@ export function UserAccountsPanel({
                   disabled={isRoleSaving}
                   className="inline-flex h-11 items-center justify-center rounded-md bg-zinc-950 px-5 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
                 >
-                  {isRoleSaving
-                    ? "Сохраняем..."
-                    : selectedRoleId
-                      ? "Изменить роль"
-                      : "Создать роль"}
+                  {isRoleSaving ? roleEditorSavingLabel : roleEditorSubmitLabel}
                 </button>
                 <button
                   type="button"
                   onClick={startCreateRole}
                   className="inline-flex h-11 items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
                 >
-                  Новая роль
+                  Создать с нуля
                 </button>
               </div>
             </form>
@@ -1330,7 +1373,7 @@ export function UserAccountsPanel({
               <p className="mt-2 max-w-xl text-sm leading-6 text-zinc-500">
                 Доступы, чекбоксы и форма изменения появятся здесь после выбора
                 системной или клубной роли. Для чистого сценария нажмите
-                «Новая роль».
+                «Создать с нуля».
               </p>
               <button
                 type="button"

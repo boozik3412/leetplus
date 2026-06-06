@@ -19,6 +19,18 @@ export const accessCapabilityCatalog = [
       'OOS, деньги в риске, рекомендации, матрица, план-факт и другие отчеты.',
   },
   {
+    key: 'export_reports',
+    label: 'Отчеты: экспорт',
+    description:
+      'Выгрузка коммерческих отчетов, экспорт сводок и отправка отчетов по email.',
+  },
+  {
+    key: 'manage_assortment_reports',
+    label: 'Отчеты: действия',
+    description:
+      'Изменение статусов рекомендаций, исключений и других управленческих действий в отчетах.',
+  },
+  {
     key: 'view_assortment_products',
     label: 'Товары и SKU',
     description:
@@ -39,6 +51,18 @@ export const accessCapabilityCatalog = [
     label: 'Гости и CRM',
     description:
       'Гостевая аналитика, CRM, группы, задачи контакта и карточки гостей.',
+  },
+  {
+    key: 'export_guests',
+    label: 'Гости и CRM: экспорт',
+    description:
+      'Выгрузка гостевых отчетов и чувствительных клиентских списков внутри своей сети.',
+  },
+  {
+    key: 'manage_guest_crm',
+    label: 'Гости и CRM: действия',
+    description:
+      'Создание и изменение CRM-задач, групп, сегментов, статусов и рабочих заметок гостей.',
   },
   {
     key: 'view_guest_gamification',
@@ -70,10 +94,22 @@ export const accessCapabilityCatalog = [
     description: 'Кампании, промо-механики, промо-наборы и оценка эффекта.',
   },
   {
+    key: 'manage_marketing',
+    label: 'Маркетинг: действия',
+    description:
+      'Создание, запуск и изменение кампаний, промо-наборов, миссий и маркетинговых правил.',
+  },
+  {
     key: 'view_communications',
     label: 'Коммуникации',
     description:
       'Обзор коммуникаций, командный чат и внутренние уведомления без общего доступа к персоналу.',
+  },
+  {
+    key: 'manage_communications',
+    label: 'Коммуникации: действия',
+    description:
+      'Отправка сообщений, создание каналов, закрепление, отметки прочтения и задачи из чата.',
   },
   {
     key: 'view_staff',
@@ -93,16 +129,34 @@ export const accessCapabilityCatalog = [
     description: 'Задачи персонала, правила повторения и шаблоны задач.',
   },
   {
+    key: 'manage_staff_tasks',
+    label: 'Персонал: действия с задачами',
+    description:
+      'Создание, изменение, запуск правил и закрытие задач персонала.',
+  },
+  {
     key: 'view_staff_standards',
     label: 'Персонал: регламенты и чек-листы',
     description:
       'Регламенты смен, чек-листы, шаблоны чек-листов и вложения стандартов.',
   },
   {
+    key: 'manage_staff_standards',
+    label: 'Персонал: действия со стандартами',
+    description:
+      'Создание, публикация и корректировка регламентов, чек-листов, шаблонов и вложений.',
+  },
+  {
     key: 'view_staff_training',
     label: 'Персонал: обучение и аттестация',
     description:
       'Курсы, адаптация, аттестации, профили обучения и отчеты готовности.',
+  },
+  {
+    key: 'manage_staff_training',
+    label: 'Персонал: действия с обучением',
+    description:
+      'Создание и изменение курсов, маршрутов адаптации, аттестаций и результатов обучения.',
   },
   {
     key: 'view_staff_knowledge',
@@ -116,14 +170,32 @@ export const accessCapabilityCatalog = [
       'Операционный дашборд, рейтинги, предупреждения, штрафы и контроль выполнения.',
   },
   {
+    key: 'manage_staff_control',
+    label: 'Персонал: действия контроля',
+    description:
+      'Создание предупреждений, штрафов, задач контроля и служебных корректировок по администраторам.',
+  },
+  {
     key: 'view_staff_directory',
     label: 'Персонал: сотрудники',
     description: 'Справочник сотрудников и карточки администраторов.',
   },
   {
+    key: 'manage_staff_directory',
+    label: 'Персонал: изменение сотрудников',
+    description:
+      'Создание и изменение карточек сотрудников, привязок к клубам и учетным записям.',
+  },
+  {
     key: 'view_staff_salary',
     label: 'Персонал: зарплата',
     description: 'Оклады, премии, штрафы и расчет выплат администраторам.',
+  },
+  {
+    key: 'manage_staff_salary',
+    label: 'Персонал: изменение зарплаты',
+    description:
+      'Создание схем оплаты, премий, штрафов и расчетов выплат администраторам.',
   },
   {
     key: 'edit_staff_knowledge',
@@ -211,10 +283,29 @@ const assortmentSectionCapabilities: AccessCapability[] = [
   'view_assortment_stores',
 ];
 
+const reportActionCapabilities: AccessCapability[] = [
+  'export_reports',
+  'manage_assortment_reports',
+];
+
+const guestActionCapabilities: AccessCapability[] = [
+  'export_guests',
+  'manage_guest_crm',
+];
+
 const staffKnowledgeWriteCapabilities: AccessCapability[] = [
   'edit_staff_knowledge',
   'review_staff_knowledge',
   'publish_staff_knowledge',
+];
+
+const staffActionCapabilities: AccessCapability[] = [
+  'manage_staff_tasks',
+  'manage_staff_standards',
+  'manage_staff_training',
+  'manage_staff_control',
+  'manage_staff_directory',
+  'manage_staff_salary',
 ];
 
 const productEditCapabilities: AccessCapability[] = [
@@ -228,15 +319,37 @@ const parentCapabilityChildren: Partial<
 > = {
   view_reports: assortmentSectionCapabilities,
   view_staff: staffSectionCapabilities,
-  view_staff_knowledge: staffKnowledgeWriteCapabilities,
+  view_staff_knowledge: [],
+  view_assortment_products: [],
+  view_assortment_catalog: [],
+  view_assortment_stores: [],
+};
+
+const requestedCapabilityAlternatives: Partial<
+  Record<AccessCapability, AccessCapability[]>
+> = {
+  view_reports: [...assortmentSectionCapabilities, ...reportActionCapabilities],
+  view_assortment_reports: reportActionCapabilities,
   view_assortment_products: ['edit_products'],
   view_assortment_catalog: ['edit_catalog'],
   view_assortment_stores: ['edit_stores'],
+  view_guests: guestActionCapabilities,
+  view_marketing: ['manage_marketing'],
+  view_communications: ['manage_communications'],
+  view_staff: [...staffSectionCapabilities, ...staffActionCapabilities],
+  view_staff_tasks: ['manage_staff_tasks'],
+  view_staff_standards: ['manage_staff_standards'],
+  view_staff_training: ['manage_staff_training'],
+  view_staff_knowledge: staffKnowledgeWriteCapabilities,
+  view_staff_control: ['manage_staff_control'],
+  view_staff_directory: ['manage_staff_directory'],
+  view_staff_salary: ['manage_staff_salary'],
 };
 
 const ownerStaffCapabilities: AccessCapability[] = [
   'view_staff',
   ...staffSectionCapabilities,
+  ...staffActionCapabilities,
   ...staffKnowledgeWriteCapabilities,
 ];
 
@@ -247,6 +360,9 @@ const shiftStaffCapabilities: AccessCapability[] = [
   'view_staff_standards',
   'view_staff_training',
   'view_staff_knowledge',
+  'manage_staff_tasks',
+  'manage_staff_standards',
+  'manage_staff_training',
 ];
 
 const standardsManagerStaffCapabilities: AccessCapability[] = [
@@ -257,6 +373,11 @@ const standardsManagerStaffCapabilities: AccessCapability[] = [
   'view_staff_knowledge',
   'view_staff_control',
   'view_staff_directory',
+  'manage_staff_tasks',
+  'manage_staff_standards',
+  'manage_staff_training',
+  'manage_staff_control',
+  'manage_staff_directory',
   ...staffKnowledgeWriteCapabilities,
 ];
 
@@ -265,13 +386,17 @@ export const roleCapabilities: Record<UserRole, AccessCapability[]> = {
     'view_dashboard',
     'view_reports',
     ...assortmentSectionCapabilities,
+    ...reportActionCapabilities,
     'view_guests',
+    ...guestActionCapabilities,
     'view_guest_gamification',
     'manage_guest_game_rules',
     'approve_guest_game_rewards',
     'view_guest_game_pii',
     'view_marketing',
+    'manage_marketing',
     'view_communications',
+    'manage_communications',
     ...ownerStaffCapabilities,
     'manage_users',
     'manage_integrations',
@@ -284,13 +409,17 @@ export const roleCapabilities: Record<UserRole, AccessCapability[]> = {
     'view_dashboard',
     'view_reports',
     ...assortmentSectionCapabilities,
+    ...reportActionCapabilities,
     'view_guests',
+    ...guestActionCapabilities,
     'view_guest_gamification',
     'manage_guest_game_rules',
     'approve_guest_game_rewards',
     'view_guest_game_pii',
     'view_marketing',
+    'manage_marketing',
     'view_communications',
+    'manage_communications',
     ...ownerStaffCapabilities,
     'manage_users',
     'manage_integrations',
@@ -303,13 +432,17 @@ export const roleCapabilities: Record<UserRole, AccessCapability[]> = {
     'view_dashboard',
     'view_reports',
     ...assortmentSectionCapabilities,
+    ...reportActionCapabilities,
     'view_guests',
+    ...guestActionCapabilities,
     'view_guest_gamification',
     'manage_guest_game_rules',
     'approve_guest_game_rewards',
     'view_guest_game_pii',
     'view_marketing',
+    'manage_marketing',
     'view_communications',
+    'manage_communications',
     ...ownerStaffCapabilities,
     'import_data',
     'use_utilities',
@@ -319,6 +452,7 @@ export const roleCapabilities: Record<UserRole, AccessCapability[]> = {
     'view_dashboard',
     'view_reports',
     'view_assortment_reports',
+    'export_reports',
     'view_assortment_products',
     'view_assortment_catalog',
     'use_utilities',
@@ -329,35 +463,44 @@ export const roleCapabilities: Record<UserRole, AccessCapability[]> = {
     'view_reports',
     'view_assortment_reports',
     'view_guests',
+    'manage_guest_crm',
     'view_guest_gamification',
     'manage_guest_game_rules',
     'approve_guest_game_rewards',
     'view_marketing',
+    'manage_marketing',
   ],
   [UserRole.CLUB_MANAGER]: [
     'view_dashboard',
     'view_reports',
     ...assortmentSectionCapabilities,
+    ...reportActionCapabilities,
     'view_guests',
+    ...guestActionCapabilities,
     'view_guest_gamification',
     'manage_guest_game_rules',
     'approve_guest_game_rewards',
     'view_guest_game_pii',
     'view_marketing',
+    'manage_marketing',
     'view_communications',
+    'manage_communications',
     ...ownerStaffCapabilities,
   ],
   [UserRole.STANDARDS_MANAGER]: [
     'view_dashboard',
     'view_communications',
+    'manage_communications',
     ...standardsManagerStaffCapabilities,
   ],
   [UserRole.SENIOR_ADMINISTRATOR]: [
     'view_communications',
+    'manage_communications',
     ...shiftStaffCapabilities,
   ],
   [UserRole.CLUB_ADMINISTRATOR]: [
     'view_communications',
+    'manage_communications',
     ...shiftStaffCapabilities,
   ],
 };
@@ -405,7 +548,7 @@ function capabilityMatches(
     return true;
   }
 
-  if (parentCapabilityChildren[requested]?.includes(owned)) {
+  if (requestedCapabilityAlternatives[requested]?.includes(owned)) {
     return true;
   }
 

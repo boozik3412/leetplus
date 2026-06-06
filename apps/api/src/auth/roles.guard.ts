@@ -71,19 +71,25 @@ export class RolesGuard implements CanActivate {
     }
 
     if (path.startsWith('/reports')) {
-      return 'view_assortment_reports';
+      return this.resolveReportsCapability(path, method);
     }
 
     if (path.startsWith('/products')) {
-      return method === 'GET' ? 'view_assortment_products' : 'edit_products';
+      return this.isReadMethod(method)
+        ? 'view_assortment_products'
+        : 'edit_products';
     }
 
     if (path.startsWith('/categories') || path.startsWith('/suppliers')) {
-      return method === 'GET' ? 'view_assortment_catalog' : 'edit_catalog';
+      return this.isReadMethod(method)
+        ? 'view_assortment_catalog'
+        : 'edit_catalog';
     }
 
     if (path.startsWith('/stores')) {
-      return method === 'GET' ? 'view_assortment_stores' : 'edit_stores';
+      return this.isReadMethod(method)
+        ? 'view_assortment_stores'
+        : 'edit_stores';
     }
 
     if (path.startsWith('/guests/gamification')) {
@@ -91,37 +97,74 @@ export class RolesGuard implements CanActivate {
     }
 
     if (path.startsWith('/guests/staff-control')) {
-      return 'view_staff_control';
+      return this.isReadMethod(method)
+        ? 'view_staff_control'
+        : 'manage_staff_control';
     }
 
     if (path.startsWith('/guests')) {
-      return 'view_guests';
+      return this.resolveGuestCapability(path, method);
     }
 
     if (path.startsWith('/marketing')) {
-      return 'view_marketing';
+      return this.isReadMethod(method) ? 'view_marketing' : 'manage_marketing';
     }
 
     if (
       path.startsWith('/staff/team-chat') ||
       path.startsWith('/staff/notifications')
     ) {
-      return 'view_communications';
+      return this.isReadMethod(method)
+        ? 'view_communications'
+        : 'manage_communications';
     }
 
     if (path.startsWith('/staff')) {
-      return this.resolveStaffCapability(path);
+      return this.resolveStaffCapability(path, method);
     }
 
     return null;
   }
 
-  private resolveStaffCapability(path: string): AccessCapability {
+  private resolveReportsCapability(
+    path: string,
+    method: string,
+  ): AccessCapability {
+    if (
+      path.includes('/export') ||
+      path.includes('/email') ||
+      path.includes('/digest')
+    ) {
+      return 'export_reports';
+    }
+
+    return this.isReadMethod(method)
+      ? 'view_assortment_reports'
+      : 'manage_assortment_reports';
+  }
+
+  private resolveGuestCapability(
+    path: string,
+    method: string,
+  ): AccessCapability {
+    if (path.includes('/export')) {
+      return 'export_guests';
+    }
+
+    return this.isReadMethod(method) ? 'view_guests' : 'manage_guest_crm';
+  }
+
+  private resolveStaffCapability(
+    path: string,
+    method: string,
+  ): AccessCapability {
     if (
       path.startsWith('/staff/team-chat') ||
       path.startsWith('/staff/notifications')
     ) {
-      return 'view_communications';
+      return this.isReadMethod(method)
+        ? 'view_communications'
+        : 'manage_communications';
     }
 
     if (path.startsWith('/staff/shift-workspace')) {
@@ -133,7 +176,9 @@ export class RolesGuard implements CanActivate {
       path.startsWith('/staff/task-rules') ||
       path.startsWith('/staff/task-templates')
     ) {
-      return 'view_staff_tasks';
+      return this.isReadMethod(method)
+        ? 'view_staff_tasks'
+        : 'manage_staff_tasks';
     }
 
     if (
@@ -142,7 +187,9 @@ export class RolesGuard implements CanActivate {
       path.startsWith('/staff/checklist-templates') ||
       path.startsWith('/staff/attachments')
     ) {
-      return 'view_staff_standards';
+      return this.isReadMethod(method)
+        ? 'view_staff_standards'
+        : 'manage_staff_standards';
     }
 
     if (
@@ -152,11 +199,15 @@ export class RolesGuard implements CanActivate {
       path.startsWith('/staff/onboarding') ||
       path.startsWith('/staff/assessments')
     ) {
-      return 'view_staff_training';
+      return this.isReadMethod(method)
+        ? 'view_staff_training'
+        : 'manage_staff_training';
     }
 
     if (path.startsWith('/staff/knowledge-base')) {
-      return 'view_staff_knowledge';
+      return this.isReadMethod(method)
+        ? 'view_staff_knowledge'
+        : 'edit_staff_knowledge';
     }
 
     if (
@@ -165,15 +216,21 @@ export class RolesGuard implements CanActivate {
       path.startsWith('/staff/discipline') ||
       path.startsWith('/staff/ai-assistant')
     ) {
-      return 'view_staff_control';
+      return this.isReadMethod(method)
+        ? 'view_staff_control'
+        : 'manage_staff_control';
     }
 
     if (path.startsWith('/staff/directory')) {
-      return 'view_staff_directory';
+      return this.isReadMethod(method)
+        ? 'view_staff_directory'
+        : 'manage_staff_directory';
     }
 
     if (path.startsWith('/staff/salary')) {
-      return 'view_staff_salary';
+      return this.isReadMethod(method)
+        ? 'view_staff_salary'
+        : 'manage_staff_salary';
     }
 
     return 'view_staff';
@@ -183,7 +240,7 @@ export class RolesGuard implements CanActivate {
     path: string,
     method: string,
   ): AccessCapability {
-    if (method === 'GET') {
+    if (this.isReadMethod(method)) {
       if (path.startsWith('/guests/gamification/rewards/export')) {
         return 'approve_guest_game_rewards';
       }
@@ -203,6 +260,10 @@ export class RolesGuard implements CanActivate {
     }
 
     return 'manage_guest_game_rules';
+  }
+
+  private isReadMethod(method: string) {
+    return method === 'GET' || method === 'HEAD' || method === 'OPTIONS';
   }
 
   private isRestrictedShiftStaffPath(

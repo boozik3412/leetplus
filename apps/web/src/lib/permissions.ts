@@ -5,25 +5,37 @@ export type Capability =
   | "view_dashboard"
   | "view_reports"
   | "view_assortment_reports"
+  | "export_reports"
+  | "manage_assortment_reports"
   | "view_assortment_products"
   | "view_assortment_catalog"
   | "view_assortment_stores"
   | "view_guests"
+  | "export_guests"
+  | "manage_guest_crm"
   | "view_guest_gamification"
   | "manage_guest_game_rules"
   | "approve_guest_game_rewards"
   | "view_guest_game_pii"
   | "view_marketing"
+  | "manage_marketing"
   | "view_communications"
+  | "manage_communications"
   | "view_staff"
   | "view_staff_shift_workspace"
   | "view_staff_tasks"
+  | "manage_staff_tasks"
   | "view_staff_standards"
+  | "manage_staff_standards"
   | "view_staff_training"
+  | "manage_staff_training"
   | "view_staff_knowledge"
   | "view_staff_control"
+  | "manage_staff_control"
   | "view_staff_directory"
+  | "manage_staff_directory"
   | "view_staff_salary"
+  | "manage_staff_salary"
   | "edit_staff_knowledge"
   | "review_staff_knowledge"
   | "publish_staff_knowledge"
@@ -60,10 +72,29 @@ export const assortmentSectionCapabilities: Capability[] = [
   "view_assortment_stores",
 ];
 
+const reportActionCapabilities: Capability[] = [
+  "export_reports",
+  "manage_assortment_reports",
+];
+
+const guestActionCapabilities: Capability[] = [
+  "export_guests",
+  "manage_guest_crm",
+];
+
 const staffKnowledgeWriteCapabilities: Capability[] = [
   "edit_staff_knowledge",
   "review_staff_knowledge",
   "publish_staff_knowledge",
+];
+
+const staffActionCapabilities: Capability[] = [
+  "manage_staff_tasks",
+  "manage_staff_standards",
+  "manage_staff_training",
+  "manage_staff_control",
+  "manage_staff_directory",
+  "manage_staff_salary",
 ];
 
 const productEditCapabilities: Capability[] = [
@@ -75,10 +106,29 @@ const productEditCapabilities: Capability[] = [
 const parentCapabilityChildren: Partial<Record<Capability, Capability[]>> = {
   view_reports: assortmentSectionCapabilities,
   view_staff: staffSectionCapabilities,
-  view_staff_knowledge: staffKnowledgeWriteCapabilities,
+  view_staff_knowledge: [],
+  view_assortment_products: [],
+  view_assortment_catalog: [],
+  view_assortment_stores: [],
+};
+
+const requestedCapabilityAlternatives: Partial<Record<Capability, Capability[]>> = {
+  view_reports: [...assortmentSectionCapabilities, ...reportActionCapabilities],
+  view_assortment_reports: reportActionCapabilities,
   view_assortment_products: ["edit_products"],
   view_assortment_catalog: ["edit_catalog"],
   view_assortment_stores: ["edit_stores"],
+  view_guests: guestActionCapabilities,
+  view_marketing: ["manage_marketing"],
+  view_communications: ["manage_communications"],
+  view_staff: [...staffSectionCapabilities, ...staffActionCapabilities],
+  view_staff_tasks: ["manage_staff_tasks"],
+  view_staff_standards: ["manage_staff_standards"],
+  view_staff_training: ["manage_staff_training"],
+  view_staff_knowledge: staffKnowledgeWriteCapabilities,
+  view_staff_control: ["manage_staff_control"],
+  view_staff_directory: ["manage_staff_directory"],
+  view_staff_salary: ["manage_staff_salary"],
 };
 
 export const capabilityOptions: CapabilityOption[] = [
@@ -98,6 +148,18 @@ export const capabilityOptions: CapabilityOption[] = [
     label: "Коммерческие отчеты",
     description:
       "OOS, деньги в риске, рекомендации, матрица, план-факт и другие отчеты.",
+  },
+  {
+    key: "export_reports",
+    label: "Отчеты: экспорт",
+    description:
+      "Выгрузка коммерческих отчетов, экспорт сводок и отправка отчетов по email.",
+  },
+  {
+    key: "manage_assortment_reports",
+    label: "Отчеты: действия",
+    description:
+      "Изменение статусов рекомендаций, исключений и других управленческих действий в отчетах.",
   },
   {
     key: "view_assortment_products",
@@ -120,6 +182,18 @@ export const capabilityOptions: CapabilityOption[] = [
     label: "Гости и CRM",
     description:
       "Гостевая аналитика, CRM, группы, задачи контакта и карточки гостей.",
+  },
+  {
+    key: "export_guests",
+    label: "Гости и CRM: экспорт",
+    description:
+      "Выгрузка гостевых отчетов и чувствительных клиентских списков внутри своей сети.",
+  },
+  {
+    key: "manage_guest_crm",
+    label: "Гости и CRM: действия",
+    description:
+      "Создание и изменение CRM-задач, групп, сегментов, статусов и рабочих заметок гостей.",
   },
   {
     key: "view_guest_gamification",
@@ -151,10 +225,22 @@ export const capabilityOptions: CapabilityOption[] = [
     description: "Кампании, промо-механики, промо-наборы и оценка эффекта.",
   },
   {
+    key: "manage_marketing",
+    label: "Маркетинг: действия",
+    description:
+      "Создание, запуск и изменение кампаний, промо-наборов, миссий и маркетинговых правил.",
+  },
+  {
     key: "view_communications",
     label: "Коммуникации",
     description:
       "Обзор коммуникаций, командный чат и внутренние уведомления без общего доступа к персоналу.",
+  },
+  {
+    key: "manage_communications",
+    label: "Коммуникации: действия",
+    description:
+      "Отправка сообщений, создание каналов, закрепление, отметки прочтения и задачи из чата.",
   },
   {
     key: "view_staff",
@@ -174,16 +260,34 @@ export const capabilityOptions: CapabilityOption[] = [
     description: "Задачи персонала, правила повторения и шаблоны задач.",
   },
   {
+    key: "manage_staff_tasks",
+    label: "Персонал: действия с задачами",
+    description:
+      "Создание, изменение, запуск правил и закрытие задач персонала.",
+  },
+  {
     key: "view_staff_standards",
     label: "Персонал: регламенты и чек-листы",
     description:
       "Регламенты смен, чек-листы, шаблоны чек-листов и вложения стандартов.",
   },
   {
+    key: "manage_staff_standards",
+    label: "Персонал: действия со стандартами",
+    description:
+      "Создание, публикация и корректировка регламентов, чек-листов, шаблонов и вложений.",
+  },
+  {
     key: "view_staff_training",
     label: "Персонал: обучение и аттестация",
     description:
       "Курсы, адаптация, аттестации, профили обучения и отчеты готовности.",
+  },
+  {
+    key: "manage_staff_training",
+    label: "Персонал: действия с обучением",
+    description:
+      "Создание и изменение курсов, маршрутов адаптации, аттестаций и результатов обучения.",
   },
   {
     key: "view_staff_knowledge",
@@ -197,14 +301,32 @@ export const capabilityOptions: CapabilityOption[] = [
       "Операционный дашборд, рейтинги, предупреждения, штрафы и контроль выполнения.",
   },
   {
+    key: "manage_staff_control",
+    label: "Персонал: действия контроля",
+    description:
+      "Создание предупреждений, штрафов, задач контроля и служебных корректировок по администраторам.",
+  },
+  {
     key: "view_staff_directory",
     label: "Персонал: сотрудники",
     description: "Справочник сотрудников и карточки администраторов.",
   },
   {
+    key: "manage_staff_directory",
+    label: "Персонал: изменение сотрудников",
+    description:
+      "Создание и изменение карточек сотрудников, привязок к клубам и учетным записям.",
+  },
+  {
     key: "view_staff_salary",
     label: "Персонал: зарплата",
     description: "Оклады, премии, штрафы и расчет выплат администраторам.",
+  },
+  {
+    key: "manage_staff_salary",
+    label: "Персонал: изменение зарплаты",
+    description:
+      "Создание схем оплаты, премий, штрафов и расчетов выплат администраторам.",
   },
   {
     key: "edit_staff_knowledge",
@@ -275,6 +397,7 @@ const validCapabilities = new Set<Capability>(
 const ownerStaffCapabilities: Capability[] = [
   "view_staff",
   ...staffSectionCapabilities,
+  ...staffActionCapabilities,
   ...staffKnowledgeWriteCapabilities,
 ];
 
@@ -285,6 +408,9 @@ const shiftStaffCapabilities: Capability[] = [
   "view_staff_standards",
   "view_staff_training",
   "view_staff_knowledge",
+  "manage_staff_tasks",
+  "manage_staff_standards",
+  "manage_staff_training",
 ];
 
 const standardsManagerStaffCapabilities: Capability[] = [
@@ -295,6 +421,11 @@ const standardsManagerStaffCapabilities: Capability[] = [
   "view_staff_knowledge",
   "view_staff_control",
   "view_staff_directory",
+  "manage_staff_tasks",
+  "manage_staff_standards",
+  "manage_staff_training",
+  "manage_staff_control",
+  "manage_staff_directory",
   ...staffKnowledgeWriteCapabilities,
 ];
 
@@ -303,13 +434,17 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "view_dashboard",
     "view_reports",
     ...assortmentSectionCapabilities,
+    ...reportActionCapabilities,
     "view_guests",
+    ...guestActionCapabilities,
     "view_guest_gamification",
     "manage_guest_game_rules",
     "approve_guest_game_rewards",
     "view_guest_game_pii",
     "view_marketing",
+    "manage_marketing",
     "view_communications",
+    "manage_communications",
     ...ownerStaffCapabilities,
     "manage_users",
     "manage_integrations",
@@ -322,13 +457,17 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "view_dashboard",
     "view_reports",
     ...assortmentSectionCapabilities,
+    ...reportActionCapabilities,
     "view_guests",
+    ...guestActionCapabilities,
     "view_guest_gamification",
     "manage_guest_game_rules",
     "approve_guest_game_rewards",
     "view_guest_game_pii",
     "view_marketing",
+    "manage_marketing",
     "view_communications",
+    "manage_communications",
     ...ownerStaffCapabilities,
     "manage_users",
     "manage_integrations",
@@ -341,13 +480,17 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "view_dashboard",
     "view_reports",
     ...assortmentSectionCapabilities,
+    ...reportActionCapabilities,
     "view_guests",
+    ...guestActionCapabilities,
     "view_guest_gamification",
     "manage_guest_game_rules",
     "approve_guest_game_rewards",
     "view_guest_game_pii",
     "view_marketing",
+    "manage_marketing",
     "view_communications",
+    "manage_communications",
     ...ownerStaffCapabilities,
     "import_data",
     "use_utilities",
@@ -357,6 +500,7 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "view_dashboard",
     "view_reports",
     "view_assortment_reports",
+    "export_reports",
     "view_assortment_products",
     "view_assortment_catalog",
     "use_utilities",
@@ -367,31 +511,46 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "view_reports",
     "view_assortment_reports",
     "view_guests",
+    "manage_guest_crm",
     "view_guest_gamification",
     "manage_guest_game_rules",
     "approve_guest_game_rewards",
     "view_marketing",
+    "manage_marketing",
   ],
   CLUB_MANAGER: [
     "view_dashboard",
     "view_reports",
     ...assortmentSectionCapabilities,
+    ...reportActionCapabilities,
     "view_guests",
+    ...guestActionCapabilities,
     "view_guest_gamification",
     "manage_guest_game_rules",
     "approve_guest_game_rewards",
     "view_guest_game_pii",
     "view_marketing",
+    "manage_marketing",
     "view_communications",
+    "manage_communications",
     ...ownerStaffCapabilities,
   ],
   STANDARDS_MANAGER: [
     "view_dashboard",
     "view_communications",
+    "manage_communications",
     ...standardsManagerStaffCapabilities,
   ],
-  SENIOR_ADMINISTRATOR: ["view_communications", ...shiftStaffCapabilities],
-  CLUB_ADMINISTRATOR: ["view_communications", ...shiftStaffCapabilities],
+  SENIOR_ADMINISTRATOR: [
+    "view_communications",
+    "manage_communications",
+    ...shiftStaffCapabilities,
+  ],
+  CLUB_ADMINISTRATOR: [
+    "view_communications",
+    "manage_communications",
+    ...shiftStaffCapabilities,
+  ],
 };
 
 const shiftWorkspaceRoles = new Set<AuthUser["role"]>([
@@ -436,7 +595,7 @@ function capabilityMatches(owned: Capability, requested: Capability) {
     return true;
   }
 
-  if (parentCapabilityChildren[requested]?.includes(owned)) {
+  if (requestedCapabilityAlternatives[requested]?.includes(owned)) {
     return true;
   }
 

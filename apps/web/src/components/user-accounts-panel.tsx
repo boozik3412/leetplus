@@ -183,6 +183,15 @@ function roleFormFromCustomRole(role: UserAccessRole): AccessRoleFormState {
   };
 }
 
+function haveSamePermissions(left: Capability[], right: Capability[]) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  const rightSet = new Set(right);
+  return left.every((permission) => rightSet.has(permission));
+}
+
 function accountRoleLabel(account: UserAccount) {
   return account.customRole?.name ?? getRoleLabel(account.role);
 }
@@ -232,6 +241,7 @@ export function UserAccountsPanel({
     ? "CLUB_ADMINISTRATOR"
     : assignableRoles[0] ?? currentUser.role;
   const [users, setUsers] = useState(initialData.users);
+  const [systemRoles, setSystemRoles] = useState(initialData.roleOptions);
   const [customRoles, setCustomRoles] = useState(initialData.customRoles);
   const [invites, setInvites] = useState(initialData.invites ?? []);
   const [form, setForm] = useState<FormState>(() => createEmptyForm(defaultRole));
@@ -267,10 +277,10 @@ export function UserAccountsPanel({
   const selectedUser = selectedId
     ? users.find((account) => account.id === selectedId) ?? null
     : null;
-  const roleOptions = initialData.roleOptions.filter((option) =>
+  const roleOptions = systemRoles.filter((option) =>
     assignableRoles.includes(option.role),
   );
-  const selectedRoleOption = initialData.roleOptions.find(
+  const selectedRoleOption = systemRoles.find(
     (option) => option.role === form.role,
   );
   const selectedCustomRole = form.customRoleId
@@ -282,42 +292,49 @@ export function UserAccountsPanel({
   const selectedSystemRoleOption = selectedSystemRole
     ? roleOptions.find((option) => option.role === selectedSystemRole) ?? null
     : null;
+  const isSystemRoleDirty =
+    roleEditorMode === "system" && selectedSystemRoleOption
+      ? !haveSamePermissions(
+          roleForm.permissions,
+          selectedSystemRoleOption.permissions,
+        )
+      : false;
   const isRoleEditorOpen = roleEditorMode !== "idle";
   const roleEditorKicker =
     roleEditorMode === "custom"
       ? "Изменение клубной роли"
       : roleEditorMode === "system"
-        ? "Шаблон системной роли"
+        ? "Роль сети"
         : "Новая клубная роль";
   const roleEditorTitle =
     roleEditorMode === "custom"
       ? "Сохранение изменений роли"
       : roleEditorMode === "system"
-        ? "Создание роли из шаблона"
+        ? selectedSystemRoleOption?.label ?? "Настройка системной роли"
         : "Создание роли с нуля";
   const roleEditorDescription =
     roleEditorMode === "custom"
       ? "Вы редактируете уже существующую клубную роль. После сохранения новые доступы применятся ко всем пользователям, которым назначена эта роль, и ко всем будущим назначениям."
       : roleEditorMode === "system" && selectedSystemRoleOption
-        ? `Системная роль "${selectedSystemRoleOption.label}" не меняется напрямую. Это шаблон: настройте доступы и сохраните отдельную клубную роль.`
+        ? `Изменения роли "${selectedSystemRoleOption.label}" сохранятся только в текущей сети клубов. Базовый шаблон LeetPlus и другие сети не изменятся.`
         : "Задайте название, описание и отметьте только те доступы, которые нужны сотруднику.";
   const roleEditorPermissionsHint =
     roleEditorMode === "custom"
       ? "Снимайте и ставьте галочки: кнопка сохранения ниже изменит именно выбранную клубную роль."
       : roleEditorMode === "system"
-        ? "Системный шаблон останется без изменений. Сохранение создаст новую клубную роль с выбранными доступами."
+        ? "Снимайте и ставьте галочки: после первого изменения появится сохранение текущей роли сети."
         : "Раскройте нужный раздел и соберите новую роль с нуля.";
   const roleEditorSubmitLabel =
     roleEditorMode === "custom"
       ? "Сохранить изменения"
       : roleEditorMode === "system"
-        ? "Создать роль из шаблона"
+        ? "Сохранить изменения в текущей роли"
         : "Создать роль";
   const roleEditorSavingLabel =
     roleEditorMode === "custom"
       ? "Сохраняем изменения..."
       : roleEditorMode === "system"
-        ? "Создаем роль..."
+        ? "Сохраняем роль сети..."
         : "Создаем роль...";
   const permissionSections = useMemo(() => {
     const optionsByKey = new Map(
@@ -461,7 +478,7 @@ export function UserAccountsPanel({
     setSelectedSystemRole(role.role);
     setRoleEditorMode("system");
     setRoleForm({
-      name: "",
+      name: role.label,
       description: role.description,
       permissions: [...role.permissions],
     });
@@ -496,6 +513,71 @@ export function UserAccountsPanel({
     event.preventDefault();
     setIsRoleSaving(true);
     setRoleStatus({ type: "idle", message: "" });
+
+    if (roleEditorMode === "system") {
+      if (!selectedSystemRole || !selectedSystemRoleOption) {
+        setRoleStatus({
+          type: "error",
+          message: "Выберите системную роль для изменения",
+        });
+        setIsRoleSaving(false);
+        return;
+      }
+
+      if (!isSystemRoleDirty) {
+        setRoleStatus({
+          type: "idle",
+          message: "",
+        });
+        setIsRoleSaving(false);
+        return;
+      }
+
+      const response = await fetch(
+        `/api/users/system-roles/${selectedSystemRole}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ permissions: roleForm.permissions }),
+        },
+      );
+
+      if (!response.ok) {
+        setRoleStatus({
+          type: "error",
+          message: await readResponseError(response),
+        });
+        setIsRoleSaving(false);
+        return;
+      }
+
+      const saved = (await response.json()) as UserRoleOption;
+      setSystemRoles((current) =>
+        current.map((role) => (role.role === saved.role ? saved : role)),
+      );
+      setUsers((current) =>
+        current.map((account) =>
+          account.role === saved.role && !account.customRoleId
+            ? {
+                ...account,
+                permissions: saved.permissions,
+              }
+            : account,
+        ),
+      );
+      setRoleForm((current) => ({
+        ...current,
+        name: saved.label,
+        description: saved.description,
+        permissions: saved.permissions,
+      }));
+      setRoleStatus({
+        type: "success",
+        message: "Изменения текущей роли сохранены для этой сети клубов",
+      });
+      setIsRoleSaving(false);
+      return;
+    }
 
     const isUpdatingRole = Boolean(selectedRoleId);
     const endpoint = selectedRoleId
@@ -1112,7 +1194,7 @@ export function UserAccountsPanel({
                       </p>
                       <span className="flex shrink-0 items-center gap-1">
                         <span className="rounded-full bg-zinc-200/70 px-2 py-0.5 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-                          шаблон
+                          {role.isOverridden ? "настроена" : "шаблон"}
                         </span>
                         <span className="rounded-full bg-zinc-200/70 px-2 py-0.5 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
                           {role.permissions.length}
@@ -1202,42 +1284,50 @@ export function UserAccountsPanel({
                 </span>
               </div>
 
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <label className="space-y-1">
-                  <span className="text-xs font-bold uppercase text-zinc-500">
-                    Название роли
-                  </span>
-                  <input
-                    required
-                    value={roleForm.name}
-                    onChange={(event) =>
-                      setRoleForm((current) => ({
-                        ...current,
-                        name: event.target.value,
-                      }))
-                    }
-                    placeholder="Например: Управляющий сменой"
-                    className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
-                  />
-                </label>
+              {roleEditorMode !== "system" ? (
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <label className="space-y-1">
+                    <span className="text-xs font-bold uppercase text-zinc-500">
+                      Название роли
+                    </span>
+                    <input
+                      required
+                      value={roleForm.name}
+                      onChange={(event) =>
+                        setRoleForm((current) => ({
+                          ...current,
+                          name: event.target.value,
+                        }))
+                      }
+                      placeholder="Например: Управляющий сменой"
+                      className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+                    />
+                  </label>
 
-                <label className="space-y-1">
-                  <span className="text-xs font-bold uppercase text-zinc-500">
-                    Описание
-                  </span>
-                  <input
-                    value={roleForm.description}
-                    onChange={(event) =>
-                      setRoleForm((current) => ({
-                        ...current,
-                        description: event.target.value,
-                      }))
-                    }
-                    placeholder="Коротко: зона ответственности"
-                    className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
-                  />
-                </label>
-              </div>
+                  <label className="space-y-1">
+                    <span className="text-xs font-bold uppercase text-zinc-500">
+                      Описание
+                    </span>
+                    <input
+                      value={roleForm.description}
+                      onChange={(event) =>
+                        setRoleForm((current) => ({
+                          ...current,
+                          description: event.target.value,
+                        }))
+                      }
+                      placeholder="Коротко: зона ответственности"
+                      className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
+                    />
+                  </label>
+                </div>
+              ) : (
+                <div className="mt-4 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-100">
+                  Вы меняете системную роль только для текущей сети клубов.
+                  Пользователи с этой ролью получат новые доступы после
+                  следующего запроса или повторного входа.
+                </div>
+              )}
 
               <div className="mt-4 rounded-md border border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950">
                 <p className="text-xs font-bold uppercase text-zinc-500">
@@ -1346,13 +1436,21 @@ export function UserAccountsPanel({
               ) : null}
 
               <div className="mt-4 flex flex-wrap gap-2">
-                <button
-                  type="submit"
-                  disabled={isRoleSaving}
-                  className="inline-flex h-11 items-center justify-center rounded-md bg-zinc-950 px-5 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
-                >
-                  {isRoleSaving ? roleEditorSavingLabel : roleEditorSubmitLabel}
-                </button>
+                {roleEditorMode !== "system" || isSystemRoleDirty ? (
+                  <button
+                    type="submit"
+                    disabled={isRoleSaving}
+                    className="inline-flex h-11 items-center justify-center rounded-md bg-zinc-950 px-5 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
+                  >
+                    {isRoleSaving
+                      ? roleEditorSavingLabel
+                      : roleEditorSubmitLabel}
+                  </button>
+                ) : (
+                  <span className="inline-flex h-11 items-center rounded-md border border-dashed border-zinc-300 px-4 text-sm font-semibold text-zinc-500 dark:border-zinc-700">
+                    Измените доступы, чтобы сохранить текущую роль
+                  </span>
+                )}
                 <button
                   type="button"
                   onClick={startCreateRole}

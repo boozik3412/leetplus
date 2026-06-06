@@ -211,6 +211,7 @@ model Tenant {
   guestAudiences                       GuestAudience[]
   guestAudienceMembers                 GuestAudienceMember[]
   userAccessRoles                      UserAccessRole[]
+  userRoleOverrides                    UserRoleOverride[]
   userInvites                          UserInvite[]
   platformAdminAuditEvents             PlatformAdminAuditEvent[]
 }
@@ -352,6 +353,20 @@ model UserAccessRole {
 
   @@unique([tenantId, name])
   @@index([tenantId, createdAt])
+}
+
+model UserRoleOverride {
+  id          String   @id @default(uuid())
+  tenantId    String
+  role        UserRole
+  permissions String[] @default([])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, role])
+  @@index([tenantId, updatedAt])
 }
 
 model UserInvite {

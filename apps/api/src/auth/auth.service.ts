@@ -39,6 +39,9 @@ type UserWithTenant = {
     name: string;
     permissions: string[];
   } | null;
+  roleOverride?: {
+    permissions: string[];
+  } | null;
 };
 
 type UserInvitePreview = {
@@ -329,7 +332,7 @@ export class AuthService {
 
     this.assertTenantActiveForUser(user);
 
-    return this.toAuthenticatedUser(user);
+    return this.toAuthenticatedUser(await this.withRoleOverride(user));
   }
 
   confirmEmail(token: string) {
@@ -459,7 +462,8 @@ export class AuthService {
   ): Promise<AuthResponse> {
     this.assertTenantActiveForUser(user);
 
-    const authenticatedUser = this.toAuthenticatedUser(user);
+    const userWithRoleOverride = await this.withRoleOverride(user);
+    const authenticatedUser = this.toAuthenticatedUser(userWithRoleOverride);
     const payload: AuthTokenPayload = {
       sub: authenticatedUser.id,
       email: authenticatedUser.email,
@@ -491,6 +495,34 @@ export class AuthService {
       tenantId: user.tenantId,
       tenantSlug: user.tenant.slug,
       tenantStatus: user.tenant.status,
+    };
+  }
+
+  private async withRoleOverride(
+    user: UserWithTenant,
+  ): Promise<UserWithTenant> {
+    if (user.customRole) {
+      return {
+        ...user,
+        roleOverride: null,
+      };
+    }
+
+    const roleOverride = await this.prisma.userRoleOverride.findUnique({
+      where: {
+        tenantId_role: {
+          tenantId: user.tenantId,
+          role: user.role,
+        },
+      },
+      select: {
+        permissions: true,
+      },
+    });
+
+    return {
+      ...user,
+      roleOverride,
     };
   }
 

@@ -524,6 +524,7 @@ export function normalizeCapabilities(
 export function resolveUserCapabilities(input: {
   role: UserRole;
   customRole?: { permissions: string[] } | null;
+  roleOverride?: { permissions: string[] } | null;
 }): AccessCapability[] {
   const customPermissions = normalizeCapabilities(
     input.customRole?.permissions,
@@ -531,6 +532,14 @@ export function resolveUserCapabilities(input: {
 
   if (input.customRole) {
     return customPermissions;
+  }
+
+  const roleOverridePermissions = normalizeCapabilities(
+    input.roleOverride?.permissions,
+  );
+
+  if (input.roleOverride) {
+    return roleOverridePermissions;
   }
 
   return roleCapabilities[input.role] ?? [];

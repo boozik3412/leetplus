@@ -22,6 +22,8 @@ import {
   type UserAccountsResponse,
   type UserInviteAccount,
   type UserInviteDto,
+  type UserRoleOption,
+  type UserRoleOverrideDto,
 } from './users.service';
 
 @Controller('users')
@@ -56,6 +58,15 @@ export class UsersController {
     @Body() dto: UserInviteDto,
   ): Promise<UserInviteAccount> {
     return this.usersService.createInvite(user, dto);
+  }
+
+  @Patch('system-roles/:role')
+  updateSystemRole(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('role') role: string,
+    @Body() dto: UserRoleOverrideDto,
+  ): Promise<UserRoleOption> {
+    return this.usersService.updateSystemRole(user, role, dto);
   }
 
   @Patch(':id')

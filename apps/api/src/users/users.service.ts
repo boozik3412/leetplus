@@ -63,7 +63,7 @@ const assignableRolesByActor: Record<UserRole, UserRole[]> = {
   [UserRole.CLUB_ADMINISTRATOR]: [],
 };
 
-const roleOptions = [
+const baseRoleOptions = [
   {
     role: UserRole.OWNER,
     label: 'Владелец',
@@ -181,6 +181,12 @@ type UserAccessRoleRow = {
   updatedAt: Date;
 };
 
+type UserRoleOverrideRow = {
+  role: UserRole;
+  permissions: string[];
+  updatedAt: Date;
+};
+
 export type UserAccountStore = {
   id: string;
   name: string;
@@ -213,6 +219,15 @@ export type UserAccessRoleAccount = {
   updatedAt: string;
 };
 
+export type UserRoleOption = {
+  role: UserRole;
+  label: string;
+  description: string;
+  permissions: AccessCapability[];
+  isOverridden: boolean;
+  updatedAt: string | null;
+};
+
 export type UserInviteAccount = {
   id: string;
   email: string | null;
@@ -231,7 +246,7 @@ export type UserInviteAccount = {
 export type UserAccountsResponse = {
   users: UserAccount[];
   stores: UserAccountStore[];
-  roleOptions: typeof roleOptions;
+  roleOptions: UserRoleOption[];
   customRoles: UserAccessRoleAccount[];
   invites: UserInviteAccount[];
   capabilityOptions: typeof accessCapabilityCatalog;
@@ -250,6 +265,10 @@ export type UserAccountDto = {
 export type UserAccessRoleDto = {
   name?: string;
   description?: string | null;
+  permissions?: string[];
+};
+
+export type UserRoleOverrideDto = {
   permissions?: string[];
 };
 
@@ -273,38 +292,50 @@ export class UsersService {
 
   async getUsers(user: AuthenticatedUser): Promise<UserAccountsResponse> {
     const { tenantId } = await this.tenantContextService.resolve(user);
-    const [users, stores, customRoles, invites] = await Promise.all([
-      this.prisma.user.findMany({
-        where: { tenantId },
-        include: userAccountInclude,
-        orderBy: [{ role: 'asc' }, { fullName: 'asc' }, { email: 'asc' }],
-      }),
-      this.prisma.store.findMany({
-        where: { tenantId },
-        select: { id: true, name: true, isActive: true },
-        orderBy: { name: 'asc' },
-      }),
-      this.prisma.userAccessRole.findMany({
-        where: { tenantId },
-        orderBy: [{ name: 'asc' }, { createdAt: 'asc' }],
-      }),
-      this.prisma.userInvite.findMany({
-        where: {
-          tenantId,
-          acceptedAt: null,
-          expiresAt: { gt: new Date() },
-        },
-        include: userInviteInclude,
-        orderBy: { createdAt: 'desc' },
-        take: 20,
-      }),
-    ]);
+    const [users, stores, customRoles, invites, roleOverrides] =
+      await Promise.all([
+        this.prisma.user.findMany({
+          where: { tenantId },
+          include: userAccountInclude,
+          orderBy: [{ role: 'asc' }, { fullName: 'asc' }, { email: 'asc' }],
+        }),
+        this.prisma.store.findMany({
+          where: { tenantId },
+          select: { id: true, name: true, isActive: true },
+          orderBy: { name: 'asc' },
+        }),
+        this.prisma.userAccessRole.findMany({
+          where: { tenantId },
+          orderBy: [{ name: 'asc' }, { createdAt: 'asc' }],
+        }),
+        this.prisma.userInvite.findMany({
+          where: {
+            tenantId,
+            acceptedAt: null,
+            expiresAt: { gt: new Date() },
+          },
+          include: userInviteInclude,
+          orderBy: { createdAt: 'desc' },
+          take: 20,
+        }),
+        this.prisma.userRoleOverride.findMany({
+          where: { tenantId },
+          select: {
+            role: true,
+            permissions: true,
+            updatedAt: true,
+          },
+        }),
+      ]);
     const storesById = this.createStoreMap(stores);
+    const roleOverridesByRole = this.createRoleOverrideMap(roleOverrides);
 
     return {
-      users: users.map((account) => this.toAccount(account)),
+      users: users.map((account) =>
+        this.toAccount(account, roleOverridesByRole),
+      ),
       stores,
-      roleOptions,
+      roleOptions: this.toRoleOptions(roleOverridesByRole),
       customRoles: customRoles.map((role) => this.toAccessRole(role)),
       invites: invites.map((invite) => this.toInvite(invite, storesById)),
       capabilityOptions: accessCapabilityCatalog,
@@ -361,7 +392,7 @@ export class UsersService {
       });
     });
 
-    return this.toAccount(created);
+    return this.toAccount(created, await this.getRoleOverrideMap(tenantId));
   }
 
   async createInvite(
@@ -523,7 +554,7 @@ export class UsersService {
       });
     });
 
-    return this.toAccount(updated);
+    return this.toAccount(updated, await this.getRoleOverrideMap(tenantId));
   }
 
   async createAccessRole(
@@ -570,6 +601,41 @@ export class UsersService {
     }
   }
 
+  async updateSystemRole(
+    actor: AuthenticatedUser,
+    roleValue: string,
+    dto: UserRoleOverrideDto,
+  ): Promise<UserRoleOption> {
+    const { tenantId } = await this.tenantContextService.resolve(actor);
+    const role = this.parseRole(roleValue);
+    this.assertCanManageSystemRoleOverride(actor, role);
+    const permissions = normalizeCapabilities(dto.permissions);
+
+    const override = await this.prisma.userRoleOverride.upsert({
+      where: {
+        tenantId_role: {
+          tenantId,
+          role,
+        },
+      },
+      create: {
+        tenantId,
+        role,
+        permissions,
+      },
+      update: {
+        permissions,
+      },
+      select: {
+        role: true,
+        permissions: true,
+        updatedAt: true,
+      },
+    });
+
+    return this.toRoleOption(role, override);
+  }
+
   private assertCanManageExistingUser(
     actor: AuthenticatedUser,
     target: Pick<UserAccountRow, 'role'>,
@@ -583,6 +649,23 @@ export class UsersService {
 
   private assertCanManageUsers(actor: AuthenticatedUser) {
     if (this.getAssignableRoles(actor).length > 0) {
+      return;
+    }
+
+    throw new ForbiddenException('Insufficient role permissions');
+  }
+
+  private assertCanManageSystemRoleOverride(
+    actor: AuthenticatedUser,
+    role: UserRole,
+  ) {
+    if (
+      actor.isPlatformAdmin ||
+      actor.role === UserRole.OWNER ||
+      actor.role === UserRole.ADMIN ||
+      (actor.role === UserRole.MANAGER &&
+        this.getAssignableRoles(actor).includes(role))
+    ) {
       return;
     }
 
@@ -805,6 +888,23 @@ export class UsersService {
     return new Map(stores.map((store) => [store.id, store] as const));
   }
 
+  private async getRoleOverrideMap(tenantId: string) {
+    const roleOverrides = await this.prisma.userRoleOverride.findMany({
+      where: { tenantId },
+      select: {
+        role: true,
+        permissions: true,
+        updatedAt: true,
+      },
+    });
+
+    return this.createRoleOverrideMap(roleOverrides);
+  }
+
+  private createRoleOverrideMap(roleOverrides: UserRoleOverrideRow[]) {
+    return new Map(roleOverrides.map((override) => [override.role, override]));
+  }
+
   private async replaceStoreAccesses(
     tx: Prisma.TransactionClient,
     userId: string,
@@ -822,7 +922,40 @@ export class UsersService {
     });
   }
 
-  private toAccount(account: UserAccountRow): UserAccount {
+  private toRoleOptions(
+    roleOverridesByRole: Map<UserRole, UserRoleOverrideRow>,
+  ): UserRoleOption[] {
+    return baseRoleOptions.map((option) =>
+      this.toRoleOption(option.role, roleOverridesByRole.get(option.role)),
+    );
+  }
+
+  private toRoleOption(
+    role: UserRole,
+    override?: UserRoleOverrideRow | null,
+  ): UserRoleOption {
+    const baseRole = baseRoleOptions.find((option) => option.role === role);
+
+    if (!baseRole) {
+      throw new BadRequestException('Unknown user role');
+    }
+
+    return {
+      role: baseRole.role,
+      label: baseRole.label,
+      description: baseRole.description,
+      permissions: override
+        ? normalizeCapabilities(override.permissions)
+        : baseRole.permissions,
+      isOverridden: Boolean(override),
+      updatedAt: override?.updatedAt.toISOString() ?? null,
+    };
+  }
+
+  private toAccount(
+    account: UserAccountRow,
+    roleOverridesByRole: Map<UserRole, UserRoleOverrideRow>,
+  ): UserAccount {
     const stores = account.storeAccesses
       .map((access) => access.store)
       .sort((a, b) => a.name.localeCompare(b.name, 'ru'));
@@ -836,7 +969,10 @@ export class UsersService {
       customRole: account.customRole
         ? this.toAccessRole(account.customRole)
         : null,
-      permissions: resolveUserCapabilities(account),
+      permissions: resolveUserCapabilities({
+        ...account,
+        roleOverride: roleOverridesByRole.get(account.role) ?? null,
+      }),
       isActive: account.isActive,
       isPlatformAdmin: account.isPlatformAdmin,
       emailVerifiedAt: account.emailVerifiedAt?.toISOString() ?? null,

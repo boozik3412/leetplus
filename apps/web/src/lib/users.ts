@@ -54,6 +54,8 @@ export type UserRoleOption = {
   label: string;
   description: string;
   permissions: Capability[];
+  isOverridden: boolean;
+  updatedAt: string | null;
 };
 
 export type CapabilityOption = {

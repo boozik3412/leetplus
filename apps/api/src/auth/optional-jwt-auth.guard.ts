@@ -64,6 +64,20 @@ export class OptionalJwtAuthGuard implements CanActivate {
         throw new UnauthorizedException('Invalid authorization token');
       }
 
+      const roleOverride = user.customRole
+        ? null
+        : await this.prisma.userRoleOverride.findUnique({
+            where: {
+              tenantId_role: {
+                tenantId: user.tenantId,
+                role: user.role,
+              },
+            },
+            select: {
+              permissions: true,
+            },
+          });
+
       request.user = {
         id: user.id,
         email: user.email,
@@ -71,7 +85,7 @@ export class OptionalJwtAuthGuard implements CanActivate {
         role: user.role,
         customRoleId: user.customRole?.id ?? user.customRoleId ?? null,
         customRoleName: user.customRole?.name ?? null,
-        permissions: resolveUserCapabilities(user),
+        permissions: resolveUserCapabilities({ ...user, roleOverride }),
         isActive: user.isActive,
         isPlatformAdmin: user.isPlatformAdmin,
         tenantId: user.tenantId,

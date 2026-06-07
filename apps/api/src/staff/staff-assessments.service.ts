@@ -222,11 +222,15 @@ export class StaffAssessmentsService {
     const { tenantId } = await this.tenantContextService.resolve(user);
     const canManageAssessments = this.canManageAssessments(user);
     const filters = this.resolveFilters(query, canManageAssessments);
+    const visibleStoreIds = canManageAssessments
+      ? null
+      : await this.getCurrentUserStoreAccessIds(tenantId, user.id);
     const where = this.buildWhere(
       tenantId,
       user,
       filters,
       canManageAssessments,
+      visibleStoreIds,
     );
 
     const [rows, stores, users] = await Promise.all([
@@ -241,7 +245,12 @@ export class StaffAssessmentsService {
         take: 200,
       }),
       this.prisma.store.findMany({
-        where: { tenantId },
+        where: {
+          tenantId,
+          ...(visibleStoreIds && visibleStoreIds.length > 0
+            ? { id: { in: visibleStoreIds } }
+            : {}),
+        },
         select: { id: true, name: true, isActive: true },
         orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
       }),
@@ -378,6 +387,23 @@ export class StaffAssessmentsService {
       );
     }
 
+    if (!this.canManageAssessments(user)) {
+      const visibleStoreIds = await this.getCurrentUserStoreAccessIds(
+        tenantId,
+        user.id,
+      );
+
+      if (
+        assessment.storeId &&
+        visibleStoreIds.length > 0 &&
+        !visibleStoreIds.includes(assessment.storeId)
+      ) {
+        throw new BadRequestException(
+          'Assessment is not available for this club',
+        );
+      }
+    }
+
     const questions = this.normalizeQuestionsFromStorage(assessment.questions);
 
     if (questions.length === 0) {
@@ -460,8 +486,10 @@ export class StaffAssessmentsService {
     user: AuthenticatedUser,
     filters: StaffAssessmentReport['filters'],
     canManageAssessments: boolean,
+    visibleStoreIds: string[] | null,
   ): Prisma.StaffAssessmentWhereInput {
     const where: Prisma.StaffAssessmentWhereInput = { tenantId };
+    const and: Prisma.StaffAssessmentWhereInput[] = [];
 
     if (filters.status !== 'all') {
       where.status = filters.status;
@@ -478,6 +506,12 @@ export class StaffAssessmentsService {
     if (!canManageAssessments) {
       where.status = 'ACTIVE';
       where.roleScope = { in: this.visibleRoleScopes(user.role) };
+
+      if (visibleStoreIds && visibleStoreIds.length > 0) {
+        and.push({
+          OR: [{ storeId: null }, { storeId: { in: visibleStoreIds } }],
+        });
+      }
     }
 
     if (filters.storeId) {
@@ -489,6 +523,10 @@ export class StaffAssessmentsService {
         { title: { contains: filters.search, mode: 'insensitive' } },
         { description: { contains: filters.search, mode: 'insensitive' } },
       ];
+    }
+
+    if (and.length > 0) {
+      where.AND = and;
     }
 
     return where;
@@ -983,6 +1021,15 @@ export class StaffAssessmentsService {
       default:
         return false;
     }
+  }
+
+  private async getCurrentUserStoreAccessIds(tenantId: string, userId: string) {
+    const row = await this.prisma.user.findFirst({
+      where: { id: userId, tenantId },
+      select: { storeAccesses: { select: { storeId: true } } },
+    });
+
+    return row?.storeAccesses.map((access) => access.storeId) ?? [];
   }
 
   private visibleRoleScopes(role: UserRole): StaffAssessmentRoleScope[] {

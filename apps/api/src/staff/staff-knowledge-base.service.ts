@@ -436,7 +436,18 @@ export class StaffKnowledgeBaseService {
     const canManageKnowledge =
       canEditKnowledge || canReviewKnowledge || canPublishKnowledge;
     const filters = this.resolveFilters(query, canManageKnowledge);
-    const where = this.buildWhere(tenantId, user, filters, canManageKnowledge);
+    const visibleStoreIds = canManageKnowledge
+      ? null
+      : await this.getCurrentUserStoreAccessIds(tenantId, user.id);
+    const where = this.buildWhere(
+      tenantId,
+      user,
+      filters,
+      canManageKnowledge,
+      visibleStoreIds,
+    );
+    const visibleArticleStoreScope =
+      this.buildVisibleArticleStoreScope(visibleStoreIds);
 
     const [rows, stores, activeUsers, folders, categories, settings] =
       await Promise.all([
@@ -452,7 +463,12 @@ export class StaffKnowledgeBaseService {
           take: 300,
         }),
         this.prisma.store.findMany({
-          where: { tenantId },
+          where: {
+            tenantId,
+            ...(visibleStoreIds && visibleStoreIds.length > 0
+              ? { id: { in: visibleStoreIds } }
+              : {}),
+          },
           select: { id: true, name: true, isActive: true },
           orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
         }),
@@ -476,6 +492,9 @@ export class StaffKnowledgeBaseService {
                   status: 'PUBLISHED',
                   roleScope: { in: this.visibleRoleScopes(user.role) },
                 }),
+            ...(visibleArticleStoreScope
+              ? { AND: [visibleArticleStoreScope] }
+              : {}),
           },
           select: { folder: true },
           distinct: ['folder'],
@@ -490,6 +509,9 @@ export class StaffKnowledgeBaseService {
                   status: 'PUBLISHED',
                   roleScope: { in: this.visibleRoleScopes(user.role) },
                 }),
+            ...(visibleArticleStoreScope
+              ? { AND: [visibleArticleStoreScope] }
+              : {}),
           },
           select: { category: true },
           distinct: ['category'],
@@ -504,6 +526,7 @@ export class StaffKnowledgeBaseService {
         user.id,
         activeUsers,
         settingsResponse.revisionSlaPolicy,
+        canManageKnowledge,
       ),
     );
     const articleSuggestions = canEditKnowledge
@@ -706,6 +729,7 @@ export class StaffKnowledgeBaseService {
       user.id,
       activeUsers,
       revisionSlaPolicy,
+      true,
     );
   }
 
@@ -838,6 +862,7 @@ export class StaffKnowledgeBaseService {
       user.id,
       activeUsers,
       revisionSlaPolicy,
+      true,
     );
   }
 
@@ -951,8 +976,10 @@ export class StaffKnowledgeBaseService {
     user: AuthenticatedUser,
     filters: StaffKnowledgeBaseReport['filters'],
     canManageKnowledge: boolean,
+    visibleStoreIds: string[] | null,
   ): Prisma.StaffKnowledgeArticleWhereInput {
     const where: Prisma.StaffKnowledgeArticleWhereInput = { tenantId };
+    const and: Prisma.StaffKnowledgeArticleWhereInput[] = [];
 
     if (filters.status !== 'all') {
       where.status = filters.status;
@@ -969,6 +996,11 @@ export class StaffKnowledgeBaseService {
     if (!canManageKnowledge) {
       where.status = 'PUBLISHED';
       where.roleScope = { in: this.visibleRoleScopes(user.role) };
+
+      const storeScope = this.buildVisibleArticleStoreScope(visibleStoreIds);
+      if (storeScope) {
+        and.push(storeScope);
+      }
     }
 
     if (filters.category) {
@@ -994,6 +1026,10 @@ export class StaffKnowledgeBaseService {
         { category: { contains: filters.search, mode: 'insensitive' } },
         { tags: { has: filters.search } },
       ];
+    }
+
+    if (and.length > 0) {
+      where.AND = and;
     }
 
     return where;
@@ -1666,6 +1702,7 @@ export class StaffKnowledgeBaseService {
     currentUserId: string,
     activeUsers: StaffKnowledgeReadUser[],
     revisionSlaPolicy: StaffKnowledgeRevisionSlaPolicy,
+    includeAudienceDetails: boolean,
   ): StaffKnowledgeArticleResponse {
     const materials = this.normalizeMaterials(row.materials);
     const relatedLinks = this.normalizeRelatedLinks(row.relatedLinks);
@@ -1683,16 +1720,24 @@ export class StaffKnowledgeBaseService {
             this.userMatchesKnowledgeTarget(candidate, row),
           )
         : [];
+    const visibleTargetUsers = includeAudienceDetails
+      ? targetUsers
+      : targetUsers.filter((candidate) => candidate.id === currentUserId);
     const currentVersionReceipts = row.readReceipts.filter(
       (receipt) => receipt.version === row.version,
     );
+    const visibleReceipts = includeAudienceDetails
+      ? currentVersionReceipts
+      : currentVersionReceipts.filter(
+          (receipt) => receipt.userId === currentUserId,
+        );
     const readUserIds = new Set(
-      currentVersionReceipts.map((receipt) => receipt.userId),
+      visibleReceipts.map((receipt) => receipt.userId),
     );
     const readByMe = currentVersionReceipts.find(
       (receipt) => receipt.userId === currentUserId,
     );
-    const readCount = targetUsers.filter((candidate) =>
+    const readCount = visibleTargetUsers.filter((candidate) =>
       readUserIds.has(candidate.id),
     ).length;
     const requiredByMe = targetUsers.some(
@@ -1729,14 +1774,14 @@ export class StaffKnowledgeBaseService {
       createdByUser: row.createdByUser,
       approvedByUser: row.approvedByUser,
       readingSummary: {
-        requiredCount: targetUsers.length,
+        requiredCount: visibleTargetUsers.length,
         readCount,
-        pendingCount: Math.max(targetUsers.length - readCount, 0),
+        pendingCount: Math.max(visibleTargetUsers.length - readCount, 0),
         requiredByMe,
         readByMe: Boolean(readByMe),
         readAt: readByMe?.readAt.toISOString() ?? null,
       },
-      readReceipts: currentVersionReceipts.map((receipt) =>
+      readReceipts: visibleReceipts.map((receipt) =>
         this.toReadReceiptResponse(receipt),
       ),
       versions: row.versions.map((version) => this.toVersionResponse(version)),
@@ -2206,6 +2251,25 @@ export class StaffKnowledgeBaseService {
       },
       orderBy: [{ role: 'asc' }, { fullName: 'asc' }, { email: 'asc' }],
     });
+  }
+
+  private async getCurrentUserStoreAccessIds(tenantId: string, userId: string) {
+    const row = await this.prisma.user.findFirst({
+      where: { id: userId, tenantId },
+      select: { storeAccesses: { select: { storeId: true } } },
+    });
+
+    return row?.storeAccesses.map((access) => access.storeId) ?? [];
+  }
+
+  private buildVisibleArticleStoreScope(visibleStoreIds: string[] | null) {
+    if (!visibleStoreIds || visibleStoreIds.length === 0) {
+      return null;
+    }
+
+    return {
+      OR: [{ storeId: null }, { storeId: { in: visibleStoreIds } }],
+    } satisfies Prisma.StaffKnowledgeArticleWhereInput;
   }
 
   private assertKnowledgeWriteAllowed(

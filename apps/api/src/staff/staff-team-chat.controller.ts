@@ -6,9 +6,11 @@ import {
   Patch,
   Post,
   Query,
+  Sse,
   UseGuards,
 } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
+import { from, interval, map, startWith, switchMap } from 'rxjs';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -22,6 +24,8 @@ import {
   type StaffChatReadDto,
   type StaffTeamChatQuery,
 } from './staff-team-chat.service';
+
+const TEAM_CHAT_EVENTS_INTERVAL_MS = 5_000;
 
 @Controller('staff/team-chat')
 @Roles(
@@ -43,6 +47,24 @@ export class StaffTeamChatController {
     @Query() query: StaffTeamChatQuery,
   ) {
     return this.staffTeamChatService.getReport(user, query);
+  }
+
+  @Sse('events')
+  events(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: StaffTeamChatQuery,
+  ) {
+    return interval(TEAM_CHAT_EVENTS_INTERVAL_MS).pipe(
+      startWith(0),
+      switchMap(() =>
+        from(this.staffTeamChatService.getLiveState(user, query)),
+      ),
+      map((data) => ({
+        type: 'team-chat-state',
+        retry: TEAM_CHAT_EVENTS_INTERVAL_MS,
+        data,
+      })),
+    );
   }
 
   @Post('channels')

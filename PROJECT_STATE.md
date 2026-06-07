@@ -1,6 +1,6 @@
 # LeetPlus Project State
 
-Last updated: 2026-06-05
+Last updated: 2026-06-07
 
 ## Current Workflow
 
@@ -79,6 +79,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added lightweight SSE live-state updates to `/staff/team-chat`: the API streams compact channel/message counter signatures through `/staff/team-chat/events`, web proxies it as same-origin `/api/staff/team-chat/events`, and the client refreshes only when chat state changes instead of polling the whole page on a fixed timer.
 - Unified the dashboard revenue formula and the `REVENUE` typed snapshot: the network KPI now uses `max(product/bar revenue, balance spend, transaction spend) + unallocated online top-ups`, stores the same formula in snapshot summary fields, and shows source/trust status plus product, game/service, top-up, and shift-cash reconciliation lines on the `/dashboard` revenue card.
 - Added the compatible marketing promo-scenario API layer: current UI and web proxy calls use `/marketing/promo-scenarios` and `/marketing/promo-scenario-rewards`, while legacy `/marketing/missions`, `/marketing/mission-rewards`, and Prisma `MarketingMission` tables stay available for production compatibility until a separate physical rename window is needed.
 - Changed the default management dashboard period to the latest completed day: `/dashboard`, `/dashboard/revenue-by-club`, and `/dashboard/revenue-diagnostics` now use `full-day` when no explicit period is selected, while current-day analytics remain available through the period filter.

@@ -94,6 +94,20 @@ export type StaffTeamChatReport = {
   canManageChannels: boolean;
 };
 
+export type StaffTeamChatLiveState = {
+  generatedAt: string;
+  activeChannelId: string | null;
+  summary: StaffTeamChatReport['summary'];
+  channels: Array<{
+    id: string;
+    updatedAt: string;
+    messagesCount: number;
+    unreadCount: number;
+    pinnedCount: number;
+    lastMessageAt: string | null;
+  }>;
+};
+
 export type StaffChatUserResponse = {
   id: string;
   email: string;
@@ -259,6 +273,55 @@ export class StaffTeamChatService {
         { value: 'SENIOR_ADMINISTRATOR', label: 'Старшие администраторы' },
       ],
       canManageChannels: this.canManageChannels(user.role),
+    };
+  }
+
+  async getLiveState(
+    user: AuthenticatedUser,
+    query: StaffTeamChatQuery = {},
+  ): Promise<StaffTeamChatLiveState> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const accessWhere = await this.buildAccessibleChannelWhere(user, tenantId);
+    const filters = this.resolveFilters(query);
+
+    const channels = await this.prisma.staffChatChannel.findMany({
+      where: accessWhere,
+      select: { id: true, updatedAt: true },
+      orderBy: [{ isDefault: 'desc' }, { scope: 'asc' }, { name: 'asc' }],
+    });
+    const channelIds = channels.map((channel) => channel.id);
+    const stats = await this.buildChannelStats(tenantId, user.id, channelIds);
+    const totals = Array.from(stats.values()).reduce(
+      (acc, item) => ({
+        messages: acc.messages + item.messagesCount,
+        pinned: acc.pinned + item.pinnedCount,
+        unread: acc.unread + item.unreadCount,
+      }),
+      { messages: 0, pinned: 0, unread: 0 },
+    );
+
+    return {
+      generatedAt: new Date().toISOString(),
+      activeChannelId:
+        filters.channelId && channelIds.includes(filters.channelId)
+          ? filters.channelId
+          : null,
+      summary: {
+        channels: channels.length,
+        ...totals,
+      },
+      channels: channels.map((channel) => {
+        const item = stats.get(channel.id);
+
+        return {
+          id: channel.id,
+          updatedAt: channel.updatedAt.toISOString(),
+          messagesCount: item?.messagesCount ?? 0,
+          unreadCount: item?.unreadCount ?? 0,
+          pinnedCount: item?.pinnedCount ?? 0,
+          lastMessageAt: item?.lastMessageAt ?? null,
+        };
+      }),
     };
   }
 

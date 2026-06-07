@@ -46,6 +46,18 @@ type TaskDraftState = {
   storeId: string;
 };
 
+type StaffTeamChatLiveState = {
+  summary: StaffTeamChatReport["summary"];
+  channels: Array<{
+    id: string;
+    updatedAt: string;
+    messagesCount: number;
+    unreadCount: number;
+    pinnedCount: number;
+    lastMessageAt: string | null;
+  }>;
+};
+
 const kindLabels: Record<StaffChatMessageKind, string> = {
   MESSAGE: "Сообщение",
   ANNOUNCEMENT: "Объявление",
@@ -92,6 +104,51 @@ const TEAM_CHAT_LIVE_REFRESH_MS = 12_000;
 
 function getChannelReadSnapshot(channel: StaffChatChannel) {
   return `${channel.messagesCount}:${channel.lastMessageAt ?? ""}`;
+}
+
+function getLiveChannelSignature(
+  channels: Array<{
+    id: string;
+    updatedAt?: string;
+    messagesCount: number;
+    unreadCount: number;
+    pinnedCount: number;
+    lastMessageAt: string | null;
+  }>,
+) {
+  return channels
+    .map((channel) =>
+      [
+        channel.id,
+        channel.updatedAt ?? "",
+        channel.messagesCount,
+        channel.unreadCount,
+        channel.pinnedCount,
+        channel.lastMessageAt ?? "",
+      ].join(":"),
+    )
+    .sort()
+    .join("|");
+}
+
+function getReportLiveSignature(report: StaffTeamChatReport) {
+  return [
+    report.summary.channels,
+    report.summary.messages,
+    report.summary.pinned,
+    report.summary.unread,
+    getLiveChannelSignature(report.channels),
+  ].join(";");
+}
+
+function getLiveStateSignature(state: StaffTeamChatLiveState) {
+  return [
+    state.summary.channels,
+    state.summary.messages,
+    state.summary.pinned,
+    state.summary.unread,
+    getLiveChannelSignature(state.channels),
+  ].join(";");
 }
 
 export function StaffTeamChatWorkspace({
@@ -183,8 +240,17 @@ export function StaffTeamChatWorkspace({
       getChannelReadSnapshot(activeChannel)
     : false;
   const pinnedMessages = report.messages.filter((message) => message.isPinned);
+  const liveSignature = useMemo(() => getReportLiveSignature(report), [report]);
+  const liveSignatureRef = useRef(liveSignature);
 
   useEffect(() => {
+    liveSignatureRef.current = liveSignature;
+  }, [liveSignature]);
+
+  useEffect(() => {
+    let source: EventSource | null = null;
+    let fallbackIntervalId: number | null = null;
+
     const refreshIfVisible = () => {
       if (document.visibilityState !== "visible") {
         return;
@@ -193,20 +259,110 @@ export function StaffTeamChatWorkspace({
       startTransition(() => router.refresh());
     };
 
-    const intervalId = window.setInterval(
-      refreshIfVisible,
-      TEAM_CHAT_LIVE_REFRESH_MS,
-    );
+    const stopFallback = () => {
+      if (fallbackIntervalId === null) {
+        return;
+      }
 
-    window.addEventListener("focus", refreshIfVisible);
-    document.addEventListener("visibilitychange", refreshIfVisible);
+      window.clearInterval(fallbackIntervalId);
+      fallbackIntervalId = null;
+    };
+
+    const startFallback = () => {
+      if (fallbackIntervalId !== null) {
+        return;
+      }
+
+      fallbackIntervalId = window.setInterval(
+        refreshIfVisible,
+        TEAM_CHAT_LIVE_REFRESH_MS,
+      );
+    };
+
+    const closeSource = () => {
+      source?.close();
+      source = null;
+    };
+
+    const openSource = () => {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+
+      if (!("EventSource" in window)) {
+        startFallback();
+        return;
+      }
+
+      closeSource();
+      stopFallback();
+
+      const params = new URLSearchParams();
+
+      if (selectedChannelId) {
+        params.set("channelId", selectedChannelId);
+      }
+
+      const query = params.toString();
+      source = new EventSource(
+        `/api/staff/team-chat/events${query ? `?${query}` : ""}`,
+      );
+
+      source.addEventListener("team-chat-state", (event) => {
+        try {
+          const payload = JSON.parse(
+            (event as MessageEvent<string>).data,
+          ) as StaffTeamChatLiveState;
+          const nextSignature = getLiveStateSignature(payload);
+
+          if (
+            nextSignature !== liveSignatureRef.current &&
+            document.visibilityState === "visible"
+          ) {
+            liveSignatureRef.current = nextSignature;
+            startTransition(() => router.refresh());
+          }
+        } catch {
+          // Ignore malformed stream events and keep the current UI state.
+        }
+      });
+
+      source.onerror = () => {
+        closeSource();
+        startFallback();
+      };
+    };
+
+    const handleFocus = () => {
+      if (!source) {
+        openSource();
+      }
+
+      refreshIfVisible();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        openSource();
+        refreshIfVisible();
+        return;
+      }
+
+      closeSource();
+    };
+
+    openSource();
+
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
-      window.clearInterval(intervalId);
-      window.removeEventListener("focus", refreshIfVisible);
-      document.removeEventListener("visibilitychange", refreshIfVisible);
+      closeSource();
+      stopFallback();
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [router, startTransition]);
+  }, [router, selectedChannelId, startTransition]);
 
   useEffect(() => {
     if (!activeChannel || !activeUnreadSignature) {

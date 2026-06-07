@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { DashboardFilters } from "@/components/dashboard-filters";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
+import { RevenueSnapshotGate } from "@/components/revenue-snapshot-gate";
 import { requireCurrentUser } from "@/lib/auth";
 import {
   getDashboardRevenueDiagnostics,
@@ -191,6 +192,13 @@ export default async function DashboardRevenueDiagnosticsPage({
             selectedStoreIds={report.selectedStoreIds}
           />
         </section>
+
+        <RevenueSnapshotGate
+          snapshot={report.revenueSnapshot}
+          periodFrom={report.periodFrom}
+          periodTo={report.periodTo}
+          selectedStoreIds={report.selectedStoreIds}
+        />
 
         <section className="mt-6 grid gap-4 lg:grid-cols-4">
           <DiagnosticSummaryCard

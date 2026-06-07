@@ -225,6 +225,7 @@ export type DashboardRevenueDiagnostics = {
   periodFrom: string;
   periodTo: string;
   selectedStoreIds: string[];
+  revenueSnapshot: DashboardRevenueSnapshot;
   rows: DashboardRevenueDiagnosticsRow[];
   totals: Omit<DashboardRevenueDiagnosticsRow, "storeId" | "storeName" | "notes">;
   unallocatedTopups: DashboardRevenueDiagnosticsUnallocatedTopups;

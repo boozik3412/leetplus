@@ -3,6 +3,7 @@ import { buildAssortmentRiskSummary } from "@/lib/assortment-risk";
 import { DashboardFilters } from "@/components/dashboard-filters";
 import { DashboardQuickSyncButton } from "@/components/dashboard-quick-sync-button";
 import { DashboardRevenuePanel } from "@/components/dashboard-revenue-panel";
+import { RevenueSnapshotGate } from "@/components/revenue-snapshot-gate";
 import { requireCurrentUser } from "@/lib/auth";
 import { isShiftWorkspaceRole, staffShiftWorkspaceHref } from "@/lib/landing";
 import {
@@ -553,6 +554,13 @@ export default async function DashboardPage({
             />
           </div>
         </section>
+
+        <RevenueSnapshotGate
+          snapshot={summary.revenueSnapshot}
+          periodFrom={summary.periodFrom}
+          periodTo={summary.periodTo}
+          selectedStoreIds={summary.selectedStoreIds}
+        />
 
         <Suspense fallback={<DashboardSecondaryPanelsSkeleton />}>
           <DashboardSecondaryPanels summary={summary} />

@@ -256,6 +256,7 @@ export type DashboardRevenueDiagnostics = {
   periodFrom: string;
   periodTo: string;
   selectedStoreIds: string[];
+  revenueSnapshot: DashboardRevenueSnapshot;
   rows: DashboardRevenueDiagnosticsRow[];
   totals: Omit<
     DashboardRevenueDiagnosticsRow,
@@ -927,6 +928,8 @@ export class DashboardService {
       transactions,
       sessions,
       shifts,
+      exactRevenueSnapshot,
+      latestRevenueSnapshot,
     ] = await Promise.all([
       this.prisma.tenant.findUnique({
         where: { id: tenantId },
@@ -1023,6 +1026,41 @@ export class DashboardService {
           refundsCashless: true,
         },
       }),
+      selectedStoreIds.length === 0
+        ? this.prisma.businessSnapshotRun.findFirst({
+            where: {
+              tenantId,
+              type: 'REVENUE',
+              status: { in: ['SUCCESS', 'EMPTY'] },
+              periodFrom: period.fromDate,
+              periodTo: period.toDate,
+            },
+            orderBy: { startedAt: 'desc' },
+            select: {
+              status: true,
+              finishedAt: true,
+              periodFrom: true,
+              periodTo: true,
+              sourceCounts: true,
+              summary: true,
+            },
+          })
+        : Promise.resolve(null),
+      this.prisma.businessSnapshotRun.findFirst({
+        where: {
+          tenantId,
+          type: 'REVENUE',
+        },
+        orderBy: { startedAt: 'desc' },
+        select: {
+          status: true,
+          finishedAt: true,
+          periodFrom: true,
+          periodTo: true,
+          sourceCounts: true,
+          summary: true,
+        },
+      }),
     ]);
 
     const rows = this.buildRevenueDiagnosticsRows(
@@ -1044,6 +1082,11 @@ export class DashboardService {
       totals,
       unallocatedTopups,
     );
+    const revenueSnapshot = this.buildDashboardRevenueSnapshot(
+      exactRevenueSnapshot ?? latestRevenueSnapshot,
+      period.fromDate,
+      period.toDate,
+    );
 
     return {
       tenantId,
@@ -1053,6 +1096,7 @@ export class DashboardService {
       periodFrom: this.toDateInputValue(period.fromDate),
       periodTo: this.toDateInputValue(period.toDate),
       selectedStoreIds,
+      revenueSnapshot,
       rows,
       totals,
       unallocatedTopups,

@@ -6,6 +6,7 @@ import { safeGetBusinessSnapshot } from "@/lib/business-snapshots";
 import {
   getStaffOperationsDashboard,
   type StaffOperationsDashboardFilters,
+  type StaffOperationsDrilldownAction,
   type StaffOperationsEmployeeRating,
   type StaffOperationsRating,
   type StaffOperationsRecurringIssue,
@@ -86,6 +87,15 @@ function formatDate(value: string | null) {
     month: "2-digit",
     year: "numeric",
   }).format(new Date(value));
+}
+
+function resolveDrilldownActions(
+  actions: StaffOperationsDrilldownAction[],
+  fallbackHref: string,
+): StaffOperationsDrilldownAction[] {
+  return actions.length > 0
+    ? actions
+    : [{ label: "Разобрать", href: fallbackHref }];
 }
 
 function riskClass(level: StaffOperationsRiskLevel) {
@@ -390,10 +400,9 @@ function StaffControlPanel({
       <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {anomalies.length > 0 ? (
           anomalies.map((anomaly) => (
-            <Link
+            <article
               key={anomaly.id}
-              href={anomaly.href}
-              className="rounded-lg border border-zinc-200 p-3 transition hover:border-emerald-400 hover:bg-emerald-50/60 dark:border-zinc-800 dark:hover:border-emerald-500/70 dark:hover:bg-emerald-500/10"
+              className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -412,7 +421,13 @@ function StaffControlPanel({
               <p className="mt-2 text-xs leading-5 text-zinc-500">
                 {anomaly.detail}
               </p>
-            </Link>
+              <DrilldownActions
+                actions={resolveDrilldownActions(
+                  anomaly.actions,
+                  anomaly.href,
+                )}
+              />
+            </article>
           ))
         ) : (
           <div className="md:col-span-2 xl:col-span-3">
@@ -641,10 +656,9 @@ function LatestRisksPanel({ risks }: { risks: StaffOperationsRiskItem[] }) {
       <div className="mt-4 space-y-3">
         {risks.length > 0 ? (
           risks.map((risk) => (
-            <Link
+            <article
               key={risk.id}
-              href={risk.href}
-              className="block rounded-lg border border-zinc-200 p-3 transition hover:border-emerald-400 hover:bg-emerald-50/60 dark:border-zinc-800 dark:hover:border-emerald-500/70 dark:hover:bg-emerald-500/10"
+              className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800"
             >
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -660,13 +674,36 @@ function LatestRisksPanel({ risks }: { risks: StaffOperationsRiskItem[] }) {
               <p className="mt-3 text-xs text-zinc-500">
                 {risk.detail} · {formatDate(risk.date)}
               </p>
-            </Link>
+              <DrilldownActions
+                actions={resolveDrilldownActions(risk.actions, risk.href)}
+              />
+            </article>
           ))
         ) : (
           <EmptyState text="Критичных задач и чеклистов по фильтрам нет." />
         )}
       </div>
     </section>
+  );
+}
+
+function DrilldownActions({
+  actions,
+}: {
+  actions: StaffOperationsDrilldownAction[];
+}) {
+  return (
+    <div className="mt-3 flex flex-wrap gap-2">
+      {actions.map((action) => (
+        <Link
+          key={`${action.label}:${action.href}`}
+          href={action.href}
+          className="inline-flex h-8 items-center rounded-full border border-zinc-300 px-3 text-xs font-semibold text-zinc-700 transition hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-800 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-emerald-500/70 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-100"
+        >
+          {action.label}
+        </Link>
+      ))}
+    </div>
   );
 }
 

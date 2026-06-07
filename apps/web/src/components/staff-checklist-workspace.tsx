@@ -114,11 +114,17 @@ async function readResponseError(response: Response) {
 
 export function StaffChecklistWorkspace({
   report,
+  focusRunId,
 }: {
   report: StaffChecklistReport;
+  focusRunId?: string | null;
 }) {
   const router = useRouter();
-  const [selectedRunId, setSelectedRunId] = useState(report.rows[0]?.id ?? "");
+  const initialRunId =
+    (focusRunId && report.rows.some((run) => run.id === focusRunId)
+      ? focusRunId
+      : report.rows[0]?.id) ?? "";
+  const [selectedRunId, setSelectedRunId] = useState(initialRunId);
   const selectedRun =
     report.rows.find((run) => run.id === selectedRunId) ??
     report.rows[0] ??
@@ -325,10 +331,11 @@ export function StaffChecklistWorkspace({
             {report.rows.map((run) => (
               <button
                 key={run.id}
+                id={`run-${run.id}`}
                 type="button"
                 onClick={() => setSelectedRunId(run.id)}
                 className={[
-                  "w-full rounded-lg border px-3 py-3 text-left transition hover:border-emerald-400 hover:bg-emerald-50/60 dark:hover:bg-emerald-500/10",
+                  "scroll-mt-24 w-full rounded-lg border px-3 py-3 text-left transition hover:border-emerald-400 hover:bg-emerald-50/60 dark:hover:bg-emerald-500/10",
                   selectedRun?.id === run.id
                     ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-500/10"
                     : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950",

@@ -69,6 +69,7 @@ export type StaffTasksQuery = {
   type?: StaffTaskType | 'all';
   priority?: StaffTaskPriority | 'all';
   storeId?: string;
+  taskId?: string;
   shiftId?: string;
   assignedToUserId?: string;
   observerUserId?: string;
@@ -114,6 +115,7 @@ export type StaffTaskReport = {
     type: StaffTaskType | 'all';
     priority: StaffTaskPriority | 'all';
     storeId: string | null;
+    taskId: string | null;
     shiftId: string | null;
     assignedToUserId: string | null;
     observerUserId: string | null;
@@ -630,6 +632,7 @@ export class StaffTasksService {
       type,
       priority,
       storeId: this.normalizeOptionalString(query.storeId),
+      taskId: this.normalizeOptionalString(query.taskId),
       shiftId: this.normalizeOptionalString(query.shiftId),
       assignedToUserId: this.normalizeOptionalString(query.assignedToUserId),
       observerUserId: this.normalizeOptionalString(query.observerUserId),
@@ -693,6 +696,10 @@ export class StaffTasksService {
 
     if (filters.storeId) {
       where.storeId = filters.storeId;
+    }
+
+    if (filters.taskId) {
+      where.id = filters.taskId;
     }
 
     if (filters.shiftId) {

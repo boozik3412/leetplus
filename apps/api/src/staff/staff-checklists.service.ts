@@ -63,6 +63,7 @@ export type StaffChecklistItemValueType = (typeof itemValueTypes)[number];
 export type StaffChecklistsQuery = {
   status?: StaffChecklistFilterStatus;
   shiftKind?: StaffChecklistShiftKind | 'all';
+  runId?: string;
   regulationId?: string;
   storeId?: string;
   assignedToUserId?: string;
@@ -134,6 +135,7 @@ export type StaffChecklistReport = {
   filters: {
     status: StaffChecklistFilterStatus;
     shiftKind: StaffChecklistShiftKind | 'all';
+    runId: string | null;
     regulationId: string | null;
     storeId: string | null;
     assignedToUserId: string | null;
@@ -895,6 +897,7 @@ export class StaffChecklistsService {
         ['all', ...shiftKinds] as const,
         'all',
       ),
+      runId: this.normalizeOptionalString(query.runId),
       regulationId: this.normalizeOptionalString(query.regulationId),
       storeId: this.normalizeOptionalString(query.storeId),
       assignedToUserId: this.normalizeOptionalString(query.assignedToUserId),
@@ -920,6 +923,10 @@ export class StaffChecklistsService {
 
     if (filters.shiftKind !== 'all') {
       where.shiftKind = filters.shiftKind;
+    }
+
+    if (filters.runId) {
+      where.id = filters.runId;
     }
 
     if (filters.regulationId) {

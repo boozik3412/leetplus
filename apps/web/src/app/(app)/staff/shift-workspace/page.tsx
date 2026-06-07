@@ -38,6 +38,7 @@ const emptyTaskReport: StaffTaskReport = {
     assignedToUserId: null,
     observerUserId: null,
     search: null,
+    taskId: null,
     dueFrom: null,
     dueTo: null,
     pageSize: 8,
@@ -70,6 +71,7 @@ const emptyChecklistReport: StaffChecklistReport = {
     regulationId: null,
     storeId: null,
     assignedToUserId: null,
+    runId: null,
     search: null,
   },
   summary: {

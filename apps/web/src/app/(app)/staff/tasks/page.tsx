@@ -158,6 +158,7 @@ function resolveFilters(params: Awaited<SearchParams>): StaffTaskFilters {
     type: isType(type) ? type : "all",
     priority: isPriority(priority) ? priority : "all",
     storeId: searchParam(params.storeId),
+    taskId: searchParam(params.taskId),
     shiftId: searchParam(params.shiftId),
     assignedToUserId: searchParam(params.assignedToUserId),
     observerUserId: searchParam(params.observerUserId),
@@ -177,7 +178,7 @@ function formatNumber(value: number) {
 function exportHref(format: "csv" | "xlsx", filters: StaffTaskFilters) {
   const params = new URLSearchParams();
 
-  Object.entries({ ...filters, format, pageSize: undefined }).forEach(
+  Object.entries({ ...filters, format, pageSize: undefined, taskId: undefined }).forEach(
     ([key, value]) => {
       if (value) {
         params.set(key, value);
@@ -195,6 +196,7 @@ function taskListHref(
   const params = new URLSearchParams();
   const next: Record<string, string | null | undefined> = {
     ...filters,
+    taskId: null,
     ...patch,
   };
 
@@ -681,10 +683,19 @@ export default async function StaffTasksPage({
               снимите часть фильтров.
             </div>
           ) : (
-            report.rows.map((task) => (
+            report.rows.map((task) => {
+              const isFocusedTask = report.filters.taskId === task.id;
+
+              return (
               <article
                 key={task.id}
-                className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
+                id={`task-${task.id}`}
+                className={[
+                  "scroll-mt-24 rounded-lg border bg-white p-4 shadow-sm dark:bg-zinc-950",
+                  isFocusedTask
+                    ? "border-emerald-500 ring-2 ring-emerald-500/25 dark:border-emerald-400"
+                    : "border-zinc-200 dark:border-zinc-800",
+                ].join(" ")}
               >
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div className="min-w-0">
@@ -761,7 +772,8 @@ export default async function StaffTasksPage({
                 </div>
                 <StaffTaskHistory task={task} />
               </article>
-            ))
+              );
+            })
           )}
         </section>
       </div>

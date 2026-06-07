@@ -93,6 +93,11 @@ type UserOption = { id: string; email: string; fullName: string | null };
 
 type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH';
 
+export type StaffOperationsDrilldownAction = {
+  label: string;
+  href: string;
+};
+
 export type StaffOperationsDashboardQuery = {
   dateFrom?: string;
   dateTo?: string;
@@ -187,6 +192,7 @@ export type StaffOperationsStaffControlAnomaly = {
   store: StoreOption | null;
   operatorLabel: string | null;
   href: string;
+  actions: StaffOperationsDrilldownAction[];
 };
 
 export type StaffOperationsRating = {
@@ -250,6 +256,7 @@ export type StaffOperationsRiskItem = {
   store: StoreOption | null;
   user: UserOption | null;
   href: string;
+  actions: StaffOperationsDrilldownAction[];
 };
 
 type DisciplineMetrics = {
@@ -413,6 +420,7 @@ export class StaffOperationsDashboardService {
         tasks,
         checklists,
         now,
+        filters,
         staffControl.anomalies,
       ),
       stores,
@@ -1010,6 +1018,11 @@ export class StaffOperationsDashboardService {
         'refunds',
         'desc',
       ),
+      actions: this.staffControlAnomalyActions(
+        filters,
+        this.staffControlOperatorsHref(filters, 'refunds', 'refunds', 'desc'),
+        'refunds',
+      ),
     });
     this.addShiftAnomaly(anomalies, {
       kind: 'SHIFT_MISSING_INCASSATION',
@@ -1027,6 +1040,16 @@ export class StaffOperationsDashboardService {
         'missing-incassation',
         'cash',
         'desc',
+      ),
+      actions: this.staffControlAnomalyActions(
+        filters,
+        this.staffControlOperatorsHref(
+          filters,
+          'missing-incassation',
+          'cash',
+          'desc',
+        ),
+        'cash',
       ),
     });
     this.addShiftAnomaly(anomalies, {
@@ -1047,6 +1070,17 @@ export class StaffOperationsDashboardService {
         'desc',
         'unlinked',
       ),
+      actions: this.staffControlAnomalyActions(
+        filters,
+        this.staffControlOperatorsHref(
+          filters,
+          'unmapped-operator',
+          'cash',
+          'desc',
+          'unlinked',
+        ),
+        null,
+      ),
     });
     this.addShiftAnomaly(anomalies, {
       kind: 'SHIFT_LONG',
@@ -1061,6 +1095,11 @@ export class StaffOperationsDashboardService {
         'hours',
         'desc',
       ),
+      actions: this.staffControlAnomalyActions(
+        filters,
+        this.staffControlOperatorsHref(filters, 'long-shift', 'hours', 'desc'),
+        'service',
+      ),
     });
     this.addShiftAnomaly(anomalies, {
       kind: 'SHIFT_LOW_MIDDLE_CHECK',
@@ -1074,6 +1113,16 @@ export class StaffOperationsDashboardService {
         'low-middle-check',
         'middleCheck',
         'asc',
+      ),
+      actions: this.staffControlAnomalyActions(
+        filters,
+        this.staffControlOperatorsHref(
+          filters,
+          'low-middle-check',
+          'middleCheck',
+          'asc',
+        ),
+        'cash',
       ),
     });
 
@@ -1101,6 +1150,20 @@ export class StaffOperationsDashboardService {
         store: this.representativeChecklistStore(missedCashChecklists),
         operatorLabel: null,
         href: this.staffChecklistReportHref(filters, 'CASH'),
+        actions: [
+          {
+            label: 'Отчет чеклистов',
+            href: this.staffChecklistReportHref(filters, 'CASH'),
+          },
+          {
+            label: 'Выполнения',
+            href: this.staffChecklistRunsHref(filters, 'CASH', 'OVERDUE'),
+          },
+          {
+            label: 'Сводка staff-control',
+            href: this.staffControlSummaryHref(filters),
+          },
+        ],
       });
     }
 
@@ -1129,6 +1192,20 @@ export class StaffOperationsDashboardService {
         store: this.representativeChecklistStore(failedBarChecklists),
         operatorLabel: null,
         href: this.staffChecklistReportHref(filters, 'BAR'),
+        actions: [
+          {
+            label: 'Отчет чеклистов',
+            href: this.staffChecklistReportHref(filters, 'BAR'),
+          },
+          {
+            label: 'Выполнения',
+            href: this.staffChecklistRunsHref(filters, 'BAR', 'all'),
+          },
+          {
+            label: 'Сводка staff-control',
+            href: this.staffControlSummaryHref(filters),
+          },
+        ],
       });
     }
 
@@ -1171,6 +1248,7 @@ export class StaffOperationsDashboardService {
       severity: RiskLevel;
       detailPrefix: string;
       href: string;
+      actions: StaffOperationsDrilldownAction[];
     },
   ) {
     if (input.rows.length === 0) {
@@ -1195,6 +1273,7 @@ export class StaffOperationsDashboardService {
       store,
       operatorLabel,
       href: input.href,
+      actions: input.actions,
     });
   }
 
@@ -1312,9 +1391,67 @@ export class StaffOperationsDashboardService {
     return `/guests/staff-control/operators?${params.toString()}`;
   }
 
+  private staffControlSummaryHref(
+    filters: ResolvedStaffOperationsDashboardFilters,
+  ) {
+    const params = new URLSearchParams({
+      dateFrom: filters.dateFrom,
+      dateTo: filters.dateTo,
+    });
+
+    if (filters.storeId) {
+      params.set('storeId', filters.storeId);
+    }
+
+    return `/guests/staff-control?${params.toString()}`;
+  }
+
+  private staffControlOperationsHref(
+    filters: ResolvedStaffOperationsDashboardFilters,
+    kind: 'all' | 'refunds' | 'cash' | 'service' = 'all',
+  ) {
+    const params = new URLSearchParams({
+      dateFrom: filters.dateFrom,
+      dateTo: filters.dateTo,
+      kind,
+      sort: 'amount',
+      direction: 'desc',
+    });
+
+    if (filters.storeId) {
+      params.set('storeId', filters.storeId);
+    }
+
+    return `/guests/staff-control/operations?${params.toString()}`;
+  }
+
+  private staffControlAnomalyActions(
+    filters: ResolvedStaffOperationsDashboardFilters,
+    operatorsHref: string,
+    operationKind: 'all' | 'refunds' | 'cash' | 'service' | null = null,
+  ): StaffOperationsDrilldownAction[] {
+    const actions: StaffOperationsDrilldownAction[] = [
+      { label: 'Смены и операторы', href: operatorsHref },
+    ];
+
+    if (operationKind) {
+      actions.push({
+        label: 'Операции',
+        href: this.staffControlOperationsHref(filters, operationKind),
+      });
+    }
+
+    actions.push({
+      label: 'Сводка staff-control',
+      href: this.staffControlSummaryHref(filters),
+    });
+
+    return actions;
+  }
+
   private staffChecklistReportHref(
     filters: ResolvedStaffOperationsDashboardFilters,
-    shiftKind: 'CASH' | 'BAR',
+    shiftKind: ChecklistDashboardRow['shiftKind'],
   ) {
     const params = new URLSearchParams({
       dateFrom: filters.dateFrom,
@@ -1330,10 +1467,45 @@ export class StaffOperationsDashboardService {
     return `/staff/checklists/report?${params.toString()}`;
   }
 
+  private staffChecklistRunsHref(
+    filters: ResolvedStaffOperationsDashboardFilters,
+    shiftKind: ChecklistDashboardRow['shiftKind'],
+    status: 'all' | 'OVERDUE' | 'ON_REVIEW' | 'RETURNED' | 'ESCALATED' = 'all',
+  ) {
+    const params = new URLSearchParams({
+      status,
+      shiftKind,
+    });
+
+    if (filters.storeId) {
+      params.set('storeId', filters.storeId);
+    }
+
+    return `/staff/checklists?${params.toString()}`;
+  }
+
+  private staffTaskDrilldownHref(task: TaskDashboardRow) {
+    const params = new URLSearchParams({
+      taskId: task.id,
+      pageSize: '200',
+    });
+
+    return `/staff/tasks?${params.toString()}#task-${task.id}`;
+  }
+
+  private staffChecklistRunDrilldownHref(run: ChecklistDashboardRow) {
+    const params = new URLSearchParams({
+      runId: run.id,
+    });
+
+    return `/staff/checklists?${params.toString()}#run-${run.id}`;
+  }
+
   private buildLatestRisks(
     tasks: TaskDashboardRow[],
     checklists: ChecklistDashboardRow[],
     now: Date,
+    filters: ResolvedStaffOperationsDashboardFilters,
     staffControlAnomalies: StaffOperationsStaffControlAnomaly[],
   ): StaffOperationsRiskItem[] {
     const risks: StaffOperationsRiskItem[] = [];
@@ -1344,6 +1516,7 @@ export class StaffOperationsDashboardService {
         task.dueAt < now &&
         !taskClosedStatuses.includes(task.status)
       ) {
+        const href = this.staffTaskDrilldownHref(task);
         risks.push({
           id: `task-overdue:${task.id}`,
           kind: 'TASK_OVERDUE',
@@ -1356,11 +1529,16 @@ export class StaffOperationsDashboardService {
           date: task.dueAt.toISOString(),
           store: task.store,
           user: task.assignedToUser,
-          href: `/staff/tasks?search=${encodeURIComponent(task.title)}`,
+          href,
+          actions: [
+            { label: 'Открыть задачу', href },
+            { label: 'История и доказательства', href },
+          ],
         });
       }
 
       if (task.status === 'ON_REVIEW') {
+        const href = this.staffTaskDrilldownHref(task);
         risks.push({
           id: `task-unchecked:${task.id}`,
           kind: 'TASK_UNCHECKED',
@@ -1370,13 +1548,18 @@ export class StaffOperationsDashboardService {
           date: (task.completedAt ?? task.updatedAt).toISOString(),
           store: task.store,
           user: task.assignedToUser,
-          href: `/staff/tasks?search=${encodeURIComponent(task.title)}`,
+          href,
+          actions: [
+            { label: 'Проверить задачу', href },
+            { label: 'История и доказательства', href },
+          ],
         });
       }
     });
 
     checklists.forEach((run) => {
       if (run.status === 'ESCALATED') {
+        const href = this.staffChecklistRunDrilldownHref(run);
         risks.push({
           id: `checklist-escalated:${run.id}`,
           kind: 'CHECKLIST_ESCALATED',
@@ -1388,11 +1571,19 @@ export class StaffOperationsDashboardService {
           date: (run.reviewedAt ?? this.activityDate(run)).toISOString(),
           store: run.store,
           user: run.assignedToUser,
-          href: `/staff/checklists?search=${encodeURIComponent(run.title)}`,
+          href,
+          actions: [
+            { label: 'Открыть чеклист', href },
+            {
+              label: 'Отчет по типу',
+              href: this.staffChecklistReportHref(filters, run.shiftKind),
+            },
+          ],
         });
       }
 
       if (run.status === 'RETURNED') {
+        const href = this.staffChecklistRunDrilldownHref(run);
         risks.push({
           id: `checklist-returned:${run.id}`,
           kind: 'CHECKLIST_RETURNED',
@@ -1402,11 +1593,19 @@ export class StaffOperationsDashboardService {
           date: (run.reviewedAt ?? this.activityDate(run)).toISOString(),
           store: run.store,
           user: run.assignedToUser,
-          href: `/staff/checklists?search=${encodeURIComponent(run.title)}`,
+          href,
+          actions: [
+            { label: 'Открыть чеклист', href },
+            {
+              label: 'Отчет по типу',
+              href: this.staffChecklistReportHref(filters, run.shiftKind),
+            },
+          ],
         });
       }
 
       if (run.failedItems > 0) {
+        const href = this.staffChecklistRunDrilldownHref(run);
         risks.push({
           id: `checklist-failed:${run.id}`,
           kind: 'CHECKLIST_FAILED',
@@ -1416,11 +1615,19 @@ export class StaffOperationsDashboardService {
           date: this.activityDate(run).toISOString(),
           store: run.store,
           user: run.assignedToUser,
-          href: `/staff/checklists?search=${encodeURIComponent(run.title)}`,
+          href,
+          actions: [
+            { label: 'Открыть чеклист', href },
+            {
+              label: 'Отчет по типу',
+              href: this.staffChecklistReportHref(filters, run.shiftKind),
+            },
+          ],
         });
       }
 
       if (run.status === 'ON_REVIEW') {
+        const href = this.staffChecklistRunDrilldownHref(run);
         risks.push({
           id: `checklist-unchecked:${run.id}`,
           kind: 'CHECKLIST_UNCHECKED',
@@ -1430,7 +1637,14 @@ export class StaffOperationsDashboardService {
           date: (run.submittedAt ?? run.updatedAt).toISOString(),
           store: run.store,
           user: run.assignedToUser,
-          href: `/staff/checklists?search=${encodeURIComponent(run.title)}`,
+          href,
+          actions: [
+            { label: 'Проверить чеклист', href },
+            {
+              label: 'Отчет по типу',
+              href: this.staffChecklistReportHref(filters, run.shiftKind),
+            },
+          ],
         });
       }
     });
@@ -1446,6 +1660,7 @@ export class StaffOperationsDashboardService {
         store: anomaly.store,
         user: null,
         href: anomaly.href,
+        actions: anomaly.actions,
       });
     });
 

@@ -146,6 +146,7 @@ export type StaffChecklistRun = {
 export type StaffChecklistFilters = {
   status?: StaffChecklistFilterStatus;
   shiftKind?: StaffChecklistShiftKind | "all";
+  runId?: string;
   regulationId?: string;
   storeId?: string;
   assignedToUserId?: string;
@@ -161,6 +162,7 @@ export type StaffChecklistReport = {
   filters: {
     status: StaffChecklistFilterStatus;
     shiftKind: StaffChecklistShiftKind | "all";
+    runId: string | null;
     regulationId: string | null;
     storeId: string | null;
     assignedToUserId: string | null;

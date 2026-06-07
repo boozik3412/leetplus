@@ -110,6 +110,7 @@ export type StaffTaskFilters = {
   type?: StaffTaskType | "all";
   priority?: StaffTaskPriority | "all";
   storeId?: string;
+  taskId?: string;
   shiftId?: string;
   assignedToUserId?: string;
   observerUserId?: string;
@@ -129,6 +130,7 @@ export type StaffTaskReport = {
     >
   > & {
     storeId: string | null;
+    taskId: string | null;
     shiftId: string | null;
     assignedToUserId: string | null;
     observerUserId: string | null;

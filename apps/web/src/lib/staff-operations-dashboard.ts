@@ -7,6 +7,11 @@ import type { StaffTrainingProfileUser } from "./staff-training-profiles";
 
 export type StaffOperationsRiskLevel = "LOW" | "MEDIUM" | "HIGH";
 
+export type StaffOperationsDrilldownAction = {
+  label: string;
+  href: string;
+};
+
 export type StaffOperationsDashboardFilters = {
   dateFrom?: string;
   dateTo?: string;
@@ -67,6 +72,7 @@ export type StaffOperationsStaffControlAnomaly = {
   store: StaffTaskStore | null;
   operatorLabel: string | null;
   href: string;
+  actions: StaffOperationsDrilldownAction[];
 };
 
 export type StaffOperationsRating = {
@@ -130,6 +136,7 @@ export type StaffOperationsRiskItem = {
   store: StaffTaskStore | null;
   user: Pick<StaffTrainingProfileUser, "id" | "email" | "fullName"> | null;
   href: string;
+  actions: StaffOperationsDrilldownAction[];
 };
 
 export type StaffOperationsDashboard = {

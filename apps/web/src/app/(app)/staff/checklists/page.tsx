@@ -78,6 +78,7 @@ function resolveFilters(params: Awaited<SearchParams>): StaffChecklistFilters {
   return {
     status: isStatus(status) ? status : "all",
     shiftKind: isShiftKind(shiftKind) ? shiftKind : "all",
+    runId: searchParam(params.runId),
     regulationId: searchParam(params.regulationId),
     storeId: searchParam(params.storeId),
     assignedToUserId: searchParam(params.assignedToUserId),
@@ -267,7 +268,11 @@ export default async function StaffChecklistsPage({
         </form>
 
         <section className="mt-6">
-          <StaffChecklistWorkspace report={report} />
+          <StaffChecklistWorkspace
+            key={report.filters.runId ?? "all-checklists"}
+            report={report}
+            focusRunId={report.filters.runId}
+          />
         </section>
       </div>
     </main>

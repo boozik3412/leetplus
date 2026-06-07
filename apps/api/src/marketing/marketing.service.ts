@@ -416,6 +416,12 @@ export type MarketingMissionRewardDto = {
 export type MarketingMissionRewardUpdateDto =
   Partial<MarketingMissionRewardDto>;
 
+export type MarketingPromoScenarioDto = MarketingMissionDto;
+export type MarketingPromoScenarioUpdateDto = MarketingMissionUpdateDto;
+export type MarketingPromoScenarioRewardDto = MarketingMissionRewardDto;
+export type MarketingPromoScenarioRewardUpdateDto =
+  MarketingMissionRewardUpdateDto;
+
 export type MarketingCampaignExportFormat = 'csv' | 'xlsx';
 
 export type MarketingCampaignExportQuery = {
@@ -718,6 +724,16 @@ export type MarketingMissionReward = {
   createdBy: { id: string; displayName: string; email: string } | null;
   approvedBy: { id: string; displayName: string; email: string } | null;
 };
+
+export type MarketingPromoScenarioStatus = MarketingMissionStatus;
+export type MarketingPromoScenarioType = MarketingMissionType;
+export type MarketingPromoScenarioTriggerKind = MarketingMissionTriggerKind;
+export type MarketingPromoScenarioRewardType = MarketingMissionRewardType;
+export type MarketingPromoScenarioRewardStatus = MarketingMissionRewardStatus;
+export type MarketingPromoScenarioRewardSource = MarketingMissionRewardSource;
+export type MarketingPromoScenarioRewardSummary = MarketingMissionRewardSummary;
+export type MarketingPromoScenario = MarketingMission;
+export type MarketingPromoScenarioReward = MarketingMissionReward;
 
 export type MarketingPromoBundleReconciliationStatus =
   | 'NO_LAUNCH'

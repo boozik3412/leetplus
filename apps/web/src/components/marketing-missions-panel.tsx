@@ -197,12 +197,12 @@ export function MarketingMissionsPanel({
 
   async function reloadData(nextSelectedId?: string) {
     const [missionsResponse, rewardsResponse] = await Promise.all([
-      fetch("/api/marketing/missions", { cache: "no-store" }),
-      fetch("/api/marketing/mission-rewards", { cache: "no-store" }),
+      fetch("/api/marketing/promo-scenarios", { cache: "no-store" }),
+      fetch("/api/marketing/promo-scenario-rewards", { cache: "no-store" }),
     ]);
 
     if (!missionsResponse.ok || !rewardsResponse.ok) {
-      throw new Error("Не удалось обновить список миссий");
+      throw new Error("Не удалось обновить список промо-сценариев");
     }
 
     const [nextMissions, nextRewards] = (await Promise.all([
@@ -255,8 +255,8 @@ export function MarketingMissionsPanel({
       };
       const response = await fetch(
         form.id
-          ? `/api/marketing/missions/${encodeURIComponent(form.id)}`
-          : "/api/marketing/missions",
+          ? `/api/marketing/promo-scenarios/${encodeURIComponent(form.id)}`
+          : "/api/marketing/promo-scenarios",
         {
           method: form.id ? "PATCH" : "POST",
           headers: { "Content-Type": "application/json" },
@@ -268,7 +268,7 @@ export function MarketingMissionsPanel({
         const body = (await response.json().catch(() => null)) as
           | { message?: string }
           | null;
-        throw new Error(body?.message ?? "Не удалось сохранить миссию");
+        throw new Error(body?.message ?? "Не удалось сохранить промо-сценарий");
       }
 
       const saved = (await response.json()) as MarketingMission;
@@ -291,7 +291,7 @@ export function MarketingMissionsPanel({
     setError(null);
 
     try {
-      const response = await fetch("/api/marketing/mission-rewards", {
+      const response = await fetch("/api/marketing/promo-scenario-rewards", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -331,7 +331,7 @@ export function MarketingMissionsPanel({
 
     try {
       const response = await fetch(
-        `/api/marketing/mission-rewards/${encodeURIComponent(reward.id)}`,
+        `/api/marketing/promo-scenario-rewards/${encodeURIComponent(reward.id)}`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },

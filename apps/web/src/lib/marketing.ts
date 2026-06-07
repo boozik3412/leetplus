@@ -376,6 +376,16 @@ export type MarketingMissionReward = {
   approvedBy: { id: string; displayName: string; email: string } | null;
 };
 
+export type MarketingPromoScenarioStatus = MarketingMissionStatus;
+export type MarketingPromoScenarioType = MarketingMissionType;
+export type MarketingPromoScenarioTriggerKind = MarketingMissionTriggerKind;
+export type MarketingPromoScenarioRewardType = MarketingMissionRewardType;
+export type MarketingPromoScenarioRewardStatus = MarketingMissionRewardStatus;
+export type MarketingPromoScenarioRewardSource = MarketingMissionRewardSource;
+export type MarketingPromoScenarioRewardSummary = MarketingMissionRewardSummary;
+export type MarketingPromoScenario = MarketingMission;
+export type MarketingPromoScenarioReward = MarketingMissionReward;
+
 export type MarketingPromoBundleReconciliationStatus =
   | "NO_LAUNCH"
   | "NO_PRODUCT_LINK"
@@ -708,32 +718,47 @@ export async function getMarketingPromoBundleReconciliation(): Promise<
   return response.json() as Promise<MarketingPromoBundleReconciliation[]>;
 }
 
-export async function getMarketingMissions(): Promise<MarketingMission[]> {
-  const response = await fetch(`${getApiUrl()}/marketing/missions`, {
+export async function getMarketingPromoScenarios(): Promise<
+  MarketingPromoScenario[]
+> {
+  const response = await fetch(`${getApiUrl()}/marketing/promo-scenarios`, {
     cache: "no-store",
     headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
-    throw new Error("Failed to fetch marketing missions");
+    throw new Error("Failed to fetch marketing promo scenarios");
   }
 
-  return response.json() as Promise<MarketingMission[]>;
+  return response.json() as Promise<MarketingPromoScenario[]>;
+}
+
+export async function getMarketingPromoScenarioRewards(): Promise<
+  MarketingPromoScenarioReward[]
+> {
+  const response = await fetch(
+    `${getApiUrl()}/marketing/promo-scenario-rewards`,
+    {
+      cache: "no-store",
+      headers: await getAuthHeaders(),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch marketing promo scenario rewards");
+  }
+
+  return response.json() as Promise<MarketingPromoScenarioReward[]>;
+}
+
+export async function getMarketingMissions(): Promise<MarketingMission[]> {
+  return getMarketingPromoScenarios();
 }
 
 export async function getMarketingMissionRewards(): Promise<
   MarketingMissionReward[]
 > {
-  const response = await fetch(`${getApiUrl()}/marketing/mission-rewards`, {
-    cache: "no-store",
-    headers: await getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    throw new Error("Failed to fetch marketing mission rewards");
-  }
-
-  return response.json() as Promise<MarketingMissionReward[]>;
+  return getMarketingPromoScenarioRewards();
 }
 
 export async function getMarketingCampaign(

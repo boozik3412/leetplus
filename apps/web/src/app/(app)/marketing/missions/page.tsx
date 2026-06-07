@@ -3,8 +3,8 @@ import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
 import { getGuestAudiences } from "@/lib/guests";
 import {
-  getMarketingMissionRewards,
-  getMarketingMissions,
+  getMarketingPromoScenarioRewards,
+  getMarketingPromoScenarios,
 } from "@/lib/marketing";
 import { getStores } from "@/lib/stores";
 
@@ -20,8 +20,8 @@ export default async function MarketingMissionsPage() {
   await requireCurrentUser();
 
   const [missions, rewards, audiences, stores] = await Promise.all([
-    safeList(getMarketingMissions()),
-    safeList(getMarketingMissionRewards()),
+    safeList(getMarketingPromoScenarios()),
+    safeList(getMarketingPromoScenarioRewards()),
     safeList(getGuestAudiences()),
     safeList(getStores()),
   ]);

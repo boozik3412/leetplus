@@ -34,6 +34,12 @@ import {
   type MarketingPromoBundleUsageImportDto,
   type MarketingPromoBundleUsageImportResult,
   type MarketingPromoBundleUsageUpdateDto,
+  type MarketingPromoScenario,
+  type MarketingPromoScenarioDto,
+  type MarketingPromoScenarioReward,
+  type MarketingPromoScenarioRewardDto,
+  type MarketingPromoScenarioRewardUpdateDto,
+  type MarketingPromoScenarioUpdateDto,
   type MarketingTariffConditions,
   type MarketingMission,
   type MarketingMissionDto,
@@ -109,6 +115,20 @@ export class MarketingController {
   getMissionRewards(
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<MarketingMissionReward[]> {
+    return this.marketingService.getMissionRewards(user);
+  }
+
+  @Get('promo-scenarios')
+  getPromoScenarios(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<MarketingPromoScenario[]> {
+    return this.marketingService.getMissions(user);
+  }
+
+  @Get('promo-scenario-rewards')
+  getPromoScenarioRewards(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<MarketingPromoScenarioReward[]> {
     return this.marketingService.getMissionRewards(user);
   }
 
@@ -202,6 +222,40 @@ export class MarketingController {
     @Param('id') id: string,
     @Body() dto: MarketingMissionRewardUpdateDto,
   ): Promise<MarketingMissionReward> {
+    return this.marketingService.updateMissionReward(user, id, dto);
+  }
+
+  @Post('promo-scenarios')
+  createPromoScenario(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: MarketingPromoScenarioDto,
+  ): Promise<MarketingPromoScenario> {
+    return this.marketingService.createMission(user, dto);
+  }
+
+  @Patch('promo-scenarios/:id')
+  updatePromoScenario(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: MarketingPromoScenarioUpdateDto,
+  ): Promise<MarketingPromoScenario> {
+    return this.marketingService.updateMission(user, id, dto);
+  }
+
+  @Post('promo-scenario-rewards')
+  createPromoScenarioReward(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: MarketingPromoScenarioRewardDto,
+  ): Promise<MarketingPromoScenarioReward> {
+    return this.marketingService.createMissionReward(user, dto);
+  }
+
+  @Patch('promo-scenario-rewards/:id')
+  updatePromoScenarioReward(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: MarketingPromoScenarioRewardUpdateDto,
+  ): Promise<MarketingPromoScenarioReward> {
     return this.marketingService.updateMissionReward(user, id, dto);
   }
 

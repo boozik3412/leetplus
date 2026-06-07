@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { BusinessSnapshotGate } from "@/components/business-snapshot-gate";
 import { requireCurrentUser } from "@/lib/auth";
 import {
   buildAssortmentRiskSummary,
@@ -16,6 +17,7 @@ import { ReportDigestForm } from "@/components/report-digest-form";
 import { ReportEmailForm } from "@/components/report-email-form";
 import { ReportEmailInlineForm } from "@/components/report-email-inline-form";
 import { ReportLoadingLink } from "@/components/report-loading-link";
+import { safeGetBusinessSnapshot } from "@/lib/business-snapshots";
 import {
   getAssortmentReport,
   getLflReport,
@@ -200,6 +202,7 @@ export default async function ReportsPage({
     newProductsReport,
     lflReport,
     stores,
+    assortmentSnapshot,
   ] = await Promise.all([
     getAssortmentReport(),
     getOperationalReport(filters),
@@ -212,6 +215,7 @@ export default async function ReportsPage({
     getNewProductsReport({ storeId: filters.storeId }),
     getLflReport(lflPeriod),
     getStores(),
+    safeGetBusinessSnapshot("ASSORTMENT_ARRIVALS"),
   ]);
   const assortmentRisk = buildAssortmentRiskSummary({
     oosRows: operationalReport.outOfStockRiskProducts,
@@ -235,6 +239,11 @@ export default async function ReportsPage({
             . Показываем только данные текущего tenant.
           </p>
         </div>
+
+        <BusinessSnapshotGate
+          snapshot={assortmentSnapshot}
+          type="ASSORTMENT_ARRIVALS"
+        />
 
         <ReportEmailForm
           defaultEmail={user.email}

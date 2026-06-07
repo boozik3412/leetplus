@@ -1,6 +1,8 @@
 import { MarketingPromoBundlesWorkspace } from "@/components/marketing-campaigns-panel";
+import { BusinessSnapshotGate } from "@/components/business-snapshot-gate";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
+import { safeGetBusinessSnapshot } from "@/lib/business-snapshots";
 import {
   getMarketingPromoBundleLaunches,
   getMarketingPromoBundleReconciliation,
@@ -46,6 +48,7 @@ export default async function MarketingPromoBundlesPage() {
     promoBundleReconciliation,
     tariffConditions,
     stores,
+    tariffSnapshot,
   ] = await Promise.all([
     safeList(getMarketingPromoBundles()),
     safeList(getProducts()),
@@ -54,6 +57,7 @@ export default async function MarketingPromoBundlesPage() {
     safeList(getMarketingPromoBundleReconciliation()),
     safeValue(getMarketingTariffConditions(), emptyMarketingTariffConditions),
     safeList(getStores()),
+    safeGetBusinessSnapshot("TARIFFS"),
   ]);
 
   return (
@@ -66,6 +70,8 @@ export default async function MarketingPromoBundlesPage() {
             { href: "/marketing", label: "Маркетинг" },
           ]}
         />
+
+        <BusinessSnapshotGate snapshot={tariffSnapshot} type="TARIFFS" />
 
         <MarketingPromoBundlesWorkspace
           promoBundles={promoBundles}

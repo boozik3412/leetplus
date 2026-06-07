@@ -1,7 +1,9 @@
 import Link from "next/link";
+import { BusinessSnapshotGate } from "@/components/business-snapshot-gate";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
 import { GuestDashboardFilters } from "@/components/guest-dashboard-filters";
+import { safeGetBusinessSnapshot } from "@/lib/business-snapshots";
 import {
   getGuestFilterOptions,
   getGuests,
@@ -137,10 +139,11 @@ export default async function GuestsPage({
     direction: searchParam(params.direction) as GuestListFilters["direction"],
   };
   const selectedPeriod = searchParam(params.period);
-  const [summary, guestList, options] = await Promise.all([
+  const [summary, guestList, options, guestSnapshot] = await Promise.all([
     getGuestsSummary(filters),
     getGuests(filters),
     getGuestFilterOptions(),
+    safeGetBusinessSnapshot("GUESTS"),
   ]);
 
   return (
@@ -202,6 +205,8 @@ export default async function GuestsPage({
           periodFrom={summary.periodFrom}
           periodTo={summary.periodTo}
         />
+
+        <BusinessSnapshotGate snapshot={guestSnapshot} type="GUESTS" />
 
         <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
           <KpiCard

@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { BusinessSnapshotGate } from "@/components/business-snapshot-gate";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
+import { safeGetBusinessSnapshot } from "@/lib/business-snapshots";
 import {
   getStaffOperationsDashboard,
   type StaffOperationsDashboardFilters,
@@ -118,7 +120,10 @@ export default async function StaffOperationsDashboardPage({
   await requireCurrentUser();
   const params = await searchParams;
   const filters = resolveFilters(params);
-  const dashboard = await getStaffOperationsDashboard(filters);
+  const [dashboard, staffSnapshot] = await Promise.all([
+    getStaffOperationsDashboard(filters),
+    safeGetBusinessSnapshot("STAFF_SHIFTS_CASH"),
+  ]);
   const summaryCards = [
     {
       label: "Индекс дисциплины",
@@ -179,6 +184,11 @@ export default async function StaffOperationsDashboardPage({
             </Link>
           </div>
         </header>
+
+        <BusinessSnapshotGate
+          snapshot={staffSnapshot}
+          type="STAFF_SHIFTS_CASH"
+        />
 
         <section className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-7">
           {summaryCards.map((card) => (

@@ -416,7 +416,7 @@ export default async function StaffTasksPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  const currentUser = await requireCurrentUser();
   const params = await searchParams;
   const filters = resolveFilters(params);
   const report = await getStaffTaskReport(filters);
@@ -768,9 +768,11 @@ export default async function StaffTasksPage({
                   <StaffTaskStatusActions
                     taskId={task.id}
                     status={task.status}
+                    assignedToUser={task.assignedToUser}
+                    currentUser={currentUser}
                   />
                 </div>
-                <StaffTaskHistory task={task} />
+                <StaffTaskHistory task={task} currentUser={currentUser} />
               </article>
               );
             })

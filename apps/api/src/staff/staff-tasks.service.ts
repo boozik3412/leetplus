@@ -1,9 +1,10 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
@@ -54,6 +55,18 @@ const taskSortKeys = [
   'updatedAt',
   'status',
   'priority',
+] as const;
+const taskReviewerRoles = [
+  UserRole.OWNER,
+  UserRole.ADMIN,
+  UserRole.MANAGER,
+  UserRole.CLUB_MANAGER,
+  UserRole.STANDARDS_MANAGER,
+] as const;
+const taskStatusManagerRoles = [
+  ...taskReviewerRoles,
+  UserRole.SENIOR_ADMINISTRATOR,
+  UserRole.CLUB_ADMINISTRATOR,
 ] as const;
 
 export type StaffTaskStatus = (typeof taskStatuses)[number];
@@ -168,6 +181,12 @@ export type StaffTaskGroup = {
     assignedToUserId?: string;
     shiftId?: string;
   };
+};
+
+type StaffTaskStatusContext = {
+  id: string;
+  status: string;
+  assignedToUserId: string | null;
 };
 
 export type StaffTaskResponse = {
@@ -443,7 +462,11 @@ export class StaffTasksService {
     const { tenantId } = await this.tenantContextService.resolve(user);
     const current = await this.prisma.staffTask.findFirst({
       where: { id, tenantId },
-      select: { id: true, status: true },
+      select: {
+        id: true,
+        status: true,
+        assignedToUserId: true,
+      },
     });
 
     if (!current) {
@@ -461,6 +484,10 @@ export class StaffTasksService {
     const currentStatus = current.status as StaffTaskStatus;
     const nextStatus = normalizedStatus ?? currentStatus;
     const dataFields = Object.keys(data);
+
+    if (normalizedStatus && normalizedStatus !== currentStatus) {
+      this.assertStatusTransitionAllowed(user, current, normalizedStatus);
+    }
 
     const task = await this.prisma.$transaction(async (tx) => {
       if (dataFields.length > 0) {
@@ -525,7 +552,11 @@ export class StaffTasksService {
     const { tenantId } = await this.tenantContextService.resolve(user);
     const current = await this.prisma.staffTask.findFirst({
       where: { id, tenantId },
-      select: { id: true, status: true },
+      select: {
+        id: true,
+        status: true,
+        assignedToUserId: true,
+      },
     });
 
     if (!current) {
@@ -537,10 +568,6 @@ export class StaffTasksService {
     const evidenceType = this.normalizeOptionalString(dto.evidenceType);
     const evidenceLabel = this.normalizeOptionalString(dto.evidenceLabel);
 
-    if (!body && !evidenceUrl) {
-      throw new BadRequestException('Comment or evidence link is required');
-    }
-
     const nextStatus =
       dto.status === undefined
         ? undefined
@@ -549,41 +576,53 @@ export class StaffTasksService {
             taskStatuses,
             current.status as StaffTaskStatus,
           );
+    const statusChange =
+      nextStatus && nextStatus !== current.status ? nextStatus : undefined;
+
+    if (!body && !evidenceUrl && !statusChange) {
+      throw new BadRequestException('Comment or evidence link is required');
+    }
+
+    if (statusChange) {
+      this.assertStatusTransitionAllowed(user, current, statusChange);
+    }
 
     const task = await this.prisma.$transaction(async (tx) => {
-      await tx.staffTaskComment.create({
-        data: {
-          tenantId,
-          taskId: current.id,
-          authorUserId: user.id,
-          body,
-          evidenceType,
-          evidenceLabel,
-          evidenceUrl,
-        },
-      });
-
-      await tx.staffTaskAuditEvent.create({
-        data: {
-          tenantId,
-          taskId: current.id,
-          actorUserId: user.id,
-          action: evidenceUrl ? 'EVIDENCE_ADDED' : 'COMMENT_ADDED',
-          message: evidenceUrl ? 'Evidence added' : 'Comment added',
-          metadata: {
-            hasBody: Boolean(body),
-            hasEvidence: Boolean(evidenceUrl),
+      if (body || evidenceUrl) {
+        await tx.staffTaskComment.create({
+          data: {
+            tenantId,
+            taskId: current.id,
+            authorUserId: user.id,
+            body,
             evidenceType,
+            evidenceLabel,
+            evidenceUrl,
           },
-        },
-      });
+        });
 
-      if (nextStatus && nextStatus !== current.status) {
+        await tx.staffTaskAuditEvent.create({
+          data: {
+            tenantId,
+            taskId: current.id,
+            actorUserId: user.id,
+            action: evidenceUrl ? 'EVIDENCE_ADDED' : 'COMMENT_ADDED',
+            message: evidenceUrl ? 'Evidence added' : 'Comment added',
+            metadata: {
+              hasBody: Boolean(body),
+              hasEvidence: Boolean(evidenceUrl),
+              evidenceType,
+            },
+          },
+        });
+      }
+
+      if (statusChange) {
         await tx.staffTask.update({
           where: { id: current.id },
           data: {
-            status: nextStatus,
-            completedAt: nextStatus === 'DONE' ? new Date() : null,
+            status: statusChange,
+            completedAt: statusChange === 'DONE' ? new Date() : null,
           },
           select: { id: true },
         });
@@ -594,8 +633,8 @@ export class StaffTasksService {
             taskId: current.id,
             actorUserId: user.id,
             action: 'STATUS_CHANGED',
-            message: `Status changed from ${current.status} to ${nextStatus}`,
-            metadata: { fromStatus: current.status, toStatus: nextStatus },
+            message: `Status changed from ${current.status} to ${statusChange}`,
+            metadata: { fromStatus: current.status, toStatus: statusChange },
           },
         });
       }
@@ -1105,6 +1144,106 @@ export class StaffTasksService {
 
   private isTerminalStatus(status: string) {
     return status === 'DONE' || status === 'CANCELED';
+  }
+
+  private assertStatusTransitionAllowed(
+    user: AuthenticatedUser,
+    current: StaffTaskStatusContext,
+    nextStatus: StaffTaskStatus,
+  ) {
+    const currentStatus = current.status as StaffTaskStatus;
+
+    if (this.isTerminalStatus(currentStatus)) {
+      throw new BadRequestException('Closed task status cannot be changed');
+    }
+
+    if (nextStatus === 'DONE') {
+      if (currentStatus !== 'ON_REVIEW') {
+        throw new BadRequestException(
+          'Task must be submitted for review before completion',
+        );
+      }
+
+      this.assertCanApproveTask(user, current);
+      return;
+    }
+
+    if (nextStatus === 'CANCELED') {
+      this.assertCanCancelTask(user);
+      return;
+    }
+
+    if (currentStatus === 'ON_REVIEW' && nextStatus === 'IN_PROGRESS') {
+      this.assertCanReturnTask(user, current);
+      return;
+    }
+
+    this.assertCanMoveTask(user, current);
+  }
+
+  private assertCanApproveTask(
+    user: AuthenticatedUser,
+    current: StaffTaskStatusContext,
+  ) {
+    if (current.assignedToUserId === user.id) {
+      throw new ForbiddenException('You cannot approve your own task');
+    }
+
+    if (!this.canReviewTask(user)) {
+      throw new ForbiddenException(
+        'Only a manager can approve submitted staff tasks',
+      );
+    }
+  }
+
+  private assertCanReturnTask(
+    user: AuthenticatedUser,
+    current: StaffTaskStatusContext,
+  ) {
+    if (current.assignedToUserId === user.id || this.canReviewTask(user)) {
+      return;
+    }
+
+    throw new ForbiddenException(
+      'Only the assignee or a manager can return a submitted task',
+    );
+  }
+
+  private assertCanCancelTask(user: AuthenticatedUser) {
+    if (this.canManageTaskStatus(user)) {
+      return;
+    }
+
+    throw new ForbiddenException(
+      'Only a staff task manager can cancel staff tasks',
+    );
+  }
+
+  private assertCanMoveTask(
+    user: AuthenticatedUser,
+    current: StaffTaskStatusContext,
+  ) {
+    if (current.assignedToUserId === user.id || this.canReviewTask(user)) {
+      return;
+    }
+
+    throw new ForbiddenException(
+      'Only the assignee or a manager can change task status',
+    );
+  }
+
+  private canReviewTask(user: AuthenticatedUser) {
+    return (
+      user.isPlatformAdmin ||
+      (taskReviewerRoles as readonly UserRole[]).includes(user.role)
+    );
+  }
+
+  private canManageTaskStatus(user: AuthenticatedUser) {
+    return (
+      user.isPlatformAdmin ||
+      (taskStatusManagerRoles as readonly UserRole[]).includes(user.role)
+    );
   }
 
   private async normalizeTaskData(

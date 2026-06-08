@@ -6,15 +6,29 @@ import {
   StaffAttachmentUpload,
   type StaffAttachmentUploadResult,
 } from "@/components/staff-attachment-upload";
+import type { AuthUser } from "@/lib/auth";
 import type { StaffTask, StaffTaskStatus } from "@/lib/staff-tasks";
 
-const statusOptions: Array<{ value: StaffTaskStatus | ""; label: string }> = [
+const baseStatusOptions: Array<{ value: StaffTaskStatus | ""; label: string }> = [
   { value: "", label: "Оставить текущий статус" },
   { value: "IN_PROGRESS", label: "Перевести в работу" },
   { value: "ON_REVIEW", label: "Передать на проверку" },
   { value: "DONE", label: "Отметить готово" },
   { value: "CANCELED", label: "Отменить" },
 ];
+
+const reviewerRoles = new Set<AuthUser["role"]>([
+  "OWNER",
+  "ADMIN",
+  "MANAGER",
+  "CLUB_MANAGER",
+  "STANDARDS_MANAGER",
+]);
+const statusManagerRoles = new Set<AuthUser["role"]>([
+  ...reviewerRoles,
+  "SENIOR_ADMINISTRATOR",
+  "CLUB_ADMINISTRATOR",
+]);
 
 const evidenceTypeLabels: Record<string, string> = {
   LINK: "Ссылка",
@@ -69,7 +83,82 @@ function userName(
   return user?.fullName ?? user?.email ?? fallback;
 }
 
-export function StaffTaskHistory({ task }: { task: StaffTask }) {
+function getStatusOptions(
+  task: StaffTask,
+  currentUser: Pick<AuthUser, "id" | "role" | "isPlatformAdmin">,
+) {
+  const canMove = canMoveTask(task, currentUser);
+
+  return baseStatusOptions.filter((option) => {
+    if (!option.value) {
+      return true;
+    }
+
+    if (task.status === "DONE" || task.status === "CANCELED") {
+      return false;
+    }
+
+    if (option.value === "DONE") {
+      return task.status === "ON_REVIEW" && canApproveTask(task, currentUser);
+    }
+
+    if (option.value === "IN_PROGRESS") {
+      if (task.status === "OPEN") {
+        return canMove;
+      }
+
+      return task.status === "ON_REVIEW" && canReturnTask(task, currentUser);
+    }
+
+    if (option.value === "ON_REVIEW") {
+      return task.status === "IN_PROGRESS" && canMove;
+    }
+
+    return option.value === "CANCELED" && canCancelTask(currentUser);
+  });
+}
+
+function canApproveTask(
+  task: StaffTask,
+  currentUser: Pick<AuthUser, "id" | "role" | "isPlatformAdmin">,
+) {
+  return (
+    task.assignedToUser?.id !== currentUser.id &&
+    (currentUser.isPlatformAdmin || reviewerRoles.has(currentUser.role))
+  );
+}
+
+function canReturnTask(
+  task: StaffTask,
+  currentUser: Pick<AuthUser, "id" | "role" | "isPlatformAdmin">,
+) {
+  return canMoveTask(task, currentUser);
+}
+
+function canMoveTask(
+  task: StaffTask,
+  currentUser: Pick<AuthUser, "id" | "role" | "isPlatformAdmin">,
+) {
+  return (
+    task.assignedToUser?.id === currentUser.id ||
+    currentUser.isPlatformAdmin ||
+    reviewerRoles.has(currentUser.role)
+  );
+}
+
+function canCancelTask(
+  currentUser: Pick<AuthUser, "role" | "isPlatformAdmin">,
+) {
+  return currentUser.isPlatformAdmin || statusManagerRoles.has(currentUser.role);
+}
+
+export function StaffTaskHistory({
+  task,
+  currentUser,
+}: {
+  task: StaffTask;
+  currentUser: Pick<AuthUser, "id" | "role" | "isPlatformAdmin">;
+}) {
   const router = useRouter();
   const [isPending, setIsPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -82,8 +171,9 @@ export function StaffTaskHistory({ task }: { task: StaffTask }) {
     const form = new FormData(event.currentTarget);
     const body = String(form.get("body") ?? "").trim();
     const evidenceUrl = String(form.get("evidenceUrl") ?? "").trim();
+    const status = String(form.get("status") ?? "").trim();
 
-    if (!body && !evidenceUrl) {
+    if (!body && !evidenceUrl && !status) {
       setError("Добавьте комментарий или ссылку на доказательство.");
       return;
     }
@@ -91,7 +181,6 @@ export function StaffTaskHistory({ task }: { task: StaffTask }) {
     setIsPending(true);
     setError(null);
 
-    const status = String(form.get("status") ?? "").trim();
     const payload = {
       body: body || null,
       evidenceUrl: evidenceUrl || null,
@@ -129,6 +218,7 @@ export function StaffTaskHistory({ task }: { task: StaffTask }) {
   }
 
   const latestAudit = task.auditEvents.slice(0, 4);
+  const statusOptions = getStatusOptions(task, currentUser);
 
   return (
     <details className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50/70 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">

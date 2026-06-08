@@ -194,6 +194,10 @@ export class RolesGuard implements CanActivate {
       return 'view_staff_shift_workspace';
     }
 
+    if (path.match(/^\/staff\/tasks\/[^/]+\/comments(?:\/|$)/)) {
+      return 'view_staff_tasks';
+    }
+
     if (
       path.startsWith('/staff/tasks') ||
       path.startsWith('/staff/task-rules') ||

@@ -505,6 +505,18 @@ export const roleCapabilities: Record<UserRole, AccessCapability[]> = {
   ],
 };
 
+const minimumRoleCapabilities: Partial<Record<UserRole, AccessCapability[]>> = {
+  [UserRole.STANDARDS_MANAGER]: roleCapabilities[UserRole.STANDARDS_MANAGER],
+};
+
+function mergeCapabilities(
+  ...capabilitySets: Array<readonly AccessCapability[] | null | undefined>
+) {
+  return Array.from(
+    new Set(capabilitySets.flatMap((capabilities) => capabilities ?? [])),
+  );
+}
+
 export function normalizeCapabilities(
   permissions: readonly string[] | null | undefined,
 ): AccessCapability[] {
@@ -539,7 +551,10 @@ export function resolveUserCapabilities(input: {
   );
 
   if (input.roleOverride) {
-    return roleOverridePermissions;
+    return mergeCapabilities(
+      minimumRoleCapabilities[input.role],
+      roleOverridePermissions,
+    );
   }
 
   return roleCapabilities[input.role] ?? [];

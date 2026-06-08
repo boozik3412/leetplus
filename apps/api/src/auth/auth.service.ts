@@ -349,7 +349,7 @@ export class AuthService {
     const normalizedToken = typeof token === 'string' ? token.trim() : '';
 
     if (!normalizedToken) {
-      throw new BadRequestException('Invite token is required');
+      throw new BadRequestException('Токен приглашения обязателен');
     }
 
     const invite = await this.prisma.userInvite.findUnique({
@@ -374,15 +374,15 @@ export class AuthService {
     });
 
     if (!invite) {
-      throw new NotFoundException('Invite was not found');
+      throw new NotFoundException('Ссылка-приглашение не найдена');
     }
 
     if (invite.acceptedAt) {
-      throw new BadRequestException('Invite is already used');
+      throw new BadRequestException('Ссылка-приглашение уже использована');
     }
 
     if (invite.expiresAt.getTime() <= Date.now()) {
-      throw new BadRequestException('Invite is expired');
+      throw new BadRequestException('Срок действия приглашения истек');
     }
 
     return invite;

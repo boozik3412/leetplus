@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import type { AuthUser } from "@/lib/auth";
@@ -57,6 +56,35 @@ type InvitePreview = {
   expiresAt: string;
 };
 
+function localizeAuthError(message: string) {
+  const normalized = message.trim().toLowerCase();
+
+  if (
+    normalized === "invite is already used" ||
+    normalized === "invate is already used"
+  ) {
+    return "Ссылка-приглашение уже использована.";
+  }
+
+  if (normalized === "invite is expired") {
+    return "Срок действия приглашения истек.";
+  }
+
+  if (normalized === "invite was not found") {
+    return "Ссылка-приглашение не найдена.";
+  }
+
+  if (normalized === "invalid email or password") {
+    return "Неверный email или пароль.";
+  }
+
+  if (normalized === "passwords do not match") {
+    return "Пароли не совпадают.";
+  }
+
+  return message;
+}
+
 function getErrorMessage(data: unknown) {
   if (
     data &&
@@ -64,7 +92,7 @@ function getErrorMessage(data: unknown) {
     "message" in data &&
     typeof data.message === "string"
   ) {
-    return data.message;
+    return localizeAuthError(data.message);
   }
 
   return "Не удалось выполнить запрос";
@@ -82,6 +110,11 @@ export function AuthForm({ mode, inviteToken }: AuthFormProps) {
   const [isInviteLoading, setIsInviteLoading] = useState(isInviteRegister);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRedirecting, setIsRedirecting] = useState(false);
+  const passwordMismatch =
+    isRegister &&
+    form.password.length > 0 &&
+    form.confirmPassword.length > 0 &&
+    form.password !== form.confirmPassword;
 
   useEffect(() => {
     if (isRegister) {
@@ -157,7 +190,7 @@ export function AuthForm({ mode, inviteToken }: AuthFormProps) {
     setError(null);
 
     if (isRegister && form.password !== form.confirmPassword) {
-      setError("Пароли не совпадают.");
+      setError("Пароли не совпадают. Проверьте повтор пароля.");
       return;
     }
 
@@ -245,7 +278,14 @@ export function AuthForm({ mode, inviteToken }: AuthFormProps) {
       ) : null}
       <form onSubmit={handleSubmit} className="space-y-4">
       {isInviteRegister ? (
-        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm text-emerald-950">
+        <div
+          className={[
+            "rounded-md border px-3 py-3 text-sm",
+            inviteError
+              ? "border-red-200 bg-red-50 text-red-700"
+              : "border-emerald-200 bg-emerald-50 text-emerald-950",
+          ].join(" ")}
+        >
           {isInviteLoading ? (
             <p>Проверяем ссылку приглашения...</p>
           ) : inviteError ? (
@@ -386,16 +426,27 @@ export function AuthForm({ mode, inviteToken }: AuthFormProps) {
             type="password"
             autoComplete="new-password"
             value={form.confirmPassword}
+            aria-invalid={passwordMismatch ? true : undefined}
             onChange={(event) =>
               setForm((current) => ({
                 ...current,
                 confirmPassword: event.target.value,
               }))
             }
-            className="mt-1 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+            className={[
+              "mt-1 w-full rounded-md border bg-white px-3 py-2 text-sm outline-none transition focus:ring-2",
+              passwordMismatch
+                ? "border-red-300 focus:border-red-500 focus:ring-red-100"
+                : "border-zinc-300 focus:border-zinc-500 focus:ring-zinc-200",
+            ].join(" ")}
             placeholder="Введите пароль еще раз"
             required
           />
+          {passwordMismatch ? (
+            <p className="mt-1 text-xs font-medium text-red-600">
+              Пароли не совпадают.
+            </p>
+          ) : null}
         </label>
       ) : null}
 
@@ -451,12 +502,12 @@ export function AuthForm({ mode, inviteToken }: AuthFormProps) {
 
       <p className="text-center text-sm text-zinc-500">
         {isRegister ? "Уже есть аккаунт?" : "Еще нет аккаунта?"}{" "}
-        <Link
+        <a
           href={isRegister ? "/login" : "/register"}
           className="font-medium text-zinc-900 underline-offset-4 hover:underline"
         >
           {isRegister ? "Войти" : "Зарегистрироваться"}
-        </Link>
+        </a>
       </p>
       </form>
     </>

@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
 import { isShiftWorkspaceRole, staffShiftWorkspaceHref } from "@/lib/landing";
-import { can } from "@/lib/permissions";
+import { can, canAccessPath } from "@/lib/permissions";
 import { canManageUserAccess } from "@/lib/roles";
 
 type StaffArea = {
@@ -87,17 +87,26 @@ export default async function StaffHubPage() {
     redirect("/dashboard");
   }
 
-  const areas = staffAreas.map((area) =>
-    area.href === "/staff/directory" && canManageUserAccess(user.role)
-      ? {
-          ...area,
-          links: [
-            { href: "/users", label: "Пользователи и роли" },
-            ...area.links,
-          ],
-        }
-      : area,
-  );
+  const areas = staffAreas
+    .filter((area) => canAccessPath(user, area.href))
+    .map((area) => {
+      const links =
+        area.href === "/staff/directory" && canManageUserAccess(user.role)
+          ? [
+              { href: "/users", label: "Пользователи и роли" },
+              ...area.links,
+            ]
+          : area.links;
+
+      return {
+        ...area,
+        links: links.filter((link) => canAccessPath(user, link.href)),
+      };
+    });
+  const quickActions = [
+    { href: "/staff/operations-dashboard", label: "Открыть дисциплину" },
+    { href: "/staff/directory", label: "Сотрудники", primary: true },
+  ].filter((action) => canAccessPath(user, action.href));
 
   return (
     <main className="px-4 py-6 text-zinc-950 dark:text-zinc-100 sm:px-6 sm:py-8">
@@ -122,20 +131,23 @@ export default async function StaffHubPage() {
                 мотивация конкретных сотрудников.
               </p>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <Link
-                href="/staff/operations-dashboard"
-                className="rounded-lg border border-zinc-200 px-4 py-3 text-sm font-semibold transition hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-800 dark:hover:border-emerald-500 dark:hover:text-emerald-200"
-              >
-                Открыть дисциплину
-              </Link>
-              <Link
-                href="/staff/directory"
-                className="rounded-lg bg-emerald-500 px-4 py-3 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
-              >
-                Сотрудники
-              </Link>
-            </div>
+            {quickActions.length > 0 ? (
+              <div className="grid grid-cols-2 gap-3">
+                {quickActions.map((action) => (
+                  <Link
+                    key={action.href}
+                    href={action.href}
+                    className={
+                      action.primary
+                        ? "rounded-lg bg-emerald-500 px-4 py-3 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
+                        : "rounded-lg border border-zinc-200 px-4 py-3 text-sm font-semibold transition hover:border-emerald-400 hover:text-emerald-700 dark:border-zinc-800 dark:hover:border-emerald-500 dark:hover:text-emerald-200"
+                    }
+                  >
+                    {action.label}
+                  </Link>
+                ))}
+              </div>
+            ) : null}
           </div>
         </header>
 

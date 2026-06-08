@@ -553,6 +553,18 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
   ],
 };
 
+const minimumRoleCapabilities: Partial<Record<AuthUser["role"], Capability[]>> = {
+  STANDARDS_MANAGER: roleCapabilities.STANDARDS_MANAGER,
+};
+
+function mergeCapabilities(
+  ...capabilitySets: Array<readonly Capability[] | null | undefined>
+) {
+  return Array.from(
+    new Set(capabilitySets.flatMap((capabilities) => capabilities ?? [])),
+  );
+}
+
 const shiftWorkspaceRoles = new Set<AuthUser["role"]>([
   "SENIOR_ADMINISTRATOR",
   "CLUB_ADMINISTRATOR",
@@ -603,14 +615,18 @@ function capabilityMatches(owned: Capability, requested: Capability) {
 }
 
 function getUserPermissions(user: AuthUser) {
+  const minimumPermissions = minimumRoleCapabilities[user.role] ?? [];
+
   if (user.permissions) {
-    return user.permissions.filter(
+    const userPermissions = user.permissions.filter(
       (permission): permission is Capability =>
         validCapabilities.has(permission as Capability),
     );
+
+    return mergeCapabilities(minimumPermissions, userPermissions);
   }
 
-  return roleCapabilities[user.role] ?? [];
+  return mergeCapabilities(roleCapabilities[user.role] ?? []);
 }
 
 export function can(user: AuthUser | null, capability: Capability) {
@@ -741,6 +757,10 @@ export function canAccessPath(user: AuthUser | null, href: string) {
     }
 
     return can(user, resolveStaffPathCapability(href));
+  }
+
+  if (href.startsWith("/commercial")) {
+    return can(user, "view_reports");
   }
 
   if (href.startsWith("/marketing")) {

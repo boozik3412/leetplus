@@ -1,8 +1,11 @@
 import type { ReactNode } from "react";
+import { redirect } from "next/navigation";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
 import { buildAssortmentRiskSummary } from "@/lib/assortment-risk";
 import { ReportLoadingLink } from "@/components/report-loading-link";
+import { getDefaultLandingPath } from "@/lib/landing";
+import { can } from "@/lib/permissions";
 import {
   getAssortmentMatrixReport,
   getAssortmentReport,
@@ -82,7 +85,11 @@ function reportHref(path: string, filters: { from: string; to: string }) {
 }
 
 export default async function CommercialAuditPage() {
-  await requireCurrentUser();
+  const user = await requireCurrentUser();
+
+  if (!can(user, "view_reports")) {
+    redirect(getDefaultLandingPath(user));
+  }
 
   const filters = lastFullDaysRange(14);
   const [assortmentReport, operationalReport, matrixReport, turnoverReport] =

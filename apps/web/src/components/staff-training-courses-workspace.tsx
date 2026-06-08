@@ -361,7 +361,9 @@ export function StaffTrainingCoursesWorkspace({
           <div className="mt-4 space-y-3">
             {report.rows.length === 0 ? (
               <p className="rounded-md border border-dashed border-zinc-300 p-4 text-sm text-zinc-500 dark:border-zinc-800">
-                Курсов пока нет. Создайте первый маршрут обучения справа.
+                {report.canManageTraining
+                  ? "Курсов пока нет. Создайте первый маршрут обучения справа."
+                  : "Доступных курсов пока нет. Когда управляющий или менеджер по стандартам опубликует маршрут, он появится здесь."}
               </p>
             ) : (
               report.rows.map((row) => (
@@ -635,7 +637,9 @@ export function StaffTrainingCoursesWorkspace({
             <CoursePreview course={selectedCourse} report={report} />
           ) : (
             <p className="rounded-md border border-dashed border-zinc-300 p-4 text-sm text-zinc-500 dark:border-zinc-800">
-              Выберите курс слева.
+              {report.rows.length > 0
+                ? "Выберите курс слева."
+                : "Здесь появится содержание курса после публикации доступного маршрута."}
             </p>
           )}
 

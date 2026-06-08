@@ -294,17 +294,11 @@ export class StaffTasksService {
     const { tenantId } = await this.tenantContextService.resolve(user);
     const filters = this.resolveFilters(query);
     const baseWhere = this.buildWhere(tenantId, filters, false, user.id);
-    const rowsWhere = this.buildWhere(tenantId, filters, true, user.id);
     const quickViewWhere = this.buildQuickViewWhere(tenantId, filters, user.id);
 
     const [rows, summaryRows, quickRows, groupRows, users, stores] =
       await Promise.all([
-        this.prisma.staffTask.findMany({
-          where: rowsWhere,
-          include: taskInclude,
-          orderBy: this.buildOrderBy(filters),
-          take: filters.pageSize,
-        }),
+        this.fetchOrderedTaskRows(tenantId, filters, user.id, filters.pageSize),
         this.prisma.staffTask.findMany({
           where: baseWhere,
           select: { status: true, dueAt: true },
@@ -377,12 +371,12 @@ export class StaffTasksService {
     const { tenantId } = await this.tenantContextService.resolve(user);
     const filters = this.resolveFilters(query);
     const format = resolveStaffExportFormat(query.format);
-    const rows = await this.prisma.staffTask.findMany({
-      where: this.buildWhere(tenantId, filters, true, user.id),
-      include: taskInclude,
-      orderBy: this.buildOrderBy(filters),
-      take: 10000,
-    });
+    const rows = await this.fetchOrderedTaskRows(
+      tenantId,
+      filters,
+      user.id,
+      10000,
+    );
 
     return buildStaffExportFile({
       format,
@@ -893,6 +887,59 @@ export class StaffTasksService {
     }
 
     return [{ dueAt: direction }, { createdAt: 'desc' }];
+  }
+
+  private async fetchOrderedTaskRows(
+    tenantId: string,
+    filters: StaffTaskReport['filters'],
+    currentUserId: string,
+    take: number,
+  ): Promise<StaffTaskRow[]> {
+    const where = this.buildWhere(tenantId, filters, true, currentUserId);
+    const orderBy = this.buildOrderBy(filters);
+
+    if (filters.status !== 'all') {
+      return this.prisma.staffTask.findMany({
+        where,
+        include: taskInclude,
+        orderBy,
+        take,
+      });
+    }
+
+    const activeRows = await this.prisma.staffTask.findMany({
+      where: this.withTaskStatusWhere(where, { notIn: ['DONE', 'CANCELED'] }),
+      include: taskInclude,
+      orderBy,
+      take,
+    });
+
+    if (activeRows.length >= take) {
+      return activeRows;
+    }
+
+    const closedRows = await this.prisma.staffTask.findMany({
+      where: this.withTaskStatusWhere(where, { in: ['DONE', 'CANCELED'] }),
+      include: taskInclude,
+      orderBy,
+      take: take - activeRows.length,
+    });
+
+    return [...activeRows, ...closedRows];
+  }
+
+  private withTaskStatusWhere(
+    where: Prisma.StaffTaskWhereInput,
+    status: Prisma.StringFilter | StaffTaskStatus,
+  ): Prisma.StaffTaskWhereInput {
+    return {
+      AND: [
+        where,
+        {
+          status,
+        },
+      ],
+    };
   }
 
   private buildSummary(

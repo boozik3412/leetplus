@@ -552,7 +552,11 @@ export default async function StaffTasksPage({
         </section>
 
         <section className="mt-6">
-          <StaffTaskCreateForm users={report.users} stores={report.stores} />
+          <StaffTaskCreateForm
+            users={report.users}
+            stores={report.stores}
+            currentUser={{ id: currentUser.id, role: currentUser.role }}
+          />
         </section>
 
         <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">

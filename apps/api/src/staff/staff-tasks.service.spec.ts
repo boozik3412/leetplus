@@ -72,6 +72,7 @@ describe('StaffTasksService status review workflow', () => {
             id: assignedToUserId,
             email: `${assignedToUserId}@example.com`,
             fullName: null,
+            role: UserRole.CLUB_ADMINISTRATOR,
           }
         : null,
       observers: [],
@@ -102,6 +103,95 @@ describe('StaffTasksService status review workflow', () => {
       staffTask: {
         findFirst: jest.fn().mockResolvedValue(currentTask),
       },
+      $transaction: jest
+        .fn()
+        .mockImplementation((callback: (tx: unknown) => unknown) =>
+          callback(tx),
+        ),
+    };
+    const tenantContextService = {
+      resolve: jest.fn().mockResolvedValue({ tenantId }),
+    };
+    const service = new StaffTasksService(
+      prisma as never,
+      tenantContextService as never,
+    );
+
+    (
+      service as unknown as {
+        fetchTaskOrThrow: jest.Mock;
+      }
+    ).fetchTaskOrThrow = jest.fn().mockResolvedValue(responseTask);
+
+    return { prisma, service, tx };
+  }
+
+  function createTaskPolicyService(
+    users: Array<{ id: string; role: UserRole }>,
+  ) {
+    const usersById = new Map(users.map((user) => [user.id, user]));
+    const findFirst = jest.fn(
+      (args: { where?: { id?: string }; select?: { role?: boolean } }) => {
+        const userId = args.where?.id;
+        const found = userId ? usersById.get(userId) : null;
+
+        if (!found) {
+          return Promise.resolve(null);
+        }
+
+        return Promise.resolve(
+          args.select?.role
+            ? { id: found.id, role: found.role }
+            : { id: found.id },
+        );
+      },
+    );
+    const findMany = jest.fn(
+      (args: {
+        where?: { id?: { in?: string[] } };
+        select?: { role?: boolean };
+      }) => {
+        const ids = args.where?.id?.in ?? [];
+        const found = ids
+          .map((id) => usersById.get(id))
+          .filter((user): user is { id: string; role: UserRole } =>
+            Boolean(user),
+          );
+
+        return Promise.resolve(
+          found.map((user) =>
+            args.select?.role
+              ? { id: user.id, role: user.role }
+              : { id: user.id },
+          ),
+        );
+      },
+    );
+    const tx = {
+      staffTask: {
+        create: jest.fn().mockResolvedValue({ id: 'task-created' }),
+      },
+      staffTaskAuditEvent: {
+        create: jest.fn(),
+      },
+      staffTaskObserver: {
+        deleteMany: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
+        createMany: jest.fn(),
+      },
+    };
+    const responseTask = {
+      ...taskRow('OPEN', 'admin-2'),
+      id: 'task-created',
+      assignedToUser: {
+        id: 'admin-2',
+        email: 'admin-2@example.com',
+        fullName: null,
+        role: UserRole.CLUB_ADMINISTRATOR,
+      },
+    };
+    const prisma = {
+      user: { findFirst, findMany },
       $transaction: jest
         .fn()
         .mockImplementation((callback: (tx: unknown) => unknown) =>
@@ -210,6 +300,91 @@ describe('StaffTasksService status review workflow', () => {
       'task-active',
       'task-closed',
     ]);
+  });
+
+  it('requires confirmation when an administrator creates a task', async () => {
+    const { prisma, service } = createTaskPolicyService([
+      { id: 'admin-2', role: UserRole.CLUB_ADMINISTRATOR },
+    ]);
+
+    await expect(
+      service.createTask(actor(UserRole.CLUB_ADMINISTRATOR, 'admin-1'), {
+        title: 'Проверить кассу',
+        assignedToUserId: 'admin-2',
+      }),
+    ).rejects.toThrow(BadRequestException);
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('does not allow an administrator to assign a task above administrator roles', async () => {
+    const { prisma, service } = createTaskPolicyService([
+      { id: 'manager-1', role: UserRole.CLUB_MANAGER },
+      { id: 'senior-1', role: UserRole.SENIOR_ADMINISTRATOR },
+    ]);
+
+    await expect(
+      service.createTask(actor(UserRole.CLUB_ADMINISTRATOR, 'admin-1'), {
+        title: 'Проверить кассу',
+        assignedToUserId: 'manager-1',
+        observerUserIds: ['senior-1'],
+      }),
+    ).rejects.toThrow(ForbiddenException);
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('does not allow an administrator to confirm a task through owner roles', async () => {
+    const { prisma, service } = createTaskPolicyService([
+      { id: 'admin-2', role: UserRole.CLUB_ADMINISTRATOR },
+      { id: 'owner-1', role: UserRole.OWNER },
+    ]);
+
+    await expect(
+      service.createTask(actor(UserRole.CLUB_ADMINISTRATOR, 'admin-1'), {
+        title: 'Проверить кассу',
+        assignedToUserId: 'admin-2',
+        observerUserIds: ['owner-1'],
+      }),
+    ).rejects.toThrow(ForbiddenException);
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('does not allow a senior administrator to assign tasks to managers', async () => {
+    const { prisma, service } = createTaskPolicyService([
+      { id: 'manager-1', role: UserRole.CLUB_MANAGER },
+    ]);
+
+    await expect(
+      service.createTask(actor(UserRole.SENIOR_ADMINISTRATOR, 'senior-1'), {
+        title: 'Проверить кассу',
+        assignedToUserId: 'manager-1',
+      }),
+    ).rejects.toThrow(ForbiddenException);
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('allows an administrator to create a task for another administrator with confirmation', async () => {
+    const { service, tx } = createTaskPolicyService([
+      { id: 'admin-2', role: UserRole.CLUB_ADMINISTRATOR },
+      { id: 'senior-1', role: UserRole.SENIOR_ADMINISTRATOR },
+    ]);
+
+    await expect(
+      service.createTask(actor(UserRole.CLUB_ADMINISTRATOR, 'admin-1'), {
+        title: 'Проверить кассу',
+        assignedToUserId: 'admin-2',
+        observerUserIds: ['senior-1'],
+      }),
+    ).resolves.toMatchObject({ id: 'task-created' });
+
+    expect(tx.staffTask.create).toHaveBeenCalled();
+    expect(tx.staffTaskObserver.createMany).toHaveBeenCalledWith({
+      data: [{ tenantId, taskId: 'task-created', userId: 'senior-1' }],
+      skipDuplicates: true,
+    });
   });
 
   it('does not allow an assigned administrator to approve their own task', async () => {

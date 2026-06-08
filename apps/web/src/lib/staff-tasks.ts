@@ -1,4 +1,5 @@
 import { getApiUrl, getAuthHeaders } from "./api";
+import type { AuthUser } from "./auth";
 
 export type StaffTaskStatus =
   | "OPEN"
@@ -31,6 +32,7 @@ export type StaffTaskType =
   | "ROLE";
 
 export type StaffTaskPriority = "LOW" | "NORMAL" | "HIGH" | "URGENT";
+export type StaffTaskUserRole = AuthUser["role"];
 export type StaffTaskSortKey =
   | "dueAt"
   | "createdAt"
@@ -42,6 +44,7 @@ export type StaffTaskUser = {
   id: string;
   email: string;
   fullName: string | null;
+  role: StaffTaskUserRole;
 };
 
 export type StaffTaskStore = {

@@ -1,13 +1,15 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import type {
   StaffTaskPriority,
   StaffTaskStore,
   StaffTaskType,
   StaffTaskUser,
+  StaffTaskUserRole,
 } from "@/lib/staff-tasks";
+import { roleLabels } from "@/lib/roles";
 
 const taskTypes: Array<{ value: StaffTaskType; label: string }> = [
   { value: "ONE_TIME", label: "Разовая" },
@@ -26,18 +28,55 @@ const priorities: Array<{ value: StaffTaskPriority; label: string }> = [
   { value: "URGENT", label: "Срочно" },
 ];
 
+const confirmationCreatorRoles = new Set<StaffTaskUserRole>([
+  "CLUB_ADMINISTRATOR",
+  "TRAINEE",
+]);
+const staffAssigneeRoles = new Set<StaffTaskUserRole>([
+  "CLUB_ADMINISTRATOR",
+  "TRAINEE",
+]);
+const confirmationRoles = new Set<StaffTaskUserRole>([
+  "SENIOR_ADMINISTRATOR",
+  "CLUB_MANAGER",
+  "STANDARDS_MANAGER",
+]);
+
 type StaffTaskCreateFormProps = {
   users: StaffTaskUser[];
   stores: StaffTaskStore[];
+  currentUser: Pick<StaffTaskUser, "id" | "role">;
 };
 
 export function StaffTaskCreateForm({
   users,
   stores,
+  currentUser,
 }: StaffTaskCreateFormProps) {
   const router = useRouter();
   const [isPending, setIsPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const needsConfirmation = confirmationCreatorRoles.has(currentUser.role);
+  const needsStaffAssignee =
+    needsConfirmation || currentUser.role === "SENIOR_ADMINISTRATOR";
+  const assigneeUsers = useMemo(
+    () =>
+      needsStaffAssignee
+        ? users.filter(
+            (user) =>
+              staffAssigneeRoles.has(user.role) &&
+              (!needsConfirmation || user.id !== currentUser.id),
+          )
+        : users,
+    [currentUser.id, needsConfirmation, needsStaffAssignee, users],
+  );
+  const observerUsers = useMemo(
+    () =>
+      needsConfirmation
+        ? users.filter((user) => confirmationRoles.has(user.role))
+        : users,
+    [needsConfirmation, users],
+  );
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -49,14 +88,45 @@ export function StaffTaskCreateForm({
       return;
     }
 
-    setIsPending(true);
-    setError(null);
-
     const dueAt = String(form.get("dueAt") ?? "").trim();
+    const assignedToUserId = String(form.get("assignedToUserId") ?? "").trim();
     const observerUserIds = form
       .getAll("observerUserIds")
       .map((value) => String(value).trim())
       .filter(Boolean);
+
+    if (
+      needsStaffAssignee &&
+      (!assignedToUserId ||
+        !assigneeUsers.some((user) => user.id === assignedToUserId))
+    ) {
+      setError("Выберите ответственного администратора или стажера.");
+      return;
+    }
+
+    if (needsConfirmation) {
+      const hasOnlyAllowedConfirmationUsers = observerUserIds.every((id) =>
+        observerUsers.some((user) => user.id === id),
+      );
+
+      if (observerUserIds.length === 0) {
+        setError(
+          "Выберите подтверждающего: старшего администратора, управляющего клубом или менеджера по стандартам.",
+        );
+        return;
+      }
+
+      if (!hasOnlyAllowedConfirmationUsers) {
+        setError(
+          "Подтверждающими могут быть только старший администратор, управляющий клубом или менеджер по стандартам.",
+        );
+        return;
+      }
+    }
+
+    setIsPending(true);
+    setError(null);
+
     const payload = {
       title,
       description: String(form.get("description") ?? "").trim() || null,
@@ -64,8 +134,7 @@ export function StaffTaskCreateForm({
       priority: form.get("priority"),
       dueAt: dueAt ? new Date(dueAt).toISOString() : null,
       storeId: String(form.get("storeId") ?? "").trim() || null,
-      assignedToUserId:
-        String(form.get("assignedToUserId") ?? "").trim() || null,
+      assignedToUserId: assignedToUserId || null,
       observerUserIds,
     };
 
@@ -132,12 +201,17 @@ export function StaffTaskCreateForm({
           </span>
           <select
             name="assignedToUserId"
+            required={needsStaffAssignee}
             className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
           >
-            <option value="">Не назначен</option>
-            {users.map((user) => (
+            <option value="">
+              {needsStaffAssignee
+                ? "Выберите администратора или стажера"
+                : "Не назначен"}
+            </option>
+            {assigneeUsers.map((user) => (
               <option key={user.id} value={user.id}>
-                {user.fullName ?? user.email}
+                {user.fullName ?? user.email} ({roleLabels[user.role] ?? user.role})
               </option>
             ))}
           </select>
@@ -208,24 +282,27 @@ export function StaffTaskCreateForm({
         </label>
       </div>
 
-      {users.length > 0 ? (
+      {observerUsers.length > 0 || needsConfirmation ? (
         <fieldset className="mt-3 rounded-lg border border-dashed border-zinc-200 p-3 dark:border-zinc-800">
           <legend className="px-1 text-xs font-bold uppercase text-zinc-500">
-            Наблюдатели
+            {needsConfirmation ? "Подтверждение задачи" : "Наблюдатели"}
           </legend>
           <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="mt-1 text-xs leading-5 text-zinc-500">
-                Получают задачу в свой список наблюдения, но не становятся
-                ответственными.
+                {needsConfirmation
+                  ? "Постановку задачи должен подтвердить старший администратор, управляющий клубом или менеджер по стандартам."
+                  : "Получают задачу в свой список наблюдения, но не становятся ответственными."}
               </p>
             </div>
             <span className="text-xs font-semibold text-zinc-500">
-              Можно выбрать несколько
+              {needsConfirmation
+                ? "Обязательно выбрать"
+                : "Можно выбрать несколько"}
             </span>
           </div>
           <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {users.map((user) => (
+            {observerUsers.map((user) => (
               <label
                 key={user.id}
                 className="flex min-h-10 items-center gap-2 rounded-md border border-zinc-200 px-3 py-2 text-sm transition hover:border-emerald-300 hover:bg-emerald-50 dark:border-zinc-800 dark:hover:border-emerald-500/70 dark:hover:bg-emerald-500/10"
@@ -236,11 +313,21 @@ export function StaffTaskCreateForm({
                   value={user.id}
                   className="h-4 w-4 rounded border-zinc-300 text-emerald-500 focus:ring-emerald-500"
                 />
-                <span className="min-w-0 truncate">
-                  {user.fullName ?? user.email}
+                <span className="min-w-0">
+                  <span className="block truncate">
+                    {user.fullName ?? user.email}
+                  </span>
+                  <span className="block truncate text-[11px] text-zinc-500">
+                    {roleLabels[user.role] ?? user.role}
+                  </span>
                 </span>
               </label>
             ))}
+            {observerUsers.length === 0 ? (
+              <p className="rounded-md border border-zinc-200 px-3 py-2 text-sm text-zinc-500 dark:border-zinc-800">
+                Нет доступных подтверждающих с нужной ролью.
+              </p>
+            ) : null}
           </div>
         </fieldset>
       ) : null}

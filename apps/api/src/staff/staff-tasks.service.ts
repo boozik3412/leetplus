@@ -68,6 +68,15 @@ const taskStatusManagerRoles = [
   UserRole.SENIOR_ADMINISTRATOR,
   UserRole.CLUB_ADMINISTRATOR,
 ] as const;
+const taskStaffAssigneeRoles = [
+  UserRole.CLUB_ADMINISTRATOR,
+  UserRole.TRAINEE,
+] as const;
+const taskConfirmationRoles = [
+  UserRole.SENIOR_ADMINISTRATOR,
+  UserRole.CLUB_MANAGER,
+  UserRole.STANDARDS_MANAGER,
+] as const;
 
 export type StaffTaskStatus = (typeof taskStatuses)[number];
 export type StaffTaskFilterStatus = (typeof taskFilterStatuses)[number];
@@ -160,7 +169,12 @@ export type StaffTaskReport = {
     byStatus: StaffTaskGroup[];
   };
   rows: StaffTaskResponse[];
-  users: Array<{ id: string; email: string; fullName: string | null }>;
+  users: Array<{
+    id: string;
+    email: string;
+    fullName: string | null;
+    role: UserRole;
+  }>;
   stores: Array<{ id: string; name: string; isActive: boolean }>;
 };
 
@@ -209,8 +223,8 @@ export type StaffTaskResponse = {
     stoppedAt: string | null;
     store: { id: string; name: string } | null;
   } | null;
-  createdByUser: { id: string; email: string; fullName: string | null } | null;
-  assignedToUser: { id: string; email: string; fullName: string | null } | null;
+  createdByUser: StaffTaskUserResponse | null;
+  assignedToUser: StaffTaskUserResponse | null;
   observers: StaffTaskObserverResponse[];
   labels: Prisma.JsonValue | null;
   checklist: Prisma.JsonValue | null;
@@ -221,7 +235,7 @@ export type StaffTaskResponse = {
 export type StaffTaskObserverResponse = {
   id: string;
   createdAt: string;
-  user: { id: string; email: string; fullName: string | null };
+  user: StaffTaskUserResponse;
 };
 
 export type StaffTaskCommentResponse = {
@@ -231,7 +245,7 @@ export type StaffTaskCommentResponse = {
   evidenceLabel: string | null;
   evidenceUrl: string | null;
   createdAt: string;
-  authorUser: { id: string; email: string; fullName: string | null } | null;
+  authorUser: StaffTaskUserResponse | null;
 };
 
 export type StaffTaskAuditEventResponse = {
@@ -240,7 +254,14 @@ export type StaffTaskAuditEventResponse = {
   message: string | null;
   metadata: Prisma.JsonValue | null;
   createdAt: string;
-  actorUser: { id: string; email: string; fullName: string | null } | null;
+  actorUser: StaffTaskUserResponse | null;
+};
+
+export type StaffTaskUserResponse = {
+  id: string;
+  email: string;
+  fullName: string | null;
+  role: UserRole;
 };
 
 const taskInclude = {
@@ -254,26 +275,34 @@ const taskInclude = {
       store: { select: { id: true, name: true } },
     },
   },
-  createdByUser: { select: { id: true, email: true, fullName: true } },
-  assignedToUser: { select: { id: true, email: true, fullName: true } },
+  createdByUser: {
+    select: { id: true, email: true, fullName: true, role: true },
+  },
+  assignedToUser: {
+    select: { id: true, email: true, fullName: true, role: true },
+  },
   observers: {
     orderBy: { createdAt: 'asc' },
     include: {
-      user: { select: { id: true, email: true, fullName: true } },
+      user: { select: { id: true, email: true, fullName: true, role: true } },
     },
   },
   comments: {
     orderBy: { createdAt: 'desc' },
     take: 3,
     include: {
-      authorUser: { select: { id: true, email: true, fullName: true } },
+      authorUser: {
+        select: { id: true, email: true, fullName: true, role: true },
+      },
     },
   },
   auditEvents: {
     orderBy: { createdAt: 'desc' },
     take: 5,
     include: {
-      actorUser: { select: { id: true, email: true, fullName: true } },
+      actorUser: {
+        select: { id: true, email: true, fullName: true, role: true },
+      },
     },
   },
 } satisfies Prisma.StaffTaskInclude;
@@ -343,7 +372,7 @@ export class StaffTasksService {
         }),
         this.prisma.user.findMany({
           where: { tenantId, isActive: true },
-          select: { id: true, email: true, fullName: true },
+          select: { id: true, email: true, fullName: true, role: true },
           orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
         }),
         this.prisma.store.findMany({
@@ -414,7 +443,16 @@ export class StaffTasksService {
     });
     const observerUserIds =
       (await this.resolveObserverUserIds(tenantId, dto.observerUserIds)) ?? [];
+    const assignedToUserId =
+      typeof data.assignedToUserId === 'string' ? data.assignedToUserId : null;
     const status = (data.status as StaffTaskStatus | undefined) ?? 'OPEN';
+
+    await this.assertTaskCreationPolicy(
+      tenantId,
+      user,
+      assignedToUserId,
+      observerUserIds,
+    );
 
     const task = await this.prisma.$transaction(async (tx) => {
       const created = await tx.staffTask.create({
@@ -1291,6 +1329,96 @@ export class StaffTasksService {
       user.isPlatformAdmin ||
       (taskStatusManagerRoles as readonly UserRole[]).includes(user.role)
     );
+  }
+
+  private mustCreateTaskForStaffOnly(user: AuthenticatedUser) {
+    return (
+      !user.isPlatformAdmin &&
+      (user.role === UserRole.CLUB_ADMINISTRATOR ||
+        user.role === UserRole.TRAINEE ||
+        user.role === UserRole.SENIOR_ADMINISTRATOR)
+    );
+  }
+
+  private mustRequestTaskConfirmation(user: AuthenticatedUser) {
+    return (
+      !user.isPlatformAdmin &&
+      (user.role === UserRole.CLUB_ADMINISTRATOR ||
+        user.role === UserRole.TRAINEE)
+    );
+  }
+
+  private async assertTaskCreationPolicy(
+    tenantId: string,
+    user: AuthenticatedUser,
+    assignedToUserId: string | null,
+    observerUserIds: string[],
+  ) {
+    const staffOnly = this.mustCreateTaskForStaffOnly(user);
+    const needsConfirmation = this.mustRequestTaskConfirmation(user);
+
+    if (!staffOnly && !needsConfirmation) {
+      return;
+    }
+
+    if (!assignedToUserId) {
+      throw new BadRequestException(
+        'Выберите ответственного администратора или стажера.',
+      );
+    }
+
+    const assignedUser = await this.prisma.user.findFirst({
+      where: { id: assignedToUserId, tenantId, isActive: true },
+      select: { id: true, role: true },
+    });
+
+    if (!assignedUser) {
+      throw new BadRequestException('Assigned user not found');
+    }
+
+    if (
+      !(taskStaffAssigneeRoles as readonly UserRole[]).includes(
+        assignedUser.role,
+      )
+    ) {
+      throw new ForbiddenException(
+        user.role === UserRole.SENIOR_ADMINISTRATOR
+          ? 'Старший администратор может назначать задачи только администраторам и стажерам.'
+          : 'Администратор и стажер могут назначать задачи только администраторам и стажерам.',
+      );
+    }
+
+    if (!needsConfirmation) {
+      return;
+    }
+
+    if (assignedUser.id === user.id) {
+      throw new ForbiddenException('Нельзя назначить задачу самому себе.');
+    }
+
+    if (observerUserIds.length === 0) {
+      throw new BadRequestException(
+        'Для задачи нужно выбрать подтверждающего: старшего администратора, управляющего клубом или менеджера по стандартам.',
+      );
+    }
+
+    const confirmationUsers = await this.prisma.user.findMany({
+      where: { id: { in: observerUserIds }, tenantId, isActive: true },
+      select: { id: true, role: true },
+    });
+    const allConfirmationUsersAreAllowed =
+      confirmationUsers.length === observerUserIds.length &&
+      confirmationUsers.every((confirmationUser) =>
+        (taskConfirmationRoles as readonly UserRole[]).includes(
+          confirmationUser.role,
+        ),
+      );
+
+    if (!allConfirmationUsersAreAllowed) {
+      throw new ForbiddenException(
+        'Подтверждающими могут быть только старший администратор, управляющий клубом или менеджер по стандартам.',
+      );
+    }
   }
 
   private async normalizeTaskData(

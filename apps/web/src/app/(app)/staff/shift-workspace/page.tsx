@@ -813,15 +813,15 @@ function ReviewPanel({
       <h2 className="text-xl font-semibold text-white">Что проверить</h2>
       <div className="mt-5 space-y-2">
         <ReviewRow
-          title="На проверке у меня"
-          description="Мои задачи ждут подтверждения"
+          title="Мои задачи на проверке"
+          description="Выполнены мной и ожидают проверяющего"
           count={myOnReview}
           href="/staff/tasks?view=my&status=ON_REVIEW"
           tone="cyan"
         />
         <ReviewRow
-          title="Проверка администраторов"
-          description="Работы, которые можно принять"
+          title="Проверить задачи команды"
+          description="Работы администраторов, которые можно принять или вернуть"
           count={reviewQueue}
           href="/staff/tasks?view=approval&status=ON_REVIEW"
           tone="blue"

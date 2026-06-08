@@ -62,6 +62,7 @@ export type StaffChatMessageDto = {
   storeId?: string | null;
   isPinned?: boolean;
   attachmentIds?: string[] | null;
+  mentionedUserIds?: string[] | null;
 };
 
 export type StaffChatReadDto = {
@@ -158,6 +159,7 @@ export type StaffChatMessageResponse = {
   authorUser: { id: string; email: string; fullName: string | null } | null;
   store: { id: string; name: string; isActive: boolean } | null;
   attachments: StaffChatMessageAttachmentResponse[];
+  mentions: StaffChatUserResponse[];
 };
 
 const channelInclude = {
@@ -188,6 +190,14 @@ const messageInclude = {
             select: { id: true, email: true, fullName: true },
           },
         },
+      },
+    },
+    orderBy: { createdAt: 'asc' },
+  },
+  mentions: {
+    include: {
+      mentionedUser: {
+        select: { id: true, email: true, fullName: true, role: true },
       },
     },
     orderBy: { createdAt: 'asc' },
@@ -426,6 +436,10 @@ export class StaffTeamChatService {
       user.id,
       dto.attachmentIds,
     );
+    const mentionedUserIds = await this.resolveMentionedUserIds(
+      tenantId,
+      dto.mentionedUserIds,
+    );
     const data = await this.normalizeMessageData(
       tenantId,
       channel,
@@ -456,6 +470,17 @@ export class StaffTeamChatService {
             }),
           ),
         );
+      }
+
+      if (mentionedUserIds.length > 0) {
+        await tx.staffChatMention.createMany({
+          data: mentionedUserIds.map((mentionedUserId) => ({
+            tenantId,
+            messageId: created.id,
+            mentionedUserId,
+          })),
+          skipDuplicates: true,
+        });
       }
 
       return tx.staffChatMessage.findUniqueOrThrow({
@@ -907,6 +932,41 @@ export class StaffTeamChatService {
     return requestedIds;
   }
 
+  private async resolveMentionedUserIds(
+    tenantId: string,
+    values: string[] | null | undefined,
+  ) {
+    const requestedIds = Array.isArray(values)
+      ? Array.from(
+          new Set(
+            values
+              .map((value) => this.normalizeOptionalString(value))
+              .filter((value): value is string => Boolean(value)),
+          ),
+        )
+      : [];
+
+    if (requestedIds.length > 20) {
+      throw new BadRequestException('No more than 20 mentions are allowed');
+    }
+
+    if (requestedIds.length === 0) {
+      return [];
+    }
+
+    const rows = await this.prisma.user.findMany({
+      where: { tenantId, isActive: true, id: { in: requestedIds } },
+      select: { id: true },
+    });
+    const availableIds = new Set(rows.map((row) => row.id));
+
+    if (requestedIds.some((id) => !availableIds.has(id))) {
+      throw new BadRequestException('Mentioned users must be active users');
+    }
+
+    return requestedIds;
+  }
+
   private async markMessagesRead(
     userId: string,
     tenantId: string,
@@ -1151,6 +1211,7 @@ export class StaffTeamChatService {
         createdAt: attachment.createdAt.toISOString(),
         uploadedByUser: attachment.uploadedByUser,
       })),
+      mentions: message.mentions.map((mention) => mention.mentionedUser),
     };
   }
 

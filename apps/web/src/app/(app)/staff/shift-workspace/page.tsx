@@ -370,6 +370,19 @@ function roleWorkspaceName(role: string) {
   return "Домашняя страница смены";
 }
 
+function canReviewStaffTaskQueue(user: { role: string; isPlatformAdmin: boolean }) {
+  return (
+    user.isPlatformAdmin ||
+    [
+      "OWNER",
+      "ADMIN",
+      "MANAGER",
+      "CLUB_MANAGER",
+      "STANDARDS_MANAGER",
+    ].includes(user.role)
+  );
+}
+
 export default async function StaffShiftWorkspacePage() {
   const user = await requireCurrentUser();
 
@@ -378,6 +391,7 @@ export default async function StaffShiftWorkspacePage() {
   }
 
   const today = todayDateInput();
+  const canReviewStaffTasks = canReviewStaffTaskQueue(user);
   const myTasksPromise = safeValue(
     getStaffTaskReport({
       view: "my",
@@ -388,16 +402,18 @@ export default async function StaffShiftWorkspacePage() {
     }),
     emptyTaskReport,
   );
-  const reviewTasksPromise = safeValue(
-    getStaffTaskReport({
-      view: "approval",
-      status: "ON_REVIEW",
-      sort: "dueAt",
-      direction: "asc",
-      pageSize: "4",
-    }),
-    emptyTaskReport,
-  );
+  const reviewTasksPromise = canReviewStaffTasks
+    ? safeValue(
+        getStaffTaskReport({
+          view: "approval",
+          status: "ON_REVIEW",
+          sort: "dueAt",
+          direction: "asc",
+          pageSize: "4",
+        }),
+        emptyTaskReport,
+      )
+    : Promise.resolve(emptyTaskReport);
   const checklistsPromise = safeValue(
     getStaffChecklistReport({
       status: "all",
@@ -549,6 +565,7 @@ export default async function StaffShiftWorkspacePage() {
             reviewQueue={reviewTasks.summary.onReview}
             returnedChecklists={checklists.summary.returned}
             overdueReviews={reviewTasks.summary.overdue}
+            canReviewStaffTasks={canReviewStaffTasks}
           />
         </section>
 
@@ -802,11 +819,13 @@ function ReviewPanel({
   reviewQueue,
   returnedChecklists,
   overdueReviews,
+  canReviewStaffTasks,
 }: {
   myOnReview: number;
   reviewQueue: number;
   returnedChecklists: number;
   overdueReviews: number;
+  canReviewStaffTasks: boolean;
 }) {
   return (
     <section className="rounded-lg border border-zinc-800 bg-zinc-950/90 p-5">
@@ -819,13 +838,15 @@ function ReviewPanel({
           href="/staff/tasks?view=my&status=ON_REVIEW"
           tone="cyan"
         />
-        <ReviewRow
-          title="Проверить задачи команды"
-          description="Работы администраторов, которые можно принять или вернуть"
-          count={reviewQueue}
-          href="/staff/tasks?view=approval&status=ON_REVIEW"
-          tone="blue"
-        />
+        {canReviewStaffTasks ? (
+          <ReviewRow
+            title="Проверить задачи команды"
+            description="Работы администраторов, которые можно принять или вернуть"
+            count={reviewQueue}
+            href="/staff/tasks?view=approval&status=ON_REVIEW"
+            tone="blue"
+          />
+        ) : null}
         <ReviewRow
           title="Возвращено на доработку"
           description="Чек-листы с замечаниями"
@@ -833,13 +854,15 @@ function ReviewPanel({
           href="/staff/checklists?status=RETURNED"
           tone="amber"
         />
-        <ReviewRow
-          title="Просроченные проверки"
-          description="Требуют внимания"
-          count={overdueReviews}
-          href="/staff/tasks?view=approval&status=OVERDUE"
-          tone="red"
-        />
+        {canReviewStaffTasks ? (
+          <ReviewRow
+            title="Просроченные проверки"
+            description="Требуют внимания"
+            count={overdueReviews}
+            href="/staff/tasks?view=approval&status=OVERDUE"
+            tone="red"
+          />
+        ) : null}
       </div>
     </section>
   );

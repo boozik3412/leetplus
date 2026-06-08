@@ -164,8 +164,7 @@ export function StaffTaskCreateForm({
   }
 
   return (
-    <form
-      onSubmit={submit}
+    <section
       className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
     >
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -188,9 +187,10 @@ export function StaffTaskCreateForm({
           {isExpanded ? (
             <button
               type="submit"
+              form="staff-task-create-form"
               disabled={isPending}
               aria-expanded={isExpanded}
-              aria-controls="staff-task-create-fields"
+              aria-controls="staff-task-create-form"
               className="inline-flex h-10 items-center justify-center rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isPending ? "Сохраняем..." : "Создать задачу"}
@@ -203,7 +203,7 @@ export function StaffTaskCreateForm({
                 setIsExpanded(true);
               }}
               aria-expanded={isExpanded}
-              aria-controls="staff-task-create-fields"
+              aria-controls="staff-task-create-form"
               className="inline-flex h-10 items-center justify-center rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
             >
               Создать задачу
@@ -212,7 +212,7 @@ export function StaffTaskCreateForm({
         </div>
       </div>
 
-      <div id="staff-task-create-fields" hidden={!isExpanded}>
+      <form id="staff-task-create-form" onSubmit={submit} hidden={!isExpanded}>
         <div className="mt-4 grid gap-3 lg:grid-cols-[1.4fr_1fr_1fr]">
           <label className="space-y-1">
             <span className="text-xs font-bold uppercase text-zinc-500">
@@ -380,7 +380,7 @@ export function StaffTaskCreateForm({
             {error}
           </p>
         ) : null}
-      </div>
-    </form>
+      </form>
+    </section>
   );
 }

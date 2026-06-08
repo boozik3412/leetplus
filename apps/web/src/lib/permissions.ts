@@ -1,4 +1,5 @@
 import type { AuthUser } from "./auth";
+import { isCommunicationChatOnlyRole } from "./landing";
 import { canManageUserAccess } from "./roles";
 
 export type Capability =
@@ -660,6 +661,10 @@ function isShiftWorkspaceRole(user: AuthUser | null) {
   return Boolean(user && shiftWorkspaceRoles.has(user.role));
 }
 
+function isCommunicationChatOnlyUser(user: AuthUser | null) {
+  return Boolean(user && isCommunicationChatOnlyRole(user.role));
+}
+
 function canAccessShiftStaffPath(href: string) {
   const path = href.split("?")[0]?.split("#")[0] ?? href;
 
@@ -756,6 +761,10 @@ export function canAccessPath(user: AuthUser | null, href: string) {
   }
 
   if (href === "/communications" || href.startsWith("/communications/")) {
+    if (isCommunicationChatOnlyUser(user)) {
+      return false;
+    }
+
     return can(user, "view_communications") || can(user, "view_guests");
   }
 
@@ -763,10 +772,15 @@ export function canAccessPath(user: AuthUser | null, href: string) {
     return can(user, "view_guest_gamification");
   }
 
-  if (
-    href.startsWith("/staff/team-chat") ||
-    href.startsWith("/staff/notifications")
-  ) {
+  if (href.startsWith("/staff/team-chat")) {
+    return can(user, "view_communications");
+  }
+
+  if (href.startsWith("/staff/notifications")) {
+    if (isCommunicationChatOnlyUser(user)) {
+      return false;
+    }
+
     return can(user, "view_communications");
   }
 

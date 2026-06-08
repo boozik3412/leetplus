@@ -12,6 +12,12 @@ export function isShiftWorkspaceRole(
   );
 }
 
+export function isCommunicationChatOnlyRole(
+  role: AuthUser["role"] | null | undefined,
+) {
+  return role === "CLUB_ADMINISTRATOR" || role === "TRAINEE";
+}
+
 export function getDefaultLandingPath(user: Pick<AuthUser, "role"> | null) {
   if (isShiftWorkspaceRole(user?.role)) {
     return staffShiftWorkspaceHref;

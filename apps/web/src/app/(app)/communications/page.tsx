@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
+import { isCommunicationChatOnlyRole } from "@/lib/landing";
 import { can } from "@/lib/permissions";
 
 type HubCard = {
@@ -50,6 +51,11 @@ const nextSteps = [
 
 export default async function CommunicationsPage() {
   const user = await requireCurrentUser();
+
+  if (isCommunicationChatOnlyRole(user.role)) {
+    redirect("/staff/team-chat");
+  }
+
   const canViewCommunications = can(user, "view_communications");
   const canViewGuests = can(user, "view_guests");
   const cards = [

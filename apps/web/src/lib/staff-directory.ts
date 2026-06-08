@@ -92,6 +92,10 @@ export type StaffDirectoryReport = {
   legacyMappings: StaffLegacyIdentityMapping[];
 };
 
+export type StaffShiftWorkspaceProfile = {
+  staffMember: StaffDirectoryMember | null;
+};
+
 export async function getStaffDirectoryReport(
   filters: StaffDirectoryFilters = {},
 ): Promise<StaffDirectoryReport> {
@@ -108,6 +112,19 @@ export async function getStaffDirectoryReport(
   }
 
   return response.json() as Promise<StaffDirectoryReport>;
+}
+
+export async function getStaffShiftWorkspaceProfile(): Promise<StaffShiftWorkspaceProfile> {
+  const response = await fetch(`${getApiUrl()}/staff/shift-workspace/profile`, {
+    cache: "no-store",
+    headers: await getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch staff shift workspace profile");
+  }
+
+  return response.json() as Promise<StaffShiftWorkspaceProfile>;
 }
 
 function query(filters: Record<string, string | undefined>) {

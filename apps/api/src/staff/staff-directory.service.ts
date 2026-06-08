@@ -202,6 +202,32 @@ export class StaffDirectoryService {
     };
   }
 
+  async getCurrentMember(user: AuthenticatedUser) {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const rows = await this.prisma.staffMember.findMany({
+      where: {
+        tenantId,
+        OR: [
+          { userId: user.id },
+          { user: { email: user.email } },
+          { email: user.email },
+        ],
+      },
+      include: staffMemberInclude,
+      orderBy: { updatedAt: 'desc' },
+      take: 5,
+    });
+    const row =
+      rows.find((member) => member.userId === user.id) ??
+      rows.find((member) => member.user?.email === user.email) ??
+      rows.find((member) => member.email === user.email) ??
+      null;
+
+    return {
+      staffMember: row ? this.toMemberResponse(row) : null,
+    };
+  }
+
   async createMember(user: AuthenticatedUser, dto: StaffMemberDto) {
     this.assertCanManageDirectory(user);
     const { tenantId } = await this.tenantContextService.resolve(user);

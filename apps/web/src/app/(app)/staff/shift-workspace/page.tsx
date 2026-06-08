@@ -16,9 +16,8 @@ import {
   type StaffChecklistRun,
 } from "@/lib/staff-checklists";
 import {
-  getStaffDirectoryReport,
+  getStaffShiftWorkspaceProfile,
   type StaffDirectoryMember,
-  type StaffDirectoryReport,
 } from "@/lib/staff-directory";
 import {
   getStaffTaskReport,
@@ -93,29 +92,6 @@ const emptyChecklistReport: StaffChecklistReport = {
   checklistTemplates: [],
   stores: [],
   users: [],
-};
-
-const emptyDirectoryReport: StaffDirectoryReport = {
-  filters: {
-    status: "all",
-    role: "all",
-    storeId: null,
-    search: null,
-  },
-  canManageDirectory: false,
-  summary: {
-    total: 0,
-    active: 0,
-    onboarding: 0,
-    suspended: 0,
-    dismissed: 0,
-    linkedAccounts: 0,
-    linkedLangameUsers: 0,
-  },
-  rows: [],
-  stores: [],
-  users: [],
-  legacyMappings: [],
 };
 
 const emptyOperatorReport: StaffOperatorReport = {
@@ -196,18 +172,6 @@ function checklistStatusLabel(status: StaffChecklistRun["status"]) {
   };
 
   return labels[status];
-}
-
-function findCurrentStaffMember(
-  rows: StaffDirectoryMember[],
-  user: { id: string; email: string },
-) {
-  return (
-    rows.find((member) => member.user?.id === user.id) ??
-    rows.find((member) => member.user?.email === user.email) ??
-    rows.find((member) => member.email === user.email) ??
-    null
-  );
 }
 
 function findShiftRow(
@@ -441,21 +405,18 @@ export default async function StaffShiftWorkspacePage() {
     }),
     emptyChecklistReport,
   );
-  const directoryPromise = safeValue(
-    getStaffDirectoryReport({
-      status: "all",
-      search: user.email,
-    }),
-    emptyDirectoryReport,
+  const profilePromise = safeValue(
+    getStaffShiftWorkspaceProfile(),
+    { staffMember: null },
   );
 
-  const [myTasks, reviewTasks, checklists, directory] = await Promise.all([
+  const [myTasks, reviewTasks, checklists, profile] = await Promise.all([
     myTasksPromise,
     reviewTasksPromise,
     checklistsPromise,
-    directoryPromise,
+    profilePromise,
   ]);
-  const staffMember = findCurrentStaffMember(directory.rows, user);
+  const staffMember = profile.staffMember;
   const shiftReport = staffMember?.externalUserId
     ? await safeValue(
         getStaffOperators({
@@ -500,6 +461,19 @@ export default async function StaffShiftWorkspacePage() {
   const isShiftActive = Boolean(currentShift && !currentShift.stoppedAt);
   const hasLangameBinding = Boolean(staffMember?.externalUserId);
   const staffName = staffMember?.displayName ?? user.fullName ?? user.email;
+  const canManageDirectory = can(user, "manage_staff_directory");
+  const headerActionHref = canManageDirectory
+    ? "/staff/directory"
+    : "/staff/tasks?view=my&status=all";
+  const headerActionLabel = canManageDirectory
+    ? "Профиль сотрудника"
+    : "Мои задачи";
+  const profileIssueHref = canManageDirectory
+    ? "/staff/directory"
+    : "/staff/team-chat";
+  const profileIssueAction = canManageDirectory
+    ? "Проверить привязку"
+    : "Написать в чат";
   const shiftStatusLabel = isShiftActive
     ? "Смена активна"
     : currentShift
@@ -526,10 +500,10 @@ export default async function StaffShiftWorkspacePage() {
               </p>
             </div>
             <Link
-              href="/staff/directory"
+              href={headerActionHref}
               className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-700 px-4 text-sm font-semibold text-zinc-100 transition hover:border-emerald-400 hover:text-emerald-200"
             >
-              Профиль сотрудника
+              {headerActionLabel}
             </Link>
           </div>
 
@@ -557,8 +531,8 @@ export default async function StaffShiftWorkspacePage() {
                 ? "Данные по выручке, гостям и окну смены появятся после активной смены в Langame."
                 : "Выручка, гости, бар и окно смены недоступны без привязки сотрудника к Langame user_id."
             }
-            href="/staff/directory"
-            action="Проверить привязку"
+            href={profileIssueHref}
+            action={profileIssueAction}
           />
         ) : null}
 

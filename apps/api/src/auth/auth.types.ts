@@ -9,6 +9,7 @@ export type AuthenticatedUser = {
   role: UserRole;
   customRoleId?: string | null;
   customRoleName?: string | null;
+  hasRoleOverride?: boolean;
   permissions?: AccessCapability[];
   isActive?: boolean;
   isPlatformAdmin: boolean;

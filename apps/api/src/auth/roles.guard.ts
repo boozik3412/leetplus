@@ -26,19 +26,36 @@ export class RolesGuard implements CanActivate {
     }
 
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
-    const role = request.user?.role;
+    const user = request.user;
+    const role = user?.role;
 
     if (role && this.isRestrictedShiftStaffPath(request, role)) {
       throw new ForbiddenException('Insufficient role permissions');
     }
 
-    if (role && allowedRoles.includes(role)) {
+    if (this.isUserAccessPath(request)) {
+      if (
+        role &&
+        allowedRoles.includes(role) &&
+        hasCapability(user, 'manage_users')
+      ) {
+        return true;
+      }
+
+      throw new ForbiddenException('Insufficient role permissions');
+    }
+
+    const mustUseCapabilityDecision = Boolean(
+      user?.customRoleId || user?.hasRoleOverride,
+    );
+
+    if (role && allowedRoles.includes(role) && !mustUseCapabilityDecision) {
       return true;
     }
 
     const capability = this.resolveRequiredCapability(request);
 
-    if (capability && hasCapability(request.user, capability)) {
+    if (capability && hasCapability(user, capability)) {
       return true;
     }
 
@@ -68,6 +85,10 @@ export class RolesGuard implements CanActivate {
 
     if (path.startsWith('/utilities')) {
       return 'use_utilities';
+    }
+
+    if (path.startsWith('/users')) {
+      return 'manage_users';
     }
 
     if (path.startsWith('/reports')) {
@@ -331,5 +352,9 @@ export class RolesGuard implements CanActivate {
     }
 
     return rawPath.startsWith('/') ? rawPath : `/${rawPath}`;
+  }
+
+  private isUserAccessPath(request: AuthenticatedRequest) {
+    return this.normalizePath(request).startsWith('/users');
   }
 }

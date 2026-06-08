@@ -19,6 +19,7 @@ export type AuthUser = {
     | "CLUB_ADMINISTRATOR";
   customRoleId?: string | null;
   customRoleName?: string | null;
+  hasRoleOverride?: boolean;
   permissions?: string[];
   isActive?: boolean;
   isPlatformAdmin: boolean;

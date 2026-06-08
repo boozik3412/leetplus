@@ -492,6 +492,7 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "view_communications",
     "manage_communications",
     ...ownerStaffCapabilities,
+    "manage_users",
     "import_data",
     "use_utilities",
     ...productEditCapabilities,
@@ -734,7 +735,9 @@ export function canAccessPath(user: AuthUser | null, href: string) {
   }
 
   if (href === "/users") {
-    return Boolean(user && canManageUserAccess(user.role));
+    return Boolean(
+      user && canManageUserAccess(user.role) && can(user, "manage_users"),
+    );
   }
 
   if (href === "/communications" || href.startsWith("/communications/")) {

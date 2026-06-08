@@ -84,6 +84,7 @@ export class JwtAuthGuard implements CanActivate {
         role: user.role,
         customRoleId: user.customRole?.id ?? user.customRoleId ?? null,
         customRoleName: user.customRole?.name ?? null,
+        hasRoleOverride: Boolean(roleOverride),
         permissions: resolveUserCapabilities({ ...user, roleOverride }),
         isActive: user.isActive,
         isPlatformAdmin: user.isPlatformAdmin,

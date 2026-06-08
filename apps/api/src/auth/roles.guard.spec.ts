@@ -7,6 +7,8 @@ import { RolesGuard } from './roles.guard';
 type RequestWithUser = {
   user?: {
     role: UserRole;
+    customRoleId?: string | null;
+    hasRoleOverride?: boolean;
     permissions?: string[];
   };
   method?: string;
@@ -73,6 +75,42 @@ describe('RolesGuard', () => {
         }),
       ),
     ).toBe(true);
+  });
+
+  it('does not let a custom role bypass mapped capabilities through @Roles', () => {
+    reflector.getAllAndOverride.mockReturnValue([UserRole.MARKETER]);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/marketing/campaigns',
+          user: {
+            role: UserRole.MARKETER,
+            customRoleId: 'custom-role-1',
+            permissions: ['view_dashboard'],
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('does not let a tenant role override bypass mapped capabilities through @Roles', () => {
+    reflector.getAllAndOverride.mockReturnValue([UserRole.STANDARDS_MANAGER]);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/reports',
+          user: {
+            role: UserRole.STANDARDS_MANAGER,
+            hasRoleOverride: true,
+            permissions: ['view_dashboard'],
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
   });
 
   it('separates marketing view access from marketing write access', () => {
@@ -401,11 +439,37 @@ describe('RolesGuard', () => {
           createContext({
             method: 'GET',
             path: '/users',
-            user: { role },
+            user: {
+              role,
+              permissions: resolveUserCapabilities({ role }),
+            },
           }),
         ),
       ).toBe(true);
     });
+  });
+
+  it('keeps user access routes behind manage_users even for assignable roles', () => {
+    reflector.getAllAndOverride.mockReturnValue([
+      UserRole.OWNER,
+      UserRole.ADMIN,
+      UserRole.MANAGER,
+      UserRole.STANDARDS_MANAGER,
+    ]);
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/users',
+          user: {
+            role: UserRole.MANAGER,
+            hasRoleOverride: true,
+            permissions: ['view_dashboard'],
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
   });
 
   it('does not open user access routes through custom manage_users alone', () => {
@@ -461,6 +525,38 @@ describe('RolesGuard', () => {
             path,
             user: {
               role: UserRole.STANDARDS_MANAGER,
+              permissions,
+            },
+          }),
+        ),
+      ).toBe(true);
+    });
+  });
+
+  it('keeps standards manager baseline staff and communications access after custom role assignment', () => {
+    reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
+    const permissions = resolveUserCapabilities({
+      role: UserRole.STANDARDS_MANAGER,
+      customRole: { permissions: ['view_dashboard'] },
+    });
+    expect(permissions).toContain('manage_users');
+
+    [
+      '/staff/tasks',
+      '/staff/shift-regulations',
+      '/staff/knowledge-base',
+      '/staff/team-chat',
+      '/staff/notifications',
+      '/guests/staff-control',
+    ].forEach((path) => {
+      expect(
+        guard.canActivate(
+          createContext({
+            method: 'GET',
+            path,
+            user: {
+              role: UserRole.STANDARDS_MANAGER,
+              customRoleId: 'custom-role-1',
               permissions,
             },
           }),

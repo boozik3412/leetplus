@@ -11,6 +11,7 @@ import { Prisma, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import {
   accessCapabilityCatalog,
+  hasCapability,
   normalizeCapabilities,
   roleCapabilities,
   resolveUserCapabilities,
@@ -564,6 +565,7 @@ export class UsersService {
     const { tenantId } = await this.tenantContextService.resolve(actor);
     this.assertCanManageUsers(actor);
     const data = this.normalizeAccessRoleDto(dto);
+    this.assertCapabilitiesGrantable(actor, data.permissions);
 
     try {
       const role = await this.prisma.userAccessRole.create({
@@ -588,6 +590,7 @@ export class UsersService {
     this.assertCanManageUsers(actor);
     await this.assertAccessRoleExists(tenantId, id);
     const data = this.normalizeAccessRoleDto(dto);
+    this.assertCapabilitiesGrantable(actor, data.permissions);
 
     try {
       const role = await this.prisma.userAccessRole.update({
@@ -610,6 +613,7 @@ export class UsersService {
     const role = this.parseRole(roleValue);
     this.assertCanManageSystemRoleOverride(actor, role);
     const permissions = normalizeCapabilities(dto.permissions);
+    this.assertCapabilitiesGrantable(actor, permissions);
 
     const override = await this.prisma.userRoleOverride.upsert({
       where: {
@@ -696,6 +700,43 @@ export class UsersService {
 
   private getAssignableRoles(actor: AuthenticatedUser) {
     return assignableRolesByActor[actor.role] ?? [];
+  }
+
+  private assertCapabilitiesGrantable(
+    actor: AuthenticatedUser,
+    permissions: AccessCapability[],
+  ) {
+    if (actor.isPlatformAdmin) {
+      return;
+    }
+
+    const deniedPermissions = permissions.filter(
+      (permission) =>
+        !hasCapability(
+          { permissions: this.getActorGrantableCapabilities(actor) },
+          permission,
+        ),
+    );
+
+    if (deniedPermissions.length > 0) {
+      throw new ForbiddenException(
+        'You cannot grant permissions outside your access scope',
+      );
+    }
+  }
+
+  private getActorGrantableCapabilities(actor: AuthenticatedUser) {
+    const explicitPermissions = normalizeCapabilities(actor.permissions);
+
+    if (
+      explicitPermissions.length > 0 ||
+      actor.customRoleId ||
+      actor.hasRoleOverride
+    ) {
+      return explicitPermissions;
+    }
+
+    return roleCapabilities[actor.role] ?? [];
   }
 
   private parseRole(role: unknown): UserRole {
@@ -946,7 +987,7 @@ export class UsersService {
       label: baseRole.label,
       description: baseRole.description,
       permissions: override
-        ? normalizeCapabilities(override.permissions)
+        ? resolveUserCapabilities({ role, roleOverride: override })
         : baseRole.permissions,
       isOverridden: Boolean(override),
       updatedAt: override?.updatedAt.toISOString() ?? null,

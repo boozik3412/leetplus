@@ -2,13 +2,14 @@ import { redirect } from "next/navigation";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { UserAccountsPanel } from "@/components/user-accounts-panel";
 import { requireCurrentUser } from "@/lib/auth";
+import { can } from "@/lib/permissions";
 import { canManageUserAccess } from "@/lib/roles";
 import { getUserAccounts } from "@/lib/users";
 
 export default async function UsersPage() {
   const user = await requireCurrentUser();
 
-  if (!canManageUserAccess(user.role)) {
+  if (!canManageUserAccess(user.role) || !can(user, "manage_users")) {
     redirect("/dashboard");
   }
 

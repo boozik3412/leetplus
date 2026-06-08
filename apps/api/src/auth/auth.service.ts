@@ -489,6 +489,7 @@ export class AuthService {
       role: user.role,
       customRoleId: user.customRole?.id ?? user.customRoleId ?? null,
       customRoleName: user.customRole?.name ?? null,
+      hasRoleOverride: Boolean(user.roleOverride),
       permissions: resolveUserCapabilities(user),
       isActive: user.isActive,
       isPlatformAdmin: user.isPlatformAdmin,

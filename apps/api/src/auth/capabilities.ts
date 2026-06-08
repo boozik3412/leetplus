@@ -444,6 +444,7 @@ export const roleCapabilities: Record<UserRole, AccessCapability[]> = {
     'view_communications',
     'manage_communications',
     ...ownerStaffCapabilities,
+    'manage_users',
     'import_data',
     'use_utilities',
     ...productEditCapabilities,
@@ -544,7 +545,10 @@ export function resolveUserCapabilities(input: {
   );
 
   if (input.customRole) {
-    return customPermissions;
+    return mergeCapabilities(
+      minimumRoleCapabilities[input.role],
+      customPermissions,
+    );
   }
 
   const roleOverridePermissions = normalizeCapabilities(

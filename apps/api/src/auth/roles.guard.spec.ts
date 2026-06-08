@@ -1,6 +1,7 @@
 import { ExecutionContext, ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { UserRole } from '@prisma/client';
+import { resolveUserCapabilities } from './capabilities';
 import { RolesGuard } from './roles.guard';
 
 type RequestWithUser = {
@@ -421,6 +422,65 @@ describe('RolesGuard', () => {
           user: {
             role: UserRole.CLUB_ADMINISTRATOR,
             permissions: ['manage_users'],
+          },
+        }),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('keeps standards manager baseline staff and communications access after tenant role override', () => {
+    reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
+    const permissions = resolveUserCapabilities({
+      role: UserRole.STANDARDS_MANAGER,
+      roleOverride: { permissions: ['view_dashboard'] },
+    });
+
+    [
+      '/staff',
+      '/staff/tasks',
+      '/staff/shift-regulations',
+      '/staff/checklists',
+      '/staff/training-courses',
+      '/staff/assessments',
+      '/staff/knowledge-base',
+      '/staff/operations-dashboard',
+      '/staff/administrator-ratings',
+      '/staff/discipline',
+      '/staff/directory',
+      '/staff/team-chat',
+      '/staff/notifications',
+      '/guests/staff-control',
+    ].forEach((path) => {
+      expect(
+        guard.canActivate(
+          createContext({
+            method: 'GET',
+            path,
+            user: {
+              role: UserRole.STANDARDS_MANAGER,
+              permissions,
+            },
+          }),
+        ),
+      ).toBe(true);
+    });
+  });
+
+  it('does not grant standards manager commercial report access through baseline permissions', () => {
+    reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
+    const permissions = resolveUserCapabilities({
+      role: UserRole.STANDARDS_MANAGER,
+      roleOverride: { permissions: ['view_dashboard'] },
+    });
+
+    expect(() =>
+      guard.canActivate(
+        createContext({
+          method: 'GET',
+          path: '/reports',
+          user: {
+            role: UserRole.STANDARDS_MANAGER,
+            permissions,
           },
         }),
       ),

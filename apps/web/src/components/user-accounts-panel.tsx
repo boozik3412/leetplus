@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { AuthUser } from "@/lib/auth";
-import type { Capability } from "@/lib/permissions";
+import { canAccessPath, type Capability } from "@/lib/permissions";
 import {
   getAssignableRoles,
   getRoleLabel,
@@ -69,6 +69,12 @@ type PermissionSectionDefinition = {
   title: string;
   description: string;
   permissions: Capability[];
+};
+
+type RoleAccessPreviewRoute = {
+  group: string;
+  href: string;
+  label: string;
 };
 
 const permissionSectionDefinitions: PermissionSectionDefinition[] = [
@@ -166,6 +172,97 @@ const defaultOpenPermissionSections: Record<string, boolean> = {
   overview: true,
   staff: true,
 };
+
+const roleAccessPreviewRoutes: RoleAccessPreviewRoute[] = [
+  { group: "Главная", href: "/dashboard", label: "Сводный дашборд" },
+  { group: "Гости", href: "/guests", label: "Дашборд гостей" },
+  { group: "Гости", href: "/guests/report", label: "Полный отчет" },
+  { group: "Гости", href: "/guests/crm/tasks", label: "CRM-задачи" },
+  { group: "Гости", href: "/guests/gamification", label: "Геймификация" },
+  { group: "Коммуникации", href: "/communications", label: "Обзор" },
+  {
+    group: "Коммуникации",
+    href: "/staff/team-chat",
+    label: "Командный чат",
+  },
+  {
+    group: "Коммуникации",
+    href: "/staff/notifications",
+    label: "Уведомления",
+  },
+  { group: "Персонал", href: "/staff", label: "Обзор персонала" },
+  {
+    group: "Персонал",
+    href: "/staff/shift-workspace",
+    label: "Рабочее место смены",
+  },
+  { group: "Персонал", href: "/staff/tasks", label: "Задачи" },
+  {
+    group: "Персонал",
+    href: "/staff/shift-regulations",
+    label: "Регламенты",
+  },
+  { group: "Персонал", href: "/staff/checklists", label: "Чек-листы" },
+  {
+    group: "Персонал",
+    href: "/staff/training-courses",
+    label: "Обучение",
+  },
+  { group: "Персонал", href: "/staff/assessments", label: "Аттестации" },
+  {
+    group: "Персонал",
+    href: "/staff/knowledge-base",
+    label: "База знаний",
+  },
+  {
+    group: "Персонал",
+    href: "/staff/operations-dashboard",
+    label: "Операционная дисциплина",
+  },
+  {
+    group: "Персонал",
+    href: "/staff/administrator-ratings",
+    label: "Рейтинг администраторов",
+  },
+  { group: "Персонал", href: "/staff/discipline", label: "Штрафы" },
+  { group: "Персонал", href: "/staff/directory", label: "Сотрудники" },
+  { group: "Персонал", href: "/staff/salary", label: "Зарплата" },
+  {
+    group: "Персонал",
+    href: "/guests/staff-control",
+    label: "Смены и администраторы",
+  },
+  { group: "Маркетинг", href: "/marketing", label: "Кампании" },
+  {
+    group: "Маркетинг",
+    href: "/marketing/promo-bundles",
+    label: "Промо-наборы",
+  },
+  {
+    group: "Маркетинг",
+    href: "/marketing/missions",
+    label: "Промо-сценарии",
+  },
+  {
+    group: "Ассортимент",
+    href: "/assortment/dashboard",
+    label: "Дашборд ассортимента",
+  },
+  { group: "Ассортимент", href: "/reports", label: "Отчеты" },
+  { group: "Ассортимент", href: "/products", label: "Товары" },
+  { group: "Ассортимент", href: "/categories", label: "Категории" },
+  { group: "Ассортимент", href: "/stores", label: "Клубы" },
+  { group: "Ассортимент", href: "/utilities", label: "Утилиты" },
+  { group: "Ассортимент", href: "/import", label: "Импорт" },
+  {
+    group: "Управление",
+    href: "/commercial/audit",
+    label: "Коммерческий аудит",
+  },
+  { group: "Управление", href: "/users", label: "Пользователи и роли" },
+  { group: "Управление", href: "/sync", label: "Синхронизация" },
+  { group: "Управление", href: "/settings", label: "Настройки" },
+];
 
 function createEmptyRoleForm(): AccessRoleFormState {
   return {
@@ -376,6 +473,56 @@ export function UserAccountsPanel({
       },
     ];
   }, [initialData]);
+  const rolePreviewUser = useMemo<AuthUser>(
+    () => ({
+      id: "role-preview",
+      email: "role-preview@leetplus.local",
+      fullName: roleForm.name || null,
+      role:
+        roleEditorMode === "system" && selectedSystemRole
+          ? selectedSystemRole
+          : "CLUB_ADMINISTRATOR",
+      customRoleId: roleEditorMode === "custom" ? selectedRoleId : null,
+      customRoleName: roleEditorMode === "custom" ? roleForm.name : null,
+      permissions: roleForm.permissions,
+      isActive: true,
+      isPlatformAdmin: false,
+      tenantId: currentUser.tenantId,
+      tenantSlug: currentUser.tenantSlug,
+    }),
+    [
+      currentUser.tenantId,
+      currentUser.tenantSlug,
+      roleEditorMode,
+      roleForm.name,
+      roleForm.permissions,
+      selectedRoleId,
+      selectedSystemRole,
+    ],
+  );
+  const roleAccessPreview = useMemo(() => {
+    const groups: Array<{ group: string; routes: RoleAccessPreviewRoute[] }> =
+      [];
+
+    roleAccessPreviewRoutes
+      .filter((route) => canAccessPath(rolePreviewUser, route.href))
+      .forEach((route) => {
+        const group = groups.find((item) => item.group === route.group);
+
+        if (group) {
+          group.routes.push(route);
+          return;
+        }
+
+        groups.push({ group: route.group, routes: [route] });
+      });
+
+    return groups;
+  }, [rolePreviewUser]);
+  const roleAccessPreviewCount = roleAccessPreview.reduce(
+    (sum, group) => sum + group.routes.length,
+    0,
+  );
 
   if (
     selectedRoleOption &&
@@ -1336,6 +1483,52 @@ export function UserAccountsPanel({
                 <p className="mt-1 text-sm text-zinc-500">
                   {roleEditorPermissionsHint}
                 </p>
+              </div>
+
+              <div className="mt-3 rounded-md border border-zinc-200 bg-white px-3 py-3 dark:border-zinc-800 dark:bg-zinc-950">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-xs font-bold uppercase text-zinc-500">
+                      Навигация роли
+                    </p>
+                    <p className="mt-1 text-sm text-zinc-500">
+                      Доступные разделы после сохранения текущих галочек.
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-zinc-200/70 px-2.5 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                    {roleAccessPreviewCount} разделов
+                  </span>
+                </div>
+
+                {roleAccessPreview.length > 0 ? (
+                  <div className="mt-3 grid gap-2 md:grid-cols-2">
+                    {roleAccessPreview.map((group) => (
+                      <section
+                        key={group.group}
+                        className="rounded-md border border-zinc-200/80 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/40"
+                      >
+                        <p className="text-[0.68rem] font-bold uppercase text-zinc-500">
+                          {group.group}
+                        </p>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {group.routes.map((route) => (
+                            <span
+                              key={route.href}
+                              title={route.href}
+                              className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200 dark:bg-zinc-950 dark:text-zinc-200 dark:ring-zinc-800"
+                            >
+                              {route.label}
+                            </span>
+                          ))}
+                        </div>
+                      </section>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-3 rounded-md border border-dashed border-zinc-300 px-3 py-2 text-sm text-zinc-500 dark:border-zinc-700">
+                    Рабочие разделы не выбраны.
+                  </p>
+                )}
               </div>
 
               <div className="mt-3 space-y-2">

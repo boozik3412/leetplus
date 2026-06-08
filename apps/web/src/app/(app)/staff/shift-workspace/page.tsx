@@ -370,7 +370,10 @@ function roleWorkspaceName(role: string) {
   return "Домашняя страница смены";
 }
 
-function canReviewStaffTaskQueue(user: { role: string; isPlatformAdmin: boolean }) {
+function canReviewStaffTaskQueue(user: {
+  role: string;
+  isPlatformAdmin: boolean;
+}) {
   return (
     user.isPlatformAdmin ||
     [
@@ -565,6 +568,8 @@ export default async function StaffShiftWorkspacePage() {
             reviewQueue={reviewTasks.summary.onReview}
             returnedChecklists={checklists.summary.returned}
             overdueReviews={reviewTasks.summary.overdue}
+            myOverdueTasks={myTasks.summary.overdue}
+            overdueChecklists={checklists.summary.overdue}
             canReviewStaffTasks={canReviewStaffTasks}
           />
         </section>
@@ -819,17 +824,59 @@ function ReviewPanel({
   reviewQueue,
   returnedChecklists,
   overdueReviews,
+  myOverdueTasks,
+  overdueChecklists,
   canReviewStaffTasks,
 }: {
   myOnReview: number;
   reviewQueue: number;
   returnedChecklists: number;
   overdueReviews: number;
+  myOverdueTasks: number;
+  overdueChecklists: number;
   canReviewStaffTasks: boolean;
 }) {
+  if (!canReviewStaffTasks) {
+    return (
+      <section className="rounded-lg border border-zinc-800 bg-zinc-950/90 p-5">
+        <h2 className="text-xl font-semibold text-white">Мой контроль</h2>
+        <div className="mt-5 space-y-2">
+          <ReviewRow
+            title="Задачи ждут проверки"
+            description="Я выполнил и отправил проверяющему"
+            count={myOnReview}
+            href="/staff/tasks?view=my&status=ON_REVIEW"
+            tone="cyan"
+          />
+          <ReviewRow
+            title="Чек-листы на доработке"
+            description="Вернулись с замечаниями, нужно исправить"
+            count={returnedChecklists}
+            href="/staff/checklists?status=RETURNED"
+            tone="amber"
+          />
+          <ReviewRow
+            title="Просроченные задачи"
+            description="Мои задачи с истекшим сроком"
+            count={myOverdueTasks}
+            href="/staff/tasks?view=my&status=OVERDUE"
+            tone="red"
+          />
+          <ReviewRow
+            title="Просроченные чек-листы"
+            description="Мои чек-листы с истекшим сроком"
+            count={overdueChecklists}
+            href="/staff/checklists?status=OVERDUE"
+            tone="red"
+          />
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="rounded-lg border border-zinc-800 bg-zinc-950/90 p-5">
-      <h2 className="text-xl font-semibold text-white">Что проверить</h2>
+      <h2 className="text-xl font-semibold text-white">Проверка и контроль</h2>
       <div className="mt-5 space-y-2">
         <ReviewRow
           title="Мои задачи на проверке"
@@ -838,15 +885,13 @@ function ReviewPanel({
           href="/staff/tasks?view=my&status=ON_REVIEW"
           tone="cyan"
         />
-        {canReviewStaffTasks ? (
-          <ReviewRow
-            title="Проверить задачи команды"
-            description="Работы администраторов, которые можно принять или вернуть"
-            count={reviewQueue}
-            href="/staff/tasks?view=approval&status=ON_REVIEW"
-            tone="blue"
-          />
-        ) : null}
+        <ReviewRow
+          title="Задачи команды на проверке"
+          description="Работы, которые можно принять или вернуть"
+          count={reviewQueue}
+          href="/staff/tasks?view=approval&status=ON_REVIEW"
+          tone="blue"
+        />
         <ReviewRow
           title="Возвращено на доработку"
           description="Чек-листы с замечаниями"
@@ -854,15 +899,13 @@ function ReviewPanel({
           href="/staff/checklists?status=RETURNED"
           tone="amber"
         />
-        {canReviewStaffTasks ? (
-          <ReviewRow
-            title="Просроченные проверки"
-            description="Требуют внимания"
-            count={overdueReviews}
-            href="/staff/tasks?view=approval&status=OVERDUE"
-            tone="red"
-          />
-        ) : null}
+        <ReviewRow
+          title="Просроченные проверки"
+          description="Работы команды с истекшим сроком"
+          count={overdueReviews}
+          href="/staff/tasks?view=approval&status=OVERDUE"
+          tone="red"
+        />
       </div>
     </section>
   );

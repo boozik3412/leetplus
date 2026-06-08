@@ -38,6 +38,7 @@ const roleOptions: Array<StaffTrainingProfileRole | "all"> = [
   "STANDARDS_MANAGER",
   "SENIOR_ADMINISTRATOR",
   "CLUB_ADMINISTRATOR",
+  "TRAINEE",
 ];
 
 function searchParam(value: string | string[] | undefined) {

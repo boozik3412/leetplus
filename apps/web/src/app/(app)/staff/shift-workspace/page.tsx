@@ -384,7 +384,7 @@ function checklistProgress(run: StaffChecklistRun | null) {
 export default async function StaffShiftWorkspacePage() {
   const user = await requireCurrentUser();
 
-  if (!can(user, "view_staff")) {
+  if (!can(user, "view_staff_shift_workspace")) {
     redirect("/dashboard");
   }
 

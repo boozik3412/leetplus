@@ -1035,7 +1035,7 @@ export class StaffAssessmentsService {
   private visibleRoleScopes(role: UserRole): StaffAssessmentRoleScope[] {
     const scopes: StaffAssessmentRoleScope[] = ['ALL_STAFF'];
 
-    if (role === UserRole.CLUB_ADMINISTRATOR) {
+    if (role === UserRole.CLUB_ADMINISTRATOR || role === UserRole.TRAINEE) {
       scopes.push('ADMINISTRATOR');
     }
 

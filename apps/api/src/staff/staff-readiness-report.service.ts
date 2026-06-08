@@ -37,6 +37,7 @@ const staffRoles = [
   UserRole.STANDARDS_MANAGER,
   UserRole.SENIOR_ADMINISTRATOR,
   UserRole.CLUB_ADMINISTRATOR,
+  UserRole.TRAINEE,
 ] as const;
 
 export type StaffReadinessStatus = 'READY' | 'ATTENTION' | 'BLOCKED';
@@ -581,7 +582,8 @@ export class StaffReadinessReportService {
     if (scope === 'ADMINISTRATOR') {
       return (
         role === UserRole.CLUB_ADMINISTRATOR ||
-        role === UserRole.SENIOR_ADMINISTRATOR
+        role === UserRole.SENIOR_ADMINISTRATOR ||
+        role === UserRole.TRAINEE
       );
     }
 
@@ -626,7 +628,7 @@ export class StaffReadinessReportService {
 
     const scopes: StaffTrainingProfileRoleScope[] = ['ALL_STAFF'];
 
-    if (role === UserRole.CLUB_ADMINISTRATOR) {
+    if (role === UserRole.CLUB_ADMINISTRATOR || role === UserRole.TRAINEE) {
       scopes.push('ADMINISTRATOR');
     }
 

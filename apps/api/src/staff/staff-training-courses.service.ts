@@ -520,7 +520,7 @@ export class StaffTrainingCoursesService {
   private visibleRoleScopes(role: UserRole): StaffTrainingRoleScope[] {
     const scopes: StaffTrainingRoleScope[] = ['ALL_STAFF'];
 
-    if (role === UserRole.CLUB_ADMINISTRATOR) {
+    if (role === UserRole.CLUB_ADMINISTRATOR || role === UserRole.TRAINEE) {
       scopes.push('ADMINISTRATOR');
     }
 

@@ -21,11 +21,18 @@ describe('UsersService role override permissions', () => {
   function createService() {
     const prisma = {
       userRoleOverride: {
-        upsert: jest.fn().mockResolvedValue({
-          role: UserRole.CLUB_ADMINISTRATOR,
-          permissions: ['view_staff_tasks', 'view_staff_standards'],
-          updatedAt,
-        }),
+        upsert: jest
+          .fn()
+          .mockImplementation(
+            (args: {
+              create: { role: UserRole };
+              update: { permissions: string[] };
+            }) => ({
+              role: args.create.role,
+              permissions: args.update.permissions,
+              updatedAt,
+            }),
+          ),
       },
       userAccessRole: {
         create: jest.fn(),
@@ -73,6 +80,67 @@ describe('UsersService role override permissions', () => {
       },
       update: {
         permissions: ['view_staff_tasks', 'view_staff_standards'],
+      },
+      select: {
+        role: true,
+        permissions: true,
+        updatedAt: true,
+      },
+    });
+  });
+
+  it('allows standards manager to save trainee role overrides', async () => {
+    const { prisma, service } = createService();
+
+    await expect(
+      service.updateSystemRole(actor, UserRole.TRAINEE, {
+        permissions: [
+          'view_staff_shift_workspace',
+          'view_staff_tasks',
+          'view_staff_standards',
+          'view_staff_training',
+          'view_staff_knowledge',
+        ],
+      }),
+    ).resolves.toMatchObject({
+      role: UserRole.TRAINEE,
+      permissions: [
+        'view_staff_shift_workspace',
+        'view_staff_tasks',
+        'view_staff_standards',
+        'view_staff_training',
+        'view_staff_knowledge',
+      ],
+      isOverridden: true,
+      updatedAt: updatedAt.toISOString(),
+    });
+
+    expect(prisma.userRoleOverride.upsert).toHaveBeenCalledWith({
+      where: {
+        tenantId_role: {
+          tenantId,
+          role: UserRole.TRAINEE,
+        },
+      },
+      create: {
+        tenantId,
+        role: UserRole.TRAINEE,
+        permissions: [
+          'view_staff_shift_workspace',
+          'view_staff_tasks',
+          'view_staff_standards',
+          'view_staff_training',
+          'view_staff_knowledge',
+        ],
+      },
+      update: {
+        permissions: [
+          'view_staff_shift_workspace',
+          'view_staff_tasks',
+          'view_staff_standards',
+          'view_staff_training',
+          'view_staff_knowledge',
+        ],
       },
       select: {
         role: true,

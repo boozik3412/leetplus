@@ -17,6 +17,7 @@ enum UserRole {
   STANDARDS_MANAGER
   SENIOR_ADMINISTRATOR
   CLUB_ADMINISTRATOR
+  TRAINEE
 }
 
 enum StockMovementType {

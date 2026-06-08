@@ -842,6 +842,7 @@ export class StaffShiftRegulationsService {
           UserRole.STANDARDS_MANAGER,
           UserRole.SENIOR_ADMINISTRATOR,
           UserRole.CLUB_ADMINISTRATOR,
+          UserRole.TRAINEE,
         ] as UserRole[]
       ).includes(role);
     }
@@ -861,7 +862,11 @@ export class StaffShiftRegulationsService {
     }
 
     return (
-      [UserRole.SENIOR_ADMINISTRATOR, UserRole.CLUB_ADMINISTRATOR] as UserRole[]
+      [
+        UserRole.SENIOR_ADMINISTRATOR,
+        UserRole.CLUB_ADMINISTRATOR,
+        UserRole.TRAINEE,
+      ] as UserRole[]
     ).includes(role);
   }
 

@@ -12,6 +12,7 @@ export const roleLabels: Record<UserRole, string> = {
   STANDARDS_MANAGER: "Менеджер по стандартам",
   SENIOR_ADMINISTRATOR: "Старший администратор",
   CLUB_ADMINISTRATOR: "Администратор клуба",
+  TRAINEE: "Стажер",
 };
 
 export const roleDescriptions: Record<UserRole, string> = {
@@ -27,6 +28,8 @@ export const roleDescriptions: Record<UserRole, string> = {
     "Задачи персонала, чеклисты смены и контроль выполнения.",
   CLUB_ADMINISTRATOR:
     "Сменные задачи и чеклисты без лишних управленческих данных.",
+  TRAINEE:
+    "Рабочее место смены, обучение, база знаний и просмотр сменных материалов без управленческих действий с задачами и стандартами.",
 };
 
 export const roleOrder: UserRole[] = [
@@ -39,6 +42,7 @@ export const roleOrder: UserRole[] = [
   "BUYER",
   "SENIOR_ADMINISTRATOR",
   "CLUB_ADMINISTRATOR",
+  "TRAINEE",
 ];
 
 const userAccessManagerRoles: UserRole[] = [
@@ -69,6 +73,7 @@ export function getAssignableRoles(actorRole: UserRole) {
       "BUYER",
       "SENIOR_ADMINISTRATOR",
       "CLUB_ADMINISTRATOR",
+      "TRAINEE",
     ] satisfies UserRole[];
   }
 
@@ -77,6 +82,7 @@ export function getAssignableRoles(actorRole: UserRole) {
       "CLUB_MANAGER",
       "SENIOR_ADMINISTRATOR",
       "CLUB_ADMINISTRATOR",
+      "TRAINEE",
     ] satisfies UserRole[];
   }
 

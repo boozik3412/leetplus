@@ -365,6 +365,15 @@ const shiftStaffCapabilities: AccessCapability[] = [
   'manage_staff_training',
 ];
 
+const traineeStaffCapabilities: AccessCapability[] = [
+  'view_staff_shift_workspace',
+  'view_staff_tasks',
+  'view_staff_standards',
+  'view_staff_training',
+  'view_staff_knowledge',
+  'manage_staff_training',
+];
+
 const standardsManagerStaffCapabilities: AccessCapability[] = [
   'view_staff',
   'view_staff_tasks',
@@ -504,6 +513,11 @@ export const roleCapabilities: Record<UserRole, AccessCapability[]> = {
     'view_communications',
     'manage_communications',
     ...shiftStaffCapabilities,
+  ],
+  [UserRole.TRAINEE]: [
+    'view_communications',
+    'manage_communications',
+    ...traineeStaffCapabilities,
   ],
 };
 

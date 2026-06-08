@@ -46,7 +46,9 @@ export class RolesGuard implements CanActivate {
     }
 
     const mustUseCapabilityDecision = Boolean(
-      user?.customRoleId || user?.hasRoleOverride,
+      user?.customRoleId ||
+      user?.hasRoleOverride ||
+      user?.role === UserRole.TRAINEE,
     );
 
     if (role && allowedRoles.includes(role) && !mustUseCapabilityDecision) {
@@ -293,7 +295,8 @@ export class RolesGuard implements CanActivate {
   ) {
     if (
       role !== UserRole.SENIOR_ADMINISTRATOR &&
-      role !== UserRole.CLUB_ADMINISTRATOR
+      role !== UserRole.CLUB_ADMINISTRATOR &&
+      role !== UserRole.TRAINEE
     ) {
       return false;
     }

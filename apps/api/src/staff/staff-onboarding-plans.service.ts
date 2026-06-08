@@ -672,7 +672,7 @@ export class StaffOnboardingPlansService {
   private visibleRoleScopes(role: UserRole): StaffOnboardingRoleScope[] {
     const scopes: StaffOnboardingRoleScope[] = ['ALL_STAFF'];
 
-    if (role === UserRole.CLUB_ADMINISTRATOR) {
+    if (role === UserRole.CLUB_ADMINISTRATOR || role === UserRole.TRAINEE) {
       scopes.push('ADMINISTRATOR');
     }
 

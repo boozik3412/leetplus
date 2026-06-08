@@ -413,6 +413,15 @@ const shiftStaffCapabilities: Capability[] = [
   "manage_staff_training",
 ];
 
+const traineeStaffCapabilities: Capability[] = [
+  "view_staff_shift_workspace",
+  "view_staff_tasks",
+  "view_staff_standards",
+  "view_staff_training",
+  "view_staff_knowledge",
+  "manage_staff_training",
+];
+
 const standardsManagerStaffCapabilities: Capability[] = [
   "view_staff",
   "view_staff_tasks",
@@ -553,6 +562,11 @@ const roleCapabilities: Record<AuthUser["role"], Capability[]> = {
     "manage_communications",
     ...shiftStaffCapabilities,
   ],
+  TRAINEE: [
+    "view_communications",
+    "manage_communications",
+    ...traineeStaffCapabilities,
+  ],
 };
 
 const minimumRoleCapabilities: Partial<Record<AuthUser["role"], Capability[]>> = {
@@ -570,6 +584,7 @@ function mergeCapabilities(
 const shiftWorkspaceRoles = new Set<AuthUser["role"]>([
   "SENIOR_ADMINISTRATOR",
   "CLUB_ADMINISTRATOR",
+  "TRAINEE",
 ]);
 
 const shiftStaffAllowedPrefixes = [

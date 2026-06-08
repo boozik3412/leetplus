@@ -38,6 +38,7 @@ const staffRoles = [
   UserRole.STANDARDS_MANAGER,
   UserRole.SENIOR_ADMINISTRATOR,
   UserRole.CLUB_ADMINISTRATOR,
+  UserRole.TRAINEE,
 ] as const;
 
 export type StaffTrainingProgressStatus = (typeof progressStatuses)[number];
@@ -825,6 +826,7 @@ export class StaffTrainingProfilesService {
       STANDARDS_MANAGER: 'Менеджер по стандартам',
       SENIOR_ADMINISTRATOR: 'Старший администратор',
       CLUB_ADMINISTRATOR: 'Администратор клуба',
+      TRAINEE: 'Стажер',
     };
 
     return labels[role] ?? role;
@@ -958,7 +960,8 @@ export class StaffTrainingProfilesService {
     if (scope === 'ADMINISTRATOR') {
       return (
         role === UserRole.CLUB_ADMINISTRATOR ||
-        role === UserRole.SENIOR_ADMINISTRATOR
+        role === UserRole.SENIOR_ADMINISTRATOR ||
+        role === UserRole.TRAINEE
       );
     }
 
@@ -1000,7 +1003,7 @@ export class StaffTrainingProfilesService {
 
     const scopes: StaffTrainingProfileRoleScope[] = ['ALL_STAFF'];
 
-    if (role === UserRole.CLUB_ADMINISTRATOR) {
+    if (role === UserRole.CLUB_ADMINISTRATOR || role === UserRole.TRAINEE) {
       scopes.push('ADMINISTRATOR');
     }
 

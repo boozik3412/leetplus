@@ -32,6 +32,7 @@ const assignableRolesByActor: Record<UserRole, UserRole[]> = {
     UserRole.STANDARDS_MANAGER,
     UserRole.SENIOR_ADMINISTRATOR,
     UserRole.CLUB_ADMINISTRATOR,
+    UserRole.TRAINEE,
   ],
   [UserRole.ADMIN]: [
     UserRole.OWNER,
@@ -43,6 +44,7 @@ const assignableRolesByActor: Record<UserRole, UserRole[]> = {
     UserRole.STANDARDS_MANAGER,
     UserRole.SENIOR_ADMINISTRATOR,
     UserRole.CLUB_ADMINISTRATOR,
+    UserRole.TRAINEE,
   ],
   [UserRole.MANAGER]: [
     UserRole.CLUB_MANAGER,
@@ -51,6 +53,7 @@ const assignableRolesByActor: Record<UserRole, UserRole[]> = {
     UserRole.BUYER,
     UserRole.SENIOR_ADMINISTRATOR,
     UserRole.CLUB_ADMINISTRATOR,
+    UserRole.TRAINEE,
   ],
   [UserRole.BUYER]: [],
   [UserRole.MARKETER]: [],
@@ -59,9 +62,11 @@ const assignableRolesByActor: Record<UserRole, UserRole[]> = {
     UserRole.CLUB_MANAGER,
     UserRole.SENIOR_ADMINISTRATOR,
     UserRole.CLUB_ADMINISTRATOR,
+    UserRole.TRAINEE,
   ],
   [UserRole.SENIOR_ADMINISTRATOR]: [],
   [UserRole.CLUB_ADMINISTRATOR]: [],
+  [UserRole.TRAINEE]: [],
 };
 
 const baseRoleOptions = [
@@ -120,6 +125,13 @@ const baseRoleOptions = [
     label: 'Администратор клуба',
     description: 'Сменные задачи и чеклисты без лишних управленческих данных.',
     permissions: roleCapabilities[UserRole.CLUB_ADMINISTRATOR],
+  },
+  {
+    role: UserRole.TRAINEE,
+    label: 'Стажер',
+    description:
+      'Рабочее место смены, обучение, база знаний и просмотр сменных материалов без управленческих действий с задачами и стандартами.',
+    permissions: roleCapabilities[UserRole.TRAINEE],
   },
 ] satisfies Array<{
   role: UserRole;

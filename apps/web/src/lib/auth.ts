@@ -16,7 +16,8 @@ export type AuthUser = {
     | "CLUB_MANAGER"
     | "STANDARDS_MANAGER"
     | "SENIOR_ADMINISTRATOR"
-    | "CLUB_ADMINISTRATOR";
+    | "CLUB_ADMINISTRATOR"
+    | "TRAINEE";
   customRoleId?: string | null;
   customRoleName?: string | null;
   hasRoleOverride?: boolean;

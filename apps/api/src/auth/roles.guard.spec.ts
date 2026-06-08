@@ -318,6 +318,65 @@ describe('RolesGuard', () => {
     ).toBe(true);
   });
 
+  it('limits trainee staff access to shift workspace and learning sections', () => {
+    reflector.getAllAndOverride.mockReturnValue([UserRole.TRAINEE]);
+    const permissions = resolveUserCapabilities({ role: UserRole.TRAINEE });
+
+    expect(permissions).toContain('view_staff_shift_workspace');
+    expect(permissions).toContain('view_staff_tasks');
+    expect(permissions).toContain('view_staff_standards');
+    expect(permissions).toContain('view_staff_training');
+    expect(permissions).toContain('view_staff_knowledge');
+    expect(permissions).not.toContain('view_staff');
+    expect(permissions).not.toContain('manage_staff_tasks');
+    expect(permissions).not.toContain('manage_staff_standards');
+
+    [
+      '/staff/shift-workspace',
+      '/staff/tasks',
+      '/staff/shift-regulations',
+      '/staff/checklists',
+      '/staff/training-courses',
+      '/staff/assessments',
+      '/staff/knowledge-base',
+      '/staff/team-chat',
+      '/staff/notifications',
+    ].forEach((path) => {
+      expect(
+        guard.canActivate(
+          createContext({
+            method: 'GET',
+            path,
+            user: {
+              role: UserRole.TRAINEE,
+              permissions,
+            },
+          }),
+        ),
+      ).toBe(true);
+    });
+
+    [
+      { method: 'GET', path: '/staff' },
+      { method: 'GET', path: '/staff/task-templates' },
+      { method: 'POST', path: '/staff/tasks' },
+      { method: 'POST', path: '/staff/shift-regulations' },
+    ].forEach(({ method, path }) => {
+      expect(() =>
+        guard.canActivate(
+          createContext({
+            method,
+            path,
+            user: {
+              role: UserRole.TRAINEE,
+              permissions,
+            },
+          }),
+        ),
+      ).toThrow(ForbiddenException);
+    });
+  });
+
   it('maps assortment routes to granular report capabilities', () => {
     reflector.getAllAndOverride.mockReturnValue([UserRole.OWNER]);
 

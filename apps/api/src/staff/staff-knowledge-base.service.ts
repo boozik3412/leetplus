@@ -2400,6 +2400,7 @@ export class StaffKnowledgeBaseService {
           UserRole.STANDARDS_MANAGER,
           UserRole.SENIOR_ADMINISTRATOR,
           UserRole.CLUB_ADMINISTRATOR,
+          UserRole.TRAINEE,
         ] as UserRole[]
       ).includes(role);
     }
@@ -2429,14 +2430,18 @@ export class StaffKnowledgeBaseService {
     }
 
     return (
-      [UserRole.SENIOR_ADMINISTRATOR, UserRole.CLUB_ADMINISTRATOR] as UserRole[]
+      [
+        UserRole.SENIOR_ADMINISTRATOR,
+        UserRole.CLUB_ADMINISTRATOR,
+        UserRole.TRAINEE,
+      ] as UserRole[]
     ).includes(role);
   }
 
   private visibleRoleScopes(role: UserRole): StaffKnowledgeRoleScope[] {
     const scopes: StaffKnowledgeRoleScope[] = ['ALL_STAFF'];
 
-    if (role === UserRole.CLUB_ADMINISTRATOR) {
+    if (role === UserRole.CLUB_ADMINISTRATOR || role === UserRole.TRAINEE) {
       scopes.push('ADMINISTRATOR');
     }
 

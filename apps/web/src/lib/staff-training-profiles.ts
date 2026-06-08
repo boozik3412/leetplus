@@ -14,7 +14,8 @@ export type StaffTrainingProfileRole =
   | "CLUB_MANAGER"
   | "STANDARDS_MANAGER"
   | "SENIOR_ADMINISTRATOR"
-  | "CLUB_ADMINISTRATOR";
+  | "CLUB_ADMINISTRATOR"
+  | "TRAINEE";
 
 export type StaffTrainingProfileStatusFilter =
   | "all"

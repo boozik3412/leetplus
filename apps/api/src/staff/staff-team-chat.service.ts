@@ -1049,6 +1049,7 @@ export class StaffTeamChatService {
         [
           UserRole.SENIOR_ADMINISTRATOR,
           UserRole.CLUB_ADMINISTRATOR,
+          UserRole.TRAINEE,
         ] as UserRole[]
       ).includes(role)
     ) {

@@ -663,7 +663,8 @@ export class UsersService {
       actor.isPlatformAdmin ||
       actor.role === UserRole.OWNER ||
       actor.role === UserRole.ADMIN ||
-      (actor.role === UserRole.MANAGER &&
+      ((actor.role === UserRole.MANAGER ||
+        actor.role === UserRole.STANDARDS_MANAGER) &&
         this.getAssignableRoles(actor).includes(role))
     ) {
       return;

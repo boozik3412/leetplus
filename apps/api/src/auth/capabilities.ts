@@ -491,6 +491,7 @@ export const roleCapabilities: Record<UserRole, AccessCapability[]> = {
     'view_dashboard',
     'view_communications',
     'manage_communications',
+    'manage_users',
     ...standardsManagerStaffCapabilities,
   ],
   [UserRole.SENIOR_ADMINISTRATOR]: [

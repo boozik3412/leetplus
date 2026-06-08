@@ -387,7 +387,7 @@ describe('RolesGuard', () => {
     ).toThrow(ForbiddenException);
   });
 
-  it('allows managers when user access route metadata includes them', () => {
+  it('allows user access managers when route metadata includes them', () => {
     reflector.getAllAndOverride.mockReturnValue([
       UserRole.OWNER,
       UserRole.ADMIN,
@@ -395,15 +395,17 @@ describe('RolesGuard', () => {
       UserRole.STANDARDS_MANAGER,
     ]);
 
-    expect(
-      guard.canActivate(
-        createContext({
-          method: 'GET',
-          path: '/users',
-          user: { role: UserRole.MANAGER },
-        }),
-      ),
-    ).toBe(true);
+    [UserRole.MANAGER, UserRole.STANDARDS_MANAGER].forEach((role) => {
+      expect(
+        guard.canActivate(
+          createContext({
+            method: 'GET',
+            path: '/users',
+            user: { role },
+          }),
+        ),
+      ).toBe(true);
+    });
   });
 
   it('does not open user access routes through custom manage_users alone', () => {
@@ -434,6 +436,7 @@ describe('RolesGuard', () => {
       role: UserRole.STANDARDS_MANAGER,
       roleOverride: { permissions: ['view_dashboard'] },
     });
+    expect(permissions).toContain('manage_users');
 
     [
       '/staff',

@@ -17,6 +17,10 @@ import {
   type StaffExportCell,
   type StaffExportFile,
 } from './staff-export';
+import {
+  StaffTeamChatService,
+  type StaffChatSystemNotificationDto,
+} from './staff-team-chat.service';
 
 const taskStatuses = [
   'OPEN',
@@ -314,6 +318,7 @@ export class StaffTasksService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
+    private readonly staffTeamChatService: StaffTeamChatService,
   ) {}
 
   async getTasks(
@@ -484,7 +489,14 @@ export class StaffTasksService {
 
       await this.syncTaskObservers(tx, tenantId, created.id, observerUserIds);
 
-      return this.fetchTaskOrThrow(tx, tenantId, created.id);
+      const task = await this.fetchTaskOrThrow(tx, tenantId, created.id);
+      await this.staffTeamChatService.createSystemNotification(
+        tenantId,
+        this.buildTaskCreatedNotification(task),
+        tx,
+      );
+
+      return task;
     });
 
     return this.toTaskResponse(task);
@@ -570,7 +582,21 @@ export class StaffTasksService {
         },
       });
 
-      return this.fetchTaskOrThrow(tx, tenantId, current.id);
+      const task = await this.fetchTaskOrThrow(tx, tenantId, current.id);
+
+      if (normalizedStatus) {
+        await this.staffTeamChatService.createSystemNotification(
+          tenantId,
+          this.buildTaskStatusNotification(
+            task,
+            currentStatus,
+            normalizedStatus,
+          ),
+          tx,
+        );
+      }
+
+      return task;
     });
 
     return this.toTaskResponse(task);
@@ -671,7 +697,21 @@ export class StaffTasksService {
         });
       }
 
-      return this.fetchTaskOrThrow(tx, tenantId, current.id);
+      const task = await this.fetchTaskOrThrow(tx, tenantId, current.id);
+
+      if (statusChange) {
+        await this.staffTeamChatService.createSystemNotification(
+          tenantId,
+          this.buildTaskStatusNotification(
+            task,
+            current.status as StaffTaskStatus,
+            statusChange,
+          ),
+          tx,
+        );
+      }
+
+      return task;
     });
 
     return this.toTaskResponse(task);
@@ -1557,6 +1597,79 @@ export class StaffTasksService {
       })),
       skipDuplicates: true,
     });
+  }
+
+  private buildTaskCreatedNotification(
+    task: StaffTaskRow,
+  ): StaffChatSystemNotificationDto {
+    return {
+      title: `Назначена задача: ${task.title}`,
+      message: this.buildTaskNotificationDetails(task),
+      storeId: task.storeId,
+      severity: this.taskNotificationSeverity(
+        task.priority as StaffTaskPriority,
+      ),
+      actionLabel: 'Открыть задачу',
+      actionHref: `/staff/tasks?taskId=${encodeURIComponent(task.id)}`,
+    };
+  }
+
+  private buildTaskStatusNotification(
+    task: StaffTaskRow,
+    fromStatus: StaffTaskStatus,
+    toStatus: StaffTaskStatus,
+  ): StaffChatSystemNotificationDto {
+    const titleByStatus: Record<StaffTaskStatus, string> = {
+      OPEN: 'Задача возвращена в новые',
+      IN_PROGRESS:
+        fromStatus === 'ON_REVIEW'
+          ? 'Задача возвращена в работу'
+          : 'Задача взята в работу',
+      ON_REVIEW: 'Задача отправлена на проверку',
+      DONE: 'Задача закрыта',
+      CANCELED: 'Задача отменена',
+    };
+
+    return {
+      title: `${titleByStatus[toStatus]}: ${task.title}`,
+      message: [
+        `Статус: ${this.taskStatusLabel(fromStatus)} -> ${this.taskStatusLabel(toStatus)}`,
+        this.buildTaskNotificationDetails(task),
+      ].join('\n'),
+      storeId: task.storeId,
+      severity:
+        toStatus === 'DONE' || toStatus === 'ON_REVIEW'
+          ? 'INFO'
+          : toStatus === 'CANCELED'
+            ? 'WARNING'
+            : this.taskNotificationSeverity(task.priority as StaffTaskPriority),
+      actionLabel: 'Открыть задачу',
+      actionHref: `/staff/tasks?taskId=${encodeURIComponent(task.id)}`,
+    };
+  }
+
+  private buildTaskNotificationDetails(task: StaffTaskRow) {
+    return [
+      task.store ? `Клуб: ${task.store.name}` : 'Клуб: вся сеть',
+      `Ответственный: ${staffUserLabel(task.assignedToUser) ?? 'Не назначен'}`,
+      task.dueAt ? `Срок: ${formatStaffDateTime(task.dueAt)}` : null,
+      `Приоритет: ${this.taskPriorityLabel(task.priority as StaffTaskPriority)}`,
+      `Тип: ${this.taskTypeLabel(task.type as StaffTaskType)}`,
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  private taskNotificationSeverity(priority: StaffTaskPriority) {
+    if (priority === 'URGENT') {
+      return 'CRITICAL';
+    }
+
+    if (priority === 'HIGH') {
+      return 'WARNING';
+    }
+
+    return 'INFO';
   }
 
   private toTaskResponse(task: StaffTaskRow): StaffTaskResponse {

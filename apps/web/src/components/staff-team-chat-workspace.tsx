@@ -106,9 +106,14 @@ const emptyChannelForm: ChannelFormState = {
 };
 
 const TEAM_CHAT_LIVE_REFRESH_MS = 12_000;
+const SYSTEM_NOTIFICATION_CHANNEL_NAME = "Уведомления";
 
 function getChannelReadSnapshot(channel: StaffChatChannel) {
   return `${channel.messagesCount}:${channel.lastMessageAt ?? ""}`;
+}
+
+function isSystemNotificationChannel(channel: StaffChatChannel | null) {
+  return channel?.name === SYSTEM_NOTIFICATION_CHANNEL_NAME;
 }
 
 function getLiveChannelSignature(
@@ -194,6 +199,7 @@ export function StaffTeamChatWorkspace({
       null
     );
   }, [selectedChannelId, report.channels]);
+  const activeChannelIsSystem = isSystemNotificationChannel(activeChannel);
   const activeUnreadSignature = useMemo(() => {
     if (!activeChannel) {
       return null;
@@ -448,6 +454,11 @@ export function StaffTeamChatWorkspace({
 
     if (!activeChannel) {
       setError("Сначала нужен канал для сообщения.");
+      return;
+    }
+
+    if (activeChannelIsSystem) {
+      setError("В канал уведомлений сообщения добавляются автоматически.");
       return;
     }
 
@@ -1030,6 +1041,7 @@ export function StaffTeamChatWorkspace({
                   onCancelTaskDraft={() => setTaskDraft(null)}
                   onTaskDraftChange={setTaskDraft}
                   onCreateTask={createTaskFromMessage}
+                  allowTaskDraft={!activeChannelIsSystem}
                   forceRead={
                     activeChannelLocallyRead &&
                     message.channelId === activeChannel?.id
@@ -1053,6 +1065,7 @@ export function StaffTeamChatWorkspace({
               onCancelTaskDraft={() => setTaskDraft(null)}
               onTaskDraftChange={setTaskDraft}
               onCreateTask={createTaskFromMessage}
+              allowTaskDraft={!activeChannelIsSystem}
               forceRead={
                 activeChannelLocallyRead &&
                 message.channelId === activeChannel?.id
@@ -1062,12 +1075,18 @@ export function StaffTeamChatWorkspace({
 
           {report.messages.length === 0 ? (
             <div className="px-4 py-8 text-sm text-zinc-500 dark:text-zinc-400 sm:px-5">
-              В этом канале пока нет сообщений. Напишите первое объявление,
-              сменный комментарий или инцидент.
+              {activeChannelIsSystem
+                ? "В этом канале пока нет уведомлений. Они появятся автоматически при назначении задач, курсов, изменении регламентов и других событиях."
+                : "В этом канале пока нет сообщений. Напишите первое объявление, сменный комментарий или инцидент."}
             </div>
           ) : null}
         </div>
 
+        {activeChannelIsSystem ? (
+          <div className="shrink-0 border-t border-zinc-200/60 px-4 py-3 text-sm text-zinc-500 dark:border-zinc-800/60 dark:text-zinc-400 sm:px-5">
+            Канал заполняется автоматически системными событиями LeetPlus.
+          </div>
+        ) : (
         <div className="shrink-0 border-t border-zinc-200/60 bg-transparent p-3 dark:border-zinc-800/60 sm:p-4">
           <div className="rounded-[24px] bg-zinc-100/90 shadow-sm ring-1 ring-zinc-200/70 dark:bg-zinc-900/70 dark:ring-zinc-800/70">
             {pendingAttachments.length > 0 ? (
@@ -1204,6 +1223,7 @@ export function StaffTeamChatWorkspace({
             </div>
           </div>
         </div>
+        )}
         </section>
       ) : null}
     </div>
@@ -1286,6 +1306,7 @@ function MessageCard({
   onCancelTaskDraft,
   onTaskDraftChange,
   onCreateTask,
+  allowTaskDraft = true,
   forceRead = false,
 }: {
   message: StaffChatMessage;
@@ -1298,6 +1319,7 @@ function MessageCard({
   onCancelTaskDraft: () => void;
   onTaskDraftChange: (draft: TaskDraftState) => void;
   onCreateTask: (message: StaffChatMessage) => void;
+  allowTaskDraft?: boolean;
   forceRead?: boolean;
 }) {
   const isTaskDraftOpen = taskDraft?.messageId === message.id && !compact;
@@ -1327,7 +1349,7 @@ function MessageCard({
             <p className="text-sm font-semibold">
               {message.authorUser?.fullName ??
                 message.authorUser?.email ??
-                "Сотрудник"}
+                "LeetPlus"}
             </p>
             <Badge>{kindLabels[message.kind]}</Badge>
             {message.priority !== "NORMAL" ? (
@@ -1347,7 +1369,7 @@ function MessageCard({
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          {!compact ? (
+          {!compact && allowTaskDraft ? (
             <button
               type="button"
               onClick={() => onOpenTaskDraft(message)}

@@ -7,6 +7,10 @@ import { Prisma, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import {
+  StaffTeamChatService,
+  type StaffChatSystemNotificationDto,
+} from './staff-team-chat.service';
 
 const courseStatuses = ['DRAFT', 'ACTIVE', 'ARCHIVED'] as const;
 const roleScopes = [
@@ -113,6 +117,7 @@ export class StaffTrainingCoursesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
+    private readonly staffTeamChatService: StaffTeamChatService,
   ) {}
 
   async getCourses(
@@ -197,6 +202,13 @@ export class StaffTrainingCoursesService {
       include: courseInclude,
     });
 
+    if (created.status === 'ACTIVE') {
+      await this.staffTeamChatService.createSystemNotification(
+        tenantId,
+        this.buildCourseNotification(created, 'created'),
+      );
+    }
+
     return this.toCourseResponse(created);
   }
 
@@ -213,7 +225,14 @@ export class StaffTrainingCoursesService {
 
     const current = await this.prisma.staffTrainingCourse.findFirst({
       where: { id, tenantId },
-      select: { id: true },
+      select: {
+        id: true,
+        title: true,
+        status: true,
+        required: true,
+        roleScope: true,
+        storeId: true,
+      },
     });
 
     if (!current) {
@@ -229,7 +248,90 @@ export class StaffTrainingCoursesService {
       include: courseInclude,
     });
 
+    if (this.shouldNotifyCourseUpdate(current, updated, normalized.data)) {
+      await this.staffTeamChatService.createSystemNotification(
+        tenantId,
+        this.buildCourseNotification(updated, 'updated'),
+      );
+    }
+
     return this.toCourseResponse(updated);
+  }
+
+  private shouldNotifyCourseUpdate(
+    current: {
+      status: string;
+      required: boolean;
+      roleScope: string;
+      storeId: string | null;
+    },
+    updated: StaffTrainingCourseRow,
+    data: Prisma.StaffTrainingCourseUncheckedUpdateInput,
+  ) {
+    if (updated.status !== 'ACTIVE') {
+      return false;
+    }
+
+    return (
+      current.status !== updated.status ||
+      current.required !== updated.required ||
+      current.roleScope !== updated.roleScope ||
+      current.storeId !== updated.storeId ||
+      data.title !== undefined ||
+      data.description !== undefined ||
+      data.steps !== undefined ||
+      data.dueDays !== undefined
+    );
+  }
+
+  private buildCourseNotification(
+    course: StaffTrainingCourseRow,
+    event: 'created' | 'updated',
+  ): StaffChatSystemNotificationDto {
+    const prefix =
+      event === 'created'
+        ? course.required
+          ? 'Назначен обязательный курс'
+          : 'Новый курс доступен'
+        : course.required
+          ? 'Обязательный курс обновлен'
+          : 'Курс обновлен';
+
+    return {
+      title: `${prefix}: ${course.title}`,
+      message: [
+        course.store ? `Клуб: ${course.store.name}` : 'Клуб: вся сеть',
+        `Кому: ${this.trainingRoleScopeLabel(
+          course.roleScope as StaffTrainingRoleScope,
+        )}`,
+        `Обязательный: ${course.required ? 'да' : 'нет'}`,
+        course.dueDays !== null
+          ? `Срок прохождения: ${course.dueDays} дн.`
+          : null,
+        `Шагов: ${course.stepsCount}`,
+      ]
+        .filter(Boolean)
+        .join('\n'),
+      storeId: course.storeId,
+      severity: course.required ? 'WARNING' : 'INFO',
+      actionLabel: 'Открыть курсы',
+      actionHref: `/staff/training-courses?search=${encodeURIComponent(
+        course.title,
+      )}`,
+    };
+  }
+
+  private trainingRoleScopeLabel(roleScope: StaffTrainingRoleScope) {
+    const labels: Record<StaffTrainingRoleScope, string> = {
+      ALL_STAFF: 'весь персонал',
+      ADMINISTRATOR: 'администраторы и стажеры',
+      SENIOR_ADMINISTRATOR: 'старшие администраторы',
+      CLUB_MANAGER: 'управляющие клубом',
+      MANAGER: 'управляющие сети',
+      STANDARDS_MANAGER: 'менеджеры по стандартам',
+    };
+
+    return labels[roleScope];
   }
 
   private resolveFilters(

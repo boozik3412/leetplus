@@ -12,11 +12,18 @@ const channelScopes = ['NETWORK', 'STORE', 'ROLE', 'CUSTOM'] as const;
 const messageKinds = ['MESSAGE', 'ANNOUNCEMENT', 'INCIDENT'] as const;
 const messagePriorities = ['NORMAL', 'HIGH', 'URGENT'] as const;
 const roleScopes = ['ALL_STAFF', 'MANAGERS', 'ADMINISTRATORS'] as const;
+export const STAFF_CHAT_NOTIFICATION_CHANNEL_NAME = 'Уведомления';
+export const STAFF_CHAT_NOTIFICATION_CHANNEL_DESCRIPTION =
+  'Системные уведомления о назначении задач, курсов, изменениях регламентов и других событиях персонала.';
 const defaultNetworkChannels = [
   {
     name: 'Информация и объявления',
     description:
       'Официальные объявления, регламенты и важные сообщения для всей сети.',
+  },
+  {
+    name: STAFF_CHAT_NOTIFICATION_CHANNEL_NAME,
+    description: STAFF_CHAT_NOTIFICATION_CHANNEL_DESCRIPTION,
   },
   {
     name: 'Техническая поддержка',
@@ -63,6 +70,16 @@ export type StaffChatMessageDto = {
   isPinned?: boolean;
   attachmentIds?: string[] | null;
   mentionedUserIds?: string[] | null;
+};
+
+export type StaffChatSystemNotificationDto = {
+  title: string;
+  message?: string | null;
+  storeId?: string | null;
+  actorUserId?: string | null;
+  severity?: 'INFO' | 'WARNING' | 'CRITICAL';
+  actionLabel?: string | null;
+  actionHref?: string | null;
 };
 
 export type StaffChatReadDto = {
@@ -431,6 +448,13 @@ export class StaffTeamChatService {
       tenantId,
       dto.channelId,
     );
+
+    if (channel.name === STAFF_CHAT_NOTIFICATION_CHANNEL_NAME) {
+      throw new BadRequestException(
+        'System notification channel does not accept manual messages',
+      );
+    }
+
     const attachmentIds = await this.resolveMessageAttachmentIds(
       tenantId,
       user.id,
@@ -492,6 +516,30 @@ export class StaffTeamChatService {
     await this.markMessagesRead(user.id, tenantId, channel.id, [message.id]);
 
     return this.toMessageResponse(message, user.id);
+  }
+
+  async createSystemNotification(
+    tenantId: string,
+    dto: StaffChatSystemNotificationDto,
+    tx?: Prisma.TransactionClient,
+  ) {
+    const client = tx ?? this.prisma;
+    const channelId = await this.ensureNotificationChannel(client, tenantId);
+    const severity = dto.severity ?? 'INFO';
+
+    return client.staffChatMessage.create({
+      data: {
+        tenantId,
+        channelId,
+        authorUserId: null,
+        storeId: dto.storeId ?? null,
+        body: this.buildSystemNotificationBody(dto),
+        kind: 'ANNOUNCEMENT',
+        priority: this.resolveSystemNotificationPriority(severity),
+        isPinned: severity === 'CRITICAL',
+      },
+      select: { id: true },
+    });
   }
 
   async updateMessage(
@@ -625,7 +673,7 @@ export class StaffTeamChatService {
           where: {
             tenantId,
             channelId: { in: channelIds },
-            authorUserId: { not: userId },
+            OR: [{ authorUserId: null }, { authorUserId: { not: userId } }],
             readReceipts: { none: { userId } },
           },
           _count: { _all: true },
@@ -667,6 +715,64 @@ export class StaffTeamChatService {
     });
 
     return stats;
+  }
+
+  private async ensureNotificationChannel(
+    client: Prisma.TransactionClient | PrismaService,
+    tenantId: string,
+  ) {
+    const channel = await client.staffChatChannel.upsert({
+      where: {
+        tenantId_name: {
+          tenantId,
+          name: STAFF_CHAT_NOTIFICATION_CHANNEL_NAME,
+        },
+      },
+      create: {
+        tenantId,
+        name: STAFF_CHAT_NOTIFICATION_CHANNEL_NAME,
+        description: STAFF_CHAT_NOTIFICATION_CHANNEL_DESCRIPTION,
+        scope: 'NETWORK',
+        isDefault: true,
+      },
+      update: {
+        description: STAFF_CHAT_NOTIFICATION_CHANNEL_DESCRIPTION,
+        isDefault: true,
+        isArchived: false,
+        scope: 'NETWORK',
+        storeId: null,
+        roleScope: null,
+      },
+      select: { id: true },
+    });
+
+    return channel.id;
+  }
+
+  private buildSystemNotificationBody(dto: StaffChatSystemNotificationDto) {
+    const lines = [
+      this.normalizeRequiredString(dto.title, 'Notification title', 240),
+      this.normalizeOptionalString(dto.message, 3200),
+      dto.actionLabel && dto.actionHref
+        ? `${this.normalizeOptionalString(dto.actionLabel, 80)}: ${this.normalizeOptionalString(dto.actionHref, 500)}`
+        : null,
+    ];
+
+    return lines.filter(Boolean).join('\n\n').slice(0, 4000);
+  }
+
+  private resolveSystemNotificationPriority(
+    severity: StaffChatSystemNotificationDto['severity'],
+  ): StaffChatMessagePriority {
+    if (severity === 'CRITICAL') {
+      return 'URGENT';
+    }
+
+    if (severity === 'WARNING') {
+      return 'HIGH';
+    }
+
+    return 'NORMAL';
   }
 
   private async ensureDefaultChannels(tenantId: string) {
@@ -826,7 +932,13 @@ export class StaffTeamChatService {
       where: {
         AND: [accessWhere, { id: targetId }],
       },
-      select: { id: true, scope: true, storeId: true, roleScope: true },
+      select: {
+        id: true,
+        name: true,
+        scope: true,
+        storeId: true,
+        roleScope: true,
+      },
     });
 
     if (!channel) {

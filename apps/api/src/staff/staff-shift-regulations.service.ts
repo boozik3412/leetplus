@@ -7,6 +7,11 @@ import { Prisma, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { formatStaffDateTime } from './staff-export';
+import {
+  StaffTeamChatService,
+  type StaffChatSystemNotificationDto,
+} from './staff-team-chat.service';
 
 const regulationStatuses = ['DRAFT', 'PUBLISHED', 'ARCHIVED'] as const;
 const shiftKinds = [
@@ -259,6 +264,7 @@ export class StaffShiftRegulationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
+    private readonly staffTeamChatService: StaffTeamChatService,
   ) {}
 
   async getRegulations(
@@ -346,6 +352,13 @@ export class StaffShiftRegulationsService {
 
     const activeUsers = await this.getAcknowledgementUsers(tenantId);
 
+    if (regulation.status === 'PUBLISHED') {
+      await this.staffTeamChatService.createSystemNotification(
+        tenantId,
+        this.buildRegulationNotification(regulation, 'published'),
+      );
+    }
+
     return this.toRegulationResponse(regulation, user.id, activeUsers);
   }
 
@@ -401,7 +414,91 @@ export class StaffShiftRegulationsService {
 
     const activeUsers = await this.getAcknowledgementUsers(tenantId);
 
+    if (this.shouldNotifyRegulationUpdate(regulation, data)) {
+      await this.staffTeamChatService.createSystemNotification(
+        tenantId,
+        this.buildRegulationNotification(regulation, 'updated'),
+      );
+    }
+
     return this.toRegulationResponse(regulation, user.id, activeUsers);
+  }
+
+  private shouldNotifyRegulationUpdate(
+    regulation: StaffShiftRegulationRow,
+    data: Prisma.StaffShiftRegulationUncheckedCreateInput,
+  ) {
+    return regulation.status === 'PUBLISHED' && Object.keys(data).length > 0;
+  }
+
+  private buildRegulationNotification(
+    regulation: StaffShiftRegulationRow,
+    event: 'published' | 'updated',
+  ): StaffChatSystemNotificationDto {
+    const sections = this.normalizeSections(regulation.sections);
+
+    return {
+      title: `${
+        event === 'published' ? 'Опубликован регламент' : 'Регламент обновлен'
+      }: ${regulation.title}`,
+      message: [
+        regulation.store ? `Клуб: ${regulation.store.name}` : 'Клуб: вся сеть',
+        `Направление: ${this.shiftKindLabel(
+          regulation.shiftKind as StaffShiftKind,
+        )}`,
+        `Кому: ${this.regulationRoleScopeLabel(
+          regulation.roleScope as StaffShiftRoleScope,
+        )}`,
+        `Версия: ${regulation.version}`,
+        regulation.effectiveFrom
+          ? `Действует с: ${formatStaffDateTime(regulation.effectiveFrom)}`
+          : null,
+        `Разделов: ${sections.length}`,
+        `Пунктов: ${this.countRegulationItems(sections)}`,
+        regulation.requiresAssessmentRetake
+          ? 'Требуется пересдача аттестации'
+          : null,
+      ]
+        .filter(Boolean)
+        .join('\n'),
+      storeId: regulation.storeId,
+      severity: regulation.requiresAssessmentRetake ? 'WARNING' : 'INFO',
+      actionLabel: 'Открыть регламенты',
+      actionHref: `/staff/shift-regulations?search=${encodeURIComponent(
+        regulation.title,
+      )}`,
+    };
+  }
+
+  private shiftKindLabel(kind: StaffShiftKind) {
+    const labels: Record<StaffShiftKind, string> = {
+      OPENING: 'открытие смены',
+      CLOSING: 'закрытие смены',
+      CASH: 'касса',
+      BAR: 'бар',
+      PC_ZONE: 'PC-зона',
+      CLEANLINESS: 'чистота',
+      INCIDENT: 'инциденты',
+      INVENTORY: 'инвентаризация',
+      CUSTOM: 'другое',
+    };
+
+    return labels[kind];
+  }
+
+  private regulationRoleScopeLabel(scope: StaffShiftRoleScope) {
+    const labels: Record<StaffShiftRoleScope, string> = {
+      ADMINISTRATOR: 'администраторы и стажеры',
+      SENIOR_ADMINISTRATOR: 'старшие администраторы',
+      MANAGER: 'управляющие и менеджеры',
+      ALL_STAFF: 'весь персонал',
+    };
+
+    return labels[scope];
+  }
+
+  private countRegulationItems(sections: StaffShiftRegulationSection[]) {
+    return sections.reduce((sum, section) => sum + section.items.length, 0);
   }
 
   async acknowledgeRegulation(

@@ -16,6 +16,10 @@ import {
   type StaffExportCell,
   type StaffExportFile,
 } from './staff-export';
+import {
+  STAFF_CHAT_NOTIFICATION_CHANNEL_DESCRIPTION,
+  STAFF_CHAT_NOTIFICATION_CHANNEL_NAME,
+} from './staff-team-chat.service';
 
 const checklistStatuses = [
   'OPEN',
@@ -1753,21 +1757,23 @@ export class StaffChecklistsService {
       where: {
         tenantId_name: {
           tenantId,
-          name: 'Информация и объявления',
+          name: STAFF_CHAT_NOTIFICATION_CHANNEL_NAME,
         },
       },
       create: {
         tenantId,
-        name: 'Информация и объявления',
-        description:
-          'Официальные объявления, регламенты и важные сообщения для всей сети.',
+        name: STAFF_CHAT_NOTIFICATION_CHANNEL_NAME,
+        description: STAFF_CHAT_NOTIFICATION_CHANNEL_DESCRIPTION,
         scope: 'NETWORK',
         isDefault: true,
       },
       update: {
+        description: STAFF_CHAT_NOTIFICATION_CHANNEL_DESCRIPTION,
         isDefault: true,
         isArchived: false,
         scope: 'NETWORK',
+        storeId: null,
+        roleScope: null,
       },
       select: { id: true },
     });

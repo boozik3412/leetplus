@@ -205,6 +205,7 @@ model Tenant {
   staffChatChannels                    StaffChatChannel[]
   staffChatChannelMembers              StaffChatChannelMember[]
   staffChatMessages                    StaffChatMessage[]
+  staffChatMessageAttachments          StaffChatMessageAttachment[]
   staffChatReadReceipts                StaffChatReadReceipt[]
   staffNotifications                   StaffNotification[]
   guestSavedFilters                    GuestSavedFilter[]
@@ -2267,6 +2268,7 @@ model StaffAttachment {
 
   tenant         Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   uploadedByUser User?  @relation("StaffAttachmentUploadedBy", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+  chatMessages   StaffChatMessageAttachment[]
 
   @@index([tenantId, createdAt], map: "staff_attachment_tenant_created_idx")
   @@index([uploadedByUserId], map: "staff_attachment_uploaded_by_idx")
@@ -2890,6 +2892,7 @@ model StaffChatMessage {
   channel      StaffChatChannel       @relation(fields: [channelId], references: [id], onDelete: Cascade)
   authorUser   User?                  @relation("StaffChatMessageAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
   store        Store?                 @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  attachments  StaffChatMessageAttachment[]
   readReceipts StaffChatReadReceipt[]
 
   @@index([tenantId, createdAt], map: "staff_chat_message_tenant_created_idx")
@@ -2897,6 +2900,22 @@ model StaffChatMessage {
   @@index([channelId, createdAt], map: "staff_chat_message_channel_created_idx")
   @@index([authorUserId], map: "staff_chat_message_author_idx")
   @@index([storeId], map: "staff_chat_message_store_idx")
+}
+
+model StaffChatMessageAttachment {
+  id           String   @id @default(uuid())
+  tenantId     String
+  messageId    String
+  attachmentId String
+  createdAt    DateTime @default(now())
+
+  tenant     Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  message    StaffChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  attachment StaffAttachment  @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, attachmentId], map: "staff_chat_message_attachment_unique")
+  @@index([tenantId, messageId], map: "staff_chat_message_attachment_message_idx")
+  @@index([attachmentId], map: "staff_chat_message_attachment_attachment_idx")
 }
 
 model StaffChatReadReceipt {

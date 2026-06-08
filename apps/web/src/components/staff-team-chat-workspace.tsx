@@ -11,7 +11,12 @@ import {
 } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import {
+  StaffAttachmentUpload,
+  type StaffAttachmentUploadResult,
+} from "@/components/staff-attachment-upload";
 import type {
+  StaffChatAttachment,
   StaffChatChannel,
   StaffChatChannelScope,
   StaffChatMessage,
@@ -165,6 +170,9 @@ export function StaffTeamChatWorkspace({
     useState<ChannelFormState>(emptyChannelForm);
   const [showChannelForm, setShowChannelForm] = useState(false);
   const [showMessageOptions, setShowMessageOptions] = useState(false);
+  const [pendingAttachments, setPendingAttachments] = useState<
+    StaffAttachmentUploadResult[]
+  >([]);
   const [taskDraft, setTaskDraft] = useState<TaskDraftState | null>(null);
   const [taskPendingMessageId, setTaskPendingMessageId] = useState<string | null>(
     null,
@@ -418,6 +426,22 @@ export function StaffTeamChatWorkspace({
     startTransition,
   ]);
 
+  function handleAttachmentUploaded(attachment: StaffAttachmentUploadResult) {
+    setPendingAttachments((current) => {
+      if (current.some((item) => item.id === attachment.id)) {
+        return current;
+      }
+
+      return [...current, attachment].slice(0, 5);
+    });
+  }
+
+  function removePendingAttachment(id: string) {
+    setPendingAttachments((current) =>
+      current.filter((attachment) => attachment.id !== id),
+    );
+  }
+
   async function sendMessage() {
     setError(null);
     setSuccess(null);
@@ -427,7 +451,7 @@ export function StaffTeamChatWorkspace({
       return;
     }
 
-    if (!form.body.trim()) {
+    if (!form.body.trim() && pendingAttachments.length === 0) {
       setError("Введите текст сообщения.");
       return;
     }
@@ -442,6 +466,7 @@ export function StaffTeamChatWorkspace({
         priority: form.priority,
         isPinned: form.isPinned,
         storeId: form.storeId || undefined,
+        attachmentIds: pendingAttachments.map((attachment) => attachment.id),
       }),
     });
 
@@ -454,6 +479,7 @@ export function StaffTeamChatWorkspace({
     }
 
     setForm(emptyForm);
+    setPendingAttachments([]);
     setShowMessageOptions(false);
     startTransition(() => router.refresh());
   }
@@ -1044,6 +1070,31 @@ export function StaffTeamChatWorkspace({
 
         <div className="shrink-0 border-t border-zinc-200/60 bg-transparent p-3 dark:border-zinc-800/60 sm:p-4">
           <div className="rounded-[24px] bg-zinc-100/90 shadow-sm ring-1 ring-zinc-200/70 dark:bg-zinc-900/70 dark:ring-zinc-800/70">
+            {pendingAttachments.length > 0 ? (
+              <div className="flex flex-wrap gap-2 px-3 pt-3">
+                {pendingAttachments.map((attachment) => (
+                  <span
+                    key={attachment.id}
+                    className="inline-flex max-w-full items-center gap-2 rounded-full bg-white px-3 py-1 text-xs font-medium text-zinc-700 ring-1 ring-zinc-200 dark:bg-zinc-950/80 dark:text-zinc-200 dark:ring-zinc-800"
+                  >
+                    <span className="max-w-[220px] truncate">
+                      {attachment.fileName}
+                    </span>
+                    <span className="text-zinc-400">
+                      {formatBytes(attachment.byteSize)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removePendingAttachment(attachment.id)}
+                      className="text-zinc-400 transition-colors hover:text-red-500"
+                      aria-label="Убрать файл"
+                    >
+                      x
+                    </button>
+                  </span>
+                ))}
+              </div>
+            ) : null}
             <div className="flex h-11 items-center gap-2">
               <button
                 type="button"
@@ -1073,7 +1124,11 @@ export function StaffTeamChatWorkspace({
               <button
                 type="button"
                 onClick={sendMessage}
-                disabled={isPending || !activeChannel}
+                disabled={
+                  isPending ||
+                  !activeChannel ||
+                  (!form.body.trim() && pendingAttachments.length === 0)
+                }
                 className="h-11 shrink-0 rounded-full bg-emerald-500 px-6 text-sm font-semibold text-zinc-950 transition-colors hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Отправить
@@ -1083,7 +1138,7 @@ export function StaffTeamChatWorkspace({
               id="message-format-options"
               className={
                 showMessageOptions
-                  ? "mt-2 grid gap-2 rounded-2xl bg-white/70 p-3 dark:bg-zinc-950/50 sm:grid-cols-2 md:grid-cols-[180px_180px_1fr]"
+                  ? "mt-2 grid gap-2 rounded-2xl bg-white/70 p-3 dark:bg-zinc-950/50 sm:grid-cols-2 lg:grid-cols-[180px_180px_1fr_180px]"
                   : "hidden"
               }
             >
@@ -1122,6 +1177,17 @@ export function StaffTeamChatWorkspace({
                   </option>
                 ))}
               </select>
+              {pendingAttachments.length < 5 ? (
+                <StaffAttachmentUpload
+                  label="Файл"
+                  buttonLabel="Прикрепить файл"
+                  onUploaded={handleAttachmentUploaded}
+                />
+              ) : (
+                <p className="flex min-h-10 items-center text-xs text-zinc-500 dark:text-zinc-400">
+                  До 5 файлов в сообщении.
+                </p>
+              )}
               <label className="flex min-h-10 items-center gap-2 rounded-lg border border-zinc-200/80 bg-transparent px-3 text-sm dark:border-zinc-800/80">
                 <input
                   type="checkbox"
@@ -1307,6 +1373,32 @@ function MessageCard({
       >
         {message.body}
       </p>
+
+      {message.attachments.length > 0 ? (
+        <div
+          className={[
+            "flex flex-wrap gap-2",
+            compact ? "mt-2" : "mt-3 sm:ml-12",
+          ].join(" ")}
+        >
+          {message.attachments.map((attachment) => (
+            <a
+              key={attachment.id}
+              href={getAttachmentHref(attachment)}
+              className="inline-flex max-w-full items-center gap-2 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-semibold text-zinc-600 transition-colors hover:border-emerald-300 hover:text-emerald-700 dark:border-zinc-800 dark:text-zinc-300 dark:hover:border-emerald-500/50 dark:hover:text-emerald-200"
+              target="_blank"
+              rel="noreferrer"
+            >
+              <span className="max-w-[260px] truncate">
+                {attachment.fileName}
+              </span>
+              <span className="text-zinc-400">
+                {formatBytes(attachment.byteSize)}
+              </span>
+            </a>
+          ))}
+        </div>
+      ) : null}
 
       {isTaskDraftOpen && taskDraft ? (
         <div className="mt-3 rounded-lg border border-emerald-200/70 p-3 dark:border-emerald-500/25">
@@ -1507,7 +1599,42 @@ function buildTaskDescription(
     message.body,
   ];
 
+  if (message.attachments.length > 0) {
+    lines.push(
+      "",
+      "Вложения:",
+      ...message.attachments.map(
+        (attachment) =>
+          `- ${attachment.fileName}: ${getAttachmentHref(attachment)}`,
+      ),
+    );
+  }
+
   return lines.join("\n");
+}
+
+function getAttachmentHref(attachment: StaffChatAttachment) {
+  if (attachment.url.startsWith("http") || attachment.url.startsWith("/api/")) {
+    return attachment.url;
+  }
+
+  return `/api${attachment.url}`;
+}
+
+function formatBytes(value: number) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return "0 B";
+  }
+
+  if (value < 1024) {
+    return `${value} B`;
+  }
+
+  if (value < 1024 * 1024) {
+    return `${(value / 1024).toFixed(1)} KB`;
+  }
+
+  return `${(value / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function formatDateTime(value: string) {

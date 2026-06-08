@@ -17,6 +17,16 @@ export type StaffChatStore = {
   isActive: boolean;
 };
 
+export type StaffChatAttachment = {
+  id: string;
+  fileName: string;
+  contentType: string;
+  byteSize: number;
+  url: string;
+  createdAt: string;
+  uploadedByUser: StaffChatUser | null;
+};
+
 export type StaffChatChannel = {
   id: string;
   name: string;
@@ -48,6 +58,7 @@ export type StaffChatMessage = {
   updatedAt: string;
   authorUser: StaffChatUser | null;
   store: StaffChatStore | null;
+  attachments: StaffChatAttachment[];
 };
 
 export type StaffTeamChatFilters = {

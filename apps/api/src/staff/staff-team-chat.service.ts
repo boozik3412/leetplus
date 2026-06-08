@@ -61,6 +61,7 @@ export type StaffChatMessageDto = {
   priority?: StaffChatMessagePriority;
   storeId?: string | null;
   isPinned?: boolean;
+  attachmentIds?: string[] | null;
 };
 
 export type StaffChatReadDto = {
@@ -134,6 +135,16 @@ export type StaffChatChannelResponse = {
   lastMessageAt: string | null;
 };
 
+export type StaffChatMessageAttachmentResponse = {
+  id: string;
+  fileName: string;
+  contentType: string;
+  byteSize: number;
+  url: string;
+  createdAt: string;
+  uploadedByUser: { id: string; email: string; fullName: string | null } | null;
+};
+
 export type StaffChatMessageResponse = {
   id: string;
   channelId: string;
@@ -146,6 +157,7 @@ export type StaffChatMessageResponse = {
   updatedAt: string;
   authorUser: { id: string; email: string; fullName: string | null } | null;
   store: { id: string; name: string; isActive: boolean } | null;
+  attachments: StaffChatMessageAttachmentResponse[];
 };
 
 const channelInclude = {
@@ -163,6 +175,23 @@ const messageInclude = {
   authorUser: { select: { id: true, email: true, fullName: true } },
   store: { select: { id: true, name: true, isActive: true } },
   readReceipts: { select: { userId: true } },
+  attachments: {
+    include: {
+      attachment: {
+        select: {
+          id: true,
+          fileName: true,
+          contentType: true,
+          byteSize: true,
+          createdAt: true,
+          uploadedByUser: {
+            select: { id: true, email: true, fullName: true },
+          },
+        },
+      },
+    },
+    orderBy: { createdAt: 'asc' },
+  },
 } satisfies Prisma.StaffChatMessageInclude;
 
 type StaffChatChannelRow = Prisma.StaffChatChannelGetPayload<{
@@ -392,16 +421,47 @@ export class StaffTeamChatService {
       tenantId,
       dto.channelId,
     );
-    const data = await this.normalizeMessageData(tenantId, channel, dto);
+    const attachmentIds = await this.resolveMessageAttachmentIds(
+      tenantId,
+      user.id,
+      dto.attachmentIds,
+    );
+    const data = await this.normalizeMessageData(
+      tenantId,
+      channel,
+      dto,
+      attachmentIds.length > 0,
+    );
 
-    const message = await this.prisma.staffChatMessage.create({
-      data: {
-        ...data,
-        tenantId,
-        channelId: channel.id,
-        authorUserId: user.id,
-      },
-      include: messageInclude,
+    const message = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.staffChatMessage.create({
+        data: {
+          ...data,
+          tenantId,
+          channelId: channel.id,
+          authorUserId: user.id,
+        },
+        select: { id: true },
+      });
+
+      if (attachmentIds.length > 0) {
+        await Promise.all(
+          attachmentIds.map((attachmentId) =>
+            tx.staffChatMessageAttachment.create({
+              data: {
+                tenantId,
+                messageId: created.id,
+                attachmentId,
+              },
+            }),
+          ),
+        );
+      }
+
+      return tx.staffChatMessage.findUniqueOrThrow({
+        where: { id: created.id },
+        include: messageInclude,
+      });
     });
 
     await this.markMessagesRead(user.id, tenantId, channel.id, [message.id]);
@@ -781,8 +841,11 @@ export class StaffTeamChatService {
     tenantId: string,
     channel: { storeId: string | null },
     dto: StaffChatMessageDto,
+    hasAttachments = false,
   ): Promise<Omit<Prisma.StaffChatMessageUncheckedCreateInput, 'tenantId'>> {
-    const body = this.normalizeRequiredString(dto.body, 'Message text', 4000);
+    const body = hasAttachments
+      ? (this.normalizeOptionalString(dto.body, 4000) ?? 'Вложение')
+      : this.normalizeRequiredString(dto.body, 'Message text', 4000);
     const kind = this.resolveOne(dto.kind, messageKinds, 'MESSAGE');
     const priority = this.resolveOne(
       dto.priority,
@@ -802,6 +865,46 @@ export class StaffTeamChatService {
       isPinned: Boolean(dto.isPinned) || kind === 'ANNOUNCEMENT',
       channelId: '',
     };
+  }
+
+  private async resolveMessageAttachmentIds(
+    tenantId: string,
+    userId: string,
+    values: string[] | null | undefined,
+  ) {
+    const requestedIds = Array.isArray(values)
+      ? Array.from(
+          new Set(
+            values
+              .map((value) => this.normalizeOptionalString(value))
+              .filter((value): value is string => Boolean(value)),
+          ),
+        )
+      : [];
+
+    if (requestedIds.length > 5) {
+      throw new BadRequestException('No more than 5 attachments are allowed');
+    }
+
+    if (requestedIds.length === 0) {
+      return [];
+    }
+
+    const rows = await this.prisma.staffAttachment.findMany({
+      where: {
+        tenantId,
+        uploadedByUserId: userId,
+        id: { in: requestedIds },
+      },
+      select: { id: true },
+    });
+    const availableIds = new Set(rows.map((row) => row.id));
+
+    if (requestedIds.some((id) => !availableIds.has(id))) {
+      throw new BadRequestException('Attachment is not available');
+    }
+
+    return requestedIds;
   }
 
   private async markMessagesRead(
@@ -1038,6 +1141,15 @@ export class StaffTeamChatService {
       updatedAt: message.updatedAt.toISOString(),
       authorUser: message.authorUser,
       store: message.store,
+      attachments: message.attachments.map(({ attachment }) => ({
+        id: attachment.id,
+        fileName: attachment.fileName,
+        contentType: attachment.contentType,
+        byteSize: attachment.byteSize,
+        url: `/staff/attachments/${attachment.id}`,
+        createdAt: attachment.createdAt.toISOString(),
+        uploadedByUser: attachment.uploadedByUser,
+      })),
     };
   }
 

@@ -198,7 +198,10 @@ export function StaffTaskCreateForm({
           ) : (
             <button
               type="button"
-              onClick={() => setIsExpanded(true)}
+              onClick={(event) => {
+                event.preventDefault();
+                setIsExpanded(true);
+              }}
               aria-expanded={isExpanded}
               aria-controls="staff-task-create-fields"
               className="inline-flex h-10 items-center justify-center rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"

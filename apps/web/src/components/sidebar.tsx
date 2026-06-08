@@ -662,6 +662,7 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const desktopSidebarRef = useRef<HTMLElement | null>(null);
+  const mobileMenuRef = useRef<HTMLDivElement | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [openNavState, setOpenNavState] = useState<OpenNavGroupsState>({
     pathname: "",
@@ -719,6 +720,10 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
         return;
       }
 
+      if (mobileMenuRef.current?.contains(target)) {
+        return;
+      }
+
       setOpenNavState({ pathname, groups: {} });
     }
 
@@ -738,6 +743,19 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
       document.removeEventListener("keydown", closeOnEscape);
     };
   }, [hasOpenNavGroup, pathname]);
+
+  useEffect(() => {
+    if (!isMobileMenuOpen) {
+      return;
+    }
+
+    const previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+    };
+  }, [isMobileMenuOpen]);
 
   async function handleLogout() {
     await fetch("/api/auth/logout", {
@@ -775,6 +793,11 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
     });
   }
 
+  function closeMobileMenu() {
+    setIsMobileMenuOpen(false);
+    closeNavGroups();
+  }
+
   return (
     <>
       <div className="sticky top-0 z-40 flex items-center justify-between border-b border-zinc-200/80 bg-white/90 px-4 py-3 shadow-sm backdrop-blur-xl dark:border-zinc-800 dark:bg-zinc-950/90 md:hidden">
@@ -805,20 +828,23 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
       </div>
 
       {isMobileMenuOpen ? (
-        <div className="fixed inset-0 z-50 md:hidden">
+        <div className="fixed inset-0 z-50 overflow-hidden md:hidden">
           <button
             type="button"
             aria-label="Закрыть меню"
-            onClick={() => setIsMobileMenuOpen(false)}
-            className="absolute inset-0 bg-zinc-950/60 backdrop-blur-sm"
+            onClick={closeMobileMenu}
+            className="absolute inset-0 z-0 bg-zinc-950/60 backdrop-blur-sm"
           />
-          <div className="relative flex h-full w-[min(20rem,calc(100vw-2rem))] flex-col border-r border-zinc-200/80 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-950">
+          <div
+            ref={mobileMenuRef}
+            className="relative z-10 flex h-dvh max-h-dvh w-[min(20rem,calc(100vw-2rem))] flex-col border-r border-zinc-200/80 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-950"
+          >
             <div className="border-b border-zinc-200/80 px-4 py-4 dark:border-zinc-800">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <LogoLink
                     href={homeHref}
-                    onNavigate={() => setIsMobileMenuOpen(false)}
+                    onNavigate={closeMobileMenu}
                   />
                   <div className="min-w-0">
                     <p className="truncate text-xs font-medium uppercase tracking-wide text-zinc-500">
@@ -832,19 +858,19 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
                 <button
                   type="button"
                   aria-label="Закрыть меню"
-                  onClick={() => setIsMobileMenuOpen(false)}
+                  onClick={closeMobileMenu}
                   className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-zinc-200 text-xl leading-none text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900"
                 >
                   ×
                 </button>
               </div>
             </div>
-            <nav className="flex-1 space-y-1 overflow-y-auto p-3">
+            <nav className="flex-1 space-y-1 overflow-y-auto overscroll-contain p-3">
               {showHomeLink ? (
                 <NavLink
                   href={homeHref}
                   label={homeLabel}
-                  onNavigate={() => setIsMobileMenuOpen(false)}
+                  onNavigate={closeMobileMenu}
                 />
               ) : null}
               {allowedNavGroups.map((group) => (
@@ -858,7 +884,7 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
                     <NavLink
                       key={item.href}
                       {...item}
-                      onNavigate={() => setIsMobileMenuOpen(false)}
+                      onNavigate={closeMobileMenu}
                     />
                   ))}
                 </NavSection>

@@ -78,6 +78,49 @@ function localizeAuthError(message: string) {
     return "Неверный email или пароль.";
   }
 
+  if (normalized === "password must contain at least 8 characters") {
+    return "Пароль должен содержать минимум 8 символов.";
+  }
+
+  if (normalized === "valid email is required") {
+    return "Укажите корректный email.";
+  }
+
+  if (normalized === "user account is inactive") {
+    return "Учетная запись отключена.";
+  }
+
+  if (normalized === "user no longer exists") {
+    return "Учетная запись больше не существует.";
+  }
+
+  if (normalized === "tenant is not active") {
+    return "Организация не активна.";
+  }
+
+  if (normalized === "user with this email already exists") {
+    return "Пользователь с таким email уже существует.";
+  }
+
+  if (normalized === "organization name is required") {
+    return "Укажите название организации.";
+  }
+
+  if (normalized === "tenant slug is already taken") {
+    return "Такой адрес организации уже занят.";
+  }
+
+  if (normalized === "invite is issued for another email") {
+    return "Приглашение выдано на другой email.";
+  }
+
+  if (
+    normalized ===
+    "tenant slug must be 3-32 lowercase letters, numbers or hyphens"
+  ) {
+    return "Адрес организации должен содержать 3-32 символа: строчные латинские буквы, цифры или дефисы.";
+  }
+
   if (normalized === "passwords do not match") {
     return "Пароли не совпадают.";
   }

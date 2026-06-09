@@ -88,7 +88,7 @@ export class AuthService {
     this.assertTenantSlug(tenantSlug);
 
     if (!organizationName) {
-      throw new BadRequestException('Organization name is required');
+      throw new BadRequestException('Укажите название организации');
     }
 
     const [existingUser, existingTenant] = await Promise.all([
@@ -97,11 +97,11 @@ export class AuthService {
     ]);
 
     if (existingUser) {
-      throw new ConflictException('User with this email already exists');
+      throw new ConflictException('Пользователь с таким email уже существует');
     }
 
     if (existingTenant) {
-      throw new ConflictException('Tenant slug is already taken');
+      throw new ConflictException('Такой адрес организации уже занят');
     }
 
     const passwordHash = await this.passwordService.hash(dto.password);
@@ -128,7 +128,7 @@ export class AuthService {
     const owner = tenant.users[0];
 
     if (!owner) {
-      throw new BadRequestException('Failed to create organization owner');
+      throw new BadRequestException('Не удалось создать владельца организации');
     }
 
     await this.emailVerificationService.sendVerificationEmail(
@@ -202,7 +202,7 @@ export class AuthService {
     ]);
 
     if (existingUser) {
-      throw new ConflictException('User with this email already exists');
+      throw new ConflictException('Пользователь с таким email уже существует');
     }
 
     const passwordHash = await this.passwordService.hash(password);
@@ -283,11 +283,11 @@ export class AuthService {
     });
 
     if (!user) {
-      throw new UnauthorizedException('Invalid email or password');
+      throw new UnauthorizedException('Неверный email или пароль');
     }
 
     if (!user.isActive) {
-      throw new UnauthorizedException('User account is inactive');
+      throw new UnauthorizedException('Учетная запись отключена');
     }
 
     const isPasswordValid = await this.passwordService.verify(
@@ -296,7 +296,7 @@ export class AuthService {
     );
 
     if (!isPasswordValid) {
-      throw new UnauthorizedException('Invalid email or password');
+      throw new UnauthorizedException('Неверный email или пароль');
     }
 
     return this.createAuthResponse(user);
@@ -323,11 +323,11 @@ export class AuthService {
     });
 
     if (!user) {
-      throw new UnauthorizedException('User no longer exists');
+      throw new UnauthorizedException('Учетная запись больше не существует');
     }
 
     if (!user.isActive) {
-      throw new UnauthorizedException('User account is inactive');
+      throw new UnauthorizedException('Учетная запись отключена');
     }
 
     this.assertTenantActiveForUser(user);
@@ -406,7 +406,7 @@ export class AuthService {
         normalizedSubmittedEmail &&
         normalizedSubmittedEmail !== invitedEmail
       ) {
-        throw new BadRequestException('Invite is issued for another email');
+        throw new BadRequestException('Приглашение выдано на другой email');
       }
     }
 
@@ -529,7 +529,7 @@ export class AuthService {
 
   private assertTenantActive(status: TenantLifecycleStatus): void {
     if (status !== TenantLifecycleStatus.ACTIVE) {
-      throw new UnauthorizedException('Tenant is not active');
+      throw new UnauthorizedException('Организация не активна');
     }
   }
 
@@ -559,14 +559,14 @@ export class AuthService {
 
   private assertEmail(email: string): void {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      throw new BadRequestException('Valid email is required');
+      throw new BadRequestException('Укажите корректный email');
     }
   }
 
   private assertPassword(password: unknown): asserts password is string {
     if (typeof password !== 'string' || password.length < 8) {
       throw new BadRequestException(
-        'Password must contain at least 8 characters',
+        'Пароль должен содержать минимум 8 символов',
       );
     }
   }
@@ -576,14 +576,14 @@ export class AuthService {
     confirmPassword: unknown,
   ) {
     if (typeof confirmPassword !== 'string' || password !== confirmPassword) {
-      throw new BadRequestException('Passwords do not match');
+      throw new BadRequestException('Пароли не совпадают');
     }
   }
 
   private assertTenantSlug(tenantSlug: string): void {
     if (!/^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$/.test(tenantSlug)) {
       throw new BadRequestException(
-        'Tenant slug must be 3-32 lowercase letters, numbers or hyphens',
+        'Адрес организации должен содержать 3-32 символа: строчные латинские буквы, цифры или дефисы',
       );
     }
   }

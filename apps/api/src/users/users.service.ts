@@ -379,7 +379,7 @@ export class UsersService {
     this.assertCanAssignAccountRole(actor, role, customRole);
 
     if (existingUser) {
-      throw new ConflictException('User with this email already exists');
+      throw new ConflictException('Пользователь с таким email уже существует');
     }
 
     const passwordHash = await this.passwordService.hash(password);
@@ -434,7 +434,7 @@ export class UsersService {
     this.assertCanAssignAccountRole(actor, role, customRole);
 
     if (existingUser) {
-      throw new ConflictException('User with this email already exists');
+      throw new ConflictException('Пользователь с таким email уже существует');
     }
 
     const rawToken = randomBytes(32).toString('base64url');
@@ -525,7 +525,9 @@ export class UsersService {
         });
 
         if (emailOwner && emailOwner.id !== existing.id) {
-          throw new ConflictException('User with this email already exists');
+          throw new ConflictException(
+            'Пользователь с таким email уже существует',
+          );
         }
 
         data.email = email;
@@ -868,14 +870,14 @@ export class UsersService {
 
   private assertEmail(email: string): void {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      throw new BadRequestException('Valid email is required');
+      throw new BadRequestException('Укажите корректный email');
     }
   }
 
   private assertPassword(password: string): void {
     if (!password || password.length < 8) {
       throw new BadRequestException(
-        'Password must contain at least 8 characters',
+        'Пароль должен содержать минимум 8 символов',
       );
     }
   }

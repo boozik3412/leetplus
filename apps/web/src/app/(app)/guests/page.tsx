@@ -1,9 +1,12 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { BusinessSnapshotGate } from "@/components/business-snapshot-gate";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
 import { GuestDashboardFilters } from "@/components/guest-dashboard-filters";
 import { safeGetBusinessSnapshot } from "@/lib/business-snapshots";
+import { getDefaultLandingPath } from "@/lib/landing";
+import { can } from "@/lib/permissions";
 import {
   getGuestFilterOptions,
   getGuests,
@@ -123,7 +126,12 @@ export default async function GuestsPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  const user = await requireCurrentUser();
+
+  if (!can(user, "view_guests")) {
+    redirect(getDefaultLandingPath(user));
+  }
+
   const params = await searchParams;
   const filters: GuestListFilters = {
     dateFrom: searchParam(params.dateFrom),

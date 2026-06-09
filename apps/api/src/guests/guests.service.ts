@@ -6637,7 +6637,7 @@ export class GuestsService {
   }
 
   private applyLatest(metrics: GuestMetrics, value: Date | null) {
-    if (!value) {
+    if (!this.isValidDate(value)) {
       return;
     }
 
@@ -6645,19 +6645,25 @@ export class GuestsService {
   }
 
   private addActivityDay(metrics: GuestMetrics, value: Date | null) {
-    if (!value) {
+    if (!this.isValidDate(value)) {
       return;
     }
 
-    metrics.activityDays.add(this.toIsoDate(value));
+    const day = this.toIsoDate(value);
+    if (day) {
+      metrics.activityDays.add(day);
+    }
   }
 
   private applyLifetimeRevenueDate(metrics: GuestMetrics, value: Date | null) {
-    if (!value) {
+    if (!this.isValidDate(value)) {
       return;
     }
 
-    metrics.lifetimeRevenueDays.add(this.toIsoDate(value));
+    const day = this.toIsoDate(value);
+    if (day) {
+      metrics.lifetimeRevenueDays.add(day);
+    }
     metrics.lifetimeFirstRevenueAt = this.minDate(
       metrics.lifetimeFirstRevenueAt,
       value,
@@ -6809,6 +6815,13 @@ export class GuestsService {
   }
 
   private maxDate(first: Date | null, second: Date | null) {
+    if (!this.isValidDate(first)) {
+      first = null;
+    }
+    if (!this.isValidDate(second)) {
+      second = null;
+    }
+
     if (!first) {
       return second;
     }
@@ -6820,6 +6833,13 @@ export class GuestsService {
   }
 
   private minDate(first: Date | null, second: Date | null) {
+    if (!this.isValidDate(first)) {
+      first = null;
+    }
+    if (!this.isValidDate(second)) {
+      second = null;
+    }
+
     if (!first) {
       return second;
     }
@@ -6831,6 +6851,10 @@ export class GuestsService {
   }
 
   private daysBetweenDates(from: Date, to: Date) {
+    if (!this.isValidDate(from) || !this.isValidDate(to)) {
+      return 0;
+    }
+
     return Math.floor(
       (this.startOfUtcDay(to).getTime() - this.startOfUtcDay(from).getTime()) /
         86_400_000,
@@ -6859,6 +6883,10 @@ export class GuestsService {
   }
 
   private daysBetween(from: Date, to: Date) {
+    if (!this.isValidDate(from) || !this.isValidDate(to)) {
+      return [];
+    }
+
     const days: string[] = [];
     const cursor = this.startOfUtcDay(from);
     const end = this.startOfUtcDay(to);
@@ -6872,6 +6900,10 @@ export class GuestsService {
   }
 
   private startOfUtcDay(value: Date) {
+    if (!this.isValidDate(value)) {
+      return new Date(0);
+    }
+
     return new Date(
       Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()),
     );
@@ -7005,20 +7037,38 @@ export class GuestsService {
   }
 
   private decimalToNumber(value: Prisma.Decimal | null) {
-    return value ? value.toNumber() : null;
+    if (!value) {
+      return null;
+    }
+
+    try {
+      const parsed = value.toNumber();
+
+      return Number.isFinite(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
   }
 
   private toIsoDate(value: Date) {
-    return value.toISOString().slice(0, 10);
+    return this.isValidDate(value) ? value.toISOString().slice(0, 10) : '';
   }
 
   private toIsoDateTime(value: Date | null) {
-    return value ? value.toISOString() : null;
+    return this.isValidDate(value) ? value.toISOString() : null;
   }
 
   private round(value: number, digits: number) {
+    if (!Number.isFinite(value)) {
+      return 0;
+    }
+
     const scale = 10 ** digits;
     return Math.round(value * scale) / scale;
+  }
+
+  private isValidDate(value: Date | null | undefined): value is Date {
+    return value instanceof Date && Number.isFinite(value.getTime());
   }
 
   private blankToNull(value: string | undefined) {

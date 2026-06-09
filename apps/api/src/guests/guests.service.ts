@@ -2736,13 +2736,60 @@ export class GuestsService {
       return;
     }
 
-    const snapshots: Array<{
+    const currentBalances: Array<{
       guestId: string | null;
       snapshotDate: Date;
       bonusBalance: Prisma.Decimal;
     }> = [];
 
     for (const guestIdBatch of this.chunk(guestIds, 1_000)) {
+      currentBalances.push(
+        ...(await this.prisma.guestBonusBalanceCurrent.findMany({
+          where: {
+            tenantId,
+            guestId: { in: guestIdBatch },
+          },
+          select: {
+            guestId: true,
+            snapshotDate: true,
+            bonusBalance: true,
+          },
+        })),
+      );
+    }
+
+    const currentGuestIds = new Set<string>();
+    for (const currentBalance of currentBalances) {
+      if (!currentBalance.guestId) {
+        continue;
+      }
+
+      currentGuestIds.add(currentBalance.guestId);
+      const metrics = this.ensureMetrics(
+        metricsByGuestId,
+        currentBalance.guestId,
+      );
+      metrics.bonusBalance = Math.max(
+        0,
+        this.decimalToNumber(currentBalance.bonusBalance) ?? 0,
+      );
+      metrics.bonusSnapshotAt = currentBalance.snapshotDate;
+    }
+
+    const fallbackGuestIds = guestIds.filter(
+      (guestId) => !currentGuestIds.has(guestId),
+    );
+    if (fallbackGuestIds.length === 0) {
+      return;
+    }
+
+    const snapshots: Array<{
+      guestId: string | null;
+      snapshotDate: Date;
+      bonusBalance: Prisma.Decimal;
+    }> = [];
+
+    for (const guestIdBatch of this.chunk(fallbackGuestIds, 1_000)) {
       snapshots.push(
         ...(await this.prisma.guestBonusBalanceSnapshot.findMany({
           where: {

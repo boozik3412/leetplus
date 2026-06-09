@@ -1536,6 +1536,44 @@ export class GuestDataFoundationService {
     profile: SourceProfile,
   ) {
     let total = new Prisma.Decimal(0);
+    const externalGuestIds = Array.from(
+      new Set(
+        rows
+          .map((row) => this.toNullableString(row.guest_id))
+          .filter((externalGuestId): externalGuestId is string =>
+            Boolean(externalGuestId),
+          ),
+      ),
+    );
+    const currentBalancesByExternalId = new Map<
+      string,
+      { bonusBalance: Prisma.Decimal }
+    >();
+
+    for (const externalGuestIdBatch of this.chunk(externalGuestIds, 1_000)) {
+      const currentBalances =
+        await this.prisma.guestBonusBalanceCurrent.findMany({
+          where: {
+            tenantId,
+            externalProvider: IntegrationProvider.LANGAME,
+            externalDomain: domain,
+            externalGuestId: { in: externalGuestIdBatch },
+          },
+          select: {
+            externalGuestId: true,
+            bonusBalance: true,
+          },
+        });
+
+      for (const currentBalance of currentBalances) {
+        currentBalancesByExternalId.set(
+          currentBalance.externalGuestId,
+          currentBalance,
+        );
+      }
+    }
+
+    const syncedAt = new Date();
 
     for (const row of rows) {
       const externalGuestId = this.toNullableString(row.guest_id);
@@ -1545,34 +1583,73 @@ export class GuestDataFoundationService {
       const bonusBalance =
         this.toDecimalOrNull(row.bonus_balance) ?? new Prisma.Decimal(0);
       total = total.add(bonusBalance);
+      const guestId = guestsByExternalId.get(externalGuestId)?.id ?? null;
+      const sourcePayloadHash = this.payloadHash(row);
+      const currentBalance = currentBalancesByExternalId.get(externalGuestId);
+      const shouldWriteHistoricalSnapshot =
+        !currentBalance ||
+        currentBalance.bonusBalance.toFixed(2) !== bonusBalance.toFixed(2);
 
-      await this.prisma.guestBonusBalanceSnapshot.upsert({
+      await this.prisma.guestBonusBalanceCurrent.upsert({
         where: {
-          tenantId_externalProvider_externalDomain_externalGuestId_snapshotDate:
-            {
-              tenantId,
-              externalProvider: IntegrationProvider.LANGAME,
-              externalDomain: domain,
-              externalGuestId,
-              snapshotDate,
-            },
+          tenantId_externalProvider_externalDomain_externalGuestId: {
+            tenantId,
+            externalProvider: IntegrationProvider.LANGAME,
+            externalDomain: domain,
+            externalGuestId,
+          },
         },
         create: {
           tenantId,
-          guestId: guestsByExternalId.get(externalGuestId)?.id ?? null,
+          guestId,
           externalProvider: IntegrationProvider.LANGAME,
           externalDomain: domain,
           externalGuestId,
-          snapshotDate,
           bonusBalance,
-          sourcePayloadHash: this.payloadHash(row),
+          snapshotDate,
+          sourcePayloadHash,
+          lastSyncedAt: syncedAt,
         },
         update: {
-          guestId: guestsByExternalId.get(externalGuestId)?.id ?? null,
+          guestId,
           bonusBalance,
-          sourcePayloadHash: this.payloadHash(row),
+          snapshotDate,
+          sourcePayloadHash,
+          lastSyncedAt: syncedAt,
         },
       });
+
+      if (shouldWriteHistoricalSnapshot) {
+        await this.prisma.guestBonusBalanceSnapshot.upsert({
+          where: {
+            tenantId_externalProvider_externalDomain_externalGuestId_snapshotDate:
+              {
+                tenantId,
+                externalProvider: IntegrationProvider.LANGAME,
+                externalDomain: domain,
+                externalGuestId,
+                snapshotDate,
+              },
+          },
+          create: {
+            tenantId,
+            guestId,
+            externalProvider: IntegrationProvider.LANGAME,
+            externalDomain: domain,
+            externalGuestId,
+            snapshotDate,
+            bonusBalance,
+            sourcePayloadHash,
+          },
+          update: {
+            guestId,
+            bonusBalance,
+            sourcePayloadHash,
+          },
+        });
+      }
+
+      currentBalancesByExternalId.set(externalGuestId, { bonusBalance });
     }
 
     profile.bonusBalances.total = rows.length;
@@ -2900,6 +2977,16 @@ export class GuestDataFoundationService {
       normalized.includes('shift') ||
       normalized.includes('kass')
     );
+  }
+
+  private chunk<T>(items: T[], size: number) {
+    const chunks: T[][] = [];
+
+    for (let index = 0; index < items.length; index += size) {
+      chunks.push(items.slice(index, index + size));
+    }
+
+    return chunks;
   }
 
   private createEmptyProfile(period: ResolvedPeriod): SourceProfile {

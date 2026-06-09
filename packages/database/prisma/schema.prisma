@@ -160,6 +160,8 @@ model Tenant {
   guestGroups                          GuestGroup[]
   guestBalanceSnapshots                GuestBalanceSnapshot[]
   guestBonusBalanceSnapshots           GuestBonusBalanceSnapshot[]
+  guestBonusBalanceCurrents            GuestBonusBalanceCurrent[]
+  guestBonusLedgerEntries              GuestBonusLedgerEntry[]
   guestSessions                        GuestSession[]
   guestLogs                            GuestLog[]
   guestTransactions                    GuestTransaction[]
@@ -272,6 +274,8 @@ model User {
   createdGuestGameSeasons              GuestGameSeason[]                     @relation("GuestGameSeasonCreatedBy")
   createdGuestGameRewards              GuestGameReward[]                     @relation("GuestGameRewardCreatedBy")
   approvedGuestGameRewards             GuestGameReward[]                     @relation("GuestGameRewardApprovedBy")
+  createdGuestBonusLedgerEntries       GuestBonusLedgerEntry[]               @relation("GuestBonusLedgerCreatedBy")
+  processedGuestBonusLedgerEntries     GuestBonusLedgerEntry[]               @relation("GuestBonusLedgerProcessedBy")
   createdGuestGameDeliveries           GuestGameDelivery[]                   @relation("GuestGameDeliveryCreatedBy")
   guestGameDeliveryEvents              GuestGameDeliveryEvent[]              @relation("GuestGameDeliveryEventActor")
   createdGuestGameEvents               GuestGameEvent[]                      @relation("GuestGameEventCreatedBy")
@@ -496,6 +500,7 @@ model Store {
   marketingMissionRewards      MarketingMissionReward[]
   guestGameRewards             GuestGameReward[]
   guestGameDeliveries          GuestGameDelivery[]
+  guestBonusLedgerEntries      GuestBonusLedgerEntry[]
   guestGameTelegramLinkChallenges GuestGameTelegramLinkChallenge[]
   guestPortalOtpChallenges     GuestPortalOtpChallenge[]
   staffTasks                   StaffTask[]
@@ -1088,6 +1093,8 @@ model Guest {
   salesFacts            SalesFact[]
   balanceSnapshots      GuestBalanceSnapshot[]
   bonusBalanceSnapshots GuestBonusBalanceSnapshot[]
+  bonusBalanceCurrent   GuestBonusBalanceCurrent?
+  bonusLedgerEntries    GuestBonusLedgerEntry[]
   sessions              GuestSession[]
   logs                  GuestLog[]
   transactions          GuestTransaction[]
@@ -1461,6 +1468,7 @@ model GuestGameProfile {
   lead          GuestCrmLead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
   createdByUser User?           @relation("GuestGameProfileCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   rewards       GuestGameReward[]
+  bonusLedgerEntries GuestBonusLedgerEntry[]
   deliveries    GuestGameDelivery[]
   events        GuestGameEvent[]
   telegramLinkChallenges GuestGameTelegramLinkChallenge[]
@@ -1624,6 +1632,7 @@ model GuestGameReward {
   approvedByUser User?             @relation("GuestGameRewardApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
   deliveries     GuestGameDelivery[]
   deliveryEvents GuestGameDeliveryEvent[]
+  bonusLedgerEntries GuestBonusLedgerEntry[]
 
   @@unique([tenantId, source, externalProvider, externalDomain, externalId], map: "guest_game_reward_external_uidx")
   @@index([tenantId, status, qualifiedAt], map: "guest_game_reward_status_idx")
@@ -1887,6 +1896,84 @@ model GuestBonusBalanceSnapshot {
   @@unique([tenantId, externalProvider, externalDomain, externalGuestId, snapshotDate])
   @@index([tenantId, snapshotDate])
   @@index([guestId])
+}
+
+model GuestBonusBalanceCurrent {
+  id                String               @id @default(uuid())
+  tenantId          String
+  guestId           String?              @unique(map: "guest_bonus_balance_current_guest_uidx")
+  externalProvider  IntegrationProvider?
+  externalDomain    String?
+  externalGuestId   String
+  bonusBalance      Decimal              @default(0) @db.Decimal(12, 2)
+  snapshotDate      DateTime
+  source            String               @default("LANGAME_SNAPSHOT")
+  sourcePayloadHash String?
+  lastSyncedAt      DateTime?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  guest  Guest? @relation(fields: [guestId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, externalProvider, externalDomain, externalGuestId], map: "guest_bonus_balance_current_external_uidx")
+  @@index([tenantId, snapshotDate], map: "guest_bonus_balance_current_snapshot_idx")
+  @@index([tenantId, bonusBalance], map: "guest_bonus_balance_current_balance_idx")
+}
+
+model GuestBonusLedgerEntry {
+  id                String               @id @default(uuid())
+  tenantId          String
+  guestId           String?
+  profileId         String?
+  rewardId          String?
+  storeId           String?
+  createdByUserId   String?
+  processedByUserId String?
+  externalProvider  IntegrationProvider?
+  externalDomain    String?
+  externalGuestId   String?
+  idempotencyKey    String
+  entryType         String               @default("EARN")
+  source            String               @default("GAMIFICATION")
+  status            String               @default("PENDING")
+  amount            Decimal              @db.Decimal(12, 2)
+  balanceBefore     Decimal?             @db.Decimal(12, 2)
+  balanceAfter      Decimal?             @db.Decimal(12, 2)
+  reason            String?
+  langameRequest    Json?
+  langameResponse   Json?
+  attempts          Int                  @default(0)
+  nextAttemptAt     DateTime?
+  lockedAt          DateTime?
+  processedAt       DateTime?
+  confirmedAt       DateTime?
+  failedAt          DateTime?
+  canceledAt        DateTime?
+  errorCode         String?
+  errorMessage      String?
+  metadata          Json?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  tenant          Tenant            @relation(fields: [tenantId], references: [id])
+  guest           Guest?            @relation(fields: [guestId], references: [id], onDelete: SetNull)
+  profile         GuestGameProfile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  reward          GuestGameReward?  @relation(fields: [rewardId], references: [id], onDelete: SetNull)
+  store           Store?            @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  createdByUser   User?             @relation("GuestBonusLedgerCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  processedByUser User?             @relation("GuestBonusLedgerProcessedBy", fields: [processedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, idempotencyKey], map: "guest_bonus_ledger_idempotency_uidx")
+  @@index([tenantId, status, nextAttemptAt], map: "guest_bonus_ledger_queue_idx")
+  @@index([tenantId, guestId, createdAt], map: "guest_bonus_ledger_guest_idx")
+  @@index([tenantId, source, createdAt], map: "guest_bonus_ledger_source_idx")
+  @@index([tenantId, externalProvider, externalDomain, externalGuestId], map: "guest_bonus_ledger_external_guest_idx")
+  @@index([profileId], map: "guest_bonus_ledger_profile_idx")
+  @@index([rewardId], map: "guest_bonus_ledger_reward_idx")
+  @@index([storeId], map: "guest_bonus_ledger_store_idx")
+  @@index([createdByUserId], map: "guest_bonus_ledger_created_by_idx")
+  @@index([processedByUserId], map: "guest_bonus_ledger_processed_by_idx")
 }
 
 model GuestSession {

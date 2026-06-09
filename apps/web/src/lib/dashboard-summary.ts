@@ -133,6 +133,8 @@ export type DashboardSummary = {
   writeOffRevenuePercent: number | null;
   previousWriteOffRevenuePercent: number | null;
   writeOffRevenuePercentDelta: number | null;
+  previousAdjustedGrossProfit: number;
+  adjustedGrossProfitToPreviousPercent: number | null;
   grossProfit: number;
   adjustedGrossProfit: number;
   marginPercent: number;

@@ -26,7 +26,7 @@ type DashboardRevenuePanelProps = {
   fullDayRevenue: number;
   fullDayRevenueToAveragePercent: number | null;
   writeOffRevenuePercent: number | null;
-  writeOffRevenuePercentDelta: number | null;
+  adjustedGrossProfitToPreviousPercent: number | null;
   storeRevenueBreakdown: DashboardStoreRevenueMetric[];
   fullReportHref: string;
   diagnosticsHref: string;
@@ -64,7 +64,7 @@ export function DashboardRevenuePanel({
   fullDayRevenue,
   fullDayRevenueToAveragePercent,
   writeOffRevenuePercent,
-  writeOffRevenuePercentDelta,
+  adjustedGrossProfitToPreviousPercent,
   storeRevenueBreakdown,
   fullReportHref,
   diagnosticsHref,
@@ -111,7 +111,7 @@ export function DashboardRevenuePanel({
           >
             <WriteOffRevenueShare
               percent={writeOffRevenuePercent}
-              deltaPercent={writeOffRevenuePercentDelta}
+              profitDeltaPercent={adjustedGrossProfitToPreviousPercent}
             />
           </HeroMetric>
         </div>
@@ -570,15 +570,15 @@ function UnallocatedTopupRevenue({ revenue }: { revenue: number }) {
 
 function WriteOffRevenueShare({
   percent,
-  deltaPercent,
+  profitDeltaPercent,
 }: {
   percent: number | null;
-  deltaPercent: number | null;
+  profitDeltaPercent: number | null;
 }) {
   const deltaTone =
-    deltaPercent === null
+    profitDeltaPercent === null
       ? "text-zinc-500"
-      : deltaPercent <= 0
+      : profitDeltaPercent >= 0
         ? "text-emerald-600 dark:text-emerald-300"
         : "text-red-600 dark:text-red-300";
 
@@ -601,7 +601,9 @@ function WriteOffRevenueShare({
             " ",
           )}
         >
-          {deltaPercent === null ? "нет базы" : formatPercent(deltaPercent)}
+          {profitDeltaPercent === null
+            ? "нет базы"
+            : formatPercent(profitDeltaPercent)}
         </span>
       </div>
     </div>

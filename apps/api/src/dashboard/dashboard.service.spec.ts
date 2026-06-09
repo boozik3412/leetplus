@@ -389,6 +389,105 @@ describe('DashboardService', () => {
     expect(summary.salesTrend).toHaveLength(8);
   });
 
+  it('compares the latest full day with previous full-day average, not itself', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-06-09T12:00:00.000Z'));
+
+    try {
+      mockEmptyDashboardData();
+      prisma.salesFact.findMany
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([
+          {
+            saleDate: new Date('2026-06-08T12:00:00.000Z'),
+            revenue: new Prisma.Decimal(1000),
+          },
+          {
+            saleDate: new Date('2026-06-07T12:00:00.000Z'),
+            revenue: new Prisma.Decimal(700),
+          },
+          {
+            saleDate: new Date('2026-06-06T12:00:00.000Z'),
+            revenue: new Prisma.Decimal(1400),
+          },
+        ])
+        .mockResolvedValueOnce([]);
+
+      const summary = await service.getSummary(undefined, {
+        period: 'full-day',
+      });
+
+      expect(summary.fullDayRevenueDate).toBe('2026-06-08');
+      expect(summary.fullDayRevenue).toBe(1000);
+      expect(summary.averageDailyRevenue).toBe(300);
+      expect(summary.fullDayRevenueToAveragePercent).toBe(233.3);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('compares adjusted gross profit with the previous comparable period', async () => {
+    mockEmptyDashboardData();
+    prisma.salesFact.findMany
+      .mockResolvedValueOnce([
+        {
+          productId: 'product-1',
+          saleDate: new Date(),
+          quantity: new Prisma.Decimal(1),
+          revenue: new Prisma.Decimal(1000),
+          cost: new Prisma.Decimal(400),
+          product: {
+            id: 'product-1',
+            article: 'DRK-001',
+            name: 'Energy Drink',
+            canonicalProduct: null,
+            categoryId: null,
+            category: null,
+          },
+          store: {
+            id: 'store-1',
+            name: 'Club A',
+          },
+        },
+      ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          revenue: new Prisma.Decimal(800),
+          cost: new Prisma.Decimal(500),
+        },
+      ]);
+    prisma.stockMovement.findMany
+      .mockResolvedValueOnce([
+        {
+          type: 'WRITEOFF',
+          amount: new Prisma.Decimal(100),
+        },
+        {
+          type: 'RETURN',
+          amount: new Prisma.Decimal(50),
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          type: 'WRITEOFF',
+          amount: new Prisma.Decimal(50),
+        },
+      ]);
+
+    const summary = await service.getSummary(undefined, { period: 'day' });
+
+    expect(summary.adjustedGrossProfit).toBe(450);
+    expect(summary.previousAdjustedGrossProfit).toBe(250);
+    expect(summary.adjustedGrossProfitToPreviousPercent).toBe(80);
+  });
+
   it('uses balance spend as store revenue and adds unallocated top-ups to network revenue', async () => {
     mockEmptyDashboardData();
     prisma.guestOperationLog.findMany.mockResolvedValue([

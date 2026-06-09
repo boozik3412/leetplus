@@ -164,6 +164,8 @@ export type DashboardSummary = {
   writeOffRevenuePercent: number | null;
   previousWriteOffRevenuePercent: number | null;
   writeOffRevenuePercentDelta: number | null;
+  previousAdjustedGrossProfit: number;
+  adjustedGrossProfitToPreviousPercent: number | null;
   grossProfit: number;
   adjustedGrossProfit: number;
   marginPercent: number;
@@ -576,6 +578,7 @@ export class DashboardService {
         },
         select: {
           revenue: true,
+          cost: true,
         },
       }),
       this.prisma.stockMovement.findMany({
@@ -812,9 +815,17 @@ export class DashboardService {
       (sum, fact) => sum + fact.revenue.toNumber(),
       0,
     );
+    const previousGrossProfit = previousSalesFacts.reduce(
+      (sum, fact) => sum + fact.revenue.toNumber() - fact.cost.toNumber(),
+      0,
+    );
     const previousMovementImpact = this.stockMovementImpact(
       previousStockMovements,
     );
+    const previousAdjustedGrossProfit =
+      previousGrossProfit -
+      previousMovementImpact.writeOffAmount -
+      previousMovementImpact.returnAmount;
     const writeOffRevenuePercent = this.ratioPercent(
       movementImpact.writeOffAmount,
       totalRevenue,
@@ -870,6 +881,11 @@ export class DashboardService {
         previousWriteOffRevenuePercent !== null
           ? this.round(writeOffRevenuePercent - previousWriteOffRevenuePercent)
           : null,
+      previousAdjustedGrossProfit: this.round(previousAdjustedGrossProfit),
+      adjustedGrossProfitToPreviousPercent: this.changePercent(
+        adjustedGrossProfit,
+        previousAdjustedGrossProfit,
+      ),
       grossProfit: this.round(grossProfit),
       adjustedGrossProfit: this.round(adjustedGrossProfit),
       marginPercent: this.marginPercent(totalCost, totalRevenue),
@@ -1324,15 +1340,18 @@ export class DashboardService {
     currentToDate.setUTCHours(23, 59, 59, 999);
     let averageFromDate = new Date(periodFromDate);
     averageFromDate.setUTCHours(0, 0, 0, 0);
+    const dayBeforeCurrentFromDate = new Date(currentFromDate);
+    dayBeforeCurrentFromDate.setUTCDate(
+      dayBeforeCurrentFromDate.getUTCDate() - 1,
+    );
+    dayBeforeCurrentFromDate.setUTCHours(23, 59, 59, 999);
     let averageToDate = new Date(
-      Math.min(periodToDate.getTime(), currentToDate.getTime()),
+      Math.min(periodToDate.getTime(), dayBeforeCurrentFromDate.getTime()),
     );
     averageToDate.setUTCHours(23, 59, 59, 999);
 
     if (averageFromDate > averageToDate) {
-      averageToDate = new Date(currentFromDate);
-      averageToDate.setUTCDate(averageToDate.getUTCDate() - 1);
-      averageToDate.setUTCHours(23, 59, 59, 999);
+      averageToDate = new Date(dayBeforeCurrentFromDate);
       averageFromDate = new Date(averageToDate);
       averageFromDate.setUTCDate(averageFromDate.getUTCDate() - 6);
       averageFromDate.setUTCHours(0, 0, 0, 0);
@@ -1511,6 +1530,14 @@ export class DashboardService {
     }
 
     return this.round((value / total) * 100);
+  }
+
+  private changePercent(current: number, previous: number) {
+    if (previous <= 0) {
+      return null;
+    }
+
+    return this.round(((current - previous) / previous) * 100);
   }
 
   private buildDashboardRevenueBreakdown(input: {

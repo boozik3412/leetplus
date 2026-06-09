@@ -547,7 +547,9 @@ export default async function DashboardPage({
                 summary.fullDayRevenueToAveragePercent
               }
               writeOffRevenuePercent={summary.writeOffRevenuePercent}
-              writeOffRevenuePercentDelta={summary.writeOffRevenuePercentDelta}
+              adjustedGrossProfitToPreviousPercent={
+                summary.adjustedGrossProfitToPreviousPercent
+              }
               storeRevenueBreakdown={summary.storeRevenueBreakdown}
               fullReportHref={revenueByClubHref}
               diagnosticsHref={revenueDiagnosticsHref}

@@ -47,6 +47,7 @@ export type StaffChatRoleScope =
 
 export type StaffTeamChatQuery = {
   channelId?: string;
+  storeId?: string;
   search?: string;
   pinned?: string;
   pageSize?: string;
@@ -94,6 +95,7 @@ export type StaffChatMessageUpdateDto = {
 export type StaffTeamChatReport = {
   filters: {
     channelId: string | null;
+    storeId: string | null;
     search: string | null;
     pinned: boolean;
     pageSize: number;
@@ -258,8 +260,16 @@ export class StaffTeamChatService {
       orderBy: [{ isDefault: 'desc' }, { scope: 'asc' }, { name: 'asc' }],
     });
 
+    const storeChannel = filters.storeId
+      ? channels.find(
+          (channel) =>
+            channel.scope === 'STORE' && channel.storeId === filters.storeId,
+        )
+      : null;
+
     const activeChannel =
       channels.find((channel) => channel.id === filters.channelId) ??
+      storeChannel ??
       channels.find((channel) => channel.name === primaryDefaultChannelName) ??
       channels.find((channel) => channel.isDefault) ??
       channels[0] ??
@@ -612,6 +622,7 @@ export class StaffTeamChatService {
 
     return {
       channelId: this.normalizeOptionalString(query.channelId),
+      storeId: this.normalizeOptionalString(query.storeId),
       search: this.normalizeOptionalString(query.search),
       pinned: query.pinned === 'true' || query.pinned === '1',
       pageSize,

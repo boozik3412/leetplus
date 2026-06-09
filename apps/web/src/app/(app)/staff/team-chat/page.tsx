@@ -19,6 +19,7 @@ function searchParam(value: string | string[] | undefined) {
 function resolveFilters(params: Awaited<SearchParams>): StaffTeamChatFilters {
   return {
     channelId: searchParam(params.channelId),
+    storeId: searchParam(params.storeId),
     search: searchParam(params.search)?.trim(),
     pinned: searchParam(params.pinned),
     pageSize: searchParam(params.pageSize) ?? "80",
@@ -41,6 +42,12 @@ export default async function StaffTeamChatPage({
   const params = await searchParams;
   const requestedChannelId = searchParam(params.channelId) ?? null;
   const report = await getStaffTeamChatReport(resolveFilters(params));
+  const initialDraft = searchParam(params.draft)?.trim() || null;
+  const shouldOpenInitialChannel = Boolean(
+    searchParam(params.storeId) || initialDraft,
+  );
+  const selectedChannelId =
+    requestedChannelId ?? (shouldOpenInitialChannel ? report.activeChannelId : null);
 
   return (
     <main className="px-4 py-6 text-zinc-950 dark:text-zinc-100 sm:px-6 sm:py-8">
@@ -91,7 +98,8 @@ export default async function StaffTeamChatPage({
         <div className="mt-6">
           <StaffTeamChatWorkspace
             report={report}
-            requestedChannelId={requestedChannelId}
+            requestedChannelId={selectedChannelId}
+            initialDraft={initialDraft}
           />
         </div>
       </div>

@@ -125,6 +125,29 @@ function todayDateInput() {
     .slice(0, 10);
 }
 
+function buildLangameBindingChatHref({
+  storeId,
+  staffName,
+  clubName,
+}: {
+  storeId: string | null;
+  staffName: string;
+  clubName: string;
+}) {
+  const params = new URLSearchParams();
+
+  if (storeId) {
+    params.set("storeId", storeId);
+  }
+
+  params.set(
+    "draft",
+    `Прошу привязать учетную запись ${staffName}, клуб ${clubName}.`,
+  );
+
+  return `/staff/team-chat?${params.toString()}`;
+}
+
 function formatNumber(value: number) {
   return new Intl.NumberFormat("ru-RU", {
     maximumFractionDigits: 0,
@@ -480,7 +503,13 @@ export default async function StaffShiftWorkspacePage() {
   const isShiftActive = Boolean(currentShift && !currentShift.stoppedAt);
   const hasLangameBinding = Boolean(staffMember?.externalUserId);
   const staffName = staffMember?.displayName ?? user.fullName ?? user.email;
+  const staffStoreId = staffMember?.store?.id ?? null;
   const canManageDirectory = can(user, "manage_staff_directory");
+  const langameBindingChatHref = buildLangameBindingChatHref({
+    storeId: staffStoreId,
+    staffName,
+    clubName: currentClubName,
+  });
   const headerActionHref = canManageDirectory
     ? "/staff/directory"
     : "/staff/tasks?view=my&status=all";
@@ -489,7 +518,9 @@ export default async function StaffShiftWorkspacePage() {
     : "Мои задачи";
   const profileIssueHref = canManageDirectory
     ? "/staff/directory"
-    : "/staff/team-chat";
+    : hasLangameBinding
+      ? "/staff/team-chat"
+      : langameBindingChatHref;
   const profileIssueAction = canManageDirectory
     ? "Проверить привязку"
     : "Написать в чат";

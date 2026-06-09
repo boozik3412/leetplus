@@ -164,9 +164,11 @@ function getLiveStateSignature(state: StaffTeamChatLiveState) {
 export function StaffTeamChatWorkspace({
   report,
   requestedChannelId,
+  initialDraft,
 }: {
   report: StaffTeamChatReport;
   requestedChannelId: string | null;
+  initialDraft: string | null;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -188,6 +190,7 @@ export function StaffTeamChatWorkspace({
     Record<string, string>
   >({});
   const autoReadSignatureRef = useRef<string | null>(null);
+  const initialDraftSignatureRef = useRef<string | null>(null);
   const selectedChannelId = requestedChannelId;
   const activeChannel = useMemo(() => {
     if (!selectedChannelId) {
@@ -200,6 +203,34 @@ export function StaffTeamChatWorkspace({
     );
   }, [selectedChannelId, report.channels]);
   const activeChannelIsSystem = isSystemNotificationChannel(activeChannel);
+
+  useEffect(() => {
+    const draft = initialDraft?.trim();
+
+    if (!draft || !activeChannel || activeChannelIsSystem) {
+      return;
+    }
+
+    const signature = `${activeChannel.id}:${draft}`;
+
+    if (initialDraftSignatureRef.current === signature) {
+      return;
+    }
+
+    initialDraftSignatureRef.current = signature;
+    setForm((current) => {
+      if (current.body.trim()) {
+        return current;
+      }
+
+      return {
+        ...current,
+        body: draft,
+        storeId: current.storeId || activeChannel.store?.id || "",
+      };
+    });
+  }, [activeChannel, activeChannelIsSystem, initialDraft]);
+
   const activeUnreadSignature = useMemo(() => {
     if (!activeChannel) {
       return null;

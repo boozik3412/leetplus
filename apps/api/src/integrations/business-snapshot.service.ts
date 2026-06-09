@@ -120,8 +120,14 @@ export class BusinessSnapshotService {
   async getStatus(
     user: AuthenticatedUser,
   ): Promise<BusinessSnapshotStatusResult> {
+    return this.getStatusForTenant(user.tenantId);
+  }
+
+  async getStatusForTenant(
+    tenantId: string,
+  ): Promise<BusinessSnapshotStatusResult> {
     const latestRuns = await this.prisma.businessSnapshotRun.findMany({
-      where: { tenantId: user.tenantId },
+      where: { tenantId },
       orderBy: { startedAt: 'desc' },
       take: 80,
     });
@@ -142,13 +148,20 @@ export class BusinessSnapshotService {
     user: AuthenticatedUser,
     query: BusinessSnapshotRunQuery,
   ): Promise<BusinessSnapshotRunResult> {
+    return this.runSnapshotsForTenant(user.tenantId, query);
+  }
+
+  async runSnapshotsForTenant(
+    tenantId: string,
+    query: BusinessSnapshotRunQuery,
+  ): Promise<BusinessSnapshotRunResult> {
     const startedAt = new Date();
     const period = this.resolvePeriod(query);
     const types = this.resolveTypes(query.type);
     const runs: BusinessSnapshotRunSummary[] = [];
 
     for (const type of types) {
-      const run = await this.createSnapshotRun(user.tenantId, type, period);
+      const run = await this.createSnapshotRun(tenantId, type, period);
       runs.push(this.toRunSummary(run));
     }
 
@@ -156,7 +169,7 @@ export class BusinessSnapshotService {
       startedAt: startedAt.toISOString(),
       finishedAt: new Date().toISOString(),
       runs,
-      status: await this.getStatus(user),
+      status: await this.getStatusForTenant(tenantId),
     };
   }
 

@@ -47,6 +47,20 @@ enum IntegrationSyncMode {
   FULL
 }
 
+enum DailyDataCoverageScope {
+  BUSINESS_FACTS
+  GUEST_FOUNDATION
+  STAFF_SHIFTS
+  BUSINESS_SNAPSHOTS
+}
+
+enum DailyDataCoverageStatus {
+  RUNNING
+  SUCCESS
+  FAILED
+  SKIPPED
+}
+
 enum ProductParsingSuggestionStatus {
   PENDING
   APPLIED
@@ -138,6 +152,7 @@ model Tenant {
   integrationSources                   IntegrationSource[]
   integrationSyncJobs                  IntegrationSyncJob[]
   businessSnapshotRuns                 BusinessSnapshotRun[]
+  dailyDataCoverages                   DailyDataCoverage[]
   langameEndpointProfileRuns           LangameEndpointProfileRun[]
   langameEndpointSnapshotRuns          LangameEndpointSnapshotRun[]
   langameTariffSnapshotItems           LangameTariffSnapshotItem[]
@@ -888,6 +903,28 @@ model BusinessSnapshotRun {
   @@index([tenantId, type, startedAt])
   @@index([tenantId, status])
   @@index([type, startedAt])
+}
+
+model DailyDataCoverage {
+  id           String                  @id @default(uuid())
+  tenantId     String
+  businessDate DateTime
+  scope        DailyDataCoverageScope
+  status       DailyDataCoverageStatus
+  startedAt    DateTime                @default(now())
+  finishedAt   DateTime?
+  sourceCounts Json?
+  summary      Json?
+  errorMessage String?
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, businessDate, scope])
+  @@index([tenantId, businessDate])
+  @@index([tenantId, status])
+  @@index([scope, businessDate])
 }
 
 model LangameEndpointProfileRun {

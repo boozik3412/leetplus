@@ -6,14 +6,21 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { LangameDailySyncService } from './langame-daily-sync.service';
 import { LangameSyncService } from './langame-sync.service';
 import type { LangameSyncQuery } from './langame.types';
+
+type DailySyncBody = {
+  date?: string;
+  force?: boolean;
+};
 
 @Controller('integrations/langame/scheduled')
 export class LangameScheduledController {
   constructor(
     private readonly configService: ConfigService,
     private readonly langameSyncService: LangameSyncService,
+    private readonly langameDailySyncService: LangameDailySyncService,
   ) {}
 
   @Post('sync')
@@ -28,6 +35,16 @@ export class LangameScheduledController {
       mode: query.mode ?? 'QUICK',
       trigger: 'AUTO',
     });
+  }
+
+  @Post('daily-sync')
+  dailySync(
+    @Headers('x-sync-service-token') token: string | undefined,
+    @Body() body: DailySyncBody = {},
+  ) {
+    this.assertToken(token);
+
+    return this.langameDailySyncService.runDailySync(body);
   }
 
   private assertToken(token: string | undefined) {

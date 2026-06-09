@@ -7,6 +7,7 @@ import { BusinessSnapshotService } from './business-snapshot.service';
 import { GuestDataFoundationService } from './guest-data-foundation.service';
 import { LangameClient } from './langame.client';
 import { LangameController } from './langame.controller';
+import { LangameDailySyncService } from './langame-daily-sync.service';
 import { LangameScheduledController } from './langame-scheduled.controller';
 import { LangameSettingsService } from './langame-settings.service';
 import { LangameSyncService } from './langame-sync.service';
@@ -19,6 +20,7 @@ import { SecretEncryptionService } from './secret-encryption.service';
     LangameClient,
     BusinessSnapshotService,
     GuestDataFoundationService,
+    LangameDailySyncService,
     LangameSettingsService,
     LangameSyncService,
     SecretEncryptionService,
@@ -26,6 +28,7 @@ import { SecretEncryptionService } from './secret-encryption.service';
   exports: [
     GuestDataFoundationService,
     BusinessSnapshotService,
+    LangameDailySyncService,
     LangameSettingsService,
     LangameSyncService,
   ],

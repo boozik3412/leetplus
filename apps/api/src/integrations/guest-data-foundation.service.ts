@@ -294,6 +294,48 @@ export class GuestDataFoundationService {
     query: GuestDataFoundationSyncQuery,
   ): Promise<GuestDataFoundationSyncResult> {
     const { tenantId } = await this.tenantContextService.resolve(user);
+    return this.syncTenantById(tenantId, query);
+  }
+
+  async syncConfiguredTenants(query: GuestDataFoundationSyncQuery): Promise<{
+    tenants: number;
+    results: GuestDataFoundationSyncResult[];
+  }> {
+    const tenants = await this.prisma.tenant.findMany({
+      where: {
+        integrationCredentials: {
+          some: {
+            provider: IntegrationProvider.LANGAME,
+            isActive: true,
+            apiKeyEncrypted: { not: null },
+          },
+        },
+        integrationSources: {
+          some: {
+            provider: IntegrationProvider.LANGAME,
+            isActive: true,
+          },
+        },
+      },
+      select: { id: true },
+      orderBy: { slug: 'asc' },
+    });
+    const results: GuestDataFoundationSyncResult[] = [];
+
+    for (const tenant of tenants) {
+      results.push(await this.syncTenantById(tenant.id, query));
+    }
+
+    return {
+      tenants: tenants.length,
+      results,
+    };
+  }
+
+  async syncTenantById(
+    tenantId: string,
+    query: GuestDataFoundationSyncQuery,
+  ): Promise<GuestDataFoundationSyncResult> {
     await this.failStaleRunningRuns(tenantId);
     const { apiKey, sources } =
       await this.langameSettingsService.resolveTenantAccess(tenantId);

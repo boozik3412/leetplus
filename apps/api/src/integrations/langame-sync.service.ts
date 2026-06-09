@@ -114,7 +114,7 @@ export class LangameSyncService {
     };
   }
 
-  private async syncTenantById(
+  async syncTenantById(
     tenantId: string,
     query: LangameSyncQuery,
   ): Promise<LangameSyncResult> {

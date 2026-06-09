@@ -30,6 +30,7 @@ import {
   UserRole.STANDARDS_MANAGER,
   UserRole.SENIOR_ADMINISTRATOR,
   UserRole.CLUB_ADMINISTRATOR,
+  UserRole.TRAINEE,
 )
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class StaffAttachmentsController {

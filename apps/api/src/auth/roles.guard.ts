@@ -55,7 +55,7 @@ export class RolesGuard implements CanActivate {
       return true;
     }
 
-    const capability = this.resolveRequiredCapability(request);
+    const capability = this.resolveRequiredCapability(request, role);
 
     if (capability && hasCapability(user, capability)) {
       return true;
@@ -66,6 +66,7 @@ export class RolesGuard implements CanActivate {
 
   private resolveRequiredCapability(
     request: AuthenticatedRequest,
+    role?: UserRole | null,
   ): AccessCapability | null {
     const path = this.normalizePath(request);
     const method = request.method?.toUpperCase() ?? 'GET';
@@ -143,7 +144,7 @@ export class RolesGuard implements CanActivate {
     }
 
     if (path.startsWith('/staff')) {
-      return this.resolveStaffCapability(path, method);
+      return this.resolveStaffCapability(path, method, role);
     }
 
     return null;
@@ -180,6 +181,7 @@ export class RolesGuard implements CanActivate {
   private resolveStaffCapability(
     path: string,
     method: string,
+    role?: UserRole | null,
   ): AccessCapability {
     if (
       path.startsWith('/staff/team-chat') ||
@@ -208,11 +210,29 @@ export class RolesGuard implements CanActivate {
         : 'manage_staff_tasks';
     }
 
+    if (path.startsWith('/staff/checklists')) {
+      if (!this.isReadMethod(method) && this.isShiftStaffRole(role)) {
+        return 'view_staff_standards';
+      }
+
+      return this.isReadMethod(method)
+        ? 'view_staff_standards'
+        : 'manage_staff_standards';
+    }
+
+    if (path.startsWith('/staff/attachments')) {
+      if (!this.isReadMethod(method) && this.isShiftStaffRole(role)) {
+        return 'view_staff_standards';
+      }
+
+      return this.isReadMethod(method)
+        ? 'view_staff_standards'
+        : 'manage_staff_standards';
+    }
+
     if (
       path.startsWith('/staff/shift-regulations') ||
-      path.startsWith('/staff/checklists') ||
-      path.startsWith('/staff/checklist-templates') ||
-      path.startsWith('/staff/attachments')
+      path.startsWith('/staff/checklist-templates')
     ) {
       return this.isReadMethod(method)
         ? 'view_staff_standards'
@@ -291,6 +311,14 @@ export class RolesGuard implements CanActivate {
 
   private isReadMethod(method: string) {
     return method === 'GET' || method === 'HEAD' || method === 'OPTIONS';
+  }
+
+  private isShiftStaffRole(role: UserRole | null | undefined) {
+    return (
+      role === UserRole.SENIOR_ADMINISTRATOR ||
+      role === UserRole.CLUB_ADMINISTRATOR ||
+      role === UserRole.TRAINEE
+    );
   }
 
   private isRestrictedShiftStaffPath(

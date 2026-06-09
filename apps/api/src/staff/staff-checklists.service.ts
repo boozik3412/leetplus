@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -30,6 +31,11 @@ const checklistStatuses = [
   'ESCALATED',
   'CANCELED',
 ] as const;
+const checklistUseOnlyRoles = new Set([
+  'SENIOR_ADMINISTRATOR',
+  'CLUB_ADMINISTRATOR',
+  'TRAINEE',
+]);
 const checklistFilterStatuses = [
   'all',
   'OVERDUE',
@@ -371,8 +377,16 @@ export class StaffChecklistsService {
   ): Promise<StaffChecklistReport> {
     const { tenantId } = await this.tenantContextService.resolve(user);
     const filters = this.resolveFilters(query);
-    const baseWhere = this.buildWhere(tenantId, filters, false);
-    const rowsWhere = this.buildWhere(tenantId, filters, true);
+    const useOnlyScope = this.buildChecklistUseOnlyScope(user);
+    const canManageChecklistRuns = !this.isChecklistUseOnlyUser(user);
+    const baseWhere = this.applyChecklistScope(
+      this.buildWhere(tenantId, filters, false),
+      useOnlyScope,
+    );
+    const rowsWhere = this.applyChecklistScope(
+      this.buildWhere(tenantId, filters, true),
+      useOnlyScope,
+    );
 
     const [rows, summaryRows, regulations, templates, stores, users] =
       await Promise.all([
@@ -437,12 +451,16 @@ export class StaffChecklistsService {
       filters,
       summary: this.buildSummary(summaryRows),
       rows: rows.map((row) => this.toRunResponse(row)),
-      publishedRegulations: regulations.map((row) =>
-        this.toRegulationOption(row),
-      ),
-      checklistTemplates: templates.map((row) => this.toTemplateOption(row)),
+      publishedRegulations: canManageChecklistRuns
+        ? regulations.map((row) => this.toRegulationOption(row))
+        : [],
+      checklistTemplates: canManageChecklistRuns
+        ? templates.map((row) => this.toTemplateOption(row))
+        : [],
       stores,
-      users,
+      users: canManageChecklistRuns
+        ? users
+        : users.filter((row) => row.id === user.id),
     };
   }
 
@@ -589,6 +607,8 @@ export class StaffChecklistsService {
   }
 
   async createChecklist(user: AuthenticatedUser, dto: StaffChecklistCreateDto) {
+    this.ensureCanCreateChecklist(user);
+
     const { tenantId } = await this.tenantContextService.resolve(user);
     const regulationId = this.normalizeOptionalString(dto.regulationId);
     const templateId = this.normalizeOptionalString(dto.templateId);
@@ -692,6 +712,8 @@ export class StaffChecklistsService {
       dto.status === undefined
         ? currentStatus
         : this.resolveOne(dto.status, checklistStatuses, currentStatus);
+    this.ensureCanUpdateChecklist(user, current, currentStatus, nextStatus);
+
     const isSubmit =
       nextStatus === 'ON_REVIEW' && currentStatus !== 'ON_REVIEW';
     const isReview =
@@ -783,6 +805,80 @@ export class StaffChecklistsService {
     });
 
     return this.toRunResponse(run);
+  }
+
+  private isChecklistUseOnlyUser(user: AuthenticatedUser) {
+    return checklistUseOnlyRoles.has(user.role);
+  }
+
+  private buildChecklistUseOnlyScope(
+    user: AuthenticatedUser,
+  ): Prisma.StaffChecklistRunWhereInput | null {
+    if (!this.isChecklistUseOnlyUser(user)) {
+      return null;
+    }
+
+    return {
+      AND: [
+        { status: { notIn: ['ACCEPTED', 'CANCELED'] } },
+        {
+          OR: [{ assignedToUserId: user.id }, { assignedToUserId: null }],
+        },
+      ],
+    };
+  }
+
+  private applyChecklistScope(
+    where: Prisma.StaffChecklistRunWhereInput,
+    scope: Prisma.StaffChecklistRunWhereInput | null,
+  ): Prisma.StaffChecklistRunWhereInput {
+    if (!scope) {
+      return where;
+    }
+
+    return {
+      AND: [where, scope],
+    };
+  }
+
+  private ensureCanCreateChecklist(user: AuthenticatedUser) {
+    if (this.isChecklistUseOnlyUser(user)) {
+      throw new ForbiddenException(
+        'Создание чек-листов недоступно для вашей роли',
+      );
+    }
+  }
+
+  private ensureCanUpdateChecklist(
+    user: AuthenticatedUser,
+    current: { assignedToUserId: string | null },
+    currentStatus: StaffChecklistStatus,
+    nextStatus: StaffChecklistStatus,
+  ) {
+    if (!this.isChecklistUseOnlyUser(user)) {
+      return;
+    }
+
+    if (current.assignedToUserId && current.assignedToUserId !== user.id) {
+      throw new ForbiddenException('Чек-лист недоступен для вашей роли');
+    }
+
+    if (currentStatus === 'ACCEPTED' || currentStatus === 'CANCELED') {
+      throw new ForbiddenException('Закрытый чек-лист нельзя изменить');
+    }
+
+    const isReviewTransition =
+      nextStatus !== currentStatus &&
+      (nextStatus === 'ACCEPTED' ||
+        nextStatus === 'RETURNED' ||
+        nextStatus === 'ESCALATED' ||
+        nextStatus === 'CANCELED');
+
+    if (isReviewTransition) {
+      throw new ForbiddenException(
+        'Проверка чек-листов недоступна для вашей роли',
+      );
+    }
   }
 
   private async resolveRegulationSource(

@@ -11,6 +11,12 @@ import {
 
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
 
+const checklistUseOnlyRoles = new Set([
+  "SENIOR_ADMINISTRATOR",
+  "CLUB_ADMINISTRATOR",
+  "TRAINEE",
+]);
+
 const statusLabels: Record<StaffChecklistFilterStatus, string> = {
   all: "Все статусы",
   OPEN: "Новые",
@@ -90,15 +96,27 @@ function formatNumber(value: number) {
   return new Intl.NumberFormat("ru-RU").format(value);
 }
 
+function isChecklistUseOnlyRole(role: string) {
+  return checklistUseOnlyRoles.has(role);
+}
+
 export default async function StaffChecklistsPage({
   searchParams,
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  const user = await requireCurrentUser();
   const params = await searchParams;
   const filters = resolveFilters(params);
   const report = await getStaffChecklistReport(filters);
+  const canManageChecklists = !isChecklistUseOnlyRole(user.role);
+  const breadcrumbItems = [
+    { href: "/dashboard", label: "Дашборд" },
+    { href: "/staff/tasks", label: "Задачи персонала" },
+    ...(canManageChecklists
+      ? [{ href: "/staff/shift-regulations", label: "Регламенты смены" }]
+      : []),
+  ];
 
   const summaryCards = [
     { label: "Всего", value: report.summary.total },
@@ -114,11 +132,7 @@ export default async function StaffChecklistsPage({
       <div className="mx-auto max-w-7xl">
         <ReportBreadcrumbs
           current="Чеклисты смены"
-          items={[
-            { href: "/dashboard", label: "Дашборд" },
-            { href: "/staff/tasks", label: "Задачи персонала" },
-            { href: "/staff/shift-regulations", label: "Регламенты смены" },
-          ]}
+          items={breadcrumbItems}
         />
 
         <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -130,31 +144,33 @@ export default async function StaffChecklistsPage({
               Чеклисты смены
             </h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-              Выполнение опубликованных регламентов: открыть смену, закрыть
-              кассу, проверить бар, PC-зону и чистоту. Обязательные пункты и
-              доказательства контролируются перед отправкой на проверку.
+              {canManageChecklists
+                ? "Выполнение опубликованных регламентов: открыть смену, закрыть кассу, проверить бар, PC-зону и чистоту. Обязательные пункты и доказательства контролируются перед отправкой на проверку."
+                : "Текущие чек-листы вашей смены: отметьте пункты, приложите доказательства и отправьте результат на проверку."}
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Link
-              href="/staff/checklists/report"
-              className="inline-flex rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900"
-            >
-              Отчет по чеклистам
-            </Link>
-            <Link
-              href="/staff/checklist-templates"
-              className="inline-flex rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
-            >
-              Шаблоны чеклистов
-            </Link>
-            <Link
-              href="/staff/shift-regulations"
-              className="inline-flex rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900"
-            >
-              Регламенты
-            </Link>
-          </div>
+          {canManageChecklists ? (
+            <div className="flex flex-wrap gap-2">
+              <Link
+                href="/staff/checklists/report"
+                className="inline-flex rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900"
+              >
+                Отчет по чеклистам
+              </Link>
+              <Link
+                href="/staff/checklist-templates"
+                className="inline-flex rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
+              >
+                Шаблоны чеклистов
+              </Link>
+              <Link
+                href="/staff/shift-regulations"
+                className="inline-flex rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900"
+              >
+                Регламенты
+              </Link>
+            </div>
+          ) : null}
         </header>
 
         <section className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
@@ -227,23 +243,25 @@ export default async function StaffChecklistsPage({
               </select>
             </label>
 
-            <label className="block text-sm">
-              <span className="text-xs font-semibold uppercase text-zinc-500">
-                Ответственный
-              </span>
-              <select
-                name="assignedToUserId"
-                defaultValue={report.filters.assignedToUserId ?? ""}
-                className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
-              >
-                <option value="">Все сотрудники</option>
-                {report.users.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.fullName ?? user.email}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {canManageChecklists ? (
+              <label className="block text-sm">
+                <span className="text-xs font-semibold uppercase text-zinc-500">
+                  Ответственный
+                </span>
+                <select
+                  name="assignedToUserId"
+                  defaultValue={report.filters.assignedToUserId ?? ""}
+                  className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                >
+                  <option value="">Все сотрудники</option>
+                  {report.users.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.fullName ?? user.email}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
 
             <label className="block text-sm lg:col-span-2">
               <span className="text-xs font-semibold uppercase text-zinc-500">
@@ -272,6 +290,8 @@ export default async function StaffChecklistsPage({
             key={report.filters.runId ?? "all-checklists"}
             report={report}
             focusRunId={report.filters.runId}
+            canCreateRuns={canManageChecklists}
+            canReviewRuns={canManageChecklists}
           />
         </section>
       </div>

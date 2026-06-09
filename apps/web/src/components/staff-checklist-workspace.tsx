@@ -115,9 +115,13 @@ async function readResponseError(response: Response) {
 export function StaffChecklistWorkspace({
   report,
   focusRunId,
+  canCreateRuns = true,
+  canReviewRuns = true,
 }: {
   report: StaffChecklistReport;
   focusRunId?: string | null;
+  canCreateRuns?: boolean;
+  canReviewRuns?: boolean;
 }) {
   const router = useRouter();
   const initialRunId =
@@ -130,19 +134,22 @@ export function StaffChecklistWorkspace({
     report.rows[0] ??
     null;
   const sourceOptions = useMemo<ChecklistSourceOption[]>(
-    () => [
-      ...report.publishedRegulations.map((regulation) => ({
-        ...regulation,
-        key: `regulation:${regulation.id}`,
-        kind: "REGULATION" as const,
-      })),
-      ...report.checklistTemplates.map((template) => ({
-        ...template,
-        key: `template:${template.id}`,
-        kind: "TEMPLATE" as const,
-      })),
-    ],
-    [report.checklistTemplates, report.publishedRegulations],
+    () =>
+      canCreateRuns
+        ? [
+            ...report.publishedRegulations.map((regulation) => ({
+              ...regulation,
+              key: `regulation:${regulation.id}`,
+              kind: "REGULATION" as const,
+            })),
+            ...report.checklistTemplates.map((template) => ({
+              ...template,
+              key: `template:${template.id}`,
+              kind: "TEMPLATE" as const,
+            })),
+          ]
+        : [],
+    [canCreateRuns, report.checklistTemplates, report.publishedRegulations],
   );
   const [selectedSourceKey, setSelectedSourceKey] = useState(
     sourceOptions[0]?.key ?? "",
@@ -157,6 +164,11 @@ export function StaffChecklistWorkspace({
   const [isPending, setIsPending] = useState(false);
 
   async function createRun() {
+    if (!canCreateRuns) {
+      setMessage("Создание чек-листов недоступно для вашей роли.");
+      return;
+    }
+
     if (!selectedSource) {
       setMessage("Сначала опубликуйте регламент или активируйте шаблон чеклиста.");
       return;
@@ -194,128 +206,146 @@ export function StaffChecklistWorkspace({
   return (
     <div className="grid gap-4 xl:grid-cols-[22rem_minmax(0,1fr)]">
       <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-        <div className="flex items-start justify-between gap-3">
+        {canCreateRuns ? (
+          <>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-300">
+                  Запуск
+                </p>
+                <h2 className="mt-1 text-lg font-semibold">Новый чеклист смены</h2>
+              </div>
+              <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
+                {formatNumber(sourceOptions.length)} основ
+              </span>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              <label className="block text-sm">
+                <span className="text-xs font-semibold uppercase text-zinc-500">
+                  Основа чеклиста
+                </span>
+                <select
+                  value={selectedSourceKey}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    const next = sourceOptions.find(
+                      (source) => source.key === value,
+                    );
+
+                    setSelectedSourceKey(value);
+                    setStoreId(next?.store?.id ?? "");
+                  }}
+                  className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                >
+                  {sourceOptions.length === 0 ? (
+                    <option value="">Нет регламентов или активных шаблонов</option>
+                  ) : null}
+                  {sourceOptions.map((source) => (
+                    <option key={source.key} value={source.key}>
+                      {source.kind === "REGULATION" ? "Регламент" : "Шаблон"} ·{" "}
+                      {source.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-300">
+                {selectedSource ? (
+                  <div className="space-y-1">
+                    <p className="font-semibold text-zinc-900 dark:text-zinc-100">
+                      {shiftKindLabels[selectedSource.shiftKind]} · v
+                      {selectedSource.version}
+                    </p>
+                    <p>
+                      {formatNumber(selectedSource.itemsCount)} пунктов,{" "}
+                      {formatNumber(selectedSource.requiredEvidenceItems)} с
+                      доказательствами
+                    </p>
+                    <p>{selectedSource.store?.name ?? "Вся сеть"}</p>
+                  </div>
+                ) : (
+                  "Опубликованный регламент или активный шаблон нужен, чтобы создать чеклист."
+                )}
+              </div>
+
+              <label className="block text-sm">
+                <span className="text-xs font-semibold uppercase text-zinc-500">
+                  Клуб
+                </span>
+                <select
+                  value={storeId}
+                  onChange={(event) => setStoreId(event.target.value)}
+                  disabled={Boolean(selectedSource?.store)}
+                  className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-950"
+                >
+                  <option value="">Вся сеть / не указан</option>
+                  {report.stores.map((store) => (
+                    <option key={store.id} value={store.id}>
+                      {store.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block text-sm">
+                <span className="text-xs font-semibold uppercase text-zinc-500">
+                  Ответственный
+                </span>
+                <select
+                  value={assignedToUserId}
+                  onChange={(event) => setAssignedToUserId(event.target.value)}
+                  className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                >
+                  <option value="">Не назначен</option>
+                  {report.users.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.fullName ?? user.email}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block text-sm">
+                <span className="text-xs font-semibold uppercase text-zinc-500">
+                  Плановое время
+                </span>
+                <input
+                  type="datetime-local"
+                  value={scheduledAt}
+                  onChange={(event) => setScheduledAt(event.target.value)}
+                  className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                />
+              </label>
+
+              <button
+                type="button"
+                onClick={createRun}
+                disabled={isPending || sourceOptions.length === 0}
+                className="w-full rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Создать чеклист
+              </button>
+              {message ? (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+                  {message}
+                </p>
+              ) : null}
+            </div>
+          </>
+        ) : (
           <div>
             <p className="text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-300">
-              Запуск
+              Выполнение
             </p>
-            <h2 className="mt-1 text-lg font-semibold">Новый чеклист смены</h2>
-          </div>
-          <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
-            {formatNumber(sourceOptions.length)} основ
-          </span>
-        </div>
-
-        <div className="mt-4 space-y-3">
-          <label className="block text-sm">
-            <span className="text-xs font-semibold uppercase text-zinc-500">
-              Основа чеклиста
-            </span>
-            <select
-              value={selectedSourceKey}
-              onChange={(event) => {
-                const value = event.target.value;
-                const next = sourceOptions.find((source) => source.key === value);
-
-                setSelectedSourceKey(value);
-                setStoreId(next?.store?.id ?? "");
-              }}
-              className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
-            >
-              {sourceOptions.length === 0 ? (
-                <option value="">Нет регламентов или активных шаблонов</option>
-              ) : null}
-              {sourceOptions.map((source) => (
-                <option key={source.key} value={source.key}>
-                  {source.kind === "REGULATION" ? "Регламент" : "Шаблон"} ·{" "}
-                  {source.title}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-300">
-            {selectedSource ? (
-              <div className="space-y-1">
-                <p className="font-semibold text-zinc-900 dark:text-zinc-100">
-                  {shiftKindLabels[selectedSource.shiftKind]} · v
-                  {selectedSource.version}
-                </p>
-                <p>
-                  {formatNumber(selectedSource.itemsCount)} пунктов,{" "}
-                  {formatNumber(selectedSource.requiredEvidenceItems)} с
-                  доказательствами
-                </p>
-                <p>{selectedSource.store?.name ?? "Вся сеть"}</p>
-              </div>
-            ) : (
-              "Опубликованный регламент или активный шаблон нужен, чтобы создать чеклист."
-            )}
-          </div>
-
-          <label className="block text-sm">
-            <span className="text-xs font-semibold uppercase text-zinc-500">
-              Клуб
-            </span>
-            <select
-              value={storeId}
-              onChange={(event) => setStoreId(event.target.value)}
-              disabled={Boolean(selectedSource?.store)}
-              className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-950"
-            >
-              <option value="">Вся сеть / не указан</option>
-              {report.stores.map((store) => (
-                <option key={store.id} value={store.id}>
-                  {store.name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="block text-sm">
-            <span className="text-xs font-semibold uppercase text-zinc-500">
-              Ответственный
-            </span>
-            <select
-              value={assignedToUserId}
-              onChange={(event) => setAssignedToUserId(event.target.value)}
-              className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
-            >
-              <option value="">Не назначен</option>
-              {report.users.map((user) => (
-                <option key={user.id} value={user.id}>
-                  {user.fullName ?? user.email}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="block text-sm">
-            <span className="text-xs font-semibold uppercase text-zinc-500">
-              Плановое время
-            </span>
-            <input
-              type="datetime-local"
-              value={scheduledAt}
-              onChange={(event) => setScheduledAt(event.target.value)}
-              className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
-            />
-          </label>
-
-          <button
-            type="button"
-            onClick={createRun}
-            disabled={isPending || sourceOptions.length === 0}
-            className="w-full rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Создать чеклист
-          </button>
-          {message ? (
-            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
-              {message}
+            <h2 className="mt-1 text-lg font-semibold">Мои текущие чек-листы</h2>
+            <p className="mt-2 text-sm leading-6 text-zinc-500">
+              Здесь отображаются только чек-листы, назначенные вам или вашей
+              смене. Создание и редактирование регламентов недоступно для этой
+              роли.
             </p>
-          ) : null}
-        </div>
+          </div>
+        )}
 
         <div className="mt-6">
           <p className="text-xs font-semibold uppercase text-zinc-500">
@@ -324,8 +354,9 @@ export function StaffChecklistWorkspace({
           <div className="mt-2 space-y-2">
             {report.rows.length === 0 ? (
               <p className="rounded-lg border border-dashed border-zinc-300 px-3 py-4 text-sm text-zinc-500 dark:border-zinc-700">
-                Выполнений пока нет. Создайте чеклист из регламента или
-                шаблона.
+                {canCreateRuns
+                  ? "Выполнений пока нет. Создайте чеклист из регламента или шаблона."
+                  : "Текущих чек-листов пока нет."}
               </p>
             ) : null}
             {report.rows.map((run) => (
@@ -361,10 +392,16 @@ export function StaffChecklistWorkspace({
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
         {selectedRun ? (
-          <ChecklistRunEditor key={selectedRun.id} run={selectedRun} />
+          <ChecklistRunEditor
+            key={selectedRun.id}
+            run={selectedRun}
+            canReviewRun={canReviewRuns}
+          />
         ) : (
           <div className="flex min-h-[24rem] items-center justify-center rounded-lg border border-dashed border-zinc-300 p-6 text-center text-zinc-500 dark:border-zinc-700">
-            Создайте первый чеклист смены из регламента или шаблона.
+            {canCreateRuns
+              ? "Создайте первый чеклист смены из регламента или шаблона."
+              : "Текущих чек-листов пока нет."}
           </div>
         )}
       </section>
@@ -372,7 +409,13 @@ export function StaffChecklistWorkspace({
   );
 }
 
-function ChecklistRunEditor({ run }: { run: StaffChecklistRun }) {
+function ChecklistRunEditor({
+  run,
+  canReviewRun,
+}: {
+  run: StaffChecklistRun;
+  canReviewRun: boolean;
+}) {
   const router = useRouter();
   const [answers, setAnswers] = useState<StaffChecklistAnswer[]>(run.answers);
   const [reviewComment, setReviewComment] = useState(run.reviewComment ?? "");
@@ -629,14 +672,18 @@ function ChecklistRunEditor({ run }: { run: StaffChecklistRun }) {
       <div className="mt-5 rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40">
         <label className="block text-sm">
           <span className="text-xs font-semibold uppercase text-zinc-500">
-            Комментарий проверки
+            {canReviewRun ? "Комментарий проверки" : "Комментарий к выполнению"}
           </span>
           <textarea
             value={reviewComment}
             onChange={(event) => setReviewComment(event.target.value)}
             rows={2}
             className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
-            placeholder="Почему приняли, вернули или эскалировали чеклист"
+            placeholder={
+              canReviewRun
+                ? "Почему приняли, вернули или эскалировали чеклист"
+                : "Что сделано, что важно проверить или где есть проблема"
+            }
           />
         </label>
         <div className="mt-3 flex flex-wrap gap-2">
@@ -651,30 +698,34 @@ function ChecklistRunEditor({ run }: { run: StaffChecklistRun }) {
           >
             Отправить на проверку
           </button>
-          <button
-            type="button"
-            onClick={() => updateRun("ACCEPTED")}
-            disabled={isPending || run.status !== "ON_REVIEW"}
-            className="rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100"
-          >
-            Принять
-          </button>
-          <button
-            type="button"
-            onClick={() => updateRun("RETURNED")}
-            disabled={isPending || run.status !== "ON_REVIEW"}
-            className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100"
-          >
-            Вернуть
-          </button>
-          <button
-            type="button"
-            onClick={() => updateRun("ESCALATED")}
-            disabled={isPending || run.status !== "ON_REVIEW"}
-            className="rounded-xl border border-red-300 bg-red-50 px-4 py-2 text-sm font-semibold text-red-800 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-100"
-          >
-            Эскалировать
-          </button>
+          {canReviewRun ? (
+            <>
+              <button
+                type="button"
+                onClick={() => updateRun("ACCEPTED")}
+                disabled={isPending || run.status !== "ON_REVIEW"}
+                className="rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100"
+              >
+                Принять
+              </button>
+              <button
+                type="button"
+                onClick={() => updateRun("RETURNED")}
+                disabled={isPending || run.status !== "ON_REVIEW"}
+                className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100"
+              >
+                Вернуть
+              </button>
+              <button
+                type="button"
+                onClick={() => updateRun("ESCALATED")}
+                disabled={isPending || run.status !== "ON_REVIEW"}
+                className="rounded-xl border border-red-300 bg-red-50 px-4 py-2 text-sm font-semibold text-red-800 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-100"
+              >
+                Эскалировать
+              </button>
+            </>
+          ) : null}
         </div>
       </div>
     </div>

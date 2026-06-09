@@ -811,6 +811,11 @@ function WorkPanel({
           title="Прогресс чек-листа"
           progress={checklistProgress}
           run={currentChecklist}
+          href={
+            currentChecklist
+              ? `/staff/checklists?runId=${currentChecklist.id}#run-${currentChecklist.id}`
+              : "/staff/checklists"
+          }
         />
         <div className="space-y-2">
           {tasks.length === 0 && checklists.length === 0 ? (
@@ -836,7 +841,7 @@ function WorkPanel({
               title={run.title}
               status={checklistStatusLabel(run.status)}
               meta={`${formatDateTime(run.scheduledAt)} · ${run.store?.name ?? "вся сеть"}`}
-              href="/staff/checklists"
+              href={`/staff/checklists?runId=${run.id}#run-${run.id}`}
               isAlert={run.isOverdue || run.status === "ESCALATED"}
               tone="emerald"
             />
@@ -962,13 +967,23 @@ function ChecklistDial({
   title,
   progress,
   run,
+  href,
 }: {
   title: string;
   progress: { done: number; total: number; percent: number };
   run: StaffChecklistRun | null;
+  href: string;
 }) {
   return (
-    <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40">
+    <Link
+      href={href}
+      className="block rounded-lg border border-zinc-200 bg-zinc-50 p-4 transition hover:border-emerald-300 hover:bg-emerald-50/60 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2 focus:ring-offset-white dark:border-zinc-800 dark:bg-zinc-900/40 dark:hover:border-emerald-500/50 dark:hover:bg-emerald-500/10 dark:focus:ring-offset-zinc-950"
+      aria-label={
+        run
+          ? `Открыть чек-лист ${run.title}`
+          : "Открыть чек-листы"
+      }
+    >
       <p className="text-sm text-zinc-600 dark:text-zinc-400">{title}</p>
       <div className="mt-5 flex items-center justify-between gap-4">
         <div>
@@ -992,7 +1007,7 @@ function ChecklistDial({
       <p className="mt-5 line-clamp-2 text-sm font-semibold text-zinc-900 dark:text-zinc-200">
         {run?.title ?? "Нет активного чек-листа"}
       </p>
-    </div>
+    </Link>
   );
 }
 

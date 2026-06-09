@@ -2736,19 +2736,29 @@ export class GuestsService {
       return;
     }
 
-    const snapshots = await this.prisma.guestBonusBalanceSnapshot.findMany({
-      where: {
-        tenantId,
-        guestId: { in: guestIds },
-      },
-      distinct: ['guestId'],
-      orderBy: [{ guestId: 'asc' }, { snapshotDate: 'desc' }],
-      select: {
-        guestId: true,
-        snapshotDate: true,
-        bonusBalance: true,
-      },
-    });
+    const snapshots: Array<{
+      guestId: string | null;
+      snapshotDate: Date;
+      bonusBalance: Prisma.Decimal;
+    }> = [];
+
+    for (const guestIdBatch of this.chunk(guestIds, 1_000)) {
+      snapshots.push(
+        ...(await this.prisma.guestBonusBalanceSnapshot.findMany({
+          where: {
+            tenantId,
+            guestId: { in: guestIdBatch },
+          },
+          distinct: ['guestId'],
+          orderBy: [{ guestId: 'asc' }, { snapshotDate: 'desc' }],
+          select: {
+            guestId: true,
+            snapshotDate: true,
+            bonusBalance: true,
+          },
+        })),
+      );
+    }
 
     for (const snapshot of snapshots) {
       if (!snapshot.guestId) {
@@ -6588,6 +6598,16 @@ export class GuestsService {
     }
 
     return totals;
+  }
+
+  private chunk<T>(items: T[], size: number) {
+    const chunks: T[][] = [];
+
+    for (let index = 0; index < items.length; index += size) {
+      chunks.push(items.slice(index, index + size));
+    }
+
+    return chunks;
   }
 
   private sortRows(

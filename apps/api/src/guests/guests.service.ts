@@ -578,6 +578,11 @@ export type StaffControlDiagnostics = {
       candidateFields: Record<string, number>;
       operatorHints: StaffOperatorHint[];
     };
+    langameUsers: {
+      total: number;
+      candidateFields: Record<string, number>;
+      operatorHints: StaffOperatorHint[];
+    };
     workingShifts: {
       total: number;
       candidateFields: Record<string, number>;
@@ -592,9 +597,22 @@ export type StaffOperatorHint = {
   fields: Record<string, string[]>;
 };
 
+export type StaffLangameUserSummary = {
+  displayName: string;
+  email: string | null;
+  username: string | null;
+  adminStatus: string | null;
+  verified: boolean | null;
+  phone: string | null;
+  externalGuestId: string | null;
+  workPointLabel: string | null;
+  updatedAt: string;
+};
+
 export type StaffUnmatchedOperatorRow = {
   externalDomain: string | null;
   externalUserId: string;
+  langameUser: StaffLangameUserSummary | null;
   storeNames: string[];
   lastClosedShiftExternalShiftId: string | null;
   lastClosedShiftStartedAt: string | null;
@@ -720,6 +738,7 @@ export type StaffOperatorReportRow = {
   mappingId: string | null;
   mappingNote: string | null;
   linkedGuest: GuestDashboardRow | null;
+  langameUser: StaffLangameUserSummary | null;
   storeNames: string[];
   lastClosedShiftExternalShiftId: string | null;
   lastClosedShiftStartedAt: string | null;
@@ -818,6 +837,7 @@ type StaffShiftMetrics = {
 type StaffUnmatchedOperatorMetrics = StaffShiftMetrics & {
   externalDomain: string | null;
   externalUserId: string;
+  langameUser: StaffLangameUserSummary | null;
   storeNames: Set<string>;
 };
 
@@ -825,6 +845,7 @@ type StaffOperatorMetrics = StaffShiftMetrics & {
   externalDomain: string | null;
   externalUserId: string;
   linkedGuest: GuestDashboardRow | null;
+  langameUser: StaffLangameUserSummary | null;
   mappingId: string | null;
   mappingNote: string | null;
   guestVisitsCount: number;
@@ -2275,7 +2296,9 @@ export class GuestsService {
         'Комментарий привязки',
       ],
       ...report.rows.map((row) => [
-        row.linkedGuest?.displayName ?? `user_id ${row.externalUserId}`,
+        row.linkedGuest?.displayName ??
+          row.langameUser?.displayName ??
+          `user_id ${row.externalUserId}`,
         row.externalUserId,
         row.externalDomain,
         row.linkedGuest ? 'Привязан' : 'Без привязки',
@@ -3646,31 +3669,34 @@ export class GuestsService {
     period: Period,
     storeId: string | null,
   ) {
-    const rows = await this.prisma.guestWorkingShift.findMany({
-      where: {
-        tenantId,
-        startedAt: { gte: period.fromDate, lte: period.toDate },
-        ...(storeId ? { storeId } : {}),
-      },
-      select: {
-        guestId: true,
-        externalDomain: true,
-        externalShiftId: true,
-        externalUserId: true,
-        startedAt: true,
-        stoppedAt: true,
-        durationMinutes: true,
-        cashAmount: true,
-        cashlessAmount: true,
-        refundsCash: true,
-        refundsCashless: true,
-        mobilePay: true,
-        yandexPay: true,
-        incassAmount: true,
-        middleCheck: true,
-        store: { select: { name: true } },
-      },
-    });
+    const [rows, langameUsersByKey] = await Promise.all([
+      this.prisma.guestWorkingShift.findMany({
+        where: {
+          tenantId,
+          startedAt: { gte: period.fromDate, lte: period.toDate },
+          ...(storeId ? { storeId } : {}),
+        },
+        select: {
+          guestId: true,
+          externalDomain: true,
+          externalShiftId: true,
+          externalUserId: true,
+          startedAt: true,
+          stoppedAt: true,
+          durationMinutes: true,
+          cashAmount: true,
+          cashlessAmount: true,
+          refundsCash: true,
+          refundsCashless: true,
+          mobilePay: true,
+          yandexPay: true,
+          incassAmount: true,
+          middleCheck: true,
+          store: { select: { name: true } },
+        },
+      }),
+      this.loadLangameStaffUsersByOperatorKey(tenantId),
+    ]);
     const total = this.emptyStaffShiftMetrics();
     const byGuestId = new Map<string, StaffShiftMetrics>();
     const byUnmatchedOperator = new Map<
@@ -3704,12 +3730,16 @@ export class GuestsService {
 
       if (!row.guestId) {
         if (row.externalUserId) {
-          const key = `${row.externalDomain ?? ''}:${row.externalUserId}`;
+          const key = this.staffOperatorKey(
+            row.externalDomain,
+            row.externalUserId,
+          );
           const operatorMetrics =
             byUnmatchedOperator.get(key) ??
             this.emptyStaffUnmatchedOperatorMetrics(
               row.externalDomain,
               row.externalUserId,
+              langameUsersByKey.get(key) ?? null,
             );
 
           if (row.store?.name) {
@@ -3769,83 +3799,85 @@ export class GuestsService {
     period: Period,
     storeId: string | null,
   ): Promise<StaffOperatorReportRow[]> {
-    const [rows, mappings, groupsByKey, sales, sessions] = await Promise.all([
-      this.prisma.guestWorkingShift.findMany({
-        where: {
-          tenantId,
-          startedAt: { gte: period.fromDate, lte: period.toDate },
-          ...(storeId ? { storeId } : {}),
-          externalUserId: { not: null },
-        },
-        select: {
-          guestId: true,
-          storeId: true,
-          externalDomain: true,
-          externalShiftId: true,
-          externalUserId: true,
-          startedAt: true,
-          stoppedAt: true,
-          durationMinutes: true,
-          cashAmount: true,
-          cashlessAmount: true,
-          refundsCash: true,
-          refundsCashless: true,
-          mobilePay: true,
-          yandexPay: true,
-          incassAmount: true,
-          middleCheck: true,
-          store: { select: { name: true } },
-          guest: { select: this.guestSelect() },
-        },
-      }),
-      this.prisma.guestStaffIdentityMapping.findMany({
-        where: { tenantId, externalProvider: IntegrationProvider.LANGAME },
-        select: {
-          id: true,
-          externalDomain: true,
-          externalUserId: true,
-          note: true,
-          guest: { select: this.guestSelect() },
-        },
-      }),
-      this.loadGuestGroups(tenantId),
-      this.prisma.salesFact.findMany({
-        where: {
-          tenantId,
-          saleDate: { gte: period.fromDate, lte: period.toDate },
-          isCanceled: false,
-          ...(storeId ? { storeId } : {}),
-        },
-        select: {
-          storeId: true,
-          saleDate: true,
-          revenue: true,
-          productNameAtSale: true,
-          product: {
-            select: {
-              name: true,
-              category: { select: { name: true } },
+    const [rows, mappings, groupsByKey, sales, sessions, langameUsersByKey] =
+      await Promise.all([
+        this.prisma.guestWorkingShift.findMany({
+          where: {
+            tenantId,
+            startedAt: { gte: period.fromDate, lte: period.toDate },
+            ...(storeId ? { storeId } : {}),
+            externalUserId: { not: null },
+          },
+          select: {
+            guestId: true,
+            storeId: true,
+            externalDomain: true,
+            externalShiftId: true,
+            externalUserId: true,
+            startedAt: true,
+            stoppedAt: true,
+            durationMinutes: true,
+            cashAmount: true,
+            cashlessAmount: true,
+            refundsCash: true,
+            refundsCashless: true,
+            mobilePay: true,
+            yandexPay: true,
+            incassAmount: true,
+            middleCheck: true,
+            store: { select: { name: true } },
+            guest: { select: this.guestSelect() },
+          },
+        }),
+        this.prisma.guestStaffIdentityMapping.findMany({
+          where: { tenantId, externalProvider: IntegrationProvider.LANGAME },
+          select: {
+            id: true,
+            externalDomain: true,
+            externalUserId: true,
+            note: true,
+            guest: { select: this.guestSelect() },
+          },
+        }),
+        this.loadGuestGroups(tenantId),
+        this.prisma.salesFact.findMany({
+          where: {
+            tenantId,
+            saleDate: { gte: period.fromDate, lte: period.toDate },
+            isCanceled: false,
+            ...(storeId ? { storeId } : {}),
+          },
+          select: {
+            storeId: true,
+            saleDate: true,
+            revenue: true,
+            productNameAtSale: true,
+            product: {
+              select: {
+                name: true,
+                category: { select: { name: true } },
+              },
             },
           },
-        },
-      }),
-      this.prisma.guestSession.findMany({
-        where: {
-          tenantId,
-          startedAt: { gte: period.fromDate, lte: period.toDate },
-          ...(storeId ? { storeId } : {}),
-        },
-        select: {
-          guestId: true,
-          storeId: true,
-          externalDomain: true,
-          externalGuestId: true,
-          externalSessionId: true,
-          startedAt: true,
-          stoppedAt: true,
-        },
-      }),
-    ]);
+        }),
+        this.prisma.guestSession.findMany({
+          where: {
+            tenantId,
+            startedAt: { gte: period.fromDate, lte: period.toDate },
+            ...(storeId ? { storeId } : {}),
+          },
+          select: {
+            guestId: true,
+            storeId: true,
+            externalDomain: true,
+            externalGuestId: true,
+            externalSessionId: true,
+            startedAt: true,
+            stoppedAt: true,
+          },
+        }),
+        this.loadLangameStaffUsersByOperatorKey(tenantId),
+      ]);
     const mappingsByKey = new Map(
       mappings.map((mapping) => [
         this.staffOperatorKey(
@@ -3874,6 +3906,7 @@ export class GuestsService {
           row.externalUserId,
           mapping?.id ?? null,
           mapping?.note ?? null,
+          langameUsersByKey.get(key) ?? null,
           linkedGuest
             ? this.toDashboardRow(linkedGuest, undefined, period, groupsByKey)
             : null,
@@ -4077,6 +4110,92 @@ export class GuestsService {
     );
   }
 
+  private async loadLangameStaffUsersByOperatorKey(tenantId: string) {
+    const rows = await this.prisma.langameStaffUser.findMany({
+      where: { tenantId },
+      select: {
+        externalDomain: true,
+        externalUserId: true,
+        email: true,
+        username: true,
+        adminStatus: true,
+        verified: true,
+        phone: true,
+        externalGuestId: true,
+        workPoint: true,
+        updatedAt: true,
+      },
+      take: 2000,
+    });
+
+    return new Map(
+      rows.map((row) => [
+        this.staffOperatorKey(row.externalDomain, row.externalUserId),
+        this.toStaffLangameUserSummary(row),
+      ]),
+    );
+  }
+
+  private toStaffLangameUserSummary(row: {
+    externalUserId: string;
+    email: string | null;
+    username: string | null;
+    adminStatus: string | null;
+    verified: boolean | null;
+    phone: string | null;
+    externalGuestId: string | null;
+    workPoint: Prisma.JsonValue | null;
+    updatedAt: Date;
+  }): StaffLangameUserSummary {
+    return {
+      displayName: row.username ?? row.email ?? `user_id ${row.externalUserId}`,
+      email: row.email,
+      username: row.username,
+      adminStatus: row.adminStatus,
+      verified: row.verified,
+      phone: row.phone,
+      externalGuestId: row.externalGuestId,
+      workPointLabel: this.langameJsonLabel(row.workPoint),
+      updatedAt: row.updatedAt.toISOString(),
+    };
+  }
+
+  private langameJsonLabel(value: Prisma.JsonValue | null): string | null {
+    if (value === null) {
+      return null;
+    }
+    if (typeof value === 'string') {
+      return value.trim() || null;
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      return String(value);
+    }
+    if (Array.isArray(value)) {
+      return value.length > 0 ? `${value.length} item(s)` : null;
+    }
+
+    const objectValue = value as Record<string, Prisma.JsonValue>;
+    const directLabel = [
+      objectValue.name,
+      objectValue.title,
+      objectValue.club_name,
+      objectValue.clubName,
+      objectValue.id,
+    ]
+      .map((candidate) =>
+        typeof candidate === 'string' || typeof candidate === 'number'
+          ? String(candidate)
+          : null,
+      )
+      .find((candidate) => candidate && candidate.trim());
+
+    if (directLabel) {
+      return directLabel;
+    }
+
+    return JSON.stringify(objectValue).slice(0, 120);
+  }
+
   private emptyStaffShiftMetrics(): StaffShiftMetrics {
     return {
       storeNames: new Set<string>(),
@@ -4137,11 +4256,13 @@ export class GuestsService {
   private emptyStaffUnmatchedOperatorMetrics(
     externalDomain: string | null,
     externalUserId: string,
+    langameUser: StaffLangameUserSummary | null,
   ): StaffUnmatchedOperatorMetrics {
     return {
       ...this.emptyStaffShiftMetrics(),
       externalDomain,
       externalUserId,
+      langameUser,
       storeNames: new Set<string>(),
     };
   }
@@ -4151,6 +4272,7 @@ export class GuestsService {
     externalUserId: string,
     mappingId: string | null,
     mappingNote: string | null,
+    langameUser: StaffLangameUserSummary | null,
     linkedGuest: GuestDashboardRow | null,
   ): StaffOperatorMetrics {
     return {
@@ -4158,6 +4280,7 @@ export class GuestsService {
       externalDomain,
       externalUserId,
       linkedGuest,
+      langameUser,
       mappingId,
       mappingNote,
       guestVisitsCount: 0,
@@ -4172,6 +4295,7 @@ export class GuestsService {
     return {
       externalDomain: metrics.externalDomain,
       externalUserId: metrics.externalUserId,
+      langameUser: metrics.langameUser,
       storeNames: Array.from(metrics.storeNames).sort(),
       lastClosedShiftExternalShiftId: metrics.lastClosedShiftExternalShiftId,
       lastClosedShiftStartedAt: this.toIsoDateTime(
@@ -4203,6 +4327,7 @@ export class GuestsService {
       mappingId: metrics.mappingId,
       mappingNote: metrics.mappingNote,
       linkedGuest: metrics.linkedGuest,
+      langameUser: metrics.langameUser,
       storeNames: Array.from(metrics.storeNames).sort(),
       lastClosedShiftExternalShiftId: metrics.lastClosedShiftExternalShiftId,
       lastClosedShiftStartedAt: this.toIsoDateTime(
@@ -4355,6 +4480,7 @@ export class GuestsService {
           run.profile,
           'cashTransactions',
         );
+        const langameUsers = this.profileSection(run.profile, 'langameUsers');
         const workingShifts = this.profileSection(run.profile, 'workingShifts');
 
         return {
@@ -4363,6 +4489,7 @@ export class GuestsService {
           endpointErrors: this.endpointErrorsFromProfile(run.profile),
           operationLogs,
           cashTransactions,
+          langameUsers,
           workingShifts,
         };
       }),
@@ -4598,6 +4725,12 @@ export class GuestsService {
       row.externalDomain,
       row.externalUserId,
       row.mappingNote,
+      row.langameUser?.displayName,
+      row.langameUser?.email,
+      row.langameUser?.username,
+      row.langameUser?.adminStatus,
+      row.langameUser?.phone,
+      row.langameUser?.workPointLabel,
       row.linkedGuest?.displayName,
       row.linkedGuest?.externalGuestId,
       row.linkedGuest?.guestGroupName,

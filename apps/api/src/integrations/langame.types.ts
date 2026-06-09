@@ -137,6 +137,24 @@ export type LangameOperationLog = {
 
 export type LangameCashTransaction = Record<string, unknown>;
 
+export type LangameUser = {
+  id: number | string;
+  email?: string | null;
+  username?: string | null;
+  admin_status?: string | number | boolean | null;
+  verified?: string | number | boolean | null;
+  comment?: string | null;
+  registered?: string | null;
+  last_login?: string | null;
+  phone?: string | null;
+  birthday?: string | null;
+  work_schedule?: unknown;
+  identity_document?: string | number | boolean | null;
+  identity_document_data?: unknown;
+  guest_id?: number | string | null;
+  work_point?: unknown;
+};
+
 export type LangameWorkingShift = Record<string, unknown>;
 
 export type LangamePcTypeInClub = Record<string, unknown>;

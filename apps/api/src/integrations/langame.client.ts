@@ -15,6 +15,7 @@ import type {
   LangameProduct,
   LangameProductExpense,
   LangameTransaction,
+  LangameUser,
   LangameWorkingShift,
 } from './langame.types';
 
@@ -217,6 +218,20 @@ export class LangameClient {
         date_to: params.dateTo,
       },
     );
+  }
+
+  async listUsers(
+    baseUrl: string,
+    apiKey: string,
+    params: {
+      page: number;
+      pageLimit: number;
+    },
+  ) {
+    return this.getList<LangameUser>(baseUrl, '/users/list', apiKey, {
+      page: String(params.page),
+      page_limit: String(params.pageLimit),
+    });
   }
 
   async listWorkingShifts(

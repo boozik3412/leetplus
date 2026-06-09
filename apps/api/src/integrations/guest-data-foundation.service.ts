@@ -29,6 +29,7 @@ import type {
   LangamePcTypeLink,
   LangameProductExpense,
   LangameTransaction,
+  LangameUser,
   LangameWorkingShift,
 } from './langame.types';
 
@@ -168,6 +169,7 @@ export type GuestDataFoundationSourceResult = {
   guestLogs: number;
   operationLogs: number;
   cashTransactions: number;
+  langameUsers: number;
   workingShifts: number;
   productSalesLinked: number;
   endpointErrors: Record<string, string>;
@@ -248,6 +250,7 @@ type SourceProfile = {
     typeCounts: Record<string, number>;
   } & FieldDiagnostics;
   cashTransactions: FieldDiagnostics;
+  langameUsers: FieldDiagnostics;
   workingShifts: FieldDiagnostics;
   pcTypesInClubs: FieldDiagnostics;
   pcTypeLinks: FieldDiagnostics;
@@ -328,6 +331,7 @@ export class GuestDataFoundationService {
         guestLogs: 0,
         operationLogs: 0,
         cashTransactions: 0,
+        langameUsers: 0,
         workingShifts: 0,
         productSalesLinked: 0,
         endpointErrors: {},
@@ -980,6 +984,17 @@ export class GuestDataFoundationService {
       );
     }
 
+    const langameUsers = await this.captureEndpoint(profile, 'users/list', () =>
+      this.paginate((page) =>
+        this.langameClient.listUsers(baseUrl, apiKey, {
+          page,
+          pageLimit: DEFAULT_PAGE_LIMIT,
+        }),
+      ),
+    );
+    this.profileRows(profile.langameUsers, langameUsers);
+    await this.syncLangameUsers(tenantId, domain, langameUsers);
+
     let workingShifts: LangameWorkingShift[] = [];
     if (query.includeWorkingShifts ?? true) {
       workingShifts = await this.captureEndpoint(
@@ -1039,6 +1054,7 @@ export class GuestDataFoundationService {
       guestLogs: guestLogs.length,
       operationLogs: operationLogs.length,
       cashTransactions: cashTransactions.length,
+      langameUsers: langameUsers.length,
       workingShifts: workingShifts.length,
       productSalesLinked,
       endpointErrors: profile.endpointErrors,
@@ -2003,6 +2019,74 @@ export class GuestDataFoundationService {
     );
   }
 
+  private async syncLangameUsers(
+    tenantId: string,
+    domain: string,
+    rows: LangameUser[],
+  ) {
+    for (const row of rows) {
+      const externalUserId = this.toNullableString(row.id);
+      if (!externalUserId) {
+        continue;
+      }
+
+      const data = {
+        tenantId,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: domain,
+        externalUserId,
+        email: this.toNullableString(row.email),
+        username: this.toNullableString(row.username),
+        adminStatus: this.toNullableString(row.admin_status),
+        verified: this.toNullableBoolean(row.verified),
+        comment: this.toNullableString(row.comment),
+        registeredAt: this.parseLangameDate(
+          this.toNullableString(row.registered),
+        ),
+        lastLoginAt: this.parseLangameDate(
+          this.toNullableString(row.last_login),
+        ),
+        phone: this.toNullableString(row.phone),
+        birthday: this.parseLangameDate(this.toNullableString(row.birthday)),
+        workSchedule: this.toNullableJson(row.work_schedule),
+        identityDocument: this.toNullableString(row.identity_document),
+        identityDocumentData: this.toNullableJson(row.identity_document_data),
+        externalGuestId: this.toNullableString(row.guest_id),
+        workPoint: this.toNullableJson(row.work_point),
+        sourcePayloadHash: this.payloadHash(row),
+      };
+
+      await this.prisma.langameStaffUser.upsert({
+        where: {
+          tenantId_externalProvider_externalDomain_externalUserId: {
+            tenantId,
+            externalProvider: IntegrationProvider.LANGAME,
+            externalDomain: domain,
+            externalUserId,
+          },
+        },
+        create: data,
+        update: {
+          email: data.email,
+          username: data.username,
+          adminStatus: data.adminStatus,
+          verified: data.verified,
+          comment: data.comment,
+          registeredAt: data.registeredAt,
+          lastLoginAt: data.lastLoginAt,
+          phone: data.phone,
+          birthday: data.birthday,
+          workSchedule: data.workSchedule,
+          identityDocument: data.identityDocument,
+          identityDocumentData: data.identityDocumentData,
+          externalGuestId: data.externalGuestId,
+          workPoint: data.workPoint,
+          sourcePayloadHash: data.sourcePayloadHash,
+        },
+      });
+    }
+  }
+
   private async linkProductSalesToGuests(
     tenantId: string,
     domain: string,
@@ -2303,6 +2387,41 @@ export class GuestDataFoundationService {
 
     const stringValue = this.scalarToString(value)?.trim();
     return stringValue ? stringValue : null;
+  }
+
+  private toNullableBoolean(value: unknown) {
+    if (value === null || value === undefined || value === '') {
+      return null;
+    }
+    if (typeof value === 'boolean') {
+      return value;
+    }
+    if (typeof value === 'number') {
+      return value !== 0;
+    }
+
+    const normalized = this.scalarToString(value)?.trim().toLowerCase();
+    if (!normalized) {
+      return null;
+    }
+    if (['1', 'true', 'yes', 'y', 'да'].includes(normalized)) {
+      return true;
+    }
+    if (['0', 'false', 'no', 'n', 'нет'].includes(normalized)) {
+      return false;
+    }
+
+    return null;
+  }
+
+  private toNullableJson(
+    value: unknown,
+  ): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput {
+    if (value === null || value === undefined || value === '') {
+      return Prisma.DbNull;
+    }
+
+    return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
   }
 
   private firstStringField(row: Record<string, unknown>, fields: string[]) {
@@ -2782,6 +2901,11 @@ export class GuestDataFoundationService {
         candidateFields: {},
       },
       cashTransactions: {
+        total: 0,
+        fieldCounts: {},
+        candidateFields: {},
+      },
+      langameUsers: {
         total: 0,
         fieldCounts: {},
         candidateFields: {},

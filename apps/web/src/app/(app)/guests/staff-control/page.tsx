@@ -1178,7 +1178,7 @@ function getStaffDisplayRows(report: StaffControlReport): StaffDisplayRow[] {
   const unmatchedRows = report.unmatchedOperators.map((row) => ({
     id: `operator:${row.externalDomain ?? "source"}:${row.externalUserId}`,
     detailHref: null,
-    displayName: `user_id ${row.externalUserId}`,
+    displayName: row.langameUser?.displayName ?? `user_id ${row.externalUserId}`,
     contact: row.externalDomain ?? "источник",
     externalGuestId: row.externalUserId,
     externalDomain: row.externalDomain,
@@ -1372,11 +1372,18 @@ function UnmatchedOperatorsPanel({ report }: { report: StaffControlReport }) {
                 >
                   <td className="px-4 py-3">
                     <p className="font-medium text-zinc-950 dark:text-zinc-50">
-                      user_id {row.externalUserId}
+                      {row.langameUser?.displayName ??
+                        `user_id ${row.externalUserId}`}
                     </p>
                     <p className="mt-1 text-xs text-zinc-500">
-                      {row.externalDomain ?? "источник"}
+                      {row.externalDomain ?? "источник"} · user_id{" "}
+                      {row.externalUserId}
                     </p>
+                    {row.langameUser?.adminStatus ? (
+                      <p className="mt-1 text-xs text-zinc-500">
+                        {row.langameUser.adminStatus}
+                      </p>
+                    ) : null}
                   </td>
                   <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">
                     {row.storeNames.length > 0
@@ -1468,7 +1475,7 @@ function DiagnosticsPanel({ report }: { report: StaffControlReport }) {
                   </p>
                 ) : null}
               </div>
-              <div className="mt-4 grid min-w-0 gap-3 lg:grid-cols-3">
+              <div className="mt-4 grid min-w-0 gap-3 lg:grid-cols-4">
                 <DiagnosticSource
                   title="all_operations_log"
                   total={run.operationLogs.total}
@@ -1480,6 +1487,12 @@ function DiagnosticsPanel({ report }: { report: StaffControlReport }) {
                   total={run.cashTransactions.total}
                   fields={run.cashTransactions.candidateFields}
                   operatorHints={run.cashTransactions.operatorHints}
+                />
+                <DiagnosticSource
+                  title="users/list"
+                  total={run.langameUsers.total}
+                  fields={run.langameUsers.candidateFields}
+                  operatorHints={run.langameUsers.operatorHints}
                 />
                 <DiagnosticSource
                   title="working_shifts"

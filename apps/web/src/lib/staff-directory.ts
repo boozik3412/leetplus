@@ -59,6 +59,7 @@ export type StaffDirectoryMember = {
     email: string;
     fullName: string | null;
   } | null;
+  langameUser: StaffLangameUserOption | null;
 };
 
 export type StaffLegacyIdentityMapping = {
@@ -69,6 +70,22 @@ export type StaffLegacyIdentityMapping = {
   guestName: string | null;
   note: string | null;
   mappedStaffMemberId: string | null;
+};
+
+export type StaffLangameUserOption = {
+  id: string;
+  externalDomain: string;
+  externalUserId: string;
+  displayName: string;
+  email: string | null;
+  username: string | null;
+  adminStatus: string | null;
+  verified: boolean | null;
+  phone: string | null;
+  externalGuestId: string | null;
+  workPointLabel: string | null;
+  mappedStaffMemberId: string | null;
+  updatedAt: string;
 };
 
 export type StaffDirectoryReport = {
@@ -90,6 +107,7 @@ export type StaffDirectoryReport = {
   stores: StaffDirectoryStore[];
   users: StaffDirectoryUser[];
   legacyMappings: StaffLegacyIdentityMapping[];
+  langameUsers: StaffLangameUserOption[];
 };
 
 export type StaffShiftWorkspaceProfile = {

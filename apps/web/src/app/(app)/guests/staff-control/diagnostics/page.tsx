@@ -95,7 +95,7 @@ export default async function StaffDiagnosticsReportPage({
                       </p>
                     ) : null}
                   </div>
-                  <div className="mt-4 grid min-w-0 gap-3 lg:grid-cols-3">
+                  <div className="mt-4 grid min-w-0 gap-3 lg:grid-cols-4">
                     <DiagnosticSource
                       title="all_operations_log"
                       total={run.operationLogs.total}
@@ -105,6 +105,11 @@ export default async function StaffDiagnosticsReportPage({
                       title="log_cash_transaction"
                       total={run.cashTransactions.total}
                       fields={run.cashTransactions.candidateFields}
+                    />
+                    <DiagnosticSource
+                      title="users/list"
+                      total={run.langameUsers.total}
+                      fields={run.langameUsers.candidateFields}
                     />
                     <DiagnosticSource
                       title="working_shifts"

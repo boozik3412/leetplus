@@ -86,6 +86,7 @@ export type StaffDirectoryReport = {
     isActive: boolean;
   }>;
   legacyMappings: StaffLegacyIdentityMapping[];
+  langameUsers: StaffLangameUserOption[];
 };
 
 export type StaffMemberResponse = {
@@ -118,6 +119,7 @@ export type StaffMemberResponse = {
     email: string;
     fullName: string | null;
   } | null;
+  langameUser: StaffLangameUserOption | null;
 };
 
 export type StaffLegacyIdentityMapping = {
@@ -128,6 +130,22 @@ export type StaffLegacyIdentityMapping = {
   guestName: string | null;
   note: string | null;
   mappedStaffMemberId: string | null;
+};
+
+export type StaffLangameUserOption = {
+  id: string;
+  externalDomain: string;
+  externalUserId: string;
+  displayName: string;
+  email: string | null;
+  username: string | null;
+  adminStatus: string | null;
+  verified: boolean | null;
+  phone: string | null;
+  externalGuestId: string | null;
+  workPointLabel: string | null;
+  mappedStaffMemberId: string | null;
+  updatedAt: string;
 };
 
 const staffMemberInclude = {
@@ -164,32 +182,41 @@ export class StaffDirectoryService {
     const where = this.buildWhere(tenantId, filters);
     const canManageDirectory = this.canManageDirectory(user);
 
-    const [rows, stores, users, legacyMappings] = await Promise.all([
-      this.prisma.staffMember.findMany({
-        where,
-        include: staffMemberInclude,
-        orderBy: [{ status: 'asc' }, { displayName: 'asc' }],
-        take: 300,
-      }),
-      this.prisma.store.findMany({
-        where: { tenantId },
-        select: { id: true, name: true, isActive: true },
-        orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
-      }),
-      this.prisma.user.findMany({
-        where: { tenantId },
-        select: {
-          id: true,
-          email: true,
-          fullName: true,
-          role: true,
-          isActive: true,
-        },
-        orderBy: [{ isActive: 'desc' }, { fullName: 'asc' }, { email: 'asc' }],
-      }),
-      this.getLegacyMappings(tenantId),
-    ]);
-    const responseRows = rows.map((row) => this.toMemberResponse(row));
+    const [rows, stores, users, legacyMappings, langameUsers] =
+      await Promise.all([
+        this.prisma.staffMember.findMany({
+          where,
+          include: staffMemberInclude,
+          orderBy: [{ status: 'asc' }, { displayName: 'asc' }],
+          take: 300,
+        }),
+        this.prisma.store.findMany({
+          where: { tenantId },
+          select: { id: true, name: true, isActive: true },
+          orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+        }),
+        this.prisma.user.findMany({
+          where: { tenantId },
+          select: {
+            id: true,
+            email: true,
+            fullName: true,
+            role: true,
+            isActive: true,
+          },
+          orderBy: [
+            { isActive: 'desc' },
+            { fullName: 'asc' },
+            { email: 'asc' },
+          ],
+        }),
+        this.getLegacyMappings(tenantId),
+        this.getLangameUsers(tenantId),
+      ]);
+    const langameUsersByKey = this.langameUsersByKey(langameUsers);
+    const responseRows = rows.map((row) =>
+      this.toMemberResponse(row, this.findLangameUser(row, langameUsersByKey)),
+    );
 
     return {
       filters,
@@ -199,6 +226,7 @@ export class StaffDirectoryService {
       stores,
       users,
       legacyMappings: this.attachMappedMembers(responseRows, legacyMappings),
+      langameUsers: this.attachMappedLangameUsers(responseRows, langameUsers),
     };
   }
 
@@ -223,8 +251,12 @@ export class StaffDirectoryService {
       rows.find((member) => member.email === user.email) ??
       null;
 
+    const langameUser = row
+      ? await this.getLangameUserForMember(tenantId, row)
+      : null;
+
     return {
-      staffMember: row ? this.toMemberResponse(row) : null,
+      staffMember: row ? this.toMemberResponse(row, langameUser) : null,
     };
   }
 
@@ -241,7 +273,9 @@ export class StaffDirectoryService {
       include: staffMemberInclude,
     });
 
-    return this.toMemberResponse(created);
+    const langameUser = await this.getLangameUserForMember(tenantId, created);
+
+    return this.toMemberResponse(created, langameUser);
   }
 
   async updateMember(user: AuthenticatedUser, id: string, dto: StaffMemberDto) {
@@ -263,7 +297,9 @@ export class StaffDirectoryService {
       include: staffMemberInclude,
     });
 
-    return this.toMemberResponse(updated);
+    const langameUser = await this.getLangameUserForMember(tenantId, updated);
+
+    return this.toMemberResponse(updated, langameUser);
   }
 
   private resolveFilters(
@@ -515,6 +551,192 @@ export class StaffDirectoryService {
     }));
   }
 
+  private async getLangameUsers(
+    tenantId: string,
+  ): Promise<StaffLangameUserOption[]> {
+    const rows = await this.prisma.langameStaffUser.findMany({
+      where: { tenantId },
+      select: {
+        id: true,
+        externalDomain: true,
+        externalUserId: true,
+        email: true,
+        username: true,
+        adminStatus: true,
+        verified: true,
+        phone: true,
+        externalGuestId: true,
+        workPoint: true,
+        updatedAt: true,
+      },
+      orderBy: [
+        { externalDomain: 'asc' },
+        { username: 'asc' },
+        { externalUserId: 'asc' },
+      ],
+      take: 1000,
+    });
+
+    return rows.map((row) => this.toLangameUserOption(row));
+  }
+
+  private async getLangameUserForMember(
+    tenantId: string,
+    member: StaffMemberRow,
+  ): Promise<StaffLangameUserOption | null> {
+    if (!member.externalDomain || !member.externalUserId) {
+      return null;
+    }
+
+    const row = await this.prisma.langameStaffUser.findFirst({
+      where: {
+        tenantId,
+        externalProvider:
+          member.externalProvider ?? IntegrationProvider.LANGAME,
+        externalDomain: member.externalDomain,
+        externalUserId: member.externalUserId,
+      },
+      select: {
+        id: true,
+        externalDomain: true,
+        externalUserId: true,
+        email: true,
+        username: true,
+        adminStatus: true,
+        verified: true,
+        phone: true,
+        externalGuestId: true,
+        workPoint: true,
+        updatedAt: true,
+      },
+    });
+
+    return row ? this.toLangameUserOption(row, member.id) : null;
+  }
+
+  private langameUsersByKey(users: StaffLangameUserOption[]) {
+    return new Map(
+      users.map((user) => [
+        this.langameIdentityKey(user.externalDomain, user.externalUserId),
+        user,
+      ]),
+    );
+  }
+
+  private findLangameUser(
+    member: StaffMemberRow,
+    usersByKey: Map<string, StaffLangameUserOption>,
+  ) {
+    if (!member.externalDomain || !member.externalUserId) {
+      return null;
+    }
+
+    const user =
+      usersByKey.get(
+        this.langameIdentityKey(member.externalDomain, member.externalUserId),
+      ) ?? null;
+
+    return user ? { ...user, mappedStaffMemberId: member.id } : null;
+  }
+
+  private attachMappedLangameUsers(
+    members: StaffMemberResponse[],
+    users: StaffLangameUserOption[],
+  ) {
+    const memberByExternalKey = new Map(
+      members
+        .filter((member) => member.externalDomain && member.externalUserId)
+        .map((member) => [
+          this.langameIdentityKey(
+            member.externalDomain as string,
+            member.externalUserId as string,
+          ),
+          member.id,
+        ]),
+    );
+
+    return users.map((user) => ({
+      ...user,
+      mappedStaffMemberId:
+        memberByExternalKey.get(
+          this.langameIdentityKey(user.externalDomain, user.externalUserId),
+        ) ?? null,
+    }));
+  }
+
+  private toLangameUserOption(
+    row: {
+      id: string;
+      externalDomain: string;
+      externalUserId: string;
+      email: string | null;
+      username: string | null;
+      adminStatus: string | null;
+      verified: boolean | null;
+      phone: string | null;
+      externalGuestId: string | null;
+      workPoint: Prisma.JsonValue | null;
+      updatedAt: Date;
+    },
+    mappedStaffMemberId: string | null = null,
+  ): StaffLangameUserOption {
+    return {
+      id: row.id,
+      externalDomain: row.externalDomain,
+      externalUserId: row.externalUserId,
+      displayName: row.username ?? row.email ?? `user_id ${row.externalUserId}`,
+      email: row.email,
+      username: row.username,
+      adminStatus: row.adminStatus,
+      verified: row.verified,
+      phone: row.phone,
+      externalGuestId: row.externalGuestId,
+      workPointLabel: this.langameJsonLabel(row.workPoint),
+      mappedStaffMemberId,
+      updatedAt: row.updatedAt.toISOString(),
+    };
+  }
+
+  private langameIdentityKey(externalDomain: string, externalUserId: string) {
+    return `${IntegrationProvider.LANGAME}:${externalDomain}:${externalUserId}`;
+  }
+
+  private langameJsonLabel(value: Prisma.JsonValue | null): string | null {
+    if (value === null) {
+      return null;
+    }
+    if (typeof value === 'string') {
+      return value.trim() || null;
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      return String(value);
+    }
+    if (Array.isArray(value)) {
+      return value.length > 0 ? `${value.length} item(s)` : null;
+    }
+
+    const objectValue = value as Record<string, Prisma.JsonValue>;
+    const directLabel = [
+      objectValue.name,
+      objectValue.title,
+      objectValue.club_name,
+      objectValue.clubName,
+      objectValue.id,
+    ]
+      .map((candidate) =>
+        typeof candidate === 'string' || typeof candidate === 'number'
+          ? String(candidate)
+          : null,
+      )
+      .find((candidate) => candidate && candidate.trim());
+
+    if (directLabel) {
+      return directLabel;
+    }
+
+    return JSON.stringify(objectValue).slice(0, 120);
+  }
+
   private buildSummary(rows: StaffMemberResponse[]) {
     return rows.reduce(
       (summary, row) => {
@@ -540,7 +762,10 @@ export class StaffDirectoryService {
     );
   }
 
-  private toMemberResponse(row: StaffMemberRow): StaffMemberResponse {
+  private toMemberResponse(
+    row: StaffMemberRow,
+    langameUser: StaffLangameUserOption | null = null,
+  ): StaffMemberResponse {
     return {
       id: row.id,
       displayName: row.displayName,
@@ -561,6 +786,7 @@ export class StaffDirectoryService {
       store: row.store,
       user: row.user,
       createdByUser: row.createdByUser,
+      langameUser,
     };
   }
 

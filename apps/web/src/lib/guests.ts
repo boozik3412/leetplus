@@ -429,6 +429,11 @@ export type StaffControlDiagnostics = {
       candidateFields: Record<string, number>;
       operatorHints: StaffOperatorHint[];
     };
+    langameUsers: {
+      total: number;
+      candidateFields: Record<string, number>;
+      operatorHints: StaffOperatorHint[];
+    };
     workingShifts: {
       total: number;
       candidateFields: Record<string, number>;
@@ -443,9 +448,22 @@ export type StaffOperatorHint = {
   fields: Record<string, string[]>;
 };
 
+export type StaffLangameUserSummary = {
+  displayName: string;
+  email: string | null;
+  username: string | null;
+  adminStatus: string | null;
+  verified: boolean | null;
+  phone: string | null;
+  externalGuestId: string | null;
+  workPointLabel: string | null;
+  updatedAt: string;
+};
+
 export type StaffUnmatchedOperatorRow = {
   externalDomain: string | null;
   externalUserId: string;
+  langameUser: StaffLangameUserSummary | null;
   storeNames: string[];
   lastClosedShiftExternalShiftId: string | null;
   lastClosedShiftStartedAt: string | null;
@@ -558,6 +576,7 @@ export type StaffOperatorReportRow = {
   mappingId: string | null;
   mappingNote: string | null;
   linkedGuest: GuestDashboardRow | null;
+  langameUser: StaffLangameUserSummary | null;
   storeNames: string[];
   lastClosedShiftExternalShiftId: string | null;
   lastClosedShiftStartedAt: string | null;

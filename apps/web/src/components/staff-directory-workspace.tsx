@@ -4,6 +4,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import {
   type StaffDirectoryMember,
   type StaffDirectoryReport,
+  type StaffLangameUserOption,
   type StaffMemberEmploymentType,
   type StaffMemberStatus,
 } from "@/lib/staff-directory";
@@ -109,6 +110,9 @@ export function StaffDirectoryWorkspace({
   const unmappedLegacy = report.legacyMappings.filter(
     (mapping) => !mapping.mappedStaffMemberId,
   );
+  const unmappedLangameUsers = report.langameUsers.filter(
+    (user) => !user.mappedStaffMemberId,
+  );
 
   function updateDraft(patch: Partial<DraftMember>) {
     setDraft((current) => ({ ...current, ...patch }));
@@ -123,6 +127,16 @@ export function StaffDirectoryWorkspace({
         draft.displayName || account?.fullName || account?.email || "",
       email: draft.email || account?.email || "",
       role: account?.role ?? draft.role,
+    });
+  }
+
+  function applyLangameUser(user: StaffLangameUserOption) {
+    updateDraft({
+      externalDomain: user.externalDomain,
+      externalUserId: user.externalUserId,
+      displayName: draft.displayName || user.displayName,
+      email: draft.email || user.email || "",
+      phone: draft.phone || user.phone || "",
     });
   }
 
@@ -248,7 +262,9 @@ export function StaffDirectoryWorkspace({
                   <span>
                     Langame:{" "}
                     {member.externalUserId
-                      ? `${member.externalDomain ?? "домен"} / ${member.externalUserId}`
+                      ? member.langameUser
+                        ? `${member.langameUser.displayName} / ${member.externalUserId}`
+                        : `${member.externalDomain ?? "домен"} / ${member.externalUserId}`
                       : "не привязан"}
                   </span>
                   <span>Обновлено: {formatDate(member.updatedAt)}</span>
@@ -257,6 +273,39 @@ export function StaffDirectoryWorkspace({
             ))}
           </div>
         )}
+
+        {unmappedLangameUsers.length > 0 ? (
+          <div className="mt-5 rounded-lg border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900/60 dark:bg-emerald-950/20">
+            <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+              Операторы Langame из API
+            </p>
+            <p className="mt-2 text-sm text-emerald-900 dark:text-emerald-100">
+              Эти сотрудники пришли из /users/list и пока не привязаны к карточкам персонала.
+            </p>
+            <div className="mt-3 grid gap-2 md:grid-cols-2">
+              {unmappedLangameUsers.slice(0, 8).map((user) => (
+                <button
+                  key={user.id}
+                  type="button"
+                  onClick={() => applyLangameUser(user)}
+                  className="rounded-md border border-emerald-200 bg-white px-3 py-2 text-left text-sm transition hover:border-emerald-400 dark:border-emerald-900/60 dark:bg-zinc-950"
+                >
+                  <span className="font-semibold">{user.displayName}</span>
+                  <span className="block text-xs text-zinc-500">
+                    {user.externalDomain} · user_id {user.externalUserId}
+                  </span>
+                  {user.adminStatus || user.workPointLabel ? (
+                    <span className="block text-xs text-zinc-500">
+                      {[user.adminStatus, user.workPointLabel]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
+                  ) : null}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
 
         {unmappedLegacy.length > 0 ? (
           <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/60 dark:bg-amber-950/20">

@@ -175,6 +175,7 @@ model Tenant {
   recommendationStates                 RecommendationState[]
   reportDigestScheduleRuns             ReportDigestScheduleRun[]
   guestStaffIdentityMappings           GuestStaffIdentityMapping[]
+  langameStaffUsers                     LangameStaffUser[]
   staffMembers                         StaffMember[]
   staffTasks                           StaffTask[]
   staffTaskTemplates                   StaffTaskTemplate[]
@@ -2029,6 +2030,37 @@ model GuestStaffIdentityMapping {
   @@index([tenantId], map: "guest_staff_identity_mapping_tenant_idx")
   @@index([guestId], map: "guest_staff_identity_mapping_guest_idx")
   @@index([createdByUserId], map: "guest_staff_identity_mapping_user_idx")
+}
+
+model LangameStaffUser {
+  id                   String              @id @default(uuid())
+  tenantId             String
+  externalProvider     IntegrationProvider @default(LANGAME)
+  externalDomain       String
+  externalUserId       String
+  email                String?
+  username             String?
+  adminStatus          String?
+  verified             Boolean?
+  comment              String?
+  registeredAt         DateTime?
+  lastLoginAt          DateTime?
+  phone                String?
+  birthday             DateTime?
+  workSchedule         Json?
+  identityDocument     String?
+  identityDocumentData Json?
+  externalGuestId      String?
+  workPoint            Json?
+  sourcePayloadHash    String?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, externalProvider, externalDomain, externalUserId], map: "langame_staff_user_external_identity_unique")
+  @@index([tenantId, externalDomain], map: "langame_staff_user_domain_idx")
+  @@index([tenantId, externalUserId], map: "langame_staff_user_external_user_idx")
 }
 
 model StaffMember {

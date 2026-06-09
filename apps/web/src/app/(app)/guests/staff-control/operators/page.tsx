@@ -459,10 +459,18 @@ export default async function StaffOperatorsPage({
                     >
                       <tr className="hover:bg-zinc-50/80 dark:hover:bg-zinc-900/50">
                         <td className="px-3 py-3 align-top">
-                          <p className="font-medium">user_id {row.externalUserId}</p>
-                          <p className="mt-1 truncate text-xs text-zinc-500">
-                            {row.externalDomain ?? "источник"}
+                          <p className="font-medium">
+                            {adminDisplayName(row)}
                           </p>
+                          <p className="mt-1 truncate text-xs text-zinc-500">
+                            {row.externalDomain ?? "источник"} · user_id{" "}
+                            {row.externalUserId}
+                          </p>
+                          {row.langameUser?.adminStatus ? (
+                            <p className="mt-1 truncate text-xs text-zinc-500">
+                              {row.langameUser.adminStatus}
+                            </p>
+                          ) : null}
                         </td>
                         <td className="px-3 py-3 align-top">
                           {row.linkedGuest ? (
@@ -475,6 +483,14 @@ export default async function StaffOperatorsPage({
                           ) : (
                             <span className="text-zinc-500">не привязан</span>
                           )}
+                          {!row.linkedGuest && row.langameUser ? (
+                            <p className="mt-1 text-xs text-zinc-500">
+                              Langame:{" "}
+                              {row.langameUser.email ??
+                                row.langameUser.phone ??
+                                "данные из /users/list"}
+                            </p>
+                          ) : null}
                           {row.mappingNote ? (
                             <p className="mt-1 text-xs text-zinc-500">
                               {row.mappingNote}
@@ -944,7 +960,11 @@ function FilterChip({ label }: { label: string }) {
 }
 
 function adminDisplayName(row: StaffOperatorReport["rows"][number]) {
-  return row.linkedGuest?.displayName ?? `user_id ${row.externalUserId}`;
+  return (
+    row.linkedGuest?.displayName ??
+    row.langameUser?.displayName ??
+    `user_id ${row.externalUserId}`
+  );
 }
 
 function AdminComparisonRow({
@@ -1079,7 +1099,7 @@ function MiniRanking({
           >
             <div className="min-w-0">
               <p className="truncate font-medium">
-                {index + 1}. {row.linkedGuest?.displayName ?? `user_id ${row.externalUserId}`}
+                {index + 1}. {adminDisplayName(row)}
               </p>
               <p className="mt-0.5 truncate text-xs text-zinc-500">
                 {row.storeNames.join(", ") || row.externalDomain || "источник"}
@@ -1192,11 +1212,16 @@ function OperatorCard({
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold">
-            user_id {row.externalUserId}
+            {adminDisplayName(row)}
           </p>
           <p className="mt-1 truncate text-xs text-zinc-500">
-            {row.externalDomain ?? "источник"}
+            {row.externalDomain ?? "источник"} · user_id {row.externalUserId}
           </p>
+          {row.langameUser?.adminStatus ? (
+            <p className="mt-1 truncate text-xs text-zinc-500">
+              {row.langameUser.adminStatus}
+            </p>
+          ) : null}
         </div>
         <span
           className={[
@@ -1221,6 +1246,15 @@ function OperatorCard({
           >
             {row.linkedGuest.displayName}
           </Link>
+        ) : row.langameUser ? (
+          <div className="mt-1">
+            <p className="truncate font-semibold">{row.langameUser.displayName}</p>
+            <p className="mt-1 truncate text-xs text-zinc-500">
+              {row.langameUser.email ??
+                row.langameUser.phone ??
+                "данные из /users/list"}
+            </p>
+          </div>
         ) : (
           <p className="mt-1 text-zinc-500">не привязан</p>
         )}

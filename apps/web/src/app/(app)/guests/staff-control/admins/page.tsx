@@ -121,7 +121,7 @@ function getRows(report: StaffControlReport): StaffDisplayRow[] {
     ...report.unmatchedOperators.map((row) => ({
       id: `operator:${row.externalDomain ?? "source"}:${row.externalUserId}`,
       detailHref: null,
-      displayName: `user_id ${row.externalUserId}`,
+      displayName: row.langameUser?.displayName ?? `user_id ${row.externalUserId}`,
       contact: row.externalDomain ?? "источник",
       externalDomain: row.externalDomain,
       guestGroupName: "Оператор Langame",

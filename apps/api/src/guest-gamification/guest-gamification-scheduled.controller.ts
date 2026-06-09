@@ -7,6 +7,11 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
+  GuestBonusLedgerService,
+  type GuestGameScheduledBonusLedgerDispatchDto,
+  type GuestGameScheduledBonusLedgerDispatchResult,
+} from './guest-bonus-ledger.service';
+import {
   GuestGamificationService,
   type GuestGameScheduledDeliveryDispatchDto,
   type GuestGameScheduledDeliveryDispatchResult,
@@ -19,6 +24,7 @@ export class GuestGamificationScheduledController {
   constructor(
     private readonly configService: ConfigService,
     private readonly gamificationService: GuestGamificationService,
+    private readonly bonusLedgerService: GuestBonusLedgerService,
   ) {}
 
   @Post('pipeline/run')
@@ -39,6 +45,16 @@ export class GuestGamificationScheduledController {
     this.assertToken(token);
 
     return this.gamificationService.runDeliveryDispatchScheduled(dto);
+  }
+
+  @Post('bonus-ledger/dispatch')
+  runScheduledBonusLedgerDispatch(
+    @Headers('x-sync-service-token') token: string | undefined,
+    @Body() dto: GuestGameScheduledBonusLedgerDispatchDto,
+  ): Promise<GuestGameScheduledBonusLedgerDispatchResult> {
+    this.assertToken(token);
+
+    return this.bonusLedgerService.runScheduledDispatch(dto);
   }
 
   private assertToken(token: string | undefined) {

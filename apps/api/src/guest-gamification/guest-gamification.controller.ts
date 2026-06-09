@@ -16,6 +16,16 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import {
+  GuestBonusLedgerService,
+  type GuestGameBonusLedgerCancelDto,
+  type GuestGameBonusLedgerDispatchDto,
+  type GuestGameBonusLedgerDispatchItem,
+  type GuestGameBonusLedgerDispatchResult,
+  type GuestGameBonusLedgerQueueDto,
+  type GuestGameBonusLedgerQueueResult,
+  type GuestGameBonusLedgerStatus,
+} from './guest-bonus-ledger.service';
+import {
   GuestGamificationService,
   type GuestGameEvent,
   type GuestGameEventDto,
@@ -64,7 +74,10 @@ import {
 )
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class GuestGamificationController {
-  constructor(private readonly gamificationService: GuestGamificationService) {}
+  constructor(
+    private readonly gamificationService: GuestGamificationService,
+    private readonly bonusLedgerService: GuestBonusLedgerService,
+  ) {}
 
   @Get('workspace')
   getWorkspace(
@@ -318,6 +331,41 @@ export class GuestGamificationController {
     @Body() dto: GuestGameDeliveryDispatchDto,
   ): Promise<GuestGameDeliveryDispatchResult> {
     return this.gamificationService.dispatchDeliveries(user, dto);
+  }
+
+  @Get('bonus-ledger/status')
+  getBonusLedgerStatus(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<GuestGameBonusLedgerStatus> {
+    return this.bonusLedgerService.getStatus(user);
+  }
+
+  @Post('bonus-ledger/queue')
+  @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
+  queueBonusLedger(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: GuestGameBonusLedgerQueueDto,
+  ): Promise<GuestGameBonusLedgerQueueResult> {
+    return this.bonusLedgerService.queueApprovedRewards(user, dto);
+  }
+
+  @Post('bonus-ledger/dispatch')
+  @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
+  dispatchBonusLedger(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: GuestGameBonusLedgerDispatchDto,
+  ): Promise<GuestGameBonusLedgerDispatchResult> {
+    return this.bonusLedgerService.dispatch(user, dto);
+  }
+
+  @Post('bonus-ledger/:id/cancel')
+  @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
+  cancelBonusLedgerEntry(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: GuestGameBonusLedgerCancelDto,
+  ): Promise<GuestGameBonusLedgerDispatchItem> {
+    return this.bonusLedgerService.cancelEntry(user, id, dto);
   }
 
   @Patch('deliveries/:id')

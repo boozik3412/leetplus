@@ -26,6 +26,7 @@ import { SecretEncryptionService } from './secret-encryption.service';
     SecretEncryptionService,
   ],
   exports: [
+    LangameClient,
     GuestDataFoundationService,
     BusinessSnapshotService,
     LangameDailySyncService,

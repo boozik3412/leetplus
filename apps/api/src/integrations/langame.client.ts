@@ -386,6 +386,49 @@ export class LangameClient {
     return result;
   }
 
+  async postEndpoint(
+    baseUrl: string,
+    apiKey: string,
+    path: string,
+    payload: Record<string, unknown>,
+  ) {
+    const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+    const url = new URL(`${this.normalizeBaseUrl(baseUrl)}${normalizedPath}`);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-KEY': apiKey,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorDetails = await this.readErrorDetails(response);
+      throw new BadRequestException(
+        [
+          `Langame ${normalizedPath} failed: ${response.status} ${response.statusText}`,
+          errorDetails,
+        ]
+          .filter(Boolean)
+          .join(' - '),
+      );
+    }
+
+    const result = await this.readJsonOrText(response);
+
+    if (this.isPlainObject(result) && result.status === false) {
+      throw new BadRequestException(
+        this.hasStringField(result, 'message')
+          ? `Langame ${normalizedPath} returned an error: ${result.message}`
+          : `Langame ${normalizedPath} returned an error`,
+      );
+    }
+
+    return result;
+  }
+
   private async getList<T>(
     baseUrl: string,
     path: string,

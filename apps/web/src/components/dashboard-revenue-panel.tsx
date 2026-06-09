@@ -419,6 +419,8 @@ function FullDayRevenue({
       : deltaPercent >= 0
         ? "text-emerald-600 dark:text-emerald-300"
         : "text-red-600 dark:text-red-300";
+  const averageTooltip =
+    "Среднесуточная считается за последние 30 полных дней до указанной даты.";
 
   return (
     <div className="mt-4 grid gap-2 border-t border-zinc-200/70 pt-3 dark:border-zinc-800/80">
@@ -431,8 +433,19 @@ function FullDayRevenue({
         </span>
       </div>
       <div className="flex items-center justify-between gap-3">
-        <span className="text-xs text-zinc-500 dark:text-zinc-400">
-          К среднесуточной
+        <span className="group relative inline-flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+          <span title={averageTooltip}>К среднесуточной</span>
+          <span
+            className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-zinc-300 text-[10px] font-semibold leading-none text-zinc-500 outline-none transition-colors group-hover:border-zinc-400 group-hover:text-zinc-700 group-focus-within:border-zinc-400 group-focus-within:text-zinc-700 dark:border-zinc-700 dark:text-zinc-400 dark:group-hover:border-zinc-500 dark:group-hover:text-zinc-200 dark:group-focus-within:border-zinc-500 dark:group-focus-within:text-zinc-200"
+            aria-label={averageTooltip}
+            tabIndex={0}
+            title={averageTooltip}
+          >
+            i
+          </span>
+          <span className="pointer-events-none absolute left-0 top-full z-20 mt-2 hidden w-64 rounded-lg border border-zinc-200 bg-white p-2 text-left text-[11px] leading-4 text-zinc-600 shadow-lg group-hover:block group-focus-within:block dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
+            {averageTooltip}
+          </span>
         </span>
         <span
           className={["text-sm font-semibold tabular-nums", deltaTone].join(

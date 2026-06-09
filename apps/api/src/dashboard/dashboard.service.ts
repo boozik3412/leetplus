@@ -108,6 +108,7 @@ type DashboardTrendMode = DashboardTrendGranularity | 'custom';
 
 const DEMAND_PERIOD_DAYS = 21;
 const ACTIVE_SKU_SALES_DAYS = 14;
+const FULL_DAY_AVERAGE_DAYS = 30;
 const NO_SALES_PERIOD_DAYS = [7, 14, 21] as const;
 
 type NoSalesPeriodDays = (typeof NO_SALES_PERIOD_DAYS)[number];
@@ -294,10 +295,7 @@ export class DashboardService {
     const skuGrouping = query.skuGrouping === 'club' ? 'club' : 'network';
     const demandPeriod = this.resolveDemandPeriod();
     const activeSkuPeriod = this.resolveActiveSkuPeriod();
-    const fullDayPeriod = this.resolveFullDayRevenuePeriod(
-      period.fromDate,
-      period.toDate,
-    );
+    const fullDayPeriod = this.resolveFullDayRevenuePeriod();
     const previousPeriod = this.resolvePreviousComparablePeriod(
       period.fromDate,
       period.toDate,
@@ -1328,34 +1326,24 @@ export class DashboardService {
     return { fromDate, toDate };
   }
 
-  private resolveFullDayRevenuePeriod(
-    periodFromDate: Date,
-    periodToDate: Date,
-  ) {
+  private resolveFullDayRevenuePeriod() {
     const now = new Date();
     const currentFromDate = new Date(
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1),
     );
     const currentToDate = new Date(currentFromDate);
     currentToDate.setUTCHours(23, 59, 59, 999);
-    let averageFromDate = new Date(periodFromDate);
-    averageFromDate.setUTCHours(0, 0, 0, 0);
     const dayBeforeCurrentFromDate = new Date(currentFromDate);
     dayBeforeCurrentFromDate.setUTCDate(
       dayBeforeCurrentFromDate.getUTCDate() - 1,
     );
     dayBeforeCurrentFromDate.setUTCHours(23, 59, 59, 999);
-    let averageToDate = new Date(
-      Math.min(periodToDate.getTime(), dayBeforeCurrentFromDate.getTime()),
+    const averageToDate = new Date(dayBeforeCurrentFromDate);
+    const averageFromDate = new Date(averageToDate);
+    averageFromDate.setUTCDate(
+      averageFromDate.getUTCDate() - (FULL_DAY_AVERAGE_DAYS - 1),
     );
-    averageToDate.setUTCHours(23, 59, 59, 999);
-
-    if (averageFromDate > averageToDate) {
-      averageToDate = new Date(dayBeforeCurrentFromDate);
-      averageFromDate = new Date(averageToDate);
-      averageFromDate.setUTCDate(averageFromDate.getUTCDate() - 6);
-      averageFromDate.setUTCHours(0, 0, 0, 0);
-    }
+    averageFromDate.setUTCHours(0, 0, 0, 0);
 
     return {
       currentFromDate,

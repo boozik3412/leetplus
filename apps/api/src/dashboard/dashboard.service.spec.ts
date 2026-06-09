@@ -389,11 +389,16 @@ describe('DashboardService', () => {
     expect(summary.salesTrend).toHaveLength(8);
   });
 
-  it('compares the latest full day with previous full-day average, not itself', async () => {
+  it('compares the latest full day with the previous 30 full-day average', async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-06-09T12:00:00.000Z'));
 
     try {
+      const averageFacts = Array.from({ length: 30 }, (_, index) => ({
+        saleDate: new Date(Date.UTC(2026, 4, 9 + index, 12)),
+        revenue: new Prisma.Decimal(100),
+      }));
+
       mockEmptyDashboardData();
       prisma.salesFact.findMany
         .mockResolvedValueOnce([])
@@ -403,16 +408,9 @@ describe('DashboardService', () => {
         .mockResolvedValueOnce([
           {
             saleDate: new Date('2026-06-08T12:00:00.000Z'),
-            revenue: new Prisma.Decimal(1000),
+            revenue: new Prisma.Decimal(150),
           },
-          {
-            saleDate: new Date('2026-06-07T12:00:00.000Z'),
-            revenue: new Prisma.Decimal(700),
-          },
-          {
-            saleDate: new Date('2026-06-06T12:00:00.000Z'),
-            revenue: new Prisma.Decimal(1400),
-          },
+          ...averageFacts,
         ])
         .mockResolvedValueOnce([]);
 
@@ -421,9 +419,9 @@ describe('DashboardService', () => {
       });
 
       expect(summary.fullDayRevenueDate).toBe('2026-06-08');
-      expect(summary.fullDayRevenue).toBe(1000);
-      expect(summary.averageDailyRevenue).toBe(300);
-      expect(summary.fullDayRevenueToAveragePercent).toBe(233.3);
+      expect(summary.fullDayRevenue).toBe(150);
+      expect(summary.averageDailyRevenue).toBe(100);
+      expect(summary.fullDayRevenueToAveragePercent).toBe(50);
     } finally {
       jest.useRealTimers();
     }

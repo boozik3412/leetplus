@@ -531,7 +531,7 @@ export default async function StaffShiftWorkspacePage() {
       : "Открытая смена не найдена";
 
   return (
-    <main className="min-h-screen bg-[#090d12] px-4 py-6 text-zinc-100 sm:px-6 sm:py-8">
+    <main className="min-h-screen bg-zinc-50 px-4 py-6 text-zinc-950 sm:px-6 sm:py-8 dark:bg-[#090d12] dark:text-zinc-100">
       <div className="mx-auto max-w-7xl">
         <ReportBreadcrumbs
           current="Моя смена"
@@ -541,17 +541,17 @@ export default async function StaffShiftWorkspacePage() {
         <header className="mt-3">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <h1 className="text-3xl font-semibold tracking-tight text-white">
+              <h1 className="text-3xl font-semibold tracking-tight text-zinc-950 dark:text-white">
                 {roleWorkspaceName(user.role)}
               </h1>
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
                 Рабочий экран администратора смены: сначала действия и проверки,
                 затем выручка, гости, регламент и быстрые разделы.
               </p>
             </div>
             <Link
               href={headerActionHref}
-              className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-700 px-4 text-sm font-semibold text-zinc-100 transition hover:border-emerald-400 hover:text-emerald-200"
+              className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 bg-white px-4 text-sm font-semibold text-zinc-900 transition hover:border-emerald-500 hover:text-emerald-700 dark:border-zinc-700 dark:bg-transparent dark:text-zinc-100 dark:hover:border-emerald-400 dark:hover:text-emerald-200"
             >
               {headerActionLabel}
             </Link>
@@ -673,36 +673,41 @@ export default async function StaffShiftWorkspacePage() {
           <TrainingPanel role={user.role} />
         </section>
 
-        <section className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <section className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
           <WorkspaceLink
             title="Регламенты"
             description="Чек-листы и стандарты"
             href="/staff/shift-regulations"
             accent="emerald"
+            icon="regulations"
           />
           <WorkspaceLink
             title="Обучение"
             description="Курсы и материалы"
             href="/staff/training-courses"
             accent="cyan"
+            icon="training"
           />
           <WorkspaceLink
             title="Командный чат"
             description="Обсуждения и новости"
             href="/staff/team-chat"
             accent="violet"
+            icon="chat"
           />
           <WorkspaceLink
             title="База знаний"
             description="Инструкции и документы"
             href="/staff/knowledge-base"
             accent="amber"
+            icon="knowledge"
           />
           <WorkspaceLink
             title="Мои задачи"
             description="Все мои задачи"
             href="/staff/tasks?view=my&status=all"
             accent="teal"
+            icon="tasks"
           />
         </section>
       </div>
@@ -724,14 +729,16 @@ function ContextChip({
       className={[
         "rounded-lg border px-4 py-3",
         tone === "good"
-          ? "border-emerald-500/35 bg-emerald-500/10"
+          ? "border-emerald-200 bg-emerald-50 dark:border-emerald-500/35 dark:bg-emerald-500/10"
           : tone === "muted"
-            ? "border-zinc-800 bg-zinc-900/50"
-            : "border-zinc-800 bg-zinc-900/70",
+            ? "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/50"
+            : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/70",
       ].join(" ")}
     >
-      <p className="text-xs font-bold uppercase text-zinc-500">{label}</p>
-      <p className="mt-1 truncate text-sm font-semibold text-zinc-100">
+      <p className="text-xs font-bold uppercase text-zinc-500 dark:text-zinc-500">
+        {label}
+      </p>
+      <p className="mt-1 truncate text-sm font-semibold text-zinc-950 dark:text-zinc-100">
         {value}
       </p>
     </div>
@@ -750,16 +757,18 @@ function StatusBanner({
   action: string;
 }) {
   return (
-    <section className="mt-4 flex flex-col gap-3 rounded-lg border border-amber-500/35 bg-amber-500/10 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+    <section className="mt-4 flex flex-col gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between dark:border-amber-500/35 dark:bg-amber-500/10">
       <div>
-        <h2 className="text-sm font-semibold text-amber-200">{title}</h2>
-        <p className="mt-1 text-sm leading-6 text-amber-100/75">
+        <h2 className="text-sm font-semibold text-amber-900 dark:text-amber-200">
+          {title}
+        </h2>
+        <p className="mt-1 text-sm leading-6 text-amber-800 dark:text-amber-100/75">
           {description}
         </p>
       </div>
       <Link
         href={href}
-        className="inline-flex h-9 shrink-0 items-center justify-center rounded-md border border-amber-400/40 px-3 text-sm font-semibold text-amber-100 transition hover:bg-amber-400/10"
+        className="inline-flex h-9 shrink-0 items-center justify-center rounded-md border border-amber-300 bg-white px-3 text-sm font-semibold text-amber-900 transition hover:bg-amber-100 dark:border-amber-400/40 dark:bg-transparent dark:text-amber-100 dark:hover:bg-amber-400/10"
       >
         {action}
       </Link>
@@ -781,14 +790,14 @@ function WorkPanel({
   overdueCount: number;
 }) {
   return (
-    <section className="rounded-lg border border-zinc-800 bg-zinc-950/90 p-5">
+    <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm shadow-zinc-950/5 dark:border-zinc-800 dark:bg-zinc-950/90 dark:shadow-none">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-xl font-semibold text-white">
+        <h2 className="text-xl font-semibold text-zinc-950 dark:text-white">
           Что нужно сделать на смене
         </h2>
         <Link
           href="/staff/tasks?view=my&status=all"
-          className="text-sm font-semibold text-emerald-300 transition hover:text-emerald-200"
+          className="text-sm font-semibold text-emerald-700 transition hover:text-emerald-600 dark:text-emerald-300 dark:hover:text-emerald-200"
         >
           Открыть задачи
         </Link>
@@ -835,13 +844,13 @@ function WorkPanel({
       <div className="mt-4 flex flex-wrap gap-3 text-sm">
         <Link
           href="/staff/tasks?view=my&status=OVERDUE"
-          className="rounded-md border border-red-500/20 bg-red-500/10 px-3 py-2 font-semibold text-red-200 transition hover:border-red-400/50"
+          className="rounded-md border border-red-200 bg-red-50 px-3 py-2 font-semibold text-red-700 transition hover:border-red-300 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-200 dark:hover:border-red-400/50"
         >
           Просрочено: {formatNumber(overdueCount)}
         </Link>
         <Link
           href="/staff/checklists"
-          className="rounded-md border border-zinc-800 px-3 py-2 font-semibold text-zinc-300 transition hover:border-emerald-500/40 hover:text-emerald-200"
+          className="rounded-md border border-zinc-200 bg-white px-3 py-2 font-semibold text-zinc-700 transition hover:border-emerald-300 hover:text-emerald-700 dark:border-zinc-800 dark:bg-transparent dark:text-zinc-300 dark:hover:border-emerald-500/40 dark:hover:text-emerald-200"
         >
           Открыть чек-листы
         </Link>
@@ -869,8 +878,10 @@ function ReviewPanel({
 }) {
   if (!canReviewStaffTasks) {
     return (
-      <section className="rounded-lg border border-zinc-800 bg-zinc-950/90 p-5">
-        <h2 className="text-xl font-semibold text-white">Мой контроль</h2>
+      <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm shadow-zinc-950/5 dark:border-zinc-800 dark:bg-zinc-950/90 dark:shadow-none">
+        <h2 className="text-xl font-semibold text-zinc-950 dark:text-white">
+          Мой контроль
+        </h2>
         <div className="mt-5 space-y-2">
           <ReviewRow
             title="Задачи ждут проверки"
@@ -906,8 +917,10 @@ function ReviewPanel({
   }
 
   return (
-    <section className="rounded-lg border border-zinc-800 bg-zinc-950/90 p-5">
-      <h2 className="text-xl font-semibold text-white">Проверка и контроль</h2>
+    <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm shadow-zinc-950/5 dark:border-zinc-800 dark:bg-zinc-950/90 dark:shadow-none">
+      <h2 className="text-xl font-semibold text-zinc-950 dark:text-white">
+        Проверка и контроль
+      </h2>
       <div className="mt-5 space-y-2">
         <ReviewRow
           title="Мои задачи на проверке"
@@ -952,14 +965,14 @@ function ChecklistDial({
   run: StaffChecklistRun | null;
 }) {
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
-      <p className="text-sm text-zinc-400">{title}</p>
+    <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40">
+      <p className="text-sm text-zinc-600 dark:text-zinc-400">{title}</p>
       <div className="mt-5 flex items-center justify-between gap-4">
         <div>
-          <p className="text-3xl font-semibold tabular-nums text-emerald-300">
+          <p className="text-3xl font-semibold tabular-nums text-emerald-600 dark:text-emerald-300">
             {progress.percent}%
           </p>
-          <p className="mt-1 text-sm text-zinc-500">
+          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-500">
             {formatNumber(progress.done)} из {formatNumber(progress.total)}{" "}
             пунктов
           </p>
@@ -967,13 +980,13 @@ function ChecklistDial({
         <div
           className="grid size-20 place-items-center rounded-full"
           style={{
-            background: `conic-gradient(#34d399 ${progress.percent}%, #1f2937 0)`,
+            background: `conic-gradient(#10b981 ${progress.percent}%, var(--border-soft) 0)`,
           }}
         >
-          <div className="size-14 rounded-full bg-zinc-950" />
+          <div className="size-14 rounded-full bg-zinc-50 dark:bg-zinc-950" />
         </div>
       </div>
-      <p className="mt-5 line-clamp-2 text-sm font-semibold text-zinc-200">
+      <p className="mt-5 line-clamp-2 text-sm font-semibold text-zinc-900 dark:text-zinc-200">
         {run?.title ?? "Нет активного чек-листа"}
       </p>
     </div>
@@ -998,17 +1011,21 @@ function ActionRow({
   return (
     <Link
       href={href}
-      className="grid gap-3 rounded-md border border-zinc-800 px-3 py-2.5 transition hover:border-emerald-500/40 hover:bg-emerald-500/5 sm:grid-cols-[1fr_auto_auto] sm:items-center"
+      className="grid gap-3 rounded-md border border-zinc-200 bg-white px-3 py-2.5 transition hover:border-emerald-300 hover:bg-emerald-50 sm:grid-cols-[1fr_auto_auto] sm:items-center dark:border-zinc-800 dark:bg-transparent dark:hover:border-emerald-500/40 dark:hover:bg-emerald-500/5"
     >
       <div className="min-w-0">
-        <p className="truncate text-sm font-semibold text-zinc-100">{title}</p>
-        <p className="mt-1 truncate text-xs text-zinc-500">{meta}</p>
+        <p className="truncate text-sm font-semibold text-zinc-950 dark:text-zinc-100">
+          {title}
+        </p>
+        <p className="mt-1 truncate text-xs text-zinc-500 dark:text-zinc-500">
+          {meta}
+        </p>
       </div>
       <StatusPill label={status} tone={tone} />
       <span
         className={[
           "text-right text-sm font-semibold",
-          isAlert ? "text-red-300" : "text-zinc-500",
+          isAlert ? "text-red-600 dark:text-red-300" : "text-zinc-500",
         ].join(" ")}
       >
         {isAlert ? "!" : "—"}
@@ -1025,11 +1042,13 @@ function StatusPill({
   tone: "blue" | "cyan" | "emerald" | "amber" | "red";
 }) {
   const classes: Record<typeof tone, string> = {
-    blue: "bg-blue-500/15 text-blue-200",
-    cyan: "bg-cyan-500/15 text-cyan-200",
-    emerald: "bg-emerald-500/15 text-emerald-200",
-    amber: "bg-amber-500/15 text-amber-200",
-    red: "bg-red-500/15 text-red-200",
+    blue: "bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-200",
+    cyan: "bg-cyan-50 text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-200",
+    emerald:
+      "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200",
+    amber:
+      "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200",
+    red: "bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-200",
   };
 
   return (
@@ -1060,11 +1079,15 @@ function ReviewRow({
   return (
     <Link
       href={href}
-      className="flex items-center justify-between gap-4 rounded-md border border-zinc-800 px-4 py-3 transition hover:border-emerald-500/40 hover:bg-emerald-500/5"
+      className="flex items-center justify-between gap-3 rounded-md border border-zinc-200 bg-white px-3 py-2.5 transition hover:border-emerald-300 hover:bg-emerald-50 dark:border-zinc-800 dark:bg-transparent dark:hover:border-emerald-500/40 dark:hover:bg-emerald-500/5"
     >
       <div>
-        <p className="text-sm font-semibold text-zinc-100">{title}</p>
-        <p className="mt-1 text-xs text-zinc-500">{description}</p>
+        <p className="text-sm font-semibold text-zinc-950 dark:text-zinc-100">
+          {title}
+        </p>
+        <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-500">
+          {description}
+        </p>
       </div>
       <StatusPill label={formatNumber(count)} tone={tone} />
     </Link>
@@ -1092,13 +1115,15 @@ function MetricCard({
   };
 
   return (
-    <section className="rounded-lg border border-zinc-800 bg-zinc-950/90 p-4">
-      <p className="text-sm text-zinc-400">{title}</p>
-      <p className="mt-2 min-h-8 text-2xl font-semibold tabular-nums text-white">
+    <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm shadow-zinc-950/5 dark:border-zinc-800 dark:bg-zinc-950/90 dark:shadow-none">
+      <p className="text-sm text-zinc-600 dark:text-zinc-400">{title}</p>
+      <p className="mt-2 min-h-8 text-2xl font-semibold tabular-nums text-zinc-950 dark:text-white">
         {value}
       </p>
-      <p className="mt-2 text-sm text-zinc-500">{detail}</p>
-      <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-zinc-800">
+      <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-500">
+        {detail}
+      </p>
+      <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
         <div
           className={["h-full rounded-full", colors[accent]].join(" ")}
           style={{ width: `${Math.min(progress, 100)}%` }}
@@ -1118,17 +1143,19 @@ function RegulationPanel({
   activeChecklistCount: number;
 }) {
   return (
-    <section className="rounded-lg border border-zinc-800 bg-zinc-950/90 p-5">
+    <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm shadow-zinc-950/5 dark:border-zinc-800 dark:bg-zinc-950/90 dark:shadow-none">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-white">Регламент смены</h2>
-          <p className="mt-2 text-sm text-zinc-500">
+          <h2 className="text-xl font-semibold text-zinc-950 dark:text-white">
+            Регламент смены
+          </h2>
+          <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-500">
             Чек-лист, обязательные пункты и результат последней проверки.
           </p>
         </div>
         <Link
           href="/staff/checklists"
-          className="inline-flex h-10 items-center justify-center rounded-md border border-emerald-500/40 px-4 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-500/10"
+          className="inline-flex h-10 items-center justify-center rounded-md border border-emerald-200 bg-emerald-50 px-4 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 dark:border-emerald-500/40 dark:bg-transparent dark:text-emerald-200 dark:hover:bg-emerald-500/10"
         >
           Открыть регламент
         </Link>
@@ -1137,12 +1164,14 @@ function RegulationPanel({
       {run ? (
         <div className="mt-5 grid gap-4 md:grid-cols-[1fr_1fr]">
           <div>
-            <p className="text-sm font-semibold text-zinc-100">{run.title}</p>
-            <p className="mt-2 text-sm text-zinc-500">
+            <p className="text-sm font-semibold text-zinc-950 dark:text-zinc-100">
+              {run.title}
+            </p>
+            <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-500">
               {checklistStatusLabel(run.status)} · выполнено{" "}
               {formatNumber(progress.done)} из {formatNumber(progress.total)}
             </p>
-            <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-zinc-800">
+            <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
               <div
                 className="h-full rounded-full bg-emerald-400"
                 style={{ width: `${Math.min(progress.percent, 100)}%` }}
@@ -1169,13 +1198,13 @@ function TrainingPanel({ role }: { role: string }) {
   const isTrainee = role === "TRAINEE";
 
   return (
-    <section className="rounded-lg border border-zinc-800 bg-zinc-950/90 p-5">
+    <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm shadow-zinc-950/5 dark:border-zinc-800 dark:bg-zinc-950/90 dark:shadow-none">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-white">
+          <h2 className="text-xl font-semibold text-zinc-950 dark:text-white">
             {isTrainee ? "Обучение стажера" : "Обучение и аттестация"}
           </h2>
-          <p className="mt-2 text-sm text-zinc-500">
+          <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-500">
             {isTrainee
               ? "Первым делом пройдите материалы адаптации и закрепите регламенты смены."
               : "Быстрый доступ к назначенным материалам, тестам и подтверждениям."}
@@ -1183,7 +1212,7 @@ function TrainingPanel({ role }: { role: string }) {
         </div>
         <Link
           href="/staff/training-courses"
-          className="inline-flex h-10 items-center justify-center rounded-md border border-emerald-500/40 px-4 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-500/10"
+          className="inline-flex h-10 items-center justify-center rounded-md border border-emerald-200 bg-emerald-50 px-4 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 dark:border-emerald-500/40 dark:bg-transparent dark:text-emerald-200 dark:hover:bg-emerald-500/10"
         >
           Перейти к обучению
         </Link>
@@ -1191,17 +1220,21 @@ function TrainingPanel({ role }: { role: string }) {
 
       <div className="mt-5 grid gap-4 md:grid-cols-[1fr_1fr]">
         <div>
-          <p className="text-sm text-zinc-400">Фокус сейчас</p>
-          <p className="mt-2 text-lg font-semibold text-zinc-100">
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            Фокус сейчас
+          </p>
+          <p className="mt-2 text-lg font-semibold text-zinc-950 dark:text-zinc-100">
             {isTrainee ? "Стандарты сервиса в клубе" : "Актуальные материалы роли"}
           </p>
-          <p className="mt-2 text-sm text-zinc-500">
+          <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-500">
             {isTrainee ? "Начните с открытия смены и общения с гостем." : "Проверьте новые инструкции и аттестации."}
           </p>
         </div>
-        <div className="rounded-md border border-zinc-800 bg-zinc-900/40 p-4">
-          <p className="text-sm font-semibold text-zinc-100">Следующий шаг</p>
-          <p className="mt-2 text-sm leading-6 text-zinc-500">
+        <div className="rounded-md border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40">
+          <p className="text-sm font-semibold text-zinc-950 dark:text-zinc-100">
+            Следующий шаг
+          </p>
+          <p className="mt-2 text-sm leading-6 text-zinc-500 dark:text-zinc-500">
             Откройте обучение, завершите назначенный модуль и вернитесь к
             задачам смены.
           </p>
@@ -1213,9 +1246,11 @@ function TrainingPanel({ role }: { role: string }) {
 
 function InfoLine({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between gap-4 rounded-md border border-zinc-800 px-3 py-2">
-      <span className="text-zinc-500">{label}</span>
-      <span className="font-semibold text-zinc-100">{value}</span>
+    <div className="flex items-center justify-between gap-4 rounded-md border border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-transparent">
+      <span className="text-zinc-500 dark:text-zinc-500">{label}</span>
+      <span className="font-semibold text-zinc-950 dark:text-zinc-100">
+        {value}
+      </span>
     </div>
   );
 }
@@ -1228,9 +1263,13 @@ function EmptyState({
   description: string;
 }) {
   return (
-    <div className="rounded-lg border border-dashed border-zinc-800 px-4 py-5">
-      <p className="text-sm font-semibold text-zinc-200">{title}</p>
-      <p className="mt-2 text-sm leading-6 text-zinc-500">{description}</p>
+    <div className="rounded-lg border border-dashed border-zinc-200 bg-zinc-50 px-4 py-5 dark:border-zinc-800 dark:bg-transparent">
+      <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-200">
+        {title}
+      </p>
+      <p className="mt-2 text-sm leading-6 text-zinc-500 dark:text-zinc-500">
+        {description}
+      </p>
     </div>
   );
 }
@@ -1240,35 +1279,113 @@ function WorkspaceLink({
   description,
   href,
   accent,
+  icon,
 }: {
   title: string;
   description: string;
   href: string;
   accent: "emerald" | "cyan" | "violet" | "amber" | "teal";
+  icon: WorkspaceLinkIcon;
 }) {
   const accents: Record<typeof accent, string> = {
-    emerald: "from-emerald-500/20 text-emerald-200",
-    cyan: "from-cyan-500/20 text-cyan-200",
-    violet: "from-violet-500/20 text-violet-200",
-    amber: "from-amber-500/20 text-amber-200",
-    teal: "from-teal-500/20 text-teal-200",
+    emerald:
+      "bg-emerald-50 text-emerald-700 ring-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-200 dark:ring-emerald-500/15",
+    cyan: "bg-cyan-50 text-cyan-700 ring-cyan-100 dark:bg-cyan-500/15 dark:text-cyan-200 dark:ring-cyan-500/15",
+    violet:
+      "bg-violet-50 text-violet-700 ring-violet-100 dark:bg-violet-500/15 dark:text-violet-200 dark:ring-violet-500/15",
+    amber:
+      "bg-amber-50 text-amber-700 ring-amber-100 dark:bg-amber-500/15 dark:text-amber-200 dark:ring-amber-500/15",
+    teal: "bg-teal-50 text-teal-700 ring-teal-100 dark:bg-teal-500/15 dark:text-teal-200 dark:ring-teal-500/15",
   };
 
   return (
     <Link
       href={href}
-      className="group rounded-lg border border-zinc-800 bg-zinc-950/90 p-4 transition hover:-translate-y-0.5 hover:border-emerald-500/40"
+      className="group flex min-h-20 items-center gap-3 rounded-lg border border-zinc-200 bg-white p-3 shadow-sm shadow-zinc-950/5 transition hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-emerald-50/60 sm:min-h-24 sm:flex-col sm:items-start sm:justify-center dark:border-zinc-800 dark:bg-zinc-950/90 dark:shadow-none dark:hover:border-emerald-500/40 dark:hover:bg-emerald-500/5"
     >
       <div
         className={[
-          "mb-4 grid size-10 place-items-center rounded-md bg-gradient-to-br to-zinc-900",
+          "grid size-10 shrink-0 place-items-center rounded-md ring-1 transition group-hover:scale-105 sm:size-11",
           accents[accent],
         ].join(" ")}
       >
-        <span className="text-sm font-bold">{title.slice(0, 1)}</span>
+        <WorkspaceLinkIconView icon={icon} />
       </div>
-      <h2 className="text-base font-semibold text-zinc-100">{title}</h2>
-      <p className="mt-1 text-sm text-zinc-500">{description}</p>
+      <div className="min-w-0">
+        <h2 className="truncate text-sm font-semibold text-zinc-950 dark:text-zinc-100">
+          {title}
+        </h2>
+        <p className="mt-0.5 line-clamp-1 text-xs text-zinc-500 dark:text-zinc-500">
+          {description}
+        </p>
+      </div>
     </Link>
+  );
+}
+
+type WorkspaceLinkIcon = "regulations" | "training" | "chat" | "knowledge" | "tasks";
+
+function WorkspaceLinkIconView({ icon }: { icon: WorkspaceLinkIcon }) {
+  const common = {
+    className: "h-5 w-5",
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 2,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true,
+  };
+
+  if (icon === "regulations") {
+    return (
+      <svg {...common}>
+        <path d="M7 3h7l4 4v14H7z" />
+        <path d="M14 3v5h5" />
+        <path d="m9.5 13 1.5 1.5 3.5-4" />
+        <path d="M9 18h6" />
+      </svg>
+    );
+  }
+
+  if (icon === "training") {
+    return (
+      <svg {...common}>
+        <path d="m3 8 9-4 9 4-9 4z" />
+        <path d="M7 10.5V15c0 1.6 2.2 3 5 3s5-1.4 5-3v-4.5" />
+        <path d="M21 8v5" />
+      </svg>
+    );
+  }
+
+  if (icon === "chat") {
+    return (
+      <svg {...common}>
+        <path d="M5 6.5h14a2 2 0 0 1 2 2v5.5a2 2 0 0 1-2 2H9l-5 3v-3.5a2 2 0 0 1-1-1.7V8.5a2 2 0 0 1 2-2z" />
+        <path d="M8 10h8" />
+        <path d="M8 13h5" />
+      </svg>
+    );
+  }
+
+  if (icon === "knowledge") {
+    return (
+      <svg {...common}>
+        <path d="M5 4.5h6.5A2.5 2.5 0 0 1 14 7v14a3 3 0 0 0-3-2.5H5z" />
+        <path d="M19 4.5h-5.5A2.5 2.5 0 0 0 11 7v14a3 3 0 0 1 3-2.5h5z" />
+        <path d="M8 8h3" />
+        <path d="M15 8h2" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg {...common}>
+      <path d="M5 4h14v17H5z" />
+      <path d="m8 9 1.5 1.5L12 8" />
+      <path d="M14 10h3" />
+      <path d="m8 15 1.5 1.5L12 14" />
+      <path d="M14 16h3" />
+    </svg>
   );
 }

@@ -497,7 +497,7 @@ export default async function StaffShiftWorkspacePage() {
     ? "Смена активна"
     : currentShift
       ? "Последняя смена"
-      : "Смена не найдена";
+      : "Открытая смена не найдена";
 
   return (
     <main className="min-h-screen bg-[#090d12] px-4 py-6 text-zinc-100 sm:px-6 sm:py-8">
@@ -543,12 +543,12 @@ export default async function StaffShiftWorkspacePage() {
             title={
               hasLangameBinding
                 ? "Активная смена не найдена"
-                : "Клуб не привязан к Langame"
+                : "Сотрудник не привязан к Langame"
             }
             description={
               hasLangameBinding
-                ? "Данные по выручке, гостям и окну смены появятся после активной смены в Langame."
-                : "Выручка, гости, бар и окно смены недоступны без привязки сотрудника к Langame user_id."
+                ? "Langame user_id указан, но открытая смена по этому сотруднику сейчас не найдена."
+                : "У учетной записи нет Langame user_id, поэтому LeetPlus не может определить текущую смену, выручку, гостей и бар."
             }
             href={profileIssueHref}
             action={profileIssueAction}

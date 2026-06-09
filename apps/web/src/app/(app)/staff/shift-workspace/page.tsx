@@ -673,7 +673,10 @@ export default async function StaffShiftWorkspacePage() {
           <TrainingPanel role={user.role} />
         </section>
 
-        <section className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
+        <section
+          aria-label="Быстрые разделы"
+          className="mt-4 grid w-fit max-w-full grid-cols-5 gap-2"
+        >
           <WorkspaceLink
             title="Регламенты"
             description="Чек-листы и стандарты"
@@ -1289,36 +1292,28 @@ function WorkspaceLink({
 }) {
   const accents: Record<typeof accent, string> = {
     emerald:
-      "bg-emerald-50 text-emerald-700 ring-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-200 dark:ring-emerald-500/15",
-    cyan: "bg-cyan-50 text-cyan-700 ring-cyan-100 dark:bg-cyan-500/15 dark:text-cyan-200 dark:ring-cyan-500/15",
+      "border-emerald-100 bg-emerald-50 text-emerald-700 hover:border-emerald-200 hover:bg-emerald-100 dark:border-emerald-500/15 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15",
+    cyan: "border-cyan-100 bg-cyan-50 text-cyan-700 hover:border-cyan-200 hover:bg-cyan-100 dark:border-cyan-500/15 dark:bg-cyan-500/10 dark:text-cyan-200 dark:hover:bg-cyan-500/15",
     violet:
-      "bg-violet-50 text-violet-700 ring-violet-100 dark:bg-violet-500/15 dark:text-violet-200 dark:ring-violet-500/15",
+      "border-violet-100 bg-violet-50 text-violet-700 hover:border-violet-200 hover:bg-violet-100 dark:border-violet-500/15 dark:bg-violet-500/10 dark:text-violet-200 dark:hover:bg-violet-500/15",
     amber:
-      "bg-amber-50 text-amber-700 ring-amber-100 dark:bg-amber-500/15 dark:text-amber-200 dark:ring-amber-500/15",
-    teal: "bg-teal-50 text-teal-700 ring-teal-100 dark:bg-teal-500/15 dark:text-teal-200 dark:ring-teal-500/15",
+      "border-amber-100 bg-amber-50 text-amber-700 hover:border-amber-200 hover:bg-amber-100 dark:border-amber-500/15 dark:bg-amber-500/10 dark:text-amber-200 dark:hover:bg-amber-500/15",
+    teal: "border-teal-100 bg-teal-50 text-teal-700 hover:border-teal-200 hover:bg-teal-100 dark:border-teal-500/15 dark:bg-teal-500/10 dark:text-teal-200 dark:hover:bg-teal-500/15",
   };
+  const accessibleLabel = `${title}. ${description}`;
 
   return (
     <Link
       href={href}
-      className="group flex min-h-20 items-center gap-3 rounded-lg border border-zinc-200 bg-white p-3 shadow-sm shadow-zinc-950/5 transition hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-emerald-50/60 sm:min-h-24 sm:flex-col sm:items-start sm:justify-center dark:border-zinc-800 dark:bg-zinc-950/90 dark:shadow-none dark:hover:border-emerald-500/40 dark:hover:bg-emerald-500/5"
+      aria-label={accessibleLabel}
+      title={accessibleLabel}
+      className={[
+        "grid h-12 w-12 place-items-center rounded-lg border shadow-sm shadow-zinc-950/5 transition hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-50 sm:h-14 sm:w-14 dark:shadow-none dark:focus-visible:ring-emerald-300 dark:focus-visible:ring-offset-zinc-950",
+        accents[accent],
+      ].join(" ")}
     >
-      <div
-        className={[
-          "grid size-10 shrink-0 place-items-center rounded-md ring-1 transition group-hover:scale-105 sm:size-11",
-          accents[accent],
-        ].join(" ")}
-      >
-        <WorkspaceLinkIconView icon={icon} />
-      </div>
-      <div className="min-w-0">
-        <h2 className="truncate text-sm font-semibold text-zinc-950 dark:text-zinc-100">
-          {title}
-        </h2>
-        <p className="mt-0.5 line-clamp-1 text-xs text-zinc-500 dark:text-zinc-500">
-          {description}
-        </p>
-      </div>
+      <WorkspaceLinkIconView icon={icon} />
+      <span className="sr-only">{title}</span>
     </Link>
   );
 }
@@ -1327,7 +1322,7 @@ type WorkspaceLinkIcon = "regulations" | "training" | "chat" | "knowledge" | "ta
 
 function WorkspaceLinkIconView({ icon }: { icon: WorkspaceLinkIcon }) {
   const common = {
-    className: "h-5 w-5",
+    className: "h-5 w-5 sm:h-6 sm:w-6",
     viewBox: "0 0 24 24",
     fill: "none",
     stroke: "currentColor",

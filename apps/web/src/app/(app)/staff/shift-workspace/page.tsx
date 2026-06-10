@@ -1072,20 +1072,16 @@ function WorkPanel({
         </div>
       )}
 
-      <div className="mt-4 flex flex-wrap gap-3 text-sm">
-        <Link
-          href="/staff/tasks?view=my&status=OVERDUE"
-          className="rounded-md border border-red-200 bg-red-50 px-3 py-2 font-semibold text-red-700 transition hover:border-red-300 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-200 dark:hover:border-red-400/50"
-        >
-          Просрочено: {formatNumber(overdueCount)}
-        </Link>
-        <Link
-          href="/staff/checklists"
-          className="rounded-md border border-zinc-200 bg-white px-3 py-2 font-semibold text-zinc-700 transition hover:border-emerald-300 hover:text-emerald-700 dark:border-zinc-800 dark:bg-transparent dark:text-zinc-300 dark:hover:border-emerald-500/40 dark:hover:text-emerald-200"
-        >
-          Открыть чек-листы
-        </Link>
-      </div>
+      {overdueCount > 0 ? (
+        <div className="mt-4 flex flex-wrap gap-3 text-sm">
+          <Link
+            href="/staff/tasks?view=my&status=OVERDUE"
+            className="rounded-md border border-red-200 bg-red-50 px-3 py-2 font-semibold text-red-700 transition hover:border-red-300 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-200 dark:hover:border-red-400/50"
+          >
+            Просрочено: {formatNumber(overdueCount)}
+          </Link>
+        </div>
+      ) : null}
     </section>
   );
 }

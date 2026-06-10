@@ -788,8 +788,8 @@ function ShiftSummaryPanel({
   shift: StaffOperatorShiftDetail | null;
 }) {
   return (
-    <section className="mt-4 min-w-0 overflow-hidden rounded-lg border border-zinc-200 bg-white p-4 shadow-sm shadow-zinc-950/5 dark:border-zinc-800 dark:bg-zinc-950/90 dark:shadow-none">
-      <div className="grid gap-3 lg:grid-cols-[1.2fr_1.2fr_1fr_1fr]">
+    <section className="mt-4 min-w-0 overflow-hidden border-y border-zinc-200 py-3 dark:border-zinc-800">
+      <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2 xl:grid-cols-[1.1fr_1.4fr_1fr_1fr]">
         <SummaryCell label="Клуб" value={clubName} />
         <SummaryCell label="Сотрудник" value={staffName} />
         <SummaryCell label="Роль" value={roleLabel} />
@@ -799,7 +799,7 @@ function ShiftSummaryPanel({
           tone={isShiftActive ? "good" : "muted"}
         />
       </div>
-      <div className="mt-3 grid min-w-0 gap-2 border-t border-zinc-200 pt-3 sm:grid-cols-2 xl:grid-cols-4 dark:border-zinc-800">
+      <div className="mt-3 grid min-w-0 gap-x-6 gap-y-3 border-t border-zinc-200 pt-3 sm:grid-cols-2 xl:grid-cols-4 dark:border-zinc-800">
         <SummaryMetric
           label="Выручка"
           value={totalRevenue === null ? "нет данных" : formatMoney(totalRevenue)}
@@ -842,7 +842,7 @@ function SummaryCell({
         : "text-zinc-950 dark:text-zinc-100";
 
   return (
-    <div className="min-w-0 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/40">
+    <div className="min-w-0">
       <p className="text-[11px] font-bold uppercase text-zinc-500 dark:text-zinc-500">
         {label}
       </p>
@@ -863,7 +863,7 @@ function SummaryMetric({
   hint: string;
 }) {
   return (
-    <div className="min-w-0 rounded-md px-2 py-1.5">
+    <div className="min-w-0">
       <div className="flex items-baseline justify-between gap-3">
         <p className="text-xs font-semibold uppercase text-zinc-500 dark:text-zinc-500">
           {label}

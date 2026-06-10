@@ -707,7 +707,7 @@ export default async function StaffShiftWorkspacePage({
           />
         ) : null}
 
-        <section className="mt-4 grid gap-4 xl:grid-cols-[1.7fr_1fr]">
+        <section className="mt-4 grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
           <WorkPanel
             selectedChecklist={selectedChecklist}
             recommendedChecklist={recommendedChecklist}
@@ -788,7 +788,7 @@ function ShiftSummaryPanel({
   shift: StaffOperatorShiftDetail | null;
 }) {
   return (
-    <section className="mt-4 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm shadow-zinc-950/5 dark:border-zinc-800 dark:bg-zinc-950/90 dark:shadow-none">
+    <section className="mt-4 min-w-0 overflow-hidden rounded-lg border border-zinc-200 bg-white p-4 shadow-sm shadow-zinc-950/5 dark:border-zinc-800 dark:bg-zinc-950/90 dark:shadow-none">
       <div className="grid gap-3 lg:grid-cols-[1.2fr_1.2fr_1fr_1fr]">
         <SummaryCell label="Клуб" value={clubName} />
         <SummaryCell label="Сотрудник" value={staffName} />
@@ -799,7 +799,7 @@ function ShiftSummaryPanel({
           tone={isShiftActive ? "good" : "muted"}
         />
       </div>
-      <div className="mt-3 grid gap-2 border-t border-zinc-200 pt-3 sm:grid-cols-2 xl:grid-cols-4 dark:border-zinc-800">
+      <div className="mt-3 grid min-w-0 gap-2 border-t border-zinc-200 pt-3 sm:grid-cols-2 xl:grid-cols-4 dark:border-zinc-800">
         <SummaryMetric
           label="Выручка"
           value={totalRevenue === null ? "нет данных" : formatMoney(totalRevenue)}
@@ -930,7 +930,7 @@ function WorkPanel({
   overdueCount: number;
 }) {
   return (
-    <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm shadow-zinc-950/5 dark:border-zinc-800 dark:bg-zinc-950/90 dark:shadow-none">
+    <section className="min-w-0 overflow-hidden rounded-lg border border-zinc-200 bg-white p-4 shadow-sm shadow-zinc-950/5 sm:p-5 dark:border-zinc-800 dark:bg-zinc-950/90 dark:shadow-none">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-xl font-semibold text-zinc-950 dark:text-white">
           Что нужно сделать на смене
@@ -1038,9 +1038,9 @@ function WorkPanel({
           </div>
         </div>
       ) : (
-        <div className="mt-5 rounded-lg border border-dashed border-zinc-300 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/30">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div>
+        <div className="mt-5 min-w-0 overflow-hidden rounded-lg border border-dashed border-zinc-300 bg-zinc-50 p-3 sm:p-4 dark:border-zinc-800 dark:bg-zinc-900/30">
+          <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
               <h3 className="text-base font-semibold text-zinc-950 dark:text-zinc-100">
                 Основной чек-лист на смену не выбран
               </h3>
@@ -1048,11 +1048,11 @@ function WorkPanel({
                 Сначала выберите действующий чек-лист клуба. После выбора здесь появятся актуальное действие, весь список дел и счетчики статусов.
               </p>
             </div>
-            <details className="lg:min-w-80">
-              <summary className="inline-flex h-10 cursor-pointer items-center rounded-md bg-emerald-600 px-4 text-sm font-semibold text-white transition hover:bg-emerald-500">
-                Выбрать основной чек-лист на смену
+            <details className="min-w-0 max-w-full lg:min-w-80">
+              <summary className="flex min-h-10 w-full cursor-pointer list-none items-center justify-center rounded-md bg-emerald-600 px-4 py-2 text-center text-sm font-semibold leading-5 text-white transition hover:bg-emerald-500 [&::-webkit-details-marker]:hidden">
+                Выбрать чек-лист
               </summary>
-              <div className="mt-3 space-y-2 rounded-md border border-zinc-200 bg-white p-2 dark:border-zinc-800 dark:bg-zinc-950">
+              <div className="mt-3 min-w-0 max-w-full space-y-2 overflow-hidden rounded-md border border-zinc-200 bg-white p-2 dark:border-zinc-800 dark:bg-zinc-950">
                 {checklists.length === 0 ? (
                   <p className="px-2 py-3 text-sm text-zinc-500 dark:text-zinc-500">
                     Для этого клуба пока нет активных чек-листов.
@@ -1120,14 +1120,14 @@ function ChecklistChoiceRow({
   return (
     <Link
       href={`/staff/shift-workspace?checklistRunId=${run.id}`}
-      className="block rounded-md border border-zinc-200 px-3 py-2 transition hover:border-emerald-300 hover:bg-emerald-50 dark:border-zinc-800 dark:hover:border-emerald-500/40 dark:hover:bg-emerald-500/5"
+      className="block min-w-0 max-w-full rounded-md border border-zinc-200 px-3 py-2 transition hover:border-emerald-300 hover:bg-emerald-50 dark:border-zinc-800 dark:hover:border-emerald-500/40 dark:hover:bg-emerald-500/5"
     >
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-zinc-950 dark:text-zinc-100">
+          <p className="line-clamp-2 break-words text-sm font-semibold text-zinc-950 dark:text-zinc-100">
             {run.title}
           </p>
-          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-500">
+          <p className="mt-1 break-words text-xs text-zinc-500 dark:text-zinc-500">
             {run.store?.name ?? "вся сеть"} · {formatDateTime(run.scheduledAt)}
           </p>
         </div>
@@ -1241,7 +1241,7 @@ function TaskControlPanel({
 
   if (totalCount === 0) {
     return (
-      <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm shadow-zinc-950/5 dark:border-zinc-800 dark:bg-zinc-950/90 dark:shadow-none">
+      <section className="min-w-0 overflow-hidden rounded-lg border border-zinc-200 bg-white p-4 shadow-sm shadow-zinc-950/5 dark:border-zinc-800 dark:bg-zinc-950/90 dark:shadow-none">
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-zinc-950 dark:text-white">
@@ -1266,7 +1266,7 @@ function TaskControlPanel({
   const visibleRows = rows.filter((row) => row.count > 0);
 
   return (
-    <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm shadow-zinc-950/5 dark:border-zinc-800 dark:bg-zinc-950/90 dark:shadow-none">
+    <section className="min-w-0 overflow-hidden rounded-lg border border-zinc-200 bg-white p-4 shadow-sm shadow-zinc-950/5 sm:p-5 dark:border-zinc-800 dark:bg-zinc-950/90 dark:shadow-none">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-xl font-semibold text-zinc-950 dark:text-white">
@@ -1329,7 +1329,7 @@ function ActionRow({
   return (
     <Link
       href={href}
-      className="grid gap-3 rounded-md border border-zinc-200 bg-white px-3 py-2.5 transition hover:border-emerald-300 hover:bg-emerald-50 sm:grid-cols-[1fr_auto_auto] sm:items-center dark:border-zinc-800 dark:bg-transparent dark:hover:border-emerald-500/40 dark:hover:bg-emerald-500/5"
+      className="grid min-w-0 gap-3 rounded-md border border-zinc-200 bg-white px-3 py-2.5 transition hover:border-emerald-300 hover:bg-emerald-50 sm:grid-cols-[1fr_auto_auto] sm:items-center dark:border-zinc-800 dark:bg-transparent dark:hover:border-emerald-500/40 dark:hover:bg-emerald-500/5"
     >
       <div className="min-w-0">
         <p className="truncate text-sm font-semibold text-zinc-950 dark:text-zinc-100">
@@ -1397,9 +1397,9 @@ function ReviewRow({
   return (
     <Link
       href={href}
-      className="flex items-center justify-between gap-3 rounded-md border border-zinc-200 bg-white px-3 py-2.5 transition hover:border-emerald-300 hover:bg-emerald-50 dark:border-zinc-800 dark:bg-transparent dark:hover:border-emerald-500/40 dark:hover:bg-emerald-500/5"
+      className="flex min-w-0 items-center justify-between gap-3 rounded-md border border-zinc-200 bg-white px-3 py-2.5 transition hover:border-emerald-300 hover:bg-emerald-50 dark:border-zinc-800 dark:bg-transparent dark:hover:border-emerald-500/40 dark:hover:bg-emerald-500/5"
     >
-      <div>
+      <div className="min-w-0">
         <p className="text-sm font-semibold text-zinc-950 dark:text-zinc-100">
           {title}
         </p>

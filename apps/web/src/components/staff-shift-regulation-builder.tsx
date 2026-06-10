@@ -13,6 +13,7 @@ import {
   type StaffAttachmentUploadResult,
 } from "@/components/staff-attachment-upload";
 import { StaffTemplatePreview } from "@/components/staff-template-preview";
+import type { StaffChecklistTemplate } from "@/lib/staff-checklist-templates";
 import type {
   StaffShiftRegulationAttachment,
   StaffShiftRegulationAttachmentType,
@@ -44,6 +45,13 @@ const statusLabels: Record<StaffShiftRegulationStatus, string> = {
   PUBLISHED: "Опубликован",
   ARCHIVED: "Архив",
 };
+
+const checklistStatusLabels: Record<StaffChecklistTemplate["status"], string> =
+  {
+    DRAFT: "Черновик",
+    ACTIVE: "Активен",
+    ARCHIVED: "Архив",
+  };
 
 const roleScopeLabels: Record<StaffShiftRoleScope, string> = {
   ADMINISTRATOR: "Администратор",
@@ -231,6 +239,18 @@ function statusClass(status: StaffShiftRegulationStatus) {
   return "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200";
 }
 
+function checklistStatusClass(status: StaffChecklistTemplate["status"]) {
+  if (status === "ACTIVE") {
+    return "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200";
+  }
+
+  if (status === "ARCHIVED") {
+    return "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400";
+  }
+
+  return "bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200";
+}
+
 function formatDateTime(value: string | null) {
   if (!value) {
     return "";
@@ -247,12 +267,14 @@ function formatDateTime(value: string | null) {
 
 export function StaffShiftRegulationBuilder({
   rows,
+  checklistTemplates,
   stores,
   assessments,
   currentUserId,
   currentUserRole,
 }: {
   rows: StaffShiftRegulation[];
+  checklistTemplates: StaffChecklistTemplate[];
   stores: StaffShiftRegulationStore[];
   assessments: StaffShiftRegulationAssessmentOption[];
   currentUserId: string;
@@ -684,9 +706,11 @@ export function StaffShiftRegulationBuilder({
         <div className="flex items-center justify-between gap-3">
           <div>
             <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
-              Каталог регламентов
+              Каталог
             </p>
-            <h2 className="mt-1 text-lg font-semibold">Регламенты смены</h2>
+            <h2 className="mt-1 text-lg font-semibold">
+              Регламенты и чек-листы
+            </h2>
           </div>
           <button
             type="button"
@@ -694,12 +718,15 @@ export function StaffShiftRegulationBuilder({
             disabled={!canManageRegulations}
             className="h-9 rounded-md bg-emerald-500 px-3 text-xs font-semibold text-zinc-950 transition hover:bg-emerald-400"
           >
-            Новый
+            Новый регламент
           </button>
         </div>
 
-        <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
-          <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+        <details className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
+          <summary className="cursor-pointer text-xs font-bold uppercase text-zinc-600 dark:text-zinc-300">
+            Заготовки регламента · {staffShiftRegulationTemplates.length}
+          </summary>
+          <p className="mt-3 text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
             Заготовки регламента
           </p>
           <p className="mt-1 text-xs leading-5 text-zinc-500">
@@ -737,9 +764,17 @@ export function StaffShiftRegulationBuilder({
               );
             })}
           </div>
-        </div>
+        </details>
 
         <div className="mt-4 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-xs font-bold uppercase text-zinc-500">
+              Регламенты
+            </h3>
+            <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+              {rows.length}
+            </span>
+          </div>
           {rows.length === 0 ? (
             <p className="rounded-md border border-dashed border-zinc-300 p-3 text-sm text-zinc-500 dark:border-zinc-800">
               Пока нет сохраненных регламентов.
@@ -795,6 +830,54 @@ export function StaffShiftRegulationBuilder({
                   </div>
                 ) : null}
               </button>
+            ))
+          )}
+        </div>
+
+        <div className="mt-5 space-y-2 border-t border-zinc-200 pt-4 dark:border-zinc-800">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-xs font-bold uppercase text-zinc-500">
+              Чек-листы
+            </h3>
+            <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+              {checklistTemplates.length}
+            </span>
+          </div>
+          {checklistTemplates.length === 0 ? (
+            <p className="rounded-md border border-dashed border-zinc-300 p-3 text-sm text-zinc-500 dark:border-zinc-800">
+              Пока нет чек-листов по выбранным фильтрам.
+            </p>
+          ) : (
+            checklistTemplates.map((template) => (
+              <Link
+                key={template.id}
+                href={`/staff/checklist-templates?templateId=${encodeURIComponent(
+                  template.id,
+                )}`}
+                target="_blank"
+                rel="noreferrer"
+                className="block rounded-md border border-zinc-200 bg-white p-3 text-left transition hover:border-emerald-500/70 hover:bg-emerald-50/40 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-emerald-500/10"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-sm font-semibold">{template.title}</p>
+                  <span
+                    className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${checklistStatusClass(
+                      template.status,
+                    )}`}
+                  >
+                    {checklistStatusLabels[template.status]}
+                  </span>
+                </div>
+                <p className="mt-2 text-xs text-zinc-500">
+                  {shiftKindLabels[template.shiftKind]} ·{" "}
+                  {template.store?.name ?? "Вся сеть"}
+                </p>
+                <p className="mt-1 text-xs text-zinc-500">
+                  {template.sectionsCount} разд., {template.itemsCount}{" "}
+                  пунктов, доказ.: {template.evidenceItemsCount}, v
+                  {template.version}
+                </p>
+              </Link>
             ))
           )}
         </div>

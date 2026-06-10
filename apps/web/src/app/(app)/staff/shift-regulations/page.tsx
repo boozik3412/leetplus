@@ -4,7 +4,10 @@ import { StaffShiftRegulationBuilder } from "@/components/staff-shift-regulation
 import { StaffShiftRegulationCatalog } from "@/components/staff-shift-regulation-catalog";
 import { requireCurrentUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
-import { getStaffChecklistTemplateReport } from "@/lib/staff-checklist-templates";
+import {
+  getStaffChecklistTemplateReport,
+  type StaffChecklistTemplateFilterStatus,
+} from "@/lib/staff-checklist-templates";
 import {
   getStaffShiftRegulationReport,
   type StaffShiftKind,
@@ -90,6 +93,24 @@ function isCatalogOnlyRole(role: string) {
   return catalogOnlyRoles.has(role);
 }
 
+function checklistStatusFromRegulationStatus(
+  status: StaffShiftRegulationFilterStatus,
+): StaffChecklistTemplateFilterStatus {
+  if (status === "DRAFT") {
+    return "DRAFT";
+  }
+
+  if (status === "PUBLISHED") {
+    return "ACTIVE";
+  }
+
+  if (status === "ARCHIVED") {
+    return "ARCHIVED";
+  }
+
+  return "all";
+}
+
 export default async function StaffShiftRegulationsPage({
   searchParams,
 }: {
@@ -105,19 +126,20 @@ export default async function StaffShiftRegulationsPage({
     : { ...requestedFilters, status: "PUBLISHED" };
   const [report, checklistTemplates] = await Promise.all([
     getStaffShiftRegulationReport(filters),
-    canManageRegulations
-      ? Promise.resolve(null)
-      : getStaffChecklistTemplateReport({
-          status: "ACTIVE",
-          shiftKind: requestedFilters.shiftKind,
-          storeId: requestedFilters.storeId,
-          search: requestedFilters.search,
-        }),
+    getStaffChecklistTemplateReport({
+      status: canManageRegulations
+        ? checklistStatusFromRegulationStatus(filters.status ?? "all")
+        : "ACTIVE",
+      shiftKind: requestedFilters.shiftKind,
+      storeId: requestedFilters.storeId,
+      search: requestedFilters.search,
+    }),
   ]);
 
   const summaryCards = canManageRegulations
     ? [
-        { label: "Всего", value: report.summary.total },
+        { label: "Регламентов", value: report.summary.total },
+        { label: "Чек-листов", value: checklistTemplates.summary.total },
         { label: "Черновики", value: report.summary.draft },
         { label: "Опубликовано", value: report.summary.published },
         { label: "Архив", value: report.summary.archived },
@@ -132,6 +154,8 @@ export default async function StaffShiftRegulationsPage({
         { label: "С пересдачей", value: report.summary.retakeRequired },
       ]
     : [
+        { label: "Регламентов", value: report.summary.published },
+        { label: "Чек-листов", value: checklistTemplates.summary.total },
         { label: "Опубликовано", value: report.summary.published },
         {
           label: "Ждут ознакомления",
@@ -291,6 +315,7 @@ export default async function StaffShiftRegulationsPage({
           {canManageRegulations ? (
             <StaffShiftRegulationBuilder
               rows={report.rows}
+              checklistTemplates={checklistTemplates.rows}
               stores={report.stores}
               assessments={report.assessments}
               currentUserId={user.id}
@@ -299,7 +324,7 @@ export default async function StaffShiftRegulationsPage({
           ) : (
             <StaffShiftRegulationCatalog
               rows={report.rows}
-              checklistTemplates={checklistTemplates?.rows ?? []}
+              checklistTemplates={checklistTemplates.rows}
             />
           )}
         </section>

@@ -201,17 +201,23 @@ async function readResponseError(response: Response) {
 
 export function StaffChecklistTemplateBuilder({
   report,
+  initialTemplateId,
   initialSourceRegulationId,
   startNew = false,
   defaultConstructorOpen = false,
 }: {
   report: StaffChecklistTemplateReport;
+  initialTemplateId?: string | null;
   initialSourceRegulationId?: string | null;
   startNew?: boolean;
   defaultConstructorOpen?: boolean;
 }) {
   const router = useRouter();
-  const initialSelectedId = startNew ? "" : report.rows[0]?.id ?? "";
+  const initialSelectedId = startNew
+    ? ""
+    : report.rows.find((template) => template.id === initialTemplateId)?.id ??
+      report.rows[0]?.id ??
+      "";
   const initialSelectedTemplate = startNew
     ? null
     : report.rows.find((template) => template.id === initialSelectedId) ??

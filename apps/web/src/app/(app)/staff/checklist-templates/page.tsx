@@ -87,6 +87,7 @@ export default async function StaffChecklistTemplatesPage({
   await requireCurrentUser();
   const params = await searchParams;
   const filters = resolveFilters(params);
+  const initialTemplateId = searchParam(params.templateId);
   const initialSourceRegulationId = searchParam(params.sourceRegulationId);
   const startNew =
     searchParam(params.new) === "1" || Boolean(initialSourceRegulationId);
@@ -233,9 +234,10 @@ export default async function StaffChecklistTemplatesPage({
         <section className="mt-6">
           <StaffChecklistTemplateBuilder
             report={report}
+            initialTemplateId={initialTemplateId}
             initialSourceRegulationId={initialSourceRegulationId}
             startNew={startNew}
-            defaultConstructorOpen={startNew}
+            defaultConstructorOpen={startNew || Boolean(initialTemplateId)}
           />
         </section>
       </div>

@@ -520,11 +520,25 @@ function ChecklistRunEditor({
     router.refresh();
   }
 
-  async function submitAnswer(sectionId: string, itemId: string) {
+  async function submitAnswer(
+    sectionId: string,
+    itemId: string,
+    evidenceRequired = false,
+  ) {
     const currentAnswer = answersByKey.get(`${sectionId}::${itemId}`);
+
+    if (currentAnswer?.completedAt) {
+      setMessage("Пункт уже отправлен.");
+      return;
+    }
 
     if (!currentAnswer?.status) {
       setMessage("Выберите результат пункта перед отправкой.");
+      return;
+    }
+
+    if (evidenceRequired && !currentAnswer.evidenceUrl) {
+      setMessage("Добавьте доказательство перед отправкой.");
       return;
     }
 
@@ -640,10 +654,6 @@ function ChecklistRunEditor({
                   answer?.completedAt ?? null,
                 );
                 const isSubmitted = Boolean(answer?.completedAt);
-                const isAnswerReady =
-                  Boolean(answer?.status) &&
-                  (!item.evidenceRequired || Boolean(answer?.evidenceUrl));
-                const canSubmitAnswer = isAnswerReady && !isSubmitted;
 
                 return (
                   <div key={item.id} className="px-3 py-3 sm:px-4">
@@ -714,15 +724,21 @@ function ChecklistRunEditor({
                             />
                             <button
                               type="button"
-                              onClick={() => submitAnswer(section.id, item.id)}
-                              disabled={isPending || !canSubmitAnswer}
+                              onClick={() =>
+                                submitAnswer(
+                                  section.id,
+                                  item.id,
+                                  item.evidenceRequired,
+                                )
+                              }
+                              disabled={isPending || isSubmitted}
                               className="h-10 w-full min-w-32 whitespace-nowrap rounded-lg bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-500 disabled:opacity-100 dark:disabled:bg-zinc-800 dark:disabled:text-zinc-500"
                               title={
                                 isSubmitted
                                   ? "Пункт уже отправлен"
                                   : item.evidenceRequired && !answer?.evidenceUrl
-                                  ? "Добавьте доказательство перед отправкой"
-                                  : "Зафиксировать выполнение пункта"
+                                    ? "Перед отправкой понадобится доказательство"
+                                    : "Зафиксировать выполнение пункта"
                               }
                             >
                               {isSubmitted ? "Отправлено" : "Отправить"}

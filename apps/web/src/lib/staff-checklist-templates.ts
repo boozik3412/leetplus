@@ -3,7 +3,6 @@ import type {
   StaffChecklistItemValueType,
   StaffChecklistShiftKind,
   StaffChecklistStore,
-  StaffChecklistTemplateOption,
 } from "./staff-checklists";
 
 export type StaffChecklistTemplateStatus = "DRAFT" | "ACTIVE" | "ARCHIVED";
@@ -31,6 +30,19 @@ export type StaffChecklistTemplateSection = {
   title: string;
   description: string | null;
   items: StaffChecklistTemplateItem[];
+};
+
+export type StaffChecklistTemplateRegulationOption = {
+  id: string;
+  title: string;
+  shiftKind: StaffChecklistShiftKind;
+  roleScope: StaffChecklistTemplateRoleScope;
+  version: number;
+  store: StaffChecklistStore | null;
+  sections: StaffChecklistTemplateSection[];
+  sectionsCount: number;
+  itemsCount: number;
+  evidenceItemsCount: number;
 };
 
 export type StaffChecklistTemplate = {
@@ -89,7 +101,7 @@ export type StaffChecklistTemplateReport = {
   };
   rows: StaffChecklistTemplate[];
   stores: StaffChecklistStore[];
-  publishedRegulations: StaffChecklistTemplateOption[];
+  publishedRegulations: StaffChecklistTemplateRegulationOption[];
 };
 
 export async function getStaffChecklistTemplateReport(

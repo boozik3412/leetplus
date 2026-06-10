@@ -106,6 +106,7 @@ export type StaffChecklistTemplateRegulationOption = {
   roleScope: StaffChecklistTemplateRoleScope;
   version: number;
   store: { id: string; name: string; isActive: boolean } | null;
+  sections: StaffChecklistTemplateSection[];
   sectionsCount: number;
   itemsCount: number;
   evidenceItemsCount: number;
@@ -553,6 +554,7 @@ export class StaffChecklistTemplatesService {
       roleScope: row.roleScope as StaffChecklistTemplateRoleScope,
       version: row.version,
       store: row.store,
+      sections,
       sectionsCount: summary.sectionsCount,
       itemsCount: summary.itemsCount,
       evidenceItemsCount: summary.evidenceItemsCount,

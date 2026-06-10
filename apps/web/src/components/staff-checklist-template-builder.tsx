@@ -9,6 +9,7 @@ import type {
 } from "@/lib/staff-checklists";
 import type {
   StaffChecklistTemplate,
+  StaffChecklistTemplateRegulationOption,
   StaffChecklistTemplateReport,
   StaffChecklistTemplateRoleScope,
   StaffChecklistTemplateSection,
@@ -118,6 +119,37 @@ function clonePackSections(
   }));
 }
 
+function cloneRegulationSections(
+  sections: StaffChecklistTemplateSection[],
+): StaffChecklistTemplateSection[] {
+  const sourceSections = sections.length > 0 ? sections : defaultSections();
+
+  return sourceSections.map((section) => ({
+    ...section,
+    id: createId(section.id || "section"),
+    items: section.items.map((item) => ({
+      ...item,
+      id: createId(item.id || "item"),
+    })),
+  }));
+}
+
+function draftFromRegulation(
+  regulation: StaffChecklistTemplateRegulationOption,
+): DraftTemplate {
+  return {
+    id: null,
+    title: regulation.title,
+    description: "",
+    shiftKind: regulation.shiftKind,
+    roleScope: regulation.roleScope,
+    status: "DRAFT",
+    storeId: regulation.store?.id ?? "",
+    sourceRegulationId: regulation.id,
+    sections: cloneRegulationSections(regulation.sections),
+  };
+}
+
 function toDraft(template: StaffChecklistTemplate | null): DraftTemplate {
   if (!template) {
     return {
@@ -185,25 +217,31 @@ export function StaffChecklistTemplateBuilder({
     : report.rows.find((template) => template.id === initialSelectedId) ??
       report.rows[0] ??
       null;
-  const initialSourceId =
+  const initialSourceRegulation =
     report.publishedRegulations.find(
       (regulation) => regulation.id === initialSourceRegulationId,
-    )?.id ??
-    report.publishedRegulations[0]?.id ??
+    ) ?? null;
+  const initialSourceId =
+    initialSourceRegulation?.id ?? report.publishedRegulations[0]?.id ??
     "";
-  const initialDraft = toDraft(initialSelectedTemplate);
+  const emptyDraft = toDraft(null);
+  const initialDraft = initialSourceRegulation
+    ? draftFromRegulation(initialSourceRegulation)
+    : toDraft(initialSelectedTemplate);
   const [draft, setDraft] = useState<DraftTemplate>(() =>
     initialDraft,
   );
   const [savedDraftSnapshot, setSavedDraftSnapshot] = useState(() =>
-    draftSnapshot(initialDraft),
+    draftSnapshot(initialSourceRegulation ? emptyDraft : initialDraft),
   );
   const [sourceRegulationId, setSourceRegulationId] = useState(
     initialSourceId,
   );
   const [message, setMessage] = useState<string | null>(() =>
-    initialSourceRegulationId && initialSourceId
-      ? "Регламент уже выбран. Нажмите «Создать чек-лист», чтобы собрать из него черновик."
+    initialSourceRegulation
+      ? "Черновик заполнен разделами и пунктами регламента. Проверьте настройки и сохраните чек-лист."
+      : initialSourceRegulationId
+        ? "Опубликованный регламент не найден или недоступен для чек-листа."
       : null,
   );
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
@@ -404,38 +442,27 @@ export function StaffChecklistTemplateBuilder({
     return true;
   }
 
-  async function createFromRegulation() {
+  function createFromRegulation() {
     if (!sourceRegulationId) {
       setMessage("Выберите опубликованный регламент.");
       return;
     }
 
-    setIsPending(true);
-    setMessage(null);
+    const regulation = report.publishedRegulations.find(
+      (item) => item.id === sourceRegulationId,
+    );
 
-    const response = await fetch("/api/staff/checklist-templates", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sourceRegulationId,
-        status: "DRAFT",
-      }),
-    });
-
-    setIsPending(false);
-
-    if (!response.ok) {
-      setMessage(await readResponseError(response));
+    if (!regulation) {
+      setMessage("Опубликованный регламент не найден или недоступен.");
       return;
     }
 
-    const template = (await response.json()) as StaffChecklistTemplate;
-    const savedDraft = toDraft(template);
-    setDraft(savedDraft);
-    setSavedDraftSnapshot(draftSnapshot(savedDraft));
+    setDraft(draftFromRegulation(regulation));
     setIsConstructorOpen(true);
-    setMessage("Чек-лист создан из регламента.");
-    router.refresh();
+    setIsPreviewOpen(false);
+    setMessage(
+      "Черновик заполнен разделами и пунктами регламента. Проверьте настройки и сохраните чек-лист.",
+    );
   }
 
   const { prompt: unsavedDraftPrompt, guardAction } = useUnsavedDraftPrompt({

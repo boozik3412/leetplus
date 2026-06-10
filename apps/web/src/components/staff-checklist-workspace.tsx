@@ -639,17 +639,16 @@ function ChecklistRunEditor({
                 const completedAt = formatCompletionDateTime(
                   answer?.completedAt ?? null,
                 );
+                const isSubmitted = Boolean(answer?.completedAt);
                 const isAnswerReady =
                   Boolean(answer?.status) &&
                   (!item.evidenceRequired || Boolean(answer?.evidenceUrl));
+                const canSubmitAnswer = isAnswerReady && !isSubmitted;
 
                 return (
-                  <div
-                    key={item.id}
-                    className="px-3 py-3 sm:px-4"
-                  >
+                  <div key={item.id} className="px-3 py-3 sm:px-4">
                     <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950/70">
-                      <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                      <div className="grid gap-3 xl:grid-cols-[minmax(18rem,1fr)_minmax(28rem,34rem)] xl:items-start">
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
                             <p className="min-w-0 text-sm font-semibold leading-5 sm:text-base">
@@ -679,8 +678,8 @@ function ChecklistRunEditor({
                             ) : null}
                           </div>
                         </div>
-                        <div className="grid min-w-0 gap-2 xl:w-[34rem]">
-                          <div className="grid gap-2 sm:grid-cols-[minmax(9rem,12rem)_minmax(0,1fr)_auto]">
+                        <div className="grid min-w-0 gap-2">
+                          <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(10rem,12rem)_minmax(12rem,1fr)] lg:grid-cols-[minmax(10rem,12rem)_minmax(14rem,1fr)_8rem]">
                             <select
                               value={answer?.status ?? ""}
                               onChange={(event) =>
@@ -692,7 +691,7 @@ function ChecklistRunEditor({
                                           .value as StaffChecklistAnswerStatus),
                                 })
                               }
-                              className="h-10 min-w-0 rounded-lg border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                              className="h-10 w-full min-w-0 rounded-lg border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950"
                             >
                               <option value="">Результат</option>
                               {Object.entries(answerStatusLabels).map(
@@ -711,20 +710,22 @@ function ChecklistRunEditor({
                                 })
                               }
                               placeholder="Короткий результат или отметка"
-                              className="h-10 min-w-0 rounded-lg border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                              className="h-10 w-full min-w-0 rounded-lg border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950"
                             />
                             <button
                               type="button"
                               onClick={() => submitAnswer(section.id, item.id)}
-                              disabled={isPending || !isAnswerReady}
-                              className="h-10 rounded-lg bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+                              disabled={isPending || !canSubmitAnswer}
+                              className="h-10 w-full min-w-32 whitespace-nowrap rounded-lg bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-500 disabled:opacity-100 dark:disabled:bg-zinc-800 dark:disabled:text-zinc-500"
                               title={
-                                item.evidenceRequired && !answer?.evidenceUrl
+                                isSubmitted
+                                  ? "Пункт уже отправлен"
+                                  : item.evidenceRequired && !answer?.evidenceUrl
                                   ? "Добавьте доказательство перед отправкой"
                                   : "Зафиксировать выполнение пункта"
                               }
                             >
-                              Отправить
+                              {isSubmitted ? "Отправлено" : "Отправить"}
                             </button>
                           </div>
                           <details className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/40">

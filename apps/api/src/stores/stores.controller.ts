@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -33,6 +34,13 @@ export class StoresController {
   @Post()
   create(@Body() dto: CreateStoreDto, @CurrentUser() user: AuthenticatedUser) {
     return this.storesService.create(dto, user);
+  }
+
+  @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Get('address-suggestions')
+  suggestAddresses(@Query('q') query?: string) {
+    return this.storesService.suggestAddresses(query);
   }
 
   @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)

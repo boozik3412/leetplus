@@ -548,6 +548,8 @@ async function main() {
         name: "LeetPlus Arena Центр",
         publicSlug: "arena-center",
         address: "Демо-адрес, центральный клуб",
+        city: "Москва",
+        timeZone: "Europe/Moscow",
         isActive: true,
       },
       {
@@ -555,6 +557,8 @@ async function main() {
         name: "LeetPlus Arena Север",
         publicSlug: "arena-north",
         address: "Демо-адрес, северный клуб",
+        city: "Москва",
+        timeZone: "Europe/Moscow",
         isActive: true,
       },
     ],

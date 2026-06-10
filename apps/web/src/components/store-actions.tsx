@@ -1,11 +1,20 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Store } from "@/lib/stores";
 
 type ErrorResponse = {
   message?: string;
+};
+
+type AddressSuggestion = {
+  value: string;
+  city: string;
+  region: string | null;
+  cityFiasId: string | null;
+  cityKladrId: string | null;
+  timeZone: string | null;
 };
 
 function getErrorMessage(data: unknown) {
@@ -52,7 +61,7 @@ export function StoreCreateForm() {
       className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm"
     >
       <h2 className="text-base font-semibold">Новая торговая точка</h2>
-      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <StoreInputs />
       </div>
 
@@ -97,8 +106,8 @@ export function StoreEditForm({ store }: { store: Store }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="grid min-w-[420px] gap-2">
-      <div className="grid gap-2 md:grid-cols-3">
+    <form onSubmit={handleSubmit} className="grid min-w-[720px] gap-2">
+      <div className="grid gap-2 md:grid-cols-5">
         <StoreInputs store={store} />
       </div>
       <div className="flex items-center gap-3">
@@ -144,6 +153,76 @@ export function StoreArchiveButton({ id }: { id: string }) {
 }
 
 function StoreInputs({ store }: { store?: Store }) {
+  const [city, setCity] = useState(store?.city ?? "");
+  const [timeZone, setTimeZone] = useState(store?.timeZone ?? "");
+  const [cityFiasId, setCityFiasId] = useState(store?.cityFiasId ?? "");
+  const [cityKladrId, setCityKladrId] = useState(store?.cityKladrId ?? "");
+  const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
+  const [isSuggesting, setIsSuggesting] = useState(false);
+  const [isSuggestionOpen, setIsSuggestionOpen] = useState(false);
+
+  useEffect(() => {
+    const query = city.trim();
+
+    if (query.length < 2 || cityFiasId) {
+      return;
+    }
+
+    const abortController = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setIsSuggesting(true);
+
+      try {
+        const response = await fetch(
+          `/api/stores/address-suggestions?q=${encodeURIComponent(query)}`,
+          {
+            signal: abortController.signal,
+          },
+        );
+
+        if (!response.ok) {
+          setSuggestions([]);
+          return;
+        }
+
+        const data = (await response.json()) as AddressSuggestion[];
+        setSuggestions(data);
+        setIsSuggestionOpen(data.length > 0);
+      } catch {
+        if (!abortController.signal.aborted) {
+          setSuggestions([]);
+        }
+      } finally {
+        if (!abortController.signal.aborted) {
+          setIsSuggesting(false);
+        }
+      }
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timer);
+      abortController.abort();
+    };
+  }, [city, cityFiasId]);
+
+  function handleCityChange(value: string) {
+    setCity(value);
+    setCityFiasId("");
+    setCityKladrId("");
+    setTimeZone("");
+    setSuggestions([]);
+    setIsSuggestionOpen(true);
+  }
+
+  function handleSuggestionSelect(suggestion: AddressSuggestion) {
+    setCity(suggestion.city);
+    setTimeZone(suggestion.timeZone ?? "");
+    setCityFiasId(suggestion.cityFiasId ?? "");
+    setCityKladrId(suggestion.cityKladrId ?? "");
+    setSuggestions([]);
+    setIsSuggestionOpen(false);
+  }
+
   return (
     <>
       <input
@@ -167,6 +246,54 @@ function StoreInputs({ store }: { store?: Store }) {
         title="Только латинские буквы, цифры и дефисы"
         className="rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
       />
+      <div className="relative">
+        <input
+          name="city"
+          value={city}
+          onChange={(event) => handleCityChange(event.target.value)}
+          onFocus={() => setIsSuggestionOpen(suggestions.length > 0)}
+          placeholder="Город"
+          autoComplete="off"
+          className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+        />
+        {isSuggestionOpen && suggestions.length > 0 ? (
+          <div className="absolute left-0 right-0 top-11 z-20 overflow-hidden rounded-md border border-zinc-200 bg-white shadow-lg">
+            {suggestions.map((suggestion) => (
+              <button
+                key={`${suggestion.cityFiasId ?? suggestion.value}-${suggestion.city}`}
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => handleSuggestionSelect(suggestion)}
+                className="block w-full px-3 py-2 text-left text-sm hover:bg-zinc-50"
+              >
+                <span className="block font-medium text-zinc-900">
+                  {suggestion.city}
+                </span>
+                <span className="block text-xs text-zinc-500">
+                  {[suggestion.region, suggestion.timeZone]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : null}
+        {isSuggesting ? (
+          <span className="absolute right-3 top-2.5 text-xs text-zinc-400">
+            ...
+          </span>
+        ) : null}
+      </div>
+      <input
+        name="timeZone"
+        value={timeZone}
+        readOnly
+        placeholder="Часовой пояс"
+        title="Подставляется автоматически по городу"
+        className="rounded-md border border-zinc-300 bg-zinc-50 px-3 py-2 text-sm text-zinc-600 outline-none"
+      />
+      <input name="cityFiasId" type="hidden" value={cityFiasId} readOnly />
+      <input name="cityKladrId" type="hidden" value={cityKladrId} readOnly />
     </>
   );
 }
@@ -187,6 +314,10 @@ async function submitStoreForm(
       name: String(formData.get("name") ?? "").trim(),
       address: optionalString(formData.get("address")) ?? null,
       publicSlug: optionalString(formData.get("publicSlug")) ?? null,
+      city: optionalString(formData.get("city")) ?? null,
+      cityFiasId: optionalString(formData.get("cityFiasId")) ?? null,
+      cityKladrId: optionalString(formData.get("cityKladrId")) ?? null,
+      timeZone: optionalString(formData.get("timeZone")) ?? null,
     }),
   });
 }

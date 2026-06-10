@@ -3,16 +3,51 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import type { CreateStoreDto, UpdateStoreDto } from './stores.dto';
+import {
+  isSupportedTimeZone,
+  normalizeStoreCity,
+  normalizeStoreTimeZone,
+  timeZoneForStoreCity,
+} from './store-timezones';
+
+const DADATA_SUGGEST_URL =
+  'https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/address';
+
+type DadataAddressSuggestion = {
+  value?: string;
+  unrestricted_value?: string;
+  data?: {
+    city?: string | null;
+    settlement?: string | null;
+    region_with_type?: string | null;
+    city_fias_id?: string | null;
+    settlement_fias_id?: string | null;
+    city_kladr_id?: string | null;
+    settlement_kladr_id?: string | null;
+    timezone?: string | null;
+  };
+};
+
+export type StoreAddressSuggestion = {
+  value: string;
+  city: string;
+  region: string | null;
+  cityFiasId: string | null;
+  cityKladrId: string | null;
+  timeZone: string | null;
+};
 
 @Injectable()
 export class StoresService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
+    private readonly configService: ConfigService,
   ) {}
 
   async findAll(user?: AuthenticatedUser) {
@@ -27,6 +62,12 @@ export class StoresService {
   async create(dto: CreateStoreDto, user: AuthenticatedUser) {
     const { tenantId } = await this.tenantContextService.resolve(user);
     const name = this.normalizeName(dto.name);
+    const location = this.normalizeLocation(
+      dto.city,
+      dto.timeZone,
+      dto.cityFiasId,
+      dto.cityKladrId,
+    );
     const publicSlug =
       dto.publicSlug == null
         ? await this.generateUniquePublicSlug(tenantId, name)
@@ -38,8 +79,56 @@ export class StoresService {
         name,
         publicSlug,
         address: this.normalizeOptionalString(dto.address),
+        city: location.city,
+        cityFiasId: location.cityFiasId,
+        cityKladrId: location.cityKladrId,
+        timeZone: location.timeZone,
       },
     });
+  }
+
+  async suggestAddresses(query: string | undefined) {
+    const cleanQuery = this.normalizeOptionalString(query);
+
+    if (!cleanQuery || cleanQuery.length < 2) {
+      return [];
+    }
+
+    const token = this.configService.get<string>('DADATA_API_KEY')?.trim();
+
+    if (!token) {
+      return [];
+    }
+
+    const response = await fetch(DADATA_SUGGEST_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Token ${token}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({
+        query: cleanQuery,
+        count: 8,
+        from_bound: { value: 'city' },
+        to_bound: { value: 'settlement' },
+        locations: [{ country: 'Россия' }],
+      }),
+    });
+
+    if (!response.ok) {
+      throw new BadRequestException('Адресный справочник временно недоступен');
+    }
+
+    const data = (await response.json()) as {
+      suggestions?: DadataAddressSuggestion[];
+    };
+
+    return (data.suggestions ?? [])
+      .map((suggestion) => this.toStoreAddressSuggestion(suggestion))
+      .filter((suggestion): suggestion is StoreAddressSuggestion =>
+        Boolean(suggestion),
+      );
   }
 
   async update(id: string, dto: UpdateStoreDto, user: AuthenticatedUser) {
@@ -64,6 +153,17 @@ export class StoresService {
         ...(dto.address !== undefined
           ? { address: this.normalizeOptionalString(dto.address) }
           : {}),
+        ...(dto.city !== undefined ||
+        dto.timeZone !== undefined ||
+        dto.cityFiasId !== undefined ||
+        dto.cityKladrId !== undefined
+          ? this.normalizeLocation(
+              dto.city,
+              dto.timeZone,
+              dto.cityFiasId,
+              dto.cityKladrId,
+            )
+          : {}),
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
       },
     });
@@ -85,7 +185,7 @@ export class StoresService {
     });
 
     if (!store) {
-      throw new NotFoundException('Store not found');
+      throw new NotFoundException('Клуб не найден');
     }
 
     return store;
@@ -95,15 +195,77 @@ export class StoresService {
     const normalized = name?.trim();
 
     if (!normalized) {
-      throw new BadRequestException('Store name is required');
+      throw new BadRequestException('Название клуба обязательно');
     }
 
     return normalized;
   }
 
+  private normalizeLocation(
+    city: string | null | undefined,
+    timeZone: string | null | undefined,
+    cityFiasId?: string | null,
+    cityKladrId?: string | null,
+  ) {
+    const normalizedCity = normalizeStoreCity(city);
+
+    if (!normalizedCity) {
+      return {
+        city: null,
+        cityFiasId: null,
+        cityKladrId: null,
+        timeZone: null,
+      };
+    }
+
+    const finalTimeZone =
+      normalizeStoreTimeZone(normalizedCity, timeZone) ??
+      timeZoneForStoreCity(normalizedCity);
+
+    if (!finalTimeZone || !isSupportedTimeZone(finalTimeZone)) {
+      throw new BadRequestException(
+        'Для выбранного города не найден часовой пояс',
+      );
+    }
+
+    return {
+      city: normalizedCity,
+      cityFiasId: this.normalizeOptionalString(cityFiasId),
+      cityKladrId: this.normalizeOptionalString(cityKladrId),
+      timeZone: finalTimeZone,
+    };
+  }
+
+  private toStoreAddressSuggestion(
+    suggestion: DadataAddressSuggestion,
+  ): StoreAddressSuggestion | null {
+    const city = normalizeStoreCity(
+      suggestion.data?.city ?? suggestion.data?.settlement,
+    );
+
+    if (!city) {
+      return null;
+    }
+
+    const timeZone = normalizeStoreTimeZone(city, suggestion.data?.timezone);
+
+    return {
+      value: suggestion.unrestricted_value ?? suggestion.value ?? city,
+      city,
+      region: this.normalizeOptionalString(suggestion.data?.region_with_type),
+      cityFiasId: this.normalizeOptionalString(
+        suggestion.data?.city_fias_id ?? suggestion.data?.settlement_fias_id,
+      ),
+      cityKladrId: this.normalizeOptionalString(
+        suggestion.data?.city_kladr_id ?? suggestion.data?.settlement_kladr_id,
+      ),
+      timeZone,
+    };
+  }
+
   private normalizeOptionalString(value: string | null | undefined) {
     if (value === null || value === undefined) {
-      return value;
+      return null;
     }
 
     return value.trim() || null;

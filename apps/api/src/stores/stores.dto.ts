@@ -2,6 +2,10 @@ export type CreateStoreDto = {
   name: string;
   publicSlug?: string | null;
   address?: string | null;
+  city?: string | null;
+  cityFiasId?: string | null;
+  cityKladrId?: string | null;
+  timeZone?: string | null;
 };
 
 export type UpdateStoreDto = Partial<CreateStoreDto> & {

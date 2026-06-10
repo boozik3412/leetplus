@@ -5,6 +5,10 @@ export type Store = {
   publicSlug: string | null;
   name: string;
   address: string | null;
+  city?: string | null;
+  cityFiasId?: string | null;
+  cityKladrId?: string | null;
+  timeZone?: string | null;
   externalDomain?: string | null;
   externalClubId?: string | null;
   isActive: boolean;

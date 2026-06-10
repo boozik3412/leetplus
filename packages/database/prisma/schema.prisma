@@ -476,6 +476,10 @@ model Store {
   name                  String
   publicSlug            String?
   address               String?
+  city                  String?
+  cityFiasId            String?
+  cityKladrId           String?
+  timeZone              String?
   isActive              Boolean              @default(true)
   externalProvider      IntegrationProvider?
   externalDomain        String?

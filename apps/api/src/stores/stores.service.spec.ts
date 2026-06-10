@@ -3,6 +3,7 @@ import { StoresService } from './stores.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { ConfigService } from '@nestjs/config';
 
 type StoresPrismaMock = {
   store: {
@@ -52,6 +53,7 @@ describe('StoresService', () => {
     service = new StoresService(
       prisma as unknown as PrismaService,
       tenantContext as unknown as TenantContextService,
+      { get: jest.fn() } as unknown as ConfigService,
     );
   });
 
@@ -74,6 +76,7 @@ describe('StoresService', () => {
       {
         name: '  Club A  ',
         address: '  Main street  ',
+        city: 'Екатеринбург',
       },
       user,
     );
@@ -82,7 +85,12 @@ describe('StoresService', () => {
       data: {
         tenantId: 'tenant-demo',
         name: 'Club A',
+        publicSlug: 'club-a',
         address: 'Main street',
+        city: 'Екатеринбург',
+        cityFiasId: null,
+        cityKladrId: null,
+        timeZone: 'Asia/Yekaterinburg',
       },
     });
   });

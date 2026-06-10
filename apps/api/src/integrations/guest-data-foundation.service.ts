@@ -16,6 +16,7 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { LangameClient } from './langame.client';
+import { parseLangameDate as parseLangameDateValue } from './langame-date';
 import { LangameSettingsService } from './langame-settings.service';
 import type {
   LangameCashTransaction,
@@ -182,6 +183,7 @@ type GuestRef = {
 
 type StoreRef = {
   id: string;
+  timeZone: string | null;
 };
 
 type ResolvedPeriod = {
@@ -1673,11 +1675,16 @@ export class GuestDataFoundationService {
       const externalClubId = this.toNullableString(
         row.club_id ?? row.list_clubs_id,
       );
+      const storeRef = externalClubId
+        ? storesByExternalClubId.get(externalClubId)
+        : null;
       const startedAt = this.parseLangameDate(
         this.toNullableString(row.date_start),
+        storeRef?.timeZone,
       );
       const stoppedAt = this.parseLangameDate(
         this.toNullableString(row.date_stop),
+        storeRef?.timeZone,
       );
 
       profile.sessions.total += 1;
@@ -1699,9 +1706,7 @@ export class GuestDataFoundationService {
           guestId: externalGuestId
             ? (guestsByExternalId.get(externalGuestId)?.id ?? null)
             : null,
-          storeId: externalClubId
-            ? (storesByExternalClubId.get(externalClubId)?.id ?? null)
-            : null,
+          storeId: storeRef?.id ?? null,
           externalProvider: IntegrationProvider.LANGAME,
           externalDomain: domain,
           externalSessionId,
@@ -1721,9 +1726,7 @@ export class GuestDataFoundationService {
           guestId: externalGuestId
             ? (guestsByExternalId.get(externalGuestId)?.id ?? null)
             : null,
-          storeId: externalClubId
-            ? (storesByExternalClubId.get(externalClubId)?.id ?? null)
-            : null,
+          storeId: storeRef?.id ?? null,
           externalGuestId,
           externalClubId,
           externalUuid: this.toNullableString(row.UUID),
@@ -1759,6 +1762,9 @@ export class GuestDataFoundationService {
       const externalClubId = this.toNullableString(
         row.club_id ?? row.list_clubs_id,
       );
+      const storeRef = externalClubId
+        ? storesByExternalClubId.get(externalClubId)
+        : null;
       const type = this.toNullableString(row.type);
       const happenedAt = this.parseLangameDate(
         row.date ??
@@ -1768,8 +1774,12 @@ export class GuestDataFoundationService {
           row.created ??
           row.time ??
           row.datetime,
+        storeRef?.timeZone,
       );
-      const updatedAtExternal = this.parseLangameDate(row.date_update);
+      const updatedAtExternal = this.parseLangameDate(
+        row.date_update,
+        storeRef?.timeZone,
+      );
       const amount = this.toBoolean(row.cancel)
         ? null
         : this.toDecimalOrNull(row.amount ?? row.sum ?? row.balance);
@@ -1804,9 +1814,7 @@ export class GuestDataFoundationService {
           guestId: externalGuestId
             ? (guestsByExternalId.get(externalGuestId)?.id ?? null)
             : null,
-          storeId: externalClubId
-            ? (storesByExternalClubId.get(externalClubId)?.id ?? null)
-            : null,
+          storeId: storeRef?.id ?? null,
           externalProvider: IntegrationProvider.LANGAME,
           externalDomain: domain,
           externalTransactionId,
@@ -1824,9 +1832,7 @@ export class GuestDataFoundationService {
           guestId: externalGuestId
             ? (guestsByExternalId.get(externalGuestId)?.id ?? null)
             : null,
-          storeId: externalClubId
-            ? (storesByExternalClubId.get(externalClubId)?.id ?? null)
-            : null,
+          storeId: storeRef?.id ?? null,
           externalGuestId,
           externalClubId,
           type,
@@ -1927,11 +1933,17 @@ export class GuestDataFoundationService {
       for (let index = 0; index < rows.length; index += 1) {
         const row = rows[index];
         const externalClubId = this.toNullableString(row.club_id);
+        const storeRef = externalClubId
+          ? storesByExternalClubId.get(externalClubId)
+          : null;
         const type = this.toNullableString(row.type);
         const operationName = this.toNullableString(row.name);
         const operationSource = this.toNullableString(row.source);
         const operationForm = this.toNullableString(row.form);
-        const happenedAt = this.parseLangameDate(row.date_normal);
+        const happenedAt = this.parseLangameDate(
+          row.date_normal,
+          storeRef?.timeZone,
+        );
         const sourceKey = this.sourceKey([
           chunk.from,
           chunk.to,
@@ -1960,9 +1972,7 @@ export class GuestDataFoundationService {
           },
           create: {
             tenantId,
-            storeId: externalClubId
-              ? (storesByExternalClubId.get(externalClubId)?.id ?? null)
-              : null,
+            storeId: storeRef?.id ?? null,
             externalProvider: IntegrationProvider.LANGAME,
             externalDomain: domain,
             sourceKey,
@@ -1976,9 +1986,7 @@ export class GuestDataFoundationService {
             sourcePayloadHash: this.payloadHash(row),
           },
           update: {
-            storeId: externalClubId
-              ? (storesByExternalClubId.get(externalClubId)?.id ?? null)
-              : null,
+            storeId: storeRef?.id ?? null,
             externalClubId,
             type,
             operationName,
@@ -2044,11 +2052,16 @@ export class GuestDataFoundationService {
 
       const externalUserId = this.toNullableString(row.user_id);
       const externalClubId = this.toNullableString(row.list_clubs_id);
+      const storeRef = externalClubId
+        ? storesByExternalClubId.get(externalClubId)
+        : null;
       const startedAt = this.parseLangameDate(
         this.toNullableString(row.date_start),
+        storeRef?.timeZone,
       );
       const stoppedAt = this.parseLangameDate(
         this.toNullableString(row.date_stop),
+        storeRef?.timeZone,
       );
       const guestId = externalUserId
         ? (staffGuestIdsByExternalUserId.get(externalUserId) ??
@@ -2068,9 +2081,7 @@ export class GuestDataFoundationService {
         create: {
           tenantId,
           guestId,
-          storeId: externalClubId
-            ? (storesByExternalClubId.get(externalClubId)?.id ?? null)
-            : null,
+          storeId: storeRef?.id ?? null,
           externalProvider: IntegrationProvider.LANGAME,
           externalDomain: domain,
           externalShiftId,
@@ -2093,9 +2104,7 @@ export class GuestDataFoundationService {
         },
         update: {
           guestId,
-          storeId: externalClubId
-            ? (storesByExternalClubId.get(externalClubId)?.id ?? null)
-            : null,
+          storeId: storeRef?.id ?? null,
           externalUserId,
           externalClubId,
           startedAt,
@@ -2278,13 +2287,17 @@ export class GuestDataFoundationService {
       select: {
         id: true,
         externalClubId: true,
+        timeZone: true,
       },
     });
 
     return new Map(
       stores
         .filter((store) => store.externalClubId)
-        .map((store) => [store.externalClubId as string, { id: store.id }]),
+        .map((store) => [
+          store.externalClubId as string,
+          { id: store.id, timeZone: store.timeZone },
+        ]),
     );
   }
 
@@ -2427,38 +2440,11 @@ export class GuestDataFoundationService {
     };
   }
 
-  private parseLangameDate(value: string | null | undefined) {
-    if (!value) {
-      return null;
-    }
-
-    const trimmed = value.trim();
-    const ruDate =
-      /^(\d{2})\.(\d{2})\.(\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?$/.exec(
-        trimmed,
-      );
-    if (ruDate) {
-      return new Date(
-        Date.UTC(
-          Number(ruDate[3]),
-          Number(ruDate[2]) - 1,
-          Number(ruDate[1]),
-          Number(ruDate[4] ?? 0),
-          Number(ruDate[5] ?? 0),
-          Number(ruDate[6] ?? 0),
-        ),
-      );
-    }
-
-    const normalized = trimmed.includes('T')
-      ? trimmed
-      : trimmed.replace(' ', 'T');
-    const withTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(normalized)
-      ? normalized
-      : `${normalized}Z`;
-    const date = new Date(withTimezone);
-
-    return Number.isNaN(date.getTime()) ? null : date;
+  private parseLangameDate(
+    value: string | null | undefined,
+    timeZone?: string | null,
+  ) {
+    return parseLangameDateValue(value, timeZone);
   }
 
   private birthdayParts(value: string | null | undefined) {

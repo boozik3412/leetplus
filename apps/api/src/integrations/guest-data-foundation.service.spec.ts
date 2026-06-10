@@ -168,6 +168,10 @@ describe('GuestDataFoundationService', () => {
     guestBonusBalanceSnapshot: {
       upsert: jest.fn(),
     },
+    guestBonusBalanceCurrent: {
+      findMany: jest.fn(),
+      upsert: jest.fn(),
+    },
     guestSession: {
       upsert: jest.fn(),
     },
@@ -181,6 +185,9 @@ describe('GuestDataFoundationService', () => {
       upsert: jest.fn(),
     },
     guestWorkingShift: {
+      upsert: jest.fn(),
+    },
+    langameStaffUser: {
       upsert: jest.fn(),
     },
     guestStaffIdentityMapping: {
@@ -249,7 +256,7 @@ describe('GuestDataFoundationService', () => {
     prisma.guestDataProfileRun.update.mockResolvedValue({});
     prisma.guestDataProfileRun.updateMany.mockResolvedValue({ count: 0 });
     prisma.store.findMany.mockResolvedValue([
-      { id: 'store-1', externalClubId: '10' },
+      { id: 'store-1', externalClubId: '10', timeZone: null },
     ]);
     prisma.store.updateMany.mockResolvedValue({ count: 1 });
     prisma.guest.upsert.mockResolvedValue({ id: 'guest-1' });
@@ -264,6 +271,9 @@ describe('GuestDataFoundationService', () => {
     prisma.$transaction.mockResolvedValue([]);
     prisma.salesFact.updateMany.mockResolvedValue({ count: 1 });
     prisma.guestStaffIdentityMapping.findMany.mockResolvedValue([]);
+    prisma.guestBonusBalanceCurrent.findMany.mockResolvedValue([]);
+    prisma.guestBonusBalanceCurrent.upsert.mockResolvedValue({});
+    prisma.langameStaffUser.upsert.mockResolvedValue({});
 
     langameClient.listGuestGroups.mockResolvedValue([
       { id: 7, name: 'VIP', percent: '10' },

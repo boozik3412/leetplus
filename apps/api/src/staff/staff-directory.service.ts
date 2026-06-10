@@ -7,6 +7,7 @@ import {
 import { IntegrationProvider, Prisma, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { LangameClient } from '../integrations/langame.client';
+import { parseLangameDate as parseLangameDateValue } from '../integrations/langame-date';
 import { LangameSettingsService } from '../integrations/langame-settings.service';
 import type { LangameWorkingShift } from '../integrations/langame.types';
 import { PrismaService } from '../prisma/prisma.service';
@@ -186,6 +187,8 @@ export type StaffActiveShiftCandidatesReport = {
     name: string;
     externalDomain: string | null;
     externalClubId: string | null;
+    city: string | null;
+    timeZone: string | null;
   };
   candidates: StaffActiveShiftCandidate[];
   errors: string[];
@@ -326,6 +329,8 @@ export class StaffDirectoryService {
         name: true,
         externalDomain: true,
         externalClubId: true,
+        city: true,
+        timeZone: true,
         integrationSourceId: true,
       },
     });
@@ -419,6 +424,8 @@ export class StaffDirectoryService {
         name: store.name,
         externalDomain: store.externalDomain,
         externalClubId: store.externalClubId,
+        city: store.city,
+        timeZone: store.timeZone,
       },
       candidates: candidates.sort(
         (first, second) =>
@@ -815,6 +822,7 @@ export class StaffDirectoryService {
       id: string;
       name: string;
       externalClubId: string | null;
+      timeZone: string | null;
     },
   ): StaffActiveShiftCandidate | null {
     const externalShiftId = this.toNullableString(row.id);
@@ -833,15 +841,17 @@ export class StaffDirectoryService {
       return null;
     }
 
-    if (!this.isOpenLangameShift(row.date_stop)) {
+    if (!this.isOpenLangameShift(row.date_stop, store.timeZone)) {
       return null;
     }
 
     const startedAt = this.parseLangameDate(
       this.toNullableString(row.date_start),
+      store.timeZone,
     );
     const stoppedAt = this.parseLangameDate(
       this.toNullableString(row.date_stop),
+      store.timeZone,
     );
 
     return {
@@ -964,7 +974,7 @@ export class StaffDirectoryService {
     return `${domain}:${externalShiftId}`;
   }
 
-  private isOpenLangameShift(value: unknown) {
+  private isOpenLangameShift(value: unknown, timeZone?: string | null) {
     const rawValue = this.toNullableString(value);
 
     if (!rawValue) {
@@ -981,42 +991,14 @@ export class StaffDirectoryService {
       return true;
     }
 
-    return this.parseLangameDate(rawValue) === null;
+    return this.parseLangameDate(rawValue, timeZone) === null;
   }
 
-  private parseLangameDate(value: string | null | undefined) {
-    if (!value) {
-      return null;
-    }
-
-    const trimmed = value.trim();
-    const ruDate =
-      /^(\d{2})\.(\d{2})\.(\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?$/.exec(
-        trimmed,
-      );
-
-    if (ruDate) {
-      return new Date(
-        Date.UTC(
-          Number(ruDate[3]),
-          Number(ruDate[2]) - 1,
-          Number(ruDate[1]),
-          Number(ruDate[4] ?? 0),
-          Number(ruDate[5] ?? 0),
-          Number(ruDate[6] ?? 0),
-        ),
-      );
-    }
-
-    const normalized = trimmed.includes('T')
-      ? trimmed
-      : trimmed.replace(' ', 'T');
-    const withTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(normalized)
-      ? normalized
-      : `${normalized}Z`;
-    const date = new Date(withTimezone);
-
-    return Number.isNaN(date.getTime()) ? null : date;
+  private parseLangameDate(
+    value: string | null | undefined,
+    timeZone?: string | null,
+  ) {
+    return parseLangameDateValue(value, timeZone);
   }
 
   private toDateInputValue(value: Date) {

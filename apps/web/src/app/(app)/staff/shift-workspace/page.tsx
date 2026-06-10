@@ -12,6 +12,7 @@ import { can } from "@/lib/permissions";
 import { getRoleLabel } from "@/lib/roles";
 import {
   getStaffChecklistReport,
+  type StaffChecklistAnswerStatus,
   type StaffChecklistReport,
   type StaffChecklistRun,
 } from "@/lib/staff-checklists";
@@ -107,12 +108,20 @@ const emptyOperatorReport: StaffOperatorReport = {
   staffOptions: [],
 };
 
+type SearchParams = Promise<{
+  [key: string]: string | string[] | undefined;
+}>;
+
 async function safeValue<T>(promise: Promise<T>, fallback: T): Promise<T> {
   try {
     return await promise;
   } catch {
     return fallback;
   }
+}
+
+function searchParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
 }
 
 function todayDateInput() {
@@ -314,14 +323,6 @@ function formatShiftDuration(shift: StaffOperatorShiftDetail | null) {
   return `${formatNumber(shift.durationHours)} ч`;
 }
 
-function shiftDurationProgress(shift: StaffOperatorShiftDetail | null) {
-  if (!shift) {
-    return 0;
-  }
-
-  return Math.min(Math.round((shift.durationHours / 12) * 100), 100);
-}
-
 function activeChecklistRows(rows: StaffChecklistRun[], userId: string) {
   return rows.filter(
     (run) =>
@@ -331,13 +332,14 @@ function activeChecklistRows(rows: StaffChecklistRun[], userId: string) {
   );
 }
 
-function findCurrentChecklistRun(
-  rows: StaffChecklistRun[],
-  shift: StaffOperatorShiftDetail | null,
-  userId: string,
-) {
-  const activeRows = activeChecklistRows(rows, userId);
+function filterClubChecklistRows(rows: StaffChecklistRun[], storeId: string | null) {
+  return rows.filter((run) => !run.store?.id || !storeId || run.store.id === storeId);
+}
 
+function findCurrentChecklistRun(
+  activeRows: StaffChecklistRun[],
+  shift: StaffOperatorShiftDetail | null,
+) {
   if (shift?.externalShiftId) {
     const byShift = activeRows.find(
       (run) => run.shift?.externalShiftId === shift.externalShiftId,
@@ -377,6 +379,114 @@ function checklistProgress(run: StaffChecklistRun | null) {
   };
 }
 
+type ChecklistItemState = "done" | "overdue" | "active" | "planned";
+
+type ChecklistTodoItem = {
+  id: string;
+  sectionTitle: string;
+  title: string;
+  instruction: string | null;
+  answerStatus: StaffChecklistAnswerStatus | null;
+  state: ChecklistItemState;
+};
+
+const answerStatusLabels: Record<StaffChecklistAnswerStatus, string> = {
+  PASS: "Выполнено",
+  FAILED: "Проблема",
+  NOT_APPLICABLE: "Не применимо",
+};
+
+function buildChecklistTodoItems(run: StaffChecklistRun | null) {
+  if (!run) {
+    return [];
+  }
+
+  const answerMap = new Map(
+    run.answers.map((answer) => [`${answer.sectionId}:${answer.itemId}`, answer]),
+  );
+  let activeAssigned = false;
+
+  return run.sections.flatMap((section) =>
+    section.items.map((item) => {
+      const answer = answerMap.get(`${section.id}:${item.id}`) ?? null;
+      let state: ChecklistItemState = "planned";
+
+      if (answer?.status) {
+        state = "done";
+      } else if (run.isOverdue) {
+        state = "overdue";
+      } else if (!activeAssigned) {
+        state = "active";
+        activeAssigned = true;
+      }
+
+      return {
+        id: `${section.id}:${item.id}`,
+        sectionTitle: section.title,
+        title: item.title,
+        instruction: item.instruction,
+        answerStatus: answer?.status ?? null,
+        state,
+      };
+    }),
+  );
+}
+
+function checklistTodoSummary(items: ChecklistTodoItem[]) {
+  return items.reduce(
+    (summary, item) => {
+      summary[item.state] += 1;
+
+      return summary;
+    },
+    { done: 0, overdue: 0, active: 0, planned: 0 },
+  );
+}
+
+function currentTodoItem(items: ChecklistTodoItem[]) {
+  return (
+    items.find((item) => item.state === "active") ??
+    items.find((item) => item.state === "overdue") ??
+    items.find((item) => item.state === "planned") ??
+    items[0] ??
+    null
+  );
+}
+
+function checklistItemStateLabel(item: ChecklistTodoItem) {
+  if (item.answerStatus) {
+    return answerStatusLabels[item.answerStatus];
+  }
+
+  const labels: Record<ChecklistItemState, string> = {
+    done: "Выполнено",
+    overdue: "Просрочено",
+    active: "Активно",
+    planned: "Запланировано",
+  };
+
+  return labels[item.state];
+}
+
+function checklistItemStateTone(item: ChecklistTodoItem) {
+  if (item.answerStatus === "FAILED") {
+    return "red";
+  }
+
+  if (item.answerStatus === "NOT_APPLICABLE") {
+    return "amber";
+  }
+
+  const tones: Record<ChecklistItemState, "emerald" | "red" | "cyan" | "blue"> = {
+    done: "emerald",
+    overdue: "red",
+    active: "cyan",
+    planned: "blue",
+  };
+
+  return tones[item.state];
+}
+
 function isActiveTask(task: StaffTask) {
   return task.status !== "DONE" && task.status !== "CANCELED";
 }
@@ -409,8 +519,14 @@ function canReviewStaffTaskQueue(user: {
   );
 }
 
-export default async function StaffShiftWorkspacePage() {
+export default async function StaffShiftWorkspacePage({
+  searchParams,
+}: {
+  searchParams: SearchParams;
+}) {
   const user = await requireCurrentUser();
+  const params = await searchParams;
+  const selectedChecklistId = searchParam(params.checklistRunId);
 
   if (!can(user, "view_staff_shift_workspace")) {
     redirect("/dashboard");
@@ -443,7 +559,6 @@ export default async function StaffShiftWorkspacePage() {
   const checklistsPromise = safeValue(
     getStaffChecklistReport({
       status: "all",
-      assignedToUserId: user.id,
     }),
     emptyChecklistReport,
   );
@@ -482,28 +597,24 @@ export default async function StaffShiftWorkspacePage() {
     staffMember?.store?.name ??
     shiftRow?.storeNames[0] ??
     "Клуб не привязан";
-  const activeChecklistCount =
-    checklists.summary.open +
-    checklists.summary.inProgress +
-    checklists.summary.onReview +
-    checklists.summary.returned +
-    checklists.summary.escalated;
   const activeTasks = myTasks.rows.filter(isActiveTask);
   const nextTasks = activeTasks.slice(0, 5);
-  const activeChecklists = activeChecklistRows(checklists.rows, user.id);
-  const currentChecklist = findCurrentChecklistRun(
-    checklists.rows,
-    currentShift,
-    user.id,
+  const staffStoreId = staffMember?.store?.id ?? null;
+  const activeChecklists = filterClubChecklistRows(
+    activeChecklistRows(checklists.rows, user.id),
+    staffStoreId,
   );
-  const currentChecklistProgress = checklistProgress(currentChecklist);
-  const nextChecklists = activeChecklists
-    .filter((run) => run.id !== currentChecklist?.id)
-    .slice(0, 2);
+  const recommendedChecklist = findCurrentChecklistRun(activeChecklists, currentShift);
+  const selectedChecklist = selectedChecklistId
+    ? activeChecklists.find((run) => run.id === selectedChecklistId) ?? null
+    : null;
+  const selectedChecklistItems = buildChecklistTodoItems(selectedChecklist);
+  const selectedChecklistSummary = checklistTodoSummary(selectedChecklistItems);
+  const selectedChecklistCurrentItem = currentTodoItem(selectedChecklistItems);
+  const selectedChecklistProgress = checklistProgress(selectedChecklist);
   const isShiftActive = Boolean(currentShift && !currentShift.stoppedAt);
   const hasLangameBinding = Boolean(staffMember?.externalUserId);
   const staffName = staffMember?.displayName ?? user.fullName ?? user.email;
-  const staffStoreId = staffMember?.store?.id ?? null;
   const canManageDirectory = can(user, "manage_staff_directory");
   const langameBindingChatHref = buildLangameBindingChatHref({
     storeId: staffStoreId,
@@ -529,6 +640,13 @@ export default async function StaffShiftWorkspacePage() {
     : currentShift
       ? "Последняя смена"
       : "Открытая смена не найдена";
+  const taskControlCount =
+    activeTasks.length +
+    checklists.summary.returned +
+    checklists.summary.overdue +
+    (canReviewStaffTasks
+      ? reviewTasks.summary.onReview + reviewTasks.summary.overdue
+      : 0);
 
   return (
     <main className="min-h-screen bg-zinc-50 px-4 py-6 text-zinc-950 sm:px-6 sm:py-8 dark:bg-[#090d12] dark:text-zinc-100">
@@ -549,24 +667,27 @@ export default async function StaffShiftWorkspacePage() {
                 затем выручка, гости, регламент и быстрые разделы.
               </p>
             </div>
-            <Link
-              href={headerActionHref}
-              className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 bg-white px-4 text-sm font-semibold text-zinc-900 transition hover:border-emerald-500 hover:text-emerald-700 dark:border-zinc-700 dark:bg-transparent dark:text-zinc-100 dark:hover:border-emerald-400 dark:hover:text-emerald-200"
-            >
-              {headerActionLabel}
-            </Link>
+            {canManageDirectory ? (
+              <Link
+                href={headerActionHref}
+                className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 bg-white px-4 text-sm font-semibold text-zinc-900 transition hover:border-emerald-500 hover:text-emerald-700 dark:border-zinc-700 dark:bg-transparent dark:text-zinc-100 dark:hover:border-emerald-400 dark:hover:text-emerald-200"
+              >
+                {headerActionLabel}
+              </Link>
+            ) : null}
           </div>
 
-          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <ContextChip label="Клуб" value={currentClubName} />
-            <ContextChip label="Сотрудник" value={staffName} />
-            <ContextChip label="Роль" value={getRoleLabel(user.role)} />
-            <ContextChip
-              label="Смена"
-              value={shiftStatusLabel}
-              tone={isShiftActive ? "good" : "muted"}
-            />
-          </div>
+          <ShiftSummaryPanel
+            clubName={currentClubName}
+            staffName={staffName}
+            roleLabel={getRoleLabel(user.role)}
+            shiftStatusLabel={shiftStatusLabel}
+            isShiftActive={isShiftActive}
+            totalRevenue={currentTotalRevenue}
+            barRevenue={currentBarRevenue}
+            guests={currentGuests}
+            shift={currentShift}
+          />
         </header>
 
         {!hasLangameBinding || !currentShift ? (
@@ -588,13 +709,18 @@ export default async function StaffShiftWorkspacePage() {
 
         <section className="mt-4 grid gap-4 xl:grid-cols-[1.7fr_1fr]">
           <WorkPanel
-            currentChecklist={currentChecklist}
-            checklistProgress={currentChecklistProgress}
-            tasks={nextTasks}
-            checklists={nextChecklists}
+            selectedChecklist={selectedChecklist}
+            recommendedChecklist={recommendedChecklist}
+            checklists={activeChecklists}
+            checklistProgress={selectedChecklistProgress}
+            checklistItems={selectedChecklistItems}
+            checklistSummary={selectedChecklistSummary}
+            currentItem={selectedChecklistCurrentItem}
             overdueCount={myTasks.summary.overdue + checklists.summary.overdue}
           />
-          <ReviewPanel
+          <TaskControlPanel
+            tasks={nextTasks}
+            totalCount={taskControlCount}
             myOnReview={myTasks.summary.onReview}
             reviewQueue={reviewTasks.summary.onReview}
             returnedChecklists={checklists.summary.returned}
@@ -605,85 +731,14 @@ export default async function StaffShiftWorkspacePage() {
           />
         </section>
 
-        <section className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <MetricCard
-            title="Выручка смены"
-            value={
-              currentTotalRevenue === null
-                ? "нет данных"
-                : formatMoney(currentTotalRevenue)
-            }
-            detail={
-              currentTotalRevenue === null
-                ? "нужна активная смена"
-                : "оплаты минус возвраты плюс бар"
-            }
-            accent="emerald"
-            progress={currentTotalRevenue ? 72 : 0}
-          />
-          <MetricCard
-            title="Бар"
-            value={
-              currentBarRevenue === null
-                ? "нет данных"
-                : formatMoney(currentBarRevenue)
-            }
-            detail={
-              currentBarRevenue === null
-                ? "нет продаж в окне смены"
-                : "товарная часть текущей смены"
-            }
-            accent="amber"
-            progress={currentBarRevenue ? 64 : 0}
-          />
-          <MetricCard
-            title="Гости"
-            value={
-              currentGuests === null
-                ? "нет данных"
-                : formatNumber(currentGuests.unique)
-            }
-            detail={
-              currentGuests === null
-                ? "нет сессий в смене"
-                : `${formatNumber(currentGuests.visits)} игровых сессий`
-            }
-            accent="cyan"
-            progress={currentGuests ? 58 : 0}
-          />
-          <MetricCard
-            title="Окно смены"
-            value={currentShift?.startedAt ? formatShiftWindow(currentShift) : "нет смены"}
-            detail={
-              currentShift
-                ? `Прошло ${formatShiftDuration(currentShift)}`
-                : "смена не найдена"
-            }
-            accent="violet"
-            progress={shiftDurationProgress(currentShift)}
-          />
-        </section>
-
-        <section className="mt-4 grid gap-4 xl:grid-cols-[1.2fr_1fr]">
-          <RegulationPanel
-            run={currentChecklist}
-            progress={currentChecklistProgress}
-            activeChecklistCount={activeChecklistCount}
-          />
+        <section className="mt-4">
           <TrainingPanel role={user.role} />
         </section>
 
         <section
           aria-label="Быстрые разделы"
-          className="mt-4 grid w-fit max-w-full grid-cols-5 gap-2"
+          className="mt-4 grid w-fit max-w-full grid-cols-3 gap-2"
         >
-          <WorkspaceLink
-            title="Регламенты"
-            description="Чек-листы и стандарты"
-            href="/staff/shift-regulations"
-            accent="emerald"
-            icon="regulations"
-          />
           <WorkspaceLink
             title="Обучение"
             description="Курсы и материалы"
@@ -705,20 +760,72 @@ export default async function StaffShiftWorkspacePage() {
             accent="amber"
             icon="knowledge"
           />
-          <WorkspaceLink
-            title="Мои задачи"
-            description="Все мои задачи"
-            href="/staff/tasks?view=my&status=all"
-            accent="teal"
-            icon="tasks"
-          />
         </section>
       </div>
     </main>
   );
 }
 
-function ContextChip({
+function ShiftSummaryPanel({
+  clubName,
+  staffName,
+  roleLabel,
+  shiftStatusLabel,
+  isShiftActive,
+  totalRevenue,
+  barRevenue,
+  guests,
+  shift,
+}: {
+  clubName: string;
+  staffName: string;
+  roleLabel: string;
+  shiftStatusLabel: string;
+  isShiftActive: boolean;
+  totalRevenue: number | null;
+  barRevenue: number | null;
+  guests: { unique: number; visits: number } | null;
+  shift: StaffOperatorShiftDetail | null;
+}) {
+  return (
+    <section className="mt-4 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm shadow-zinc-950/5 dark:border-zinc-800 dark:bg-zinc-950/90 dark:shadow-none">
+      <div className="grid gap-3 lg:grid-cols-[1.2fr_1.2fr_1fr_1fr]">
+        <SummaryCell label="Клуб" value={clubName} />
+        <SummaryCell label="Сотрудник" value={staffName} />
+        <SummaryCell label="Роль" value={roleLabel} />
+        <SummaryCell
+          label="Смена"
+          value={shiftStatusLabel}
+          tone={isShiftActive ? "good" : "muted"}
+        />
+      </div>
+      <div className="mt-3 grid gap-2 border-t border-zinc-200 pt-3 sm:grid-cols-2 xl:grid-cols-4 dark:border-zinc-800">
+        <SummaryMetric
+          label="Выручка"
+          value={totalRevenue === null ? "нет данных" : formatMoney(totalRevenue)}
+          hint={totalRevenue === null ? "нужна активная смена" : "оплаты, возвраты и бар"}
+        />
+        <SummaryMetric
+          label="Бар"
+          value={barRevenue === null ? "нет данных" : formatMoney(barRevenue)}
+          hint={barRevenue === null ? "нет продаж в смене" : "товары в окне смены"}
+        />
+        <SummaryMetric
+          label="Гости"
+          value={guests === null ? "нет данных" : formatNumber(guests.unique)}
+          hint={guests === null ? "нет сессий" : `${formatNumber(guests.visits)} сессий`}
+        />
+        <SummaryMetric
+          label="Окно"
+          value={shift?.startedAt ? formatShiftWindow(shift) : "нет смены"}
+          hint={shift ? `длительность ${formatShiftDuration(shift)}` : "смена не найдена"}
+        />
+      </div>
+    </section>
+  );
+}
+
+function SummaryCell({
   label,
   value,
   tone = "default",
@@ -727,22 +834,46 @@ function ContextChip({
   value: string;
   tone?: "default" | "good" | "muted";
 }) {
+  const toneClass =
+    tone === "good"
+      ? "text-emerald-700 dark:text-emerald-200"
+      : tone === "muted"
+        ? "text-zinc-700 dark:text-zinc-300"
+        : "text-zinc-950 dark:text-zinc-100";
+
   return (
-    <div
-      className={[
-        "rounded-lg border px-4 py-3",
-        tone === "good"
-          ? "border-emerald-200 bg-emerald-50 dark:border-emerald-500/35 dark:bg-emerald-500/10"
-          : tone === "muted"
-            ? "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/50"
-            : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/70",
-      ].join(" ")}
-    >
-      <p className="text-xs font-bold uppercase text-zinc-500 dark:text-zinc-500">
+    <div className="min-w-0 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/40">
+      <p className="text-[11px] font-bold uppercase text-zinc-500 dark:text-zinc-500">
         {label}
       </p>
-      <p className="mt-1 truncate text-sm font-semibold text-zinc-950 dark:text-zinc-100">
+      <p className={["mt-1 truncate text-sm font-semibold", toneClass].join(" ")}>
         {value}
+      </p>
+    </div>
+  );
+}
+
+function SummaryMetric({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+}) {
+  return (
+    <div className="min-w-0 rounded-md px-2 py-1.5">
+      <div className="flex items-baseline justify-between gap-3">
+        <p className="text-xs font-semibold uppercase text-zinc-500 dark:text-zinc-500">
+          {label}
+        </p>
+        <p className="truncate text-sm font-semibold tabular-nums text-zinc-950 dark:text-zinc-100">
+          {value}
+        </p>
+      </div>
+      <p className="mt-1 truncate text-xs text-zinc-500 dark:text-zinc-500">
+        {hint}
       </p>
     </div>
   );
@@ -780,16 +911,22 @@ function StatusBanner({
 }
 
 function WorkPanel({
-  currentChecklist,
-  checklistProgress,
-  tasks,
+  selectedChecklist,
+  recommendedChecklist,
   checklists,
+  checklistProgress,
+  checklistItems,
+  checklistSummary,
+  currentItem,
   overdueCount,
 }: {
-  currentChecklist: StaffChecklistRun | null;
-  checklistProgress: { done: number; total: number; percent: number };
-  tasks: StaffTask[];
+  selectedChecklist: StaffChecklistRun | null;
+  recommendedChecklist: StaffChecklistRun | null;
   checklists: StaffChecklistRun[];
+  checklistProgress: { done: number; total: number; percent: number };
+  checklistItems: ChecklistTodoItem[];
+  checklistSummary: ReturnType<typeof checklistTodoSummary>;
+  currentItem: ChecklistTodoItem | null;
   overdueCount: number;
 }) {
   return (
@@ -798,56 +935,142 @@ function WorkPanel({
         <h2 className="text-xl font-semibold text-zinc-950 dark:text-white">
           Что нужно сделать на смене
         </h2>
-        <Link
-          href="/staff/tasks?view=my&status=all"
-          className="text-sm font-semibold text-emerald-700 transition hover:text-emerald-600 dark:text-emerald-300 dark:hover:text-emerald-200"
-        >
-          Открыть задачи
-        </Link>
-      </div>
-
-      <div className="mt-5 grid gap-4 lg:grid-cols-[17rem_1fr]">
-        <ChecklistDial
-          title="Прогресс чек-листа"
-          progress={checklistProgress}
-          run={currentChecklist}
-          href={
-            currentChecklist
-              ? `/staff/checklists?runId=${currentChecklist.id}#run-${currentChecklist.id}`
-              : "/staff/checklists"
-          }
-        />
-        <div className="space-y-2">
-          {tasks.length === 0 && checklists.length === 0 ? (
-            <EmptyState
-              title="На смену пока ничего не назначено"
-              description="Когда появятся задачи или чек-листы, они окажутся в этом списке."
-            />
-          ) : null}
-          {tasks.map((task) => (
-            <ActionRow
-              key={task.id}
-              title={task.title}
-              status={taskStatusLabel(task.status)}
-              meta={`${formatDateTime(task.dueAt)} · ${task.store?.name ?? "вся сеть"}`}
-              href={`/staff/tasks?taskId=${task.id}`}
-              isAlert={task.isOverdue || task.priority === "URGENT"}
-              tone={task.status === "ON_REVIEW" ? "cyan" : "blue"}
-            />
-          ))}
-          {checklists.map((run) => (
-            <ActionRow
-              key={run.id}
-              title={run.title}
-              status={checklistStatusLabel(run.status)}
-              meta={`${formatDateTime(run.scheduledAt)} · ${run.store?.name ?? "вся сеть"}`}
-              href={`/staff/checklists?runId=${run.id}#run-${run.id}`}
-              isAlert={run.isOverdue || run.status === "ESCALATED"}
-              tone="emerald"
-            />
-          ))}
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href="/staff/shift-regulations"
+            className="inline-flex h-9 items-center rounded-md border border-zinc-200 bg-white px-3 text-sm font-semibold text-zinc-800 transition hover:border-emerald-300 hover:text-emerald-700 dark:border-zinc-800 dark:bg-transparent dark:text-zinc-200 dark:hover:border-emerald-500/50 dark:hover:text-emerald-200"
+          >
+            Регламент смены
+          </Link>
+          <Link
+            href="/staff/checklists"
+            className="inline-flex h-9 items-center rounded-md border border-emerald-200 bg-emerald-50 px-3 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15"
+          >
+            Все чек-листы
+          </Link>
         </div>
       </div>
+
+      {selectedChecklist ? (
+        <div className="mt-5 space-y-4">
+          <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/40">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs font-bold uppercase text-zinc-500 dark:text-zinc-500">
+                  Основной чек-лист
+                </p>
+                <h3 className="mt-1 truncate text-lg font-semibold text-zinc-950 dark:text-zinc-100">
+                  {selectedChecklist.title}
+                </h3>
+                <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-500">
+                  {checklistStatusLabel(selectedChecklist.status)} ·{" "}
+                  {selectedChecklist.store?.name ?? "вся сеть"} ·{" "}
+                  {formatDateTime(selectedChecklist.scheduledAt)}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Link
+                  href="/staff/shift-workspace"
+                  className="inline-flex h-9 items-center rounded-md border border-zinc-200 bg-white px-3 text-sm font-semibold text-zinc-700 transition hover:border-emerald-300 hover:text-emerald-700 dark:border-zinc-800 dark:bg-transparent dark:text-zinc-300 dark:hover:border-emerald-500/40"
+                >
+                  Сменить
+                </Link>
+                <Link
+                  href={`/staff/checklists?runId=${selectedChecklist.id}#run-${selectedChecklist.id}`}
+                  className="inline-flex h-9 items-center rounded-md border border-emerald-200 bg-emerald-50 px-3 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200"
+                >
+                  Открыть
+                </Link>
+              </div>
+            </div>
+            <div className="mt-4 grid gap-2 sm:grid-cols-4">
+              <ChecklistCounter label="Выполнено" value={checklistSummary.done} tone="emerald" />
+              <ChecklistCounter label="Просрочено" value={checklistSummary.overdue} tone="red" />
+              <ChecklistCounter label="Активно" value={checklistSummary.active} tone="cyan" />
+              <ChecklistCounter label="Запланировано" value={checklistSummary.planned} tone="blue" />
+            </div>
+            <div className="mt-4 rounded-md border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/40">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs font-bold uppercase text-zinc-500 dark:text-zinc-500">
+                  Актуальное действие
+                </p>
+                <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-500">
+                  {formatNumber(checklistProgress.done)} из{" "}
+                  {formatNumber(checklistProgress.total)} · {checklistProgress.percent}%
+                </p>
+              </div>
+              {currentItem ? (
+                <div className="mt-3">
+                  <StatusPill
+                    label={checklistItemStateLabel(currentItem)}
+                    tone={checklistItemStateTone(currentItem)}
+                  />
+                  <p className="mt-3 text-base font-semibold text-zinc-950 dark:text-zinc-100">
+                    {currentItem.title}
+                  </p>
+                  <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-500">
+                    {currentItem.sectionTitle}
+                  </p>
+                  {currentItem.instruction ? (
+                    <p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+                      {currentItem.instruction}
+                    </p>
+                  ) : null}
+                </div>
+              ) : (
+                <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-500">
+                  В чек-листе пока нет пунктов.
+                </p>
+              )}
+            </div>
+            {checklistItems.length > 0 ? (
+              <details className="mt-3 rounded-md border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-transparent">
+                <summary className="cursor-pointer text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                  Показать все действия чек-листа
+                </summary>
+                <div className="mt-3 space-y-2">
+                  {checklistItems.map((item) => (
+                    <ChecklistTodoRow key={item.id} item={item} />
+                  ))}
+                </div>
+              </details>
+            ) : null}
+          </div>
+        </div>
+      ) : (
+        <div className="mt-5 rounded-lg border border-dashed border-zinc-300 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/30">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h3 className="text-base font-semibold text-zinc-950 dark:text-zinc-100">
+                Основной чек-лист на смену не выбран
+              </h3>
+              <p className="mt-1 text-sm leading-6 text-zinc-500 dark:text-zinc-500">
+                Сначала выберите действующий чек-лист клуба. После выбора здесь появятся актуальное действие, весь список дел и счетчики статусов.
+              </p>
+            </div>
+            <details className="lg:min-w-80">
+              <summary className="inline-flex h-10 cursor-pointer items-center rounded-md bg-emerald-600 px-4 text-sm font-semibold text-white transition hover:bg-emerald-500">
+                Выбрать основной чек-лист на смену
+              </summary>
+              <div className="mt-3 space-y-2 rounded-md border border-zinc-200 bg-white p-2 dark:border-zinc-800 dark:bg-zinc-950">
+                {checklists.length === 0 ? (
+                  <p className="px-2 py-3 text-sm text-zinc-500 dark:text-zinc-500">
+                    Для этого клуба пока нет активных чек-листов.
+                  </p>
+                ) : (
+                  checklists.map((run) => (
+                    <ChecklistChoiceRow
+                      key={run.id}
+                      run={run}
+                      isRecommended={run.id === recommendedChecklist?.id}
+                    />
+                  ))
+                )}
+              </div>
+            </details>
+          </div>
+        </div>
+      )}
 
       <div className="mt-4 flex flex-wrap gap-3 text-sm">
         <Link
@@ -867,7 +1090,79 @@ function WorkPanel({
   );
 }
 
-function ReviewPanel({
+function ChecklistCounter({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: "emerald" | "red" | "cyan" | "blue";
+}) {
+  const tones: Record<typeof tone, string> = {
+    emerald: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200",
+    red: "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-200",
+    cyan: "bg-cyan-50 text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-200",
+    blue: "bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-200",
+  };
+
+  return (
+    <div className={["rounded-md px-3 py-2", tones[tone]].join(" ")}>
+      <p className="text-[11px] font-bold uppercase opacity-75">{label}</p>
+      <p className="mt-1 text-xl font-semibold tabular-nums">{formatNumber(value)}</p>
+    </div>
+  );
+}
+
+function ChecklistChoiceRow({
+  run,
+  isRecommended,
+}: {
+  run: StaffChecklistRun;
+  isRecommended: boolean;
+}) {
+  return (
+    <Link
+      href={`/staff/shift-workspace?checklistRunId=${run.id}`}
+      className="block rounded-md border border-zinc-200 px-3 py-2 transition hover:border-emerald-300 hover:bg-emerald-50 dark:border-zinc-800 dark:hover:border-emerald-500/40 dark:hover:bg-emerald-500/5"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold text-zinc-950 dark:text-zinc-100">
+            {run.title}
+          </p>
+          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-500">
+            {run.store?.name ?? "вся сеть"} · {formatDateTime(run.scheduledAt)}
+          </p>
+        </div>
+        {isRecommended ? <StatusPill label="Рекомендован" tone="emerald" /> : null}
+      </div>
+    </Link>
+  );
+}
+
+function ChecklistTodoRow({ item }: { item: ChecklistTodoItem }) {
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-zinc-200 px-3 py-2 sm:flex-row sm:items-center sm:justify-between dark:border-zinc-800">
+      <div className="min-w-0">
+        <p className="truncate text-sm font-semibold text-zinc-950 dark:text-zinc-100">
+          {item.title}
+        </p>
+        <p className="mt-1 truncate text-xs text-zinc-500 dark:text-zinc-500">
+          {item.sectionTitle}
+        </p>
+      </div>
+      <StatusPill
+        label={checklistItemStateLabel(item)}
+        tone={checklistItemStateTone(item)}
+      />
+    </div>
+  );
+}
+
+function TaskControlPanel({
+  tasks,
+  totalCount,
   myOnReview,
   reviewQueue,
   returnedChecklists,
@@ -876,6 +1171,8 @@ function ReviewPanel({
   overdueChecklists,
   canReviewStaffTasks,
 }: {
+  tasks: StaffTask[];
+  totalCount: number;
   myOnReview: number;
   reviewQueue: number;
   returnedChecklists: number;
@@ -884,130 +1181,137 @@ function ReviewPanel({
   overdueChecklists: number;
   canReviewStaffTasks: boolean;
 }) {
-  if (!canReviewStaffTasks) {
+  const rows = canReviewStaffTasks
+    ? [
+        {
+          title: "Мои задачи на проверке",
+          description: "Выполнены мной и ожидают проверяющего",
+          count: myOnReview,
+          href: "/staff/tasks?view=my&status=ON_REVIEW",
+          tone: "cyan" as const,
+        },
+        {
+          title: "Задачи команды на проверке",
+          description: "Работы, которые можно принять или вернуть",
+          count: reviewQueue,
+          href: "/staff/tasks?view=approval&status=ON_REVIEW",
+          tone: "blue" as const,
+        },
+        {
+          title: "Чек-листы на доработке",
+          description: "Вернулись с замечаниями, нужно исправить",
+          count: returnedChecklists,
+          href: "/staff/checklists?status=RETURNED",
+          tone: "amber" as const,
+        },
+        {
+          title: "Просроченные проверки",
+          description: "Работы команды с истекшим сроком",
+          count: overdueReviews,
+          href: "/staff/tasks?view=approval&status=OVERDUE",
+          tone: "red" as const,
+        },
+      ]
+    : [
+        {
+          title: "Задачи ждут проверки",
+          description: "Я выполнил и отправил проверяющему",
+          count: myOnReview,
+          href: "/staff/tasks?view=my&status=ON_REVIEW",
+          tone: "cyan" as const,
+        },
+        {
+          title: "Чек-листы на доработке",
+          description: "Вернулись с замечаниями, нужно исправить",
+          count: returnedChecklists,
+          href: "/staff/checklists?status=RETURNED",
+          tone: "amber" as const,
+        },
+        {
+          title: "Просроченные задачи",
+          description: "Мои задачи с истекшим сроком",
+          count: myOverdueTasks,
+          href: "/staff/tasks?view=my&status=OVERDUE",
+          tone: "red" as const,
+        },
+        {
+          title: "Просроченные чек-листы",
+          description: "Мои чек-листы с истекшим сроком",
+          count: overdueChecklists,
+          href: "/staff/checklists?status=OVERDUE",
+          tone: "red" as const,
+        },
+      ];
+
+  if (totalCount === 0) {
     return (
-      <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm shadow-zinc-950/5 dark:border-zinc-800 dark:bg-zinc-950/90 dark:shadow-none">
-        <h2 className="text-xl font-semibold text-zinc-950 dark:text-white">
-          Мой контроль
-        </h2>
-        <div className="mt-5 space-y-2">
-          <ReviewRow
-            title="Задачи ждут проверки"
-            description="Я выполнил и отправил проверяющему"
-            count={myOnReview}
-            href="/staff/tasks?view=my&status=ON_REVIEW"
-            tone="cyan"
-          />
-          <ReviewRow
-            title="Чек-листы на доработке"
-            description="Вернулись с замечаниями, нужно исправить"
-            count={returnedChecklists}
-            href="/staff/checklists?status=RETURNED"
-            tone="amber"
-          />
-          <ReviewRow
-            title="Просроченные задачи"
-            description="Мои задачи с истекшим сроком"
-            count={myOverdueTasks}
-            href="/staff/tasks?view=my&status=OVERDUE"
-            tone="red"
-          />
-          <ReviewRow
-            title="Просроченные чек-листы"
-            description="Мои чек-листы с истекшим сроком"
-            count={overdueChecklists}
-            href="/staff/checklists?status=OVERDUE"
-            tone="red"
-          />
+      <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm shadow-zinc-950/5 dark:border-zinc-800 dark:bg-zinc-950/90 dark:shadow-none">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-zinc-950 dark:text-white">
+              Мои задачи и контроль
+            </h2>
+            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-500">
+              Активных задач и проверок нет
+            </p>
+          </div>
+          <StatusPill label="0" tone="emerald" />
         </div>
+        <Link
+          href="/staff/tasks?view=my&status=all"
+          className="mt-3 inline-flex h-9 items-center rounded-md border border-zinc-200 bg-white px-3 text-sm font-semibold text-zinc-700 transition hover:border-emerald-300 hover:text-emerald-700 dark:border-zinc-800 dark:bg-transparent dark:text-zinc-300 dark:hover:border-emerald-500/40"
+        >
+          Открыть список задач
+        </Link>
       </section>
     );
   }
 
+  const visibleRows = rows.filter((row) => row.count > 0);
+
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm shadow-zinc-950/5 dark:border-zinc-800 dark:bg-zinc-950/90 dark:shadow-none">
-      <h2 className="text-xl font-semibold text-zinc-950 dark:text-white">
-        Проверка и контроль
-      </h2>
-      <div className="mt-5 space-y-2">
-        <ReviewRow
-          title="Мои задачи на проверке"
-          description="Выполнены мной и ожидают проверяющего"
-          count={myOnReview}
-          href="/staff/tasks?view=my&status=ON_REVIEW"
-          tone="cyan"
-        />
-        <ReviewRow
-          title="Задачи команды на проверке"
-          description="Работы, которые можно принять или вернуть"
-          count={reviewQueue}
-          href="/staff/tasks?view=approval&status=ON_REVIEW"
-          tone="blue"
-        />
-        <ReviewRow
-          title="Возвращено на доработку"
-          description="Чек-листы с замечаниями"
-          count={returnedChecklists}
-          href="/staff/checklists?status=RETURNED"
-          tone="amber"
-        />
-        <ReviewRow
-          title="Просроченные проверки"
-          description="Работы команды с истекшим сроком"
-          count={overdueReviews}
-          href="/staff/tasks?view=approval&status=OVERDUE"
-          tone="red"
-        />
-      </div>
-    </section>
-  );
-}
-
-function ChecklistDial({
-  title,
-  progress,
-  run,
-  href,
-}: {
-  title: string;
-  progress: { done: number; total: number; percent: number };
-  run: StaffChecklistRun | null;
-  href: string;
-}) {
-  return (
-    <Link
-      href={href}
-      className="block rounded-lg border border-zinc-200 bg-zinc-50 p-4 transition hover:border-emerald-300 hover:bg-emerald-50/60 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2 focus:ring-offset-white dark:border-zinc-800 dark:bg-zinc-900/40 dark:hover:border-emerald-500/50 dark:hover:bg-emerald-500/10 dark:focus:ring-offset-zinc-950"
-      aria-label={
-        run
-          ? `Открыть чек-лист ${run.title}`
-          : "Открыть чек-листы"
-      }
-    >
-      <p className="text-sm text-zinc-600 dark:text-zinc-400">{title}</p>
-      <div className="mt-5 flex items-center justify-between gap-4">
+      <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-3xl font-semibold tabular-nums text-emerald-600 dark:text-emerald-300">
-            {progress.percent}%
-          </p>
+          <h2 className="text-xl font-semibold text-zinc-950 dark:text-white">
+            Мои задачи и контроль
+          </h2>
           <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-500">
-            {formatNumber(progress.done)} из {formatNumber(progress.total)}{" "}
-            пунктов
+            Выполнение моих задач, возвраты и проверки
           </p>
         </div>
-        <div
-          className="grid size-20 place-items-center rounded-full"
-          style={{
-            background: `conic-gradient(#10b981 ${progress.percent}%, var(--border-soft) 0)`,
-          }}
-        >
-          <div className="size-14 rounded-full bg-zinc-50 dark:bg-zinc-950" />
-        </div>
+        <StatusPill label={formatNumber(totalCount)} tone="cyan" />
       </div>
-      <p className="mt-5 line-clamp-2 text-sm font-semibold text-zinc-900 dark:text-zinc-200">
-        {run?.title ?? "Нет активного чек-листа"}
-      </p>
-    </Link>
+      <div className="mt-5 space-y-2">
+        {tasks.map((task) => (
+          <ActionRow
+            key={task.id}
+            title={task.title}
+            status={taskStatusLabel(task.status)}
+            meta={`${formatDateTime(task.dueAt)} · ${task.store?.name ?? "вся сеть"}`}
+            href={`/staff/tasks?taskId=${task.id}`}
+            isAlert={task.isOverdue || task.priority === "URGENT"}
+            tone={task.status === "ON_REVIEW" ? "cyan" : "blue"}
+          />
+        ))}
+        {visibleRows.map((row) => (
+          <ReviewRow
+            key={row.href}
+            title={row.title}
+            description={row.description}
+            count={row.count}
+            href={row.href}
+            tone={row.tone}
+          />
+        ))}
+      </div>
+      <Link
+        href="/staff/tasks?view=my&status=all"
+        className="mt-4 inline-flex h-9 items-center rounded-md border border-zinc-200 bg-white px-3 text-sm font-semibold text-zinc-700 transition hover:border-emerald-300 hover:text-emerald-700 dark:border-zinc-800 dark:bg-transparent dark:text-zinc-300 dark:hover:border-emerald-500/40"
+      >
+        Все мои задачи
+      </Link>
+    </section>
   );
 }
 
@@ -1112,106 +1416,6 @@ function ReviewRow({
   );
 }
 
-function MetricCard({
-  title,
-  value,
-  detail,
-  accent,
-  progress,
-}: {
-  title: string;
-  value: string;
-  detail: string;
-  accent: "emerald" | "amber" | "cyan" | "violet";
-  progress: number;
-}) {
-  const colors: Record<typeof accent, string> = {
-    emerald: "bg-emerald-400",
-    amber: "bg-amber-400",
-    cyan: "bg-cyan-400",
-    violet: "bg-violet-400",
-  };
-
-  return (
-    <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm shadow-zinc-950/5 dark:border-zinc-800 dark:bg-zinc-950/90 dark:shadow-none">
-      <p className="text-sm text-zinc-600 dark:text-zinc-400">{title}</p>
-      <p className="mt-2 min-h-8 text-2xl font-semibold tabular-nums text-zinc-950 dark:text-white">
-        {value}
-      </p>
-      <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-500">
-        {detail}
-      </p>
-      <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
-        <div
-          className={["h-full rounded-full", colors[accent]].join(" ")}
-          style={{ width: `${Math.min(progress, 100)}%` }}
-        />
-      </div>
-    </section>
-  );
-}
-
-function RegulationPanel({
-  run,
-  progress,
-  activeChecklistCount,
-}: {
-  run: StaffChecklistRun | null;
-  progress: { done: number; total: number; percent: number };
-  activeChecklistCount: number;
-}) {
-  return (
-    <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm shadow-zinc-950/5 dark:border-zinc-800 dark:bg-zinc-950/90 dark:shadow-none">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-semibold text-zinc-950 dark:text-white">
-            Регламент смены
-          </h2>
-          <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-500">
-            Чек-лист, обязательные пункты и результат последней проверки.
-          </p>
-        </div>
-        <Link
-          href="/staff/checklists"
-          className="inline-flex h-10 items-center justify-center rounded-md border border-emerald-200 bg-emerald-50 px-4 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 dark:border-emerald-500/40 dark:bg-transparent dark:text-emerald-200 dark:hover:bg-emerald-500/10"
-        >
-          Открыть регламент
-        </Link>
-      </div>
-
-      {run ? (
-        <div className="mt-5 grid gap-4 md:grid-cols-[1fr_1fr]">
-          <div>
-            <p className="text-sm font-semibold text-zinc-950 dark:text-zinc-100">
-              {run.title}
-            </p>
-            <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-500">
-              {checklistStatusLabel(run.status)} · выполнено{" "}
-              {formatNumber(progress.done)} из {formatNumber(progress.total)}
-            </p>
-            <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
-              <div
-                className="h-full rounded-full bg-emerald-400"
-                style={{ width: `${Math.min(progress.percent, 100)}%` }}
-              />
-            </div>
-          </div>
-          <div className="grid gap-2 text-sm">
-            <InfoLine label="Активных чек-листов" value={formatNumber(activeChecklistCount)} />
-            <InfoLine label="Проблемных пунктов" value={formatNumber(run.blockingIssues.length)} />
-            <InfoLine label="Доказательств" value={`${formatNumber(run.evidenceDone)}/${formatNumber(run.evidenceTotal)}`} />
-          </div>
-        </div>
-      ) : (
-        <EmptyState
-          title="Нет активного чек-листа"
-          description="Если регламент обязателен для смены, назначьте его через раздел регламентов и чек-листов."
-        />
-      )}
-    </section>
-  );
-}
-
 function TrainingPanel({ role }: { role: string }) {
   const isTrainee = role === "TRAINEE";
 
@@ -1259,36 +1463,6 @@ function TrainingPanel({ role }: { role: string }) {
         </div>
       </div>
     </section>
-  );
-}
-
-function InfoLine({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between gap-4 rounded-md border border-zinc-200 bg-white px-3 py-2 dark:border-zinc-800 dark:bg-transparent">
-      <span className="text-zinc-500 dark:text-zinc-500">{label}</span>
-      <span className="font-semibold text-zinc-950 dark:text-zinc-100">
-        {value}
-      </span>
-    </div>
-  );
-}
-
-function EmptyState({
-  title,
-  description,
-}: {
-  title: string;
-  description: string;
-}) {
-  return (
-    <div className="rounded-lg border border-dashed border-zinc-200 bg-zinc-50 px-4 py-5 dark:border-zinc-800 dark:bg-transparent">
-      <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-200">
-        {title}
-      </p>
-      <p className="mt-2 text-sm leading-6 text-zinc-500 dark:text-zinc-500">
-        {description}
-      </p>
-    </div>
   );
 }
 

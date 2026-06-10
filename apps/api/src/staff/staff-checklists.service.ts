@@ -1754,9 +1754,12 @@ export class StaffChecklistsService {
           ? this.resolveOne(status, answerStatuses, 'PASS')
           : null;
         const evidenceUrl = this.normalizeEvidenceUrl(record.evidenceUrl);
-        const completedAt =
-          this.normalizeOptionalString(record.completedAt) ??
-          (normalizedStatus ? new Date().toISOString() : null);
+        const persistedCompletedAt = this.normalizeOptionalString(
+          record.completedAt,
+        );
+        const completedAt = normalizedStatus
+          ? (persistedCompletedAt ?? new Date().toISOString())
+          : null;
 
         return {
           sectionId: section.id,

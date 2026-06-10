@@ -99,6 +99,20 @@ function formatDateTime(value: string | null) {
   }).format(new Date(value));
 }
 
+function formatCompletionDateTime(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
 function formatNumber(value: number) {
   return new Intl.NumberFormat("ru-RU").format(value);
 }
@@ -418,9 +432,12 @@ function ChecklistRunEditor({
 }) {
   const router = useRouter();
   const [answers, setAnswers] = useState<StaffChecklistAnswer[]>(run.answers);
+  const [persistedAnswers, setPersistedAnswers] =
+    useState<StaffChecklistAnswer[]>(run.answers);
   const [reviewComment, setReviewComment] = useState(run.reviewComment ?? "");
   const [message, setMessage] = useState<string | null>(null);
   const [isPending, setIsPending] = useState(false);
+
   const answersByKey = useMemo(
     () => new Map(answers.map((answer) => [answerKey(answer), answer])),
     [answers],
@@ -460,7 +477,11 @@ function ChecklistRunEditor({
     );
   }
 
-  async function updateRun(status?: StaffChecklistStatus) {
+  async function updateRun(
+    status?: StaffChecklistStatus,
+    nextAnswers = answers,
+    successMessage?: string,
+  ) {
     setIsPending(true);
     setMessage(null);
 
@@ -468,7 +489,7 @@ function ChecklistRunEditor({
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        answers,
+        answers: nextAnswers,
         status,
         reviewComment,
       }),
@@ -481,18 +502,54 @@ function ChecklistRunEditor({
       return;
     }
 
+    const updatedRun = (await response.json()) as StaffChecklistRun;
+    setAnswers(updatedRun.answers);
+    setPersistedAnswers(updatedRun.answers);
+    setReviewComment(updatedRun.reviewComment ?? "");
+
     const successMessages: Partial<Record<StaffChecklistStatus, string>> = {
       ON_REVIEW: "Чеклист отправлен на проверку.",
       ACCEPTED: "Чеклист принят.",
       RETURNED: "Чеклист возвращен на доработку.",
       ESCALATED: "Чеклист эскалирован и отправлен в командный чат.",
     };
-    setMessage(
-      status
-        ? successMessages[status] ?? "Чеклист обновлен."
-        : "Чеклист обновлен.",
-    );
+    const fallbackMessage = status
+      ? (successMessages[status] ?? "Чеклист обновлен.")
+      : "Чеклист обновлен.";
+    setMessage(successMessage ?? fallbackMessage);
     router.refresh();
+  }
+
+  async function submitAnswer(sectionId: string, itemId: string) {
+    const currentAnswer = answersByKey.get(`${sectionId}::${itemId}`);
+
+    if (!currentAnswer?.status) {
+      setMessage("Выберите результат пункта перед отправкой.");
+      return;
+    }
+
+    const nextAnswers = persistedAnswers.map((answer) =>
+      answer.sectionId === sectionId && answer.itemId === itemId
+        ? {
+            ...answer,
+            value: currentAnswer.value,
+            status: currentAnswer.status,
+            note: currentAnswer.note,
+            evidenceUrl: currentAnswer.evidenceUrl,
+            completedAt: null,
+          }
+        : answer,
+    );
+    const nextStatus =
+      run.status === "OPEN" || run.status === "RETURNED"
+        ? "IN_PROGRESS"
+        : undefined;
+
+    await updateRun(
+      nextStatus,
+      nextAnswers,
+      "Пункт отправлен. Время выполнения зафиксировано.",
+    );
   }
 
   return (
@@ -579,87 +636,137 @@ function ChecklistRunEditor({
             <div className="divide-y divide-zinc-200 dark:divide-zinc-800">
               {section.items.map((item) => {
                 const answer = answersByKey.get(`${section.id}::${item.id}`);
+                const completedAt = formatCompletionDateTime(
+                  answer?.completedAt ?? null,
+                );
+                const isAnswerReady =
+                  Boolean(answer?.status) &&
+                  (!item.evidenceRequired || Boolean(answer?.evidenceUrl));
 
                 return (
                   <div
                     key={item.id}
-                    className="grid gap-3 px-4 py-4 lg:grid-cols-[minmax(0,1fr)_18rem]"
+                    className="px-3 py-3 sm:px-4"
                   >
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="font-semibold">{item.title}</p>
-                        {item.required ? <Pill>обязательный</Pill> : null}
-                        {item.evidenceRequired ? (
-                          <Pill>нужно доказательство</Pill>
-                        ) : null}
-                        {item.score > 0 ? <Pill>{item.score} балл.</Pill> : null}
+                    <div className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950/70">
+                      <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="min-w-0 text-sm font-semibold leading-5 sm:text-base">
+                              {item.title}
+                            </p>
+                            {item.required ? <Pill>обязательный</Pill> : null}
+                            {item.evidenceRequired ? (
+                              <Pill>доказательство</Pill>
+                            ) : null}
+                            {item.score > 0 ? <Pill>{item.score} балл.</Pill> : null}
+                          </div>
+                          {item.instruction ? (
+                            <p className="mt-1 text-sm leading-5 text-zinc-500">
+                              {item.instruction}
+                            </p>
+                          ) : null}
+                          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+                            <span>
+                              {answer?.status
+                                ? answerStatusLabels[answer.status]
+                                : "ждет результата"}
+                            </span>
+                            {completedAt ? (
+                              <span className="rounded-full bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200">
+                                отправлено {completedAt}
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                        <div className="grid min-w-0 gap-2 xl:w-[34rem]">
+                          <div className="grid gap-2 sm:grid-cols-[minmax(9rem,12rem)_minmax(0,1fr)_auto]">
+                            <select
+                              value={answer?.status ?? ""}
+                              onChange={(event) =>
+                                patchAnswer(section.id, item.id, {
+                                  status:
+                                    event.target.value === ""
+                                      ? null
+                                      : (event.target
+                                          .value as StaffChecklistAnswerStatus),
+                                })
+                              }
+                              className="h-10 min-w-0 rounded-lg border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                            >
+                              <option value="">Результат</option>
+                              {Object.entries(answerStatusLabels).map(
+                                ([value, label]) => (
+                                  <option key={value} value={value}>
+                                    {label}
+                                  </option>
+                                ),
+                              )}
+                            </select>
+                            <input
+                              value={answer?.value ?? ""}
+                              onChange={(event) =>
+                                patchAnswer(section.id, item.id, {
+                                  value: event.target.value,
+                                })
+                              }
+                              placeholder="Короткий результат или отметка"
+                              className="h-10 min-w-0 rounded-lg border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => submitAnswer(section.id, item.id)}
+                              disabled={isPending || !isAnswerReady}
+                              className="h-10 rounded-lg bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+                              title={
+                                item.evidenceRequired && !answer?.evidenceUrl
+                                  ? "Добавьте доказательство перед отправкой"
+                                  : "Зафиксировать выполнение пункта"
+                              }
+                            >
+                              Отправить
+                            </button>
+                          </div>
+                          <details className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900/40">
+                            <summary className="cursor-pointer text-xs font-semibold uppercase text-zinc-500">
+                              Доказательство и комментарий
+                            </summary>
+                            <div className="mt-2 grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto]">
+                              <input
+                                value={answer?.evidenceUrl ?? ""}
+                                onChange={(event) =>
+                                  patchAnswer(section.id, item.id, {
+                                    evidenceUrl: event.target.value,
+                                  })
+                                }
+                                placeholder="Ссылка на фото/файл"
+                                className="h-10 min-w-0 rounded-lg border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                              />
+                              <StaffAttachmentUpload
+                                label="Загрузить доказательство"
+                                buttonLabel="Загрузить файл"
+                                className="min-w-0"
+                                onUploaded={(attachment) =>
+                                  patchAnswer(section.id, item.id, {
+                                    evidenceUrl: attachment.url,
+                                  })
+                                }
+                              />
+                            </div>
+                            <textarea
+                              value={answer?.note ?? ""}
+                              onChange={(event) =>
+                                patchAnswer(section.id, item.id, {
+                                  note: event.target.value,
+                                })
+                              }
+                              placeholder="Комментарий по пункту"
+                              rows={2}
+                              className="mt-2 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                            />
+                          </details>
+                        </div>
                       </div>
-                      {item.instruction ? (
-                        <p className="mt-2 text-sm leading-6 text-zinc-500">
-                          {item.instruction}
-                        </p>
-                      ) : null}
-                    </div>
-                    <div className="space-y-2">
-                      <select
-                        value={answer?.status ?? ""}
-                        onChange={(event) =>
-                          patchAnswer(section.id, item.id, {
-                            status:
-                              event.target.value === ""
-                                ? null
-                                : (event.target.value as StaffChecklistAnswerStatus),
-                          })
-                        }
-                        className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
-                      >
-                        <option value="">Выберите результат</option>
-                        {Object.entries(answerStatusLabels).map(([value, label]) => (
-                          <option key={value} value={value}>
-                            {label}
-                          </option>
-                        ))}
-                      </select>
-                      <input
-                        value={answer?.value ?? ""}
-                        onChange={(event) =>
-                          patchAnswer(section.id, item.id, {
-                            value: event.target.value,
-                          })
-                        }
-                        placeholder="Значение, сумма, ссылка или отметка"
-                        className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
-                      />
-                      <input
-                        value={answer?.evidenceUrl ?? ""}
-                        onChange={(event) =>
-                          patchAnswer(section.id, item.id, {
-                            evidenceUrl: event.target.value,
-                          })
-                        }
-                        placeholder="Ссылка на фото/файл, если нужно"
-                        className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
-                      />
-                      <StaffAttachmentUpload
-                        label="Загрузить доказательство"
-                        buttonLabel="Загрузить файл"
-                        onUploaded={(attachment) =>
-                          patchAnswer(section.id, item.id, {
-                            evidenceUrl: attachment.url,
-                          })
-                        }
-                      />
-                      <textarea
-                        value={answer?.note ?? ""}
-                        onChange={(event) =>
-                          patchAnswer(section.id, item.id, {
-                            note: event.target.value,
-                          })
-                        }
-                        placeholder="Комментарий по пункту"
-                        rows={2}
-                        className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
-                      />
                     </div>
                   </div>
                 );

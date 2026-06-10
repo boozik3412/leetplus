@@ -9,6 +9,7 @@ import type {
   StaffShiftRegulationAttachmentType,
   StaffShiftRoleScope,
 } from "@/lib/staff-shift-regulations";
+import type { StaffChecklistTemplate } from "@/lib/staff-checklist-templates";
 
 const shiftKindLabels: Record<StaffShiftKind, string> = {
   OPENING: "Открытие смены",
@@ -90,10 +91,16 @@ function countItems(row: StaffShiftRegulation) {
   return row.sections.reduce((sum, section) => sum + section.items.length, 0);
 }
 
+function countTemplateItems(row: StaffChecklistTemplate) {
+  return row.sections.reduce((sum, section) => sum + section.items.length, 0);
+}
+
 export function StaffShiftRegulationCatalog({
   rows,
+  checklistTemplates = [],
 }: {
   rows: StaffShiftRegulation[];
+  checklistTemplates?: StaffChecklistTemplate[];
 }) {
   const router = useRouter();
   const [selectedId, setSelectedId] = useState<string | null>(
@@ -137,30 +144,127 @@ export function StaffShiftRegulationCatalog({
     }
   }
 
-  if (rows.length === 0) {
+  if (rows.length === 0 && checklistTemplates.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-5 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
-        Опубликованных регламентов пока нет. Когда управляющий или менеджер по
-        стандартам опубликует материал, он появится в этом каталоге.
+        Опубликованных регламентов и активных чек-листов пока нет. Когда
+        управляющий или менеджер по стандартам опубликует материал, он появится
+        в этом каталоге.
       </div>
     );
   }
 
-  if (!selectedRow) {
-    return null;
-  }
+  const selectedRegulation = selectedRow;
+  const hasRegulations = Boolean(selectedRegulation);
 
-  const effectiveFrom = formatDateTime(selectedRow.effectiveFrom);
-  const publishedAt = formatDateTime(selectedRow.publishedAt);
+  const effectiveFrom = selectedRegulation
+    ? formatDateTime(selectedRegulation.effectiveFrom)
+    : null;
+  const publishedAt = selectedRegulation
+    ? formatDateTime(selectedRegulation.publishedAt)
+    : null;
   const acknowledgedAt = formatDateTime(
-    selectedRow.acknowledgementSummary.acknowledgedAt,
+    selectedRegulation?.acknowledgementSummary.acknowledgedAt ?? null,
   );
   const shouldAcknowledge =
-    selectedRow.acknowledgementSummary.requiredByMe &&
-    !selectedRow.acknowledgementSummary.acknowledgedByMe;
+    Boolean(selectedRegulation?.acknowledgementSummary.requiredByMe) &&
+    !selectedRegulation?.acknowledgementSummary.acknowledgedByMe;
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
+    <div className="space-y-4">
+      {checklistTemplates.length > 0 ? (
+        <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950 sm:p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+                Чек-листы
+              </p>
+              <h2 className="mt-1 text-lg font-semibold">Чек-листы смены</h2>
+              <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+                Активные чек-листы, доступные вашей роли и клубу. Откройте
+                карточку, чтобы посмотреть разделы и пункты без редактирования.
+              </p>
+            </div>
+            <span className="shrink-0 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200">
+              {checklistTemplates.length}
+            </span>
+          </div>
+
+          <div className="mt-4 grid gap-3 lg:grid-cols-2">
+            {checklistTemplates.map((template) => (
+              <details
+                key={template.id}
+                className="group rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/35"
+              >
+                <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                  <div className="flex min-w-0 items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h3 className="line-clamp-2 text-sm font-semibold text-zinc-950 dark:text-zinc-100">
+                        {template.title}
+                      </h3>
+                      <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                        {shiftKindLabels[template.shiftKind]} ·{" "}
+                        {template.store?.name ?? "вся сеть"} · v
+                        {template.version}
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-1 text-[11px] font-bold uppercase text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200">
+                      Активен
+                    </span>
+                  </div>
+                  <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                    {template.sectionsCount} разд.,{" "}
+                    {countTemplateItems(template)} пунктов
+                    {template.evidenceItemsCount > 0
+                      ? `, доказательств: ${template.evidenceItemsCount}`
+                      : ""}
+                  </p>
+                </summary>
+
+                <div className="mt-3 space-y-3 border-t border-zinc-200 pt-3 dark:border-zinc-800">
+                  {template.description ? (
+                    <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+                      {template.description}
+                    </p>
+                  ) : null}
+                  {template.sections.map((section, sectionIndex) => (
+                    <section key={section.id} className="space-y-2">
+                      <div>
+                        <p className="text-[11px] font-bold uppercase text-zinc-500">
+                          Раздел {sectionIndex + 1}
+                        </p>
+                        <h4 className="mt-0.5 text-sm font-semibold">
+                          {section.title}
+                        </h4>
+                      </div>
+                      {section.items.map((item, itemIndex) => (
+                        <div
+                          key={item.id}
+                          className="rounded-md border border-zinc-200 bg-white p-2 dark:border-zinc-800 dark:bg-zinc-950/50"
+                        >
+                          <p className="text-sm font-medium">
+                            {itemIndex + 1}. {item.title}
+                          </p>
+                          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                            {valueTypeLabels[item.valueType]}
+                            {item.required ? " · обязательно" : ""}
+                            {item.evidenceRequired
+                              ? " · нужно доказательство"
+                              : ""}
+                          </p>
+                        </div>
+                      ))}
+                    </section>
+                  ))}
+                </div>
+              </details>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {hasRegulations && selectedRegulation ? (
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
       <aside className="min-w-0 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -178,7 +282,7 @@ export function StaffShiftRegulationCatalog({
 
         <div className="mt-4 space-y-2">
           {rows.map((row) => {
-            const isSelected = row.id === selectedRow.id;
+            const isSelected = row.id === selectedRegulation.id;
 
             return (
               <button
@@ -217,11 +321,11 @@ export function StaffShiftRegulationCatalog({
               Опубликованный регламент
             </p>
             <h2 className="mt-1 break-words text-2xl font-semibold">
-              {selectedRow.title}
+              {selectedRegulation.title}
             </h2>
-            {selectedRow.description ? (
+            {selectedRegulation.description ? (
               <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                {selectedRow.description}
+                {selectedRegulation.description}
               </p>
             ) : null}
           </div>
@@ -229,19 +333,19 @@ export function StaffShiftRegulationCatalog({
           {shouldAcknowledge ? (
             <button
               type="button"
-              onClick={() => acknowledge(selectedRow)}
-              disabled={pendingId === selectedRow.id}
+              onClick={() => acknowledge(selectedRegulation)}
+              disabled={pendingId === selectedRegulation.id}
               className="inline-flex h-10 shrink-0 items-center justify-center rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-70"
             >
-              {pendingId === selectedRow.id ? "Подтверждаем..." : "Ознакомлен"}
+              {pendingId === selectedRegulation.id ? "Подтверждаем..." : "Ознакомлен"}
             </button>
           ) : (
             <span
               className={`inline-flex h-10 shrink-0 items-center justify-center rounded-md px-3 text-sm font-semibold ${acknowledgementClass(
-                selectedRow,
+                selectedRegulation,
               )}`}
             >
-              {acknowledgedAt ? `Ознакомлен ${acknowledgedAt}` : acknowledgementLabel(selectedRow)}
+              {acknowledgedAt ? `Ознакомлен ${acknowledgedAt}` : acknowledgementLabel(selectedRegulation)}
             </span>
           )}
         </div>
@@ -254,12 +358,12 @@ export function StaffShiftRegulationCatalog({
 
         <div className="mt-5 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
           {[
-            ["Тип", shiftKindLabels[selectedRow.shiftKind]],
-            ["Кому", roleScopeLabels[selectedRow.roleScope]],
-            ["Клуб", selectedRow.store?.name ?? "Вся сеть"],
-            ["Версия", `v${selectedRow.version}`],
-            ["Пунктов", countItems(selectedRow)],
-            ["Доказательств", selectedRow.requiredEvidenceItems],
+            ["Тип", shiftKindLabels[selectedRegulation.shiftKind]],
+            ["Кому", roleScopeLabels[selectedRegulation.roleScope]],
+            ["Клуб", selectedRegulation.store?.name ?? "Вся сеть"],
+            ["Версия", `v${selectedRegulation.version}`],
+            ["Пунктов", countItems(selectedRegulation)],
+            ["Доказательств", selectedRegulation.requiredEvidenceItems],
             ["Действует с", effectiveFrom ?? "сразу после публикации"],
             ["Опубликован", publishedAt ?? "дата не указана"],
           ].map(([label, value]) => (
@@ -275,12 +379,12 @@ export function StaffShiftRegulationCatalog({
           ))}
         </div>
 
-        {selectedRow.requiresAssessmentRetake ? (
+        {selectedRegulation.requiresAssessmentRetake ? (
           <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
             После изменения регламента требуется повторная проверка знаний:
             {" "}
             <span className="font-semibold">
-              {selectedRow.assessment?.title ?? "проверка будет назначена отдельно"}
+              {selectedRegulation.assessment?.title ?? "проверка будет назначена отдельно"}
             </span>
             .
           </div>
@@ -288,12 +392,12 @@ export function StaffShiftRegulationCatalog({
 
         <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,320px)]">
           <div className="min-w-0 space-y-4">
-            {selectedRow.sections.length === 0 ? (
+            {selectedRegulation.sections.length === 0 ? (
               <div className="rounded-lg border border-dashed border-zinc-300 p-4 text-sm text-zinc-500 dark:border-zinc-800">
                 В регламенте пока нет разделов.
               </div>
             ) : (
-              selectedRow.sections.map((section, sectionIndex) => (
+              selectedRegulation.sections.map((section, sectionIndex) => (
                 <section
                   key={section.id}
                   className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800"
@@ -358,13 +462,13 @@ export function StaffShiftRegulationCatalog({
 
           <aside className="min-w-0 rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
             <h3 className="text-base font-semibold">Материалы</h3>
-            {selectedRow.attachments.length === 0 ? (
+            {selectedRegulation.attachments.length === 0 ? (
               <p className="mt-2 text-sm leading-6 text-zinc-500">
                 Вложения к этому регламенту не добавлены.
               </p>
             ) : (
               <div className="mt-3 space-y-2">
-                {selectedRow.attachments.map((attachment) => (
+                {selectedRegulation.attachments.map((attachment) => (
                   <a
                     key={attachment.id}
                     href={attachment.url}
@@ -391,6 +495,12 @@ export function StaffShiftRegulationCatalog({
           </aside>
         </div>
       </section>
+        </div>
+      ) : (
+        <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-5 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
+          Опубликованных регламентов для вашей роли и клуба пока нет.
+        </div>
+      )}
     </div>
   );
 }

@@ -336,6 +336,7 @@ describe('RolesGuard', () => {
       '/staff/tasks',
       '/staff/shift-regulations',
       '/staff/checklists',
+      '/staff/checklist-templates',
       '/staff/training-courses',
       '/staff/assessments',
       '/staff/knowledge-base',
@@ -361,6 +362,7 @@ describe('RolesGuard', () => {
       { method: 'GET', path: '/staff/task-templates' },
       { method: 'POST', path: '/staff/tasks' },
       { method: 'POST', path: '/staff/shift-regulations' },
+      { method: 'POST', path: '/staff/checklist-templates' },
     ].forEach(({ method, path }) => {
       expect(() =>
         guard.canActivate(

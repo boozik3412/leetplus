@@ -339,9 +339,12 @@ export class RolesGuard implements CanActivate {
       return false;
     }
 
+    if (path.startsWith('/staff/checklist-templates')) {
+      return !this.isReadMethod(request.method?.toUpperCase() ?? 'GET');
+    }
+
     const deniedPrefixes = [
       '/staff/checklists/report',
-      '/staff/checklist-templates',
       '/staff/task-templates',
       '/staff/training-profiles',
       '/staff/readiness-report',
@@ -363,6 +366,7 @@ export class RolesGuard implements CanActivate {
       '/staff/task-rules',
       '/staff/shift-regulations',
       '/staff/checklists',
+      '/staff/checklist-templates',
       '/staff/training-courses',
       '/staff/assessments',
       '/staff/knowledge-base',

@@ -30,6 +30,7 @@ import {
   UserRole.STANDARDS_MANAGER,
   UserRole.SENIOR_ADMINISTRATOR,
   UserRole.CLUB_ADMINISTRATOR,
+  UserRole.TRAINEE,
 )
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class StaffChecklistTemplatesController {
@@ -52,7 +53,6 @@ export class StaffChecklistTemplatesController {
     UserRole.MANAGER,
     UserRole.CLUB_MANAGER,
     UserRole.STANDARDS_MANAGER,
-    UserRole.SENIOR_ADMINISTRATOR,
   )
   createTemplate(
     @CurrentUser() user: AuthenticatedUser,
@@ -68,7 +68,6 @@ export class StaffChecklistTemplatesController {
     UserRole.MANAGER,
     UserRole.CLUB_MANAGER,
     UserRole.STANDARDS_MANAGER,
-    UserRole.SENIOR_ADMINISTRATOR,
   )
   updateTemplate(
     @CurrentUser() user: AuthenticatedUser,

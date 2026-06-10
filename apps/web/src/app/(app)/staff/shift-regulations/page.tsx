@@ -4,6 +4,7 @@ import { StaffShiftRegulationBuilder } from "@/components/staff-shift-regulation
 import { StaffShiftRegulationCatalog } from "@/components/staff-shift-regulation-catalog";
 import { requireCurrentUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
+import { getStaffChecklistTemplateReport } from "@/lib/staff-checklist-templates";
 import {
   getStaffShiftRegulationReport,
   type StaffShiftKind,
@@ -102,7 +103,17 @@ export default async function StaffShiftRegulationsPage({
   const filters: StaffShiftRegulationFilters = canManageRegulations
     ? requestedFilters
     : { ...requestedFilters, status: "PUBLISHED" };
-  const report = await getStaffShiftRegulationReport(filters);
+  const [report, checklistTemplates] = await Promise.all([
+    getStaffShiftRegulationReport(filters),
+    canManageRegulations
+      ? Promise.resolve(null)
+      : getStaffChecklistTemplateReport({
+          status: "ACTIVE",
+          shiftKind: requestedFilters.shiftKind,
+          storeId: requestedFilters.storeId,
+          search: requestedFilters.search,
+        }),
+  ]);
 
   const summaryCards = canManageRegulations
     ? [
@@ -286,7 +297,10 @@ export default async function StaffShiftRegulationsPage({
               currentUserRole={user.role}
             />
           ) : (
-            <StaffShiftRegulationCatalog rows={report.rows} />
+            <StaffShiftRegulationCatalog
+              rows={report.rows}
+              checklistTemplates={checklistTemplates?.rows ?? []}
+            />
           )}
         </section>
       </div>

@@ -364,6 +364,11 @@ type ChecklistSource = {
   sections: Prisma.JsonValue;
 };
 
+type ChecklistSourceScope = {
+  roleScopes: string[];
+  storeIds: string[] | null;
+};
+
 @Injectable()
 export class StaffChecklistsService {
   constructor(
@@ -379,6 +384,7 @@ export class StaffChecklistsService {
     const filters = this.resolveFilters(query);
     const useOnlyScope = this.buildChecklistUseOnlyScope(user);
     const canManageChecklistRuns = !this.isChecklistUseOnlyUser(user);
+    const sourceScope = await this.resolveChecklistSourceScope(tenantId, user);
     const baseWhere = this.applyChecklistScope(
       this.buildWhere(tenantId, filters, false),
       useOnlyScope,
@@ -386,6 +392,14 @@ export class StaffChecklistsService {
     const rowsWhere = this.applyChecklistScope(
       this.buildWhere(tenantId, filters, true),
       useOnlyScope,
+    );
+    const regulationWhere = this.applyRegulationSourceScope(
+      { tenantId, status: 'PUBLISHED' },
+      sourceScope,
+    );
+    const templateWhere = this.applyTemplateSourceScope(
+      { tenantId, status: 'ACTIVE' },
+      sourceScope,
     );
 
     const [rows, summaryRows, regulations, templates, stores, users] =
@@ -407,7 +421,7 @@ export class StaffChecklistsService {
           take: 2000,
         }),
         this.prisma.staffShiftRegulation.findMany({
-          where: { tenantId, status: 'PUBLISHED' },
+          where: regulationWhere,
           select: {
             id: true,
             title: true,
@@ -421,7 +435,7 @@ export class StaffChecklistsService {
           take: 200,
         }),
         this.prisma.staffChecklistTemplate.findMany({
-          where: { tenantId, status: 'ACTIVE' },
+          where: templateWhere,
           select: {
             id: true,
             title: true,
@@ -451,12 +465,10 @@ export class StaffChecklistsService {
       filters,
       summary: this.buildSummary(summaryRows),
       rows: rows.map((row) => this.toRunResponse(row)),
-      publishedRegulations: canManageChecklistRuns
-        ? regulations.map((row) => this.toRegulationOption(row))
-        : [],
-      checklistTemplates: canManageChecklistRuns
-        ? templates.map((row) => this.toTemplateOption(row))
-        : [],
+      publishedRegulations: regulations.map((row) =>
+        this.toRegulationOption(row),
+      ),
+      checklistTemplates: templates.map((row) => this.toTemplateOption(row)),
       stores,
       users: canManageChecklistRuns
         ? users
@@ -839,6 +851,73 @@ export class StaffChecklistsService {
     return {
       AND: [where, scope],
     };
+  }
+
+  private async resolveChecklistSourceScope(
+    tenantId: string,
+    user: AuthenticatedUser,
+  ): Promise<ChecklistSourceScope | null> {
+    if (!this.isChecklistUseOnlyUser(user)) {
+      return null;
+    }
+
+    const actor = await this.prisma.user.findFirst({
+      where: { id: user.id, tenantId, isActive: true },
+      select: { storeAccesses: { select: { storeId: true } } },
+    });
+
+    return {
+      roleScopes: this.sourceRoleScopesForUser(user.role),
+      storeIds: actor?.storeAccesses.length
+        ? actor.storeAccesses.map((access) => access.storeId)
+        : null,
+    };
+  }
+
+  private applyRegulationSourceScope(
+    where: Prisma.StaffShiftRegulationWhereInput,
+    scope: ChecklistSourceScope | null,
+  ): Prisma.StaffShiftRegulationWhereInput {
+    if (!scope) {
+      return where;
+    }
+
+    const scoped: Prisma.StaffShiftRegulationWhereInput = {
+      roleScope: { in: scope.roleScopes },
+    };
+
+    if (scope.storeIds) {
+      scoped.OR = [{ storeId: null }, { storeId: { in: scope.storeIds } }];
+    }
+
+    return { AND: [where, scoped] };
+  }
+
+  private applyTemplateSourceScope(
+    where: Prisma.StaffChecklistTemplateWhereInput,
+    scope: ChecklistSourceScope | null,
+  ): Prisma.StaffChecklistTemplateWhereInput {
+    if (!scope) {
+      return where;
+    }
+
+    const scoped: Prisma.StaffChecklistTemplateWhereInput = {
+      roleScope: { in: scope.roleScopes },
+    };
+
+    if (scope.storeIds) {
+      scoped.OR = [{ storeId: null }, { storeId: { in: scope.storeIds } }];
+    }
+
+    return { AND: [where, scoped] };
+  }
+
+  private sourceRoleScopesForUser(role: AuthenticatedUser['role']) {
+    if (role === 'SENIOR_ADMINISTRATOR') {
+      return ['ADMINISTRATOR', 'SENIOR_ADMINISTRATOR', 'ALL_STAFF'];
+    }
+
+    return ['ADMINISTRATOR', 'ALL_STAFF'];
   }
 
   private ensureCanCreateChecklist(user: AuthenticatedUser) {

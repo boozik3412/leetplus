@@ -131,6 +131,11 @@ export type StaffShiftRegulationReport = {
   assessments: StaffShiftRegulationAssessmentOption[];
 };
 
+type StaffShiftCatalogScope = {
+  roleScopes: StaffShiftRoleScope[];
+  storeIds: string[] | null;
+};
+
 export type StaffShiftRegulationAssessmentOption = {
   id: string;
   title: string;
@@ -273,8 +278,12 @@ export class StaffShiftRegulationsService {
     query: StaffShiftRegulationsQuery = {},
   ): Promise<StaffShiftRegulationReport> {
     const { tenantId } = await this.tenantContextService.resolve(user);
-    const filters = this.resolveFilters(query);
-    const where = this.buildWhere(tenantId, filters);
+    const catalogScope = await this.resolveCatalogScope(tenantId, user);
+    const filters = this.resolveFilters(query, catalogScope);
+    const where = this.applyCatalogScope(
+      this.buildWhere(tenantId, filters),
+      catalogScope,
+    );
 
     const [rows, stores, activeUsers, assessments] = await Promise.all([
       this.prisma.staffShiftRegulation.findMany({
@@ -639,13 +648,16 @@ export class StaffShiftRegulationsService {
 
   private resolveFilters(
     query: StaffShiftRegulationsQuery,
+    catalogScope: StaffShiftCatalogScope | null = null,
   ): StaffShiftRegulationReport['filters'] {
     return {
-      status: this.resolveOne(
-        query.status,
-        ['all', ...regulationStatuses] as const,
-        'all',
-      ),
+      status: catalogScope
+        ? 'PUBLISHED'
+        : this.resolveOne(
+            query.status,
+            ['all', ...regulationStatuses] as const,
+            'all',
+          ),
       shiftKind: this.resolveOne(
         query.shiftKind,
         ['all', ...shiftKinds] as const,
@@ -682,6 +694,62 @@ export class StaffShiftRegulationsService {
     }
 
     return where;
+  }
+
+  private applyCatalogScope(
+    where: Prisma.StaffShiftRegulationWhereInput,
+    scope: StaffShiftCatalogScope | null,
+  ): Prisma.StaffShiftRegulationWhereInput {
+    if (!scope) {
+      return where;
+    }
+
+    const scoped: Prisma.StaffShiftRegulationWhereInput = {
+      roleScope: { in: scope.roleScopes },
+    };
+
+    if (scope.storeIds) {
+      scoped.OR = [{ storeId: null }, { storeId: { in: scope.storeIds } }];
+    }
+
+    return { AND: [where, scoped] };
+  }
+
+  private async resolveCatalogScope(
+    tenantId: string,
+    user: AuthenticatedUser,
+  ): Promise<StaffShiftCatalogScope | null> {
+    if (!this.isShiftCatalogUser(user)) {
+      return null;
+    }
+
+    const actor = await this.prisma.user.findFirst({
+      where: { id: user.id, tenantId, isActive: true },
+      select: { storeAccesses: { select: { storeId: true } } },
+    });
+
+    return {
+      roleScopes: this.roleScopesForUser(user.role),
+      storeIds: actor?.storeAccesses.length
+        ? actor.storeAccesses.map((access) => access.storeId)
+        : null,
+    };
+  }
+
+  private isShiftCatalogUser(user: AuthenticatedUser) {
+    return (
+      user.role === UserRole.SENIOR_ADMINISTRATOR ||
+      user.role === UserRole.CLUB_ADMINISTRATOR ||
+      user.role === UserRole.TRAINEE
+    );
+  }
+
+  private roleScopesForUser(role: UserRole): StaffShiftRoleScope[] {
+    if (role === UserRole.SENIOR_ADMINISTRATOR) {
+      return ['ADMINISTRATOR', 'SENIOR_ADMINISTRATOR', 'ALL_STAFF'];
+    }
+
+    return ['ADMINISTRATOR', 'ALL_STAFF'];
   }
 
   private buildSummary(rows: StaffShiftRegulationResponse[]) {

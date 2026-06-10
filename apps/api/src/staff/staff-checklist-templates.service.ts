@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
@@ -167,6 +167,11 @@ type SectionSummary = {
   scoreTotal: number;
 };
 
+type StaffChecklistTemplateCatalogScope = {
+  roleScopes: StaffChecklistTemplateRoleScope[];
+  storeIds: string[] | null;
+};
+
 @Injectable()
 export class StaffChecklistTemplatesService {
   constructor(
@@ -179,8 +184,16 @@ export class StaffChecklistTemplatesService {
     query: StaffChecklistTemplatesQuery = {},
   ): Promise<StaffChecklistTemplateReport> {
     const { tenantId } = await this.tenantContextService.resolve(user);
-    const filters = this.resolveFilters(query);
-    const where = this.buildWhere(tenantId, filters);
+    const catalogScope = await this.resolveCatalogScope(tenantId, user);
+    const filters = this.resolveFilters(query, catalogScope);
+    const where = this.applyCatalogScope(
+      this.buildWhere(tenantId, filters),
+      catalogScope,
+    );
+    const regulationWhere = this.applyRegulationCatalogScope(
+      { tenantId, status: 'PUBLISHED' },
+      catalogScope,
+    );
 
     const [rows, stores, regulations] = await Promise.all([
       this.prisma.staffChecklistTemplate.findMany({
@@ -195,7 +208,7 @@ export class StaffChecklistTemplatesService {
         orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
       }),
       this.prisma.staffShiftRegulation.findMany({
-        where: { tenantId, status: 'PUBLISHED' },
+        where: regulationWhere,
         select: {
           id: true,
           title: true,
@@ -361,13 +374,16 @@ export class StaffChecklistTemplatesService {
 
   private resolveFilters(
     query: StaffChecklistTemplatesQuery,
+    catalogScope: StaffChecklistTemplateCatalogScope | null = null,
   ): StaffChecklistTemplateReport['filters'] {
     return {
-      status: this.resolveOne(
-        query.status,
-        ['all', ...templateStatuses] as const,
-        'all',
-      ),
+      status: catalogScope
+        ? 'ACTIVE'
+        : this.resolveOne(
+            query.status,
+            ['all', ...templateStatuses] as const,
+            'all',
+          ),
       shiftKind: this.resolveOne(
         query.shiftKind,
         ['all', ...shiftKinds] as const,
@@ -409,6 +425,81 @@ export class StaffChecklistTemplatesService {
     }
 
     return where;
+  }
+
+  private applyCatalogScope(
+    where: Prisma.StaffChecklistTemplateWhereInput,
+    scope: StaffChecklistTemplateCatalogScope | null,
+  ): Prisma.StaffChecklistTemplateWhereInput {
+    if (!scope) {
+      return where;
+    }
+
+    const scoped: Prisma.StaffChecklistTemplateWhereInput = {
+      roleScope: { in: scope.roleScopes },
+    };
+
+    if (scope.storeIds) {
+      scoped.OR = [{ storeId: null }, { storeId: { in: scope.storeIds } }];
+    }
+
+    return { AND: [where, scoped] };
+  }
+
+  private applyRegulationCatalogScope(
+    where: Prisma.StaffShiftRegulationWhereInput,
+    scope: StaffChecklistTemplateCatalogScope | null,
+  ): Prisma.StaffShiftRegulationWhereInput {
+    if (!scope) {
+      return where;
+    }
+
+    const scoped: Prisma.StaffShiftRegulationWhereInput = {
+      roleScope: { in: scope.roleScopes },
+    };
+
+    if (scope.storeIds) {
+      scoped.OR = [{ storeId: null }, { storeId: { in: scope.storeIds } }];
+    }
+
+    return { AND: [where, scoped] };
+  }
+
+  private async resolveCatalogScope(
+    tenantId: string,
+    user: AuthenticatedUser,
+  ): Promise<StaffChecklistTemplateCatalogScope | null> {
+    if (!this.isShiftCatalogUser(user)) {
+      return null;
+    }
+
+    const actor = await this.prisma.user.findFirst({
+      where: { id: user.id, tenantId, isActive: true },
+      select: { storeAccesses: { select: { storeId: true } } },
+    });
+
+    return {
+      roleScopes: this.roleScopesForUser(user.role),
+      storeIds: actor?.storeAccesses.length
+        ? actor.storeAccesses.map((access) => access.storeId)
+        : null,
+    };
+  }
+
+  private isShiftCatalogUser(user: AuthenticatedUser) {
+    return (
+      user.role === UserRole.SENIOR_ADMINISTRATOR ||
+      user.role === UserRole.CLUB_ADMINISTRATOR ||
+      user.role === UserRole.TRAINEE
+    );
+  }
+
+  private roleScopesForUser(role: UserRole): StaffChecklistTemplateRoleScope[] {
+    if (role === UserRole.SENIOR_ADMINISTRATOR) {
+      return ['ADMINISTRATOR', 'SENIOR_ADMINISTRATOR', 'ALL_STAFF'];
+    }
+
+    return ['ADMINISTRATOR', 'ALL_STAFF'];
   }
 
   private buildSummary(rows: StaffChecklistTemplateResponse[]) {

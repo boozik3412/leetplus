@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -373,6 +374,45 @@ export class StaffChecklistTemplatesService {
     return this.toTemplateResponse(template);
   }
 
+  async deleteTemplate(user: AuthenticatedUser, id: string) {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const template = await this.prisma.staffChecklistTemplate.findFirst({
+      where: { id, tenantId },
+      select: {
+        id: true,
+        title: true,
+        createdByUserId: true,
+        _count: { select: { checklistRuns: true } },
+      },
+    });
+
+    if (!template) {
+      throw new NotFoundException('Checklist template not found');
+    }
+
+    if (!this.canDeleteTemplate(user, template.createdByUserId)) {
+      throw new ForbiddenException(
+        'Удалить чек-лист может автор, управляющий клубом, управляющий сети или владелец',
+      );
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.staffChecklistRun.updateMany({
+        where: { tenantId, templateId: template.id },
+        data: { templateId: null },
+      });
+      await tx.staffChecklistTemplate.delete({
+        where: { id: template.id },
+      });
+    });
+
+    return {
+      id: template.id,
+      deleted: true,
+      detachedChecklistRuns: template._count.checklistRuns,
+    };
+  }
+
   private resolveFilters(
     query: StaffChecklistTemplatesQuery,
     catalogScope: StaffChecklistTemplateCatalogScope | null = null,
@@ -501,6 +541,24 @@ export class StaffChecklistTemplatesService {
     }
 
     return ['ADMINISTRATOR', 'ALL_STAFF'];
+  }
+
+  private canDeleteTemplate(
+    user: AuthenticatedUser,
+    createdByUserId: string | null,
+  ) {
+    if (createdByUserId && createdByUserId === user.id) {
+      return true;
+    }
+
+    return (
+      [
+        UserRole.OWNER,
+        UserRole.ADMIN,
+        UserRole.MANAGER,
+        UserRole.CLUB_MANAGER,
+      ] as UserRole[]
+    ).includes(user.role);
   }
 
   private buildSummary(rows: StaffChecklistTemplateResponse[]) {

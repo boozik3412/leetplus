@@ -117,42 +117,41 @@ export default async function StaffChecklistTemplatesPage({
               Персонал
             </p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight">
-              Конструктор чек-листов
+              Чек-листы смены
             </h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-              Соберите чек-лист без привязки к конкретной смене: разделы,
-              пункты, обязательность, доказательства и баллы. Активный чек-лист
-              можно выбрать при запуске смены.
+              Каталог чек-листов, которые можно выбрать при запуске смены.
+              Конструктор открывается только для создания или редактирования.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Link
               href="/staff/shift-regulations"
-              className="inline-flex rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900"
+              className="inline-flex h-11 min-w-44 items-center justify-center rounded-md border border-zinc-300 bg-white px-4 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-950 dark:hover:bg-zinc-900"
             >
               Регламенты
             </Link>
             <Link
               href="/staff/checklists"
-              className="inline-flex rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900"
+              className="inline-flex h-11 min-w-44 items-center justify-center rounded-md border border-zinc-300 bg-white px-4 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-950 dark:hover:bg-zinc-900"
             >
               Выполнение чек-листов
             </Link>
           </div>
         </header>
 
-        <section className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <section className="mt-6 flex flex-wrap gap-2 border-y border-zinc-200 py-3 dark:border-zinc-800">
           {summaryCards.map((card) => (
             <div
               key={card.label}
-              className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950"
+              className="inline-flex min-h-9 items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-sm dark:border-zinc-800 dark:bg-zinc-950"
             >
-              <p className="text-xs font-semibold uppercase text-zinc-500">
+              <span className="text-xs font-semibold uppercase text-zinc-500">
                 {card.label}
-              </p>
-              <p className="mt-2 text-2xl font-semibold">
+              </span>
+              <span className="text-base font-semibold">
                 {formatNumber(card.value)}
-              </p>
+              </span>
             </div>
           ))}
         </section>

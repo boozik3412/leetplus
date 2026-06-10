@@ -684,7 +684,7 @@ export function StaffShiftRegulationBuilder({
         <div className="flex items-center justify-between gap-3">
           <div>
             <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
-              Каталог
+              Каталог регламентов
             </p>
             <h2 className="mt-1 text-lg font-semibold">Регламенты смены</h2>
           </div>
@@ -700,7 +700,7 @@ export function StaffShiftRegulationBuilder({
 
         <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
           <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
-            Шаблоны из регламента
+            Заготовки регламента
           </p>
           <p className="mt-1 text-xs leading-5 text-zinc-500">
             Дневная и ночная смена администратора по текущему файлу.
@@ -842,9 +842,11 @@ export function StaffShiftRegulationBuilder({
                 href={`/staff/checklist-templates?sourceRegulationId=${encodeURIComponent(
                   selectedRow.id,
                 )}`}
+                target="_blank"
+                rel="noreferrer"
                 className="inline-flex h-10 items-center rounded-md border border-emerald-300 bg-emerald-50 px-3 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15"
               >
-                Создать чек-лист
+                Открыть чек-лист
               </Link>
             ) : null}
             {canManageRegulations ? (

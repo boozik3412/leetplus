@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -75,5 +76,20 @@ export class StaffChecklistTemplatesController {
     @Body() dto: StaffChecklistTemplateDto,
   ) {
     return this.staffChecklistTemplatesService.updateTemplate(user, id, dto);
+  }
+
+  @Delete(':id')
+  @Roles(
+    UserRole.OWNER,
+    UserRole.ADMIN,
+    UserRole.MANAGER,
+    UserRole.CLUB_MANAGER,
+    UserRole.STANDARDS_MANAGER,
+  )
+  deleteTemplate(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ) {
+    return this.staffChecklistTemplatesService.deleteTemplate(user, id);
   }
 }

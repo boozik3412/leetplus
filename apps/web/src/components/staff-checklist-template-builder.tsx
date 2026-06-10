@@ -249,6 +249,7 @@ export function StaffChecklistTemplateBuilder({
     defaultConstructorOpen,
   );
   const [isPending, setIsPending] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const selectedStoreName =
     report.stores.find((store) => store.id === draft.storeId)?.name ??
     "Вся сеть";
@@ -465,6 +466,44 @@ export function StaffChecklistTemplateBuilder({
     );
   }
 
+  async function deleteTemplate(template: StaffChecklistTemplate) {
+    const confirmed = window.confirm(
+      `Удалить чек-лист "${template.title}" навсегда? История уже запущенных проверок сохранится.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingId(template.id);
+    setMessage(null);
+
+    try {
+      const response = await fetch(
+        `/api/staff/checklist-templates/${encodeURIComponent(template.id)}`,
+        { method: "DELETE" },
+      );
+
+      if (!response.ok) {
+        setMessage(await readResponseError(response));
+        return;
+      }
+
+      const nextTemplate = report.rows.find((row) => row.id !== template.id);
+      const nextDraft = nextTemplate ? toDraft(nextTemplate) : toDraft(null);
+      setDraft(nextDraft);
+      setSavedDraftSnapshot(draftSnapshot(nextDraft));
+      setIsConstructorOpen(Boolean(nextTemplate));
+      setIsPreviewOpen(false);
+      setMessage("Чек-лист удален.");
+      router.refresh();
+    } catch (caught) {
+      setMessage(caught instanceof Error ? caught.message : "Ошибка запроса");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   const { prompt: unsavedDraftPrompt, guardAction } = useUnsavedDraftPrompt({
     enabled: hasUnsavedChanges,
     onSaveDraft: () => saveTemplate("DRAFT"),
@@ -473,12 +512,12 @@ export function StaffChecklistTemplateBuilder({
   return (
     <>
       {unsavedDraftPrompt}
-      <div className="grid gap-4 xl:grid-cols-[22rem_minmax(0,1fr)]">
+      <div className="grid gap-4 xl:grid-cols-[20rem_minmax(0,1fr)]">
       <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
         <div className="flex items-start justify-between gap-3">
           <div>
             <p className="text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-300">
-              Каталог
+              Каталог чек-листов
             </p>
             <h2 className="mt-1 text-lg font-semibold">Чек-листы</h2>
           </div>
@@ -491,8 +530,14 @@ export function StaffChecklistTemplateBuilder({
           </button>
         </div>
 
-        <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
-          <label className="block text-sm">
+        <details
+          className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40"
+          open={Boolean(initialSourceRegulation)}
+        >
+          <summary className="cursor-pointer text-xs font-semibold uppercase text-zinc-600 dark:text-zinc-300">
+            Создать из регламента
+          </summary>
+          <label className="mt-3 block text-sm">
             <span className="text-xs font-semibold uppercase text-zinc-500">
               Из регламента
             </span>
@@ -519,10 +564,13 @@ export function StaffChecklistTemplateBuilder({
           >
             Создать чек-лист
           </button>
-        </div>
+        </details>
 
-        <div className="mt-4 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
-          <div className="flex items-start justify-between gap-3">
+        <details className="mt-4 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
+          <summary className="cursor-pointer text-xs font-semibold uppercase text-zinc-600 dark:text-zinc-300">
+            Готовые паки · {staffChecklistTemplatePacks.length}
+          </summary>
+          <div className="mt-3 flex items-start justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase text-zinc-500">
                 Готовые паки
@@ -561,7 +609,7 @@ export function StaffChecklistTemplateBuilder({
               </button>
             ))}
           </div>
-        </div>
+        </details>
 
         <div className="mt-4 space-y-2">
           {report.rows.length === 0 ? (
@@ -570,32 +618,51 @@ export function StaffChecklistTemplateBuilder({
             </p>
           ) : null}
           {report.rows.map((template) => (
-            <button
+            <div
               key={template.id}
-              type="button"
-              onClick={() => guardAction(() => loadTemplate(template))}
               className={[
-                "w-full rounded-lg border px-3 py-3 text-left transition hover:border-emerald-400 hover:bg-emerald-50/60 dark:hover:bg-emerald-500/10",
+                "rounded-lg border transition hover:border-emerald-400 hover:bg-emerald-50/60 dark:hover:bg-emerald-500/10",
                 draft.id === template.id
                   ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-500/10"
                   : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950",
               ].join(" ")}
             >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold">{template.title}</p>
-                  <p className="mt-1 text-xs text-zinc-500">
-                    {shiftKindLabels[template.shiftKind]} ·{" "}
-                    {template.store?.name ?? "Вся сеть"}
-                  </p>
+              <button
+                type="button"
+                onClick={() => guardAction(() => loadTemplate(template))}
+                className="w-full px-3 py-3 text-left"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-zinc-500">
+                      Чек-лист
+                    </p>
+                    <p className="mt-1 text-sm font-semibold">
+                      {template.title}
+                    </p>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      {shiftKindLabels[template.shiftKind]} ·{" "}
+                      {template.store?.name ?? "Вся сеть"}
+                    </p>
+                  </div>
+                  <StatusBadge status={template.status} />
                 </div>
-                <StatusBadge status={template.status} />
+                <p className="mt-2 text-xs text-zinc-500">
+                  {formatNumber(template.itemsCount)} пунктов ·{" "}
+                  {formatNumber(template.evidenceItemsCount)} доказ.
+                </p>
+              </button>
+              <div className="border-t border-zinc-200 px-3 py-2 dark:border-zinc-800">
+                <button
+                  type="button"
+                  disabled={deletingId === template.id}
+                  onClick={() => void deleteTemplate(template)}
+                  className="text-xs font-semibold text-red-600 transition hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-60 dark:text-red-300"
+                >
+                  {deletingId === template.id ? "Удаляем..." : "Удалить"}
+                </button>
               </div>
-              <p className="mt-2 text-xs text-zinc-500">
-                {formatNumber(template.itemsCount)} пунктов ·{" "}
-                {formatNumber(template.evidenceItemsCount)} доказ.
-              </p>
-            </button>
+            </div>
           ))}
         </div>
       </section>

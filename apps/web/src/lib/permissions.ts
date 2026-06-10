@@ -410,7 +410,6 @@ const shiftStaffCapabilities: Capability[] = [
   "view_staff_training",
   "view_staff_knowledge",
   "manage_staff_tasks",
-  "manage_staff_standards",
   "manage_staff_training",
 ];
 

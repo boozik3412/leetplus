@@ -31,6 +31,7 @@ import {
   UserRole.STANDARDS_MANAGER,
   UserRole.SENIOR_ADMINISTRATOR,
   UserRole.CLUB_ADMINISTRATOR,
+  UserRole.TRAINEE,
 )
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class StaffShiftRegulationsController {
@@ -53,7 +54,6 @@ export class StaffShiftRegulationsController {
     UserRole.MANAGER,
     UserRole.CLUB_MANAGER,
     UserRole.STANDARDS_MANAGER,
-    UserRole.SENIOR_ADMINISTRATOR,
   )
   createRegulation(
     @CurrentUser() user: AuthenticatedUser,
@@ -69,7 +69,6 @@ export class StaffShiftRegulationsController {
     UserRole.MANAGER,
     UserRole.CLUB_MANAGER,
     UserRole.STANDARDS_MANAGER,
-    UserRole.SENIOR_ADMINISTRATOR,
   )
   updateRegulation(
     @CurrentUser() user: AuthenticatedUser,
@@ -88,6 +87,7 @@ export class StaffShiftRegulationsController {
     UserRole.STANDARDS_MANAGER,
     UserRole.SENIOR_ADMINISTRATOR,
     UserRole.CLUB_ADMINISTRATOR,
+    UserRole.TRAINEE,
   )
   acknowledgeRegulation(
     @CurrentUser() user: AuthenticatedUser,

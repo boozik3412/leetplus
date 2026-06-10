@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import {
@@ -271,6 +272,7 @@ export function StaffShiftRegulationBuilder({
   >(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [isConstructorOpen, setIsConstructorOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const canManageRegulations = [
     "OWNER",
@@ -326,11 +328,13 @@ export function StaffShiftRegulationBuilder({
     const nextDraft = row ? fromRegulation(row) : defaultDraft();
     setDraft(nextDraft);
     setSavedDraftSnapshot(draftSnapshot(nextDraft));
+    setIsConstructorOpen(true);
     setError(null);
   }
 
   function applyTemplate(template: StaffShiftRegulationTemplate) {
     setDraft(draftFromTemplate(template));
+    setIsConstructorOpen(true);
     setError(null);
   }
 
@@ -809,39 +813,67 @@ export function StaffShiftRegulationBuilder({
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => setIsPreviewOpen((current) => !current)}
+              onClick={() => setIsConstructorOpen((current) => !current)}
               className={[
                 "h-10 rounded-md border px-3 text-sm font-semibold transition",
-                isPreviewOpen
+                isConstructorOpen
                   ? "border-emerald-500 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-200"
                   : "border-zinc-300 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900",
               ].join(" ")}
             >
-              {isPreviewOpen ? "Скрыть предпросмотр" : "Предпросмотр"}
+              {isConstructorOpen ? "Свернуть" : "Открыть конструктор"}
             </button>
+            {isConstructorOpen ? (
+              <button
+                type="button"
+                onClick={() => setIsPreviewOpen((current) => !current)}
+                className={[
+                  "h-10 rounded-md border px-3 text-sm font-semibold transition",
+                  isPreviewOpen
+                    ? "border-emerald-500 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-200"
+                    : "border-zinc-300 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900",
+                ].join(" ")}
+              >
+                {isPreviewOpen ? "Скрыть предпросмотр" : "Предпросмотр"}
+              </button>
+            ) : null}
+            {selectedRow?.status === "PUBLISHED" && canManageRegulations ? (
+              <Link
+                href={`/staff/checklist-templates?sourceRegulationId=${encodeURIComponent(
+                  selectedRow.id,
+                )}`}
+                className="inline-flex h-10 items-center rounded-md border border-emerald-300 bg-emerald-50 px-3 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15"
+              >
+                Создать чек-лист
+              </Link>
+            ) : null}
             {canManageRegulations ? (
               <>
-                <button
-                  type="button"
-                  disabled={isPending}
-                  onClick={() => save("DRAFT")}
-                  className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:hover:bg-zinc-900"
-                >
-                  Сохранить черновик
-                </button>
-                <button
-                  type="button"
-                  disabled={isPending}
-                  onClick={() => save("PUBLISHED")}
-                  className="h-10 rounded-md bg-emerald-500 px-3 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {selectedRow?.status === "PUBLISHED"
-                    ? "Опубликовать новую версию"
-                    : "Опубликовать"}
-                </button>
+                {isConstructorOpen ? (
+                  <>
+                    <button
+                      type="button"
+                      disabled={isPending}
+                      onClick={() => save("DRAFT")}
+                      className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:hover:bg-zinc-900"
+                    >
+                      Сохранить черновик
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isPending}
+                      onClick={() => save("PUBLISHED")}
+                      className="h-10 rounded-md bg-emerald-500 px-3 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {selectedRow?.status === "PUBLISHED"
+                        ? "Опубликовать новую версию"
+                        : "Опубликовать"}
+                    </button>
+                  </>
+                ) : null}
               </>
             ) : null}
-            {draft.id && canManageRegulations ? (
+            {draft.id && canManageRegulations && isConstructorOpen ? (
               <button
                 type="button"
                 disabled={isPending}
@@ -880,6 +912,8 @@ export function StaffShiftRegulationBuilder({
           </div>
         </div>
 
+        {isConstructorOpen ? (
+          <>
         {selectedRow?.status === "PUBLISHED" ? (
           <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1548,6 +1582,29 @@ export function StaffShiftRegulationBuilder({
             {error}
           </p>
         ) : null}
+          </>
+        ) : (
+          <div className="mt-4 rounded-lg border border-dashed border-zinc-300 bg-zinc-50 p-4 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-400">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="font-semibold text-zinc-900 dark:text-zinc-100">
+                  Конструктор свернут
+                </p>
+                <p className="mt-1 leading-6">
+                  Откройте его только когда нужно изменить структуру регламента,
+                  разделы, пункты, материалы или параметры публикации.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsConstructorOpen(true)}
+                className="inline-flex h-10 shrink-0 items-center justify-center rounded-md bg-zinc-950 px-3 text-sm font-semibold text-white transition hover:bg-zinc-800 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
+              >
+                Открыть конструктор
+              </button>
+            </div>
+          </div>
+        )}
       </section>
       </div>
     </>

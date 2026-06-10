@@ -122,7 +122,7 @@ function toDraft(template: StaffChecklistTemplate | null): DraftTemplate {
   if (!template) {
     return {
       id: null,
-      title: "Новый шаблон чеклиста",
+      title: "Новый чек-лист",
       description: "",
       shiftKind: "OPENING",
       roleScope: "ADMINISTRATOR",
@@ -169,16 +169,29 @@ async function readResponseError(response: Response) {
 
 export function StaffChecklistTemplateBuilder({
   report,
+  initialSourceRegulationId,
+  startNew = false,
+  defaultConstructorOpen = false,
 }: {
   report: StaffChecklistTemplateReport;
+  initialSourceRegulationId?: string | null;
+  startNew?: boolean;
+  defaultConstructorOpen?: boolean;
 }) {
   const router = useRouter();
-  const [selectedId, setSelectedId] = useState(report.rows[0]?.id ?? "");
-  const selectedTemplate =
-    report.rows.find((template) => template.id === selectedId) ??
-    report.rows[0] ??
-    null;
-  const initialDraft = toDraft(selectedTemplate);
+  const initialSelectedId = startNew ? "" : report.rows[0]?.id ?? "";
+  const initialSelectedTemplate = startNew
+    ? null
+    : report.rows.find((template) => template.id === initialSelectedId) ??
+      report.rows[0] ??
+      null;
+  const initialSourceId =
+    report.publishedRegulations.find(
+      (regulation) => regulation.id === initialSourceRegulationId,
+    )?.id ??
+    report.publishedRegulations[0]?.id ??
+    "";
+  const initialDraft = toDraft(initialSelectedTemplate);
   const [draft, setDraft] = useState<DraftTemplate>(() =>
     initialDraft,
   );
@@ -186,10 +199,17 @@ export function StaffChecklistTemplateBuilder({
     draftSnapshot(initialDraft),
   );
   const [sourceRegulationId, setSourceRegulationId] = useState(
-    report.publishedRegulations[0]?.id ?? "",
+    initialSourceId,
   );
-  const [message, setMessage] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(() =>
+    initialSourceRegulationId && initialSourceId
+      ? "Регламент уже выбран. Нажмите «Создать чек-лист», чтобы собрать из него черновик."
+      : null,
+  );
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [isConstructorOpen, setIsConstructorOpen] = useState(
+    defaultConstructorOpen,
+  );
   const [isPending, setIsPending] = useState(false);
   const selectedStoreName =
     report.stores.find((store) => store.id === draft.storeId)?.name ??
@@ -211,14 +231,14 @@ export function StaffChecklistTemplateBuilder({
 
   function loadTemplate(template: StaffChecklistTemplate | null) {
     const nextDraft = toDraft(template);
-    setSelectedId(template?.id ?? "");
     setDraft(nextDraft);
     setSavedDraftSnapshot(draftSnapshot(nextDraft));
+    setIsConstructorOpen(true);
     setMessage(null);
   }
 
   function loadTemplatePack(pack: StaffChecklistTemplatePack) {
-    setSelectedId("");
+    setIsConstructorOpen(true);
     setDraft({
       id: null,
       title: pack.title,
@@ -230,7 +250,7 @@ export function StaffChecklistTemplateBuilder({
       sourceRegulationId: "",
       sections: clonePackSections(pack.sections),
     });
-    setMessage("Пак загружен в конструктор. Проверьте клуб, пункты и сохраните как шаблон.");
+    setMessage("Пак загружен в конструктор. Проверьте клуб, пункты и сохраните как чек-лист.");
   }
 
   function patchDraft(patch: Partial<DraftTemplate>) {
@@ -274,7 +294,7 @@ export function StaffChecklistTemplateBuilder({
 
   function removeSection(sectionId: string) {
     if (draft.sections.length === 1) {
-      setMessage("В шаблоне должен остаться хотя бы один раздел.");
+      setMessage("В чек-листе должен остаться хотя бы один раздел.");
       return;
     }
 
@@ -376,10 +396,10 @@ export function StaffChecklistTemplateBuilder({
 
     const template = (await response.json()) as StaffChecklistTemplate;
     const savedDraft = toDraft(template);
-    setSelectedId(template.id);
     setDraft(savedDraft);
     setSavedDraftSnapshot(draftSnapshot(savedDraft));
-    setMessage(status === "ACTIVE" ? "Шаблон активирован." : "Шаблон сохранен.");
+    setIsConstructorOpen(true);
+    setMessage(status === "ACTIVE" ? "Чек-лист активирован." : "Чек-лист сохранен.");
     router.refresh();
     return true;
   }
@@ -411,10 +431,10 @@ export function StaffChecklistTemplateBuilder({
 
     const template = (await response.json()) as StaffChecklistTemplate;
     const savedDraft = toDraft(template);
-    setSelectedId(template.id);
     setDraft(savedDraft);
     setSavedDraftSnapshot(draftSnapshot(savedDraft));
-    setMessage("Шаблон создан из регламента.");
+    setIsConstructorOpen(true);
+    setMessage("Чек-лист создан из регламента.");
     router.refresh();
   }
 
@@ -433,7 +453,7 @@ export function StaffChecklistTemplateBuilder({
             <p className="text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-300">
               Каталог
             </p>
-            <h2 className="mt-1 text-lg font-semibold">Шаблоны</h2>
+            <h2 className="mt-1 text-lg font-semibold">Чек-листы</h2>
           </div>
           <button
             type="button"
@@ -470,7 +490,7 @@ export function StaffChecklistTemplateBuilder({
             disabled={isPending || report.publishedRegulations.length === 0}
             className="mt-3 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900"
           >
-            Создать копию
+            Создать чек-лист
           </button>
         </div>
 
@@ -519,7 +539,7 @@ export function StaffChecklistTemplateBuilder({
         <div className="mt-4 space-y-2">
           {report.rows.length === 0 ? (
             <p className="rounded-lg border border-dashed border-zinc-300 px-3 py-5 text-sm text-zinc-500 dark:border-zinc-700">
-              Шаблонов пока нет.
+              Чек-листов пока нет.
             </p>
           ) : null}
           {report.rows.map((template) => (
@@ -564,16 +584,30 @@ export function StaffChecklistTemplateBuilder({
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => setIsPreviewOpen((current) => !current)}
+              onClick={() => setIsConstructorOpen((current) => !current)}
               className={[
                 "h-10 rounded-lg border px-3 text-sm font-semibold transition",
-                isPreviewOpen
+                isConstructorOpen
                   ? "border-emerald-500 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-200"
                   : "border-zinc-200 hover:bg-zinc-100 dark:border-zinc-800 dark:hover:bg-zinc-900",
               ].join(" ")}
             >
-              {isPreviewOpen ? "Скрыть предпросмотр" : "Предпросмотр"}
+              {isConstructorOpen ? "Свернуть" : "Открыть конструктор"}
             </button>
+            {isConstructorOpen ? (
+              <button
+                type="button"
+                onClick={() => setIsPreviewOpen((current) => !current)}
+                className={[
+                  "h-10 rounded-lg border px-3 text-sm font-semibold transition",
+                  isPreviewOpen
+                    ? "border-emerald-500 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-200"
+                    : "border-zinc-200 hover:bg-zinc-100 dark:border-zinc-800 dark:hover:bg-zinc-900",
+                ].join(" ")}
+              >
+                {isPreviewOpen ? "Скрыть предпросмотр" : "Предпросмотр"}
+              </button>
+            ) : null}
             <Metric label="Разделы" value={summary.sections} />
             <Metric label="Пункты" value={summary.items} />
             <Metric label="Обяз." value={summary.required} />
@@ -582,6 +616,8 @@ export function StaffChecklistTemplateBuilder({
           </div>
         </div>
 
+        {isConstructorOpen ? (
+          <>
         {message ? (
           <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
             {message}
@@ -857,6 +893,29 @@ export function StaffChecklistTemplateBuilder({
             </button>
           ) : null}
         </div>
+          </>
+        ) : (
+          <div className="mt-4 rounded-lg border border-dashed border-zinc-300 bg-zinc-50 p-4 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-400">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="font-semibold text-zinc-900 dark:text-zinc-100">
+                  Конструктор свернут
+                </p>
+                <p className="mt-1 leading-6">
+                  Откройте его, когда нужно изменить разделы, пункты,
+                  доказательства или статус чек-листа.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsConstructorOpen(true)}
+                className="inline-flex h-10 shrink-0 items-center justify-center rounded-xl bg-zinc-950 px-3 text-sm font-semibold text-white transition hover:bg-zinc-800 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
+              >
+                Открыть конструктор
+              </button>
+            </div>
+          </div>
+        )}
       </section>
       </div>
     </>

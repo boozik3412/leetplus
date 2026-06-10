@@ -87,6 +87,9 @@ export default async function StaffChecklistTemplatesPage({
   await requireCurrentUser();
   const params = await searchParams;
   const filters = resolveFilters(params);
+  const initialSourceRegulationId = searchParam(params.sourceRegulationId);
+  const startNew =
+    searchParam(params.new) === "1" || Boolean(initialSourceRegulationId);
   const report = await getStaffChecklistTemplateReport(filters);
   const summaryCards = [
     { label: "Всего", value: report.summary.total },
@@ -100,7 +103,7 @@ export default async function StaffChecklistTemplatesPage({
     <main className="px-4 py-6 text-zinc-950 dark:text-zinc-100 sm:px-6 sm:py-8">
       <div className="mx-auto max-w-7xl">
         <ReportBreadcrumbs
-          current="Шаблоны чеклистов"
+          current="Чек-листы смены"
           items={[
             { href: "/dashboard", label: "Дашборд" },
             { href: "/staff/tasks", label: "Задачи персонала" },
@@ -114,20 +117,28 @@ export default async function StaffChecklistTemplatesPage({
               Персонал
             </p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight">
-              Шаблоны чеклистов
+              Конструктор чек-листов
             </h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-              Соберите чеклист без привязки к конкретной смене: разделы, пункты,
-              обязательность, доказательства и баллы. Активный шаблон можно
-              выбрать при запуске чеклиста смены.
+              Соберите чек-лист без привязки к конкретной смене: разделы,
+              пункты, обязательность, доказательства и баллы. Активный чек-лист
+              можно выбрать при запуске смены.
             </p>
           </div>
-          <Link
-            href="/staff/checklists"
-            className="inline-flex rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900"
-          >
-            Запуски чеклистов
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/staff/shift-regulations"
+              className="inline-flex rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900"
+            >
+              Регламенты
+            </Link>
+            <Link
+              href="/staff/checklists"
+              className="inline-flex rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900"
+            >
+              Выполнение чек-листов
+            </Link>
+          </div>
         </header>
 
         <section className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
@@ -221,7 +232,12 @@ export default async function StaffChecklistTemplatesPage({
         </form>
 
         <section className="mt-6">
-          <StaffChecklistTemplateBuilder report={report} />
+          <StaffChecklistTemplateBuilder
+            report={report}
+            initialSourceRegulationId={initialSourceRegulationId}
+            startNew={startNew}
+            defaultConstructorOpen={startNew}
+          />
         </section>
       </div>
     </main>

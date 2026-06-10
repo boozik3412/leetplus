@@ -175,12 +175,22 @@ export default async function StaffShiftRegulationsPage({
                 : "Открывайте опубликованные регламенты, материалы и чек-листы смены. Если регламент требует ознакомления, подтвердите его после прочтения."}
             </p>
           </div>
-          <Link
-            href={canManageRegulations ? "/staff/tasks" : "/staff/checklists"}
-            className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
-          >
-            {canManageRegulations ? "Задачи персонала" : "Открыть чек-листы"}
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            {canManageRegulations ? (
+              <Link
+                href="/staff/checklist-templates?new=1"
+                className="inline-flex h-10 items-center justify-center rounded-md bg-emerald-500 px-3 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
+              >
+                Новый чек-лист
+              </Link>
+            ) : null}
+            <Link
+              href={canManageRegulations ? "/staff/tasks" : "/staff/checklists"}
+              className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+            >
+              {canManageRegulations ? "Задачи персонала" : "Открыть чек-листы"}
+            </Link>
+          </div>
         </header>
 
         <section

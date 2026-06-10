@@ -12,6 +12,7 @@ Last updated: 2026-06-07
 - VDS auto-deploy watches `origin/main`; preferred workflow is code change, verify build if needed, commit, push.
 - VDS deploy script builds API and Web sequentially (`pnpm --filter api build`, then `pnpm --filter web build`) because the server currently has no swap and parallel workspace builds can be OOM-killed, leaving an incomplete `.next` production build.
 - Do not spend time refreshing local DB state or restarting local services unless explicitly requested. User reviews changes directly on `leetplus.ru`.
+- Production QA owner account: `123@123.ru`; production QA shift-role administrator account: `123admin@123.ru`. Passwords are provided in the task context and must not be committed to the repository.
 
 ## Stack
 

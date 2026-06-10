@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
+import { getApiUrl, getAuthHeaders, readApiError } from "@/lib/api";
 import { requireCurrentUser } from "@/lib/auth";
 import {
   getStaffOperators,
@@ -15,6 +16,7 @@ import {
   type StaffChecklistAnswerStatus,
   type StaffChecklistReport,
   type StaffChecklistRun,
+  type StaffChecklistTemplateOption,
 } from "@/lib/staff-checklists";
 import {
   getStaffShiftWorkspaceProfile,
@@ -118,6 +120,37 @@ async function safeValue<T>(promise: Promise<T>, fallback: T): Promise<T> {
   } catch {
     return fallback;
   }
+}
+
+async function startChecklistFromTemplate(formData: FormData) {
+  "use server";
+
+  const templateId = String(formData.get("templateId") ?? "").trim();
+  const storeId = String(formData.get("storeId") ?? "").trim();
+
+  if (!templateId) {
+    redirect("/staff/shift-workspace?checklistStartError=template");
+  }
+
+  const response = await fetch(`${getApiUrl()}/staff/checklists`, {
+    method: "POST",
+    headers: {
+      ...(await getAuthHeaders()),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      templateId,
+      storeId: storeId || null,
+    }),
+  });
+
+  if (!response.ok) {
+    const message = encodeURIComponent(await readApiError(response));
+    redirect(`/staff/shift-workspace?checklistStartError=${message}`);
+  }
+
+  const run = (await response.json()) as StaffChecklistRun;
+  redirect(`/staff/shift-workspace?checklistRunId=${encodeURIComponent(run.id)}`);
 }
 
 function searchParam(value: string | string[] | undefined) {
@@ -326,14 +359,20 @@ function formatShiftDuration(shift: StaffOperatorShiftDetail | null) {
 function activeChecklistRows(rows: StaffChecklistRun[], userId: string) {
   return rows.filter(
     (run) =>
-      run.status !== "ACCEPTED" &&
-      run.status !== "CANCELED" &&
+      ["OPEN", "IN_PROGRESS", "RETURNED", "ESCALATED"].includes(run.status) &&
       (run.assignedToUser?.id === userId || !run.assignedToUser),
   );
 }
 
 function filterClubChecklistRows(rows: StaffChecklistRun[], storeId: string | null) {
   return rows.filter((run) => !run.store?.id || !storeId || run.store.id === storeId);
+}
+
+function filterClubChecklistTemplates(
+  rows: StaffChecklistTemplateOption[],
+  storeId: string | null,
+) {
+  return rows.filter((template) => !template.store?.id || !storeId || template.store.id === storeId);
 }
 
 function findCurrentChecklistRun(
@@ -527,6 +566,7 @@ export default async function StaffShiftWorkspacePage({
   const user = await requireCurrentUser();
   const params = await searchParams;
   const selectedChecklistId = searchParam(params.checklistRunId);
+  const checklistStartError = searchParam(params.checklistStartError);
 
   if (!can(user, "view_staff_shift_workspace")) {
     redirect("/dashboard");
@@ -602,6 +642,10 @@ export default async function StaffShiftWorkspacePage({
   const staffStoreId = staffMember?.store?.id ?? null;
   const activeChecklists = filterClubChecklistRows(
     activeChecklistRows(checklists.rows, user.id),
+    staffStoreId,
+  );
+  const availableChecklistTemplates = filterClubChecklistTemplates(
+    checklists.checklistTemplates,
     staffStoreId,
   );
   const recommendedChecklist = findCurrentChecklistRun(activeChecklists, currentShift);
@@ -712,6 +756,9 @@ export default async function StaffShiftWorkspacePage({
             selectedChecklist={selectedChecklist}
             recommendedChecklist={recommendedChecklist}
             checklists={activeChecklists}
+            checklistTemplates={availableChecklistTemplates}
+            checklistStartError={checklistStartError ?? null}
+            staffStoreId={staffStoreId}
             checklistProgress={selectedChecklistProgress}
             checklistItems={selectedChecklistItems}
             checklistSummary={selectedChecklistSummary}
@@ -914,6 +961,9 @@ function WorkPanel({
   selectedChecklist,
   recommendedChecklist,
   checklists,
+  checklistTemplates,
+  checklistStartError,
+  staffStoreId,
   checklistProgress,
   checklistItems,
   checklistSummary,
@@ -923,12 +973,27 @@ function WorkPanel({
   selectedChecklist: StaffChecklistRun | null;
   recommendedChecklist: StaffChecklistRun | null;
   checklists: StaffChecklistRun[];
+  checklistTemplates: StaffChecklistTemplateOption[];
+  checklistStartError: string | null;
+  staffStoreId: string | null;
   checklistProgress: { done: number; total: number; percent: number };
   checklistItems: ChecklistTodoItem[];
   checklistSummary: ReturnType<typeof checklistTodoSummary>;
   currentItem: ChecklistTodoItem | null;
   overdueCount: number;
 }) {
+  const runningTemplateIds = new Set(
+    checklists
+      .map((run) => run.templateId)
+      .filter((templateId): templateId is string => Boolean(templateId)),
+  );
+  const templateChoices = checklistTemplates.filter(
+    (template) => !runningTemplateIds.has(template.id),
+  );
+  const recommendedTemplateId = recommendedChecklist
+    ? null
+    : (templateChoices[0]?.id ?? null);
+
   return (
     <section className="min-w-0 overflow-hidden rounded-lg border border-zinc-200 bg-white p-4 shadow-sm shadow-zinc-950/5 sm:p-5 dark:border-zinc-800 dark:bg-zinc-950/90 dark:shadow-none">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1053,18 +1118,35 @@ function WorkPanel({
                 Выбрать чек-лист
               </summary>
               <div className="mt-3 min-w-0 max-w-full space-y-2 overflow-hidden rounded-md border border-zinc-200 bg-white p-2 dark:border-zinc-800 dark:bg-zinc-950">
-                {checklists.length === 0 ? (
+                {checklistStartError ? (
+                  <p className="rounded-md bg-red-50 px-2 py-2 text-sm font-medium text-red-700 dark:bg-red-500/10 dark:text-red-200">
+                    {checklistStartError === "template"
+                      ? "Сначала выберите чек-лист."
+                      : checklistStartError}
+                  </p>
+                ) : null}
+                {checklists.length === 0 && templateChoices.length === 0 ? (
                   <p className="px-2 py-3 text-sm text-zinc-500 dark:text-zinc-500">
                     Для этого клуба пока нет активных чек-листов.
                   </p>
                 ) : (
-                  checklists.map((run) => (
-                    <ChecklistChoiceRow
-                      key={run.id}
-                      run={run}
-                      isRecommended={run.id === recommendedChecklist?.id}
-                    />
-                  ))
+                  <>
+                    {checklists.map((run) => (
+                      <ChecklistChoiceRow
+                        key={run.id}
+                        run={run}
+                        isRecommended={run.id === recommendedChecklist?.id}
+                      />
+                    ))}
+                    {templateChoices.map((template) => (
+                      <ChecklistTemplateChoiceRow
+                        key={template.id}
+                        template={template}
+                        storeId={staffStoreId}
+                        isRecommended={template.id === recommendedTemplateId}
+                      />
+                    ))}
+                  </>
                 )}
               </div>
             </details>
@@ -1134,6 +1216,42 @@ function ChecklistChoiceRow({
         {isRecommended ? <StatusPill label="Рекомендован" tone="emerald" /> : null}
       </div>
     </Link>
+  );
+}
+
+function ChecklistTemplateChoiceRow({
+  template,
+  storeId,
+  isRecommended,
+}: {
+  template: StaffChecklistTemplateOption;
+  storeId: string | null;
+  isRecommended: boolean;
+}) {
+  return (
+    <form action={startChecklistFromTemplate}>
+      <input type="hidden" name="templateId" value={template.id} />
+      {storeId ? <input type="hidden" name="storeId" value={storeId} /> : null}
+      <button
+        type="submit"
+        className="block w-full min-w-0 max-w-full rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-left transition hover:border-emerald-300 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:hover:border-emerald-500/50 dark:hover:bg-emerald-500/15"
+      >
+        <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+          <div className="min-w-0">
+            <p className="line-clamp-2 break-words text-sm font-semibold text-zinc-950 dark:text-zinc-100">
+              {template.title}
+            </p>
+            <p className="mt-1 break-words text-xs text-zinc-500 dark:text-zinc-500">
+              {template.store?.name ?? "вся сеть"} · v{template.version} ·{" "}
+              {formatNumber(template.itemsCount)} пунктов
+            </p>
+          </div>
+          {isRecommended ? (
+            <StatusPill label="Рекомендован" tone="emerald" />
+          ) : null}
+        </div>
+      </button>
+    </form>
   );
 }
 

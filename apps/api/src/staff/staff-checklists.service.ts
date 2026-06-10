@@ -619,11 +619,10 @@ export class StaffChecklistsService {
   }
 
   async createChecklist(user: AuthenticatedUser, dto: StaffChecklistCreateDto) {
-    this.ensureCanCreateChecklist(user);
-
     const { tenantId } = await this.tenantContextService.resolve(user);
     const regulationId = this.normalizeOptionalString(dto.regulationId);
     const templateId = this.normalizeOptionalString(dto.templateId);
+    const isUseOnlyUser = this.isChecklistUseOnlyUser(user);
 
     if (!regulationId && !templateId) {
       throw new BadRequestException(
@@ -640,8 +639,18 @@ export class StaffChecklistsService {
     const source = regulationId
       ? await this.resolveRegulationSource(tenantId, regulationId)
       : await this.resolveTemplateSource(tenantId, templateId!);
+    const sourceScope = isUseOnlyUser
+      ? await this.resolveChecklistSourceScope(tenantId, user)
+      : null;
 
     const requestedStoreId = this.normalizeOptionalString(dto.storeId);
+    this.ensureCanStartChecklist(user, {
+      source,
+      sourceScope,
+      requestedStoreId,
+      assignedToUserId: this.normalizeOptionalString(dto.assignedToUserId),
+      shiftId: this.normalizeOptionalString(dto.shiftId),
+    });
 
     if (
       source.storeId &&
@@ -656,10 +665,23 @@ export class StaffChecklistsService {
       source.storeId ?? requestedStoreId,
     );
     const shiftId = await this.resolveShiftId(tenantId, dto.shiftId);
-    const assignedToUserId = await this.resolveUserId(
-      tenantId,
-      dto.assignedToUserId,
-    );
+    const assignedToUserId = isUseOnlyUser
+      ? user.id
+      : await this.resolveUserId(tenantId, dto.assignedToUserId);
+
+    if (isUseOnlyUser && source.kind === 'TEMPLATE') {
+      const currentRun = await this.findCurrentOwnTemplateRun(
+        tenantId,
+        user.id,
+        source.id,
+        storeId,
+      );
+
+      if (currentRun) {
+        return this.toRunResponse(currentRun);
+      }
+    }
+
     const sections = this.normalizeSections(source.sections);
     const answers = this.defaultAnswers(sections);
     const metrics = this.calculateMetrics(sections, answers);
@@ -918,6 +940,92 @@ export class StaffChecklistsService {
     }
 
     return ['ADMINISTRATOR', 'ALL_STAFF'];
+  }
+
+  private ensureCanStartChecklist(
+    user: AuthenticatedUser,
+    options: {
+      source: ChecklistSource;
+      sourceScope: ChecklistSourceScope | null;
+      requestedStoreId: string | null;
+      assignedToUserId: string | null;
+      shiftId: string | null;
+    },
+  ) {
+    if (!this.isChecklistUseOnlyUser(user)) {
+      this.ensureCanCreateChecklist(user);
+      return;
+    }
+
+    if (options.source.kind !== 'TEMPLATE') {
+      throw new ForbiddenException(
+        'Сменные роли могут запускать только активные шаблоны чек-листов.',
+      );
+    }
+
+    if (options.assignedToUserId && options.assignedToUserId !== user.id) {
+      throw new ForbiddenException(
+        'Чек-лист смены можно запустить только для текущего пользователя.',
+      );
+    }
+
+    if (options.shiftId) {
+      throw new ForbiddenException(
+        'Привязка к смене доступна только через домашнюю страницу смены.',
+      );
+    }
+
+    if (!this.isSourceVisibleForScope(options.source, options.sourceScope)) {
+      throw new ForbiddenException(
+        'Шаблон чек-листа недоступен для вашей роли или клуба.',
+      );
+    }
+
+    if (
+      options.requestedStoreId &&
+      options.sourceScope?.storeIds &&
+      !options.sourceScope.storeIds.includes(options.requestedStoreId)
+    ) {
+      throw new ForbiddenException('Клуб чек-листа недоступен для вашей роли.');
+    }
+  }
+
+  private isSourceVisibleForScope(
+    source: ChecklistSource,
+    scope: ChecklistSourceScope | null,
+  ) {
+    if (!scope) {
+      return false;
+    }
+
+    if (!scope.roleScopes.includes(source.roleScope)) {
+      return false;
+    }
+
+    return (
+      !scope.storeIds ||
+      !source.storeId ||
+      scope.storeIds.includes(source.storeId)
+    );
+  }
+
+  private findCurrentOwnTemplateRun(
+    tenantId: string,
+    userId: string,
+    templateId: string,
+    storeId: string | null,
+  ) {
+    return this.prisma.staffChecklistRun.findFirst({
+      where: {
+        tenantId,
+        templateId,
+        assignedToUserId: userId,
+        storeId,
+        status: { in: ['OPEN', 'IN_PROGRESS', 'RETURNED', 'ESCALATED'] },
+      },
+      include: checklistRunInclude,
+      orderBy: [{ updatedAt: 'desc' }],
+    });
   }
 
   private ensureCanCreateChecklist(user: AuthenticatedUser) {

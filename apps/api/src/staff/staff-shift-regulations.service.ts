@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -422,6 +423,74 @@ export class StaffShiftRegulationsService {
     }
 
     return this.toRegulationResponse(regulation, user.id, activeUsers);
+  }
+
+  async deleteRegulation(user: AuthenticatedUser, id: string) {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const regulation = await this.prisma.staffShiftRegulation.findFirst({
+      where: { id, tenantId },
+      select: {
+        id: true,
+        title: true,
+        createdByUserId: true,
+        _count: { select: { checklistRuns: true, checklistTemplates: true } },
+      },
+    });
+
+    if (!regulation) {
+      throw new NotFoundException('Shift regulation not found');
+    }
+
+    if (!this.canDeleteRegulation(user, regulation.createdByUserId)) {
+      throw new ForbiddenException(
+        'Удалить регламент может автор, управляющий клубом, управляющий сети или владелец',
+      );
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.staffChecklistRun.updateMany({
+        where: { tenantId, regulationId: regulation.id },
+        data: { regulationId: null },
+      });
+      await tx.staffChecklistTemplate.updateMany({
+        where: { tenantId, sourceRegulationId: regulation.id },
+        data: { sourceRegulationId: null },
+      });
+      await tx.staffShiftRegulationAcknowledgement.deleteMany({
+        where: { tenantId, regulationId: regulation.id },
+      });
+      await tx.staffShiftRegulationVersion.deleteMany({
+        where: { tenantId, regulationId: regulation.id },
+      });
+      await tx.staffShiftRegulation.delete({
+        where: { id: regulation.id },
+      });
+    });
+
+    return {
+      id: regulation.id,
+      deleted: true,
+      detachedChecklistRuns: regulation._count.checklistRuns,
+      detachedChecklistTemplates: regulation._count.checklistTemplates,
+    };
+  }
+
+  private canDeleteRegulation(
+    user: AuthenticatedUser,
+    createdByUserId: string | null,
+  ) {
+    if (createdByUserId && createdByUserId === user.id) {
+      return true;
+    }
+
+    return (
+      [
+        UserRole.OWNER,
+        UserRole.ADMIN,
+        UserRole.MANAGER,
+        UserRole.CLUB_MANAGER,
+      ] as UserRole[]
+    ).includes(user.role);
   }
 
   private shouldNotifyRegulationUpdate(

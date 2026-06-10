@@ -282,6 +282,7 @@ export default async function StaffShiftRegulationsPage({
               rows={report.rows}
               stores={report.stores}
               assessments={report.assessments}
+              currentUserId={user.id}
               currentUserRole={user.role}
             />
           ) : (

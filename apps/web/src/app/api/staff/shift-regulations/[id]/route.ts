@@ -12,3 +12,16 @@ export async function PATCH(
     "PATCH",
   );
 }
+
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
+
+  return proxyJsonRequest(
+    request,
+    `/staff/shift-regulations/${encodeURIComponent(id)}`,
+    "DELETE",
+  );
+}

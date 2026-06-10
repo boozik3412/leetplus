@@ -3,6 +3,7 @@
 import type { FormEvent, ReactNode } from "react";
 import { useEffect, useState } from "react";
 import type {
+  GuestPortalCheckInResponse,
   GuestPortalCommunicationPreferenceAction,
   GuestPortalCommunicationPreferenceResponse,
   GuestPortalLangameDetailsResponse,
@@ -60,6 +61,8 @@ export function GuestPortalClient({
     null,
   );
   const [isStartingTelegramLink, setStartingTelegramLink] = useState(false);
+  const [checkInMessage, setCheckInMessage] = useState<string | null>(null);
+  const [isCheckingIn, setCheckingIn] = useState(false);
 
   const basePath = `/api/guest-portal/${encodeURIComponent(
     tenantSlug,
@@ -137,6 +140,7 @@ export function GuestPortalClient({
       setMessengerMessage(null);
       setTelegramLink(null);
       setTelegramLinkMessage(null);
+      setCheckInMessage(null);
       setMessage(data.delivery.message);
     } catch (error) {
       setMessage(
@@ -180,6 +184,7 @@ export function GuestPortalClient({
       setMessengerMessage(null);
       setTelegramLink(null);
       setTelegramLinkMessage(null);
+      setCheckInMessage(null);
       setMessage("Профиль подтвержден.");
     } catch (error) {
       setMessage(
@@ -361,6 +366,43 @@ export function GuestPortalClient({
     }
   }
 
+  async function checkIn() {
+    setCheckingIn(true);
+    setCheckInMessage(null);
+
+    try {
+      const response = await fetch("/api/guest-portal/session/check-in", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+
+      if (!response.ok) {
+        throw new Error(await readMessage(response));
+      }
+
+      const data = (await response.json()) as GuestPortalCheckInResponse;
+      const xpDelta = data.checkIn.processResult.summary.appliedXpDelta;
+      const rewards = data.checkIn.processResult.summary.createdRewards;
+      const rewardText = rewards
+        ? ` Наград в очереди: ${formatNumber(rewards)}.`
+        : "";
+
+      setPortal(data.portal);
+      setCheckInMessage(
+        `Чекин выполнен. Начислено XP: ${formatNumber(xpDelta)}.${rewardText}`,
+      );
+    } catch (error) {
+      setCheckInMessage(
+        error instanceof Error
+          ? error.message
+          : "Не удалось выполнить чекин.",
+      );
+    } finally {
+      setCheckingIn(false);
+    }
+  }
+
   const pageTitle = portal?.store.name ?? config?.store.name ?? "Клуб";
   const tenantName = portal?.tenant.name ?? config?.tenant.name ?? "LeetPlus";
 
@@ -411,12 +453,15 @@ export function GuestPortalClient({
             telegramLink={telegramLink}
             telegramLinkMessage={telegramLinkMessage}
             isStartingTelegramLink={isStartingTelegramLink}
+            checkInMessage={checkInMessage}
+            isCheckingIn={isCheckingIn}
             onPhoneChange={setPhone}
             onCheckLangameMatch={checkLangameMatch}
             onCheckLangameDetails={checkLangameDetails}
             onUpdateCommunicationPreference={updateCommunicationPreference}
             onUpdateMessenger={updateMessengerChannel}
             onStartTelegramLink={startTelegramLink}
+            onCheckIn={checkIn}
           />
         ) : (
           <VerificationLanding
@@ -634,12 +679,15 @@ function VerifiedPortal({
   telegramLink,
   telegramLinkMessage,
   isStartingTelegramLink,
+  checkInMessage,
+  isCheckingIn,
   onPhoneChange,
   onCheckLangameMatch,
   onCheckLangameDetails,
   onUpdateCommunicationPreference,
   onUpdateMessenger,
   onStartTelegramLink,
+  onCheckIn,
 }: {
   portal: GuestPortalPayload;
   phone: string;
@@ -656,6 +704,8 @@ function VerifiedPortal({
   telegramLink: GuestPortalTelegramLinkStartResponse | null;
   telegramLinkMessage: string | null;
   isStartingTelegramLink: boolean;
+  checkInMessage: string | null;
+  isCheckingIn: boolean;
   onPhoneChange: (value: string) => void;
   onCheckLangameMatch: (event: FormEvent<HTMLFormElement>) => void;
   onCheckLangameDetails: () => void;
@@ -667,6 +717,7 @@ function VerifiedPortal({
     identity: string,
   ) => void;
   onStartTelegramLink: () => void;
+  onCheckIn: () => void;
 }) {
   return (
     <div className="space-y-5 py-6">
@@ -698,6 +749,13 @@ function VerifiedPortal({
       />
 
       <NextActionsPanel portal={portal} />
+
+      <CheckInPanel
+        portal={portal}
+        message={checkInMessage}
+        isLoading={isCheckingIn}
+        onCheckIn={onCheckIn}
+      />
 
       <CommunicationPanel
         portal={portal}
@@ -1411,6 +1469,59 @@ function NextActionsPanel({ portal }: { portal: GuestPortalPayload }) {
           </article>
         ))}
       </div>
+    </section>
+  );
+}
+
+function CheckInPanel({
+  portal,
+  message,
+  isLoading,
+  onCheckIn,
+}: {
+  portal: GuestPortalPayload;
+  message: string | null;
+  isLoading: boolean;
+  onCheckIn: () => void;
+}) {
+  const disabled = isLoading || !portal.guestFound;
+
+  return (
+    <section className="rounded-lg border border-cyan-300/20 bg-cyan-300/[0.06] p-5">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="max-w-3xl">
+          <p className="text-xs font-bold uppercase text-cyan-200">
+            Чекин в клубе
+          </p>
+          <h3 className="mt-1 text-2xl font-black text-white">
+            Подтвердить активную сессию
+          </h3>
+          <p className="mt-2 text-sm leading-6 text-slate-300">
+            Чекин доступен, когда Langame видит открытую сессию гостя именно в
+            этом клубе. Событие сразу участвует в миссиях и Battle Pass.
+          </p>
+        </div>
+        <button
+          className="rounded-lg bg-cyan-300 px-5 py-3 text-sm font-black text-slate-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+          type="button"
+          disabled={disabled}
+          onClick={onCheckIn}
+        >
+          {isLoading ? "Проверяем..." : "Пройти чекин"}
+        </button>
+      </div>
+
+      {!portal.guestFound ? (
+        <p className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-sm text-amber-100">
+          Сначала сопоставьте профиль гостя с Langame.
+        </p>
+      ) : null}
+
+      {message ? (
+        <p className="mt-3 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-slate-200">
+          {message}
+        </p>
+      ) : null}
     </section>
   );
 }

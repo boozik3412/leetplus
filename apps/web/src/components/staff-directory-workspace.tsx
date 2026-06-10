@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   type StaffDirectoryMember,
   type StaffDirectoryReport,
@@ -41,6 +41,33 @@ type DraftMember = {
   externalDomain: string;
   externalUserId: string;
   note: string;
+};
+
+type ActiveShiftCandidate = {
+  id: string;
+  externalDomain: string;
+  externalUserId: string;
+  externalShiftId: string;
+  externalClubId: string | null;
+  operatorName: string;
+  operatorEmail: string | null;
+  storeId: string;
+  storeName: string;
+  startedAt: string | null;
+  stoppedAt: string | null;
+  source: "LIVE" | "SNAPSHOT";
+};
+
+type ActiveShiftReport = {
+  checkedAt: string;
+  store: {
+    id: string;
+    name: string;
+    externalDomain: string | null;
+    externalClubId: string | null;
+  };
+  candidates: ActiveShiftCandidate[];
+  errors: string[];
 };
 
 function emptyDraft(): DraftMember {
@@ -91,6 +118,20 @@ function formatDate(value: string | null) {
   return new Intl.DateTimeFormat("ru-RU").format(new Date(value));
 }
 
+function formatDateTime(value: string | null) {
+  if (!value) {
+    return "время не указано";
+  }
+
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
 export function StaffDirectoryWorkspace({
   report,
 }: {
@@ -102,6 +143,12 @@ export function StaffDirectoryWorkspace({
   );
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [activeShiftReport, setActiveShiftReport] =
+    useState<ActiveShiftReport | null>(null);
+  const [activeShiftsLoading, setActiveShiftsLoading] = useState(false);
+  const [activeShiftsError, setActiveShiftsError] = useState<string | null>(
+    null,
+  );
 
   const selectedMember = useMemo(
     () => members.find((member) => member.id === draft.id) ?? null,
@@ -113,6 +160,75 @@ export function StaffDirectoryWorkspace({
   const unmappedLangameUsers = report.langameUsers.filter(
     (user) => !user.mappedStaffMemberId,
   );
+  const displayedActiveShiftReport =
+    activeShiftReport?.store.id === draft.storeId ? activeShiftReport : null;
+
+  useEffect(() => {
+    const storeId = draft.storeId;
+
+    if (!report.canManageDirectory || !storeId) {
+      return;
+    }
+
+    const controller = new AbortController();
+
+    Promise.resolve()
+      .then(() => {
+        if (controller.signal.aborted) {
+          return null;
+        }
+
+        setActiveShiftsLoading(true);
+        setActiveShiftsError(null);
+
+        return fetch(
+          `/api/staff/directory/active-shifts?storeId=${encodeURIComponent(
+            storeId,
+          )}`,
+          { signal: controller.signal },
+        );
+      })
+      .then(async (response) => {
+        if (!response) {
+          return null;
+        }
+
+        if (!response.ok) {
+          const error = (await response.json().catch(() => null)) as {
+            message?: string;
+          } | null;
+          throw new Error(
+            error?.message ?? "Не удалось получить открытые смены Langame",
+          );
+        }
+
+        return response.json() as Promise<ActiveShiftReport>;
+      })
+      .then((payload) => {
+        if (payload) {
+          setActiveShiftReport(payload);
+        }
+      })
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+
+        setActiveShiftReport(null);
+        setActiveShiftsError(
+          error instanceof Error
+            ? error.message
+            : "Не удалось получить открытые смены Langame",
+        );
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setActiveShiftsLoading(false);
+        }
+      });
+
+    return () => controller.abort();
+  }, [draft.storeId, report.canManageDirectory]);
 
   function updateDraft(patch: Partial<DraftMember>) {
     setDraft((current) => ({ ...current, ...patch }));
@@ -138,6 +254,18 @@ export function StaffDirectoryWorkspace({
       email: draft.email || user.email || "",
       phone: draft.phone || user.phone || "",
     });
+  }
+
+  function applyActiveShiftCandidate(candidate: ActiveShiftCandidate) {
+    updateDraft({
+      externalDomain: candidate.externalDomain,
+      externalUserId: candidate.externalUserId,
+      displayName: draft.displayName || candidate.operatorName,
+      email: draft.email || candidate.operatorEmail || "",
+    });
+    setMessage(
+      `Выбран Langame user_id ${candidate.externalUserId}. Проверьте карточку и сохраните изменения.`,
+    );
   }
 
   async function saveMember() {
@@ -511,6 +639,78 @@ export function StaffDirectoryWorkspace({
             <p className="text-xs font-bold uppercase text-zinc-500">
               Langame
             </p>
+            {report.canManageDirectory ? (
+              <div className="mt-3 rounded-md border border-emerald-200 bg-white p-3 dark:border-emerald-900/60 dark:bg-zinc-950">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold">
+                      Сейчас на смене в выбранном клубе
+                    </p>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      Кандидаты из открытых смен Langame для быстрой привязки.
+                    </p>
+                  </div>
+                  {activeShiftsLoading ? (
+                    <span className="rounded-full bg-zinc-100 px-2 py-1 text-xs font-semibold text-zinc-500 dark:bg-zinc-900">
+                      Обновляем
+                    </span>
+                  ) : null}
+                </div>
+
+                {!draft.storeId ? (
+                  <p className="mt-3 rounded-md border border-dashed border-zinc-300 px-3 py-2 text-xs text-zinc-500 dark:border-zinc-700">
+                    Выберите клуб в карточке сотрудника, чтобы увидеть открытые
+                    смены.
+                  </p>
+                ) : activeShiftsLoading && !displayedActiveShiftReport ? (
+                  <p className="mt-3 rounded-md border border-dashed border-zinc-300 px-3 py-2 text-xs text-zinc-500 dark:border-zinc-700">
+                    Ищем открытые смены Langame по выбранному клубу...
+                  </p>
+                ) : activeShiftsError ? (
+                  <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-200">
+                    {activeShiftsError}
+                  </p>
+                ) : displayedActiveShiftReport?.candidates.length ? (
+                  <div className="mt-3 space-y-2">
+                    {displayedActiveShiftReport.candidates
+                      .slice(0, 4)
+                      .map((shift) => (
+                        <button
+                          key={shift.id}
+                          type="button"
+                          onClick={() => applyActiveShiftCandidate(shift)}
+                          className="w-full rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-left transition hover:border-emerald-400 hover:bg-emerald-50 dark:border-zinc-800 dark:bg-zinc-900/60 dark:hover:bg-emerald-950/20"
+                        >
+                          <span className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="text-sm font-semibold">
+                              {shift.operatorName}
+                            </span>
+                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-bold uppercase text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+                              {shift.source === "LIVE" ? "live" : "snapshot"}
+                            </span>
+                          </span>
+                          <span className="mt-1 block text-xs text-zinc-500">
+                            user_id {shift.externalUserId} · смена открыта{" "}
+                            {formatDateTime(shift.startedAt)}
+                          </span>
+                        </button>
+                      ))}
+                    {displayedActiveShiftReport.errors.length > 0 ? (
+                      <p className="text-xs text-amber-700 dark:text-amber-300">
+                        Часть источников не ответила:{" "}
+                        {displayedActiveShiftReport.errors
+                          .slice(0, 2)
+                          .join("; ")}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="mt-3 rounded-md border border-dashed border-zinc-300 px-3 py-2 text-xs text-zinc-500 dark:border-zinc-700">
+                    Открытых смен по выбранному клубу сейчас не найдено.
+                  </p>
+                )}
+              </div>
+            ) : null}
             <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
               <Field label="Домен">
                 <input

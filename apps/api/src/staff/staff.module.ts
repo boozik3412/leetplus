@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
+import { IntegrationsModule } from '../integrations/integrations.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { TenancyModule } from '../tenancy/tenancy.module';
 import { StaffAiAssistantController } from './staff-ai-assistant.controller';
@@ -50,7 +51,7 @@ import { StaffTasksController } from './staff-tasks.controller';
 import { StaffTasksService } from './staff-tasks.service';
 
 @Module({
-  imports: [AuthModule, PrismaModule, TenancyModule],
+  imports: [AuthModule, IntegrationsModule, PrismaModule, TenancyModule],
   controllers: [
     StaffTasksController,
     StaffAiAssistantController,

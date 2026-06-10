@@ -2,6 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import { useUnsavedDraftPrompt } from "@/hooks/use-unsaved-draft-prompt";
 import type {
   StaffChecklistItemValueType,
   StaffChecklistShiftKind,
@@ -145,6 +146,10 @@ function toDraft(template: StaffChecklistTemplate | null): DraftTemplate {
   };
 }
 
+function draftSnapshot(draft: DraftTemplate) {
+  return JSON.stringify(draft);
+}
+
 function formatNumber(value: number) {
   return new Intl.NumberFormat("ru-RU").format(value);
 }
@@ -173,8 +178,12 @@ export function StaffChecklistTemplateBuilder({
     report.rows.find((template) => template.id === selectedId) ??
     report.rows[0] ??
     null;
+  const initialDraft = toDraft(selectedTemplate);
   const [draft, setDraft] = useState<DraftTemplate>(() =>
-    toDraft(selectedTemplate),
+    initialDraft,
+  );
+  const [savedDraftSnapshot, setSavedDraftSnapshot] = useState(() =>
+    draftSnapshot(initialDraft),
   );
   const [sourceRegulationId, setSourceRegulationId] = useState(
     report.publishedRegulations[0]?.id ?? "",
@@ -196,10 +205,15 @@ export function StaffChecklistTemplateBuilder({
       score: items.reduce((sum, item) => sum + Number(item.score || 0), 0),
     };
   }, [draft.sections]);
+  const currentDraftSnapshot = useMemo(() => draftSnapshot(draft), [draft]);
+  const hasUnsavedChanges =
+    !isPending && currentDraftSnapshot !== savedDraftSnapshot;
 
   function loadTemplate(template: StaffChecklistTemplate | null) {
+    const nextDraft = toDraft(template);
     setSelectedId(template?.id ?? "");
-    setDraft(toDraft(template));
+    setDraft(nextDraft);
+    setSavedDraftSnapshot(draftSnapshot(nextDraft));
     setMessage(null);
   }
 
@@ -357,14 +371,17 @@ export function StaffChecklistTemplateBuilder({
 
     if (!response.ok) {
       setMessage(await readResponseError(response));
-      return;
+      return false;
     }
 
     const template = (await response.json()) as StaffChecklistTemplate;
+    const savedDraft = toDraft(template);
     setSelectedId(template.id);
-    setDraft(toDraft(template));
+    setDraft(savedDraft);
+    setSavedDraftSnapshot(draftSnapshot(savedDraft));
     setMessage(status === "ACTIVE" ? "Шаблон активирован." : "Шаблон сохранен.");
     router.refresh();
+    return true;
   }
 
   async function createFromRegulation() {
@@ -393,14 +410,23 @@ export function StaffChecklistTemplateBuilder({
     }
 
     const template = (await response.json()) as StaffChecklistTemplate;
+    const savedDraft = toDraft(template);
     setSelectedId(template.id);
-    setDraft(toDraft(template));
+    setDraft(savedDraft);
+    setSavedDraftSnapshot(draftSnapshot(savedDraft));
     setMessage("Шаблон создан из регламента.");
     router.refresh();
   }
 
+  const { prompt: unsavedDraftPrompt, guardAction } = useUnsavedDraftPrompt({
+    enabled: hasUnsavedChanges,
+    onSaveDraft: () => saveTemplate("DRAFT"),
+  });
+
   return (
-    <div className="grid gap-4 xl:grid-cols-[22rem_minmax(0,1fr)]">
+    <>
+      {unsavedDraftPrompt}
+      <div className="grid gap-4 xl:grid-cols-[22rem_minmax(0,1fr)]">
       <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -411,7 +437,7 @@ export function StaffChecklistTemplateBuilder({
           </div>
           <button
             type="button"
-            onClick={() => loadTemplate(null)}
+            onClick={() => guardAction(() => loadTemplate(null))}
             className="rounded-xl bg-emerald-500 px-3 py-2 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
           >
             Новый
@@ -440,7 +466,7 @@ export function StaffChecklistTemplateBuilder({
           </label>
           <button
             type="button"
-            onClick={createFromRegulation}
+            onClick={() => guardAction(() => void createFromRegulation())}
             disabled={isPending || report.publishedRegulations.length === 0}
             className="mt-3 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:bg-zinc-900"
           >
@@ -467,7 +493,7 @@ export function StaffChecklistTemplateBuilder({
               <button
                 key={pack.id}
                 type="button"
-                onClick={() => loadTemplatePack(pack)}
+                onClick={() => guardAction(() => loadTemplatePack(pack))}
                 className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-3 text-left transition hover:border-emerald-400 hover:bg-emerald-50/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-500 dark:border-zinc-800 dark:bg-zinc-900/40 dark:hover:bg-emerald-500/10"
               >
                 <div className="flex items-start justify-between gap-3">
@@ -500,7 +526,7 @@ export function StaffChecklistTemplateBuilder({
             <button
               key={template.id}
               type="button"
-              onClick={() => loadTemplate(template)}
+              onClick={() => guardAction(() => loadTemplate(template))}
               className={[
                 "w-full rounded-lg border px-3 py-3 text-left transition hover:border-emerald-400 hover:bg-emerald-50/60 dark:hover:bg-emerald-500/10",
                 draft.id === template.id
@@ -832,7 +858,8 @@ export function StaffChecklistTemplateBuilder({
           ) : null}
         </div>
       </section>
-    </div>
+      </div>
+    </>
   );
 }
 

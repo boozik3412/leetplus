@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -76,6 +77,23 @@ export class StaffShiftRegulationsController {
     @Body() dto: StaffShiftRegulationDto,
   ) {
     return this.staffShiftRegulationsService.updateRegulation(user, id, dto);
+  }
+
+  @Delete(':id')
+  @Roles(
+    UserRole.OWNER,
+    UserRole.ADMIN,
+    UserRole.MANAGER,
+    UserRole.CLUB_MANAGER,
+    UserRole.STANDARDS_MANAGER,
+    UserRole.SENIOR_ADMINISTRATOR,
+    UserRole.CLUB_ADMINISTRATOR,
+  )
+  deleteRegulation(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ) {
+    return this.staffShiftRegulationsService.deleteRegulation(user, id);
   }
 
   @Post(':id/acknowledgements')

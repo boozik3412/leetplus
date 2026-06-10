@@ -7,6 +7,7 @@ import {
   type StaffAttachmentUploadResult,
 } from "@/components/staff-attachment-upload";
 import { StaffMaterialPreview } from "@/components/staff-material-preview";
+import { useUnsavedDraftPrompt } from "@/hooks/use-unsaved-draft-prompt";
 import type {
   StaffKnowledgeArticle,
   StaffKnowledgeArticleSuggestion,
@@ -336,6 +337,10 @@ function fromArticle(row: StaffKnowledgeArticle): DraftArticle {
   };
 }
 
+function draftSnapshot(draft: DraftArticle) {
+  return JSON.stringify(draft);
+}
+
 function tagsFromText(value: string) {
   return value
     .split(",")
@@ -498,8 +503,14 @@ export function StaffKnowledgeBaseWorkspace({
   const router = useRouter();
   const [reviewQueueTab, setReviewQueueTab] =
     useState<(typeof reviewQueueTabs)[number]["key"]>("REVIEW");
+  const initialDraft = report.rows[0]
+    ? fromArticle(report.rows[0])
+    : defaultDraft();
   const [draft, setDraft] = useState<DraftArticle>(() =>
-    report.rows[0] ? fromArticle(report.rows[0]) : defaultDraft(),
+    initialDraft,
+  );
+  const [savedDraftSnapshot, setSavedDraftSnapshot] = useState(() =>
+    draftSnapshot(initialDraft),
   );
   const [isPending, setIsPending] = useState(false);
   const [settingsPending, setSettingsPending] = useState(false);
@@ -522,12 +533,19 @@ export function StaffKnowledgeBaseWorkspace({
     report.canEditKnowledge ||
     report.canReviewKnowledge ||
     report.canPublishKnowledge;
-  const canSaveCurrentStatus =
-    draft.status === "PUBLISHED" || draft.status === "ARCHIVED"
-      ? report.canPublishKnowledge
-      : draft.status === "RETURNED"
-        ? report.canReviewKnowledge
-      : canSaveArticle;
+  function canSaveStatus(status: StaffKnowledgeArticleStatus) {
+    if (status === "PUBLISHED" || status === "ARCHIVED") {
+      return report.canPublishKnowledge;
+    }
+
+    if (status === "RETURNED") {
+      return report.canReviewKnowledge;
+    }
+
+    return canSaveArticle;
+  }
+
+  const canSaveCurrentStatus = canSaveStatus(draft.status);
   const effectiveRevisionSlaDays = draft.revisionSlaDays.trim()
     ? Number(draft.revisionSlaDays)
     : defaultRevisionSlaDays(
@@ -569,6 +587,19 @@ export function StaffKnowledgeBaseWorkspace({
       report.canReviewKnowledge,
     ],
   );
+  const currentDraftSnapshot = useMemo(() => draftSnapshot(draft), [draft]);
+  const hasUnsavedChanges =
+    report.canManageKnowledge &&
+    !isPending &&
+    currentDraftSnapshot !== savedDraftSnapshot;
+
+  function loadArticle(row: StaffKnowledgeArticle | null) {
+    const nextDraft = row ? fromArticle(row) : defaultDraft();
+    setDraft(nextDraft);
+    setSavedDraftSnapshot(draftSnapshot(nextDraft));
+    setMessage(null);
+    setError(null);
+  }
 
   function updateDraft(patch: Partial<DraftArticle>) {
     setDraft((current) => ({ ...current, ...patch }));
@@ -681,17 +712,17 @@ export function StaffKnowledgeBaseWorkspace({
     }));
   }
 
-  async function save(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
+  async function saveArticle(statusOverride?: StaffKnowledgeArticleStatus) {
     if (!draft.title.trim()) {
       setError("Укажите название статьи.");
-      return;
+      return false;
     }
 
-    if (!canSaveCurrentStatus) {
+    const targetStatus = statusOverride ?? draft.status;
+
+    if (!canSaveStatus(targetStatus)) {
       setError("У вашей роли нет прав на изменение базы знаний.");
-      return;
+      return false;
     }
 
     setIsPending(true);
@@ -705,7 +736,7 @@ export function StaffKnowledgeBaseWorkspace({
       folder: draft.folder.trim() || "Общие",
       category: draft.category.trim() || "Общие стандарты",
       roleScope: draft.roleScope,
-      status: draft.status,
+      status: targetStatus,
       templateKey: draft.templateKey || null,
       requiresReading: draft.requiresReading,
       revisionSlaDays: draft.revisionSlaDays.trim()
@@ -755,14 +786,23 @@ export function StaffKnowledgeBaseWorkspace({
       }
 
       const saved = (await response.json()) as StaffKnowledgeArticle;
-      setDraft(fromArticle(saved));
+      const savedDraft = fromArticle(saved);
+      setDraft(savedDraft);
+      setSavedDraftSnapshot(draftSnapshot(savedDraft));
       setMessage("Статья сохранена.");
       router.refresh();
+      return true;
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Ошибка запроса");
+      return false;
     } finally {
       setIsPending(false);
     }
+  }
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await saveArticle();
   }
 
   async function markRead(article: StaffKnowledgeArticle) {
@@ -862,8 +902,15 @@ export function StaffKnowledgeBaseWorkspace({
     }
   }
 
+  const { prompt: unsavedDraftPrompt, guardAction } = useUnsavedDraftPrompt({
+    enabled: hasUnsavedChanges,
+    onSaveDraft: () => saveArticle("DRAFT"),
+  });
+
   return (
-    <div className="space-y-6">
+    <>
+      {unsavedDraftPrompt}
+      <div className="space-y-6">
       {report.canManageKnowledge ? (
         <details className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
           <summary className="cursor-pointer list-none">
@@ -1026,7 +1073,7 @@ export function StaffKnowledgeBaseWorkspace({
             </div>
             <button
               type="button"
-              onClick={() => setDraft(defaultDraft())}
+              onClick={() => guardAction(() => loadArticle(null))}
               className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
             >
               Новая статья
@@ -1038,7 +1085,7 @@ export function StaffKnowledgeBaseWorkspace({
               <button
                 key={seed.title}
                 type="button"
-                onClick={() => loadSeed(seed)}
+                onClick={() => guardAction(() => loadSeed(seed))}
                 className="rounded-lg border border-zinc-200 p-3 text-left transition hover:border-emerald-500 hover:bg-emerald-50/70 dark:border-zinc-800 dark:hover:bg-emerald-500/10"
               >
                 <span className="text-sm font-semibold">{seed.title}</span>
@@ -1076,7 +1123,7 @@ export function StaffKnowledgeBaseWorkspace({
                   <button
                     key={suggestion.id}
                     type="button"
-                    onClick={() => loadSuggestion(suggestion)}
+                    onClick={() => guardAction(() => loadSuggestion(suggestion))}
                     className="rounded-lg border border-zinc-200 p-3 text-left transition hover:border-emerald-500 hover:bg-emerald-50/70 dark:border-zinc-800 dark:hover:bg-emerald-500/10"
                   >
                     <span className="text-sm font-semibold">
@@ -1161,7 +1208,7 @@ export function StaffKnowledgeBaseWorkspace({
                 <button
                   key={row.id}
                   type="button"
-                  onClick={() => setDraft(fromArticle(row))}
+                  onClick={() => guardAction(() => loadArticle(row))}
                   className="rounded-lg border border-zinc-200 p-3 text-left transition hover:border-emerald-500 hover:bg-emerald-50/70 dark:border-zinc-800 dark:hover:bg-emerald-500/10"
                 >
                   <span className="flex flex-wrap items-center gap-2">
@@ -1215,7 +1262,7 @@ export function StaffKnowledgeBaseWorkspace({
                 <button
                   key={row.id}
                   type="button"
-                  onClick={() => setDraft(fromArticle(row))}
+                  onClick={() => guardAction(() => loadArticle(row))}
                   className={[
                     "w-full rounded-lg border p-3 text-left transition",
                     draft.id === row.id
@@ -1927,7 +1974,8 @@ export function StaffKnowledgeBaseWorkspace({
           ) : null}
         </section>
       </div>
-    </div>
+      </div>
+    </>
   );
 }
 

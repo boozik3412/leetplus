@@ -325,6 +325,32 @@ export type GuestPortalOtpVerifyResponse = {
   portal: GuestPortalPayload;
 };
 
+export type GuestPortalCheckInResponse = {
+  checkIn: {
+    checkedIn: true;
+    checkedAt: string;
+    liveSession: {
+      externalDomain: string;
+      externalSessionId: string;
+      externalUuid: string | null;
+      startedAt: string | null;
+      durationMinutes: number | null;
+      sessionType: string;
+      sessionPacket: boolean | null;
+      store: { id: string; name: string } | null;
+    };
+    processResult: {
+      summary: {
+        appliedXpDelta: number;
+        createdRewards: number;
+        queuedRewardAmount: number;
+      };
+    };
+    note: string;
+  };
+  portal: GuestPortalPayload;
+};
+
 export type GuestPortalCommunicationPreferenceAction =
   | "GRANT"
   | "DENY"

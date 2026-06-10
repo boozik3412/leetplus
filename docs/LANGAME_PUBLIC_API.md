@@ -1,6 +1,6 @@
 # Langame Public API
 
-Последняя проверка: 2026-06-09.
+Последняя проверка: 2026-06-10.
 
 Актуальная документация: https://46.langamepro.ru/public_api/doc
 
@@ -13,6 +13,7 @@
 - `/public_api/routes` требует `api_key` в query string и также поддерживается нашим клиентом с header `X-API-KEY`.
 - Прямой вызов `https://46.langamepro.ru/public_api/routes` без ключа возвращает `400 Validation failed`, поле `api_key` обязательно.
 - В LeetPlus production безопасная проверка маршрутов идет через `/integrations/langame/routes-diagnostics`; endpoint доступен только OWNER/ADMIN и не раскрывает ключ.
+- Для QA-проверок production использовать тестовую учетную запись LeetPlus `123@123.ru`. Пароль не хранить в репозитории, токены и Langame API key не выводить в логи.
 
 ## Маршруты Из Документации
 
@@ -86,6 +87,14 @@
 
 - `id`, `guest_id`, `date_start`, `date_stop`, `UUID`
 - `normal_stop`, `expand`, `create_by_rezerv`, `packet`
+
+## Live-Сессия И Чекин Гостя
+
+- Для проверки, находится ли гость сейчас в клубе, LeetPlus использует `/guests/sessions` за короткое окно последних дней.
+- Активная сессия определяется по `guest_id` и пустому/нулевому `date_stop`.
+- Для чек-ина обязательны `id`, `guest_id`, `date_start`, `date_stop`; дополнительно используются `UUID`, `packet`, `club_id` или `list_clubs_id`, если Langame их отдает.
+- Если `club_id/list_clubs_id` в ответе нет, клуб определяется по источнику/domain Langame и привязке `IntegrationSource -> Store`.
+- Событие чек-ина в LeetPlus создается как `GuestGameEvent` с `eventType = CHECK_IN` и `source = CHECK_IN`; оно доступно в миссиях, Battle Pass и будущих live-начислениях бонусов.
 
 ## Что Это Дает Персоналу
 

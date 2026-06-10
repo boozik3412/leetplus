@@ -13,5 +13,6 @@ import { GuestGamificationService } from './guest-gamification.service';
     GuestGamificationScheduledController,
   ],
   providers: [GuestGamificationService, GuestBonusLedgerService],
+  exports: [GuestGamificationService],
 })
 export class GuestGamificationModule {}

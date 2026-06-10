@@ -6,6 +6,7 @@ import {
   staffShiftRegulationTemplates,
   type StaffShiftRegulationTemplate,
 } from "@/lib/staff-shift-regulation-templates";
+import { useUnsavedDraftPrompt } from "@/hooks/use-unsaved-draft-prompt";
 import {
   StaffAttachmentUpload,
   type StaffAttachmentUploadResult,
@@ -204,6 +205,10 @@ function fromRegulation(row: StaffShiftRegulation): DraftRegulation {
   };
 }
 
+function draftSnapshot(draft: DraftRegulation) {
+  return JSON.stringify(draft);
+}
+
 function formatAssessmentOption(
   assessment: StaffShiftRegulationAssessmentOption,
 ) {
@@ -243,21 +248,28 @@ export function StaffShiftRegulationBuilder({
   rows,
   stores,
   assessments,
+  currentUserId,
   currentUserRole,
 }: {
   rows: StaffShiftRegulation[];
   stores: StaffShiftRegulationStore[];
   assessments: StaffShiftRegulationAssessmentOption[];
+  currentUserId: string;
   currentUserRole: string;
 }) {
   const router = useRouter();
+  const initialDraft = rows[0] ? fromRegulation(rows[0]) : defaultDraft();
   const [draft, setDraft] = useState<DraftRegulation>(() =>
-    rows[0] ? fromRegulation(rows[0]) : defaultDraft(),
+    initialDraft,
+  );
+  const [savedDraftSnapshot, setSavedDraftSnapshot] = useState(() =>
+    draftSnapshot(initialDraft),
   );
   const [isPending, setIsPending] = useState(false);
   const [acknowledgementPendingId, setAcknowledgementPendingId] = useState<
     string | null
   >(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const canManageRegulations = [
@@ -268,11 +280,28 @@ export function StaffShiftRegulationBuilder({
     "STANDARDS_MANAGER",
     "SENIOR_ADMINISTRATOR",
   ].includes(currentUserRole);
+  const canForceDeleteRegulations = [
+    "OWNER",
+    "ADMIN",
+    "MANAGER",
+    "CLUB_MANAGER",
+  ].includes(currentUserRole);
   const selectedRow = draft.id
     ? rows.find((row) => row.id === draft.id) ?? null
     : null;
+  const canDeleteSelectedRegulation = Boolean(
+    selectedRow &&
+      (canForceDeleteRegulations ||
+        selectedRow.createdByUser?.id === currentUserId),
+  );
   const selectedStoreName =
     stores.find((store) => store.id === draft.storeId)?.name ?? "Вся сеть";
+  const currentDraftSnapshot = useMemo(() => draftSnapshot(draft), [draft]);
+  const hasUnsavedChanges =
+    canManageRegulations &&
+    !isPending &&
+    !deletingId &&
+    currentDraftSnapshot !== savedDraftSnapshot;
 
   const totals = useMemo(() => {
     const items = draft.sections.flatMap((section) => section.items);
@@ -291,6 +320,13 @@ export function StaffShiftRegulationBuilder({
 
   function updateDraft(patch: Partial<DraftRegulation>) {
     setDraft((current) => ({ ...current, ...patch }));
+  }
+
+  function loadRegulation(row: StaffShiftRegulation | null) {
+    const nextDraft = row ? fromRegulation(row) : defaultDraft();
+    setDraft(nextDraft);
+    setSavedDraftSnapshot(draftSnapshot(nextDraft));
+    setError(null);
   }
 
   function applyTemplate(template: StaffShiftRegulationTemplate) {
@@ -444,19 +480,19 @@ export function StaffShiftRegulationBuilder({
   async function save(statusOverride?: StaffShiftRegulationStatus) {
     if (!canManageRegulations) {
       setError("Редактирование регламентов доступно управляющим ролям.");
-      return;
+      return false;
     }
 
     const title = draft.title.trim();
 
     if (!title) {
       setError("Укажите название регламента.");
-      return;
+      return false;
     }
 
     if (draft.sections.length === 0) {
       setError("Добавьте хотя бы один раздел.");
-      return;
+      return false;
     }
 
     const hasItems = draft.sections.some((section) =>
@@ -465,7 +501,7 @@ export function StaffShiftRegulationBuilder({
 
     if (!hasItems) {
       setError("Добавьте хотя бы один пункт регламента.");
-      return;
+      return false;
     }
 
     const incompleteAttachment = draft.attachments.find((attachment) => {
@@ -477,12 +513,12 @@ export function StaffShiftRegulationBuilder({
 
     if (incompleteAttachment) {
       setError("Для каждого материала укажите название и ссылку.");
-      return;
+      return false;
     }
 
     if (draft.requiresAssessmentRetake && !draft.assessmentId) {
       setError("Выберите активный тест или аттестацию для пересдачи после публикации.");
-      return;
+      return false;
     }
 
     setIsPending(true);
@@ -543,10 +579,14 @@ export function StaffShiftRegulationBuilder({
       }
 
       const saved = (await response.json()) as StaffShiftRegulation;
-      setDraft(fromRegulation(saved));
+      const savedDraft = fromRegulation(saved);
+      setDraft(savedDraft);
+      setSavedDraftSnapshot(draftSnapshot(savedDraft));
       router.refresh();
+      return true;
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Ошибка запроса");
+      return false;
     } finally {
       setIsPending(false);
     }
@@ -583,8 +623,59 @@ export function StaffShiftRegulationBuilder({
     }
   }
 
+  async function deleteRegulation(row: StaffShiftRegulation) {
+    if (!canDeleteSelectedRegulation) {
+      setError(
+        "Удалить регламент может автор, управляющий клубом, управляющий сети или владелец.",
+      );
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Удалить регламент "${row.title}" навсегда? Он исчезнет из каталога, а история выполненных чек-листов останется сохраненной.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingId(row.id);
+    setError(null);
+
+    try {
+      const response = await fetch(
+        `/api/staff/shift-regulations/${encodeURIComponent(row.id)}`,
+        { method: "DELETE" },
+      );
+
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as {
+          message?: string;
+        } | null;
+        throw new Error(data?.message ?? "Не удалось удалить регламент");
+      }
+
+      const nextRow = rows.find((candidate) => candidate.id !== row.id);
+      const nextDraft = nextRow ? fromRegulation(nextRow) : defaultDraft();
+      setDraft(nextDraft);
+      setSavedDraftSnapshot(draftSnapshot(nextDraft));
+      router.refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Ошибка запроса");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  const { prompt: unsavedDraftPrompt, guardAction } = useUnsavedDraftPrompt({
+    enabled: hasUnsavedChanges,
+    onSaveDraft: () => save("DRAFT"),
+  });
+
   return (
-    <div className="grid gap-5 xl:grid-cols-[340px_1fr]">
+    <>
+      {unsavedDraftPrompt}
+      <div className="grid gap-5 xl:grid-cols-[340px_1fr]">
       <aside className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -595,7 +686,7 @@ export function StaffShiftRegulationBuilder({
           </div>
           <button
             type="button"
-            onClick={() => setDraft(defaultDraft())}
+            onClick={() => guardAction(() => loadRegulation(null))}
             disabled={!canManageRegulations}
             className="h-9 rounded-md bg-emerald-500 px-3 text-xs font-semibold text-zinc-950 transition hover:bg-emerald-400"
           >
@@ -654,7 +745,7 @@ export function StaffShiftRegulationBuilder({
               <button
                 key={row.id}
                 type="button"
-                onClick={() => setDraft(fromRegulation(row))}
+                onClick={() => guardAction(() => loadRegulation(row))}
                 className={[
                   "w-full rounded-md border p-3 text-left transition hover:border-emerald-500/70 hover:bg-emerald-50/40 dark:hover:bg-emerald-500/10",
                   draft.id === row.id
@@ -758,6 +849,18 @@ export function StaffShiftRegulationBuilder({
                 className="h-10 rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-600 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
               >
                 В архив
+              </button>
+            ) : null}
+            {selectedRow && canDeleteSelectedRegulation ? (
+              <button
+                type="button"
+                disabled={Boolean(deletingId) || isPending}
+                onClick={() => deleteRegulation(selectedRow)}
+                className="h-10 rounded-md border border-red-300 px-3 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/60 dark:text-red-200 dark:hover:bg-red-950/30"
+              >
+                {deletingId === selectedRow.id
+                  ? "Удаляем..."
+                  : "Удалить навсегда"}
               </button>
             ) : null}
             {selectedRow?.status === "PUBLISHED" &&
@@ -1446,6 +1549,7 @@ export function StaffShiftRegulationBuilder({
           </p>
         ) : null}
       </section>
-    </div>
+      </div>
+    </>
   );
 }

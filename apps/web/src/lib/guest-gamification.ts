@@ -266,6 +266,23 @@ export type GuestGameProcessEventResult = {
   note: string;
 };
 
+export type GuestGameCheckInResult = {
+  checkedIn: true;
+  checkedAt: string;
+  liveSession: {
+    externalDomain: string;
+    externalSessionId: string;
+    externalUuid: string | null;
+    startedAt: string | null;
+    durationMinutes: number | null;
+    sessionType: string;
+    sessionPacket: boolean | null;
+    store: { id: string; name: string } | null;
+  };
+  processResult: GuestGameProcessEventResult;
+  note: string;
+};
+
 export type GuestGameSnapshotFact = {
   id: string;
   source:
@@ -790,4 +807,29 @@ export async function getGuestGamificationWorkspace(): Promise<GuestGamification
   }
 
   return response.json() as Promise<GuestGamificationWorkspace>;
+}
+
+export async function checkInGuestGame(
+  guestId: string,
+  options: { storeId?: string | null; note?: string | null } = {},
+): Promise<GuestGameCheckInResult> {
+  const response = await fetch(`${getApiUrl()}/guests/gamification/check-ins`, {
+    method: "POST",
+    cache: "no-store",
+    headers: {
+      ...(await getAuthHeaders()),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      guestId,
+      storeId: options.storeId ?? null,
+      note: options.note ?? null,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to check in guest");
+  }
+
+  return response.json() as Promise<GuestGameCheckInResult>;
 }

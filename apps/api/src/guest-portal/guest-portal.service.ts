@@ -12,6 +12,7 @@ import {
   IntegrationProvider,
   Prisma,
   TenantLifecycleStatus,
+  UserRole,
 } from '@prisma/client';
 import {
   createHash,
@@ -20,6 +21,11 @@ import {
   randomInt,
   randomUUID,
 } from 'node:crypto';
+import type { AuthenticatedUser } from '../auth/auth.types';
+import {
+  GuestGamificationService,
+  type GuestGameCheckInResult,
+} from '../guest-gamification/guest-gamification.service';
 import { LangameSettingsService } from '../integrations/langame-settings.service';
 import type {
   LangameGuestDetailsPortalResult,
@@ -504,6 +510,11 @@ export type GuestPortalLangameDetailsResponse = {
   langame: LangameGuestDetailsPortalResult | null;
 };
 
+export type GuestPortalCheckInResponse = {
+  checkIn: GuestGameCheckInResult;
+  portal: GuestPortalPayload;
+};
+
 type GuestPortalMissionProgress = {
   current: number;
   percent: number;
@@ -516,6 +527,7 @@ export class GuestPortalService {
     private readonly configService: ConfigService,
     private readonly jwtService: JwtService,
     private readonly langameSettingsService: LangameSettingsService,
+    private readonly guestGamificationService: GuestGamificationService,
   ) {}
 
   async getPublicConfig(
@@ -740,6 +752,49 @@ export class GuestPortalService {
   async getSession(authorization: string | undefined) {
     const payload = await this.verifyGuestToken(authorization);
     return this.buildPortalPayload(payload);
+  }
+
+  async checkIn(
+    authorization: string | undefined,
+    dto: { note?: unknown },
+  ): Promise<GuestPortalCheckInResponse> {
+    const payload = await this.verifyGuestToken(authorization);
+    const context = await this.getTenantStoreByIds(
+      payload.tenantId,
+      payload.storeId,
+    );
+    const guest = await this.findGuest(payload);
+
+    if (!guest) {
+      throw new BadRequestException(
+        'Гость еще не сопоставлен с Langame. Сначала подтвердите профиль гостя.',
+      );
+    }
+
+    const actor: AuthenticatedUser = {
+      id: `guest-portal:${payload.sub}`,
+      email: 'guest-portal@leetplus.local',
+      fullName: 'Гостевой портал',
+      role: UserRole.CLUB_MANAGER,
+      isPlatformAdmin: false,
+      tenantId: context.tenant.id,
+      tenantSlug: context.tenant.slug,
+      tenantStatus: TenantLifecycleStatus.ACTIVE,
+    };
+    const checkIn = await this.guestGamificationService.checkIn(actor, {
+      guestId: guest.id,
+      storeId: context.store.id,
+      note: stringField(dto.note) ?? 'Чекин гостя из публичного кабинета.',
+    });
+
+    return {
+      checkIn,
+      portal: await this.buildPortalPayload({
+        ...payload,
+        guestId: guest.id,
+        profileId: checkIn.processResult.event.profile?.id ?? payload.profileId,
+      }),
+    };
   }
 
   async updateCommunicationPreferences(

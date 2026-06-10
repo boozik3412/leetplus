@@ -19,6 +19,9 @@ import {
 } from 'node:crypto';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { GuestDataFoundationService } from '../integrations/guest-data-foundation.service';
+import { LangameClient } from '../integrations/langame.client';
+import { LangameSettingsService } from '../integrations/langame-settings.service';
+import type { LangameGuestSession } from '../integrations/langame.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 
@@ -547,6 +550,78 @@ export type GuestDetail = GuestDashboardRow & {
   }>;
 };
 
+export type GuestLiveSessionResult = {
+  checkedAt: string;
+  isActive: boolean;
+  reason:
+    | 'ACTIVE_SESSION_FOUND'
+    | 'NO_ACTIVE_SESSION'
+    | 'NO_EXTERNAL_GUEST_ID'
+    | 'LANGAME_NOT_CONFIGURED';
+  guest: {
+    id: string;
+    externalDomain: string | null;
+    externalGuestId: string;
+    displayName: string;
+    contact: string;
+  };
+  session: {
+    id: string | null;
+    externalSessionId: string;
+    externalDomain: string;
+    externalUuid: string | null;
+    startedAt: string | null;
+    stoppedAt: string | null;
+    durationMinutes: number | null;
+    packet: boolean | null;
+    normalStop: boolean | null;
+  } | null;
+  store: {
+    id: string;
+    name: string;
+    externalDomain: string | null;
+    externalClubId: string | null;
+    confidence: 'EXPLICIT_CLUB_ID' | 'SOURCE_STORE' | 'DOMAIN' | 'UNKNOWN';
+  } | null;
+  diagnostics: {
+    online: boolean;
+    sourcesChecked: number;
+    rowsChecked: number;
+    errors: Array<{ domain: string; message: string }>;
+  };
+};
+
+type LiveLangameSession = {
+  externalSessionId: string;
+  externalGuestId: string | null;
+  externalClubId: string | null;
+  externalUuid: string | null;
+  startedAt: Date | null;
+  stoppedAt: Date | null;
+  durationMinutes: number | null;
+  packet: boolean | null;
+  normalStop: boolean | null;
+  raw: LangameGuestSession;
+};
+
+type CachedLiveSessionRow = {
+  id: string;
+  externalSessionId: string;
+  externalDomain: string | null;
+  externalUuid: string | null;
+  startedAt: Date | null;
+  stoppedAt: Date | null;
+  durationMinutes: number | null;
+  packet: boolean | null;
+  normalStop: boolean | null;
+  store: {
+    id: string;
+    name: string;
+    externalDomain: string | null;
+    externalClubId: string | null;
+  } | null;
+};
+
 export type StaffControlRow = GuestDashboardRow & {
   controlFlags: string[];
   storeNames: string[];
@@ -891,6 +966,8 @@ export class GuestsService {
     private readonly tenantContextService: TenantContextService,
     private readonly configService: ConfigService,
     private readonly guestDataFoundationService: GuestDataFoundationService,
+    private readonly langameSettingsService: LangameSettingsService,
+    private readonly langameClient: LangameClient,
   ) {}
 
   async getFilterOptions(user: AuthenticatedUser): Promise<GuestFilterOptions> {
@@ -2400,6 +2477,552 @@ export class GuestsService {
       contentType: 'text/csv; charset=utf-8',
       buffer: Buffer.from(this.toCsv(csvRows), 'utf8'),
     };
+  }
+
+  async getGuestLiveSession(
+    user: AuthenticatedUser,
+    id: string,
+  ): Promise<GuestLiveSessionResult> {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const checkedAt = new Date();
+    const guest = await this.prisma.guest.findFirst({
+      where: { id, tenantId },
+      select: {
+        id: true,
+        externalDomain: true,
+        externalGuestId: true,
+        fullNameMasked: true,
+        phoneMasked: true,
+        emailMasked: true,
+      },
+    });
+
+    if (!guest) {
+      throw new NotFoundException('Гость не найден');
+    }
+
+    const diagnostics: GuestLiveSessionResult['diagnostics'] = {
+      online: true,
+      sourcesChecked: 0,
+      rowsChecked: 0,
+      errors: [],
+    };
+    const guestSummary = this.liveSessionGuestSummary(guest);
+
+    if (!guest.externalGuestId) {
+      return {
+        checkedAt: checkedAt.toISOString(),
+        isActive: false,
+        reason: 'NO_EXTERNAL_GUEST_ID',
+        guest: guestSummary,
+        session: null,
+        store: null,
+        diagnostics,
+      };
+    }
+
+    const period = this.liveSessionLookupPeriod(checkedAt);
+
+    try {
+      const { apiKey, sources } =
+        await this.langameSettingsService.resolveTenantAccess(tenantId);
+      const preferredSources = guest.externalDomain
+        ? sources.filter((source) => source.domain === guest.externalDomain)
+        : [];
+      const sourcesToCheck =
+        preferredSources.length > 0 ? preferredSources : sources;
+
+      for (const source of sourcesToCheck) {
+        diagnostics.sourcesChecked += 1;
+
+        try {
+          const liveSession = await this.findLiveSessionInLangameSource({
+            apiKey,
+            baseUrl: source.baseUrl,
+            domain: source.domain,
+            externalGuestId: guest.externalGuestId,
+            period,
+            diagnostics,
+          });
+
+          if (!liveSession) {
+            continue;
+          }
+
+          const store = await this.resolveLiveSessionStore(
+            tenantId,
+            source.id,
+            source.domain,
+            liveSession.externalClubId,
+          );
+          const persisted = await this.persistLiveSession({
+            tenantId,
+            guestId: guest.id,
+            sourceDomain: source.domain,
+            storeId: store?.id ?? null,
+            session: liveSession,
+          });
+
+          return {
+            checkedAt: checkedAt.toISOString(),
+            isActive: true,
+            reason: 'ACTIVE_SESSION_FOUND',
+            guest: guestSummary,
+            session: {
+              id: persisted.id,
+              externalSessionId: liveSession.externalSessionId,
+              externalDomain: source.domain,
+              externalUuid: liveSession.externalUuid,
+              startedAt: this.toIsoDateTime(liveSession.startedAt),
+              stoppedAt: this.toIsoDateTime(liveSession.stoppedAt),
+              durationMinutes: liveSession.durationMinutes,
+              packet: liveSession.packet,
+              normalStop: liveSession.normalStop,
+            },
+            store,
+            diagnostics,
+          };
+        } catch (error) {
+          diagnostics.errors.push({
+            domain: source.domain,
+            message: this.liveSessionErrorMessage(error),
+          });
+        }
+      }
+    } catch (error) {
+      diagnostics.online = false;
+      diagnostics.errors.push({
+        domain: guest.externalDomain ?? 'langame',
+        message: this.liveSessionErrorMessage(error),
+      });
+
+      const cached = await this.findCachedLiveSession(tenantId, guest.id);
+
+      if (cached) {
+        return this.cachedLiveSessionResult(checkedAt, guestSummary, cached, {
+          ...diagnostics,
+          online: false,
+        });
+      }
+
+      return {
+        checkedAt: checkedAt.toISOString(),
+        isActive: false,
+        reason: 'LANGAME_NOT_CONFIGURED',
+        guest: guestSummary,
+        session: null,
+        store: null,
+        diagnostics,
+      };
+    }
+
+    const cached = await this.findCachedLiveSession(tenantId, guest.id);
+
+    if (cached) {
+      return this.cachedLiveSessionResult(checkedAt, guestSummary, cached, {
+        ...diagnostics,
+        online: false,
+      });
+    }
+
+    return {
+      checkedAt: checkedAt.toISOString(),
+      isActive: false,
+      reason: 'NO_ACTIVE_SESSION',
+      guest: guestSummary,
+      session: null,
+      store: null,
+      diagnostics,
+    };
+  }
+
+  private async findLiveSessionInLangameSource(params: {
+    apiKey: string;
+    baseUrl: string;
+    domain: string;
+    externalGuestId: string;
+    period: { dateFrom: string; dateTo: string };
+    diagnostics: GuestLiveSessionResult['diagnostics'];
+  }) {
+    const pageLimit = 200;
+    const maxPages = 5;
+
+    for (let page = 1; page <= maxPages; page += 1) {
+      const rows = await this.langameClient.listGuestSessions(
+        params.baseUrl,
+        params.apiKey,
+        {
+          page,
+          pageLimit,
+          dateFrom: params.period.dateFrom,
+          dateTo: params.period.dateTo,
+        },
+      );
+      params.diagnostics.rowsChecked += rows.length;
+
+      for (const row of rows) {
+        if (
+          this.liveSessionScalar(row.guest_id) === params.externalGuestId &&
+          this.isOpenLangameSessionStop(row.date_stop)
+        ) {
+          const liveSession = this.toLiveLangameSession(row);
+
+          if (liveSession.externalSessionId) {
+            return liveSession;
+          }
+        }
+      }
+
+      if (rows.length < pageLimit) {
+        break;
+      }
+    }
+
+    return null;
+  }
+
+  private toLiveLangameSession(row: LangameGuestSession): LiveLangameSession {
+    const startedAt = this.parseLangameDate(
+      this.liveSessionScalar(row.date_start),
+    );
+    const stoppedAt = this.parseLangameDate(
+      this.liveSessionScalar(row.date_stop),
+    );
+
+    return {
+      externalSessionId: this.liveSessionScalar(row.id) ?? '',
+      externalGuestId: this.liveSessionScalar(row.guest_id),
+      externalClubId: this.liveSessionScalar(row.club_id ?? row.list_clubs_id),
+      externalUuid: this.liveSessionScalar(row.UUID),
+      startedAt,
+      stoppedAt,
+      durationMinutes: this.durationMinutesBetween(startedAt, stoppedAt),
+      packet: this.liveSessionBoolean(row.packet),
+      normalStop: this.liveSessionBoolean(row.normal_stop),
+      raw: row,
+    };
+  }
+
+  private async persistLiveSession(params: {
+    tenantId: string;
+    guestId: string;
+    sourceDomain: string;
+    storeId: string | null;
+    session: LiveLangameSession;
+  }) {
+    const sourcePayloadHash = this.liveSessionPayloadHash(params.session.raw);
+
+    return this.prisma.guestSession.upsert({
+      where: {
+        tenantId_externalProvider_externalDomain_externalSessionId: {
+          tenantId: params.tenantId,
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: params.sourceDomain,
+          externalSessionId: params.session.externalSessionId,
+        },
+      },
+      create: {
+        tenantId: params.tenantId,
+        guestId: params.guestId,
+        storeId: params.storeId,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: params.sourceDomain,
+        externalSessionId: params.session.externalSessionId,
+        externalGuestId: params.session.externalGuestId,
+        externalClubId: params.session.externalClubId,
+        externalUuid: params.session.externalUuid,
+        startedAt: params.session.startedAt,
+        stoppedAt: params.session.stoppedAt,
+        durationMinutes: params.session.durationMinutes,
+        normalStop: params.session.normalStop,
+        packet: params.session.packet,
+        sourcePayloadHash,
+      },
+      update: {
+        guestId: params.guestId,
+        storeId: params.storeId,
+        externalGuestId: params.session.externalGuestId,
+        externalClubId: params.session.externalClubId,
+        externalUuid: params.session.externalUuid,
+        startedAt: params.session.startedAt,
+        stoppedAt: params.session.stoppedAt,
+        durationMinutes: params.session.durationMinutes,
+        normalStop: params.session.normalStop,
+        packet: params.session.packet,
+        sourcePayloadHash,
+      },
+      select: { id: true },
+    });
+  }
+
+  private async resolveLiveSessionStore(
+    tenantId: string,
+    integrationSourceId: string,
+    externalDomain: string,
+    externalClubId: string | null,
+  ): Promise<GuestLiveSessionResult['store']> {
+    if (externalClubId) {
+      const store = await this.prisma.store.findFirst({
+        where: {
+          tenantId,
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain,
+          externalClubId,
+          isActive: true,
+        },
+        select: {
+          id: true,
+          name: true,
+          externalDomain: true,
+          externalClubId: true,
+        },
+      });
+
+      if (store) {
+        return { ...store, confidence: 'EXPLICIT_CLUB_ID' };
+      }
+    }
+
+    const sourceStores = await this.prisma.store.findMany({
+      where: { tenantId, integrationSourceId, isActive: true },
+      take: 2,
+      select: {
+        id: true,
+        name: true,
+        externalDomain: true,
+        externalClubId: true,
+      },
+    });
+
+    if (sourceStores.length === 1) {
+      return { ...sourceStores[0], confidence: 'SOURCE_STORE' };
+    }
+
+    const domainStores = await this.prisma.store.findMany({
+      where: {
+        tenantId,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain,
+        isActive: true,
+      },
+      take: 2,
+      select: {
+        id: true,
+        name: true,
+        externalDomain: true,
+        externalClubId: true,
+      },
+    });
+
+    if (domainStores.length === 1) {
+      return { ...domainStores[0], confidence: 'DOMAIN' };
+    }
+
+    return null;
+  }
+
+  private async findCachedLiveSession(
+    tenantId: string,
+    guestId: string,
+  ): Promise<CachedLiveSessionRow | null> {
+    const lookback = new Date(Date.now() - 72 * 60 * 60 * 1000);
+
+    return this.prisma.guestSession.findFirst({
+      where: {
+        tenantId,
+        guestId,
+        stoppedAt: null,
+        startedAt: { gte: lookback },
+      },
+      orderBy: { startedAt: 'desc' },
+      select: {
+        id: true,
+        externalSessionId: true,
+        externalDomain: true,
+        externalUuid: true,
+        startedAt: true,
+        stoppedAt: true,
+        durationMinutes: true,
+        packet: true,
+        normalStop: true,
+        store: {
+          select: {
+            id: true,
+            name: true,
+            externalDomain: true,
+            externalClubId: true,
+          },
+        },
+      },
+    });
+  }
+
+  private cachedLiveSessionResult(
+    checkedAt: Date,
+    guest: GuestLiveSessionResult['guest'],
+    cached: CachedLiveSessionRow,
+    diagnostics: GuestLiveSessionResult['diagnostics'],
+  ): GuestLiveSessionResult {
+    return {
+      checkedAt: checkedAt.toISOString(),
+      isActive: true,
+      reason: 'ACTIVE_SESSION_FOUND',
+      guest,
+      session: {
+        id: cached.id,
+        externalSessionId: cached.externalSessionId,
+        externalDomain: cached.externalDomain ?? '',
+        externalUuid: cached.externalUuid,
+        startedAt: this.toIsoDateTime(cached.startedAt),
+        stoppedAt: this.toIsoDateTime(cached.stoppedAt),
+        durationMinutes:
+          cached.durationMinutes ??
+          this.durationMinutesBetween(cached.startedAt, cached.stoppedAt),
+        packet: cached.packet,
+        normalStop: cached.normalStop,
+      },
+      store: cached.store
+        ? {
+            ...cached.store,
+            confidence: 'SOURCE_STORE',
+          }
+        : null,
+      diagnostics,
+    };
+  }
+
+  private liveSessionGuestSummary(guest: {
+    id: string;
+    externalDomain: string | null;
+    externalGuestId: string;
+    fullNameMasked: string | null;
+    phoneMasked: string | null;
+    emailMasked: string | null;
+  }): GuestLiveSessionResult['guest'] {
+    return {
+      id: guest.id,
+      externalDomain: guest.externalDomain,
+      externalGuestId: guest.externalGuestId,
+      displayName: guest.fullNameMasked ?? guest.externalGuestId,
+      contact: guest.phoneMasked ?? guest.emailMasked ?? 'нет контакта',
+    };
+  }
+
+  private liveSessionLookupPeriod(now: Date) {
+    const from = new Date(now);
+    from.setUTCDate(from.getUTCDate() - 2);
+
+    return {
+      dateFrom: this.toDateParam(from),
+      dateTo: this.toDateParam(now),
+    };
+  }
+
+  private toDateParam(value: Date) {
+    return value.toISOString().slice(0, 10);
+  }
+
+  private isOpenLangameSessionStop(value: unknown) {
+    const normalized = this.liveSessionScalar(value)?.toLowerCase();
+
+    return (
+      !normalized ||
+      normalized === 'null' ||
+      normalized === '0' ||
+      normalized.startsWith('0000-00-00')
+    );
+  }
+
+  private liveSessionScalar(value: unknown) {
+    if (value === null || value === undefined) {
+      return null;
+    }
+
+    if (
+      typeof value !== 'string' &&
+      typeof value !== 'number' &&
+      typeof value !== 'boolean' &&
+      typeof value !== 'bigint'
+    ) {
+      return null;
+    }
+
+    const normalized = String(value).trim();
+    return normalized ? normalized : null;
+  }
+
+  private liveSessionBoolean(value: unknown) {
+    if (value === true || value === 'true' || value === '1' || value === 1) {
+      return true;
+    }
+
+    if (value === false || value === 'false' || value === '0' || value === 0) {
+      return false;
+    }
+
+    return null;
+  }
+
+  private parseLangameDate(value: string | null | undefined) {
+    if (!value) {
+      return null;
+    }
+
+    const trimmed = value.trim();
+    const ruDate =
+      /^(\d{2})\.(\d{2})\.(\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?$/.exec(
+        trimmed,
+      );
+
+    if (ruDate) {
+      return new Date(
+        Date.UTC(
+          Number(ruDate[3]),
+          Number(ruDate[2]) - 1,
+          Number(ruDate[1]),
+          Number(ruDate[4] ?? 0),
+          Number(ruDate[5] ?? 0),
+          Number(ruDate[6] ?? 0),
+        ),
+      );
+    }
+
+    const normalized = trimmed.includes('T')
+      ? trimmed
+      : trimmed.replace(' ', 'T');
+    const withTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(normalized)
+      ? normalized
+      : `${normalized}Z`;
+    const date = new Date(withTimezone);
+
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  private durationMinutesBetween(
+    startedAt: Date | null,
+    stoppedAt: Date | null,
+  ) {
+    if (!startedAt) {
+      return null;
+    }
+
+    const end = stoppedAt ?? new Date();
+    const minutes = Math.max(
+      0,
+      Math.round((end.getTime() - startedAt.getTime()) / 60000),
+    );
+
+    return Number.isFinite(minutes) ? minutes : null;
+  }
+
+  private liveSessionPayloadHash(row: LangameGuestSession) {
+    return createHash('sha256').update(JSON.stringify(row)).digest('hex');
+  }
+
+  private liveSessionErrorMessage(error: unknown) {
+    return error instanceof Error && error.message
+      ? error.message
+      : 'Не удалось проверить активную сессию Langame';
   }
 
   async updateGuestCrm(

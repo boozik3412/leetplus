@@ -12,6 +12,9 @@ import {
   UserRole,
 } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { LangameClient } from '../integrations/langame.client';
+import { LangameSettingsService } from '../integrations/langame-settings.service';
+import type { LangameGuestSession } from '../integrations/langame.types';
 import { PrismaService } from '../prisma/prisma.service';
 
 const statusValues = [
@@ -30,7 +33,13 @@ const rewardStatuses = [
   'EXPIRED',
 ] as const;
 const rewardSources = ['MANUAL', 'LANGAME', 'API_IMPORT', 'CASHIER'] as const;
-const eventSources = ['MANUAL', 'LANGAME', 'API_IMPORT', 'SYSTEM'] as const;
+const eventSources = [
+  'MANUAL',
+  'LANGAME',
+  'API_IMPORT',
+  'SYSTEM',
+  'CHECK_IN',
+] as const;
 const deliveryChannels = ['TELEGRAM', 'MAX', 'CASHIER', 'MANUAL'] as const;
 const deliveryStatuses = [
   'READY',
@@ -1344,6 +1353,29 @@ export type GuestGameProcessEventResult = {
   note: string;
 };
 
+export type GuestGameCheckInDto = {
+  guestId?: string | null;
+  storeId?: string | null;
+  note?: string | null;
+};
+
+export type GuestGameCheckInResult = {
+  checkedIn: true;
+  checkedAt: string;
+  liveSession: {
+    externalDomain: string;
+    externalSessionId: string;
+    externalUuid: string | null;
+    startedAt: string | null;
+    durationMinutes: number | null;
+    sessionType: string;
+    sessionPacket: boolean | null;
+    store: { id: string; name: string } | null;
+  };
+  processResult: GuestGameProcessEventResult;
+  note: string;
+};
+
 export type GuestGameSnapshotFact = {
   id: string;
   source:
@@ -1419,6 +1451,20 @@ export type GuestGamePipelineFactResult = {
   reason: string | null;
   dryRun: GuestGameDryRunResult | null;
   process: GuestGameProcessEventResult | null;
+};
+
+type CheckInLiveSession = {
+  externalDomain: string;
+  externalSessionId: string;
+  externalGuestId: string | null;
+  externalClubId: string | null;
+  externalUuid: string | null;
+  startedAt: Date | null;
+  durationMinutes: number | null;
+  sessionType: string;
+  sessionPacket: boolean | null;
+  store: { id: string; name: string } | null;
+  raw: LangameGuestSession;
 };
 
 export type GuestGamePipelineRunResult = {
@@ -1563,7 +1609,11 @@ function maxDate(left: Date | null, right: Date | null) {
 
 @Injectable()
 export class GuestGamificationService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly langameSettingsService: LangameSettingsService,
+    private readonly langameClient: LangameClient,
+  ) {}
 
   async getWorkspace(
     user: AuthenticatedUser,
@@ -2048,7 +2098,7 @@ export class GuestGamificationService {
       },
       create: {
         tenantId: user.tenantId,
-        createdByUserId: user.id,
+        createdByUserId: actorUserId(user),
         updatedByUserId: user.id,
         rawType,
         normalizedType,
@@ -3300,7 +3350,7 @@ export class GuestGamificationService {
         profileId: item.profileId,
         guestId: reward.guest?.id ?? null,
         storeId: item.store?.id ?? null,
-        createdByUserId: user.id,
+        createdByUserId: actorUserId(user),
         channel: item.channel,
         status,
         readinessStatus: item.queueStatus,
@@ -3958,11 +4008,15 @@ export class GuestGamificationService {
     });
     const eventReference = buildProcessExternalReference(dto, dryRun.eventType);
     const processPayload = buildProcessPayload(dto, dryRun);
+    const source: EventSource =
+      nullableString(dto.sourceFactKind) === 'LIVE_CHECK_IN'
+        ? 'CHECK_IN'
+        : 'API_IMPORT';
     const event = await this.createProcessEvent(user, {
       profileId: profile.id,
       guestId: profile.guest?.id ?? dryRun.guest?.id ?? null,
       eventType: dryRun.eventType,
-      source: 'API_IMPORT',
+      source,
       externalProvider: eventReference?.externalProvider ?? null,
       externalDomain: eventReference?.externalDomain ?? null,
       externalId: eventReference?.externalId ?? null,
@@ -3995,6 +4049,94 @@ export class GuestGamificationService {
         langameWrite: false,
       },
       note: 'Событие и очередь наград созданы внутри LeetPlus. Запись в Langame не выполнялась.',
+    };
+  }
+
+  async checkIn(
+    user: AuthenticatedUser,
+    dto: GuestGameCheckInDto,
+  ): Promise<GuestGameCheckInResult> {
+    const guestId = nullableId(dto.guestId);
+
+    if (!guestId) {
+      throw new BadRequestException('Выберите гостя для чекина');
+    }
+
+    const guest = await this.getTenantGuest(user, guestId);
+
+    if (!nullableString(guest.externalGuestId)) {
+      throw new BadRequestException(
+        'У гостя нет Langame guest_id, поэтому проверить активную сессию нельзя.',
+      );
+    }
+
+    let liveSession: CheckInLiveSession | null;
+
+    try {
+      liveSession = await this.findActiveCheckInSession(user.tenantId, guest);
+    } catch (error) {
+      throw new BadRequestException(
+        `Не удалось проверить активную сессию Langame: ${this.checkInErrorMessage(error)}`,
+      );
+    }
+
+    if (!liveSession) {
+      throw new BadRequestException(
+        'Активная сессия гостя в Langame не найдена. Чекин доступен только гостю, который сейчас находится в клубе.',
+      );
+    }
+
+    const expectedStoreId = nullableId(dto.storeId);
+
+    if (
+      expectedStoreId &&
+      (!liveSession.store || liveSession.store.id !== expectedStoreId)
+    ) {
+      throw new BadRequestException(
+        'Не удалось подтвердить, что активная сессия гостя открыта в этом клубе.',
+      );
+    }
+
+    const checkedAt = new Date();
+    const eventExternalId = [
+      'check-in',
+      liveSession.externalDomain,
+      liveSession.externalSessionId,
+      guest.externalGuestId,
+    ].join(':');
+    const processResult = await this.processEvent(user, {
+      guestId: guest.id,
+      storeId: liveSession.store?.id ?? null,
+      eventType: 'CHECK_IN',
+      occurredAt: checkedAt.toISOString(),
+      sessionType: liveSession.sessionType,
+      sessionPacket: liveSession.sessionPacket,
+      sessionMinutes: liveSession.durationMinutes ?? 0,
+      sourceFactId: liveSession.externalSessionId,
+      sourceFactKind: 'LIVE_CHECK_IN',
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: liveSession.externalDomain,
+      externalId: eventExternalId,
+      note:
+        nullableString(dto.note) ??
+        'Гость прошел чекин в активной сессии Langame.',
+    });
+
+    return {
+      checkedIn: true,
+      checkedAt: checkedAt.toISOString(),
+      liveSession: {
+        externalDomain: liveSession.externalDomain,
+        externalSessionId: liveSession.externalSessionId,
+        externalUuid: liveSession.externalUuid,
+        startedAt: liveSession.startedAt?.toISOString() ?? null,
+        durationMinutes: liveSession.durationMinutes,
+        sessionType: liveSession.sessionType,
+        sessionPacket: liveSession.sessionPacket,
+        store: liveSession.store,
+      },
+      processResult,
+      note: 'Чекин подтвержден активной сессией Langame и обработан правилами геймификации.',
     };
   }
 
@@ -5062,7 +5204,7 @@ export class GuestGamificationService {
       tenantId: isCreate ? user.tenantId : undefined,
       guestId: nullableId(dto.guestId),
       leadId: nullableId(dto.leadId),
-      createdByUserId: isCreate ? user.id : undefined,
+      createdByUserId: isCreate ? actorUserId(user) : undefined,
       displayName:
         stringValue(dto.displayName) ??
         guest?.fullNameMasked ??
@@ -5103,7 +5245,7 @@ export class GuestGamificationService {
     return clean({
       tenantId: isCreate ? user.tenantId : undefined,
       audienceId: nullableId(dto.audienceId),
-      createdByUserId: isCreate ? user.id : undefined,
+      createdByUserId: isCreate ? actorUserId(user) : undefined,
       name: requiredString(dto.name, 'Название лутбокса', isCreate),
       status: enumValue(
         dto.status,
@@ -5148,7 +5290,7 @@ export class GuestGamificationService {
     return clean({
       tenantId: isCreate ? user.tenantId : undefined,
       audienceId: nullableId(dto.audienceId),
-      createdByUserId: isCreate ? user.id : undefined,
+      createdByUserId: isCreate ? actorUserId(user) : undefined,
       name: requiredString(dto.name, 'Название миссии', isCreate),
       status: enumValue(
         dto.status,
@@ -5197,7 +5339,7 @@ export class GuestGamificationService {
     return clean({
       tenantId: isCreate ? user.tenantId : undefined,
       audienceId: nullableId(dto.audienceId),
-      createdByUserId: isCreate ? user.id : undefined,
+      createdByUserId: isCreate ? actorUserId(user) : undefined,
       name: requiredString(dto.name, 'Название сезона', isCreate),
       status: enumValue(
         dto.status,
@@ -5263,7 +5405,7 @@ export class GuestGamificationService {
       missionId: nullableId(dto.missionId),
       seasonId: nullableId(dto.seasonId),
       storeId: nullableId(dto.storeId),
-      createdByUserId: isCreate ? user.id : undefined,
+      createdByUserId: isCreate ? actorUserId(user) : undefined,
       approvedByUserId:
         status === 'APPROVED' || status === 'PAID' ? user.id : undefined,
       status,
@@ -5324,7 +5466,7 @@ export class GuestGamificationService {
       lootBoxId: nullableId(dto.lootBoxId),
       missionId: nullableId(dto.missionId),
       seasonId: nullableId(dto.seasonId),
-      createdByUserId: user.id,
+      createdByUserId: actorUserId(user),
       eventType: requiredString(dto.eventType, 'Тип события', true),
       source: enumValue(dto.source, eventSources, 'MANUAL'),
       externalProvider: integrationProviderValue(dto.externalProvider),
@@ -5349,7 +5491,7 @@ export class GuestGamificationService {
         lootBoxId: dto.lootBoxId ?? null,
         missionId: dto.missionId ?? null,
         seasonId: dto.seasonId ?? null,
-        createdByUserId: user.id,
+        createdByUserId: actorUserId(user),
         eventType: dto.eventType ?? 'SYSTEM',
         source: 'SYSTEM',
         xpDelta: intValue(dto.xpDelta) ?? 0,
@@ -5459,6 +5601,287 @@ export class GuestGamificationService {
     }
 
     return row;
+  }
+
+  private async findActiveCheckInSession(
+    tenantId: string,
+    guest: {
+      externalDomain: string | null;
+      externalGuestId: string;
+    },
+  ): Promise<CheckInLiveSession | null> {
+    const externalGuestId = nullableString(guest.externalGuestId);
+
+    if (!externalGuestId) {
+      return null;
+    }
+
+    const { apiKey, sources } =
+      await this.langameSettingsService.resolveTenantAccess(tenantId);
+    const preferredDomain = nullableString(guest.externalDomain);
+    const orderedSources = preferredDomain
+      ? [
+          ...sources.filter((source) => source.domain === preferredDomain),
+          ...sources.filter((source) => source.domain !== preferredDomain),
+        ]
+      : sources;
+    const period = this.checkInLookupPeriod(new Date());
+
+    for (const source of orderedSources) {
+      try {
+        const session = await this.findCheckInSessionInSource({
+          apiKey,
+          source,
+          externalGuestId,
+          period,
+        });
+
+        if (session) {
+          return {
+            ...session,
+            store: await this.resolveCheckInStore(
+              tenantId,
+              source.id,
+              source.domain,
+              session.externalClubId,
+            ),
+          };
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    return null;
+  }
+
+  private async findCheckInSessionInSource(params: {
+    apiKey: string;
+    source: { id: string; domain: string; baseUrl: string };
+    externalGuestId: string;
+    period: { dateFrom: string; dateTo: string };
+  }): Promise<CheckInLiveSession | null> {
+    const pageLimit = 200;
+    const maxPages = 5;
+
+    for (let page = 1; page <= maxPages; page += 1) {
+      const rows = await this.langameClient.listGuestSessions(
+        params.source.baseUrl,
+        params.apiKey,
+        {
+          page,
+          pageLimit,
+          dateFrom: params.period.dateFrom,
+          dateTo: params.period.dateTo,
+        },
+      );
+
+      for (const row of rows) {
+        if (
+          this.checkInScalar(row.guest_id) === params.externalGuestId &&
+          this.isOpenCheckInSessionStop(row.date_stop)
+        ) {
+          const session = this.toCheckInLiveSession(params.source.domain, row);
+
+          if (session.externalSessionId) {
+            return session;
+          }
+        }
+      }
+
+      if (rows.length < pageLimit) {
+        break;
+      }
+    }
+
+    return null;
+  }
+
+  private toCheckInLiveSession(
+    externalDomain: string,
+    row: LangameGuestSession,
+  ): CheckInLiveSession {
+    const startedAt = this.parseCheckInLangameDate(
+      this.checkInScalar(row.date_start),
+    );
+    const packet = this.checkInBoolean(row.packet);
+
+    return {
+      externalDomain,
+      externalSessionId: this.checkInScalar(row.id) ?? '',
+      externalGuestId: this.checkInScalar(row.guest_id),
+      externalClubId: this.checkInScalar(row.club_id ?? row.list_clubs_id),
+      externalUuid: this.checkInScalar(row.UUID),
+      startedAt,
+      durationMinutes: this.checkInDurationMinutes(startedAt),
+      sessionType: packet ? 'packet_hours' : 'regular_session',
+      sessionPacket: packet,
+      store: null,
+      raw: row,
+    };
+  }
+
+  private async resolveCheckInStore(
+    tenantId: string,
+    integrationSourceId: string,
+    externalDomain: string,
+    externalClubId: string | null,
+  ): Promise<CheckInLiveSession['store']> {
+    if (externalClubId) {
+      const store = await this.prisma.store.findFirst({
+        where: {
+          tenantId,
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain,
+          externalClubId,
+          isActive: true,
+        },
+        select: { id: true, name: true },
+      });
+
+      if (store) {
+        return store;
+      }
+    }
+
+    const sourceStores = await this.prisma.store.findMany({
+      where: { tenantId, integrationSourceId, isActive: true },
+      take: 2,
+      select: { id: true, name: true },
+    });
+
+    if (sourceStores.length === 1) {
+      return sourceStores[0];
+    }
+
+    const domainStores = await this.prisma.store.findMany({
+      where: {
+        tenantId,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain,
+        isActive: true,
+      },
+      take: 2,
+      select: { id: true, name: true },
+    });
+
+    return domainStores.length === 1 ? domainStores[0] : null;
+  }
+
+  private checkInLookupPeriod(now: Date) {
+    const from = new Date(now);
+    from.setUTCDate(from.getUTCDate() - 2);
+
+    return {
+      dateFrom: this.checkInDateParam(from),
+      dateTo: this.checkInDateParam(now),
+    };
+  }
+
+  private checkInDateParam(value: Date) {
+    return value.toISOString().slice(0, 10);
+  }
+
+  private isOpenCheckInSessionStop(value: unknown) {
+    const normalized = this.checkInScalar(value)?.toLowerCase();
+
+    return (
+      !normalized ||
+      normalized === 'null' ||
+      normalized === '0' ||
+      normalized.startsWith('0000-00-00')
+    );
+  }
+
+  private checkInScalar(value: unknown) {
+    if (value === null || value === undefined) {
+      return null;
+    }
+
+    if (
+      typeof value !== 'string' &&
+      typeof value !== 'number' &&
+      typeof value !== 'boolean' &&
+      typeof value !== 'bigint'
+    ) {
+      return null;
+    }
+
+    const normalized = String(value).trim();
+    return normalized ? normalized : null;
+  }
+
+  private checkInBoolean(value: unknown) {
+    if (value === true || value === 'true' || value === '1' || value === 1) {
+      return true;
+    }
+
+    if (value === false || value === 'false' || value === '0' || value === 0) {
+      return false;
+    }
+
+    return null;
+  }
+
+  private parseCheckInLangameDate(value: string | null | undefined) {
+    if (!value) {
+      return null;
+    }
+
+    const trimmed = value.trim();
+    const ruDate =
+      /^(\d{2})\.(\d{2})\.(\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?$/.exec(
+        trimmed,
+      );
+
+    if (ruDate) {
+      return new Date(
+        Date.UTC(
+          Number(ruDate[3]),
+          Number(ruDate[2]) - 1,
+          Number(ruDate[1]),
+          Number(ruDate[4] ?? 0),
+          Number(ruDate[5] ?? 0),
+          Number(ruDate[6] ?? 0),
+        ),
+      );
+    }
+
+    const normalized = trimmed.includes('T')
+      ? trimmed
+      : trimmed.replace(' ', 'T');
+    const withTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(normalized)
+      ? normalized
+      : `${normalized}Z`;
+    const date = new Date(withTimezone);
+
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  private checkInDurationMinutes(startedAt: Date | null) {
+    if (!startedAt) {
+      return null;
+    }
+
+    const minutes = Math.max(
+      0,
+      Math.round((Date.now() - startedAt.getTime()) / 60000),
+    );
+
+    return Number.isFinite(minutes) ? minutes : null;
+  }
+
+  private checkInErrorMessage(error: unknown) {
+    const message =
+      error instanceof Error && error.message
+        ? error.message
+        : 'неизвестная ошибка';
+
+    if (message.toLowerCase().includes('not configured')) {
+      return 'интеграция Langame не настроена';
+    }
+
+    return message;
   }
 
   private async getTenantGuest(user: AuthenticatedUser, id: string) {
@@ -7774,7 +8197,8 @@ function appendDryRunTriggerCheck(
   if (
     !expected ||
     expected === actual ||
-    (expected === 'VISIT' && actual === 'SESSION_START') ||
+    (expected === 'VISIT' &&
+      (actual === 'SESSION_START' || actual === 'CHECK_IN')) ||
     (expected === 'BAR_PURCHASE' && actual === 'PRODUCT_PURCHASE') ||
     (expected === 'PRODUCT_PURCHASE' && actual === 'BAR_PURCHASE')
   ) {
@@ -8275,6 +8699,11 @@ function dryRunSeasonXp(value: unknown, context: DryRunContext) {
   if (eventType === 'MISSION_COMPLETED') {
     return Math.round(dryRunNumber(rules.missionCompletion, 0));
   }
+  if (eventType === 'CHECK_IN') {
+    return Math.round(
+      dryRunNumber(rules.checkIn, dryRunNumber(rules.visit, 0)) + packetBonus,
+    );
+  }
   if (eventType === 'SESSION_START' || eventType === 'VISIT') {
     return Math.round(dryRunNumber(rules.visit, 0) + packetBonus);
   }
@@ -8465,6 +8894,12 @@ function clean<T extends Record<string, unknown>>(value: T): T {
   return Object.fromEntries(
     Object.entries(value).filter(([, item]) => item !== undefined),
   ) as T;
+}
+
+function actorUserId(user: AuthenticatedUser) {
+  const id = nullableId(user.id);
+
+  return id && !id.startsWith('guest-portal:') ? id : null;
 }
 
 function requiredString(value: unknown, label: string, required: boolean) {
@@ -8817,6 +9252,7 @@ function defaultMissionConditions(): Prisma.InputJsonValue {
 function defaultXpRules(): Prisma.InputJsonValue {
   return {
     visit: 20,
+    checkIn: 20,
     playHour: 10,
     barPurchase: 25,
     missionCompletion: 50,

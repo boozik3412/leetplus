@@ -167,6 +167,7 @@ type SeasonForm = {
   periodFrom: string;
   periodTo: string;
   xpVisit: string;
+  xpCheckIn: string;
   xpPlayHour: string;
   xpBarPurchase: string;
   xpMissionCompletion: string;
@@ -263,6 +264,7 @@ const tabs: Array<{ id: TabId; label: string }> = [
 const dryRunEventOptions = [
   { value: "SESSION_START", label: "Старт сессии" },
   { value: "VISIT", label: "Визит" },
+  { value: "CHECK_IN", label: "Чекин в клубе" },
   { value: "PLAY_HOUR", label: "Час игры" },
   { value: "BAR_PURCHASE", label: "Покупка бара" },
   { value: "PRODUCT_PURCHASE", label: "Товарная покупка" },
@@ -475,6 +477,7 @@ const defaultSeasonForm: SeasonForm = {
   periodFrom: "",
   periodTo: "",
   xpVisit: "20",
+  xpCheckIn: "20",
   xpPlayHour: "10",
   xpBarPurchase: "25",
   xpMissionCompletion: "50",
@@ -495,10 +498,12 @@ const defaultSeasonForm: SeasonForm = {
   premiumRewardLabel: "Усиленный промокод",
   xpRulesText: jsonText({
     visit: 20,
+    checkIn: 20,
     playHour: 10,
     barPurchase: 25,
     missionCompletion: 50,
     packetSessionBonus: 15,
+    guestLog: 5,
     packetMode: "ANY",
   }),
   levelsText: jsonText([
@@ -5287,7 +5292,7 @@ function SeasonBusinessRules({
       title="Лестница Battle Pass"
       description="Задайте XP за действия, количество уровней и частоту наград. Система соберет free и premium дорожки сама."
     >
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
         <Field label="XP за визит">
           <input
             className={fieldClass}
@@ -5295,6 +5300,15 @@ function SeasonBusinessRules({
             min="0"
             value={form.xpVisit}
             onChange={(event) => onChange({ xpVisit: event.target.value })}
+          />
+        </Field>
+        <Field label="XP за чекин">
+          <input
+            className={fieldClass}
+            type="number"
+            min="0"
+            value={form.xpCheckIn}
+            onChange={(event) => onChange({ xpCheckIn: event.target.value })}
           />
         </Field>
         <Field label="XP за час">
@@ -6753,6 +6767,7 @@ function seasonToForm(season: GuestGameSeason): SeasonForm {
     periodFrom: dateInputValue(season.periodFrom),
     periodTo: dateInputValue(season.periodTo),
     xpVisit: numberRule(season.xpRules, "visit", "20"),
+    xpCheckIn: numberRule(season.xpRules, "checkIn", "20"),
     xpPlayHour: numberRule(season.xpRules, "playHour", "10"),
     xpBarPurchase: numberRule(season.xpRules, "barPurchase", "25"),
     xpMissionCompletion: numberRule(
@@ -7005,6 +7020,7 @@ function buildSeasonXpRules(form: SeasonForm) {
   return {
     source: "business_controls",
     visit: numeric(form.xpVisit, 0),
+    checkIn: numeric(form.xpCheckIn, numeric(form.xpVisit, 0)),
     playHour: numeric(form.xpPlayHour, 0),
     barPurchase: numeric(form.xpBarPurchase, 0),
     missionCompletion: numeric(form.xpMissionCompletion, 0),

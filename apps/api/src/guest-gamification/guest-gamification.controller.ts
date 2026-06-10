@@ -27,6 +27,8 @@ import {
 } from './guest-bonus-ledger.service';
 import {
   GuestGamificationService,
+  type GuestGameCheckInDto,
+  type GuestGameCheckInResult,
   type GuestGameEvent,
   type GuestGameEventDto,
   type GuestGameDryRunDto,
@@ -107,6 +109,14 @@ export class GuestGamificationController {
     @Body() dto: GuestGameProcessEventDto,
   ): Promise<GuestGameProcessEventResult> {
     return this.gamificationService.processEvent(user, dto);
+  }
+
+  @Post('check-ins')
+  checkIn(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: GuestGameCheckInDto,
+  ): Promise<GuestGameCheckInResult> {
+    return this.gamificationService.checkIn(user, dto);
   }
 
   @Post('pipeline/run')

@@ -34,6 +34,7 @@ import {
   type GuestCrmUpdateDto,
   type GuestExportFile,
   type GuestFilterOptions,
+  type GuestLiveSessionResult,
   type GuestSavedFilter,
   type GuestSavedFilterDto,
   type GuestDetail,
@@ -349,6 +350,14 @@ export class GuestsController {
     @Param('id') id: string,
   ): Promise<{ id: string; updatedShifts: number }> {
     return this.guestsService.unmapStaffIdentity(user, id);
+  }
+
+  @Get(':id/live-session')
+  getGuestLiveSession(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<GuestLiveSessionResult> {
+    return this.guestsService.getGuestLiveSession(user, id);
   }
 
   @Get(':id')

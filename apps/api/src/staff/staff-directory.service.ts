@@ -6,6 +6,9 @@ import {
 } from '@nestjs/common';
 import { IntegrationProvider, Prisma, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { LangameClient } from '../integrations/langame.client';
+import { LangameSettingsService } from '../integrations/langame-settings.service';
+import type { LangameWorkingShift } from '../integrations/langame.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 
@@ -32,6 +35,15 @@ const manageableRoles = new Set<UserRole>([
   UserRole.STANDARDS_MANAGER,
 ]);
 
+const accountBackedStaffRoles = [
+  UserRole.MANAGER,
+  UserRole.CLUB_MANAGER,
+  UserRole.STANDARDS_MANAGER,
+  UserRole.SENIOR_ADMINISTRATOR,
+  UserRole.CLUB_ADMINISTRATOR,
+  UserRole.TRAINEE,
+] as const;
+
 export type StaffMemberStatus = (typeof memberStatuses)[number];
 export type StaffMemberEmploymentType = (typeof employmentTypes)[number];
 
@@ -40,6 +52,10 @@ export type StaffDirectoryQuery = {
   role?: UserRole | 'all';
   storeId?: string;
   search?: string;
+};
+
+export type StaffActiveShiftQuery = {
+  storeId?: string;
 };
 
 export type StaffMemberDto = {
@@ -148,6 +164,33 @@ export type StaffLangameUserOption = {
   updatedAt: string;
 };
 
+export type StaffActiveShiftCandidate = {
+  id: string;
+  externalDomain: string;
+  externalUserId: string;
+  externalShiftId: string;
+  externalClubId: string | null;
+  operatorName: string;
+  operatorEmail: string | null;
+  storeId: string;
+  storeName: string;
+  startedAt: string | null;
+  stoppedAt: string | null;
+  source: 'LIVE' | 'SNAPSHOT';
+};
+
+export type StaffActiveShiftCandidatesReport = {
+  checkedAt: string;
+  store: {
+    id: string;
+    name: string;
+    externalDomain: string | null;
+    externalClubId: string | null;
+  };
+  candidates: StaffActiveShiftCandidate[];
+  errors: string[];
+};
+
 const staffMemberInclude = {
   store: { select: { id: true, name: true, isActive: true } },
   user: {
@@ -171,6 +214,8 @@ export class StaffDirectoryService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
+    private readonly langameSettingsService: LangameSettingsService,
+    private readonly langameClient: LangameClient,
   ) {}
 
   async getDirectory(
@@ -178,6 +223,7 @@ export class StaffDirectoryService {
     query: StaffDirectoryQuery = {},
   ): Promise<StaffDirectoryReport> {
     const { tenantId } = await this.tenantContextService.resolve(user);
+    await this.ensureAccountBackedStaffMembers(tenantId);
     const filters = this.resolveFilters(query);
     const where = this.buildWhere(tenantId, filters);
     const canManageDirectory = this.canManageDirectory(user);
@@ -232,6 +278,7 @@ export class StaffDirectoryService {
 
   async getCurrentMember(user: AuthenticatedUser) {
     const { tenantId } = await this.tenantContextService.resolve(user);
+    await this.ensureAccountBackedStaffMembers(tenantId, user.id);
     const rows = await this.prisma.staffMember.findMany({
       where: {
         tenantId,
@@ -257,6 +304,127 @@ export class StaffDirectoryService {
 
     return {
       staffMember: row ? this.toMemberResponse(row, langameUser) : null,
+    };
+  }
+
+  async getActiveShiftCandidates(
+    user: AuthenticatedUser,
+    query: StaffActiveShiftQuery = {},
+  ): Promise<StaffActiveShiftCandidatesReport> {
+    this.assertCanManageDirectory(user);
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const storeId = this.cleanString(query.storeId);
+
+    if (!storeId) {
+      throw new BadRequestException('Store is required');
+    }
+
+    const store = await this.prisma.store.findFirst({
+      where: { id: storeId, tenantId },
+      select: {
+        id: true,
+        name: true,
+        externalDomain: true,
+        externalClubId: true,
+        integrationSourceId: true,
+      },
+    });
+
+    if (!store) {
+      throw new NotFoundException('Store not found');
+    }
+
+    const checkedAt = new Date();
+    const errors: string[] = [];
+    const candidatesByKey = new Map<string, StaffActiveShiftCandidate>();
+
+    try {
+      const { apiKey, sources } =
+        await this.langameSettingsService.resolveTenantAccess(tenantId);
+      const matchedSources = this.langameSourcesForStore(store, sources);
+
+      if (matchedSources.length === 0) {
+        errors.push(
+          'Для выбранного клуба не найден активный Langame-источник.',
+        );
+      }
+
+      const dateTo = this.toDateInputValue(
+        new Date(checkedAt.getTime() + 12 * 60 * 60 * 1000),
+      );
+      const dateFrom = this.toDateInputValue(
+        new Date(checkedAt.getTime() - 36 * 60 * 60 * 1000),
+      );
+
+      for (const source of matchedSources) {
+        try {
+          const rows = await this.listRecentWorkingShifts(
+            source.baseUrl,
+            apiKey,
+            dateFrom,
+            dateTo,
+          );
+
+          for (const row of rows) {
+            const candidate = this.activeShiftCandidateFromLangameRow(
+              row,
+              source.domain,
+              store,
+            );
+
+            if (!candidate) {
+              continue;
+            }
+
+            candidatesByKey.set(candidate.id, candidate);
+          }
+        } catch (error) {
+          errors.push(
+            `${source.domain}: ${
+              error instanceof Error
+                ? error.message
+                : 'не удалось получить открытые смены'
+            }`,
+          );
+        }
+      }
+    } catch (error) {
+      errors.push(
+        error instanceof Error
+          ? error.message
+          : 'Langame API временно недоступен',
+      );
+    }
+
+    const cachedCandidates = await this.getCachedActiveShiftCandidates(
+      tenantId,
+      store,
+      checkedAt,
+    );
+
+    for (const candidate of cachedCandidates) {
+      if (!candidatesByKey.has(candidate.id)) {
+        candidatesByKey.set(candidate.id, candidate);
+      }
+    }
+
+    const candidates = await this.enrichActiveShiftCandidates(tenantId, [
+      ...candidatesByKey.values(),
+    ]);
+
+    return {
+      checkedAt: checkedAt.toISOString(),
+      store: {
+        id: store.id,
+        name: store.name,
+        externalDomain: store.externalDomain,
+        externalClubId: store.externalClubId,
+      },
+      candidates: candidates.sort(
+        (first, second) =>
+          this.dateMs(second.startedAt) - this.dateMs(first.startedAt),
+      ),
+      errors,
     };
   }
 
@@ -527,6 +695,357 @@ export class StaffDirectoryService {
       note: row.note,
       mappedStaffMemberId: null,
     }));
+  }
+
+  private async ensureAccountBackedStaffMembers(
+    tenantId: string,
+    userId?: string,
+  ) {
+    const accounts = await this.prisma.user.findMany({
+      where: {
+        tenantId,
+        ...(userId ? { id: userId } : {}),
+        role: { in: [...accountBackedStaffRoles] },
+        staffMember: { is: null },
+      },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        role: true,
+        isActive: true,
+        storeAccesses: {
+          select: { storeId: true },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+      take: userId ? 1 : 300,
+    });
+
+    if (accounts.length === 0) {
+      return;
+    }
+
+    await this.prisma.staffMember.createMany({
+      data: accounts.map((account) => {
+        const storeIds = account.storeAccesses.map((access) => access.storeId);
+
+        return {
+          tenantId,
+          userId: account.id,
+          storeId: storeIds.length === 1 ? storeIds[0] : null,
+          displayName: account.fullName ?? account.email,
+          email: account.email,
+          role: account.role,
+          status: account.isActive ? 'ACTIVE' : 'SUSPENDED',
+          employmentType: account.role === UserRole.TRAINEE ? 'TRAINEE' : null,
+        };
+      }),
+      skipDuplicates: true,
+    });
+  }
+
+  private langameSourcesForStore(
+    store: {
+      externalDomain: string | null;
+      externalClubId: string | null;
+      integrationSourceId: string | null;
+    },
+    sources: Array<{ id: string; domain: string; baseUrl: string }>,
+  ) {
+    const exactSources = sources.filter((source) => {
+      if (
+        store.integrationSourceId &&
+        source.id === store.integrationSourceId
+      ) {
+        return true;
+      }
+
+      return Boolean(
+        store.externalDomain && source.domain === store.externalDomain,
+      );
+    });
+
+    if (exactSources.length > 0) {
+      return exactSources;
+    }
+
+    return store.externalDomain
+      ? sources.filter((source) => source.domain === store.externalDomain)
+      : sources.length === 1
+        ? sources
+        : [];
+  }
+
+  private async listRecentWorkingShifts(
+    baseUrl: string,
+    apiKey: string,
+    dateFrom: string,
+    dateTo: string,
+  ) {
+    const rows: LangameWorkingShift[] = [];
+    const pageLimit = 100;
+
+    for (let page = 1; page <= 5; page += 1) {
+      const pageRows = await this.langameClient.listWorkingShifts(
+        baseUrl,
+        apiKey,
+        {
+          page,
+          pageLimit,
+          dateFrom,
+          dateTo,
+        },
+      );
+
+      rows.push(...pageRows);
+
+      if (pageRows.length < pageLimit) {
+        break;
+      }
+    }
+
+    return rows;
+  }
+
+  private activeShiftCandidateFromLangameRow(
+    row: LangameWorkingShift,
+    domain: string,
+    store: {
+      id: string;
+      name: string;
+      externalClubId: string | null;
+    },
+  ): StaffActiveShiftCandidate | null {
+    const externalShiftId = this.toNullableString(row.id);
+    const externalUserId = this.toNullableString(row.user_id);
+    const externalClubId = this.toNullableString(row.list_clubs_id);
+
+    if (!externalShiftId || !externalUserId) {
+      return null;
+    }
+
+    if (
+      store.externalClubId &&
+      externalClubId &&
+      externalClubId !== store.externalClubId
+    ) {
+      return null;
+    }
+
+    if (!this.isOpenLangameShift(row.date_stop)) {
+      return null;
+    }
+
+    const startedAt = this.parseLangameDate(
+      this.toNullableString(row.date_start),
+    );
+    const stoppedAt = this.parseLangameDate(
+      this.toNullableString(row.date_stop),
+    );
+
+    return {
+      id: this.activeShiftKey(domain, externalShiftId),
+      externalDomain: domain,
+      externalUserId,
+      externalShiftId,
+      externalClubId,
+      operatorName: `user_id ${externalUserId}`,
+      operatorEmail: null,
+      storeId: store.id,
+      storeName: store.name,
+      startedAt: startedAt?.toISOString() ?? null,
+      stoppedAt: stoppedAt?.toISOString() ?? null,
+      source: 'LIVE',
+    };
+  }
+
+  private async getCachedActiveShiftCandidates(
+    tenantId: string,
+    store: {
+      id: string;
+      name: string;
+      externalClubId: string | null;
+    },
+    checkedAt: Date,
+  ) {
+    const startedAfter = new Date(checkedAt.getTime() - 72 * 60 * 60 * 1000);
+    const rows = await this.prisma.guestWorkingShift.findMany({
+      where: {
+        tenantId,
+        storeId: store.id,
+        stoppedAt: null,
+        startedAt: { gte: startedAfter },
+        externalDomain: { not: null },
+        externalUserId: { not: null },
+      },
+      select: {
+        externalDomain: true,
+        externalUserId: true,
+        externalShiftId: true,
+        externalClubId: true,
+        startedAt: true,
+        stoppedAt: true,
+      },
+      orderBy: [{ startedAt: 'desc' }, { updatedAt: 'desc' }],
+      take: 20,
+    });
+
+    return rows.flatMap((row) => {
+      if (!row.externalDomain || !row.externalUserId) {
+        return [];
+      }
+
+      return [
+        {
+          id: this.activeShiftKey(row.externalDomain, row.externalShiftId),
+          externalDomain: row.externalDomain,
+          externalUserId: row.externalUserId,
+          externalShiftId: row.externalShiftId,
+          externalClubId: row.externalClubId,
+          operatorName: `user_id ${row.externalUserId}`,
+          operatorEmail: null,
+          storeId: store.id,
+          storeName: store.name,
+          startedAt: row.startedAt?.toISOString() ?? null,
+          stoppedAt: row.stoppedAt?.toISOString() ?? null,
+          source: 'SNAPSHOT' as const,
+        },
+      ];
+    });
+  }
+
+  private async enrichActiveShiftCandidates(
+    tenantId: string,
+    candidates: StaffActiveShiftCandidate[],
+  ) {
+    if (candidates.length === 0) {
+      return candidates;
+    }
+
+    const users = await this.prisma.langameStaffUser.findMany({
+      where: {
+        tenantId,
+        OR: candidates.map((candidate) => ({
+          externalDomain: candidate.externalDomain,
+          externalUserId: candidate.externalUserId,
+        })),
+      },
+      select: {
+        externalDomain: true,
+        externalUserId: true,
+        username: true,
+        email: true,
+      },
+    });
+    const usersByKey = new Map(
+      users.map((user) => [
+        `${user.externalDomain}:${user.externalUserId}`,
+        user,
+      ]),
+    );
+
+    return candidates.map((candidate) => {
+      const user = usersByKey.get(
+        `${candidate.externalDomain}:${candidate.externalUserId}`,
+      );
+
+      return user
+        ? {
+            ...candidate,
+            operatorName: user.username ?? user.email ?? candidate.operatorName,
+            operatorEmail: user.email,
+          }
+        : candidate;
+    });
+  }
+
+  private activeShiftKey(domain: string, externalShiftId: string) {
+    return `${domain}:${externalShiftId}`;
+  }
+
+  private isOpenLangameShift(value: unknown) {
+    const rawValue = this.toNullableString(value);
+
+    if (!rawValue) {
+      return true;
+    }
+
+    const normalized = rawValue.toLowerCase();
+    if (
+      normalized === '0' ||
+      normalized === 'null' ||
+      normalized === 'false' ||
+      normalized.startsWith('0000-00-00')
+    ) {
+      return true;
+    }
+
+    return this.parseLangameDate(rawValue) === null;
+  }
+
+  private parseLangameDate(value: string | null | undefined) {
+    if (!value) {
+      return null;
+    }
+
+    const trimmed = value.trim();
+    const ruDate =
+      /^(\d{2})\.(\d{2})\.(\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?$/.exec(
+        trimmed,
+      );
+
+    if (ruDate) {
+      return new Date(
+        Date.UTC(
+          Number(ruDate[3]),
+          Number(ruDate[2]) - 1,
+          Number(ruDate[1]),
+          Number(ruDate[4] ?? 0),
+          Number(ruDate[5] ?? 0),
+          Number(ruDate[6] ?? 0),
+        ),
+      );
+    }
+
+    const normalized = trimmed.includes('T')
+      ? trimmed
+      : trimmed.replace(' ', 'T');
+    const withTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(normalized)
+      ? normalized
+      : `${normalized}Z`;
+    const date = new Date(withTimezone);
+
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  private toDateInputValue(value: Date) {
+    const year = value.getUTCFullYear();
+    const month = String(value.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(value.getUTCDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  private toNullableString(value: unknown) {
+    if (value === null || value === undefined) {
+      return null;
+    }
+
+    if (
+      typeof value !== 'string' &&
+      typeof value !== 'number' &&
+      typeof value !== 'boolean' &&
+      typeof value !== 'bigint'
+    ) {
+      return null;
+    }
+
+    const stringValue = String(value).trim();
+    return stringValue ? stringValue : null;
+  }
+
+  private dateMs(value: string | null) {
+    return value ? new Date(value).getTime() : 0;
   }
 
   private attachMappedMembers(

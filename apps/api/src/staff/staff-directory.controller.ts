@@ -16,6 +16,8 @@ import { RolesGuard } from '../auth/roles.guard';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import {
   StaffDirectoryService,
+  type StaffActiveShiftCandidatesReport,
+  type StaffActiveShiftQuery,
   type StaffDirectoryQuery,
   type StaffDirectoryReport,
   type StaffMemberDto,
@@ -41,6 +43,14 @@ export class StaffDirectoryController {
     @Query() query: StaffDirectoryQuery,
   ): Promise<StaffDirectoryReport> {
     return this.staffDirectoryService.getDirectory(user, query);
+  }
+
+  @Get('active-shifts')
+  getActiveShiftCandidates(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: StaffActiveShiftQuery,
+  ): Promise<StaffActiveShiftCandidatesReport> {
+    return this.staffDirectoryService.getActiveShiftCandidates(user, query);
   }
 
   @Post()

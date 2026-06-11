@@ -264,6 +264,18 @@ function isApprovalWorkflowTask(task: StaffTask) {
   );
 }
 
+function taskCandidateUserIds(task: StaffTask) {
+  const labels = taskLabelsRecord(task);
+  const candidateUserIds = labels?.candidateUserIds;
+
+  return Array.isArray(candidateUserIds)
+    ? candidateUserIds.filter(
+        (candidateUserId): candidateUserId is string =>
+          typeof candidateUserId === "string" && candidateUserId.length > 0,
+      )
+    : [];
+}
+
 function statusBadgeClass(task: StaffTask) {
   const base =
     "inline-flex rounded-full px-2.5 py-1 text-xs font-semibold uppercase";
@@ -773,6 +785,7 @@ export default async function StaffTasksPage({
                     taskId={task.id}
                     status={task.status}
                     assignedToUser={task.assignedToUser}
+                    candidateUserIds={taskCandidateUserIds(task)}
                     currentUser={currentUser}
                   />
                 </div>

@@ -42,6 +42,8 @@ const confirmationRoles = new Set<StaffTaskUserRole>([
   "STANDARDS_MANAGER",
 ]);
 
+type AssignmentMode = "ANY_OF" | "INDIVIDUAL";
+
 type StaffTaskCreateFormProps = {
   users: StaffTaskUser[];
   stores: StaffTaskStore[];
@@ -55,55 +57,108 @@ export function StaffTaskCreateForm({
 }: StaffTaskCreateFormProps) {
   const router = useRouter();
   const needsConfirmation = confirmationCreatorRoles.has(currentUser.role);
+  const needsStaffAssignee =
+    needsConfirmation || currentUser.role === "SENIOR_ADMINISTRATOR";
   const [isExpanded, setIsExpanded] = useState(() => !needsConfirmation);
   const [isPending, setIsPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const needsStaffAssignee =
-    needsConfirmation || currentUser.role === "SENIOR_ADMINISTRATOR";
+  const [selectedStoreId, setSelectedStoreId] = useState("");
+  const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [assignmentMode, setAssignmentMode] =
+    useState<AssignmentMode>("INDIVIDUAL");
+
   const assigneeUsers = useMemo(
     () =>
-      needsStaffAssignee
+      (needsStaffAssignee
         ? users.filter(
             (user) =>
               staffAssigneeRoles.has(user.role) &&
               (!needsConfirmation || user.id !== currentUser.id),
           )
-        : users,
+        : users
+      ).sort((left, right) => userLabel(left).localeCompare(userLabel(right))),
     [currentUser.id, needsConfirmation, needsStaffAssignee, users],
   );
   const observerUsers = useMemo(
     () =>
-      needsConfirmation
+      (needsConfirmation
         ? users.filter((user) => confirmationRoles.has(user.role))
-        : users,
+        : users
+      ).sort((left, right) => userLabel(left).localeCompare(userLabel(right))),
     [needsConfirmation, users],
   );
+  const activeStores = useMemo(
+    () =>
+      stores
+        .filter((store) => store.isActive)
+        .sort((left, right) => left.name.localeCompare(right.name)),
+    [stores],
+  );
+  const usersWithoutStore = useMemo(
+    () => assigneeUsers.filter((user) => userStoreIds(user).length === 0),
+    [assigneeUsers],
+  );
+  const selectedCount = selectedAssigneeIds.size;
+  const allAssigneesSelected =
+    assigneeUsers.length > 0 &&
+    assigneeUsers.every((user) => selectedAssigneeIds.has(user.id));
+
+  function setMany(ids: string[], checked: boolean) {
+    setSelectedAssigneeIds((current) => {
+      const next = new Set(current);
+      ids.forEach((id) => {
+        if (checked) {
+          next.add(id);
+        } else {
+          next.delete(id);
+        }
+      });
+      return next;
+    });
+  }
+
+  function toggleStore(store: StaffTaskStore, checked: boolean) {
+    const ids = assigneeUsers
+      .filter((user) => userStoreIds(user).includes(store.id))
+      .map((user) => user.id);
+
+    setMany(ids, checked);
+
+    if (checked && !selectedStoreId) {
+      setSelectedStoreId(store.id);
+    }
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const title = String(form.get("title") ?? "").trim();
+    const assigneeIds = Array.from(selectedAssigneeIds);
 
     if (!title) {
       setError("Укажите название задачи.");
       return;
     }
 
-    const dueAt = String(form.get("dueAt") ?? "").trim();
-    const assignedToUserId = String(form.get("assignedToUserId") ?? "").trim();
+    if (needsStaffAssignee && assigneeIds.length === 0) {
+      setError("Выберите хотя бы одного администратора или стажера.");
+      return;
+    }
+
+    if (
+      needsStaffAssignee &&
+      !assigneeIds.every((id) => assigneeUsers.some((user) => user.id === id))
+    ) {
+      setError("Среди ответственных есть сотрудник, которому нельзя назначить задачу.");
+      return;
+    }
+
     const observerUserIds = form
       .getAll("observerUserIds")
       .map((value) => String(value).trim())
       .filter(Boolean);
-
-    if (
-      needsStaffAssignee &&
-      (!assignedToUserId ||
-        !assigneeUsers.some((user) => user.id === assignedToUserId))
-    ) {
-      setError("Выберите ответственного администратора или стажера.");
-      return;
-    }
 
     if (needsConfirmation) {
       const hasOnlyAllowedConfirmationUsers = observerUserIds.every((id) =>
@@ -125,6 +180,7 @@ export function StaffTaskCreateForm({
       }
     }
 
+    const dueAt = String(form.get("dueAt") ?? "").trim();
     setIsPending(true);
     setError(null);
 
@@ -134,8 +190,13 @@ export function StaffTaskCreateForm({
       type: form.get("type"),
       priority: form.get("priority"),
       dueAt: dueAt ? new Date(dueAt).toISOString() : null,
-      storeId: String(form.get("storeId") ?? "").trim() || null,
-      assignedToUserId: assignedToUserId || null,
+      storeId: selectedStoreId || null,
+      assignedToUserId:
+        assigneeIds.length === 1 && assignmentMode !== "ANY_OF"
+          ? assigneeIds[0]
+          : null,
+      assignedToUserIds: assigneeIds,
+      assignmentMode: assigneeIds.length > 0 ? assignmentMode : "SINGLE",
       observerUserIds,
     };
 
@@ -154,6 +215,9 @@ export function StaffTaskCreateForm({
       }
 
       event.currentTarget.reset();
+      setSelectedAssigneeIds(new Set());
+      setSelectedStoreId("");
+      setAssignmentMode("INDIVIDUAL");
       setIsExpanded(false);
       router.refresh();
     } catch (caught) {
@@ -164,15 +228,16 @@ export function StaffTaskCreateForm({
   }
 
   return (
-    <section
-      className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
-    >
+    <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
             Быстрое создание
           </p>
           <h2 className="mt-1 text-lg font-semibold">Новая задача персоналу</h2>
+          <p className="mt-1 text-sm text-zinc-500">
+            Можно выбрать весь клуб, группу сотрудников или точечных ответственных.
+          </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
           {isExpanded ? (
@@ -189,8 +254,6 @@ export function StaffTaskCreateForm({
               type="submit"
               form="staff-task-create-form"
               disabled={isPending}
-              aria-expanded={isExpanded}
-              aria-controls="staff-task-create-form"
               className="inline-flex h-10 items-center justify-center rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isPending ? "Сохраняем..." : "Создать задачу"}
@@ -198,12 +261,7 @@ export function StaffTaskCreateForm({
           ) : (
             <button
               type="button"
-              onClick={(event) => {
-                event.preventDefault();
-                setIsExpanded(true);
-              }}
-              aria-expanded={isExpanded}
-              aria-controls="staff-task-create-form"
+              onClick={() => setIsExpanded(true)}
               className="inline-flex h-10 items-center justify-center rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
             >
               Создать задачу
@@ -228,21 +286,18 @@ export function StaffTaskCreateForm({
 
           <label className="space-y-1">
             <span className="text-xs font-bold uppercase text-zinc-500">
-              Ответственный
+              Клуб задачи
             </span>
             <select
-              name="assignedToUserId"
-              required={needsStaffAssignee}
+              name="storeId"
+              value={selectedStoreId}
+              onChange={(event) => setSelectedStoreId(event.target.value)}
               className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
             >
-              <option value="">
-                {needsStaffAssignee
-                  ? "Выберите администратора или стажера"
-                  : "Не назначен"}
-              </option>
-              {assigneeUsers.map((user) => (
-                <option key={user.id} value={user.id}>
-                  {user.fullName ?? user.email} ({roleLabels[user.role] ?? user.role})
+              <option value="">Вся сеть</option>
+              {stores.map((store) => (
+                <option key={store.id} value={store.id}>
+                  {store.name}
                 </option>
               ))}
             </select>
@@ -260,24 +315,124 @@ export function StaffTaskCreateForm({
           </label>
         </div>
 
-        <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_1fr_1fr]">
-          <label className="space-y-1">
-            <span className="text-xs font-bold uppercase text-zinc-500">
-              Клуб
-            </span>
-            <select
-              name="storeId"
-              className="h-11 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950"
-            >
-              <option value="">Вся сеть</option>
-              {stores.map((store) => (
-                <option key={store.id} value={store.id}>
-                  {store.name}
-                </option>
-              ))}
-            </select>
-          </label>
+        <fieldset className="mt-3 rounded-lg border border-dashed border-zinc-200 p-3 dark:border-zinc-800">
+          <legend className="px-1 text-xs font-bold uppercase text-zinc-500">
+            Ответственные
+          </legend>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <p className="text-sm font-semibold">
+                Выбрано: {selectedCount}
+              </p>
+              <p className="mt-1 text-xs leading-5 text-zinc-500">
+                Отметьте клуб целиком или отдельных сотрудников. Для администраторов доступны только администраторы и стажеры.
+              </p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <label className={assignmentModeClass(assignmentMode === "ANY_OF")}>
+                <input
+                  type="radio"
+                  name="assignmentMode"
+                  value="ANY_OF"
+                  checked={assignmentMode === "ANY_OF"}
+                  onChange={() => setAssignmentMode("ANY_OF")}
+                  className="sr-only"
+                />
+                <span>Одна общая</span>
+                <span className="text-[11px] font-normal text-zinc-500">
+                  Выполнит любой из выбранных
+                </span>
+              </label>
+              <label
+                className={assignmentModeClass(assignmentMode === "INDIVIDUAL")}
+              >
+                <input
+                  type="radio"
+                  name="assignmentMode"
+                  value="INDIVIDUAL"
+                  checked={assignmentMode === "INDIVIDUAL"}
+                  onChange={() => setAssignmentMode("INDIVIDUAL")}
+                  className="sr-only"
+                />
+                <span>Каждому отдельно</span>
+                <span className="text-[11px] font-normal text-zinc-500">
+                  Будет создана задача на каждого
+                </span>
+              </label>
+            </div>
+          </div>
 
+          <div className="mt-3 flex flex-wrap gap-2">
+            <CheckPill
+              label="Весь персонал"
+              count={assigneeUsers.length}
+              checked={allAssigneesSelected}
+              disabled={assigneeUsers.length === 0}
+              onChange={(checked) =>
+                setMany(
+                  assigneeUsers.map((user) => user.id),
+                  checked,
+                )
+              }
+            />
+            {activeStores.map((store) => {
+              const storeUsers = assigneeUsers.filter((user) =>
+                userStoreIds(user).includes(store.id),
+              );
+              const checked =
+                storeUsers.length > 0 &&
+                storeUsers.every((user) => selectedAssigneeIds.has(user.id));
+
+              return (
+                <CheckPill
+                  key={store.id}
+                  label={store.name}
+                  count={storeUsers.length}
+                  checked={checked}
+                  disabled={storeUsers.length === 0}
+                  onChange={(nextChecked) => toggleStore(store, nextChecked)}
+                />
+              );
+            })}
+          </div>
+
+          <div className="mt-3 grid gap-3 lg:grid-cols-2">
+            {activeStores.map((store) => {
+              const storeUsers = assigneeUsers.filter((user) =>
+                userStoreIds(user).includes(store.id),
+              );
+
+              if (storeUsers.length === 0) {
+                return null;
+              }
+
+              return (
+                <AssigneeGroup
+                  key={store.id}
+                  title={store.name}
+                  users={storeUsers}
+                  selectedAssigneeIds={selectedAssigneeIds}
+                  onToggle={(id, checked) => setMany([id], checked)}
+                />
+              );
+            })}
+            {usersWithoutStore.length > 0 ? (
+              <AssigneeGroup
+                title="Вся сеть / без клуба"
+                users={usersWithoutStore}
+                selectedAssigneeIds={selectedAssigneeIds}
+                onToggle={(id, checked) => setMany([id], checked)}
+              />
+            ) : null}
+            {assigneeUsers.length === 0 ? (
+              <p className="rounded-md border border-zinc-200 px-3 py-2 text-sm text-zinc-500 dark:border-zinc-800">
+                Нет доступных сотрудников для назначения.
+              </p>
+            ) : null}
+          </div>
+        </fieldset>
+
+        <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_1fr]">
           <label className="space-y-1">
             <span className="text-xs font-bold uppercase text-zinc-500">
               Тип
@@ -319,13 +474,11 @@ export function StaffTaskCreateForm({
               {needsConfirmation ? "Подтверждение задачи" : "Наблюдатели"}
             </legend>
             <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <p className="mt-1 text-xs leading-5 text-zinc-500">
-                  {needsConfirmation
-                    ? "Постановку задачи должен подтвердить старший администратор, управляющий клубом или менеджер по стандартам."
-                    : "Получают задачу в свой список наблюдения, но не становятся ответственными."}
-                </p>
-              </div>
+              <p className="mt-1 text-xs leading-5 text-zinc-500">
+                {needsConfirmation
+                  ? "Постановку задачи должен подтвердить старший администратор, управляющий клубом или менеджер по стандартам."
+                  : "Получают задачу в список наблюдения, но не становятся ответственными."}
+              </p>
               <span className="text-xs font-semibold text-zinc-500">
                 {needsConfirmation
                   ? "Обязательно выбрать"
@@ -334,25 +487,12 @@ export function StaffTaskCreateForm({
             </div>
             <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {observerUsers.map((user) => (
-                <label
+                <UserCheckbox
                   key={user.id}
-                  className="flex min-h-10 items-center gap-2 rounded-md border border-zinc-200 px-3 py-2 text-sm transition hover:border-emerald-300 hover:bg-emerald-50 dark:border-zinc-800 dark:hover:border-emerald-500/70 dark:hover:bg-emerald-500/10"
-                >
-                  <input
-                    name="observerUserIds"
-                    type="checkbox"
-                    value={user.id}
-                    className="h-4 w-4 rounded border-zinc-300 text-emerald-500 focus:ring-emerald-500"
-                  />
-                  <span className="min-w-0">
-                    <span className="block truncate">
-                      {user.fullName ?? user.email}
-                    </span>
-                    <span className="block truncate text-[11px] text-zinc-500">
-                      {roleLabels[user.role] ?? user.role}
-                    </span>
-                  </span>
-                </label>
+                  user={user}
+                  name="observerUserIds"
+                  checked={undefined}
+                />
               ))}
               {observerUsers.length === 0 ? (
                 <p className="rounded-md border border-zinc-200 px-3 py-2 text-sm text-zinc-500 dark:border-zinc-800">
@@ -383,4 +523,126 @@ export function StaffTaskCreateForm({
       </form>
     </section>
   );
+}
+
+function AssigneeGroup({
+  title,
+  users,
+  selectedAssigneeIds,
+  onToggle,
+}: {
+  title: string;
+  users: StaffTaskUser[];
+  selectedAssigneeIds: Set<string>;
+  onToggle: (id: string, checked: boolean) => void;
+}) {
+  return (
+    <div className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm font-semibold">{title}</p>
+        <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
+          {users.length}
+        </span>
+      </div>
+      <div className="mt-2 grid gap-2">
+        {users.map((user) => (
+          <UserCheckbox
+            key={user.id}
+            user={user}
+            name="assigneeUserIds"
+            checked={selectedAssigneeIds.has(user.id)}
+            onChange={(checked) => onToggle(user.id, checked)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function UserCheckbox({
+  user,
+  name,
+  checked,
+  onChange,
+}: {
+  user: StaffTaskUser;
+  name: string;
+  checked?: boolean;
+  onChange?: (checked: boolean) => void;
+}) {
+  const controlled = checked !== undefined;
+
+  return (
+    <label className="flex min-h-10 items-center gap-2 rounded-md border border-zinc-200 px-3 py-2 text-sm transition hover:border-emerald-300 hover:bg-emerald-50 dark:border-zinc-800 dark:hover:border-emerald-500/70 dark:hover:bg-emerald-500/10">
+      <input
+        name={name}
+        type="checkbox"
+        value={user.id}
+        {...(controlled ? { checked } : {})}
+        onChange={(event) => onChange?.(event.target.checked)}
+        className="h-4 w-4 rounded border-zinc-300 text-emerald-500 focus:ring-emerald-500"
+      />
+      <span className="min-w-0">
+        <span className="block truncate">{userLabel(user)}</span>
+        <span className="block truncate text-[11px] text-zinc-500">
+          {roleLabels[user.role] ?? user.role}
+        </span>
+      </span>
+    </label>
+  );
+}
+
+function CheckPill({
+  label,
+  count,
+  checked,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  count: number;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label
+      className={[
+        "inline-flex min-h-9 items-center gap-2 rounded-full border px-3 text-xs font-semibold transition",
+        checked
+          ? "border-emerald-400 bg-emerald-50 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-200"
+          : "border-zinc-200 text-zinc-600 hover:border-emerald-300 dark:border-zinc-800 dark:text-zinc-300 dark:hover:border-emerald-500/70",
+        disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer",
+      ].join(" ")}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+        className="h-4 w-4 rounded border-zinc-300 text-emerald-500 focus:ring-emerald-500"
+      />
+      <span>{label}</span>
+      <span className="rounded-full bg-zinc-950/5 px-1.5 py-0.5 text-[11px] dark:bg-white/10">
+        {count}
+      </span>
+    </label>
+  );
+}
+
+function assignmentModeClass(active: boolean) {
+  return [
+    "flex cursor-pointer flex-col rounded-md border px-3 py-2 text-sm font-semibold transition",
+    active
+      ? "border-emerald-400 bg-emerald-50 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-200"
+      : "border-zinc-200 text-zinc-700 hover:border-emerald-300 dark:border-zinc-800 dark:text-zinc-200 dark:hover:border-emerald-500/70",
+  ].join(" ");
+}
+
+function userLabel(user: StaffTaskUser) {
+  return user.fullName ?? user.email;
+}
+
+function userStoreIds(user: StaffTaskUser) {
+  return user.stores?.map((store) => store.id) ?? [];
 }

@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { Prisma, UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
@@ -60,6 +61,7 @@ const taskSortKeys = [
   'status',
   'priority',
 ] as const;
+const taskAssignmentModes = ['SINGLE', 'ANY_OF', 'INDIVIDUAL'] as const;
 const taskReviewerRoles = [
   UserRole.OWNER,
   UserRole.ADMIN,
@@ -88,6 +90,7 @@ export type StaffTaskViewMode = (typeof taskViewModes)[number];
 export type StaffTaskType = (typeof taskTypes)[number];
 export type StaffTaskPriority = (typeof taskPriorities)[number];
 export type StaffTaskSortKey = (typeof taskSortKeys)[number];
+export type StaffTaskAssignmentMode = (typeof taskAssignmentModes)[number];
 
 export type StaffTasksQuery = {
   view?: StaffTaskViewMode;
@@ -121,6 +124,8 @@ export type StaffTaskDto = {
   storeId?: string | null;
   shiftId?: string | null;
   assignedToUserId?: string | null;
+  assignedToUserIds?: unknown;
+  assignmentMode?: StaffTaskAssignmentMode;
   observerUserIds?: unknown;
   labels?: unknown;
   checklist?: unknown;
@@ -178,6 +183,7 @@ export type StaffTaskReport = {
     email: string;
     fullName: string | null;
     role: UserRole;
+    stores: Array<{ id: string; name: string; isActive: boolean }>;
   }>;
   stores: Array<{ id: string; name: string; isActive: boolean }>;
 };
@@ -205,6 +211,7 @@ type StaffTaskStatusContext = {
   id: string;
   status: string;
   assignedToUserId: string | null;
+  labels: Prisma.JsonValue | null;
 };
 
 export type StaffTaskResponse = {
@@ -266,6 +273,7 @@ export type StaffTaskUserResponse = {
   email: string;
   fullName: string | null;
   role: UserRole;
+  stores?: Array<{ id: string; name: string; isActive: boolean }>;
 };
 
 const taskInclude = {
@@ -377,7 +385,22 @@ export class StaffTasksService {
         }),
         this.prisma.user.findMany({
           where: { tenantId, isActive: true },
-          select: { id: true, email: true, fullName: true, role: true },
+          select: {
+            id: true,
+            email: true,
+            fullName: true,
+            role: true,
+            staffMember: {
+              select: {
+                store: { select: { id: true, name: true, isActive: true } },
+              },
+            },
+            storeAccesses: {
+              select: {
+                store: { select: { id: true, name: true, isActive: true } },
+              },
+            },
+          },
           orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
         }),
         this.prisma.store.findMany({
@@ -393,7 +416,33 @@ export class StaffTasksService {
       quickViews: this.buildQuickViews(quickRows, user.id),
       groups: this.buildGroups(groupRows),
       rows: rows.map((task) => this.toTaskResponse(task)),
-      users,
+      users: users.map((reportUser) => {
+        const storesById = new Map<
+          string,
+          { id: string; name: string; isActive: boolean }
+        >();
+
+        if (reportUser.staffMember?.store) {
+          storesById.set(
+            reportUser.staffMember.store.id,
+            reportUser.staffMember.store,
+          );
+        }
+
+        reportUser.storeAccesses.forEach((access) => {
+          storesById.set(access.store.id, access.store);
+        });
+
+        return {
+          id: reportUser.id,
+          email: reportUser.email,
+          fullName: reportUser.fullName,
+          role: reportUser.role,
+          stores: Array.from(storesById.values()).sort((left, right) =>
+            left.name.localeCompare(right.name),
+          ),
+        };
+      }),
       stores,
     };
   }
@@ -448,58 +497,117 @@ export class StaffTasksService {
     });
     const observerUserIds =
       (await this.resolveObserverUserIds(tenantId, dto.observerUserIds)) ?? [];
-    const assignedToUserId =
+    const fallbackAssignedToUserId =
       typeof data.assignedToUserId === 'string' ? data.assignedToUserId : null;
+    const assignedToUserIds = await this.resolveAssignedUserIds(
+      tenantId,
+      dto.assignedToUserIds,
+      fallbackAssignedToUserId,
+    );
+    const assignmentMode = this.resolveAssignmentMode(
+      dto.assignmentMode,
+      assignedToUserIds.length,
+    );
     const status = (data.status as StaffTaskStatus | undefined) ?? 'OPEN';
 
     await this.assertTaskCreationPolicy(
       tenantId,
       user,
-      assignedToUserId,
+      assignedToUserIds,
       observerUserIds,
     );
 
-    const task = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.staffTask.create({
-        data: {
-          ...(data as Prisma.StaffTaskUncheckedCreateInput),
-          tenantId,
-          status,
-          createdByUserId: user.id,
-          completedAt: status === 'DONE' ? new Date() : null,
-        },
-        select: { id: true },
-      });
+    const tasks = await this.prisma.$transaction(async (tx) => {
+      const createdTasks: StaffTaskRow[] = [];
+      const groupId =
+        assignmentMode === 'INDIVIDUAL' && assignedToUserIds.length > 1
+          ? randomUUID()
+          : null;
+      const taskTargets =
+        assignmentMode === 'INDIVIDUAL' && assignedToUserIds.length > 0
+          ? assignedToUserIds
+          : [
+              assignmentMode === 'ANY_OF'
+                ? null
+                : (assignedToUserIds[0] ?? null),
+            ];
 
-      await tx.staffTaskAuditEvent.create({
-        data: {
-          tenantId,
-          taskId: created.id,
-          actorUserId: user.id,
-          action: 'CREATED',
-          message: 'Task created',
-          metadata: {
+      for (const targetUserId of taskTargets) {
+        const assignmentObserverUserIds =
+          assignmentMode === 'ANY_OF'
+            ? Array.from(new Set([...observerUserIds, ...assignedToUserIds]))
+            : observerUserIds;
+        const assignmentLabels = this.buildAssignmentLabels(data.labels, {
+          assignmentMode,
+          candidateUserIds:
+            assignmentMode === 'ANY_OF'
+              ? assignedToUserIds
+              : targetUserId
+                ? [targetUserId]
+                : [],
+          bulkTaskGroupId: groupId,
+          originalAssignedToUserIds: assignedToUserIds,
+        });
+        const created = await tx.staffTask.create({
+          data: {
+            ...(data as Prisma.StaffTaskUncheckedCreateInput),
+            tenantId,
             status,
-            priority: data.priority ?? 'NORMAL',
-            type: data.type ?? 'ONE_TIME',
-            observerUserIds,
+            assignedToUserId: targetUserId,
+            labels: assignmentLabels,
+            createdByUserId: user.id,
+            completedAt: status === 'DONE' ? new Date() : null,
           },
-        },
-      });
+          select: { id: true },
+        });
 
-      await this.syncTaskObservers(tx, tenantId, created.id, observerUserIds);
+        await tx.staffTaskAuditEvent.create({
+          data: {
+            tenantId,
+            taskId: created.id,
+            actorUserId: user.id,
+            action: 'CREATED',
+            message: 'Task created',
+            metadata: {
+              status,
+              priority: data.priority ?? 'NORMAL',
+              type: data.type ?? 'ONE_TIME',
+              observerUserIds: assignmentObserverUserIds,
+              assignedToUserIds,
+              assignmentMode,
+              bulkTaskGroupId: groupId,
+            },
+          },
+        });
 
-      const task = await this.fetchTaskOrThrow(tx, tenantId, created.id);
-      await this.staffTeamChatService.createSystemNotification(
-        tenantId,
-        this.buildTaskCreatedNotification(task),
-        tx,
-      );
+        await this.syncTaskObservers(
+          tx,
+          tenantId,
+          created.id,
+          assignmentObserverUserIds,
+        );
 
-      return task;
+        const task = await this.fetchTaskOrThrow(tx, tenantId, created.id);
+        await this.staffTeamChatService.createSystemNotification(
+          tenantId,
+          this.buildTaskCreatedNotification(task),
+          tx,
+        );
+        createdTasks.push(task);
+      }
+
+      return createdTasks;
     });
 
-    return this.toTaskResponse(task);
+    if (tasks.length === 1) {
+      return this.toTaskResponse(tasks[0]);
+    }
+
+    return {
+      assignmentMode,
+      createdCount: tasks.length,
+      tasks: tasks.map((task) => this.toTaskResponse(task)),
+    };
   }
 
   async updateTask(user: AuthenticatedUser, id: string, dto: StaffTaskDto) {
@@ -510,6 +618,7 @@ export class StaffTasksService {
         id: true,
         status: true,
         assignedToUserId: true,
+        labels: true,
       },
     });
 
@@ -614,6 +723,7 @@ export class StaffTasksService {
         id: true,
         status: true,
         assignedToUserId: true,
+        labels: true,
       },
     });
 
@@ -820,7 +930,24 @@ export class StaffTasksService {
     if (filters.assignedToUserId) {
       where.assignedToUserId = filters.assignedToUserId;
     } else if (includeStatus && filters.view === 'my') {
-      where.assignedToUserId = currentUserId;
+      and.push({
+        OR: [
+          { assignedToUserId: currentUserId },
+          {
+            AND: [
+              {
+                labels: {
+                  path: ['assignmentMode'],
+                  equals: 'ANY_OF',
+                },
+              },
+              {
+                observers: { some: { userId: currentUserId } },
+              },
+            ],
+          },
+        ],
+      });
     }
 
     if (filters.observerUserId) {
@@ -1096,8 +1223,11 @@ export class StaffTasksService {
       {
         key: 'my',
         label: 'Мои',
-        count: rows.filter((row) => row.assignedToUserId === currentUserId)
-          .length,
+        count: rows.filter(
+          (row) =>
+            row.assignedToUserId === currentUserId ||
+            this.isAnyOfTaskForUser(row, currentUserId),
+        ).length,
       },
       {
         key: 'watched',
@@ -1310,7 +1440,10 @@ export class StaffTasksService {
     user: AuthenticatedUser,
     current: StaffTaskStatusContext,
   ) {
-    if (current.assignedToUserId === user.id) {
+    if (
+      current.assignedToUserId === user.id ||
+      this.taskCandidateUserIds(current).includes(user.id)
+    ) {
       throw new ForbiddenException('You cannot approve your own task');
     }
 
@@ -1325,7 +1458,11 @@ export class StaffTasksService {
     user: AuthenticatedUser,
     current: StaffTaskStatusContext,
   ) {
-    if (current.assignedToUserId === user.id || this.canReviewTask(user)) {
+    if (
+      current.assignedToUserId === user.id ||
+      this.taskCandidateUserIds(current).includes(user.id) ||
+      this.canReviewTask(user)
+    ) {
       return;
     }
 
@@ -1348,7 +1485,11 @@ export class StaffTasksService {
     user: AuthenticatedUser,
     current: StaffTaskStatusContext,
   ) {
-    if (current.assignedToUserId === user.id || this.canReviewTask(user)) {
+    if (
+      current.assignedToUserId === user.id ||
+      this.taskCandidateUserIds(current).includes(user.id) ||
+      this.canReviewTask(user)
+    ) {
       return;
     }
 
@@ -1388,10 +1529,147 @@ export class StaffTasksService {
     );
   }
 
+  private resolveAssignmentMode(
+    value: StaffTaskAssignmentMode | undefined,
+    assignedCount: number,
+  ): StaffTaskAssignmentMode {
+    const mode = this.resolveOne(value, taskAssignmentModes, 'SINGLE');
+
+    if (mode === 'ANY_OF' && assignedCount === 0) {
+      throw new BadRequestException(
+        'Для общей задачи выберите хотя бы одного ответственного.',
+      );
+    }
+
+    if (mode === 'INDIVIDUAL' && assignedCount === 0) {
+      throw new BadRequestException(
+        'Для отдельных задач выберите ответственных.',
+      );
+    }
+
+    if (mode === 'SINGLE' && assignedCount > 1) {
+      return 'INDIVIDUAL';
+    }
+
+    return mode;
+  }
+
+  private async resolveAssignedUserIds(
+    tenantId: string,
+    value: unknown,
+    fallbackUserId: string | null,
+  ) {
+    const rawValues = Array.isArray(value)
+      ? value
+      : typeof value === 'string'
+        ? value.split(',')
+        : fallbackUserId
+          ? [fallbackUserId]
+          : [];
+    const ids = Array.from(
+      new Set(
+        rawValues
+          .map((item) => (typeof item === 'string' ? item.trim() : ''))
+          .filter(Boolean),
+      ),
+    );
+
+    if (ids.length === 0) {
+      return [];
+    }
+
+    const users = await this.prisma.user.findMany({
+      where: { tenantId, id: { in: ids }, isActive: true },
+      select: { id: true },
+    });
+    const foundIds = new Set(users.map((assignedUser) => assignedUser.id));
+    const missingId = ids.find((id) => !foundIds.has(id));
+
+    if (missingId) {
+      throw new BadRequestException('Assigned user not found');
+    }
+
+    return ids;
+  }
+
+  private buildAssignmentLabels(
+    value: Prisma.StaffTaskUncheckedUpdateInput['labels'],
+    assignment: {
+      assignmentMode: StaffTaskAssignmentMode;
+      candidateUserIds: string[];
+      bulkTaskGroupId: string | null;
+      originalAssignedToUserIds: string[];
+    },
+  ) {
+    const labels =
+      value && typeof value === 'object' && !Array.isArray(value)
+        ? { ...(value as Record<string, unknown>) }
+        : {};
+
+    if (
+      assignment.assignmentMode === 'SINGLE' &&
+      assignment.candidateUserIds.length <= 1 &&
+      !assignment.bulkTaskGroupId
+    ) {
+      return labels as Prisma.InputJsonValue;
+    }
+
+    return {
+      ...labels,
+      assignmentMode: assignment.assignmentMode,
+      candidateUserIds: assignment.candidateUserIds,
+      originalAssignedToUserIds: assignment.originalAssignedToUserIds,
+      ...(assignment.bulkTaskGroupId
+        ? { bulkTaskGroupId: assignment.bulkTaskGroupId }
+        : {}),
+    } satisfies Prisma.InputJsonValue;
+  }
+
+  private taskLabelRecord(task: { labels: Prisma.JsonValue | null }) {
+    if (
+      task.labels &&
+      typeof task.labels === 'object' &&
+      !Array.isArray(task.labels)
+    ) {
+      return task.labels as Record<string, unknown>;
+    }
+
+    return null;
+  }
+
+  private taskCandidateUserIds(task: { labels: Prisma.JsonValue | null }) {
+    const labels = this.taskLabelRecord(task);
+    const candidateUserIds = labels?.candidateUserIds;
+
+    return Array.isArray(candidateUserIds)
+      ? candidateUserIds.filter(
+          (candidateUserId): candidateUserId is string =>
+            typeof candidateUserId === 'string' && candidateUserId.length > 0,
+        )
+      : [];
+  }
+
+  private isAnyOfTaskForUser(
+    task: {
+      labels: Prisma.JsonValue | null;
+      observers?: Array<{ userId: string }>;
+    },
+    userId: string,
+  ) {
+    const labels = this.taskLabelRecord(task);
+
+    return (
+      labels?.assignmentMode === 'ANY_OF' &&
+      this.taskCandidateUserIds(task).includes(userId) &&
+      (!task.observers ||
+        task.observers.some((observer) => observer.userId === userId))
+    );
+  }
+
   private async assertTaskCreationPolicy(
     tenantId: string,
     user: AuthenticatedUser,
-    assignedToUserId: string | null,
+    assignedToUserIds: string[],
     observerUserIds: string[],
   ) {
     const staffOnly = this.mustCreateTaskForStaffOnly(user);
@@ -1401,26 +1679,28 @@ export class StaffTasksService {
       return;
     }
 
-    if (!assignedToUserId) {
+    if (assignedToUserIds.length === 0) {
       throw new BadRequestException(
         'Выберите ответственного администратора или стажера.',
       );
     }
 
-    const assignedUser = await this.prisma.user.findFirst({
-      where: { id: assignedToUserId, tenantId, isActive: true },
+    const assignedUsers = await this.prisma.user.findMany({
+      where: { id: { in: assignedToUserIds }, tenantId, isActive: true },
       select: { id: true, role: true },
     });
 
-    if (!assignedUser) {
+    if (assignedUsers.length !== assignedToUserIds.length) {
       throw new BadRequestException('Assigned user not found');
     }
 
-    if (
-      !(taskStaffAssigneeRoles as readonly UserRole[]).includes(
+    const hasOnlyAllowedAssignedUsers = assignedUsers.every((assignedUser) =>
+      (taskStaffAssigneeRoles as readonly UserRole[]).includes(
         assignedUser.role,
-      )
-    ) {
+      ),
+    );
+
+    if (!hasOnlyAllowedAssignedUsers) {
       throw new ForbiddenException(
         user.role === UserRole.SENIOR_ADMINISTRATOR
           ? 'Старший администратор может назначать задачи только администраторам и стажерам.'
@@ -1432,7 +1712,7 @@ export class StaffTasksService {
       return;
     }
 
-    if (assignedUser.id === user.id) {
+    if (assignedUsers.some((assignedUser) => assignedUser.id === user.id)) {
       throw new ForbiddenException('Нельзя назначить задачу самому себе.');
     }
 

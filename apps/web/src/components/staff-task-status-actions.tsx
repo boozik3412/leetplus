@@ -28,6 +28,7 @@ type StaffTaskStatusActionsProps = {
   taskId: string;
   status: StaffTaskStatus;
   assignedToUser: StaffTaskUser | null;
+  candidateUserIds?: string[];
   currentUser: Pick<AuthUser, "id" | "role" | "isPlatformAdmin">;
 };
 
@@ -35,6 +36,7 @@ export function StaffTaskStatusActions({
   taskId,
   status,
   assignedToUser,
+  candidateUserIds = [],
   currentUser,
 }: StaffTaskStatusActionsProps) {
   const router = useRouter();
@@ -73,7 +75,12 @@ export function StaffTaskStatusActions({
     }
   }
 
-  const actions = getStatusActions(status, assignedToUser, currentUser);
+  const actions = getStatusActions(
+    status,
+    assignedToUser,
+    candidateUserIds,
+    currentUser,
+  );
   const isTerminal = status === "DONE" || status === "CANCELED";
   const canCancel = canCancelTask(currentUser);
 
@@ -114,10 +121,11 @@ export function StaffTaskStatusActions({
 function getStatusActions(
   status: StaffTaskStatus,
   assignedToUser: StaffTaskUser | null,
+  candidateUserIds: string[],
   currentUser: Pick<AuthUser, "id" | "role" | "isPlatformAdmin">,
 ) {
   const actions: StaffTaskStatusAction[] = [];
-  const canMove = canMoveTask(assignedToUser, currentUser);
+  const canMove = canMoveTask(assignedToUser, candidateUserIds, currentUser);
 
   if (status === "OPEN" && canMove) {
     actions.push({
@@ -136,7 +144,7 @@ function getStatusActions(
   }
 
   if (status === "ON_REVIEW") {
-    if (canReturnTask(assignedToUser, currentUser)) {
+    if (canReturnTask(assignedToUser, candidateUserIds, currentUser)) {
       actions.push({
         status: "IN_PROGRESS",
         label: "Вернуть в работу",
@@ -144,7 +152,7 @@ function getStatusActions(
       });
     }
 
-    if (canApproveTask(assignedToUser, currentUser)) {
+    if (canApproveTask(assignedToUser, candidateUserIds, currentUser)) {
       actions.push({
         status: "DONE",
         label: "Готово",
@@ -158,27 +166,32 @@ function getStatusActions(
 
 function canApproveTask(
   assignedToUser: StaffTaskUser | null,
+  candidateUserIds: string[],
   currentUser: Pick<AuthUser, "id" | "role" | "isPlatformAdmin">,
 ) {
   return (
     assignedToUser?.id !== currentUser.id &&
+    !candidateUserIds.includes(currentUser.id) &&
     (currentUser.isPlatformAdmin || reviewerRoles.has(currentUser.role))
   );
 }
 
 function canReturnTask(
   assignedToUser: StaffTaskUser | null,
+  candidateUserIds: string[],
   currentUser: Pick<AuthUser, "id" | "role" | "isPlatformAdmin">,
 ) {
-  return canMoveTask(assignedToUser, currentUser);
+  return canMoveTask(assignedToUser, candidateUserIds, currentUser);
 }
 
 function canMoveTask(
   assignedToUser: StaffTaskUser | null,
+  candidateUserIds: string[],
   currentUser: Pick<AuthUser, "id" | "role" | "isPlatformAdmin">,
 ) {
   return (
     assignedToUser?.id === currentUser.id ||
+    candidateUserIds.includes(currentUser.id) ||
     currentUser.isPlatformAdmin ||
     reviewerRoles.has(currentUser.role)
   );

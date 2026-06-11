@@ -45,6 +45,7 @@ export type StaffTaskUser = {
   email: string;
   fullName: string | null;
   role: StaffTaskUserRole;
+  stores?: StaffTaskStore[];
 };
 
 export type StaffTaskStore = {

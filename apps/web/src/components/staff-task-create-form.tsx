@@ -270,7 +270,12 @@ export function StaffTaskCreateForm({
         </div>
       </div>
 
-      <form id="staff-task-create-form" onSubmit={submit} hidden={!isExpanded}>
+      <form
+        id="staff-task-create-form"
+        onSubmit={submit}
+        hidden={!isExpanded}
+        noValidate
+      >
         <div className="mt-4 grid gap-3 lg:grid-cols-[1.4fr_1fr_1fr]">
           <label className="space-y-1">
             <span className="text-xs font-bold uppercase text-zinc-500">

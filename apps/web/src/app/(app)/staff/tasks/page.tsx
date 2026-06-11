@@ -276,6 +276,34 @@ function taskCandidateUserIds(task: StaffTask) {
     : [];
 }
 
+function taskAssigneeLabel(task: StaffTask, users: StaffTask["assignedToUser"][]) {
+  const assignedLabel = userLabel(task.assignedToUser);
+
+  if (assignedLabel) {
+    return assignedLabel;
+  }
+
+  const labels = taskLabelsRecord(task);
+
+  if (labels?.assignmentMode !== "ANY_OF") {
+    return null;
+  }
+
+  const candidates = new Set(taskCandidateUserIds(task));
+  const candidateLabels = users
+    .filter((user): user is NonNullable<typeof user> =>
+      Boolean(user && candidates.has(user.id)),
+    )
+    .map((user) => userLabel(user))
+    .filter(Boolean);
+
+  if (candidateLabels.length === 0) {
+    return candidates.size > 0 ? `Любой из ${candidates.size}` : null;
+  }
+
+  return `Любой из: ${candidateLabels.join(", ")}`;
+}
+
 function statusBadgeClass(task: StaffTask) {
   const base =
     "inline-flex rounded-full px-2.5 py-1 text-xs font-semibold uppercase";
@@ -763,7 +791,8 @@ export default async function StaffTasksPage({
                           Ответственный
                         </dt>
                         <dd>
-                          {userLabel(task.assignedToUser) ?? "Не назначен"}
+                          {taskAssigneeLabel(task, report.users) ??
+                            "Не назначен"}
                         </dd>
                       </div>
                       <div>

@@ -1931,7 +1931,7 @@ export class StaffTasksService {
   private buildTaskNotificationDetails(task: StaffTaskRow) {
     return [
       task.store ? `Клуб: ${task.store.name}` : 'Клуб: вся сеть',
-      `Ответственный: ${staffUserLabel(task.assignedToUser) ?? 'Не назначен'}`,
+      `Ответственный: ${this.taskAssigneeLabel(task) ?? 'Не назначен'}`,
       task.dueAt ? `Срок: ${formatStaffDateTime(task.dueAt)}` : null,
       `Приоритет: ${this.taskPriorityLabel(task.priority as StaffTaskPriority)}`,
       `Тип: ${this.taskTypeLabel(task.type as StaffTaskType)}`,
@@ -2021,7 +2021,7 @@ export class StaffTasksService {
       this.taskTypeLabel(task.type),
       this.taskPriorityLabel(task.priority),
       task.store?.name ?? null,
-      staffUserLabel(task.assignedToUser),
+      this.taskAssigneeLabel(task),
       task.observers
         .map((observer) => staffUserLabel(observer.user))
         .join(', '),
@@ -2034,6 +2034,38 @@ export class StaffTasksService {
       latestComment?.evidenceLabel ?? latestComment?.evidenceUrl ?? null,
       task.description,
     ];
+  }
+
+  private taskAssigneeLabel(task: {
+    assignedToUser: StaffTaskUserResponse | null;
+    observers: Array<{ userId?: string; user: StaffTaskUserResponse }>;
+    labels: Prisma.JsonValue | null;
+  }) {
+    const assignedLabel = staffUserLabel(task.assignedToUser);
+
+    if (assignedLabel) {
+      return assignedLabel;
+    }
+
+    const labels = this.taskLabelRecord(task);
+
+    if (labels?.assignmentMode !== 'ANY_OF') {
+      return null;
+    }
+
+    const candidateIds = new Set(this.taskCandidateUserIds(task));
+    const candidateLabels = task.observers
+      .filter((observer) =>
+        candidateIds.has(observer.userId ?? observer.user.id),
+      )
+      .map((observer) => staffUserLabel(observer.user))
+      .filter(Boolean);
+
+    if (candidateLabels.length === 0) {
+      return candidateIds.size > 0 ? `Любой из ${candidateIds.size}` : null;
+    }
+
+    return `Любой из: ${candidateLabels.join(', ')}`;
   }
 
   private taskStatusLabel(status: StaffTaskStatus) {

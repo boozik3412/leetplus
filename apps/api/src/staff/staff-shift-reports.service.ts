@@ -206,9 +206,10 @@ export class StaffShiftReportsService {
       activeShift = await this.findShiftById(tenantId, activeShift.id, storeId);
     }
 
+    const reportStoreId = activeShift?.storeId ?? storeId;
     const shiftOptions = await this.findShiftOptions(
       tenantId,
-      storeId,
+      reportStoreId,
       activeShift?.id ?? requestedShiftId ?? null,
       now,
     );
@@ -217,18 +218,18 @@ export class StaffShiftReportsService {
     const checklists = await this.findChecklistRuns(
       tenantId,
       user.id,
-      storeId,
+      reportStoreId,
       since,
     );
     const tasks = await this.findCompletedTasks(
       tenantId,
       user.id,
-      storeId,
+      reportStoreId,
       since,
     );
     const financials = await this.resolveFinancials(
       tenantId,
-      storeId,
+      reportStoreId,
       activeShift,
       now,
     );
@@ -243,7 +244,7 @@ export class StaffShiftReportsService {
 
     return {
       generatedAt: now.toISOString(),
-      storeId,
+      storeId: reportStoreId,
       selectedShiftId: activeShift?.id ?? null,
       clubName,
       dateLabel,
@@ -340,11 +341,23 @@ export class StaffShiftReportsService {
     shiftId: string,
     storeId: string | null,
   ) {
-    return this.prisma.guestWorkingShift.findFirst({
+    const scopedShift = await this.prisma.guestWorkingShift.findFirst({
       where: {
         id: shiftId,
         tenantId,
         ...(storeId ? { storeId } : {}),
+      },
+      include: { store: { select: { id: true, name: true } } },
+    });
+
+    if (scopedShift || !storeId) {
+      return scopedShift;
+    }
+
+    return this.prisma.guestWorkingShift.findFirst({
+      where: {
+        id: shiftId,
+        tenantId,
       },
       include: { store: { select: { id: true, name: true } } },
     });

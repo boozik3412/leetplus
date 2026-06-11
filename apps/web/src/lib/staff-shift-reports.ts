@@ -32,9 +32,21 @@ export type StaffShiftReportFinancials = {
   sourceNotes: string[];
 };
 
+export type StaffShiftReportShiftOption = {
+  id: string;
+  externalUserId: string | null;
+  operatorName: string;
+  storeName: string;
+  startedAt: string | null;
+  stoppedAt: string | null;
+  status: "OPEN" | "CLOSED";
+  isSelected: boolean;
+};
+
 export type StaffShiftReportDraft = {
   generatedAt: string;
   storeId: string | null;
+  selectedShiftId: string | null;
   clubName: string;
   dateLabel: string;
   dayPartLabel: string;
@@ -58,6 +70,8 @@ export type StaffShiftReportDraft = {
     completedAt: string | null;
   }>;
   attachments: StaffShiftReportAttachment[];
+  shiftOptions: StaffShiftReportShiftOption[];
+  syncWarnings: string[];
   financials: StaffShiftReportFinancials;
   missingData: string[];
   body: string;
@@ -69,14 +83,34 @@ export type StaffShiftReportSendResult = {
   chatHref: string;
 };
 
-export async function getStaffShiftReportDraft() {
-  const response = await fetch(`${getApiUrl()}/staff/shift-reports/draft`, {
+async function readReportApiError(response: Response) {
+  try {
+    const data = (await response.json()) as { message?: unknown };
+
+    if (typeof data.message === "string" && data.message.trim()) {
+      return data.message;
+    }
+  } catch {
+    // The backend can return an empty response on infrastructure errors.
+  }
+
+  return "Не удалось сформировать черновик отчета по смене.";
+}
+
+export async function getStaffShiftReportDraft(shiftId?: string | null) {
+  const url = new URL(`${getApiUrl()}/staff/shift-reports/draft`);
+
+  if (shiftId) {
+    url.searchParams.set("shiftId", shiftId);
+  }
+
+  const response = await fetch(url, {
     cache: "no-store",
     headers: await getAuthHeaders(),
   });
 
   if (!response.ok) {
-    throw new Error("Failed to fetch staff shift report draft");
+    throw new Error(await readReportApiError(response));
   }
 
   return response.json() as Promise<StaffShiftReportDraft>;

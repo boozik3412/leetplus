@@ -51,8 +51,10 @@ export function StaffShiftReportEditor({
 }: {
   draft: StaffShiftReportDraft;
 }) {
+  const [activeDraft, setActiveDraft] = useState(draft);
   const [body, setBody] = useState(draft.body);
   const [attachments, setAttachments] = useState(draft.attachments);
+  const [isRefreshingDraft, setIsRefreshingDraft] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<StaffShiftReportSendResult | null>(null);
@@ -60,6 +62,32 @@ export function StaffShiftReportEditor({
     () => attachments.map((attachment) => attachment.id).slice(0, 20),
     [attachments],
   );
+
+  async function refreshDraft(shiftId: string | null) {
+    setError(null);
+    setResult(null);
+    setIsRefreshingDraft(true);
+
+    const url = new URL("/api/staff/shift-reports/draft", window.location.origin);
+
+    if (shiftId) {
+      url.searchParams.set("shiftId", shiftId);
+    }
+
+    const response = await fetch(url, { cache: "no-store" });
+    setIsRefreshingDraft(false);
+
+    if (!response.ok) {
+      setError(await readResponseError(response));
+      return;
+    }
+
+    const nextDraft = (await response.json()) as StaffShiftReportDraft;
+
+    setActiveDraft(nextDraft);
+    setBody(nextDraft.body);
+    setAttachments(nextDraft.attachments);
+  }
 
   function appendAttachment(attachment: StaffAttachmentUploadResult) {
     const nextAttachment = toReportAttachment(attachment);
@@ -92,7 +120,7 @@ export function StaffShiftReportEditor({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         body,
-        storeId: draft.storeId,
+        storeId: activeDraft.storeId,
         attachmentIds,
       }),
     });
@@ -114,27 +142,72 @@ export function StaffShiftReportEditor({
           <p className="text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-300">
             Черновик отчета
           </p>
-          <h2 className="mt-1 text-xl font-semibold">{draft.clubName}</h2>
+          <h2 className="mt-1 text-xl font-semibold">{activeDraft.clubName}</h2>
           <p className="mt-1 text-sm text-zinc-500">
-            {draft.dateLabel} · {draft.dayPartLabel}
+            {activeDraft.dateLabel} · {activeDraft.dayPartLabel}
           </p>
         </div>
 
         <div className="space-y-2 text-sm">
-          <SummaryRow label="Администратор" value={draft.administratorName} />
+          <SummaryRow
+            label="Администратор"
+            value={activeDraft.administratorName}
+          />
           <SummaryRow
             label="Чек-листы"
-            value={`${draft.checklists.length}`}
+            value={`${activeDraft.checklists.length}`}
           />
-          <SummaryRow label="Задачи" value={`${draft.tasks.length}`} />
+          <SummaryRow label="Задачи" value={`${activeDraft.tasks.length}`} />
           <SummaryRow label="Файлы" value={`${attachments.length}`} />
         </div>
 
-        {draft.missingData.length > 0 ? (
+        {activeDraft.shiftOptions.length > 0 ? (
+          <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
+            <label className="block">
+              <span className="text-xs font-semibold uppercase text-zinc-500">
+                Смена Langame
+              </span>
+              <select
+                value={activeDraft.selectedShiftId ?? ""}
+                disabled={isRefreshingDraft}
+                onChange={(event) =>
+                  void refreshDraft(event.currentTarget.value || null)
+                }
+                className="mt-2 h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-semibold outline-none transition focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-950"
+              >
+                <option value="">Не выбрана</option>
+                {activeDraft.shiftOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {formatShiftOption(option)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={() => void refreshDraft(activeDraft.selectedShiftId)}
+              disabled={isRefreshingDraft}
+              className="mt-2 inline-flex h-9 items-center justify-center rounded-md border border-zinc-300 px-3 text-xs font-semibold text-zinc-700 transition hover:border-emerald-500 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-200"
+            >
+              {isRefreshingDraft ? "Обновляем..." : "Обновить данные"}
+            </button>
+          </div>
+        ) : null}
+
+        {activeDraft.syncWarnings.length > 0 ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+            <p className="font-semibold">Данные Langame нужно проверить</p>
+            <p className="mt-1 text-xs leading-5">
+              {activeDraft.syncWarnings.join(" ")}
+            </p>
+          </div>
+        ) : null}
+
+        {activeDraft.missingData.length > 0 ? (
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
             <p className="font-semibold">Заполнить вручную</p>
             <p className="mt-1 text-xs leading-5">
-              {draft.missingData.join(", ")}.
+              {activeDraft.missingData.join(", ")}.
             </p>
           </div>
         ) : null}
@@ -247,6 +320,22 @@ export function StaffShiftReportEditor({
       </section>
     </div>
   );
+}
+
+function formatShiftOption(
+  option: StaffShiftReportDraft["shiftOptions"][number],
+) {
+  const status = option.status === "OPEN" ? "открыта" : "закрыта";
+  const startedAt = option.startedAt
+    ? new Date(option.startedAt).toLocaleString("ru-RU", {
+        day: "2-digit",
+        month: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : "без времени";
+
+  return `${status} · ${startedAt} · ${option.operatorName}`;
 }
 
 function SummaryRow({ label, value }: { label: string; value: string }) {

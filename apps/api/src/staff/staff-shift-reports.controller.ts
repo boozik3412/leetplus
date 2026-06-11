@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -7,6 +7,7 @@ import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import {
   StaffShiftReportsService,
+  type StaffShiftReportDraftQuery,
   type StaffShiftReportSendDto,
 } from './staff-shift-reports.service';
 
@@ -28,8 +29,11 @@ export class StaffShiftReportsController {
   ) {}
 
   @Get('draft')
-  getDraft(@CurrentUser() user: AuthenticatedUser) {
-    return this.staffShiftReportsService.getDraft(user);
+  getDraft(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: StaffShiftReportDraftQuery,
+  ) {
+    return this.staffShiftReportsService.getDraft(user, query);
   }
 
   @Post('send')

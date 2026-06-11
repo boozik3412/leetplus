@@ -1,6 +1,14 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { IntegrationProvider, Prisma } from '@prisma/client';
+import { createHash } from 'node:crypto';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import { LangameClient } from '../integrations/langame.client';
+import { parseLangameDate as parseLangameDateValue } from '../integrations/langame-date';
+import { LangameSettingsService } from '../integrations/langame-settings.service';
+import type {
+  LangameProductExpense,
+  LangameWorkingShift,
+} from '../integrations/langame.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import {
@@ -9,6 +17,8 @@ import {
 } from './staff-team-chat.service';
 
 const SHIFT_REPORT_ATTACHMENT_LIMIT = 20;
+const SHIFT_REPORT_LANGAME_PAGE_LIMIT = 100;
+const SHIFT_REPORT_RECENT_WINDOW_HOURS = 96;
 
 export type StaffShiftReportAttachment = {
   id: string;
@@ -42,9 +52,21 @@ export type StaffShiftReportFinancials = {
   sourceNotes: string[];
 };
 
+export type StaffShiftReportShiftOption = {
+  id: string;
+  externalUserId: string | null;
+  operatorName: string;
+  storeName: string;
+  startedAt: string | null;
+  stoppedAt: string | null;
+  status: 'OPEN' | 'CLOSED';
+  isSelected: boolean;
+};
+
 export type StaffShiftReportDraft = {
   generatedAt: string;
   storeId: string | null;
+  selectedShiftId: string | null;
   clubName: string;
   dateLabel: string;
   dayPartLabel: string;
@@ -68,9 +90,15 @@ export type StaffShiftReportDraft = {
     completedAt: string | null;
   }>;
   attachments: StaffShiftReportAttachment[];
+  shiftOptions: StaffShiftReportShiftOption[];
+  syncWarnings: string[];
   financials: StaffShiftReportFinancials;
   missingData: string[];
   body: string;
+};
+
+export type StaffShiftReportDraftQuery = {
+  shiftId?: string | null;
 };
 
 export type StaffShiftReportSendDto = {
@@ -89,30 +117,50 @@ type ShiftReportActiveShift = Prisma.GuestWorkingShiftGetPayload<{
   include: { store: { select: { id: true; name: true } } };
 }>;
 
+type ShiftReportStore = {
+  id: string;
+  name: string;
+  timeZone: string | null;
+  externalDomain: string | null;
+  externalClubId: string | null;
+  integrationSourceId: string | null;
+};
+
+type ShiftReportSource = {
+  id: string;
+  domain: string;
+  baseUrl: string;
+};
+
 type ShiftReportSalesFact = Prisma.SalesFactGetPayload<{
   select: {
     revenue: true;
     quantity: true;
     productNameAtSale: true;
-    product: {
-      select: {
-        name: true;
-        category: { select: { name: true } };
-      };
-    };
+    externalProductId: true;
+    productId: true;
   };
-}>;
+}> & {
+  productName: string | null;
+  categoryName: string | null;
+};
 
 @Injectable()
 export class StaffShiftReportsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContextService: TenantContextService,
+    private readonly langameSettingsService: LangameSettingsService,
+    private readonly langameClient: LangameClient,
   ) {}
 
-  async getDraft(user: AuthenticatedUser): Promise<StaffShiftReportDraft> {
+  async getDraft(
+    user: AuthenticatedUser,
+    query: StaffShiftReportDraftQuery = {},
+  ): Promise<StaffShiftReportDraft> {
     const { tenantId } = await this.tenantContextService.resolve(user);
     const now = new Date();
+    const requestedShiftId = this.normalizeOptionalString(query.shiftId);
     const member = await this.prisma.staffMember.findFirst({
       where: { tenantId, userId: user.id },
       include: {
@@ -121,16 +169,48 @@ export class StaffShiftReportsService {
             id: true,
             name: true,
             timeZone: true,
+            externalDomain: true,
+            externalClubId: true,
+            integrationSourceId: true,
           },
         },
       },
     });
     const storeId = member?.storeId ?? null;
     const timeZone = member?.store?.timeZone ?? 'Asia/Yekaterinburg';
-    const activeShift = await this.findActiveShift(
+    const requestedShift = requestedShiftId
+      ? await this.findShiftById(tenantId, requestedShiftId, storeId)
+      : null;
+    const syncWarnings = await this.syncReportDataFromLangame(
+      tenantId,
+      member?.store ?? null,
+      requestedShift,
+      now,
+    );
+    let activeShift = await this.findReportShift(
       tenantId,
       storeId,
       member?.externalUserId ?? null,
+      requestedShiftId,
+      now,
+    );
+
+    if (activeShift) {
+      syncWarnings.push(
+        ...(await this.syncShiftProductSalesFromLangame(
+          tenantId,
+          activeShift,
+          now,
+        )),
+      );
+      activeShift = await this.findShiftById(tenantId, activeShift.id, storeId);
+    }
+
+    const shiftOptions = await this.findShiftOptions(
+      tenantId,
+      storeId,
+      activeShift?.id ?? requestedShiftId ?? null,
+      now,
     );
     const since =
       activeShift?.startedAt ?? new Date(now.getTime() - 24 * 60 * 60 * 1000);
@@ -164,6 +244,7 @@ export class StaffShiftReportsService {
     return {
       generatedAt: now.toISOString(),
       storeId,
+      selectedShiftId: activeShift?.id ?? null,
       clubName,
       dateLabel,
       dayPartLabel,
@@ -187,6 +268,8 @@ export class StaffShiftReportsService {
         completedAt: row.completedAt?.toISOString() ?? null,
       })),
       attachments,
+      shiftOptions,
+      syncWarnings,
       financials,
       missingData,
       body: this.buildDraftBody({
@@ -252,24 +335,577 @@ export class StaffShiftReportsService {
     };
   }
 
-  private async findActiveShift(
+  private async findShiftById(
+    tenantId: string,
+    shiftId: string,
+    storeId: string | null,
+  ) {
+    return this.prisma.guestWorkingShift.findFirst({
+      where: {
+        id: shiftId,
+        tenantId,
+        ...(storeId ? { storeId } : {}),
+      },
+      include: { store: { select: { id: true, name: true } } },
+    });
+  }
+
+  private async findReportShift(
     tenantId: string,
     storeId: string | null,
     externalUserId: string | null,
+    requestedShiftId: string | null,
+    now: Date,
   ) {
+    if (requestedShiftId) {
+      return this.findShiftById(tenantId, requestedShiftId, storeId);
+    }
+
     if (!externalUserId) {
       return null;
     }
+
+    const openShift = await this.prisma.guestWorkingShift.findFirst({
+      where: {
+        tenantId,
+        externalUserId,
+        ...(storeId ? { storeId } : {}),
+        stoppedAt: null,
+      },
+      include: { store: { select: { id: true, name: true } } },
+      orderBy: [{ startedAt: 'desc' }, { updatedAt: 'desc' }],
+    });
+
+    if (openShift) {
+      return openShift;
+    }
+
+    const recentSince = new Date(
+      now.getTime() - SHIFT_REPORT_RECENT_WINDOW_HOURS * 60 * 60 * 1000,
+    );
 
     return this.prisma.guestWorkingShift.findFirst({
       where: {
         tenantId,
         externalUserId,
-        stoppedAt: null,
         ...(storeId ? { storeId } : {}),
+        stoppedAt: { not: null },
+        OR: [
+          { startedAt: { gte: recentSince } },
+          { stoppedAt: { gte: recentSince } },
+        ],
+      },
+      include: { store: { select: { id: true, name: true } } },
+      orderBy: [
+        { stoppedAt: 'desc' },
+        { startedAt: 'desc' },
+        { updatedAt: 'desc' },
+      ],
+    });
+  }
+
+  private async syncReportDataFromLangame(
+    tenantId: string,
+    store: ShiftReportStore | null,
+    requestedShift: ShiftReportActiveShift | null,
+    now: Date,
+  ) {
+    const warnings: string[] = [];
+
+    if (!store) {
+      return warnings;
+    }
+
+    try {
+      const { apiKey, sources } =
+        await this.langameSettingsService.resolveTenantAccess(tenantId);
+      const matchedSources = this.langameSourcesForStore(store, sources);
+
+      if (matchedSources.length === 0) {
+        return ['Для клуба не найден активный Langame-источник.'];
+      }
+
+      const syncWindow = this.resolveShiftSyncWindow(requestedShift, now);
+
+      for (const source of matchedSources) {
+        try {
+          await this.syncWorkingShiftsFromSource(
+            tenantId,
+            store,
+            source,
+            apiKey,
+            syncWindow,
+          );
+        } catch (error) {
+          warnings.push(
+            `${source.domain}: ${
+              error instanceof Error
+                ? error.message
+                : 'не удалось обновить смены Langame'
+            }`,
+          );
+        }
+      }
+    } catch (error) {
+      warnings.push(
+        error instanceof Error
+          ? error.message
+          : 'Langame API временно недоступен',
+      );
+    }
+
+    return warnings;
+  }
+
+  private resolveShiftSyncWindow(
+    requestedShift: ShiftReportActiveShift | null,
+    now: Date,
+  ) {
+    const fromBase =
+      requestedShift?.startedAt ??
+      new Date(
+        now.getTime() - SHIFT_REPORT_RECENT_WINDOW_HOURS * 60 * 60 * 1000,
+      );
+    const toBase = requestedShift?.stoppedAt ?? now;
+
+    return {
+      dateFrom: this.toDateInputValue(
+        new Date(fromBase.getTime() - 12 * 60 * 60 * 1000),
+      ),
+      dateTo: this.toDateInputValue(
+        new Date(toBase.getTime() + 12 * 60 * 60 * 1000),
+      ),
+    };
+  }
+
+  private async syncWorkingShiftsFromSource(
+    tenantId: string,
+    store: ShiftReportStore,
+    source: ShiftReportSource,
+    apiKey: string,
+    window: { dateFrom: string; dateTo: string },
+  ) {
+    for (let page = 1; page <= 5; page += 1) {
+      const rows = await this.langameClient.listWorkingShifts(
+        source.baseUrl,
+        apiKey,
+        {
+          page,
+          pageLimit: SHIFT_REPORT_LANGAME_PAGE_LIMIT,
+          dateFrom: window.dateFrom,
+          dateTo: window.dateTo,
+        },
+      );
+
+      for (const row of rows) {
+        await this.upsertWorkingShiftFromLangameRow(
+          tenantId,
+          store,
+          source.domain,
+          row,
+        );
+      }
+
+      if (rows.length < SHIFT_REPORT_LANGAME_PAGE_LIMIT) {
+        break;
+      }
+    }
+  }
+
+  private async upsertWorkingShiftFromLangameRow(
+    tenantId: string,
+    store: ShiftReportStore,
+    domain: string,
+    row: LangameWorkingShift,
+  ) {
+    const externalShiftId = this.toNullableString(row.id);
+    const externalUserId = this.toNullableString(row.user_id);
+    const externalClubId = this.toNullableString(row.list_clubs_id);
+
+    if (!externalShiftId) {
+      return;
+    }
+
+    if (
+      store.externalClubId &&
+      externalClubId &&
+      externalClubId !== store.externalClubId
+    ) {
+      return;
+    }
+
+    const startedAt = this.parseLangameDate(
+      this.toNullableString(row.date_start),
+      store.timeZone,
+    );
+    const stoppedAt = this.parseLangameDate(
+      this.toNullableString(row.date_stop),
+      store.timeZone,
+    );
+
+    await this.prisma.guestWorkingShift.upsert({
+      where: {
+        tenantId_externalProvider_externalDomain_externalShiftId: {
+          tenantId,
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: domain,
+          externalShiftId,
+        },
+      },
+      create: {
+        tenantId,
+        storeId: store.id,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: domain,
+        externalShiftId,
+        externalUserId,
+        externalClubId,
+        startedAt,
+        stoppedAt,
+        durationMinutes: this.durationMinutes(startedAt, stoppedAt),
+        cashStart: this.toDecimalOrNull(row.start),
+        cashAmount: this.toDecimalOrNull(row.nal),
+        cashlessAmount: this.toDecimalOrNull(row.beznal),
+        refundsCash: this.toDecimalOrNull(row.refunds_nal),
+        refundsCashless: this.toDecimalOrNull(row.refunds_beznal),
+        mobilePay: this.toDecimalOrNull(row.mobile_pay),
+        yandexPay: this.toDecimalOrNull(row.yandex_pay),
+        incassAmount: this.toDecimalOrNull(row.incass),
+        middleCheck: this.toDecimalOrNull(row.middle_check),
+        message: this.toNullableString(row.message),
+        sourcePayloadHash: this.payloadHash(row),
+      },
+      update: {
+        storeId: store.id,
+        externalUserId,
+        externalClubId,
+        startedAt,
+        stoppedAt,
+        durationMinutes: this.durationMinutes(startedAt, stoppedAt),
+        cashStart: this.toDecimalOrNull(row.start),
+        cashAmount: this.toDecimalOrNull(row.nal),
+        cashlessAmount: this.toDecimalOrNull(row.beznal),
+        refundsCash: this.toDecimalOrNull(row.refunds_nal),
+        refundsCashless: this.toDecimalOrNull(row.refunds_beznal),
+        mobilePay: this.toDecimalOrNull(row.mobile_pay),
+        yandexPay: this.toDecimalOrNull(row.yandex_pay),
+        incassAmount: this.toDecimalOrNull(row.incass),
+        middleCheck: this.toDecimalOrNull(row.middle_check),
+        message: this.toNullableString(row.message),
+        sourcePayloadHash: this.payloadHash(row),
+      },
+    });
+  }
+
+  private async syncShiftProductSalesFromLangame(
+    tenantId: string,
+    shift: ShiftReportActiveShift,
+    now: Date,
+  ) {
+    const warnings: string[] = [];
+
+    if (!shift.storeId || !shift.startedAt) {
+      return warnings;
+    }
+
+    const store = await this.prisma.store.findFirst({
+      where: { id: shift.storeId, tenantId },
+      select: {
+        id: true,
+        name: true,
+        timeZone: true,
+        externalDomain: true,
+        externalClubId: true,
+        integrationSourceId: true,
+      },
+    });
+
+    if (!store) {
+      return warnings;
+    }
+
+    try {
+      const { apiKey, sources } =
+        await this.langameSettingsService.resolveTenantAccess(tenantId);
+      const matchedSources = this.langameSourcesForStore(store, sources);
+      const stoppedAt = shift.stoppedAt ?? now;
+      const window = {
+        dateFrom: this.toDateInputValue(
+          new Date(shift.startedAt.getTime() - 12 * 60 * 60 * 1000),
+        ),
+        dateTo: this.toDateInputValue(
+          new Date(stoppedAt.getTime() + 12 * 60 * 60 * 1000),
+        ),
+      };
+
+      for (const source of matchedSources) {
+        try {
+          await this.syncProductSalesFromSource(
+            tenantId,
+            store,
+            source,
+            apiKey,
+            window,
+          );
+        } catch (error) {
+          warnings.push(
+            `${source.domain}: ${
+              error instanceof Error
+                ? error.message
+                : 'не удалось обновить продажи товаров Langame'
+            }`,
+          );
+        }
+      }
+    } catch (error) {
+      warnings.push(
+        error instanceof Error
+          ? error.message
+          : 'Langame API временно недоступен для обновления продаж',
+      );
+    }
+
+    return warnings;
+  }
+
+  private async syncProductSalesFromSource(
+    tenantId: string,
+    store: ShiftReportStore,
+    source: ShiftReportSource,
+    apiKey: string,
+    window: { dateFrom: string; dateTo: string },
+  ) {
+    const productsByExternalId = await this.loadProductMap(
+      tenantId,
+      source.domain,
+    );
+    const storesByExternalClubId = new Map<
+      string | null,
+      { id: string; name: string }
+    >([[store.externalClubId, { id: store.id, name: store.name }]]);
+
+    for (let page = 1; page <= 5; page += 1) {
+      const rows = await this.langameClient.listProductExpenses(
+        source.baseUrl,
+        apiKey,
+        {
+          page,
+          pageLimit: SHIFT_REPORT_LANGAME_PAGE_LIMIT,
+          dateFrom: window.dateFrom,
+          dateTo: window.dateTo,
+        },
+      );
+
+      for (const row of rows) {
+        await this.upsertProductSaleFromLangameRow(
+          tenantId,
+          store,
+          source.domain,
+          productsByExternalId,
+          storesByExternalClubId,
+          row,
+        );
+      }
+
+      if (rows.length < SHIFT_REPORT_LANGAME_PAGE_LIMIT) {
+        break;
+      }
+    }
+  }
+
+  private async upsertProductSaleFromLangameRow(
+    tenantId: string,
+    store: ShiftReportStore,
+    domain: string,
+    productsByExternalId: Map<string, { id: string; name: string }>,
+    storesByExternalClubId: Map<string | null, { id: string; name: string }>,
+    row: LangameProductExpense,
+  ) {
+    const externalSaleId = this.toNullableString(row.id);
+    const externalProductId = this.toNullableString(row.list_goods_id);
+    const externalClubId = this.toNullableString(row.list_clubs_id);
+
+    if (!externalSaleId || !externalProductId) {
+      return;
+    }
+
+    if (
+      store.externalClubId &&
+      externalClubId &&
+      externalClubId !== store.externalClubId
+    ) {
+      return;
+    }
+
+    const product = await this.resolveSaleProduct(
+      tenantId,
+      domain,
+      productsByExternalId,
+      externalProductId,
+    );
+    const saleStore =
+      externalClubId && !storesByExternalClubId.has(externalClubId)
+        ? await this.resolveSaleStore(
+            tenantId,
+            domain,
+            storesByExternalClubId,
+            externalClubId,
+          )
+        : (storesByExternalClubId.get(externalClubId) ??
+          storesByExternalClubId.get(store.externalClubId) ?? {
+            id: store.id,
+            name: store.name,
+          });
+    const isCanceled = Number(row.cancel) === 1;
+    const quantity = isCanceled ? 0 : Number(row.count ?? 0);
+    const salePrice =
+      this.toDecimalOrNull(row.price_sale) ?? new Prisma.Decimal(0);
+    const purchasePrice =
+      this.toDecimalOrNull(row.price_purchase) ?? new Prisma.Decimal(0);
+    const saleDate =
+      this.parseLangameDate(this.toNullableString(row.date), store.timeZone) ??
+      new Date();
+    const sourcePayloadHash = this.payloadHash(row);
+
+    await this.prisma.salesFact.upsert({
+      where: {
+        tenantId_externalProvider_externalDomain_externalSaleId: {
+          tenantId,
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: domain,
+          externalSaleId,
+        },
+      },
+      create: {
+        tenantId,
+        storeId: saleStore.id,
+        productId: product.id,
+        saleDate,
+        quantity: new Prisma.Decimal(quantity),
+        revenue: isCanceled ? new Prisma.Decimal(0) : salePrice.mul(quantity),
+        cost: isCanceled ? new Prisma.Decimal(0) : purchasePrice.mul(quantity),
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: domain,
+        externalSaleId,
+        externalProductId,
+        externalClubId,
+        productNameAtSale: product.name,
+        storeNameAtSale: saleStore.name,
+        sourcePayloadHash,
+        isCanceled,
+        canceledAt: isCanceled ? new Date() : null,
+      },
+      update: {
+        storeId: saleStore.id,
+        productId: product.id,
+        saleDate,
+        quantity: new Prisma.Decimal(quantity),
+        revenue: isCanceled ? new Prisma.Decimal(0) : salePrice.mul(quantity),
+        cost: isCanceled ? new Prisma.Decimal(0) : purchasePrice.mul(quantity),
+        externalProductId,
+        externalClubId,
+        productNameAtSale: product.name,
+        storeNameAtSale: saleStore.name,
+        sourcePayloadHash,
+        isCanceled,
+        canceledAt: isCanceled ? new Date() : null,
+      },
+    });
+  }
+
+  private async findShiftOptions(
+    tenantId: string,
+    storeId: string | null,
+    selectedShiftId: string | null,
+    now: Date,
+  ): Promise<StaffShiftReportShiftOption[]> {
+    if (!storeId) {
+      return [];
+    }
+
+    const recentSince = new Date(
+      now.getTime() - SHIFT_REPORT_RECENT_WINDOW_HOURS * 60 * 60 * 1000,
+    );
+    const openRows = await this.prisma.guestWorkingShift.findMany({
+      where: {
+        tenantId,
+        storeId,
+        stoppedAt: null,
       },
       include: { store: { select: { id: true, name: true } } },
       orderBy: [{ startedAt: 'desc' }, { updatedAt: 'desc' }],
+      take: 15,
+    });
+    const closedRows = await this.prisma.guestWorkingShift.findMany({
+      where: {
+        tenantId,
+        storeId,
+        stoppedAt: { not: null },
+        OR: [
+          { startedAt: { gte: recentSince } },
+          { stoppedAt: { gte: recentSince } },
+          ...(selectedShiftId ? [{ id: selectedShiftId }] : []),
+        ],
+      },
+      include: { store: { select: { id: true, name: true } } },
+      orderBy: [
+        { stoppedAt: 'desc' },
+        { startedAt: 'desc' },
+        { updatedAt: 'desc' },
+      ],
+      take: 30,
+    });
+    const rowsById = new Map(
+      [...openRows, ...closedRows].map((row) => [row.id, row]),
+    );
+    const rows = Array.from(rowsById.values()).slice(0, 30);
+    const userFilters = rows
+      .filter((row) => row.externalDomain && row.externalUserId)
+      .map((row) => ({
+        externalDomain: row.externalDomain as string,
+        externalUserId: row.externalUserId as string,
+      }));
+    const users =
+      userFilters.length > 0
+        ? await this.prisma.langameStaffUser.findMany({
+            where: {
+              tenantId,
+              OR: userFilters,
+            },
+            select: {
+              externalDomain: true,
+              externalUserId: true,
+              username: true,
+              email: true,
+            },
+          })
+        : [];
+    const usersByKey = new Map(
+      users.map((user) => [
+        `${user.externalDomain}:${user.externalUserId}`,
+        user,
+      ]),
+    );
+
+    return rows.map((row) => {
+      const user =
+        row.externalDomain && row.externalUserId
+          ? usersByKey.get(`${row.externalDomain}:${row.externalUserId}`)
+          : null;
+
+      return {
+        id: row.id,
+        externalUserId: row.externalUserId,
+        operatorName:
+          user?.username ??
+          user?.email ??
+          `user_id ${row.externalUserId ?? 'не указан'}`,
+        storeName: row.store?.name ?? 'Клуб не указан',
+        startedAt: row.startedAt?.toISOString() ?? null,
+        stoppedAt: row.stoppedAt?.toISOString() ?? null,
+        status: row.stoppedAt ? 'CLOSED' : 'OPEN',
+        isSelected: row.id === selectedShiftId,
+      };
     });
   }
 
@@ -393,49 +1029,40 @@ export class StaffShiftReportsService {
     }
 
     let sales: ShiftReportSalesFact[] = [];
+    let productSalesRead = false;
 
     if (storeId && startedAt) {
-      sales = await this.prisma.salesFact.findMany({
-        where: {
+      try {
+        sales = await this.findShiftProductSales(
           tenantId,
           storeId,
-          isCanceled: false,
-          saleDate: {
-            gte: startedAt,
-            lte: productWindowEnd,
-          },
-        },
-        select: {
-          revenue: true,
-          quantity: true,
-          productNameAtSale: true,
-          product: {
-            select: {
-              name: true,
-              category: { select: { name: true } },
-            },
-          },
-        },
-      });
-      sourceNotes.push(
-        'Бар и товары: Langame /products/expense, сохранено в SalesFact.',
-      );
+          startedAt,
+          productWindowEnd,
+        );
+        productSalesRead = true;
+        sourceNotes.push(
+          'Бар и товары: Langame /products/expense, сохранено в SalesFact.',
+        );
+      } catch {
+        sourceNotes.push(
+          'Бар и товары не заполнены: не удалось прочитать продажи SalesFact.',
+        );
+      }
     } else {
       sourceNotes.push(
         'Бар и товары не заполнены: нет клуба или времени начала смены.',
       );
     }
 
-    const productRevenue =
-      storeId && startedAt
-        ? this.round(
-            sales.reduce(
-              (sum, sale) => sum + (this.decimalToNumber(sale.revenue) ?? 0),
-              0,
-            ),
-            2,
-          )
-        : null;
+    const productRevenue = productSalesRead
+      ? this.round(
+          sales.reduce(
+            (sum, sale) => sum + (this.decimalToNumber(sale.revenue) ?? 0),
+            0,
+          ),
+          2,
+        )
+      : null;
     const groups = this.groupProductSales(sales);
 
     if (sales.length > 0) {
@@ -461,6 +1088,61 @@ export class StaffShiftReportsService {
       merch: groups.merch ?? emptyGroup,
       sourceNotes,
     };
+  }
+
+  private async findShiftProductSales(
+    tenantId: string,
+    storeId: string,
+    startedAt: Date,
+    stoppedAt: Date,
+  ): Promise<ShiftReportSalesFact[]> {
+    const rows = await this.prisma.salesFact.findMany({
+      where: {
+        tenantId,
+        storeId,
+        isCanceled: false,
+        saleDate: {
+          gte: startedAt,
+          lte: stoppedAt,
+        },
+      },
+      select: {
+        revenue: true,
+        quantity: true,
+        productNameAtSale: true,
+        externalProductId: true,
+        productId: true,
+      },
+    });
+
+    const productIds = Array.from(new Set(rows.map((row) => row.productId)));
+    const products =
+      productIds.length > 0
+        ? await this.prisma.product.findMany({
+            where: { tenantId, id: { in: productIds } },
+            select: {
+              id: true,
+              name: true,
+              category: { select: { name: true } },
+            },
+          })
+        : [];
+    const productsById = new Map(
+      products.map((product) => [product.id, product]),
+    );
+
+    return rows.map((row) => {
+      const product = productsById.get(row.productId);
+      const fallbackProductName = row.externalProductId
+        ? `Langame product #${row.externalProductId}`
+        : null;
+
+      return {
+        ...row,
+        productName: product?.name ?? fallbackProductName,
+        categoryName: product?.category?.name ?? null,
+      };
+    });
   }
 
   private groupProductSales(sales: ShiftReportSalesFact[]) {
@@ -493,8 +1175,8 @@ export class StaffShiftReportsService {
   private resolveProductReportGroup(sale: ShiftReportSalesFact) {
     const haystack = [
       sale.productNameAtSale,
-      sale.product.name,
-      sale.product.category?.name,
+      sale.productName,
+      sale.categoryName,
     ]
       .filter(Boolean)
       .join(' ')
@@ -797,6 +1479,221 @@ export class StaffShiftReportsService {
     const factor = 10 ** fractionDigits;
 
     return Math.round((value + Number.EPSILON) * factor) / factor;
+  }
+
+  private langameSourcesForStore(
+    store: ShiftReportStore,
+    sources: ShiftReportSource[],
+  ) {
+    const exactSources = sources.filter((source) => {
+      if (
+        store.integrationSourceId &&
+        source.id === store.integrationSourceId
+      ) {
+        return true;
+      }
+
+      return Boolean(
+        store.externalDomain && source.domain === store.externalDomain,
+      );
+    });
+
+    if (exactSources.length > 0) {
+      return exactSources;
+    }
+
+    return store.externalDomain
+      ? sources.filter((source) => source.domain === store.externalDomain)
+      : sources.length === 1
+        ? sources
+        : [];
+  }
+
+  private async loadProductMap(tenantId: string, domain: string) {
+    const products = await this.prisma.product.findMany({
+      where: {
+        tenantId,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: domain,
+        externalProductId: { not: null },
+      },
+      select: {
+        id: true,
+        name: true,
+        externalProductId: true,
+      },
+    });
+
+    return new Map(
+      products
+        .filter((product) => product.externalProductId)
+        .map((product) => [
+          product.externalProductId as string,
+          {
+            id: product.id,
+            name: product.name,
+          },
+        ]),
+    );
+  }
+
+  private async resolveSaleProduct(
+    tenantId: string,
+    domain: string,
+    productsByExternalId: Map<string, { id: string; name: string }>,
+    externalProductId: string,
+  ) {
+    const existing = productsByExternalId.get(externalProductId);
+
+    if (existing) {
+      return existing;
+    }
+
+    const placeholderName = `Langame product #${externalProductId}`;
+    const product = await this.prisma.product.upsert({
+      where: {
+        tenantId_externalProvider_externalDomain_externalProductId: {
+          tenantId,
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: domain,
+          externalProductId,
+        },
+      },
+      create: {
+        tenantId,
+        article: `LG-${domain}-${externalProductId}`,
+        name: placeholderName,
+        purchasePrice: new Prisma.Decimal(0),
+        salePrice: new Prisma.Decimal(0),
+        isActive: false,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: domain,
+        externalProductId,
+        externalMissingSince: new Date(),
+      },
+      update: {
+        isActive: false,
+        externalMissingSince: new Date(),
+      },
+      select: {
+        id: true,
+        name: true,
+      },
+    });
+    const resolved = { id: product.id, name: product.name };
+    productsByExternalId.set(externalProductId, resolved);
+
+    return resolved;
+  }
+
+  private async resolveSaleStore(
+    tenantId: string,
+    domain: string,
+    storesByExternalClubId: Map<string | null, { id: string; name: string }>,
+    externalClubId: string,
+  ) {
+    const existing = storesByExternalClubId.get(externalClubId);
+
+    if (existing) {
+      return existing;
+    }
+
+    const placeholderName = `Langame club #${externalClubId}`;
+    const store = await this.prisma.store.upsert({
+      where: {
+        tenantId_externalProvider_externalDomain_externalClubId: {
+          tenantId,
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: domain,
+          externalClubId,
+        },
+      },
+      create: {
+        tenantId,
+        name: placeholderName,
+        isActive: false,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: domain,
+        externalClubId,
+      },
+      update: {
+        isActive: false,
+      },
+      select: {
+        id: true,
+        name: true,
+      },
+    });
+    const resolved = { id: store.id, name: store.name };
+    storesByExternalClubId.set(externalClubId, resolved);
+
+    return resolved;
+  }
+
+  private parseLangameDate(
+    value: string | null | undefined,
+    timeZone?: string | null,
+  ) {
+    return parseLangameDateValue(value, timeZone);
+  }
+
+  private toDateInputValue(value: Date) {
+    const year = value.getUTCFullYear();
+    const month = String(value.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(value.getUTCDate()).padStart(2, '0');
+
+    return `${year}-${month}-${day}`;
+  }
+
+  private durationMinutes(startedAt: Date | null, stoppedAt: Date | null) {
+    if (!startedAt || !stoppedAt || stoppedAt < startedAt) {
+      return null;
+    }
+
+    return Math.round((stoppedAt.getTime() - startedAt.getTime()) / 60_000);
+  }
+
+  private toDecimalOrNull(value: unknown) {
+    if (value === null || value === undefined || value === '') {
+      return null;
+    }
+
+    const stringValue = this.scalarToString(value);
+    if (!stringValue) {
+      return null;
+    }
+
+    try {
+      return new Prisma.Decimal(stringValue.replace(',', '.'));
+    } catch {
+      return null;
+    }
+  }
+
+  private toNullableString(value: unknown) {
+    if (value === null || value === undefined) {
+      return null;
+    }
+
+    const stringValue = this.scalarToString(value)?.trim();
+    return stringValue ? stringValue : null;
+  }
+
+  private scalarToString(value: unknown) {
+    if (
+      typeof value === 'string' ||
+      typeof value === 'number' ||
+      typeof value === 'boolean' ||
+      typeof value === 'bigint'
+    ) {
+      return String(value);
+    }
+
+    return null;
+  }
+
+  private payloadHash(value: unknown) {
+    return createHash('sha256').update(JSON.stringify(value)).digest('hex');
   }
 
   private normalizeRequiredString(

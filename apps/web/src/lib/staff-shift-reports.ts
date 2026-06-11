@@ -9,6 +9,29 @@ export type StaffShiftReportAttachment = {
   createdAt: string;
 };
 
+export type StaffShiftReportProductGroup = {
+  quantity: number;
+  revenue: number;
+};
+
+export type StaffShiftReportFinancials = {
+  sourceWindowStartedAt: string | null;
+  sourceWindowStoppedAt: string | null;
+  cashAmount: number | null;
+  cashlessAmount: number | null;
+  mobilePay: number | null;
+  yandexPay: number | null;
+  refundsAmount: number | null;
+  incassAmount: number | null;
+  shiftCashTotal: number | null;
+  productRevenue: number | null;
+  productSalesCount: number;
+  hookahs: StaffShiftReportProductGroup;
+  devices: StaffShiftReportProductGroup;
+  merch: StaffShiftReportProductGroup;
+  sourceNotes: string[];
+};
+
 export type StaffShiftReportDraft = {
   generatedAt: string;
   storeId: string | null;
@@ -35,6 +58,7 @@ export type StaffShiftReportDraft = {
     completedAt: string | null;
   }>;
   attachments: StaffShiftReportAttachment[];
+  financials: StaffShiftReportFinancials;
   missingData: string[];
   body: string;
 };

@@ -19,6 +19,29 @@ export type StaffShiftReportAttachment = {
   createdAt: string;
 };
 
+export type StaffShiftReportProductGroup = {
+  quantity: number;
+  revenue: number;
+};
+
+export type StaffShiftReportFinancials = {
+  sourceWindowStartedAt: string | null;
+  sourceWindowStoppedAt: string | null;
+  cashAmount: number | null;
+  cashlessAmount: number | null;
+  mobilePay: number | null;
+  yandexPay: number | null;
+  refundsAmount: number | null;
+  incassAmount: number | null;
+  shiftCashTotal: number | null;
+  productRevenue: number | null;
+  productSalesCount: number;
+  hookahs: StaffShiftReportProductGroup;
+  devices: StaffShiftReportProductGroup;
+  merch: StaffShiftReportProductGroup;
+  sourceNotes: string[];
+};
+
 export type StaffShiftReportDraft = {
   generatedAt: string;
   storeId: string | null;
@@ -45,6 +68,7 @@ export type StaffShiftReportDraft = {
     completedAt: string | null;
   }>;
   attachments: StaffShiftReportAttachment[];
+  financials: StaffShiftReportFinancials;
   missingData: string[];
   body: string;
 };
@@ -60,6 +84,24 @@ export type StaffShiftReportSendResult = {
   messageId: string;
   chatHref: string;
 };
+
+type ShiftReportActiveShift = Prisma.GuestWorkingShiftGetPayload<{
+  include: { store: { select: { id: true; name: true } } };
+}>;
+
+type ShiftReportSalesFact = Prisma.SalesFactGetPayload<{
+  select: {
+    revenue: true;
+    quantity: true;
+    productNameAtSale: true;
+    product: {
+      select: {
+        name: true;
+        category: { select: { name: true } };
+      };
+    };
+  };
+}>;
 
 @Injectable()
 export class StaffShiftReportsService {
@@ -104,6 +146,12 @@ export class StaffShiftReportsService {
       storeId,
       since,
     );
+    const financials = await this.resolveFinancials(
+      tenantId,
+      storeId,
+      activeShift,
+      now,
+    );
     const attachments = this.collectChecklistAttachments(checklists);
     const clubName =
       activeShift?.store?.name ?? member?.store?.name ?? 'Клуб не указан';
@@ -111,15 +159,7 @@ export class StaffShiftReportsService {
       member?.displayName ?? user.fullName ?? user.email ?? 'Администратор';
     const dateLabel = this.formatDate(now, timeZone);
     const dayPartLabel = this.resolveDayPart(now, timeZone);
-    const missingData = [
-      'наличные',
-      'безналичные',
-      'кальяны',
-      'девайсы',
-      'мерч',
-      'итоговая сумма смены',
-      'кто принял смену',
-    ];
+    const missingData = this.resolveMissingData(financials);
 
     return {
       generatedAt: now.toISOString(),
@@ -147,6 +187,7 @@ export class StaffShiftReportsService {
         completedAt: row.completedAt?.toISOString() ?? null,
       })),
       attachments,
+      financials,
       missingData,
       body: this.buildDraftBody({
         clubName,
@@ -156,6 +197,7 @@ export class StaffShiftReportsService {
         checklists,
         tasks,
         attachments,
+        financials,
       }),
     };
   }
@@ -305,6 +347,207 @@ export class StaffShiftReportsService {
     );
   }
 
+  private async resolveFinancials(
+    tenantId: string,
+    storeId: string | null,
+    activeShift: ShiftReportActiveShift | null,
+    now: Date,
+  ): Promise<StaffShiftReportFinancials> {
+    const startedAt = activeShift?.startedAt ?? null;
+    const stoppedAt = activeShift?.stoppedAt ?? null;
+    const productWindowEnd = stoppedAt ?? now;
+    const emptyGroup = { quantity: 0, revenue: 0 };
+    const cashAmount = this.decimalToNumber(activeShift?.cashAmount);
+    const cashlessAmount = this.decimalToNumber(activeShift?.cashlessAmount);
+    const mobilePay = this.decimalToNumber(activeShift?.mobilePay);
+    const yandexPay = this.decimalToNumber(activeShift?.yandexPay);
+    const refundsCash = this.decimalToNumber(activeShift?.refundsCash);
+    const refundsCashless = this.decimalToNumber(activeShift?.refundsCashless);
+    const refundsAmount =
+      refundsCash === null && refundsCashless === null
+        ? null
+        : this.round((refundsCash ?? 0) + (refundsCashless ?? 0), 2);
+    const shiftCashTotal =
+      cashAmount === null &&
+      cashlessAmount === null &&
+      mobilePay === null &&
+      yandexPay === null &&
+      refundsAmount === null
+        ? null
+        : this.round(
+            (cashAmount ?? 0) +
+              (cashlessAmount ?? 0) +
+              (mobilePay ?? 0) +
+              (yandexPay ?? 0) -
+              (refundsAmount ?? 0),
+            2,
+          );
+    const sourceNotes: string[] = [];
+
+    if (activeShift) {
+      sourceNotes.push('Касса смены: Langame /working_shifts/list.');
+    } else {
+      sourceNotes.push(
+        'Касса смены не заполнена: активная смена Langame для сотрудника не найдена.',
+      );
+    }
+
+    let sales: ShiftReportSalesFact[] = [];
+
+    if (storeId && startedAt) {
+      sales = await this.prisma.salesFact.findMany({
+        where: {
+          tenantId,
+          storeId,
+          isCanceled: false,
+          saleDate: {
+            gte: startedAt,
+            lte: productWindowEnd,
+          },
+        },
+        select: {
+          revenue: true,
+          quantity: true,
+          productNameAtSale: true,
+          product: {
+            select: {
+              name: true,
+              category: { select: { name: true } },
+            },
+          },
+        },
+      });
+      sourceNotes.push(
+        'Бар и товары: Langame /products/expense, сохранено в SalesFact.',
+      );
+    } else {
+      sourceNotes.push(
+        'Бар и товары не заполнены: нет клуба или времени начала смены.',
+      );
+    }
+
+    const productRevenue =
+      storeId && startedAt
+        ? this.round(
+            sales.reduce(
+              (sum, sale) => sum + (this.decimalToNumber(sale.revenue) ?? 0),
+              0,
+            ),
+            2,
+          )
+        : null;
+    const groups = this.groupProductSales(sales);
+
+    if (sales.length > 0) {
+      sourceNotes.push(
+        'Кальяны, девайсы и мерч распознаны по названию товара или категории; отчет можно скорректировать перед отправкой.',
+      );
+    }
+
+    return {
+      sourceWindowStartedAt: startedAt?.toISOString() ?? null,
+      sourceWindowStoppedAt: stoppedAt?.toISOString() ?? null,
+      cashAmount,
+      cashlessAmount,
+      mobilePay,
+      yandexPay,
+      refundsAmount,
+      incassAmount: this.decimalToNumber(activeShift?.incassAmount),
+      shiftCashTotal,
+      productRevenue,
+      productSalesCount: sales.length,
+      hookahs: groups.hookahs ?? emptyGroup,
+      devices: groups.devices ?? emptyGroup,
+      merch: groups.merch ?? emptyGroup,
+      sourceNotes,
+    };
+  }
+
+  private groupProductSales(sales: ShiftReportSalesFact[]) {
+    const groups = {
+      hookahs: { quantity: 0, revenue: 0 },
+      devices: { quantity: 0, revenue: 0 },
+      merch: { quantity: 0, revenue: 0 },
+    } satisfies Record<string, StaffShiftReportProductGroup>;
+
+    for (const sale of sales) {
+      const group = this.resolveProductReportGroup(sale);
+
+      if (!group) {
+        continue;
+      }
+
+      groups[group].quantity = this.round(
+        groups[group].quantity + (this.decimalToNumber(sale.quantity) ?? 0),
+        2,
+      );
+      groups[group].revenue = this.round(
+        groups[group].revenue + (this.decimalToNumber(sale.revenue) ?? 0),
+        2,
+      );
+    }
+
+    return groups;
+  }
+
+  private resolveProductReportGroup(sale: ShiftReportSalesFact) {
+    const haystack = [
+      sale.productNameAtSale,
+      sale.product.name,
+      sale.product.category?.name,
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLocaleLowerCase('ru-RU');
+
+    if (/кальян|hookah|табак|уголь|калауд|чаша|мундштук|смесь/.test(haystack)) {
+      return 'hookahs' as const;
+    }
+
+    if (
+      /девайс|device|аренд|джойст|геймпад|dualshock|playstation|ps4|ps5|vr|руль/.test(
+        haystack,
+      )
+    ) {
+      return 'devices' as const;
+    }
+
+    if (
+      /мерч|merch|футбол|худи|толстов|кепк|стикер|брелок|шоппер|значок/.test(
+        haystack,
+      )
+    ) {
+      return 'merch' as const;
+    }
+
+    return null;
+  }
+
+  private resolveMissingData(financials: StaffShiftReportFinancials) {
+    const missing: string[] = [];
+
+    if (financials.cashAmount === null) {
+      missing.push('наличные');
+    }
+    if (
+      financials.cashlessAmount === null &&
+      financials.mobilePay === null &&
+      financials.yandexPay === null
+    ) {
+      missing.push('безналичные');
+    }
+    if (financials.productRevenue === null) {
+      missing.push('бар и товарные продажи');
+    }
+    if (financials.shiftCashTotal === null) {
+      missing.push('итоговая сумма смены');
+    }
+
+    missing.push('кто принял смену');
+
+    return missing;
+  }
+
   private normalizeAttachment(value: unknown) {
     const record = this.asRecord(value);
     const id = this.normalizeOptionalString(record.id);
@@ -341,6 +584,7 @@ export class StaffShiftReportsService {
     }>;
     tasks: Array<{ title: string; status: string }>;
     attachments: StaffShiftReportAttachment[];
+    financials: StaffShiftReportFinancials;
   }) {
     const checklistLines = input.checklists.length
       ? input.checklists.map(
@@ -356,20 +600,38 @@ export class StaffShiftReportsService {
           (attachment) => `- ${attachment.fileName}: ${attachment.url}`,
         )
       : ['- фото и файлы пока не приложены'];
+    const financialNoteLines = input.financials.sourceNotes.length
+      ? input.financials.sourceNotes.map((note) => `- ${note}`)
+      : ['- источники финансовых данных не определены'];
+    const cashNote =
+      input.financials.incassAmount !== null &&
+      input.financials.incassAmount > 0
+        ? ` (инкассация ${this.formatMoney(input.financials.incassAmount)})`
+        : '';
+    const cashlessBreakdown = this.formatCashlessBreakdown(input.financials);
+    const refundsLine =
+      input.financials.refundsAmount !== null &&
+      input.financials.refundsAmount > 0
+        ? [`Возвраты: ${this.formatMoney(input.financials.refundsAmount)}`]
+        : [];
 
     return [
       `Клуб: ${input.clubName}`,
       `Дата: ${input.dateLabel} (${input.dayPartLabel})`,
       `Администратор: ${input.administratorName}`,
-      'Наличные: ',
-      'Безналичные: ',
-      'Бар: ',
-      'Кальяны: ',
-      'Девайсы: ',
-      'Мерч: ',
-      'ИТОГО: ',
+      `Наличные: ${this.formatMoneyOrBlank(input.financials.cashAmount)}${cashNote}`,
+      `Безналичные: ${this.formatMoneyOrBlank(this.cashlessTotal(input.financials))}${cashlessBreakdown}`,
+      `Бар: ${this.formatMoneyOrBlank(input.financials.productRevenue)}`,
+      `Кальяны: ${this.formatProductGroup(input.financials.hookahs)}`,
+      `Девайсы: ${this.formatProductGroup(input.financials.devices)}`,
+      `Мерч: ${this.formatProductGroup(input.financials.merch)}`,
+      `ИТОГО: ${this.formatMoneyOrBlank(input.financials.shiftCashTotal)}`,
+      ...refundsLine,
       '',
       'Смену принял: ',
+      '',
+      'Источники данных:',
+      ...financialNoteLines,
       '',
       'Чек-листы:',
       ...checklistLines,
@@ -462,6 +724,79 @@ export class StaffShiftReportsService {
           ),
         )
       : [];
+  }
+
+  private cashlessTotal(financials: StaffShiftReportFinancials) {
+    const values = [
+      financials.cashlessAmount,
+      financials.mobilePay,
+      financials.yandexPay,
+    ];
+
+    if (values.every((value) => value === null)) {
+      return null;
+    }
+
+    return this.round(
+      values.reduce<number>((sum, value) => sum + (value ?? 0), 0),
+      2,
+    );
+  }
+
+  private formatCashlessBreakdown(financials: StaffShiftReportFinancials) {
+    const parts = [
+      financials.cashlessAmount !== null
+        ? `карта ${this.formatMoney(financials.cashlessAmount)}`
+        : null,
+      financials.mobilePay !== null && financials.mobilePay > 0
+        ? `mobile ${this.formatMoney(financials.mobilePay)}`
+        : null,
+      financials.yandexPay !== null && financials.yandexPay > 0
+        ? `Yandex ${this.formatMoney(financials.yandexPay)}`
+        : null,
+    ].filter((part): part is string => Boolean(part));
+
+    return parts.length > 1 ? ` (${parts.join(', ')})` : '';
+  }
+
+  private formatProductGroup(group: StaffShiftReportProductGroup) {
+    if (group.quantity <= 0 && group.revenue <= 0) {
+      return '0';
+    }
+
+    return `${this.formatQuantity(group.quantity)} шт (${this.formatMoney(group.revenue)})`;
+  }
+
+  private formatMoneyOrBlank(value: number | null) {
+    return value === null ? '' : this.formatMoney(value);
+  }
+
+  private formatMoney(value: number) {
+    return `${this.round(value, 2).toLocaleString('ru-RU', {
+      maximumFractionDigits: 2,
+    })} руб.`;
+  }
+
+  private formatQuantity(value: number) {
+    return this.round(value, 2).toLocaleString('ru-RU', {
+      maximumFractionDigits: 2,
+    });
+  }
+
+  private decimalToNumber(value: Prisma.Decimal | null | undefined) {
+    if (value === null || value === undefined) {
+      return null;
+    }
+
+    const parsed = value.toNumber();
+
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  private round(value: number, fractionDigits = 0) {
+    const factor = 10 ** fractionDigits;
+
+    return Math.round((value + Number.EPSILON) * factor) / factor;
   }
 
   private normalizeRequiredString(

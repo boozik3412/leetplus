@@ -94,6 +94,42 @@ function formatAttachmentSize(value: number) {
   return `${(value / 1024 / 1024).toFixed(1)} МБ`;
 }
 
+function getAttachmentHref(attachment: StaffChecklistEvidenceAttachment) {
+  const url = attachment.url.trim();
+
+  if (url.startsWith("/api/")) {
+    return url;
+  }
+
+  if (url.startsWith("/staff/attachments/")) {
+    return `/api${url}`;
+  }
+
+  try {
+    const parsedUrl = new URL(url);
+
+    if (parsedUrl.pathname.startsWith("/api/staff/attachments/")) {
+      return `${parsedUrl.pathname}${parsedUrl.search}`;
+    }
+
+    if (parsedUrl.pathname.startsWith("/staff/attachments/")) {
+      return `/api${parsedUrl.pathname}${parsedUrl.search}`;
+    }
+  } catch {
+    return url;
+  }
+
+  return url;
+}
+
+function isPreviewableImage(attachment: StaffChecklistEvidenceAttachment) {
+  if (attachment.contentType.toLowerCase().startsWith("image/")) {
+    return true;
+  }
+
+  return /\.(avif|gif|jpe?g|png|webp)$/i.test(attachment.fileName);
+}
+
 function statusClass(status: StaffChecklistStatus, isOverdue: boolean) {
   const base = "inline-flex rounded-full px-2.5 py-1 text-xs font-semibold";
 
@@ -476,6 +512,11 @@ function ChecklistRunEditor({
   const [reviewComment, setReviewComment] = useState(run.reviewComment ?? "");
   const [message, setMessage] = useState<string | null>(null);
   const [isPending, setIsPending] = useState(false);
+  const [previewAttachment, setPreviewAttachment] =
+    useState<StaffChecklistEvidenceAttachment | null>(null);
+  const previewAttachmentHref = previewAttachment
+    ? getAttachmentHref(previewAttachment)
+    : null;
 
   const answersByKey = useMemo(
     () => new Map(answers.map((answer) => [answerKey(answer), answer])),
@@ -649,7 +690,8 @@ function ChecklistRunEditor({
   }
 
   return (
-    <div>
+    <>
+      <div>
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-300">
@@ -867,7 +909,15 @@ function ChecklistRunEditor({
                                     className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs dark:border-zinc-800 dark:bg-zinc-950"
                                   >
                                     <a
-                                      href={attachment.url}
+                                      href={getAttachmentHref(attachment)}
+                                      onClick={(event) => {
+                                        if (!isPreviewableImage(attachment)) {
+                                          return;
+                                        }
+
+                                        event.preventDefault();
+                                        setPreviewAttachment(attachment);
+                                      }}
                                       target="_blank"
                                       rel="noreferrer"
                                       className="min-w-0 truncate font-semibold text-emerald-700 hover:text-emerald-600 dark:text-emerald-300"
@@ -981,6 +1031,59 @@ function ChecklistRunEditor({
         </div>
       </div>
     </div>
+    {previewAttachment && previewAttachmentHref ? (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Просмотр фото"
+        onClick={() => setPreviewAttachment(null)}
+      >
+        <div
+          className="max-h-[92vh] w-full max-w-5xl overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 shadow-2xl"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="flex items-center justify-between gap-3 border-b border-zinc-800 px-4 py-3">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-zinc-100">
+                {previewAttachment.fileName}
+              </p>
+              {previewAttachment.byteSize > 0 ? (
+                <p className="text-xs text-zinc-400">
+                  {formatAttachmentSize(previewAttachment.byteSize)}
+                </p>
+              ) : null}
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <a
+                href={previewAttachmentHref}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-lg border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-100 transition hover:bg-zinc-900"
+              >
+                Открыть оригинал
+              </a>
+              <button
+                type="button"
+                onClick={() => setPreviewAttachment(null)}
+                className="rounded-lg border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-100 transition hover:bg-zinc-900"
+              >
+                Закрыть
+              </button>
+            </div>
+          </div>
+          <div className="flex max-h-[78vh] items-center justify-center overflow-auto bg-black p-3">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={previewAttachmentHref}
+              alt={previewAttachment.fileName}
+              className="max-h-[74vh] max-w-full rounded-lg object-contain"
+            />
+          </div>
+        </div>
+      </div>
+    ) : null}
+    </>
   );
 }
 

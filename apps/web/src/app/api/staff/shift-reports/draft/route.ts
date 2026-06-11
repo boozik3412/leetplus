@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { getApiUrl, getAuthHeaders, readApiError } from "@/lib/api";
 
-export async function GET() {
+export async function GET(request: Request) {
   const headers = await getAuthHeaders();
+  const url = new URL(request.url);
 
   if (!headers.Authorization) {
     return NextResponse.json(
@@ -11,10 +12,13 @@ export async function GET() {
     );
   }
 
-  const response = await fetch(`${getApiUrl()}/staff/shift-reports/draft`, {
-    headers,
-    cache: "no-store",
-  });
+  const response = await fetch(
+    `${getApiUrl()}/staff/shift-reports/draft${url.search}`,
+    {
+      headers,
+      cache: "no-store",
+    },
+  );
 
   if (!response.ok) {
     return NextResponse.json(

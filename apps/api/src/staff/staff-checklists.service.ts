@@ -124,6 +124,15 @@ export type StaffChecklistItem = {
   score: number;
 };
 
+export type StaffChecklistEvidenceAttachment = {
+  id: string;
+  fileName: string;
+  contentType: string;
+  byteSize: number;
+  url: string;
+  createdAt: string;
+};
+
 export type StaffChecklistAnswer = {
   sectionId: string;
   itemId: string;
@@ -131,6 +140,7 @@ export type StaffChecklistAnswer = {
   status: StaffChecklistAnswerStatus | null;
   note: string | null;
   evidenceUrl: string | null;
+  evidenceAttachments: StaffChecklistEvidenceAttachment[];
   completedAt: string | null;
 };
 
@@ -1726,6 +1736,7 @@ export class StaffChecklistsService {
         status: null,
         note: null,
         evidenceUrl: null,
+        evidenceAttachments: [],
         completedAt: null,
       })),
     );
@@ -1754,6 +1765,10 @@ export class StaffChecklistsService {
           ? this.resolveOne(status, answerStatuses, 'PASS')
           : null;
         const evidenceUrl = this.normalizeEvidenceUrl(record.evidenceUrl);
+        const evidenceAttachments = this.normalizeEvidenceAttachments(
+          record.evidenceAttachments,
+          evidenceUrl,
+        );
         const persistedCompletedAt = this.normalizeOptionalString(
           record.completedAt,
         );
@@ -1768,6 +1783,7 @@ export class StaffChecklistsService {
           status: normalizedStatus,
           note: this.normalizeOptionalString(record.note),
           evidenceUrl,
+          evidenceAttachments,
           completedAt,
         };
       }),
@@ -1822,7 +1838,7 @@ export class StaffChecklistsService {
           metrics.requiredItemsDone += 1;
         }
 
-        if (item.evidenceRequired && answer?.evidenceUrl) {
+        if (item.evidenceRequired && this.answerHasEvidence(answer)) {
           metrics.evidenceDone += 1;
         }
 
@@ -1835,7 +1851,7 @@ export class StaffChecklistsService {
           });
         }
 
-        if (item.evidenceRequired && !answer?.evidenceUrl) {
+        if (item.evidenceRequired && !this.answerHasEvidence(answer)) {
           metrics.blockingIssues.push({
             sectionId: section.id,
             itemId: item.id,
@@ -1913,7 +1929,7 @@ export class StaffChecklistsService {
             `Чеклист: ${run.title}`,
             `Раздел: ${source.section.title}`,
             answer.note ? `Комментарий: ${answer.note}` : null,
-            answer.evidenceUrl ? `Доказательство: ${answer.evidenceUrl}` : null,
+            this.formatAnswerEvidenceLinks(answer),
           ]
             .filter(Boolean)
             .join('\n'),
@@ -2310,11 +2326,89 @@ export class StaffChecklistsService {
     return date;
   }
 
+  private answerHasEvidence(answer: StaffChecklistAnswer | undefined) {
+    return Boolean(
+      answer?.evidenceUrl || (answer?.evidenceAttachments?.length ?? 0) > 0,
+    );
+  }
+
+  private formatAnswerEvidenceLinks(answer: StaffChecklistAnswer) {
+    const links = [
+      ...answer.evidenceAttachments.map((attachment) => attachment.url),
+      answer.evidenceUrl,
+    ].filter((value): value is string => Boolean(value));
+    const uniqueLinks = Array.from(new Set(links));
+
+    return uniqueLinks.length > 0
+      ? `Доказательства: ${uniqueLinks.join(', ')}`
+      : null;
+  }
+
+  private normalizeEvidenceAttachments(
+    value: unknown,
+    fallbackUrl: string | null,
+  ): StaffChecklistEvidenceAttachment[] {
+    const rawAttachments = Array.isArray(value) ? value : [];
+    const attachments = new Map<string, StaffChecklistEvidenceAttachment>();
+
+    for (const attachment of rawAttachments.slice(0, 20)) {
+      const record = this.asRecord(attachment);
+      const url = this.normalizeEvidenceUrl(record.url);
+
+      if (!url) {
+        continue;
+      }
+
+      attachments.set(url, {
+        id: this.normalizeOptionalString(record.id) ?? url,
+        fileName: this.normalizeOptionalString(record.fileName) ?? 'Файл',
+        contentType:
+          this.normalizeOptionalString(record.contentType) ??
+          'application/octet-stream',
+        byteSize: this.normalizeAttachmentByteSize(record.byteSize),
+        url,
+        createdAt: this.normalizeOptionalString(record.createdAt) ?? '',
+      });
+    }
+
+    if (fallbackUrl && !attachments.has(fallbackUrl)) {
+      attachments.set(fallbackUrl, {
+        id: fallbackUrl,
+        fileName: 'Доказательство',
+        contentType: 'text/uri-list',
+        byteSize: 0,
+        url: fallbackUrl,
+        createdAt: '',
+      });
+    }
+
+    return Array.from(attachments.values());
+  }
+
+  private normalizeAttachmentByteSize(value: unknown) {
+    const size =
+      typeof value === 'number'
+        ? value
+        : typeof value === 'string'
+          ? Number.parseInt(value, 10)
+          : 0;
+
+    if (!Number.isFinite(size)) {
+      return 0;
+    }
+
+    return Math.min(Math.max(Math.trunc(size), 0), 50 * 1024 * 1024);
+  }
+
   private normalizeEvidenceUrl(value: unknown) {
     const normalized = this.normalizeOptionalString(value);
 
     if (!normalized) {
       return null;
+    }
+
+    if (normalized.startsWith('/staff/attachments/')) {
+      return normalized;
     }
 
     let url: URL;

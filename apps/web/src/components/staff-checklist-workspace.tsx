@@ -2,10 +2,14 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { StaffAttachmentUpload } from "@/components/staff-attachment-upload";
+import {
+  StaffAttachmentUpload,
+  type StaffAttachmentUploadResult,
+} from "@/components/staff-attachment-upload";
 import type {
   StaffChecklistAnswer,
   StaffChecklistAnswerStatus,
+  StaffChecklistEvidenceAttachment,
   StaffChecklistRegulationOption,
   StaffChecklistReport,
   StaffChecklistRun,
@@ -53,6 +57,41 @@ type ChecklistSourceOption =
 
 function answerKey(answer: Pick<StaffChecklistAnswer, "sectionId" | "itemId">) {
   return `${answer.sectionId}::${answer.itemId}`;
+}
+
+function getEvidenceAttachments(answer: StaffChecklistAnswer | undefined) {
+  return answer?.evidenceAttachments ?? [];
+}
+
+function answerHasEvidence(answer: StaffChecklistAnswer | undefined) {
+  return Boolean(
+    answer?.evidenceUrl || getEvidenceAttachments(answer).length > 0,
+  );
+}
+
+function toEvidenceAttachment(
+  attachment: StaffAttachmentUploadResult,
+): StaffChecklistEvidenceAttachment {
+  return {
+    id: attachment.id,
+    fileName: attachment.fileName,
+    contentType: attachment.contentType,
+    byteSize: attachment.byteSize,
+    url: attachment.url,
+    createdAt: attachment.createdAt,
+  };
+}
+
+function formatAttachmentSize(value: number) {
+  if (value <= 0) {
+    return "";
+  }
+
+  if (value < 1024 * 1024) {
+    return `${(value / 1024).toFixed(1)} КБ`;
+  }
+
+  return `${(value / 1024 / 1024).toFixed(1)} МБ`;
 }
 
 function statusClass(status: StaffChecklistStatus, isOverdue: boolean) {
@@ -453,7 +492,7 @@ function ChecklistRunEditor({
             issues.push("нет результата");
           }
 
-          if (item.evidenceRequired && !answer?.evidenceUrl) {
+          if (item.evidenceRequired && !answerHasEvidence(answer)) {
             issues.push("нет ссылки на доказательство");
           }
 
@@ -475,6 +514,48 @@ function ChecklistRunEditor({
           : answer,
       ),
     );
+  }
+
+  function appendEvidenceAttachment(
+    sectionId: string,
+    itemId: string,
+    attachment: StaffAttachmentUploadResult,
+  ) {
+    const currentAnswer = answersByKey.get(`${sectionId}::${itemId}`);
+    const nextAttachment = toEvidenceAttachment(attachment);
+    const nextAttachments = [
+      ...getEvidenceAttachments(currentAnswer).filter(
+        (item) => item.id !== nextAttachment.id,
+      ),
+      nextAttachment,
+    ].slice(0, 20);
+
+    patchAnswer(sectionId, itemId, {
+      evidenceUrl: currentAnswer?.evidenceUrl ?? nextAttachment.url,
+      evidenceAttachments: nextAttachments,
+    });
+  }
+
+  function removeEvidenceAttachment(
+    sectionId: string,
+    itemId: string,
+    attachmentId: string,
+  ) {
+    const currentAnswer = answersByKey.get(`${sectionId}::${itemId}`);
+    const nextAttachments = getEvidenceAttachments(currentAnswer).filter(
+      (attachment) => attachment.id !== attachmentId,
+    );
+    const removedAttachment = getEvidenceAttachments(currentAnswer).find(
+      (attachment) => attachment.id === attachmentId,
+    );
+
+    patchAnswer(sectionId, itemId, {
+      evidenceAttachments: nextAttachments,
+      evidenceUrl:
+        currentAnswer?.evidenceUrl === removedAttachment?.url
+          ? (nextAttachments[0]?.url ?? null)
+          : (currentAnswer?.evidenceUrl ?? null),
+    });
   }
 
   async function updateRun(
@@ -537,7 +618,7 @@ function ChecklistRunEditor({
       return;
     }
 
-    if (evidenceRequired && !currentAnswer.evidenceUrl) {
+    if (evidenceRequired && !answerHasEvidence(currentAnswer)) {
       setMessage("Добавьте доказательство перед отправкой.");
       return;
     }
@@ -550,6 +631,7 @@ function ChecklistRunEditor({
             status: currentAnswer.status,
             note: currentAnswer.note,
             evidenceUrl: currentAnswer.evidenceUrl,
+            evidenceAttachments: currentAnswer.evidenceAttachments ?? [],
             completedAt: null,
           }
         : answer,
@@ -654,6 +736,8 @@ function ChecklistRunEditor({
                   answer?.completedAt ?? null,
                 );
                 const isSubmitted = Boolean(answer?.completedAt);
+                const evidenceAttachments = getEvidenceAttachments(answer);
+                const hasEvidence = answerHasEvidence(answer);
 
                 return (
                   <div key={item.id} className="px-3 py-3 sm:px-4">
@@ -736,7 +820,7 @@ function ChecklistRunEditor({
                               title={
                                 isSubmitted
                                   ? "Пункт уже отправлен"
-                                  : item.evidenceRequired && !answer?.evidenceUrl
+                                  : item.evidenceRequired && !hasEvidence
                                     ? "Перед отправкой понадобится доказательство"
                                     : "Зафиксировать выполнение пункта"
                               }
@@ -756,20 +840,64 @@ function ChecklistRunEditor({
                                     evidenceUrl: event.target.value,
                                   })
                                 }
-                                placeholder="Ссылка на фото/файл"
+                                placeholder="Ссылка на фото/файл, если он уже загружен отдельно"
                                 className="h-10 min-w-0 rounded-lg border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950"
                               />
                               <StaffAttachmentUpload
-                                label="Загрузить доказательство"
-                                buttonLabel="Загрузить файл"
+                                label="Добавить фото или файлы"
+                                buttonLabel="Добавить фото"
                                 className="min-w-0"
+                                multiple
+                                accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt"
+                                compressImages
                                 onUploaded={(attachment) =>
-                                  patchAnswer(section.id, item.id, {
-                                    evidenceUrl: attachment.url,
-                                  })
+                                  appendEvidenceAttachment(
+                                    section.id,
+                                    item.id,
+                                    attachment,
+                                  )
                                 }
                               />
                             </div>
+                            {evidenceAttachments.length > 0 ? (
+                              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                                {evidenceAttachments.map((attachment, index) => (
+                                  <div
+                                    key={`${attachment.id}-${index}`}
+                                    className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs dark:border-zinc-800 dark:bg-zinc-950"
+                                  >
+                                    <a
+                                      href={attachment.url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="min-w-0 truncate font-semibold text-emerald-700 hover:text-emerald-600 dark:text-emerald-300"
+                                    >
+                                      {attachment.fileName}
+                                      {attachment.byteSize > 0
+                                        ? ` · ${formatAttachmentSize(
+                                            attachment.byteSize,
+                                          )}`
+                                        : ""}
+                                    </a>
+                                    {!isSubmitted ? (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          removeEvidenceAttachment(
+                                            section.id,
+                                            item.id,
+                                            attachment.id,
+                                          )
+                                        }
+                                        className="shrink-0 rounded-md px-2 py-1 font-semibold text-zinc-500 hover:bg-zinc-100 hover:text-red-600 dark:hover:bg-zinc-900"
+                                      >
+                                        Убрать
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
                             <textarea
                               value={answer?.note ?? ""}
                               onChange={(event) =>

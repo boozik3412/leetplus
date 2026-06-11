@@ -711,14 +711,23 @@ export default async function StaffShiftWorkspacePage({
                 затем выручка, гости, регламент и быстрые разделы.
               </p>
             </div>
-            {canManageDirectory ? (
+            <div className="flex flex-wrap gap-2">
               <Link
-                href={headerActionHref}
-                className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 bg-white px-4 text-sm font-semibold text-zinc-900 transition hover:border-emerald-500 hover:text-emerald-700 dark:border-zinc-700 dark:bg-transparent dark:text-zinc-100 dark:hover:border-emerald-400 dark:hover:text-emerald-200"
+                href="/staff/shift-reports/new"
+                target="_blank"
+                className="inline-flex h-10 items-center justify-center rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
               >
-                {headerActionLabel}
+                Сформировать отчет
               </Link>
-            ) : null}
+              {canManageDirectory ? (
+                <Link
+                  href={headerActionHref}
+                  className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 bg-white px-4 text-sm font-semibold text-zinc-900 transition hover:border-emerald-500 hover:text-emerald-700 dark:border-zinc-700 dark:bg-transparent dark:text-zinc-100 dark:hover:border-emerald-400 dark:hover:text-emerald-200"
+                >
+                  {headerActionLabel}
+                </Link>
+              ) : null}
+            </div>
           </div>
 
           <ShiftSummaryPanel

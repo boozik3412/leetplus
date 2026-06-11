@@ -3,6 +3,8 @@
 import { useRef, useState, type ChangeEvent } from "react";
 
 const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+const DEFAULT_IMAGE_MAX_SIDE = 1800;
+const DEFAULT_IMAGE_QUALITY = 0.82;
 
 export type StaffAttachmentUploadResult = {
   id: string;
@@ -17,6 +19,11 @@ type StaffAttachmentUploadProps = {
   label?: string;
   buttonLabel?: string;
   className?: string;
+  multiple?: boolean;
+  accept?: string;
+  compressImages?: boolean;
+  maxImageSide?: number;
+  imageQuality?: number;
   onUploaded: (attachment: StaffAttachmentUploadResult) => void;
 };
 
@@ -41,10 +48,108 @@ async function readUploadError(response: Response) {
   }
 }
 
+function renameImageFile(file: File, extension: string) {
+  const normalizedExtension = extension.startsWith(".")
+    ? extension
+    : `.${extension}`;
+  const withoutExtension = file.name.replace(/\.[^.]+$/, "");
+
+  return `${withoutExtension || "photo"}${normalizedExtension}`;
+}
+
+async function canvasToBlob(
+  canvas: HTMLCanvasElement,
+  type: string,
+  quality: number,
+) {
+  return new Promise<Blob | null>((resolve) => {
+    canvas.toBlob(resolve, type, quality);
+  });
+}
+
+async function prepareImageUploadFile(
+  file: File,
+  maxImageSide: number,
+  imageQuality: number,
+) {
+  if (!file.type.startsWith("image/") || typeof window === "undefined") {
+    return file;
+  }
+
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, maxImageSide / Math.max(bitmap.width, bitmap.height));
+
+    if (scale >= 1 && file.size <= MAX_ATTACHMENT_BYTES) {
+      bitmap.close();
+      return file;
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+
+    const context = canvas.getContext("2d");
+    if (!context) {
+      bitmap.close();
+      return file;
+    }
+
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+
+    const blob = await canvasToBlob(canvas, "image/jpeg", imageQuality);
+    if (!blob || blob.size >= file.size) {
+      return file;
+    }
+
+    return new File([blob], renameImageFile(file, "jpg"), {
+      type: "image/jpeg",
+      lastModified: Date.now(),
+    });
+  } catch {
+    return file;
+  }
+}
+
+async function prepareUploadFile(
+  file: File,
+  compressImages: boolean,
+  maxImageSide: number,
+  imageQuality: number,
+) {
+  if (!compressImages) {
+    return file;
+  }
+
+  return prepareImageUploadFile(file, maxImageSide, imageQuality);
+}
+
+async function uploadFile(file: File) {
+  const formData = new FormData();
+  formData.set("file", file);
+
+  const response = await fetch("/api/staff/attachments", {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!response.ok) {
+    throw new Error(await readUploadError(response));
+  }
+
+  return (await response.json()) as StaffAttachmentUploadResult;
+}
+
 export function StaffAttachmentUpload({
   label = "Файл",
   buttonLabel = "Загрузить",
   className = "",
+  multiple = false,
+  accept,
+  compressImages = false,
+  maxImageSide = DEFAULT_IMAGE_MAX_SIDE,
+  imageQuality = DEFAULT_IMAGE_QUALITY,
   onUploaded,
 }: StaffAttachmentUploadProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -52,38 +157,42 @@ export function StaffAttachmentUpload({
   const [message, setMessage] = useState<string | null>(null);
 
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
+    const files = Array.from(event.target.files ?? []);
 
-    if (!file) {
+    if (files.length === 0) {
       return;
     }
-
-    if (file.size > MAX_ATTACHMENT_BYTES) {
-      setMessage("Файл должен быть не больше 5 МБ");
-      event.target.value = "";
-      return;
-    }
-
-    const formData = new FormData();
-    formData.set("file", file);
 
     setIsUploading(true);
     setMessage(null);
 
-    try {
-      const response = await fetch("/api/staff/attachments", {
-        method: "POST",
-        body: formData,
-      });
+    let uploadedCount = 0;
 
-      if (!response.ok) {
-        throw new Error(await readUploadError(response));
+    try {
+      for (const sourceFile of files) {
+        const file = await prepareUploadFile(
+          sourceFile,
+          compressImages,
+          maxImageSide,
+          imageQuality,
+        );
+
+        if (file.size > MAX_ATTACHMENT_BYTES) {
+          throw new Error(
+            `${sourceFile.name}: файл должен быть не больше 5 МБ после сжатия`,
+          );
+        }
+
+        const attachment = await uploadFile(file);
+        onUploaded(attachment);
+        uploadedCount += 1;
       }
 
-      const attachment =
-        (await response.json()) as StaffAttachmentUploadResult;
-      onUploaded(attachment);
-      setMessage(`${attachment.fileName} · ${formatBytes(attachment.byteSize)}`);
+      const suffix =
+        uploadedCount === 1
+          ? `${files[0]?.name ?? "файл"} · ${formatBytes(files[0]?.size ?? 0)}`
+          : `Загружено файлов: ${uploadedCount}`;
+      setMessage(suffix);
     } catch (caught) {
       setMessage(
         caught instanceof Error ? caught.message : "Не удалось загрузить файл",
@@ -100,6 +209,8 @@ export function StaffAttachmentUpload({
         ref={inputRef}
         type="file"
         className="hidden"
+        multiple={multiple}
+        accept={accept}
         onChange={handleFileChange}
       />
       <button

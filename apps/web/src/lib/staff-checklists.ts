@@ -51,6 +51,15 @@ export type StaffChecklistItem = {
   score: number;
 };
 
+export type StaffChecklistEvidenceAttachment = {
+  id: string;
+  fileName: string;
+  contentType: string;
+  byteSize: number;
+  url: string;
+  createdAt: string;
+};
+
 export type StaffChecklistSection = {
   id: string;
   title: string;
@@ -65,6 +74,7 @@ export type StaffChecklistAnswer = {
   status: StaffChecklistAnswerStatus | null;
   note: string | null;
   evidenceUrl: string | null;
+  evidenceAttachments: StaffChecklistEvidenceAttachment[];
   completedAt: string | null;
 };
 

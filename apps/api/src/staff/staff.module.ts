@@ -34,6 +34,8 @@ import { StaffSalaryController } from './staff-salary.controller';
 import { StaffSalaryService } from './staff-salary.service';
 import { StaffShiftRegulationsController } from './staff-shift-regulations.controller';
 import { StaffShiftRegulationsService } from './staff-shift-regulations.service';
+import { StaffShiftReportsController } from './staff-shift-reports.controller';
+import { StaffShiftReportsService } from './staff-shift-reports.service';
 import { StaffShiftWorkspaceController } from './staff-shift-workspace.controller';
 import { StaffTaskRecurringRulesController } from './staff-task-recurring-rules.controller';
 import { StaffTaskRecurringRulesScheduledController } from './staff-task-recurring-rules-scheduled.controller';
@@ -68,6 +70,7 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffAssessmentsController,
     StaffAttachmentsController,
     StaffShiftRegulationsController,
+    StaffShiftReportsController,
     StaffShiftWorkspaceController,
     StaffChecklistTemplatesController,
     StaffChecklistsController,
@@ -93,6 +96,7 @@ import { StaffTasksService } from './staff-tasks.service';
     StaffAssessmentsService,
     StaffAttachmentsService,
     StaffShiftRegulationsService,
+    StaffShiftReportsService,
     StaffChecklistTemplatesService,
     StaffChecklistsService,
     StaffTeamChatService,

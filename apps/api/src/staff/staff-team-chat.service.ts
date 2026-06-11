@@ -12,9 +12,13 @@ const channelScopes = ['NETWORK', 'STORE', 'ROLE', 'CUSTOM'] as const;
 const messageKinds = ['MESSAGE', 'ANNOUNCEMENT', 'INCIDENT'] as const;
 const messagePriorities = ['NORMAL', 'HIGH', 'URGENT'] as const;
 const roleScopes = ['ALL_STAFF', 'MANAGERS', 'ADMINISTRATORS'] as const;
+const STAFF_CHAT_MESSAGE_MAX_ATTACHMENTS = 20;
 export const STAFF_CHAT_NOTIFICATION_CHANNEL_NAME = 'Уведомления';
 export const STAFF_CHAT_NOTIFICATION_CHANNEL_DESCRIPTION =
   'Системные уведомления о назначении задач, курсов, изменениях регламентов и других событиях персонала.';
+export const STAFF_CHAT_REPORTING_CHANNEL_NAME = 'Отчетность';
+export const STAFF_CHAT_REPORTING_CHANNEL_DESCRIPTION =
+  'Итоговые отчеты администраторов по сменам: чек-листы, задачи, вложения и ручные комментарии перед сдачей смены.';
 const defaultNetworkChannels = [
   {
     name: 'Информация и объявления',
@@ -24,6 +28,10 @@ const defaultNetworkChannels = [
   {
     name: STAFF_CHAT_NOTIFICATION_CHANNEL_NAME,
     description: STAFF_CHAT_NOTIFICATION_CHANNEL_DESCRIPTION,
+  },
+  {
+    name: STAFF_CHAT_REPORTING_CHANNEL_NAME,
+    description: STAFF_CHAT_REPORTING_CHANNEL_DESCRIPTION,
   },
   {
     name: 'Техническая поддержка',
@@ -1030,8 +1038,10 @@ export class StaffTeamChatService {
         )
       : [];
 
-    if (requestedIds.length > 5) {
-      throw new BadRequestException('No more than 5 attachments are allowed');
+    if (requestedIds.length > STAFF_CHAT_MESSAGE_MAX_ATTACHMENTS) {
+      throw new BadRequestException(
+        `No more than ${STAFF_CHAT_MESSAGE_MAX_ATTACHMENTS} attachments are allowed`,
+      );
     }
 
     if (requestedIds.length === 0) {

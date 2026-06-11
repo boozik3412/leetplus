@@ -196,6 +196,10 @@ export class RolesGuard implements CanActivate {
       return 'view_staff_shift_workspace';
     }
 
+    if (path.startsWith('/staff/shift-reports')) {
+      return 'view_staff_shift_workspace';
+    }
+
     if (path.match(/^\/staff\/tasks\/[^/]+\/comments(?:\/|$)/)) {
       return 'view_staff_tasks';
     }
@@ -371,6 +375,7 @@ export class RolesGuard implements CanActivate {
       '/staff/assessments',
       '/staff/knowledge-base',
       '/staff/shift-workspace',
+      '/staff/shift-reports',
       '/staff/team-chat',
       '/staff/notifications',
       '/staff/attachments',

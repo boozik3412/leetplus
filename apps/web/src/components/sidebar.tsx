@@ -800,8 +800,21 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
 
   return (
     <>
-      <div className="sticky top-0 z-40 flex items-center justify-between border-b border-zinc-200/80 bg-white/90 px-4 py-3 shadow-sm backdrop-blur-xl dark:border-zinc-800 dark:bg-zinc-950/90 md:hidden">
-        <div className="flex items-center gap-3">
+      <div className="sticky top-0 z-40 flex items-center gap-3 border-b border-zinc-200/80 bg-white/90 px-4 py-3 shadow-sm backdrop-blur-xl dark:border-zinc-800 dark:bg-zinc-950/90 md:hidden">
+        <button
+          type="button"
+          aria-label="Открыть меню"
+          aria-expanded={isMobileMenuOpen}
+          onClick={() => setIsMobileMenuOpen(true)}
+          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-zinc-200 bg-white text-zinc-900 transition hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
+        >
+          <span className="grid gap-1.5">
+            <span className="block h-0.5 w-5 rounded-full bg-current" />
+            <span className="block h-0.5 w-5 rounded-full bg-current" />
+            <span className="block h-0.5 w-5 rounded-full bg-current" />
+          </span>
+        </button>
+        <div className="flex min-w-0 items-center gap-3">
           <LogoLink href={homeHref} />
           <div className="min-w-0">
             <p className="truncate text-xs font-medium uppercase tracking-wide text-zinc-500">
@@ -812,19 +825,6 @@ export function Sidebar({ user }: { user: AuthUser | null }) {
             </p>
           </div>
         </div>
-        <button
-          type="button"
-          aria-label="Открыть меню"
-          aria-expanded={isMobileMenuOpen}
-          onClick={() => setIsMobileMenuOpen(true)}
-          className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-zinc-200 bg-white text-zinc-900 transition hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
-        >
-          <span className="grid gap-1.5">
-            <span className="block h-0.5 w-5 rounded-full bg-current" />
-            <span className="block h-0.5 w-5 rounded-full bg-current" />
-            <span className="block h-0.5 w-5 rounded-full bg-current" />
-          </span>
-        </button>
       </div>
 
       {isMobileMenuOpen ? (

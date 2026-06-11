@@ -1358,6 +1358,7 @@ function MessageCard({
   const authorName =
     message.authorUser?.fullName ?? message.authorUser?.email ?? "LeetPlus";
   const authorInitial = authorName.trim().slice(0, 1).toUpperCase() || "L";
+  const messageContent = parseMessageAction(message.body);
 
   return (
     <article
@@ -1424,8 +1425,14 @@ function MessageCard({
           compact ? "mt-2 line-clamp-3" : "mt-3 sm:ml-12",
         ].join(" ")}
       >
-        {message.body}
+        {messageContent.body}
       </p>
+
+      {messageContent.action ? (
+        <div className={compact ? "mt-2" : "mt-3 sm:ml-12"}>
+          <MessageActionLink action={messageContent.action} />
+        </div>
+      ) : null}
 
       {message.attachments.length > 0 ? (
         <div
@@ -1571,6 +1578,104 @@ function MessageCard({
       ) : null}
     </article>
   );
+}
+
+function MessageActionLink({
+  action,
+}: {
+  action: { label: string; href: string };
+}) {
+  const className =
+    "inline-flex items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 dark:border-emerald-500/35 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15";
+
+  if (action.href.startsWith("/")) {
+    return (
+      <Link href={action.href} className={className}>
+        {action.label}
+      </Link>
+    );
+  }
+
+  return (
+    <a href={action.href} className={className} target="_blank" rel="noreferrer">
+      {action.label}
+    </a>
+  );
+}
+
+function parseMessageAction(body: string) {
+  const lines = body.split("\n");
+  const actionLineIndex = findLastTextLineIndex(lines);
+
+  if (actionLineIndex === -1) {
+    return { body, action: null };
+  }
+
+  const match = lines[actionLineIndex]
+    ?.trim()
+    .match(/^(Открыть [^:]{1,80}):\s*((?:\/|https?:\/\/)\S+)$/i);
+
+  if (!match) {
+    return { body, action: null };
+  }
+
+  const href = normalizeMessageActionHref(match[2]);
+
+  if (!href) {
+    return { body, action: null };
+  }
+
+  const visibleLines = lines.slice();
+  visibleLines.splice(actionLineIndex, 1);
+
+  while (visibleLines.length > 0 && !visibleLines[visibleLines.length - 1]?.trim()) {
+    visibleLines.pop();
+  }
+
+  return {
+    body: visibleLines.join("\n"),
+    action: {
+      label: match[1],
+      href,
+    },
+  };
+}
+
+function findLastTextLineIndex(lines: string[]) {
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    if (lines[index]?.trim()) {
+      return index;
+    }
+  }
+
+  return -1;
+}
+
+function normalizeMessageActionHref(rawHref: string) {
+  if (rawHref.startsWith("/")) {
+    return rawHref;
+  }
+
+  try {
+    const url = new URL(rawHref);
+
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return null;
+    }
+
+    if (
+      url.hostname === "leetplus.ru" ||
+      url.hostname === "www.leetplus.ru" ||
+      url.hostname === "localhost" ||
+      url.hostname === "127.0.0.1"
+    ) {
+      return `${url.pathname}${url.search}${url.hash}`;
+    }
+
+    return url.toString();
+  } catch {
+    return null;
+  }
 }
 
 function Metric({ label, value }: { label: string; value: number }) {

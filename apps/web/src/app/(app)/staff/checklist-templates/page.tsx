@@ -1,7 +1,9 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { StaffChecklistTemplateBuilder } from "@/components/staff-checklist-template-builder";
 import { requireCurrentUser } from "@/lib/auth";
+import { isShiftWorkspaceRole } from "@/lib/landing";
 import {
   getStaffChecklistTemplateReport,
   type StaffChecklistTemplateFilterStatus,
@@ -84,8 +86,13 @@ export default async function StaffChecklistTemplatesPage({
 }: {
   searchParams: SearchParams;
 }) {
-  await requireCurrentUser();
+  const user = await requireCurrentUser();
   const params = await searchParams;
+
+  if (isShiftWorkspaceRole(user.role)) {
+    redirect("/staff/checklists");
+  }
+
   const filters = resolveFilters(params);
   const initialTemplateId = searchParam(params.templateId);
   const initialSourceRegulationId = searchParam(params.sourceRegulationId);

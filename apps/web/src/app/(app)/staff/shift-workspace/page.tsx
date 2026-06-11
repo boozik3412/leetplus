@@ -566,6 +566,7 @@ export default async function StaffShiftWorkspacePage({
   const user = await requireCurrentUser();
   const params = await searchParams;
   const selectedChecklistId = searchParam(params.checklistRunId);
+  const isChecklistPickerOpen = searchParam(params.checklistPicker) === "1";
   const checklistStartError = searchParam(params.checklistStartError);
 
   if (!can(user, "view_staff_shift_workspace")) {
@@ -649,9 +650,14 @@ export default async function StaffShiftWorkspacePage({
     staffStoreId,
   );
   const recommendedChecklist = findCurrentChecklistRun(activeChecklists, currentShift);
-  const selectedChecklist = selectedChecklistId
-    ? activeChecklists.find((run) => run.id === selectedChecklistId) ?? null
-    : null;
+  const selectedChecklist = isChecklistPickerOpen
+    ? null
+    : selectedChecklistId
+      ? activeChecklists.find((run) => run.id === selectedChecklistId) ??
+        recommendedChecklist ??
+        activeChecklists[0] ??
+        null
+      : recommendedChecklist ?? activeChecklists[0] ?? null;
   const selectedChecklistItems = buildChecklistTodoItems(selectedChecklist);
   const selectedChecklistSummary = checklistTodoSummary(selectedChecklistItems);
   const selectedChecklistCurrentItem = currentTodoItem(selectedChecklistItems);
@@ -1044,7 +1050,7 @@ function WorkPanel({
               </div>
               <div className="flex flex-wrap gap-2">
                 <Link
-                  href="/staff/shift-workspace"
+                  href="/staff/shift-workspace?checklistPicker=1"
                   className="inline-flex h-9 items-center rounded-md border border-zinc-200 bg-white px-3 text-sm font-semibold text-zinc-700 transition hover:border-emerald-300 hover:text-emerald-700 dark:border-zinc-800 dark:bg-transparent dark:text-zinc-300 dark:hover:border-emerald-500/40"
                 >
                   Сменить
@@ -1098,7 +1104,10 @@ function WorkPanel({
               )}
             </div>
             {checklistItems.length > 0 ? (
-              <details className="mt-3 rounded-md border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-transparent">
+              <details
+                open
+                className="mt-3 rounded-md border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-transparent"
+              >
                 <summary className="cursor-pointer text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                   Показать все действия чек-листа
                 </summary>

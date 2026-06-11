@@ -4,13 +4,16 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { UserRole } from '@prisma/client';
+import { TenantLifecycleStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from './auth.service';
 import { EmailVerificationService } from './email-verification.service';
 
 type PrismaMock = {
   user: {
+    findUnique: jest.Mock;
+  };
+  userRoleOverride: {
     findUnique: jest.Mock;
   };
   tenant: {
@@ -46,6 +49,7 @@ function createUserWithTenant() {
     tenantId: 'tenant-1',
     tenant: {
       slug: 'club-a',
+      status: TenantLifecycleStatus.ACTIVE,
     },
   };
 }
@@ -61,6 +65,9 @@ describe('AuthService', () => {
     prisma = {
       user: {
         findUnique: jest.fn(),
+      },
+      userRoleOverride: {
+        findUnique: jest.fn().mockResolvedValue(null),
       },
       tenant: {
         findUnique: jest.fn(),
@@ -93,6 +100,7 @@ describe('AuthService', () => {
     prisma.tenant.create.mockResolvedValue({
       id: 'tenant-1',
       slug: 'club-a',
+      status: TenantLifecycleStatus.ACTIVE,
       users: [createUserWithTenant()],
     });
 
@@ -105,7 +113,7 @@ describe('AuthService', () => {
         tenantSlug: ' Club-A ',
         fullName: 'Owner',
       }),
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       accessToken: 'signed-token',
       user: {
         id: 'user-1',
@@ -118,6 +126,10 @@ describe('AuthService', () => {
         tenantSlug: 'club-a',
       },
     });
+    expect(jwtService.signAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ sub: 'user-1' }),
+      { expiresIn: '24h' },
+    );
 
     expect(prisma.tenant.create).toHaveBeenCalledWith({
       data: {
@@ -200,6 +212,10 @@ describe('AuthService', () => {
         tenantId: 'tenant-1',
       },
     });
+    expect(jwtService.signAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ sub: 'user-1' }),
+      { expiresIn: '24h' },
+    );
   });
 
   it('rejects invalid credentials', async () => {

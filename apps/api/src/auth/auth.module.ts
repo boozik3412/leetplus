@@ -27,7 +27,7 @@ type JwtExpiresIn = NonNullable<JwtModuleOptions['signOptions']>['expiresIn'];
         secret: configService.get<string>('JWT_SECRET') ?? DEV_JWT_SECRET,
         signOptions: {
           expiresIn: (configService.get<string>('JWT_EXPIRES_IN') ??
-            '1h') as JwtExpiresIn,
+            '24h') as JwtExpiresIn,
         },
       }),
     }),

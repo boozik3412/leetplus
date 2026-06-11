@@ -20,6 +20,8 @@ type AuthResponse = {
   user: AuthenticatedUser;
 };
 
+const AUTH_TOKEN_EXPIRES_IN = '24h';
+
 type UserWithTenant = {
   id: string;
   email: string;
@@ -476,7 +478,9 @@ export class AuthService {
     };
 
     return {
-      accessToken: await this.jwtService.signAsync(payload),
+      accessToken: await this.jwtService.signAsync(payload, {
+        expiresIn: AUTH_TOKEN_EXPIRES_IN,
+      }),
       user: authenticatedUser,
     };
   }

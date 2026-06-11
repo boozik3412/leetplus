@@ -7,7 +7,7 @@ import {
 } from "@/lib/api";
 import type { AuthResponse } from "@/lib/auth";
 
-const AUTH_COOKIE_MAX_AGE = 60 * 60;
+const AUTH_COOKIE_MAX_AGE = 60 * 60 * 24;
 
 export async function POST(request: Request) {
   const payload = (await request.json()) as {

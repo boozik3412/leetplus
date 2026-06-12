@@ -454,9 +454,11 @@ export function StaffShiftOperationsOverview({
 
       <div className="grid gap-4 py-4 lg:grid-cols-4">
         <Metric
-          label="На сменах"
+          label="Админы в работе"
           value={formatNumber(activeAdmins.total.size)}
-          caption={`${formatNumber(shiftsCount)} активных смен`}
+          caption={`${formatNumber(shiftsCount)} смен Langame, ${formatNumber(
+            clubGroups.length,
+          )} клуба`}
           tone={activeAdmins.total.size > 0 ? "good" : "default"}
         />
         <Metric

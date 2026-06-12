@@ -106,6 +106,22 @@ function currentOperationalDate() {
   return `${valueByType.year}-${valueByType.month}-${valueByType.day}`;
 }
 
+function operationalDateOffset(value: string, days: number) {
+  const date = new Date(`${value}T12:00:00+05:00`);
+  date.setDate(date.getDate() + days);
+  const parts = new Intl.DateTimeFormat("ru-RU", {
+    timeZone: "Asia/Yekaterinburg",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const valueByType = Object.fromEntries(
+    parts.map((part) => [part.type, part.value]),
+  );
+
+  return `${valueByType.year}-${valueByType.month}-${valueByType.day}`;
+}
+
 function operationalDateLabel(value: string) {
   return new Intl.DateTimeFormat("ru-RU", {
     timeZone: "Asia/Yekaterinburg",
@@ -146,7 +162,7 @@ export default async function StaffShiftRegulationsPage({
     ? requestedFilters
     : { ...requestedFilters, status: "PUBLISHED" };
   const operationalDate = currentOperationalDate();
-  const [report, checklistTemplates, checklistExecution, taskReport] =
+  const [report, checklistTemplates, checklistExecution, recentChecklistExecution, taskReport] =
     await Promise.all([
     getStaffShiftRegulationReport(filters),
     getStaffChecklistTemplateReport({
@@ -162,6 +178,14 @@ export default async function StaffShiftRegulationsPage({
           status: "all",
           shiftKind: "all",
           dateFrom: operationalDate,
+          dateTo: operationalDate,
+        })
+      : Promise.resolve(null),
+    canManageRegulations
+      ? getStaffChecklistExecutionReport({
+          status: "all",
+          shiftKind: "all",
+          dateFrom: operationalDateOffset(operationalDate, -14),
           dateTo: operationalDate,
         })
       : Promise.resolve(null),
@@ -222,6 +246,7 @@ export default async function StaffShiftRegulationsPage({
         {checklistExecution && taskReport ? (
           <StaffShiftOperationsOverview
             checklists={checklistExecution}
+            recentChecklists={recentChecklistExecution ?? undefined}
             tasks={taskReport}
             dateLabel={operationalDateLabel(operationalDate)}
           />

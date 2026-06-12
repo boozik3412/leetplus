@@ -1,7 +1,11 @@
+"use client";
+
+import { useState, type ReactNode } from "react";
 import type {
   StaffChecklistExecutionMetrics,
   StaffChecklistExecutionReport,
   StaffChecklistExecutionRun,
+  StaffChecklistStatus,
 } from "@/lib/staff-checklists";
 import type {
   StaffTask,
@@ -16,6 +20,21 @@ type OverviewGroup = {
   checklist: StaffChecklistExecutionMetrics;
   tasks: StaffTaskGroup;
   activeAdmins: number;
+  kind: "club" | "employee";
+};
+
+type ModalState =
+  | { type: "club"; key: string }
+  | { type: "employee"; key: string }
+  | null;
+
+type ShiftSnapshot = {
+  key: string;
+  startedAt: string | null;
+  stoppedAt: string | null;
+  storeName: string | null;
+  admins: string[];
+  runs: StaffChecklistExecutionRun[];
 };
 
 const emptyChecklistMetrics: StaffChecklistExecutionMetrics = {
@@ -55,8 +74,41 @@ const emptyTaskGroup: StaffTaskGroup = {
   filter: {},
 };
 
+const checklistStatusLabels: Record<StaffChecklistStatus, string> = {
+  OPEN: "Новый",
+  IN_PROGRESS: "В работе",
+  ON_REVIEW: "На проверке",
+  ACCEPTED: "Принят",
+  RETURNED: "Возвращен",
+  ESCALATED: "Эскалация",
+  CANCELED: "Отменен",
+};
+
 function formatNumber(value: number) {
   return new Intl.NumberFormat("ru-RU").format(value);
+}
+
+function formatDateTime(value: string | null) {
+  if (!value) {
+    return "не указано";
+  }
+
+  return new Intl.DateTimeFormat("ru-RU", {
+    timeZone: "Asia/Yekaterinburg",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function userName(user: StaffChecklistExecutionRun["assignedToUser"]) {
+  return user?.fullName ?? user?.email ?? "Сотрудник не указан";
+}
+
+function uniqueStrings(values: string[]) {
+  return Array.from(new Set(values.filter(Boolean)));
 }
 
 function formatPercent(value: number) {
@@ -97,6 +149,38 @@ function taskCompletionPercent(metrics: Pick<StaffTaskGroup, "total" | "done" | 
   return ratioPercent(metrics.done, Math.max(metrics.total - metrics.canceled, 0));
 }
 
+function checklistRunTime(run: StaffChecklistExecutionRun) {
+  return run.submittedAt ?? run.scheduledAt ?? run.shift?.startedAt ?? null;
+}
+
+function checklistProgress(run: StaffChecklistExecutionRun) {
+  return `${formatNumber(run.requiredItemsDone)}/${formatNumber(
+    run.requiredItemsTotal,
+  )} пунктов`;
+}
+
+function getChecklistSortTime(run: StaffChecklistExecutionRun) {
+  const value = checklistRunTime(run);
+
+  return value ? new Date(value).getTime() : 0;
+}
+
+function operationsDetailHref(userId: string) {
+  return `/staff/operations-dashboard?userId=${encodeURIComponent(userId)}`;
+}
+
+function checklistDetailHref(userId: string) {
+  return `/staff/checklists/report?assignedToUserId=${encodeURIComponent(
+    userId,
+  )}`;
+}
+
+function taskDetailHref(userId: string) {
+  return `/staff/tasks?assignedToUserId=${encodeURIComponent(
+    userId,
+  )}&view=byShift`;
+}
+
 function isActiveChecklistRun(run: StaffChecklistExecutionRun) {
   return ["OPEN", "IN_PROGRESS", "ON_REVIEW", "RETURNED", "ESCALATED"].includes(
     run.status,
@@ -113,6 +197,70 @@ function getTaskStoreKey(task: StaffTask) {
 
 function getChecklistStoreKey(run: StaffChecklistExecutionRun) {
   return run.store?.id ?? run.shift?.store?.id ?? "network";
+}
+
+function getClubRuns(
+  checklists: StaffChecklistExecutionReport,
+  group: OverviewGroup,
+) {
+  return checklists.runs.filter((run) => getChecklistStoreKey(run) === group.key);
+}
+
+function getEmployeeRuns(
+  checklists: StaffChecklistExecutionReport,
+  group: OverviewGroup,
+) {
+  return checklists.runs.filter((run) => run.assignedToUser?.id === group.key);
+}
+
+function buildShiftSnapshots(runs: StaffChecklistExecutionRun[]) {
+  const shifts = new Map<string, ShiftSnapshot>();
+
+  runs.forEach((run) => {
+    const key = run.shift?.id ?? `run:${run.id}`;
+    const current = shifts.get(key) ?? {
+      key,
+      startedAt: run.shift?.startedAt ?? checklistRunTime(run),
+      stoppedAt: run.shift?.stoppedAt ?? null,
+      storeName: run.shift?.store?.name ?? run.store?.name ?? null,
+      admins: [],
+      runs: [],
+    };
+
+    current.runs.push(run);
+    current.admins = uniqueStrings([
+      ...current.admins,
+      userName(run.assignedToUser),
+    ]);
+    shifts.set(key, current);
+  });
+
+  return Array.from(shifts.values()).sort((left, right) => {
+    const leftTime = left.startedAt ? new Date(left.startedAt).getTime() : 0;
+    const rightTime = right.startedAt ? new Date(right.startedAt).getTime() : 0;
+
+    return rightTime - leftTime;
+  });
+}
+
+function checklistStatusClass(status: StaffChecklistStatus, overdue: number) {
+  if (overdue > 0 || status === "ESCALATED") {
+    return "bg-rose-50 text-rose-700 ring-rose-200 dark:bg-rose-500/10 dark:text-rose-200 dark:ring-rose-900/70";
+  }
+
+  if (status === "ACCEPTED") {
+    return "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-200 dark:ring-emerald-900/70";
+  }
+
+  if (status === "ON_REVIEW") {
+    return "bg-cyan-50 text-cyan-700 ring-cyan-200 dark:bg-cyan-500/10 dark:text-cyan-200 dark:ring-cyan-900/70";
+  }
+
+  if (status === "RETURNED") {
+    return "bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-200 dark:ring-amber-900/70";
+  }
+
+  return "bg-zinc-100 text-zinc-700 ring-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:ring-zinc-700";
 }
 
 function buildActiveAdminSets(
@@ -191,6 +339,7 @@ function mergeByClub(
       checklist: group,
       tasks: { ...emptyTaskGroup, key: group.key, label: group.label },
       activeAdmins: activeAdminsByClub.get(group.key)?.size ?? 0,
+      kind: "club",
     });
   });
 
@@ -204,6 +353,7 @@ function mergeByClub(
       checklist: current?.checklist ?? emptyChecklistMetrics,
       tasks: group,
       activeAdmins: activeAdminsByClub.get(group.key)?.size ?? current?.activeAdmins ?? 0,
+      kind: "club",
     });
   });
 
@@ -224,6 +374,7 @@ function mergeByEmployee(
       checklist: group,
       tasks: { ...emptyTaskGroup, key: group.key, label: group.label },
       activeAdmins: activeChecklistCount(group) > 0 ? 1 : 0,
+      kind: "employee",
     });
   });
 
@@ -238,6 +389,7 @@ function mergeByEmployee(
       tasks: group,
       activeAdmins:
         current?.activeAdmins ?? (activeTaskCount(group) > 0 ? 1 : 0),
+      kind: "employee",
     });
   });
 
@@ -316,12 +468,27 @@ function MiniProgress({
   );
 }
 
-function OperationsRow({ group }: { group: OverviewGroup }) {
+function OperationsRow({
+  group,
+  onOpen,
+}: {
+  group: OverviewGroup;
+  onOpen: () => void;
+}) {
   const checklistPercent = group.checklist.requiredPercent;
   const taskPercent = taskCompletionPercent(group.tasks);
+  const activityCount =
+    group.kind === "club"
+      ? group.activeAdmins
+      : activeChecklistCount(group.checklist) + activeTaskCount(group.tasks);
+  const activityLabel = group.kind === "club" ? "админов" : "активных";
 
   return (
-    <div className="grid gap-3 border-t border-zinc-100 py-3 first:border-t-0 dark:border-zinc-800 sm:grid-cols-[minmax(0,1.35fr)_5rem_minmax(0,1fr)_minmax(0,1fr)] sm:items-center">
+    <button
+      type="button"
+      onClick={onOpen}
+      className="group grid w-full gap-3 border-t border-zinc-100 py-3 text-left transition first:border-t-0 hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 dark:border-zinc-800 dark:hover:bg-zinc-900/70 sm:grid-cols-[minmax(0,1.35fr)_6.5rem_minmax(0,1fr)_minmax(0,1fr)_1.5rem] sm:items-center"
+    >
       <div className="min-w-0">
         <p className="truncate text-sm font-semibold text-zinc-950 dark:text-zinc-100">
           {group.label}
@@ -331,8 +498,8 @@ function OperationsRow({ group }: { group: OverviewGroup }) {
         ) : null}
       </div>
       <div className="inline-flex w-fit items-center gap-1 rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
-        <span>{formatNumber(group.activeAdmins)}</span>
-        <span className="font-medium text-zinc-500">в работе</span>
+        <span>{formatNumber(activityCount)}</span>
+        <span className="font-medium text-zinc-500">{activityLabel}</span>
       </div>
       <MiniProgress
         label="Чек-листы"
@@ -348,7 +515,13 @@ function OperationsRow({ group }: { group: OverviewGroup }) {
           Math.max(group.tasks.total - group.tasks.canceled, 0),
         )} закрыто`}
       />
-    </div>
+      <span
+        aria-hidden="true"
+        className="hidden size-6 items-center justify-center rounded-full border border-zinc-200 text-sm text-zinc-500 transition group-hover:border-emerald-300 group-hover:text-emerald-600 dark:border-zinc-700 dark:text-zinc-400 sm:inline-flex"
+      >
+        →
+      </span>
+    </button>
   );
 }
 
@@ -391,7 +564,7 @@ function DetailsBlock({
 }: {
   title: string;
   count: number;
-  children: React.ReactNode;
+  children: ReactNode;
   open?: boolean;
 }) {
   return (
@@ -400,8 +573,13 @@ function DetailsBlock({
       className="group rounded-md border border-zinc-200 bg-zinc-50/70 dark:border-zinc-800 dark:bg-zinc-950/60"
     >
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-sm font-semibold text-zinc-800 dark:text-zinc-100">
-        <span>{title}</span>
-        <span className="inline-flex items-center rounded-full bg-white px-2 py-0.5 text-xs text-zinc-500 ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800">
+        <span className="inline-flex min-w-0 items-center gap-2">
+          <span className="grid size-6 shrink-0 place-items-center rounded-full bg-white text-xs text-zinc-500 ring-1 ring-zinc-200 transition dark:bg-zinc-900 dark:ring-zinc-800">
+            <span className="transition-transform group-open:rotate-90">›</span>
+          </span>
+          <span className="truncate">{title}</span>
+        </span>
+        <span className="inline-flex shrink-0 items-center rounded-full bg-white px-2 py-0.5 text-xs text-zinc-500 ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800">
           {formatNumber(count)}
         </span>
       </summary>
@@ -410,18 +588,317 @@ function DetailsBlock({
   );
 }
 
+function StatusPill({
+  status,
+  overdue,
+}: {
+  status: StaffChecklistStatus;
+  overdue: number;
+}) {
+  return (
+    <span
+      className={[
+        "inline-flex w-fit items-center rounded-full px-2 py-0.5 text-xs font-semibold ring-1",
+        checklistStatusClass(status, overdue),
+      ].join(" ")}
+    >
+      {overdue > 0 ? "Просрочен" : checklistStatusLabels[status]}
+    </span>
+  );
+}
+
+function ModalShell({
+  title,
+  subtitle,
+  children,
+  onClose,
+}: {
+  title: string;
+  subtitle: string | null;
+  children: ReactNode;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/60 px-4 py-6 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      onMouseDown={(event) => {
+        if (event.currentTarget === event.target) {
+          onClose();
+        }
+      }}
+    >
+      <div className="max-h-[88vh] w-full max-w-3xl overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-950">
+        <div className="flex items-start justify-between gap-4 border-b border-zinc-100 p-4 dark:border-zinc-800">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-300">
+              Детализация
+            </p>
+            <h3 className="mt-1 truncate text-xl font-semibold tracking-tight">
+              {title}
+            </h3>
+            {subtitle ? (
+              <p className="mt-1 text-sm text-zinc-500">{subtitle}</p>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="grid size-9 shrink-0 place-items-center rounded-full border border-zinc-200 text-lg text-zinc-500 transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+            aria-label="Закрыть"
+          >
+            ×
+          </button>
+        </div>
+        <div className="max-h-[calc(88vh-5.5rem)] overflow-y-auto p-4">
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ClubModal({
+  group,
+  checklists,
+  onClose,
+}: {
+  group: OverviewGroup;
+  checklists: StaffChecklistExecutionReport;
+  onClose: () => void;
+}) {
+  const shifts = buildShiftSnapshots(getClubRuns(checklists, group)).slice(0, 3);
+
+  return (
+    <ModalShell title={group.label} subtitle={group.caption} onClose={onClose}>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Metric
+          label="Чек-листы"
+          value={formatPercent(group.checklist.requiredPercent)}
+          caption={`${formatNumber(group.checklist.requiredItemsDone)}/${formatNumber(
+            group.checklist.requiredItemsTotal,
+          )} пунктов`}
+          tone={group.checklist.requiredPercent >= 85 ? "good" : "warn"}
+        />
+        <Metric
+          label="Задачи"
+          value={formatPercent(taskCompletionPercent(group.tasks))}
+          caption={`${formatNumber(group.tasks.done)}/${formatNumber(
+            Math.max(group.tasks.total - group.tasks.canceled, 0),
+          )} закрыто`}
+          tone={taskCompletionPercent(group.tasks) >= 85 ? "good" : "warn"}
+        />
+        <Metric
+          label="Админы"
+          value={formatNumber(group.activeAdmins)}
+          caption="активных на сменах"
+          tone={group.activeAdmins > 0 ? "good" : "default"}
+        />
+      </div>
+
+      <div className="mt-5">
+        <h4 className="text-sm font-semibold uppercase text-zinc-500">
+          Последние 3 смены
+        </h4>
+        <div className="mt-3 space-y-3">
+          {shifts.length > 0 ? (
+            shifts.map((shift) => (
+              <div
+                key={shift.key}
+                className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800"
+              >
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p className="text-sm font-semibold">
+                      {shift.storeName ?? group.label}
+                    </p>
+                    <p className="mt-1 text-sm text-zinc-500">
+                      {formatDateTime(shift.startedAt)}
+                      {shift.stoppedAt
+                        ? ` - ${formatDateTime(shift.stoppedAt)}`
+                        : " - смена открыта"}
+                    </p>
+                  </div>
+                  <div className="text-sm text-zinc-500 sm:text-right">
+                    {shift.admins.join(", ")}
+                  </div>
+                </div>
+                <div className="mt-3 space-y-2">
+                  {shift.runs.slice(0, 4).map((run) => (
+                    <div
+                      key={run.id}
+                      className="grid gap-2 rounded-md bg-zinc-50 p-2 dark:bg-zinc-900/60 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold">
+                          {run.title}
+                        </p>
+                        <p className="mt-0.5 text-xs text-zinc-500">
+                          {userName(run.assignedToUser)}
+                        </p>
+                      </div>
+                      <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
+                        {checklistProgress(run)}
+                      </span>
+                      <StatusPill status={run.status} overdue={run.overdue} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))
+          ) : (
+            <p className="rounded-md border border-dashed border-zinc-300 p-4 text-sm text-zinc-500 dark:border-zinc-700">
+              За выбранный период смены с чек-листами по этому клубу не найдены.
+            </p>
+          )}
+        </div>
+      </div>
+    </ModalShell>
+  );
+}
+
+function EmployeeModal({
+  group,
+  checklists,
+  onClose,
+}: {
+  group: OverviewGroup;
+  checklists: StaffChecklistExecutionReport;
+  onClose: () => void;
+}) {
+  const runs = getEmployeeRuns(checklists, group)
+    .sort((left, right) => getChecklistSortTime(right) - getChecklistSortTime(left))
+    .slice(0, 6);
+
+  return (
+    <ModalShell
+      title={group.label}
+      subtitle={group.caption}
+      onClose={onClose}
+    >
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Metric
+          label="Чек-листы"
+          value={formatPercent(group.checklist.requiredPercent)}
+          caption={`${formatNumber(group.checklist.requiredItemsDone)}/${formatNumber(
+            group.checklist.requiredItemsTotal,
+          )} пунктов`}
+          tone={group.checklist.requiredPercent >= 85 ? "good" : "warn"}
+        />
+        <Metric
+          label="Задачи"
+          value={formatPercent(taskCompletionPercent(group.tasks))}
+          caption={`${formatNumber(group.tasks.done)}/${formatNumber(
+            Math.max(group.tasks.total - group.tasks.canceled, 0),
+          )} закрыто`}
+          tone={taskCompletionPercent(group.tasks) >= 85 ? "good" : "warn"}
+        />
+        <Metric
+          label="Внимание"
+          value={formatNumber(
+            group.checklist.overdue +
+              group.checklist.blockingIssues +
+              group.tasks.overdue,
+          )}
+          caption="просрочки и блокеры"
+          tone={
+            group.checklist.overdue +
+              group.checklist.blockingIssues +
+              group.tasks.overdue >
+            0
+              ? "bad"
+              : "good"
+          }
+        />
+      </div>
+
+      <div className="mt-5 flex flex-wrap gap-2">
+        <a
+          href={operationsDetailHref(group.key)}
+          className="inline-flex h-10 items-center rounded-md bg-zinc-950 px-3 text-sm font-semibold text-white transition hover:bg-zinc-800 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
+        >
+          Детализация
+        </a>
+        <a
+          href={checklistDetailHref(group.key)}
+          className="inline-flex h-10 items-center rounded-md border border-zinc-300 px-3 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+        >
+          История чек-листов
+        </a>
+        <a
+          href={taskDetailHref(group.key)}
+          className="inline-flex h-10 items-center rounded-md border border-zinc-300 px-3 text-sm font-semibold transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+        >
+          Задачи по сменам
+        </a>
+      </div>
+
+      <div className="mt-5">
+        <h4 className="text-sm font-semibold uppercase text-zinc-500">
+          Запуски чек-листов
+        </h4>
+        <div className="mt-3 space-y-2">
+          {runs.length > 0 ? (
+            runs.map((run) => (
+              <div
+                key={run.id}
+                className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800"
+              >
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold">{run.title}</p>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      Старт: {formatDateTime(checklistRunTime(run))}
+                      {run.shift?.store?.name || run.store?.name
+                        ? ` · ${run.shift?.store?.name ?? run.store?.name}`
+                        : ""}
+                    </p>
+                  </div>
+                  <StatusPill status={run.status} overdue={run.overdue} />
+                </div>
+                <div className="mt-3">
+                  <MiniProgress
+                    label="Прогресс пунктов"
+                    value={run.requiredPercent}
+                    detail={checklistProgress(run)}
+                  />
+                </div>
+              </div>
+            ))
+          ) : (
+            <p className="rounded-md border border-dashed border-zinc-300 p-4 text-sm text-zinc-500 dark:border-zinc-700">
+              Запусков чек-листов по сотруднику за выбранный период не найдено.
+            </p>
+          )}
+        </div>
+      </div>
+    </ModalShell>
+  );
+}
+
 export function StaffShiftOperationsOverview({
   checklists,
+  recentChecklists,
   tasks,
   dateLabel,
 }: {
   checklists: StaffChecklistExecutionReport;
+  recentChecklists?: StaffChecklistExecutionReport;
   tasks: StaffTaskReport;
   dateLabel: string;
 }) {
+  const [modal, setModal] = useState<ModalState>(null);
   const activeAdmins = buildActiveAdminSets(checklists, tasks);
   const clubGroups = mergeByClub(checklists, tasks, activeAdmins.byClub);
   const employeeGroups = mergeByEmployee(checklists, tasks);
+  const modalChecklists = recentChecklists ?? checklists;
+  const selectedGroup = modal
+    ? (modal.type === "club" ? clubGroups : employeeGroups).find(
+        (group) => group.key === modal.key,
+      ) ?? null
+    : null;
   const shiftsCount = activeShiftCount(checklists, tasks);
   const taskWorkTotal = Math.max(tasks.summary.total - tasks.summary.canceled, 0);
   const taskPercent = ratioPercent(tasks.summary.done, taskWorkTotal);
@@ -506,7 +983,11 @@ export function StaffShiftOperationsOverview({
         <DetailsBlock title="По клубам" count={clubGroups.length} open>
           {clubGroups.length > 0 ? (
             clubGroups.map((group) => (
-              <OperationsRow key={group.key} group={group} />
+              <OperationsRow
+                key={group.key}
+                group={group}
+                onOpen={() => setModal({ type: "club", key: group.key })}
+              />
             ))
           ) : (
             <p className="py-3 text-sm text-zinc-500">
@@ -518,7 +999,11 @@ export function StaffShiftOperationsOverview({
         <DetailsBlock title="По администраторам" count={employeeGroups.length}>
           {employeeGroups.length > 0 ? (
             employeeGroups.slice(0, 12).map((group) => (
-              <OperationsRow key={group.key} group={group} />
+              <OperationsRow
+                key={group.key}
+                group={group}
+                onOpen={() => setModal({ type: "employee", key: group.key })}
+              />
             ))
           ) : (
             <p className="py-3 text-sm text-zinc-500">
@@ -527,6 +1012,22 @@ export function StaffShiftOperationsOverview({
           )}
         </DetailsBlock>
       </div>
+
+      {modal && selectedGroup && modal.type === "club" ? (
+        <ClubModal
+          group={selectedGroup}
+          checklists={modalChecklists}
+          onClose={() => setModal(null)}
+        />
+      ) : null}
+
+      {modal && selectedGroup && modal.type === "employee" ? (
+        <EmployeeModal
+          group={selectedGroup}
+          checklists={modalChecklists}
+          onClose={() => setModal(null)}
+        />
+      ) : null}
     </section>
   );
 }

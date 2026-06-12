@@ -157,19 +157,23 @@ export default async function StaffShiftRegulationsPage({
       storeId: requestedFilters.storeId,
       search: requestedFilters.search,
     }),
-    getStaffChecklistExecutionReport({
-      status: "all",
-      shiftKind: "all",
-      dateFrom: operationalDate,
-      dateTo: operationalDate,
-    }),
-    getStaffTaskReport({
-      status: "all",
-      dueFrom: operationalDate,
-      dueTo: operationalDate,
-      sort: "dueAt",
-      pageSize: "500",
-    }),
+    canManageRegulations
+      ? getStaffChecklistExecutionReport({
+          status: "all",
+          shiftKind: "all",
+          dateFrom: operationalDate,
+          dateTo: operationalDate,
+        })
+      : Promise.resolve(null),
+    canManageRegulations
+      ? getStaffTaskReport({
+          status: "all",
+          dueFrom: operationalDate,
+          dueTo: operationalDate,
+          sort: "dueAt",
+          pageSize: "500",
+        })
+      : Promise.resolve(null),
   ]);
 
   return (
@@ -215,11 +219,13 @@ export default async function StaffShiftRegulationsPage({
           </div>
         </header>
 
-        <StaffShiftOperationsOverview
-          checklists={checklistExecution}
-          tasks={taskReport}
-          dateLabel={operationalDateLabel(operationalDate)}
-        />
+        {checklistExecution && taskReport ? (
+          <StaffShiftOperationsOverview
+            checklists={checklistExecution}
+            tasks={taskReport}
+            dateLabel={operationalDateLabel(operationalDate)}
+          />
+        ) : null}
 
         <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
           <form

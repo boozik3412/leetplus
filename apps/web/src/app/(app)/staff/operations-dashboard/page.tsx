@@ -49,12 +49,51 @@ function searchParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
+function yektDateParts(date: Date) {
+  const parts = new Intl.DateTimeFormat("ru-RU", {
+    timeZone: "Asia/Yekaterinburg",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+
+  return Object.fromEntries(parts.map((part) => [part.type, part.value])) as {
+    year: string;
+    month: string;
+    day: string;
+  };
+}
+
+function yektDateParam(date: Date) {
+  const parts = yektDateParts(date);
+
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function defaultStaffControlPeriod() {
+  const now = new Date();
+  const todayParts = yektDateParts(now);
+  const firstDay = `${todayParts.year}-${todayParts.month}-01`;
+  const yesterdayNoon = new Date(
+    `${yektDateParam(now)}T12:00:00+05:00`,
+  );
+  yesterdayNoon.setDate(yesterdayNoon.getDate() - 1);
+  const lastFullDay = yektDateParam(yesterdayNoon);
+
+  return {
+    dateFrom: firstDay,
+    dateTo: lastFullDay < firstDay ? firstDay : lastFullDay,
+  };
+}
+
 function resolveFilters(
   params: Awaited<SearchParams>,
 ): StaffOperationsDashboardFilters {
+  const defaultPeriod = defaultStaffControlPeriod();
+
   return {
-    dateFrom: searchParam(params.dateFrom),
-    dateTo: searchParam(params.dateTo),
+    dateFrom: searchParam(params.dateFrom) ?? defaultPeriod.dateFrom,
+    dateTo: searchParam(params.dateTo) ?? defaultPeriod.dateTo,
     storeId: searchParam(params.storeId),
     userId: searchParam(params.userId),
     search: searchParam(params.search)?.trim(),
@@ -83,10 +122,15 @@ function formatDate(value: string | null) {
   }
 
   return new Intl.DateTimeFormat("ru-RU", {
+    timeZone: "Asia/Yekaterinburg",
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
-  }).format(new Date(value));
+  }).format(new Date(`${value}T00:00:00+05:00`));
+}
+
+function formatDateRange(dateFrom: string, dateTo: string) {
+  return `${formatDate(dateFrom)} - ${formatDate(dateTo)}`;
 }
 
 function resolveDrilldownActions(
@@ -134,6 +178,10 @@ export default async function StaffOperationsDashboardPage({
     getStaffOperationsDashboard(filters),
     safeGetBusinessSnapshot("STAFF_SHIFTS_CASH"),
   ]);
+  const staffControlPeriodLabel = formatDateRange(
+    dashboard.filters.dateFrom,
+    dashboard.filters.dateTo,
+  );
   const summaryCards = [
     {
       label: "Индекс дисциплины",
@@ -199,6 +247,26 @@ export default async function StaffOperationsDashboardPage({
           snapshot={staffSnapshot}
           type="STAFF_SHIFTS_CASH"
         />
+
+        <section className="mt-6 rounded-lg border border-emerald-200 bg-emerald-50/80 p-4 text-emerald-950 dark:border-emerald-900/70 dark:bg-emerald-500/10 dark:text-emerald-100">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
+                Период staff-control
+              </p>
+              <p className="mt-1 text-xl font-semibold tracking-tight">
+                {staffControlPeriodLabel}
+              </p>
+              <p className="mt-1 text-sm text-emerald-800/80 dark:text-emerald-100/75">
+                По умолчанию берется текущий месяц без текущего неполного дня:
+                только полностью закрытые сутки.
+              </p>
+            </div>
+            <div className="inline-flex w-fit rounded-full bg-white px-3 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-200 dark:ring-emerald-800">
+              Полные сутки
+            </div>
+          </div>
+        </section>
 
         <section className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-7">
           {summaryCards.map((card) => (

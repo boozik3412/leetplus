@@ -116,8 +116,21 @@ function formatHours(value: number) {
   return `${formatNumber(Math.round(value * 10) / 10)} ч`;
 }
 
-function formatDate(value: string | null) {
+function parseDateForLabel(value: string | null | undefined) {
   if (!value) {
+    return null;
+  }
+
+  const dateOnly = value.includes("T") ? value.slice(0, 10) : value;
+  const parsed = new Date(`${dateOnly}T00:00:00+05:00`);
+
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatDate(value: string | null | undefined) {
+  const parsed = parseDateForLabel(value);
+
+  if (!parsed) {
     return "не указано";
   }
 
@@ -126,10 +139,10 @@ function formatDate(value: string | null) {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
-  }).format(new Date(`${value}T00:00:00+05:00`));
+  }).format(parsed);
 }
 
-function formatDateRange(dateFrom: string, dateTo: string) {
+function formatDateRange(dateFrom: string | null | undefined, dateTo: string | null | undefined) {
   return `${formatDate(dateFrom)} - ${formatDate(dateTo)}`;
 }
 

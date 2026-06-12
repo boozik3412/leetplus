@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
+import { StaffShiftOperationsOverview } from "@/components/staff-shift-operations-overview";
 import { StaffShiftRegulationBuilder } from "@/components/staff-shift-regulation-builder";
 import { StaffShiftRegulationCatalog } from "@/components/staff-shift-regulation-catalog";
 import { requireCurrentUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
+import { getStaffChecklistExecutionReport } from "@/lib/staff-checklists";
 import {
   getStaffChecklistTemplateReport,
   type StaffChecklistTemplateFilterStatus,
@@ -14,6 +16,7 @@ import {
   type StaffShiftRegulationFilterStatus,
   type StaffShiftRegulationFilters,
 } from "@/lib/staff-shift-regulations";
+import { getStaffTaskReport } from "@/lib/staff-tasks";
 
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
 
@@ -85,12 +88,30 @@ function resolveFilters(params: Awaited<SearchParams>): StaffShiftRegulationFilt
   };
 }
 
-function formatNumber(value: number) {
-  return new Intl.NumberFormat("ru-RU").format(value);
-}
-
 function isCatalogOnlyRole(role: string) {
   return catalogOnlyRoles.has(role);
+}
+
+function currentOperationalDate() {
+  const parts = new Intl.DateTimeFormat("ru-RU", {
+    timeZone: "Asia/Yekaterinburg",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const valueByType = Object.fromEntries(
+    parts.map((part) => [part.type, part.value]),
+  );
+
+  return `${valueByType.year}-${valueByType.month}-${valueByType.day}`;
+}
+
+function operationalDateLabel(value: string) {
+  return new Intl.DateTimeFormat("ru-RU", {
+    timeZone: "Asia/Yekaterinburg",
+    day: "2-digit",
+    month: "long",
+  }).format(new Date(`${value}T00:00:00+05:00`));
 }
 
 function checklistStatusFromRegulationStatus(
@@ -124,7 +145,9 @@ export default async function StaffShiftRegulationsPage({
   const filters: StaffShiftRegulationFilters = canManageRegulations
     ? requestedFilters
     : { ...requestedFilters, status: "PUBLISHED" };
-  const [report, checklistTemplates] = await Promise.all([
+  const operationalDate = currentOperationalDate();
+  const [report, checklistTemplates, checklistExecution, taskReport] =
+    await Promise.all([
     getStaffShiftRegulationReport(filters),
     getStaffChecklistTemplateReport({
       status: canManageRegulations
@@ -134,39 +157,20 @@ export default async function StaffShiftRegulationsPage({
       storeId: requestedFilters.storeId,
       search: requestedFilters.search,
     }),
+    getStaffChecklistExecutionReport({
+      status: "all",
+      shiftKind: "all",
+      dateFrom: operationalDate,
+      dateTo: operationalDate,
+    }),
+    getStaffTaskReport({
+      status: "all",
+      dueFrom: operationalDate,
+      dueTo: operationalDate,
+      sort: "dueAt",
+      pageSize: "500",
+    }),
   ]);
-
-  const summaryCards = canManageRegulations
-    ? [
-        { label: "Регламентов", value: report.summary.total },
-        { label: "Чек-листов", value: checklistTemplates.summary.total },
-        { label: "Черновики", value: report.summary.draft },
-        { label: "Опубликовано", value: report.summary.published },
-        { label: "Архив", value: report.summary.archived },
-        {
-          label: "Пунктов с доказательством",
-          value: report.summary.requiredEvidenceItems,
-        },
-        {
-          label: "Ждут ознакомления",
-          value: report.summary.pendingAcknowledgements,
-        },
-        { label: "С пересдачей", value: report.summary.retakeRequired },
-      ]
-    : [
-        { label: "Регламентов", value: report.summary.published },
-        { label: "Чек-листов", value: checklistTemplates.summary.total },
-        { label: "Опубликовано", value: report.summary.published },
-        {
-          label: "Ждут ознакомления",
-          value: report.summary.pendingAcknowledgements,
-        },
-        {
-          label: "Пунктов с доказательством",
-          value: report.summary.requiredEvidenceItems,
-        },
-        { label: "С пересдачей", value: report.summary.retakeRequired },
-      ];
 
   return (
     <main className="px-4 py-6 text-zinc-950 dark:text-zinc-100 sm:px-6 sm:py-8">
@@ -211,21 +215,11 @@ export default async function StaffShiftRegulationsPage({
           </div>
         </header>
 
-        <section className="mt-6 flex flex-wrap gap-2 border-y border-zinc-200 py-3 dark:border-zinc-800">
-          {summaryCards.map((card) => (
-            <div
-              key={card.label}
-              className="inline-flex min-h-9 items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-sm dark:border-zinc-800 dark:bg-zinc-950"
-            >
-              <span className="text-xs font-semibold uppercase text-zinc-500">
-                {card.label}
-              </span>
-              <span className="text-base font-semibold">
-                {formatNumber(card.value)}
-              </span>
-            </div>
-          ))}
-        </section>
+        <StaffShiftOperationsOverview
+          checklists={checklistExecution}
+          tasks={taskReport}
+          dateLabel={operationalDateLabel(operationalDate)}
+        />
 
         <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
           <form

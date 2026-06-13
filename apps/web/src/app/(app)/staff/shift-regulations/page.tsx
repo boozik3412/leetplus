@@ -162,8 +162,14 @@ export default async function StaffShiftRegulationsPage({
     ? requestedFilters
     : { ...requestedFilters, status: "PUBLISHED" };
   const operationalDate = currentOperationalDate();
-  const [report, checklistTemplates, checklistExecution, recentChecklistExecution, taskReport] =
-    await Promise.all([
+  const [
+    report,
+    checklistTemplates,
+    checklistExecution,
+    recentChecklistExecution,
+    taskReport,
+    recentTaskReport,
+  ] = await Promise.all([
     getStaffShiftRegulationReport(filters),
     getStaffChecklistTemplateReport({
       status: canManageRegulations
@@ -195,6 +201,16 @@ export default async function StaffShiftRegulationsPage({
           dueFrom: operationalDate,
           dueTo: operationalDate,
           sort: "dueAt",
+          pageSize: "500",
+        })
+      : Promise.resolve(null),
+    canManageRegulations
+      ? getStaffTaskReport({
+          status: "all",
+          dueFrom: operationalDateOffset(operationalDate, -14),
+          dueTo: operationalDate,
+          sort: "dueAt",
+          direction: "desc",
           pageSize: "500",
         })
       : Promise.resolve(null),
@@ -248,6 +264,7 @@ export default async function StaffShiftRegulationsPage({
             checklists={checklistExecution}
             recentChecklists={recentChecklistExecution ?? undefined}
             tasks={taskReport}
+            recentTasks={recentTaskReport ?? undefined}
             dateLabel={operationalDateLabel(operationalDate)}
           />
         ) : null}

@@ -11,6 +11,7 @@ import type {
   StaffTask,
   StaffTaskGroup,
   StaffTaskReport,
+  StaffTaskStatus,
 } from "@/lib/staff-tasks";
 
 type OverviewGroup = {
@@ -82,6 +83,14 @@ const checklistStatusLabels: Record<StaffChecklistStatus, string> = {
   RETURNED: "Возвращен",
   ESCALATED: "Эскалация",
   CANCELED: "Отменен",
+};
+
+const taskStatusLabels: Record<StaffTaskStatus, string> = {
+  OPEN: "Новая",
+  IN_PROGRESS: "В работе",
+  ON_REVIEW: "На проверке",
+  DONE: "Готово",
+  CANCELED: "Отменена",
 };
 
 function formatNumber(value: number) {
@@ -206,11 +215,57 @@ function getClubRuns(
   return checklists.runs.filter((run) => getChecklistStoreKey(run) === group.key);
 }
 
+function getClubTasks(tasks: StaffTaskReport, group: OverviewGroup) {
+  return tasks.rows.filter((task) => getTaskStoreKey(task) === group.key);
+}
+
 function getEmployeeRuns(
   checklists: StaffChecklistExecutionReport,
   group: OverviewGroup,
 ) {
   return checklists.runs.filter((run) => run.assignedToUser?.id === group.key);
+}
+
+function getEmployeeTasks(tasks: StaffTaskReport, group: OverviewGroup) {
+  return tasks.rows.filter((task) => task.assignedToUser?.id === group.key);
+}
+
+function taskTime(task: StaffTask) {
+  return task.dueAt ?? task.completedAt ?? task.updatedAt ?? task.createdAt;
+}
+
+function getTaskSortTime(task: StaffTask) {
+  const value = taskTime(task);
+
+  return value ? new Date(value).getTime() : 0;
+}
+
+function sortRunsByRecent(runs: StaffChecklistExecutionRun[]) {
+  return [...runs].sort(
+    (left, right) => getChecklistSortTime(right) - getChecklistSortTime(left),
+  );
+}
+
+function sortTasksByRecent(tasks: StaffTask[]) {
+  return [...tasks].sort(
+    (left, right) => getTaskSortTime(right) - getTaskSortTime(left),
+  );
+}
+
+function taskAssigneeName(task: StaffTask) {
+  return (
+    task.assignedToUser?.fullName ??
+    task.assignedToUser?.email ??
+    "Не назначен"
+  );
+}
+
+function hasChecklistControlGap(group: OverviewGroup) {
+  return (
+    group.kind === "club" &&
+    group.activeAdmins > 0 &&
+    activeChecklistCount(group.checklist) === 0
+  );
 }
 
 function buildShiftSnapshots(runs: StaffChecklistExecutionRun[]) {
@@ -258,6 +313,22 @@ function checklistStatusClass(status: StaffChecklistStatus, overdue: number) {
 
   if (status === "RETURNED") {
     return "bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-200 dark:ring-amber-900/70";
+  }
+
+  return "bg-zinc-100 text-zinc-700 ring-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:ring-zinc-700";
+}
+
+function taskStatusClass(status: StaffTaskStatus, isOverdue: boolean) {
+  if (isOverdue) {
+    return "bg-rose-50 text-rose-700 ring-rose-200 dark:bg-rose-500/10 dark:text-rose-200 dark:ring-rose-900/70";
+  }
+
+  if (status === "DONE") {
+    return "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-200 dark:ring-emerald-900/70";
+  }
+
+  if (status === "ON_REVIEW") {
+    return "bg-cyan-50 text-cyan-700 ring-cyan-200 dark:bg-cyan-500/10 dark:text-cyan-200 dark:ring-cyan-900/70";
   }
 
   return "bg-zinc-100 text-zinc-700 ring-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:ring-zinc-700";
@@ -482,6 +553,7 @@ function OperationsRow({
       ? group.activeAdmins
       : activeChecklistCount(group.checklist) + activeTaskCount(group.tasks);
   const activityLabel = group.kind === "club" ? "админов" : "активных";
+  const checklistGap = hasChecklistControlGap(group);
 
   return (
     <button
@@ -495,6 +567,11 @@ function OperationsRow({
         </p>
         {group.caption ? (
           <p className="mt-1 truncate text-xs text-zinc-500">{group.caption}</p>
+        ) : null}
+        {checklistGap ? (
+          <p className="mt-1 inline-flex w-fit rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700 ring-1 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-200 dark:ring-amber-900/70">
+            Нет активного чек-листа на смене
+          </p>
         ) : null}
       </div>
       <div className="inline-flex w-fit items-center gap-1 rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
@@ -607,6 +684,84 @@ function StatusPill({
   );
 }
 
+function TaskStatusPill({ task }: { task: StaffTask }) {
+  return (
+    <span
+      className={[
+        "inline-flex w-fit items-center rounded-full px-2 py-0.5 text-xs font-semibold ring-1",
+        taskStatusClass(task.status, task.isOverdue),
+      ].join(" ")}
+    >
+      {task.isOverdue ? "Просрочена" : taskStatusLabels[task.status]}
+    </span>
+  );
+}
+
+function AttentionNote({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/70 dark:bg-amber-500/10 dark:text-amber-100">
+      <p className="font-semibold">{title}</p>
+      <p className="mt-1 text-xs leading-5 text-amber-800/80 dark:text-amber-100/75">
+        {children}
+      </p>
+    </div>
+  );
+}
+
+function RecentChecklistItem({ run }: { run: StaffChecklistExecutionRun }) {
+  return (
+    <div className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold">{run.title}</p>
+          <p className="mt-1 text-xs text-zinc-500">
+            {formatDateTime(checklistRunTime(run))}
+            {run.shift?.store?.name || run.store?.name
+              ? ` · ${run.shift?.store?.name ?? run.store?.name}`
+              : ""}
+          </p>
+        </div>
+        <StatusPill status={run.status} overdue={run.overdue} />
+      </div>
+      <div className="mt-3">
+        <MiniProgress
+          label="Прогресс пунктов"
+          value={run.requiredPercent}
+          detail={checklistProgress(run)}
+        />
+      </div>
+    </div>
+  );
+}
+
+function RecentTaskItem({ task }: { task: StaffTask }) {
+  return (
+    <div className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold">{task.title}</p>
+          <p className="mt-1 text-xs text-zinc-500">
+            {formatDateTime(taskTime(task))}
+            {task.store?.name || task.shift?.store?.name
+              ? ` · ${task.store?.name ?? task.shift?.store?.name}`
+              : ""}
+          </p>
+        </div>
+        <TaskStatusPill task={task} />
+      </div>
+      <p className="mt-2 text-xs text-zinc-500">
+        Ответственный: {taskAssigneeName(task)}
+      </p>
+    </div>
+  );
+}
+
 function ModalShell({
   title,
   subtitle,
@@ -663,16 +818,46 @@ function ModalShell({
 function ClubModal({
   group,
   checklists,
+  recentChecklists,
+  tasks,
+  recentTasks,
+  fallbackMode,
   onClose,
 }: {
   group: OverviewGroup;
   checklists: StaffChecklistExecutionReport;
+  recentChecklists: StaffChecklistExecutionReport;
+  tasks: StaffTaskReport;
+  recentTasks: StaffTaskReport;
+  fallbackMode: boolean;
   onClose: () => void;
 }) {
-  const shifts = buildShiftSnapshots(getClubRuns(checklists, group)).slice(0, 3);
+  const currentRuns = sortRunsByRecent(getClubRuns(checklists, group));
+  const currentTasks = sortTasksByRecent(getClubTasks(tasks, group));
+  const recentRuns = sortRunsByRecent(getClubRuns(recentChecklists, group));
+  const fallbackRuns = currentRuns.length > 0 ? currentRuns : recentRuns;
+  const fallbackTasks =
+    currentTasks.length > 0
+      ? currentTasks
+      : sortTasksByRecent(getClubTasks(recentTasks, group));
+  const shifts = buildShiftSnapshots(fallbackRuns).slice(0, 3);
+  const showingFallback = fallbackMode || currentRuns.length === 0 || currentTasks.length === 0;
 
   return (
     <ModalShell title={group.label} subtitle={group.caption} onClose={onClose}>
+      <div className="mb-4 space-y-3">
+        {showingFallback ? (
+          <AttentionNote title="За сегодня мало данных">
+            Показываем последнюю активность за период: до 2 чек-листов и до 2 задач, чтобы было видно, когда клуб последний раз работал по контролю.
+          </AttentionNote>
+        ) : null}
+        {hasChecklistControlGap(group) ? (
+          <AttentionNote title="Нужна проверка чек-листа">
+            В клубе есть активный администратор, но нет активного чек-листа на смене. Это точка внимания: администраторы не должны работать без чек-листа.
+          </AttentionNote>
+        ) : null}
+      </div>
+
       <div className="grid gap-3 sm:grid-cols-3">
         <Metric
           label="Чек-листы"
@@ -698,63 +883,69 @@ function ClubModal({
         />
       </div>
 
-      <div className="mt-5">
-        <h4 className="text-sm font-semibold uppercase text-zinc-500">
-          Последние 3 смены
-        </h4>
-        <div className="mt-3 space-y-3">
-          {shifts.length > 0 ? (
-            shifts.map((shift) => (
+      <div className="mt-5 grid gap-4 lg:grid-cols-2">
+        <div>
+          <h4 className="text-sm font-semibold uppercase text-zinc-500">
+            Последние чек-листы
+          </h4>
+          <div className="mt-3 space-y-2">
+            {fallbackRuns.length > 0 ? (
+              fallbackRuns.slice(0, 2).map((run) => (
+                <RecentChecklistItem key={run.id} run={run} />
+              ))
+            ) : (
+              <p className="rounded-md border border-dashed border-zinc-300 p-4 text-sm text-zinc-500 dark:border-zinc-700">
+                За период чек-листы по клубу не найдены.
+              </p>
+            )}
+          </div>
+        </div>
+        <div>
+          <h4 className="text-sm font-semibold uppercase text-zinc-500">
+            Последние задачи
+          </h4>
+          <div className="mt-3 space-y-2">
+            {fallbackTasks.length > 0 ? (
+              fallbackTasks.slice(0, 2).map((task) => (
+                <RecentTaskItem key={task.id} task={task} />
+              ))
+            ) : (
+              <p className="rounded-md border border-dashed border-zinc-300 p-4 text-sm text-zinc-500 dark:border-zinc-700">
+                За период задачи по клубу не найдены.
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {shifts.length > 0 ? (
+        <div className="mt-5">
+          <h4 className="text-sm font-semibold uppercase text-zinc-500">
+            Последние смены
+          </h4>
+          <div className="mt-3 space-y-2">
+            {shifts.map((shift) => (
               <div
                 key={shift.key}
                 className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800"
               >
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <p className="text-sm font-semibold">
-                      {shift.storeName ?? group.label}
-                    </p>
-                    <p className="mt-1 text-sm text-zinc-500">
-                      {formatDateTime(shift.startedAt)}
-                      {shift.stoppedAt
-                        ? ` - ${formatDateTime(shift.stoppedAt)}`
-                        : " - смена открыта"}
-                    </p>
-                  </div>
-                  <div className="text-sm text-zinc-500 sm:text-right">
-                    {shift.admins.join(", ")}
-                  </div>
-                </div>
-                <div className="mt-3 space-y-2">
-                  {shift.runs.slice(0, 4).map((run) => (
-                    <div
-                      key={run.id}
-                      className="grid gap-2 rounded-md bg-zinc-50 p-2 dark:bg-zinc-900/60 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center"
-                    >
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold">
-                          {run.title}
-                        </p>
-                        <p className="mt-0.5 text-xs text-zinc-500">
-                          {userName(run.assignedToUser)}
-                        </p>
-                      </div>
-                      <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
-                        {checklistProgress(run)}
-                      </span>
-                      <StatusPill status={run.status} overdue={run.overdue} />
-                    </div>
-                  ))}
-                </div>
+                <p className="text-sm font-semibold">
+                  {shift.storeName ?? group.label}
+                </p>
+                <p className="mt-1 text-xs text-zinc-500">
+                  {formatDateTime(shift.startedAt)}
+                  {shift.stoppedAt
+                    ? ` - ${formatDateTime(shift.stoppedAt)}`
+                    : " - смена открыта"}
+                </p>
+                <p className="mt-1 text-xs text-zinc-500">
+                  {shift.admins.join(", ")}
+                </p>
               </div>
-            ))
-          ) : (
-            <p className="rounded-md border border-dashed border-zinc-300 p-4 text-sm text-zinc-500 dark:border-zinc-700">
-              За выбранный период смены с чек-листами по этому клубу не найдены.
-            </p>
-          )}
+            ))}
+          </div>
         </div>
-      </div>
+      ) : null}
     </ModalShell>
   );
 }
@@ -762,15 +953,29 @@ function ClubModal({
 function EmployeeModal({
   group,
   checklists,
+  recentChecklists,
+  tasks,
+  recentTasks,
+  fallbackMode,
   onClose,
 }: {
   group: OverviewGroup;
   checklists: StaffChecklistExecutionReport;
+  recentChecklists: StaffChecklistExecutionReport;
+  tasks: StaffTaskReport;
+  recentTasks: StaffTaskReport;
+  fallbackMode: boolean;
   onClose: () => void;
 }) {
-  const runs = getEmployeeRuns(checklists, group)
-    .sort((left, right) => getChecklistSortTime(right) - getChecklistSortTime(left))
-    .slice(0, 6);
+  const currentRuns = sortRunsByRecent(getEmployeeRuns(checklists, group));
+  const currentTasks = sortTasksByRecent(getEmployeeTasks(tasks, group));
+  const recentRuns = sortRunsByRecent(getEmployeeRuns(recentChecklists, group));
+  const displayRuns = currentRuns.length > 0 ? currentRuns : recentRuns;
+  const displayTasks =
+    currentTasks.length > 0
+      ? currentTasks
+      : sortTasksByRecent(getEmployeeTasks(recentTasks, group));
+  const showingFallback = fallbackMode || currentRuns.length === 0 || currentTasks.length === 0;
 
   return (
     <ModalShell
@@ -778,6 +983,14 @@ function EmployeeModal({
       subtitle={group.caption}
       onClose={onClose}
     >
+      {showingFallback ? (
+        <div className="mb-4">
+          <AttentionNote title="За сегодня мало данных">
+            Показываем последнюю активность сотрудника за период: до 2 чек-листов и до 2 задач. Полную историю можно открыть через детализацию.
+          </AttentionNote>
+        </div>
+      ) : null}
+
       <div className="grid gap-3 sm:grid-cols-3">
         <Metric
           label="Чек-листы"
@@ -835,43 +1048,38 @@ function EmployeeModal({
         </a>
       </div>
 
-      <div className="mt-5">
-        <h4 className="text-sm font-semibold uppercase text-zinc-500">
-          Запуски чек-листов
-        </h4>
-        <div className="mt-3 space-y-2">
-          {runs.length > 0 ? (
-            runs.map((run) => (
-              <div
-                key={run.id}
-                className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800"
-              >
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold">{run.title}</p>
-                    <p className="mt-1 text-xs text-zinc-500">
-                      Старт: {formatDateTime(checklistRunTime(run))}
-                      {run.shift?.store?.name || run.store?.name
-                        ? ` · ${run.shift?.store?.name ?? run.store?.name}`
-                        : ""}
-                    </p>
-                  </div>
-                  <StatusPill status={run.status} overdue={run.overdue} />
-                </div>
-                <div className="mt-3">
-                  <MiniProgress
-                    label="Прогресс пунктов"
-                    value={run.requiredPercent}
-                    detail={checklistProgress(run)}
-                  />
-                </div>
-              </div>
-            ))
-          ) : (
-            <p className="rounded-md border border-dashed border-zinc-300 p-4 text-sm text-zinc-500 dark:border-zinc-700">
-              Запусков чек-листов по сотруднику за выбранный период не найдено.
-            </p>
-          )}
+      <div className="mt-5 grid gap-4 lg:grid-cols-2">
+        <div>
+          <h4 className="text-sm font-semibold uppercase text-zinc-500">
+            Последние чек-листы
+          </h4>
+          <div className="mt-3 space-y-2">
+            {displayRuns.length > 0 ? (
+              displayRuns.slice(0, 2).map((run) => (
+                <RecentChecklistItem key={run.id} run={run} />
+              ))
+            ) : (
+              <p className="rounded-md border border-dashed border-zinc-300 p-4 text-sm text-zinc-500 dark:border-zinc-700">
+                За период чек-листы по сотруднику не найдены.
+              </p>
+            )}
+          </div>
+        </div>
+        <div>
+          <h4 className="text-sm font-semibold uppercase text-zinc-500">
+            Последние задачи
+          </h4>
+          <div className="mt-3 space-y-2">
+            {displayTasks.length > 0 ? (
+              displayTasks.slice(0, 2).map((task) => (
+                <RecentTaskItem key={task.id} task={task} />
+              ))
+            ) : (
+              <p className="rounded-md border border-dashed border-zinc-300 p-4 text-sm text-zinc-500 dark:border-zinc-700">
+                За период задачи по сотруднику не найдены.
+              </p>
+            )}
+          </div>
         </div>
       </div>
     </ModalShell>
@@ -882,11 +1090,13 @@ export function StaffShiftOperationsOverview({
   checklists,
   recentChecklists,
   tasks,
+  recentTasks,
   dateLabel,
 }: {
   checklists: StaffChecklistExecutionReport;
   recentChecklists?: StaffChecklistExecutionReport;
   tasks: StaffTaskReport;
+  recentTasks?: StaffTaskReport;
   dateLabel: string;
 }) {
   const [modal, setModal] = useState<ModalState>(null);
@@ -894,8 +1104,23 @@ export function StaffShiftOperationsOverview({
   const clubGroups = mergeByClub(checklists, tasks, activeAdmins.byClub);
   const employeeGroups = mergeByEmployee(checklists, tasks);
   const modalChecklists = recentChecklists ?? checklists;
+  const modalTasks = recentTasks ?? tasks;
+  const recentActiveAdmins = buildActiveAdminSets(modalChecklists, modalTasks);
+  const recentClubGroups = mergeByClub(
+    modalChecklists,
+    modalTasks,
+    recentActiveAdmins.byClub,
+  );
+  const recentEmployeeGroups = mergeByEmployee(modalChecklists, modalTasks);
+  const hasCurrentRows = checklists.summary.total > 0 || tasks.summary.total > 0;
+  const useFallbackGroups =
+    !hasCurrentRows && (recentClubGroups.length > 0 || recentEmployeeGroups.length > 0);
+  const displayClubGroups = useFallbackGroups ? recentClubGroups : clubGroups;
+  const displayEmployeeGroups = useFallbackGroups
+    ? recentEmployeeGroups
+    : employeeGroups;
   const selectedGroup = modal
-    ? (modal.type === "club" ? clubGroups : employeeGroups).find(
+    ? (modal.type === "club" ? displayClubGroups : displayEmployeeGroups).find(
         (group) => group.key === modal.key,
       ) ?? null
     : null;
@@ -904,6 +1129,8 @@ export function StaffShiftOperationsOverview({
   const taskPercent = ratioPercent(tasks.summary.done, taskWorkTotal);
   const checklistActive = activeChecklistCount(checklists.summary);
   const taskActive = activeTaskCount(tasks.summary);
+  const noChecklistWorkflow =
+    checklists.summary.accepted + checklistActive === 0;
   const riskCount =
     checklists.summary.overdue +
     checklists.summary.blockingIssues +
@@ -979,10 +1206,25 @@ export function StaffShiftOperationsOverview({
         />
       </div>
 
+      {noChecklistWorkflow ? (
+        <div className="mt-3">
+          <AttentionNote title="Чек-листы не запущены">
+            В текущем срезе нет принятых, активных или отправленных на проверку чек-листов. Если администраторы находятся на смене, это некорректный режим работы и требует проверки.
+          </AttentionNote>
+        </div>
+      ) : null}
+
       <div className="mt-4 grid gap-3 lg:grid-cols-2">
-        <DetailsBlock title="По клубам" count={clubGroups.length} open>
-          {clubGroups.length > 0 ? (
-            clubGroups.map((group) => (
+        <DetailsBlock title="По клубам" count={displayClubGroups.length} open>
+          {useFallbackGroups ? (
+            <div className="mb-2">
+              <AttentionNote title="Сегодня нет активного контроля">
+                Ниже показана последняя активность за период. Откройте клуб, чтобы увидеть последние 2 чек-листа и 2 задачи.
+              </AttentionNote>
+            </div>
+          ) : null}
+          {displayClubGroups.length > 0 ? (
+            displayClubGroups.map((group) => (
               <OperationsRow
                 key={group.key}
                 group={group}
@@ -996,9 +1238,16 @@ export function StaffShiftOperationsOverview({
           )}
         </DetailsBlock>
 
-        <DetailsBlock title="По администраторам" count={employeeGroups.length}>
-          {employeeGroups.length > 0 ? (
-            employeeGroups.slice(0, 12).map((group) => (
+        <DetailsBlock title="По администраторам" count={displayEmployeeGroups.length}>
+          {useFallbackGroups ? (
+            <div className="mb-2">
+              <AttentionNote title="Сегодня нет активного контроля">
+                Ниже показаны сотрудники с последней активностью за период. В детализации видны последние чек-листы и задачи.
+              </AttentionNote>
+            </div>
+          ) : null}
+          {displayEmployeeGroups.length > 0 ? (
+            displayEmployeeGroups.slice(0, 12).map((group) => (
               <OperationsRow
                 key={group.key}
                 group={group}
@@ -1016,7 +1265,11 @@ export function StaffShiftOperationsOverview({
       {modal && selectedGroup && modal.type === "club" ? (
         <ClubModal
           group={selectedGroup}
-          checklists={modalChecklists}
+          checklists={checklists}
+          recentChecklists={modalChecklists}
+          tasks={tasks}
+          recentTasks={modalTasks}
+          fallbackMode={useFallbackGroups}
           onClose={() => setModal(null)}
         />
       ) : null}
@@ -1024,7 +1277,11 @@ export function StaffShiftOperationsOverview({
       {modal && selectedGroup && modal.type === "employee" ? (
         <EmployeeModal
           group={selectedGroup}
-          checklists={modalChecklists}
+          checklists={checklists}
+          recentChecklists={modalChecklists}
+          tasks={tasks}
+          recentTasks={modalTasks}
+          fallbackMode={useFallbackGroups}
           onClose={() => setModal(null)}
         />
       ) : null}

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
@@ -55,24 +56,6 @@ const shiftKindLabels: Record<StaffChecklistShiftKind | "all", string> = {
   INCIDENT: "Инцидент",
   INVENTORY: "Передача ТМЦ",
   CUSTOM: "Другое",
-};
-
-const executionSortLabels: Record<StaffChecklistExecutionSort, string> = {
-  activityDate: "Дата активности",
-  checklist: "Чеклист",
-  store: "Клуб",
-  employee: "Сотрудник",
-  score: "Оценка",
-  problems: "Проблемы",
-  status: "Статус",
-};
-
-const executionDirectionLabels: Record<
-  StaffChecklistExecutionSortDirection,
-  string
-> = {
-  desc: "По убыванию",
-  asc: "По возрастанию",
 };
 
 const executionProblemLabels: Record<
@@ -252,19 +235,24 @@ function reportHref(
   return query ? `/staff/checklists/report?${query}` : "/staff/checklists/report";
 }
 
-function sortHref(
-  filters: ReportFilterState,
-  sort: StaffChecklistExecutionSort,
-) {
-  const nextDirection =
-    filters.sort === sort && filters.direction === "asc" ? "desc" : "asc";
-
-  return reportHref(filters, { sort, direction: nextDirection });
-}
-
 function problemCount(run: StaffChecklistExecutionRun) {
   return run.failedItems + run.blockingIssues;
 }
+
+const reportFilterNames = [
+  "dateFrom",
+  "dateTo",
+  "status",
+  "shiftKind",
+  "storeId",
+  "assignedToUserId",
+  "search",
+  "sort",
+  "direction",
+  "problems",
+  "scoreRange",
+  "sourceType",
+];
 
 function formatDate(value: string | null) {
   if (!value) {
@@ -506,115 +494,200 @@ export default async function StaffChecklistExecutionReportPage({
 
         <section className="mt-6 rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
           <div className="border-b border-zinc-200 px-4 py-4 dark:border-zinc-800">
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-              <div>
-                <p className="text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-300">
-                  Выполнения
-                </p>
-                <div className="mt-1 flex flex-wrap items-center gap-2">
-                  <h2 className="text-xl font-semibold">
-                    Последние чеклисты в выборке
-                  </h2>
-                  <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-500 dark:bg-zinc-900">
-                    {formatNumber(report.runs.length)}
-                  </span>
-                </div>
-              </div>
-              <form className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:min-w-[680px]">
-                <HiddenReportFilters
-                  filters={report.filters}
-                  names={[
-                    "dateFrom",
-                    "dateTo",
-                    "status",
-                    "shiftKind",
-                    "storeId",
-                    "assignedToUserId",
-                    "search",
-                  ]}
-                />
-                <SelectField
-                  label="Источник"
-                  name="sourceType"
-                  defaultValue={report.filters.sourceType}
-                  options={executionSourceLabels}
-                  compact
-                />
-                <SelectField
-                  label="Проблемы"
-                  name="problems"
-                  defaultValue={report.filters.problems}
-                  options={executionProblemLabels}
-                  compact
-                />
-                <SelectField
-                  label="Оценка"
-                  name="scoreRange"
-                  defaultValue={report.filters.scoreRange}
-                  options={executionScoreLabels}
-                  compact
-                />
-                <SelectField
-                  label="Сортировка"
-                  name="sort"
-                  defaultValue={report.filters.sort}
-                  options={executionSortLabels}
-                  compact
-                />
-                <SelectField
-                  label="Порядок"
-                  name="direction"
-                  defaultValue={report.filters.direction}
-                  options={executionDirectionLabels}
-                  compact
-                />
-                <div className="flex items-end">
-                  <button
-                    type="submit"
-                    className="h-10 w-full rounded-xl bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200"
-                  >
-                    Показать
-                  </button>
-                </div>
-              </form>
+            <p className="text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-300">
+              Выполнения
+            </p>
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <h2 className="text-xl font-semibold">
+                Последние чеклисты в выборке
+              </h2>
+              <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-500 dark:bg-zinc-900">
+                {formatNumber(report.runs.length)}
+              </span>
+              <span className="text-xs text-zinc-500">
+                Фильтры и сортировка встроены в заголовки колонок.
+              </span>
             </div>
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-full text-left text-sm">
               <thead className="border-b border-zinc-200 text-xs uppercase text-zinc-500 dark:border-zinc-800">
                 <tr>
-                  <SortableHeader
+                  <TableHeaderMenu
                     label="Чеклист"
                     sort="checklist"
                     filters={report.filters}
-                  />
-                  <SortableHeader
+                    activeFilter={
+                      report.filters.sourceType !== "all" ||
+                      report.filters.status !== "all" ||
+                      Boolean(report.filters.search)
+                    }
+                  >
+                    <HeaderFilterForm
+                      filters={report.filters}
+                      resetNames={["sourceType", "status", "search"]}
+                    >
+                      <SelectField
+                        label="Источник"
+                        name="sourceType"
+                        defaultValue={report.filters.sourceType}
+                        options={executionSourceLabels}
+                        compact
+                      />
+                      <SelectField
+                        label="Статус"
+                        name="status"
+                        defaultValue={report.filters.status}
+                        options={statusLabels}
+                        compact
+                      />
+                      <label className="block text-sm">
+                        <span className="text-xs font-semibold uppercase text-zinc-500">
+                          Поиск
+                        </span>
+                        <input
+                          name="search"
+                          defaultValue={report.filters.search ?? ""}
+                          placeholder="Название чек-листа"
+                          className="mt-1 h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                        />
+                      </label>
+                    </HeaderFilterForm>
+                  </TableHeaderMenu>
+                  <TableHeaderMenu
                     label="Клуб / смена"
                     sort="store"
                     filters={report.filters}
-                  />
-                  <SortableHeader
+                    activeFilter={Boolean(report.filters.storeId)}
+                  >
+                    <HeaderFilterForm
+                      filters={report.filters}
+                      resetNames={["storeId"]}
+                    >
+                      <label className="block text-sm">
+                        <span className="text-xs font-semibold uppercase text-zinc-500">
+                          Клуб
+                        </span>
+                        <select
+                          name="storeId"
+                          defaultValue={report.filters.storeId ?? ""}
+                          className="mt-1 h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                        >
+                          <option value="">Все клубы</option>
+                          {report.stores.map((store) => (
+                            <option key={store.id} value={store.id}>
+                              {store.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </HeaderFilterForm>
+                  </TableHeaderMenu>
+                  <TableHeaderMenu
                     label="Сотрудник"
                     sort="employee"
                     filters={report.filters}
-                  />
-                  <SortableHeader
+                    activeFilter={Boolean(report.filters.assignedToUserId)}
+                  >
+                    <HeaderFilterForm
+                      filters={report.filters}
+                      resetNames={["assignedToUserId"]}
+                    >
+                      <label className="block text-sm">
+                        <span className="text-xs font-semibold uppercase text-zinc-500">
+                          Сотрудник
+                        </span>
+                        <select
+                          name="assignedToUserId"
+                          defaultValue={report.filters.assignedToUserId ?? ""}
+                          className="mt-1 h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                        >
+                          <option value="">Все сотрудники</option>
+                          {report.users.map((user) => (
+                            <option key={user.id} value={user.id}>
+                              {user.fullName ?? user.email}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </HeaderFilterForm>
+                  </TableHeaderMenu>
+                  <TableHeaderMenu
                     label="Дата"
                     sort="activityDate"
                     filters={report.filters}
-                  />
-                  <SortableHeader
+                    activeFilter={Boolean(
+                      report.filters.dateFrom || report.filters.dateTo,
+                    )}
+                  >
+                    <HeaderFilterForm
+                      filters={report.filters}
+                      resetNames={["dateFrom", "dateTo"]}
+                    >
+                      <label className="block text-sm">
+                        <span className="text-xs font-semibold uppercase text-zinc-500">
+                          С даты
+                        </span>
+                        <input
+                          type="date"
+                          name="dateFrom"
+                          defaultValue={report.filters.dateFrom ?? ""}
+                          className="mt-1 h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                        />
+                      </label>
+                      <label className="block text-sm">
+                        <span className="text-xs font-semibold uppercase text-zinc-500">
+                          По дату
+                        </span>
+                        <input
+                          type="date"
+                          name="dateTo"
+                          defaultValue={report.filters.dateTo ?? ""}
+                          className="mt-1 h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+                        />
+                      </label>
+                    </HeaderFilterForm>
+                  </TableHeaderMenu>
+                  <TableHeaderMenu
                     label="Оценка"
                     sort="score"
                     filters={report.filters}
                     align="right"
-                  />
-                  <SortableHeader
+                    activeFilter={report.filters.scoreRange !== "all"}
+                  >
+                    <HeaderFilterForm
+                      filters={report.filters}
+                      resetNames={["scoreRange"]}
+                    >
+                      <SelectField
+                        label="Оценка"
+                        name="scoreRange"
+                        defaultValue={report.filters.scoreRange}
+                        options={executionScoreLabels}
+                        compact
+                      />
+                    </HeaderFilterForm>
+                  </TableHeaderMenu>
+                  <TableHeaderMenu
                     label="Проблемы"
                     sort="problems"
                     filters={report.filters}
                     align="right"
-                  />
+                    activeFilter={report.filters.problems !== "all"}
+                  >
+                    <HeaderFilterForm
+                      filters={report.filters}
+                      resetNames={["problems"]}
+                    >
+                      <SelectField
+                        label="Проблемы"
+                        name="problems"
+                        defaultValue={report.filters.problems}
+                        options={executionProblemLabels}
+                        compact
+                      />
+                    </HeaderFilterForm>
+                  </TableHeaderMenu>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
@@ -697,35 +770,121 @@ function HiddenReportFilters({
   );
 }
 
-function SortableHeader({
+function HeaderFilterForm({
+  filters,
+  resetNames,
+  children,
+}: {
+  filters: ReportFilterState;
+  resetNames: string[];
+  children: ReactNode;
+}) {
+  const hiddenNames = reportFilterNames.filter(
+    (name) => !resetNames.includes(name),
+  );
+  const resetUpdates = Object.fromEntries(
+    resetNames.map((name) => [name, null]),
+  ) as Record<string, null>;
+
+  return (
+    <form method="get" className="mt-3 space-y-3 border-t border-zinc-200 pt-3 normal-case dark:border-zinc-800">
+      <HiddenReportFilters filters={filters} names={hiddenNames} />
+      <div className="space-y-3">{children}</div>
+      <div className="flex gap-2">
+        <button
+          type="submit"
+          className="flex-1 rounded-lg bg-zinc-950 px-3 py-2 text-xs font-semibold text-white transition hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200"
+        >
+          Применить
+        </button>
+        <Link
+          href={reportHref(filters, resetUpdates)}
+          className="rounded-lg border border-zinc-200 px-3 py-2 text-xs font-semibold text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900"
+        >
+          Сбросить
+        </Link>
+      </div>
+    </form>
+  );
+}
+
+function TableHeaderMenu({
   label,
   sort,
   filters,
   align = "left",
+  activeFilter = false,
+  children,
 }: {
   label: string;
   sort: StaffChecklistExecutionSort;
   filters: ReportFilterState;
   align?: "left" | "right";
+  activeFilter?: boolean;
+  children?: ReactNode;
 }) {
-  const active = filters.sort === sort;
-  const arrow = active ? (filters.direction === "asc" ? "↑" : "↓") : "↕";
+  const activeSort = filters.sort === sort;
+  const sortCaption = activeSort
+    ? filters.direction === "asc"
+      ? "возр."
+      : "убыв."
+    : null;
 
   return (
     <th
-      className={`px-4 py-3 font-medium ${
+      className={`min-w-44 px-4 py-3 align-top font-medium ${
         align === "right" ? "text-right" : ""
       }`}
     >
-      <Link
-        href={sortHref(filters, sort)}
-        className={`inline-flex items-center gap-1 rounded-md transition hover:text-zinc-950 dark:hover:text-zinc-100 ${
-          align === "right" ? "justify-end" : ""
-        } ${active ? "text-zinc-950 dark:text-zinc-100" : ""}`}
-      >
-        <span>{label}</span>
-        <span className="text-[10px] leading-none">{arrow}</span>
-      </Link>
+      <details className="group inline-block max-w-[18rem] text-left">
+        <summary
+          className={`inline-flex cursor-pointer list-none items-center gap-1.5 rounded-lg px-2 py-1 transition hover:bg-zinc-100 hover:text-zinc-950 group-open:bg-zinc-100 group-open:text-zinc-950 dark:hover:bg-zinc-900 dark:hover:text-zinc-100 dark:group-open:bg-zinc-900 dark:group-open:text-zinc-100 [&::-webkit-details-marker]:hidden ${
+            activeSort || activeFilter ? "text-zinc-950 dark:text-zinc-100" : ""
+          }`}
+        >
+          <span>{label}</span>
+          {sortCaption ? (
+            <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-semibold normal-case text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+              {sortCaption}
+            </span>
+          ) : null}
+          {activeFilter ? (
+            <span
+              className="h-1.5 w-1.5 rounded-full bg-emerald-500"
+              aria-label="Фильтр активен"
+            />
+          ) : null}
+          <span className="text-[10px] normal-case text-zinc-400">v</span>
+        </summary>
+        <div className="mt-2 w-72 max-w-[75vw] rounded-lg border border-zinc-200 bg-white p-3 text-left text-sm font-normal normal-case text-zinc-950 shadow-lg dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100">
+          <p className="text-xs font-semibold uppercase text-zinc-500">
+            Сортировка
+          </p>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <Link
+              href={reportHref(filters, { sort, direction: "asc" })}
+              className={`rounded-lg border px-3 py-2 text-xs font-semibold transition ${
+                activeSort && filters.direction === "asc"
+                  ? "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200"
+                  : "border-zinc-200 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900"
+              }`}
+            >
+              По возрастанию
+            </Link>
+            <Link
+              href={reportHref(filters, { sort, direction: "desc" })}
+              className={`rounded-lg border px-3 py-2 text-xs font-semibold transition ${
+                activeSort && filters.direction === "desc"
+                  ? "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200"
+                  : "border-zinc-200 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900"
+              }`}
+            >
+              По убыванию
+            </Link>
+          </div>
+          {children}
+        </div>
+      </details>
     </th>
   );
 }

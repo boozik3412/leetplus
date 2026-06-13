@@ -277,7 +277,7 @@ export function StaffShiftReportEditor({
               label="Добавить файлы к отчету"
               buttonLabel="Добавить файлы"
               multiple
-              accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt"
+              accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.txt"
               compressImages
               onUploaded={appendAttachment}
             />

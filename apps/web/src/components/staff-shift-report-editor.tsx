@@ -59,7 +59,7 @@ export function StaffShiftReportEditor({
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<StaffShiftReportSendResult | null>(null);
   const attachmentIds = useMemo(
-    () => attachments.map((attachment) => attachment.id).slice(0, 20),
+    () => attachments.map((attachment) => attachment.id),
     [attachments],
   );
 

@@ -16,7 +16,6 @@ import {
   STAFF_CHAT_REPORTING_CHANNEL_NAME,
 } from './staff-team-chat.service';
 
-const SHIFT_REPORT_ATTACHMENT_LIMIT = 20;
 const SHIFT_REPORT_LANGAME_PAGE_LIMIT = 100;
 const SHIFT_REPORT_RECENT_WINDOW_HOURS = 96;
 
@@ -990,10 +989,7 @@ export class StaffShiftReportsService {
       }
     }
 
-    return Array.from(attachments.values()).slice(
-      0,
-      SHIFT_REPORT_ATTACHMENT_LIMIT,
-    );
+    return Array.from(attachments.values());
   }
 
   private async resolveFinancials(
@@ -1369,10 +1365,7 @@ export class StaffShiftReportsService {
     userId: string,
     values: string[] | null | undefined,
   ) {
-    const requestedIds = this.uniqueStrings(values).slice(
-      0,
-      SHIFT_REPORT_ATTACHMENT_LIMIT,
-    );
+    const requestedIds = this.uniqueStrings(values);
 
     if (requestedIds.length === 0) {
       return [];

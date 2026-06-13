@@ -832,11 +832,11 @@ function TableHeaderMenu({
 
   return (
     <th
-      className={`min-w-44 px-4 py-3 align-top font-medium ${
+      className={`relative min-w-44 px-4 py-3 align-top font-medium ${
         align === "right" ? "text-right" : ""
       }`}
     >
-      <details className="group inline-block max-w-[18rem] text-left">
+      <details className="group relative inline-block max-w-[18rem] text-left">
         <summary
           className={`inline-flex cursor-pointer list-none items-center gap-1.5 rounded-lg px-2 py-1 transition hover:bg-zinc-100 hover:text-zinc-950 group-open:bg-zinc-100 group-open:text-zinc-950 dark:hover:bg-zinc-900 dark:hover:text-zinc-100 dark:group-open:bg-zinc-900 dark:group-open:text-zinc-100 [&::-webkit-details-marker]:hidden ${
             activeSort || activeFilter ? "text-zinc-950 dark:text-zinc-100" : ""
@@ -856,7 +856,11 @@ function TableHeaderMenu({
           ) : null}
           <span className="text-[10px] normal-case text-zinc-400">v</span>
         </summary>
-        <div className="mt-2 w-72 max-w-[75vw] rounded-lg border border-zinc-200 bg-white p-3 text-left text-sm font-normal normal-case text-zinc-950 shadow-lg dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100">
+        <div
+          className={`absolute top-full z-50 mt-2 w-72 max-w-[75vw] rounded-lg border border-zinc-200 bg-white p-3 text-left text-sm font-normal normal-case text-zinc-950 shadow-lg dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 ${
+            align === "right" ? "right-0" : "left-0"
+          }`}
+        >
           <p className="text-xs font-semibold uppercase text-zinc-500">
             Сортировка
           </p>

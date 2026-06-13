@@ -62,6 +62,30 @@ const itemValueTypes = [
   'SELECT',
   'TIMESTAMP',
 ] as const;
+const executionSortFields = [
+  'activityDate',
+  'checklist',
+  'store',
+  'employee',
+  'score',
+  'problems',
+  'status',
+] as const;
+const executionSortDirections = ['asc', 'desc'] as const;
+const executionProblemFilters = ['all', 'with', 'none'] as const;
+const executionScoreFilters = [
+  'all',
+  'lt50',
+  '50to79',
+  '80to99',
+  '100',
+] as const;
+const executionSourceFilters = [
+  'all',
+  'REGULATION',
+  'TEMPLATE',
+  'RUN',
+] as const;
 
 export type StaffChecklistStatus = (typeof checklistStatuses)[number];
 export type StaffChecklistFilterStatus =
@@ -69,6 +93,15 @@ export type StaffChecklistFilterStatus =
 export type StaffChecklistShiftKind = (typeof shiftKinds)[number];
 export type StaffChecklistAnswerStatus = (typeof answerStatuses)[number];
 export type StaffChecklistItemValueType = (typeof itemValueTypes)[number];
+export type StaffChecklistExecutionSort = (typeof executionSortFields)[number];
+export type StaffChecklistExecutionSortDirection =
+  (typeof executionSortDirections)[number];
+export type StaffChecklistExecutionProblemFilter =
+  (typeof executionProblemFilters)[number];
+export type StaffChecklistExecutionScoreFilter =
+  (typeof executionScoreFilters)[number];
+export type StaffChecklistExecutionSourceFilter =
+  (typeof executionSourceFilters)[number];
 
 export type StaffChecklistsQuery = {
   status?: StaffChecklistFilterStatus;
@@ -83,6 +116,11 @@ export type StaffChecklistsQuery = {
 export type StaffChecklistExecutionReportQuery = StaffChecklistsQuery & {
   dateFrom?: string;
   dateTo?: string;
+  sort?: StaffChecklistExecutionSort;
+  direction?: StaffChecklistExecutionSortDirection;
+  problems?: StaffChecklistExecutionProblemFilter;
+  scoreRange?: StaffChecklistExecutionScoreFilter;
+  sourceType?: StaffChecklistExecutionSourceFilter;
 };
 
 export type StaffChecklistExecutionExportQuery =
@@ -237,6 +275,11 @@ export type StaffChecklistExecutionReport = {
   filters: StaffChecklistReport['filters'] & {
     dateFrom: string | null;
     dateTo: string | null;
+    sort: StaffChecklistExecutionSort;
+    direction: StaffChecklistExecutionSortDirection;
+    problems: StaffChecklistExecutionProblemFilter;
+    scoreRange: StaffChecklistExecutionScoreFilter;
+    sourceType: StaffChecklistExecutionSourceFilter;
   };
   summary: StaffChecklistExecutionMetrics;
   byClub: StaffChecklistExecutionGroup[];
@@ -516,6 +559,7 @@ export class StaffChecklistsService {
         orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
       }),
     ]);
+    const reportRows = this.applyExecutionTableFilters(rows, filters);
 
     const summary = this.createExecutionMetrics();
     const byClub = new Map<string, StaffChecklistExecutionGroup>();
@@ -523,7 +567,7 @@ export class StaffChecklistsService {
     const byEmployee = new Map<string, StaffChecklistExecutionGroup>();
     const byChecklist = new Map<string, StaffChecklistExecutionGroup>();
 
-    rows.forEach((row) => {
+    reportRows.forEach((row) => {
       this.addRunToExecutionMetrics(summary, row);
 
       const clubGroup = this.getExecutionGroup(
@@ -575,7 +619,7 @@ export class StaffChecklistsService {
       byShift: this.finalizeExecutionGroups(byShift),
       byEmployee: this.finalizeExecutionGroups(byEmployee),
       byChecklist: this.finalizeExecutionGroups(byChecklist),
-      runs: rows.slice(0, 300).map((row) => this.toExecutionRun(row)),
+      runs: reportRows.slice(0, 300).map((row) => this.toExecutionRun(row)),
       stores,
       users,
     };
@@ -598,6 +642,7 @@ export class StaffChecklistsService {
       ],
       take: 10000,
     });
+    const reportRows = this.applyExecutionTableFilters(rows, filters);
 
     return buildStaffExportFile({
       format,
@@ -622,7 +667,7 @@ export class StaffChecklistsService {
           'Обязательные, %',
           'Доказательства, %',
         ],
-        ...rows.map((row) => this.toExecutionExportRow(row)),
+        ...reportRows.map((row) => this.toExecutionExportRow(row)),
       ],
       widths: [36, 34, 18, 18, 24, 28, 20, 20, 20, 22, 14, 18, 18, 14, 16, 18],
     });
@@ -1141,6 +1186,23 @@ export class StaffChecklistsService {
       ...baseFilters,
       dateFrom: this.normalizeDateFilter(query.dateFrom),
       dateTo: this.normalizeDateFilter(query.dateTo),
+      sort: this.resolveOne(query.sort, executionSortFields, 'activityDate'),
+      direction: this.resolveOne(
+        query.direction,
+        executionSortDirections,
+        'desc',
+      ),
+      problems: this.resolveOne(query.problems, executionProblemFilters, 'all'),
+      scoreRange: this.resolveOne(
+        query.scoreRange,
+        executionScoreFilters,
+        'all',
+      ),
+      sourceType: this.resolveOne(
+        query.sourceType,
+        executionSourceFilters,
+        'all',
+      ),
     };
   }
 
@@ -1182,6 +1244,139 @@ export class StaffChecklistsService {
     }
 
     return where;
+  }
+
+  private applyExecutionTableFilters(
+    rows: StaffChecklistRunRow[],
+    filters: StaffChecklistExecutionReport['filters'],
+  ) {
+    return rows
+      .filter((row) => {
+        const source = this.resolveChecklistSource(row);
+        const problems = this.executionProblemCount(row);
+        const scorePercent = this.executionScorePercent(row);
+
+        if (
+          filters.sourceType !== 'all' &&
+          source.type !== filters.sourceType
+        ) {
+          return false;
+        }
+
+        if (filters.problems === 'with' && problems <= 0) {
+          return false;
+        }
+
+        if (filters.problems === 'none' && problems > 0) {
+          return false;
+        }
+
+        return this.matchesExecutionScoreFilter(
+          scorePercent,
+          filters.scoreRange,
+        );
+      })
+      .sort((left, right) => {
+        const result = this.compareExecutionRows(left, right, filters.sort);
+        const directed = filters.direction === 'asc' ? result : -result;
+
+        if (directed !== 0) {
+          return directed;
+        }
+
+        return (
+          this.executionActivityDate(right).getTime() -
+          this.executionActivityDate(left).getTime()
+        );
+      });
+  }
+
+  private compareExecutionRows(
+    left: StaffChecklistRunRow,
+    right: StaffChecklistRunRow,
+    sort: StaffChecklistExecutionSort,
+  ) {
+    if (sort === 'checklist') {
+      return this.compareExecutionText(
+        this.resolveChecklistSource(left).title,
+        this.resolveChecklistSource(right).title,
+      );
+    }
+
+    if (sort === 'store') {
+      return this.compareExecutionText(
+        left.store?.name ?? '',
+        right.store?.name ?? '',
+      );
+    }
+
+    if (sort === 'employee') {
+      return this.compareExecutionText(
+        left.assignedToUser?.fullName ?? left.assignedToUser?.email ?? '',
+        right.assignedToUser?.fullName ?? right.assignedToUser?.email ?? '',
+      );
+    }
+
+    if (sort === 'score') {
+      return (
+        this.executionScorePercent(left) - this.executionScorePercent(right)
+      );
+    }
+
+    if (sort === 'problems') {
+      return (
+        this.executionProblemCount(left) - this.executionProblemCount(right)
+      );
+    }
+
+    if (sort === 'status') {
+      return this.compareExecutionText(left.status, right.status);
+    }
+
+    return (
+      this.executionActivityDate(left).getTime() -
+      this.executionActivityDate(right).getTime()
+    );
+  }
+
+  private executionScorePercent(row: StaffChecklistRunRow) {
+    return this.percent(row.scoreEarned, row.scoreTotal);
+  }
+
+  private executionProblemCount(row: StaffChecklistRunRow) {
+    return (
+      row.failedItems + this.normalizeBlockingIssues(row.blockingIssues).length
+    );
+  }
+
+  private matchesExecutionScoreFilter(
+    scorePercent: number,
+    scoreRange: StaffChecklistExecutionScoreFilter,
+  ) {
+    if (scoreRange === 'lt50') {
+      return scorePercent < 50;
+    }
+
+    if (scoreRange === '50to79') {
+      return scorePercent >= 50 && scorePercent < 80;
+    }
+
+    if (scoreRange === '80to99') {
+      return scorePercent >= 80 && scorePercent < 100;
+    }
+
+    if (scoreRange === '100') {
+      return scorePercent === 100;
+    }
+
+    return true;
+  }
+
+  private compareExecutionText(left: string, right: string) {
+    return left.localeCompare(right, 'ru', {
+      sensitivity: 'base',
+      numeric: true,
+    });
   }
 
   private resolveFilters(

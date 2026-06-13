@@ -28,6 +28,27 @@ export type StaffChecklistItemValueType =
   | "FILE_LINK"
   | "SELECT"
   | "TIMESTAMP";
+export type StaffChecklistExecutionSort =
+  | "activityDate"
+  | "checklist"
+  | "store"
+  | "employee"
+  | "score"
+  | "problems"
+  | "status";
+export type StaffChecklistExecutionSortDirection = "asc" | "desc";
+export type StaffChecklistExecutionProblemFilter = "all" | "with" | "none";
+export type StaffChecklistExecutionScoreFilter =
+  | "all"
+  | "lt50"
+  | "50to79"
+  | "80to99"
+  | "100";
+export type StaffChecklistExecutionSourceFilter =
+  | "all"
+  | "REGULATION"
+  | "TEMPLATE"
+  | "RUN";
 
 export type StaffChecklistStore = {
   id: string;
@@ -166,6 +187,11 @@ export type StaffChecklistFilters = {
 export type StaffChecklistExecutionReportFilters = StaffChecklistFilters & {
   dateFrom?: string;
   dateTo?: string;
+  sort?: StaffChecklistExecutionSort;
+  direction?: StaffChecklistExecutionSortDirection;
+  problems?: StaffChecklistExecutionProblemFilter;
+  scoreRange?: StaffChecklistExecutionScoreFilter;
+  sourceType?: StaffChecklistExecutionSourceFilter;
 };
 
 export type StaffChecklistReport = {
@@ -254,6 +280,11 @@ export type StaffChecklistExecutionReport = {
   filters: StaffChecklistReport["filters"] & {
     dateFrom: string | null;
     dateTo: string | null;
+    sort: StaffChecklistExecutionSort;
+    direction: StaffChecklistExecutionSortDirection;
+    problems: StaffChecklistExecutionProblemFilter;
+    scoreRange: StaffChecklistExecutionScoreFilter;
+    sourceType: StaffChecklistExecutionSourceFilter;
   };
   summary: StaffChecklistExecutionMetrics;
   byClub: StaffChecklistExecutionGroup[];

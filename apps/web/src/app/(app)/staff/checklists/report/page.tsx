@@ -3,15 +3,24 @@ import { ReportBreadcrumbs } from "@/components/report-breadcrumbs";
 import { requireCurrentUser } from "@/lib/auth";
 import {
   getStaffChecklistExecutionReport,
+  type StaffChecklistExecutionProblemFilter,
   type StaffChecklistExecutionGroup,
+  type StaffChecklistExecutionReport,
   type StaffChecklistExecutionReportFilters,
   type StaffChecklistExecutionRun,
+  type StaffChecklistExecutionScoreFilter,
+  type StaffChecklistExecutionSort,
+  type StaffChecklistExecutionSortDirection,
+  type StaffChecklistExecutionSourceFilter,
   type StaffChecklistFilterStatus,
   type StaffChecklistShiftKind,
   type StaffChecklistStatus,
 } from "@/lib/staff-checklists";
 
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
+type ReportFilterState =
+  | StaffChecklistExecutionReportFilters
+  | StaffChecklistExecutionReport["filters"];
 
 const statusLabels: Record<StaffChecklistFilterStatus, string> = {
   all: "Все статусы",
@@ -46,6 +55,52 @@ const shiftKindLabels: Record<StaffChecklistShiftKind | "all", string> = {
   INCIDENT: "Инцидент",
   INVENTORY: "Передача ТМЦ",
   CUSTOM: "Другое",
+};
+
+const executionSortLabels: Record<StaffChecklistExecutionSort, string> = {
+  activityDate: "Дата активности",
+  checklist: "Чеклист",
+  store: "Клуб",
+  employee: "Сотрудник",
+  score: "Оценка",
+  problems: "Проблемы",
+  status: "Статус",
+};
+
+const executionDirectionLabels: Record<
+  StaffChecklistExecutionSortDirection,
+  string
+> = {
+  desc: "По убыванию",
+  asc: "По возрастанию",
+};
+
+const executionProblemLabels: Record<
+  StaffChecklistExecutionProblemFilter,
+  string
+> = {
+  all: "Все чек-листы",
+  with: "Только с проблемами",
+  none: "Без проблем",
+};
+
+const executionScoreLabels: Record<StaffChecklistExecutionScoreFilter, string> =
+  {
+    all: "Любая оценка",
+    lt50: "Ниже 50%",
+    "50to79": "50-79%",
+    "80to99": "80-99%",
+    "100": "100%",
+  };
+
+const executionSourceLabels: Record<
+  StaffChecklistExecutionSourceFilter,
+  string
+> = {
+  all: "Все источники",
+  REGULATION: "Регламенты",
+  TEMPLATE: "Шаблоны",
+  RUN: "Разовые",
 };
 
 function searchParam(value: string | string[] | undefined) {
@@ -83,11 +138,65 @@ function isShiftKind(
   );
 }
 
+function isExecutionSort(
+  value: string | undefined,
+): value is StaffChecklistExecutionSort {
+  return (
+    value === "activityDate" ||
+    value === "checklist" ||
+    value === "store" ||
+    value === "employee" ||
+    value === "score" ||
+    value === "problems" ||
+    value === "status"
+  );
+}
+
+function isExecutionDirection(
+  value: string | undefined,
+): value is StaffChecklistExecutionSortDirection {
+  return value === "asc" || value === "desc";
+}
+
+function isExecutionProblems(
+  value: string | undefined,
+): value is StaffChecklistExecutionProblemFilter {
+  return value === "all" || value === "with" || value === "none";
+}
+
+function isExecutionScoreRange(
+  value: string | undefined,
+): value is StaffChecklistExecutionScoreFilter {
+  return (
+    value === "all" ||
+    value === "lt50" ||
+    value === "50to79" ||
+    value === "80to99" ||
+    value === "100"
+  );
+}
+
+function isExecutionSourceType(
+  value: string | undefined,
+): value is StaffChecklistExecutionSourceFilter {
+  return (
+    value === "all" ||
+    value === "REGULATION" ||
+    value === "TEMPLATE" ||
+    value === "RUN"
+  );
+}
+
 function resolveFilters(
   params: Awaited<SearchParams>,
 ): StaffChecklistExecutionReportFilters {
   const status = searchParam(params.status);
   const shiftKind = searchParam(params.shiftKind);
+  const sort = searchParam(params.sort);
+  const direction = searchParam(params.direction);
+  const problems = searchParam(params.problems);
+  const scoreRange = searchParam(params.scoreRange);
+  const sourceType = searchParam(params.sourceType);
 
   return {
     status: isStatus(status) ? status : "all",
@@ -97,6 +206,11 @@ function resolveFilters(
     search: searchParam(params.search)?.trim(),
     dateFrom: searchParam(params.dateFrom),
     dateTo: searchParam(params.dateTo),
+    sort: isExecutionSort(sort) ? sort : "activityDate",
+    direction: isExecutionDirection(direction) ? direction : "desc",
+    problems: isExecutionProblems(problems) ? problems : "all",
+    scoreRange: isExecutionScoreRange(scoreRange) ? scoreRange : "all",
+    sourceType: isExecutionSourceType(sourceType) ? sourceType : "all",
   };
 }
 
@@ -117,6 +231,39 @@ function exportHref(
   });
 
   return `/api/staff/checklists/report/export?${params.toString()}`;
+}
+
+function reportHref(
+  filters: ReportFilterState,
+  updates: Record<string, string | null | undefined>,
+) {
+  const params = new URLSearchParams();
+
+  Object.entries({
+    ...(filters as Record<string, string | null | undefined>),
+    ...updates,
+  }).forEach(([key, value]) => {
+    if (value) {
+      params.set(key, value);
+    }
+  });
+
+  const query = params.toString();
+  return query ? `/staff/checklists/report?${query}` : "/staff/checklists/report";
+}
+
+function sortHref(
+  filters: ReportFilterState,
+  sort: StaffChecklistExecutionSort,
+) {
+  const nextDirection =
+    filters.sort === sort && filters.direction === "asc" ? "desc" : "asc";
+
+  return reportHref(filters, { sort, direction: nextDirection });
+}
+
+function problemCount(run: StaffChecklistExecutionRun) {
+  return run.failedItems + run.blockingIssues;
 }
 
 function formatDate(value: string | null) {
@@ -250,6 +397,10 @@ export default async function StaffChecklistExecutionReportPage({
         </section>
 
         <form className="mt-6 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+          <HiddenReportFilters
+            filters={report.filters}
+            names={["sort", "direction", "problems", "scoreRange", "sourceType"]}
+          />
           <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-7">
             <label className="block text-sm">
               <span className="text-xs font-semibold uppercase text-zinc-500">
@@ -355,23 +506,115 @@ export default async function StaffChecklistExecutionReportPage({
 
         <section className="mt-6 rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
           <div className="border-b border-zinc-200 px-4 py-4 dark:border-zinc-800">
-            <p className="text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-300">
-              Выполнения
-            </p>
-            <h2 className="mt-1 text-xl font-semibold">
-              Последние чеклисты в выборке
-            </h2>
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-300">
+                  Выполнения
+                </p>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <h2 className="text-xl font-semibold">
+                    Последние чеклисты в выборке
+                  </h2>
+                  <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-500 dark:bg-zinc-900">
+                    {formatNumber(report.runs.length)}
+                  </span>
+                </div>
+              </div>
+              <form className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:min-w-[680px]">
+                <HiddenReportFilters
+                  filters={report.filters}
+                  names={[
+                    "dateFrom",
+                    "dateTo",
+                    "status",
+                    "shiftKind",
+                    "storeId",
+                    "assignedToUserId",
+                    "search",
+                  ]}
+                />
+                <SelectField
+                  label="Источник"
+                  name="sourceType"
+                  defaultValue={report.filters.sourceType}
+                  options={executionSourceLabels}
+                  compact
+                />
+                <SelectField
+                  label="Проблемы"
+                  name="problems"
+                  defaultValue={report.filters.problems}
+                  options={executionProblemLabels}
+                  compact
+                />
+                <SelectField
+                  label="Оценка"
+                  name="scoreRange"
+                  defaultValue={report.filters.scoreRange}
+                  options={executionScoreLabels}
+                  compact
+                />
+                <SelectField
+                  label="Сортировка"
+                  name="sort"
+                  defaultValue={report.filters.sort}
+                  options={executionSortLabels}
+                  compact
+                />
+                <SelectField
+                  label="Порядок"
+                  name="direction"
+                  defaultValue={report.filters.direction}
+                  options={executionDirectionLabels}
+                  compact
+                />
+                <div className="flex items-end">
+                  <button
+                    type="submit"
+                    className="h-10 w-full rounded-xl bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200"
+                  >
+                    Показать
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-full text-left text-sm">
               <thead className="border-b border-zinc-200 text-xs uppercase text-zinc-500 dark:border-zinc-800">
                 <tr>
-                  <th className="px-4 py-3 font-medium">Чеклист</th>
-                  <th className="px-4 py-3 font-medium">Клуб / смена</th>
-                  <th className="px-4 py-3 font-medium">Сотрудник</th>
-                  <th className="px-4 py-3 font-medium">Дата</th>
-                  <th className="px-4 py-3 text-right font-medium">Оценка</th>
-                  <th className="px-4 py-3 text-right font-medium">Проблемы</th>
+                  <SortableHeader
+                    label="Чеклист"
+                    sort="checklist"
+                    filters={report.filters}
+                  />
+                  <SortableHeader
+                    label="Клуб / смена"
+                    sort="store"
+                    filters={report.filters}
+                  />
+                  <SortableHeader
+                    label="Сотрудник"
+                    sort="employee"
+                    filters={report.filters}
+                  />
+                  <SortableHeader
+                    label="Дата"
+                    sort="activityDate"
+                    filters={report.filters}
+                  />
+                  <SortableHeader
+                    label="Оценка"
+                    sort="score"
+                    filters={report.filters}
+                    align="right"
+                  />
+                  <SortableHeader
+                    label="Проблемы"
+                    sort="problems"
+                    filters={report.filters}
+                    align="right"
+                  />
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
@@ -402,11 +645,13 @@ function SelectField({
   name,
   defaultValue,
   options,
+  compact = false,
 }: {
   label: string;
   name: string;
   defaultValue: string;
   options: Record<string, string>;
+  compact?: boolean;
 }) {
   return (
     <label className="block text-sm">
@@ -416,7 +661,9 @@ function SelectField({
       <select
         name={name}
         defaultValue={defaultValue}
-        className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
+        className={`mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950 ${
+          compact ? "h-10 py-1.5" : "py-2"
+        }`}
       >
         {Object.entries(options).map(([value, optionLabel]) => (
           <option key={value} value={value}>
@@ -425,6 +672,61 @@ function SelectField({
         ))}
       </select>
     </label>
+  );
+}
+
+function HiddenReportFilters({
+  filters,
+  names,
+}: {
+  filters: ReportFilterState;
+  names: string[];
+}) {
+  const values = filters as Record<string, string | null | undefined>;
+
+  return (
+    <>
+      {names.map((name) => {
+        const value = values[name];
+
+        return value ? (
+          <input key={name} type="hidden" name={name} value={value} />
+        ) : null;
+      })}
+    </>
+  );
+}
+
+function SortableHeader({
+  label,
+  sort,
+  filters,
+  align = "left",
+}: {
+  label: string;
+  sort: StaffChecklistExecutionSort;
+  filters: ReportFilterState;
+  align?: "left" | "right";
+}) {
+  const active = filters.sort === sort;
+  const arrow = active ? (filters.direction === "asc" ? "↑" : "↓") : "↕";
+
+  return (
+    <th
+      className={`px-4 py-3 font-medium ${
+        align === "right" ? "text-right" : ""
+      }`}
+    >
+      <Link
+        href={sortHref(filters, sort)}
+        className={`inline-flex items-center gap-1 rounded-md transition hover:text-zinc-950 dark:hover:text-zinc-100 ${
+          align === "right" ? "justify-end" : ""
+        } ${active ? "text-zinc-950 dark:text-zinc-100" : ""}`}
+      >
+        <span>{label}</span>
+        <span className="text-[10px] leading-none">{arrow}</span>
+      </Link>
+    </th>
   );
 }
 
@@ -508,6 +810,8 @@ function GroupTable({
 }
 
 function ExecutionRow({ run }: { run: StaffChecklistExecutionRun }) {
+  const problems = problemCount(run);
+
   return (
     <tr>
       <td className="px-4 py-3">
@@ -547,13 +851,18 @@ function ExecutionRow({ run }: { run: StaffChecklistExecutionRun }) {
       <td className="px-4 py-3 text-right">
         <span
           className={
-            run.failedItems > 0
+            problems > 0
               ? "font-semibold text-red-600 dark:text-red-300"
               : "text-zinc-500"
           }
         >
-          {formatNumber(run.failedItems)}
+          {formatNumber(problems)}
         </span>
+        {run.blockingIssues > 0 ? (
+          <p className="mt-1 text-xs text-zinc-500">
+            блокеров: {formatNumber(run.blockingIssues)}
+          </p>
+        ) : null}
       </td>
     </tr>
   );

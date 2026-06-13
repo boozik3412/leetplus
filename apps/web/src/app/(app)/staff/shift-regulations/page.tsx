@@ -148,6 +148,29 @@ function checklistStatusFromRegulationStatus(
   return "all";
 }
 
+function ChecklistHistoryIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M7 4h7.5A3.5 3.5 0 0 1 18 7.5V10" />
+      <path d="M7 4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5" />
+      <path d="M9 9h4" />
+      <path d="M9 13h3" />
+      <path d="M16 14a4 4 0 1 1-2.83 1.17" />
+      <path d="M16 12v3h3" />
+      <path d="M12 15h1" />
+    </svg>
+  );
+}
+
 export default async function StaffShiftRegulationsPage({
   searchParams,
 }: {
@@ -250,6 +273,13 @@ export default async function StaffShiftRegulationsPage({
                 Новый чек-лист
               </Link>
             ) : null}
+            <Link
+              href="/staff/checklists/report"
+              className="inline-flex h-11 min-w-44 items-center justify-center gap-2 rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+            >
+              <ChecklistHistoryIcon className="size-4 shrink-0" />
+              <span>История чек-листов</span>
+            </Link>
             <Link
               href={canManageRegulations ? "/staff/tasks" : "/staff/checklists"}
               className="inline-flex h-11 min-w-44 items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"

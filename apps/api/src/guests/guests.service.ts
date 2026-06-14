@@ -3277,6 +3277,7 @@ export class GuestsService {
       );
       this.applyLatest(metrics, sessionActivityAt);
       this.addActivityDay(metrics, sessionActivityAt);
+      this.addStoreVisit(metrics, session.storeId, session.store?.name ?? null);
 
       if (
         this.sessionOverlapsPeriod(
@@ -3289,11 +3290,6 @@ export class GuestsService {
         )
       ) {
         metrics.sessionsCount += 1;
-        this.addStoreVisit(
-          metrics,
-          session.storeId,
-          session.store?.name ?? null,
-        );
         this.addOverlapVisitDays(
           metrics.visitsDays,
           session.startedAt,

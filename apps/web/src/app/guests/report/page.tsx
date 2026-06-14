@@ -527,7 +527,9 @@ function ReportTable({
             Страница {formatNumber(guestList.page)} из{" "}
             {formatNumber(guestList.totalPages)}, показано{" "}
             {formatNumber(guestList.rows.length)} из{" "}
-            {formatNumber(guestList.totalRows)} гостей
+            {formatNumber(guestList.totalRows)} гостей. Частота визитов показывает
+            сессии, уникальные дни, игровые часы за выбранный период и дату
+            последней активности.
           </p>
         </div>
         <div className="text-sm text-zinc-500">
@@ -537,10 +539,13 @@ function ReportTable({
       </div>
       {guestList.rows.length > 0 ? (
         <div className="overflow-x-auto">
-          <table className="min-w-[2050px] divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
+          <table className="min-w-[1880px] divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
             <thead className="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900/60">
               <tr>
                 <th className="px-4 py-3 text-left font-semibold">Гость</th>
+                <th className="px-4 py-3 text-left font-semibold">
+                  Частота визитов
+                </th>
                 <th className="px-4 py-3 text-left font-semibold">Контакт</th>
                 <th className="px-4 py-3 text-left font-semibold">Группа</th>
                 <th className="px-4 py-3 text-left font-semibold">Сегмент</th>
@@ -549,9 +554,6 @@ function ReportTable({
                 <th className="px-4 py-3 text-left font-semibold">
                   Риск оттока
                 </th>
-                <th className="px-4 py-3 text-right font-semibold">Сессии</th>
-                <th className="px-4 py-3 text-right font-semibold">Дни</th>
-                <th className="px-4 py-3 text-right font-semibold">Часы</th>
                 <th className="px-4 py-3 text-right font-semibold">Деньги</th>
                 <th className="px-4 py-3 text-right font-semibold">
                   LTV факт
@@ -560,9 +562,6 @@ function ReportTable({
                 <th className="px-4 py-3 text-right font-semibold">Бар</th>
                 <th className="px-4 py-3 text-left font-semibold">
                   Регистрация
-                </th>
-                <th className="px-4 py-3 text-left font-semibold">
-                  Активность
                 </th>
                 <th className="px-4 py-3 text-left font-semibold">
                   Следующий шаг
@@ -586,6 +585,37 @@ function ReportTable({
                     </Link>
                     <p className="mt-1 text-xs text-zinc-500">
                       ID {row.externalGuestId}
+                    </p>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="grid min-w-44 grid-cols-3 gap-2 rounded-md bg-zinc-50 p-2 text-center dark:bg-zinc-900/60">
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase text-zinc-500">
+                          Сессии
+                        </p>
+                        <p className="mt-1 font-semibold tabular-nums">
+                          {formatNumber(row.sessionsCount)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase text-zinc-500">
+                          Дни
+                        </p>
+                        <p className="mt-1 font-semibold tabular-nums">
+                          {formatNumber(row.visitsDays)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase text-zinc-500">
+                          Часы
+                        </p>
+                        <p className="mt-1 font-semibold tabular-nums">
+                          {formatNumber(row.playHours, 1)}
+                        </p>
+                      </div>
+                    </div>
+                    <p className="mt-2 text-xs text-zinc-500">
+                      последний визит: {formatDate(row.lastActivityAt)}
                     </p>
                   </td>
                   <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">
@@ -629,15 +659,6 @@ function ReportTable({
                     ) : null}
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums">
-                    {formatNumber(row.sessionsCount)}
-                  </td>
-                  <td className="px-4 py-3 text-right tabular-nums">
-                    {formatNumber(row.visitsDays)}
-                  </td>
-                  <td className="px-4 py-3 text-right tabular-nums">
-                    {formatNumber(row.playHours, 1)} ч
-                  </td>
-                  <td className="px-4 py-3 text-right tabular-nums">
                     {formatRubles(row.transactionAmount + row.barRevenue)}
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums">
@@ -666,9 +687,6 @@ function ReportTable({
                   </td>
                   <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">
                     {formatDate(row.insertedAt)}
-                  </td>
-                  <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">
-                    {formatDate(row.lastActivityAt)}
                   </td>
                   <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">
                     <p>{row.nextAction ?? "нет действия"}</p>

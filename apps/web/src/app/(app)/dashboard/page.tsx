@@ -17,6 +17,7 @@ import { getStores } from "@/lib/stores";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
+import { PendingNavigationLink } from "./pending-navigation-link";
 
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
 
@@ -837,10 +838,11 @@ function BusinessSignalPanel({ groups }: { groups: BusinessSignalGroup[] }) {
 
 function BusinessSignalCard({ signal }: { signal: BusinessSignal }) {
   return (
-    <Link
+    <PendingNavigationLink
       href={signal.href}
+      pendingLabel={`Открываем: ${signal.title.toLowerCase()}`}
       className={[
-        "group flex h-full min-h-[210px] flex-col rounded-lg border bg-white p-4 transition hover:-translate-y-0.5 hover:shadow-sm dark:bg-zinc-950",
+        "group relative flex h-full min-h-[210px] flex-col rounded-lg border bg-white p-4 transition hover:-translate-y-0.5 hover:shadow-sm data-[pending=true]:translate-y-0 data-[pending=true]:opacity-75 data-[pending=true]:shadow-sm dark:bg-zinc-950",
         signal.tone === "danger"
           ? "border-red-200 dark:border-red-900/70"
           : signal.tone === "warning"
@@ -876,6 +878,6 @@ function BusinessSignalCard({ signal }: { signal: BusinessSignal }) {
       <span className="mt-3 text-sm font-semibold text-emerald-700 transition group-hover:text-emerald-600 dark:text-emerald-300">
         {signal.actionLabel}
       </span>
-    </Link>
+    </PendingNavigationLink>
   );
 }

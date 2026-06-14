@@ -957,6 +957,7 @@ type ResolvedGuestFilters = {
 };
 
 type GuestGroupsByKey = Map<string, string>;
+type StoreByExternalClubKey = Map<string, { id: string; name: string }>;
 type CsvCell = string | number | null;
 type BuiltGuestList = Omit<
   GuestListResponse,
@@ -3204,13 +3205,16 @@ export class GuestsService {
   ) {
     const guestWhere = this.buildGuestWhere(tenantId, filters, guestIds);
     const storeWhere = filters.storeId ? { storeId: filters.storeId } : {};
-    const [allGuests, groupsByKey] = await Promise.all([
-      this.prisma.guest.findMany({
-        where: guestWhere,
-        select: this.guestSelect(),
-      }),
-      this.loadGuestGroups(tenantId),
-    ]);
+    const [allGuests, groupsByKey, storesByExternalClubKey] = await Promise.all(
+      [
+        this.prisma.guest.findMany({
+          where: guestWhere,
+          select: this.guestSelect(),
+        }),
+        this.loadGuestGroups(tenantId),
+        this.loadStoresByExternalClubKey(tenantId),
+      ],
+    );
     const [sessions, transactions, sales] = await Promise.all([
       this.prisma.guestSession.findMany({
         where: {
@@ -3226,6 +3230,8 @@ export class GuestsService {
         select: {
           guestId: true,
           storeId: true,
+          externalDomain: true,
+          externalClubId: true,
           startedAt: true,
           stoppedAt: true,
           durationMinutes: true,
@@ -3277,7 +3283,15 @@ export class GuestsService {
       );
       this.applyLatest(metrics, sessionActivityAt);
       this.addActivityDay(metrics, sessionActivityAt);
-      this.addStoreVisit(metrics, session.storeId, session.store?.name ?? null);
+      const storeRef =
+        session.storeId && session.store
+          ? { id: session.storeId, name: session.store.name }
+          : this.resolveStoreByExternalClub(
+              storesByExternalClubKey,
+              session.externalDomain,
+              session.externalClubId,
+            );
+      this.addStoreVisit(metrics, storeRef?.id ?? null, storeRef?.name ?? null);
 
       if (
         this.sessionOverlapsPeriod(
@@ -5721,6 +5735,57 @@ export class GuestsService {
         group.name,
       ]),
     );
+  }
+
+  private async loadStoresByExternalClubKey(
+    tenantId: string,
+  ): Promise<StoreByExternalClubKey> {
+    const stores = await this.prisma.store.findMany({
+      where: {
+        tenantId,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: { not: null },
+        externalClubId: { not: null },
+      },
+      select: {
+        id: true,
+        name: true,
+        externalDomain: true,
+        externalClubId: true,
+      },
+    });
+
+    return new Map(
+      stores
+        .filter((store) => store.externalDomain && store.externalClubId)
+        .map((store) => [
+          this.storeExternalClubKey(
+            store.externalDomain as string,
+            store.externalClubId as string,
+          ),
+          { id: store.id, name: store.name },
+        ]),
+    );
+  }
+
+  private resolveStoreByExternalClub(
+    storesByExternalClubKey: StoreByExternalClubKey,
+    externalDomain: string | null,
+    externalClubId: string | null,
+  ) {
+    if (!externalDomain || !externalClubId) {
+      return null;
+    }
+
+    return (
+      storesByExternalClubKey.get(
+        this.storeExternalClubKey(externalDomain, externalClubId),
+      ) ?? null
+    );
+  }
+
+  private storeExternalClubKey(externalDomain: string, externalClubId: string) {
+    return `${externalDomain}:${externalClubId}`;
   }
 
   private toDashboardRow(

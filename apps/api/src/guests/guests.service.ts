@@ -1179,7 +1179,7 @@ export class GuestsService {
       ...guestList.rows.map((row) => [
         row.displayName,
         row.externalGuestId,
-        row.primaryStoreName ?? 'Клуб не определен',
+        row.primaryStoreName ?? row.externalDomain ?? 'Клуб не определен',
         row.primaryStoreVisits,
         row.contact,
         row.guestGroupName ?? row.externalDomain ?? 'Без группы',

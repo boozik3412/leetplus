@@ -222,7 +222,23 @@ function sortLabel(sort: NonNullable<GuestListFilters["sort"]>) {
 }
 
 function primaryStoreLabel(row: GuestDashboardRow) {
-  return row.primaryStoreName ?? "Клуб не определен";
+  return row.primaryStoreName ?? row.externalDomain ?? "Клуб не определен";
+}
+
+function primaryStoreMeta(row: GuestDashboardRow) {
+  if (row.primaryStoreVisits > 0) {
+    return `${formatNumber(row.primaryStoreVisits)} визитов в клубе`;
+  }
+
+  if (row.primaryStoreName) {
+    return "клуб из истории";
+  }
+
+  if (row.externalDomain) {
+    return "источник Langame";
+  }
+
+  return "нет клубной привязки";
 }
 
 function nextActionLabel(row: GuestDashboardRow) {
@@ -637,9 +653,7 @@ function ReportTable({
                       {primaryStoreLabel(row)}
                     </p>
                     <p className="mt-1 text-xs text-zinc-500">
-                      {row.primaryStoreVisits > 0
-                        ? `${formatNumber(row.primaryStoreVisits)} визитов в клубе`
-                        : "нет визитов за период"}
+                      {primaryStoreMeta(row)}
                     </p>
                     <p className="mt-1 text-xs text-zinc-500">
                       {row.guestGroupName ?? "без группы"}

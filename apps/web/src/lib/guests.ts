@@ -28,6 +28,9 @@ export type GuestDashboardRow = {
   id: string;
   externalDomain: string | null;
   externalGuestId: string;
+  primaryStoreId: string | null;
+  primaryStoreName: string | null;
+  primaryStoreVisits: number;
   guestGroupName: string | null;
   displayName: string;
   contact: string;

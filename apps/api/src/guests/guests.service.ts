@@ -189,6 +189,9 @@ export type GuestDashboardRow = {
   id: string;
   externalDomain: string | null;
   externalGuestId: string;
+  primaryStoreId: string | null;
+  primaryStoreName: string | null;
+  primaryStoreVisits: number;
   guestGroupName: string | null;
   displayName: string;
   contact: string;
@@ -879,6 +882,7 @@ type GuestMetrics = {
   sessionsCount: number;
   visitsDays: Set<string>;
   playMinutes: number;
+  storeVisits: Map<string, { name: string | null; visits: number }>;
   transactionsCount: number;
   transactionAmount: number;
   barRevenue: number;
@@ -1134,6 +1138,8 @@ export class GuestsService {
       [
         'Гость',
         'Внешний ID',
+        'Основной клуб',
+        'Визитов в основном клубе',
         'Контакт',
         'Группа',
         'Сегмент',
@@ -1172,8 +1178,10 @@ export class GuestsService {
       ...guestList.rows.map((row) => [
         row.displayName,
         row.externalGuestId,
+        row.primaryStoreName ?? 'Клуб не определен',
+        row.primaryStoreVisits,
         row.contact,
-        row.guestGroupName ?? row.externalDomain,
+        row.guestGroupName ?? row.externalDomain ?? 'Без группы',
         this.segmentExportLabel(row.segment),
         this.crmStatusExportLabel(row.crmStatus),
         row.sessionsCount,
@@ -1204,7 +1212,7 @@ export class GuestsService {
         row.churnRisk.valueAtRisk,
         this.formatExportDate(row.insertedAt),
         this.formatExportDate(row.lastActivityAt),
-        row.nextAction,
+        this.guestNextActionExportLabel(row),
         this.formatExportDateTime(row.nextContactAt),
       ]),
     ];
@@ -3217,9 +3225,11 @@ export class GuestsService {
         },
         select: {
           guestId: true,
+          storeId: true,
           startedAt: true,
           stoppedAt: true,
           durationMinutes: true,
+          store: { select: { name: true } },
         },
       }),
       this.prisma.guestTransaction.findMany({
@@ -3279,6 +3289,11 @@ export class GuestsService {
         )
       ) {
         metrics.sessionsCount += 1;
+        this.addStoreVisit(
+          metrics,
+          session.storeId,
+          session.store?.name ?? null,
+        );
         this.addOverlapVisitDays(
           metrics.visitsDays,
           session.startedAt,
@@ -5738,6 +5753,7 @@ export class GuestsService {
       transactionAmount + barRevenue,
       period,
     );
+    const primaryStore = this.resolvePrimaryGuestStore(metrics);
     const guestGroupName = guest.externalGuestTypeId
       ? (groupsByKey.get(
           this.guestGroupKey(guest.externalDomain, guest.externalGuestTypeId),
@@ -5748,6 +5764,9 @@ export class GuestsService {
       id: guest.id,
       externalDomain: guest.externalDomain,
       externalGuestId: guest.externalGuestId,
+      primaryStoreId: primaryStore.id,
+      primaryStoreName: primaryStore.name,
+      primaryStoreVisits: primaryStore.visits,
       guestGroupName,
       displayName:
         this.decryptSensitiveValue(guest.fullNameEncrypted) ??
@@ -7152,6 +7171,30 @@ export class GuestsService {
     return labels[status];
   }
 
+  private guestNextActionExportLabel(row: GuestDashboardRow) {
+    if (row.nextAction) {
+      return row.nextAction;
+    }
+
+    if (row.churnRisk.level === 'HIGH' || row.segment === 'risk') {
+      return 'Связаться и предложить повод вернуться';
+    }
+
+    if (row.segment === 'lost') {
+      return 'Проверить контакт и подготовить реактивацию';
+    }
+
+    if (row.segment === 'new') {
+      return 'Закрепить первый повторный визит';
+    }
+
+    if (row.segment === 'quiet') {
+      return 'Добавить в мягкую коммуникацию';
+    }
+
+    return 'Плановое наблюдение';
+  }
+
   private formatExportDate(value: string | null) {
     return this.formatExportDateValue(value, false);
   }
@@ -7231,6 +7274,7 @@ export class GuestsService {
       sessionsCount: 0,
       visitsDays: new Set<string>(),
       playMinutes: 0,
+      storeVisits: new Map<string, { name: string | null; visits: number }>(),
       transactionsCount: 0,
       transactionAmount: 0,
       barRevenue: 0,
@@ -7246,6 +7290,50 @@ export class GuestsService {
     map.set(guestId, created);
 
     return created;
+  }
+
+  private addStoreVisit(
+    metrics: GuestMetrics,
+    storeId: string | null,
+    storeName: string | null,
+  ) {
+    if (!storeId) {
+      return;
+    }
+
+    const current = metrics.storeVisits.get(storeId) ?? {
+      name: storeName,
+      visits: 0,
+    };
+    current.visits += 1;
+    current.name = current.name ?? storeName;
+    metrics.storeVisits.set(storeId, current);
+  }
+
+  private resolvePrimaryGuestStore(metrics: GuestMetrics | undefined) {
+    const empty = { id: null, name: null, visits: 0 };
+
+    if (!metrics || metrics.storeVisits.size === 0) {
+      return empty;
+    }
+
+    return Array.from(metrics.storeVisits.entries()).reduce(
+      (best, [id, current]) => {
+        if (current.visits > best.visits) {
+          return { id, name: current.name, visits: current.visits };
+        }
+
+        if (
+          current.visits === best.visits &&
+          (current.name ?? '').localeCompare(best.name ?? '', 'ru') < 0
+        ) {
+          return { id, name: current.name, visits: current.visits };
+        }
+
+        return best;
+      },
+      empty as { id: string | null; name: string | null; visits: number },
+    );
   }
 
   private sumPeriodMetrics(metricsByGuestId: Map<string, GuestMetrics>) {

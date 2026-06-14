@@ -221,6 +221,44 @@ function sortLabel(sort: NonNullable<GuestListFilters["sort"]>) {
   return labels[sort];
 }
 
+function primaryStoreLabel(row: GuestDashboardRow) {
+  return row.primaryStoreName ?? "Клуб не определен";
+}
+
+function nextActionLabel(row: GuestDashboardRow) {
+  if (row.nextAction) {
+    return row.nextAction;
+  }
+
+  if (row.churnRisk.level === "HIGH" || row.segment === "risk") {
+    return "Связаться и предложить повод вернуться";
+  }
+
+  if (row.segment === "lost") {
+    return "Проверить контакт и подготовить реактивацию";
+  }
+
+  if (row.segment === "new") {
+    return "Закрепить первый повторный визит";
+  }
+
+  if (row.segment === "quiet") {
+    return "Добавить в мягкую коммуникацию";
+  }
+
+  return "Плановое наблюдение";
+}
+
+function activityLabel(row: GuestDashboardRow) {
+  const parts = [
+    `${formatNumber(row.sessionsCount)} сесс.`,
+    `${formatNumber(row.visitsDays)} дн.`,
+    `${formatNumber(row.playHours, 1)} ч`,
+  ];
+
+  return parts.join(" · ");
+}
+
 export default async function GuestFullReportPage({
   searchParams,
 }: {
@@ -297,6 +335,14 @@ export default async function GuestFullReportPage({
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <Link
+              href={reportHref(filters)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            >
+              Открыть отдельно
+            </Link>
             <Link
               href={exportHref(filters)}
               className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200 dark:hover:bg-emerald-900/50"
@@ -539,30 +585,26 @@ function ReportTable({
       </div>
       {guestList.rows.length > 0 ? (
         <div className="overflow-x-auto">
-          <table className="min-w-[1880px] divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
+          <table className="min-w-[1180px] divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
             <thead className="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900/60">
               <tr>
                 <th className="px-4 py-3 text-left font-semibold">Гость</th>
                 <th className="px-4 py-3 text-left font-semibold">
+                  Основной клуб
+                </th>
+                <th className="px-4 py-3 text-left font-semibold">
                   Частота визитов
                 </th>
-                <th className="px-4 py-3 text-left font-semibold">Контакт</th>
-                <th className="px-4 py-3 text-left font-semibold">Группа</th>
-                <th className="px-4 py-3 text-left font-semibold">Сегмент</th>
-                <th className="px-4 py-3 text-left font-semibold">CRM</th>
-                <th className="px-4 py-3 text-left font-semibold">RFM</th>
+                <th className="px-4 py-3 text-left font-semibold">
+                  Сегмент / CRM
+                </th>
                 <th className="px-4 py-3 text-left font-semibold">
                   Риск оттока
                 </th>
-                <th className="px-4 py-3 text-right font-semibold">Деньги</th>
                 <th className="px-4 py-3 text-right font-semibold">
-                  LTV факт
+                  Деньги / LTV
                 </th>
                 <th className="px-4 py-3 text-right font-semibold">Бонусы</th>
-                <th className="px-4 py-3 text-right font-semibold">Бар</th>
-                <th className="px-4 py-3 text-left font-semibold">
-                  Регистрация
-                </th>
                 <th className="px-4 py-3 text-left font-semibold">
                   Следующий шаг
                 </th>
@@ -586,59 +628,46 @@ function ReportTable({
                     <p className="mt-1 text-xs text-zinc-500">
                       ID {row.externalGuestId}
                     </p>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="grid min-w-44 grid-cols-3 gap-2 rounded-md bg-zinc-50 p-2 text-center dark:bg-zinc-900/60">
-                      <div>
-                        <p className="text-[10px] font-semibold uppercase text-zinc-500">
-                          Сессии
-                        </p>
-                        <p className="mt-1 font-semibold tabular-nums">
-                          {formatNumber(row.sessionsCount)}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-semibold uppercase text-zinc-500">
-                          Дни
-                        </p>
-                        <p className="mt-1 font-semibold tabular-nums">
-                          {formatNumber(row.visitsDays)}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-semibold uppercase text-zinc-500">
-                          Часы
-                        </p>
-                        <p className="mt-1 font-semibold tabular-nums">
-                          {formatNumber(row.playHours, 1)}
-                        </p>
-                      </div>
-                    </div>
-                    <p className="mt-2 text-xs text-zinc-500">
-                      последний визит: {formatDate(row.lastActivityAt)}
+                    <p className="mt-1 max-w-56 truncate text-xs text-zinc-500">
+                      {row.contact}
                     </p>
                   </td>
-                  <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">
-                    {row.contact}
-                  </td>
-                  <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">
-                    {row.guestGroupName ?? row.externalDomain ?? "источник"}
-                  </td>
-                  <td className="px-4 py-3">{segmentLabel(row.segment)}</td>
-                  <td className="px-4 py-3">{crmStatusLabel(row.crmStatus)}</td>
                   <td className="px-4 py-3">
+                    <p className="font-medium text-zinc-800 dark:text-zinc-100">
+                      {primaryStoreLabel(row)}
+                    </p>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      {row.primaryStoreVisits > 0
+                        ? `${formatNumber(row.primaryStoreVisits)} визитов в клубе`
+                        : "нет визитов за период"}
+                    </p>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      {row.guestGroupName ?? "без группы"}
+                    </p>
+                  </td>
+                  <td className="px-4 py-3">
+                    <p className="font-semibold tabular-nums">
+                      {activityLabel(row)}
+                    </p>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      последний визит: {formatDate(row.lastActivityAt)}
+                    </p>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      зарегистрирован: {formatDate(row.insertedAt)}
+                    </p>
+                  </td>
+                  <td className="px-4 py-3">
+                    <p className="font-medium">{segmentLabel(row.segment)}</p>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      CRM: {crmStatusLabel(row.crmStatus)}
+                    </p>
                     <span
-                      className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${rfmSegmentTone(
+                      className={`mt-2 inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${rfmSegmentTone(
                         row.rfm.segment,
                       )}`}
                     >
-                      {row.rfm.totalScore}/15 · {rfmSegmentLabel(row.rfm.segment)}
+                      RFM {row.rfm.totalScore}/15 · {rfmSegmentLabel(row.rfm.segment)}
                     </span>
-                    <p className="mt-1 text-xs text-zinc-500">
-                      R {row.rfm.recencyDays ?? "нет"} дн · F{" "}
-                      {formatNumber(row.rfm.frequency)} · M{" "}
-                      {formatRubles(row.rfm.monetary)}
-                    </p>
                   </td>
                   <td className="px-4 py-3">
                     <span
@@ -659,16 +688,20 @@ function ReportTable({
                     ) : null}
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums">
-                    {formatRubles(row.transactionAmount + row.barRevenue)}
-                  </td>
-                  <td className="px-4 py-3 text-right tabular-nums">
-                    {formatRubles(row.ltv.totalRevenue)}
+                    <p className="font-semibold">
+                      {formatRubles(row.transactionAmount + row.barRevenue)}
+                    </p>
                     <p className="text-xs text-zinc-500">
-                      {formatNumber(row.ltv.revenueDays)} дн. с выручкой
+                      LTV {formatRubles(row.ltv.totalRevenue)}
+                    </p>
+                    <p className="text-xs text-zinc-500">
+                      бар {formatRubles(row.barRevenue)}
                     </p>
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums">
-                    {formatRubles(row.bonusLoad.currentBalance)}
+                    <p className="font-semibold">
+                      {formatRubles(row.bonusLoad.currentBalance)}
+                    </p>
                     <p
                       className={`text-xs font-medium ${bonusLoadTone(
                         row.bonusLoad.status,
@@ -682,16 +715,14 @@ function ReportTable({
                       </p>
                     ) : null}
                   </td>
-                  <td className="px-4 py-3 text-right tabular-nums">
-                    {formatRubles(row.barRevenue)}
-                  </td>
                   <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">
-                    {formatDate(row.insertedAt)}
-                  </td>
-                  <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">
-                    <p>{row.nextAction ?? "нет действия"}</p>
+                    <p className="max-w-64 font-medium text-zinc-800 dark:text-zinc-100">
+                      {nextActionLabel(row)}
+                    </p>
                     <p className="mt-1 text-xs text-zinc-500">
-                      {formatDateTime(row.nextContactAt)}
+                      {row.nextContactAt
+                        ? formatDateTime(row.nextContactAt)
+                        : "без даты контакта"}
                     </p>
                   </td>
                 </tr>

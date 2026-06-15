@@ -726,6 +726,76 @@ export type GuestGamePilotReadiness = {
   note: string;
 };
 
+export type GuestGameBonusLedgerMode = "DISABLED" | "DRY_RUN" | "READY";
+
+export type GuestGameBonusLedgerItemStatus =
+  | "QUEUED"
+  | "DRY_RUN"
+  | "CONFIRMED"
+  | "FAILED"
+  | "SKIPPED"
+  | "CANCELED"
+  | "BLOCKED";
+
+export type GuestGameBonusLedgerStatus = {
+  mode: GuestGameBonusLedgerMode;
+  modeLabel: string;
+  ready: boolean;
+  langamePath: string | null;
+  rewardTypes: string[];
+  pendingApprovedRewards: number;
+  pending: number;
+  processing: number;
+  confirmed: number;
+  failed: number;
+  canceled: number;
+  total: number;
+  note: string;
+};
+
+export type GuestGameBonusLedgerQueueItem = {
+  rewardId: string;
+  status: "QUEUED" | "SKIPPED";
+  reason: string | null;
+  externalDomain: string | null;
+  externalGuestId: string | null;
+  amount: number;
+};
+
+export type GuestGameBonusLedgerQueueResult = {
+  checkedRewards: number;
+  queued: number;
+  skipped: number;
+  rewardTypes: string[];
+  items: GuestGameBonusLedgerQueueItem[];
+  note: string;
+};
+
+export type GuestGameBonusLedgerDispatchItem = {
+  ledgerEntryId: string;
+  rewardId: string | null;
+  status: GuestGameBonusLedgerItemStatus;
+  amount: number;
+  externalDomain: string | null;
+  externalGuestId: string | null;
+  note: string;
+};
+
+export type GuestGameBonusLedgerDispatchResult = {
+  mode: GuestGameBonusLedgerMode;
+  dryRun: boolean;
+  ready: boolean;
+  queued: GuestGameBonusLedgerQueueResult | null;
+  checked: number;
+  confirmed: number;
+  failed: number;
+  skipped: number;
+  blocked: number;
+  items: GuestGameBonusLedgerDispatchItem[];
+  status: GuestGameBonusLedgerStatus;
+  note: string;
+};
+
 export type GuestGameBonusLedgerReconciliationState =
   | "NOT_READY"
   | "WAITING_SYNC"

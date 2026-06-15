@@ -10,6 +10,8 @@ import {
 } from "react";
 import type { GuestAudience, GuestCrmLead, GuestDashboardRow } from "@/lib/guests";
 import type {
+  GuestGameBonusLedgerDispatchResult,
+  GuestGameBonusLedgerQueueResult,
   GuestGameEvent,
   GuestGameDryRunResult,
   GuestGameGuestLogMappingIntent,
@@ -67,6 +69,10 @@ type GuestLogMappingPayload = {
   intent: GuestGameGuestLogMappingIntent;
   note: string;
 };
+
+type BonusLedgerActionResult =
+  | { kind: "queue"; result: GuestGameBonusLedgerQueueResult }
+  | { kind: "dispatch"; result: GuestGameBonusLedgerDispatchResult };
 
 type ProfileForm = {
   guestId: string;
@@ -623,6 +629,8 @@ export function GuestGamificationPanel({
     useState<GuestGamePipelineRunResult | null>(null);
   const [deliveryDispatchResult, setDeliveryDispatchResult] =
     useState<GuestGameDeliveryDispatchResult | null>(null);
+  const [bonusLedgerResult, setBonusLedgerResult] =
+    useState<BonusLedgerActionResult | null>(null);
   const [redeemedReward, setRedeemedReward] =
     useState<GuestGameReward | null>(null);
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
@@ -1167,6 +1175,65 @@ export function GuestGamificationPanel({
     });
   }
 
+  async function queueBonusLedger() {
+    await saveAction("bonus-ledger-queue", async () => {
+      assertCan(
+        access.canApproveRewards,
+        "Для постановки бонусов в ledger нужно право `Геймификация: награды`.",
+      );
+
+      const result = await postJson<GuestGameBonusLedgerQueueResult>(
+        "/api/guests/gamification/bonus-ledger/queue",
+        { limit: 50 },
+      );
+
+      setBonusLedgerResult({ kind: "queue", result });
+      await reloadWorkspace();
+    });
+  }
+
+  async function dryRunBonusLedgerDispatch() {
+    await saveAction("bonus-ledger-dry-run", async () => {
+      assertCan(
+        access.canApproveRewards,
+        "Для проверки bonus ledger dispatch нужно право `Геймификация: награды`.",
+      );
+
+      const result = await postJson<GuestGameBonusLedgerDispatchResult>(
+        "/api/guests/gamification/bonus-ledger/dispatch",
+        {
+          dryRun: true,
+          queueApprovedRewards: false,
+          limit: 25,
+        },
+      );
+
+      setBonusLedgerResult({ kind: "dispatch", result });
+      await reloadWorkspace();
+    });
+  }
+
+  async function dispatchBonusLedger() {
+    await saveAction("bonus-ledger-dispatch", async () => {
+      assertCan(
+        access.canApproveRewards,
+        "Для запуска bonus ledger dispatch нужно право `Геймификация: награды`.",
+      );
+
+      const result = await postJson<GuestGameBonusLedgerDispatchResult>(
+        "/api/guests/gamification/bonus-ledger/dispatch",
+        {
+          dryRun: false,
+          queueApprovedRewards: true,
+          limit: 25,
+        },
+      );
+
+      setBonusLedgerResult({ kind: "dispatch", result });
+      await reloadWorkspace();
+    });
+  }
+
   async function updateDeliveryStatus(
     delivery: GuestGameDelivery,
     status: GuestGameDeliveryStatus,
@@ -1256,8 +1323,9 @@ export function GuestGamificationPanel({
             </p>
           </div>
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
-            Автоматическая запись наград в Langame выключена: выдача идет через
-            ручное подтверждение, код или кассира.
+            Начисления в Langame идут через bonus ledger: approved-награда
+            попадает в очередь, dry-run проверяет контур, а dispatch пишет
+            бонусы только при включенном backend-режиме.
           </div>
         </div>
 
@@ -1358,6 +1426,10 @@ export function GuestGamificationPanel({
           onUpdateDeliveryStatus={updateDeliveryStatus}
           onSaveGuestLogMapping={saveGuestLogTypeMapping}
           onDeleteGuestLogMapping={deleteGuestLogTypeMapping}
+          onQueueBonusLedger={queueBonusLedger}
+          onDryRunBonusLedger={dryRunBonusLedgerDispatch}
+          onDispatchBonusLedger={dispatchBonusLedger}
+          bonusLedgerResult={bonusLedgerResult}
         />
       ) : null}
 
@@ -2293,6 +2365,10 @@ function OverviewTab({
   onUpdateDeliveryStatus,
   onSaveGuestLogMapping,
   onDeleteGuestLogMapping,
+  onQueueBonusLedger,
+  onDryRunBonusLedger,
+  onDispatchBonusLedger,
+  bonusLedgerResult,
 }: {
   workspace: GuestGamificationWorkspace;
   pendingRewards: GuestGameReward[];
@@ -2318,6 +2394,10 @@ function OverviewTab({
   onDeleteGuestLogMapping: (
     mapping: GuestGameGuestLogTypeMapping,
   ) => Promise<void>;
+  onQueueBonusLedger: () => void;
+  onDryRunBonusLedger: () => void;
+  onDispatchBonusLedger: () => void;
+  bonusLedgerResult: BonusLedgerActionResult | null;
 }) {
   return (
     <div className="space-y-5">
@@ -2331,7 +2411,7 @@ function OverviewTab({
             </p>
           </div>
           <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-100">
-            Safe-mode: без автоматической записи в Langame
+            Safe-mode: bonus ledger с dry-run
           </div>
         </div>
 
@@ -2382,8 +2462,8 @@ function OverviewTab({
       <div className="grid gap-3 md:grid-cols-3">
         <SafetyNoteCard
           title="Langame"
-          value="только факты"
-          text="Правила используют подготовленные события и не пишут бонусы обратно без отдельного write-сценария."
+          value="ledger-контур"
+          text="Правила используют подготовленные события и не пишут бонусы напрямую: начисление идет через bonus ledger и backend-флаг реальной записи."
         />
         <SafetyNoteCard
           title="Экономика"
@@ -2393,7 +2473,7 @@ function OverviewTab({
         <SafetyNoteCard
           title="Выдача"
           value={formatMoney(workspace.summary.pendingRewardAmount)}
-          text="Награды проходят через очередь, код или кассира, чтобы исключить двойную выдачу."
+          text="Награды проходят через кошелек, outbox или bonus ledger, чтобы исключить двойную выдачу и сохранить аудит начислений."
         />
       </div>
 
@@ -2401,7 +2481,15 @@ function OverviewTab({
       <EffectControlCard effect={workspace.effect} />
       <IntegrationReadinessCard readiness={workspace.integrationReadiness} />
       <PilotReadinessCard readiness={workspace.pilotReadiness} />
-      <BonusLedgerAuditCard audit={workspace.bonusLedgerAudit} />
+      <BonusLedgerAuditCard
+        audit={workspace.bonusLedgerAudit}
+        saving={saving}
+        canApproveRewards={canApproveRewards}
+        onQueueBonusLedger={onQueueBonusLedger}
+        onDryRunBonusLedger={onDryRunBonusLedger}
+        onDispatchBonusLedger={onDispatchBonusLedger}
+        result={bonusLedgerResult}
+      />
       <CommunicationQueueCard
         queue={workspace.communicationQueue}
         outbox={workspace.deliveryOutbox}
@@ -2734,10 +2822,23 @@ function PilotReadinessCard({
 
 function BonusLedgerAuditCard({
   audit,
+  saving,
+  canApproveRewards,
+  onQueueBonusLedger,
+  onDryRunBonusLedger,
+  onDispatchBonusLedger,
+  result,
 }: {
   audit: GuestGamificationWorkspace["bonusLedgerAudit"];
+  saving: string | null;
+  canApproveRewards: boolean;
+  onQueueBonusLedger: () => void;
+  onDryRunBonusLedger: () => void;
+  onDispatchBonusLedger: () => void;
+  result: BonusLedgerActionResult | null;
 }) {
   const visibleItems = audit.items.slice(0, 8);
+  const actionDisabled = saving !== null || !canApproveRewards;
   const nextIssue =
     audit.items.find(
       (item) => item.reconciliation.state === "MISMATCH",
@@ -2772,6 +2873,56 @@ function BonusLedgerAuditCard({
             : "Подтвержденных ledger-операций пока нет"}
         </div>
       </div>
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm leading-6 text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/20 dark:text-emerald-100">
+          <span className="font-bold">Управление начислениями:</span>{" "}
+          approved bonus-награды сначала попадают в ledger, затем dry-run проверяет
+          очередь без claim, а dispatch начисляет бонусы в Langame только когда
+          backend-режим готов к реальной записи.
+        </div>
+        <div className="flex flex-wrap gap-2 lg:justify-end">
+          <button
+            type="button"
+            className={smallButtonClass}
+            onClick={onQueueBonusLedger}
+            disabled={actionDisabled}
+          >
+            {saving === "bonus-ledger-queue"
+              ? "Ставим в ledger..."
+              : "Поставить approved"}
+          </button>
+          <button
+            type="button"
+            className={smallButtonClass}
+            onClick={onDryRunBonusLedger}
+            disabled={actionDisabled}
+          >
+            {saving === "bonus-ledger-dry-run"
+              ? "Проверяем..."
+              : "Dry-run dispatch"}
+          </button>
+          <button
+            type="button"
+            className={primaryButtonClass}
+            onClick={onDispatchBonusLedger}
+            disabled={actionDisabled}
+          >
+            {saving === "bonus-ledger-dispatch"
+              ? "Начисляем..."
+              : "Запустить dispatch"}
+          </button>
+        </div>
+      </div>
+
+      {!canApproveRewards ? (
+        <p className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+          Для управления ledger нужно право `Геймификация: награды`; журнал и
+          сверка доступны только на просмотр.
+        </p>
+      ) : null}
+
+      {result ? <BonusLedgerActionResultCard result={result} /> : null}
 
       <div className="mt-4 grid gap-2 text-center text-xs sm:grid-cols-2 xl:grid-cols-5">
         <MiniMetric
@@ -2890,6 +3041,82 @@ function BonusLedgerAuditCard({
         {audit.note}
       </p>
     </section>
+  );
+}
+
+function BonusLedgerActionResultCard({
+  result,
+}: {
+  result: BonusLedgerActionResult;
+}) {
+  if (result.kind === "queue") {
+    return (
+      <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
+        <div className="grid gap-2 text-center text-xs sm:grid-cols-3">
+          <MiniMetric label="проверено" value={result.result.checkedRewards} />
+          <MiniMetric label="в ledger" value={result.result.queued} />
+          <MiniMetric label="пропущено" value={result.result.skipped} />
+        </div>
+        <p className="mt-3 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+          {result.result.note}
+        </p>
+      </div>
+    );
+  }
+
+  const dispatch = result.result;
+
+  return (
+    <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
+      <div className="grid gap-2 text-center text-xs sm:grid-cols-3 xl:grid-cols-6">
+        <MiniMetric label="режим" value={dispatch.status.modeLabel} />
+        <MiniMetric label="проверено" value={dispatch.checked} />
+        <MiniMetric label="confirmed" value={dispatch.confirmed} />
+        <MiniMetric label="skip" value={dispatch.skipped} />
+        <MiniMetric label="blocked" value={dispatch.blocked} />
+        <MiniMetric label="ошибки" value={dispatch.failed} />
+      </div>
+
+      {dispatch.queued ? (
+        <p className="mt-3 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+          Перед dispatch поставлено в ledger: {dispatch.queued.queued} из{" "}
+          {dispatch.queued.checkedRewards}, пропущено {dispatch.queued.skipped}.
+        </p>
+      ) : null}
+
+      <p className="mt-3 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+        {dispatch.note}
+      </p>
+
+      {dispatch.items.length ? (
+        <div className="mt-3 space-y-2">
+          {dispatch.items.slice(0, 5).map((item) => (
+            <div
+              key={item.ledgerEntryId}
+              className="flex flex-col gap-2 rounded-lg bg-white px-3 py-2 text-xs ring-1 ring-zinc-200 dark:bg-zinc-950 dark:ring-zinc-800 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div className="min-w-0">
+                <span
+                  className={[
+                    "mr-2 rounded-full px-2 py-1 text-[11px] font-bold uppercase",
+                    bonusLedgerStatusClass(item.status),
+                  ].join(" ")}
+                >
+                  {item.status}
+                </span>
+                <span className="text-zinc-600 dark:text-zinc-300">
+                  {item.externalDomain ?? "Langame"}{" "}
+                  {item.externalGuestId ? `· ${item.externalGuestId}` : ""}
+                </span>
+              </div>
+              <span className="font-semibold text-zinc-950 dark:text-white">
+                {formatMoney(item.amount)}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -7729,12 +7956,17 @@ function bonusLedgerStatusClass(status: string) {
   switch (status) {
     case "CONFIRMED":
       return "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200";
+    case "QUEUED":
     case "PENDING":
       return "bg-cyan-100 text-cyan-800 dark:bg-cyan-950 dark:text-cyan-200";
+    case "DRY_RUN":
     case "PROCESSING":
       return "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-200";
     case "FAILED":
+    case "BLOCKED":
       return "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200";
+    case "SKIPPED":
+      return "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200";
     case "CANCELED":
       return "bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200";
     default:

@@ -283,6 +283,8 @@ export type GuestPortalPayload = {
     progressPercent: number;
     balance: number | null;
     bonusBalance: number | null;
+    bonusBalanceSource: string | null;
+    bonusBalanceSyncedAt: string | null;
     lastSyncedAt: string | null;
   };
   guestSnapshot: GuestPortalGuestSnapshot;
@@ -2154,6 +2156,7 @@ export class GuestPortalService {
     const [
       groups,
       balanceSnapshot,
+      bonusBalanceCurrent,
       bonusBalanceSnapshot,
       lootBoxes,
       missions,
@@ -2173,6 +2176,26 @@ export class GuestPortalService {
               guestId: guest.id,
             },
             orderBy: { snapshotDate: 'desc' },
+          })
+        : null,
+      guest
+        ? this.prisma.guestBonusBalanceCurrent.findFirst({
+            where: {
+              tenantId: context.tenant.id,
+              OR: [
+                { guestId: guest.id },
+                {
+                  externalProvider: guest.externalProvider,
+                  externalDomain: guest.externalDomain,
+                  externalGuestId: guest.externalGuestId,
+                },
+              ],
+            },
+            orderBy: [
+              { snapshotDate: 'desc' },
+              { lastSyncedAt: 'desc' },
+              { updatedAt: 'desc' },
+            ],
           })
         : null,
       guest
@@ -2261,6 +2284,7 @@ export class GuestPortalService {
       guest,
       groups,
       balanceSnapshot,
+      bonusBalanceCurrent,
       bonusBalanceSnapshot,
       currentHours,
     );
@@ -2612,6 +2636,13 @@ export class GuestPortalService {
       countHoursTo: Prisma.Decimal | null;
     }>,
     balanceSnapshot: { balance: Prisma.Decimal; snapshotDate: Date } | null,
+    bonusBalanceCurrent: {
+      bonusBalance: Prisma.Decimal;
+      snapshotDate: Date;
+      source: string;
+      lastSyncedAt: Date | null;
+      updatedAt: Date;
+    } | null,
     bonusBalanceSnapshot: {
       bonusBalance: Prisma.Decimal;
       snapshotDate: Date;
@@ -2664,6 +2695,14 @@ export class GuestPortalService {
       newestDate([
         guest?.lastSyncedAt ?? null,
         balanceSnapshot?.snapshotDate ?? null,
+        bonusBalanceCurrent?.lastSyncedAt ?? null,
+        bonusBalanceCurrent?.snapshotDate ?? null,
+        bonusBalanceSnapshot?.snapshotDate ?? null,
+      ])?.toISOString() ?? null;
+    const bonusBalanceSyncedAt =
+      newestDate([
+        bonusBalanceCurrent?.lastSyncedAt ?? null,
+        bonusBalanceCurrent?.snapshotDate ?? null,
         bonusBalanceSnapshot?.snapshotDate ?? null,
       ])?.toISOString() ?? null;
 
@@ -2675,7 +2714,15 @@ export class GuestPortalService {
       nextGroupHours: nextFrom,
       progressPercent,
       balance: decimalNumber(balanceSnapshot?.balance ?? null),
-      bonusBalance: decimalNumber(bonusBalanceSnapshot?.bonusBalance ?? null),
+      bonusBalance: decimalNumber(
+        bonusBalanceCurrent?.bonusBalance ??
+          bonusBalanceSnapshot?.bonusBalance ??
+          null,
+      ),
+      bonusBalanceSource:
+        bonusBalanceCurrent?.source ??
+        (bonusBalanceSnapshot ? 'LANGAME_SNAPSHOT' : null),
+      bonusBalanceSyncedAt,
       lastSyncedAt,
     };
   }

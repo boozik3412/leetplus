@@ -2209,7 +2209,7 @@ function LoyaltyPanel({ portal }: { portal: GuestPortalPayload }) {
         tone="gold"
       />
 
-      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
         <InfoLine
           label="Баланс"
           value={
@@ -2217,9 +2217,17 @@ function LoyaltyPanel({ portal }: { portal: GuestPortalPayload }) {
           }
         />
         <InfoLine
-          label="Данные обновлены"
+          label="Бонусы из"
+          value={bonusBalanceSourceLabel(loyalty.bonusBalanceSource)}
+        />
+        <InfoLine
+          label="Бонусы обновлены"
           value={
-            loyalty.lastSyncedAt ? formatDate(loyalty.lastSyncedAt) : "нет данных"
+            loyalty.bonusBalanceSyncedAt
+              ? formatDate(loyalty.bonusBalanceSyncedAt)
+              : loyalty.lastSyncedAt
+                ? formatDate(loyalty.lastSyncedAt)
+                : "нет данных"
           }
         />
       </div>
@@ -3089,6 +3097,17 @@ function communicationPreferenceButtonClass(
   } satisfies Record<GuestPortalCommunicationPreferenceAction, string>;
 
   return `${base} ${classes[action]}`;
+}
+
+function bonusBalanceSourceLabel(source: string | null) {
+  switch (source) {
+    case "LANGAME_LEDGER":
+      return "начисления";
+    case "LANGAME_SNAPSHOT":
+      return "Langame";
+    default:
+      return source ? "LeetPlus" : "нет данных";
+  }
 }
 
 function walletStateLabel(

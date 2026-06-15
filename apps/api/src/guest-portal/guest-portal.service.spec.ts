@@ -217,6 +217,66 @@ describe('GuestPortalService', () => {
     });
   });
 
+  describe('buildLoyalty', () => {
+    it('prefers current bonus balance updated by ledger over historical snapshot', () => {
+      const { service } = createService();
+
+      const loyalty = (service as any).buildLoyalty(
+        {
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: '1337.langame.ru',
+          externalGuestTypeId: null,
+          currentCountHours: null,
+          lastSyncedAt: new Date('2026-06-15T07:00:00.000Z'),
+        },
+        [],
+        null,
+        {
+          bonusBalance: new Prisma.Decimal(150),
+          snapshotDate: new Date('2026-06-15T10:00:00.000Z'),
+          source: 'LANGAME_LEDGER',
+          lastSyncedAt: new Date('2026-06-15T10:01:00.000Z'),
+          updatedAt: new Date('2026-06-15T10:01:00.000Z'),
+        },
+        {
+          bonusBalance: new Prisma.Decimal(100),
+          snapshotDate: new Date('2026-06-15T00:00:00.000Z'),
+        },
+        null,
+      );
+
+      expect(loyalty).toMatchObject({
+        bonusBalance: 150,
+        bonusBalanceSource: 'LANGAME_LEDGER',
+        bonusBalanceSyncedAt: '2026-06-15T10:01:00.000Z',
+        lastSyncedAt: '2026-06-15T10:01:00.000Z',
+      });
+    });
+
+    it('falls back to the latest snapshot when current bonus balance is absent', () => {
+      const { service } = createService();
+
+      const loyalty = (service as any).buildLoyalty(
+        null,
+        [],
+        null,
+        null,
+        {
+          bonusBalance: new Prisma.Decimal(90),
+          snapshotDate: new Date('2026-06-15T00:00:00.000Z'),
+        },
+        null,
+      );
+
+      expect(loyalty).toMatchObject({
+        bonusBalance: 90,
+        bonusBalanceSource: 'LANGAME_SNAPSHOT',
+        bonusBalanceSyncedAt: '2026-06-15T00:00:00.000Z',
+        lastSyncedAt: '2026-06-15T00:00:00.000Z',
+      });
+    });
+  });
+
   describe('verifyOtp', () => {
     it('creates a separate game profile for phone-only gamification registration', async () => {
       const { jwtService, prisma, service } = createService({

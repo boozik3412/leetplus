@@ -123,6 +123,8 @@ export type GuestPortalPayload = {
     progressPercent: number;
     balance: number | null;
     bonusBalance: number | null;
+    bonusBalanceSource: string | null;
+    bonusBalanceSyncedAt: string | null;
     lastSyncedAt: string | null;
   };
   guestSnapshot: {

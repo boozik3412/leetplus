@@ -42,6 +42,8 @@ const TELEGRAM_LINK_TTL_MINUTES = 15;
 const COMMUNICATION_PREFERENCE_EVENT_PREFIX =
   'guest_portal:communication_preference:';
 const TELEGRAM_LINK_EVENT_PREFIX = 'guest_portal:telegram_bot_link:';
+const GAME_CONSENT_EVENT_TYPE = 'GAME_CONSENT_GRANTED';
+const GAME_CONSENT_VERSION = 'guest-game-v1-2026-06-15';
 type JwtExpiresIn = NonNullable<JwtSignOptions['expiresIn']>;
 type GuestPortalOtpDeliveryChannel = 'DEV' | 'SMS' | 'TELEGRAM' | 'MAX';
 type GuestPortalOtpDeliveryStatus =
@@ -79,10 +81,13 @@ type GuestPortalTokenPayload = {
 type GuestPortalOtpChallengeRegistration = {
   id: string;
   tenantId: string;
+  storeId: string;
   guestId: string | null;
   profileId: string | null;
   phoneHash: string;
   phoneMasked: string | null;
+  gameConsentAcceptedAt: Date | null;
+  gameConsentVersion: string | null;
 };
 
 type TenantStoreContext = {
@@ -150,6 +155,8 @@ export type GuestPortalGamificationClubDirectory = {
       activeLootBoxes: number;
       activeSeasons: number;
       activeRules: number;
+      gamificationEnabled: boolean;
+      configuredByStore: boolean;
       bonusWriteReady: boolean;
     };
   }>;
@@ -616,6 +623,7 @@ export class GuestPortalService {
           longitude: true,
           externalProvider: true,
           externalDomain: true,
+          gamificationEnabled: true,
           tenant: {
             select: {
               id: true,
@@ -713,6 +721,8 @@ export class GuestPortalService {
             activeLootBoxes,
             activeSeasons,
             activeRules,
+            gamificationEnabled: store.gamificationEnabled || activeRules > 0,
+            configuredByStore: store.gamificationEnabled,
             bonusWriteReady:
               bonusWriteEnabled &&
               store.externalProvider === IntegrationProvider.LANGAME &&
@@ -720,7 +730,7 @@ export class GuestPortalService {
           },
         };
       })
-      .filter((club) => club.gamification.activeRules > 0)
+      .filter((club) => club.gamification.gamificationEnabled)
       .sort((left, right) => compareDirectoryClubs(left, right));
     const cities = uniqueStrings(
       clubs.map((club) => club.store.city?.trim() || null),
@@ -737,12 +747,13 @@ export class GuestPortalService {
   async startOtp(
     tenantSlug: string,
     storeId: string,
-    dto: { phone?: unknown },
+    dto: { phone?: unknown; gameConsentAccepted?: unknown },
   ): Promise<GuestPortalOtpStartResponse> {
     const context = await this.getTenantStore(tenantSlug, storeId);
     const phone = this.phoneIdentity(dto.phone);
     const now = new Date();
     const resendAfter = new Date(now.getTime() - OTP_RESEND_SECONDS * 1000);
+    const gameConsentAcceptedAt = dto.gameConsentAccepted === true ? now : null;
 
     await this.prisma.guestPortalOtpChallenge.updateMany({
       where: {
@@ -833,6 +844,8 @@ export class GuestPortalService {
         deliveryChannel: delivery.channel,
         expiresAt,
         deliveredAt: delivery.deliveredAt,
+        gameConsentAcceptedAt,
+        gameConsentVersion: gameConsentAcceptedAt ? GAME_CONSENT_VERSION : null,
       },
     });
 
@@ -1001,11 +1014,43 @@ export class GuestPortalService {
           profileId: profile.id,
         },
       });
+      await this.createGameConsentEvent(tx, challenge, profile.id, now);
 
       return {
         id: profile.id,
         guestId: profile.guestId ?? challenge.guestId,
       };
+    });
+  }
+
+  private async createGameConsentEvent(
+    tx: Prisma.TransactionClient,
+    challenge: GuestPortalOtpChallengeRegistration,
+    profileId: string,
+    now: Date,
+  ) {
+    if (!challenge.gameConsentAcceptedAt) {
+      return;
+    }
+
+    await tx.guestGameEvent.create({
+      data: {
+        tenantId: challenge.tenantId,
+        profileId,
+        guestId: challenge.guestId,
+        eventType: GAME_CONSENT_EVENT_TYPE,
+        source: 'GUEST_PORTAL',
+        externalId: `otp:${challenge.id}:game-consent`,
+        occurredAt: challenge.gameConsentAcceptedAt,
+        payload: {
+          consentVersion: challenge.gameConsentVersion ?? GAME_CONSENT_VERSION,
+          storeId: challenge.storeId,
+          phoneMasked: challenge.phoneMasked,
+          acceptedAt: challenge.gameConsentAcceptedAt.toISOString(),
+        },
+        note: 'Гость подтвердил участие в геймификации LeetPlus при OTP-регистрации.',
+        createdAt: now,
+      },
     });
   }
 

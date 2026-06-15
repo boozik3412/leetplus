@@ -54,6 +54,8 @@ export type GuestPortalGamificationClub = {
     activeLootBoxes: number;
     activeSeasons: number;
     activeRules: number;
+    gamificationEnabled: boolean;
+    configuredByStore: boolean;
     bonusWriteReady: boolean;
   };
 };

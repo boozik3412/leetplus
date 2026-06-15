@@ -48,7 +48,7 @@ export class GuestPortalController {
   startOtp(
     @Param('tenantSlug') tenantSlug: string,
     @Param('storeId') storeId: string,
-    @Body() dto: { phone?: unknown },
+    @Body() dto: { phone?: unknown; gameConsentAccepted?: unknown },
   ): Promise<GuestPortalOtpStartResponse> {
     return this.guestPortalService.startOtp(tenantSlug, storeId, dto);
   }

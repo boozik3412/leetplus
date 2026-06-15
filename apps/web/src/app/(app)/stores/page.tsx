@@ -76,7 +76,20 @@ export default async function StoresPage() {
                       </span>
                     </td>
                     <td className="px-5 py-4 text-zinc-700">
-                      {store.isActive ? "Активна" : "Архив"}
+                      <div className="space-y-1">
+                        <p>{store.isActive ? "Активна" : "Архив"}</p>
+                        <p
+                          className={
+                            store.gamificationEnabled
+                              ? "text-emerald-700"
+                              : "text-zinc-500"
+                          }
+                        >
+                          {store.gamificationEnabled
+                            ? "Квесты включены"
+                            : "Квесты выключены"}
+                        </p>
+                      </div>
                     </td>
                     {canEditStores ? (
                       <td className="px-5 py-4 text-right">

@@ -26,6 +26,9 @@ function createPrismaMock() {
       create: jest.fn(),
       update: jest.fn(),
     },
+    guestGameEvent: {
+      create: jest.fn(),
+    },
     guestGameMission: {
       findMany: jest.fn(),
     },
@@ -64,6 +67,7 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   prisma.guestGameProfile.findFirst.mockResolvedValue(null);
   prisma.guestGameProfile.create.mockResolvedValue(null);
   prisma.guestGameProfile.update.mockResolvedValue(null);
+  prisma.guestGameEvent.create.mockResolvedValue({});
   prisma.guestGameMission.findMany.mockResolvedValue([]);
   prisma.guestGameLootBox.findMany.mockResolvedValue([]);
   prisma.guestGameSeason.findMany.mockResolvedValue([]);
@@ -87,6 +91,7 @@ describe('GuestPortalService', () => {
           address: 'ул. Ленина, 1',
           latitude: new Prisma.Decimal('56.838011'),
           longitude: new Prisma.Decimal('60.597465'),
+          gamificationEnabled: false,
           externalProvider: IntegrationProvider.LANGAME,
           externalDomain: '46',
           tenant: {
@@ -103,6 +108,7 @@ describe('GuestPortalService', () => {
           address: 'ул. Малышева, 2',
           latitude: null,
           longitude: null,
+          gamificationEnabled: true,
           externalProvider: IntegrationProvider.LANGAME,
           externalDomain: '46',
           tenant: {
@@ -133,7 +139,7 @@ describe('GuestPortalService', () => {
         lng: '60.597',
       });
 
-      expect(directory.total).toBe(1);
+      expect(directory.total).toBe(2);
       expect(directory.cities).toEqual(['Екатеринбург']);
       expect(directory.clubs[0]).toMatchObject({
         id: 'leet:club-1337',
@@ -143,11 +149,21 @@ describe('GuestPortalService', () => {
           activeMissions: 1,
           activeLootBoxes: 1,
           activeRules: 2,
+          gamificationEnabled: true,
+          configuredByStore: false,
           bonusWriteReady: true,
         },
       });
       expect(directory.clubs[0].location.coordinatesReady).toBe(true);
       expect(directory.clubs[0].location.distanceKm).toBeLessThan(1);
+      expect(directory.clubs[1]).toMatchObject({
+        id: 'no-games:silent',
+        gamification: {
+          activeRules: 0,
+          gamificationEnabled: true,
+          configuredByStore: true,
+        },
+      });
     });
   });
 
@@ -180,6 +196,8 @@ describe('GuestPortalService', () => {
           },
         ],
       });
+      const consentAcceptedAt = new Date('2026-06-15T08:00:00.000Z');
+
       prisma.guestPortalOtpChallenge.findFirst.mockResolvedValue({
         id: challengeId,
         tenantId: 'tenant-1',
@@ -192,6 +210,8 @@ describe('GuestPortalService', () => {
         status: 'PENDING',
         attempts: 0,
         expiresAt: new Date(Date.now() + 60_000),
+        gameConsentAcceptedAt: consentAcceptedAt,
+        gameConsentVersion: 'guest-game-v1-2026-06-15',
       });
       prisma.guestGameProfile.create.mockResolvedValue({
         id: 'profile-1',
@@ -222,6 +242,24 @@ describe('GuestPortalService', () => {
             status: 'VERIFIED',
             guestId: null,
             profileId: 'profile-1',
+          }),
+        }),
+      );
+      expect(prisma.guestGameEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            tenantId: 'tenant-1',
+            profileId: 'profile-1',
+            guestId: null,
+            eventType: 'GAME_CONSENT_GRANTED',
+            source: 'GUEST_PORTAL',
+            externalId: `otp:${challengeId}:game-consent`,
+            occurredAt: consentAcceptedAt,
+            payload: expect.objectContaining({
+              consentVersion: 'guest-game-v1-2026-06-15',
+              storeId: 'store-1',
+              phoneMasked: '+7 *** ***-99-99',
+            }),
           }),
         }),
       );

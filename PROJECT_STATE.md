@@ -80,7 +80,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
-- Added public gamification registration at `/play`: guests choose a club, confirm a phone via OTP, get a separate `GuestGameProfile` for XP/missions/rewards, and do not create a row in the general synced `Guest` table unless Langame snapshot data already exists or later sync links it.
+- Added public gamification registration at `/play`: guests choose a club enabled by `Store.gamificationEnabled` or active game rules, accept game participation consent, confirm a phone via OTP, get a separate `GuestGameProfile` for XP/missions/rewards, and do not create a row in the general synced `Guest` table unless Langame snapshot data already exists or later sync links it.
 - Integrated the confirmed Langame master balance endpoint into Guest Game Hub bonuses: approved bonus rewards can be queued and dispatched to `/master_api/guests/balance/phone` as `bonus_balance` or `balance` by decrypted guest phone, with no raw phone/token persisted in ledger audit; rules with `manualApprovalRequired=false` auto-approve rewards for the ledger path.
 - Added lightweight SSE live-state updates to `/staff/team-chat`: the API streams compact channel/message counter signatures through `/staff/team-chat/events`, web proxies it as same-origin `/api/staff/team-chat/events`, and the client refreshes only when chat state changes instead of polling the whole page on a fixed timer.
 - Added file attachments to `/staff/team-chat`: messages can now reference tenant-scoped uploads from `/staff/attachments`, the composer supports text-only, attachment-only, and text-plus-file messages, chat cards render compact attachment links, and tasks created from chat messages keep the attachment list in their description.

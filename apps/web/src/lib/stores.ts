@@ -11,6 +11,7 @@ export type Store = {
   timeZone?: string | null;
   externalDomain?: string | null;
   externalClubId?: string | null;
+  gamificationEnabled: boolean;
   isActive: boolean;
 };
 

@@ -6,6 +6,7 @@ export type CreateStoreDto = {
   cityFiasId?: string | null;
   cityKladrId?: string | null;
   timeZone?: string | null;
+  gamificationEnabled?: boolean;
 };
 
 export type UpdateStoreDto = Partial<CreateStoreDto> & {

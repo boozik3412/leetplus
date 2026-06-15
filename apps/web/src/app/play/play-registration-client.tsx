@@ -33,6 +33,7 @@ export function PlayRegistrationClient({
   const [portal, setPortal] = useState<GuestPortalPayload | null>(null);
   const [langameMatch, setLangameMatch] =
     useState<GuestPortalLangameMatchResponse | null>(null);
+  const [gameConsentAccepted, setGameConsentAccepted] = useState(false);
   const [message, setMessage] = useState<string | null>(loadError);
   const [locationMessage, setLocationMessage] = useState<string | null>(null);
   const [isLocating, setLocating] = useState(false);
@@ -160,7 +161,7 @@ export function PlayRegistrationClient({
       const response = await fetch(`${clubApiPath(selectedClub)}/otp/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone }),
+        body: JSON.stringify({ phone, gameConsentAccepted }),
       });
 
       if (!response.ok) {
@@ -384,9 +385,28 @@ export function PlayRegistrationClient({
                           value={phone}
                         />
                       </label>
+                      <label className="flex items-start gap-3 rounded-lg border border-white/10 bg-white/[0.04] p-3 text-sm leading-6 text-slate-300">
+                        <input
+                          checked={gameConsentAccepted}
+                          className="mt-1 size-4 rounded border-white/20 bg-white/[0.06]"
+                          onChange={(event) =>
+                            setGameConsentAccepted(event.target.checked)
+                          }
+                          type="checkbox"
+                        />
+                        <span>
+                          Я хочу участвовать в квестах LeetPlus и согласен на
+                          обработку телефона для входа, игрового профиля,
+                          начисления бонусов и безопасной сверки с Langame.
+                        </span>
+                      </label>
                       <button
                         className="min-h-11 w-full rounded-lg bg-emerald-300 px-4 text-sm font-black text-slate-950 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-60"
-                        disabled={isSubmitting || !phone.trim()}
+                        disabled={
+                          isSubmitting ||
+                          !phone.trim() ||
+                          !gameConsentAccepted
+                        }
                         type="submit"
                       >
                         {isSubmitting ? "Отправляем..." : "Получить код"}
@@ -500,6 +520,10 @@ function ClubOption({
         <Metric label="Лутбоксы" value={club.gamification.activeLootBoxes} />
         <Metric label="Сезоны" value={club.gamification.activeSeasons} />
         <Metric
+          label="Квесты"
+          value={club.gamification.configuredByStore ? "включены" : "по правилам"}
+        />
+        <Metric
           label="Langame"
           value={club.gamification.bonusWriteReady ? "готов" : "очередь"}
         />
@@ -522,6 +546,13 @@ function SelectedClubSummary({ club }: { club: GuestPortalGamificationClub }) {
       <div className="mt-3 flex flex-wrap gap-2">
         <StatusPill tone="emerald">
           {formatNumber(club.gamification.activeRules)} активных правил
+        </StatusPill>
+        <StatusPill
+          tone={club.gamification.configuredByStore ? "cyan" : "amber"}
+        >
+          {club.gamification.configuredByStore
+            ? "Квесты включены в клубе"
+            : "Доступно по активным правилам"}
         </StatusPill>
         <StatusPill tone={club.gamification.bonusWriteReady ? "cyan" : "amber"}>
           {club.gamification.bonusWriteReady

@@ -91,7 +91,26 @@ describe('StoresService', () => {
         cityFiasId: null,
         cityKladrId: null,
         timeZone: 'Asia/Yekaterinburg',
+        gamificationEnabled: false,
       },
+    });
+  });
+
+  it('updates explicit gamification flag inside tenant', async () => {
+    prisma.store.findFirst.mockResolvedValue({
+      id: 'store-1',
+      name: 'Club A',
+    });
+    prisma.store.update.mockResolvedValue({
+      id: 'store-1',
+      gamificationEnabled: true,
+    });
+
+    await service.update('store-1', { gamificationEnabled: true }, user);
+
+    expect(prisma.store.update).toHaveBeenCalledWith({
+      where: { id: 'store-1' },
+      data: { gamificationEnabled: true },
     });
   });
 

@@ -61,7 +61,7 @@ export function StoreCreateForm() {
       className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm"
     >
       <h2 className="text-base font-semibold">Новая торговая точка</h2>
-      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
         <StoreInputs />
       </div>
 
@@ -106,8 +106,8 @@ export function StoreEditForm({ store }: { store: Store }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="grid min-w-[720px] gap-2">
-      <div className="grid gap-2 md:grid-cols-5">
+    <form onSubmit={handleSubmit} className="grid min-w-[860px] gap-2">
+      <div className="grid gap-2 md:grid-cols-6">
         <StoreInputs store={store} />
       </div>
       <div className="flex items-center gap-3">
@@ -294,6 +294,15 @@ function StoreInputs({ store }: { store?: Store }) {
       />
       <input name="cityFiasId" type="hidden" value={cityFiasId} readOnly />
       <input name="cityKladrId" type="hidden" value={cityKladrId} readOnly />
+      <label className="flex min-h-10 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700">
+        <input
+          name="gamificationEnabled"
+          type="checkbox"
+          defaultChecked={store?.gamificationEnabled ?? false}
+          className="size-4 rounded border-zinc-300 text-zinc-900"
+        />
+        Квесты
+      </label>
     </>
   );
 }
@@ -318,6 +327,7 @@ async function submitStoreForm(
       cityFiasId: optionalString(formData.get("cityFiasId")) ?? null,
       cityKladrId: optionalString(formData.get("cityKladrId")) ?? null,
       timeZone: optionalString(formData.get("timeZone")) ?? null,
+      gamificationEnabled: formData.get("gamificationEnabled") === "on",
     }),
   });
 }

@@ -83,6 +83,10 @@ export class StoresService {
         cityFiasId: location.cityFiasId,
         cityKladrId: location.cityKladrId,
         timeZone: location.timeZone,
+        gamificationEnabled: this.normalizeBoolean(
+          dto.gamificationEnabled,
+          false,
+        ),
       },
     });
   }
@@ -165,6 +169,14 @@ export class StoresService {
             )
           : {}),
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+        ...(dto.gamificationEnabled !== undefined
+          ? {
+              gamificationEnabled: this.normalizeBoolean(
+                dto.gamificationEnabled,
+                false,
+              ),
+            }
+          : {}),
       },
     });
   }
@@ -269,6 +281,10 @@ export class StoresService {
     }
 
     return value.trim() || null;
+  }
+
+  private normalizeBoolean(value: unknown, fallback: boolean) {
+    return typeof value === 'boolean' ? value : fallback;
   }
 
   private async normalizePublicSlug(

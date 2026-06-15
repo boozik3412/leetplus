@@ -481,6 +481,7 @@ model Store {
   cityKladrId           String?
   latitude              Decimal?             @db.Decimal(9, 6)
   longitude             Decimal?             @db.Decimal(9, 6)
+  gamificationEnabled   Boolean              @default(false)
   timeZone              String?
   isActive              Boolean              @default(true)
   externalProvider      IntegrationProvider?
@@ -1825,6 +1826,8 @@ model GuestPortalOtpChallenge {
   expiresAt       DateTime
   deliveredAt     DateTime?
   verifiedAt      DateTime?
+  gameConsentAcceptedAt DateTime?
+  gameConsentVersion    String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 

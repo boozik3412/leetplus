@@ -16,7 +16,7 @@ export async function GET(request: Request, { params }: RouteContext) {
   const url = new URL(request.url);
   const headers: Record<string, string> = {};
 
-  if (path.length === 1 && path[0] === "session") {
+  if (path.length >= 1 && path[0] === "session") {
     const cookieStore = await cookies();
     const token = cookieStore.get(GUEST_AUTH_COOKIE_NAME)?.value ?? null;
 

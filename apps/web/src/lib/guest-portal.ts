@@ -400,6 +400,79 @@ export type GuestPortalPayload = {
   };
 };
 
+export type GuestPortalGameSummary = {
+  generatedAt: string;
+  tenant: GuestPortalPayload["tenant"];
+  store: GuestPortalPayload["store"];
+  profile: GuestPortalPayload["profile"];
+  account: {
+    guestFound: boolean;
+    state: GuestPortalPayload["guestSnapshot"]["participation"]["accountState"];
+    stateLabel: string;
+    readinessPercent: number;
+    langameLinked: boolean;
+  };
+  loyalty: Pick<
+    GuestPortalPayload["loyalty"],
+    | "groupName"
+    | "discountPercent"
+    | "bonusBalance"
+    | "bonusBalanceSource"
+    | "bonusBalanceSyncedAt"
+  >;
+  rewards: {
+    summary: GuestPortalPayload["gamification"]["rewardSummary"];
+    ready: GuestPortalPayload["gamification"]["rewards"];
+    latestBonus: GuestPortalPayload["gamification"]["bonusHistory"]["items"][number] | null;
+  };
+  missions: {
+    total: number;
+    featured: Array<
+      Pick<
+        GuestPortalPayload["gamification"]["missions"][number],
+        | "id"
+        | "name"
+        | "rewardLabel"
+        | "xpReward"
+        | "progressCurrent"
+        | "progressTarget"
+        | "progressPercent"
+        | "periodTo"
+      >
+    >;
+  };
+  battlePass: {
+    active: Pick<
+      GuestPortalPayload["gamification"]["seasons"][number],
+      | "id"
+      | "name"
+      | "currentLevel"
+      | "nextLevel"
+      | "progressPercent"
+      | "xpToNextLevel"
+      | "nextRewardLabel"
+      | "readyRewards"
+      | "waitingApprovalRewards"
+    > | null;
+  };
+  nextActions: GuestPortalPayload["gamification"]["nextActions"];
+  activity: Pick<
+    GuestPortalPayload["activity"]["summary"],
+    "sessionsCount" | "playMinutes" | "gameEventsCount" | "lastActivityAt"
+  >;
+  communications: {
+    phoneConsentStatus: GuestPortalPayload["communications"]["phone"]["consentStatus"];
+    telegram: Pick<
+      GuestPortalPayload["communications"]["telegram"],
+      "connected" | "readyForRewards" | "status"
+    >;
+    max: Pick<
+      GuestPortalPayload["communications"]["max"],
+      "connected" | "readyForRewards" | "status"
+    >;
+  };
+};
+
 export type GuestPortalOtpVerifyResponse = {
   token: string;
   portal: GuestPortalPayload;

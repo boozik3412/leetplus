@@ -11,6 +11,7 @@ import {
   type GuestPortalCheckInResponse,
   type GuestPortalCommunicationPreferenceResponse,
   type GuestPortalGamificationClubDirectory,
+  type GuestPortalGameSummary,
   type GuestPortalLangameDetailsResponse,
   type GuestPortalMessengerUpdateResponse,
   GuestPortalService,
@@ -72,6 +73,13 @@ export class GuestPortalController {
     @Headers('authorization') authorization: string | undefined,
   ): Promise<GuestPortalPayload> {
     return this.guestPortalService.getSession(authorization);
+  }
+
+  @Get('session/game-summary')
+  getGameSummary(
+    @Headers('authorization') authorization: string | undefined,
+  ): Promise<GuestPortalGameSummary> {
+    return this.guestPortalService.getGameSummary(authorization);
   }
 
   @Post('session/check-in')

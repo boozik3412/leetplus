@@ -312,6 +312,79 @@ export type GuestPortalPayload = {
   communications: GuestPortalCommunications;
 };
 
+export type GuestPortalGameSummary = {
+  generatedAt: string;
+  tenant: GuestPortalPayload['tenant'];
+  store: GuestPortalPayload['store'];
+  profile: GuestPortalPayload['profile'];
+  account: {
+    guestFound: boolean;
+    state: GuestPortalGuestSnapshot['participation']['accountState'];
+    stateLabel: string;
+    readinessPercent: number;
+    langameLinked: boolean;
+  };
+  loyalty: Pick<
+    GuestPortalPayload['loyalty'],
+    | 'groupName'
+    | 'discountPercent'
+    | 'bonusBalance'
+    | 'bonusBalanceSource'
+    | 'bonusBalanceSyncedAt'
+  >;
+  rewards: {
+    summary: GuestPortalRewardSummary;
+    ready: GuestPortalReward[];
+    latestBonus: GuestPortalBonusHistoryItem | null;
+  };
+  missions: {
+    total: number;
+    featured: Array<
+      Pick<
+        GuestPortalMission,
+        | 'id'
+        | 'name'
+        | 'rewardLabel'
+        | 'xpReward'
+        | 'progressCurrent'
+        | 'progressTarget'
+        | 'progressPercent'
+        | 'periodTo'
+      >
+    >;
+  };
+  battlePass: {
+    active: Pick<
+      GuestPortalSeason,
+      | 'id'
+      | 'name'
+      | 'currentLevel'
+      | 'nextLevel'
+      | 'progressPercent'
+      | 'xpToNextLevel'
+      | 'nextRewardLabel'
+      | 'readyRewards'
+      | 'waitingApprovalRewards'
+    > | null;
+  };
+  nextActions: GuestPortalNextAction[];
+  activity: Pick<
+    GuestPortalPayload['activity']['summary'],
+    'sessionsCount' | 'playMinutes' | 'gameEventsCount' | 'lastActivityAt'
+  >;
+  communications: {
+    phoneConsentStatus: GuestPortalCommunications['phone']['consentStatus'];
+    telegram: Pick<
+      GuestPortalCommunicationChannel,
+      'connected' | 'readyForRewards' | 'status'
+    >;
+    max: Pick<
+      GuestPortalCommunicationChannel,
+      'connected' | 'readyForRewards' | 'status'
+    >;
+  };
+};
+
 export type GuestPortalBonusHistory = {
   summary: {
     total: number;
@@ -1212,6 +1285,12 @@ export class GuestPortalService {
   async getSession(authorization: string | undefined) {
     const payload = await this.verifyGuestToken(authorization);
     return this.buildPortalPayload(payload);
+  }
+
+  async getGameSummary(
+    authorization: string | undefined,
+  ): Promise<GuestPortalGameSummary> {
+    return buildGameSummaryFromPortal(await this.getSession(authorization));
   }
 
   async checkIn(
@@ -3328,6 +3407,93 @@ export class GuestPortalService {
 
     return secret;
   }
+}
+
+function buildGameSummaryFromPortal(
+  portal: GuestPortalPayload,
+): GuestPortalGameSummary {
+  const featuredMissions = [...portal.gamification.missions]
+    .sort((left, right) => right.progressPercent - left.progressPercent)
+    .slice(0, 3)
+    .map((mission) => ({
+      id: mission.id,
+      name: mission.name,
+      rewardLabel: mission.rewardLabel,
+      xpReward: mission.xpReward,
+      progressCurrent: mission.progressCurrent,
+      progressTarget: mission.progressTarget,
+      progressPercent: mission.progressPercent,
+      periodTo: mission.periodTo,
+    }));
+  const activeSeason = portal.gamification.seasons[0] ?? null;
+
+  return {
+    generatedAt: new Date().toISOString(),
+    tenant: portal.tenant,
+    store: portal.store,
+    profile: portal.profile,
+    account: {
+      guestFound: portal.guestFound,
+      state: portal.guestSnapshot.participation.accountState,
+      stateLabel: portal.guestSnapshot.participation.accountStateLabel,
+      readinessPercent: portal.guestSnapshot.participation.readinessPercent,
+      langameLinked:
+        portal.guestSnapshot.participation.accountState === 'LANGAME_SYNCED',
+    },
+    loyalty: {
+      groupName: portal.loyalty.groupName,
+      discountPercent: portal.loyalty.discountPercent,
+      bonusBalance: portal.loyalty.bonusBalance,
+      bonusBalanceSource: portal.loyalty.bonusBalanceSource,
+      bonusBalanceSyncedAt: portal.loyalty.bonusBalanceSyncedAt,
+    },
+    rewards: {
+      summary: portal.gamification.rewardSummary,
+      ready: portal.gamification.rewards
+        .filter((reward) => reward.walletState === 'READY')
+        .slice(0, 5),
+      latestBonus: portal.gamification.bonusHistory.items[0] ?? null,
+    },
+    missions: {
+      total: portal.gamification.missions.length,
+      featured: featuredMissions,
+    },
+    battlePass: {
+      active: activeSeason
+        ? {
+            id: activeSeason.id,
+            name: activeSeason.name,
+            currentLevel: activeSeason.currentLevel,
+            nextLevel: activeSeason.nextLevel,
+            progressPercent: activeSeason.progressPercent,
+            xpToNextLevel: activeSeason.xpToNextLevel,
+            nextRewardLabel: activeSeason.nextRewardLabel,
+            readyRewards: activeSeason.readyRewards,
+            waitingApprovalRewards: activeSeason.waitingApprovalRewards,
+          }
+        : null,
+    },
+    nextActions: portal.gamification.nextActions.slice(0, 5),
+    activity: {
+      sessionsCount: portal.activity.summary.sessionsCount,
+      playMinutes: portal.activity.summary.playMinutes,
+      gameEventsCount: portal.activity.summary.gameEventsCount,
+      lastActivityAt: portal.activity.summary.lastActivityAt,
+    },
+    communications: {
+      phoneConsentStatus: portal.communications.phone.consentStatus,
+      telegram: {
+        connected: portal.communications.telegram.connected,
+        readyForRewards: portal.communications.telegram.readyForRewards,
+        status: portal.communications.telegram.status,
+      },
+      max: {
+        connected: portal.communications.max.connected,
+        readyForRewards: portal.communications.max.readyForRewards,
+        status: portal.communications.max.status,
+      },
+    },
+  };
 }
 
 function otpChallengeStatus(status: GuestPortalOtpDeliveryStatus) {

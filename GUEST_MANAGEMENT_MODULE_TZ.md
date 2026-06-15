@@ -1551,6 +1551,8 @@ V2:
 
 Реализация v1: `/marketing/missions` создает миссии, хранит условия по фактам Langame, сегмент гостей, клубы, период, бюджет, лимиты, anti-fraud rules, флаг ручного согласования и очередь наград со статусами `PENDING`, `APPROVED`, `PAID`, `CANCELED`. Для правил без ручного согласования бонусные награды могут автоматически уходить в `APPROVED` и затем начисляться в Langame через bonus ledger и `POST /master_api/guests/balance/phone`.
 
+Для будущего Telegram/Mini App и легкого игрового интерфейса поверх гостевого кабинета добавлен read-only `GET /guest-portal/session/game-summary`. Endpoint работает по существующему guest-token и возвращает компактное безопасное состояние игрока: профиль, готовность аккаунта, бонусный баланс, готовые награды, featured-миссии, Battle Pass, next actions, счетчики активности и готовность каналов без полного `guestSnapshot`, timeline, raw phone, live-запросов в Langame и записи в Langame.
+
 Критерии приемки:
 
 - миссия проверяется по фактам;

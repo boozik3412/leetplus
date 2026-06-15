@@ -42,6 +42,7 @@ export type StaffChatChannel = {
   members: StaffChatUser[];
   messagesCount: number;
   unreadCount: number;
+  mentionUnreadCount: number;
   pinnedCount: number;
   lastMessageAt: string | null;
 };
@@ -54,11 +55,13 @@ export type StaffChatMessage = {
   priority: StaffChatMessagePriority;
   isPinned: boolean;
   isReadByMe: boolean;
+  mentionedMe: boolean;
   createdAt: string;
   updatedAt: string;
   authorUser: StaffChatUser | null;
   store: StaffChatStore | null;
   attachments: StaffChatAttachment[];
+  mentions: StaffChatUser[];
 };
 
 export type StaffTeamChatFilters = {

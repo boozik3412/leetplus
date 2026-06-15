@@ -23,6 +23,7 @@ import type {
   StaffChatMessageKind,
   StaffChatMessagePriority,
   StaffChatStore,
+  StaffChatUser,
   StaffTeamChatReport,
 } from "@/lib/staff-team-chat";
 
@@ -58,6 +59,7 @@ type StaffTeamChatLiveState = {
     updatedAt: string;
     messagesCount: number;
     unreadCount: number;
+    mentionUnreadCount: number;
     pinnedCount: number;
     lastMessageAt: string | null;
   }>;
@@ -122,6 +124,7 @@ function getLiveChannelSignature(
     updatedAt?: string;
     messagesCount: number;
     unreadCount: number;
+    mentionUnreadCount?: number;
     pinnedCount: number;
     lastMessageAt: string | null;
   }>,
@@ -133,6 +136,7 @@ function getLiveChannelSignature(
         channel.updatedAt ?? "",
         channel.messagesCount,
         channel.unreadCount,
+        channel.mentionUnreadCount ?? 0,
         channel.pinnedCount,
         channel.lastMessageAt ?? "",
       ].join(":"),
@@ -180,6 +184,8 @@ export function StaffTeamChatWorkspace({
   const [pendingAttachments, setPendingAttachments] = useState<
     StaffAttachmentUploadResult[]
   >([]);
+  const [selectedMentionIds, setSelectedMentionIds] = useState<string[]>([]);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [taskDraft, setTaskDraft] = useState<TaskDraftState | null>(null);
   const [taskPendingMessageId, setTaskPendingMessageId] = useState<string | null>(
     null,
@@ -191,6 +197,7 @@ export function StaffTeamChatWorkspace({
   >({});
   const autoReadSignatureRef = useRef<string | null>(null);
   const initialDraftSignatureRef = useRef<string | null>(null);
+  const messageInputRef = useRef<HTMLTextAreaElement | null>(null);
   const selectedChannelId = requestedChannelId;
   const activeChannel = useMemo(() => {
     if (!selectedChannelId) {
@@ -287,6 +294,31 @@ export function StaffTeamChatWorkspace({
   const pinnedMessages = report.messages.filter((message) => message.isPinned);
   const liveSignature = useMemo(() => getReportLiveSignature(report), [report]);
   const liveSignatureRef = useRef(liveSignature);
+  const selectedMentionUsers = useMemo(
+    () =>
+      selectedMentionIds
+        .map((userId) => report.users.find((user) => user.id === userId))
+        .filter((user): user is StaffChatUser => Boolean(user)),
+    [report.users, selectedMentionIds],
+  );
+  const mentionCandidates = useMemo(() => {
+    if (mentionQuery === null || activeChannelIsSystem) {
+      return [];
+    }
+
+    const query = mentionQuery.trim().toLowerCase();
+
+    return report.users
+      .filter((user) => !selectedMentionIds.includes(user.id))
+      .filter((user) => {
+        if (!query) {
+          return true;
+        }
+
+        return getMentionSearchText(user).includes(query);
+      })
+      .slice(0, 6);
+  }, [activeChannelIsSystem, mentionQuery, report.users, selectedMentionIds]);
 
   useEffect(() => {
     liveSignatureRef.current = liveSignature;
@@ -479,6 +511,35 @@ export function StaffTeamChatWorkspace({
     );
   }
 
+  function handleMessageBodyChange(body: string) {
+    setForm((current) => ({
+      ...current,
+      body,
+    }));
+    setMentionQuery(getActiveMentionQuery(body));
+  }
+
+  function selectMentionUser(user: StaffChatUser) {
+    setForm((current) => ({
+      ...current,
+      body: replaceActiveMentionToken(
+        current.body,
+        getMentionDisplayName(user),
+      ),
+    }));
+    setSelectedMentionIds((current) =>
+      current.includes(user.id) ? current : [...current, user.id],
+    );
+    setMentionQuery(null);
+    requestAnimationFrame(() => messageInputRef.current?.focus());
+  }
+
+  function removeMentionUser(userId: string) {
+    setSelectedMentionIds((current) =>
+      current.filter((item) => item !== userId),
+    );
+  }
+
   async function sendMessage() {
     setError(null);
     setSuccess(null);
@@ -509,6 +570,7 @@ export function StaffTeamChatWorkspace({
         isPinned: form.isPinned,
         storeId: form.storeId || undefined,
         attachmentIds: pendingAttachments.map((attachment) => attachment.id),
+        mentionedUserIds: selectedMentionIds,
       }),
     });
 
@@ -522,6 +584,8 @@ export function StaffTeamChatWorkspace({
 
     setForm(emptyForm);
     setPendingAttachments([]);
+    setSelectedMentionIds([]);
+    setMentionQuery(null);
     setShowMessageOptions(false);
     startTransition(() => router.refresh());
   }
@@ -1119,7 +1183,7 @@ export function StaffTeamChatWorkspace({
           </div>
         ) : (
         <div className="shrink-0 border-t border-zinc-200/60 bg-transparent p-3 dark:border-zinc-800/60 sm:p-4">
-          <div className="rounded-[24px] bg-zinc-100/90 shadow-sm ring-1 ring-zinc-200/70 dark:bg-zinc-900/70 dark:ring-zinc-800/70">
+          <div className="relative rounded-[24px] bg-zinc-100/90 shadow-sm ring-1 ring-zinc-200/70 dark:bg-zinc-900/70 dark:ring-zinc-800/70">
             {pendingAttachments.length > 0 ? (
               <div className="flex flex-wrap gap-2 px-3 pt-3">
                 {pendingAttachments.map((attachment) => (
@@ -1145,6 +1209,31 @@ export function StaffTeamChatWorkspace({
                 ))}
               </div>
             ) : null}
+            {selectedMentionUsers.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-2 px-3 pt-3">
+                <span className="text-xs font-semibold uppercase text-zinc-500 dark:text-zinc-400">
+                  Кому
+                </span>
+                {selectedMentionUsers.map((user) => (
+                  <span
+                    key={user.id}
+                    className="inline-flex max-w-full items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-100 dark:ring-emerald-500/25"
+                  >
+                    <span className="max-w-[220px] truncate">
+                      @{getMentionDisplayName(user)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeMentionUser(user.id)}
+                      className="text-emerald-700/70 transition-colors hover:text-red-500 dark:text-emerald-200/70 dark:hover:text-red-300"
+                      aria-label={`Убрать упоминание ${getMentionDisplayName(user)}`}
+                    >
+                      x
+                    </button>
+                  </span>
+                ))}
+              </div>
+            ) : null}
             <div className="flex h-11 items-center gap-2">
               <button
                 type="button"
@@ -1161,13 +1250,9 @@ export function StaffTeamChatWorkspace({
                 +
               </button>
               <textarea
+                ref={messageInputRef}
                 value={form.body}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    body: event.target.value,
-                  }))
-                }
+                onChange={(event) => handleMessageBodyChange(event.target.value)}
                 className="h-11 min-h-11 flex-1 resize-none overflow-hidden rounded-full border-0 bg-transparent px-2 py-3 text-sm leading-5 outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
                 placeholder="Что нужно передать смене или управляющим?"
               />
@@ -1184,6 +1269,35 @@ export function StaffTeamChatWorkspace({
                 Отправить
               </button>
             </div>
+            {mentionCandidates.length > 0 ? (
+              <div className="absolute bottom-[52px] left-14 z-20 max-h-72 w-[min(360px,calc(100%-5rem))] overflow-auto rounded-2xl border border-zinc-200 bg-white p-2 shadow-xl dark:border-zinc-800 dark:bg-zinc-950">
+                <p className="px-3 py-2 text-xs font-bold uppercase text-zinc-500 dark:text-zinc-400">
+                  Упомянуть сотрудника
+                </p>
+                <div className="space-y-1">
+                  {mentionCandidates.map((user) => (
+                    <button
+                      key={user.id}
+                      type="button"
+                      onClick={() => selectMentionUser(user)}
+                      className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors hover:bg-emerald-50 focus-visible:bg-emerald-50 focus-visible:outline-none dark:hover:bg-emerald-500/10 dark:focus-visible:bg-emerald-500/10"
+                    >
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-bold text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
+                        {getMentionDisplayName(user).slice(0, 1).toUpperCase()}
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                          {getMentionDisplayName(user)}
+                        </span>
+                        <span className="block truncate text-xs text-zinc-500 dark:text-zinc-400">
+                          {user.email}
+                        </span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             <div
               id="message-format-options"
               className={
@@ -1293,11 +1407,18 @@ function ChannelLink({
               {channelScopeLabel(channel)}
             </p>
           </div>
-        {unreadCount > 0 ? (
-          <span className="rounded-full bg-emerald-500 px-2 py-0.5 text-xs font-bold text-zinc-950">
-            {formatNumber(unreadCount)}
-          </span>
-        ) : null}
+          <div className="flex shrink-0 items-center gap-1">
+            {channel.mentionUnreadCount > 0 ? (
+              <span className="rounded-full bg-sky-500 px-2 py-0.5 text-xs font-bold text-white">
+                @{formatNumber(channel.mentionUnreadCount)}
+              </span>
+            ) : null}
+            {unreadCount > 0 ? (
+              <span className="rounded-full bg-emerald-500 px-2 py-0.5 text-xs font-bold text-zinc-950">
+                {formatNumber(unreadCount)}
+              </span>
+            ) : null}
+          </div>
         </div>
         <div className="mt-1 flex gap-2 text-xs text-zinc-500 dark:text-zinc-400">
           <span>{formatNumber(channel.messagesCount)} сообщ.</span>
@@ -1364,6 +1485,9 @@ function MessageCard({
     <article
       className={[
         "border-b px-4 py-4 transition-colors last:border-b-0 hover:bg-zinc-50/60 dark:hover:bg-zinc-900/20",
+        message.mentionedMe
+          ? "bg-sky-50/60 dark:bg-sky-500/5"
+          : "",
         message.priority === "URGENT"
           ? "border-red-200/70 dark:border-red-500/25"
           : message.priority === "HIGH"
@@ -1390,6 +1514,7 @@ function MessageCard({
               </Badge>
             ) : null}
             {message.isPinned ? <Badge tone="emerald">Закреплено</Badge> : null}
+            {message.mentionedMe ? <Badge tone="sky">@ мне</Badge> : null}
             {!forceRead && !message.isReadByMe ? (
               <Badge tone="emerald">Новое</Badge>
             ) : null}
@@ -1425,8 +1550,29 @@ function MessageCard({
           compact ? "mt-2 line-clamp-3" : "mt-3 sm:ml-12",
         ].join(" ")}
       >
-        {messageContent.body}
+        {renderMessageBody(messageContent.body, message.mentions)}
       </p>
+
+      {message.mentions.length > 0 ? (
+        <div
+          className={[
+            "flex flex-wrap items-center gap-2",
+            compact ? "mt-2" : "mt-2 sm:ml-12",
+          ].join(" ")}
+        >
+          <span className="text-xs font-semibold uppercase text-zinc-500 dark:text-zinc-400">
+            Упомянуты
+          </span>
+          {message.mentions.map((user) => (
+            <span
+              key={user.id}
+              className="rounded-full bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-700 ring-1 ring-sky-200 dark:bg-sky-500/10 dark:text-sky-200 dark:ring-sky-500/25"
+            >
+              @{getMentionDisplayName(user)}
+            </span>
+          ))}
+        </div>
+      ) : null}
 
       {messageContent.action ? (
         <div className={compact ? "mt-2" : "mt-3 sm:ml-12"}>
@@ -1678,6 +1824,80 @@ function normalizeMessageActionHref(rawHref: string) {
   }
 }
 
+function getMentionDisplayName(user: StaffChatUser) {
+  return user.fullName?.trim() || user.email;
+}
+
+function getMentionSearchText(user: StaffChatUser) {
+  return [user.fullName, user.email, user.role]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function getActiveMentionQuery(body: string) {
+  return body.match(/(?:^|\s)@([^\s@]{0,40})$/u)?.[1] ?? null;
+}
+
+function replaceActiveMentionToken(body: string, label: string) {
+  return body.replace(
+    /(^|\s)@([^\s@]{0,40})$/u,
+    (_match, prefix: string) => `${prefix}@${label} `,
+  );
+}
+
+function renderMessageBody(body: string, mentions: StaffChatUser[]) {
+  const labels = Array.from(
+    new Set(
+      mentions
+        .map((user) => getMentionDisplayName(user).trim())
+        .filter(Boolean),
+    ),
+  ).sort((left, right) => right.length - left.length);
+
+  if (labels.length === 0) {
+    return body;
+  }
+
+  const matcher = new RegExp(
+    `@(${labels.map(escapeRegExp).join("|")})`,
+    "giu",
+  );
+  const nodes: ReactNode[] = [];
+  let lastIndex = 0;
+  let index = 0;
+
+  for (const match of body.matchAll(matcher)) {
+    const start = match.index ?? 0;
+    const value = match[0];
+
+    if (start > lastIndex) {
+      nodes.push(body.slice(lastIndex, start));
+    }
+
+    nodes.push(
+      <span
+        key={`${value}-${start}-${index}`}
+        className="rounded-full bg-sky-50 px-1.5 py-0.5 font-semibold text-sky-700 ring-1 ring-sky-200 dark:bg-sky-500/10 dark:text-sky-200 dark:ring-sky-500/25"
+      >
+        {value}
+      </span>,
+    );
+    lastIndex = start + value.length;
+    index += 1;
+  }
+
+  if (lastIndex < body.length) {
+    nodes.push(body.slice(lastIndex));
+  }
+
+  return nodes.length > 0 ? nodes : body;
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function Metric({ label, value }: { label: string; value: number }) {
   return (
     <div className="rounded-lg border border-zinc-200 px-3 py-2 dark:border-zinc-800">
@@ -1694,7 +1914,7 @@ function Badge({
   tone = "zinc",
 }: {
   children: ReactNode;
-  tone?: "zinc" | "emerald" | "amber" | "red";
+  tone?: "zinc" | "emerald" | "amber" | "red" | "sky";
 }) {
   const classes = {
     zinc: "bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200",
@@ -1703,6 +1923,7 @@ function Badge({
     amber:
       "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200",
     red: "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-200",
+    sky: "bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-200",
   };
 
   return (

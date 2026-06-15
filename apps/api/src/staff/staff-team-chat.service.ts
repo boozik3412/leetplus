@@ -132,6 +132,7 @@ export type StaffTeamChatLiveState = {
     updatedAt: string;
     messagesCount: number;
     unreadCount: number;
+    mentionUnreadCount: number;
     pinnedCount: number;
     lastMessageAt: string | null;
   }>;
@@ -159,6 +160,7 @@ export type StaffChatChannelResponse = {
   members: StaffChatUserResponse[];
   messagesCount: number;
   unreadCount: number;
+  mentionUnreadCount: number;
   pinnedCount: number;
   lastMessageAt: string | null;
 };
@@ -181,6 +183,7 @@ export type StaffChatMessageResponse = {
   priority: StaffChatMessagePriority;
   isPinned: boolean;
   isReadByMe: boolean;
+  mentionedMe: boolean;
   createdAt: string;
   updatedAt: string;
   authorUser: { id: string; email: string; fullName: string | null } | null;
@@ -242,6 +245,7 @@ type StaffChatMessageRow = Prisma.StaffChatMessageGetPayload<{
 type ChannelStats = {
   messagesCount: number;
   unreadCount: number;
+  mentionUnreadCount: number;
   pinnedCount: number;
   lastMessageAt: string | null;
 };
@@ -392,6 +396,7 @@ export class StaffTeamChatService {
           updatedAt: channel.updatedAt.toISOString(),
           messagesCount: item?.messagesCount ?? 0,
           unreadCount: item?.unreadCount ?? 0,
+          mentionUnreadCount: item?.mentionUnreadCount ?? 0,
           pinnedCount: item?.pinnedCount ?? 0,
           lastMessageAt: item?.lastMessageAt ?? null,
         };
@@ -666,6 +671,7 @@ export class StaffTeamChatService {
       stats.set(channelId, {
         messagesCount: 0,
         unreadCount: 0,
+        mentionUnreadCount: 0,
         pinnedCount: 0,
         lastMessageAt: null,
       });
@@ -675,35 +681,53 @@ export class StaffTeamChatService {
       return stats;
     }
 
-    const [messageCounts, pinnedCounts, unreadCounts, latestMessages] =
-      await Promise.all([
-        this.prisma.staffChatMessage.groupBy({
-          by: ['channelId'],
-          where: { tenantId, channelId: { in: channelIds } },
-          _count: { _all: true },
-        }),
-        this.prisma.staffChatMessage.groupBy({
-          by: ['channelId'],
-          where: { tenantId, channelId: { in: channelIds }, isPinned: true },
-          _count: { _all: true },
-        }),
-        this.prisma.staffChatMessage.groupBy({
-          by: ['channelId'],
-          where: {
+    const [
+      messageCounts,
+      pinnedCounts,
+      unreadCounts,
+      mentionUnreadCounts,
+      latestMessages,
+    ] = await Promise.all([
+      this.prisma.staffChatMessage.groupBy({
+        by: ['channelId'],
+        where: { tenantId, channelId: { in: channelIds } },
+        _count: { _all: true },
+      }),
+      this.prisma.staffChatMessage.groupBy({
+        by: ['channelId'],
+        where: { tenantId, channelId: { in: channelIds }, isPinned: true },
+        _count: { _all: true },
+      }),
+      this.prisma.staffChatMessage.groupBy({
+        by: ['channelId'],
+        where: {
+          tenantId,
+          channelId: { in: channelIds },
+          OR: [{ authorUserId: null }, { authorUserId: { not: userId } }],
+          readReceipts: { none: { userId } },
+        },
+        _count: { _all: true },
+      }),
+      this.prisma.staffChatMention.findMany({
+        where: {
+          tenantId,
+          mentionedUserId: userId,
+          message: {
             tenantId,
             channelId: { in: channelIds },
             OR: [{ authorUserId: null }, { authorUserId: { not: userId } }],
             readReceipts: { none: { userId } },
           },
-          _count: { _all: true },
-        }),
-        this.prisma.staffChatMessage.findMany({
-          where: { tenantId, channelId: { in: channelIds } },
-          distinct: ['channelId'],
-          orderBy: [{ channelId: 'asc' }, { createdAt: 'desc' }],
-          select: { channelId: true, createdAt: true },
-        }),
-      ]);
+        },
+        select: { message: { select: { channelId: true } } },
+      }),
+      this.prisma.staffChatMessage.findMany({
+        where: { tenantId, channelId: { in: channelIds } },
+        distinct: ['channelId'],
+        orderBy: [{ channelId: 'asc' }, { createdAt: 'desc' }],
+        select: { channelId: true, createdAt: true },
+      }),
+    ]);
 
     messageCounts.forEach((row) => {
       const item = stats.get(row.channelId);
@@ -723,6 +747,13 @@ export class StaffTeamChatService {
       const item = stats.get(row.channelId);
       if (item) {
         item.unreadCount = row._count._all;
+      }
+    });
+
+    mentionUnreadCounts.forEach((row) => {
+      const item = stats.get(row.message.channelId);
+      if (item) {
+        item.mentionUnreadCount += 1;
       }
     });
 
@@ -1312,6 +1343,7 @@ export class StaffTeamChatService {
       members: channel.members.map((member) => member.user),
       messagesCount: stats?.messagesCount ?? 0,
       unreadCount: stats?.unreadCount ?? 0,
+      mentionUnreadCount: stats?.mentionUnreadCount ?? 0,
       pinnedCount: stats?.pinnedCount ?? 0,
       lastMessageAt: stats?.lastMessageAt ?? null,
     };
@@ -1331,6 +1363,9 @@ export class StaffTeamChatService {
       isReadByMe:
         message.authorUser?.id === userId ||
         message.readReceipts.some((receipt) => receipt.userId === userId),
+      mentionedMe: message.mentions.some(
+        (mention) => mention.mentionedUser.id === userId,
+      ),
       createdAt: message.createdAt.toISOString(),
       updatedAt: message.updatedAt.toISOString(),
       authorUser: message.authorUser,

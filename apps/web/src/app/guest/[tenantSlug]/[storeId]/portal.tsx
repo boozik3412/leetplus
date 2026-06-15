@@ -23,6 +23,7 @@ type GuestPortalClientProps = {
 };
 
 type LoadState = "loading" | "ready" | "error";
+type OnboardingTone = "emerald" | "cyan" | "amber" | "slate";
 
 export function GuestPortalClient({
   tenantSlug,
@@ -722,9 +723,16 @@ function VerifiedPortal({
   onStartTelegramLink: () => void;
   onCheckIn: () => void;
 }) {
+  const accountState = portal.guestSnapshot.participation.accountState;
+  const showGameProfileOnboarding = accountState === "GAME_PROFILE";
+
   return (
     <div className="space-y-5 py-6">
-      {!portal.guestFound ? (
+      {showGameProfileOnboarding ? (
+        <GameProfileOnboardingPanel portal={portal} />
+      ) : null}
+
+      {!portal.guestFound && !showGameProfileOnboarding ? (
         <div className="rounded-lg border border-amber-300/30 bg-amber-300/[0.08] p-4 text-sm leading-6 text-amber-50">
           Профиль не найден в синхронизированной базе гостей. Проверьте номер у
           администратора клуба: после синхронизации Langame здесь появятся
@@ -774,7 +782,7 @@ function VerifiedPortal({
         onStartTelegramLink={onStartTelegramLink}
       />
 
-      <section className="grid gap-5 lg:grid-cols-[0.95fr_1.05fr]">
+      <section id="profile" className="grid gap-5 lg:grid-cols-[0.95fr_1.05fr]">
         <div className="rounded-lg border border-white/10 bg-[#0b111c] p-5">
           <div className="flex items-start gap-4">
             <ProfileFrame frame={portal.profile.frame} />
@@ -824,6 +832,223 @@ function VerifiedPortal({
         <LootBoxesPanel portal={portal} />
       </section>
     </div>
+  );
+}
+
+function GameProfileOnboardingPanel({
+  portal,
+}: {
+  portal: GuestPortalPayload;
+}) {
+  const participation = portal.guestSnapshot.participation;
+  const communications = portal.communications;
+  const readyRewardCount = portal.gamification.rewardSummary.ready;
+  const hasQuestSurface =
+    portal.gamification.nextActions.length > 0 ||
+    portal.gamification.missions.length > 0 ||
+    portal.gamification.lootBoxes.length > 0 ||
+    portal.gamification.seasons.length > 0;
+  const matchedWithLangame =
+    portal.guestFound || portal.crmLead.matchedGuestFound;
+  const communicationReady =
+    communications.telegram.readyForRewards ||
+    communications.max.readyForRewards ||
+    communications.phone.consentStatus === "GRANTED";
+  const firstAction = portal.gamification.nextActions[0] ?? null;
+  const questHref = firstAction
+    ? `#${nextActionAnchorDomId(firstAction.anchor)}`
+    : portal.gamification.missions.length
+      ? "#missions"
+      : portal.gamification.lootBoxes.length
+        ? "#lootBoxes"
+        : "#battlePass";
+  const statusCards = [
+    {
+      title: "Игровой профиль",
+      value: portal.profile.id ? "создан" : "готовится",
+      hint: portal.profile.id
+        ? "Прогресс, XP и награды хранятся отдельно от общей базы гостей."
+        : "Профиль появится после подтверждения телефона.",
+      tone: portal.profile.id ? "emerald" : "amber",
+    },
+    {
+      title: "Langame",
+      value: matchedWithLangame ? "связан" : "ожидает связи",
+      hint: matchedWithLangame
+        ? "Сессии клуба смогут участвовать в квестах и начислении бонусов."
+        : "Проверьте телефон в Langame, чтобы подтянуть клубные сессии.",
+      tone: matchedWithLangame ? "emerald" : "amber",
+    },
+    {
+      title: "Канал наград",
+      value: communicationReady ? "готов" : "нужно согласие",
+      hint: communicationReady
+        ? "Клуб сможет использовать разрешенный канал для игровых уведомлений."
+        : "Подтвердите согласие или привяжите Telegram/MAX для наград.",
+      tone: communicationReady ? "cyan" : "amber",
+    },
+    {
+      title: "Бонусы",
+      value: readyRewardCount ? `${formatNumber(readyRewardCount)} к выдаче` : "после квеста",
+      hint: readyRewardCount
+        ? "Готовые награды уже ждут в кошельке гостя."
+        : "Первый бонус появится после выполнения задания в клубе.",
+      tone: readyRewardCount ? "emerald" : "slate",
+    },
+  ] satisfies Array<{
+    title: string;
+    value: string;
+    hint: string;
+    tone: OnboardingTone;
+  }>;
+  const steps = [
+    {
+      title: "Проверить профиль",
+      href: "#profile",
+      status: "READY",
+      label: "готово",
+      description:
+        "Телефон подтвержден, а игровой профиль LeetPlus отделен от общей базы гостей клуба.",
+    },
+    {
+      title: "Связать Langame",
+      href: "#langame-match",
+      status: matchedWithLangame ? "READY" : "NEXT",
+      label: matchedWithLangame ? "готово" : "следующий шаг",
+      description:
+        "Сопоставление нужно, чтобы сессии в клубе 1337 и будущих клубах попадали в игровые правила.",
+    },
+    {
+      title: "Выбрать квест",
+      href: questHref,
+      status: hasQuestSurface ? "NEXT" : "LOCKED",
+      label: hasQuestSurface ? "доступно" : "ожидает настройки",
+      description:
+        firstAction?.description ??
+        "Миссии, Battle Pass и лутбоксы подскажут, за какое действие начислится первый бонус.",
+    },
+    {
+      title: "Включить канал наград",
+      href: "#communications",
+      status: communicationReady ? "READY" : "NEXT",
+      label: communicationReady ? "готово" : "подключить",
+      description:
+        "Согласие и мессенджер помогут получать игровые уведомления без внутренней учетной записи.",
+    },
+    {
+      title: "Пройти чекин",
+      href: "#check-in",
+      status: matchedWithLangame ? "NEXT" : "LOCKED",
+      label: matchedWithLangame ? "в клубе" : "после Langame",
+      description:
+        "Когда Langame видит активную сессию в клубе, чекин запускает обработку квестов и бонусов.",
+    },
+  ] satisfies Array<{
+    title: string;
+    href: string;
+    status: "READY" | "NEXT" | "LOCKED";
+    label: string;
+    description: string;
+  }>;
+
+  return (
+    <section className="rounded-lg border border-emerald-300/25 bg-[#07120f] p-5">
+      <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+        <div className="max-w-3xl">
+          <p className="text-xs font-bold uppercase text-emerald-300">
+            Участник геймификации
+          </p>
+          <h2 className="mt-2 text-3xl font-black text-white">
+            Игровой профиль создан
+          </h2>
+          <p className="mt-3 text-sm leading-6 text-slate-300">
+            Это отдельная регистрация для квестов и бонусов LeetPlus: гость не
+            смешивается с общей базой клуба, а связь с Langame и каналами наград
+            подключается по шагам после подтверждения телефона.
+          </p>
+        </div>
+        <div className="rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3">
+          <p className="text-xs font-bold uppercase text-slate-500">
+            Готовность
+          </p>
+          <p className="mt-1 text-3xl font-black text-white">
+            {participation.readinessPercent}%
+          </p>
+          <p className="mt-1 text-xs font-semibold text-slate-400">
+            {participation.accountStateLabel}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {statusCards.map((card) => (
+          <div
+            key={card.title}
+            className={`rounded-lg border p-4 ${onboardingToneClass(card.tone)}`}
+          >
+            <p className="text-xs font-bold uppercase opacity-80">
+              {card.title}
+            </p>
+            <p className="mt-2 text-xl font-black text-white">{card.value}</p>
+            <p className="mt-2 text-sm leading-6 text-slate-300">{card.hint}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-5 grid gap-3 lg:grid-cols-5">
+        {steps.map((step, index) => (
+          <a
+            key={step.title}
+            href={step.href}
+            className="group rounded-lg border border-white/10 bg-white/[0.035] p-4 transition hover:-translate-y-0.5 hover:border-cyan-300/40 hover:bg-cyan-300/[0.06]"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-white/10 bg-black/25 text-sm font-black text-white">
+                {index + 1}
+              </span>
+              <span
+                className={`rounded-full px-2 py-1 text-[10px] font-black uppercase ${onboardingStepStatusClass(
+                  step.status,
+                )}`}
+              >
+                {step.label}
+              </span>
+            </div>
+            <p className="mt-3 text-base font-black text-white group-hover:text-cyan-100">
+              {step.title}
+            </p>
+            <p className="mt-2 text-sm leading-6 text-slate-400">
+              {step.description}
+            </p>
+          </a>
+        ))}
+      </div>
+
+      {participation.readiness.length ? (
+        <div className="mt-5 grid gap-2 md:grid-cols-2">
+          {participation.readiness.map((item) => (
+            <div
+              key={item.id}
+              className="flex items-start justify-between gap-3 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm"
+            >
+              <div>
+                <p className="font-bold text-white">{item.label}</p>
+                <p className="mt-1 text-xs leading-5 text-slate-400">
+                  {item.note}
+                </p>
+              </div>
+              <span
+                className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-black uppercase ${readinessStatusClass(
+                  item.status,
+                )}`}
+              >
+                {readinessStatusLabel(item.status)}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -921,7 +1146,10 @@ function CommunicationPanel({
     : null;
 
   return (
-    <section className="rounded-lg border border-white/10 bg-[#0b111c] p-5">
+    <section
+      id="communications"
+      className="rounded-lg border border-white/10 bg-[#0b111c] p-5"
+    >
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-xs font-bold uppercase text-cyan-200">
@@ -1413,7 +1641,10 @@ function NextActionsPanel({ portal }: { portal: GuestPortalPayload }) {
   }
 
   return (
-    <section className="rounded-lg border border-emerald-300/20 bg-[#08130f] p-5">
+    <section
+      id="next-actions"
+      className="rounded-lg border border-emerald-300/20 bg-[#08130f] p-5"
+    >
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-xs font-bold uppercase text-emerald-300">
@@ -1490,7 +1721,10 @@ function CheckInPanel({
   const disabled = isLoading || !portal.guestFound;
 
   return (
-    <section className="rounded-lg border border-cyan-300/20 bg-cyan-300/[0.06] p-5">
+    <section
+      id="check-in"
+      className="rounded-lg border border-cyan-300/20 bg-cyan-300/[0.06] p-5"
+    >
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="max-w-3xl">
           <p className="text-xs font-bold uppercase text-cyan-200">
@@ -1601,7 +1835,10 @@ function LangameMatchPanel({
     result?.sources.reduce((sum, source) => sum + source.resultsCount, 0) ?? 0;
 
   return (
-    <section className="rounded-lg border border-cyan-300/20 bg-cyan-300/[0.06] p-4">
+    <section
+      id="langame-match"
+      className="rounded-lg border border-cyan-300/20 bg-cyan-300/[0.06] p-4"
+    >
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="max-w-3xl">
           <div className="flex flex-wrap items-center gap-2">
@@ -2146,7 +2383,10 @@ function BattlePassPanel({ portal }: { portal: GuestPortalPayload }) {
     null;
 
   return (
-    <div className="rounded-lg border border-white/10 bg-[#0b111c] p-5">
+    <div
+      id="battlePass"
+      className="rounded-lg border border-white/10 bg-[#0b111c] p-5"
+    >
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-xs font-bold uppercase text-cyan-200">
@@ -2267,7 +2507,10 @@ function RewardsPanel({ portal }: { portal: GuestPortalPayload }) {
     rewards.find((reward) => reward.walletState === "READY") ?? null;
 
   return (
-    <div className="rounded-lg border border-white/10 bg-[#0b111c] p-5">
+    <div
+      id="rewards"
+      className="rounded-lg border border-white/10 bg-[#0b111c] p-5"
+    >
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-xs font-bold uppercase text-emerald-300">
@@ -2373,7 +2616,10 @@ function RewardsPanel({ portal }: { portal: GuestPortalPayload }) {
 
 function MissionsPanel({ portal }: { portal: GuestPortalPayload }) {
   return (
-    <div className="rounded-lg border border-white/10 bg-[#0b111c] p-5">
+    <div
+      id="missions"
+      className="rounded-lg border border-white/10 bg-[#0b111c] p-5"
+    >
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-xs font-bold uppercase text-cyan-200">Миссии</p>
@@ -2477,7 +2723,10 @@ function LootBoxesPanel({ portal }: { portal: GuestPortalPayload }) {
   const lootBoxes = portal.gamification.lootBoxes;
 
   return (
-    <div className="rounded-lg border border-white/10 bg-[#0b111c] p-5">
+    <div
+      id="lootBoxes"
+      className="rounded-lg border border-white/10 bg-[#0b111c] p-5"
+    >
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-xs font-bold uppercase text-emerald-300">
@@ -2956,6 +3205,44 @@ function nextActionAnchorLabel(
   >;
 
   return labels[anchor];
+}
+
+function nextActionAnchorDomId(
+  anchor: GuestPortalPayload["gamification"]["nextActions"][number]["anchor"],
+) {
+  const ids = {
+    rewards: "rewards",
+    lootBoxes: "lootBoxes",
+    missions: "missions",
+    battlePass: "battlePass",
+    profile: "profile",
+  } satisfies Record<
+    GuestPortalPayload["gamification"]["nextActions"][number]["anchor"],
+    string
+  >;
+
+  return ids[anchor];
+}
+
+function onboardingToneClass(tone: OnboardingTone) {
+  const classes = {
+    emerald: "border-emerald-300/25 bg-emerald-300/[0.07]",
+    cyan: "border-cyan-300/25 bg-cyan-300/[0.07]",
+    amber: "border-amber-300/25 bg-amber-300/[0.07]",
+    slate: "border-white/10 bg-white/[0.035]",
+  } satisfies Record<OnboardingTone, string>;
+
+  return classes[tone];
+}
+
+function onboardingStepStatusClass(status: "READY" | "NEXT" | "LOCKED") {
+  const classes = {
+    READY: "bg-emerald-300/10 text-emerald-200",
+    NEXT: "bg-cyan-300/10 text-cyan-100",
+    LOCKED: "bg-slate-300/10 text-slate-300",
+  } satisfies Record<typeof status, string>;
+
+  return classes[status];
 }
 
 function LoadingState() {

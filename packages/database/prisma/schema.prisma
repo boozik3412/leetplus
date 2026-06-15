@@ -479,6 +479,8 @@ model Store {
   city                  String?
   cityFiasId            String?
   cityKladrId           String?
+  latitude              Decimal?             @db.Decimal(9, 6)
+  longitude             Decimal?             @db.Decimal(9, 6)
   timeZone              String?
   isActive              Boolean              @default(true)
   externalProvider      IntegrationProvider?

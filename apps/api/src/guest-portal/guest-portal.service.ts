@@ -108,6 +108,44 @@ export type GuestPortalPublicConfig = {
   };
 };
 
+export type GuestPortalGamificationClubDirectory = {
+  updatedAt: string;
+  total: number;
+  cities: string[];
+  clubs: Array<{
+    id: string;
+    tenant: {
+      name: string;
+      slug: string;
+    };
+    store: {
+      id: string;
+      publicSlug: string | null;
+      name: string;
+      city: string | null;
+      address: string | null;
+    };
+    location: {
+      city: string | null;
+      address: string | null;
+      latitude: number | null;
+      longitude: number | null;
+      coordinatesReady: boolean;
+      distanceKm: number | null;
+    };
+    links: {
+      guestPortalPath: string;
+    };
+    gamification: {
+      activeMissions: number;
+      activeLootBoxes: number;
+      activeSeasons: number;
+      activeRules: number;
+      bonusWriteReady: boolean;
+    };
+  }>;
+};
+
 export type GuestPortalOtpStartResponse = {
   challengeId: string;
   phoneMasked: string;
@@ -547,6 +585,143 @@ export class GuestPortalService {
         resendSeconds: OTP_RESEND_SECONDS,
         devCodeEnabled: this.isDevOtpEnabled(),
       },
+    };
+  }
+
+  async getGamificationClubDirectory(
+    query: { lat?: string; lng?: string } = {},
+  ): Promise<GuestPortalGamificationClubDirectory> {
+    const [stores, missions, lootBoxes, seasons] = await Promise.all([
+      this.prisma.store.findMany({
+        where: {
+          isActive: true,
+          tenant: { is: { status: TenantLifecycleStatus.ACTIVE } },
+        },
+        select: {
+          id: true,
+          publicSlug: true,
+          name: true,
+          city: true,
+          address: true,
+          latitude: true,
+          longitude: true,
+          externalProvider: true,
+          externalDomain: true,
+          tenant: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+            },
+          },
+        },
+        orderBy: [{ city: 'asc' }, { name: 'asc' }],
+      }),
+      this.prisma.guestGameMission.findMany({
+        where: { status: 'ACTIVE' },
+        select: {
+          tenantId: true,
+          storeIds: true,
+          periodFrom: true,
+          periodTo: true,
+        },
+      }),
+      this.prisma.guestGameLootBox.findMany({
+        where: { status: 'ACTIVE' },
+        select: {
+          tenantId: true,
+          storeIds: true,
+        },
+      }),
+      this.prisma.guestGameSeason.findMany({
+        where: { status: 'ACTIVE' },
+        select: {
+          tenantId: true,
+          periodFrom: true,
+          periodTo: true,
+        },
+      }),
+    ]);
+    const guestLocation = geoPoint(query.lat, query.lng);
+    const bonusWriteEnabled = booleanEnv(
+      this.configService.get<string>('LANGAME_BONUS_ACCRUAL_ENABLED'),
+    );
+    const clubs = stores
+      .map((store) => {
+        const activeMissions = missions.filter(
+          (mission) =>
+            mission.tenantId === store.tenant.id &&
+            matchesStore(mission.storeIds, store.id) &&
+            activePeriod(mission.periodFrom, mission.periodTo),
+        ).length;
+        const activeLootBoxes = lootBoxes.filter(
+          (lootBox) =>
+            lootBox.tenantId === store.tenant.id &&
+            matchesStore(lootBox.storeIds, store.id),
+        ).length;
+        const activeSeasons = seasons.filter(
+          (season) =>
+            season.tenantId === store.tenant.id &&
+            activePeriod(season.periodFrom, season.periodTo),
+        ).length;
+        const activeRules = activeMissions + activeLootBoxes + activeSeasons;
+        const storeSlug = store.publicSlug ?? store.id;
+        const latitude = decimalNumber(store.latitude);
+        const longitude = decimalNumber(store.longitude);
+        const distanceKm =
+          guestLocation && latitude !== null && longitude !== null
+            ? haversineDistanceKm(guestLocation, { latitude, longitude })
+            : null;
+
+        return {
+          id: `${store.tenant.slug}:${storeSlug}`,
+          tenant: {
+            name: store.tenant.name,
+            slug: store.tenant.slug,
+          },
+          store: {
+            id: store.id,
+            publicSlug: store.publicSlug,
+            name: store.name,
+            city: store.city,
+            address: store.address,
+          },
+          location: {
+            city: store.city,
+            address: store.address,
+            latitude,
+            longitude,
+            coordinatesReady: latitude !== null && longitude !== null,
+            distanceKm,
+          },
+          links: {
+            guestPortalPath: `/guest/${encodeURIComponent(
+              store.tenant.slug,
+            )}/${encodeURIComponent(storeSlug)}`,
+          },
+          gamification: {
+            activeMissions,
+            activeLootBoxes,
+            activeSeasons,
+            activeRules,
+            bonusWriteReady:
+              bonusWriteEnabled &&
+              store.externalProvider === IntegrationProvider.LANGAME &&
+              Boolean(store.externalDomain),
+          },
+        };
+      })
+      .filter((club) => club.gamification.activeRules > 0)
+      .sort((left, right) => compareDirectoryClubs(left, right));
+    const cities = uniqueStrings(
+      clubs.map((club) => club.store.city?.trim() || null),
+    ).sort((left, right) => left.localeCompare(right, 'ru'));
+
+    return {
+      updatedAt: new Date().toISOString(),
+      total: clubs.length,
+      cities,
+      clubs,
     };
   }
 
@@ -2853,6 +3028,76 @@ function uniqueStrings(values: Array<string | null | undefined>) {
   return [
     ...new Set(values.filter((value): value is string => Boolean(value))),
   ];
+}
+
+function booleanEnv(value: string | undefined) {
+  return ['1', 'true', 'yes', 'on'].includes(value?.trim().toLowerCase() ?? '');
+}
+
+function geoPoint(lat: string | undefined, lng: string | undefined) {
+  const latitude = coordinateNumber(lat, -90, 90);
+  const longitude = coordinateNumber(lng, -180, 180);
+
+  return latitude === null || longitude === null
+    ? null
+    : { latitude, longitude };
+}
+
+function coordinateNumber(value: string | undefined, min: number, max: number) {
+  if (!value) {
+    return null;
+  }
+
+  const numeric = Number(value.replace(',', '.'));
+  return Number.isFinite(numeric) && numeric >= min && numeric <= max
+    ? numeric
+    : null;
+}
+
+function haversineDistanceKm(
+  from: { latitude: number; longitude: number },
+  to: { latitude: number; longitude: number },
+) {
+  const earthRadiusKm = 6371;
+  const deltaLatitude = degreesToRadians(to.latitude - from.latitude);
+  const deltaLongitude = degreesToRadians(to.longitude - from.longitude);
+  const fromLatitude = degreesToRadians(from.latitude);
+  const toLatitude = degreesToRadians(to.latitude);
+  const angle =
+    Math.sin(deltaLatitude / 2) ** 2 +
+    Math.cos(fromLatitude) *
+      Math.cos(toLatitude) *
+      Math.sin(deltaLongitude / 2) ** 2;
+  const distance =
+    2 * earthRadiusKm * Math.atan2(Math.sqrt(angle), Math.sqrt(1 - angle));
+
+  return Math.round(distance * 10) / 10;
+}
+
+function degreesToRadians(value: number) {
+  return (value * Math.PI) / 180;
+}
+
+function compareDirectoryClubs(
+  left: GuestPortalGamificationClubDirectory['clubs'][number],
+  right: GuestPortalGamificationClubDirectory['clubs'][number],
+) {
+  if (left.location.distanceKm !== null || right.location.distanceKm !== null) {
+    if (left.location.distanceKm === null) {
+      return 1;
+    }
+
+    if (right.location.distanceKm === null) {
+      return -1;
+    }
+
+    return left.location.distanceKm - right.location.distanceKm;
+  }
+
+  return (
+    (left.store.city ?? '').localeCompare(right.store.city ?? '', 'ru') ||
+    left.store.name.localeCompare(right.store.name, 'ru')
+  );
 }
 
 function normalizeTelegramLinkCode(value: string) {

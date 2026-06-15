@@ -1,7 +1,16 @@
-import { Body, Controller, Get, Headers, Param, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common';
 import {
   type GuestPortalCheckInResponse,
   type GuestPortalCommunicationPreferenceResponse,
+  type GuestPortalGamificationClubDirectory,
   type GuestPortalLangameDetailsResponse,
   type GuestPortalMessengerUpdateResponse,
   GuestPortalService,
@@ -18,6 +27,14 @@ import {
 @Controller('guest-portal')
 export class GuestPortalController {
   constructor(private readonly guestPortalService: GuestPortalService) {}
+
+  @Get('gamification/clubs')
+  getGamificationClubDirectory(
+    @Query('lat') lat?: string,
+    @Query('lng') lng?: string,
+  ): Promise<GuestPortalGamificationClubDirectory> {
+    return this.guestPortalService.getGamificationClubDirectory({ lat, lng });
+  }
 
   @Get(':tenantSlug/:storeId/public-config')
   getPublicConfig(

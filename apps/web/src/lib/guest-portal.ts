@@ -18,6 +18,46 @@ export type GuestPortalPublicConfig = {
   };
 };
 
+export type GuestPortalGamificationClubDirectory = {
+  updatedAt: string;
+  total: number;
+  cities: string[];
+  clubs: GuestPortalGamificationClub[];
+};
+
+export type GuestPortalGamificationClub = {
+  id: string;
+  tenant: {
+    name: string;
+    slug: string;
+  };
+  store: {
+    id: string;
+    publicSlug: string | null;
+    name: string;
+    city: string | null;
+    address: string | null;
+  };
+  location: {
+    city: string | null;
+    address: string | null;
+    latitude: number | null;
+    longitude: number | null;
+    coordinatesReady: boolean;
+    distanceKm: number | null;
+  };
+  links: {
+    guestPortalPath: string;
+  };
+  gamification: {
+    activeMissions: number;
+    activeLootBoxes: number;
+    activeSeasons: number;
+    activeRules: number;
+    bonusWriteReady: boolean;
+  };
+};
+
 export type GuestPortalOtpStartResponse = {
   challengeId: string;
   phoneMasked: string;

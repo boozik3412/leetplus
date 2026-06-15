@@ -44,6 +44,8 @@ const COMMUNICATION_PREFERENCE_EVENT_PREFIX =
 const TELEGRAM_LINK_EVENT_PREFIX = 'guest_portal:telegram_bot_link:';
 const GAME_CONSENT_EVENT_TYPE = 'GAME_CONSENT_GRANTED';
 const GAME_CONSENT_VERSION = 'guest-game-v1-2026-06-15';
+const GAME_PROFILE_LINKED_EVENT_TYPE = 'GAME_PROFILE_LINKED';
+const GAME_PROFILE_LINK_SOURCE = 'GUEST_PORTAL_PROFILE_LINK';
 type JwtExpiresIn = NonNullable<JwtSignOptions['expiresIn']>;
 type GuestPortalOtpDeliveryChannel = 'DEV' | 'SMS' | 'TELEGRAM' | 'MAX';
 type GuestPortalOtpDeliveryStatus =
@@ -88,6 +90,20 @@ type GuestPortalOtpChallengeRegistration = {
   phoneMasked: string | null;
   gameConsentAcceptedAt: Date | null;
   gameConsentVersion: string | null;
+};
+
+type GuestPortalGameProfileLinkStatus =
+  | 'LINKED'
+  | 'ALREADY_LINKED'
+  | 'WAITING_FOR_SYNC'
+  | 'CONFLICT'
+  | 'NOT_LINKED';
+
+type GuestPortalGameProfileLinkResult = {
+  status: GuestPortalGameProfileLinkStatus;
+  guestId: string | null;
+  profileId: string | null;
+  linkedNow: boolean;
 };
 
 type TenantStoreContext = {
@@ -535,7 +551,11 @@ export type GuestPortalLangameMatchResponse = {
   localGuestFound: boolean;
   localGuestId: string | null;
   profileId: string | null;
+  linkStatus: GuestPortalGameProfileLinkStatus;
+  linkedGuestId: string | null;
+  linkedProfileId: string | null;
   nextAction: string;
+  portal: GuestPortalPayload | null;
   sources: Array<{
     id: string;
     name: string;
@@ -1800,6 +1820,27 @@ export class GuestPortalService {
         : anySuccess
           ? 'NOT_FOUND'
           : 'FAILED';
+    const linkResult = localGuestId
+      ? await this.linkGameProfileToLocalGuest(
+          payload,
+          localProfile?.id ?? payload.profileId,
+          localGuestId,
+          phone.masked,
+        )
+      : ({
+          status: foundInLangame ? 'WAITING_FOR_SYNC' : 'NOT_LINKED',
+          guestId: null,
+          profileId: localProfile?.id ?? payload.profileId,
+          linkedNow: false,
+        } satisfies GuestPortalGameProfileLinkResult);
+    const refreshedPayload =
+      linkResult.linkedNow || linkResult.status === 'ALREADY_LINKED'
+        ? await this.buildPortalPayload({
+            ...payload,
+            guestId: linkResult.guestId,
+            profileId: linkResult.profileId ?? payload.profileId,
+          })
+        : null;
 
     return {
       checkedAt: diagnostics.checkedAt,
@@ -1808,10 +1849,214 @@ export class GuestPortalService {
       status,
       localGuestFound,
       localGuestId,
-      profileId: localProfile?.id ?? payload.profileId,
-      nextAction: guestPortalLangameMatchNextAction(status),
+      profileId: linkResult.profileId ?? localProfile?.id ?? payload.profileId,
+      linkStatus: linkResult.status,
+      linkedGuestId: linkResult.guestId,
+      linkedProfileId: linkResult.profileId,
+      nextAction: guestPortalLangameMatchNextAction(status, linkResult.status),
+      portal: refreshedPayload,
       sources,
     };
+  }
+
+  private async linkGameProfileToLocalGuest(
+    payload: GuestPortalTokenPayload,
+    profileId: string | null,
+    guestId: string,
+    phoneMasked: string | null,
+  ): Promise<GuestPortalGameProfileLinkResult> {
+    if (!profileId) {
+      return {
+        status: 'NOT_LINKED',
+        guestId,
+        profileId: null,
+        linkedNow: false,
+      };
+    }
+
+    const now = new Date();
+
+    return this.prisma.$transaction(async (tx) => {
+      const [profile, guest, existingLinkedProfile] = await Promise.all([
+        tx.guestGameProfile.findFirst({
+          where: {
+            id: profileId,
+            tenantId: payload.tenantId,
+            status: 'ACTIVE',
+          },
+          select: {
+            id: true,
+            guestId: true,
+            phoneHash: true,
+            contactMasked: true,
+            displayName: true,
+          },
+        }),
+        tx.guest.findFirst({
+          where: {
+            id: guestId,
+            tenantId: payload.tenantId,
+            isDisabled: false,
+            phoneHash: payload.phoneHash,
+          },
+          select: {
+            id: true,
+            externalProvider: true,
+            externalDomain: true,
+            externalGuestId: true,
+            phoneMasked: true,
+            emailMasked: true,
+            fullNameMasked: true,
+          },
+        }),
+        tx.guestGameProfile.findFirst({
+          where: {
+            tenantId: payload.tenantId,
+            guestId,
+            status: 'ACTIVE',
+          },
+          select: { id: true },
+        }),
+      ]);
+
+      if (!profile || !guest) {
+        return {
+          status: 'NOT_LINKED',
+          guestId,
+          profileId: profile?.id ?? profileId,
+          linkedNow: false,
+        };
+      }
+
+      if (profile.guestId === guest.id) {
+        return {
+          status: 'ALREADY_LINKED',
+          guestId: guest.id,
+          profileId: profile.id,
+          linkedNow: false,
+        };
+      }
+
+      if (
+        (profile.guestId && profile.guestId !== guest.id) ||
+        (existingLinkedProfile && existingLinkedProfile.id !== profile.id)
+      ) {
+        return {
+          status: 'CONFLICT',
+          guestId: guest.id,
+          profileId: profile.id,
+          linkedNow: false,
+        };
+      }
+
+      await tx.guestGameProfile.update({
+        where: { id: profile.id },
+        data: {
+          guestId: guest.id,
+          phoneHash: profile.phoneHash ?? payload.phoneHash,
+          contactMasked:
+            profile.contactMasked ??
+            guest.phoneMasked ??
+            guest.emailMasked ??
+            phoneMasked,
+          displayName:
+            profile.displayName ??
+            guest.fullNameMasked ??
+            guest.externalGuestId ??
+            'Гость клуба',
+          lastActivityAt: now,
+        },
+      });
+      await this.backfillGameProfileGuestLinks(
+        tx,
+        payload.tenantId,
+        profile.id,
+        guest.id,
+      );
+      await this.createGameProfileLinkedEvent(tx, {
+        tenantId: payload.tenantId,
+        profileId: profile.id,
+        guestId: guest.id,
+        externalProvider: guest.externalProvider,
+        externalDomain: guest.externalDomain,
+        externalGuestId: guest.externalGuestId,
+        phoneMasked: phoneMasked ?? guest.phoneMasked,
+        source: 'guest_portal_langame_match',
+        occurredAt: now,
+      });
+
+      return {
+        status: 'LINKED',
+        guestId: guest.id,
+        profileId: profile.id,
+        linkedNow: true,
+      };
+    });
+  }
+
+  private async backfillGameProfileGuestLinks(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    profileId: string,
+    guestId: string,
+  ) {
+    await Promise.all([
+      tx.guestGameReward.updateMany({
+        where: { tenantId, profileId, guestId: null },
+        data: { guestId },
+      }),
+      tx.guestGameEvent.updateMany({
+        where: { tenantId, profileId, guestId: null },
+        data: { guestId },
+      }),
+      tx.guestGameDelivery.updateMany({
+        where: { tenantId, profileId, guestId: null },
+        data: { guestId },
+      }),
+      tx.guestBonusLedgerEntry.updateMany({
+        where: { tenantId, profileId, guestId: null },
+        data: { guestId },
+      }),
+    ]);
+  }
+
+  private async createGameProfileLinkedEvent(
+    tx: Prisma.TransactionClient,
+    input: {
+      tenantId: string;
+      profileId: string;
+      guestId: string;
+      externalProvider: IntegrationProvider | null;
+      externalDomain: string | null;
+      externalGuestId: string;
+      phoneMasked: string | null;
+      source: string;
+      occurredAt: Date;
+    },
+  ) {
+    await tx.guestGameEvent.createMany({
+      data: [
+        {
+          tenantId: input.tenantId,
+          profileId: input.profileId,
+          guestId: input.guestId,
+          eventType: GAME_PROFILE_LINKED_EVENT_TYPE,
+          source: GAME_PROFILE_LINK_SOURCE,
+          externalProvider: input.externalProvider,
+          externalDomain: input.externalDomain,
+          externalId: `game-profile-link:${input.profileId}:${input.guestId}`,
+          occurredAt: input.occurredAt,
+          payload: {
+            source: input.source,
+            phoneMasked: input.phoneMasked,
+            externalGuestId: input.externalGuestId,
+          },
+          note: 'Игровой профиль участника геймификации безопасно связан с синхронизированным гостем Langame.',
+          createdAt: input.occurredAt,
+        },
+      ],
+      skipDuplicates: true,
+    });
   }
 
   async getLangameGuestDetails(
@@ -3362,9 +3607,22 @@ function normalizeTelegramBotUsername(value: string | null) {
 
 function guestPortalLangameMatchNextAction(
   status: GuestPortalLangameMatchResponse['status'],
+  linkStatus: GuestPortalGameProfileLinkStatus,
 ) {
+  if (linkStatus === 'LINKED') {
+    return 'Профиль Langame найден в сохраненных данных и сразу связан с игровым профилем. Бонусы, миссии и история будут считаться по общей связке.';
+  }
+
+  if (linkStatus === 'ALREADY_LINKED') {
+    return 'Игровой профиль уже связан с синхронизированным гостем Langame. Данные лояльности и геймификации обновляются обычной синхронизацией.';
+  }
+
+  if (linkStatus === 'CONFLICT') {
+    return 'Langame-гость найден, но уже есть другая активная игровая связка. Попросите администратора проверить профиль перед объединением.';
+  }
+
   if (status === 'MATCHED_LOCAL') {
-    return 'Профиль уже найден в LeetPlus. Данные лояльности и геймификации обновятся после обычной синхронизации Langame.';
+    return 'Профиль найден в LeetPlus. Если связь не появилась автоматически, дождитесь следующей синхронизации Langame или обратитесь к администратору клуба.';
   }
 
   if (status === 'FOUND_IN_LANGAME') {

@@ -221,6 +221,9 @@ export function GuestPortalClient({
       const data =
         (await response.json()) as GuestPortalLangameMatchResponse;
       setLangameMatch(data);
+      if (data.portal) {
+        setPortal(data.portal);
+      }
       setLangameMatchMessage(data.nextAction);
       setLangameDetails(null);
       setLangameDetailsMessage(null);
@@ -1665,6 +1668,13 @@ function LangameMatchPanel({
               {result.phoneMasked} · {totalResults} совпадений ·{" "}
               {formatTime(result.checkedAt)}
             </span>
+            <span
+              className={`rounded-lg px-3 py-1 text-xs font-black uppercase ${langameLinkStatusClass(
+                result.linkStatus,
+              )}`}
+            >
+              {langameLinkStatusLabel(result.linkStatus)}
+            </span>
           </div>
 
           <div className="grid gap-3 lg:grid-cols-3">
@@ -3054,6 +3064,20 @@ function langameMatchStatusLabel(
   return labels[status];
 }
 
+function langameLinkStatusLabel(
+  status: GuestPortalLangameMatchResponse["linkStatus"],
+) {
+  const labels = {
+    LINKED: "профиль связан",
+    ALREADY_LINKED: "уже связан",
+    WAITING_FOR_SYNC: "ждет синхронизацию",
+    CONFLICT: "нужна проверка",
+    NOT_LINKED: "не связан",
+  } satisfies Record<GuestPortalLangameMatchResponse["linkStatus"], string>;
+
+  return labels[status];
+}
+
 function langameDetailsStatusLabel(
   status: GuestPortalLangameDetailsResponse["status"],
 ) {
@@ -3126,6 +3150,20 @@ function langameMatchStatusClass(
     NOT_FOUND: "bg-amber-300/10 text-amber-100",
     FAILED: "bg-rose-300/10 text-rose-100",
   } satisfies Record<GuestPortalLangameMatchResponse["status"], string>;
+
+  return classes[status];
+}
+
+function langameLinkStatusClass(
+  status: GuestPortalLangameMatchResponse["linkStatus"],
+) {
+  const classes = {
+    LINKED: "bg-emerald-300/10 text-emerald-200",
+    ALREADY_LINKED: "bg-emerald-300/10 text-emerald-200",
+    WAITING_FOR_SYNC: "bg-cyan-300/10 text-cyan-100",
+    CONFLICT: "bg-amber-300/10 text-amber-100",
+    NOT_LINKED: "bg-slate-300/10 text-slate-300",
+  } satisfies Record<GuestPortalLangameMatchResponse["linkStatus"], string>;
 
   return classes[status];
 }

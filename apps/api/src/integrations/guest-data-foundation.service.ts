@@ -42,6 +42,8 @@ const STALE_RUNNING_SYNC_MS = 2 * 60 * 60 * 1000;
 const STALE_RUNNING_SYNC_MESSAGE =
   'Синхронизация остановлена: не было завершения больше 2 часов. Запустите повторно.';
 const FRESH_GUEST_SYNC_MS = 24 * 60 * 60 * 1000;
+const GAME_PROFILE_LINKED_EVENT_TYPE = 'GAME_PROFILE_LINKED';
+const GAME_PROFILE_LINK_SOURCE = 'FOUNDATION_SYNC_PROFILE_LINK';
 
 export type GuestDataFoundationSyncQuery = {
   dateFrom?: string;
@@ -1402,11 +1404,118 @@ export class GuestDataFoundationService {
           phone.hash,
           syncedAt,
         );
+        await this.matchGameProfileByPhone(
+          tenantId,
+          guest.id,
+          phone.hash,
+          phone.masked,
+          {
+            externalProvider: IntegrationProvider.LANGAME,
+            externalDomain: domain,
+            externalGuestId,
+          },
+          syncedAt,
+        );
       }
     }
 
     profile.guests.duplicatePhoneHashes = duplicatePhoneHashes.size;
     profile.guests.duplicateEmailHashes = duplicateEmailHashes.size;
+  }
+
+  private async matchGameProfileByPhone(
+    tenantId: string,
+    guestId: string,
+    phoneHash: string,
+    phoneMasked: string | null,
+    guestIdentity: {
+      externalProvider: IntegrationProvider;
+      externalDomain: string;
+      externalGuestId: string;
+    },
+    matchedAt: Date,
+  ) {
+    const profile = await this.prisma.guestGameProfile.findFirst({
+      where: {
+        tenantId,
+        phoneHash,
+        status: 'ACTIVE',
+        OR: [{ guestId: null }, { guestId }],
+      },
+      select: {
+        id: true,
+        guestId: true,
+        contactMasked: true,
+      },
+      orderBy: [{ guestId: 'desc' }, { updatedAt: 'desc' }],
+    });
+
+    if (!profile || profile.guestId === guestId) {
+      return;
+    }
+
+    const existingLinkedProfile = await this.prisma.guestGameProfile.findFirst({
+      where: {
+        tenantId,
+        guestId,
+        status: 'ACTIVE',
+      },
+      select: { id: true },
+    });
+
+    if (existingLinkedProfile && existingLinkedProfile.id !== profile.id) {
+      return;
+    }
+
+    await this.prisma.guestGameProfile.update({
+      where: { id: profile.id },
+      data: {
+        guestId,
+        contactMasked: profile.contactMasked ?? phoneMasked,
+        lastActivityAt: matchedAt,
+      },
+    });
+    await Promise.all([
+      this.prisma.guestGameReward.updateMany({
+        where: { tenantId, profileId: profile.id, guestId: null },
+        data: { guestId },
+      }),
+      this.prisma.guestGameEvent.updateMany({
+        where: { tenantId, profileId: profile.id, guestId: null },
+        data: { guestId },
+      }),
+      this.prisma.guestGameDelivery.updateMany({
+        where: { tenantId, profileId: profile.id, guestId: null },
+        data: { guestId },
+      }),
+      this.prisma.guestBonusLedgerEntry.updateMany({
+        where: { tenantId, profileId: profile.id, guestId: null },
+        data: { guestId },
+      }),
+    ]);
+    await this.prisma.guestGameEvent.createMany({
+      data: [
+        {
+          tenantId,
+          profileId: profile.id,
+          guestId,
+          eventType: GAME_PROFILE_LINKED_EVENT_TYPE,
+          source: GAME_PROFILE_LINK_SOURCE,
+          externalProvider: guestIdentity.externalProvider,
+          externalDomain: guestIdentity.externalDomain,
+          externalId: `game-profile-link:${profile.id}:${guestId}`,
+          occurredAt: matchedAt,
+          payload: {
+            source: 'guest_foundation_sync',
+            phoneMasked,
+            externalGuestId: guestIdentity.externalGuestId,
+          },
+          note: 'Игровой профиль участника геймификации связан с гостем после синхронизации Langame.',
+          createdAt: matchedAt,
+        },
+      ],
+      skipDuplicates: true,
+    });
   }
 
   private async matchManualCrmLeadsByPhone(

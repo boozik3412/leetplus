@@ -428,7 +428,16 @@ export type GuestPortalLangameMatchResponse = {
   localGuestFound: boolean;
   localGuestId: string | null;
   profileId: string | null;
+  linkStatus:
+    | "LINKED"
+    | "ALREADY_LINKED"
+    | "WAITING_FOR_SYNC"
+    | "CONFLICT"
+    | "NOT_LINKED";
+  linkedGuestId: string | null;
+  linkedProfileId: string | null;
   nextAction: string;
+  portal: GuestPortalPayload | null;
   sources: Array<{
     id: string;
     name: string;

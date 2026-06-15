@@ -1,4 +1,5 @@
 import { IntegrationProvider, UserRole } from '@prisma/client';
+import { createHmac } from 'node:crypto';
 import { GuestDataFoundationService } from './guest-data-foundation.service';
 
 const user = {
@@ -162,6 +163,23 @@ describe('GuestDataFoundationService', () => {
     guestCrmEvent: {
       create: jest.fn(),
     },
+    guestGameProfile: {
+      findFirst: jest.fn(),
+      update: jest.fn(),
+    },
+    guestGameReward: {
+      updateMany: jest.fn(),
+    },
+    guestGameEvent: {
+      createMany: jest.fn(),
+      updateMany: jest.fn(),
+    },
+    guestGameDelivery: {
+      updateMany: jest.fn(),
+    },
+    guestBonusLedgerEntry: {
+      updateMany: jest.fn(),
+    },
     guestBalanceSnapshot: {
       upsert: jest.fn(),
     },
@@ -268,6 +286,13 @@ describe('GuestDataFoundationService', () => {
     prisma.guestCrmLead.updateMany.mockResolvedValue({ count: 0 });
     prisma.guest.update.mockResolvedValue({});
     prisma.guestCrmEvent.create.mockResolvedValue({});
+    prisma.guestGameProfile.findFirst.mockResolvedValue(null);
+    prisma.guestGameProfile.update.mockResolvedValue({});
+    prisma.guestGameReward.updateMany.mockResolvedValue({ count: 0 });
+    prisma.guestGameEvent.createMany.mockResolvedValue({ count: 0 });
+    prisma.guestGameEvent.updateMany.mockResolvedValue({ count: 0 });
+    prisma.guestGameDelivery.updateMany.mockResolvedValue({ count: 0 });
+    prisma.guestBonusLedgerEntry.updateMany.mockResolvedValue({ count: 0 });
     prisma.$transaction.mockResolvedValue([]);
     prisma.salesFact.updateMany.mockResolvedValue({ count: 1 });
     prisma.guestStaffIdentityMapping.findMany.mockResolvedValue([]);
@@ -560,6 +585,129 @@ describe('GuestDataFoundationService', () => {
     expect(shiftUpsert.update.externalClubId).toBe('10');
     expect(shiftUpsert.update.durationMinutes).toBe(630);
     expect(shiftUpsert.update.message).toBeNull();
+  });
+
+  it('links a phone-only game profile to a synced Langame guest by phone hash', async () => {
+    const phoneHash = createHmac('sha256', 'local-secret')
+      .update('79991112233')
+      .digest('hex');
+    prisma.guestGameProfile.findFirst
+      .mockResolvedValueOnce({
+        id: 'profile-1',
+        guestId: null,
+        contactMasked: null,
+      })
+      .mockResolvedValueOnce(null);
+
+    await service.syncTenant(user, {
+      dateFrom: '2026-05-01',
+      dateTo: '2026-05-01',
+    });
+
+    expect(prisma.guestGameProfile.findFirst).toHaveBeenCalledWith({
+      where: {
+        tenantId: 'tenant-1',
+        phoneHash,
+        status: 'ACTIVE',
+        OR: [{ guestId: null }, { guestId: 'guest-1' }],
+      },
+      select: {
+        id: true,
+        guestId: true,
+        contactMasked: true,
+      },
+      orderBy: [{ guestId: 'desc' }, { updatedAt: 'desc' }],
+    });
+    const gameProfileUpdateCalls = prisma.guestGameProfile.update.mock
+      .calls as Array<
+      [
+        {
+          where: { id: string };
+          data: {
+            guestId: string;
+            contactMasked: string | null;
+            lastActivityAt: Date;
+          };
+        },
+      ]
+    >;
+    const gameProfileUpdate = gameProfileUpdateCalls[0]?.[0];
+    expect(gameProfileUpdate).toBeDefined();
+    if (!gameProfileUpdate) {
+      throw new Error('Game profile update was not called');
+    }
+    expect(gameProfileUpdate.where).toEqual({ id: 'profile-1' });
+    expect(gameProfileUpdate.data.guestId).toBe('guest-1');
+    expect(gameProfileUpdate.data.contactMasked).toBe('***2233');
+    expect(gameProfileUpdate.data.lastActivityAt).toBeInstanceOf(Date);
+    expect(prisma.guestGameReward.updateMany).toHaveBeenCalledWith({
+      where: {
+        tenantId: 'tenant-1',
+        profileId: 'profile-1',
+        guestId: null,
+      },
+      data: { guestId: 'guest-1' },
+    });
+    expect(prisma.guestGameDelivery.updateMany).toHaveBeenCalledWith({
+      where: {
+        tenantId: 'tenant-1',
+        profileId: 'profile-1',
+        guestId: null,
+      },
+      data: { guestId: 'guest-1' },
+    });
+    expect(prisma.guestBonusLedgerEntry.updateMany).toHaveBeenCalledWith({
+      where: {
+        tenantId: 'tenant-1',
+        profileId: 'profile-1',
+        guestId: null,
+      },
+      data: { guestId: 'guest-1' },
+    });
+    const gameEventCreateManyCalls = prisma.guestGameEvent.createMany.mock
+      .calls as Array<
+      [
+        {
+          data: Array<{
+            tenantId: string;
+            profileId: string;
+            guestId: string;
+            eventType: string;
+            source: string;
+            externalProvider: IntegrationProvider;
+            externalDomain: string;
+            externalId: string;
+            payload: {
+              source: string;
+              phoneMasked: string | null;
+              externalGuestId: string;
+            };
+          }>;
+          skipDuplicates: boolean;
+        },
+      ]
+    >;
+    const linkEventCreateMany = gameEventCreateManyCalls[0]?.[0];
+    expect(linkEventCreateMany).toBeDefined();
+    if (!linkEventCreateMany) {
+      throw new Error('Game profile link event was not created');
+    }
+    expect(linkEventCreateMany.skipDuplicates).toBe(true);
+    expect(linkEventCreateMany.data[0]).toMatchObject({
+      tenantId: 'tenant-1',
+      profileId: 'profile-1',
+      guestId: 'guest-1',
+      eventType: 'GAME_PROFILE_LINKED',
+      source: 'FOUNDATION_SYNC_PROFILE_LINK',
+      externalProvider: IntegrationProvider.LANGAME,
+      externalDomain: 'club.example',
+      externalId: 'game-profile-link:profile-1:guest-1',
+      payload: {
+        source: 'guest_foundation_sync',
+        phoneMasked: '***2233',
+        externalGuestId: '42',
+      },
+    });
   });
 
   it('loads guest logs only when explicitly requested', async () => {

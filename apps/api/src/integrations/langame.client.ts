@@ -68,27 +68,61 @@ export class LangameClient {
     );
   }
 
-  async listGuests(baseUrl: string, apiKey: string) {
-    return this.getList<LangameGuest>(baseUrl, '/guests/list', apiKey);
+  async listGuests(
+    baseUrl: string,
+    apiKey: string,
+    params?: { page: number; pageLimit: number },
+  ) {
+    return this.getList<LangameGuest>(
+      baseUrl,
+      '/guests/list',
+      apiKey,
+      params
+        ? {
+            page: String(params.page),
+            page_limit: String(params.pageLimit),
+          }
+        : undefined,
+    );
   }
 
   async listGuestGroups(baseUrl: string, apiKey: string) {
     return this.getList<LangameGuestGroup>(baseUrl, '/guests/groups', apiKey);
   }
 
-  async listGuestBalances(baseUrl: string, apiKey: string) {
+  async listGuestBalances(
+    baseUrl: string,
+    apiKey: string,
+    params?: { page: number; pageLimit: number },
+  ) {
     return this.getList<LangameGuestBalance>(
       baseUrl,
       '/guests/balance',
       apiKey,
+      params
+        ? {
+            page: String(params.page),
+            page_limit: String(params.pageLimit),
+          }
+        : undefined,
     );
   }
 
-  async listGuestBonusBalances(baseUrl: string, apiKey: string) {
+  async listGuestBonusBalances(
+    baseUrl: string,
+    apiKey: string,
+    params?: { page: number; pageLimit: number },
+  ) {
     return this.getList<LangameGuestBonusBalance>(
       baseUrl,
       '/guests/bonus_balance',
       apiKey,
+      params
+        ? {
+            page: String(params.page),
+            page_limit: String(params.pageLimit),
+          }
+        : undefined,
     );
   }
 

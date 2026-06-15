@@ -883,13 +883,23 @@ export class GuestDataFoundationService {
     }
 
     const guests = await this.captureEndpoint(profile, 'guests/list', () =>
-      this.langameClient.listGuests(baseUrl, apiKey),
+      this.paginate((page) =>
+        this.langameClient.listGuests(baseUrl, apiKey, {
+          page,
+          pageLimit: DEFAULT_PAGE_LIMIT,
+        }),
+      ),
     );
     await this.syncGuests(tenantId, domain, guests, profile, now);
     const guestsByExternalId = await this.loadGuestLookup(tenantId, domain);
 
     const balances = await this.captureEndpoint(profile, 'guests/balance', () =>
-      this.langameClient.listGuestBalances(baseUrl, apiKey),
+      this.paginate((page) =>
+        this.langameClient.listGuestBalances(baseUrl, apiKey, {
+          page,
+          pageLimit: DEFAULT_PAGE_LIMIT,
+        }),
+      ),
     );
     await this.syncBalances(
       tenantId,
@@ -903,7 +913,13 @@ export class GuestDataFoundationService {
     const bonusBalances = await this.captureEndpoint(
       profile,
       'guests/bonus_balance',
-      () => this.langameClient.listGuestBonusBalances(baseUrl, apiKey),
+      () =>
+        this.paginate((page) =>
+          this.langameClient.listGuestBonusBalances(baseUrl, apiKey, {
+            page,
+            pageLimit: DEFAULT_PAGE_LIMIT,
+          }),
+        ),
     );
     await this.syncBonusBalances(
       tenantId,

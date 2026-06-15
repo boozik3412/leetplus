@@ -950,6 +950,7 @@ type Period = {
 
 type ResolvePeriodOptions = {
   minimumPeriodMonths?: number;
+  maximumPeriodMonths?: number;
 };
 
 type ResolvedGuestFilters = {
@@ -1023,6 +1024,7 @@ export class GuestsService {
       await this.tenantContextService.resolve(user);
     const period = this.resolvePeriod(query, {
       minimumPeriodMonths: GUEST_ANALYTICS_MIN_PERIOD_MONTHS,
+      maximumPeriodMonths: GUEST_ANALYTICS_MIN_PERIOD_MONTHS,
     });
     const filters = await this.resolveGuestFilters(tenantId, query);
     const { guests, metricsByGuestId, groupsByKey } =
@@ -1122,7 +1124,10 @@ export class GuestsService {
   ): Promise<GuestListResponse> {
     const page = this.resolvePositiveInteger(query.page, 1, 1, 10_000);
     const pageSize = this.resolvePositiveInteger(query.pageSize, 50, 10, 200);
-    const guestList = await this.buildGuestList(user, query);
+    const guestList = await this.buildGuestList(user, query, {
+      minimumPeriodMonths: GUEST_ANALYTICS_MIN_PERIOD_MONTHS,
+      maximumPeriodMonths: GUEST_ANALYTICS_MIN_PERIOD_MONTHS,
+    });
     const totalRows = guestList.rows.length;
     const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
     const normalizedPage = Math.min(page, totalPages);
@@ -1148,7 +1153,9 @@ export class GuestsService {
     user: AuthenticatedUser,
     query: GuestListQuery = {},
   ): Promise<GuestExportFile> {
-    const guestList = await this.buildGuestList(user, query);
+    const guestList = await this.buildGuestList(user, query, {
+      minimumPeriodMonths: GUEST_ANALYTICS_MIN_PERIOD_MONTHS,
+    });
     const csvRows: CsvCell[][] = [
       [
         'Гость',
@@ -2018,11 +2025,10 @@ export class GuestsService {
   private async buildGuestList(
     user: AuthenticatedUser,
     query: GuestListQuery = {},
+    periodOptions: ResolvePeriodOptions = {},
   ): Promise<BuiltGuestList> {
     const { tenantId } = await this.tenantContextService.resolve(user);
-    const period = this.resolvePeriod(query, {
-      minimumPeriodMonths: GUEST_ANALYTICS_MIN_PERIOD_MONTHS,
-    });
+    const period = this.resolvePeriod(query, periodOptions);
     const filters = await this.resolveGuestFilters(tenantId, query);
     const segment = this.resolveSegment(query.segment);
     const crmStatus = this.resolveCrmStatusFilter(query.crmStatus);
@@ -3676,6 +3682,25 @@ export class GuestsService {
 
     if (fromDate > minimumFromDate) {
       fromDate.setTime(minimumFromDate.getTime());
+    }
+  }
+
+  private resolveMaximumPeriod(
+    fromDate: Date,
+    toDate: Date,
+    options: ResolvePeriodOptions,
+  ) {
+    if (!options.maximumPeriodMonths || options.maximumPeriodMonths <= 0) {
+      return;
+    }
+
+    const maximumFromDate = this.minimumPeriodFromDate(
+      toDate,
+      options.maximumPeriodMonths,
+    );
+
+    if (fromDate < maximumFromDate) {
+      fromDate.setTime(maximumFromDate.getTime());
     }
   }
 
@@ -7263,6 +7288,7 @@ export class GuestsService {
     toDate.setUTCHours(23, 59, 59, 999);
 
     this.resolveMinimumPeriod(fromDate, toDate, options);
+    this.resolveMaximumPeriod(fromDate, toDate, options);
 
     if (fromDate > toDate) {
       throw new BadRequestException('dateFrom must be before dateTo');

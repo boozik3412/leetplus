@@ -1112,6 +1112,7 @@ export type GuestGameIntegrationReadinessItem = {
     | 'TELEGRAM_WEBHOOK'
     | 'TELEGRAM_DELIVERY'
     | 'MAX_DELIVERY'
+    | 'BONUS_LEDGER_SCHEDULER'
     | 'LANGAME_WRITE_API';
   title: string;
   status: GuestGameIntegrationReadinessStatus;
@@ -2254,6 +2255,12 @@ export class GuestGamificationService {
     const langameWriteItem = integrationReadiness.items.find(
       (item) => item.key === 'LANGAME_WRITE_API',
     );
+    const bonusLedgerSchedulerItem = integrationReadiness.items.find(
+      (item) => item.key === 'BONUS_LEDGER_SCHEDULER',
+    );
+    const bonusLedgerAutonomousReady = Boolean(
+      langameWriteItem?.ready && bonusLedgerSchedulerItem?.ready,
+    );
     const ledgerConfirmed = bonusLedgerAudit.summary.confirmed;
     const ledgerReconciliationPending =
       bonusLedgerAudit.summary.reconciliationPending;
@@ -2415,26 +2422,36 @@ export class GuestGamificationService {
       {
         key: 'BONUS_LEDGER',
         title: 'Bonus ledger -> Langame',
-        status: langameWriteItem?.ready
+        status: bonusLedgerAutonomousReady
           ? bonusRewards.length
             ? 'READY'
             : 'PARTIAL'
-          : cashierReady || approvedRewards.length
-            ? 'MANUAL_ONLY'
-            : 'BLOCKED',
-        statusLabel: langameWriteItem?.ready
+          : langameWriteItem?.ready || bonusLedgerSchedulerItem?.enabled
+            ? 'PARTIAL'
+            : cashierReady || approvedRewards.length
+              ? 'MANUAL_ONLY'
+              : 'BLOCKED',
+        statusLabel: bonusLedgerAutonomousReady
           ? bonusRewards.length
-            ? 'готов к записи'
+            ? 'авто готово'
             : 'ждет бонус'
-          : 'ручной режим',
-        ready: Boolean(langameWriteItem?.ready && bonusRewards.length),
+          : langameWriteItem?.ready
+            ? 'нужен scheduler'
+            : bonusLedgerSchedulerItem?.enabled
+              ? 'нужен write API'
+              : 'ручной режим',
+        ready: Boolean(bonusLedgerAutonomousReady && bonusRewards.length),
         metric: `${bonusRewards.length} bonus rewards`,
-        note: 'Боевой dispatcher пишет только одобренные бонусные награды через master endpoint Langame по телефону гостя.',
-        nextAction: langameWriteItem?.ready
+        note: 'Автономный scheduler должен поставить approved bonus rewards в ledger и отправить их через master endpoint Langame по телефону гостя без админского клика.',
+        nextAction: bonusLedgerAutonomousReady
           ? bonusRewards.length
-            ? 'Запустить scheduled bonus-ledger dispatch на тестовой записи и проверить ответ Langame.'
+            ? 'Дождаться ближайшего scheduler tick на тестовой записи и проверить ответ Langame.'
             : 'Создать approved-награду с бонусным rewardType для ledger.'
-          : 'До включения LANGAME_BONUS_ACCRUAL_ENABLED использовать claim-код или ручную выдачу.',
+          : langameWriteItem?.ready
+            ? 'Включить GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED и сначала прогнать dry-run/canary для 1337.'
+            : bonusLedgerSchedulerItem?.enabled
+              ? 'После dry-run включить LANGAME_BONUS_ACCRUAL_ENABLED=true для реальной записи в Langame.'
+              : 'До включения LANGAME_BONUS_ACCRUAL_ENABLED использовать claim-код или ручную выдачу.',
       },
       {
         key: 'BALANCE_RECONCILIATION',
@@ -2535,6 +2552,9 @@ export class GuestGamificationService {
       maxProvider?.configured && maxProvider.enabledByEnv,
     );
     const langameBonusAccrualEnabled = envFlag('LANGAME_BONUS_ACCRUAL_ENABLED');
+    const bonusLedgerScheduler = bonusLedgerSchedulerReadiness(
+      langameBonusAccrualEnabled,
+    );
     const items: GuestGameIntegrationReadinessItem[] = [
       {
         key: 'PUBLIC_PORTAL',
@@ -2681,6 +2701,7 @@ export class GuestGamificationService {
         nextAction:
           'Не включать автоматизацию MAX до утвержденного endpoint, токена, согласий и обработки отписок.',
       },
+      bonusLedgerScheduler,
       {
         key: 'LANGAME_WRITE_API',
         title: 'Запись бонусов в Langame',
@@ -8305,6 +8326,116 @@ function envFlag(name: string) {
   const value = envString(name)?.toLowerCase();
 
   return value === '1' || value === 'true' || value === 'yes';
+}
+
+function envOptionalFlag(name: string): boolean | null {
+  const value = envString(name)?.toLowerCase();
+
+  if (!value) {
+    return null;
+  }
+
+  if (['1', 'true', 'yes', 'on'].includes(value)) {
+    return true;
+  }
+
+  if (['0', 'false', 'no', 'off'].includes(value)) {
+    return false;
+  }
+
+  return null;
+}
+
+function envPositiveInt(name: string, fallback: number) {
+  const parsed = Number(envString(name));
+  const value = Number.isFinite(parsed) ? Math.trunc(parsed) : fallback;
+
+  return value > 0 ? value : fallback;
+}
+
+function bonusLedgerSchedulerReadiness(
+  langameBonusAccrualEnabled: boolean,
+): GuestGameIntegrationReadinessItem {
+  const explicitEnabled = envOptionalFlag(
+    'GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED',
+  );
+  const dryRunOverride = envOptionalFlag(
+    'GUEST_GAME_BONUS_LEDGER_SCHEDULER_DRY_RUN',
+  );
+  const queueApprovedRewards =
+    envOptionalFlag(
+      'GUEST_GAME_BONUS_LEDGER_SCHEDULER_QUEUE_APPROVED_REWARDS',
+    ) ?? true;
+  const syncTokenConfigured = Boolean(envString('SYNC_SERVICE_TOKEN'));
+  const nodeEnv = envString('NODE_ENV');
+  const defaultProductionEnabled =
+    nodeEnv === 'production' && syncTokenConfigured;
+  const enabled = explicitEnabled ?? defaultProductionEnabled;
+  const forcedDryRun = dryRunOverride === true;
+  const intervalMs = envPositiveInt(
+    'GUEST_GAME_BONUS_LEDGER_SCHEDULER_INTERVAL_MS',
+    5 * 60 * 1000,
+  );
+  const limit = envPositiveInt('GUEST_GAME_BONUS_LEDGER_SCHEDULER_LIMIT', 50);
+  const tenantScope =
+    envString('GUEST_GAME_BONUS_LEDGER_SCHEDULER_TENANT_SLUG') ??
+    envString('GUEST_GAME_BONUS_LEDGER_SCHEDULER_TENANT_ID') ??
+    'все tenant';
+  const rewardTypes =
+    envString('GUEST_GAME_BONUS_LEDGER_SCHEDULER_REWARD_TYPES') ??
+    envString('LANGAME_BONUS_ACCRUAL_REWARD_TYPES') ??
+    'BONUS,BONUS_POINTS,BONUS_BALANCE,LOYALTY_BONUS';
+  const ready = enabled && !forcedDryRun && langameBonusAccrualEnabled;
+  const configured = syncTokenConfigured || explicitEnabled !== null;
+  const status: GuestGameIntegrationReadinessStatus = ready
+    ? 'READY'
+    : enabled
+      ? 'MANUAL_ONLY'
+      : configured
+        ? 'PARTIAL'
+        : 'BLOCKED';
+
+  return {
+    key: 'BONUS_LEDGER_SCHEDULER',
+    title: 'Автозапуск bonus ledger',
+    status,
+    statusLabel: ready
+      ? 'автоначисление'
+      : enabled
+        ? forcedDryRun
+          ? 'dry-run'
+          : 'ждет write API'
+        : configured
+          ? 'выключен'
+          : 'нужен token',
+    ready,
+    configured,
+    enabled,
+    requiredEnv: [
+      'SYNC_SERVICE_TOKEN',
+      'GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED',
+      'GUEST_GAME_BONUS_LEDGER_SCHEDULER_DRY_RUN',
+      'LANGAME_BONUS_ACCRUAL_ENABLED',
+    ],
+    note: ready
+      ? `Scheduler обрабатывает ledger каждые ${intervalMs} мс, лимит ${limit}, scope ${tenantScope}, reward types ${rewardTypes}. Queue approved rewards: ${queueApprovedRewards ? 'on' : 'off'}.`
+      : enabled
+        ? forcedDryRun
+          ? `Scheduler включен в dry-run: проверяет очередь каждые ${intervalMs} мс без claim и записи в Langame.`
+          : 'Scheduler включен, но реальные начисления ждут LANGAME_BONUS_ACCRUAL_ENABLED=true.'
+        : configured
+          ? 'Scheduler настроен частично или выключен явно; автономная обработка bonus ledger не запущена.'
+          : 'Scheduler не запущен: нужен SYNC_SERVICE_TOKEN или явное включение на VDS.',
+    nextAction: ready
+      ? 'Проверить первый production batch на одной награде и затем сверить GuestBonusBalanceCurrent с ночным Langame snapshot.'
+      : enabled
+        ? forcedDryRun
+          ? 'Снять dry-run только после проверки очереди, tenant Langame ключа и тестовой записи.'
+          : 'Включить LANGAME_BONUS_ACCRUAL_ENABLED=true только после dry-run и проверки tenant Langame ключа.'
+        : configured
+          ? 'Включить GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED=true или убрать явное выключение после согласования VDS/env.'
+          : 'Задать SYNC_SERVICE_TOKEN на VDS и включить scheduler сначала в dry-run/canary для 1337.',
+  };
 }
 
 function maskAlias(value: string | null) {

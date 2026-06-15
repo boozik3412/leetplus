@@ -656,6 +656,7 @@ export type GuestGameIntegrationReadinessItem = {
     | "TELEGRAM_WEBHOOK"
     | "TELEGRAM_DELIVERY"
     | "MAX_DELIVERY"
+    | "BONUS_LEDGER_SCHEDULER"
     | "LANGAME_WRITE_API";
   title: string;
   status: GuestGameIntegrationReadinessStatus;

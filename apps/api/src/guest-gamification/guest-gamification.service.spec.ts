@@ -444,6 +444,102 @@ describe('GuestGamificationService', () => {
     delete process.env.GUEST_GAME_DELIVERY_REAL_SEND_ENABLED;
     delete process.env.GUEST_GAME_DELIVERY_TELEGRAM_ENABLED;
     delete process.env.GUEST_GAME_DELIVERY_TELEGRAM_BOT_TOKEN;
+    delete process.env.SYNC_SERVICE_TOKEN;
+    delete process.env.LANGAME_BONUS_ACCRUAL_ENABLED;
+    delete process.env.GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED;
+    delete process.env.GUEST_GAME_BONUS_LEDGER_SCHEDULER_DRY_RUN;
+    delete process.env.GUEST_GAME_BONUS_LEDGER_SCHEDULER_INTERVAL_MS;
+    delete process.env.GUEST_GAME_BONUS_LEDGER_SCHEDULER_LIMIT;
+    delete process.env.GUEST_GAME_BONUS_LEDGER_SCHEDULER_TENANT_SLUG;
+    delete process.env.GUEST_GAME_BONUS_LEDGER_SCHEDULER_REWARD_TYPES;
+  });
+
+  describe('integration readiness', () => {
+    it('shows bonus ledger scheduler as blocked until service scheduling is configured', () => {
+      const { service } = createService();
+
+      const readiness = (service as any).buildIntegrationReadiness([]);
+      const scheduler = readiness.items.find(
+        (item: { key: string }) => item.key === 'BONUS_LEDGER_SCHEDULER',
+      );
+
+      expect(scheduler).toMatchObject({
+        status: 'BLOCKED',
+        ready: false,
+        configured: false,
+        enabled: false,
+      });
+      expect(scheduler.requiredEnv).toContain('SYNC_SERVICE_TOKEN');
+      expect(scheduler.requiredEnv).toContain('LANGAME_BONUS_ACCRUAL_ENABLED');
+    });
+
+    it('marks bonus ledger scheduler ready only when production scheduling and Langame write are enabled', () => {
+      const originalNodeEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'production';
+      process.env.SYNC_SERVICE_TOKEN = 'sync-token';
+      process.env.LANGAME_BONUS_ACCRUAL_ENABLED = 'true';
+      process.env.GUEST_GAME_BONUS_LEDGER_SCHEDULER_INTERVAL_MS = '60000';
+      process.env.GUEST_GAME_BONUS_LEDGER_SCHEDULER_LIMIT = '7';
+      process.env.GUEST_GAME_BONUS_LEDGER_SCHEDULER_TENANT_SLUG = 'demo';
+      process.env.GUEST_GAME_BONUS_LEDGER_SCHEDULER_REWARD_TYPES =
+        'BONUS,CASHBACK';
+      const { service } = createService();
+
+      try {
+        const readiness = (service as any).buildIntegrationReadiness([]);
+        const scheduler = readiness.items.find(
+          (item: { key: string }) => item.key === 'BONUS_LEDGER_SCHEDULER',
+        );
+
+        expect(scheduler).toMatchObject({
+          status: 'READY',
+          statusLabel: 'автоначисление',
+          ready: true,
+          configured: true,
+          enabled: true,
+        });
+        expect(scheduler.note).toContain('60000');
+        expect(scheduler.note).toContain('demo');
+        expect(scheduler.note).toContain('BONUS,CASHBACK');
+      } finally {
+        if (originalNodeEnv === undefined) {
+          delete process.env.NODE_ENV;
+        } else {
+          process.env.NODE_ENV = originalNodeEnv;
+        }
+      }
+    });
+
+    it('keeps bonus ledger scheduler in safe mode when dry-run is forced', () => {
+      const originalNodeEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'production';
+      process.env.SYNC_SERVICE_TOKEN = 'sync-token';
+      process.env.LANGAME_BONUS_ACCRUAL_ENABLED = 'true';
+      process.env.GUEST_GAME_BONUS_LEDGER_SCHEDULER_DRY_RUN = 'true';
+      const { service } = createService();
+
+      try {
+        const readiness = (service as any).buildIntegrationReadiness([]);
+        const scheduler = readiness.items.find(
+          (item: { key: string }) => item.key === 'BONUS_LEDGER_SCHEDULER',
+        );
+
+        expect(scheduler).toMatchObject({
+          status: 'MANUAL_ONLY',
+          statusLabel: 'dry-run',
+          ready: false,
+          configured: true,
+          enabled: true,
+        });
+        expect(scheduler.note).toContain('dry-run');
+      } finally {
+        if (originalNodeEnv === undefined) {
+          delete process.env.NODE_ENV;
+        } else {
+          process.env.NODE_ENV = originalNodeEnv;
+        }
+      }
+    });
   });
 
   describe('dryRun', () => {

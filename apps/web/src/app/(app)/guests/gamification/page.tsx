@@ -87,11 +87,11 @@ const emptyWorkspace: GuestGamificationWorkspace = {
   },
   integrationReadiness: {
     summary: {
-      total: 7,
+      total: 8,
       ready: 1,
       partial: 0,
       blocked: 4,
-      manualOnly: 2,
+      manualOnly: 3,
     },
     items: [
       {
@@ -177,6 +177,22 @@ const emptyWorkspace: GuestGamificationWorkspace = {
         ],
         note: "MAX требует подтвержденный API-контракт.",
         nextAction: "Не включать до юридической и технической подготовки.",
+      },
+      {
+        key: "BONUS_LEDGER_SCHEDULER",
+        title: "Автозапуск bonus ledger",
+        status: "MANUAL_ONLY",
+        statusLabel: "выключен",
+        ready: false,
+        configured: false,
+        enabled: false,
+        requiredEnv: [
+          "SYNC_SERVICE_TOKEN",
+          "GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED",
+          "LANGAME_BONUS_ACCRUAL_ENABLED",
+        ],
+        note: "Автономный scheduler bonus ledger появится после ответа API workspace.",
+        nextAction: "Включать сначала в dry-run/canary для 1337.",
       },
       {
         key: "LANGAME_WRITE_API",

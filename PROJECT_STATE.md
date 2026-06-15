@@ -80,6 +80,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added Guest Game Hub visibility for autonomous bonus accruals: integration readiness now has a separate `BONUS_LEDGER_SCHEDULER` item, and pilot readiness treats `Bonus ledger -> Langame` as fully ready only when the scheduler is enabled, not forced to dry-run, and `LANGAME_BONUS_ACCRUAL_ENABLED=true`.
 - Added an API-side scheduler for Guest Game Hub bonus ledger dispatch: `GuestBonusLedgerSchedulerService` can run the existing scheduled bonus-ledger dispatcher on an interval, skips overlapping ticks, supports tenant/reward/limit/dry-run env controls, logs only aggregate counts, and still requires `LANGAME_BONUS_ACCRUAL_ENABLED=true` for real Langame balance writes.
 - Added guest-visible bonus ledger history to the public guest portal: `/guest/[tenantSlug]/[storeId]` now shows recent gamification bonus operations from `GuestBonusLedgerEntry` by `guestId` or separate `GuestGameProfile`, including amount, guest-facing status, reward source, store, date, and confirmed balance-after while still hiding raw phone, tokens, Langame request/response payloads, and technical errors.
 - Updated the public guest portal loyalty card to read gamification bonuses from `GuestBonusBalanceCurrent` first, falling back to the latest `GuestBonusBalanceSnapshot`; guests can now see the ledger-updated bonus balance source and sync date before the next historical snapshot arrives.

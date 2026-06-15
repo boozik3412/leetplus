@@ -25,6 +25,8 @@ import type { LangameGuestSession } from '../integrations/langame.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 
+const GUEST_ANALYTICS_MIN_PERIOD_MONTHS = 3;
+
 export type GuestsSummaryQuery = {
   dateFrom?: string;
   dateTo?: string;
@@ -946,6 +948,10 @@ type Period = {
   to: string;
 };
 
+type ResolvePeriodOptions = {
+  minimumPeriodMonths?: number;
+};
+
 type ResolvedGuestFilters = {
   storeId: string | null;
   guestGroupId: string | null;
@@ -1015,7 +1021,9 @@ export class GuestsService {
   ): Promise<GuestsSummary> {
     const { tenantId, tenantSlug } =
       await this.tenantContextService.resolve(user);
-    const period = this.resolvePeriod(query);
+    const period = this.resolvePeriod(query, {
+      minimumPeriodMonths: GUEST_ANALYTICS_MIN_PERIOD_MONTHS,
+    });
     const filters = await this.resolveGuestFilters(tenantId, query);
     const { guests, metricsByGuestId, groupsByKey } =
       await this.buildGuestMetrics(tenantId, period, filters);
@@ -2012,7 +2020,9 @@ export class GuestsService {
     query: GuestListQuery = {},
   ): Promise<BuiltGuestList> {
     const { tenantId } = await this.tenantContextService.resolve(user);
-    const period = this.resolvePeriod(query);
+    const period = this.resolvePeriod(query, {
+      minimumPeriodMonths: GUEST_ANALYTICS_MIN_PERIOD_MONTHS,
+    });
     const filters = await this.resolveGuestFilters(tenantId, query);
     const segment = this.resolveSegment(query.segment);
     const crmStatus = this.resolveCrmStatusFilter(query.crmStatus);
@@ -3411,7 +3421,7 @@ export class GuestsService {
     await this.applyLatestBonusBalanceMetrics(
       tenantId,
       metricsByGuestId,
-      selectedGuestIds,
+      guests,
     );
 
     return { guests, metricsByGuestId, groupsByKey };
@@ -3420,8 +3430,10 @@ export class GuestsService {
   private async applyLatestBonusBalanceMetrics(
     tenantId: string,
     metricsByGuestId: Map<string, GuestMetrics>,
-    guestIds: string[],
+    guests: GuestBase[],
   ) {
+    const guestIds = guests.map((guest) => guest.id);
+
     if (guestIds.length === 0) {
       return;
     }
@@ -3448,30 +3460,97 @@ export class GuestsService {
       );
     }
 
-    const currentGuestIds = new Set<string>();
+    const resolvedGuestIds = new Set<string>();
+    const applyBalance = (
+      guestId: string,
+      bonusBalance: Prisma.Decimal,
+      snapshotDate: Date,
+    ) => {
+      resolvedGuestIds.add(guestId);
+      const metrics = this.ensureMetrics(metricsByGuestId, guestId);
+      metrics.bonusBalance = Math.max(
+        0,
+        this.decimalToNumber(bonusBalance) ?? 0,
+      );
+      metrics.bonusSnapshotAt = snapshotDate;
+    };
+
     for (const currentBalance of currentBalances) {
       if (!currentBalance.guestId) {
         continue;
       }
 
-      currentGuestIds.add(currentBalance.guestId);
-      const metrics = this.ensureMetrics(
-        metricsByGuestId,
+      applyBalance(
         currentBalance.guestId,
+        currentBalance.bonusBalance,
+        currentBalance.snapshotDate,
       );
-      metrics.bonusBalance = Math.max(
-        0,
-        this.decimalToNumber(currentBalance.bonusBalance) ?? 0,
+    }
+
+    const externalGuestMap = new Map<string, string>();
+    for (const guest of guests) {
+      if (resolvedGuestIds.has(guest.id)) {
+        continue;
+      }
+
+      const externalKey = this.guestBonusExternalKey(
+        guest.externalDomain,
+        guest.externalGuestId,
       );
-      metrics.bonusSnapshotAt = currentBalance.snapshotDate;
+
+      if (externalKey && !externalGuestMap.has(externalKey)) {
+        externalGuestMap.set(externalKey, guest.id);
+      }
+    }
+
+    const externalBalanceFilters = guests
+      .filter((guest) => !resolvedGuestIds.has(guest.id))
+      .filter((guest) => Boolean(guest.externalGuestId))
+      .map((guest) => ({
+        externalDomain: guest.externalDomain,
+        externalGuestId: guest.externalGuestId,
+      }));
+
+    for (const externalBalanceFilterBatch of this.chunk(
+      externalBalanceFilters,
+      500,
+    )) {
+      const externalBalances =
+        await this.prisma.guestBonusBalanceCurrent.findMany({
+          where: {
+            tenantId,
+            OR: externalBalanceFilterBatch,
+          },
+          select: {
+            externalDomain: true,
+            externalGuestId: true,
+            snapshotDate: true,
+            bonusBalance: true,
+          },
+        });
+
+      for (const externalBalance of externalBalances) {
+        const externalKey = this.guestBonusExternalKey(
+          externalBalance.externalDomain,
+          externalBalance.externalGuestId,
+        );
+        const guestId = externalKey ? externalGuestMap.get(externalKey) : null;
+
+        if (!guestId || resolvedGuestIds.has(guestId)) {
+          continue;
+        }
+
+        applyBalance(
+          guestId,
+          externalBalance.bonusBalance,
+          externalBalance.snapshotDate,
+        );
+      }
     }
 
     const fallbackGuestIds = guestIds.filter(
-      (guestId) => !currentGuestIds.has(guestId),
+      (guestId) => !resolvedGuestIds.has(guestId),
     );
-    if (fallbackGuestIds.length === 0) {
-      return;
-    }
 
     const snapshots: Array<{
       guestId: string | null;
@@ -3502,12 +3581,101 @@ export class GuestsService {
         continue;
       }
 
-      const metrics = this.ensureMetrics(metricsByGuestId, snapshot.guestId);
-      metrics.bonusBalance = Math.max(
-        0,
-        this.decimalToNumber(snapshot.bonusBalance) ?? 0,
+      applyBalance(
+        snapshot.guestId,
+        snapshot.bonusBalance,
+        snapshot.snapshotDate,
       );
-      metrics.bonusSnapshotAt = snapshot.snapshotDate;
+    }
+
+    const remainingExternalFilters = guests
+      .filter((guest) => !resolvedGuestIds.has(guest.id))
+      .filter((guest) => Boolean(guest.externalGuestId))
+      .map((guest) => ({
+        externalDomain: guest.externalDomain,
+        externalGuestId: guest.externalGuestId,
+      }));
+
+    for (const externalSnapshotFilterBatch of this.chunk(
+      remainingExternalFilters,
+      500,
+    )) {
+      const externalSnapshots =
+        await this.prisma.guestBonusBalanceSnapshot.findMany({
+          where: {
+            tenantId,
+            OR: externalSnapshotFilterBatch,
+          },
+          orderBy: { snapshotDate: 'desc' },
+          select: {
+            externalDomain: true,
+            externalGuestId: true,
+            snapshotDate: true,
+            bonusBalance: true,
+          },
+        });
+
+      for (const externalSnapshot of externalSnapshots) {
+        const externalKey = this.guestBonusExternalKey(
+          externalSnapshot.externalDomain,
+          externalSnapshot.externalGuestId,
+        );
+        const guestId = externalKey ? externalGuestMap.get(externalKey) : null;
+
+        if (!guestId || resolvedGuestIds.has(guestId)) {
+          continue;
+        }
+
+        applyBalance(
+          guestId,
+          externalSnapshot.bonusBalance,
+          externalSnapshot.snapshotDate,
+        );
+      }
+    }
+  }
+
+  private guestBonusExternalKey(
+    externalDomain: string | null,
+    externalGuestId: string | null,
+  ) {
+    if (!externalGuestId) {
+      return null;
+    }
+
+    return `${externalDomain ?? ''}:${externalGuestId}`;
+  }
+
+  private minimumPeriodFromDate(toDate: Date, months: number) {
+    const minimumFromDate = new Date(
+      Date.UTC(
+        toDate.getUTCFullYear(),
+        toDate.getUTCMonth(),
+        toDate.getUTCDate(),
+      ),
+    );
+    minimumFromDate.setUTCMonth(minimumFromDate.getUTCMonth() - months);
+    minimumFromDate.setUTCHours(0, 0, 0, 0);
+
+    return minimumFromDate;
+  }
+
+  private resolveMinimumPeriod(
+    fromDate: Date,
+    toDate: Date,
+    options: ResolvePeriodOptions,
+  ) {
+    if (!options.minimumPeriodMonths || options.minimumPeriodMonths <= 0) {
+      return;
+    }
+
+    const minimumFromDate = this.minimumPeriodFromDate(
+      toDate,
+      options.minimumPeriodMonths,
+    );
+
+    if (fromDate > minimumFromDate) {
+      fromDate.setTime(minimumFromDate.getTime());
     }
   }
 
@@ -7072,7 +7240,10 @@ export class GuestsService {
     return this.parseDateInput(trimmed, 'nextContactAt');
   }
 
-  private resolvePeriod(query: GuestsSummaryQuery): Period {
+  private resolvePeriod(
+    query: GuestsSummaryQuery,
+    options: ResolvePeriodOptions = {},
+  ): Period {
     const now = new Date();
     const defaultTo = new Date(
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
@@ -7090,6 +7261,8 @@ export class GuestsService {
 
     fromDate.setUTCHours(0, 0, 0, 0);
     toDate.setUTCHours(23, 59, 59, 999);
+
+    this.resolveMinimumPeriod(fromDate, toDate, options);
 
     if (fromDate > toDate) {
       throw new BadRequestException('dateFrom must be before dateTo');

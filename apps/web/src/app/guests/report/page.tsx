@@ -326,8 +326,8 @@ export default async function GuestFullReportPage({
   ]);
   const effectiveFilters: GuestListFilters = {
     ...filters,
-    dateFrom: filters.dateFrom ?? guestList.periodFrom,
-    dateTo: filters.dateTo ?? guestList.periodTo,
+    dateFrom: guestList.periodFrom,
+    dateTo: guestList.periodTo,
     pageSize: filters.pageSize ?? String(guestList.pageSize),
     segment: filters.segment ?? guestList.segment,
     sort: filters.sort ?? guestList.sort,
@@ -362,7 +362,7 @@ export default async function GuestFullReportPage({
           </div>
           <div className="flex flex-wrap gap-2">
             <Link
-              href={reportHref(filters)}
+              href={reportHref(effectiveFilters)}
               target="_blank"
               rel="noopener noreferrer"
               className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
@@ -370,7 +370,7 @@ export default async function GuestFullReportPage({
               Открыть отдельно
             </Link>
             <Link
-              href={exportHref(filters)}
+              href={exportHref(effectiveFilters)}
               target="_blank"
               rel="noopener noreferrer"
               className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200 dark:hover:bg-emerald-900/50"
@@ -378,13 +378,13 @@ export default async function GuestFullReportPage({
               CSV
             </Link>
             <Link
-              href={reportHref({ ...filters, page: "1" })}
+              href={reportHref({ ...effectiveFilters, page: "1" })}
               className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
             >
               Обновить
             </Link>
             <Link
-              href={dashboardHref(filters)}
+              href={dashboardHref(effectiveFilters)}
               className="rounded-md bg-zinc-950 px-3 py-2 text-sm font-semibold text-white hover:bg-zinc-800 dark:bg-emerald-400 dark:text-zinc-950 dark:hover:bg-emerald-300"
             >
               Вернуться в дашборд
@@ -393,7 +393,7 @@ export default async function GuestFullReportPage({
         </header>
 
         <ReportFilters
-          filters={filters}
+          filters={effectiveFilters}
           options={options}
           periodFrom={guestList.periodFrom}
           periodTo={guestList.periodTo}
@@ -414,7 +414,7 @@ export default async function GuestFullReportPage({
           crmContactEvents={crmContactEvents}
         />
 
-        <ReportTable filters={filters} guestList={guestList} />
+        <ReportTable filters={effectiveFilters} guestList={guestList} />
       </div>
     </main>
   );

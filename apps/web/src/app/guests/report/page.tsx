@@ -112,6 +112,22 @@ function segmentLabel(segment: GuestDashboardRow["segment"] | "top") {
   return labels[segment];
 }
 
+function segmentTone(segment: GuestDashboardRow["segment"]) {
+  if (segment === "active" || segment === "new" || segment === "repeat") {
+    return "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300";
+  }
+
+  if (segment === "risk") {
+    return "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300";
+  }
+
+  if (segment === "lost") {
+    return "bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300";
+  }
+
+  return "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300";
+}
+
 function crmStatusLabel(status: GuestCrmStatus) {
   const labels: Record<GuestCrmStatus, string> = {
     NONE: "Без статуса",
@@ -138,22 +154,6 @@ function rfmSegmentLabel(segment: GuestRfmSegment) {
   };
 
   return labels[segment];
-}
-
-function rfmSegmentTone(segment: GuestRfmSegment) {
-  if (segment === "CHAMPION" || segment === "LOYAL") {
-    return "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300";
-  }
-
-  if (segment === "PROMISING") {
-    return "bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300";
-  }
-
-  if (segment === "AT_RISK" || segment === "LOST") {
-    return "bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300";
-  }
-
-  return "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300";
 }
 
 function churnRiskLabel(level: GuestChurnRiskLevel) {
@@ -275,6 +275,16 @@ function activityLabel(row: GuestDashboardRow) {
   return parts.join(" · ");
 }
 
+function recentActivityLabel(row: GuestDashboardRow) {
+  const parts = [
+    `${formatNumber(row.recentSessionsCount)} сесс.`,
+    `${formatNumber(row.recentVisitsDays)} дн.`,
+    `${formatNumber(row.recentPlayHours, 1)} ч`,
+  ];
+
+  return parts.join(" · ");
+}
+
 export default async function GuestFullReportPage({
   searchParams,
 }: {
@@ -361,6 +371,8 @@ export default async function GuestFullReportPage({
             </Link>
             <Link
               href={exportHref(filters)}
+              target="_blank"
+              rel="noopener noreferrer"
               className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200 dark:hover:bg-emerald-900/50"
             >
               CSV
@@ -589,9 +601,8 @@ function ReportTable({
             Страница {formatNumber(guestList.page)} из{" "}
             {formatNumber(guestList.totalPages)}, показано{" "}
             {formatNumber(guestList.rows.length)} из{" "}
-            {formatNumber(guestList.totalRows)} гостей. Частота визитов показывает
-            сессии, уникальные дни, игровые часы за выбранный период и дату
-            последней активности.
+            {formatNumber(guestList.totalRows)} гостей. На экране оставлены
+            ключевые сигналы; полный набор полей доступен в CSV.
           </p>
         </div>
         <div className="text-sm text-zinc-500">
@@ -601,7 +612,7 @@ function ReportTable({
       </div>
       {guestList.rows.length > 0 ? (
         <div className="overflow-x-auto">
-          <table className="min-w-[1180px] divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
+          <table className="min-w-[1080px] divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
             <thead className="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-900/60">
               <tr>
                 <th className="px-4 py-3 text-left font-semibold">Гость</th>
@@ -609,20 +620,17 @@ function ReportTable({
                   Основной клуб
                 </th>
                 <th className="px-4 py-3 text-left font-semibold">
-                  Частота визитов
+                  Активность
                 </th>
                 <th className="px-4 py-3 text-left font-semibold">
-                  Сегмент / CRM
-                </th>
-                <th className="px-4 py-3 text-left font-semibold">
-                  Риск оттока
-                </th>
-                <th className="px-4 py-3 text-right font-semibold">
                   Деньги / LTV
+                </th>
+                <th className="px-4 py-3 text-left font-semibold">
+                  Риск
                 </th>
                 <th className="px-4 py-3 text-right font-semibold">Бонусы</th>
                 <th className="px-4 py-3 text-left font-semibold">
-                  Следующий шаг
+                  CRM / действие
                 </th>
               </tr>
             </thead>
@@ -647,6 +655,13 @@ function ReportTable({
                     <p className="mt-1 max-w-56 truncate text-xs text-zinc-500">
                       {row.contact}
                     </p>
+                    <span
+                      className={`mt-2 inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${segmentTone(
+                        row.segment,
+                      )}`}
+                    >
+                      {segmentLabel(row.segment)}
+                    </span>
                   </td>
                   <td className="px-4 py-3">
                     <p className="font-medium text-zinc-800 dark:text-zinc-100">
@@ -660,28 +675,41 @@ function ReportTable({
                     </p>
                   </td>
                   <td className="px-4 py-3">
-                    <p className="font-semibold tabular-nums">
+                    <p className="font-semibold tabular-nums text-zinc-950 dark:text-zinc-50">
                       {activityLabel(row)}
+                    </p>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      за выбранный период
+                    </p>
+                    <p className="mt-2 text-xs font-medium text-zinc-600 dark:text-zinc-300">
+                      история: {recentActivityLabel(row)}
                     </p>
                     <p className="mt-1 text-xs text-zinc-500">
                       последний визит: {formatDate(row.lastActivityAt)}
                     </p>
-                    <p className="mt-1 text-xs text-zinc-500">
-                      зарегистрирован: {formatDate(row.insertedAt)}
-                    </p>
+                    {row.churnRisk.expectedIntervalDays !== null ? (
+                      <p className="mt-1 text-xs text-zinc-500">
+                        обычный интервал: {row.churnRisk.expectedIntervalDays} дн.
+                      </p>
+                    ) : null}
                   </td>
-                  <td className="px-4 py-3">
-                    <p className="font-medium">{segmentLabel(row.segment)}</p>
-                    <p className="mt-1 text-xs text-zinc-500">
-                      CRM: {crmStatusLabel(row.crmStatus)}
+                  <td className="px-4 py-3 tabular-nums">
+                    <p className="font-semibold text-zinc-950 dark:text-zinc-50">
+                      {formatRubles(row.transactionAmount + row.barRevenue)}
                     </p>
-                    <span
-                      className={`mt-2 inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${rfmSegmentTone(
-                        row.rfm.segment,
-                      )}`}
-                    >
-                      RFM {row.rfm.totalScore}/15 · {rfmSegmentLabel(row.rfm.segment)}
-                    </span>
+                    <p className="text-xs text-zinc-500">
+                      за период, бар {formatRubles(row.barRevenue)}
+                    </p>
+                    <p className="mt-2 text-xs font-medium text-zinc-700 dark:text-zinc-200">
+                      {row.ltv.revenueDays > 0
+                        ? `LTV ${formatRubles(row.ltv.totalRevenue)}`
+                        : "LTV: нет связанной выручки"}
+                    </p>
+                    <p className="text-xs text-zinc-500">
+                      {row.ltv.revenueDays > 0
+                        ? `${formatNumber(row.ltv.revenueDays)} дн. с выручкой`
+                        : "проверьте связку гостя с операциями"}
+                    </p>
                   </td>
                   <td className="px-4 py-3">
                     <span
@@ -692,7 +720,7 @@ function ReportTable({
                       {churnRiskLabel(row.churnRisk.level)} ·{" "}
                       {row.churnRisk.score}/100
                     </span>
-                    <p className="mt-1 max-w-48 text-xs text-zinc-500">
+                    <p className="mt-2 max-w-52 text-xs text-zinc-500">
                       {row.churnRisk.reason}
                     </p>
                     {row.churnRisk.valueAtRisk > 0 ? (
@@ -700,16 +728,8 @@ function ReportTable({
                         в риске {formatRubles(row.churnRisk.valueAtRisk)}
                       </p>
                     ) : null}
-                  </td>
-                  <td className="px-4 py-3 text-right tabular-nums">
-                    <p className="font-semibold">
-                      {formatRubles(row.transactionAmount + row.barRevenue)}
-                    </p>
-                    <p className="text-xs text-zinc-500">
-                      LTV {formatRubles(row.ltv.totalRevenue)}
-                    </p>
-                    <p className="text-xs text-zinc-500">
-                      бар {formatRubles(row.barRevenue)}
+                    <p className="mt-1 text-xs text-zinc-500">
+                      RFM {row.rfm.totalScore}/15 · {rfmSegmentLabel(row.rfm.segment)}
                     </p>
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums">
@@ -728,15 +748,26 @@ function ReportTable({
                         {formatNumber(row.bonusLoad.balanceToLtvPercent, 1)}% от LTV
                       </p>
                     ) : null}
+                    <p className="mt-1 text-xs text-zinc-500">
+                      {row.bonusLoad.latestSnapshotAt
+                        ? `снимок ${formatDate(row.bonusLoad.latestSnapshotAt)}`
+                        : "снимок бонусов не найден"}
+                    </p>
                   </td>
                   <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">
                     <p className="max-w-64 font-medium text-zinc-800 dark:text-zinc-100">
                       {nextActionLabel(row)}
                     </p>
                     <p className="mt-1 text-xs text-zinc-500">
+                      CRM: {crmStatusLabel(row.crmStatus)}
+                    </p>
+                    <p className="mt-1 text-xs text-zinc-500">
                       {row.nextContactAt
                         ? formatDateTime(row.nextContactAt)
                         : "без даты контакта"}
+                    </p>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      зарегистрирован: {formatDate(row.insertedAt)}
                     </p>
                   </td>
                 </tr>

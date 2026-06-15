@@ -180,14 +180,24 @@ export default async function GuestsPage({
             </p>
           </div>
           <div className="flex flex-col gap-3 lg:items-end">
-            <Link
-              href={guestsReportHref(filters)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex h-10 items-center justify-center rounded-full border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
-            >
-              Полный отчет
-            </Link>
+            <div className="flex flex-wrap gap-2">
+              <Link
+                href={guestsReportHref(filters)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex h-10 items-center justify-center rounded-full border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+              >
+                Полный отчет
+              </Link>
+              <Link
+                href={guestsExportHref(filters)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex h-10 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 px-4 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15"
+              >
+                CSV
+              </Link>
+            </div>
             <div className="rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
               <p className="text-zinc-500">Гостей в выборке</p>
               <p className="mt-1 text-2xl font-semibold tabular-nums">
@@ -283,8 +293,16 @@ export default async function GuestsPage({
         </section>
 
         <section className="mt-6 grid gap-6 xl:grid-cols-2">
-          <GuestMiniTable title="TOP гостей" rows={summary.topGuests} />
-          <GuestMiniTable title="Гости в риске" rows={summary.riskGuestsRows} />
+          <GuestMiniTable
+            title="TOP гостей"
+            rows={summary.topGuests}
+            reportFilters={{ ...summaryToFilters(summary), segment: "top" }}
+          />
+          <GuestMiniTable
+            title="Гости в риске"
+            rows={summary.riskGuestsRows}
+            reportFilters={{ ...summaryToFilters(summary), segment: "risk" }}
+          />
         </section>
 
         <GuestListTable filters={filters} guestList={guestList} />
@@ -1001,14 +1019,36 @@ function QualityMetric({ label, value }: { label: string; value: number }) {
 function GuestMiniTable({
   title,
   rows,
+  reportFilters,
 }: {
   title: string;
   rows: GuestDashboardRow[];
+  reportFilters?: GuestListFilters;
 }) {
   return (
     <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
+      <div className="flex flex-col gap-3 border-b border-zinc-200 px-5 py-4 dark:border-zinc-800 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-base font-semibold">{title}</h2>
+        {reportFilters ? (
+          <div className="flex flex-wrap gap-2 text-xs font-semibold">
+            <Link
+              href={guestsReportHref(reportFilters)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-full border border-zinc-300 px-3 py-1.5 text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+            >
+              Открыть
+            </Link>
+            <Link
+              href={guestsExportHref(reportFilters)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-emerald-800 transition hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15"
+            >
+              CSV
+            </Link>
+          </div>
+        ) : null}
       </div>
       {rows.length > 0 ? (
         <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
@@ -1078,13 +1118,33 @@ function GuestListTable({
             {formatNumber(guestList.totalPages)}
           </p>
         </div>
-        <div className="flex flex-wrap gap-2 text-xs font-medium">
-          <SortLink filters={filters} sort="revenue" label="Деньги" />
-          <SortLink filters={filters} sort="ltv" label="LTV" />
-          <SortLink filters={filters} sort="bonusLoad" label="Бонусы" />
-          <SortLink filters={filters} sort="sessions" label="Сессии" />
-          <SortLink filters={filters} sort="lastActivity" label="Активность" />
-          <SortLink filters={filters} sort="registered" label="Регистрация" />
+        <div className="flex flex-col gap-2 lg:items-end">
+          <div className="flex flex-wrap gap-2 text-xs font-medium">
+            <SortLink filters={filters} sort="revenue" label="Деньги" />
+            <SortLink filters={filters} sort="ltv" label="LTV" />
+            <SortLink filters={filters} sort="bonusLoad" label="Бонусы" />
+            <SortLink filters={filters} sort="sessions" label="Сессии" />
+            <SortLink filters={filters} sort="lastActivity" label="Активность" />
+            <SortLink filters={filters} sort="registered" label="Регистрация" />
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs font-semibold">
+            <Link
+              href={guestsReportHref(filters)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-full border border-zinc-300 px-3 py-1.5 text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+            >
+              Открыть отчет
+            </Link>
+            <Link
+              href={guestsExportHref(filters)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-emerald-800 transition hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/15"
+            >
+              CSV
+            </Link>
+          </div>
         </div>
       </div>
       {guestList.rows.length > 0 ? (
@@ -1276,6 +1336,14 @@ function guestsReportHref(filters: GuestListFilters) {
     page: "1",
     pageSize: "200",
   });
+}
+
+function guestsExportHref(filters: GuestListFilters) {
+  const exportFilters = { ...filters };
+  delete exportFilters.page;
+  delete exportFilters.pageSize;
+
+  return guestsPathHref("/api/guests/export", exportFilters);
 }
 
 function guestsPathHref(pathname: string, filters: GuestListFilters) {

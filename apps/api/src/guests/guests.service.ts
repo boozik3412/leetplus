@@ -200,6 +200,9 @@ export type GuestDashboardRow = {
   sessionsCount: number;
   visitsDays: number;
   playHours: number;
+  recentSessionsCount: number;
+  recentVisitsDays: number;
+  recentPlayHours: number;
   currentCountHours: number | null;
   transactionAmount: number;
   barRevenue: number;
@@ -882,6 +885,9 @@ type GuestMetrics = {
   sessionsCount: number;
   visitsDays: Set<string>;
   playMinutes: number;
+  recentSessionsCount: number;
+  recentVisitsDays: Set<string>;
+  recentPlayMinutes: number;
   storeVisits: Map<string, { name: string | null; visits: number }>;
   transactionsCount: number;
   transactionAmount: number;
@@ -1148,6 +1154,9 @@ export class GuestsService {
         'Сессии',
         'Дни визитов',
         'Часы',
+        'Сессии в истории',
+        'Дни визитов в истории',
+        'Часы в истории',
         'LTV факт, руб',
         'LTV операции, руб',
         'LTV бар, руб',
@@ -1188,6 +1197,9 @@ export class GuestsService {
         row.sessionsCount,
         row.visitsDays,
         row.playHours,
+        row.recentSessionsCount,
+        row.recentVisitsDays,
+        row.recentPlayHours,
         row.ltv.totalRevenue,
         row.ltv.transactionRevenue,
         row.ltv.barRevenue,
@@ -3293,16 +3305,46 @@ export class GuestsService {
             );
       this.addStoreVisit(metrics, storeRef?.id ?? null, storeRef?.name ?? null);
 
-      if (
-        this.sessionOverlapsPeriod(
+      const overlapsRecentActivityWindow = this.sessionOverlapsPeriod(
+        session.startedAt,
+        session.stoppedAt,
+        session.durationMinutes,
+        period.activityFromDate,
+        period.toDate,
+        now,
+      );
+
+      if (overlapsRecentActivityWindow) {
+        metrics.recentSessionsCount += 1;
+        this.addOverlapVisitDays(
+          metrics.recentVisitsDays,
           session.startedAt,
           session.stoppedAt,
           session.durationMinutes,
-          period.fromDate,
+          period.activityFromDate,
           period.toDate,
           now,
-        )
-      ) {
+        );
+        metrics.recentPlayMinutes += this.sessionOverlapMinutes(
+          session.startedAt,
+          session.stoppedAt,
+          session.durationMinutes,
+          period.activityFromDate,
+          period.toDate,
+          now,
+        );
+      }
+
+      const overlapsSelectedPeriod = this.sessionOverlapsPeriod(
+        session.startedAt,
+        session.stoppedAt,
+        session.durationMinutes,
+        period.fromDate,
+        period.toDate,
+        now,
+      );
+
+      if (overlapsSelectedPeriod) {
         metrics.sessionsCount += 1;
         this.addOverlapVisitDays(
           metrics.visitsDays,
@@ -5846,6 +5888,9 @@ export class GuestsService {
       sessionsCount: metrics?.sessionsCount ?? 0,
       visitsDays: metrics?.visitsDays.size ?? 0,
       playHours: this.round((metrics?.playMinutes ?? 0) / 60, 1),
+      recentSessionsCount: metrics?.recentSessionsCount ?? 0,
+      recentVisitsDays: metrics?.recentVisitsDays.size ?? 0,
+      recentPlayHours: this.round((metrics?.recentPlayMinutes ?? 0) / 60, 1),
       currentCountHours: this.decimalToNumber(guest.currentCountHours),
       transactionAmount,
       barRevenue,
@@ -7335,6 +7380,9 @@ export class GuestsService {
       sessionsCount: 0,
       visitsDays: new Set<string>(),
       playMinutes: 0,
+      recentSessionsCount: 0,
+      recentVisitsDays: new Set<string>(),
+      recentPlayMinutes: 0,
       storeVisits: new Map<string, { name: string | null; visits: number }>(),
       transactionsCount: 0,
       transactionAmount: 0,

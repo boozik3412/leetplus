@@ -39,6 +39,9 @@ export type GuestDashboardRow = {
   sessionsCount: number;
   visitsDays: number;
   playHours: number;
+  recentSessionsCount: number;
+  recentVisitsDays: number;
+  recentPlayHours: number;
   currentCountHours: number | null;
   transactionAmount: number;
   barRevenue: number;

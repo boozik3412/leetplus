@@ -80,6 +80,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added a Guest Game Hub current-balance reconciliation panel: `/guests/gamification` now compares `GuestBonusBalanceCurrent` with the latest saved `GuestBonusBalanceSnapshot` by `guestId` or external Langame id, highlights matched/mismatched/waiting/no-snapshot states after ledger accruals, and still avoids live Langame reads or raw phone/payload exposure.
 - Added operator controls for the Guest Game Hub bonus ledger: `/guests/gamification` can queue approved bonus rewards, run a safe dry-run dispatch, and launch the protected backend dispatch path while showing checked/queued/confirmed/failed/skipped/blocked results without exposing raw phone numbers, tokens, or full Langame payloads.
 - Added a bonus ledger audit panel to Guest Game Hub: `/guests/gamification` now shows recent gamification accrual ledger entries, retry/error state, masked guest/contact context, and reconciliation between confirmed ledger `balanceAfter` and the next saved Langame bonus-balance snapshot, without exposing raw phone numbers, tokens, or full Langame payloads.
 - Added a pilot readiness checklist to Guest Game Hub: `/guests/gamification` now selects 1337 as the preferred pilot club, scores readiness from `/play` registration through OTP, game profile, Langame link, active rules, test event, reward queue, bonus ledger, and post-accrual balance reconciliation, and shows the next action without live Langame reads or PII exposure.

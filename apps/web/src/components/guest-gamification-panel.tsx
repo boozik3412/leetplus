@@ -2490,6 +2490,9 @@ function OverviewTab({
         onDispatchBonusLedger={onDispatchBonusLedger}
         result={bonusLedgerResult}
       />
+      <BonusBalanceCurrentReconciliationCard
+        reconciliation={workspace.bonusBalanceCurrentReconciliation}
+      />
       <CommunicationQueueCard
         queue={workspace.communicationQueue}
         outbox={workspace.deliveryOutbox}
@@ -3039,6 +3042,163 @@ function BonusLedgerAuditCard({
 
       <p className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
         {audit.note}
+      </p>
+    </section>
+  );
+}
+
+function BonusBalanceCurrentReconciliationCard({
+  reconciliation,
+}: {
+  reconciliation: GuestGamificationWorkspace["bonusBalanceCurrentReconciliation"];
+}) {
+  const statePriority = {
+    MISMATCH: 0,
+    WAITING_SYNC: 1,
+    NO_SNAPSHOT: 2,
+    MATCHED: 3,
+  } satisfies Record<
+    GuestGamificationWorkspace["bonusBalanceCurrentReconciliation"]["items"][number]["state"],
+    number
+  >;
+  const visibleItems = [...reconciliation.items]
+    .sort((left, right) => statePriority[left.state] - statePriority[right.state])
+    .slice(0, 8);
+  const nextIssue =
+    visibleItems.find((item) => item.state === "MISMATCH") ??
+    visibleItems.find((item) => item.state === "WAITING_SYNC") ??
+    visibleItems.find((item) => item.state === "NO_SNAPSHOT") ??
+    null;
+
+  return (
+    <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-cyan-600 dark:text-cyan-300">
+            Bonus balance
+          </p>
+          <h2 className="mt-1 text-lg font-bold text-zinc-950 dark:text-white">
+            Сверка текущего бонусного баланса
+          </h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+            Контроль показывает, подтвердил ли ночной Langame snapshot текущий
+            бонусный баланс после ledger-начислений. Страница не делает
+            live-запросы и не раскрывает raw phone или payload.
+          </p>
+        </div>
+        <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
+          {reconciliation.summary.latestCurrentAt
+            ? `Current: ${formatDate(reconciliation.summary.latestCurrentAt)}`
+            : "Текущих bonus balance записей пока нет"}
+          {reconciliation.summary.latestSnapshotAt
+            ? ` · Snapshot: ${formatDate(
+                reconciliation.summary.latestSnapshotAt,
+              )}`
+            : ""}
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-2 text-center text-xs sm:grid-cols-2 xl:grid-cols-6">
+        <MiniMetric
+          label="current"
+          value={formatMoney(reconciliation.summary.amountCurrent)}
+        />
+        <MiniMetric
+          label="snapshot"
+          value={formatMoney(reconciliation.summary.amountSnapshot)}
+        />
+        <MiniMetric
+          label="diff"
+          value={formatMoney(reconciliation.summary.diffTotal)}
+        />
+        <MiniMetric label="сошлось" value={reconciliation.summary.matched} />
+        <MiniMetric
+          label="ждет / нет"
+          value={`${reconciliation.summary.waitingSync}/${reconciliation.summary.noSnapshot}`}
+        />
+        <MiniMetric
+          label="расхождения"
+          value={reconciliation.summary.mismatched}
+        />
+      </div>
+
+      {nextIssue ? (
+        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-100">
+          <span className="font-bold">Контрольный сигнал:</span>{" "}
+          {nextIssue.note}
+        </div>
+      ) : null}
+
+      <div className="mt-4 space-y-2">
+        {visibleItems.length ? (
+          visibleItems.map((item) => (
+            <article
+              key={item.id}
+              className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60"
+            >
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span
+                      className={[
+                        "rounded-full px-2 py-1 text-[11px] font-bold uppercase",
+                        bonusBalanceCurrentReconciliationClass(item.state),
+                      ].join(" ")}
+                    >
+                      {item.stateLabel}
+                    </span>
+                    <span className="rounded-full bg-zinc-200 px-2 py-1 text-[11px] font-bold uppercase text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
+                      {item.source}
+                    </span>
+                  </div>
+                  <h3 className="mt-2 truncate text-sm font-bold text-zinc-950 dark:text-white">
+                    {item.guest.displayName}
+                  </h3>
+                  <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                    {item.guest.contact ?? "контакт скрыт"}
+                    {item.externalDomain ? ` · ${item.externalDomain}` : ""}
+                    {item.externalGuestId ? ` · ${item.externalGuestId}` : ""}
+                  </p>
+                </div>
+                <div className="grid gap-2 text-xs sm:grid-cols-2 lg:min-w-[520px] lg:grid-cols-4">
+                  <MiniMetric
+                    label="current"
+                    value={formatMoney(item.currentBalance)}
+                  />
+                  <MiniMetric
+                    label="snapshot"
+                    value={
+                      item.latestSnapshotBalance === null
+                        ? "нет"
+                        : formatMoney(item.latestSnapshotBalance)
+                    }
+                  />
+                  <MiniMetric
+                    label="diff"
+                    value={item.diff === null ? "нет" : formatMoney(item.diff)}
+                  />
+                  <MiniMetric
+                    label="updated"
+                    value={formatDate(item.currentSnapshotAt)}
+                  />
+                </div>
+              </div>
+
+              <p className="mt-3 rounded-lg bg-white px-3 py-2 text-xs leading-5 text-zinc-600 ring-1 ring-zinc-200 dark:bg-zinc-950 dark:text-zinc-300 dark:ring-zinc-800">
+                {item.note}
+                {item.latestSnapshotAt
+                  ? ` Последний snapshot: ${formatDate(item.latestSnapshotAt)}.`
+                  : ""}
+              </p>
+            </article>
+          ))
+        ) : (
+          <EmptyState text="Текущих bonus balance записей пока нет: блок наполнится после guest foundation sync или первого ledger-начисления." />
+        )}
+      </div>
+
+      <p className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
+        {reconciliation.note}
       </p>
     </section>
   );
@@ -7988,6 +8148,21 @@ function bonusLedgerReconciliationClass(
     case "NOT_APPLICABLE":
     default:
       return "bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200";
+  }
+}
+
+function bonusBalanceCurrentReconciliationClass(
+  state: GuestGamificationWorkspace["bonusBalanceCurrentReconciliation"]["items"][number]["state"],
+) {
+  switch (state) {
+    case "MATCHED":
+      return "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200";
+    case "WAITING_SYNC":
+    case "NO_SNAPSHOT":
+      return "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200";
+    case "MISMATCH":
+    default:
+      return "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200";
   }
 }
 

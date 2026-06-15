@@ -48,6 +48,12 @@ function createPrismaMock() {
       findMany: jest.fn(),
       update: jest.fn(),
     },
+    guestBonusBalanceCurrent: {
+      findMany: jest.fn(),
+    },
+    guestBonusBalanceSnapshot: {
+      findMany: jest.fn(),
+    },
   } as any;
 }
 
@@ -395,6 +401,43 @@ function rewardRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function bonusBalanceCurrentRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'current-1',
+    guestId: 'guest-1',
+    externalProvider: IntegrationProvider.LANGAME,
+    externalDomain: 'club-1',
+    externalGuestId: 'lg-guest-1',
+    bonusBalance: new Prisma.Decimal(150),
+    snapshotDate: now,
+    source: 'LANGAME_LEDGER',
+    lastSyncedAt: now,
+    updatedAt: now,
+    guest: {
+      id: 'guest-1',
+      externalDomain: 'club-1',
+      externalGuestId: 'lg-guest-1',
+      fullNameMasked: 'Guest One',
+      phoneMasked: '+7 *** **-11',
+      emailMasked: null,
+    },
+    ...overrides,
+  };
+}
+
+function bonusBalanceSnapshotRow(overrides: Record<string, unknown> = {}) {
+  return {
+    guestId: 'guest-1',
+    externalProvider: IntegrationProvider.LANGAME,
+    externalDomain: 'club-1',
+    externalGuestId: 'lg-guest-1',
+    snapshotDate: now,
+    bonusBalance: new Prisma.Decimal(150),
+    sourcePayloadHash: 'hash-1',
+    ...overrides,
+  };
+}
+
 describe('GuestGamificationService', () => {
   afterEach(() => {
     jest.restoreAllMocks();
@@ -655,6 +698,77 @@ describe('GuestGamificationService', () => {
         service.redeemReward(user, { rewardCode: 'LP-100' }),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(prisma.guestGameReward.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getBonusBalanceCurrentReconciliation', () => {
+    it('keeps ledger-updated current balance waiting until a fresh Langame snapshot arrives', async () => {
+      const { service, prisma } = createService();
+
+      prisma.guestBonusBalanceCurrent.findMany.mockResolvedValue([
+        bonusBalanceCurrentRow({
+          bonusBalance: new Prisma.Decimal(150),
+          source: 'LANGAME_LEDGER',
+          snapshotDate: new Date('2026-06-10T10:00:00.000Z'),
+        }),
+      ]);
+      prisma.guestBonusBalanceSnapshot.findMany.mockResolvedValue([
+        bonusBalanceSnapshotRow({
+          bonusBalance: new Prisma.Decimal(100),
+          snapshotDate: new Date('2026-06-10T00:00:00.000Z'),
+        }),
+      ]);
+
+      const result = await (
+        service as any
+      ).getBonusBalanceCurrentReconciliation(user);
+
+      expect(result.summary).toMatchObject({
+        totalCurrent: 1,
+        waitingSync: 1,
+        mismatched: 0,
+        ledgerBacked: 1,
+      });
+      expect(result.items[0]).toMatchObject({
+        state: 'WAITING_SYNC',
+        latestSnapshotBalance: 100,
+        currentBalance: 150,
+        diff: -50,
+      });
+    });
+
+    it('marks a fresh snapshot mismatch for manual verification', async () => {
+      const { service, prisma } = createService();
+
+      prisma.guestBonusBalanceCurrent.findMany.mockResolvedValue([
+        bonusBalanceCurrentRow({
+          bonusBalance: new Prisma.Decimal(150),
+          snapshotDate: new Date('2026-06-10T10:00:00.000Z'),
+        }),
+      ]);
+      prisma.guestBonusBalanceSnapshot.findMany.mockResolvedValue([
+        bonusBalanceSnapshotRow({
+          bonusBalance: new Prisma.Decimal(125),
+          snapshotDate: new Date('2026-06-10T11:00:00.000Z'),
+        }),
+      ]);
+
+      const result = await (
+        service as any
+      ).getBonusBalanceCurrentReconciliation(user);
+
+      expect(result.summary).toMatchObject({
+        totalCurrent: 1,
+        waitingSync: 0,
+        mismatched: 1,
+        diffTotal: -25,
+      });
+      expect(result.items[0]).toMatchObject({
+        state: 'MISMATCH',
+        latestSnapshotBalance: 125,
+        currentBalance: 150,
+        diff: -25,
+      });
     });
   });
 

@@ -225,6 +225,24 @@ const emptyWorkspace: GuestGamificationWorkspace = {
     items: [],
     note: "Журнал bonus ledger появится после ответа API workspace.",
   },
+  bonusBalanceCurrentReconciliation: {
+    summary: {
+      totalCurrent: 0,
+      matched: 0,
+      mismatched: 0,
+      waitingSync: 0,
+      noSnapshot: 0,
+      ledgerBacked: 0,
+      snapshotBacked: 0,
+      amountCurrent: 0,
+      amountSnapshot: 0,
+      diffTotal: 0,
+      latestCurrentAt: null,
+      latestSnapshotAt: null,
+    },
+    items: [],
+    note: "Сверка текущего бонусного баланса появится после ответа API workspace.",
+  },
   communicationQueue: {
     summary: {
       total: 0,

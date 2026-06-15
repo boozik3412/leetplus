@@ -1,5 +1,7 @@
 # LeetPlus Бэклог
 
+- Готово: Guest Game Hub получил read-only сверку текущего бонусного баланса после ledger-начислений. `/guests/gamification` сравнивает `GuestBonusBalanceCurrent` с последним `GuestBonusBalanceSnapshot` по `guestId` или внешнему Langame-id, показывает агрегаты current/snapshot/diff и статусы `сошлось / расхождение / ждет sync / нет snapshot` без live-запросов в Langame, raw phone, токенов и полного payload.
+
 - Готово: Guest Game Hub получил управление bonus ledger без ручных API-вызовов. На `/guests/gamification` в карточке ledger теперь доступны постановка approved bonus-наград в очередь, safe dry-run dispatch и боевой dispatch через существующий backend-контур; UI показывает последний результат запуска: проверено, поставлено в ledger, confirmed/failed/skipped/blocked и note dispatcher. Реальная запись в Langame по-прежнему защищена backend-режимом `LANGAME_BONUS_ACCRUAL_ENABLED=true`, а raw phone, токены и полный Langame payload не выводятся.
 
 - Готово: в Guest Game Hub добавлен read-only журнал bonus ledger для пилота геймификации. `/guests/gamification` показывает последние начисления, статусы `PENDING/PROCESSING/CONFIRMED/FAILED/CANCELED`, суммы, клуб, маску контакта, attempts/next retry, ошибку Langame и сверку `ledger.balanceAfter` с последним `GuestBonusBalanceSnapshot` после confirmed-операции. Пункт пилотного чек-листа "Сверка после начисления" теперь становится `READY/PARTIAL/BLOCKED` по реальному журналу; raw phone, токены и полный Langame payload в workspace не выводятся.

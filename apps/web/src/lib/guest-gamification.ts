@@ -875,6 +875,54 @@ export type GuestGameBonusLedgerAudit = {
   note: string;
 };
 
+export type GuestGameBonusBalanceCurrentReconciliationState =
+  | "MATCHED"
+  | "MISMATCH"
+  | "WAITING_SYNC"
+  | "NO_SNAPSHOT";
+
+export type GuestGameBonusBalanceCurrentReconciliationItem = {
+  id: string;
+  source: string;
+  externalProvider: string | null;
+  externalDomain: string | null;
+  externalGuestId: string;
+  currentBalance: number;
+  currentSnapshotAt: string;
+  lastSyncedAt: string | null;
+  updatedAt: string;
+  latestSnapshotAt: string | null;
+  latestSnapshotBalance: number | null;
+  diff: number | null;
+  state: GuestGameBonusBalanceCurrentReconciliationState;
+  stateLabel: string;
+  note: string;
+  guest: {
+    id: string | null;
+    displayName: string;
+    contact: string | null;
+  };
+};
+
+export type GuestGameBonusBalanceCurrentReconciliation = {
+  summary: {
+    totalCurrent: number;
+    matched: number;
+    mismatched: number;
+    waitingSync: number;
+    noSnapshot: number;
+    ledgerBacked: number;
+    snapshotBacked: number;
+    amountCurrent: number;
+    amountSnapshot: number;
+    diffTotal: number;
+    latestCurrentAt: string | null;
+    latestSnapshotAt: string | null;
+  };
+  items: GuestGameBonusBalanceCurrentReconciliationItem[];
+  note: string;
+};
+
 export type GuestGameTariffSnapshotStatus =
   | "READY"
   | "PARTIAL"
@@ -982,6 +1030,7 @@ export type GuestGamificationWorkspace = {
   integrationReadiness: GuestGameIntegrationReadiness;
   pilotReadiness: GuestGamePilotReadiness;
   bonusLedgerAudit: GuestGameBonusLedgerAudit;
+  bonusBalanceCurrentReconciliation: GuestGameBonusBalanceCurrentReconciliation;
   communicationQueue: GuestGameCommunicationQueue;
   deliveryOutbox: GuestGameDeliveryOutbox;
   profiles: GuestGameProfile[];

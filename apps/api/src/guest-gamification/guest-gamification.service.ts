@@ -236,6 +236,29 @@ const bonusLedgerAuditSnapshotSelect = {
   sourcePayloadHash: true,
 } satisfies Prisma.GuestBonusBalanceSnapshotSelect;
 
+const bonusBalanceCurrentReconciliationSelect = {
+  id: true,
+  guestId: true,
+  externalProvider: true,
+  externalDomain: true,
+  externalGuestId: true,
+  bonusBalance: true,
+  snapshotDate: true,
+  source: true,
+  lastSyncedAt: true,
+  updatedAt: true,
+  guest: {
+    select: {
+      id: true,
+      externalDomain: true,
+      externalGuestId: true,
+      fullNameMasked: true,
+      phoneMasked: true,
+      emailMasked: true,
+    },
+  },
+} satisfies Prisma.GuestBonusBalanceCurrentSelect;
+
 const lootBoxInclude = {
   audience: { select: audienceSelect },
   createdByUser: { select: creatorSelect },
@@ -553,6 +576,10 @@ type BonusLedgerAuditRow = Prisma.GuestBonusLedgerEntryGetPayload<{
 type BonusLedgerAuditSnapshotRow = Prisma.GuestBonusBalanceSnapshotGetPayload<{
   select: typeof bonusLedgerAuditSnapshotSelect;
 }>;
+type BonusBalanceCurrentReconciliationRow =
+  Prisma.GuestBonusBalanceCurrentGetPayload<{
+    select: typeof bonusBalanceCurrentReconciliationSelect;
+  }>;
 
 export type GuestGameUser = {
   id: string;
@@ -1234,6 +1261,54 @@ export type GuestGameBonusLedgerAudit = {
   note: string;
 };
 
+export type GuestGameBonusBalanceCurrentReconciliationState =
+  | 'MATCHED'
+  | 'MISMATCH'
+  | 'WAITING_SYNC'
+  | 'NO_SNAPSHOT';
+
+export type GuestGameBonusBalanceCurrentReconciliationItem = {
+  id: string;
+  source: string;
+  externalProvider: string | null;
+  externalDomain: string | null;
+  externalGuestId: string;
+  currentBalance: number;
+  currentSnapshotAt: string;
+  lastSyncedAt: string | null;
+  updatedAt: string;
+  latestSnapshotAt: string | null;
+  latestSnapshotBalance: number | null;
+  diff: number | null;
+  state: GuestGameBonusBalanceCurrentReconciliationState;
+  stateLabel: string;
+  note: string;
+  guest: {
+    id: string | null;
+    displayName: string;
+    contact: string | null;
+  };
+};
+
+export type GuestGameBonusBalanceCurrentReconciliation = {
+  summary: {
+    totalCurrent: number;
+    matched: number;
+    mismatched: number;
+    waitingSync: number;
+    noSnapshot: number;
+    ledgerBacked: number;
+    snapshotBacked: number;
+    amountCurrent: number;
+    amountSnapshot: number;
+    diffTotal: number;
+    latestCurrentAt: string | null;
+    latestSnapshotAt: string | null;
+  };
+  items: GuestGameBonusBalanceCurrentReconciliationItem[];
+  note: string;
+};
+
 export type GuestGamificationWorkspace = {
   summary: GuestGamificationSummary;
   economy: GuestGameEconomy;
@@ -1241,6 +1316,7 @@ export type GuestGamificationWorkspace = {
   integrationReadiness: GuestGameIntegrationReadiness;
   pilotReadiness: GuestGamePilotReadiness;
   bonusLedgerAudit: GuestGameBonusLedgerAudit;
+  bonusBalanceCurrentReconciliation: GuestGameBonusBalanceCurrentReconciliation;
   communicationQueue: GuestGameCommunicationQueue;
   deliveryOutbox: GuestGameDeliveryOutbox;
   profiles: GuestGameProfile[];
@@ -1899,6 +1975,7 @@ export class GuestGamificationService {
       guestLogCatalog,
       pilotStores,
       bonusLedgerAudit,
+      bonusBalanceCurrentReconciliation,
     ] = await Promise.all([
       this.getProfiles(user),
       this.getLootBoxes(user),
@@ -1911,6 +1988,7 @@ export class GuestGamificationService {
       this.getGuestLogCatalog(user),
       this.getPilotStores(user),
       this.getBonusLedgerAudit(user),
+      this.getBonusBalanceCurrentReconciliation(user),
     ]);
 
     const effect = await this.buildEffect(
@@ -1950,6 +2028,7 @@ export class GuestGamificationService {
         deliveryOutbox,
       }),
       bonusLedgerAudit,
+      bonusBalanceCurrentReconciliation,
       communicationQueue,
       deliveryOutbox,
       profiles,
@@ -2048,6 +2127,62 @@ export class GuestGamificationService {
       select: bonusLedgerAuditSnapshotSelect,
       orderBy: [{ snapshotDate: 'desc' }, { createdAt: 'desc' }],
       take: 300,
+    });
+  }
+
+  private async getBonusBalanceCurrentReconciliation(
+    user: AuthenticatedUser,
+  ): Promise<GuestGameBonusBalanceCurrentReconciliation> {
+    const currents = await this.prisma.guestBonusBalanceCurrent.findMany({
+      where: { tenantId: user.tenantId },
+      select: bonusBalanceCurrentReconciliationSelect,
+      orderBy: [
+        { snapshotDate: 'desc' },
+        { bonusBalance: 'desc' },
+        { updatedAt: 'desc' },
+      ],
+      take: 50,
+    });
+    const snapshots = await this.getBonusBalanceCurrentSnapshots(
+      user.tenantId,
+      currents,
+    );
+
+    return buildBonusBalanceCurrentReconciliation(currents, snapshots);
+  }
+
+  private async getBonusBalanceCurrentSnapshots(
+    tenantId: string,
+    currents: BonusBalanceCurrentReconciliationRow[],
+  ): Promise<BonusLedgerAuditSnapshotRow[]> {
+    const snapshotScopes: Prisma.GuestBonusBalanceSnapshotWhereInput[] = [];
+
+    for (const current of currents) {
+      if (current.guestId) {
+        snapshotScopes.push({ guestId: current.guestId });
+      }
+
+      if (current.externalGuestId) {
+        snapshotScopes.push({
+          externalProvider: current.externalProvider,
+          externalDomain: current.externalDomain,
+          externalGuestId: current.externalGuestId,
+        });
+      }
+    }
+
+    if (!snapshotScopes.length) {
+      return [];
+    }
+
+    return this.prisma.guestBonusBalanceSnapshot.findMany({
+      where: {
+        tenantId,
+        OR: snapshotScopes,
+      },
+      select: bonusLedgerAuditSnapshotSelect,
+      orderBy: [{ snapshotDate: 'desc' }, { createdAt: 'desc' }],
+      take: Math.max(300, currents.length * 10),
     });
   }
 
@@ -6843,6 +6978,164 @@ function mapReward(row: RewardRow): GuestGameReward {
     store: row.store,
     createdBy: mapUser(row.createdByUser),
     approvedBy: mapUser(row.approvedByUser),
+  };
+}
+
+function buildBonusBalanceCurrentReconciliation(
+  currents: BonusBalanceCurrentReconciliationRow[],
+  snapshots: BonusLedgerAuditSnapshotRow[],
+): GuestGameBonusBalanceCurrentReconciliation {
+  const snapshotByKey = new Map<string, BonusLedgerAuditSnapshotRow>();
+
+  for (const snapshot of snapshots) {
+    for (const key of bonusLedgerSnapshotKeys(snapshot)) {
+      if (!snapshotByKey.has(key)) {
+        snapshotByKey.set(key, snapshot);
+      }
+    }
+  }
+
+  const items = currents.map((current) => {
+    const snapshot = bonusLedgerSnapshotKeys(current)
+      .map((key) => snapshotByKey.get(key))
+      .filter((value): value is BonusLedgerAuditSnapshotRow => Boolean(value))
+      .reduce<BonusLedgerAuditSnapshotRow | null>(
+        (latest, candidate) =>
+          !latest ||
+          candidate.snapshotDate.getTime() > latest.snapshotDate.getTime()
+            ? candidate
+            : latest,
+        null,
+      );
+
+    return mapBonusBalanceCurrentReconciliationItem(current, snapshot);
+  });
+  const latestCurrentAt = currents.reduce<Date | null>(
+    (latest, current) => maxDate(latest, current.snapshotDate),
+    null,
+  );
+  const latestSnapshotAt = snapshots.reduce<Date | null>(
+    (latest, snapshot) => maxDate(latest, snapshot.snapshotDate),
+    null,
+  );
+
+  return {
+    summary: {
+      totalCurrent: items.length,
+      matched: items.filter((item) => item.state === 'MATCHED').length,
+      mismatched: items.filter((item) => item.state === 'MISMATCH').length,
+      waitingSync: items.filter((item) => item.state === 'WAITING_SYNC').length,
+      noSnapshot: items.filter((item) => item.state === 'NO_SNAPSHOT').length,
+      ledgerBacked: items.filter((item) => item.source === 'LANGAME_LEDGER')
+        .length,
+      snapshotBacked: items.filter((item) => item.latestSnapshotAt).length,
+      amountCurrent: roundMoney(sum(items.map((item) => item.currentBalance))),
+      amountSnapshot: roundMoney(
+        sum(items.map((item) => item.latestSnapshotBalance ?? 0)),
+      ),
+      diffTotal: roundMoney(sum(items.map((item) => item.diff ?? 0))),
+      latestCurrentAt: iso(latestCurrentAt),
+      latestSnapshotAt: iso(latestSnapshotAt),
+    },
+    items,
+    note: 'Сверка сравнивает текущий GuestBonusBalanceCurrent с последним сохраненным GuestBonusBalanceSnapshot по guestId или внешнему Langame-id. Live-запросы в Langame при открытии страницы не выполняются.',
+  };
+}
+
+function mapBonusBalanceCurrentReconciliationItem(
+  row: BonusBalanceCurrentReconciliationRow,
+  snapshot: BonusLedgerAuditSnapshotRow | null,
+): GuestGameBonusBalanceCurrentReconciliationItem {
+  const currentBalance = numberValue(row.bonusBalance);
+  const latestSnapshotBalance = snapshot
+    ? numberValue(snapshot.bonusBalance)
+    : null;
+  const snapshotIsFresh =
+    snapshot !== null &&
+    snapshot.snapshotDate.getTime() >= row.snapshotDate.getTime();
+  const diff =
+    latestSnapshotBalance === null
+      ? null
+      : roundMoney(latestSnapshotBalance - currentBalance);
+  const guestDisplay =
+    row.guest?.fullNameMasked ?? row.externalGuestId ?? 'гость без профиля';
+  const guestContact = row.guest?.phoneMasked ?? row.guest?.emailMasked ?? null;
+  const reconciliation = bonusBalanceCurrentReconciliationState({
+    source: row.source,
+    snapshotIsFresh,
+    diff,
+    snapshot,
+  });
+
+  return {
+    id: row.id,
+    source: row.source,
+    externalProvider: row.externalProvider,
+    externalDomain: row.externalDomain,
+    externalGuestId: row.externalGuestId,
+    currentBalance,
+    currentSnapshotAt: row.snapshotDate.toISOString(),
+    lastSyncedAt: iso(row.lastSyncedAt),
+    updatedAt: row.updatedAt.toISOString(),
+    latestSnapshotAt: snapshot ? snapshot.snapshotDate.toISOString() : null,
+    latestSnapshotBalance,
+    diff,
+    state: reconciliation.state,
+    stateLabel: reconciliation.stateLabel,
+    note: reconciliation.note,
+    guest: {
+      id: row.guest?.id ?? row.guestId,
+      displayName: guestDisplay,
+      contact: guestContact,
+    },
+  };
+}
+
+function bonusBalanceCurrentReconciliationState({
+  source,
+  snapshotIsFresh,
+  diff,
+  snapshot,
+}: {
+  source: string;
+  snapshotIsFresh: boolean;
+  diff: number | null;
+  snapshot: BonusLedgerAuditSnapshotRow | null;
+}): Pick<
+  GuestGameBonusBalanceCurrentReconciliationItem,
+  'state' | 'stateLabel' | 'note'
+> {
+  if (!snapshot) {
+    return {
+      state: 'NO_SNAPSHOT',
+      stateLabel: 'нет snapshot',
+      note: 'Для текущего бонусного баланса еще нет исторического Langame snapshot. Нужен следующий guest foundation sync.',
+    };
+  }
+
+  if (!snapshotIsFresh) {
+    return {
+      state: 'WAITING_SYNC',
+      stateLabel: 'ждет sync',
+      note:
+        source === 'LANGAME_LEDGER'
+          ? 'Баланс уже обновлен ledger-начислением, но ночной Langame snapshot еще не подтвердил новое значение.'
+          : 'Текущая запись свежее последнего найденного snapshot: дождитесь следующей синхронизации балансов.',
+    };
+  }
+
+  if (diff !== null && Math.abs(diff) <= 0.01) {
+    return {
+      state: 'MATCHED',
+      stateLabel: 'сошлось',
+      note: 'Последний Langame snapshot совпадает с текущим бонусным балансом LeetPlus.',
+    };
+  }
+
+  return {
+    state: 'MISMATCH',
+    stateLabel: 'расхождение',
+    note: 'Текущий бонусный баланс LeetPlus отличается от последнего Langame snapshot: нужна ручная сверка гостя и ledger-операций.',
   };
 }
 

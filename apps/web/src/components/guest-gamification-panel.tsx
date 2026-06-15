@@ -2401,6 +2401,7 @@ function OverviewTab({
       <EffectControlCard effect={workspace.effect} />
       <IntegrationReadinessCard readiness={workspace.integrationReadiness} />
       <PilotReadinessCard readiness={workspace.pilotReadiness} />
+      <BonusLedgerAuditCard audit={workspace.bonusLedgerAudit} />
       <CommunicationQueueCard
         queue={workspace.communicationQueue}
         outbox={workspace.deliveryOutbox}
@@ -2726,6 +2727,167 @@ function PilotReadinessCard({
 
       <p className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
         {readiness.note}
+      </p>
+    </section>
+  );
+}
+
+function BonusLedgerAuditCard({
+  audit,
+}: {
+  audit: GuestGamificationWorkspace["bonusLedgerAudit"];
+}) {
+  const visibleItems = audit.items.slice(0, 8);
+  const nextIssue =
+    audit.items.find(
+      (item) => item.reconciliation.state === "MISMATCH",
+    ) ??
+    audit.items.find((item) => item.status === "FAILED") ??
+    audit.items.find(
+      (item) => item.reconciliation.state === "WAITING_SYNC",
+    ) ??
+    null;
+
+  return (
+    <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-300">
+            Bonus ledger
+          </p>
+          <h2 className="mt-1 text-lg font-bold text-zinc-950 dark:text-white">
+            Журнал начислений и сверка Langame
+          </h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+            Последние операции показывают путь бонуса от очереди до confirmed,
+            retry и сверки с ночным bonus balance snapshot. В журнал не попадают
+            raw phone, токены и полный payload Langame.
+          </p>
+        </div>
+        <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
+          {audit.summary.latestConfirmedAt
+            ? `Последнее подтверждение: ${formatDate(
+                audit.summary.latestConfirmedAt,
+              )}`
+            : "Подтвержденных ledger-операций пока нет"}
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-2 text-center text-xs sm:grid-cols-2 xl:grid-cols-5">
+        <MiniMetric
+          label="очередь"
+          value={`${audit.summary.pending}/${audit.summary.processing}`}
+        />
+        <MiniMetric
+          label="confirmed"
+          value={formatMoney(audit.summary.amountConfirmed)}
+        />
+        <MiniMetric
+          label="ошибки / retry"
+          value={`${audit.summary.failed}/${audit.summary.retryReady}`}
+        />
+        <MiniMetric
+          label="ждет sync"
+          value={audit.summary.reconciliationPending}
+        />
+        <MiniMetric
+          label="расхождения"
+          value={audit.summary.reconciliationMismatch}
+        />
+      </div>
+
+      {nextIssue ? (
+        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-100">
+          <span className="font-bold">Следующее действие:</span>{" "}
+          {nextIssue.nextAction}
+        </div>
+      ) : null}
+
+      <div className="mt-4 space-y-2">
+        {visibleItems.length ? (
+          visibleItems.map((item) => (
+            <article
+              key={item.id}
+              className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60"
+            >
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span
+                      className={[
+                        "rounded-full px-2 py-1 text-[11px] font-bold uppercase",
+                        bonusLedgerStatusClass(item.status),
+                      ].join(" ")}
+                    >
+                      {item.statusLabel}
+                    </span>
+                    <span
+                      className={[
+                        "rounded-full px-2 py-1 text-[11px] font-bold uppercase",
+                        bonusLedgerReconciliationClass(
+                          item.reconciliation.state,
+                        ),
+                      ].join(" ")}
+                    >
+                      {item.reconciliation.stateLabel}
+                    </span>
+                    {item.retryReady ? (
+                      <span className="rounded-full bg-amber-100 px-2 py-1 text-[11px] font-bold uppercase text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                        retry ready
+                      </span>
+                    ) : null}
+                  </div>
+                  <h3 className="mt-2 truncate text-sm font-bold text-zinc-950 dark:text-white">
+                    {item.reward?.rewardLabel ?? item.reason ?? item.source}
+                  </h3>
+                  <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                    {item.guest.displayName}
+                    {item.guest.contact ? ` · ${item.guest.contact}` : ""}
+                    {item.store ? ` · ${item.store.name}` : ""}
+                    {item.externalDomain ? ` · ${item.externalDomain}` : ""}
+                  </p>
+                </div>
+                <div className="grid gap-2 text-xs sm:grid-cols-2 lg:min-w-[520px] lg:grid-cols-4">
+                  <MiniMetric label="сумма" value={formatMoney(item.amount)} />
+                  <MiniMetric
+                    label="balanceAfter"
+                    value={
+                      item.balanceAfter === null
+                        ? "нет"
+                        : formatMoney(item.balanceAfter)
+                    }
+                  />
+                  <MiniMetric
+                    label="snapshot"
+                    value={
+                      item.reconciliation.latestSnapshotBalance === null
+                        ? "нет"
+                        : formatMoney(item.reconciliation.latestSnapshotBalance)
+                    }
+                  />
+                  <MiniMetric label="attempts" value={item.attempts} />
+                </div>
+              </div>
+
+              <div className="mt-3 grid gap-2 text-xs lg:grid-cols-[minmax(0,1fr)_220px]">
+                <p className="rounded-lg bg-white px-3 py-2 leading-5 text-zinc-600 ring-1 ring-zinc-200 dark:bg-zinc-950 dark:text-zinc-300 dark:ring-zinc-800">
+                  {item.errorMessage ?? item.reconciliation.note}
+                </p>
+                <p className="rounded-lg bg-white px-3 py-2 leading-5 text-zinc-500 ring-1 ring-zinc-200 dark:bg-zinc-950 dark:text-zinc-400 dark:ring-zinc-800">
+                  {item.nextAttemptAt
+                    ? `Retry: ${formatDate(item.nextAttemptAt)}`
+                    : `Создано: ${formatDate(item.createdAt)}`}
+                </p>
+              </div>
+            </article>
+          ))
+        ) : (
+          <EmptyState text="Ledger-операций пока нет: после первой approved bonus-награды здесь появится очередь, dispatch и сверка." />
+        )}
+      </div>
+
+      <p className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
+        {audit.note}
       </p>
     </section>
   );
@@ -7560,6 +7722,40 @@ function integrationReadinessStatusClass(
     case "BLOCKED":
     default:
       return "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200";
+  }
+}
+
+function bonusLedgerStatusClass(status: string) {
+  switch (status) {
+    case "CONFIRMED":
+      return "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200";
+    case "PENDING":
+      return "bg-cyan-100 text-cyan-800 dark:bg-cyan-950 dark:text-cyan-200";
+    case "PROCESSING":
+      return "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-200";
+    case "FAILED":
+      return "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200";
+    case "CANCELED":
+      return "bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200";
+    default:
+      return "bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200";
+  }
+}
+
+function bonusLedgerReconciliationClass(
+  state: GuestGamificationWorkspace["bonusLedgerAudit"]["items"][number]["reconciliation"]["state"],
+) {
+  switch (state) {
+    case "MATCHED":
+      return "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200";
+    case "WAITING_SYNC":
+    case "NOT_READY":
+      return "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200";
+    case "MISMATCH":
+      return "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200";
+    case "NOT_APPLICABLE":
+    default:
+      return "bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200";
   }
 }
 

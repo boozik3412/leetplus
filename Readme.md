@@ -34,6 +34,8 @@ Payload: `phone`, `type`, `sum`, `comment`, где `type` может быть `b
 
 Внутренний Guest Game Hub на `/guests/gamification` показывает пилотный чек-лист готовности клуба к первому бонусу: 1337 выбирается приоритетно, далее проверяются `/play`, OTP, игровой профиль, связка с Langame, активные правила, тестовое событие, очередь наград, bonus ledger и обязательная сверка баланса после первого production-начисления.
 
+На той же странице есть read-only журнал bonus ledger: последние операции начислений показывают статус, сумму, клуб, маску контакта, attempts/next retry, ошибку Langame и сверку confirmed `balanceAfter` с последним сохраненным `GuestBonusBalanceSnapshot`; raw phone, токены и полный Langame payload не выводятся.
+
 ## Что уже реализовано
 
 ### Дашборд

@@ -166,6 +166,76 @@ const pilotStoreSelect = {
   isActive: true,
 } satisfies Prisma.StoreSelect;
 
+const bonusLedgerAuditSelect = {
+  id: true,
+  guestId: true,
+  profileId: true,
+  rewardId: true,
+  storeId: true,
+  status: true,
+  entryType: true,
+  source: true,
+  amount: true,
+  balanceBefore: true,
+  balanceAfter: true,
+  externalProvider: true,
+  externalDomain: true,
+  externalGuestId: true,
+  attempts: true,
+  nextAttemptAt: true,
+  processedAt: true,
+  confirmedAt: true,
+  failedAt: true,
+  canceledAt: true,
+  errorCode: true,
+  errorMessage: true,
+  reason: true,
+  metadata: true,
+  createdAt: true,
+  updatedAt: true,
+  reward: {
+    select: {
+      id: true,
+      status: true,
+      rewardType: true,
+      rewardLabel: true,
+      rewardCode: true,
+      qualifiedAt: true,
+      paidAt: true,
+    },
+  },
+  profile: {
+    select: {
+      id: true,
+      displayName: true,
+      contactMasked: true,
+    },
+  },
+  guest: {
+    select: {
+      id: true,
+      externalDomain: true,
+      externalGuestId: true,
+      fullNameMasked: true,
+      phoneMasked: true,
+      emailMasked: true,
+    },
+  },
+  store: { select: { id: true, name: true } },
+  createdByUser: { select: creatorSelect },
+  processedByUser: { select: creatorSelect },
+} satisfies Prisma.GuestBonusLedgerEntrySelect;
+
+const bonusLedgerAuditSnapshotSelect = {
+  guestId: true,
+  externalProvider: true,
+  externalDomain: true,
+  externalGuestId: true,
+  snapshotDate: true,
+  bonusBalance: true,
+  sourcePayloadHash: true,
+} satisfies Prisma.GuestBonusBalanceSnapshotSelect;
+
 const lootBoxInclude = {
   audience: { select: audienceSelect },
   createdByUser: { select: creatorSelect },
@@ -476,6 +546,12 @@ type SnapshotProductExpenseRow = Prisma.SalesFactGetPayload<{
 }>;
 type PilotStoreRow = Prisma.StoreGetPayload<{
   select: typeof pilotStoreSelect;
+}>;
+type BonusLedgerAuditRow = Prisma.GuestBonusLedgerEntryGetPayload<{
+  select: typeof bonusLedgerAuditSelect;
+}>;
+type BonusLedgerAuditSnapshotRow = Prisma.GuestBonusBalanceSnapshotGetPayload<{
+  select: typeof bonusLedgerAuditSnapshotSelect;
 }>;
 
 export type GuestGameUser = {
@@ -1079,12 +1155,92 @@ export type GuestGamePilotReadiness = {
   note: string;
 };
 
+export type GuestGameBonusLedgerReconciliationState =
+  | 'NOT_READY'
+  | 'WAITING_SYNC'
+  | 'MATCHED'
+  | 'MISMATCH'
+  | 'NOT_APPLICABLE';
+
+export type GuestGameBonusLedgerAuditItem = {
+  id: string;
+  status: string;
+  statusLabel: string;
+  entryType: string;
+  source: string;
+  amount: number;
+  balanceBefore: number | null;
+  balanceAfter: number | null;
+  externalProvider: string | null;
+  externalDomain: string | null;
+  externalGuestId: string | null;
+  phoneMasked: string | null;
+  attempts: number;
+  retryReady: boolean;
+  nextAttemptAt: string | null;
+  processedAt: string | null;
+  confirmedAt: string | null;
+  failedAt: string | null;
+  canceledAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  errorCode: string | null;
+  errorMessage: string | null;
+  reason: string | null;
+  guest: {
+    id: string | null;
+    displayName: string;
+    contact: string | null;
+  };
+  reward: {
+    id: string;
+    status: string;
+    rewardType: string;
+    rewardLabel: string;
+    rewardCode: string | null;
+  } | null;
+  store: { id: string; name: string } | null;
+  createdBy: GuestGameUser | null;
+  processedBy: GuestGameUser | null;
+  reconciliation: {
+    state: GuestGameBonusLedgerReconciliationState;
+    stateLabel: string;
+    latestSnapshotAt: string | null;
+    latestSnapshotBalance: number | null;
+    expectedBalance: number | null;
+    diff: number | null;
+    note: string;
+  };
+  nextAction: string;
+};
+
+export type GuestGameBonusLedgerAudit = {
+  summary: {
+    total: number;
+    pending: number;
+    processing: number;
+    confirmed: number;
+    failed: number;
+    canceled: number;
+    retryReady: number;
+    reconciliationPending: number;
+    reconciliationMismatch: number;
+    amountPending: number;
+    amountConfirmed: number;
+    amountFailed: number;
+    latestConfirmedAt: string | null;
+  };
+  items: GuestGameBonusLedgerAuditItem[];
+  note: string;
+};
+
 export type GuestGamificationWorkspace = {
   summary: GuestGamificationSummary;
   economy: GuestGameEconomy;
   effect: GuestGameEffect;
   integrationReadiness: GuestGameIntegrationReadiness;
   pilotReadiness: GuestGamePilotReadiness;
+  bonusLedgerAudit: GuestGameBonusLedgerAudit;
   communicationQueue: GuestGameCommunicationQueue;
   deliveryOutbox: GuestGameDeliveryOutbox;
   profiles: GuestGameProfile[];
@@ -1654,6 +1810,12 @@ function snapshotSummary(value: Prisma.JsonValue | null): string | null {
   return typeof summary === 'string' ? summary : null;
 }
 
+function jsonRecord(value: Prisma.JsonValue | null): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value
+    : {};
+}
+
 function uniqueStrings(values: string[]) {
   return [...new Set(values)].slice(0, 16);
 }
@@ -1736,6 +1898,7 @@ export class GuestGamificationService {
       tariffSnapshots,
       guestLogCatalog,
       pilotStores,
+      bonusLedgerAudit,
     ] = await Promise.all([
       this.getProfiles(user),
       this.getLootBoxes(user),
@@ -1747,6 +1910,7 @@ export class GuestGamificationService {
       this.getTariffSnapshots(user),
       this.getGuestLogCatalog(user),
       this.getPilotStores(user),
+      this.getBonusLedgerAudit(user),
     ]);
 
     const effect = await this.buildEffect(
@@ -1781,9 +1945,11 @@ export class GuestGamificationService {
         rewards,
         events,
         integrationReadiness,
+        bonusLedgerAudit,
         communicationQueue,
         deliveryOutbox,
       }),
+      bonusLedgerAudit,
       communicationQueue,
       deliveryOutbox,
       profiles,
@@ -1814,6 +1980,77 @@ export class GuestGamificationService {
     });
   }
 
+  private async getBonusLedgerAudit(
+    user: AuthenticatedUser,
+  ): Promise<GuestGameBonusLedgerAudit> {
+    const entries = await this.prisma.guestBonusLedgerEntry.findMany({
+      where: { tenantId: user.tenantId },
+      select: bonusLedgerAuditSelect,
+      orderBy: [{ createdAt: 'desc' }],
+      take: 30,
+    });
+    const snapshots = await this.getBonusLedgerAuditSnapshots(
+      user.tenantId,
+      entries,
+    );
+
+    return buildBonusLedgerAudit(entries, snapshots);
+  }
+
+  private async getBonusLedgerAuditSnapshots(
+    tenantId: string,
+    entries: BonusLedgerAuditRow[],
+  ): Promise<BonusLedgerAuditSnapshotRow[]> {
+    const confirmedEntries = entries.filter(
+      (entry) => entry.status === 'CONFIRMED' && entry.confirmedAt,
+    );
+
+    if (!confirmedEntries.length) {
+      return [];
+    }
+
+    const earliestConfirmedAt = confirmedEntries.reduce<Date | null>(
+      (earliest, entry) =>
+        !earliest ||
+        (entry.confirmedAt && entry.confirmedAt.getTime() < earliest.getTime())
+          ? entry.confirmedAt
+          : earliest,
+      null,
+    );
+    const snapshotScopes: Prisma.GuestBonusBalanceSnapshotWhereInput[] = [];
+
+    for (const entry of confirmedEntries) {
+      if (entry.guestId) {
+        snapshotScopes.push({ guestId: entry.guestId });
+      }
+
+      if (entry.externalGuestId) {
+        snapshotScopes.push({
+          externalProvider: entry.externalProvider,
+          externalDomain: entry.externalDomain,
+          externalGuestId: entry.externalGuestId,
+        });
+      }
+    }
+
+    if (!snapshotScopes.length) {
+      return [];
+    }
+
+    return this.prisma.guestBonusBalanceSnapshot.findMany({
+      where: {
+        tenantId,
+        snapshotDate: earliestConfirmedAt
+          ? { gte: earliestConfirmedAt }
+          : undefined,
+        OR: snapshotScopes,
+      },
+      select: bonusLedgerAuditSnapshotSelect,
+      orderBy: [{ snapshotDate: 'desc' }, { createdAt: 'desc' }],
+      take: 300,
+    });
+  }
+
   private buildPilotReadiness({
     tenantSlug,
     stores,
@@ -1824,6 +2061,7 @@ export class GuestGamificationService {
     rewards,
     events,
     integrationReadiness,
+    bonusLedgerAudit,
     communicationQueue,
     deliveryOutbox,
   }: {
@@ -1836,6 +2074,7 @@ export class GuestGamificationService {
     rewards: GuestGameReward[];
     events: GuestGameEvent[];
     integrationReadiness: GuestGameIntegrationReadiness;
+    bonusLedgerAudit: GuestGameBonusLedgerAudit;
     communicationQueue: GuestGameCommunicationQueue;
     deliveryOutbox: GuestGameDeliveryOutbox;
   }): GuestGamePilotReadiness {
@@ -1880,6 +2119,11 @@ export class GuestGamificationService {
     const langameWriteItem = integrationReadiness.items.find(
       (item) => item.key === 'LANGAME_WRITE_API',
     );
+    const ledgerConfirmed = bonusLedgerAudit.summary.confirmed;
+    const ledgerReconciliationPending =
+      bonusLedgerAudit.summary.reconciliationPending;
+    const ledgerReconciliationMismatch =
+      bonusLedgerAudit.summary.reconciliationMismatch;
     const registrationReady = Boolean(
       targetStore && (targetStore.gamificationEnabled || activeRuleCount > 0),
     );
@@ -2060,16 +2304,38 @@ export class GuestGamificationService {
       {
         key: 'BALANCE_RECONCILIATION',
         title: 'Сверка после начисления',
-        status:
-          langameWriteItem?.ready && bonusRewards.length
+        status: ledgerConfirmed
+          ? ledgerReconciliationMismatch
+            ? 'BLOCKED'
+            : ledgerReconciliationPending
+              ? 'PARTIAL'
+              : 'READY'
+          : langameWriteItem?.ready && bonusRewards.length
             ? 'PARTIAL'
             : 'MANUAL_ONLY',
-        statusLabel: 'после пилота',
-        ready: false,
-        metric: 'snapshot vs current',
-        note: 'Финальный production-сигнал: после первого начисления сверить GuestBonusBalanceCurrent с ночным snapshot Langame.',
-        nextAction:
-          'После боевого начисления дождаться guest foundation sync и сравнить текущий live-баланс с новым snapshot.',
+        statusLabel: ledgerConfirmed
+          ? ledgerReconciliationMismatch
+            ? 'расхождение'
+            : ledgerReconciliationPending
+              ? 'ждет snapshot'
+              : 'сверено'
+          : 'после пилота',
+        ready: Boolean(
+          ledgerConfirmed &&
+          !ledgerReconciliationPending &&
+          !ledgerReconciliationMismatch,
+        ),
+        metric: ledgerConfirmed
+          ? `${ledgerConfirmed} confirmed / ${ledgerReconciliationMismatch} mismatch`
+          : 'snapshot vs current',
+        note: 'Финальный production-сигнал: после первого начисления сверить ledger balanceAfter с ночным snapshot Langame.',
+        nextAction: ledgerConfirmed
+          ? ledgerReconciliationMismatch
+            ? 'Разобрать записи расхождений в журнале bonus ledger и сверить гостя в Langame.'
+            : ledgerReconciliationPending
+              ? 'Дождаться guest foundation sync и нового bonus balance snapshot после начисления.'
+              : 'Сохранить эту операцию как эталон пилотного начисления.'
+          : 'После боевого начисления дождаться guest foundation sync и сравнить текущий live-баланс с новым snapshot.',
       },
     ];
     const ready = items.filter((item) => item.status === 'READY').length;
@@ -6580,6 +6846,301 @@ function mapReward(row: RewardRow): GuestGameReward {
   };
 }
 
+function buildBonusLedgerAudit(
+  entries: BonusLedgerAuditRow[],
+  snapshots: BonusLedgerAuditSnapshotRow[],
+): GuestGameBonusLedgerAudit {
+  const snapshotByKey = new Map<string, BonusLedgerAuditSnapshotRow>();
+
+  for (const snapshot of snapshots) {
+    for (const key of bonusLedgerSnapshotKeys(snapshot)) {
+      if (!snapshotByKey.has(key)) {
+        snapshotByKey.set(key, snapshot);
+      }
+    }
+  }
+
+  const now = new Date();
+  const items = entries.map((entry) => {
+    const snapshot =
+      bonusLedgerSnapshotKeys(entry)
+        .map((key) => snapshotByKey.get(key))
+        .find((value): value is BonusLedgerAuditSnapshotRow =>
+          Boolean(value),
+        ) ?? null;
+
+    return mapBonusLedgerAuditItem(entry, snapshot, now);
+  });
+  const latestConfirmedAt = entries.reduce<Date | null>(
+    (latest, entry) => maxDate(latest, entry.confirmedAt),
+    null,
+  );
+
+  return {
+    summary: {
+      total: items.length,
+      pending: items.filter((item) => item.status === 'PENDING').length,
+      processing: items.filter((item) => item.status === 'PROCESSING').length,
+      confirmed: items.filter((item) => item.status === 'CONFIRMED').length,
+      failed: items.filter((item) => item.status === 'FAILED').length,
+      canceled: items.filter((item) => item.status === 'CANCELED').length,
+      retryReady: items.filter((item) => item.retryReady).length,
+      reconciliationPending: items.filter(
+        (item) => item.reconciliation.state === 'WAITING_SYNC',
+      ).length,
+      reconciliationMismatch: items.filter(
+        (item) => item.reconciliation.state === 'MISMATCH',
+      ).length,
+      amountPending: roundMoney(
+        sum(
+          items
+            .filter((item) => ['PENDING', 'PROCESSING'].includes(item.status))
+            .map((item) => item.amount),
+        ),
+      ),
+      amountConfirmed: roundMoney(
+        sum(
+          items
+            .filter((item) => item.status === 'CONFIRMED')
+            .map((item) => item.amount),
+        ),
+      ),
+      amountFailed: roundMoney(
+        sum(
+          items
+            .filter((item) => item.status === 'FAILED')
+            .map((item) => item.amount),
+        ),
+      ),
+      latestConfirmedAt: iso(latestConfirmedAt),
+    },
+    items,
+    note: 'Журнал показывает последние bonus-ledger операции геймификации без raw phone, токенов и полного Langame payload. Сверка считается только по сохраненным GuestBonusBalanceSnapshot после подтвержденного начисления.',
+  };
+}
+
+function mapBonusLedgerAuditItem(
+  row: BonusLedgerAuditRow,
+  snapshot: BonusLedgerAuditSnapshotRow | null,
+  now: Date,
+): GuestGameBonusLedgerAuditItem {
+  const metadata = jsonRecord(row.metadata);
+  const phoneMasked =
+    nullableString(metadata.phoneMasked) ??
+    row.guest?.phoneMasked ??
+    row.profile?.contactMasked ??
+    null;
+  const guestDisplay =
+    row.profile?.displayName ??
+    row.guest?.fullNameMasked ??
+    row.externalGuestId ??
+    'Гость не связан';
+  const guestContact =
+    row.profile?.contactMasked ??
+    row.guest?.phoneMasked ??
+    row.guest?.emailMasked ??
+    phoneMasked;
+  const retryReady =
+    row.status === 'FAILED' &&
+    (!row.nextAttemptAt || row.nextAttemptAt.getTime() <= now.getTime());
+  const reconciliation = bonusLedgerReconciliation(row, snapshot);
+
+  return {
+    id: row.id,
+    status: row.status,
+    statusLabel: bonusLedgerStatusLabel(row.status),
+    entryType: row.entryType,
+    source: row.source,
+    amount: numberValue(row.amount),
+    balanceBefore: numberOrNull(row.balanceBefore),
+    balanceAfter: numberOrNull(row.balanceAfter),
+    externalProvider: row.externalProvider,
+    externalDomain: row.externalDomain,
+    externalGuestId: row.externalGuestId,
+    phoneMasked,
+    attempts: row.attempts,
+    retryReady,
+    nextAttemptAt: iso(row.nextAttemptAt),
+    processedAt: iso(row.processedAt),
+    confirmedAt: iso(row.confirmedAt),
+    failedAt: iso(row.failedAt),
+    canceledAt: iso(row.canceledAt),
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+    errorCode: row.errorCode,
+    errorMessage: row.errorMessage,
+    reason: row.reason,
+    guest: {
+      id: row.guest?.id ?? row.profileId,
+      displayName: guestDisplay,
+      contact: guestContact,
+    },
+    reward: row.reward
+      ? {
+          id: row.reward.id,
+          status: row.reward.status,
+          rewardType: row.reward.rewardType,
+          rewardLabel: row.reward.rewardLabel,
+          rewardCode: row.reward.rewardCode,
+        }
+      : null,
+    store: row.store,
+    createdBy: mapUser(row.createdByUser),
+    processedBy: mapUser(row.processedByUser),
+    reconciliation,
+    nextAction: bonusLedgerNextAction(row, retryReady, reconciliation),
+  };
+}
+
+function bonusLedgerReconciliation(
+  row: BonusLedgerAuditRow,
+  snapshot: BonusLedgerAuditSnapshotRow | null,
+): GuestGameBonusLedgerAuditItem['reconciliation'] {
+  const expectedBalance = numberOrNull(row.balanceAfter);
+
+  if (['FAILED', 'CANCELED'].includes(row.status)) {
+    return {
+      state: 'NOT_APPLICABLE',
+      stateLabel: 'не требуется',
+      latestSnapshotAt: null,
+      latestSnapshotBalance: null,
+      expectedBalance,
+      diff: null,
+      note: 'Запись не подтверждена в Langame, сверка баланса не требуется.',
+    };
+  }
+
+  if (row.status !== 'CONFIRMED') {
+    return {
+      state: 'NOT_READY',
+      stateLabel: 'рано сверять',
+      latestSnapshotAt: null,
+      latestSnapshotBalance: null,
+      expectedBalance,
+      diff: null,
+      note: 'Сначала нужно подтвердить начисление через bonus ledger dispatcher.',
+    };
+  }
+
+  if (
+    !snapshot ||
+    !row.confirmedAt ||
+    snapshot.snapshotDate.getTime() < row.confirmedAt.getTime()
+  ) {
+    return {
+      state: 'WAITING_SYNC',
+      stateLabel: 'ждет snapshot',
+      latestSnapshotAt: snapshot ? snapshot.snapshotDate.toISOString() : null,
+      latestSnapshotBalance: snapshot
+        ? numberValue(snapshot.bonusBalance)
+        : null,
+      expectedBalance,
+      diff: null,
+      note: 'Начисление подтверждено, но еще нет свежего Langame snapshot после операции.',
+    };
+  }
+
+  const latestSnapshotBalance = numberValue(snapshot.bonusBalance);
+  const diff =
+    expectedBalance === null
+      ? null
+      : roundMoney(latestSnapshotBalance - expectedBalance);
+  const matched = diff !== null && Math.abs(diff) <= 0.01;
+
+  return {
+    state: matched ? 'MATCHED' : 'MISMATCH',
+    stateLabel: matched ? 'сошлось' : 'расхождение',
+    latestSnapshotAt: snapshot.snapshotDate.toISOString(),
+    latestSnapshotBalance,
+    expectedBalance,
+    diff,
+    note: matched
+      ? 'Последний Langame snapshot совпадает с ожидаемым балансом после ledger-начисления.'
+      : 'Langame snapshot отличается от ожидаемого баланса: нужна ручная сверка по гостю и операции.',
+  };
+}
+
+function bonusLedgerNextAction(
+  row: BonusLedgerAuditRow,
+  retryReady: boolean,
+  reconciliation: GuestGameBonusLedgerAuditItem['reconciliation'],
+) {
+  if (row.status === 'PENDING') {
+    return 'Запустить bonus-ledger dispatch или дождаться scheduled dispatcher.';
+  }
+
+  if (row.status === 'PROCESSING') {
+    return 'Проверить, не завис ли worker; stale-lock вернет запись в обработку по расписанию.';
+  }
+
+  if (row.status === 'FAILED') {
+    return retryReady
+      ? 'Повторить dispatch после проверки Langame-ключа, телефона гостя и домена клуба.'
+      : 'Дождаться nextAttemptAt или вручную разобрать ошибку перед повтором.';
+  }
+
+  if (row.status === 'CONFIRMED') {
+    if (reconciliation.state === 'MATCHED') {
+      return 'Операция закрыта: можно использовать ее как эталон пилотного начисления.';
+    }
+
+    if (reconciliation.state === 'MISMATCH') {
+      return 'Сверить гостя в Langame и при необходимости оформить обратную/корректирующую операцию.';
+    }
+
+    return 'Дождаться guest foundation sync и ночного bonus balance snapshot для финальной сверки.';
+  }
+
+  if (row.status === 'CANCELED') {
+    return 'Оставить отмену в аудите; для подтвержденных операций использовать отдельную обратную запись.';
+  }
+
+  return 'Проверить статус ledger-записи перед следующей операцией.';
+}
+
+function bonusLedgerStatusLabel(status: string) {
+  switch (status) {
+    case 'PENDING':
+      return 'в очереди';
+    case 'PROCESSING':
+      return 'обработка';
+    case 'CONFIRMED':
+      return 'подтверждено';
+    case 'FAILED':
+      return 'ошибка';
+    case 'CANCELED':
+      return 'отменено';
+    default:
+      return status.toLowerCase();
+  }
+}
+
+function bonusLedgerSnapshotKeys(value: {
+  guestId?: string | null;
+  externalProvider?: IntegrationProvider | null;
+  externalDomain?: string | null;
+  externalGuestId?: string | null;
+}) {
+  const keys: string[] = [];
+
+  if (value.guestId) {
+    keys.push(`guest:${value.guestId}`);
+  }
+
+  if (value.externalGuestId) {
+    keys.push(
+      [
+        'external',
+        value.externalProvider ?? 'UNKNOWN',
+        value.externalDomain ?? '',
+        value.externalGuestId,
+      ].join(':'),
+    );
+  }
+
+  return keys;
+}
+
 function mapDeliveryEvent(row: DeliveryEventRow): GuestGameDeliveryEvent {
   return {
     id: row.id,
@@ -9659,6 +10220,10 @@ function economyRecommendation({
 
 function sum(values: number[]) {
   return values.reduce((total, value) => total + value, 0);
+}
+
+function roundMoney(value: number) {
+  return Math.round(value * 100) / 100;
 }
 
 function levelFromXp(xp: number) {

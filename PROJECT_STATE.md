@@ -80,6 +80,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added a bonus ledger audit panel to Guest Game Hub: `/guests/gamification` now shows recent gamification accrual ledger entries, retry/error state, masked guest/contact context, and reconciliation between confirmed ledger `balanceAfter` and the next saved Langame bonus-balance snapshot, without exposing raw phone numbers, tokens, or full Langame payloads.
 - Added a pilot readiness checklist to Guest Game Hub: `/guests/gamification` now selects 1337 as the preferred pilot club, scores readiness from `/play` registration through OTP, game profile, Langame link, active rules, test event, reward queue, bonus ledger, and post-accrual balance reconciliation, and shows the next action without live Langame reads or PII exposure.
 - Added guest-only onboarding for `GAME_PROFILE` participants in the public guest portal: separate game-profile registrations now get a constructive route through profile, Langame match, first quest, reward channel, and club check-in instead of the generic “guest not found” warning, with anchors into the existing portal blocks and no employee account requirement.
 - Added a no-provider club map to public gamification registration: `/play` now renders a coordinate-based club map from saved `Store.latitude/longitude`, shows the guest point after geolocation, reflects the current search/radius result set, and lets guests pick a club by marker without external map keys or live Langame reads.

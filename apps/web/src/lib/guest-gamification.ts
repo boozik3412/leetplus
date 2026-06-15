@@ -726,6 +726,85 @@ export type GuestGamePilotReadiness = {
   note: string;
 };
 
+export type GuestGameBonusLedgerReconciliationState =
+  | "NOT_READY"
+  | "WAITING_SYNC"
+  | "MATCHED"
+  | "MISMATCH"
+  | "NOT_APPLICABLE";
+
+export type GuestGameBonusLedgerAuditItem = {
+  id: string;
+  status: string;
+  statusLabel: string;
+  entryType: string;
+  source: string;
+  amount: number;
+  balanceBefore: number | null;
+  balanceAfter: number | null;
+  externalProvider: string | null;
+  externalDomain: string | null;
+  externalGuestId: string | null;
+  phoneMasked: string | null;
+  attempts: number;
+  retryReady: boolean;
+  nextAttemptAt: string | null;
+  processedAt: string | null;
+  confirmedAt: string | null;
+  failedAt: string | null;
+  canceledAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  errorCode: string | null;
+  errorMessage: string | null;
+  reason: string | null;
+  guest: {
+    id: string | null;
+    displayName: string;
+    contact: string | null;
+  };
+  reward: {
+    id: string;
+    status: string;
+    rewardType: string;
+    rewardLabel: string;
+    rewardCode: string | null;
+  } | null;
+  store: { id: string; name: string } | null;
+  createdBy: GuestGameUser | null;
+  processedBy: GuestGameUser | null;
+  reconciliation: {
+    state: GuestGameBonusLedgerReconciliationState;
+    stateLabel: string;
+    latestSnapshotAt: string | null;
+    latestSnapshotBalance: number | null;
+    expectedBalance: number | null;
+    diff: number | null;
+    note: string;
+  };
+  nextAction: string;
+};
+
+export type GuestGameBonusLedgerAudit = {
+  summary: {
+    total: number;
+    pending: number;
+    processing: number;
+    confirmed: number;
+    failed: number;
+    canceled: number;
+    retryReady: number;
+    reconciliationPending: number;
+    reconciliationMismatch: number;
+    amountPending: number;
+    amountConfirmed: number;
+    amountFailed: number;
+    latestConfirmedAt: string | null;
+  };
+  items: GuestGameBonusLedgerAuditItem[];
+  note: string;
+};
+
 export type GuestGameTariffSnapshotStatus =
   | "READY"
   | "PARTIAL"
@@ -832,6 +911,7 @@ export type GuestGamificationWorkspace = {
   effect: GuestGameEffect;
   integrationReadiness: GuestGameIntegrationReadiness;
   pilotReadiness: GuestGamePilotReadiness;
+  bonusLedgerAudit: GuestGameBonusLedgerAudit;
   communicationQueue: GuestGameCommunicationQueue;
   deliveryOutbox: GuestGameDeliveryOutbox;
   profiles: GuestGameProfile[];

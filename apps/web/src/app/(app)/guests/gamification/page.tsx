@@ -206,6 +206,25 @@ const emptyWorkspace: GuestGamificationWorkspace = {
     items: [],
     note: "Пилотный чек-лист появится после ответа API workspace.",
   },
+  bonusLedgerAudit: {
+    summary: {
+      total: 0,
+      pending: 0,
+      processing: 0,
+      confirmed: 0,
+      failed: 0,
+      canceled: 0,
+      retryReady: 0,
+      reconciliationPending: 0,
+      reconciliationMismatch: 0,
+      amountPending: 0,
+      amountConfirmed: 0,
+      amountFailed: 0,
+      latestConfirmedAt: null,
+    },
+    items: [],
+    note: "Журнал bonus ledger появится после ответа API workspace.",
+  },
   communicationQueue: {
     summary: {
       total: 0,

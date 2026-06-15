@@ -80,6 +80,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added a pilot readiness checklist to Guest Game Hub: `/guests/gamification` now selects 1337 as the preferred pilot club, scores readiness from `/play` registration through OTP, game profile, Langame link, active rules, test event, reward queue, bonus ledger, and post-accrual balance reconciliation, and shows the next action without live Langame reads or PII exposure.
 - Added guest-only onboarding for `GAME_PROFILE` participants in the public guest portal: separate game-profile registrations now get a constructive route through profile, Langame match, first quest, reward channel, and club check-in instead of the generic “guest not found” warning, with anchors into the existing portal blocks and no employee account requirement.
 - Added a no-provider club map to public gamification registration: `/play` now renders a coordinate-based club map from saved `Store.latitude/longitude`, shows the guest point after geolocation, reflects the current search/radius result set, and lets guests pick a club by marker without external map keys or live Langame reads.
 - Added radius search to public gamification registration: `GET /guest-portal/gamification/clubs` now accepts `radiusKm`, returns applied-radius metadata and hidden-without-coordinates counts, and `/play` lets guests filter nearby clubs by 1/3/5/10/25 km or reset to all clubs after geolocation.

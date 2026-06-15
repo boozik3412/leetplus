@@ -193,6 +193,19 @@ const emptyWorkspace: GuestGamificationWorkspace = {
     ],
     note: "Готовность интеграций появится после ответа API workspace.",
   },
+  pilotReadiness: {
+    targetStore: null,
+    summary: {
+      total: 0,
+      ready: 0,
+      partial: 0,
+      blocked: 0,
+      manualOnly: 0,
+      readinessPercent: 0,
+    },
+    items: [],
+    note: "Пилотный чек-лист появится после ответа API workspace.",
+  },
   communicationQueue: {
     summary: {
       total: 0,

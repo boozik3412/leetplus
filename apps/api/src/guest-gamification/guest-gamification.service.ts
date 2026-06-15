@@ -154,6 +154,18 @@ const creatorSelect = {
   email: true,
 } satisfies Prisma.UserSelect;
 
+const pilotStoreSelect = {
+  id: true,
+  name: true,
+  publicSlug: true,
+  address: true,
+  city: true,
+  externalDomain: true,
+  externalClubId: true,
+  gamificationEnabled: true,
+  isActive: true,
+} satisfies Prisma.StoreSelect;
+
 const lootBoxInclude = {
   audience: { select: audienceSelect },
   createdByUser: { select: creatorSelect },
@@ -461,6 +473,9 @@ type SnapshotGuestGroupRow = Prisma.GuestGroupGetPayload<{
 }>;
 type SnapshotProductExpenseRow = Prisma.SalesFactGetPayload<{
   select: typeof snapshotProductExpenseSelect;
+}>;
+type PilotStoreRow = Prisma.StoreGetPayload<{
+  select: typeof pilotStoreSelect;
 }>;
 
 export type GuestGameUser = {
@@ -1018,11 +1033,58 @@ export type GuestGameIntegrationReadiness = {
   note: string;
 };
 
+export type GuestGamePilotReadinessItem = {
+  key:
+    | 'CLUB'
+    | 'PUBLIC_REGISTRATION'
+    | 'OTP'
+    | 'GAME_PROFILE'
+    | 'LANGAME_MATCH'
+    | 'ACTIVE_RULES'
+    | 'TEST_EVENT'
+    | 'REWARD_QUEUE'
+    | 'BONUS_LEDGER'
+    | 'BALANCE_RECONCILIATION';
+  title: string;
+  status: GuestGameIntegrationReadinessStatus;
+  statusLabel: string;
+  ready: boolean;
+  metric: string;
+  note: string;
+  nextAction: string;
+};
+
+export type GuestGamePilotReadiness = {
+  targetStore: {
+    id: string;
+    name: string;
+    publicSlug: string | null;
+    city: string | null;
+    address: string | null;
+    externalDomain: string | null;
+    externalClubId: string | null;
+    gamificationEnabled: boolean;
+    guestPortalPath: string;
+    playPath: string;
+  } | null;
+  summary: {
+    total: number;
+    ready: number;
+    partial: number;
+    blocked: number;
+    manualOnly: number;
+    readinessPercent: number;
+  };
+  items: GuestGamePilotReadinessItem[];
+  note: string;
+};
+
 export type GuestGamificationWorkspace = {
   summary: GuestGamificationSummary;
   economy: GuestGameEconomy;
   effect: GuestGameEffect;
   integrationReadiness: GuestGameIntegrationReadiness;
+  pilotReadiness: GuestGamePilotReadiness;
   communicationQueue: GuestGameCommunicationQueue;
   deliveryOutbox: GuestGameDeliveryOutbox;
   profiles: GuestGameProfile[];
@@ -1608,6 +1670,50 @@ function maxDate(left: Date | null, right: Date | null) {
   return right.getTime() > left.getTime() ? right : left;
 }
 
+function pickPilotStore(stores: PilotStoreRow[]) {
+  return (
+    stores.find((store) =>
+      [
+        store.name,
+        store.publicSlug,
+        store.externalDomain,
+        store.externalClubId,
+        store.address,
+        store.city,
+      ]
+        .filter(Boolean)
+        .some((value) => value?.toLowerCase().includes('1337')),
+    ) ??
+    stores.find((store) => store.gamificationEnabled) ??
+    stores[0] ??
+    null
+  );
+}
+
+function ruleMatchesPilotStore(
+  rule: { status: StatusValue; storeIds: string[] },
+  storeId: string | null,
+) {
+  if (rule.status !== 'ACTIVE') {
+    return false;
+  }
+
+  return (
+    !rule.storeIds.length || Boolean(storeId && rule.storeIds.includes(storeId))
+  );
+}
+
+function isBonusLedgerRewardType(rewardType: string | null) {
+  const normalized = rewardType?.trim().toUpperCase();
+
+  return Boolean(
+    normalized &&
+    ['BONUS', 'BONUS_POINTS', 'BONUS_BALANCE', 'LOYALTY_BONUS'].includes(
+      normalized,
+    ),
+  );
+}
+
 @Injectable()
 export class GuestGamificationService {
   constructor(
@@ -1629,6 +1735,7 @@ export class GuestGamificationService {
       events,
       tariffSnapshots,
       guestLogCatalog,
+      pilotStores,
     ] = await Promise.all([
       this.getProfiles(user),
       this.getLootBoxes(user),
@@ -1639,6 +1746,7 @@ export class GuestGamificationService {
       this.getEvents(user),
       this.getTariffSnapshots(user),
       this.getGuestLogCatalog(user),
+      this.getPilotStores(user),
     ]);
 
     const effect = await this.buildEffect(
@@ -1648,6 +1756,9 @@ export class GuestGamificationService {
       seasons,
       events,
     );
+    const integrationReadiness = this.buildIntegrationReadiness(deliveries);
+    const communicationQueue = this.buildCommunicationQueue(profiles, rewards);
+    const deliveryOutbox = this.buildDeliveryOutbox(deliveries);
 
     return {
       summary: this.buildSummary(
@@ -1659,9 +1770,22 @@ export class GuestGamificationService {
       ),
       economy: this.buildEconomy(lootBoxes, missions, seasons, rewards, events),
       effect,
-      integrationReadiness: this.buildIntegrationReadiness(deliveries),
-      communicationQueue: this.buildCommunicationQueue(profiles, rewards),
-      deliveryOutbox: this.buildDeliveryOutbox(deliveries),
+      integrationReadiness,
+      pilotReadiness: this.buildPilotReadiness({
+        tenantSlug: user.tenantSlug,
+        stores: pilotStores,
+        profiles,
+        lootBoxes,
+        missions,
+        seasons,
+        rewards,
+        events,
+        integrationReadiness,
+        communicationQueue,
+        deliveryOutbox,
+      }),
+      communicationQueue,
+      deliveryOutbox,
       profiles,
       lootBoxes,
       missions,
@@ -1670,6 +1794,308 @@ export class GuestGamificationService {
       events,
       tariffSnapshots,
       guestLogCatalog,
+    };
+  }
+
+  private async getPilotStores(
+    user: AuthenticatedUser,
+  ): Promise<PilotStoreRow[]> {
+    return this.prisma.store.findMany({
+      where: {
+        tenantId: user.tenantId,
+        isActive: true,
+      },
+      select: pilotStoreSelect,
+      orderBy: [
+        { gamificationEnabled: 'desc' },
+        { name: 'asc' },
+        { createdAt: 'asc' },
+      ],
+    });
+  }
+
+  private buildPilotReadiness({
+    tenantSlug,
+    stores,
+    profiles,
+    lootBoxes,
+    missions,
+    seasons,
+    rewards,
+    events,
+    integrationReadiness,
+    communicationQueue,
+    deliveryOutbox,
+  }: {
+    tenantSlug: string;
+    stores: PilotStoreRow[];
+    profiles: GuestGameProfile[];
+    lootBoxes: GuestGameLootBox[];
+    missions: GuestGameMission[];
+    seasons: GuestGameSeason[];
+    rewards: GuestGameReward[];
+    events: GuestGameEvent[];
+    integrationReadiness: GuestGameIntegrationReadiness;
+    communicationQueue: GuestGameCommunicationQueue;
+    deliveryOutbox: GuestGameDeliveryOutbox;
+  }): GuestGamePilotReadiness {
+    const targetStore = pickPilotStore(stores);
+    const targetStoreId = targetStore?.id ?? null;
+    const activeProfiles = profiles.filter(
+      (profile) => profile.status === 'ACTIVE',
+    );
+    const linkedProfiles = activeProfiles.filter((profile) => profile.guest);
+    const activeLootBoxes = lootBoxes.filter((item) =>
+      ruleMatchesPilotStore(item, targetStoreId),
+    );
+    const activeMissions = missions.filter((item) =>
+      ruleMatchesPilotStore(item, targetStoreId),
+    );
+    const activeSeasons = seasons.filter((item) => item.status === 'ACTIVE');
+    const activeRuleCount =
+      activeLootBoxes.length + activeMissions.length + activeSeasons.length;
+    const pilotRewards = targetStoreId
+      ? rewards.filter(
+          (reward) => !reward.store || reward.store.id === targetStoreId,
+        )
+      : rewards;
+    const approvedRewards = pilotRewards.filter(
+      (reward) => reward.status === 'APPROVED',
+    );
+    const pendingRewards = pilotRewards.filter(
+      (reward) => reward.status === 'PENDING',
+    );
+    const readyWalletRewards = pilotRewards.filter(
+      (reward) => reward.walletState === 'READY',
+    );
+    const bonusRewards = approvedRewards.filter((reward) =>
+      isBonusLedgerRewardType(reward.rewardType),
+    );
+    const cashierReady =
+      communicationQueue.summary.readyForCashier +
+      deliveryOutbox.summary.cashier;
+    const otpItem = integrationReadiness.items.find(
+      (item) => item.key === 'OTP',
+    );
+    const langameWriteItem = integrationReadiness.items.find(
+      (item) => item.key === 'LANGAME_WRITE_API',
+    );
+    const registrationReady = Boolean(
+      targetStore && (targetStore.gamificationEnabled || activeRuleCount > 0),
+    );
+    const storeSlugOrId = targetStore?.publicSlug ?? targetStore?.id ?? null;
+    const targetStorePayload = targetStore
+      ? {
+          id: targetStore.id,
+          name: targetStore.name,
+          publicSlug: targetStore.publicSlug,
+          city: targetStore.city,
+          address: targetStore.address,
+          externalDomain: targetStore.externalDomain,
+          externalClubId: targetStore.externalClubId,
+          gamificationEnabled: targetStore.gamificationEnabled,
+          guestPortalPath: `/guest/${tenantSlug}/${storeSlugOrId}`,
+          playPath: '/play',
+        }
+      : null;
+    const items: GuestGamePilotReadinessItem[] = [
+      {
+        key: 'CLUB',
+        title: 'Клуб пилота',
+        status: targetStore
+          ? targetStore.gamificationEnabled
+            ? 'READY'
+            : 'PARTIAL'
+          : 'BLOCKED',
+        statusLabel: targetStore
+          ? targetStore.gamificationEnabled
+            ? 'в каталоге'
+            : 'нужен флаг'
+          : 'нет клуба',
+        ready: Boolean(targetStore?.gamificationEnabled),
+        metric: targetStore?.name ?? 'клуб не выбран',
+        note: targetStore
+          ? 'Пилот выбирает клуб 1337, если он найден среди активных клубов; иначе берется первый клуб с включенной геймификацией.'
+          : 'В tenant нет активного клуба для пилотного запуска геймификации.',
+        nextAction: targetStore?.gamificationEnabled
+          ? 'Оставить клуб включенным в публичном каталоге /play.'
+          : 'Включить флаг геймификации у пилотного клуба на странице клубов.',
+      },
+      {
+        key: 'PUBLIC_REGISTRATION',
+        title: 'Публичная регистрация',
+        status: registrationReady
+          ? 'READY'
+          : targetStore
+            ? 'PARTIAL'
+            : 'BLOCKED',
+        statusLabel: registrationReady ? 'готово' : 'не готово',
+        ready: registrationReady,
+        metric: registrationReady ? '/play' : 'нужна настройка',
+        note: 'Гость должен пройти путь /play -> выбор клуба -> согласие -> OTP без сотруднической авторизации.',
+        nextAction: registrationReady
+          ? 'Проверить путь на тестовом телефоне и открыть гостевой кабинет клуба.'
+          : 'Включить клуб в каталог /play через флаг геймификации или активное игровое правило.',
+      },
+      {
+        key: 'OTP',
+        title: 'OTP-доставка',
+        status: otpItem?.status ?? 'BLOCKED',
+        statusLabel: otpItem?.statusLabel ?? 'нет данных',
+        ready: Boolean(otpItem?.ready),
+        metric: otpItem?.enabled ? 'включено' : 'выключено',
+        note:
+          otpItem?.note ??
+          'Для production-пилота нужен явный OTP-канал или контролируемый dev-режим.',
+        nextAction:
+          otpItem?.nextAction ??
+          'Настроить SMS/Telegram/MAX provider или временно согласовать dev OTP.',
+      },
+      {
+        key: 'GAME_PROFILE',
+        title: 'Игровой профиль',
+        status: activeProfiles.length
+          ? 'READY'
+          : registrationReady
+            ? 'PARTIAL'
+            : 'BLOCKED',
+        statusLabel: activeProfiles.length ? 'есть профиль' : 'ожидает гостя',
+        ready: activeProfiles.length > 0,
+        metric: `${activeProfiles.length} активных`,
+        note: 'Регистрация не создает общий Guest, а создает отдельный GuestGameProfile для XP, миссий и наград.',
+        nextAction: activeProfiles.length
+          ? 'Использовать тестовый профиль для dry-run и первого события.'
+          : 'Зарегистрировать тестового участника через /play.',
+      },
+      {
+        key: 'LANGAME_MATCH',
+        title: 'Связка с Langame',
+        status: linkedProfiles.length
+          ? 'READY'
+          : activeProfiles.length
+            ? 'PARTIAL'
+            : 'BLOCKED',
+        statusLabel: linkedProfiles.length ? 'связан' : 'нужна сверка',
+        ready: linkedProfiles.length > 0,
+        metric: `${linkedProfiles.length}/${activeProfiles.length}`,
+        note: 'Для бонусной записи нужен связанный Langame-гость или следующий guest foundation sync по phoneHash.',
+        nextAction: linkedProfiles.length
+          ? 'Перейти к проверке факта сессии и события.'
+          : 'В гостевом кабинете нажать ручную проверку Langame или дождаться foundation sync.',
+      },
+      {
+        key: 'ACTIVE_RULES',
+        title: 'Активные правила',
+        status: activeRuleCount ? 'READY' : targetStore ? 'PARTIAL' : 'BLOCKED',
+        statusLabel: activeRuleCount ? 'есть сценарии' : 'нет правил',
+        ready: activeRuleCount > 0,
+        metric: `${activeRuleCount} правил`,
+        note: 'Пилоту нужен хотя бы один активный лутбокс, миссия или Battle Pass, применимый к клубу.',
+        nextAction: activeRuleCount
+          ? 'Запустить dry-run по тестовому профилю и пилотному клубу.'
+          : 'Создать простую миссию или лутбокс для клуба 1337.',
+      },
+      {
+        key: 'TEST_EVENT',
+        title: 'Тестовое событие',
+        status: events.length
+          ? 'READY'
+          : activeRuleCount && linkedProfiles.length
+            ? 'PARTIAL'
+            : 'BLOCKED',
+        statusLabel: events.length ? 'есть история' : 'нужен dry-run',
+        ready: events.length > 0,
+        metric: `${events.length} событий`,
+        note: 'Перед боевым начислением нужно подтвердить dry-run/process-event на сохраненном snapshot-факте или ручном событии.',
+        nextAction: events.length
+          ? 'Проверить созданные награды и idempotency по событию.'
+          : 'Во вкладке тестового запуска выполнить dry-run и подтвердить одно событие.',
+      },
+      {
+        key: 'REWARD_QUEUE',
+        title: 'Очередь наград',
+        status: readyWalletRewards.length
+          ? 'READY'
+          : pendingRewards.length || activeRuleCount
+            ? 'PARTIAL'
+            : 'BLOCKED',
+        statusLabel: readyWalletRewards.length
+          ? 'готово к выдаче'
+          : pendingRewards.length
+            ? 'ждет проверки'
+            : 'пусто',
+        ready: readyWalletRewards.length > 0,
+        metric: `${readyWalletRewards.length} готово`,
+        note: 'Награда должна появиться в кошельке с кодом кассиру или как approved bonus reward для ledger.',
+        nextAction: readyWalletRewards.length
+          ? 'Проверить код выдачи или подготовку ledger-записи.'
+          : pendingRewards.length
+            ? 'Подтвердить тестовую награду или включить auto-approve для безопасного правила.'
+            : 'Создать событие, которое формирует награду.',
+      },
+      {
+        key: 'BONUS_LEDGER',
+        title: 'Bonus ledger -> Langame',
+        status: langameWriteItem?.ready
+          ? bonusRewards.length
+            ? 'READY'
+            : 'PARTIAL'
+          : cashierReady || approvedRewards.length
+            ? 'MANUAL_ONLY'
+            : 'BLOCKED',
+        statusLabel: langameWriteItem?.ready
+          ? bonusRewards.length
+            ? 'готов к записи'
+            : 'ждет бонус'
+          : 'ручной режим',
+        ready: Boolean(langameWriteItem?.ready && bonusRewards.length),
+        metric: `${bonusRewards.length} bonus rewards`,
+        note: 'Боевой dispatcher пишет только одобренные бонусные награды через master endpoint Langame по телефону гостя.',
+        nextAction: langameWriteItem?.ready
+          ? bonusRewards.length
+            ? 'Запустить scheduled bonus-ledger dispatch на тестовой записи и проверить ответ Langame.'
+            : 'Создать approved-награду с бонусным rewardType для ledger.'
+          : 'До включения LANGAME_BONUS_ACCRUAL_ENABLED использовать claim-код или ручную выдачу.',
+      },
+      {
+        key: 'BALANCE_RECONCILIATION',
+        title: 'Сверка после начисления',
+        status:
+          langameWriteItem?.ready && bonusRewards.length
+            ? 'PARTIAL'
+            : 'MANUAL_ONLY',
+        statusLabel: 'после пилота',
+        ready: false,
+        metric: 'snapshot vs current',
+        note: 'Финальный production-сигнал: после первого начисления сверить GuestBonusBalanceCurrent с ночным snapshot Langame.',
+        nextAction:
+          'После боевого начисления дождаться guest foundation sync и сравнить текущий live-баланс с новым snapshot.',
+      },
+    ];
+    const ready = items.filter((item) => item.status === 'READY').length;
+    const partial = items.filter((item) => item.status === 'PARTIAL').length;
+    const blocked = items.filter((item) => item.status === 'BLOCKED').length;
+    const manualOnly = items.filter(
+      (item) => item.status === 'MANUAL_ONLY',
+    ).length;
+    const readinessPercent = items.length
+      ? Math.round(
+          ((ready + partial * 0.5 + manualOnly * 0.5) / items.length) * 100,
+        )
+      : 0;
+
+    return {
+      targetStore: targetStorePayload,
+      summary: {
+        total: items.length,
+        ready,
+        partial,
+        blocked,
+        manualOnly,
+        readinessPercent,
+      },
+      items,
+      note: 'Пилотный чек-лист показывает путь от публичной регистрации до первого бонуса в Langame по уже сохраненным данным LeetPlus. Он не делает live-запросов и не раскрывает ПДн.',
     };
   }
 

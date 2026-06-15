@@ -680,6 +680,52 @@ export type GuestGameIntegrationReadiness = {
   note: string;
 };
 
+export type GuestGamePilotReadinessItem = {
+  key:
+    | "CLUB"
+    | "PUBLIC_REGISTRATION"
+    | "OTP"
+    | "GAME_PROFILE"
+    | "LANGAME_MATCH"
+    | "ACTIVE_RULES"
+    | "TEST_EVENT"
+    | "REWARD_QUEUE"
+    | "BONUS_LEDGER"
+    | "BALANCE_RECONCILIATION";
+  title: string;
+  status: GuestGameIntegrationReadinessStatus;
+  statusLabel: string;
+  ready: boolean;
+  metric: string;
+  note: string;
+  nextAction: string;
+};
+
+export type GuestGamePilotReadiness = {
+  targetStore: {
+    id: string;
+    name: string;
+    publicSlug: string | null;
+    city: string | null;
+    address: string | null;
+    externalDomain: string | null;
+    externalClubId: string | null;
+    gamificationEnabled: boolean;
+    guestPortalPath: string;
+    playPath: string;
+  } | null;
+  summary: {
+    total: number;
+    ready: number;
+    partial: number;
+    blocked: number;
+    manualOnly: number;
+    readinessPercent: number;
+  };
+  items: GuestGamePilotReadinessItem[];
+  note: string;
+};
+
 export type GuestGameTariffSnapshotStatus =
   | "READY"
   | "PARTIAL"
@@ -785,6 +831,7 @@ export type GuestGamificationWorkspace = {
   economy: GuestGameEconomy;
   effect: GuestGameEffect;
   integrationReadiness: GuestGameIntegrationReadiness;
+  pilotReadiness: GuestGamePilotReadiness;
   communicationQueue: GuestGameCommunicationQueue;
   deliveryOutbox: GuestGameDeliveryOutbox;
   profiles: GuestGameProfile[];

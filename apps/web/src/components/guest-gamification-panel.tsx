@@ -2400,6 +2400,7 @@ function OverviewTab({
       <EconomyControlCard economy={workspace.economy} />
       <EffectControlCard effect={workspace.effect} />
       <IntegrationReadinessCard readiness={workspace.integrationReadiness} />
+      <PilotReadinessCard readiness={workspace.pilotReadiness} />
       <CommunicationQueueCard
         queue={workspace.communicationQueue}
         outbox={workspace.deliveryOutbox}
@@ -2590,6 +2591,142 @@ function IntegrationReadinessCard({
           </article>
         ))}
       </div>
+    </section>
+  );
+}
+
+function PilotReadinessCard({
+  readiness,
+}: {
+  readiness: GuestGamificationWorkspace["pilotReadiness"];
+}) {
+  const target = readiness.targetStore;
+  const nextIssue =
+    readiness.items.find((item) => item.status === "BLOCKED") ??
+    readiness.items.find((item) => item.status === "PARTIAL") ??
+    readiness.items.find((item) => item.status === "MANUAL_ONLY") ??
+    null;
+
+  return (
+    <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-cyan-600 dark:text-cyan-300">
+            Пилотный прогон
+          </p>
+          <h2 className="mt-1 text-lg font-bold text-zinc-950 dark:text-white">
+            Готовность клуба к первому бонусу
+          </h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+            Чек-лист собирает путь от /play и OTP до события, кошелька наград,
+            bonus ledger и последующей сверки баланса Langame. Проверка строится
+            по сохраненным данным LeetPlus и не делает live-запросов.
+          </p>
+        </div>
+
+        <div className="grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)] xl:w-[420px]">
+          <div className="rounded-lg border border-cyan-200 bg-cyan-50 p-3 text-center dark:border-cyan-900/60 dark:bg-cyan-950/30">
+            <span className="block text-xs font-semibold text-cyan-700 dark:text-cyan-200">
+              Готовность
+            </span>
+            <span className="mt-1 block text-3xl font-black text-zinc-950 dark:text-white">
+              {readiness.summary.readinessPercent}%
+            </span>
+          </div>
+          <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm dark:border-zinc-800 dark:bg-zinc-900/60">
+            <p className="font-bold text-zinc-950 dark:text-white">
+              {target?.name ?? "Пилотный клуб не найден"}
+            </p>
+            <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+              {target
+                ? [
+                    target.city,
+                    target.address,
+                    target.externalDomain,
+                    target.externalClubId,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ") || "Клуб выбран из активных точек сети"
+                : "Добавьте активный клуб или включите геймификацию у 1337."}
+            </p>
+            {target ? (
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Link
+                  href={target.playPath}
+                  className="rounded-lg bg-cyan-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-cyan-700"
+                >
+                  Открыть /play
+                </Link>
+                <Link
+                  href={target.guestPortalPath}
+                  className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-bold text-zinc-700 transition hover:border-cyan-300 hover:text-cyan-700 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+                >
+                  Кабинет клуба
+                </Link>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-2 text-center text-xs sm:grid-cols-4">
+        <MiniMetric label="Готово" value={readiness.summary.ready} />
+        <MiniMetric
+          label="Частично"
+          value={readiness.summary.partial}
+        />
+        <MiniMetric
+          label="Блокеры"
+          value={readiness.summary.blocked}
+        />
+        <MiniMetric
+          label="Ручной режим"
+          value={readiness.summary.manualOnly}
+        />
+      </div>
+
+      {nextIssue ? (
+        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-100">
+          <span className="font-bold">Следующий шаг:</span>{" "}
+          {nextIssue.nextAction}
+        </div>
+      ) : null}
+
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        {readiness.items.map((item, index) => (
+          <article
+            key={item.key}
+            className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-zinc-200 bg-white text-xs font-black text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200">
+                {index + 1}
+              </span>
+              <span
+                className={[
+                  "shrink-0 rounded-full px-2 py-1 text-[11px] font-bold uppercase",
+                  integrationReadinessStatusClass(item.status),
+                ].join(" ")}
+              >
+                {item.statusLabel}
+              </span>
+            </div>
+            <h3 className="mt-3 text-sm font-bold text-zinc-950 dark:text-white">
+              {item.title}
+            </h3>
+            <p className="mt-1 text-xs font-semibold text-cyan-700 dark:text-cyan-200">
+              {item.metric}
+            </p>
+            <p className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+              {item.note}
+            </p>
+          </article>
+        ))}
+      </div>
+
+      <p className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs leading-5 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
+        {readiness.note}
+      </p>
     </section>
   );
 }

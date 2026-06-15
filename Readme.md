@@ -30,6 +30,8 @@ Payload: `phone`, `type`, `sum`, `comment`, где `type` может быть `b
 
 Боевой dispatcher включается env-флагом `LANGAME_BONUS_ACCRUAL_ENABLED=true`; путь по умолчанию: `LANGAME_BONUS_ACCRUAL_PATH=/master_api/guests/balance/phone`.
 
+Публичная регистрация участника геймификации доступна на `/play`. Страница загружает только клубы с активными правилами Guest Game Hub, поддерживает поиск по городу/клубу/адресу и геолокацию при заполненных `Store.latitude/longitude`. После OTP LeetPlus создает или переиспользует отдельный `GuestGameProfile` по подтвержденному телефону и tenant scope, записывает `profileId` в гостевую сессию и не создает запись в общем `Guest`; связь с Langame-гостем появляется через сохраненный snapshot или отдельную проверку match.
+
 ## Что уже реализовано
 
 ### Дашборд

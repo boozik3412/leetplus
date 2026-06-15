@@ -76,6 +76,15 @@ type GuestPortalTokenPayload = {
   phoneHash: string;
 };
 
+type GuestPortalOtpChallengeRegistration = {
+  id: string;
+  tenantId: string;
+  guestId: string | null;
+  profileId: string | null;
+  phoneHash: string;
+  phoneMasked: string | null;
+};
+
 type TenantStoreContext = {
   tenant: {
     id: string;
@@ -895,21 +904,15 @@ export class GuestPortalService {
       throw new BadRequestException('Код введен неверно.');
     }
 
-    await this.prisma.guestPortalOtpChallenge.update({
-      where: { id: challenge.id },
-      data: {
-        status: 'VERIFIED',
-        verifiedAt: new Date(),
-      },
-    });
+    const profile = await this.completeOtpRegistration(challenge);
 
     const payload: GuestPortalTokenPayload = {
       sub: challenge.id,
       purpose: GUEST_PORTAL_PURPOSE,
       tenantId: context.tenant.id,
       storeId: context.store.id,
-      guestId: challenge.guestId,
-      profileId: challenge.profileId,
+      guestId: profile.guestId,
+      profileId: profile.id,
       phoneHash: challenge.phoneHash,
     };
     const token = await this.jwtService.signAsync(payload, {
@@ -922,6 +925,130 @@ export class GuestPortalService {
       token,
       portal: await this.buildPortalPayload(payload),
     };
+  }
+
+  private async completeOtpRegistration(
+    challenge: GuestPortalOtpChallengeRegistration,
+  ) {
+    const now = new Date();
+
+    return this.prisma.$transaction(async (tx) => {
+      const guest = challenge.guestId
+        ? await tx.guest.findFirst({
+            where: {
+              id: challenge.guestId,
+              tenantId: challenge.tenantId,
+              isDisabled: false,
+            },
+            select: {
+              id: true,
+              externalGuestId: true,
+              fullNameMasked: true,
+              phoneMasked: true,
+              emailMasked: true,
+            },
+          })
+        : null;
+      const existingProfile = await this.findRegistrationProfile(tx, challenge);
+      const profile = existingProfile
+        ? await tx.guestGameProfile.update({
+            where: { id: existingProfile.id },
+            data: {
+              ...(guest && !existingProfile.guestId
+                ? { guestId: guest.id }
+                : {}),
+              phoneHash: existingProfile.phoneHash ?? challenge.phoneHash,
+              contactMasked:
+                existingProfile.contactMasked ??
+                guest?.phoneMasked ??
+                guest?.emailMasked ??
+                challenge.phoneMasked,
+              displayName:
+                existingProfile.displayName ??
+                guest?.fullNameMasked ??
+                guest?.externalGuestId ??
+                'Гость клуба',
+              status: 'ACTIVE',
+              lastActivityAt: now,
+            },
+            select: { id: true, guestId: true },
+          })
+        : await tx.guestGameProfile.create({
+            data: {
+              tenantId: challenge.tenantId,
+              ...(guest ? { guestId: guest.id } : {}),
+              displayName:
+                guest?.fullNameMasked ??
+                guest?.externalGuestId ??
+                'Гость клуба',
+              contactMasked:
+                guest?.phoneMasked ??
+                guest?.emailMasked ??
+                challenge.phoneMasked,
+              phoneHash: challenge.phoneHash,
+              status: 'ACTIVE',
+              lastActivityAt: now,
+            },
+            select: { id: true, guestId: true },
+          });
+
+      await tx.guestPortalOtpChallenge.update({
+        where: { id: challenge.id },
+        data: {
+          status: 'VERIFIED',
+          verifiedAt: now,
+          guestId: profile.guestId ?? challenge.guestId,
+          profileId: profile.id,
+        },
+      });
+
+      return {
+        id: profile.id,
+        guestId: profile.guestId ?? challenge.guestId,
+      };
+    });
+  }
+
+  private async findRegistrationProfile(
+    tx: Prisma.TransactionClient,
+    challenge: GuestPortalOtpChallengeRegistration,
+  ) {
+    if (challenge.profileId) {
+      const profile = await tx.guestGameProfile.findFirst({
+        where: {
+          id: challenge.profileId,
+          tenantId: challenge.tenantId,
+          status: 'ACTIVE',
+        },
+      });
+
+      if (profile) {
+        return profile;
+      }
+    }
+
+    if (challenge.guestId) {
+      const profile = await tx.guestGameProfile.findFirst({
+        where: {
+          tenantId: challenge.tenantId,
+          guestId: challenge.guestId,
+          status: 'ACTIVE',
+        },
+      });
+
+      if (profile) {
+        return profile;
+      }
+    }
+
+    return tx.guestGameProfile.findFirst({
+      where: {
+        tenantId: challenge.tenantId,
+        phoneHash: challenge.phoneHash,
+        status: 'ACTIVE',
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
   }
 
   async getSession(authorization: string | undefined) {

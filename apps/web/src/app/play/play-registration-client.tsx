@@ -557,6 +557,19 @@ function VerifiedSummary({
         <h3 className="mt-1 text-2xl font-black text-white">
           {portal.profile.displayName}
         </h3>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <StatusPill tone="emerald">Игровой профиль создан</StatusPill>
+          <StatusPill
+            tone={
+              portal.guestSnapshot.participation.accountState ===
+              "LANGAME_SYNCED"
+                ? "cyan"
+                : "amber"
+            }
+          >
+            {portal.guestSnapshot.participation.accountStateLabel}
+          </StatusPill>
+        </div>
         <div className="mt-4 grid grid-cols-3 gap-2">
           <Metric label="Уровень" value={portal.profile.level} />
           <Metric label="XP" value={portal.profile.xp} />

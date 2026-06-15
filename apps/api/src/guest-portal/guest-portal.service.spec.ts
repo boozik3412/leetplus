@@ -2,12 +2,29 @@
 
 import { ConfigService } from '@nestjs/config';
 import { IntegrationProvider, Prisma } from '@prisma/client';
+import { createHash } from 'node:crypto';
 import { GuestPortalService } from './guest-portal.service';
 
 function createPrismaMock() {
-  return {
+  const prisma = {
+    $transaction: jest.fn((callback) => callback(prisma)),
+    tenant: {
+      findFirst: jest.fn(),
+    },
+    guest: {
+      findFirst: jest.fn(),
+    },
     store: {
       findMany: jest.fn(),
+    },
+    guestPortalOtpChallenge: {
+      findFirst: jest.fn(),
+      update: jest.fn(),
+    },
+    guestGameProfile: {
+      findFirst: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
     },
     guestGameMission: {
       findMany: jest.fn(),
@@ -19,6 +36,8 @@ function createPrismaMock() {
       findMany: jest.fn(),
     },
   } as any;
+
+  return prisma;
 }
 
 function createService(configValues: Record<string, string | undefined> = {}) {
@@ -26,20 +45,30 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   const configService = {
     get: jest.fn((key: string) => configValues[key]),
   } as unknown as ConfigService;
+  const jwtService = {
+    signAsync: jest.fn(),
+  };
   const service = new GuestPortalService(
     prisma,
     configService,
-    {} as any,
+    jwtService as any,
     {} as any,
     {} as any,
   );
 
+  prisma.tenant.findFirst.mockResolvedValue(null);
+  prisma.guest.findFirst.mockResolvedValue(null);
   prisma.store.findMany.mockResolvedValue([]);
+  prisma.guestPortalOtpChallenge.findFirst.mockResolvedValue(null);
+  prisma.guestPortalOtpChallenge.update.mockResolvedValue({});
+  prisma.guestGameProfile.findFirst.mockResolvedValue(null);
+  prisma.guestGameProfile.create.mockResolvedValue(null);
+  prisma.guestGameProfile.update.mockResolvedValue(null);
   prisma.guestGameMission.findMany.mockResolvedValue([]);
   prisma.guestGameLootBox.findMany.mockResolvedValue([]);
   prisma.guestGameSeason.findMany.mockResolvedValue([]);
 
-  return { prisma, service };
+  return { jwtService, prisma, service };
 }
 
 describe('GuestPortalService', () => {
@@ -119,6 +148,95 @@ describe('GuestPortalService', () => {
       });
       expect(directory.clubs[0].location.coordinatesReady).toBe(true);
       expect(directory.clubs[0].location.distanceKm).toBeLessThan(1);
+    });
+  });
+
+  describe('verifyOtp', () => {
+    it('creates a separate game profile for phone-only gamification registration', async () => {
+      const { jwtService, prisma, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+      });
+      const challengeId = 'challenge-1';
+      const code = '123456';
+      const codeHash = createHash('sha256')
+        .update(`test-secret:${challengeId}:${code}`)
+        .digest('hex');
+      const buildPortalPayload = jest
+        .spyOn(service as any, 'buildPortalPayload')
+        .mockResolvedValue({
+          profile: { id: 'profile-1' },
+        });
+
+      prisma.tenant.findFirst.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'Leet Clubs',
+        slug: 'leet',
+        stores: [
+          {
+            id: 'store-1',
+            publicSlug: 'club-1337',
+            name: '1337',
+            address: 'ул. Ленина, 1',
+          },
+        ],
+      });
+      prisma.guestPortalOtpChallenge.findFirst.mockResolvedValue({
+        id: challengeId,
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        phoneHash: 'phone-hash-1',
+        phoneMasked: '+7 *** ***-99-99',
+        guestId: null,
+        profileId: null,
+        codeHash,
+        status: 'PENDING',
+        attempts: 0,
+        expiresAt: new Date(Date.now() + 60_000),
+      });
+      prisma.guestGameProfile.create.mockResolvedValue({
+        id: 'profile-1',
+        guestId: null,
+      });
+      jwtService.signAsync.mockResolvedValue('guest-token');
+
+      const result = await service.verifyOtp('leet', 'club-1337', {
+        challengeId,
+        code,
+      });
+
+      expect(prisma.guestGameProfile.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            tenantId: 'tenant-1',
+            displayName: 'Гость клуба',
+            contactMasked: '+7 *** ***-99-99',
+            phoneHash: 'phone-hash-1',
+            status: 'ACTIVE',
+          }),
+        }),
+      );
+      expect(prisma.guestPortalOtpChallenge.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: challengeId },
+          data: expect.objectContaining({
+            status: 'VERIFIED',
+            guestId: null,
+            profileId: 'profile-1',
+          }),
+        }),
+      );
+      expect(jwtService.signAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          guestId: null,
+          profileId: 'profile-1',
+          phoneHash: 'phone-hash-1',
+        }),
+        expect.any(Object),
+      );
+      expect(buildPortalPayload).toHaveBeenCalledWith(
+        expect.objectContaining({ profileId: 'profile-1' }),
+      );
+      expect(result.token).toBe('guest-token');
     });
   });
 });

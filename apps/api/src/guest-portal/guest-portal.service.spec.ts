@@ -166,6 +166,13 @@ describe('GuestPortalService', () => {
       });
 
       expect(directory.total).toBe(2);
+      expect(directory.search).toMatchObject({
+        locationReady: true,
+        radiusKm: null,
+        radiusApplied: false,
+        totalBeforeRadius: 2,
+        hiddenWithoutCoordinates: 0,
+      });
       expect(directory.cities).toEqual(['Екатеринбург']);
       expect(directory.clubs[0]).toMatchObject({
         id: 'leet:club-1337',
@@ -190,6 +197,23 @@ describe('GuestPortalService', () => {
           configuredByStore: true,
         },
       });
+
+      const nearbyDirectory = await service.getGamificationClubDirectory({
+        lat: '56.838',
+        lng: '60.597',
+        radiusKm: '1',
+      });
+
+      expect(nearbyDirectory.total).toBe(1);
+      expect(nearbyDirectory.search).toMatchObject({
+        locationReady: true,
+        radiusKm: 1,
+        radiusApplied: true,
+        totalBeforeRadius: 2,
+        hiddenWithoutCoordinates: 1,
+      });
+      expect(nearbyDirectory.clubs).toHaveLength(1);
+      expect(nearbyDirectory.clubs[0].id).toBe('leet:club-1337');
     });
   });
 

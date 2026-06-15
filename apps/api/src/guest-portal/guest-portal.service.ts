@@ -142,6 +142,13 @@ export type GuestPortalGamificationClubDirectory = {
   updatedAt: string;
   total: number;
   cities: string[];
+  search: {
+    locationReady: boolean;
+    radiusKm: number | null;
+    radiusApplied: boolean;
+    totalBeforeRadius: number;
+    hiddenWithoutCoordinates: number;
+  };
   clubs: Array<{
     id: string;
     tenant: {
@@ -625,7 +632,7 @@ export class GuestPortalService {
   }
 
   async getGamificationClubDirectory(
-    query: { lat?: string; lng?: string } = {},
+    query: { lat?: string; lng?: string; radiusKm?: string } = {},
   ): Promise<GuestPortalGamificationClubDirectory> {
     const [stores, missions, lootBoxes, seasons] = await Promise.all([
       this.prisma.store.findMany({
@@ -680,10 +687,11 @@ export class GuestPortalService {
       }),
     ]);
     const guestLocation = geoPoint(query.lat, query.lng);
+    const radiusKm = radiusNumber(query.radiusKm);
     const bonusWriteEnabled = booleanEnv(
       this.configService.get<string>('LANGAME_BONUS_ACCRUAL_ENABLED'),
     );
-    const clubs = stores
+    const allClubs = stores
       .map((store) => {
         const activeMissions = missions.filter(
           (mission) =>
@@ -750,16 +758,41 @@ export class GuestPortalService {
           },
         };
       })
-      .filter((club) => club.gamification.gamificationEnabled)
-      .sort((left, right) => compareDirectoryClubs(left, right));
+      .filter((club) => club.gamification.gamificationEnabled);
+    const radiusApplied = Boolean(guestLocation && radiusKm !== null);
+    let radiusFilteredClubs = allClubs;
+
+    if (guestLocation && radiusKm !== null) {
+      const radiusLimitKm = radiusKm;
+
+      radiusFilteredClubs = allClubs.filter((club) => {
+        const distanceKm = club.location.distanceKm;
+
+        return distanceKm !== null && distanceKm <= radiusLimitKm;
+      });
+    }
+
+    const clubs = radiusFilteredClubs.sort((left, right) =>
+      compareDirectoryClubs(left, right),
+    );
     const cities = uniqueStrings(
       clubs.map((club) => club.store.city?.trim() || null),
     ).sort((left, right) => left.localeCompare(right, 'ru'));
+    const hiddenWithoutCoordinates = radiusApplied
+      ? allClubs.filter((club) => club.location.distanceKm === null).length
+      : 0;
 
     return {
       updatedAt: new Date().toISOString(),
       total: clubs.length,
       cities,
+      search: {
+        locationReady: Boolean(guestLocation),
+        radiusKm,
+        radiusApplied,
+        totalBeforeRadius: allClubs.length,
+        hiddenWithoutCoordinates,
+      },
       clubs,
     };
   }
@@ -3458,6 +3491,20 @@ function geoPoint(lat: string | undefined, lng: string | undefined) {
   return latitude === null || longitude === null
     ? null
     : { latitude, longitude };
+}
+
+function radiusNumber(value: string | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const numeric = Number(value.replace(',', '.'));
+
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return null;
+  }
+
+  return Math.min(Math.round(numeric * 10) / 10, 500);
 }
 
 function coordinateNumber(value: string | undefined, min: number, max: number) {

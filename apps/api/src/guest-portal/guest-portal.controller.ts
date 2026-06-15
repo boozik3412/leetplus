@@ -32,8 +32,13 @@ export class GuestPortalController {
   getGamificationClubDirectory(
     @Query('lat') lat?: string,
     @Query('lng') lng?: string,
+    @Query('radiusKm') radiusKm?: string,
   ): Promise<GuestPortalGamificationClubDirectory> {
-    return this.guestPortalService.getGamificationClubDirectory({ lat, lng });
+    return this.guestPortalService.getGamificationClubDirectory({
+      lat,
+      lng,
+      radiusKm,
+    });
   }
 
   @Get(':tenantSlug/:storeId/public-config')

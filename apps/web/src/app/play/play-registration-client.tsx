@@ -17,12 +17,24 @@ type PlayRegistrationClientProps = {
   loadError: string | null;
 };
 
+type PlayLocation = {
+  latitude: number;
+  longitude: number;
+};
+
+const RADIUS_OPTIONS = [null, 1, 3, 5, 10, 25] as const;
+type RadiusOption = (typeof RADIUS_OPTIONS)[number];
+
 export function PlayRegistrationClient({
   initialDirectory,
   loadError,
 }: PlayRegistrationClientProps) {
   const [directory, setDirectory] = useState(initialDirectory);
   const [query, setQuery] = useState("");
+  const [locationCoords, setLocationCoords] = useState<PlayLocation | null>(
+    null,
+  );
+  const [radiusKm, setRadiusKm] = useState<RadiusOption>(null);
   const [selectedClubId, setSelectedClubId] = useState(
     initialDirectory.clubs[0]?.id ?? "",
   );
@@ -90,7 +102,11 @@ export function PlayRegistrationClient({
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        void refreshDirectoryByLocation(position.coords);
+        const coords = {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        };
+        void refreshDirectoryByLocation(coords, radiusKm);
       },
       () => {
         setLocating(false);
@@ -104,12 +120,31 @@ export function PlayRegistrationClient({
     );
   }
 
-  async function refreshDirectoryByLocation(coords: GeolocationCoordinates) {
+  function applyRadius(nextRadiusKm: RadiusOption) {
+    setRadiusKm(nextRadiusKm);
+
+    if (!locationCoords) {
+      setLocationMessage("Сначала нажмите «Найти рядом».");
+      return;
+    }
+
+    void refreshDirectoryByLocation(locationCoords, nextRadiusKm);
+  }
+
+  async function refreshDirectoryByLocation(
+    coords: PlayLocation,
+    nextRadiusKm: RadiusOption,
+  ) {
     try {
       const params = new URLSearchParams({
         lat: String(coords.latitude),
         lng: String(coords.longitude),
       });
+
+      if (nextRadiusKm !== null) {
+        params.set("radiusKm", String(nextRadiusKm));
+      }
+
       const response = await fetch(
         `/api/guest-portal/gamification/clubs?${params}`,
         { cache: "no-store" },
@@ -126,8 +161,16 @@ export function PlayRegistrationClient({
       ).length;
 
       setDirectory(data);
+      setLocationCoords(coords);
+      setSelectedClubId((currentId) =>
+        data.clubs.some((club) => club.id === currentId)
+          ? currentId
+          : (data.clubs[0]?.id ?? ""),
+      );
       setLocationMessage(
-        clubsWithDistance > 0
+        data.search.radiusApplied
+          ? radiusSearchMessage(data)
+          : clubsWithDistance > 0
           ? `Нашли ${formatNumber(clubsWithDistance)} клубов с расстоянием.`
           : "Геолокация получена. У клубов пока не заполнены координаты.",
       );
@@ -245,6 +288,9 @@ export function PlayRegistrationClient({
 
       const data = (await response.json()) as GuestPortalLangameMatchResponse;
       setLangameMatch(data);
+      if (data.portal) {
+        setPortal(data.portal);
+      }
     } catch (error) {
       setMessage(
         error instanceof Error
@@ -320,6 +366,38 @@ export function PlayRegistrationClient({
                       {city}
                     </button>
                   ))}
+                </div>
+              ) : null}
+
+              {locationCoords || directory.search.locationReady ? (
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  <span className="mr-1 text-xs font-bold uppercase text-slate-400">
+                    Радиус
+                  </span>
+                  {RADIUS_OPTIONS.map((option) => {
+                    const isActive = radiusKm === option;
+
+                    return (
+                      <button
+                        className={`rounded-lg border px-3 py-2 text-sm font-black transition ${
+                          isActive
+                            ? "border-emerald-300/50 bg-emerald-300/[0.14] text-emerald-100"
+                            : "border-white/10 bg-white/[0.04] text-slate-200 hover:border-cyan-300/40 hover:text-cyan-100"
+                        }`}
+                        key={option ?? "all"}
+                        onClick={() => applyRadius(option)}
+                        type="button"
+                      >
+                        {radiusOptionLabel(option)}
+                      </button>
+                    );
+                  })}
+                  {directory.search.hiddenWithoutCoordinates > 0 ? (
+                    <span className="text-xs leading-5 text-slate-500">
+                      Без координат:{" "}
+                      {formatNumber(directory.search.hiddenWithoutCoordinates)}
+                    </span>
+                  ) : null}
                 </div>
               ) : null}
 
@@ -723,6 +801,21 @@ function formatNumber(value: number) {
   return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 }).format(
     value,
   );
+}
+
+function radiusOptionLabel(value: RadiusOption) {
+  return value === null ? "Все" : `${formatNumber(value)} км`;
+}
+
+function radiusSearchMessage(directory: GuestPortalGamificationClubDirectory) {
+  const radius = directory.search.radiusKm ?? 0;
+  const hidden = directory.search.hiddenWithoutCoordinates;
+  const hiddenText =
+    hidden > 0 ? ` ${formatNumber(hidden)} клубов без координат скрыты.` : "";
+
+  return `Показаны ${formatNumber(directory.total)} из ${formatNumber(
+    directory.search.totalBeforeRadius,
+  )} клубов в радиусе ${formatNumber(radius)} км.${hiddenText}`;
 }
 
 async function readMessage(response: Response) {

@@ -22,6 +22,13 @@ export type GuestPortalGamificationClubDirectory = {
   updatedAt: string;
   total: number;
   cities: string[];
+  search: {
+    locationReady: boolean;
+    radiusKm: number | null;
+    radiusApplied: boolean;
+    totalBeforeRadius: number;
+    hiddenWithoutCoordinates: number;
+  };
   clubs: GuestPortalGamificationClub[];
 };
 

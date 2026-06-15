@@ -8,6 +8,13 @@ const emptyDirectory: GuestPortalGamificationClubDirectory = {
   updatedAt: new Date(0).toISOString(),
   total: 0,
   cities: [],
+  search: {
+    locationReady: false,
+    radiusKm: null,
+    radiusApplied: false,
+    totalBeforeRadius: 0,
+    hiddenWithoutCoordinates: 0,
+  },
   clubs: [],
 };
 

@@ -22,6 +22,13 @@ type PlayLocation = {
   longitude: number;
 };
 
+type MapViewport = {
+  minLatitude: number;
+  maxLatitude: number;
+  minLongitude: number;
+  maxLongitude: number;
+};
+
 const RADIUS_OPTIONS = [null, 1, 3, 5, 10, 25] as const;
 type RadiusOption = (typeof RADIUS_OPTIONS)[number];
 
@@ -408,6 +415,13 @@ export function PlayRegistrationClient({
               ) : null}
             </div>
 
+            <ClubMap
+              clubs={visibleClubs}
+              onSelectClub={selectClub}
+              selectedClubId={selectedClub?.id ?? ""}
+              userLocation={locationCoords}
+            />
+
             <div className="space-y-3">
               {visibleClubs.length > 0 ? (
                 visibleClubs.map((club) => (
@@ -553,6 +567,128 @@ export function PlayRegistrationClient({
         </section>
       </div>
     </main>
+  );
+}
+
+function ClubMap({
+  clubs,
+  selectedClubId,
+  userLocation,
+  onSelectClub,
+}: {
+  clubs: GuestPortalGamificationClub[];
+  selectedClubId: string;
+  userLocation: PlayLocation | null;
+  onSelectClub: (club: GuestPortalGamificationClub) => void;
+}) {
+  const mappedClubs = clubs.filter(
+    (club) =>
+      club.location.latitude !== null && club.location.longitude !== null,
+  );
+  const missingCoordinates = clubs.length - mappedClubs.length;
+  const points = [
+    ...mappedClubs.map((club) => ({
+      latitude: club.location.latitude ?? 0,
+      longitude: club.location.longitude ?? 0,
+    })),
+    ...(userLocation ? [userLocation] : []),
+  ];
+  const viewport = buildMapViewport(points);
+  const selectedClub =
+    clubs.find((club) => club.id === selectedClubId) ?? clubs[0];
+
+  return (
+    <div className="rounded-lg border border-white/10 bg-[#0b111c] p-4 shadow-2xl shadow-black/20">
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-bold uppercase text-slate-400">
+            Карта клубов
+          </p>
+          <p className="mt-1 text-sm font-semibold text-slate-200">
+            {mappedClubs.length > 0
+              ? `На карте: ${formatNumber(mappedClubs.length)}`
+              : "Координаты клубов не заполнены"}
+          </p>
+        </div>
+        {userLocation ? (
+          <span className="rounded-lg bg-cyan-300/10 px-3 py-1 text-xs font-black text-cyan-100">
+            Вы рядом
+          </span>
+        ) : null}
+      </div>
+
+      <div className="relative h-72 overflow-hidden rounded-lg border border-white/10 bg-[#070b12]">
+        <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.05)_1px,transparent_1px)] bg-[size:36px_36px]" />
+        <div className="absolute left-[12%] top-[30%] h-px w-[76%] rotate-[-8deg] bg-emerald-300/15" />
+        <div className="absolute left-[20%] top-[58%] h-px w-[62%] rotate-[12deg] bg-cyan-300/15" />
+
+        {userLocation && viewport ? (
+          <div
+            className="absolute size-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-cyan-100 bg-cyan-300 shadow-lg shadow-cyan-500/25"
+            style={mapPointStyle(userLocation, viewport)}
+            title="Ваше местоположение"
+          />
+        ) : null}
+
+        {viewport
+          ? mappedClubs.map((club, index) => {
+              const position = mapPointStyle(
+                {
+                  latitude: club.location.latitude ?? 0,
+                  longitude: club.location.longitude ?? 0,
+                },
+                viewport,
+                index,
+              );
+              const isSelected = club.id === selectedClubId;
+
+              return (
+                <button
+                  aria-label={`Выбрать ${club.store.name}`}
+                  className={`absolute flex size-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border text-xs font-black shadow-lg transition ${
+                    isSelected
+                      ? "z-20 border-emerald-100 bg-emerald-300 text-slate-950 shadow-emerald-500/30"
+                      : "z-10 border-white/30 bg-slate-950 text-slate-100 shadow-black/40 hover:border-cyan-200 hover:bg-cyan-200 hover:text-slate-950"
+                  }`}
+                  key={club.id}
+                  onClick={() => onSelectClub(club)}
+                  style={position}
+                  title={club.store.name}
+                  type="button"
+                >
+                  {index + 1}
+                </button>
+              );
+            })
+          : null}
+
+        {mappedClubs.length === 0 ? (
+          <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-sm leading-6 text-slate-400">
+            Карта станет доступна после заполнения координат клубов.
+          </div>
+        ) : null}
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm">
+        <div className="min-w-0">
+          <p className="truncate font-bold text-white">
+            {selectedClub?.store.name ?? "Клуб не выбран"}
+          </p>
+          {selectedClub ? (
+            <p className="mt-1 truncate text-slate-400">
+              {[selectedClub.store.city, selectedClub.store.address]
+                .filter(Boolean)
+                .join(", ") || selectedClub.tenant.name}
+            </p>
+          ) : null}
+        </div>
+        {missingCoordinates > 0 ? (
+          <span className="shrink-0 rounded-lg border border-white/10 px-3 py-1 text-xs font-bold text-slate-400">
+            Без координат: {formatNumber(missingCoordinates)}
+          </span>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
@@ -801,6 +937,78 @@ function formatNumber(value: number) {
   return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 }).format(
     value,
   );
+}
+
+function buildMapViewport(
+  points: Array<{ latitude: number; longitude: number }>,
+): MapViewport | null {
+  if (points.length === 0) {
+    return null;
+  }
+
+  const latitudes = points.map((point) => point.latitude);
+  const longitudes = points.map((point) => point.longitude);
+  let minLatitude = Math.min(...latitudes);
+  let maxLatitude = Math.max(...latitudes);
+  let minLongitude = Math.min(...longitudes);
+  let maxLongitude = Math.max(...longitudes);
+
+  if (minLatitude === maxLatitude) {
+    minLatitude -= 0.01;
+    maxLatitude += 0.01;
+  }
+
+  if (minLongitude === maxLongitude) {
+    minLongitude -= 0.01;
+    maxLongitude += 0.01;
+  }
+
+  const latitudePadding = (maxLatitude - minLatitude) * 0.12;
+  const longitudePadding = (maxLongitude - minLongitude) * 0.12;
+
+  return {
+    minLatitude: minLatitude - latitudePadding,
+    maxLatitude: maxLatitude + latitudePadding,
+    minLongitude: minLongitude - longitudePadding,
+    maxLongitude: maxLongitude + longitudePadding,
+  };
+}
+
+function mapPointStyle(
+  point: { latitude: number; longitude: number },
+  viewport: MapViewport,
+  index = 0,
+) {
+  const longitudeRange = viewport.maxLongitude - viewport.minLongitude;
+  const latitudeRange = viewport.maxLatitude - viewport.minLatitude;
+  const x =
+    ((point.longitude - viewport.minLongitude) / longitudeRange) * 100 +
+    mapMarkerOffset(index, "x");
+  const y =
+    (1 - (point.latitude - viewport.minLatitude) / latitudeRange) * 100 +
+    mapMarkerOffset(index, "y");
+
+  return {
+    left: `${clamp(x, 6, 94)}%`,
+    top: `${clamp(y, 6, 94)}%`,
+  };
+}
+
+function mapMarkerOffset(index: number, axis: "x" | "y") {
+  const offsets = [
+    { x: 0, y: 0 },
+    { x: 1.4, y: -1.4 },
+    { x: -1.4, y: 1.4 },
+    { x: 1.4, y: 1.4 },
+    { x: -1.4, y: -1.4 },
+  ];
+  const offset = offsets[index % offsets.length];
+
+  return offset[axis];
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
 }
 
 function radiusOptionLabel(value: RadiusOption) {

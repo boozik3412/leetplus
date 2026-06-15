@@ -6,6 +6,7 @@ const publicPathPrefixes = [
   "/api",
   "/_next",
   "/login",
+  "/play",
   "/register",
   "/verify-email",
   "/guest",

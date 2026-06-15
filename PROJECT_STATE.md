@@ -80,6 +80,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added a no-provider club map to public gamification registration: `/play` now renders a coordinate-based club map from saved `Store.latitude/longitude`, shows the guest point after geolocation, reflects the current search/radius result set, and lets guests pick a club by marker without external map keys or live Langame reads.
 - Added radius search to public gamification registration: `GET /guest-portal/gamification/clubs` now accepts `radiusKm`, returns applied-radius metadata and hidden-without-coordinates counts, and `/play` lets guests filter nearby clubs by 1/3/5/10/25 km or reset to all clubs after geolocation.
 - Added safe game-profile linking for public gamification participants: manual Langame match in the guest portal now links an existing `GuestGameProfile` to a synced `Guest` by confirmed `phoneHash`, returns a refreshed portal payload, writes an idempotent `GAME_PROFILE_LINKED` event without raw phone, and guest foundation sync performs the same link after Langame data appears while backfilling `guestId` into game rewards, events, deliveries, and bonus ledger entries.
 - Added public gamification registration at `/play`: guests choose a club enabled by `Store.gamificationEnabled` or active game rules, accept game participation consent, confirm a phone via OTP, get a separate `GuestGameProfile` for XP/missions/rewards, and do not create a row in the general synced `Guest` table unless Langame snapshot data already exists or later sync links it.

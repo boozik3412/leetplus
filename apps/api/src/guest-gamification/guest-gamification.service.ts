@@ -16,6 +16,10 @@ import { LangameClient } from '../integrations/langame.client';
 import { LangameSettingsService } from '../integrations/langame-settings.service';
 import type { LangameGuestSession } from '../integrations/langame.types';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  GuestBonusLedgerSchedulerService,
+  type GuestBonusLedgerSchedulerRuntimeStatus,
+} from './guest-bonus-ledger-scheduler.service';
 
 const statusValues = [
   'DRAFT',
@@ -1121,6 +1125,7 @@ export type GuestGameIntegrationReadinessItem = {
   configured: boolean;
   enabled: boolean;
   requiredEnv: string[];
+  details?: Array<{ label: string; value: string }>;
   note: string;
   nextAction: string;
 };
@@ -1959,6 +1964,7 @@ export class GuestGamificationService {
     private readonly prisma: PrismaService,
     private readonly langameSettingsService: LangameSettingsService,
     private readonly langameClient: LangameClient,
+    private readonly bonusLedgerSchedulerService: GuestBonusLedgerSchedulerService,
   ) {}
 
   async getWorkspace(
@@ -2554,6 +2560,7 @@ export class GuestGamificationService {
     const langameBonusAccrualEnabled = envFlag('LANGAME_BONUS_ACCRUAL_ENABLED');
     const bonusLedgerScheduler = bonusLedgerSchedulerReadiness(
       langameBonusAccrualEnabled,
+      this.bonusLedgerSchedulerService.getRuntimeStatus(),
     );
     const items: GuestGameIntegrationReadinessItem[] = [
       {
@@ -8355,6 +8362,7 @@ function envPositiveInt(name: string, fallback: number) {
 
 function bonusLedgerSchedulerReadiness(
   langameBonusAccrualEnabled: boolean,
+  runtimeStatus?: GuestBonusLedgerSchedulerRuntimeStatus | null,
 ): GuestGameIntegrationReadinessItem {
   const explicitEnabled = envOptionalFlag(
     'GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED',
@@ -8370,12 +8378,15 @@ function bonusLedgerSchedulerReadiness(
   const nodeEnv = envString('NODE_ENV');
   const defaultProductionEnabled =
     nodeEnv === 'production' && syncTokenConfigured;
-  const enabled = explicitEnabled ?? defaultProductionEnabled;
+  const enabled =
+    runtimeStatus?.enabled ?? explicitEnabled ?? defaultProductionEnabled;
   const forcedDryRun = dryRunOverride === true;
-  const intervalMs = envPositiveInt(
-    'GUEST_GAME_BONUS_LEDGER_SCHEDULER_INTERVAL_MS',
-    5 * 60 * 1000,
-  );
+  const intervalMs =
+    runtimeStatus?.intervalMs ??
+    envPositiveInt(
+      'GUEST_GAME_BONUS_LEDGER_SCHEDULER_INTERVAL_MS',
+      5 * 60 * 1000,
+    );
   const limit = envPositiveInt('GUEST_GAME_BONUS_LEDGER_SCHEDULER_LIMIT', 50);
   const tenantScope =
     envString('GUEST_GAME_BONUS_LEDGER_SCHEDULER_TENANT_SLUG') ??
@@ -8386,7 +8397,10 @@ function bonusLedgerSchedulerReadiness(
     envString('LANGAME_BONUS_ACCRUAL_REWARD_TYPES') ??
     'BONUS,BONUS_POINTS,BONUS_BALANCE,LOYALTY_BONUS';
   const ready = enabled && !forcedDryRun && langameBonusAccrualEnabled;
-  const configured = syncTokenConfigured || explicitEnabled !== null;
+  const configured =
+    syncTokenConfigured ||
+    explicitEnabled !== null ||
+    Boolean(runtimeStatus?.enabled);
   const status: GuestGameIntegrationReadinessStatus = ready
     ? 'READY'
     : enabled
@@ -8417,6 +8431,15 @@ function bonusLedgerSchedulerReadiness(
       'GUEST_GAME_BONUS_LEDGER_SCHEDULER_DRY_RUN',
       'LANGAME_BONUS_ACCRUAL_ENABLED',
     ],
+    details: bonusLedgerSchedulerDetails({
+      enabled,
+      intervalMs,
+      limit,
+      tenantScope,
+      rewardTypes,
+      queueApprovedRewards,
+      runtimeStatus,
+    }),
     note: ready
       ? `Scheduler обрабатывает ledger каждые ${intervalMs} мс, лимит ${limit}, scope ${tenantScope}, reward types ${rewardTypes}. Queue approved rewards: ${queueApprovedRewards ? 'on' : 'off'}.`
       : enabled
@@ -8436,6 +8459,108 @@ function bonusLedgerSchedulerReadiness(
           ? 'Включить GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED=true или убрать явное выключение после согласования VDS/env.'
           : 'Задать SYNC_SERVICE_TOKEN на VDS и включить scheduler сначала в dry-run/canary для 1337.',
   };
+}
+
+function bonusLedgerSchedulerDetails({
+  enabled,
+  intervalMs,
+  limit,
+  tenantScope,
+  rewardTypes,
+  queueApprovedRewards,
+  runtimeStatus,
+}: {
+  enabled: boolean;
+  intervalMs: number;
+  limit: number;
+  tenantScope: string;
+  rewardTypes: string;
+  queueApprovedRewards: boolean;
+  runtimeStatus?: GuestBonusLedgerSchedulerRuntimeStatus | null;
+}): GuestGameIntegrationReadinessItem['details'] {
+  const details: GuestGameIntegrationReadinessItem['details'] = [
+    {
+      label: 'Состояние',
+      value: runtimeStatus?.running
+        ? 'выполняется'
+        : enabled
+          ? 'включен'
+          : 'выключен',
+    },
+    { label: 'Интервал', value: `${intervalMs} мс` },
+    { label: 'Лимит', value: String(limit) },
+    { label: 'Scope', value: tenantScope },
+    { label: 'Reward types', value: rewardTypes },
+    {
+      label: 'Queue approved',
+      value: queueApprovedRewards ? 'on' : 'off',
+    },
+    {
+      label: 'Последний запуск',
+      value: bonusLedgerSchedulerLastRunLabel(runtimeStatus),
+    },
+    {
+      label: 'Последний результат',
+      value: bonusLedgerSchedulerLastResultLabel(runtimeStatus),
+    },
+  ];
+
+  if (runtimeStatus?.lastSkippedAt) {
+    details.push({
+      label: 'Последний skip',
+      value: `${runtimeStatus.lastSkippedAt}: ${
+        runtimeStatus.lastSkipReason ?? 'previous dispatch is still running'
+      }`,
+    });
+  }
+
+  return details;
+}
+
+function bonusLedgerSchedulerLastRunLabel(
+  runtimeStatus?: GuestBonusLedgerSchedulerRuntimeStatus | null,
+) {
+  if (!runtimeStatus?.lastStartedAt) {
+    return runtimeStatus?.running ? 'выполняется' : 'еще не запускался';
+  }
+
+  const outcome =
+    runtimeStatus.lastOutcome === 'SUCCESS'
+      ? 'успех'
+      : runtimeStatus.lastOutcome === 'ERROR'
+        ? 'ошибка'
+        : runtimeStatus.running
+          ? 'выполняется'
+          : 'нет результата';
+
+  if (!runtimeStatus.lastFinishedAt) {
+    return `${outcome} · старт ${runtimeStatus.lastStartedAt}`;
+  }
+
+  return `${outcome} · ${runtimeStatus.lastFinishedAt}`;
+}
+
+function bonusLedgerSchedulerLastResultLabel(
+  runtimeStatus?: GuestBonusLedgerSchedulerRuntimeStatus | null,
+) {
+  const result = runtimeStatus?.lastResult;
+
+  if (!result) {
+    return runtimeStatus?.lastError
+      ? `ошибка: ${runtimeStatus.lastError}`
+      : 'нет результата';
+  }
+
+  return [
+    `mode ${result.mode}`,
+    `dryRun ${result.dryRun ? 'on' : 'off'}`,
+    `tenants ${result.processedTenants}/${result.checkedTenants}`,
+    `queued ${result.queued}`,
+    `confirmed ${result.confirmed}`,
+    `failed ${result.failed}`,
+    `blocked ${result.blocked}`,
+    `skipped ${result.skipped}`,
+  ].join(', ');
 }
 
 function maskAlias(value: string | null) {

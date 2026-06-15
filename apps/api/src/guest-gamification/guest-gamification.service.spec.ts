@@ -8,6 +8,7 @@ import {
   UserRole,
 } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
+import type { GuestBonusLedgerSchedulerRuntimeStatus } from './guest-bonus-ledger-scheduler.service';
 import {
   GuestGamificationService,
   type GuestGameDryRunResult,
@@ -57,22 +58,48 @@ function createPrismaMock() {
   } as any;
 }
 
-function createService(prisma = createPrismaMock()) {
+function schedulerRuntimeStatus(
+  overrides: Partial<GuestBonusLedgerSchedulerRuntimeStatus> = {},
+): GuestBonusLedgerSchedulerRuntimeStatus {
+  return {
+    enabled: false,
+    running: false,
+    intervalMs: null,
+    lastStartedAt: null,
+    lastFinishedAt: null,
+    lastOutcome: null,
+    lastError: null,
+    lastResult: null,
+    lastSkippedAt: null,
+    lastSkipReason: null,
+    ...overrides,
+  };
+}
+
+function createService(
+  prisma = createPrismaMock(),
+  schedulerStatus: GuestBonusLedgerSchedulerRuntimeStatus | null = null,
+) {
   const langameSettingsService = {
     resolveTenantAccess: jest.fn(),
   };
   const langameClient = {
     postEndpoint: jest.fn(),
   };
+  const bonusLedgerSchedulerService = {
+    getRuntimeStatus: jest.fn(() => schedulerStatus),
+  };
 
   return {
     prisma,
     langameSettingsService,
     langameClient,
+    bonusLedgerSchedulerService,
     service: new GuestGamificationService(
       prisma,
       langameSettingsService as any,
       langameClient as any,
+      bonusLedgerSchedulerService as any,
     ),
   };
 }
@@ -508,6 +535,67 @@ describe('GuestGamificationService', () => {
           process.env.NODE_ENV = originalNodeEnv;
         }
       }
+    });
+
+    it('exposes bonus ledger scheduler runtime details without sensitive data', () => {
+      process.env.SYNC_SERVICE_TOKEN = 'sync-token';
+      process.env.LANGAME_BONUS_ACCRUAL_ENABLED = 'true';
+      const { service } = createService(
+        createPrismaMock(),
+        schedulerRuntimeStatus({
+          enabled: true,
+          intervalMs: 60000,
+          lastStartedAt: '2026-06-10T10:00:00.000Z',
+          lastFinishedAt: '2026-06-10T10:00:03.000Z',
+          lastOutcome: 'SUCCESS',
+          lastResult: {
+            mode: 'READY',
+            dryRun: false,
+            checkedTenants: 1,
+            processedTenants: 1,
+            skippedTenants: 0,
+            erroredTenants: 0,
+            queued: 2,
+            checked: 3,
+            confirmed: 2,
+            failed: 0,
+            skipped: 1,
+            blocked: 0,
+          },
+          lastSkippedAt: '2026-06-10T10:00:01.000Z',
+          lastSkipReason: 'previous dispatch is still running',
+        }),
+      );
+
+      const readiness = (service as any).buildIntegrationReadiness([]);
+      const scheduler = readiness.items.find(
+        (item: { key: string }) => item.key === 'BONUS_LEDGER_SCHEDULER',
+      );
+      const detailsText = JSON.stringify(scheduler.details);
+
+      expect(scheduler.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            label: 'Состояние',
+            value: 'включен',
+          }),
+          expect.objectContaining({
+            label: 'Последний запуск',
+            value: 'успех · 2026-06-10T10:00:03.000Z',
+          }),
+          expect.objectContaining({
+            label: 'Последний результат',
+            value:
+              'mode READY, dryRun off, tenants 1/1, queued 2, confirmed 2, failed 0, blocked 0, skipped 1',
+          }),
+          expect.objectContaining({
+            label: 'Последний skip',
+            value:
+              '2026-06-10T10:00:01.000Z: previous dispatch is still running',
+          }),
+        ]),
+      );
+      expect(detailsText).not.toContain('sync-token');
     });
 
     it('keeps bonus ledger scheduler in safe mode when dry-run is forced', () => {

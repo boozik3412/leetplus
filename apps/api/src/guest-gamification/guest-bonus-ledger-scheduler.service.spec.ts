@@ -57,6 +57,13 @@ describe('GuestBonusLedgerSchedulerService', () => {
 
     service.onModuleInit();
 
+    expect(service.getRuntimeStatus()).toMatchObject({
+      enabled: false,
+      running: false,
+      intervalMs: null,
+      lastOutcome: null,
+      lastResult: null,
+    });
     expect(bonusLedgerService.runScheduledDispatch).not.toHaveBeenCalled();
     service.onModuleDestroy();
   });
@@ -92,6 +99,44 @@ describe('GuestBonusLedgerSchedulerService', () => {
       tenantSlug: 'demo',
       rewardTypes: ['BONUS', 'CASHBACK'],
     });
+    expect(service.getRuntimeStatus()).toMatchObject({
+      running: false,
+      lastOutcome: 'SUCCESS',
+      lastError: null,
+      lastResult: {
+        mode: 'DRY_RUN',
+        dryRun: true,
+        checkedTenants: 1,
+        processedTenants: 1,
+        skippedTenants: 0,
+        erroredTenants: 0,
+        checked: 2,
+        skipped: 2,
+      },
+    });
+    expect(service.getRuntimeStatus().lastStartedAt).toEqual(
+      expect.any(String),
+    );
+    expect(service.getRuntimeStatus().lastFinishedAt).toEqual(
+      expect.any(String),
+    );
+  });
+
+  it('stores runtime status after failed dispatch', async () => {
+    const { service, bonusLedgerService } = createService();
+
+    bonusLedgerService.runScheduledDispatch.mockRejectedValueOnce(
+      new Error('Langame unavailable'),
+    );
+
+    await expect(service.runOnce()).resolves.toBeNull();
+
+    expect(service.getRuntimeStatus()).toMatchObject({
+      running: false,
+      lastOutcome: 'ERROR',
+      lastError: 'Langame unavailable',
+      lastResult: null,
+    });
   });
 
   it('skips overlapping ticks while a previous dispatch is running', async () => {
@@ -111,9 +156,20 @@ describe('GuestBonusLedgerSchedulerService', () => {
 
     expect(secondRun).toBeNull();
     expect(bonusLedgerService.runScheduledDispatch).toHaveBeenCalledTimes(1);
+    const skippedStatus = service.getRuntimeStatus();
+    expect(skippedStatus).toMatchObject({
+      running: true,
+      lastSkipReason: 'previous dispatch is still running',
+    });
+    expect(skippedStatus.lastSkippedAt).toEqual(expect.any(String));
 
     resolveDispatch?.(scheduledResult({ checked: 1 }));
 
     await expect(firstRun).resolves.toMatchObject({ checked: 1 });
+    expect(service.getRuntimeStatus()).toMatchObject({
+      running: false,
+      lastOutcome: 'SUCCESS',
+      lastResult: { checked: 1 },
+    });
   });
 });

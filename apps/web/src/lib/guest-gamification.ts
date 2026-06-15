@@ -665,6 +665,7 @@ export type GuestGameIntegrationReadinessItem = {
   configured: boolean;
   enabled: boolean;
   requiredEnv: string[];
+  details?: Array<{ label: string; value: string }>;
   note: string;
   nextAction: string;
 };

@@ -14,6 +14,37 @@ import {
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
 const DEFAULT_LIMIT = 50;
 
+export type GuestBonusLedgerSchedulerRunOutcome = 'SUCCESS' | 'ERROR';
+
+export type GuestBonusLedgerSchedulerRuntimeResult = Pick<
+  GuestGameScheduledBonusLedgerDispatchResult,
+  | 'mode'
+  | 'dryRun'
+  | 'checkedTenants'
+  | 'processedTenants'
+  | 'skippedTenants'
+  | 'erroredTenants'
+  | 'queued'
+  | 'checked'
+  | 'confirmed'
+  | 'failed'
+  | 'skipped'
+  | 'blocked'
+>;
+
+export type GuestBonusLedgerSchedulerRuntimeStatus = {
+  enabled: boolean;
+  running: boolean;
+  intervalMs: number | null;
+  lastStartedAt: string | null;
+  lastFinishedAt: string | null;
+  lastOutcome: GuestBonusLedgerSchedulerRunOutcome | null;
+  lastError: string | null;
+  lastResult: GuestBonusLedgerSchedulerRuntimeResult | null;
+  lastSkippedAt: string | null;
+  lastSkipReason: string | null;
+};
+
 @Injectable()
 export class GuestBonusLedgerSchedulerService
   implements OnModuleInit, OnModuleDestroy
@@ -21,6 +52,15 @@ export class GuestBonusLedgerSchedulerService
   private readonly logger = new Logger(GuestBonusLedgerSchedulerService.name);
   private timer: ReturnType<typeof setInterval> | null = null;
   private isRunning = false;
+  private enabled = false;
+  private intervalMs: number | null = null;
+  private lastStartedAt: string | null = null;
+  private lastFinishedAt: string | null = null;
+  private lastOutcome: GuestBonusLedgerSchedulerRunOutcome | null = null;
+  private lastError: string | null = null;
+  private lastResult: GuestBonusLedgerSchedulerRuntimeResult | null = null;
+  private lastSkippedAt: string | null = null;
+  private lastSkipReason: string | null = null;
 
   constructor(
     private readonly configService: ConfigService,
@@ -28,21 +68,24 @@ export class GuestBonusLedgerSchedulerService
   ) {}
 
   onModuleInit() {
-    if (!this.isSchedulerEnabled()) {
+    this.enabled = this.isSchedulerEnabled();
+
+    if (!this.enabled) {
+      this.intervalMs = null;
       this.logger.log('Guest bonus ledger scheduler is disabled');
       return;
     }
 
-    const intervalMs = this.getPositiveInt(
+    this.intervalMs = this.getPositiveInt(
       'GUEST_GAME_BONUS_LEDGER_SCHEDULER_INTERVAL_MS',
       DEFAULT_INTERVAL_MS,
     );
     this.logger.log(
-      `Guest bonus ledger scheduler is enabled with ${intervalMs}ms interval`,
+      `Guest bonus ledger scheduler is enabled with ${this.intervalMs}ms interval`,
     );
 
     void this.runOnce();
-    this.timer = setInterval(() => void this.runOnce(), intervalMs);
+    this.timer = setInterval(() => void this.runOnce(), this.intervalMs);
   }
 
   onModuleDestroy() {
@@ -52,8 +95,25 @@ export class GuestBonusLedgerSchedulerService
     }
   }
 
+  getRuntimeStatus(): GuestBonusLedgerSchedulerRuntimeStatus {
+    return {
+      enabled: this.enabled,
+      running: this.isRunning,
+      intervalMs: this.intervalMs,
+      lastStartedAt: this.lastStartedAt,
+      lastFinishedAt: this.lastFinishedAt,
+      lastOutcome: this.lastOutcome,
+      lastError: this.lastError,
+      lastResult: this.lastResult ? { ...this.lastResult } : null,
+      lastSkippedAt: this.lastSkippedAt,
+      lastSkipReason: this.lastSkipReason,
+    };
+  }
+
   async runOnce(): Promise<GuestGameScheduledBonusLedgerDispatchResult | null> {
     if (this.isRunning) {
+      this.lastSkippedAt = new Date().toISOString();
+      this.lastSkipReason = 'previous dispatch is still running';
       this.logger.warn(
         'Guest bonus ledger scheduler tick skipped: still running',
       );
@@ -61,11 +121,18 @@ export class GuestBonusLedgerSchedulerService
     }
 
     this.isRunning = true;
+    this.lastStartedAt = new Date().toISOString();
+    this.lastFinishedAt = null;
+    this.lastOutcome = null;
+    this.lastError = null;
+    this.lastResult = null;
 
     try {
       const result = await this.bonusLedgerService.runScheduledDispatch(
         this.buildDispatchDto(),
       );
+      this.lastOutcome = 'SUCCESS';
+      this.lastResult = compactScheduledDispatchResult(result);
       this.logger.log(
         [
           'Guest bonus ledger scheduler finished:',
@@ -81,6 +148,8 @@ export class GuestBonusLedgerSchedulerService
 
       return result;
     } catch (error) {
+      this.lastOutcome = 'ERROR';
+      this.lastError = schedulerErrorMessage(error);
       this.logger.error(
         'Guest bonus ledger scheduler failed',
         error instanceof Error ? error.stack : String(error),
@@ -88,6 +157,7 @@ export class GuestBonusLedgerSchedulerService
 
       return null;
     } finally {
+      this.lastFinishedAt = new Date().toISOString();
       this.isRunning = false;
     }
   }
@@ -197,4 +267,34 @@ export class GuestBonusLedgerSchedulerService
 
     return value > 0 ? value : fallback;
   }
+}
+
+function compactScheduledDispatchResult(
+  result: GuestGameScheduledBonusLedgerDispatchResult,
+): GuestBonusLedgerSchedulerRuntimeResult {
+  return {
+    mode: result.mode,
+    dryRun: result.dryRun,
+    checkedTenants: result.checkedTenants,
+    processedTenants: result.processedTenants,
+    skippedTenants: result.skippedTenants,
+    erroredTenants: result.erroredTenants,
+    queued: result.queued,
+    checked: result.checked,
+    confirmed: result.confirmed,
+    failed: result.failed,
+    skipped: result.skipped,
+    blocked: result.blocked,
+  };
+}
+
+function schedulerErrorMessage(error: unknown) {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'string'
+        ? error
+        : String(error);
+
+  return (message || 'unknown error').slice(0, 500);
 }

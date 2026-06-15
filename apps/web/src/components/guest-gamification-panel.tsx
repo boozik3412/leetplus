@@ -2659,6 +2659,22 @@ function IntegrationReadinessCard({
               {item.note}
             </p>
 
+            {item.details?.length ? (
+              <dl className="mt-3 space-y-1 border-t border-zinc-200 pt-3 text-xs dark:border-zinc-800">
+                {item.details.map((detail) => (
+                  <div
+                    key={`${item.key}-${detail.label}`}
+                    className="grid grid-cols-[96px_1fr] gap-2"
+                  >
+                    <dt className="text-zinc-400">{detail.label}</dt>
+                    <dd className="min-w-0 break-words font-semibold text-zinc-700 dark:text-zinc-200">
+                      {detail.value}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            ) : null}
+
             {item.requiredEnv.length ? (
               <div className="mt-3 flex flex-wrap gap-1">
                 {item.requiredEnv.slice(0, 4).map((envName) => (

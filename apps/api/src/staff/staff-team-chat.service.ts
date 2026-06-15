@@ -528,6 +528,43 @@ export class StaffTeamChatService {
           })),
           skipDuplicates: true,
         });
+
+        const notificationUserIds = mentionedUserIds.filter(
+          (mentionedUserId) => mentionedUserId !== user.id,
+        );
+
+        if (notificationUserIds.length > 0) {
+          const authorLabel = user.fullName?.trim() || user.email;
+
+          await tx.staffNotification.createMany({
+            data: notificationUserIds.map((targetUserId) => ({
+              tenantId,
+              storeId: data.storeId ?? channel.storeId ?? null,
+              targetUserId,
+              sourceType: 'TEAM_CHAT',
+              sourceId: created.id,
+              severity: 'INFO',
+              status: 'OPEN',
+              title: `Вас упомянули в чате: ${channel.name}`.slice(0, 240),
+              message: [
+                `Автор: ${authorLabel}`,
+                (data.storeId ?? channel.storeId)
+                  ? 'Клуб: канал клуба'
+                  : 'Клуб: вся сеть',
+                data.body.slice(0, 700),
+              ].join('\n'),
+              actionLabel: 'Открыть чат',
+              actionHref: `/staff/team-chat?channelId=${encodeURIComponent(channel.id)}`,
+              dedupeKey: `team-chat:${created.id}:mention:${targetUserId}`,
+              metadata: {
+                channelId: channel.id,
+                mentionedUserId: targetUserId,
+                authorUserId: user.id,
+              },
+            })),
+            skipDuplicates: true,
+          });
+        }
       }
 
       return tx.staffChatMessage.findUniqueOrThrow({

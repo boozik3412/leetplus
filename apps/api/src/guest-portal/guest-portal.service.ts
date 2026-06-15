@@ -295,6 +295,7 @@ export type GuestPortalPayload = {
     seasons: GuestPortalSeason[];
     rewardSummary: GuestPortalRewardSummary;
     rewards: GuestPortalReward[];
+    bonusHistory: GuestPortalBonusHistory;
   };
   activity: {
     summary: {
@@ -309,6 +310,38 @@ export type GuestPortalPayload = {
     xpHistory: GuestPortalXpHistoryItem[];
   };
   communications: GuestPortalCommunications;
+};
+
+export type GuestPortalBonusHistory = {
+  summary: {
+    total: number;
+    confirmedAmount: number;
+    pendingAmount: number;
+    failed: number;
+    latestAt: string | null;
+  };
+  items: GuestPortalBonusHistoryItem[];
+};
+
+export type GuestPortalBonusHistoryItem = {
+  id: string;
+  status:
+    | 'PENDING'
+    | 'PROCESSING'
+    | 'CONFIRMED'
+    | 'FAILED'
+    | 'CANCELED'
+    | 'UNKNOWN';
+  statusLabel: string;
+  amount: number;
+  balanceAfter: number | null;
+  title: string;
+  sourceKind: GuestPortalReward['sourceKind'];
+  sourceLabel: string | null;
+  storeName: string | null;
+  occurredAt: string;
+  confirmedAt: string | null;
+  processedAt: string | null;
 };
 
 export type GuestPortalCrmLead = {
@@ -601,6 +634,31 @@ export type GuestPortalCheckInResponse = {
 type GuestPortalMissionProgress = {
   current: number;
   percent: number;
+};
+
+type GuestPortalBonusLedgerRow = {
+  id: string;
+  status: string;
+  entryType: string;
+  amount: Prisma.Decimal;
+  balanceAfter: Prisma.Decimal | null;
+  processedAt: Date | null;
+  confirmedAt: Date | null;
+  failedAt: Date | null;
+  canceledAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  reward: {
+    rewardLabel: string;
+    rewardType: string;
+    lootBoxId: string | null;
+    missionId: string | null;
+    seasonId: string | null;
+    lootBox?: { name: string } | null;
+    mission?: { name: string } | null;
+    season?: { name: string } | null;
+  } | null;
+  store: { name: string } | null;
 };
 
 @Injectable()
@@ -2162,6 +2220,7 @@ export class GuestPortalService {
       missions,
       seasons,
       rewards,
+      bonusLedgerRows,
       communicationEvents,
       activity,
     ] = await Promise.all([
@@ -2253,6 +2312,52 @@ export class GuestPortalService {
             take: 20,
           })
         : [],
+      guest || profile
+        ? this.prisma.guestBonusLedgerEntry.findMany({
+            where: {
+              tenantId: context.tenant.id,
+              AND: [
+                {
+                  OR: [
+                    ...(guest ? [{ guestId: guest.id }] : []),
+                    ...(profile ? [{ profileId: profile.id }] : []),
+                  ],
+                },
+                {
+                  OR: [{ storeId: null }, { storeId: context.store.id }],
+                },
+              ],
+            },
+            select: {
+              id: true,
+              status: true,
+              entryType: true,
+              amount: true,
+              balanceAfter: true,
+              processedAt: true,
+              confirmedAt: true,
+              failedAt: true,
+              canceledAt: true,
+              createdAt: true,
+              updatedAt: true,
+              reward: {
+                select: {
+                  rewardLabel: true,
+                  rewardType: true,
+                  lootBoxId: true,
+                  missionId: true,
+                  seasonId: true,
+                  lootBox: { select: { name: true } },
+                  mission: { select: { name: true } },
+                  season: { select: { name: true } },
+                },
+              },
+              store: { select: { name: true } },
+            },
+            orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+            take: 10,
+          })
+        : [],
       guest
         ? this.prisma.guestCrmEvent.findMany({
             where: {
@@ -2299,6 +2404,7 @@ export class GuestPortalService {
       visibleMissions,
     );
     const portalRewards = rewards.map(mapReward).sort(comparePortalRewards);
+    const bonusHistory = this.buildBonusHistory(bonusLedgerRows);
     const portalLootBoxes = lootBoxes
       .filter((item) => matchesStore(item.storeIds, context.store.id))
       .slice(0, 6)
@@ -2357,6 +2463,7 @@ export class GuestPortalService {
         seasons: portalSeasons,
         rewardSummary: buildRewardSummary(portalRewards),
         rewards: portalRewards,
+        bonusHistory,
       },
       activity,
       communications: buildCommunications(
@@ -2725,6 +2832,12 @@ export class GuestPortalService {
       bonusBalanceSyncedAt,
       lastSyncedAt,
     };
+  }
+
+  private buildBonusHistory(
+    rows: GuestPortalBonusLedgerRow[],
+  ): GuestPortalBonusHistory {
+    return buildBonusLedgerHistory(rows);
   }
 
   private async findGuest(payload: GuestPortalTokenPayload) {
@@ -4003,6 +4116,113 @@ function buildRewardSummary(
   };
 }
 
+function buildBonusLedgerHistory(
+  rows: GuestPortalBonusLedgerRow[],
+): GuestPortalBonusHistory {
+  const items = rows
+    .map((row) => mapBonusLedgerHistoryItem(row))
+    .sort(
+      (left, right) =>
+        Date.parse(right.occurredAt) - Date.parse(left.occurredAt),
+    );
+
+  return {
+    summary: {
+      total: items.length,
+      confirmedAmount: moneyNumber(
+        items
+          .filter((item) => item.status === 'CONFIRMED')
+          .reduce((sum, item) => sum + item.amount, 0),
+      ),
+      pendingAmount: moneyNumber(
+        items
+          .filter(
+            (item) => item.status === 'PENDING' || item.status === 'PROCESSING',
+          )
+          .reduce((sum, item) => sum + item.amount, 0),
+      ),
+      failed: items.filter((item) => item.status === 'FAILED').length,
+      latestAt: items[0]?.occurredAt ?? null,
+    },
+    items,
+  };
+}
+
+function mapBonusLedgerHistoryItem(
+  row: GuestPortalBonusLedgerRow,
+): GuestPortalBonusHistoryItem {
+  const status = bonusLedgerPortalStatus(row.status);
+  const source = row.reward
+    ? rewardSource(row.reward)
+    : ({ sourceKind: 'MANUAL', sourceLabel: null } satisfies Pick<
+        GuestPortalReward,
+        'sourceKind' | 'sourceLabel'
+      >);
+  const occurredAt =
+    row.confirmedAt ??
+    row.processedAt ??
+    row.failedAt ??
+    row.canceledAt ??
+    row.updatedAt ??
+    row.createdAt;
+
+  return {
+    id: row.id,
+    status,
+    statusLabel: bonusLedgerStatusLabel(status),
+    amount: moneyNumber(decimalNumber(row.amount) ?? 0),
+    balanceAfter: decimalNumber(row.balanceAfter),
+    title: row.reward?.rewardLabel ?? bonusLedgerEntryTypeLabel(row.entryType),
+    sourceKind: source.sourceKind,
+    sourceLabel: source.sourceLabel,
+    storeName: row.store?.name ?? null,
+    occurredAt: occurredAt.toISOString(),
+    confirmedAt: iso(row.confirmedAt),
+    processedAt: iso(row.processedAt),
+  };
+}
+
+function bonusLedgerPortalStatus(
+  status: string,
+): GuestPortalBonusHistoryItem['status'] {
+  switch (status) {
+    case 'PENDING':
+    case 'PROCESSING':
+    case 'CONFIRMED':
+    case 'FAILED':
+    case 'CANCELED':
+      return status;
+    default:
+      return 'UNKNOWN';
+  }
+}
+
+function bonusLedgerStatusLabel(status: GuestPortalBonusHistoryItem['status']) {
+  const labels = {
+    PENDING: 'В очереди',
+    PROCESSING: 'Отправляется',
+    CONFIRMED: 'Начислено',
+    FAILED: 'Проверяется',
+    CANCELED: 'Отменено',
+    UNKNOWN: 'Проверяется',
+  } satisfies Record<GuestPortalBonusHistoryItem['status'], string>;
+
+  return labels[status];
+}
+
+function bonusLedgerEntryTypeLabel(entryType: string) {
+  switch (entryType) {
+    case 'SPEND':
+    case 'WRITE_OFF':
+      return 'Списание бонусов';
+    case 'ADJUST':
+    case 'ADJUSTMENT':
+      return 'Корректировка бонусов';
+    default:
+      return 'Начисление бонусов';
+  }
+}
+
 function buildNextActions(input: {
   guestFound: boolean;
   lootBoxes: GuestPortalLootBox[];
@@ -5250,6 +5470,10 @@ function numberField(value: unknown) {
 
 function decimalNumber(value: Prisma.Decimal | null | undefined) {
   return value == null ? null : Number(value);
+}
+
+function moneyNumber(value: number) {
+  return Math.round(value * 100) / 100;
 }
 
 function percent(value: number, total: number) {

@@ -824,7 +824,10 @@ function VerifiedPortal({
 
       <section className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
         <BattlePassPanel portal={portal} />
-        <RewardsPanel portal={portal} />
+        <div className="space-y-5">
+          <RewardsPanel portal={portal} />
+          <BonusHistoryPanel portal={portal} />
+        </div>
       </section>
 
       <section className="grid gap-5 lg:grid-cols-2">
@@ -2622,6 +2625,103 @@ function RewardsPanel({ portal }: { portal: GuestPortalPayload }) {
   );
 }
 
+function BonusHistoryPanel({ portal }: { portal: GuestPortalPayload }) {
+  const history = portal.gamification.bonusHistory;
+  const items = history.items;
+
+  return (
+    <div className="rounded-lg border border-amber-200/20 bg-[#111018] p-5">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-bold uppercase text-amber-200">
+            Бонусные операции
+          </p>
+          <h3 className="mt-1 text-2xl font-black text-white">
+            История начислений
+          </h3>
+        </div>
+        <span className="rounded-lg border border-amber-200/20 bg-amber-300/10 px-3 py-2 text-sm font-black text-amber-100">
+          {formatNumber(history.summary.total)}
+        </span>
+      </div>
+
+      <div className="mt-5 grid grid-cols-2 gap-3">
+        <Metric
+          label="Начислено"
+          value={formatSignedBonusAmount(history.summary.confirmedAmount)}
+        />
+        <Metric
+          label="В очереди"
+          value={formatSignedBonusAmount(history.summary.pendingAmount)}
+        />
+        <Metric label="Проверяется" value={formatNumber(history.summary.failed)} />
+        <Metric
+          label="Последнее"
+          value={
+            history.summary.latestAt
+              ? formatDate(history.summary.latestAt)
+              : "-"
+          }
+        />
+      </div>
+
+      <div className="mt-4 space-y-3">
+        {items.length ? (
+          items.slice(0, 6).map((item) => (
+            <div
+              key={item.id}
+              className="rounded-lg border border-white/10 bg-[#070b12] p-3"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate font-black text-white">{item.title}</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {formatDate(item.occurredAt)} {formatTime(item.occurredAt)}
+                  </p>
+                </div>
+                <span
+                  className={`shrink-0 rounded-lg px-2 py-1 text-xs font-black ${bonusHistoryStatusClass(
+                    item.status,
+                  )}`}
+                >
+                  {item.statusLabel}
+                </span>
+              </div>
+
+              <div className="mt-3 grid gap-2 text-xs text-slate-400 sm:grid-cols-2">
+                <span>
+                  {rewardSourceLabel(item.sourceKind)}
+                  {item.sourceLabel ? `: ${item.sourceLabel}` : ""}
+                </span>
+                <span className="text-right sm:text-left">
+                  {item.storeName ?? "Сетевая награда"}
+                </span>
+              </div>
+
+              <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm">
+                <span
+                  className={`font-black ${bonusHistoryAmountClass(
+                    item.amount,
+                  )}`}
+                >
+                  {formatSignedBonusAmount(item.amount)}
+                </span>
+                <span className="truncate text-slate-400">
+                  {item.balanceAfter == null
+                    ? "Баланс обновится после подтверждения"
+                    : `Баланс после: ${formatNumber(item.balanceAfter)}`}
+                </span>
+              </div>
+            </div>
+          ))
+        ) : (
+          <EmptyBlock text="История бонусов появится после первого начисления за квест, лутбокс или Battle Pass." />
+        )}
+      </div>
+    </div>
+  );
+}
+
 function MissionsPanel({ portal }: { portal: GuestPortalPayload }) {
   return (
     <div
@@ -3158,6 +3258,39 @@ function rewardSourceLabel(
   >;
 
   return labels[sourceKind];
+}
+
+function bonusHistoryStatusClass(
+  status: GuestPortalPayload["gamification"]["bonusHistory"]["items"][number]["status"],
+) {
+  const classes = {
+    PENDING: "bg-amber-300/10 text-amber-100",
+    PROCESSING: "bg-cyan-300/10 text-cyan-100",
+    CONFIRMED: "bg-emerald-300/10 text-emerald-200",
+    FAILED: "bg-rose-300/10 text-rose-100",
+    CANCELED: "bg-slate-300/10 text-slate-300",
+    UNKNOWN: "bg-slate-300/10 text-slate-300",
+  } satisfies Record<
+    GuestPortalPayload["gamification"]["bonusHistory"]["items"][number]["status"],
+    string
+  >;
+
+  return classes[status];
+}
+
+function bonusHistoryAmountClass(value: number) {
+  if (value > 0) {
+    return "text-emerald-100";
+  }
+  if (value < 0) {
+    return "text-rose-100";
+  }
+  return "text-slate-100";
+}
+
+function formatSignedBonusAmount(value: number) {
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${formatNumber(value)}`;
 }
 
 function walletStateHint(

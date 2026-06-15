@@ -1,5 +1,7 @@
 # LeetPlus Бэклог
 
+- Готово: публичный гостевой кабинет получил историю бонусных операций геймификации. В `/guest/[tenantSlug]/[storeId]` рядом с кошельком наград показываются последние записи `GuestBonusLedgerEntry` по `guestId` или отдельному `GuestGameProfile`: сумма, гостевой статус, источник квеста/лутбокса/Battle Pass, клуб, дата и `balanceAfter` после подтверждения. Raw phone, токены, `langameRequest`, `langameResponse` и технические ошибки Langame в публичный payload не попадают.
+
 - Готово: публичный гостевой кабинет теперь показывает бонусный баланс геймификации из live-контура. Блок лояльности `/guest/[tenantSlug]/[storeId]` берет `GuestBonusBalanceCurrent` с fallback на последний `GuestBonusBalanceSnapshot`, показывает источник бонусов и дату обновления, поэтому ledger-начисление видно гостю до следующего ночного snapshot.
 
 - Готово: Guest Game Hub получил read-only сверку текущего бонусного баланса после ledger-начислений. `/guests/gamification` сравнивает `GuestBonusBalanceCurrent` с последним `GuestBonusBalanceSnapshot` по `guestId` или внешнему Langame-id, показывает агрегаты current/snapshot/diff и статусы `сошлось / расхождение / ждет sync / нет snapshot` без live-запросов в Langame, raw phone, токенов и полного payload.

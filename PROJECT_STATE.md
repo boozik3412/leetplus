@@ -80,6 +80,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added guest-visible bonus ledger history to the public guest portal: `/guest/[tenantSlug]/[storeId]` now shows recent gamification bonus operations from `GuestBonusLedgerEntry` by `guestId` or separate `GuestGameProfile`, including amount, guest-facing status, reward source, store, date, and confirmed balance-after while still hiding raw phone, tokens, Langame request/response payloads, and technical errors.
 - Updated the public guest portal loyalty card to read gamification bonuses from `GuestBonusBalanceCurrent` first, falling back to the latest `GuestBonusBalanceSnapshot`; guests can now see the ledger-updated bonus balance source and sync date before the next historical snapshot arrives.
 - Added a Guest Game Hub current-balance reconciliation panel: `/guests/gamification` now compares `GuestBonusBalanceCurrent` with the latest saved `GuestBonusBalanceSnapshot` by `guestId` or external Langame id, highlights matched/mismatched/waiting/no-snapshot states after ledger accruals, and still avoids live Langame reads or raw phone/payload exposure.
 - Added operator controls for the Guest Game Hub bonus ledger: `/guests/gamification` can queue approved bonus rewards, run a safe dry-run dispatch, and launch the protected backend dispatch path while showing checked/queued/confirmed/failed/skipped/blocked results without exposing raw phone numbers, tokens, or full Langame payloads.

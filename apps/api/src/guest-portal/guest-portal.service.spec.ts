@@ -34,6 +34,7 @@ function createPrismaMock() {
       updateMany: jest.fn(),
     },
     guestBonusLedgerEntry: {
+      findMany: jest.fn(),
       updateMany: jest.fn(),
     },
     guestGameEvent: {
@@ -86,6 +87,7 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   prisma.guestGameProfile.update.mockResolvedValue(null);
   prisma.guestGameReward.updateMany.mockResolvedValue({ count: 0 });
   prisma.guestGameDelivery.updateMany.mockResolvedValue({ count: 0 });
+  prisma.guestBonusLedgerEntry.findMany.mockResolvedValue([]);
   prisma.guestBonusLedgerEntry.updateMany.mockResolvedValue({ count: 0 });
   prisma.guestGameEvent.create.mockResolvedValue({});
   prisma.guestGameEvent.createMany.mockResolvedValue({ count: 0 });
@@ -273,6 +275,98 @@ describe('GuestPortalService', () => {
         bonusBalanceSource: 'LANGAME_SNAPSHOT',
         bonusBalanceSyncedAt: '2026-06-15T00:00:00.000Z',
         lastSyncedAt: '2026-06-15T00:00:00.000Z',
+      });
+    });
+  });
+
+  describe('buildBonusHistory', () => {
+    it('maps ledger rows to safe guest-facing bonus history', () => {
+      const { service } = createService();
+
+      const history = (service as any).buildBonusHistory([
+        {
+          id: 'ledger-confirmed',
+          status: 'CONFIRMED',
+          entryType: 'EARN',
+          amount: new Prisma.Decimal(50),
+          balanceAfter: new Prisma.Decimal(150),
+          processedAt: new Date('2026-06-15T10:00:00.000Z'),
+          confirmedAt: new Date('2026-06-15T10:01:00.000Z'),
+          failedAt: null,
+          canceledAt: null,
+          createdAt: new Date('2026-06-15T09:58:00.000Z'),
+          updatedAt: new Date('2026-06-15T10:01:00.000Z'),
+          reward: {
+            rewardLabel: '50 бонусов за квест',
+            rewardType: 'BONUS_BALANCE',
+            lootBoxId: null,
+            missionId: 'mission-1',
+            seasonId: null,
+            lootBox: null,
+            mission: { name: 'Квест клуба 1337' },
+            season: null,
+          },
+          store: { name: '1337' },
+        },
+        {
+          id: 'ledger-pending',
+          status: 'PENDING',
+          entryType: 'EARN',
+          amount: new Prisma.Decimal(20),
+          balanceAfter: null,
+          processedAt: null,
+          confirmedAt: null,
+          failedAt: null,
+          canceledAt: null,
+          createdAt: new Date('2026-06-15T10:05:00.000Z'),
+          updatedAt: new Date('2026-06-15T10:05:00.000Z'),
+          reward: null,
+          store: null,
+        },
+        {
+          id: 'ledger-failed',
+          status: 'FAILED',
+          entryType: 'EARN',
+          amount: new Prisma.Decimal(10),
+          balanceAfter: null,
+          processedAt: new Date('2026-06-15T10:02:00.000Z'),
+          confirmedAt: null,
+          failedAt: new Date('2026-06-15T10:03:00.000Z'),
+          canceledAt: null,
+          createdAt: new Date('2026-06-15T10:00:00.000Z'),
+          updatedAt: new Date('2026-06-15T10:03:00.000Z'),
+          reward: null,
+          store: { name: '1337' },
+        },
+      ]);
+
+      expect(history.summary).toEqual({
+        total: 3,
+        confirmedAmount: 50,
+        pendingAmount: 20,
+        failed: 1,
+        latestAt: '2026-06-15T10:05:00.000Z',
+      });
+      expect(history.items[0]).toMatchObject({
+        id: 'ledger-pending',
+        status: 'PENDING',
+        statusLabel: 'В очереди',
+        title: 'Начисление бонусов',
+      });
+      expect(history.items[1]).toMatchObject({
+        id: 'ledger-failed',
+        status: 'FAILED',
+        statusLabel: 'Проверяется',
+      });
+      expect(history.items[2]).toMatchObject({
+        id: 'ledger-confirmed',
+        status: 'CONFIRMED',
+        statusLabel: 'Начислено',
+        amount: 50,
+        balanceAfter: 150,
+        sourceKind: 'MISSION',
+        sourceLabel: 'Квест клуба 1337',
+        storeName: '1337',
       });
     });
   });

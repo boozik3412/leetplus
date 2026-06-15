@@ -301,6 +301,35 @@ export type GuestPortalPayload = {
       qualifiedAt: string;
       expiresAt: string | null;
     }>;
+    bonusHistory: {
+      summary: {
+        total: number;
+        confirmedAmount: number;
+        pendingAmount: number;
+        failed: number;
+        latestAt: string | null;
+      };
+      items: Array<{
+        id: string;
+        status:
+          | "PENDING"
+          | "PROCESSING"
+          | "CONFIRMED"
+          | "FAILED"
+          | "CANCELED"
+          | "UNKNOWN";
+        statusLabel: string;
+        amount: number;
+        balanceAfter: number | null;
+        title: string;
+        sourceKind: "LOOT_BOX" | "MISSION" | "BATTLE_PASS" | "MANUAL";
+        sourceLabel: string | null;
+        storeName: string | null;
+        occurredAt: string;
+        confirmedAt: string | null;
+        processedAt: string | null;
+      }>;
+    };
   };
   activity: {
     summary: {

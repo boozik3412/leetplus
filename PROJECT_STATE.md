@@ -1,6 +1,6 @@
 # LeetPlus Project State
 
-Last updated: 2026-06-07
+Last updated: 2026-06-15
 
 ## Current Workflow
 
@@ -80,6 +80,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Integrated the confirmed Langame master balance endpoint into Guest Game Hub bonuses: approved bonus rewards can be queued and dispatched to `/master_api/guests/balance/phone` as `bonus_balance` or `balance` by decrypted guest phone, with no raw phone/token persisted in ledger audit; rules with `manualApprovalRequired=false` auto-approve rewards for the ledger path.
 - Added lightweight SSE live-state updates to `/staff/team-chat`: the API streams compact channel/message counter signatures through `/staff/team-chat/events`, web proxies it as same-origin `/api/staff/team-chat/events`, and the client refreshes only when chat state changes instead of polling the whole page on a fixed timer.
 - Added file attachments to `/staff/team-chat`: messages can now reference tenant-scoped uploads from `/staff/attachments`, the composer supports text-only, attachment-only, and text-plus-file messages, chat cards render compact attachment links, and tasks created from chat messages keep the attachment list in their description.
 - Unified the dashboard revenue formula and the `REVENUE` typed snapshot: the network KPI now uses `max(product/bar revenue, balance spend, transaction spend) + unallocated online top-ups`, stores the same formula in snapshot summary fields, and shows source/trust status plus product, game/service, top-up, and shift-cash reconciliation lines on the `/dashboard` revenue card.

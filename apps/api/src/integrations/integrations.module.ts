@@ -32,6 +32,7 @@ import { SecretEncryptionService } from './secret-encryption.service';
     LangameDailySyncService,
     LangameSettingsService,
     LangameSyncService,
+    SecretEncryptionService,
   ],
 })
 export class IntegrationsModule {}

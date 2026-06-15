@@ -208,6 +208,7 @@ export type GuestGameDryRunRule = {
   kind: "LOOT_BOX" | "MISSION" | "SEASON";
   name: string;
   status: string;
+  manualApprovalRequired: boolean;
   eligible: boolean;
   rewardType: string | null;
   rewardAmount: number | null;

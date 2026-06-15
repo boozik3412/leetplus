@@ -9,13 +9,24 @@ import {
 import type { AuthenticatedUser } from '../auth/auth.types';
 import { LangameClient } from '../integrations/langame.client';
 import { LangameSettingsService } from '../integrations/langame-settings.service';
+import { SecretEncryptionService } from '../integrations/secret-encryption.service';
 import { PrismaService } from '../prisma/prisma.service';
 
+const langameBalancePhonePath = '/guests/balance/phone';
+const langameBalancePhoneMasterPath = `/master_api${langameBalancePhonePath}`;
 const defaultBonusRewardTypes = [
   'BONUS',
   'BONUS_POINTS',
   'BONUS_BALANCE',
   'LOYALTY_BONUS',
+] as const;
+const moneyBalanceRewardTypes = [
+  'BALANCE',
+  'MONEY_BALANCE',
+  'CASH_BALANCE',
+  'DEPOSIT',
+  'WALLET_BALANCE',
+  'LANGAME_BALANCE',
 ] as const;
 const scheduledBonusLedgerActorRoles = [
   UserRole.OWNER,
@@ -32,6 +43,7 @@ type BonusLedgerItemStatus =
   | 'SKIPPED'
   | 'CANCELED'
   | 'BLOCKED';
+type LangameBalanceType = 'balance' | 'bonus_balance';
 
 export type GuestGameBonusLedgerQueueDto = {
   rewardTypes?: string[] | string | null;
@@ -182,6 +194,7 @@ export class GuestBonusLedgerService {
     private readonly configService: ConfigService,
     private readonly langameClient: LangameClient,
     private readonly langameSettingsService: LangameSettingsService,
+    private readonly secretEncryptionService: SecretEncryptionService,
   ) {}
 
   async getStatus(
@@ -258,6 +271,8 @@ export class GuestBonusLedgerService {
             externalProvider: true,
             externalDomain: true,
             externalGuestId: true,
+            phoneEncrypted: true,
+            phoneMasked: true,
           },
         },
       },
@@ -279,14 +294,17 @@ export class GuestBonusLedgerService {
         reward.guest?.externalProvider ??
         IntegrationProvider.LANGAME;
       const amount = decimalToNumber(reward.rewardAmount);
+      const phone = this.resolveEncryptedPhone(reward.guest);
+      const balanceType = langameBalanceTypeForRewardType(reward.rewardType);
 
-      if (!externalGuestId) {
+      if (!phone) {
         items.push({
           rewardId: reward.id,
           status: 'SKIPPED',
-          reason: 'У награды нет guestExternalId Langame.',
+          reason:
+            'У гостя нет расшифровываемого телефона для Langame /master_api/guests/balance/phone.',
           externalDomain,
-          externalGuestId: null,
+          externalGuestId,
           amount,
         });
         continue;
@@ -310,9 +328,11 @@ export class GuestBonusLedgerService {
         amount: reward.rewardAmount,
         reason: reward.rewardLabel,
         metadata: {
+          langameBalanceType: balanceType,
           rewardType: reward.rewardType,
           rewardLabel: reward.rewardLabel,
           rewardCode: reward.rewardCode,
+          phoneMasked: phone.masked,
         },
       });
       items.push({
@@ -669,15 +689,21 @@ export class GuestBonusLedgerService {
   ): Promise<GuestGameBonusLedgerDispatchItem> {
     try {
       const source = this.resolveEntrySource(entry, access);
-      const payload = this.buildLangamePayload(entry);
-      const response = await this.langameClient.postEndpoint(
+      const phone = await this.resolveEntryPhone(entry);
+      const payload = this.buildLangamePayload(entry, phone.value);
+      const response = await this.langameClient.adjustGuestBalanceByPhone(
         source.baseUrl,
         access.apiKey,
-        config.path!,
         payload,
+        config.path ?? langameBalancePhoneMasterPath,
       );
 
-      await this.confirmEntry(actorUserId, entry, payload, response);
+      await this.confirmEntry(
+        actorUserId,
+        entry,
+        this.buildLangameAuditPayload(payload, phone.masked),
+        sanitizeLangameBalanceResponse(response),
+      );
 
       return {
         ledgerEntryId: entry.id,
@@ -882,6 +908,71 @@ export class GuestBonusLedgerService {
     });
   }
 
+  private resolveEncryptedPhone(
+    guest: {
+      phoneEncrypted: string | null;
+      phoneMasked: string | null;
+    } | null,
+  ) {
+    if (!guest?.phoneEncrypted) {
+      return null;
+    }
+
+    let phone: string | null;
+
+    try {
+      phone = normalizeLangamePhone(
+        this.secretEncryptionService.decrypt(guest.phoneEncrypted),
+      );
+    } catch {
+      phone = null;
+    }
+
+    if (!phone) {
+      return null;
+    }
+
+    return {
+      value: phone,
+      masked: guest.phoneMasked ?? maskPhoneForAudit(phone),
+    };
+  }
+
+  private async resolveEntryPhone(entry: ClaimedBonusLedgerEntry) {
+    const select = {
+      phoneEncrypted: true,
+      phoneMasked: true,
+    } satisfies Prisma.GuestSelect;
+    const guest = entry.guestId
+      ? await this.prisma.guest.findFirst({
+          where: {
+            id: entry.guestId,
+            tenantId: entry.tenantId,
+          },
+          select,
+        })
+      : entry.externalGuestId
+        ? await this.prisma.guest.findFirst({
+            where: clean({
+              tenantId: entry.tenantId,
+              externalProvider: entry.externalProvider,
+              externalDomain: entry.externalDomain,
+              externalGuestId: entry.externalGuestId,
+            }),
+            select,
+          })
+        : null;
+    const phone = this.resolveEncryptedPhone(guest);
+
+    if (!phone) {
+      throw new BadRequestException(
+        'У ledger-записи нет расшифровываемого телефона гостя для Langame /master_api/guests/balance/phone.',
+      );
+    }
+
+    return phone;
+  }
+
   private resolveEntrySource(
     entry: ClaimedBonusLedgerEntry,
     access: TenantAccess,
@@ -909,18 +1000,40 @@ export class GuestBonusLedgerService {
     );
   }
 
-  private buildLangamePayload(entry: ClaimedBonusLedgerEntry) {
+  private buildLangamePayload(
+    entry: ClaimedBonusLedgerEntry,
+    phone: string,
+  ): {
+    phone: string;
+    type: LangameBalanceType;
+    sum: number;
+    comment: string;
+  } {
     return {
-      idempotency_key: entry.idempotencyKey,
-      external_guest_id: entry.externalGuestId,
-      guest_id: entry.externalGuestId,
-      amount: decimalToNumber(entry.amount),
-      entry_type: entry.entryType,
-      source: 'LeetPlus',
-      reason: entry.reason,
-      reward_id: entry.rewardId,
-      ledger_entry_id: entry.id,
-      metadata: entry.metadata,
+      phone,
+      type: langameBalanceTypeForEntry(entry),
+      sum: decimalToNumber(entry.amount),
+      comment: truncate(
+        [
+          'LeetPlus',
+          entry.reason,
+          entry.rewardId ? `reward:${entry.rewardId}` : null,
+          `ledger:${entry.id}`,
+        ]
+          .filter(Boolean)
+          .join(' | '),
+        240,
+      ),
+    };
+  }
+
+  private buildLangameAuditPayload(
+    payload: ReturnType<GuestBonusLedgerService['buildLangamePayload']>,
+    phoneMasked: string,
+  ) {
+    return {
+      ...payload,
+      phone: phoneMasked,
     };
   }
 
@@ -928,8 +1041,10 @@ export class GuestBonusLedgerService {
     dto: GuestGameBonusLedgerDispatchDto | GuestGameBonusLedgerQueueDto = {},
     forceDryRun = false,
   ): BonusLedgerConfig {
-    const path = nullableString(
-      this.configService.get<string>('LANGAME_BONUS_ACCRUAL_PATH'),
+    const path = normalizeLangameBalancePath(
+      nullableString(
+        this.configService.get<string>('LANGAME_BONUS_ACCRUAL_PATH'),
+      ) ?? langameBalancePhoneMasterPath,
     );
     const enabled = booleanValue(
       this.configService.get<string>('LANGAME_BONUS_ACCRUAL_ENABLED'),
@@ -937,8 +1052,8 @@ export class GuestBonusLedgerService {
     );
     const dryRun =
       forceDryRun ||
-      booleanValue('dryRun' in dto ? dto.dryRun : undefined, !enabled || !path);
-    const ready = enabled && Boolean(path) && !dryRun;
+      booleanValue('dryRun' in dto ? dto.dryRun : undefined, !enabled);
+    const ready = enabled && !dryRun;
     const mode: BonusLedgerMode = dryRun
       ? 'DRY_RUN'
       : ready
@@ -1039,8 +1154,8 @@ export class GuestBonusLedgerService {
       note: config.dryRun
         ? 'Scheduled bonus ledger dispatcher ran in dry-run mode without claims or Langame writes.'
         : config.ready
-          ? 'Scheduled bonus ledger dispatcher processed ledger queue through configured Langame write endpoint.'
-          : 'Scheduled bonus ledger dispatcher is disabled until LANGAME_BONUS_ACCRUAL_ENABLED and LANGAME_BONUS_ACCRUAL_PATH are configured.',
+          ? 'Scheduled bonus ledger dispatcher processed ledger queue through Langame master balance endpoint.'
+          : 'Scheduled bonus ledger dispatcher is disabled until LANGAME_BONUS_ACCRUAL_ENABLED is configured.',
     };
   }
 }
@@ -1067,14 +1182,110 @@ function bonusLedgerModeLabel(mode: BonusLedgerMode) {
 
 function bonusLedgerStatusNote(config: BonusLedgerConfig) {
   if (config.mode === 'READY') {
-    return 'Worker может claim-ить ledger и отправлять начисления в настроенный Langame endpoint.';
+    return 'Worker может claim-ить ledger и отправлять начисления в Langame /master_api/guests/balance/phone.';
   }
 
   if (config.mode === 'DRY_RUN') {
     return 'Worker проверяет очередь без claim и без записи в Langame.';
   }
 
-  return 'Для боевого режима задайте LANGAME_BONUS_ACCRUAL_ENABLED=true и LANGAME_BONUS_ACCRUAL_PATH.';
+  return 'Для боевого режима задайте LANGAME_BONUS_ACCRUAL_ENABLED=true; путь по умолчанию /master_api/guests/balance/phone.';
+}
+
+function normalizeLangameBalancePath(path: string) {
+  const normalized = path.startsWith('/') ? path : `/${path}`;
+
+  if (normalized.startsWith('/master_api/')) {
+    return normalized;
+  }
+
+  if (normalized.startsWith('/guests/')) {
+    return `/master_api${normalized}`;
+  }
+
+  return normalized;
+}
+
+function langameBalanceTypeForRewardType(rewardType: string | null) {
+  const normalized = rewardType?.trim().toUpperCase();
+
+  return normalized &&
+    moneyBalanceRewardTypes.includes(
+      normalized as (typeof moneyBalanceRewardTypes)[number],
+    )
+    ? 'balance'
+    : 'bonus_balance';
+}
+
+function langameBalanceTypeForEntry(
+  entry: ClaimedBonusLedgerEntry,
+): LangameBalanceType {
+  const metadata = jsonRecord(entry.metadata);
+  const configuredType = nullableString(metadata.langameBalanceType)
+    ?.trim()
+    .toLowerCase();
+
+  if (configuredType === 'balance' || configuredType === 'bonus_balance') {
+    return configuredType;
+  }
+
+  return langameBalanceTypeForRewardType(nullableString(metadata.rewardType));
+}
+
+function normalizeLangamePhone(value: string | null) {
+  const digits = value?.replace(/\D/g, '') ?? '';
+
+  if (digits.length === 10) {
+    return `7${digits}`;
+  }
+
+  if (digits.length === 11 && digits.startsWith('8')) {
+    return `7${digits.slice(1)}`;
+  }
+
+  return digits.length >= 11 && digits.length <= 15 ? digits : null;
+}
+
+function maskPhoneForAudit(value: string) {
+  const digits = value.replace(/\D/g, '');
+  const suffix = digits.slice(-4);
+
+  return suffix ? `***${suffix}` : '***';
+}
+
+function sanitizeLangameBalanceResponse(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sanitizeLangameBalanceResponse);
+  }
+
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [
+      key,
+      isPhoneLikeKey(key) && typeof entry === 'string'
+        ? maskPhoneForAudit(entry)
+        : sanitizeLangameBalanceResponse(entry),
+    ]),
+  );
+}
+
+function isPhoneLikeKey(key: string) {
+  const normalized = key.toLowerCase();
+
+  return (
+    normalized === 'phone' ||
+    normalized === 'phone_number' ||
+    normalized === 'tel'
+  );
+}
+
+function jsonRecord(value: Prisma.JsonValue | null) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
 function booleanValue(value: unknown, fallback: boolean) {

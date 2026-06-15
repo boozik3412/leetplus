@@ -177,6 +177,56 @@ describe('LangameClient', () => {
       'X-API-KEY': 'test-key',
     });
   });
+
+  it('posts master balance updates by phone with X-Request-Token and no public API key header', async () => {
+    const fetchMock = jest.fn().mockResolvedValueOnce(
+      responseWithBody({
+        status: true,
+        data: { id: 42 },
+      }),
+    );
+    global.fetch = fetchMock as typeof fetch;
+
+    const payload = await client.adjustGuestBalanceByPhone(
+      'https://46.langamepro.ru/public_api',
+      'request-token',
+      {
+        phone: '79999999999',
+        type: 'bonus_balance',
+        sum: 10,
+        comment: 'LeetPlus test',
+      },
+    );
+
+    expect(payload).toEqual({
+      status: true,
+      data: { id: 42 },
+    });
+
+    const calls = fetchMock.mock.calls as Array<[string | URL, RequestInit?]>;
+    const url = new URL(calls[0][0]);
+    const init = calls[0][1];
+
+    expect(url.toString()).toBe(
+      'https://46.langamepro.ru/master_api/guests/balance/phone',
+    );
+    expect(init?.method).toBe('POST');
+    expect(init?.headers).toMatchObject({
+      'Content-Type': 'application/json',
+      'X-Request-Token': 'request-token',
+    });
+    expect(
+      Object.prototype.hasOwnProperty.call(init?.headers ?? {}, 'X-API-KEY'),
+    ).toBe(false);
+    expect(init?.body).toBe(
+      JSON.stringify({
+        phone: '79999999999',
+        type: 'bonus_balance',
+        sum: 10,
+        comment: 'LeetPlus test',
+      }),
+    );
+  });
 });
 
 function responseWithRows(rows: unknown[]) {

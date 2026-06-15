@@ -1295,6 +1295,7 @@ export type GuestGameDryRunRule = {
   kind: 'LOOT_BOX' | 'MISSION' | 'SEASON';
   name: string;
   status: string;
+  manualApprovalRequired: boolean;
   eligible: boolean;
   rewardType: string | null;
   rewardAmount: number | null;
@@ -1706,6 +1707,7 @@ export class GuestGamificationService {
     const maxDeliveryConfigured = Boolean(
       maxProvider?.configured && maxProvider.enabledByEnv,
     );
+    const langameBonusAccrualEnabled = envFlag('LANGAME_BONUS_ACCRUAL_ENABLED');
     const items: GuestGameIntegrationReadinessItem[] = [
       {
         key: 'PUBLIC_PORTAL',
@@ -1854,16 +1856,20 @@ export class GuestGamificationService {
       },
       {
         key: 'LANGAME_WRITE_API',
-        title: 'Запись наград в Langame',
-        status: 'MANUAL_ONLY',
-        statusLabel: 'выключено',
-        ready: false,
-        configured: false,
-        enabled: false,
-        requiredEnv: [],
-        note: 'Награды, XP и события остаются внутри LeetPlus до подтвержденного write API, идемпотентности, аудита и rollback.',
+        title: 'Запись бонусов в Langame',
+        status: langameBonusAccrualEnabled ? 'READY' : 'MANUAL_ONLY',
+        statusLabel: langameBonusAccrualEnabled
+          ? 'master endpoint готов'
+          : 'выключено',
+        ready: langameBonusAccrualEnabled,
+        configured: true,
+        enabled: langameBonusAccrualEnabled,
+        requiredEnv: ['LANGAME_BONUS_ACCRUAL_ENABLED'],
+        note: langameBonusAccrualEnabled
+          ? 'Бонусный ledger может начислять bonus_balance или balance через /master_api/guests/balance/phone по телефону гостя.'
+          : 'Бонусный ledger готов к Langame master balance endpoint, но боевые списания и начисления выключены env-флагом.',
         nextAction:
-          'Продолжать через очередь, кассира и безопасные claim-коды; Langame write API не включать без отдельного согласования.',
+          'Включать только после проверки dry-run, tenant Langame ключа и расписания ledger-диспетчера.',
       },
     ];
 
@@ -4180,7 +4186,7 @@ export class GuestGamificationService {
           profileId,
           guestId,
           storeId: nullableId(dto.storeId),
-          status: 'PENDING',
+          status: rule.manualApprovalRequired ? 'PENDING' : 'APPROVED',
           source: 'API_IMPORT',
           externalProvider: eventReference?.externalProvider ?? null,
           externalDomain: eventReference?.externalDomain ?? null,
@@ -8034,6 +8040,7 @@ function evaluateLootBoxDryRun(
     kind: 'LOOT_BOX',
     name: rule.name,
     status: rule.status,
+    manualApprovalRequired: rule.manualApprovalRequired,
     rewardType: rule.rewardType,
     rewardAmount: rule.rewardAmount,
     rewardLabel: rule.rewardLabel,
@@ -8086,6 +8093,7 @@ function evaluateMissionDryRun(
     kind: 'MISSION',
     name: rule.name,
     status: rule.status,
+    manualApprovalRequired: rule.manualApprovalRequired,
     rewardType: rule.rewardType,
     rewardAmount: rule.rewardAmount,
     rewardLabel: rule.rewardLabel,
@@ -8134,6 +8142,7 @@ function evaluateSeasonDryRun(
     kind: 'SEASON',
     name: rule.name,
     status: rule.status,
+    manualApprovalRequired: rule.manualApprovalRequired,
     rewardType: selectedRewardLabel ? 'BATTLE_PASS_REWARD' : null,
     rewardAmount: 0,
     rewardLabel: selectedRewardLabel,

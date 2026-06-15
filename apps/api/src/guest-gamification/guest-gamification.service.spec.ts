@@ -188,6 +188,7 @@ function dryRunResult(
         rewardAmount: 50,
         rewardLabel: '50 bonus points',
         selectedRewardLabel: '50 bonus points',
+        manualApprovalRequired: false,
         xpDelta: 30,
         budgetAmount: null,
         reasons: [],
@@ -491,6 +492,40 @@ describe('GuestGamificationService', () => {
         idempotencyKey: 'guest-game:GUEST_SESSION:SESSION_START:session-1',
         langameWrite: false,
       });
+    });
+
+    it('auto-approves rewards when the rule does not require manual approval', async () => {
+      const { service } = createService();
+
+      jest.spyOn(service as any, 'createReward').mockResolvedValue(
+        rewardResult({
+          status: 'APPROVED',
+        }),
+      );
+
+      await (service as any).createProcessRewards(
+        user,
+        {
+          eventType: 'SESSION_START',
+          storeId: null,
+        },
+        dryRunResult(),
+        'profile-1',
+        {
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'club-1',
+          externalId: 'session-1',
+        },
+      );
+
+      expect((service as any).createReward).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({
+          status: 'APPROVED',
+          rewardType: 'BONUS',
+          rewardAmount: 50,
+        }),
+      );
     });
   });
 

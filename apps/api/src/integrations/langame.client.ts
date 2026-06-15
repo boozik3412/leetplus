@@ -26,6 +26,7 @@ type LangameResponse<T> = {
 };
 
 type LangameQueryParams = Record<string, string>;
+type LangameBalanceType = 'balance' | 'bonus_balance';
 
 const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -463,6 +464,55 @@ export class LangameClient {
     return result;
   }
 
+  async adjustGuestBalanceByPhone(
+    baseUrl: string,
+    requestToken: string,
+    payload: {
+      phone: string;
+      type: LangameBalanceType;
+      sum: number;
+      comment: string;
+    },
+    path = '/guests/balance/phone',
+  ) {
+    const normalizedPath = this.masterApiPath(path);
+    const displayPath = `/master_api${normalizedPath}`;
+    const url = new URL(`${this.masterApiBaseUrl(baseUrl)}${normalizedPath}`);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Request-Token': requestToken,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorDetails = await this.readErrorDetails(response);
+      throw new BadRequestException(
+        [
+          `Langame ${displayPath} failed: ${response.status} ${response.statusText}`,
+          errorDetails,
+        ]
+          .filter(Boolean)
+          .join(' - '),
+      );
+    }
+
+    const result = await this.readJsonOrText(response);
+
+    if (this.isPlainObject(result) && result.status === false) {
+      throw new BadRequestException(
+        this.hasStringField(result, 'message')
+          ? `Langame ${displayPath} returned an error: ${result.message}`
+          : `Langame ${displayPath} returned an error`,
+      );
+    }
+
+    return result;
+  }
+
   private async getList<T>(
     baseUrl: string,
     path: string,
@@ -641,5 +691,27 @@ export class LangameClient {
 
   private normalizeBaseUrl(baseUrl: string) {
     return baseUrl.replace(/\/+$/, '');
+  }
+
+  private masterApiBaseUrl(baseUrl: string) {
+    const normalized = this.normalizeBaseUrl(baseUrl);
+
+    if (normalized.endsWith('/master_api')) {
+      return normalized;
+    }
+
+    if (normalized.endsWith('/public_api')) {
+      return `${normalized.slice(0, -'/public_api'.length)}/master_api`;
+    }
+
+    return `${normalized}/master_api`;
+  }
+
+  private masterApiPath(path: string) {
+    const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+
+    return normalizedPath.startsWith('/master_api/')
+      ? normalizedPath.slice('/master_api'.length)
+      : normalizedPath;
   }
 }

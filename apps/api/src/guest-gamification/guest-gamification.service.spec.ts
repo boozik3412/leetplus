@@ -840,7 +840,7 @@ describe('GuestGamificationService', () => {
       );
     });
 
-    it('shows empty guests/logs as a pilot data warning without blocking dry-run', () => {
+    it('shows empty guests/logs as a pilot data warning without blocking dry-run when rules do not depend on it', () => {
       const { service } = createService();
 
       const readiness = (service as any).buildPilotReadiness(
@@ -866,9 +866,53 @@ describe('GuestGamificationService', () => {
         expect.arrayContaining([
           expect.objectContaining({
             key: 'GUEST_LOGS',
+            status: 'MANUAL_ONLY',
+            ready: false,
+            metric: 'текущие правила без guests/logs',
+            nextAction: expect.stringContaining('Можно запускать dry-run'),
+          }),
+        ]),
+      );
+    });
+
+    it('blocks dry-run when active pilot rules depend on guests/logs but the catalog is empty', () => {
+      const { service } = createService();
+
+      const readiness = (service as any).buildPilotReadiness(
+        pilotReadinessInput({
+          missions: [
+            activeMission({
+              conditions: {
+                guestLogTypes: ['session_start'],
+              },
+            }),
+          ],
+          guestLogCatalog: {
+            items: [],
+            mappings: [],
+            summary: {
+              types: 0,
+              logs: 0,
+              domains: 0,
+              latestAt: null,
+            },
+          },
+        }),
+      );
+
+      expect(readiness.runbook).toMatchObject({
+        stage: 'BLOCKED',
+        canRunDryRun: false,
+        blockers: ['Факты guests/logs'],
+      });
+      expect(readiness.runbook.nextAction).toContain('/sync');
+      expect(readiness.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            key: 'GUEST_LOGS',
             status: 'BLOCKED',
             ready: false,
-            metric: '0 логов',
+            metric: '0 логов / 1 правил',
             nextAction: expect.stringContaining('/sync'),
           }),
         ]),

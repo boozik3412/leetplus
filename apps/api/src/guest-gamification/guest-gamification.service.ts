@@ -2016,6 +2016,7 @@ const pilotRunbookPrerequisiteKeys = new Set<
   'GAME_PROFILE',
   'LANGAME_MATCH',
   'ACTIVE_RULES',
+  'GUEST_LOGS',
 ]);
 
 function buildPilotRunbookActions({
@@ -2209,7 +2210,7 @@ function buildPilotRunbook({
       nextAction:
         prerequisiteBlockers[0]?.nextAction ??
         'Закрыть блокеры пилотного чек-листа.',
-      note: 'Пилотный прогон первого бонуса нельзя запускать, пока не закрыты базовые условия регистрации, OTP, профиля, связки с Langame и активного правила.',
+      note: 'Пилотный прогон первого бонуса нельзя запускать, пока не закрыты базовые условия регистрации, OTP, профиля, связки с Langame, активного правила и обязательных snapshot-фактов.',
     });
   }
 
@@ -2910,6 +2911,12 @@ export class GuestGamificationService {
     const guestLogMappings = guestLogCatalog.mappings.length;
     const guestLogLatestAt = guestLogCatalog.summary.latestAt;
     const guestLogsReady = guestLogTypes > 0 && guestLogRows > 0;
+    const guestLogRuleDependencies = [
+      ...activeLootBoxes,
+      ...activeMissions,
+      ...activeSeasons,
+    ].filter(guestGameRuleUsesGuestLogs).length;
+    const guestLogsRequiredByRules = guestLogRuleDependencies > 0;
     const pilotRewards = targetStoreId
       ? rewards.filter(
           (reward) => !reward.store || reward.store.id === targetStoreId,
@@ -3067,28 +3074,42 @@ export class GuestGamificationService {
         title: 'Факты guests/logs',
         status: guestLogsReady
           ? 'READY'
-          : guestLogMappings
-            ? 'PARTIAL'
-            : 'BLOCKED',
+          : guestLogsRequiredByRules
+            ? 'BLOCKED'
+            : guestLogMappings
+              ? 'PARTIAL'
+              : 'MANUAL_ONLY',
         statusLabel: guestLogsReady
           ? 'типы найдены'
-          : guestLogMappings
-            ? 'ждет sync'
-            : 'пусто',
+          : guestLogsRequiredByRules
+            ? 'нужен sync'
+            : guestLogMappings
+              ? 'ждет sync'
+              : 'не требуется',
         ready: guestLogsReady,
         metric: guestLogsReady
-          ? `${guestLogRows} логов / ${guestLogTypes} типов`
-          : guestLogMappings
-            ? `${guestLogMappings} сопоставлений`
-            : '0 логов',
+          ? guestLogsRequiredByRules
+            ? `${guestLogRows} логов / ${guestLogTypes} типов / ${guestLogRuleDependencies} правил`
+            : `${guestLogRows} логов / ${guestLogTypes} типов`
+          : guestLogsRequiredByRules
+            ? `0 логов / ${guestLogRuleDependencies} правил`
+            : guestLogMappings
+              ? `${guestLogMappings} сопоставлений`
+              : 'текущие правила без guests/logs',
         note: guestLogsReady
-          ? `Каталог событий готов для правил и anti-fraud: ${guestLogDomains} источников, последнее событие ${guestLogLatestAt ?? 'без даты'}.`
-          : guestLogMappings
-            ? 'Словарь типов уже настроен, но сохраненных фактов guests/logs пока нет.'
-            : 'Без сохраненных guests/logs управляющий не видит реальные raw-типы событий для квестов и anti-fraud.',
+          ? guestLogsRequiredByRules
+            ? `Каталог событий готов для ${guestLogRuleDependencies} правил guests/logs: ${guestLogDomains} источников, последнее событие ${guestLogLatestAt ?? 'без даты'}.`
+            : `Каталог событий сохранен для будущих квестов и anti-fraud: ${guestLogDomains} источников, последнее событие ${guestLogLatestAt ?? 'без даты'}. Текущие правила могут идти без guests/logs.`
+          : guestLogsRequiredByRules
+            ? 'Активные правила используют типы guests/logs, но сохраненных фактов пока нет: dry-run по этим правилам будет неполным.'
+            : guestLogMappings
+              ? 'Словарь типов уже настроен, но текущие активные правила не требуют guests/logs.'
+              : 'Текущие активные правила не требуют guests/logs; каталог нужен для будущих квестов и anti-fraud.',
         nextAction: guestLogsReady
           ? 'Скачать CSV каталога и выбрать реальные типы для правил 1337.'
-          : 'На /sync включить расширенную проверку guests/logs и дождаться сохраненных фактов.',
+          : guestLogsRequiredByRules
+            ? 'На /sync включить расширенную проверку guests/logs и дождаться сохраненных фактов перед dry-run.'
+            : 'Можно запускать dry-run текущих правил; для расширенных квестов позже заполнить guests/logs на /sync.',
       },
       {
         key: 'TEST_EVENT',
@@ -10674,6 +10695,42 @@ function appendDryRunTariffSingleCheck(
   }
 
   reasons.push(`${label} подходит`);
+}
+
+function guestGameRuleUsesGuestLogs(
+  rule: GuestGameLootBox | GuestGameMission | GuestGameSeason,
+) {
+  if ('xpRules' in rule) {
+    return guestGameRuleConfigUsesGuestLogs(rule.xpRules);
+  }
+
+  if ('conditions' in rule) {
+    return (
+      guestGameRuleConfigUsesGuestLogs(rule.conditions) ||
+      guestGameRuleConfigUsesGuestLogs(rule.antiFraudRules)
+    );
+  }
+
+  return guestGameRuleConfigUsesGuestLogs(rule.periodRules);
+}
+
+function guestGameRuleConfigUsesGuestLogs(value: unknown) {
+  const rules = dryRunRecord(value);
+  const configuredTypes = normalizedGuestLogTypes(
+    dryRunStringValues(
+      rules.guestLogTypes,
+      rules.guestLogType,
+      rules.logTypes,
+      rules.logType,
+      rules.blockedGuestLogTypes,
+      rules.deniedGuestLogTypes,
+      rules.blockedLogTypes,
+      rules.deniedLogTypes,
+    ),
+  );
+  const guestLogXp = dryRunOptionalNumber(rules.guestLog);
+
+  return configuredTypes.length > 0 || (guestLogXp != null && guestLogXp > 0);
 }
 
 function appendDryRunGuestLogTypeCheck(

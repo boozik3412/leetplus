@@ -345,6 +345,13 @@ function ReadyGameView({
         </div>
       </section>
 
+      <div className="mt-4">
+        <NextActionsPanel
+          actions={summary.nextActions}
+          guestPortalHref={guestPortalHref}
+        />
+      </div>
+
       <section className="mt-4 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
         <RewardResultPanel summary={summary} />
         <MissionsPanel missions={summary.missions.featured} />
@@ -381,6 +388,99 @@ function Metric({
       <p className="mt-1 text-2xl font-black">{value}</p>
       <p className="mt-1 text-xs text-zinc-500">{note}</p>
     </div>
+  );
+}
+
+function NextActionsPanel({
+  actions,
+  guestPortalHref,
+}: {
+  actions: GuestPortalGameSummary["nextActions"];
+  guestPortalHref: string;
+}) {
+  if (actions.length === 0) {
+    return (
+      <section className="rounded-lg border border-white/10 bg-white/[0.06] p-5">
+        <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
+          План игры
+        </p>
+        <h2 className="mt-1 text-xl font-black">Свободная игра</h2>
+        <p className="mt-3 text-sm leading-6 text-zinc-300">
+          Как только появятся награды, квесты или новый сезонный шаг, они
+          появятся здесь.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="rounded-lg border border-white/10 bg-white/[0.06] p-5">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
+            План игры
+          </p>
+          <h2 className="mt-1 text-xl font-black">Что сделать дальше</h2>
+        </div>
+        <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-bold text-zinc-300">
+          {formatNumber(actions.length)} шага
+        </span>
+      </div>
+      <div className="mt-5 grid gap-3 lg:grid-cols-3">
+        {actions.map((action) => {
+          const href = gameActionHref(action, guestPortalHref);
+
+          return (
+            <article
+              key={action.id}
+              className="rounded-lg border border-white/10 bg-zinc-950/45 p-4"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    {action.statusLabel}
+                  </p>
+                  <h3 className="mt-1 truncate text-sm font-black text-white">
+                    {action.title}
+                  </h3>
+                </div>
+                <span
+                  className={[
+                    "shrink-0 rounded-full px-2 py-1 text-xs font-black",
+                    actionPriorityClass(action.priority),
+                  ].join(" ")}
+                >
+                  {actionPriorityLabel(action.priority)}
+                </span>
+              </div>
+              <p className="mt-3 text-sm leading-5 text-zinc-300">
+                {action.description}
+              </p>
+              {action.progressPercent !== null ? (
+                <div className="mt-4">
+                  <div className="flex items-center justify-between text-xs text-zinc-500">
+                    <span>прогресс</span>
+                    <span>{Math.round(action.progressPercent)}%</span>
+                  </div>
+                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
+                    <div
+                      className="h-full rounded-full bg-emerald-300"
+                      style={{ width: `${clampPercent(action.progressPercent)}%` }}
+                    />
+                  </div>
+                </div>
+              ) : null}
+              <Link
+                href={href}
+                className="mt-4 flex min-h-10 items-center justify-center rounded-lg border border-emerald-300/35 px-3 text-sm font-black text-emerald-100 transition hover:border-emerald-300 hover:bg-emerald-300/10"
+              >
+                {gameActionButtonLabel(action)}
+              </Link>
+            </article>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -1169,6 +1269,26 @@ function rewardSourceKindLabel(
   >;
 
   return labels[kind];
+}
+
+function actionPriorityLabel(priority: GameNextAction["priority"]) {
+  const labels = {
+    HIGH: "важно",
+    MEDIUM: "скоро",
+    LOW: "потом",
+  } satisfies Record<GameNextAction["priority"], string>;
+
+  return labels[priority];
+}
+
+function actionPriorityClass(priority: GameNextAction["priority"]) {
+  const classes = {
+    HIGH: "bg-emerald-300 text-zinc-950",
+    MEDIUM: "bg-amber-300 text-zinc-950",
+    LOW: "bg-white/10 text-zinc-300",
+  } satisfies Record<GameNextAction["priority"], string>;
+
+  return classes[priority];
 }
 
 function walletStateLabel(state: GameRewardWalletState) {

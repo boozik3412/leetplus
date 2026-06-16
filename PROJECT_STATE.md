@@ -80,6 +80,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added a full next-actions plan to the lightweight public game screen: `/play/game` now renders all bounded `summary.nextActions` with priority, status, progress, and links to the relevant local game block or guest portal without new API calls, live Langame reads, or admin involvement.
 - Added a bounded Battle Pass level track to the lightweight public game screen: `GET /guest-portal/session/game-summary` now returns up to 5 safe levels around the current/next season progress, and `/play/game` shows XP thresholds, free/premium rewards, and level state without exposing the full season JSON or live Langame reads.
 - Added a bounded recent reward wallet to the lightweight public game screen: `GET /guest-portal/session/game-summary` now includes `rewards.recent` with up to 5 safe reward rows, and `/play/game` shows reward state, source, amount, date, expiry, and READY code without exposing raw PII, reward status internals, or Langame payload.
 - Added a scoped bonus-ledger preflight for the first Langame canary write: Guest Game Hub now exposes the exact ready count and safe first-claim preview for pilot store 1337 and keeps `LIVE_WRITE` blocked unless there is exactly one claimable ledger entry in that scope.

@@ -202,7 +202,30 @@ function portalPayloadFixture() {
           anchor: 'rewards',
         },
       ],
-      lootBoxes: [],
+      lootBoxes: [
+        {
+          id: 'loot-1',
+          name: 'Стартовый лутбокс',
+          triggerKind: 'SESSION_START',
+          rewardLabel: '50 бонусов',
+          rewardType: 'BONUS',
+          manualApprovalRequired: false,
+          note: null,
+          openedCount: 1,
+          readyRewards: 0,
+          waitingApprovalRewards: 1,
+          redeemedRewards: 0,
+          latestReward: {
+            id: 'reward-2',
+            walletState: 'WAITING_APPROVAL',
+            rewardLabel: '50 бонусов',
+            rewardCode: null,
+            claimPayload: null,
+            qualifiedAt: '2026-06-15T08:00:00.000Z',
+            expiresAt: null,
+          },
+        },
+      ],
       missions: [
         {
           id: 'mission-1',
@@ -420,6 +443,18 @@ describe('GuestPortalService', () => {
           summary: portal.gamification.rewardSummary,
           ready: [portal.gamification.rewards[0]],
           latestBonus: portal.gamification.bonusHistory.items[0],
+        },
+        lootBoxes: {
+          total: 1,
+          featured: [
+            expect.objectContaining({
+              id: 'loot-1',
+              latestReward: expect.objectContaining({
+                id: 'reward-2',
+                walletState: 'WAITING_APPROVAL',
+              }),
+            }),
+          ],
         },
         missions: {
           total: 2,

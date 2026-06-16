@@ -336,6 +336,10 @@ function ReadyGameView({
         <MissionsPanel missions={summary.missions.featured} />
       </section>
 
+      <section className="mt-4">
+        <LootBoxesPanel lootBoxes={summary.lootBoxes.featured} />
+      </section>
+
       <section className="mt-4 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
         <BattlePassPanel battlePass={summary.battlePass.active} />
         <ChannelsPanel summary={summary} />
@@ -498,6 +502,150 @@ function RewardResultPanel({ summary }: { summary: GuestPortalGameSummary }) {
         </p>
       )}
     </section>
+  );
+}
+
+function LootBoxesPanel({
+  lootBoxes,
+}: {
+  lootBoxes: GuestPortalGameSummary["lootBoxes"]["featured"];
+}) {
+  const [openedLootBoxId, setOpenedLootBoxId] = useState<string | null>(null);
+
+  return (
+    <section className="rounded-lg border border-white/10 bg-white/[0.06] p-5">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
+            Лутбоксы
+          </p>
+          <h2 className="mt-1 text-xl font-black">Открыть приз</h2>
+        </div>
+        <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-bold text-zinc-300">
+          {formatNumber(lootBoxes.length)} активных
+        </span>
+      </div>
+
+      {lootBoxes.length ? (
+        <div className="mt-5 grid gap-3 lg:grid-cols-3">
+          {lootBoxes.map((lootBox) => {
+            const latestReward = lootBox.latestReward;
+            const isOpened = openedLootBoxId === lootBox.id;
+
+            return (
+              <article
+                key={lootBox.id}
+                className={[
+                  "rounded-lg border p-4 transition",
+                  latestReward
+                    ? "border-emerald-300/30 bg-emerald-300/[0.07]"
+                    : "border-white/10 bg-zinc-950/45",
+                ].join(" ")}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="truncate text-sm font-black">
+                      {lootBox.name}
+                    </h3>
+                    <p className="mt-1 text-xs text-zinc-400">
+                      {lootBox.rewardLabel ??
+                        "Награда определяется правилами клуба"}
+                    </p>
+                  </div>
+                  <span className="shrink-0 rounded-full bg-white/10 px-2 py-1 text-xs font-black text-zinc-200">
+                    {lootBox.triggerKind}
+                  </span>
+                </div>
+
+                <div className="mt-4 grid grid-cols-3 gap-2">
+                  <MiniMetric
+                    label="Сработал"
+                    value={formatNumber(lootBox.openedCount)}
+                  />
+                  <MiniMetric
+                    label="К выдаче"
+                    value={formatNumber(lootBox.readyRewards)}
+                  />
+                  <MiniMetric
+                    label="Получено"
+                    value={formatNumber(lootBox.redeemedRewards)}
+                  />
+                </div>
+
+                {latestReward ? (
+                  <div className="mt-4 rounded-lg border border-emerald-300/25 bg-zinc-950/50 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-emerald-200">
+                          Последний результат
+                        </p>
+                        <p className="mt-1 text-xs text-zinc-500">
+                          {formatDate(latestReward.qualifiedAt)}
+                        </p>
+                      </div>
+                      <span className="rounded-full bg-white/10 px-2 py-1 text-xs font-black text-zinc-200">
+                        {walletStateLabel(latestReward.walletState)}
+                      </span>
+                    </div>
+
+                    {isOpened ? (
+                      <div className="mt-3 rounded-lg border border-emerald-200/25 bg-emerald-300/[0.08] p-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-emerald-200">
+                          Выпала награда
+                        </p>
+                        <p className="mt-1 text-lg font-black text-white">
+                          {latestReward.rewardLabel}
+                        </p>
+                        <p className="mt-2 text-xs leading-5 text-zinc-300">
+                          {walletStateHint(latestReward.walletState)}
+                          {latestReward.expiresAt
+                            ? ` До ${formatDate(latestReward.expiresAt)}.`
+                            : ""}
+                        </p>
+                        {latestReward.rewardCode &&
+                        latestReward.walletState === "READY" ? (
+                          <p className="mt-3 rounded-lg border border-dashed border-emerald-200/50 px-3 py-2 text-sm font-black text-emerald-50">
+                            Код кассиру: {latestReward.rewardCode}
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setOpenedLootBoxId(lootBox.id)}
+                        className="mt-3 w-full rounded-lg bg-emerald-300 px-3 py-2 text-sm font-black text-zinc-950 transition hover:bg-emerald-200"
+                        aria-expanded={false}
+                      >
+                        Открыть лутбокс
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <p className="mt-4 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs leading-5 text-zinc-400">
+                    Лутбокс откроется после подходящего события в клубе:
+                    сессии, квеста или правила Guest Game Hub.
+                  </p>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="mt-5 text-sm leading-6 text-zinc-300">
+          Лутбоксы появятся после настройки правил старта сессии или клубных
+          событий.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function MiniMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-zinc-950/45 p-2">
+      <p className="text-[11px] text-zinc-500">{label}</p>
+      <p className="mt-1 text-sm font-black text-white">{value}</p>
+    </div>
   );
 }
 
@@ -829,6 +977,40 @@ function activityKindLabel(
   >;
 
   return labels[kind];
+}
+
+function walletStateLabel(
+  state: GuestPortalGameSummary["rewards"]["ready"][number]["walletState"],
+) {
+  const labels = {
+    WAITING_APPROVAL: "Ждет проверки",
+    READY: "Можно забрать",
+    REDEEMED: "Выдано",
+    CANCELED: "Отменено",
+    EXPIRED: "Сгорело",
+  } satisfies Record<
+    GuestPortalGameSummary["rewards"]["ready"][number]["walletState"],
+    string
+  >;
+
+  return labels[state];
+}
+
+function walletStateHint(
+  state: GuestPortalGameSummary["rewards"]["ready"][number]["walletState"],
+) {
+  const hints = {
+    WAITING_APPROVAL: "Сотрудник клуба проверит результат и подготовит выдачу.",
+    READY: "Покажите код кассиру в клубе, чтобы получить награду.",
+    REDEEMED: "Награда уже выдана и отмечена в LeetPlus.",
+    CANCELED: "Награда отменена сотрудником клуба.",
+    EXPIRED: "Срок действия награды закончился.",
+  } satisfies Record<
+    GuestPortalGameSummary["rewards"]["ready"][number]["walletState"],
+    string
+  >;
+
+  return hints[state];
 }
 
 function ChannelsPanel({ summary }: { summary: GuestPortalGameSummary }) {

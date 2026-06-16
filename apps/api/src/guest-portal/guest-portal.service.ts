@@ -337,6 +337,24 @@ export type GuestPortalGameSummary = {
     ready: GuestPortalReward[];
     latestBonus: GuestPortalBonusHistoryItem | null;
   };
+  lootBoxes: {
+    total: number;
+    featured: Array<
+      Pick<
+        GuestPortalLootBox,
+        | 'id'
+        | 'name'
+        | 'triggerKind'
+        | 'rewardLabel'
+        | 'rewardType'
+        | 'openedCount'
+        | 'readyRewards'
+        | 'waitingApprovalRewards'
+        | 'redeemedRewards'
+        | 'latestReward'
+      >
+    >;
+  };
   missions: {
     total: number;
     featured: Array<
@@ -3428,6 +3446,30 @@ export class GuestPortalService {
 function buildGameSummaryFromPortal(
   portal: GuestPortalPayload,
 ): GuestPortalGameSummary {
+  const featuredLootBoxes = [...portal.gamification.lootBoxes]
+    .sort((left, right) => {
+      if (left.latestReward && !right.latestReward) {
+        return -1;
+      }
+      if (!left.latestReward && right.latestReward) {
+        return 1;
+      }
+
+      return right.readyRewards - left.readyRewards;
+    })
+    .slice(0, 3)
+    .map((lootBox) => ({
+      id: lootBox.id,
+      name: lootBox.name,
+      triggerKind: lootBox.triggerKind,
+      rewardLabel: lootBox.rewardLabel,
+      rewardType: lootBox.rewardType,
+      openedCount: lootBox.openedCount,
+      readyRewards: lootBox.readyRewards,
+      waitingApprovalRewards: lootBox.waitingApprovalRewards,
+      redeemedRewards: lootBox.redeemedRewards,
+      latestReward: lootBox.latestReward,
+    }));
   const featuredMissions = [...portal.gamification.missions]
     .sort((left, right) => right.progressPercent - left.progressPercent)
     .slice(0, 3)
@@ -3472,6 +3514,10 @@ function buildGameSummaryFromPortal(
         .filter((reward) => reward.walletState === 'READY')
         .slice(0, 5),
       latestBonus: portal.gamification.bonusHistory.items[0] ?? null,
+    },
+    lootBoxes: {
+      total: portal.gamification.lootBoxes.length,
+      featured: featuredLootBoxes,
     },
     missions: {
       total: portal.gamification.missions.length,

@@ -425,6 +425,24 @@ export type GuestPortalGameSummary = {
     ready: GuestPortalPayload["gamification"]["rewards"];
     latestBonus: GuestPortalPayload["gamification"]["bonusHistory"]["items"][number] | null;
   };
+  lootBoxes: {
+    total: number;
+    featured: Array<
+      Pick<
+        GuestPortalPayload["gamification"]["lootBoxes"][number],
+        | "id"
+        | "name"
+        | "triggerKind"
+        | "rewardLabel"
+        | "rewardType"
+        | "openedCount"
+        | "readyRewards"
+        | "waitingApprovalRewards"
+        | "redeemedRewards"
+        | "latestReward"
+      >
+    >;
+  };
   missions: {
     total: number;
     featured: Array<

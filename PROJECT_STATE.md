@@ -80,6 +80,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added a bounded recent reward wallet to the lightweight public game screen: `GET /guest-portal/session/game-summary` now includes `rewards.recent` with up to 5 safe reward rows, and `/play/game` shows reward state, source, amount, date, expiry, and READY code without exposing raw PII, reward status internals, or Langame payload.
 - Added a scoped bonus-ledger preflight for the first Langame canary write: Guest Game Hub now exposes the exact ready count and safe first-claim preview for pilot store 1337 and keeps `LIVE_WRITE` blocked unless there is exactly one claimable ledger entry in that scope.
 - Added operator cancellation from the pilot ledger preflight preview: `/guests/gamification` can now cancel a shown pending/failed/stale-processing ledger row through the existing guarded cancel API, preserving the backend fresh-lock guard and linked reward/delivery cascade before any Langame write.
 - Added a first-bonus pilot runbook to Guest Game Hub: `/guests/gamification` now turns the 1337 readiness checklist into explicit stages `BLOCKED`, `DRY_RUN`, `CANARY`, `LIVE_WRITE`, `RECONCILIATION`, and `READY`, with gates for dry-run/canary/live/reconciliation and safe next actions before the first Langame bonus write.

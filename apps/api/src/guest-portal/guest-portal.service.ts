@@ -343,6 +343,22 @@ export type GuestPortalGameSummary = {
   rewards: {
     summary: GuestPortalRewardSummary;
     ready: GuestPortalReward[];
+    recent: Array<
+      Pick<
+        GuestPortalReward,
+        | 'id'
+        | 'walletState'
+        | 'rewardType'
+        | 'rewardAmount'
+        | 'rewardLabel'
+        | 'sourceKind'
+        | 'sourceLabel'
+        | 'rewardCode'
+        | 'claimPayload'
+        | 'qualifiedAt'
+        | 'expiresAt'
+      >
+    >;
     latestBonus: GuestPortalBonusHistoryItem | null;
   };
   lootBoxes: {
@@ -3474,6 +3490,25 @@ export class GuestPortalService {
 function buildGameSummaryFromPortal(
   portal: GuestPortalPayload,
 ): GuestPortalGameSummary {
+  const recentRewards = [...portal.gamification.rewards]
+    .sort(
+      (left, right) =>
+        Date.parse(right.qualifiedAt) - Date.parse(left.qualifiedAt),
+    )
+    .slice(0, 5)
+    .map((reward) => ({
+      id: reward.id,
+      walletState: reward.walletState,
+      rewardType: reward.rewardType,
+      rewardAmount: reward.rewardAmount,
+      rewardLabel: reward.rewardLabel,
+      sourceKind: reward.sourceKind,
+      sourceLabel: reward.sourceLabel,
+      rewardCode: reward.rewardCode,
+      claimPayload: reward.claimPayload,
+      qualifiedAt: reward.qualifiedAt,
+      expiresAt: reward.expiresAt,
+    }));
   const featuredLootBoxes = [...portal.gamification.lootBoxes]
     .sort((left, right) => {
       if (left.latestReward && !right.latestReward) {
@@ -3541,6 +3576,7 @@ function buildGameSummaryFromPortal(
       ready: portal.gamification.rewards
         .filter((reward) => reward.walletState === 'READY')
         .slice(0, 5),
+      recent: recentRewards,
       latestBonus: portal.gamification.bonusHistory.items[0] ?? null,
     },
     lootBoxes: {

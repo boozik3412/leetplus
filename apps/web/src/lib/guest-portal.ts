@@ -423,6 +423,22 @@ export type GuestPortalGameSummary = {
   rewards: {
     summary: GuestPortalPayload["gamification"]["rewardSummary"];
     ready: GuestPortalPayload["gamification"]["rewards"];
+    recent: Array<
+      Pick<
+        GuestPortalPayload["gamification"]["rewards"][number],
+        | "id"
+        | "walletState"
+        | "rewardType"
+        | "rewardAmount"
+        | "rewardLabel"
+        | "sourceKind"
+        | "sourceLabel"
+        | "rewardCode"
+        | "claimPayload"
+        | "qualifiedAt"
+        | "expiresAt"
+      >
+    >;
     latestBonus: GuestPortalPayload["gamification"]["bonusHistory"]["items"][number] | null;
   };
   lootBoxes: {

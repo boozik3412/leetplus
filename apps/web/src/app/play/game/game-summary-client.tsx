@@ -11,6 +11,8 @@ import type {
 type LoadState = "loading" | "ready" | "empty" | "error";
 type SubmitState = "idle" | "submitting";
 type GameNextAction = GuestPortalGameSummary["nextActions"][number];
+type GameRewardWalletState =
+  GuestPortalGameSummary["rewards"]["recent"][number]["walletState"];
 
 class EmptySessionError extends Error {}
 
@@ -384,9 +386,10 @@ function Metric({
 
 function RewardResultPanel({ summary }: { summary: GuestPortalGameSummary }) {
   const reward = summary.rewards.ready[0] ?? null;
+  const recentRewards = summary.rewards.recent;
   const latestBonus = summary.rewards.latestBonus;
   const bonusBalance = summary.loyalty.bonusBalance;
-  const hasRewardResult = Boolean(reward || latestBonus);
+  const hasRewardResult = Boolean(reward || latestBonus || recentRewards.length);
 
   return (
     <section
@@ -509,6 +512,72 @@ function RewardResultPanel({ summary }: { summary: GuestPortalGameSummary }) {
               {summary.loyalty.bonusBalanceSource ?? "ожидаем первый snapshot"}
             </p>
           </div>
+
+          {recentRewards.length ? (
+            <div className="rounded-lg border border-white/10 bg-zinc-950/45 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Кошелек наград
+                  </p>
+                  <h3 className="mt-1 text-sm font-black text-white">
+                    Последние награды
+                  </h3>
+                </div>
+                <span className="rounded-full bg-white/10 px-2 py-1 text-xs font-black text-zinc-200">
+                  {formatNumber(recentRewards.length)}
+                </span>
+              </div>
+              <div className="mt-3 space-y-2">
+                {recentRewards.map((item) => {
+                  const readyCode =
+                    item.walletState === "READY"
+                      ? item.rewardCode ?? item.claimPayload
+                      : null;
+
+                  return (
+                    <div
+                      key={item.id}
+                      className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-3"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-black text-white">
+                            {item.rewardLabel}
+                          </p>
+                          <p className="mt-1 text-xs text-zinc-500">
+                            {item.sourceLabel ?? rewardSourceKindLabel(item.sourceKind)}
+                            {" · "}
+                            {formatDate(item.qualifiedAt)}
+                          </p>
+                        </div>
+                        <span
+                          className={[
+                            "shrink-0 rounded-full px-2 py-1 text-xs font-black",
+                            walletStateBadgeClass(item.walletState),
+                          ].join(" ")}
+                        >
+                          {walletStateLabel(item.walletState)}
+                        </span>
+                      </div>
+                      <div className="mt-3 flex flex-col gap-1 text-xs text-zinc-400 sm:flex-row sm:items-center sm:justify-between">
+                        <span>{formatNumber(item.rewardAmount)} · {item.rewardType}</span>
+                        {readyCode ? (
+                          <span className="font-black text-emerald-200">
+                            код: {readyCode}
+                          </span>
+                        ) : item.expiresAt ? (
+                          <span>до {formatDate(item.expiresAt)}</span>
+                        ) : (
+                          <span>{walletStateHint(item.walletState)}</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : (
         <p className="mt-5 text-sm leading-6 text-zinc-300">
@@ -1003,36 +1072,54 @@ function activityKindLabel(
   return labels[kind];
 }
 
-function walletStateLabel(
-  state: GuestPortalGameSummary["rewards"]["ready"][number]["walletState"],
+function rewardSourceKindLabel(
+  kind: GuestPortalGameSummary["rewards"]["recent"][number]["sourceKind"],
 ) {
+  const labels = {
+    LOOT_BOX: "лутбокс",
+    MISSION: "квест",
+    BATTLE_PASS: "Battle Pass",
+    MANUAL: "ручная награда",
+  } satisfies Record<
+    GuestPortalGameSummary["rewards"]["recent"][number]["sourceKind"],
+    string
+  >;
+
+  return labels[kind];
+}
+
+function walletStateLabel(state: GameRewardWalletState) {
   const labels = {
     WAITING_APPROVAL: "Ждет проверки",
     READY: "Можно забрать",
     REDEEMED: "Выдано",
     CANCELED: "Отменено",
     EXPIRED: "Сгорело",
-  } satisfies Record<
-    GuestPortalGameSummary["rewards"]["ready"][number]["walletState"],
-    string
-  >;
+  } satisfies Record<GameRewardWalletState, string>;
 
   return labels[state];
 }
 
-function walletStateHint(
-  state: GuestPortalGameSummary["rewards"]["ready"][number]["walletState"],
-) {
+function walletStateBadgeClass(state: GameRewardWalletState) {
+  const classes = {
+    WAITING_APPROVAL: "bg-amber-300 text-zinc-950",
+    READY: "bg-emerald-300 text-zinc-950",
+    REDEEMED: "bg-white/10 text-zinc-200",
+    CANCELED: "bg-rose-300/20 text-rose-100",
+    EXPIRED: "bg-white/10 text-zinc-400",
+  } satisfies Record<GameRewardWalletState, string>;
+
+  return classes[state];
+}
+
+function walletStateHint(state: GameRewardWalletState) {
   const hints = {
     WAITING_APPROVAL: "Сотрудник клуба проверит результат и подготовит выдачу.",
     READY: "Покажите код кассиру в клубе, чтобы получить награду.",
     REDEEMED: "Награда уже выдана и отмечена в LeetPlus.",
     CANCELED: "Награда отменена сотрудником клуба.",
     EXPIRED: "Срок действия награды закончился.",
-  } satisfies Record<
-    GuestPortalGameSummary["rewards"]["ready"][number]["walletState"],
-    string
-  >;
+  } satisfies Record<GameRewardWalletState, string>;
 
   return hints[state];
 }

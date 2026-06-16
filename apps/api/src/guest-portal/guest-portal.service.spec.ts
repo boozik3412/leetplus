@@ -442,6 +442,18 @@ describe('GuestPortalService', () => {
         rewards: {
           summary: portal.gamification.rewardSummary,
           ready: [portal.gamification.rewards[0]],
+          recent: [
+            expect.objectContaining({
+              id: 'reward-1',
+              walletState: 'READY',
+              rewardCode: 'LP-123',
+            }),
+            expect.objectContaining({
+              id: 'reward-2',
+              walletState: 'WAITING_APPROVAL',
+              claimPayload: null,
+            }),
+          ],
           latestBonus: portal.gamification.bonusHistory.items[0],
         },
         lootBoxes: {
@@ -511,6 +523,8 @@ describe('GuestPortalService', () => {
         },
       });
       expect(summary.generatedAt).toEqual(expect.any(String));
+      expect(summary.rewards.recent).toHaveLength(2);
+      expect(summary.rewards.recent[0]).not.toHaveProperty('status');
       expect(summary).not.toHaveProperty('guestSnapshot');
       expect(summary.activity).not.toHaveProperty('timeline');
       expect(summary.activity).not.toHaveProperty('xpHistory');

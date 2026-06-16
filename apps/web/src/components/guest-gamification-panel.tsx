@@ -4259,77 +4259,102 @@ function CommunicationQueueCard({
         ) : null}
         <div className="mt-3 space-y-2">
           {visibleDeliveries.length ? (
-            visibleDeliveries.map((delivery) => (
-              <div
-                key={delivery.id}
-                className="rounded-lg border border-cyan-200 bg-white p-3 dark:border-cyan-900/60 dark:bg-zinc-950"
-              >
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap gap-2">
-                      <span className="rounded-full bg-cyan-100 px-2 py-1 text-[11px] font-bold text-cyan-800 dark:bg-cyan-950 dark:text-cyan-100">
-                        {delivery.statusLabel}
-                      </span>
-                      <span className="rounded-full bg-zinc-200 px-2 py-1 text-[11px] font-bold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
-                        {delivery.channelLabel}
-                      </span>
-                      <span
-                        className={[
-                          "rounded-full px-2 py-1 text-[11px] font-bold",
-                          communicationQueueStatusClass(delivery.readinessStatus),
-                        ].join(" ")}
-                      >
-                        {delivery.readinessStatusLabel}
-                      </span>
+            visibleDeliveries.map((delivery) => {
+              const canRetryDelivery = delivery.status === "FAILED";
+              const canMarkDeliverySent = delivery.status === "READY";
+              const canCancelDelivery =
+                delivery.status !== "SENT" && delivery.status !== "CANCELED";
+
+              return (
+                <div
+                  key={delivery.id}
+                  className="rounded-lg border border-cyan-200 bg-white p-3 dark:border-cyan-900/60 dark:bg-zinc-950"
+                >
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap gap-2">
+                        <span className="rounded-full bg-cyan-100 px-2 py-1 text-[11px] font-bold text-cyan-800 dark:bg-cyan-950 dark:text-cyan-100">
+                          {delivery.statusLabel}
+                        </span>
+                        <span className="rounded-full bg-zinc-200 px-2 py-1 text-[11px] font-bold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
+                          {delivery.channelLabel}
+                        </span>
+                        <span
+                          className={[
+                            "rounded-full px-2 py-1 text-[11px] font-bold",
+                            communicationQueueStatusClass(
+                              delivery.readinessStatus,
+                            ),
+                          ].join(" ")}
+                        >
+                          {delivery.readinessStatusLabel}
+                        </span>
+                      </div>
+                      <h3 className="mt-2 truncate text-sm font-bold text-zinc-950 dark:text-white">
+                        {delivery.messageTitle}
+                      </h3>
+                      <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+                        {delivery.profile?.displayName ??
+                          delivery.guest?.displayName ??
+                          delivery.reward.guestExternalId ??
+                          "Гость"}
+                        {delivery.store ? ` · ${delivery.store.name}` : ""}
+                      </p>
                     </div>
-                    <h3 className="mt-2 truncate text-sm font-bold text-zinc-950 dark:text-white">
-                      {delivery.messageTitle}
-                    </h3>
-                    <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-                      {delivery.profile?.displayName ??
-                        delivery.guest?.displayName ??
-                        delivery.reward.guestExternalId ??
-                        "Гость"}
-                      {delivery.store ? ` · ${delivery.store.name}` : ""}
-                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {canRetryDelivery ? (
+                        <button
+                          type="button"
+                          className={smallButtonClass}
+                          disabled={saving === `delivery-${delivery.id}`}
+                          onClick={() =>
+                            onUpdateDeliveryStatus(delivery, "READY")
+                          }
+                        >
+                          Повторить
+                        </button>
+                      ) : null}
+                      {canMarkDeliverySent ? (
+                        <button
+                          type="button"
+                          className={smallButtonClass}
+                          disabled={saving === `delivery-${delivery.id}`}
+                          onClick={() =>
+                            onUpdateDeliveryStatus(delivery, "SENT")
+                          }
+                        >
+                          Отметить выдано
+                        </button>
+                      ) : null}
+                      {canCancelDelivery ? (
+                        <button
+                          type="button"
+                          className={smallButtonClass}
+                          disabled={saving === `delivery-${delivery.id}`}
+                          onClick={() =>
+                            onUpdateDeliveryStatus(delivery, "CANCELED")
+                          }
+                        >
+                          Отменить
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    {delivery.status !== "SENT" ? (
-                      <button
-                        type="button"
-                        className={smallButtonClass}
-                        disabled={saving === `delivery-${delivery.id}`}
-                        onClick={() => onUpdateDeliveryStatus(delivery, "SENT")}
-                      >
-                        Отметить выдано
-                      </button>
-                    ) : null}
-                    {delivery.status !== "CANCELED" ? (
-                      <button
-                        type="button"
-                        className={smallButtonClass}
-                        disabled={saving === `delivery-${delivery.id}`}
-                        onClick={() => onUpdateDeliveryStatus(delivery, "CANCELED")}
-                      >
-                        Отменить
-                      </button>
-                    ) : null}
-                  </div>
+                  {delivery.blockers.length ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {delivery.blockers.slice(0, 3).map((blocker) => (
+                        <span
+                          key={blocker}
+                          className="rounded-full bg-cyan-50 px-2 py-1 text-[11px] font-semibold text-cyan-800 dark:bg-cyan-950/40 dark:text-cyan-100"
+                        >
+                          {blocker}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
-                {delivery.blockers.length ? (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {delivery.blockers.slice(0, 3).map((blocker) => (
-                      <span
-                        key={blocker}
-                        className="rounded-full bg-cyan-50 px-2 py-1 text-[11px] font-semibold text-cyan-800 dark:bg-cyan-950/40 dark:text-cyan-100"
-                      >
-                        {blocker}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            ))
+              );
+            })
           ) : (
             <EmptyState text="Outbox пока пуст. Подготовьте его из текущей очереди выдачи, когда награды и согласия будут готовы к обработке." />
           )}

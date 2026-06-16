@@ -80,6 +80,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added explicit manual retry protection for gamification delivery outbox: operators can return a `FAILED` delivery to `READY` only when the saved readiness is still `READY_FOR_BOT` or `READY_FOR_CASHIER`; `failedAt`/terminal timestamps are cleared for the retry, while `SENT` and `CANCELED` records cannot be resurrected manually.
 - Hardened the gamification delivery outbox refresh lifecycle: preparing deliveries can still refresh old blocked no-consent/no-channel snapshots after Telegram consent appears, but it no longer rewrites terminal `SENT`, `FAILED`, or `CANCELED` delivery records back to `READY`.
 - Added profile-level communication consent for public gamification participants: `GuestGameProfile` now stores its own phone consent status/source/timestamps, OTP game consent and Telegram contact-share grant it on the separate game profile, and Guest Game Hub uses it for bot delivery readiness before a common `Guest` or CRM lead exists.
 - Added Guest Game Hub readiness for Telegram auth reply sender: `/guests/gamification` now exposes a separate integration item for API-side Telegram contact-share replies, with webhook/sender/token status, required env names, and next QA action without exposing Telegram secrets, raw chat ids, raw updates, phone data, or Langame payload.

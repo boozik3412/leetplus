@@ -2067,6 +2067,117 @@ describe('GuestGamificationService', () => {
     });
   });
 
+  describe('updateDelivery', () => {
+    it('returns failed ready delivery to READY and clears terminal timestamps', async () => {
+      const { service, prisma } = createService();
+      const failedAt = new Date('2026-06-10T09:00:00.000Z');
+      const current = deliveryRow({
+        status: 'FAILED',
+        readinessStatus: 'READY_FOR_BOT',
+        failedAt,
+        note: 'telegram timeout',
+      });
+      prisma.guestGameDelivery.findFirst.mockResolvedValue(current);
+      prisma.guestGameDelivery.update.mockResolvedValue(
+        deliveryRow({
+          status: 'READY',
+          readinessStatus: 'READY_FOR_BOT',
+          failedAt: null,
+          canceledAt: null,
+          note: 'retry after provider fix',
+        }),
+      );
+      jest.spyOn(service as any, 'createDeliveryEvent').mockResolvedValue(null);
+
+      const result = await service.updateDelivery(user, 'delivery-1', {
+        status: 'READY',
+        note: 'retry after provider fix',
+      });
+
+      expect(result).toMatchObject({
+        id: 'delivery-1',
+        status: 'READY',
+        failedAt: null,
+        canceledAt: null,
+      });
+      expect(prisma.guestGameDelivery.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'delivery-1' },
+          data: expect.objectContaining({
+            status: 'READY',
+            sentAt: null,
+            failedAt: null,
+            canceledAt: null,
+            note: 'retry after provider fix',
+          }),
+        }),
+      );
+      expect((service as any).createDeliveryEvent).toHaveBeenCalledWith(
+        user,
+        'delivery-1',
+        'reward-1',
+        expect.objectContaining({
+          eventType: 'DELIVERY_STATUS_UPDATED',
+          fromStatus: 'FAILED',
+          toStatus: 'READY',
+          channel: 'TELEGRAM',
+          note: 'retry after provider fix',
+        }),
+      );
+    });
+
+    it.each(['SENT', 'CANCELED'] as const)(
+      'does not return terminal %s delivery to READY manually',
+      async (status) => {
+        const { service, prisma } = createService();
+        prisma.guestGameDelivery.findFirst.mockResolvedValue(
+          deliveryRow({
+            status,
+            sentAt: status === 'SENT' ? now : null,
+            canceledAt: status === 'CANCELED' ? now : null,
+          }),
+        );
+
+        await expect(
+          service.updateDelivery(user, 'delivery-1', { status: 'READY' }),
+        ).rejects.toBeInstanceOf(ConflictException);
+        expect(prisma.guestGameDelivery.update).not.toHaveBeenCalled();
+      },
+    );
+
+    it('does not bypass readiness blockers when returning a delivery to READY', async () => {
+      const { service, prisma } = createService();
+      prisma.guestGameDelivery.findFirst.mockResolvedValue(
+        deliveryRow({
+          status: 'FAILED',
+          readinessStatus: 'NEEDS_CONSENT',
+          failedAt: now,
+        }),
+      );
+
+      await expect(
+        service.updateDelivery(user, 'delivery-1', { status: 'READY' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.guestGameDelivery.update).not.toHaveBeenCalled();
+    });
+
+    it('does not bypass readiness blockers when marking delivery as sent', async () => {
+      const { service, prisma } = createService();
+      prisma.guestGameDelivery.findFirst.mockResolvedValue(
+        deliveryRow({
+          status: 'FAILED',
+          readinessStatus: 'NEEDS_CONSENT',
+          failedAt: now,
+        }),
+      );
+
+      await expect(
+        service.updateDelivery(user, 'delivery-1', { status: 'SENT' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.guestGameDelivery.update).not.toHaveBeenCalled();
+    });
+  });
+
   describe('dispatchDeliveries', () => {
     it('records dispatcher dry-run events without sending or mutating deliveries', async () => {
       const { service, prisma } = createService();

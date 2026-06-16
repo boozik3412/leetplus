@@ -5490,17 +5490,67 @@ export class GuestGamificationService {
       deliveryStatuses,
       deliveryStatusValue(current.status),
     );
+    const currentStatus = deliveryStatusValue(current.status);
+    const currentReadinessStatus = communicationQueueStatusValue(
+      current.readinessStatus,
+    );
+
+    if (
+      (currentStatus === 'SENT' || currentStatus === 'CANCELED') &&
+      nextStatus !== currentStatus
+    ) {
+      throw new ConflictException(
+        'Terminal delivery status cannot be changed.',
+      );
+    }
+
+    if (nextStatus === 'READY') {
+      if (currentStatus !== 'READY' && currentStatus !== 'FAILED') {
+        throw new ConflictException(
+          'Only failed delivery can be returned to READY manually.',
+        );
+      }
+
+      if (!isReadyDeliveryQueueStatus(currentReadinessStatus)) {
+        throw new BadRequestException(
+          'Delivery readiness is not READY_FOR_BOT or READY_FOR_CASHIER.',
+        );
+      }
+    }
+
+    if (
+      nextStatus === 'SENT' &&
+      currentStatus !== 'SENT' &&
+      currentStatus !== 'READY' &&
+      currentStatus !== 'FAILED'
+    ) {
+      throw new BadRequestException(
+        'Only ready or failed delivery can be marked as sent.',
+      );
+    }
+
+    if (
+      nextStatus === 'SENT' &&
+      currentStatus !== 'SENT' &&
+      !isReadyDeliveryQueueStatus(currentReadinessStatus)
+    ) {
+      throw new BadRequestException(
+        'Delivery readiness is not READY_FOR_BOT or READY_FOR_CASHIER.',
+      );
+    }
+
     const now = new Date();
     const data = clean({
       status: nextStatus,
       note: nullableString(dto.note),
-      sentAt: nextStatus === 'SENT' ? (current.sentAt ?? now) : current.sentAt,
-      failedAt:
-        nextStatus === 'FAILED' ? (current.failedAt ?? now) : current.failedAt,
+      sentAt: nextStatus === 'SENT' ? (current.sentAt ?? now) : null,
+      failedAt: nextStatus === 'FAILED' ? (current.failedAt ?? now) : null,
       canceledAt:
         nextStatus === 'CANCELED'
           ? (current.canceledAt ?? now)
-          : current.canceledAt,
+          : nextStatus === 'READY' || nextStatus === 'SENT'
+            ? null
+            : current.canceledAt,
     });
     const row = await this.prisma.guestGameDelivery.update({
       where: { id },

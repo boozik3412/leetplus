@@ -75,6 +75,11 @@ type BonusLedgerActionResult =
   | { kind: "queue"; result: GuestGameBonusLedgerQueueResult }
   | { kind: "dispatch"; result: GuestGameBonusLedgerDispatchResult };
 
+type BonusLedgerActionOptions = {
+  storeId?: string | null;
+  limit?: number;
+};
+
 type ProfileForm = {
   guestId: string;
   leadId: string;
@@ -1176,7 +1181,7 @@ export function GuestGamificationPanel({
     });
   }
 
-  async function queueBonusLedger() {
+  async function queueBonusLedger(options: BonusLedgerActionOptions = {}) {
     await saveAction("bonus-ledger-queue", async () => {
       assertCan(
         access.canApproveRewards,
@@ -1185,7 +1190,10 @@ export function GuestGamificationPanel({
 
       const result = await postJson<GuestGameBonusLedgerQueueResult>(
         "/api/guests/gamification/bonus-ledger/queue",
-        { limit: 50 },
+        {
+          limit: options.limit ?? 50,
+          storeId: nullable(options.storeId ?? ""),
+        },
       );
 
       setBonusLedgerResult({ kind: "queue", result });
@@ -1193,7 +1201,9 @@ export function GuestGamificationPanel({
     });
   }
 
-  async function dryRunBonusLedgerDispatch() {
+  async function dryRunBonusLedgerDispatch(
+    options: BonusLedgerActionOptions = {},
+  ) {
     await saveAction("bonus-ledger-dry-run", async () => {
       assertCan(
         access.canApproveRewards,
@@ -1205,7 +1215,8 @@ export function GuestGamificationPanel({
         {
           dryRun: true,
           queueApprovedRewards: false,
-          limit: 25,
+          limit: options.limit ?? 25,
+          storeId: nullable(options.storeId ?? ""),
         },
       );
 
@@ -1235,7 +1246,9 @@ export function GuestGamificationPanel({
     });
   }
 
-  async function dispatchBonusLedgerCanary() {
+  async function dispatchBonusLedgerCanary(
+    options: BonusLedgerActionOptions = {},
+  ) {
     await saveAction("bonus-ledger-canary-dispatch", async () => {
       assertCan(
         access.canApproveRewards,
@@ -1249,6 +1262,7 @@ export function GuestGamificationPanel({
           queueApprovedRewards: false,
           canary: true,
           limit: 1,
+          storeId: nullable(options.storeId ?? ""),
         },
       );
 
@@ -2419,10 +2433,10 @@ function OverviewTab({
   onDeleteGuestLogMapping: (
     mapping: GuestGameGuestLogTypeMapping,
   ) => Promise<void>;
-  onQueueBonusLedger: () => void;
-  onDryRunBonusLedger: () => void;
+  onQueueBonusLedger: (options?: BonusLedgerActionOptions) => void;
+  onDryRunBonusLedger: (options?: BonusLedgerActionOptions) => void;
   onDispatchBonusLedger: () => void;
-  onDispatchBonusLedgerCanary: () => void;
+  onDispatchBonusLedgerCanary: (options?: BonusLedgerActionOptions) => void;
   bonusLedgerResult: BonusLedgerActionResult | null;
 }) {
   return (
@@ -2756,19 +2770,23 @@ function PilotReadinessCard({
   saving: string | null;
   canApproveRewards: boolean;
   onOpenDryRun: () => void;
-  onQueueBonusLedger: () => void;
-  onDryRunBonusLedger: () => void;
-  onDispatchBonusLedger: () => void;
+  onQueueBonusLedger: (options?: BonusLedgerActionOptions) => void;
+  onDryRunBonusLedger: (options?: BonusLedgerActionOptions) => void;
+  onDispatchBonusLedger: (options?: BonusLedgerActionOptions) => void;
   onOpenReconciliation: () => void;
 }) {
   const target = readiness.targetStore;
   const runbook = readiness.runbook;
+  const pilotLedgerScope = {
+    storeId: target?.id ?? null,
+    limit: 1,
+  };
   const actionHandlers: Record<GuestGamePilotRunbookAction["key"], () => void> =
     {
       OPEN_DRY_RUN: onOpenDryRun,
-      QUEUE_BONUS_LEDGER: onQueueBonusLedger,
-      DRY_RUN_BONUS_LEDGER: onDryRunBonusLedger,
-      DISPATCH_BONUS_LEDGER: onDispatchBonusLedger,
+      QUEUE_BONUS_LEDGER: () => onQueueBonusLedger(pilotLedgerScope),
+      DRY_RUN_BONUS_LEDGER: () => onDryRunBonusLedger(pilotLedgerScope),
+      DISPATCH_BONUS_LEDGER: () => onDispatchBonusLedger(pilotLedgerScope),
       RECONCILE_BALANCE: onOpenReconciliation,
     };
   const nextIssue =
@@ -2898,14 +2916,20 @@ function PilotReadinessCard({
                   requiresRewardAccess && !canApproveRewards;
                 const disabledBySaving =
                   requiresRewardAccess && saving !== null;
+                const disabledByPilotStore = requiresRewardAccess && !target?.id;
                 const disabled =
-                  !action.enabled || disabledByAccess || disabledBySaving;
+                  !action.enabled ||
+                  disabledByAccess ||
+                  disabledBySaving ||
+                  disabledByPilotStore;
                 const disabledReason = !action.enabled
                   ? action.disabledReason
                   : disabledByAccess
                     ? "Для ledger-действий нужно право `Геймификация: награды`."
                     : disabledBySaving
                       ? "Дождитесь завершения текущего действия."
+                      : disabledByPilotStore
+                        ? "Пилотный клуб не найден."
                       : null;
 
                 return (

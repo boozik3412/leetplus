@@ -187,6 +187,7 @@ describe('GuestBonusLedgerService', () => {
     const result = await service.dispatch(user, {
       limit: 5,
       queueApprovedRewards: false,
+      storeId: 'store-1337',
     });
 
     expect(result).toMatchObject({
@@ -215,6 +216,23 @@ describe('GuestBonusLedgerService', () => {
       }),
     ]);
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(prisma.guestBonusLedgerEntry.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tenantId: user.tenantId,
+          storeId: 'store-1337',
+        }),
+        take: 5,
+      }),
+    );
+    expect(prisma.guestBonusLedgerEntry.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tenantId: user.tenantId,
+          storeId: 'store-1337',
+        }),
+      }),
+    );
     expect(langameSettingsService.resolveTenantAccess).not.toHaveBeenCalled();
     expect(langameClient.postEndpoint).not.toHaveBeenCalled();
     expect(langameClient.adjustGuestBalanceByPhone).not.toHaveBeenCalled();
@@ -256,7 +274,7 @@ describe('GuestBonusLedgerService', () => {
     const { service, prisma, langameSettingsService } = createService({
       LANGAME_BONUS_ACCRUAL_ENABLED: 'true',
     });
-    const entry = ledgerEntry();
+    const entry = ledgerEntry({ storeId: 'store-1337' });
     const access = {
       apiKey: 'secret',
       sources: [],
@@ -343,6 +361,7 @@ describe('GuestBonusLedgerService', () => {
       canary: true,
       queueApprovedRewards: true,
       limit: 25,
+      storeId: 'store-1337',
     });
 
     expect(result).toMatchObject({
@@ -360,6 +379,7 @@ describe('GuestBonusLedgerService', () => {
       expect.objectContaining({
         canary: true,
         limit: 1,
+        storeId: 'store-1337',
       }),
     );
   });
@@ -373,7 +393,7 @@ describe('GuestBonusLedgerService', () => {
         id: 'reward-1',
         profileId: 'profile-1',
         guestId: 'guest-1',
-        storeId: null,
+        storeId: 'store-1337',
         externalProvider: IntegrationProvider.LANGAME,
         externalDomain: 'club-1',
         guestExternalId: null,
@@ -392,7 +412,10 @@ describe('GuestBonusLedgerService', () => {
     ]);
     prisma.guestBonusLedgerEntry.createMany.mockResolvedValue({ count: 1 });
 
-    const result = await service.queueApprovedRewards(user);
+    const result = await service.queueApprovedRewards(user, {
+      limit: 1,
+      storeId: 'store-1337',
+    });
 
     expect(result).toMatchObject({
       checkedRewards: 1,
@@ -403,6 +426,7 @@ describe('GuestBonusLedgerService', () => {
       data: [
         expect.objectContaining({
           rewardId: 'reward-1',
+          storeId: 'store-1337',
           externalDomain: 'club-1',
           externalGuestId: null,
           status: 'PENDING',
@@ -416,6 +440,15 @@ describe('GuestBonusLedgerService', () => {
       ],
       skipDuplicates: true,
     });
+    expect(prisma.guestGameReward.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tenantId: user.tenantId,
+          storeId: 'store-1337',
+        }),
+        take: 1,
+      }),
+    );
     expect(
       JSON.stringify(prisma.guestBonusLedgerEntry.createMany.mock.calls[0][0]),
     ).not.toContain('79991112233');

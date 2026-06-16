@@ -48,6 +48,7 @@ type LangameBalanceType = 'balance' | 'bonus_balance';
 export type GuestGameBonusLedgerQueueDto = {
   rewardTypes?: string[] | string | null;
   limit?: number | string | null;
+  storeId?: string | null;
 };
 
 export type GuestGameBonusLedgerDispatchDto = GuestGameBonusLedgerQueueDto & {
@@ -159,6 +160,7 @@ type BonusLedgerConfig = {
   enabled: boolean;
   path: string | null;
   rewardTypes: string[];
+  storeId: string | null;
   limit: number;
   maxAttempts: number;
   retryMinutes: number;
@@ -207,7 +209,10 @@ export class GuestBonusLedgerService {
     const config = this.resolveConfig(dto);
     const grouped = await this.prisma.guestBonusLedgerEntry.groupBy({
       by: ['status'],
-      where: { tenantId: user.tenantId },
+      where: {
+        tenantId: user.tenantId,
+        ...(config.storeId ? { storeId: config.storeId } : {}),
+      },
       _count: { _all: true },
     });
     const counts = new Map(
@@ -216,6 +221,7 @@ export class GuestBonusLedgerService {
     const pendingApprovedRewards = await this.countApprovedRewards(
       user.tenantId,
       config.rewardTypes,
+      config.storeId,
     );
     const total = [...counts.values()].reduce((sum, value) => sum + value, 0);
 
@@ -241,11 +247,13 @@ export class GuestBonusLedgerService {
     dto: GuestGameBonusLedgerQueueDto = {},
   ): Promise<GuestGameBonusLedgerQueueResult> {
     const rewardTypes = this.resolveRewardTypes(dto.rewardTypes);
+    const storeId = nullableString(dto.storeId);
     const limit = positiveInt(dto.limit, 500, 1000);
     const rewards = await this.prisma.guestGameReward.findMany({
       where: {
         tenantId: user.tenantId,
         status: 'APPROVED',
+        ...(storeId ? { storeId } : {}),
         rewardAmount: { gt: 0 },
         OR: rewardTypes.map((type) => ({
           rewardType: { equals: type, mode: 'insensitive' as const },
@@ -694,11 +702,16 @@ export class GuestBonusLedgerService {
     return this.buildScheduledSummary(config, tenantResults);
   }
 
-  private async countApprovedRewards(tenantId: string, rewardTypes: string[]) {
+  private async countApprovedRewards(
+    tenantId: string,
+    rewardTypes: string[],
+    storeId: string | null,
+  ) {
     return this.prisma.guestGameReward.count({
       where: {
         tenantId,
         status: 'APPROVED',
+        ...(storeId ? { storeId } : {}),
         rewardAmount: { gt: 0 },
         OR: rewardTypes.map((type) => ({
           rewardType: { equals: type, mode: 'insensitive' as const },
@@ -720,6 +733,7 @@ export class GuestBonusLedgerService {
     return this.prisma.guestBonusLedgerEntry.findMany({
       where: {
         tenantId,
+        ...(config.storeId ? { storeId: config.storeId } : {}),
         status: { in: ['PENDING', 'FAILED'] },
         OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: new Date() } }],
       },
@@ -732,6 +746,10 @@ export class GuestBonusLedgerService {
     tenantId: string,
     config: BonusLedgerConfig,
   ): Promise<ClaimedBonusLedgerEntry[]> {
+    const storeFilter = config.storeId
+      ? Prisma.sql`AND "storeId" = ${config.storeId}`
+      : Prisma.empty;
+
     return this.prisma.$queryRaw<ClaimedBonusLedgerEntry[]>(Prisma.sql`
       UPDATE "GuestBonusLedgerEntry"
       SET
@@ -744,6 +762,7 @@ export class GuestBonusLedgerService {
         SELECT "id"
         FROM "GuestBonusLedgerEntry"
         WHERE "tenantId" = ${tenantId}
+          ${storeFilter}
           AND (
             "status" = 'PENDING'
             OR (
@@ -1181,6 +1200,7 @@ export class GuestBonusLedgerService {
       enabled,
       path,
       rewardTypes: this.resolveRewardTypes(dto.rewardTypes),
+      storeId: nullableString(dto.storeId),
       limit: canary ? 1 : positiveInt(dto.limit, 50, 250),
       maxAttempts: positiveInt(
         this.configService.get<string>('LANGAME_BONUS_ACCRUAL_MAX_ATTEMPTS'),

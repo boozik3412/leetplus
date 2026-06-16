@@ -32,6 +32,7 @@ function createPrismaMock() {
     },
     guestGameProfile: {
       findFirst: jest.fn(),
+      findMany: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
     },
@@ -54,6 +55,7 @@ function createPrismaMock() {
     guestGameEvent: {
       create: jest.fn(),
       createMany: jest.fn(),
+      findFirst: jest.fn(),
       updateMany: jest.fn(),
     },
     guestGameMission: {
@@ -101,6 +103,7 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   prisma.guestPortalOtpChallenge.update.mockResolvedValue({});
   prisma.guestPortalOtpChallenge.updateMany.mockResolvedValue({ count: 0 });
   prisma.guestGameProfile.findFirst.mockResolvedValue(null);
+  prisma.guestGameProfile.findMany.mockResolvedValue([]);
   prisma.guestGameProfile.create.mockResolvedValue(null);
   prisma.guestGameProfile.update.mockResolvedValue(null);
   prisma.guestGameTelegramLinkChallenge.findFirst.mockResolvedValue(null);
@@ -115,6 +118,7 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   prisma.guestBonusLedgerEntry.updateMany.mockResolvedValue({ count: 0 });
   prisma.guestGameEvent.create.mockResolvedValue({});
   prisma.guestGameEvent.createMany.mockResolvedValue({ count: 0 });
+  prisma.guestGameEvent.findFirst.mockResolvedValue(null);
   prisma.guestGameEvent.updateMany.mockResolvedValue({ count: 0 });
   prisma.guestGameMission.findMany.mockResolvedValue([]);
   prisma.guestGameLootBox.findMany.mockResolvedValue([]);
@@ -125,6 +129,30 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   });
 
   return { jwtService, langameSettingsService, prisma, service };
+}
+
+function buildTestReferralCode(
+  tenantSlug: string,
+  storeId: string,
+  storePublicSlug: string | null,
+  profileId: string,
+  secret: string,
+) {
+  const source = [
+    'guest-game-referral-v1',
+    tenantSlug,
+    storeId,
+    storePublicSlug ?? '',
+    profileId,
+  ].join(':');
+  const digest = createHmac('sha256', secret)
+    .update(source)
+    .digest('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+
+  return `lp_ref_${digest.slice(0, 22)}`;
 }
 
 function portalPayloadFixture() {
@@ -1672,7 +1700,9 @@ describe('GuestPortalService', () => {
     it('creates a separate game profile for phone-only gamification registration', async () => {
       const { jwtService, prisma, service } = createService({
         APP_ENCRYPTION_KEY: 'test-secret',
+        GUEST_GAME_REFERRAL_SECRET: 'referral-secret',
       });
+      const referralSecret = (service as any).referralSecret() as string;
       const challengeId = 'challenge-1';
       const code = '123456';
       const codeHash = createHash('sha256')
@@ -1698,6 +1728,13 @@ describe('GuestPortalService', () => {
         ],
       });
       const consentAcceptedAt = new Date('2026-06-15T08:00:00.000Z');
+      const referralCode = buildTestReferralCode(
+        'leet',
+        'store-1',
+        'club-1337',
+        'inviter-profile-1',
+        referralSecret,
+      );
 
       prisma.guestPortalOtpChallenge.findFirst.mockResolvedValue({
         id: challengeId,
@@ -1718,11 +1755,16 @@ describe('GuestPortalService', () => {
         id: 'profile-1',
         guestId: null,
       });
+      prisma.guestGameProfile.findMany.mockResolvedValue([
+        { id: 'inviter-profile-1', guestId: 'inviter-guest-1' },
+        { id: 'profile-1', guestId: null },
+      ]);
       jwtService.signAsync.mockResolvedValue('guest-token');
 
       const result = await service.verifyOtp('leet', 'club-1337', {
         challengeId,
         code,
+        referralCode,
       });
 
       expect(prisma.guestGameProfile.create).toHaveBeenCalledWith(
@@ -1764,6 +1806,29 @@ describe('GuestPortalService', () => {
               consentVersion: 'guest-game-v1-2026-06-15',
               storeId: 'store-1',
               phoneMasked: '+7 *** ***-99-99',
+            }),
+          }),
+        }),
+      );
+      expect(prisma.guestGameEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            tenantId: 'tenant-1',
+            profileId: 'profile-1',
+            guestId: null,
+            eventType: 'GAME_REFERRAL_ACCEPTED',
+            source: 'GUEST_PORTAL_REFERRAL',
+            externalId: `otp:${challengeId}:referral`,
+            payload: expect.objectContaining({
+              channel: 'OTP',
+              storeId: 'store-1',
+              clubId: 'leet:club-1337',
+              referralCodeMasked: expect.stringContaining('...'),
+              inviterProfileId: 'inviter-profile-1',
+              inviterGuestId: 'inviter-guest-1',
+              valid: true,
+              selfReferral: false,
+              eligibleForReward: true,
             }),
           }),
         }),

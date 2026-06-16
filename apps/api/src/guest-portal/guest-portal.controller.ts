@@ -68,7 +68,8 @@ export class GuestPortalController {
   verifyOtp(
     @Param('tenantSlug') tenantSlug: string,
     @Param('storeId') storeId: string,
-    @Body() dto: { challengeId?: unknown; code?: unknown },
+    @Body()
+    dto: { challengeId?: unknown; code?: unknown; referralCode?: unknown },
   ): Promise<GuestPortalOtpVerifyResponse> {
     return this.guestPortalService.verifyOtp(tenantSlug, storeId, dto);
   }
@@ -86,7 +87,7 @@ export class GuestPortalController {
   getUserCallAuthStatus(
     @Param('tenantSlug') tenantSlug: string,
     @Param('storeId') storeId: string,
-    @Body() dto: { challengeId?: unknown },
+    @Body() dto: { challengeId?: unknown; referralCode?: unknown },
   ): Promise<GuestPortalUserCallAuthStatusResponse> {
     return this.guestPortalService.getUserCallAuthStatus(
       tenantSlug,
@@ -108,7 +109,7 @@ export class GuestPortalController {
   getTelegramAuthStatus(
     @Param('tenantSlug') tenantSlug: string,
     @Param('storeId') storeId: string,
-    @Body() dto: { challengeId?: unknown },
+    @Body() dto: { challengeId?: unknown; referralCode?: unknown },
   ): Promise<GuestPortalTelegramAuthStatusResponse> {
     return this.guestPortalService.getTelegramAuthStatus(
       tenantSlug,

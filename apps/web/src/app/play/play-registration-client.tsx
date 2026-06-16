@@ -213,7 +213,10 @@ export function PlayRegistrationClient({
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ challengeId: telegramAuth.challengeId }),
+            body: JSON.stringify({
+              challengeId: telegramAuth.challengeId,
+              ...(referralCode ? { referralCode } : {}),
+            }),
           },
         );
 
@@ -266,7 +269,7 @@ export function PlayRegistrationClient({
         clearInterval(intervalId);
       }
     };
-  }, [portal, selectedClub, telegramAuth]);
+  }, [portal, referralCode, selectedClub, telegramAuth]);
 
   useEffect(() => {
     if (!selectedClub || !userCallAuth || portal) {
@@ -289,7 +292,10 @@ export function PlayRegistrationClient({
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ challengeId: userCallAuth.challengeId }),
+            body: JSON.stringify({
+              challengeId: userCallAuth.challengeId,
+              ...(referralCode ? { referralCode } : {}),
+            }),
           },
         );
 
@@ -342,7 +348,7 @@ export function PlayRegistrationClient({
         clearInterval(intervalId);
       }
     };
-  }, [portal, selectedClub, userCallAuth]);
+  }, [portal, referralCode, selectedClub, userCallAuth]);
 
   async function locateClubs() {
     if (!navigator.geolocation) {
@@ -602,6 +608,7 @@ export function PlayRegistrationClient({
         body: JSON.stringify({
           challengeId: challenge.challengeId,
           code,
+          ...(referralCode ? { referralCode } : {}),
         }),
       });
 
@@ -1984,7 +1991,13 @@ function normalizeReferralCode(value: string | null) {
     return null;
   }
 
-  return normalized.slice(0, 80);
+  const code = normalized.slice(0, 80);
+
+  if (!/^lp_ref_[A-Za-z0-9_-]{16,64}$/.test(code)) {
+    return null;
+  }
+
+  return code;
 }
 
 function otpDeliveryStatusLabel(

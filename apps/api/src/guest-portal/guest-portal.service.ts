@@ -63,6 +63,10 @@ const GAME_PROFILE_LINK_SOURCE = 'GUEST_PORTAL_PROFILE_LINK';
 const GAME_SUMMARY_MISSION_LIMIT = 6;
 const GAME_SUMMARY_MISSION_HISTORY_LIMIT = 12;
 const GUEST_GAME_REFERRAL_CODE_PREFIX = 'lp_ref_';
+const GAME_REFERRAL_ACCEPTED_EVENT_TYPE = 'GAME_REFERRAL_ACCEPTED';
+const GAME_REFERRAL_EVENT_SOURCE = 'GUEST_PORTAL_REFERRAL';
+const GUEST_GAME_REFERRAL_LOOKUP_LIMIT = 5000;
+const GUEST_GAME_REFERRAL_CODE_PATTERN = /^lp_ref_[A-Za-z0-9_-]{16,64}$/;
 type JwtExpiresIn = NonNullable<JwtSignOptions['expiresIn']>;
 type GuestPortalOtpDeliveryChannel = 'DEV' | 'SMS' | 'TELEGRAM' | 'MAX';
 type GuestPortalOtpDeliveryStatus =
@@ -118,6 +122,17 @@ type GuestPortalOtpChallengeRegistration = {
   phoneMasked: string | null;
   gameConsentAcceptedAt: Date | null;
   gameConsentVersion: string | null;
+};
+
+type GuestGameReferralRegistrationChannel =
+  | 'OTP'
+  | 'TELEGRAM_BOT'
+  | 'USER_CALL';
+
+type GuestGameReferralRegistrationOptions = {
+  code: string | null;
+  channel: GuestGameReferralRegistrationChannel;
+  externalId: string;
 };
 
 type GuestPortalGameProfileLinkStatus =
@@ -1668,10 +1683,11 @@ export class GuestPortalService {
   async getUserCallAuthStatus(
     tenantSlug: string,
     storeId: string,
-    dto: { challengeId?: unknown },
+    dto: { challengeId?: unknown; referralCode?: unknown },
   ): Promise<GuestPortalUserCallAuthStatusResponse> {
     const context = await this.getTenantStore(tenantSlug, storeId);
     const challengeId = this.requiredString(dto.challengeId, 'challengeId');
+    const referralCode = normalizeGameReferralCode(dto.referralCode);
     const challenge = await this.prisma.guestPortalOtpChallenge.findFirst({
       where: {
         id: challengeId,
@@ -1713,7 +1729,11 @@ export class GuestPortalService {
     }
 
     if (challenge.status === USER_CALL_AUTH_CONFIRMED_STATUS) {
-      const profile = await this.completeOtpRegistration(challenge);
+      const profile = await this.completeOtpRegistration(challenge, context, {
+        code: referralCode,
+        channel: 'USER_CALL',
+        externalId: `user-call:${challenge.id}:referral`,
+      });
       const payload: GuestPortalTokenPayload = {
         sub: `user-call:${challenge.id}`,
         purpose: GUEST_PORTAL_PURPOSE,
@@ -1750,6 +1770,16 @@ export class GuestPortalService {
             'Звонок был подтвержден, но игровой профиль не был безопасно создан.',
         };
       }
+
+      await this.recordGameReferralEvent(context, {
+        code: referralCode,
+        channel: 'USER_CALL',
+        externalId: `user-call:${challenge.id}:referral`,
+        profile: {
+          id: challenge.profileId,
+          guestId: challenge.guestId,
+        },
+      });
 
       const payload: GuestPortalTokenPayload = {
         sub: `user-call:${challenge.id}`,
@@ -1871,10 +1901,11 @@ export class GuestPortalService {
   async verifyOtp(
     tenantSlug: string,
     storeId: string,
-    dto: { challengeId?: unknown; code?: unknown },
+    dto: { challengeId?: unknown; code?: unknown; referralCode?: unknown },
   ): Promise<GuestPortalOtpVerifyResponse> {
     const context = await this.getTenantStore(tenantSlug, storeId);
     const challengeId = this.requiredString(dto.challengeId, 'challengeId');
+    const referralCode = normalizeGameReferralCode(dto.referralCode);
     const code = this.requiredString(dto.code, 'Код').replace(/\D/g, '');
 
     if (code.length !== 6) {
@@ -1915,7 +1946,11 @@ export class GuestPortalService {
       throw new BadRequestException('Код введен неверно.');
     }
 
-    const profile = await this.completeOtpRegistration(challenge);
+    const profile = await this.completeOtpRegistration(challenge, context, {
+      code: referralCode,
+      channel: 'OTP',
+      externalId: `otp:${challenge.id}:referral`,
+    });
 
     const payload: GuestPortalTokenPayload = {
       sub: challenge.id,
@@ -2025,10 +2060,11 @@ export class GuestPortalService {
   async getTelegramAuthStatus(
     tenantSlug: string,
     storeId: string,
-    dto: { challengeId?: unknown },
+    dto: { challengeId?: unknown; referralCode?: unknown },
   ): Promise<GuestPortalTelegramAuthStatusResponse> {
     const context = await this.getTenantStore(tenantSlug, storeId);
     const challengeId = this.requiredString(dto.challengeId, 'challengeId');
+    const referralCode = normalizeGameReferralCode(dto.referralCode);
     const challenge =
       await this.prisma.guestGameTelegramLinkChallenge.findFirst({
         where: {
@@ -2126,10 +2162,26 @@ export class GuestPortalService {
       };
       const token = await this.signGuestPortalToken(payload);
 
-      if (challenge.status === TELEGRAM_AUTH_VERIFIED_STATUS) {
-        await this.prisma.guestGameTelegramLinkChallenge.update({
-          where: { id: challenge.id },
-          data: { status: TELEGRAM_AUTH_SESSION_ISSUED_STATUS },
+      if (challenge.status === TELEGRAM_AUTH_VERIFIED_STATUS || referralCode) {
+        const now = new Date();
+        await this.prisma.$transaction(async (tx) => {
+          if (challenge.status === TELEGRAM_AUTH_VERIFIED_STATUS) {
+            await tx.guestGameTelegramLinkChallenge.update({
+              where: { id: challenge.id },
+              data: { status: TELEGRAM_AUTH_SESSION_ISSUED_STATUS },
+            });
+          }
+
+          await this.createGameReferralEvent(tx, context, {
+            code: referralCode,
+            channel: 'TELEGRAM_BOT',
+            externalId: `telegram-auth:${challenge.id}:referral`,
+            profile: {
+              id: challenge.profileId,
+              guestId: payload.guestId,
+            },
+            now,
+          });
         });
       }
 
@@ -2162,6 +2214,8 @@ export class GuestPortalService {
 
   private async completeOtpRegistration(
     challenge: GuestPortalOtpChallengeRegistration,
+    context: TenantStoreContext,
+    referral?: GuestGameReferralRegistrationOptions,
   ) {
     const now = new Date();
     const profileConsentData = gameProfileConsentGrantData(
@@ -2241,6 +2295,18 @@ export class GuestPortalService {
         },
       });
       await this.createGameConsentEvent(tx, challenge, profile.id, now);
+      await this.createGameReferralEvent(tx, context, {
+        ...(referral ?? {
+          code: null,
+          channel: 'OTP',
+          externalId: `otp:${challenge.id}:referral`,
+        }),
+        profile: {
+          id: profile.id,
+          guestId: profile.guestId ?? challenge.guestId,
+        },
+        now,
+      });
 
       return {
         id: profile.id,
@@ -2278,6 +2344,135 @@ export class GuestPortalService {
         createdAt: now,
       },
     });
+  }
+
+  private async recordGameReferralEvent(
+    context: TenantStoreContext,
+    options: GuestGameReferralRegistrationOptions & {
+      profile: { id: string; guestId: string | null };
+    },
+  ) {
+    if (!options.code) {
+      return;
+    }
+
+    const now = new Date();
+    await this.prisma.$transaction((tx) =>
+      this.createGameReferralEvent(tx, context, {
+        ...options,
+        now,
+      }),
+    );
+  }
+
+  private async createGameReferralEvent(
+    tx: Prisma.TransactionClient,
+    context: TenantStoreContext,
+    options: GuestGameReferralRegistrationOptions & {
+      profile: { id: string; guestId: string | null };
+      now: Date;
+    },
+  ) {
+    const code = normalizeGameReferralCode(options.code);
+
+    if (!code) {
+      return;
+    }
+
+    const existingEvent = await tx.guestGameEvent.findFirst({
+      where: {
+        tenantId: context.tenant.id,
+        source: GAME_REFERRAL_EVENT_SOURCE,
+        externalId: options.externalId,
+      },
+      select: { id: true },
+    });
+
+    if (existingEvent) {
+      return;
+    }
+
+    const attribution = await this.resolveGameReferralAttribution(
+      tx,
+      context,
+      options.profile,
+      code,
+    );
+    const clubId = `${context.tenant.slug}:${
+      context.store.publicSlug ?? context.store.id
+    }`;
+
+    await tx.guestGameEvent.create({
+      data: {
+        tenantId: context.tenant.id,
+        profileId: options.profile.id,
+        guestId: options.profile.guestId,
+        eventType: GAME_REFERRAL_ACCEPTED_EVENT_TYPE,
+        source: GAME_REFERRAL_EVENT_SOURCE,
+        externalId: options.externalId,
+        occurredAt: options.now,
+        payload: {
+          channel: options.channel,
+          storeId: context.store.id,
+          storePublicSlug: context.store.publicSlug,
+          clubId,
+          referralCodeMasked: maskGameReferralCode(code),
+          inviterProfileId: attribution.inviterProfileId,
+          inviterGuestId: attribution.inviterGuestId,
+          valid: attribution.valid,
+          selfReferral: attribution.selfReferral,
+          eligibleForReward: attribution.eligibleForReward,
+          acceptedAt: options.now.toISOString(),
+        },
+        note: 'Guest registered through a LeetPlus Play referral link.',
+        createdAt: options.now,
+      },
+    });
+  }
+
+  private async resolveGameReferralAttribution(
+    tx: Prisma.TransactionClient,
+    context: TenantStoreContext,
+    profile: { id: string; guestId: string | null },
+    code: string,
+  ) {
+    const candidates = await tx.guestGameProfile.findMany({
+      where: {
+        tenantId: context.tenant.id,
+        status: 'ACTIVE',
+      },
+      select: {
+        id: true,
+        guestId: true,
+      },
+      orderBy: { updatedAt: 'desc' },
+      take: GUEST_GAME_REFERRAL_LOOKUP_LIMIT,
+    });
+    const secret = this.referralSecret();
+    const inviter =
+      candidates.find(
+        (candidate) =>
+          buildGameReferralCodeFromParts(
+            context.tenant.slug,
+            context.store.id,
+            context.store.publicSlug,
+            candidate.id,
+            secret,
+          ) === code,
+      ) ?? null;
+    const selfReferral =
+      Boolean(inviter) &&
+      (inviter?.id === profile.id ||
+        (Boolean(inviter?.guestId && profile.guestId) &&
+          inviter?.guestId === profile.guestId));
+
+    return {
+      inviterProfileId: inviter?.id ?? null,
+      inviterGuestId: inviter?.guestId ?? null,
+      valid: Boolean(inviter),
+      selfReferral,
+      eligibleForReward: Boolean(inviter) && !selfReferral,
+    };
   }
 
   private async findRegistrationProfile(
@@ -5141,13 +5336,47 @@ function buildGameReferral(
   };
 }
 
+function normalizeGameReferralCode(value: unknown) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const code = value.trim().slice(0, 80);
+
+  if (!GUEST_GAME_REFERRAL_CODE_PATTERN.test(code)) {
+    return null;
+  }
+
+  return code;
+}
+
+function maskGameReferralCode(code: string) {
+  return `${code.slice(0, 10)}...${code.slice(-4)}`;
+}
+
 function buildGameReferralCode(portal: GuestPortalPayload, secret: string) {
-  const source = [
-    'guest-game-referral-v1',
+  return buildGameReferralCodeFromParts(
     portal.tenant.slug,
     portal.store.id,
-    portal.store.publicSlug ?? '',
+    portal.store.publicSlug,
     portal.profile.id,
+    secret,
+  );
+}
+
+function buildGameReferralCodeFromParts(
+  tenantSlug: string,
+  storeId: string,
+  storePublicSlug: string | null,
+  profileId: string | null,
+  secret: string,
+) {
+  const source = [
+    'guest-game-referral-v1',
+    tenantSlug,
+    storeId,
+    storePublicSlug ?? '',
+    profileId ?? '',
   ].join(':');
   const digest = toBase64Url(
     createHmac('sha256', secret).update(source).digest(),

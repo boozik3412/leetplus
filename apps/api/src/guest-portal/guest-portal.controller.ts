@@ -25,6 +25,9 @@ import {
   type GuestPortalTelegramLinkConfirmResponse,
   type GuestPortalTelegramLinkStartResponse,
   type GuestPortalTelegramWebhookResponse,
+  type GuestPortalUserCallAuthStartResponse,
+  type GuestPortalUserCallAuthStatusResponse,
+  type GuestPortalUserCallConfirmResponse,
 } from './guest-portal.service';
 
 @Controller('guest-portal')
@@ -68,6 +71,28 @@ export class GuestPortalController {
     @Body() dto: { challengeId?: unknown; code?: unknown },
   ): Promise<GuestPortalOtpVerifyResponse> {
     return this.guestPortalService.verifyOtp(tenantSlug, storeId, dto);
+  }
+
+  @Post(':tenantSlug/:storeId/user-call-auth/start')
+  startUserCallAuth(
+    @Param('tenantSlug') tenantSlug: string,
+    @Param('storeId') storeId: string,
+    @Body() dto: { phone?: unknown; gameConsentAccepted?: unknown },
+  ): Promise<GuestPortalUserCallAuthStartResponse> {
+    return this.guestPortalService.startUserCallAuth(tenantSlug, storeId, dto);
+  }
+
+  @Post(':tenantSlug/:storeId/user-call-auth/status')
+  getUserCallAuthStatus(
+    @Param('tenantSlug') tenantSlug: string,
+    @Param('storeId') storeId: string,
+    @Body() dto: { challengeId?: unknown },
+  ): Promise<GuestPortalUserCallAuthStatusResponse> {
+    return this.guestPortalService.getUserCallAuthStatus(
+      tenantSlug,
+      storeId,
+      dto,
+    );
   }
 
   @Post(':tenantSlug/:storeId/telegram-auth/start')
@@ -166,6 +191,18 @@ export class GuestPortalController {
     },
   ): Promise<GuestPortalTelegramLinkConfirmResponse> {
     return this.guestPortalService.confirmTelegramLink(secret, dto);
+  }
+
+  @Post('user-call/confirm')
+  confirmUserCallAuth(
+    @Headers('x-guest-portal-user-call-secret') secret: string | undefined,
+    @Body()
+    dto: {
+      challengeId?: unknown;
+      callerPhone?: unknown;
+    },
+  ): Promise<GuestPortalUserCallConfirmResponse> {
+    return this.guestPortalService.confirmUserCallAuth(secret, dto);
   }
 
   @Post('telegram/webhook')

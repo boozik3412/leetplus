@@ -45,6 +45,9 @@ const TELEGRAM_AUTH_PENDING_STATUS = 'AUTH_PENDING';
 const TELEGRAM_AUTH_AWAITING_CONTACT_STATUS = 'AUTH_AWAITING_CONTACT';
 const TELEGRAM_AUTH_VERIFIED_STATUS = 'AUTH_VERIFIED';
 const TELEGRAM_AUTH_SESSION_ISSUED_STATUS = 'AUTH_SESSION_ISSUED';
+const USER_CALL_AUTH_CHANNEL = 'USER_CALL';
+const USER_CALL_AUTH_CONFIRMED_STATUS = 'CALL_CONFIRMED';
+const USER_CALL_AUTH_SESSION_ISSUED_STATUS = 'CALL_SESSION_ISSUED';
 const COMMUNICATION_PREFERENCE_EVENT_PREFIX =
   'guest_portal:communication_preference:';
 const TELEGRAM_LINK_EVENT_PREFIX = 'guest_portal:telegram_bot_link:';
@@ -296,6 +299,32 @@ export type GuestPortalTelegramAuthStatusResponse = {
   profileId: string | null;
   phoneMasked?: string | null;
   telegramIdentityMasked?: string | null;
+  message: string;
+};
+
+export type GuestPortalUserCallAuthStartResponse = {
+  challengeId: string;
+  phoneMasked: string;
+  callNumber: string;
+  callHref: string;
+  expiresAt: string;
+  status: 'PENDING';
+  message: string;
+};
+
+export type GuestPortalUserCallAuthStatusResponse = {
+  status: 'PENDING' | 'CONFIRMED' | 'EXPIRED' | 'FAILED';
+  token?: string;
+  portal?: GuestPortalPayload;
+  profileId: string | null;
+  phoneMasked: string | null;
+  message: string;
+};
+
+export type GuestPortalUserCallConfirmResponse = {
+  status: 'CONFIRMED' | 'EXPIRED' | 'FAILED';
+  challengeId: string;
+  phoneMasked: string | null;
   message: string;
 };
 
@@ -1231,6 +1260,7 @@ export class GuestPortalService {
 
   private buildGamificationVerificationPlan(): GuestPortalGamificationClubDirectory['verification'] {
     const otpConfig = guestPortalOtpDeliveryConfig(this.configService);
+    const userCallConfig = guestPortalUserCallConfig(this.configService);
     const devOtpEnabled = this.isDevOtpEnabled();
     const telegramBotUsername = this.telegramBotUsername();
     const telegramWebhookSecret = configString(
@@ -1271,6 +1301,14 @@ export class GuestPortalService {
         otpConfig.sms.enabled &&
         Boolean(otpConfig.sms.endpoint) &&
         Boolean(otpConfig.sms.token));
+    const userCallRequiredEnv = [
+      ...(userCallConfig.enabled ? [] : ['GUEST_PORTAL_USER_CALL_ENABLED']),
+      ...(userCallConfig.phoneNumber
+        ? []
+        : ['GUEST_PORTAL_USER_CALL_PHONE_NUMBER']),
+      ...(userCallConfig.secret ? [] : ['GUEST_PORTAL_USER_CALL_SECRET']),
+    ];
+    const userCallReady = userCallRequiredEnv.length === 0;
 
     return {
       recommendedChannel: 'TELEGRAM_BOT',
@@ -1295,15 +1333,16 @@ export class GuestPortalService {
           rank: 2,
           channel: 'USER_CALL',
           role: 'FALLBACK',
-          status: 'PLANNED',
+          status: userCallReady ? 'READY' : 'PLANNED',
           label: 'Звонок на номер',
-          statusLabel: 'fallback',
+          statusLabel: userCallReady ? 'готов' : 'fallback',
           message:
             'Дешевый резерв: гость звонит на номер, а LeetPlus подтверждает телефон по входящему вызову.',
-          nextAction:
-            'Подключить номер или call-provider для входящих вызовов и связать caller id с OTP challenge.',
+          nextAction: userCallReady
+            ? 'Использовать звонок пользователя как дешевый fallback после Telegram-бота.'
+            : 'Подключить номер или call-provider для входящих вызовов и связать caller id с OTP challenge.',
           botUsername: null,
-          requiredEnv: [],
+          requiredEnv: userCallRequiredEnv,
         },
         {
           rank: 3,
@@ -1480,6 +1519,344 @@ export class GuestPortalService {
           ? { requiredEnv: delivery.requiredEnv }
           : {}),
       },
+    };
+  }
+
+  async startUserCallAuth(
+    tenantSlug: string,
+    storeId: string,
+    dto: { phone?: unknown; gameConsentAccepted?: unknown },
+  ): Promise<GuestPortalUserCallAuthStartResponse> {
+    const context = await this.getTenantStore(tenantSlug, storeId);
+    const phone = this.phoneIdentity(dto.phone);
+    const callConfig = guestPortalUserCallConfig(this.configService);
+
+    if (dto.gameConsentAccepted !== true) {
+      throw new BadRequestException(
+        'Подтвердите участие в квестах и обработку телефона для игрового профиля.',
+      );
+    }
+
+    if (!callConfig.enabled || !callConfig.phoneNumber || !callConfig.secret) {
+      throw new BadRequestException(
+        'Звонок на номер пока не настроен. Используйте Telegram-бот или SMS-код.',
+      );
+    }
+
+    const now = new Date();
+    const resendAfter = new Date(now.getTime() - OTP_RESEND_SECONDS * 1000);
+    const expiresAt = new Date(now.getTime() + OTP_TTL_MINUTES * 60 * 1000);
+
+    await this.prisma.guestPortalOtpChallenge.updateMany({
+      where: {
+        deliveryChannel: USER_CALL_AUTH_CHANNEL,
+        status: 'PENDING',
+        expiresAt: { lt: now },
+      },
+      data: { status: 'EXPIRED' },
+    });
+
+    const recentChallenge = await this.prisma.guestPortalOtpChallenge.findFirst(
+      {
+        where: {
+          tenantId: context.tenant.id,
+          storeId: context.store.id,
+          phoneHash: phone.hash,
+          deliveryChannel: USER_CALL_AUTH_CHANNEL,
+          status: 'PENDING',
+          createdAt: { gt: resendAfter },
+        },
+        orderBy: { createdAt: 'desc' },
+      },
+    );
+
+    if (recentChallenge) {
+      throw new BadRequestException(
+        'Звонок уже ожидается. Попробуйте повторить чуть позже.',
+      );
+    }
+
+    const [guest, profileByPhone] = await Promise.all([
+      this.prisma.guest.findFirst({
+        where: {
+          tenantId: context.tenant.id,
+          phoneHash: phone.hash,
+          isDisabled: false,
+        },
+        orderBy: [{ lastActivityAt: 'desc' }, { updatedAt: 'desc' }],
+        select: {
+          id: true,
+          phoneConsentStatus: true,
+          unsubscribedAt: true,
+        },
+      }),
+      this.prisma.guestGameProfile.findFirst({
+        where: {
+          tenantId: context.tenant.id,
+          phoneHash: phone.hash,
+          status: 'ACTIVE',
+        },
+        orderBy: { updatedAt: 'desc' },
+        select: {
+          id: true,
+          telegramIdentity: true,
+          maxIdentity: true,
+          phoneConsentStatus: true,
+          unsubscribedAt: true,
+        },
+      }),
+    ]);
+
+    const profile = guest
+      ? await this.prisma.guestGameProfile.findFirst({
+          where: {
+            tenantId: context.tenant.id,
+            guestId: guest.id,
+            status: 'ACTIVE',
+          },
+          orderBy: { updatedAt: 'desc' },
+          select: {
+            id: true,
+            telegramIdentity: true,
+            maxIdentity: true,
+            phoneConsentStatus: true,
+            unsubscribedAt: true,
+          },
+        })
+      : profileByPhone;
+    const id = randomUUID();
+    const opaqueCode = randomBytes(18).toString('hex');
+
+    await this.prisma.guestPortalOtpChallenge.create({
+      data: {
+        id,
+        tenantId: context.tenant.id,
+        storeId: context.store.id,
+        phoneHash: phone.hash,
+        phoneMasked: phone.masked,
+        guestId: guest?.id ?? null,
+        profileId: profile?.id ?? null,
+        codeHash: this.hashOtpCode(id, opaqueCode),
+        status: 'PENDING',
+        deliveryChannel: USER_CALL_AUTH_CHANNEL,
+        expiresAt,
+        gameConsentAcceptedAt: now,
+        gameConsentVersion: GAME_CONSENT_VERSION,
+      },
+    });
+
+    return {
+      challengeId: id,
+      phoneMasked: phone.masked,
+      callNumber: callConfig.phoneNumber,
+      callHref: callConfig.callHref,
+      expiresAt: expiresAt.toISOString(),
+      status: 'PENDING',
+      message:
+        'Позвоните на указанный номер с этого телефона. LeetPlus завершит вход после подтверждения входящего вызова провайдером.',
+    };
+  }
+
+  async getUserCallAuthStatus(
+    tenantSlug: string,
+    storeId: string,
+    dto: { challengeId?: unknown },
+  ): Promise<GuestPortalUserCallAuthStatusResponse> {
+    const context = await this.getTenantStore(tenantSlug, storeId);
+    const challengeId = this.requiredString(dto.challengeId, 'challengeId');
+    const challenge = await this.prisma.guestPortalOtpChallenge.findFirst({
+      where: {
+        id: challengeId,
+        tenantId: context.tenant.id,
+        storeId: context.store.id,
+        deliveryChannel: USER_CALL_AUTH_CHANNEL,
+      },
+    });
+
+    if (!challenge) {
+      throw new BadRequestException('Call auth challenge не найден.');
+    }
+
+    if (
+      challenge.status === 'PENDING' &&
+      challenge.expiresAt.getTime() <= Date.now()
+    ) {
+      await this.prisma.guestPortalOtpChallenge.update({
+        where: { id: challenge.id },
+        data: { status: 'EXPIRED' },
+      });
+
+      return {
+        status: 'EXPIRED',
+        profileId: challenge.profileId,
+        phoneMasked: challenge.phoneMasked,
+        message: 'Срок ожидания звонка истек. Создайте новый вход.',
+      };
+    }
+
+    if (challenge.status === 'PENDING') {
+      return {
+        status: 'PENDING',
+        profileId: challenge.profileId,
+        phoneMasked: challenge.phoneMasked,
+        message:
+          'Ожидаем входящий звонок с подтвержденного телефона. Страница проверяет статус автоматически.',
+      };
+    }
+
+    if (challenge.status === USER_CALL_AUTH_CONFIRMED_STATUS) {
+      const profile = await this.completeOtpRegistration(challenge);
+      const payload: GuestPortalTokenPayload = {
+        sub: `user-call:${challenge.id}`,
+        purpose: GUEST_PORTAL_PURPOSE,
+        tenantId: context.tenant.id,
+        storeId: context.store.id,
+        guestId: profile.guestId,
+        profileId: profile.id,
+        phoneHash: challenge.phoneHash,
+      };
+      const token = await this.signGuestPortalToken(payload);
+
+      await this.prisma.guestPortalOtpChallenge.update({
+        where: { id: challenge.id },
+        data: { status: USER_CALL_AUTH_SESSION_ISSUED_STATUS },
+      });
+
+      return {
+        status: 'CONFIRMED',
+        token,
+        portal: await this.buildPortalPayload(payload),
+        profileId: profile.id,
+        phoneMasked: challenge.phoneMasked,
+        message: 'Телефон подтвержден входящим звонком. Игровой профиль готов.',
+      };
+    }
+
+    if (challenge.status === USER_CALL_AUTH_SESSION_ISSUED_STATUS) {
+      if (!challenge.profileId) {
+        return {
+          status: 'FAILED',
+          profileId: null,
+          phoneMasked: challenge.phoneMasked,
+          message:
+            'Звонок был подтвержден, но игровой профиль не был безопасно создан.',
+        };
+      }
+
+      const payload: GuestPortalTokenPayload = {
+        sub: `user-call:${challenge.id}`,
+        purpose: GUEST_PORTAL_PURPOSE,
+        tenantId: context.tenant.id,
+        storeId: context.store.id,
+        guestId: challenge.guestId,
+        profileId: challenge.profileId,
+        phoneHash: challenge.phoneHash,
+      };
+      const token = await this.signGuestPortalToken(payload);
+
+      return {
+        status: 'CONFIRMED',
+        token,
+        portal: await this.buildPortalPayload(payload),
+        profileId: challenge.profileId,
+        phoneMasked: challenge.phoneMasked,
+        message: 'Телефон уже подтвержден входящим звонком.',
+      };
+    }
+
+    return {
+      status: challenge.status === 'EXPIRED' ? 'EXPIRED' : 'FAILED',
+      profileId: challenge.profileId,
+      phoneMasked: challenge.phoneMasked,
+      message:
+        challenge.status === 'EXPIRED'
+          ? 'Срок ожидания звонка истек.'
+          : 'Звонок не может быть завершен в текущем статусе.',
+    };
+  }
+
+  async confirmUserCallAuth(
+    secret: string | undefined,
+    dto: { challengeId?: unknown; callerPhone?: unknown },
+  ): Promise<GuestPortalUserCallConfirmResponse> {
+    this.assertUserCallSecret(secret);
+    const challengeId = this.requiredString(dto.challengeId, 'challengeId');
+    const callerPhone = this.phoneIdentity(dto.callerPhone);
+    const challenge = await this.prisma.guestPortalOtpChallenge.findFirst({
+      where: {
+        id: challengeId,
+        deliveryChannel: USER_CALL_AUTH_CHANNEL,
+      },
+    });
+
+    if (!challenge) {
+      throw new BadRequestException('Call auth challenge не найден.');
+    }
+
+    if (challenge.expiresAt.getTime() <= Date.now()) {
+      await this.prisma.guestPortalOtpChallenge.update({
+        where: { id: challenge.id },
+        data: { status: 'EXPIRED' },
+      });
+
+      return {
+        status: 'EXPIRED',
+        challengeId: challenge.id,
+        phoneMasked: challenge.phoneMasked,
+        message: 'Срок ожидания звонка истек.',
+      };
+    }
+
+    if (challenge.status === USER_CALL_AUTH_CONFIRMED_STATUS) {
+      return {
+        status: 'CONFIRMED',
+        challengeId: challenge.id,
+        phoneMasked: challenge.phoneMasked,
+        message: 'Звонок уже подтвержден.',
+      };
+    }
+
+    if (challenge.status !== 'PENDING') {
+      return {
+        status: 'FAILED',
+        challengeId: challenge.id,
+        phoneMasked: challenge.phoneMasked,
+        message: 'Call auth challenge не находится в ожидании звонка.',
+      };
+    }
+
+    if (callerPhone.hash !== challenge.phoneHash) {
+      const attempts = challenge.attempts + 1;
+      await this.prisma.guestPortalOtpChallenge.update({
+        where: { id: challenge.id },
+        data: {
+          attempts,
+          status: attempts >= OTP_MAX_ATTEMPTS ? 'BLOCKED' : 'PENDING',
+        },
+      });
+
+      return {
+        status: 'FAILED',
+        challengeId: challenge.id,
+        phoneMasked: challenge.phoneMasked,
+        message: 'Caller id не совпал с телефоном challenge.',
+      };
+    }
+
+    await this.prisma.guestPortalOtpChallenge.update({
+      where: { id: challenge.id },
+      data: {
+        status: USER_CALL_AUTH_CONFIRMED_STATUS,
+        deliveredAt: new Date(),
+      },
+    });
+
+    return {
+      status: 'CONFIRMED',
+      challengeId: challenge.id,
+      phoneMasked: challenge.phoneMasked,
+      message:
+        'Звонок подтвержден. Browser status endpoint выдаст гостевую сессию.',
     };
   }
 
@@ -4330,6 +4707,23 @@ export class GuestPortalService {
     }
   }
 
+  private assertUserCallSecret(secret: string | undefined) {
+    const expected = configString(
+      this.configService,
+      'GUEST_PORTAL_USER_CALL_SECRET',
+    );
+
+    if (!expected) {
+      throw new UnauthorizedException(
+        'GUEST_PORTAL_USER_CALL_SECRET is not configured',
+      );
+    }
+
+    if (!secret || secret.trim() !== expected) {
+      throw new UnauthorizedException('Invalid user call secret');
+    }
+  }
+
   private isDevOtpEnabled() {
     return (
       this.configService.get<string>('GUEST_PORTAL_DEV_OTP_ENABLED') ===
@@ -5066,6 +5460,21 @@ function guestPortalOtpDeliveryConfig(configService: ConfigService) {
       endpoint: configString(configService, 'GUEST_PORTAL_OTP_MAX_ENDPOINT'),
       token: configString(configService, 'GUEST_PORTAL_OTP_MAX_TOKEN'),
     },
+  };
+}
+
+function guestPortalUserCallConfig(configService: ConfigService) {
+  const rawPhoneNumber = configString(
+    configService,
+    'GUEST_PORTAL_USER_CALL_PHONE_NUMBER',
+  );
+  const phoneNumber = rawPhoneNumber.replace(/[^\d+]/g, '');
+
+  return {
+    enabled: configFlag(configService, 'GUEST_PORTAL_USER_CALL_ENABLED'),
+    phoneNumber: rawPhoneNumber,
+    callHref: phoneNumber ? `tel:${phoneNumber}` : '',
+    secret: configString(configService, 'GUEST_PORTAL_USER_CALL_SECRET'),
   };
 }
 

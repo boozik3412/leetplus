@@ -757,6 +757,25 @@ export type GuestPortalTelegramAuthStatusResponse = {
   message: string;
 };
 
+export type GuestPortalUserCallAuthStartResponse = {
+  challengeId: string;
+  phoneMasked: string;
+  callNumber: string;
+  callHref: string;
+  expiresAt: string;
+  status: "PENDING";
+  message: string;
+};
+
+export type GuestPortalUserCallAuthStatusResponse = {
+  status: "PENDING" | "CONFIRMED" | "EXPIRED" | "FAILED";
+  token?: string;
+  portal?: GuestPortalPayload;
+  profileId: string | null;
+  phoneMasked: string | null;
+  message: string;
+};
+
 export type GuestPortalTelegramLinkStartResponse = {
   code: string;
   codeMasked: string;

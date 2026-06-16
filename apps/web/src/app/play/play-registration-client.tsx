@@ -13,6 +13,8 @@ import type {
   GuestPortalPayload,
   GuestPortalTelegramAuthStartResponse,
   GuestPortalTelegramAuthStatusResponse,
+  GuestPortalUserCallAuthStartResponse,
+  GuestPortalUserCallAuthStatusResponse,
 } from "@/lib/guest-portal";
 
 type PlayRegistrationClientProps = {
@@ -67,6 +69,10 @@ export function PlayRegistrationClient({
     useState<GuestPortalTelegramAuthStartResponse | null>(null);
   const [telegramAuthStatus, setTelegramAuthStatus] =
     useState<GuestPortalTelegramAuthStatusResponse | null>(null);
+  const [userCallAuth, setUserCallAuth] =
+    useState<GuestPortalUserCallAuthStartResponse | null>(null);
+  const [userCallAuthStatus, setUserCallAuthStatus] =
+    useState<GuestPortalUserCallAuthStatusResponse | null>(null);
   const [portal, setPortal] = useState<GuestPortalPayload | null>(null);
   const [langameMatch, setLangameMatch] =
     useState<GuestPortalLangameMatchResponse | null>(null);
@@ -84,6 +90,8 @@ export function PlayRegistrationClient({
   const [isSubmitting, setSubmitting] = useState(false);
   const [isStartingTelegramAuth, setStartingTelegramAuth] = useState(false);
   const [isPollingTelegramAuth, setPollingTelegramAuth] = useState(false);
+  const [isStartingUserCallAuth, setStartingUserCallAuth] = useState(false);
+  const [isPollingUserCallAuth, setPollingUserCallAuth] = useState(false);
   const [isCheckingLangame, setCheckingLangame] = useState(false);
 
   const visibleClubs = useMemo(() => {
@@ -170,6 +178,8 @@ export function PlayRegistrationClient({
     setChallenge(null);
     setTelegramAuth(null);
     setTelegramAuthStatus(null);
+    setUserCallAuth(null);
+    setUserCallAuthStatus(null);
     setCode("");
     setPortal(null);
     setLangameMatch(null);
@@ -251,6 +261,82 @@ export function PlayRegistrationClient({
       }
     };
   }, [portal, selectedClub, telegramAuth]);
+
+  useEffect(() => {
+    if (!selectedClub || !userCallAuth || portal) {
+      return;
+    }
+
+    let isActive = true;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
+    async function pollUserCallAuth() {
+      if (!selectedClub || !userCallAuth) {
+        return;
+      }
+
+      setPollingUserCallAuth(true);
+
+      try {
+        const response = await fetch(
+          `${clubApiPath(selectedClub)}/user-call-auth/status`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ challengeId: userCallAuth.challengeId }),
+          },
+        );
+
+        if (!isActive) {
+          return;
+        }
+
+        if (!response.ok) {
+          throw new Error(await readMessage(response));
+        }
+
+        const data =
+          (await response.json()) as GuestPortalUserCallAuthStatusResponse;
+        setUserCallAuthStatus(data);
+        setMessage(data.message);
+
+        if (data.status === "CONFIRMED" && data.portal) {
+          setPortal(data.portal);
+          setUserCallAuth(null);
+          setLangameMatch(null);
+        }
+
+        if (data.status === "EXPIRED" || data.status === "FAILED") {
+          setUserCallAuth(null);
+        }
+      } catch (error) {
+        if (!isActive) {
+          return;
+        }
+
+        setMessage(
+          error instanceof Error
+            ? error.message
+            : "Не удалось проверить вход по звонку.",
+        );
+      } finally {
+        if (isActive) {
+          setPollingUserCallAuth(false);
+        }
+      }
+    }
+
+    void pollUserCallAuth();
+    intervalId = setInterval(() => void pollUserCallAuth(), 3000);
+
+    return () => {
+      isActive = false;
+
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [portal, selectedClub, userCallAuth]);
 
   async function locateClubs() {
     if (!navigator.geolocation) {
@@ -359,6 +445,8 @@ export function PlayRegistrationClient({
     setChallenge(null);
     setTelegramAuth(null);
     setTelegramAuthStatus(null);
+    setUserCallAuth(null);
+    setUserCallAuthStatus(null);
     setCode("");
     setPortal(null);
     setLangameMatch(null);
@@ -399,6 +487,8 @@ export function PlayRegistrationClient({
     setChallenge(null);
     setTelegramAuth(null);
     setTelegramAuthStatus(null);
+    setUserCallAuth(null);
+    setUserCallAuthStatus(null);
     setCode("");
     setPortal(null);
     setLangameMatch(null);
@@ -434,6 +524,58 @@ export function PlayRegistrationClient({
       );
     } finally {
       setStartingTelegramAuth(false);
+    }
+  }
+
+  async function startUserCallAuth() {
+    if (!selectedClub) {
+      setMessage("Выберите клуб для участия.");
+      return;
+    }
+
+    setStartingUserCallAuth(true);
+    setMessage(null);
+    setChallenge(null);
+    setTelegramAuth(null);
+    setTelegramAuthStatus(null);
+    setUserCallAuth(null);
+    setUserCallAuthStatus(null);
+    setCode("");
+    setPortal(null);
+    setLangameMatch(null);
+
+    try {
+      const response = await fetch(
+        `${clubApiPath(selectedClub)}/user-call-auth/start`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ phone, gameConsentAccepted }),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(await readMessage(response));
+      }
+
+      const data =
+        (await response.json()) as GuestPortalUserCallAuthStartResponse;
+      setUserCallAuth(data);
+      setUserCallAuthStatus({
+        status: "PENDING",
+        profileId: null,
+        phoneMasked: data.phoneMasked,
+        message: data.message,
+      });
+      setMessage(data.message);
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Не удалось создать вход по звонку.",
+      );
+    } finally {
+      setStartingUserCallAuth(false);
     }
   }
 
@@ -717,6 +859,17 @@ export function PlayRegistrationClient({
                           начисления бонусов и безопасной сверки с Langame.
                         </span>
                       </label>
+
+                      <UserCallAuthPanel
+                        disabled={!gameConsentAccepted || !phone.trim()}
+                        isPolling={isPollingUserCallAuth}
+                        isStarting={isStartingUserCallAuth}
+                        onStart={startUserCallAuth}
+                        userCallAuth={userCallAuth}
+                        userCallAuthStatus={userCallAuthStatus}
+                        verification={directory.verification}
+                      />
+
                       <button
                         className="min-h-11 w-full rounded-lg bg-emerald-300 px-4 text-sm font-black text-slate-950 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-60"
                         disabled={
@@ -1250,6 +1403,108 @@ function TelegramAuthPanel({
   );
 }
 
+function UserCallAuthPanel({
+  verification,
+  userCallAuth,
+  userCallAuthStatus,
+  disabled,
+  isStarting,
+  isPolling,
+  onStart,
+}: {
+  verification: GuestPortalGamificationClubDirectory["verification"];
+  userCallAuth: GuestPortalUserCallAuthStartResponse | null;
+  userCallAuthStatus: GuestPortalUserCallAuthStatusResponse | null;
+  disabled: boolean;
+  isStarting: boolean;
+  isPolling: boolean;
+  onStart: () => void;
+}) {
+  const userCallOption = verification.options.find(
+    (option) => option.channel === "USER_CALL",
+  );
+  const ready = userCallOption?.status === "READY";
+
+  return (
+    <div className="rounded-lg border border-cyan-300/25 bg-cyan-300/[0.06] p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-bold uppercase text-cyan-200">
+            2 место
+          </p>
+          <h3 className="mt-1 text-lg font-black text-white">
+            Звонок пользователя
+          </h3>
+          <p className="mt-1 text-sm leading-6 text-slate-300">
+            Дешевый fallback: гость звонит с введенного телефона, а LeetPlus
+            завершает вход после подтверждения caller id провайдером.
+          </p>
+        </div>
+        <StatusPill tone={ready ? "cyan" : "amber"}>
+          {userCallOption?.statusLabel ?? "fallback"}
+        </StatusPill>
+      </div>
+
+      {userCallAuthStatus ? (
+        <div className="mt-3 rounded-lg border border-white/10 bg-[#070b12] px-3 py-2">
+          <p className="text-sm font-bold text-white">
+            {userCallAuthStatusLabel(userCallAuthStatus.status)}
+          </p>
+          <p className="mt-1 text-sm leading-6 text-slate-300">
+            {userCallAuthStatus.message}
+          </p>
+        </div>
+      ) : null}
+
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <button
+          className="min-h-11 rounded-lg bg-cyan-300 px-4 text-sm font-black text-slate-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={disabled || !ready || isStarting}
+          onClick={onStart}
+          type="button"
+        >
+          {isStarting ? "Создаем..." : "Создать вход по звонку"}
+        </button>
+
+        {userCallAuth?.callHref ? (
+          <a
+            className="flex min-h-11 items-center justify-center rounded-lg border border-cyan-300/35 px-4 text-sm font-black text-cyan-100 transition hover:border-cyan-300"
+            href={userCallAuth.callHref}
+          >
+            Позвонить {userCallAuth.callNumber}
+          </a>
+        ) : (
+          <button
+            className="min-h-11 rounded-lg border border-white/10 px-4 text-sm font-black text-slate-500"
+            disabled
+            type="button"
+          >
+            Номер появится после старта
+          </button>
+        )}
+      </div>
+
+      {userCallAuth ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-400">
+          <span>{userCallAuth.phoneMasked}</span>
+          {isPolling ? <span>проверяем...</span> : null}
+        </div>
+      ) : null}
+
+      {disabled ? (
+        <p className="mt-2 text-xs leading-5 text-amber-100">
+          Введите телефон и подтвердите согласие, чтобы создать вход по звонку.
+        </p>
+      ) : !ready ? (
+        <p className="mt-2 text-xs leading-5 text-amber-100">
+          Звонок включится после настройки номера и provider secret; используйте
+          SMS-код.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function SelectedClubSummary({ club }: { club: GuestPortalGamificationClub }) {
   return (
     <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
@@ -1679,6 +1934,19 @@ function telegramAuthStatusLabel(
     EXPIRED: "Ссылка истекла",
     FAILED: "Вход не завершен",
   } satisfies Record<GuestPortalTelegramAuthStatusResponse["status"], string>;
+
+  return labels[status];
+}
+
+function userCallAuthStatusLabel(
+  status: GuestPortalUserCallAuthStatusResponse["status"],
+) {
+  const labels = {
+    PENDING: "Ожидаем звонок",
+    CONFIRMED: "Подтверждено",
+    EXPIRED: "Ожидание истекло",
+    FAILED: "Вход не завершен",
+  } satisfies Record<GuestPortalUserCallAuthStatusResponse["status"], string>;
 
   return labels[status];
 }

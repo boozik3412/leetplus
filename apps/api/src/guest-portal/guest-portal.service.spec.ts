@@ -26,7 +26,9 @@ function createPrismaMock() {
     },
     guestPortalOtpChallenge: {
       findFirst: jest.fn(),
+      create: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
     },
     guestGameProfile: {
       findFirst: jest.fn(),
@@ -95,7 +97,9 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   prisma.guestCrmLead.update.mockResolvedValue({});
   prisma.store.findMany.mockResolvedValue([]);
   prisma.guestPortalOtpChallenge.findFirst.mockResolvedValue(null);
+  prisma.guestPortalOtpChallenge.create.mockResolvedValue({});
   prisma.guestPortalOtpChallenge.update.mockResolvedValue({});
+  prisma.guestPortalOtpChallenge.updateMany.mockResolvedValue({ count: 0 });
   prisma.guestGameProfile.findFirst.mockResolvedValue(null);
   prisma.guestGameProfile.create.mockResolvedValue(null);
   prisma.guestGameProfile.update.mockResolvedValue(null);
@@ -1315,6 +1319,183 @@ describe('GuestPortalService', () => {
         status: 'CONFIRMED',
         token: 'guest-token',
         profileId: 'profile-1',
+      });
+    });
+  });
+
+  describe('user call auth', () => {
+    it('creates a pending call challenge for the phone fallback', async () => {
+      const { prisma, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+        GUEST_PORTAL_USER_CALL_ENABLED: 'true',
+        GUEST_PORTAL_USER_CALL_PHONE_NUMBER: '+7 343 000-00-00',
+        GUEST_PORTAL_USER_CALL_SECRET: 'call-secret',
+      });
+
+      prisma.tenant.findFirst.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'Leet Clubs',
+        slug: 'leet',
+        stores: [
+          {
+            id: 'store-1',
+            publicSlug: 'club-1337',
+            name: '1337',
+            address: 'Lenina, 1',
+          },
+        ],
+      });
+
+      const result = await service.startUserCallAuth('leet', 'club-1337', {
+        phone: '+7 999 999-99-99',
+        gameConsentAccepted: true,
+      });
+
+      expect(prisma.guestPortalOtpChallenge.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            deliveryChannel: 'USER_CALL',
+            status: 'PENDING',
+          }),
+          data: { status: 'EXPIRED' },
+        }),
+      );
+      expect(prisma.guestPortalOtpChallenge.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            tenantId: 'tenant-1',
+            storeId: 'store-1',
+            phoneMasked: '***9999',
+            status: 'PENDING',
+            deliveryChannel: 'USER_CALL',
+            gameConsentVersion: 'guest-game-v1-2026-06-15',
+          }),
+        }),
+      );
+      expect(result).toMatchObject({
+        phoneMasked: '***9999',
+        callNumber: '+7 343 000-00-00',
+        callHref: 'tel:+73430000000',
+        status: 'PENDING',
+      });
+    });
+
+    it('confirms a matching provider caller id without exposing raw phone', async () => {
+      const { prisma, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+        GUEST_PORTAL_USER_CALL_SECRET: 'call-secret',
+      });
+      const phoneHash = createHmac('sha256', 'test-secret')
+        .update('79999999999')
+        .digest('hex');
+
+      prisma.guestPortalOtpChallenge.findFirst.mockResolvedValue({
+        id: 'call-auth-1',
+        phoneHash,
+        phoneMasked: '***9999',
+        attempts: 0,
+        status: 'PENDING',
+        expiresAt: new Date(Date.now() + 60_000),
+      });
+
+      const result = await service.confirmUserCallAuth('call-secret', {
+        challengeId: 'call-auth-1',
+        callerPhone: '+7 999 999-99-99',
+      });
+
+      expect(prisma.guestPortalOtpChallenge.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'call-auth-1' },
+          data: expect.objectContaining({
+            status: 'CALL_CONFIRMED',
+            deliveredAt: expect.any(Date),
+          }),
+        }),
+      );
+      expect(result).toMatchObject({
+        status: 'CONFIRMED',
+        challengeId: 'call-auth-1',
+        phoneMasked: '***9999',
+      });
+      expect(JSON.stringify(result)).not.toContain('79999999999');
+    });
+
+    it('issues a guest token after the confirmed call status is polled', async () => {
+      const { jwtService, prisma, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+      });
+      jest.spyOn(service as any, 'buildPortalPayload').mockResolvedValue({
+        profile: { id: 'profile-1' },
+      });
+
+      prisma.tenant.findFirst.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'Leet Clubs',
+        slug: 'leet',
+        stores: [
+          {
+            id: 'store-1',
+            publicSlug: 'club-1337',
+            name: '1337',
+            address: 'Lenina, 1',
+          },
+        ],
+      });
+      prisma.guestPortalOtpChallenge.findFirst.mockResolvedValue({
+        id: 'call-auth-1',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        guestId: null,
+        profileId: null,
+        phoneHash: 'phone-hash-1',
+        phoneMasked: '***9999',
+        status: 'CALL_CONFIRMED',
+        expiresAt: new Date(Date.now() + 60_000),
+        gameConsentAcceptedAt: new Date('2026-06-15T08:00:00.000Z'),
+        gameConsentVersion: 'guest-game-v1-2026-06-15',
+      });
+      prisma.guestGameProfile.create.mockResolvedValue({
+        id: 'profile-1',
+        guestId: null,
+      });
+      jwtService.signAsync.mockResolvedValue('guest-token');
+
+      const status = await service.getUserCallAuthStatus('leet', 'club-1337', {
+        challengeId: 'call-auth-1',
+      });
+
+      expect(prisma.guestGameProfile.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            tenantId: 'tenant-1',
+            contactMasked: '***9999',
+            phoneHash: 'phone-hash-1',
+            status: 'ACTIVE',
+          }),
+        }),
+      );
+      expect(prisma.guestPortalOtpChallenge.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'call-auth-1' },
+          data: expect.objectContaining({
+            status: 'CALL_SESSION_ISSUED',
+          }),
+        }),
+      );
+      expect(jwtService.signAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sub: 'user-call:call-auth-1',
+          guestId: null,
+          profileId: 'profile-1',
+          phoneHash: 'phone-hash-1',
+        }),
+        expect.any(Object),
+      );
+      expect(status).toMatchObject({
+        status: 'CONFIRMED',
+        token: 'guest-token',
+        profileId: 'profile-1',
+        phoneMasked: '***9999',
       });
     });
   });

@@ -238,7 +238,6 @@ function ReadyGameView({
       )}`,
     [summary.store.id, summary.store.publicSlug, summary.tenant.slug],
   );
-  const activeReward = summary.rewards.ready[0] ?? null;
   const primaryAction = summary.nextActions[0] ?? null;
 
   return (
@@ -333,7 +332,7 @@ function ReadyGameView({
       </section>
 
       <section className="mt-4 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
-        <ReadyRewardPanel reward={activeReward} />
+        <RewardResultPanel summary={summary} />
         <MissionsPanel missions={summary.missions.featured} />
       </section>
 
@@ -363,11 +362,12 @@ function Metric({
   );
 }
 
-function ReadyRewardPanel({
-  reward,
-}: {
-  reward: GuestPortalGameSummary["rewards"]["ready"][number] | null;
-}) {
+function RewardResultPanel({ summary }: { summary: GuestPortalGameSummary }) {
+  const reward = summary.rewards.ready[0] ?? null;
+  const latestBonus = summary.rewards.latestBonus;
+  const bonusBalance = summary.loyalty.bonusBalance;
+  const hasRewardResult = Boolean(reward || latestBonus);
+
   return (
     <section className="rounded-lg border border-white/10 bg-white/[0.06] p-5">
       <div className="flex items-start justify-between gap-3">
@@ -375,33 +375,117 @@ function ReadyRewardPanel({
           <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
             Кошелек
           </p>
-          <h2 className="mt-1 text-xl font-black">Готовая награда</h2>
+          <h2 className="mt-1 text-xl font-black">Результат квеста</h2>
         </div>
-        {reward ? (
+        {latestBonus ? (
+          <span
+            className={[
+              "rounded-full px-2 py-1 text-xs font-black",
+              latestBonus.status === "CONFIRMED"
+                ? "bg-emerald-300 text-zinc-950"
+                : "bg-white/10 text-zinc-200",
+            ].join(" ")}
+          >
+            {latestBonus.statusLabel}
+          </span>
+        ) : reward ? (
           <span className="rounded-full bg-emerald-300 px-2 py-1 text-xs font-black text-zinc-950">
             READY
           </span>
         ) : null}
       </div>
 
-      {reward ? (
-        <div className="mt-5">
-          <p className="text-lg font-black">{reward.rewardLabel}</p>
-          <p className="mt-2 text-sm text-zinc-300">
-            {reward.sourceLabel ?? reward.sourceKind} ·{" "}
-            {formatNumber(reward.rewardAmount)}
-          </p>
+      {hasRewardResult ? (
+        <div className="mt-5 space-y-4">
+          {latestBonus ? (
+            <div className="rounded-lg border border-emerald-300/25 bg-emerald-300/[0.08] p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-200">
+                Последний бонус
+              </p>
+              <div className="mt-2 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-lg font-black text-white">
+                    {latestBonus.title}
+                  </p>
+                  <p className="mt-1 text-sm text-zinc-300">
+                    {latestBonus.sourceLabel ?? latestBonus.sourceKind}
+                    {latestBonus.storeName
+                      ? ` · ${latestBonus.storeName}`
+                      : ""}
+                  </p>
+                </div>
+                <span
+                  className={[
+                    "shrink-0 text-xl font-black",
+                    latestBonus.amount >= 0
+                      ? "text-emerald-300"
+                      : "text-rose-300",
+                  ].join(" ")}
+                >
+                  {formatSignedNumber(latestBonus.amount)}
+                </span>
+              </div>
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                <div className="rounded-lg border border-white/10 bg-zinc-950/50 p-3">
+                  <p className="text-xs text-zinc-400">Статус</p>
+                  <p className="mt-1 text-sm font-black">
+                    {latestBonus.statusLabel}
+                  </p>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    {formatDate(latestBonus.confirmedAt ?? latestBonus.occurredAt)}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-white/10 bg-zinc-950/50 p-3">
+                  <p className="text-xs text-zinc-400">Баланс после</p>
+                  <p className="mt-1 text-sm font-black">
+                    {latestBonus.balanceAfter !== null
+                      ? formatNumber(latestBonus.balanceAfter)
+                      : bonusBalance !== null
+                        ? formatNumber(bonusBalance)
+                        : "обновляется"}
+                  </p>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    {bonusBalance !== null
+                      ? "текущий бонусный баланс"
+                      : "ждем подтверждения Langame"}
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {reward ? (
+            <div>
+              <p className="text-lg font-black">{reward.rewardLabel}</p>
+              <p className="mt-2 text-sm text-zinc-300">
+                {reward.sourceLabel ?? reward.sourceKind} ·{" "}
+                {formatNumber(reward.rewardAmount)}
+              </p>
+              <div className="mt-4 rounded-lg border border-white/10 bg-zinc-950/60 p-4">
+                <p className="text-xs text-zinc-400">Код для кассы</p>
+                <p className="mt-1 break-all text-2xl font-black tracking-wider">
+                  {reward.rewardCode ??
+                    reward.claimPayload ??
+                    "покажите кабинет"}
+                </p>
+              </div>
+              {reward.expiresAt ? (
+                <p className="mt-3 text-xs text-zinc-400">
+                  Действует до {formatDate(reward.expiresAt)}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
           <div className="mt-4 rounded-lg border border-white/10 bg-zinc-950/60 p-4">
-            <p className="text-xs text-zinc-400">Код для кассы</p>
-            <p className="mt-1 break-all text-2xl font-black tracking-wider">
-              {reward.rewardCode ?? reward.claimPayload ?? "покажите кабинет"}
+            <p className="text-xs text-zinc-400">Бонусный баланс</p>
+            <p className="mt-1 text-2xl font-black">
+              {bonusBalance !== null ? formatNumber(bonusBalance) : "нет данных"}
+            </p>
+            <p className="mt-1 text-xs text-zinc-500">
+              {summary.loyalty.bonusBalanceSource ?? "ожидаем первый snapshot"}
             </p>
           </div>
-          {reward.expiresAt ? (
-            <p className="mt-3 text-xs text-zinc-400">
-              Действует до {formatDate(reward.expiresAt)}
-            </p>
-          ) : null}
         </div>
       ) : (
         <p className="mt-5 text-sm leading-6 text-zinc-300">
@@ -757,6 +841,13 @@ function clampPercent(value: number) {
 function formatNumber(value: number) {
   return new Intl.NumberFormat("ru-RU", {
     maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function formatSignedNumber(value: number) {
+  return new Intl.NumberFormat("ru-RU", {
+    maximumFractionDigits: 0,
+    signDisplay: "always",
   }).format(value);
 }
 

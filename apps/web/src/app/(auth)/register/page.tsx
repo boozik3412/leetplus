@@ -1,4 +1,5 @@
 import { AuthForm } from "@/components/auth-form";
+import { redirectIfAuthenticated } from "@/lib/auth";
 
 type RegisterPageProps = {
   searchParams: Promise<{
@@ -7,6 +8,8 @@ type RegisterPageProps = {
 };
 
 export default async function RegisterPage({ searchParams }: RegisterPageProps) {
+  await redirectIfAuthenticated();
+
   const { invite } = await searchParams;
   const inviteToken = typeof invite === "string" ? invite : null;
 

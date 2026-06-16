@@ -32,6 +32,8 @@ export function proxy(request: NextRequest) {
 
   if (!token || isExpiredJwt(token)) {
     const loginUrl = new URL("/login", request.url);
+    const returnTo = `${request.nextUrl.pathname}${request.nextUrl.search}`;
+    loginUrl.searchParams.set("returnTo", returnTo);
     const response = NextResponse.redirect(loginUrl);
     response.cookies.delete(authCookieName);
 

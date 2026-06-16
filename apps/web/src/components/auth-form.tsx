@@ -11,6 +11,7 @@ type AuthMode = "login" | "register";
 type AuthFormProps = {
   mode: AuthMode;
   inviteToken?: string | null;
+  returnTo?: string | null;
 };
 
 type FormState = {
@@ -141,7 +142,7 @@ function getErrorMessage(data: unknown) {
   return "Не удалось выполнить запрос";
 }
 
-export function AuthForm({ mode, inviteToken }: AuthFormProps) {
+export function AuthForm({ mode, inviteToken, returnTo }: AuthFormProps) {
   const router = useRouter();
   const isRegister = mode === "register";
   const isInviteRegister = isRegister && Boolean(inviteToken);
@@ -300,7 +301,7 @@ export function AuthForm({ mode, inviteToken }: AuthFormProps) {
           ? landingPath
           : isRegister
           ? `/verify-email?email=${encodeURIComponent(form.email)}`
-          : landingPath,
+          : returnTo ?? landingPath,
       );
     } catch {
       setError("Backend недоступен. Проверьте, что API запущен.");

@@ -1,7 +1,23 @@
 import Link from "next/link";
 import { AuthForm } from "@/components/auth-form";
+import { redirectIfAuthenticated, sanitizeReturnTo } from "@/lib/auth";
 
-export default function LoginPage() {
+type LoginPageProps = {
+  searchParams: Promise<{
+    returnTo?: string | string[];
+  }>;
+};
+
+function searchParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+export default async function LoginPage({ searchParams }: LoginPageProps) {
+  const params = await searchParams;
+  const returnTo = sanitizeReturnTo(searchParam(params.returnTo));
+
+  await redirectIfAuthenticated(returnTo);
+
   return (
     <div className="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">
       <div className="mb-6">
@@ -14,7 +30,7 @@ export default function LoginPage() {
         </p>
       </div>
 
-      <AuthForm mode="login" />
+      <AuthForm mode="login" returnTo={returnTo} />
 
       <div className="mt-5 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
         <p className="text-sm font-semibold text-emerald-950">

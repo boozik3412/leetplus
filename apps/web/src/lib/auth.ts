@@ -58,12 +58,28 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
 
 export const getCurrentUserForRequest = cache(fetchCurrentUser);
 
-export async function redirectIfAuthenticated() {
+export async function redirectIfAuthenticated(returnTo?: string | null) {
   const user = await getCurrentUserForRequest();
 
   if (user) {
-    redirect(getDefaultLandingPath(user));
+    redirect(sanitizeReturnTo(returnTo) ?? getDefaultLandingPath(user));
   }
+}
+
+export function sanitizeReturnTo(value?: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  if (!value.startsWith("/") || value.startsWith("//")) {
+    return null;
+  }
+
+  if (value.startsWith("/login") || value.startsWith("/register")) {
+    return null;
+  }
+
+  return value;
 }
 
 export async function requireCurrentUser() {

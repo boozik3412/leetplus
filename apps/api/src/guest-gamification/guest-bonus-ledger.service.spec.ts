@@ -38,7 +38,11 @@ function createPrismaMock() {
       updateMany: jest.fn(),
     },
     guestGameDelivery: {
+      findMany: jest.fn(),
       updateMany: jest.fn(),
+    },
+    guestGameDeliveryEvent: {
+      createMany: jest.fn(),
     },
     guest: {
       findFirst: jest.fn(),
@@ -76,7 +80,9 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   prisma.guestGameReward.count.mockResolvedValue(0);
   prisma.guestGameReward.findMany.mockResolvedValue([]);
   prisma.guestGameReward.updateMany.mockResolvedValue({ count: 0 });
+  prisma.guestGameDelivery.findMany.mockResolvedValue([]);
   prisma.guestGameDelivery.updateMany.mockResolvedValue({ count: 0 });
+  prisma.guestGameDeliveryEvent.createMany.mockResolvedValue({ count: 0 });
   prisma.guest.findFirst.mockResolvedValue(null);
   prisma.$transaction.mockImplementation((callback) => callback(prisma));
 
@@ -784,7 +790,21 @@ describe('GuestBonusLedgerService', () => {
 
     prisma.guestBonusLedgerEntry.findFirst.mockResolvedValue(entry);
     prisma.guestGameReward.updateMany.mockResolvedValue({ count: 1 });
-    prisma.guestGameDelivery.updateMany.mockResolvedValue({ count: 2 });
+    prisma.guestGameDelivery.findMany.mockResolvedValue([
+      {
+        id: 'delivery-cancel-1',
+        rewardId: 'reward-cancel-1',
+        status: 'READY',
+        channel: 'TELEGRAM',
+      },
+      {
+        id: 'delivery-cancel-2',
+        rewardId: 'reward-cancel-1',
+        status: 'FAILED',
+        channel: 'MAX',
+      },
+    ]);
+    prisma.guestGameDelivery.updateMany.mockResolvedValue({ count: 1 });
 
     const result = await service.cancelEntry(user, 'ledger-cancel-1', {
       reason: 'Wrong guest match',
@@ -813,7 +833,7 @@ describe('GuestBonusLedgerService', () => {
     expect(prisma.guestGameDelivery.updateMany).toHaveBeenCalledWith({
       where: {
         tenantId: user.tenantId,
-        rewardId: 'reward-cancel-1',
+        id: 'delivery-cancel-1',
         status: { notIn: ['SENT', 'CANCELED'] },
       },
       data: expect.objectContaining({
@@ -821,6 +841,42 @@ describe('GuestBonusLedgerService', () => {
         canceledAt: expect.any(Date),
         note: expect.stringContaining('Wrong guest match'),
       }),
+    });
+    expect(prisma.guestGameDelivery.updateMany).toHaveBeenCalledWith({
+      where: {
+        tenantId: user.tenantId,
+        id: 'delivery-cancel-2',
+        status: { notIn: ['SENT', 'CANCELED'] },
+      },
+      data: expect.objectContaining({
+        status: 'CANCELED',
+        canceledAt: expect.any(Date),
+        note: expect.stringContaining('Wrong guest match'),
+      }),
+    });
+    expect(prisma.guestGameDeliveryEvent.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          tenantId: user.tenantId,
+          deliveryId: 'delivery-cancel-1',
+          rewardId: 'reward-cancel-1',
+          actorUserId: user.id,
+          eventType: 'DELIVERY_CANCELED_BY_LEDGER',
+          fromStatus: 'READY',
+          toStatus: 'CANCELED',
+          channel: 'TELEGRAM',
+          note: expect.stringContaining('Wrong guest match'),
+          payload: expect.objectContaining({
+            ledgerEntryId: 'ledger-cancel-1',
+            reason: 'Wrong guest match',
+          }),
+        }),
+        expect.objectContaining({
+          deliveryId: 'delivery-cancel-2',
+          fromStatus: 'FAILED',
+          channel: 'MAX',
+        }),
+      ],
     });
     expect(result).toMatchObject({
       ledgerEntryId: 'ledger-cancel-1',
@@ -830,5 +886,30 @@ describe('GuestBonusLedgerService', () => {
       note: expect.stringContaining('reward canceled: 1'),
     });
     expect(result.note).toContain('deliveries canceled: 2');
+  });
+
+  it('blocks cancellation while a ledger entry has a fresh processing lock', async () => {
+    const { service, prisma } = createService({
+      LANGAME_BONUS_ACCRUAL_STALE_LOCK_MINUTES: '15',
+    });
+    const entry = ledgerEntry({
+      id: 'ledger-processing-1',
+      rewardId: 'reward-processing-1',
+      status: 'PROCESSING',
+      lockedAt: new Date(Date.now() - 60 * 1000),
+    });
+
+    prisma.guestBonusLedgerEntry.findFirst.mockResolvedValue(entry);
+
+    await expect(
+      service.cancelEntry(user, 'ledger-processing-1', {
+        reason: 'Operator retry',
+      }),
+    ).rejects.toThrow('обрабатывается');
+
+    expect(prisma.guestBonusLedgerEntry.update).not.toHaveBeenCalled();
+    expect(prisma.guestGameReward.updateMany).not.toHaveBeenCalled();
+    expect(prisma.guestGameDelivery.updateMany).not.toHaveBeenCalled();
+    expect(prisma.guestGameDeliveryEvent.createMany).not.toHaveBeenCalled();
   });
 });

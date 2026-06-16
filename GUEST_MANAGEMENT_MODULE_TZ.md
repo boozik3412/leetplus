@@ -1557,7 +1557,7 @@ V2:
 
 Связка отдельного `GuestGameProfile` с синхронизированным гостем Langame не создает новую запись в общем массиве гостей: LeetPlus сопоставляет по подтвержденному `phoneHash`, протягивает `guestId` в накопленные игровые награды, события, delivery и bonus ledger, а `GAME_PROFILE_LINKED` и ответ ручной проверки Langame хранят безопасные счетчики backfill без raw phone.
 
-Отмена ledger-операции до подтверждения Langame считается terminal для связанного автоматического reward: LeetPlus переводит ledger, approved-награду и непосланные delivery в `CANCELED`, чтобы публичный кошелек не показывал бонус как готовый к выдаче после остановки внешнего начисления.
+Отмена ledger-операции до подтверждения Langame считается terminal для связанного автоматического reward: LeetPlus не дает отменить свежий `PROCESSING` lock, а pending/failed/stale-processing записи переводят ledger, approved-награду и непосланные delivery в `CANCELED` с событием `DELIVERY_CANCELED_BY_LEDGER`, чтобы публичный кошелек не показывал бонус как готовый к выдаче после остановки внешнего начисления.
 
 Критерии приемки:
 

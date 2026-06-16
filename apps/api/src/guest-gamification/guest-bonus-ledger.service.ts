@@ -477,6 +477,16 @@ export class GuestBonusLedgerService {
       );
     }
 
+    const config = this.resolveConfig();
+    if (
+      row.status === 'PROCESSING' &&
+      bonusLedgerLockIsFresh(row.lockedAt, config.staleLockMinutes)
+    ) {
+      throw new BadRequestException(
+        'Ledger-запись сейчас обрабатывается worker-ом. Дождитесь завершения или протухания lock перед отменой.',
+      );
+    }
+
     const canceled = await this.prisma.$transaction(async (tx) => {
       const canceledAt = new Date();
       await tx.guestBonusLedgerEntry.update({
@@ -506,26 +516,68 @@ export class GuestBonusLedgerService {
         },
       });
 
-      const deliveries =
-        rewards.count > 0
-          ? await tx.guestGameDelivery.updateMany({
-              where: {
-                tenantId: user.tenantId,
-                rewardId: row.rewardId,
-                status: { notIn: ['SENT', 'CANCELED'] },
-              },
-              data: {
-                status: 'CANCELED',
-                canceledAt,
-                note: truncate(
-                  `Отменено вместе с bonus ledger ${row.id}: ${reason}`,
-                  1000,
-                ),
-              },
-            })
-          : { count: 0 };
+      let deliveryCount = 0;
 
-      return { rewards: rewards.count, deliveries: deliveries.count };
+      if (rewards.count > 0) {
+        const deliveries = await tx.guestGameDelivery.findMany({
+          where: {
+            tenantId: user.tenantId,
+            rewardId: row.rewardId,
+            status: { notIn: ['SENT', 'CANCELED'] },
+          },
+          select: {
+            id: true,
+            rewardId: true,
+            status: true,
+            channel: true,
+          },
+        });
+        const eventData: Prisma.GuestGameDeliveryEventCreateManyInput[] = [];
+        const note = truncate(
+          `Отменено вместе с bonus ledger ${row.id}: ${reason}`,
+          1000,
+        );
+
+        for (const delivery of deliveries) {
+          const updated = await tx.guestGameDelivery.updateMany({
+            where: {
+              id: delivery.id,
+              tenantId: user.tenantId,
+              status: { notIn: ['SENT', 'CANCELED'] },
+            },
+            data: {
+              status: 'CANCELED',
+              canceledAt,
+              note,
+            },
+          });
+
+          if (updated.count > 0) {
+            deliveryCount += updated.count;
+            eventData.push({
+              tenantId: user.tenantId,
+              deliveryId: delivery.id,
+              rewardId: delivery.rewardId,
+              actorUserId: user.id,
+              eventType: 'DELIVERY_CANCELED_BY_LEDGER',
+              fromStatus: delivery.status,
+              toStatus: 'CANCELED',
+              channel: delivery.channel,
+              note,
+              payload: {
+                ledgerEntryId: row.id,
+                reason,
+              },
+            });
+          }
+        }
+
+        if (eventData.length > 0) {
+          await tx.guestGameDeliveryEvent.createMany({ data: eventData });
+        }
+      }
+
+      return { rewards: rewards.count, deliveries: deliveryCount };
     });
 
     return {
@@ -1298,6 +1350,24 @@ function bonusLedgerCancelNote(
   ].filter(Boolean);
 
   return details.length ? `${reason} ${details.join(', ')}.` : reason;
+}
+
+function bonusLedgerLockIsFresh(
+  lockedAt: Date | string | null | undefined,
+  staleLockMinutes: number,
+) {
+  if (!lockedAt) {
+    return false;
+  }
+
+  const value = lockedAt instanceof Date ? lockedAt : new Date(lockedAt);
+  const lockedAtMs = value.getTime();
+
+  if (!Number.isFinite(lockedAtMs)) {
+    return false;
+  }
+
+  return Date.now() - lockedAtMs < staleLockMinutes * 60 * 1000;
 }
 
 function normalizeLangamePhone(value: string | null) {

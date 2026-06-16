@@ -445,6 +445,32 @@ function pilotReadinessInput(overrides: Record<string, unknown> = {}) {
         reconciliationMismatch: 0,
       },
     },
+    guestLogCatalog: {
+      items: [
+        {
+          type: 'session_start',
+          normalizedType: 'session_start',
+          count: 12,
+          latestAt: '2026-06-15T08:00:00.000Z',
+          domains: [
+            {
+              domain: '1337.langame.ru',
+              provider: 'LANGAME',
+              count: 12,
+              latestAt: '2026-06-15T08:00:00.000Z',
+            },
+          ],
+          mapping: null,
+        },
+      ],
+      mappings: [],
+      summary: {
+        types: 1,
+        logs: 12,
+        domains: 1,
+        latestAt: '2026-06-15T08:00:00.000Z',
+      },
+    },
     pilotLedgerPreflight: pilotLedgerPreflightFixture(),
     communicationQueue: {
       summary: {
@@ -787,6 +813,15 @@ describe('GuestGamificationService', () => {
         blockers: [],
       });
       expect(readiness.runbook.nextAction).toContain('dry-run');
+      expect(readiness.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            key: 'GUEST_LOGS',
+            status: 'READY',
+            metric: '12 логов / 1 типов',
+          }),
+        ]),
+      );
       expect(readiness.runbook.actions).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -800,6 +835,41 @@ describe('GuestGamificationService', () => {
           expect.objectContaining({
             key: 'DISPATCH_BONUS_LEDGER',
             enabled: false,
+          }),
+        ]),
+      );
+    });
+
+    it('shows empty guests/logs as a pilot data warning without blocking dry-run', () => {
+      const { service } = createService();
+
+      const readiness = (service as any).buildPilotReadiness(
+        pilotReadinessInput({
+          guestLogCatalog: {
+            items: [],
+            mappings: [],
+            summary: {
+              types: 0,
+              logs: 0,
+              domains: 0,
+              latestAt: null,
+            },
+          },
+        }),
+      );
+
+      expect(readiness.runbook).toMatchObject({
+        stage: 'DRY_RUN',
+        canRunDryRun: true,
+      });
+      expect(readiness.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            key: 'GUEST_LOGS',
+            status: 'BLOCKED',
+            ready: false,
+            metric: '0 логов',
+            nextAction: expect.stringContaining('/sync'),
           }),
         ]),
       );

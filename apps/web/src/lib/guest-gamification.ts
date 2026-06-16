@@ -690,6 +690,7 @@ export type GuestGamePilotReadinessItem = {
     | "GAME_PROFILE"
     | "LANGAME_MATCH"
     | "ACTIVE_RULES"
+    | "GUEST_LOGS"
     | "TEST_EVENT"
     | "REWARD_QUEUE"
     | "BONUS_LEDGER"

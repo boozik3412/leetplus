@@ -3146,6 +3146,9 @@ function PilotReadinessCard({
             <p className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
               {item.note}
             </p>
+            <p className="mt-2 rounded-lg border border-zinc-200 bg-white px-2 py-2 text-xs font-semibold leading-5 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300">
+              Следующее: {item.nextAction}
+            </p>
           </article>
         ))}
       </div>

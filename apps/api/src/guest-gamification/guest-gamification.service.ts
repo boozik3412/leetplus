@@ -1151,6 +1151,7 @@ export type GuestGamePilotReadinessItem = {
     | 'GAME_PROFILE'
     | 'LANGAME_MATCH'
     | 'ACTIVE_RULES'
+    | 'GUEST_LOGS'
     | 'TEST_EVENT'
     | 'REWARD_QUEUE'
     | 'BONUS_LEDGER'
@@ -2571,6 +2572,7 @@ export class GuestGamificationService {
         events,
         integrationReadiness,
         bonusLedgerAudit,
+        guestLogCatalog,
         pilotLedgerPreflight,
         communicationQueue,
         deliveryOutbox,
@@ -2867,6 +2869,7 @@ export class GuestGamificationService {
     events,
     integrationReadiness,
     bonusLedgerAudit,
+    guestLogCatalog,
     pilotLedgerPreflight,
     communicationQueue,
     deliveryOutbox,
@@ -2881,6 +2884,7 @@ export class GuestGamificationService {
     events: GuestGameEvent[];
     integrationReadiness: GuestGameIntegrationReadiness;
     bonusLedgerAudit: GuestGameBonusLedgerAudit;
+    guestLogCatalog: GuestGameGuestLogCatalog;
     pilotLedgerPreflight: GuestGamePilotLedgerPreflight;
     communicationQueue: GuestGameCommunicationQueue;
     deliveryOutbox: GuestGameDeliveryOutbox;
@@ -2900,6 +2904,12 @@ export class GuestGamificationService {
     const activeSeasons = seasons.filter((item) => item.status === 'ACTIVE');
     const activeRuleCount =
       activeLootBoxes.length + activeMissions.length + activeSeasons.length;
+    const guestLogTypes = guestLogCatalog.summary.types;
+    const guestLogRows = guestLogCatalog.summary.logs;
+    const guestLogDomains = guestLogCatalog.summary.domains;
+    const guestLogMappings = guestLogCatalog.mappings.length;
+    const guestLogLatestAt = guestLogCatalog.summary.latestAt;
+    const guestLogsReady = guestLogTypes > 0 && guestLogRows > 0;
     const pilotRewards = targetStoreId
       ? rewards.filter(
           (reward) => !reward.store || reward.store.id === targetStoreId,
@@ -3051,6 +3061,34 @@ export class GuestGamificationService {
         nextAction: activeRuleCount
           ? 'Запустить dry-run по тестовому профилю и пилотному клубу.'
           : 'Создать простую миссию или лутбокс для клуба 1337.',
+      },
+      {
+        key: 'GUEST_LOGS',
+        title: 'Факты guests/logs',
+        status: guestLogsReady
+          ? 'READY'
+          : guestLogMappings
+            ? 'PARTIAL'
+            : 'BLOCKED',
+        statusLabel: guestLogsReady
+          ? 'типы найдены'
+          : guestLogMappings
+            ? 'ждет sync'
+            : 'пусто',
+        ready: guestLogsReady,
+        metric: guestLogsReady
+          ? `${guestLogRows} логов / ${guestLogTypes} типов`
+          : guestLogMappings
+            ? `${guestLogMappings} сопоставлений`
+            : '0 логов',
+        note: guestLogsReady
+          ? `Каталог событий готов для правил и anti-fraud: ${guestLogDomains} источников, последнее событие ${guestLogLatestAt ?? 'без даты'}.`
+          : guestLogMappings
+            ? 'Словарь типов уже настроен, но сохраненных фактов guests/logs пока нет.'
+            : 'Без сохраненных guests/logs управляющий не видит реальные raw-типы событий для квестов и anti-fraud.',
+        nextAction: guestLogsReady
+          ? 'Скачать CSV каталога и выбрать реальные типы для правил 1337.'
+          : 'На /sync включить расширенную проверку guests/logs и дождаться сохраненных фактов.',
       },
       {
         key: 'TEST_EVENT',

@@ -516,6 +516,13 @@ export type GuestPortalGameSummary = {
   tenant: GuestPortalPayload["tenant"];
   store: GuestPortalPayload["store"];
   profile: GuestPortalPayload["profile"];
+  referral: {
+    status: "READY";
+    code: string;
+    link: string;
+    shareText: string;
+    channelHint: string;
+  };
   account: {
     guestFound: boolean;
     state: GuestPortalPayload["guestSnapshot"]["participation"]["accountState"];

@@ -8,6 +8,7 @@ type PlayPageProps = {
   searchParams: Promise<{
     club?: string | string[];
     clubId?: string | string[];
+    ref?: string | string[];
     storeId?: string | string[];
   }>;
 };
@@ -39,6 +40,7 @@ export default async function PlayPage({ searchParams }: PlayPageProps) {
     <PlayRegistrationClient
       initialClubId={searchParam(params.clubId) ?? searchParam(params.club)}
       initialDirectory={directory}
+      initialReferralCode={searchParam(params.ref)}
       initialStoreId={searchParam(params.storeId)}
       loadError={loadError}
     />

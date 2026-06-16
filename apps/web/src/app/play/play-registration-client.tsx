@@ -20,6 +20,7 @@ import type {
 type PlayRegistrationClientProps = {
   initialDirectory: GuestPortalGamificationClubDirectory;
   initialClubId: string | null;
+  initialReferralCode: string | null;
   initialStoreId: string | null;
   loadError: string | null;
 };
@@ -45,6 +46,7 @@ type VerificationStatus =
 export function PlayRegistrationClient({
   initialDirectory,
   initialClubId,
+  initialReferralCode,
   initialStoreId,
   loadError,
 }: PlayRegistrationClientProps) {
@@ -93,6 +95,10 @@ export function PlayRegistrationClient({
   const [isStartingUserCallAuth, setStartingUserCallAuth] = useState(false);
   const [isPollingUserCallAuth, setPollingUserCallAuth] = useState(false);
   const [isCheckingLangame, setCheckingLangame] = useState(false);
+  const referralCode = useMemo(
+    () => normalizeReferralCode(initialReferralCode),
+    [initialReferralCode],
+  );
 
   const visibleClubs = useMemo(() => {
     const needle = normalizeSearch(query);
@@ -682,6 +688,17 @@ export function PlayRegistrationClient({
             </Link>
           </div>
         </header>
+
+        {referralCode ? (
+          <section className="mt-4 rounded-lg border border-cyan-300/25 bg-cyan-300/[0.08] px-4 py-3 text-sm text-cyan-50">
+            <p className="font-black">Вы открыли приглашение в LeetPlus Play</p>
+            <p className="mt-1 leading-6 text-cyan-100/85">
+              Код {referralCode} сохранен в ссылке. Выберите клуб, подтвердите
+              телефон и начните игру; начисление реферального бонуса будет
+              подключаться отдельным правилом Guest Game Hub.
+            </p>
+          </section>
+        ) : null}
 
         <ActiveGameSessionPanel
           message={activeSessionMessage}
@@ -1958,6 +1975,16 @@ async function readMessage(response: Response) {
   } catch {
     return "Ошибка запроса";
   }
+}
+
+function normalizeReferralCode(value: string | null) {
+  const normalized = value?.trim() ?? "";
+
+  if (!normalized) {
+    return null;
+  }
+
+  return normalized.slice(0, 80);
 }
 
 function otpDeliveryStatusLabel(

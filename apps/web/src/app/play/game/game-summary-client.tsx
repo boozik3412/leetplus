@@ -361,6 +361,10 @@ function ReadyGameView({
       </section>
 
       <section className="mt-4">
+        <ReferralPanel referral={summary.referral} />
+      </section>
+
+      <section className="mt-4">
         <ProgressPanel progress={summary.progress} />
       </section>
 
@@ -396,6 +400,76 @@ function ReadyGameView({
         <ActivityPanel activity={summary.activity} />
       </section>
     </div>
+  );
+}
+
+function ReferralPanel({
+  referral,
+}: {
+  referral: GuestPortalGameSummary["referral"];
+}) {
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">(
+    "idle",
+  );
+
+  async function copyReferralLink() {
+    try {
+      await navigator.clipboard.writeText(referral.link);
+      setCopyState("copied");
+    } catch {
+      setCopyState("failed");
+    }
+  }
+
+  return (
+    <section
+      id="referral"
+      className="rounded-lg border border-cyan-300/25 bg-cyan-300/[0.08] p-5"
+    >
+      <div className="grid gap-4 lg:grid-cols-[1fr_0.9fr] lg:items-center">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-cyan-200">
+            Рефералка
+          </p>
+          <h2 className="mt-1 text-xl font-black">
+            Пригласите друга в квесты клуба
+          </h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-300">
+            {referral.channelHint}
+          </p>
+        </div>
+
+        <div className="grid gap-2">
+          <div className="rounded-lg border border-white/10 bg-zinc-950/50 px-3 py-2">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+              Код
+            </p>
+            <p className="mt-1 break-all font-mono text-sm font-bold text-cyan-100">
+              {referral.code}
+            </p>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <button
+              type="button"
+              onClick={copyReferralLink}
+              className="rounded-lg bg-cyan-200 px-4 py-3 text-sm font-black text-zinc-950 transition hover:bg-cyan-100"
+            >
+              {copyState === "copied"
+                ? "Ссылка скопирована"
+                : copyState === "failed"
+                  ? "Не удалось скопировать"
+                  : "Скопировать ссылку"}
+            </button>
+            <a
+              href={referral.link}
+              className="rounded-lg border border-cyan-200/35 px-4 py-3 text-center text-sm font-black text-cyan-100 transition hover:border-cyan-100 hover:text-white"
+            >
+              Открыть ссылку
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 

@@ -62,6 +62,7 @@ const GAME_PROFILE_LINKED_EVENT_TYPE = 'GAME_PROFILE_LINKED';
 const GAME_PROFILE_LINK_SOURCE = 'GUEST_PORTAL_PROFILE_LINK';
 const GAME_SUMMARY_MISSION_LIMIT = 6;
 const GAME_SUMMARY_MISSION_HISTORY_LIMIT = 12;
+const GUEST_GAME_REFERRAL_CODE_PREFIX = 'lp_ref_';
 type JwtExpiresIn = NonNullable<JwtSignOptions['expiresIn']>;
 type GuestPortalOtpDeliveryChannel = 'DEV' | 'SMS' | 'TELEGRAM' | 'MAX';
 type GuestPortalOtpDeliveryStatus =
@@ -485,6 +486,13 @@ export type GuestPortalGameSummary = {
   tenant: GuestPortalPayload['tenant'];
   store: GuestPortalPayload['store'];
   profile: GuestPortalPayload['profile'];
+  referral: {
+    status: 'READY';
+    code: string;
+    link: string;
+    shareText: string;
+    channelHint: string;
+  };
   account: {
     guestFound: boolean;
     state: GuestPortalGuestSnapshot['participation']['accountState'];
@@ -2322,7 +2330,10 @@ export class GuestPortalService {
   async getGameSummary(
     authorization: string | undefined,
   ): Promise<GuestPortalGameSummary> {
-    return buildGameSummaryFromPortal(await this.getSession(authorization));
+    return buildGameSummaryFromPortal(await this.getSession(authorization), {
+      referralSecret: this.referralSecret(),
+      webUrl: this.publicWebUrl(),
+    });
   }
 
   async checkIn(
@@ -4941,10 +4952,29 @@ export class GuestPortalService {
 
     return secret;
   }
+
+  private referralSecret() {
+    return (
+      this.configService.get<string>('GUEST_GAME_REFERRAL_SECRET')?.trim() ||
+      this.configService.get<string>('JWT_SECRET')?.trim() ||
+      this.configService.get<string>('APP_ENCRYPTION_KEY')?.trim() ||
+      'guest-game-referral-local-secret'
+    );
+  }
+
+  private publicWebUrl() {
+    return (
+      this.configService.get<string>('WEB_URL')?.trim() ||
+      this.configService.get<string>('FRONTEND_URL')?.trim() ||
+      this.configService.get<string>('NEXT_PUBLIC_WEB_URL')?.trim() ||
+      'http://localhost:3000'
+    );
+  }
 }
 
 function buildGameSummaryFromPortal(
   portal: GuestPortalPayload,
+  options: { referralSecret: string; webUrl: string },
 ): GuestPortalGameSummary {
   const recentRewards = [...portal.gamification.rewards]
     .sort(
@@ -5006,6 +5036,7 @@ function buildGameSummaryFromPortal(
     tenant: portal.tenant,
     store: portal.store,
     profile: portal.profile,
+    referral: buildGameReferral(portal, options),
     account: {
       guestFound: portal.guestFound,
       state: portal.guestSnapshot.participation.accountState,
@@ -5090,6 +5121,63 @@ function buildGameSummaryFromPortal(
       },
     },
   };
+}
+
+function buildGameReferral(
+  portal: GuestPortalPayload,
+  options: { referralSecret: string; webUrl: string },
+): GuestPortalGameSummary['referral'] {
+  const code = buildGameReferralCode(portal, options.referralSecret);
+  const clubId = `${portal.tenant.slug}:${portal.store.publicSlug ?? portal.store.id}`;
+  const link = buildPlayReferralLink(options.webUrl, clubId, code);
+
+  return {
+    status: 'READY',
+    code,
+    link,
+    shareText: `Я участвую в квестах ${portal.store.name}. Заходи в LeetPlus, выбирай клуб и забирай бонусы: ${link}`,
+    channelHint:
+      'Ссылку можно отправить в Telegram, MAX или личным сообщением; raw phone и внутренние id гостя в нее не попадают.',
+  };
+}
+
+function buildGameReferralCode(portal: GuestPortalPayload, secret: string) {
+  const source = [
+    'guest-game-referral-v1',
+    portal.tenant.slug,
+    portal.store.id,
+    portal.store.publicSlug ?? '',
+    portal.profile.id,
+  ].join(':');
+  const digest = toBase64Url(
+    createHmac('sha256', secret).update(source).digest(),
+  );
+
+  return `${GUEST_GAME_REFERRAL_CODE_PREFIX}${digest.slice(0, 22)}`;
+}
+
+function buildPlayReferralLink(webUrl: string, clubId: string, code: string) {
+  const baseUrl = safeWebUrl(webUrl);
+  const url = new URL('/play', baseUrl);
+  url.searchParams.set('clubId', clubId);
+  url.searchParams.set('ref', code);
+  return url.toString();
+}
+
+function safeWebUrl(webUrl: string) {
+  try {
+    return new URL(webUrl).toString();
+  } catch {
+    return 'http://localhost:3000/';
+  }
+}
+
+function toBase64Url(value: Buffer) {
+  return value
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
 }
 
 function mapGameSummaryMission(

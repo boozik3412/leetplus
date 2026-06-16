@@ -523,7 +523,10 @@ function portalPayloadFixture() {
 describe('GuestPortalService', () => {
   describe('getGameSummary', () => {
     it('returns compact game state from the existing guest session payload', async () => {
-      const { service } = createService();
+      const { service } = createService({
+        GUEST_GAME_REFERRAL_SECRET: 'referral-secret',
+        WEB_URL: 'https://leetplus.ru',
+      });
       const portal = portalPayloadFixture();
       const getSession = jest
         .spyOn(service, 'getSession')
@@ -536,6 +539,11 @@ describe('GuestPortalService', () => {
         tenant: portal.tenant,
         store: portal.store,
         profile: portal.profile,
+        referral: {
+          status: 'READY',
+          code: expect.stringMatching(/^lp_ref_[A-Za-z0-9_-]{22}$/),
+          channelHint: expect.stringContaining('raw phone'),
+        },
         account: {
           guestFound: true,
           state: 'LANGAME_SYNCED',
@@ -746,6 +754,14 @@ describe('GuestPortalService', () => {
         },
       });
       expect(summary.generatedAt).toEqual(expect.any(String));
+      expect(summary.referral.link).toContain('https://leetplus.ru/play?');
+      expect(summary.referral.link).toContain('clubId=demo%3Aclub-1337');
+      expect(summary.referral.link).toContain(
+        `ref=${encodeURIComponent(summary.referral.code)}`,
+      );
+      expect(summary.referral.shareText).toContain(summary.referral.link);
+      expect(summary.referral.link).not.toContain(portal.profile.id);
+      expect(summary.referral.link).not.toContain(portal.profile.contactMasked);
       expect(summary.rewards.recent).toHaveLength(2);
       expect(summary.rewards.recent[0]).not.toHaveProperty('status');
       expect(summary.rewards.bonusHistory.items).toHaveLength(1);

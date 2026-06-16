@@ -351,6 +351,14 @@ export type GuestPortalTelegramWebhookResponse = {
           remove_keyboard: boolean;
         };
   };
+  replyDispatch?: {
+    provider: 'TELEGRAM';
+    status: 'DISABLED' | 'SKIPPED' | 'SENT' | 'FAILED';
+    chatIdMasked: string | null;
+    message: string;
+    requiredEnv?: string[];
+    error?: string;
+  };
 };
 
 export type GuestPortalPayload = {
@@ -1221,14 +1229,38 @@ export class GuestPortalService {
     const otpConfig = guestPortalOtpDeliveryConfig(this.configService);
     const devOtpEnabled = this.isDevOtpEnabled();
     const telegramBotUsername = this.telegramBotUsername();
-    const telegramAuthReady = Boolean(
-      telegramBotUsername &&
-      configString(
-        this.configService,
-        'GUEST_GAME_TELEGRAM_LINK_SECRET',
-        'GUEST_GAME_TELEGRAM_WEBHOOK_SECRET',
-      ),
+    const telegramWebhookSecret = configString(
+      this.configService,
+      'GUEST_GAME_TELEGRAM_LINK_SECRET',
+      'GUEST_GAME_TELEGRAM_WEBHOOK_SECRET',
     );
+    const telegramReplySenderEnabled = configFlag(
+      this.configService,
+      'GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED',
+    );
+    const telegramReplySenderToken = configString(
+      this.configService,
+      'GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_BOT_TOKEN',
+      'GUEST_GAME_TELEGRAM_BOT_TOKEN',
+      'TELEGRAM_BOT_TOKEN',
+    );
+    const telegramAuthRequiredEnv = [
+      ...(telegramBotUsername ? [] : ['GUEST_GAME_TELEGRAM_BOT_USERNAME']),
+      ...(telegramWebhookSecret
+        ? []
+        : [
+            'GUEST_GAME_TELEGRAM_LINK_SECRET or GUEST_GAME_TELEGRAM_WEBHOOK_SECRET',
+          ]),
+      ...(telegramReplySenderEnabled
+        ? []
+        : ['GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED']),
+      ...(telegramReplySenderToken
+        ? []
+        : [
+            'GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_BOT_TOKEN or GUEST_GAME_TELEGRAM_BOT_TOKEN',
+          ]),
+    ];
+    const telegramAuthReady = telegramAuthRequiredEnv.length === 0;
     const smsReady =
       devOtpEnabled ||
       (otpConfig.realSendEnabled &&
@@ -1253,12 +1285,7 @@ export class GuestPortalService {
             ? 'Использовать Telegram contact-share как основной вход на /play; SMS оставить резервом.'
             : 'Настроить Telegram bot username/link secret и добавить первичный Telegram-login с передачей телефона.',
           botUsername: telegramBotUsername,
-          requiredEnv: telegramAuthReady
-            ? []
-            : [
-                'GUEST_GAME_TELEGRAM_BOT_USERNAME',
-                'GUEST_GAME_TELEGRAM_LINK_SECRET or GUEST_GAME_TELEGRAM_WEBHOOK_SECRET',
-              ],
+          requiredEnv: telegramAuthRequiredEnv,
         },
         {
           rank: 2,
@@ -2337,7 +2364,10 @@ export class GuestPortalService {
       );
 
       if (authStart) {
-        return authStart;
+        return this.dispatchTelegramWebhookReply(
+          authStart,
+          update.telegramChatId,
+        );
       }
 
       try {
@@ -2370,7 +2400,12 @@ export class GuestPortalService {
     }
 
     if (update.contactPhone) {
-      return this.completeTelegramAuthContact(update, telegramIdentityMasked);
+      const response = await this.completeTelegramAuthContact(
+        update,
+        telegramIdentityMasked,
+      );
+
+      return this.dispatchTelegramWebhookReply(response, update.telegramChatId);
     }
 
     return {
@@ -2708,6 +2743,90 @@ export class GuestPortalService {
         remove_keyboard: true,
       },
     };
+  }
+
+  private async dispatchTelegramWebhookReply(
+    response: GuestPortalTelegramWebhookResponse,
+    telegramChatId: string,
+  ): Promise<GuestPortalTelegramWebhookResponse> {
+    if (!response.reply) {
+      return response;
+    }
+
+    const chatIdMasked = response.reply.chatIdMasked;
+
+    if (
+      !configFlag(
+        this.configService,
+        'GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED',
+      )
+    ) {
+      return {
+        ...response,
+        replyDispatch: {
+          provider: 'TELEGRAM',
+          status: 'DISABLED',
+          chatIdMasked,
+          message:
+            'Telegram webhook reply sender is disabled. An external adapter can still use the reply payload.',
+          requiredEnv: ['GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED'],
+        },
+      };
+    }
+
+    const token = configString(
+      this.configService,
+      'GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_BOT_TOKEN',
+      'GUEST_GAME_TELEGRAM_BOT_TOKEN',
+      'TELEGRAM_BOT_TOKEN',
+    );
+
+    if (!token) {
+      return {
+        ...response,
+        replyDispatch: {
+          provider: 'TELEGRAM',
+          status: 'SKIPPED',
+          chatIdMasked,
+          message:
+            'Telegram webhook reply sender is enabled, but bot token is not configured.',
+          requiredEnv: [
+            'GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_BOT_TOKEN or GUEST_GAME_TELEGRAM_BOT_TOKEN',
+          ],
+        },
+      };
+    }
+
+    try {
+      await sendTelegramWebhookReply({
+        token,
+        chatId: telegramChatId,
+        text: response.reply.text,
+        replyMarkup: response.reply.replyMarkup,
+      });
+
+      return {
+        ...response,
+        replyDispatch: {
+          provider: 'TELEGRAM',
+          status: 'SENT',
+          chatIdMasked,
+          message: 'Telegram webhook reply was sent by LeetPlus API.',
+        },
+      };
+    } catch (error) {
+      return {
+        ...response,
+        replyDispatch: {
+          provider: 'TELEGRAM',
+          status: 'FAILED',
+          chatIdMasked,
+          message:
+            'Telegram webhook reply sender failed after processing the auth state.',
+          error: safeDeliveryErrorMessage(error),
+        },
+      };
+    }
   }
 
   private async unsubscribeTelegramWebhookProfile(
@@ -4991,6 +5110,54 @@ async function sendTelegramOtpDelivery({
   if (!response.ok || !ok) {
     throw new Error(
       `Telegram OTP failed: ${providerErrorText(payload) || response.status}`,
+    );
+  }
+
+  return payload;
+}
+
+async function sendTelegramWebhookReply({
+  token,
+  chatId,
+  text,
+  replyMarkup,
+}: {
+  token: string;
+  chatId: string;
+  text: string;
+  replyMarkup?: NonNullable<
+    GuestPortalTelegramWebhookResponse['reply']
+  >['replyMarkup'];
+}) {
+  const body: Record<string, unknown> = {
+    chat_id: chatId,
+    text,
+    disable_web_page_preview: true,
+  };
+
+  if (replyMarkup) {
+    body.reply_markup = replyMarkup;
+  }
+
+  const response = await fetch(
+    `https://api.telegram.org/bot${encodeURIComponent(token)}/sendMessage`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+  );
+  const payload = await safeJson(response);
+  const ok =
+    payload && typeof payload === 'object' && 'ok' in payload
+      ? Boolean((payload as { ok?: unknown }).ok)
+      : response.ok;
+
+  if (!response.ok || !ok) {
+    throw new Error(
+      `Telegram webhook reply failed: ${
+        providerErrorText(payload) || response.status
+      }`,
     );
   }
 

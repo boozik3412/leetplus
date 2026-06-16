@@ -1083,6 +1083,88 @@ describe('GuestPortalService', () => {
       });
     });
 
+    it('sends Telegram auth reply when webhook sender is enabled', async () => {
+      const fetchMock = jest.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(
+          JSON.stringify({ ok: true, result: { message_id: 777 } }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        ),
+      );
+      const { prisma, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+        GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+        GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED: 'true',
+        GUEST_GAME_TELEGRAM_BOT_TOKEN: 'telegram-token',
+      });
+      const codeHash = createHmac('sha256', 'test-secret')
+        .update('telegram-link:ABCDEF1234')
+        .digest('hex');
+
+      prisma.guestGameTelegramLinkChallenge.findFirst.mockResolvedValue({
+        id: 'telegram-auth-1',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        profileId: 'pending-profile-1',
+        codeHash,
+        status: 'AUTH_PENDING',
+        expiresAt: new Date(Date.now() + 60_000),
+        profile: {
+          id: 'pending-profile-1',
+          status: 'PENDING_TELEGRAM_AUTH',
+        },
+      });
+
+      try {
+        const result = await service.handleTelegramWebhook('telegram-secret', {
+          message: {
+            text: `/start lp_ABCDEF1234`,
+            chat: { id: 123456 },
+            from: { id: 123456, username: 'player_one' },
+          },
+        });
+
+        expect(result.replyDispatch).toMatchObject({
+          provider: 'TELEGRAM',
+          status: 'SENT',
+          chatIdMasked: 'ch...56',
+        });
+        expect(fetchMock).toHaveBeenCalledWith(
+          'https://api.telegram.org/bottelegram-token/sendMessage',
+          expect.objectContaining({
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: expect.any(String),
+          }),
+        );
+
+        const requestBody = JSON.parse(
+          fetchMock.mock.calls[0][1]?.body as string,
+        );
+
+        expect(requestBody).toMatchObject({
+          chat_id: '123456',
+          disable_web_page_preview: true,
+          reply_markup: {
+            keyboard: [
+              [
+                {
+                  text: 'Поделиться телефоном',
+                  request_contact: true,
+                },
+              ],
+            ],
+            resize_keyboard: true,
+            one_time_keyboard: true,
+          },
+        });
+      } finally {
+        fetchMock.mockRestore();
+      }
+    });
+
     it('confirms Telegram contact and issues a guest session token', async () => {
       const { jwtService, prisma, service } = createService({
         APP_ENCRYPTION_KEY: 'test-secret',

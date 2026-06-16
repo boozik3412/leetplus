@@ -15,6 +15,7 @@ import {
   type GuestGameEvent,
   type GuestGameMission,
   type GuestGamePipelineRunResult,
+  type GuestGamePilotFirstBonusReconciliation,
   type GuestGamePilotLedgerPreflight,
   type GuestGameProcessEventResult,
   type GuestGameProfile,
@@ -369,6 +370,54 @@ function pilotLedgerPreflightFixture(
   };
 }
 
+function pilotFirstBonusReconciliationFixture(
+  overrides: Partial<GuestGamePilotFirstBonusReconciliation> = {},
+): GuestGamePilotFirstBonusReconciliation {
+  return {
+    status: 'WAITING_LIVE',
+    statusLabel: 'ждет live',
+    ready: false,
+    scopedStoreId: 'store-1337',
+    scopedStoreName: '1337',
+    ledgerEntry: null,
+    metric: '0 confirmed bonus_balance',
+    note: 'No confirmed pilot bonus balance entry yet.',
+    nextAction: 'Run one pilot canary.',
+    ...overrides,
+  };
+}
+
+function pilotFirstBonusLedgerEntryFixture(
+  overrides: Partial<
+    NonNullable<GuestGamePilotFirstBonusReconciliation['ledgerEntry']>
+  > = {},
+): NonNullable<GuestGamePilotFirstBonusReconciliation['ledgerEntry']> {
+  return {
+    id: 'ledger-1',
+    status: 'CONFIRMED',
+    statusLabel: 'подтверждено',
+    amount: 100,
+    balanceAfter: 150,
+    confirmedAt: '2026-06-10T10:00:00.000Z',
+    guest: {
+      id: 'guest-1',
+      displayName: 'Guest One',
+      contact: '+7 *** **-11',
+    },
+    store: { id: 'store-1337', name: '1337' },
+    reconciliation: {
+      state: 'WAITING_SYNC',
+      stateLabel: 'ждет snapshot',
+      latestSnapshotAt: null,
+      latestSnapshotBalance: null,
+      expectedBalance: 150,
+      diff: null,
+      note: 'Need a fresh snapshot.',
+    },
+    ...overrides,
+  };
+}
+
 function integrationReadinessForPilot({
   otpReady = true,
   ledgerReady = false,
@@ -472,6 +521,7 @@ function pilotReadinessInput(overrides: Record<string, unknown> = {}) {
       },
     },
     pilotLedgerPreflight: pilotLedgerPreflightFixture(),
+    pilotFirstBonusReconciliation: pilotFirstBonusReconciliationFixture(),
     communicationQueue: {
       summary: {
         readyForCashier: 0,
@@ -1057,13 +1107,13 @@ describe('GuestGamificationService', () => {
           integrationReadiness: integrationReadinessForPilot({
             ledgerReady: true,
           }),
-          bonusLedgerAudit: {
-            summary: {
-              confirmed: 1,
-              reconciliationPending: 1,
-              reconciliationMismatch: 0,
-            },
-          },
+          pilotFirstBonusReconciliation: pilotFirstBonusReconciliationFixture({
+            status: 'WAITING_SYNC',
+            statusLabel: 'ждет snapshot',
+            ledgerEntry: pilotFirstBonusLedgerEntryFixture(),
+            metric: '100 бонусов / snapshot нужен',
+            nextAction: 'Дождаться guest foundation sync и snapshot.',
+          }),
         }),
       );
 
@@ -1082,6 +1132,101 @@ describe('GuestGamificationService', () => {
           expect.objectContaining({
             key: 'RECONCILE_BALANCE',
             enabled: true,
+          }),
+        ]),
+      );
+    });
+
+    it('keeps pilot in live-write until the scoped first bonus_balance entry is confirmed', () => {
+      const { service } = createService();
+
+      const readiness = (service as any).buildPilotReadiness(
+        pilotReadinessInput({
+          events: [eventResult()],
+          rewards: [rewardResult()],
+          integrationReadiness: integrationReadinessForPilot({
+            ledgerReady: true,
+          }),
+          pilotLedgerPreflight: pilotLedgerPreflightFixture({
+            status: 'READY',
+            statusLabel: '1 готова',
+            ready: true,
+            readyCount: 1,
+            pendingCount: 1,
+          }),
+          bonusLedgerAudit: {
+            summary: {
+              confirmed: 5,
+              reconciliationPending: 0,
+              reconciliationMismatch: 0,
+            },
+          },
+          pilotFirstBonusReconciliation: pilotFirstBonusReconciliationFixture(),
+        }),
+      );
+
+      expect(readiness.runbook).toMatchObject({
+        stage: 'LIVE_WRITE',
+        canRunLive: true,
+        canReconcile: false,
+      });
+      expect(readiness.runbook.firstBonusReconciliation).toMatchObject({
+        status: 'WAITING_LIVE',
+        ledgerEntry: null,
+      });
+      expect(readiness.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            key: 'BALANCE_RECONCILIATION',
+            ready: false,
+            metric: '0 confirmed bonus_balance',
+          }),
+        ]),
+      );
+    });
+
+    it('marks pilot ready only when the scoped first bonus_balance entry matches a snapshot', () => {
+      const { service } = createService();
+
+      const readiness = (service as any).buildPilotReadiness(
+        pilotReadinessInput({
+          events: [eventResult()],
+          rewards: [rewardResult()],
+          integrationReadiness: integrationReadinessForPilot({
+            ledgerReady: true,
+          }),
+          pilotFirstBonusReconciliation: pilotFirstBonusReconciliationFixture({
+            status: 'MATCHED',
+            statusLabel: 'сверено',
+            ready: true,
+            ledgerEntry: pilotFirstBonusLedgerEntryFixture({
+              reconciliation: {
+                state: 'MATCHED',
+                stateLabel: 'сошлось',
+                latestSnapshotAt: '2026-06-10T12:00:00.000Z',
+                latestSnapshotBalance: 150,
+                expectedBalance: 150,
+                diff: 0,
+                note: 'Snapshot matches.',
+              },
+            }),
+            metric: '100 бонусов / snapshot совпал',
+          }),
+        }),
+      );
+
+      expect(readiness.runbook).toMatchObject({
+        stage: 'READY',
+        canRunLive: false,
+        canReconcile: true,
+      });
+      expect(readiness.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            key: 'BALANCE_RECONCILIATION',
+            status: 'READY',
+            ready: true,
+            metric: '100 бонусов / snapshot совпал',
           }),
         ]),
       );
@@ -1186,6 +1331,129 @@ describe('GuestGamificationService', () => {
       });
       expect(JSON.stringify(preflight)).not.toContain('79999999999');
       expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('pilot first bonus reconciliation', () => {
+    it('ignores money balance entries and reconciles the first scoped bonus_balance entry', async () => {
+      const { service, prisma } = createService();
+      const confirmedAt = new Date('2026-06-10T10:00:00.000Z');
+      const snapshotDate = new Date('2026-06-10T12:00:00.000Z');
+      const baseLedgerRow = {
+        id: 'ledger-balance',
+        guestId: 'guest-1',
+        profileId: 'profile-1',
+        rewardId: 'reward-1',
+        storeId: 'store-1337',
+        status: 'CONFIRMED',
+        entryType: 'EARN',
+        source: 'GAMIFICATION_REWARD',
+        amount: new Prisma.Decimal(100),
+        balanceBefore: new Prisma.Decimal(50),
+        balanceAfter: new Prisma.Decimal(150),
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: '1337.langame.ru',
+        externalGuestId: 'lg-guest-1',
+        attempts: 1,
+        nextAttemptAt: null,
+        processedAt: confirmedAt,
+        confirmedAt,
+        failedAt: null,
+        canceledAt: null,
+        errorCode: null,
+        errorMessage: null,
+        reason: 'Quest reward',
+        metadata: {
+          phoneMasked: '+7 *** **-99',
+          rawPhone: '79999999999',
+          rewardType: 'BALANCE',
+          langameBalanceType: 'balance',
+        },
+        createdAt: confirmedAt,
+        updatedAt: confirmedAt,
+        reward: {
+          id: 'reward-1',
+          status: 'APPROVED',
+          rewardType: 'BALANCE',
+          rewardLabel: 'Денежный баланс',
+          rewardCode: 'LP-MONEY',
+          qualifiedAt: confirmedAt,
+          paidAt: null,
+        },
+        profile: {
+          id: 'profile-1',
+          displayName: 'Игрок 1337',
+          contactMasked: '+7 *** **-99',
+        },
+        guest: {
+          id: 'guest-1',
+          externalDomain: '1337.langame.ru',
+          externalGuestId: 'lg-guest-1',
+          fullNameMasked: 'И***',
+          phoneMasked: '+7 *** **-99',
+          emailMasked: null,
+        },
+        store: { id: 'store-1337', name: '1337' },
+        createdByUser: null,
+        processedByUser: null,
+      };
+      const bonusLedgerRow = {
+        ...baseLedgerRow,
+        id: 'ledger-bonus',
+        rewardId: 'reward-2',
+        metadata: {
+          phoneMasked: '+7 *** **-99',
+          rawPhone: '79999999999',
+          rewardType: 'BONUS',
+          langameBalanceType: 'bonus_balance',
+        },
+        reward: {
+          ...baseLedgerRow.reward,
+          id: 'reward-2',
+          rewardType: 'BONUS',
+          rewardLabel: 'Первый квест',
+          rewardCode: 'LP-BONUS',
+        },
+      };
+
+      prisma.guestBonusLedgerEntry.findMany.mockResolvedValue([
+        baseLedgerRow,
+        bonusLedgerRow,
+      ]);
+      prisma.guestBonusBalanceSnapshot.findMany.mockResolvedValue([
+        bonusBalanceSnapshotRow({
+          snapshotDate,
+          bonusBalance: new Prisma.Decimal(150),
+        }),
+      ]);
+
+      const reconciliation = await (
+        service as any
+      ).getPilotFirstBonusReconciliation(user, pilotStoreFixture());
+
+      expect(reconciliation).toMatchObject({
+        status: 'MATCHED',
+        ready: true,
+        scopedStoreId: 'store-1337',
+        ledgerEntry: expect.objectContaining({
+          id: 'ledger-bonus',
+          amount: 100,
+          reconciliation: expect.objectContaining({
+            state: 'MATCHED',
+            latestSnapshotBalance: 150,
+          }),
+        }),
+      });
+      expect(prisma.guestBonusLedgerEntry.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            tenantId: user.tenantId,
+            storeId: 'store-1337',
+            status: 'CONFIRMED',
+          }),
+        }),
+      );
+      expect(JSON.stringify(reconciliation)).not.toContain('79999999999');
     });
   });
 

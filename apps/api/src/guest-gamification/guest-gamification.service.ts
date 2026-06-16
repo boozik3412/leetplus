@@ -1219,6 +1219,39 @@ export type GuestGamePilotLedgerPreflight = {
   nextAction: string;
 };
 
+export type GuestGamePilotFirstBonusReconciliationStatus =
+  | 'NO_STORE'
+  | 'WAITING_LIVE'
+  | 'WAITING_SYNC'
+  | 'MATCHED'
+  | 'MISMATCH';
+
+export type GuestGamePilotFirstBonusReconciliation = {
+  status: GuestGamePilotFirstBonusReconciliationStatus;
+  statusLabel: string;
+  ready: boolean;
+  scopedStoreId: string | null;
+  scopedStoreName: string | null;
+  ledgerEntry: {
+    id: string;
+    status: string;
+    statusLabel: string;
+    amount: number;
+    balanceAfter: number | null;
+    confirmedAt: string | null;
+    guest: {
+      id: string | null;
+      displayName: string;
+      contact: string | null;
+    };
+    store: { id: string; name: string } | null;
+    reconciliation: GuestGameBonusLedgerAuditItem['reconciliation'];
+  } | null;
+  metric: string;
+  note: string;
+  nextAction: string;
+};
+
 export type GuestGamePilotRunbookStage =
   | 'BLOCKED'
   | 'DRY_RUN'
@@ -1250,6 +1283,7 @@ export type GuestGamePilotRunbook = {
   canRunLive: boolean;
   canReconcile: boolean;
   ledgerPreflight: GuestGamePilotLedgerPreflight;
+  firstBonusReconciliation: GuestGamePilotFirstBonusReconciliation;
   actions: GuestGamePilotRunbookAction[];
   blockers: string[];
   safeguards: string[];
@@ -2128,9 +2162,7 @@ function buildPilotRunbook({
   bonusRewards,
   bonusLedgerAutonomousReady,
   ledgerPreflight,
-  ledgerConfirmed,
-  ledgerReconciliationPending,
-  ledgerReconciliationMismatch,
+  firstBonusReconciliation,
 }: {
   items: GuestGamePilotReadinessItem[];
   activeRuleCount: number;
@@ -2140,9 +2172,7 @@ function buildPilotRunbook({
   bonusRewards: number;
   bonusLedgerAutonomousReady: boolean;
   ledgerPreflight: GuestGamePilotLedgerPreflight;
-  ledgerConfirmed: number;
-  ledgerReconciliationPending: number;
-  ledgerReconciliationMismatch: number;
+  firstBonusReconciliation: GuestGamePilotFirstBonusReconciliation;
 }): GuestGamePilotRunbook {
   const prerequisiteBlockers = items.filter(
     (item) =>
@@ -2165,7 +2195,7 @@ function buildPilotRunbook({
     bonusLedgerAutonomousReady &&
     bonusRewards > 0 &&
     ledgerPreflight.ready;
-  const canReconcile = ledgerConfirmed > 0;
+  const canReconcile = Boolean(firstBonusReconciliation.ledgerEntry);
   const canaryNextAction = !bonusRewards
     ? 'Подготовить approved reward с бонусным rewardType, чтобы он попал в bonus ledger, а не в ручную выдачу.'
     : ledgerPreflight.readyCount === 0
@@ -2184,10 +2214,14 @@ function buildPilotRunbook({
     'После подтверждения Langame обязательна сверка GuestBonusBalanceCurrent с новым snapshot.',
   ];
   const withActions = (
-    runbook: Omit<GuestGamePilotRunbook, 'actions' | 'ledgerPreflight'>,
+    runbook: Omit<
+      GuestGamePilotRunbook,
+      'actions' | 'ledgerPreflight' | 'firstBonusReconciliation'
+    >,
   ): GuestGamePilotRunbook => ({
     ...runbook,
     ledgerPreflight,
+    firstBonusReconciliation,
     actions: buildPilotRunbookActions({
       stage: runbook.stage,
       canRunDryRun: runbook.canRunDryRun,
@@ -2216,25 +2250,7 @@ function buildPilotRunbook({
     });
   }
 
-  if (ledgerConfirmed > 0) {
-    if (ledgerReconciliationMismatch > 0 || ledgerReconciliationPending > 0) {
-      return withActions({
-        stage: 'RECONCILIATION',
-        stageLabel: 'Сверка',
-        canRunDryRun,
-        canRunCanary,
-        canRunLive: false,
-        canReconcile,
-        blockers: downstreamBlockerTitles,
-        safeguards,
-        nextAction:
-          ledgerReconciliationMismatch > 0
-            ? 'Разобрать расхождения ledger и Langame snapshot до следующего live-write.'
-            : 'Дождаться свежего guest foundation sync и bonus balance snapshot после первого начисления.',
-        note: 'Первое начисление уже подтверждено Langame; следующий обязательный этап - сверка баланса и отсутствие расхождений.',
-      });
-    }
-
+  if (firstBonusReconciliation.status === 'MATCHED') {
     return withActions({
       stage: 'READY',
       stageLabel: 'Готово',
@@ -2246,7 +2262,25 @@ function buildPilotRunbook({
       safeguards,
       nextAction:
         'Сохранить пилот 1337 как эталонный сценарий и расширять лимит начислений только после проверки журнала.',
-      note: 'Путь первого бонуса прошел до подтверждения Langame и последующей сверки баланса.',
+      note: 'Путь первого bonus_balance начисления прошел до подтверждения Langame и последующей сверки баланса.',
+    });
+  }
+
+  if (
+    firstBonusReconciliation.status === 'WAITING_SYNC' ||
+    firstBonusReconciliation.status === 'MISMATCH'
+  ) {
+    return withActions({
+      stage: 'RECONCILIATION',
+      stageLabel: 'Сверка',
+      canRunDryRun,
+      canRunCanary,
+      canRunLive: false,
+      canReconcile,
+      blockers: downstreamBlockerTitles,
+      safeguards,
+      nextAction: firstBonusReconciliation.nextAction,
+      note: 'Первое начисление уже подтверждено Langame; следующий обязательный этап - сверка баланса и отсутствие расхождений.',
     });
   }
 
@@ -2503,6 +2537,130 @@ function buildPilotLedgerPreflight({
   };
 }
 
+function buildPilotFirstBonusReconciliation({
+  targetStore,
+  ledgerEntry,
+}: {
+  targetStore: PilotStoreRow | null;
+  ledgerEntry: GuestGameBonusLedgerAuditItem | null;
+}): GuestGamePilotFirstBonusReconciliation {
+  if (!targetStore) {
+    return {
+      status: 'NO_STORE',
+      statusLabel: 'нет клуба',
+      ready: false,
+      scopedStoreId: null,
+      scopedStoreName: null,
+      ledgerEntry: null,
+      metric: 'клуб не выбран',
+      note: 'Первую сверку bonus_balance нельзя проверить без выбранного пилотного клуба.',
+      nextAction:
+        'Выбрать активный клуб 1337 или включить геймификацию у пилотной точки.',
+    };
+  }
+
+  if (!ledgerEntry) {
+    return {
+      status: 'WAITING_LIVE',
+      statusLabel: 'ждет live',
+      ready: false,
+      scopedStoreId: targetStore.id,
+      scopedStoreName: targetStore.name,
+      ledgerEntry: null,
+      metric: '0 confirmed bonus_balance',
+      note: 'В scope пилотного клуба еще нет подтвержденного положительного bonus_balance начисления через Langame.',
+      nextAction:
+        'Довести canary до одного confirmed bonus_balance начисления по 1337, затем ждать свежий snapshot баланса.',
+    };
+  }
+
+  const reconciliation = ledgerEntry.reconciliation;
+  const status: GuestGamePilotFirstBonusReconciliationStatus =
+    reconciliation.state === 'MATCHED'
+      ? 'MATCHED'
+      : reconciliation.state === 'MISMATCH'
+        ? 'MISMATCH'
+        : 'WAITING_SYNC';
+
+  const ledgerPayload = {
+    id: ledgerEntry.id,
+    status: ledgerEntry.status,
+    statusLabel: ledgerEntry.statusLabel,
+    amount: ledgerEntry.amount,
+    balanceAfter: ledgerEntry.balanceAfter,
+    confirmedAt: ledgerEntry.confirmedAt,
+    guest: ledgerEntry.guest,
+    store: ledgerEntry.store,
+    reconciliation,
+  };
+
+  if (status === 'MATCHED') {
+    return {
+      status,
+      statusLabel: 'сверено',
+      ready: true,
+      scopedStoreId: targetStore.id,
+      scopedStoreName: targetStore.name,
+      ledgerEntry: ledgerPayload,
+      metric: `${ledgerEntry.amount} бонусов / snapshot совпал`,
+      note: 'Первая bonus_balance операция пилота подтверждена Langame и совпала с последующим snapshot баланса.',
+      nextAction:
+        'Сохранить эту ledger-запись как эталон пилотного начисления перед расширением лимитов.',
+    };
+  }
+
+  if (status === 'MISMATCH') {
+    return {
+      status,
+      statusLabel: 'расхождение',
+      ready: false,
+      scopedStoreId: targetStore.id,
+      scopedStoreName: targetStore.name,
+      ledgerEntry: ledgerPayload,
+      metric: `${ledgerEntry.amount} бонусов / diff ${reconciliation.diff ?? 'n/a'}`,
+      note: 'Первая bonus_balance операция пилота подтверждена, но сохраненный Langame snapshot не совпал с ожидаемым balanceAfter.',
+      nextAction:
+        'Разобрать первую ledger-запись 1337 в журнале, сверить гостя в Langame и не расширять live-write до устранения расхождения.',
+    };
+  }
+
+  return {
+    status,
+    statusLabel: 'ждет snapshot',
+    ready: false,
+    scopedStoreId: targetStore.id,
+    scopedStoreName: targetStore.name,
+    ledgerEntry: ledgerPayload,
+    metric: `${ledgerEntry.amount} бонусов / snapshot нужен`,
+    note: 'Первая bonus_balance операция пилота уже подтверждена Langame, но еще нет свежего snapshot после confirmedAt.',
+    nextAction:
+      'Дождаться guest foundation sync и нового bonus balance snapshot после первого начисления.',
+  };
+}
+
+function isPilotFirstBonusLedgerRow(row: BonusLedgerAuditRow) {
+  if (
+    row.status !== 'CONFIRMED' ||
+    row.entryType !== 'EARN' ||
+    numberValue(row.amount) <= 0
+  ) {
+    return false;
+  }
+
+  const metadata = jsonRecord(row.metadata);
+  const configuredType = nullableString(metadata.langameBalanceType)
+    ?.trim()
+    .toLowerCase();
+
+  if (configuredType) {
+    return configuredType === 'bonus_balance';
+  }
+
+  return isBonusLedgerRewardType(
+    nullableString(metadata.rewardType) ?? row.reward?.rewardType ?? null,
+  );
+}
+
 @Injectable()
 export class GuestGamificationService {
   constructor(
@@ -2545,10 +2703,12 @@ export class GuestGamificationService {
     ]);
 
     const targetPilotStore = pickPilotStore(pilotStores);
-    const [effect, pilotLedgerPreflight] = await Promise.all([
-      this.buildEffect(user, lootBoxes, missions, seasons, events),
-      this.getPilotBonusLedgerPreflight(user, targetPilotStore),
-    ]);
+    const [effect, pilotLedgerPreflight, pilotFirstBonusReconciliation] =
+      await Promise.all([
+        this.buildEffect(user, lootBoxes, missions, seasons, events),
+        this.getPilotBonusLedgerPreflight(user, targetPilotStore),
+        this.getPilotFirstBonusReconciliation(user, targetPilotStore),
+      ]);
     const integrationReadiness = this.buildIntegrationReadiness(deliveries);
     const communicationQueue = this.buildCommunicationQueue(profiles, rewards);
     const deliveryOutbox = this.buildDeliveryOutbox(deliveries);
@@ -2574,9 +2734,9 @@ export class GuestGamificationService {
         rewards,
         events,
         integrationReadiness,
-        bonusLedgerAudit,
         guestLogCatalog,
         pilotLedgerPreflight,
+        pilotFirstBonusReconciliation,
         communicationQueue,
         deliveryOutbox,
       }),
@@ -2734,6 +2894,51 @@ export class GuestGamificationService {
     });
   }
 
+  private async getPilotFirstBonusReconciliation(
+    user: AuthenticatedUser,
+    targetStore: PilotStoreRow | null,
+  ): Promise<GuestGamePilotFirstBonusReconciliation> {
+    if (!targetStore) {
+      return buildPilotFirstBonusReconciliation({
+        targetStore: null,
+        ledgerEntry: null,
+      });
+    }
+
+    const candidates = await this.prisma.guestBonusLedgerEntry.findMany({
+      where: {
+        tenantId: user.tenantId,
+        storeId: targetStore.id,
+        status: 'CONFIRMED',
+        entryType: 'EARN',
+        confirmedAt: { not: null },
+      },
+      select: bonusLedgerAuditSelect,
+      orderBy: [{ confirmedAt: 'asc' }, { createdAt: 'asc' }],
+      take: 100,
+    });
+    const firstBonusRow =
+      candidates.find((row) => isPilotFirstBonusLedgerRow(row)) ?? null;
+
+    if (!firstBonusRow) {
+      return buildPilotFirstBonusReconciliation({
+        targetStore,
+        ledgerEntry: null,
+      });
+    }
+
+    const snapshots = await this.getBonusLedgerAuditSnapshots(user.tenantId, [
+      firstBonusRow,
+    ]);
+    const ledgerEntry =
+      buildBonusLedgerAudit([firstBonusRow], snapshots).items[0] ?? null;
+
+    return buildPilotFirstBonusReconciliation({
+      targetStore,
+      ledgerEntry,
+    });
+  }
+
   private async getBonusLedgerAudit(
     user: AuthenticatedUser,
   ): Promise<GuestGameBonusLedgerAudit> {
@@ -2871,9 +3076,9 @@ export class GuestGamificationService {
     rewards,
     events,
     integrationReadiness,
-    bonusLedgerAudit,
     guestLogCatalog,
     pilotLedgerPreflight,
+    pilotFirstBonusReconciliation,
     communicationQueue,
     deliveryOutbox,
   }: {
@@ -2886,9 +3091,9 @@ export class GuestGamificationService {
     rewards: GuestGameReward[];
     events: GuestGameEvent[];
     integrationReadiness: GuestGameIntegrationReadiness;
-    bonusLedgerAudit: GuestGameBonusLedgerAudit;
     guestLogCatalog: GuestGameGuestLogCatalog;
     pilotLedgerPreflight: GuestGamePilotLedgerPreflight;
+    pilotFirstBonusReconciliation: GuestGamePilotFirstBonusReconciliation;
     communicationQueue: GuestGameCommunicationQueue;
     deliveryOutbox: GuestGameDeliveryOutbox;
   }): GuestGamePilotReadiness {
@@ -2951,11 +3156,6 @@ export class GuestGamificationService {
     const bonusLedgerAutonomousReady = Boolean(
       langameWriteItem?.ready && bonusLedgerSchedulerItem?.ready,
     );
-    const ledgerConfirmed = bonusLedgerAudit.summary.confirmed;
-    const ledgerReconciliationPending =
-      bonusLedgerAudit.summary.reconciliationPending;
-    const ledgerReconciliationMismatch =
-      bonusLedgerAudit.summary.reconciliationMismatch;
     const registrationReady = Boolean(
       targetStore && (targetStore.gamificationEnabled || activeRuleCount > 0),
     );
@@ -3212,38 +3412,28 @@ export class GuestGamificationService {
       {
         key: 'BALANCE_RECONCILIATION',
         title: 'Сверка после начисления',
-        status: ledgerConfirmed
-          ? ledgerReconciliationMismatch
+        status: pilotFirstBonusReconciliation.ready
+          ? 'READY'
+          : pilotFirstBonusReconciliation.status === 'MISMATCH'
             ? 'BLOCKED'
-            : ledgerReconciliationPending
+            : pilotFirstBonusReconciliation.status === 'WAITING_SYNC'
               ? 'PARTIAL'
-              : 'READY'
-          : langameWriteItem?.ready && bonusRewards.length
-            ? 'PARTIAL'
-            : 'MANUAL_ONLY',
-        statusLabel: ledgerConfirmed
-          ? ledgerReconciliationMismatch
-            ? 'расхождение'
-            : ledgerReconciliationPending
-              ? 'ждет snapshot'
-              : 'сверено'
-          : 'после пилота',
-        ready: Boolean(
-          ledgerConfirmed &&
-          !ledgerReconciliationPending &&
-          !ledgerReconciliationMismatch,
-        ),
-        metric: ledgerConfirmed
-          ? `${ledgerConfirmed} confirmed / ${ledgerReconciliationMismatch} mismatch`
-          : 'snapshot vs current',
-        note: 'Финальный production-сигнал: после первого начисления сверить ledger balanceAfter с ночным snapshot Langame.',
-        nextAction: ledgerConfirmed
-          ? ledgerReconciliationMismatch
-            ? 'Разобрать записи расхождений в журнале bonus ledger и сверить гостя в Langame.'
-            : ledgerReconciliationPending
-              ? 'Дождаться guest foundation sync и нового bonus balance snapshot после начисления.'
-              : 'Сохранить эту операцию как эталон пилотного начисления.'
-          : 'После боевого начисления дождаться guest foundation sync и сравнить текущий live-баланс с новым snapshot.',
+              : pilotFirstBonusReconciliation.status === 'NO_STORE'
+                ? 'BLOCKED'
+                : langameWriteItem?.ready && bonusRewards.length
+                  ? 'PARTIAL'
+                  : 'MANUAL_ONLY',
+        statusLabel: pilotFirstBonusReconciliation.statusLabel,
+        ready: pilotFirstBonusReconciliation.ready,
+        metric: pilotFirstBonusReconciliation.metric,
+        note: pilotFirstBonusReconciliation.note,
+        nextAction: pilotFirstBonusReconciliation.nextAction,
+        actionHref: pilotFirstBonusReconciliation.ledgerEntry
+          ? '#bonus-balance-reconciliation'
+          : null,
+        actionLabel: pilotFirstBonusReconciliation.ledgerEntry
+          ? 'Открыть сверку'
+          : null,
       },
     ];
     const ready = items.filter((item) => item.status === 'READY').length;
@@ -3266,9 +3456,7 @@ export class GuestGamificationService {
       bonusRewards: bonusRewards.length,
       bonusLedgerAutonomousReady,
       ledgerPreflight: pilotLedgerPreflight,
-      ledgerConfirmed,
-      ledgerReconciliationPending,
-      ledgerReconciliationMismatch,
+      firstBonusReconciliation: pilotFirstBonusReconciliation,
     });
 
     return {

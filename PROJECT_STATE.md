@@ -80,6 +80,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added a scoped first-bonus reconciliation gate to the Guest Game Hub pilot runbook: the backend now finds the first confirmed positive `bonus_balance` ledger entry for the 1337 pilot store, ignores money `balance` entries, compares `balanceAfter` with the next saved Langame bonus snapshot, and exposes `firstBonusReconciliation` so the UI only marks the pilot `RECONCILIATION`/`READY` from the actual pilot bonus path.
 - Added deep-link club preselection to public gamification registration: `/play` accepts `clubId`, `club`, or `storeId` query params and selects the matching gamification club immediately, while Guest Game Hub pilot links now open `/play?storeId=<pilot-store-id>` for the 1337 QA path.
 - Added action links to the Guest Game Hub pilot checklist: readiness items now carry safe `actionHref/actionLabel` values for `/stores`, `/play`, the guest portal, `/sync`, and the `guests/logs` CSV export, and `/guests/gamification` renders those links in the next-step card without additional API calls.
 - Made the Guest Game Hub `guests/logs` pilot readiness dependency-aware: `/guests/gamification` still allows controlled dry-run when the current active rules do not use guest-log fields, but moves the runbook to `BLOCKED` and points to `/sync` when active loot boxes, missions, or Battle Pass rules depend on `guestLogTypes`, `blockedGuestLogTypes`, or guest-log XP while the saved catalog is empty.

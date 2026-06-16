@@ -758,6 +758,39 @@ export type GuestGamePilotLedgerPreflight = {
   nextAction: string;
 };
 
+export type GuestGamePilotFirstBonusReconciliationStatus =
+  | "NO_STORE"
+  | "WAITING_LIVE"
+  | "WAITING_SYNC"
+  | "MATCHED"
+  | "MISMATCH";
+
+export type GuestGamePilotFirstBonusReconciliation = {
+  status: GuestGamePilotFirstBonusReconciliationStatus;
+  statusLabel: string;
+  ready: boolean;
+  scopedStoreId: string | null;
+  scopedStoreName: string | null;
+  ledgerEntry: {
+    id: string;
+    status: string;
+    statusLabel: string;
+    amount: number;
+    balanceAfter: number | null;
+    confirmedAt: string | null;
+    guest: {
+      id: string | null;
+      displayName: string;
+      contact: string | null;
+    };
+    store: { id: string; name: string } | null;
+    reconciliation: GuestGameBonusLedgerAuditItem["reconciliation"];
+  } | null;
+  metric: string;
+  note: string;
+  nextAction: string;
+};
+
 export type GuestGamePilotRunbookStage =
   | "BLOCKED"
   | "DRY_RUN"
@@ -789,6 +822,7 @@ export type GuestGamePilotRunbook = {
   canRunLive: boolean;
   canReconcile: boolean;
   ledgerPreflight: GuestGamePilotLedgerPreflight;
+  firstBonusReconciliation: GuestGamePilotFirstBonusReconciliation;
   actions: GuestGamePilotRunbookAction[];
   blockers: string[];
   safeguards: string[];

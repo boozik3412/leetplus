@@ -244,6 +244,17 @@ const emptyWorkspace: GuestGamificationWorkspace = {
         note: "Preflight появится после ответа API workspace.",
         nextAction: "Дождаться ответа API workspace.",
       },
+      firstBonusReconciliation: {
+        status: "NO_STORE",
+        statusLabel: "нет клуба",
+        ready: false,
+        scopedStoreId: null,
+        scopedStoreName: null,
+        ledgerEntry: null,
+        metric: "клуб не выбран",
+        note: "Первая сверка bonus_balance появится после ответа API workspace.",
+        nextAction: "Дождаться ответа API workspace.",
+      },
       actions: [
         {
           key: "OPEN_DRY_RUN",

@@ -48,6 +48,7 @@ function createPrismaMock() {
       update: jest.fn(),
     },
     guestGameDelivery: {
+      create: jest.fn(),
       findMany: jest.fn(),
       findFirst: jest.fn(),
       update: jest.fn(),
@@ -1973,6 +1974,96 @@ describe('GuestGamificationService', () => {
         currentBalance: 150,
         diff: -25,
       });
+    });
+  });
+
+  describe('prepareDeliveries', () => {
+    it.each(['SENT', 'FAILED', 'CANCELED'] as const)(
+      'does not overwrite terminal %s deliveries during outbox refresh',
+      async (status) => {
+        const { service, prisma } = createService();
+        const sentDelivery = deliveryRow({
+          status,
+          sentAt: status === 'SENT' ? now : null,
+          failedAt: status === 'FAILED' ? now : null,
+          canceledAt: status === 'CANCELED' ? now : null,
+        });
+        jest
+          .spyOn(service, 'getProfiles')
+          .mockResolvedValue([profileFixture()]);
+        jest.spyOn(service, 'getRewards').mockResolvedValue([rewardResult()]);
+        jest
+          .spyOn(service as any, 'createDeliveryEvent')
+          .mockResolvedValue(null);
+        prisma.guestGameDelivery.findFirst.mockResolvedValue(sentDelivery);
+
+        const result = await service.prepareDeliveries(user, {
+          includeBlocked: true,
+        });
+
+        expect(result).toMatchObject({
+          created: 0,
+          updated: 0,
+          skipped: 1,
+        });
+        expect(result.deliveries[0]).toMatchObject({
+          id: 'delivery-1',
+          status,
+        });
+        expect(prisma.guestGameDelivery.update).not.toHaveBeenCalled();
+        expect(prisma.guestGameDelivery.create).not.toHaveBeenCalled();
+        expect((service as any).createDeliveryEvent).not.toHaveBeenCalled();
+      },
+    );
+
+    it('refreshes blocked consent snapshots after profile-level Telegram consent appears', async () => {
+      const { service, prisma } = createService();
+      jest.spyOn(service, 'getProfiles').mockResolvedValue([profileFixture()]);
+      jest.spyOn(service, 'getRewards').mockResolvedValue([rewardResult()]);
+      jest.spyOn(service as any, 'createDeliveryEvent').mockResolvedValue(null);
+      prisma.guestGameDelivery.findFirst.mockResolvedValue(
+        deliveryRow({
+          status: 'BLOCKED',
+          readinessStatus: 'NEEDS_CONSENT',
+        }),
+      );
+      prisma.guestGameDelivery.update.mockResolvedValue(
+        deliveryRow({
+          status: 'READY',
+          readinessStatus: 'READY_FOR_BOT',
+        }),
+      );
+
+      const result = await service.prepareDeliveries(user, {
+        includeBlocked: true,
+      });
+
+      expect(result).toMatchObject({
+        created: 0,
+        updated: 1,
+        skipped: 0,
+      });
+      expect(prisma.guestGameDelivery.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'delivery-1' },
+          data: expect.objectContaining({
+            status: 'READY',
+            readinessStatus: 'READY_FOR_BOT',
+            channel: 'TELEGRAM',
+          }),
+        }),
+      );
+      expect((service as any).createDeliveryEvent).toHaveBeenCalledWith(
+        user,
+        'delivery-1',
+        'reward-1',
+        expect.objectContaining({
+          eventType: 'DELIVERY_REFRESHED',
+          fromStatus: 'BLOCKED',
+          toStatus: 'READY',
+          channel: 'TELEGRAM',
+        }),
+      );
     });
   });
 

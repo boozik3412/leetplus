@@ -5412,6 +5412,13 @@ export class GuestGamificationService {
         },
         include: deliveryInclude,
       });
+
+      if (existing && isTerminalDeliveryStatus(existing.status)) {
+        skipped += 1;
+        deliveries.push(mapDelivery(existing));
+        continue;
+      }
+
       const baseData = clean({
         profileId: item.profileId,
         guestId: reward.guest?.id ?? null,
@@ -9241,6 +9248,10 @@ function deliveryStatusValue(status: string): GuestGameDeliveryStatus {
   return deliveryStatuses.includes(status as GuestGameDeliveryStatus)
     ? (status as GuestGameDeliveryStatus)
     : 'BLOCKED';
+}
+
+function isTerminalDeliveryStatus(status: string | null) {
+  return status === 'SENT' || status === 'FAILED' || status === 'CANCELED';
 }
 
 function deliveryChannelValue(

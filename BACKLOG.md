@@ -1,5 +1,7 @@
 # LeetPlus Бэклог
 
+- Готово: добавлен первый легкий публичный игровой экран `/play/game`. Экран читает `GET /guest-portal/session/game-summary` через guest-token proxy и показывает профиль, XP, бонусный баланс, готовую награду, featured-миссии, Battle Pass, next actions и готовность каналов; без гостевой сессии ведет на `/play`. После OTP на `/play` теперь есть отдельный переход `Открыть игру`.
+
 - Готово: добавлен компактный read-only контракт игрового состояния гостя для будущего Telegram/Mini App. `GET /guest-portal/session/game-summary` работает по существующему guest-token, переиспользует безопасный `GuestPortalPayload` и возвращает профиль игрока, готовность аккаунта, бонусный баланс, готовые награды, featured-миссии, Battle Pass, next actions, счетчики активности и готовность каналов без полного `guestSnapshot`, timeline, raw phone, live-запросов в Langame и записи в Langame.
 
 - Готово: публичный гостевой кабинет получил историю бонусных операций геймификации. В `/guest/[tenantSlug]/[storeId]` рядом с кошельком наград показываются последние записи `GuestBonusLedgerEntry` по `guestId` или отдельному `GuestGameProfile`: сумма, гостевой статус, источник квеста/лутбокса/Battle Pass, клуб, дата и `balanceAfter` после подтверждения. Raw phone, токены, `langameRequest`, `langameResponse` и технические ошибки Langame в публичный payload не попадают.

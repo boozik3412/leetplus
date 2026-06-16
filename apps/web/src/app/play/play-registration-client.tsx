@@ -879,6 +879,13 @@ function VerifiedSummary({
       ) : null}
 
       <Link
+        className="flex min-h-11 items-center justify-center rounded-lg border border-emerald-300/40 px-4 text-sm font-black text-emerald-100 transition hover:border-emerald-300"
+        href="/play/game"
+      >
+        Открыть игру
+      </Link>
+
+      <Link
         className="flex min-h-11 items-center justify-center rounded-lg bg-emerald-300 px-4 text-sm font-black text-slate-950 transition hover:bg-emerald-200"
         href={club.links.guestPortalPath}
       >

@@ -80,6 +80,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added deep-link club preselection to public gamification registration: `/play` accepts `clubId`, `club`, or `storeId` query params and selects the matching gamification club immediately, while Guest Game Hub pilot links now open `/play?storeId=<pilot-store-id>` for the 1337 QA path.
 - Added action links to the Guest Game Hub pilot checklist: readiness items now carry safe `actionHref/actionLabel` values for `/stores`, `/play`, the guest portal, `/sync`, and the `guests/logs` CSV export, and `/guests/gamification` renders those links in the next-step card without additional API calls.
 - Made the Guest Game Hub `guests/logs` pilot readiness dependency-aware: `/guests/gamification` still allows controlled dry-run when the current active rules do not use guest-log fields, but moves the runbook to `BLOCKED` and points to `/sync` when active loot boxes, missions, or Battle Pass rules depend on `guestLogTypes`, `blockedGuestLogTypes`, or guest-log XP while the saved catalog is empty.
 - Added a guest-safe bonus journey to the lightweight public game screen: `GET /guest-portal/session/game-summary` now exposes `journey` with registration, Langame link, activity/check-in, mission, reward, and bonus-accrual steps, and `/play/game` shows `Путь к бонусу` with readiness percent, next step, and anchors to the right local block or guest-portal Langame match without extra API calls, raw PII, Langame payload, or admin involvement.

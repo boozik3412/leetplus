@@ -2971,7 +2971,7 @@ export class GuestGamificationService {
           externalClubId: targetStore.externalClubId,
           gamificationEnabled: targetStore.gamificationEnabled,
           guestPortalPath: `/guest/${tenantSlug}/${storeSlugOrId}`,
-          playPath: '/play',
+          playPath: `/play?storeId=${encodeURIComponent(targetStore.id)}`,
         }
       : null;
     const items: GuestGamePilotReadinessItem[] = [
@@ -3014,7 +3014,7 @@ export class GuestGamificationService {
         nextAction: registrationReady
           ? 'Проверить путь на тестовом телефоне и открыть гостевой кабинет клуба.'
           : 'Включить клуб в каталог /play через флаг геймификации или активное игровое правило.',
-        actionHref: '/play',
+        actionHref: targetStorePayload?.playPath ?? '/play',
         actionLabel: 'Открыть /play',
       },
       {
@@ -3046,7 +3046,7 @@ export class GuestGamificationService {
         nextAction: activeProfiles.length
           ? 'Использовать тестовый профиль для dry-run и первого события.'
           : 'Зарегистрировать тестового участника через /play.',
-        actionHref: '/play',
+        actionHref: targetStorePayload?.playPath ?? '/play',
         actionLabel: 'Открыть /play',
       },
       {

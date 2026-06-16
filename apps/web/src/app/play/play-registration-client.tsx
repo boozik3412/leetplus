@@ -15,6 +15,8 @@ import type {
 
 type PlayRegistrationClientProps = {
   initialDirectory: GuestPortalGamificationClubDirectory;
+  initialClubId: string | null;
+  initialStoreId: string | null;
   loadError: string | null;
 };
 
@@ -36,6 +38,8 @@ type ActiveSessionState = "loading" | "ready" | "empty" | "error";
 
 export function PlayRegistrationClient({
   initialDirectory,
+  initialClubId,
+  initialStoreId,
   loadError,
 }: PlayRegistrationClientProps) {
   const [directory, setDirectory] = useState(initialDirectory);
@@ -44,8 +48,12 @@ export function PlayRegistrationClient({
     null,
   );
   const [radiusKm, setRadiusKm] = useState<RadiusOption>(null);
-  const [selectedClubId, setSelectedClubId] = useState(
-    initialDirectory.clubs[0]?.id ?? "",
+  const [selectedClubId, setSelectedClubId] = useState(() =>
+    resolveInitialClubId(
+      initialDirectory.clubs,
+      initialClubId,
+      initialStoreId,
+    ),
   );
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
@@ -1098,6 +1106,44 @@ function clubApiPath(club: GuestPortalGamificationClub) {
   return `/api/guest-portal/${encodeURIComponent(
     club.tenant.slug,
   )}/${encodeURIComponent(storeSlug)}`;
+}
+
+function resolveInitialClubId(
+  clubs: GuestPortalGamificationClub[],
+  initialClubId: string | null,
+  initialStoreId: string | null,
+) {
+  const clubId = normalizedIdParam(initialClubId);
+  const storeId = normalizedIdParam(initialStoreId);
+
+  if (clubId) {
+    const directClub = clubs.find((club) => club.id === clubId);
+
+    if (directClub) {
+      return directClub.id;
+    }
+  }
+
+  if (storeId) {
+    const storeClub = clubs.find(
+      (club) =>
+        club.store.id === storeId ||
+        club.store.publicSlug === storeId ||
+        club.id === `${club.tenant.slug}:${storeId}`,
+    );
+
+    if (storeClub) {
+      return storeClub.id;
+    }
+  }
+
+  return clubs[0]?.id ?? "";
+}
+
+function normalizedIdParam(value: string | null) {
+  const trimmed = value?.trim();
+
+  return trimmed ? trimmed : null;
 }
 
 function normalizeSearch(value: string) {

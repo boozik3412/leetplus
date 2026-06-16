@@ -813,8 +813,17 @@ describe('GuestGamificationService', () => {
         blockers: [],
       });
       expect(readiness.runbook.nextAction).toContain('dry-run');
+      expect(readiness.targetStore).toMatchObject({
+        id: 'store-1337',
+        playPath: '/play?storeId=store-1337',
+      });
       expect(readiness.items).toEqual(
         expect.arrayContaining([
+          expect.objectContaining({
+            key: 'PUBLIC_REGISTRATION',
+            actionHref: '/play?storeId=store-1337',
+            actionLabel: 'Открыть /play',
+          }),
           expect.objectContaining({
             key: 'GUEST_LOGS',
             status: 'READY',

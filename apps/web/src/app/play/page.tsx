@@ -4,6 +4,14 @@ import { PlayRegistrationClient } from "./play-registration-client";
 
 export const dynamic = "force-dynamic";
 
+type PlayPageProps = {
+  searchParams: Promise<{
+    club?: string | string[];
+    clubId?: string | string[];
+    storeId?: string | string[];
+  }>;
+};
+
 const emptyDirectory: GuestPortalGamificationClubDirectory = {
   updatedAt: new Date(0).toISOString(),
   total: 0,
@@ -18,15 +26,26 @@ const emptyDirectory: GuestPortalGamificationClubDirectory = {
   clubs: [],
 };
 
-export default async function PlayPage() {
+export default async function PlayPage({ searchParams }: PlayPageProps) {
+  const params = await searchParams;
   const { directory, loadError } = await loadClubDirectory();
 
   return (
     <PlayRegistrationClient
+      initialClubId={searchParam(params.clubId) ?? searchParam(params.club)}
       initialDirectory={directory}
+      initialStoreId={searchParam(params.storeId)}
       loadError={loadError}
     />
   );
+}
+
+function searchParam(value: string | string[] | undefined) {
+  if (Array.isArray(value)) {
+    return value[0] ?? null;
+  }
+
+  return value ?? null;
 }
 
 async function loadClubDirectory(): Promise<{

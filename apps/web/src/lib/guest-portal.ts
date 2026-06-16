@@ -449,6 +449,42 @@ export type GuestPortalPayload = {
   };
 };
 
+export type GuestPortalGameJourneyStepId =
+  | "PROFILE"
+  | "LANGAME"
+  | "CHECK_IN"
+  | "MISSION"
+  | "REWARD"
+  | "BONUS";
+
+export type GuestPortalGameJourneyStepStatus =
+  | "DONE"
+  | "CURRENT"
+  | "WAITING"
+  | "ATTENTION";
+
+export type GuestPortalGameJourney = {
+  summary: {
+    completed: number;
+    total: number;
+    readyPercent: number;
+    nextStepId: GuestPortalGameJourneyStepId | null;
+    nextStepLabel: string | null;
+  };
+  steps: Array<{
+    id: GuestPortalGameJourneyStepId;
+    label: string;
+    status: GuestPortalGameJourneyStepStatus;
+    hint: string;
+    anchor:
+      | "profile"
+      | "langame-match"
+      | "progress"
+      | "missions"
+      | "rewards";
+  }>;
+};
+
 export type GuestPortalGameSummary = {
   generatedAt: string;
   tenant: GuestPortalPayload["tenant"];
@@ -595,6 +631,7 @@ export type GuestPortalGameSummary = {
     };
     timeline: GuestPortalGameProgressTimelineItem[];
   };
+  journey: GuestPortalGameJourney;
   nextActions: GuestPortalPayload["gamification"]["nextActions"];
   activity: Pick<
     GuestPortalPayload["activity"]["summary"],

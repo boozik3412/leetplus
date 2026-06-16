@@ -19,6 +19,7 @@ type GameMission = GuestPortalGameSummary["missions"]["featured"][number];
 type GameMissionHistoryItem = GuestPortalGameSummary["missions"]["history"][number];
 type GameProgressTimelineItem =
   GuestPortalGameSummary["progress"]["timeline"][number];
+type GameJourneyStep = GuestPortalGameSummary["journey"]["steps"][number];
 type MissionBoardFilter = "AVAILABLE" | "ALMOST_DONE" | "REWARD_PENDING" | "ALL";
 
 class EmptySessionError extends Error {}
@@ -353,6 +354,13 @@ function ReadyGameView({
       </section>
 
       <section className="mt-4">
+        <JourneyPanel
+          journey={summary.journey}
+          guestPortalHref={guestPortalHref}
+        />
+      </section>
+
+      <section className="mt-4">
         <ProgressPanel progress={summary.progress} />
       </section>
 
@@ -389,6 +397,109 @@ function ReadyGameView({
       </section>
     </div>
   );
+}
+
+function JourneyPanel({
+  journey,
+  guestPortalHref,
+}: {
+  journey: GuestPortalGameSummary["journey"];
+  guestPortalHref: string;
+}) {
+  const nextStepLabel = journey.summary.nextStepLabel ?? "маршрут пройден";
+
+  return (
+    <section id="journey" className="rounded-lg border border-white/10 bg-white/[0.06] p-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
+            Путь к бонусу
+          </p>
+          <h2 className="mt-1 text-xl font-black">
+            {journey.summary.completed}/{journey.summary.total} шагов готовы
+          </h2>
+        </div>
+        <span className="w-fit rounded-full bg-white/10 px-3 py-1 text-xs font-bold text-zinc-300">
+          следующий: {nextStepLabel}
+        </span>
+      </div>
+
+      <div className="mt-4">
+        <div className="flex items-center justify-between text-xs text-zinc-500">
+          <span>готовность</span>
+          <span>{journey.summary.readyPercent}%</span>
+        </div>
+        <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
+          <div
+            className="h-full rounded-full bg-emerald-300"
+            style={{ width: `${clampPercent(journey.summary.readyPercent)}%` }}
+          />
+        </div>
+      </div>
+
+      <ol className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+        {journey.steps.map((step, index) => (
+          <li
+            key={step.id}
+            className="min-h-32 border-l border-white/10 pl-3"
+          >
+            <div className="flex items-center gap-2">
+              <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-zinc-950 text-xs font-black text-zinc-300">
+                {index + 1}
+              </span>
+              <span className={journeyStatusClass(step.status)}>
+                {journeyStatusLabel(step.status)}
+              </span>
+            </div>
+            <h3 className="mt-3 text-sm font-black text-white">{step.label}</h3>
+            <p className="mt-2 text-xs leading-5 text-zinc-400">{step.hint}</p>
+            {step.status !== "DONE" ? (
+              <Link
+                href={journeyStepHref(step, guestPortalHref)}
+                className="mt-3 inline-flex min-h-9 items-center rounded-lg border border-emerald-300/30 px-3 text-xs font-black text-emerald-100 transition hover:border-emerald-300 hover:bg-emerald-300/10"
+              >
+                Открыть
+              </Link>
+            ) : null}
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function journeyStatusLabel(status: GameJourneyStep["status"]) {
+  const labels = {
+    DONE: "готово",
+    CURRENT: "сейчас",
+    WAITING: "ждет",
+    ATTENTION: "проверить",
+  } satisfies Record<GameJourneyStep["status"], string>;
+
+  return labels[status];
+}
+
+function journeyStatusClass(status: GameJourneyStep["status"]) {
+  const base = "rounded-full px-2 py-1 text-xs font-black";
+
+  switch (status) {
+    case "DONE":
+      return `${base} bg-emerald-300 text-zinc-950`;
+    case "CURRENT":
+      return `${base} bg-sky-300 text-zinc-950`;
+    case "WAITING":
+      return `${base} bg-amber-300/20 text-amber-100`;
+    default:
+      return `${base} bg-rose-300/20 text-rose-100`;
+  }
+}
+
+function journeyStepHref(step: GameJourneyStep, guestPortalHref: string) {
+  if (step.anchor === "langame-match") {
+    return `${guestPortalHref}#langame-match`;
+  }
+
+  return `#${step.anchor}`;
 }
 
 function ProgressPanel({

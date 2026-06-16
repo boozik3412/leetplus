@@ -655,6 +655,47 @@ describe('GuestPortalService', () => {
             }),
           ]),
         },
+        journey: {
+          summary: {
+            completed: 6,
+            total: 6,
+            readyPercent: 100,
+            nextStepId: null,
+            nextStepLabel: null,
+          },
+          steps: [
+            expect.objectContaining({
+              id: 'PROFILE',
+              status: 'DONE',
+              anchor: 'profile',
+            }),
+            expect.objectContaining({
+              id: 'LANGAME',
+              status: 'DONE',
+              anchor: 'langame-match',
+            }),
+            expect.objectContaining({
+              id: 'CHECK_IN',
+              status: 'DONE',
+              anchor: 'progress',
+            }),
+            expect.objectContaining({
+              id: 'MISSION',
+              status: 'DONE',
+              anchor: 'missions',
+            }),
+            expect.objectContaining({
+              id: 'REWARD',
+              status: 'DONE',
+              anchor: 'rewards',
+            }),
+            expect.objectContaining({
+              id: 'BONUS',
+              status: 'DONE',
+              anchor: 'rewards',
+            }),
+          ],
+        },
         activity: {
           sessionsCount: 4,
           playMinutes: 360,

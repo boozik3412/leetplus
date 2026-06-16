@@ -322,6 +322,39 @@ export type GuestPortalPayload = {
   communications: GuestPortalCommunications;
 };
 
+export type GuestPortalGameJourneyStepId =
+  | 'PROFILE'
+  | 'LANGAME'
+  | 'CHECK_IN'
+  | 'MISSION'
+  | 'REWARD'
+  | 'BONUS';
+
+export type GuestPortalGameJourneyStepStatus =
+  | 'DONE'
+  | 'CURRENT'
+  | 'WAITING'
+  | 'ATTENTION';
+
+export type GuestPortalGameJourneyStep = {
+  id: GuestPortalGameJourneyStepId;
+  label: string;
+  status: GuestPortalGameJourneyStepStatus;
+  hint: string;
+  anchor: 'profile' | 'langame-match' | 'progress' | 'missions' | 'rewards';
+};
+
+export type GuestPortalGameJourney = {
+  summary: {
+    completed: number;
+    total: number;
+    readyPercent: number;
+    nextStepId: GuestPortalGameJourneyStepId | null;
+    nextStepLabel: string | null;
+  };
+  steps: GuestPortalGameJourneyStep[];
+};
+
 export type GuestPortalGameSummary = {
   generatedAt: string;
   tenant: GuestPortalPayload['tenant'];
@@ -468,6 +501,7 @@ export type GuestPortalGameSummary = {
     };
     timeline: GuestPortalGameProgressTimelineItem[];
   };
+  journey: GuestPortalGameJourney;
   nextActions: GuestPortalNextAction[];
   activity: Pick<
     GuestPortalPayload['activity']['summary'],
@@ -3652,6 +3686,7 @@ function buildGameSummaryFromPortal(
     .map(mapGameSummaryMission);
   const activeSeason = portal.gamification.seasons[0] ?? null;
   const progress = buildGameProgressSummary(portal, recentRewards);
+  const journey = buildGameJourney(portal, progress);
 
   return {
     generatedAt: new Date().toISOString(),
@@ -3711,6 +3746,7 @@ function buildGameSummaryFromPortal(
         : null,
     },
     progress,
+    journey,
     nextActions: portal.gamification.nextActions.slice(0, 5),
     activity: {
       sessionsCount: portal.activity.summary.sessionsCount,
@@ -3890,6 +3926,135 @@ function buildGameProgressSummary(
       lastActivityAt: portal.activity.summary.lastActivityAt,
     },
     timeline,
+  };
+}
+
+function buildGameJourney(
+  portal: GuestPortalPayload,
+  progress: GuestPortalGameSummary['progress'],
+): GuestPortalGameSummary['journey'] {
+  const hasGameProfile = Boolean(portal.profile.id);
+  const langameLinked =
+    portal.guestSnapshot.participation.accountState === 'LANGAME_SYNCED';
+  const hasActivity =
+    portal.activity.summary.gameEventsCount > 0 ||
+    portal.activity.summary.sessionsCount > 0;
+  const missionsTotal = portal.gamification.missions.length;
+  const missionsCompleted = progress.summary.missionsCompleted;
+  const rewardSummary = portal.gamification.rewardSummary;
+  const bonusHistory = portal.gamification.bonusHistory;
+  const rewardCreated = rewardSummary.total > 0;
+  const bonusConfirmed =
+    bonusHistory.summary.confirmedAmount !== 0 ||
+    bonusHistory.items.some((item) => item.status === 'CONFIRMED');
+  const bonusPending =
+    bonusHistory.summary.pendingAmount !== 0 ||
+    bonusHistory.items.some(
+      (item) => item.status === 'PENDING' || item.status === 'PROCESSING',
+    );
+  const bonusAttention =
+    bonusHistory.summary.failed > 0 ||
+    bonusHistory.items.some((item) => item.status === 'FAILED');
+  const steps: GuestPortalGameJourneyStep[] = [
+    {
+      id: 'PROFILE',
+      label: 'Регистрация',
+      status: hasGameProfile ? 'DONE' : 'ATTENTION',
+      hint: hasGameProfile
+        ? 'Телефон подтвержден, отдельный игровой профиль LeetPlus создан.'
+        : 'Нужно пройти вход по телефону на /play.',
+      anchor: 'profile',
+    },
+    {
+      id: 'LANGAME',
+      label: 'Связь с Langame',
+      status: langameLinked ? 'DONE' : 'ATTENTION',
+      hint: langameLinked
+        ? 'Профиль безопасно связан с сохраненным Langame-гостем.'
+        : 'Подтвердите совпадение с Langame, чтобы бонус ушел в клубный баланс.',
+      anchor: 'langame-match',
+    },
+    {
+      id: 'CHECK_IN',
+      label: 'Активность в клубе',
+      status: hasActivity ? 'DONE' : langameLinked ? 'CURRENT' : 'WAITING',
+      hint: hasActivity
+        ? 'LeetPlus уже видит игровую активность или чек-ин.'
+        : langameLinked
+          ? 'Сделайте чек-ин или начните сессию в клубе.'
+          : 'Сначала нужна связь с Langame.',
+      anchor: 'progress',
+    },
+    {
+      id: 'MISSION',
+      label: 'Квест',
+      status:
+        missionsCompleted > 0
+          ? 'DONE'
+          : missionsTotal > 0 && langameLinked
+            ? 'CURRENT'
+            : 'WAITING',
+      hint:
+        missionsCompleted > 0
+          ? 'Хотя бы один квест уже выполнен.'
+          : missionsTotal > 0
+            ? 'Выберите ближайший квест и доберите прогресс.'
+            : 'Для клуба еще не опубликованы активные квесты.',
+      anchor: 'missions',
+    },
+    {
+      id: 'REWARD',
+      label: 'Награда',
+      status:
+        rewardCreated || rewardSummary.ready > 0 || rewardSummary.redeemed > 0
+          ? 'DONE'
+          : missionsCompleted > 0
+            ? 'CURRENT'
+            : 'WAITING',
+      hint: rewardCreated
+        ? 'Награда уже создана в кошельке LeetPlus.'
+        : missionsCompleted > 0
+          ? 'Квест выполнен, награда готовится к выдаче.'
+          : 'Награда появится после выполнения квеста.',
+      anchor: 'rewards',
+    },
+    {
+      id: 'BONUS',
+      label: 'Бонус в Langame',
+      status: bonusConfirmed
+        ? 'DONE'
+        : bonusAttention
+          ? 'ATTENTION'
+          : bonusPending
+            ? 'CURRENT'
+            : rewardCreated
+              ? 'CURRENT'
+              : 'WAITING',
+      hint: bonusConfirmed
+        ? 'Langame подтвердил начисление, баланс обновлен в LeetPlus.'
+        : bonusAttention
+          ? 'Начисление требует проверки команды клуба.'
+          : bonusPending
+            ? 'Бонус стоит в очереди или отправляется в Langame.'
+            : rewardCreated
+              ? 'Награда есть, следующий шаг - постановка в bonus ledger.'
+              : 'Сначала нужна готовая награда за квест.',
+      anchor: 'rewards',
+    },
+  ];
+  const total = steps.length;
+  const completed = steps.filter((step) => step.status === 'DONE').length;
+  const nextStep = steps.find((step) => step.status !== 'DONE') ?? null;
+
+  return {
+    summary: {
+      completed,
+      total,
+      readyPercent: total > 0 ? Math.round((completed / total) * 100) : 0,
+      nextStepId: nextStep?.id ?? null,
+      nextStepLabel: nextStep?.label ?? null,
+    },
+    steps,
   };
 }
 

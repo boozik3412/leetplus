@@ -519,6 +519,10 @@ describe('GuestPortalService', () => {
             }),
           ],
           latestBonus: portal.gamification.bonusHistory.items[0],
+          bonusHistory: {
+            summary: portal.gamification.bonusHistory.summary,
+            items: portal.gamification.bonusHistory.items,
+          },
         },
         lootBoxes: {
           total: 1,
@@ -596,12 +600,45 @@ describe('GuestPortalService', () => {
       expect(summary.generatedAt).toEqual(expect.any(String));
       expect(summary.rewards.recent).toHaveLength(2);
       expect(summary.rewards.recent[0]).not.toHaveProperty('status');
+      expect(summary.rewards.bonusHistory.items).toHaveLength(1);
+      expect(summary.rewards.bonusHistory.items[0]).not.toHaveProperty(
+        'langameRequest',
+      );
+      expect(summary.rewards.bonusHistory.items[0]).not.toHaveProperty(
+        'langameResponse',
+      );
       expect(summary.battlePass.active?.levels).toHaveLength(5);
       expect(summary.battlePass.active?.levels[0].level).toBe(2);
       expect(summary.battlePass.active?.levels[4].level).toBe(6);
       expect(summary).not.toHaveProperty('guestSnapshot');
       expect(summary.activity).not.toHaveProperty('timeline');
       expect(summary.activity).not.toHaveProperty('xpHistory');
+    });
+
+    it('limits bonus ledger history in compact game summary', async () => {
+      const { service } = createService();
+      const portal = portalPayloadFixture();
+      const baseItem = portal.gamification.bonusHistory.items[0];
+      portal.gamification.bonusHistory = {
+        summary: {
+          ...portal.gamification.bonusHistory.summary,
+          total: 6,
+        },
+        items: Array.from({ length: 6 }, (_, index) => ({
+          ...baseItem,
+          id: `ledger-${index + 1}`,
+          occurredAt: `2026-06-15T08:0${index}:00.000Z`,
+        })),
+      };
+      jest.spyOn(service, 'getSession').mockResolvedValue(portal as any);
+
+      const summary = await service.getGameSummary('Bearer guest-token');
+
+      expect(summary.rewards.bonusHistory.summary.total).toBe(6);
+      expect(summary.rewards.bonusHistory.items).toHaveLength(5);
+      expect(summary.rewards.bonusHistory.items.map((item) => item.id)).toEqual(
+        ['ledger-1', 'ledger-2', 'ledger-3', 'ledger-4', 'ledger-5'],
+      );
     });
   });
 

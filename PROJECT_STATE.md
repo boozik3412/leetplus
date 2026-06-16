@@ -80,6 +80,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added a bounded bonus-ledger history to the lightweight public game screen: `GET /guest-portal/session/game-summary` now exposes up to 5 safe `rewards.bonusHistory` rows, and `/play/game` shows queued/sending/confirmed/failed/canceled bonus operations with amount, source, store, date, and balance-after without raw phone, Langame tokens, `langameRequest`, `langameResponse`, or admin-only details.
 - Added a full next-actions plan to the lightweight public game screen: `/play/game` now renders all bounded `summary.nextActions` with priority, status, progress, and links to the relevant local game block or guest portal without new API calls, live Langame reads, or admin involvement.
 - Added a bounded Battle Pass level track to the lightweight public game screen: `GET /guest-portal/session/game-summary` now returns up to 5 safe levels around the current/next season progress, and `/play/game` shows XP thresholds, free/premium rewards, and level state without exposing the full season JSON or live Langame reads.
 - Added a bounded recent reward wallet to the lightweight public game screen: `GET /guest-portal/session/game-summary` now includes `rewards.recent` with up to 5 safe reward rows, and `/play/game` shows reward state, source, amount, date, expiry, and READY code without exposing raw PII, reward status internals, or Langame payload.

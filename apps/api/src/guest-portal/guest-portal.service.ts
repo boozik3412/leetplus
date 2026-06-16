@@ -360,6 +360,10 @@ export type GuestPortalGameSummary = {
       >
     >;
     latestBonus: GuestPortalBonusHistoryItem | null;
+    bonusHistory: {
+      summary: GuestPortalBonusHistory['summary'];
+      items: GuestPortalBonusHistoryItem[];
+    };
   };
   lootBoxes: {
     total: number;
@@ -3593,6 +3597,10 @@ function buildGameSummaryFromPortal(
         .slice(0, 5),
       recent: recentRewards,
       latestBonus: portal.gamification.bonusHistory.items[0] ?? null,
+      bonusHistory: {
+        summary: portal.gamification.bonusHistory.summary,
+        items: portal.gamification.bonusHistory.items.slice(0, 5),
+      },
     },
     lootBoxes: {
       total: portal.gamification.lootBoxes.length,

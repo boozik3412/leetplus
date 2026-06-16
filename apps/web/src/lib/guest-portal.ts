@@ -439,7 +439,13 @@ export type GuestPortalGameSummary = {
         | "expiresAt"
       >
     >;
-    latestBonus: GuestPortalPayload["gamification"]["bonusHistory"]["items"][number] | null;
+    latestBonus:
+      | GuestPortalPayload["gamification"]["bonusHistory"]["items"][number]
+      | null;
+    bonusHistory: {
+      summary: GuestPortalPayload["gamification"]["bonusHistory"]["summary"];
+      items: GuestPortalPayload["gamification"]["bonusHistory"]["items"];
+    };
   };
   lootBoxes: {
     total: number;

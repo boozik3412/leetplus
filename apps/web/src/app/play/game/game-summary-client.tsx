@@ -13,6 +13,8 @@ type SubmitState = "idle" | "submitting";
 type GameNextAction = GuestPortalGameSummary["nextActions"][number];
 type GameRewardWalletState =
   GuestPortalGameSummary["rewards"]["recent"][number]["walletState"];
+type GameBonusHistoryItem =
+  GuestPortalGameSummary["rewards"]["bonusHistory"]["items"][number];
 
 class EmptySessionError extends Error {}
 
@@ -488,8 +490,11 @@ function RewardResultPanel({ summary }: { summary: GuestPortalGameSummary }) {
   const reward = summary.rewards.ready[0] ?? null;
   const recentRewards = summary.rewards.recent;
   const latestBonus = summary.rewards.latestBonus;
+  const bonusHistory = summary.rewards.bonusHistory;
   const bonusBalance = summary.loyalty.bonusBalance;
-  const hasRewardResult = Boolean(reward || latestBonus || recentRewards.length);
+  const hasRewardResult = Boolean(
+    reward || latestBonus || recentRewards.length || bonusHistory.items.length,
+  );
 
   return (
     <section
@@ -613,6 +618,10 @@ function RewardResultPanel({ summary }: { summary: GuestPortalGameSummary }) {
             </p>
           </div>
 
+          {bonusHistory.items.length ? (
+            <BonusHistoryPanel history={bonusHistory} />
+          ) : null}
+
           {recentRewards.length ? (
             <div className="rounded-lg border border-white/10 bg-zinc-950/45 p-4">
               <div className="flex items-center justify-between gap-3">
@@ -686,6 +695,107 @@ function RewardResultPanel({ summary }: { summary: GuestPortalGameSummary }) {
         </p>
       )}
     </section>
+  );
+}
+
+function BonusHistoryPanel({
+  history,
+}: {
+  history: GuestPortalGameSummary["rewards"]["bonusHistory"];
+}) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-zinc-950/45 p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+            Langame ledger
+          </p>
+          <h3 className="mt-1 text-sm font-black text-white">
+            История начислений
+          </h3>
+        </div>
+        <span className="rounded-full bg-white/10 px-2 py-1 text-xs font-black text-zinc-200">
+          {formatNumber(history.items.length)}
+        </span>
+      </div>
+      <div className="mt-4 grid gap-2 sm:grid-cols-3">
+        <BonusHistoryMetric
+          label="Начислено"
+          value={formatSignedNumber(history.summary.confirmedAmount)}
+        />
+        <BonusHistoryMetric
+          label="В очереди"
+          value={formatSignedNumber(history.summary.pendingAmount)}
+        />
+        <BonusHistoryMetric
+          label="Проверки"
+          value={formatNumber(history.summary.failed)}
+        />
+      </div>
+      <div className="mt-4 space-y-2">
+        {history.items.map((item) => (
+          <div
+            key={item.id}
+            className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-3"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-black text-white">
+                  {item.title}
+                </p>
+                <p className="mt-1 text-xs text-zinc-500">
+                  {item.sourceLabel ?? rewardSourceKindLabel(item.sourceKind)}
+                  {item.storeName ? ` · ${item.storeName}` : ""}
+                </p>
+              </div>
+              <span
+                className={[
+                  "shrink-0 rounded-full px-2 py-1 text-xs font-black",
+                  bonusStatusBadgeClass(item.status),
+                ].join(" ")}
+              >
+                {item.statusLabel}
+              </span>
+            </div>
+            <div className="mt-3 flex flex-col gap-1 text-xs text-zinc-400 sm:flex-row sm:items-center sm:justify-between">
+              <span
+                className={
+                  item.amount >= 0 ? "text-emerald-200" : "text-rose-200"
+                }
+              >
+                {formatSignedNumber(item.amount)}
+              </span>
+              <span>
+                {bonusHistoryDate(item)}
+                {item.balanceAfter !== null
+                  ? ` · баланс ${formatNumber(item.balanceAfter)}`
+                  : ""}
+              </span>
+            </div>
+            {item.status !== "CONFIRMED" ? (
+              <p className="mt-2 text-xs leading-5 text-zinc-500">
+                {bonusStatusHint(item.status)}
+              </p>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BonusHistoryMetric({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-zinc-950/50 p-3">
+      <p className="text-xs text-zinc-500">{label}</p>
+      <p className="mt-1 text-sm font-black text-white">{value}</p>
+    </div>
   );
 }
 
@@ -1269,6 +1379,36 @@ function rewardSourceKindLabel(
   >;
 
   return labels[kind];
+}
+
+function bonusStatusBadgeClass(status: GameBonusHistoryItem["status"]) {
+  const classes = {
+    PENDING: "bg-amber-300 text-zinc-950",
+    PROCESSING: "bg-sky-300 text-zinc-950",
+    CONFIRMED: "bg-emerald-300 text-zinc-950",
+    FAILED: "bg-rose-300/20 text-rose-100",
+    CANCELED: "bg-white/10 text-zinc-400",
+    UNKNOWN: "bg-white/10 text-zinc-300",
+  } satisfies Record<GameBonusHistoryItem["status"], string>;
+
+  return classes[status];
+}
+
+function bonusStatusHint(status: GameBonusHistoryItem["status"]) {
+  const hints = {
+    PENDING: "Начисление уже поставлено в очередь и уйдет в Langame автоматически.",
+    PROCESSING: "Начисление сейчас отправляется в Langame.",
+    CONFIRMED: "Бонус подтвержден Langame и учтен в игровом балансе.",
+    FAILED: "Начисление не потеряно: LeetPlus проверит его повторно или покажет в админке.",
+    CANCELED: "Начисление отменено до подтверждения в Langame.",
+    UNKNOWN: "Статус проверяется, начисление остается в журнале LeetPlus.",
+  } satisfies Record<GameBonusHistoryItem["status"], string>;
+
+  return hints[status];
+}
+
+function bonusHistoryDate(item: GameBonusHistoryItem) {
+  return formatDate(item.confirmedAt ?? item.processedAt ?? item.occurredAt);
 }
 
 function actionPriorityLabel(priority: GameNextAction["priority"]) {

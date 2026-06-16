@@ -1052,6 +1052,8 @@ function MissionsPanel({
                     </span>
                   </div>
 
+                  <MissionRewardStatusCard status={mission.rewardStatus} />
+
                   {activeStep ? (
                     <div className="mt-4 rounded-lg border border-emerald-300/25 bg-emerald-300/[0.08] p-3">
                       <p className="text-xs font-semibold uppercase tracking-wide text-emerald-200">
@@ -1217,7 +1219,7 @@ function missionMatchesFilter(
     case "ALMOST_DONE":
       return mission.progressPercent >= 70 && mission.progressPercent < 100;
     case "REWARD_PENDING":
-      return mission.progressPercent >= 100;
+      return mission.rewardStatus.state !== "IN_PROGRESS";
     case "ALL":
       return true;
     default:
@@ -1226,6 +1228,22 @@ function missionMatchesFilter(
 }
 
 function missionCardClass(mission: GameMission) {
+  if (
+    mission.rewardStatus.state === "FAILED" ||
+    mission.rewardStatus.state === "CANCELED" ||
+    mission.rewardStatus.state === "EXPIRED"
+  ) {
+    return "rounded-lg border border-rose-300/25 bg-rose-300/[0.06] p-4";
+  }
+
+  if (
+    mission.rewardStatus.state === "QUEUED" ||
+    mission.rewardStatus.state === "SENDING" ||
+    mission.rewardStatus.state === "WAITING_APPROVAL"
+  ) {
+    return "rounded-lg border border-amber-300/25 bg-amber-300/[0.06] p-4";
+  }
+
   return [
     "rounded-lg border p-4",
     mission.progressPercent >= 100
@@ -1237,6 +1255,22 @@ function missionCardClass(mission: GameMission) {
 }
 
 function missionStatusBadgeClass(mission: GameMission) {
+  if (
+    mission.rewardStatus.state === "FAILED" ||
+    mission.rewardStatus.state === "CANCELED" ||
+    mission.rewardStatus.state === "EXPIRED"
+  ) {
+    return "mt-1 block rounded-full bg-rose-300/20 px-2 py-1 text-xs font-bold text-rose-100";
+  }
+
+  if (
+    mission.rewardStatus.state === "QUEUED" ||
+    mission.rewardStatus.state === "SENDING" ||
+    mission.rewardStatus.state === "WAITING_APPROVAL"
+  ) {
+    return "mt-1 block rounded-full bg-amber-300/20 px-2 py-1 text-xs font-bold text-amber-100";
+  }
+
   return [
     "mt-1 block rounded-full px-2 py-1 text-xs font-bold",
     mission.progressPercent >= 100
@@ -1248,6 +1282,10 @@ function missionStatusBadgeClass(mission: GameMission) {
 }
 
 function missionStateLabel(mission: GameMission) {
+  if (mission.rewardStatus.state !== "IN_PROGRESS") {
+    return mission.rewardStatus.label.toLowerCase();
+  }
+
   if (mission.progressPercent >= 100) {
     return mission.manualApprovalRequired
       ? "ждет подтверждения"
@@ -1263,6 +1301,101 @@ function missionRewardNote(mission: GameMission) {
   }
 
   return "Бонус начисляется автоматически после выполнения.";
+}
+
+function MissionRewardStatusCard({
+  status,
+}: {
+  status: GameMission["rewardStatus"];
+}) {
+  const rewardLabel =
+    status.rewardLabel ??
+    (status.rewardAmount !== null
+      ? `${formatSignedNumber(status.rewardAmount)} бонусов`
+      : null);
+  const meta = [
+    status.rewardWalletState ? walletStateLabel(status.rewardWalletState) : null,
+    status.occurredAt ? formatDate(status.occurredAt) : null,
+    status.balanceAfter !== null
+      ? `баланс ${formatNumber(status.balanceAfter)}`
+      : null,
+  ].filter((item): item is string => Boolean(item));
+
+  return (
+    <div className={missionRewardStatusPanelClass(status.state)}>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <p className={missionRewardStatusTitleClass(status.state)}>
+            {status.label}
+          </p>
+          <p className="mt-1 text-xs leading-5 text-zinc-300">{status.hint}</p>
+        </div>
+        {rewardLabel ? (
+          <span className="shrink-0 rounded-full bg-white/10 px-2 py-1 text-xs font-black text-zinc-100">
+            {rewardLabel}
+          </span>
+        ) : null}
+      </div>
+      {meta.length ? (
+        <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-bold text-zinc-400">
+          {meta.map((item) => (
+            <span
+              key={item}
+              className="rounded-full border border-white/10 px-2 py-1"
+            >
+              {item}
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function missionRewardStatusPanelClass(
+  state: GameMission["rewardStatus"]["state"],
+) {
+  const base = "mt-4 rounded-lg border px-3 py-3";
+
+  switch (state) {
+    case "CONFIRMED":
+    case "READY":
+    case "REDEEMED":
+    case "COMPLETED":
+      return `${base} border-emerald-300/25 bg-emerald-300/[0.08]`;
+    case "QUEUED":
+    case "SENDING":
+    case "WAITING_APPROVAL":
+      return `${base} border-amber-300/25 bg-amber-300/[0.07]`;
+    case "FAILED":
+    case "CANCELED":
+    case "EXPIRED":
+      return `${base} border-rose-300/25 bg-rose-300/[0.07]`;
+    default:
+      return `${base} border-white/10 bg-zinc-950/35`;
+  }
+}
+
+function missionRewardStatusTitleClass(
+  state: GameMission["rewardStatus"]["state"],
+) {
+  switch (state) {
+    case "CONFIRMED":
+    case "READY":
+    case "REDEEMED":
+    case "COMPLETED":
+      return "text-xs font-black uppercase tracking-wide text-emerald-200";
+    case "QUEUED":
+    case "SENDING":
+    case "WAITING_APPROVAL":
+      return "text-xs font-black uppercase tracking-wide text-amber-100";
+    case "FAILED":
+    case "CANCELED":
+    case "EXPIRED":
+      return "text-xs font-black uppercase tracking-wide text-rose-100";
+    default:
+      return "text-xs font-black uppercase tracking-wide text-zinc-300";
+  }
 }
 
 function missionStepStateLabel(

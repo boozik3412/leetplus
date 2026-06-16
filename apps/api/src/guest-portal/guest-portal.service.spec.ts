@@ -257,6 +257,17 @@ function portalPayloadFixture() {
           ],
           periodTo: null,
           manualApprovalRequired: false,
+          rewardStatus: {
+            state: 'IN_PROGRESS',
+            label: 'Награда впереди',
+            hint: 'Закройте шаги квеста, чтобы получить бонус.',
+            rewardLabel: null,
+            rewardAmount: null,
+            rewardWalletState: null,
+            ledgerStatus: null,
+            balanceAfter: null,
+            occurredAt: null,
+          },
         },
         {
           id: 'mission-2',
@@ -271,6 +282,17 @@ function portalPayloadFixture() {
           questSteps: [],
           periodTo: '2026-06-30T20:59:59.000Z',
           manualApprovalRequired: false,
+          rewardStatus: {
+            state: 'CONFIRMED',
+            label: 'Бонус начислен',
+            hint: 'Langame подтвердил начисление. Баланс после: 250.',
+            rewardLabel: '100 бонусов',
+            rewardAmount: 100,
+            rewardWalletState: null,
+            ledgerStatus: 'CONFIRMED',
+            balanceAfter: 250,
+            occurredAt: '2026-06-15T08:01:00.000Z',
+          },
         },
       ],
       seasons: [
@@ -539,12 +561,24 @@ describe('GuestPortalService', () => {
         missions: {
           total: 2,
           featured: [
-            expect.objectContaining({ id: 'mission-2', progressPercent: 100 }),
+            expect.objectContaining({
+              id: 'mission-2',
+              progressPercent: 100,
+              rewardStatus: expect.objectContaining({
+                state: 'CONFIRMED',
+                ledgerStatus: 'CONFIRMED',
+                rewardAmount: 100,
+                balanceAfter: 250,
+              }),
+            }),
             expect.objectContaining({
               id: 'mission-1',
               progressPercent: 50,
               progressUnit: 'час',
               manualApprovalRequired: false,
+              rewardStatus: expect.objectContaining({
+                state: 'IN_PROGRESS',
+              }),
               questSteps: [
                 expect.objectContaining({
                   id: 'play-first-hour',

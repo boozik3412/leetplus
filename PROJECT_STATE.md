@@ -80,6 +80,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added mission-level reward status to the lightweight public game screen: `GET /guest-portal/session/game-summary` now exposes safe `rewardStatus` for each featured mission, and `/play/game` shows whether the quest reward is ahead, waiting approval, ready, queued, sending to Langame, confirmed, failed, canceled, redeemed, or expired without new API calls, raw PII, Langame payload, or admin involvement.
 - Added a bounded mission board to the lightweight public game screen: `GET /guest-portal/session/game-summary` now exposes up to 6 featured missions, and `/play/game` lets the guest switch between available, almost-done, reward-ready, and all quests without new API calls, live Langame reads, raw PII, or admin involvement.
 - Added a bounded bonus-ledger history to the lightweight public game screen: `GET /guest-portal/session/game-summary` now exposes up to 5 safe `rewards.bonusHistory` rows, and `/play/game` shows queued/sending/confirmed/failed/canceled bonus operations with amount, source, store, date, and balance-after without raw phone, Langame tokens, `langameRequest`, `langameResponse`, or admin-only details.
 - Added a full next-actions plan to the lightweight public game screen: `/play/game` now renders all bounded `summary.nextActions` with priority, status, progress, and links to the relevant local game block or guest portal without new API calls, live Langame reads, or admin involvement.

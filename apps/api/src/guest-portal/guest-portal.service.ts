@@ -400,6 +400,7 @@ export type GuestPortalGameSummary = {
         | 'questSteps'
         | 'periodTo'
         | 'manualApprovalRequired'
+        | 'rewardStatus'
       >
     >;
   };
@@ -645,6 +646,30 @@ export type GuestPortalMission = {
   questSteps: GuestPortalMissionStep[];
   periodTo: string | null;
   manualApprovalRequired: boolean;
+  rewardStatus: GuestPortalMissionRewardStatus;
+};
+
+export type GuestPortalMissionRewardStatus = {
+  state:
+    | 'IN_PROGRESS'
+    | 'COMPLETED'
+    | 'WAITING_APPROVAL'
+    | 'READY'
+    | 'QUEUED'
+    | 'SENDING'
+    | 'CONFIRMED'
+    | 'FAILED'
+    | 'CANCELED'
+    | 'REDEEMED'
+    | 'EXPIRED';
+  label: string;
+  hint: string;
+  rewardLabel: string | null;
+  rewardAmount: number | null;
+  rewardWalletState: GuestPortalReward['walletState'] | null;
+  ledgerStatus: GuestPortalBonusHistoryItem['status'] | null;
+  balanceAfter: number | null;
+  occurredAt: string | null;
 };
 
 export type GuestPortalMissionStep = {
@@ -811,6 +836,23 @@ type GuestPortalBonusLedgerRow = {
     season?: { name: string } | null;
   } | null;
   store: { name: string } | null;
+};
+
+type GuestPortalRewardRow = {
+  id: string;
+  status: string;
+  lootBoxId: string | null;
+  missionId: string | null;
+  seasonId: string | null;
+  rewardType: string;
+  rewardAmount: Prisma.Decimal;
+  rewardLabel: string;
+  rewardCode: string | null;
+  qualifiedAt: Date;
+  expiresAt: Date | null;
+  lootBox?: { name: string } | null;
+  mission?: { name: string } | null;
+  season?: { name: string } | null;
 };
 
 @Injectable()
@@ -2587,7 +2629,7 @@ export class GuestPortalService {
       .slice(0, 6)
       .map((item) => mapLootBox(item, rewards));
     const portalMissions = visibleMissions.map((item) =>
-      mapMission(item, missionProgress.get(item.id)),
+      mapMission(item, missionProgress.get(item.id), rewards, bonusLedgerRows),
     );
     const portalSeasons = seasons
       .filter((item) => activePeriod(item.periodFrom, item.periodTo))
@@ -3568,6 +3610,7 @@ function buildGameSummaryFromPortal(
       questSteps: mission.questSteps,
       periodTo: mission.periodTo,
       manualApprovalRequired: mission.manualApprovalRequired,
+      rewardStatus: mission.rewardStatus,
     }));
   const activeSeason = portal.gamification.seasons[0] ?? null;
 
@@ -4194,15 +4237,7 @@ function mapLootBox(
     manualApprovalRequired: boolean;
     note: string | null;
   },
-  rewards: Array<{
-    id: string;
-    lootBoxId: string | null;
-    status: string;
-    rewardLabel: string;
-    rewardCode: string | null;
-    qualifiedAt: Date;
-    expiresAt: Date | null;
-  }>,
+  rewards: GuestPortalRewardRow[],
 ): GuestPortalLootBox {
   const rewardState = buildLootBoxRewardState(row.id, rewards);
 
@@ -4220,15 +4255,7 @@ function mapLootBox(
 
 function buildLootBoxRewardState(
   lootBoxId: string,
-  rewards: Array<{
-    id: string;
-    lootBoxId: string | null;
-    status: string;
-    rewardLabel: string;
-    rewardCode: string | null;
-    qualifiedAt: Date;
-    expiresAt: Date | null;
-  }>,
+  rewards: GuestPortalRewardRow[],
 ): Pick<
   GuestPortalLootBox,
   | 'openedCount'
@@ -4290,6 +4317,8 @@ function mapMission(
     manualApprovalRequired: boolean;
   },
   progress?: GuestPortalMissionProgress,
+  rewards: GuestPortalRewardRow[] = [],
+  bonusLedgerRows: GuestPortalBonusLedgerRow[] = [],
 ): GuestPortalMission {
   const progressCurrent = progress?.current ?? 0;
   const questSteps = missionQuestSteps(row.conditions, progressCurrent);
@@ -4313,7 +4342,227 @@ function mapMission(
     questSteps,
     periodTo: iso(row.periodTo),
     manualApprovalRequired: row.manualApprovalRequired,
+    rewardStatus: buildMissionRewardStatus({
+      missionId: row.id,
+      manualApprovalRequired: row.manualApprovalRequired,
+      progressPercent,
+      rewards,
+      bonusLedgerRows,
+    }),
   };
+}
+
+function buildMissionRewardStatus({
+  missionId,
+  manualApprovalRequired,
+  progressPercent,
+  rewards,
+  bonusLedgerRows,
+}: {
+  missionId: string;
+  manualApprovalRequired: boolean;
+  progressPercent: number;
+  rewards: GuestPortalRewardRow[];
+  bonusLedgerRows: GuestPortalBonusLedgerRow[];
+}): GuestPortalMissionRewardStatus {
+  const latestLedger = bonusLedgerRows
+    .filter((row) => row.reward?.missionId === missionId)
+    .sort(
+      (left, right) =>
+        missionLedgerEventDate(right).getTime() -
+        missionLedgerEventDate(left).getTime(),
+    )[0];
+
+  if (latestLedger) {
+    return missionLedgerRewardStatus(latestLedger);
+  }
+
+  const latestReward = rewards
+    .filter((reward) => reward.missionId === missionId)
+    .sort(
+      (left, right) => right.qualifiedAt.getTime() - left.qualifiedAt.getTime(),
+    )[0];
+
+  if (latestReward) {
+    return missionWalletRewardStatus(latestReward);
+  }
+
+  if (progressPercent >= 100) {
+    return {
+      state: 'COMPLETED',
+      label: 'Квест выполнен',
+      hint: manualApprovalRequired
+        ? 'Команда клуба проверит выполнение и подтвердит награду.'
+        : 'Событие принято, награда появится после обработки правила.',
+      rewardLabel: null,
+      rewardAmount: null,
+      rewardWalletState: null,
+      ledgerStatus: null,
+      balanceAfter: null,
+      occurredAt: null,
+    };
+  }
+
+  return {
+    state: 'IN_PROGRESS',
+    label: 'Награда впереди',
+    hint: 'Закройте шаги квеста, чтобы получить бонус.',
+    rewardLabel: null,
+    rewardAmount: null,
+    rewardWalletState: null,
+    ledgerStatus: null,
+    balanceAfter: null,
+    occurredAt: null,
+  };
+}
+
+function missionLedgerRewardStatus(
+  row: GuestPortalBonusLedgerRow,
+): GuestPortalMissionRewardStatus {
+  const ledgerStatus = bonusLedgerPortalStatus(row.status);
+  const amount = moneyNumber(decimalNumber(row.amount) ?? 0);
+  const balanceAfter = decimalNumber(row.balanceAfter);
+  const occurredAt = missionLedgerEventDate(row).toISOString();
+  const base = {
+    rewardLabel: row.reward?.rewardLabel ?? null,
+    rewardAmount: amount,
+    rewardWalletState: null,
+    ledgerStatus,
+    balanceAfter,
+    occurredAt,
+  } satisfies Omit<GuestPortalMissionRewardStatus, 'state' | 'label' | 'hint'>;
+
+  switch (ledgerStatus) {
+    case 'PENDING':
+      return {
+        ...base,
+        state: 'QUEUED',
+        label: 'Бонус в очереди',
+        hint: 'Начисление уже подготовлено и будет отправлено в Langame.',
+      };
+    case 'PROCESSING':
+      return {
+        ...base,
+        state: 'SENDING',
+        label: 'Отправляется',
+        hint: 'LeetPlus отправляет бонус в Langame.',
+      };
+    case 'CONFIRMED':
+      return {
+        ...base,
+        state: 'CONFIRMED',
+        label: 'Бонус начислен',
+        hint:
+          balanceAfter === null
+            ? 'Langame подтвердил начисление бонуса.'
+            : `Langame подтвердил начисление. Баланс после: ${formatSafeAmount(
+                balanceAfter,
+              )}.`,
+      };
+    case 'FAILED':
+    case 'UNKNOWN':
+      return {
+        ...base,
+        state: 'FAILED',
+        label: 'Нужна проверка',
+        hint: 'Начисление не подтвердилось автоматически, команда клуба проверит его.',
+      };
+    case 'CANCELED':
+      return {
+        ...base,
+        state: 'CANCELED',
+        label: 'Начисление отменено',
+        hint: 'Эта бонусная операция остановлена до подтверждения в Langame.',
+      };
+    default:
+      return {
+        ...base,
+        state: 'FAILED',
+        label: 'Нужна проверка',
+        hint: 'Статус начисления требует проверки команды клуба.',
+      };
+  }
+}
+
+function missionWalletRewardStatus(
+  reward: GuestPortalRewardRow,
+): GuestPortalMissionRewardStatus {
+  const rewardWalletStateValue = rewardWalletState(
+    reward.status,
+    reward.expiresAt,
+  );
+  const base = {
+    rewardLabel: reward.rewardLabel,
+    rewardAmount: moneyNumber(decimalNumber(reward.rewardAmount) ?? 0),
+    rewardWalletState: rewardWalletStateValue,
+    ledgerStatus: null,
+    balanceAfter: null,
+    occurredAt: reward.qualifiedAt.toISOString(),
+  } satisfies Omit<GuestPortalMissionRewardStatus, 'state' | 'label' | 'hint'>;
+
+  switch (rewardWalletStateValue) {
+    case 'WAITING_APPROVAL':
+      return {
+        ...base,
+        state: 'WAITING_APPROVAL',
+        label: 'Ждет подтверждения',
+        hint: 'Награда создана и ожидает проверки команды клуба.',
+      };
+    case 'READY':
+      return {
+        ...base,
+        state: 'READY',
+        label: 'Награда готова',
+        hint: reward.rewardCode
+          ? 'Покажите код кассиру или дождитесь автоматического начисления.'
+          : 'Награда готова к выдаче или постановке в bonus ledger.',
+      };
+    case 'REDEEMED':
+      return {
+        ...base,
+        state: 'REDEEMED',
+        label: 'Награда выдана',
+        hint: 'Награда по этому квесту уже использована.',
+      };
+    case 'EXPIRED':
+      return {
+        ...base,
+        state: 'EXPIRED',
+        label: 'Срок истек',
+        hint: 'Срок действия награды по этому квесту истек.',
+      };
+    case 'CANCELED':
+      return {
+        ...base,
+        state: 'CANCELED',
+        label: 'Награда отменена',
+        hint: 'Награда по этому квесту отменена.',
+      };
+    default:
+      return {
+        ...base,
+        state: 'WAITING_APPROVAL',
+        label: 'Проверяется',
+        hint: 'Награда по этому квесту требует проверки.',
+      };
+  }
+}
+
+function missionLedgerEventDate(row: GuestPortalBonusLedgerRow) {
+  return (
+    row.confirmedAt ??
+    row.processedAt ??
+    row.failedAt ??
+    row.canceledAt ??
+    row.updatedAt ??
+    row.createdAt
+  );
+}
+
+function formatSafeAmount(value: number) {
+  return new Intl.NumberFormat('ru-RU', {
+    maximumFractionDigits: 2,
+  }).format(value);
 }
 
 function missionQuestSteps(

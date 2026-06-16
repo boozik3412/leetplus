@@ -83,6 +83,42 @@ export type GuestPortalOtpStartResponse = {
   };
 };
 
+export type GuestPortalMissionRewardStatus = {
+  state:
+    | "IN_PROGRESS"
+    | "COMPLETED"
+    | "WAITING_APPROVAL"
+    | "READY"
+    | "QUEUED"
+    | "SENDING"
+    | "CONFIRMED"
+    | "FAILED"
+    | "CANCELED"
+    | "REDEEMED"
+    | "EXPIRED";
+  label: string;
+  hint: string;
+  rewardLabel: string | null;
+  rewardAmount: number | null;
+  rewardWalletState:
+    | "WAITING_APPROVAL"
+    | "READY"
+    | "REDEEMED"
+    | "CANCELED"
+    | "EXPIRED"
+    | null;
+  ledgerStatus:
+    | "PENDING"
+    | "PROCESSING"
+    | "CONFIRMED"
+    | "FAILED"
+    | "CANCELED"
+    | "UNKNOWN"
+    | null;
+  balanceAfter: number | null;
+  occurredAt: string | null;
+};
+
 export type GuestPortalPayload = {
   tenant: GuestPortalPublicConfig["tenant"];
   store: GuestPortalPublicConfig["store"];
@@ -244,6 +280,7 @@ export type GuestPortalPayload = {
       }>;
       periodTo: string | null;
       manualApprovalRequired: boolean;
+      rewardStatus: GuestPortalMissionRewardStatus;
     }>;
     seasons: Array<{
       id: string;
@@ -481,6 +518,7 @@ export type GuestPortalGameSummary = {
         | "questSteps"
         | "periodTo"
         | "manualApprovalRequired"
+        | "rewardStatus"
       >
     >;
   };

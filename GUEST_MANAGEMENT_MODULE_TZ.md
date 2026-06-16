@@ -1559,7 +1559,7 @@ V2:
 
 Отмена ledger-операции до подтверждения Langame считается terminal для связанного автоматического reward: LeetPlus не дает отменить свежий `PROCESSING` lock, а pending/failed/stale-processing записи переводят ledger, approved-награду и непосланные delivery в `CANCELED` с событием `DELIVERY_CANCELED_BY_LEDGER`, чтобы публичный кошелек не показывал бонус как готовый к выдаче после остановки внешнего начисления.
 
-Для пилота первого бонуса в клубе 1337 Guest Game Hub дополнительно возвращает runbook-стадию поверх чек-листа готовности: `Стоп`, `Dry-run`, `Canary`, `Live write`, `Сверка` или `Готово`. Стадия показывает gate-флаги dry-run/canary/live/reconciliation, блокеры и следующий безопасный шаг, чтобы первый bonus ledger write в Langame запускался только после тестового события, approved bonus reward и готовности scheduler/write-флагов.
+Для пилота первого бонуса в клубе 1337 Guest Game Hub дополнительно возвращает runbook-стадию поверх чек-листа готовности: `Стоп`, `Dry-run`, `Canary`, `Live write`, `Сверка` или `Готово`. Стадия показывает gate-флаги dry-run/canary/live/reconciliation, блокеры и следующий безопасный шаг, чтобы первый bonus ledger write в Langame запускался только после тестового события, approved bonus reward и готовности scheduler/write-флагов. Runbook также возвращает список action-кнопок с `enabled/disabledReason`: открыть dry-run/process-event, поставить approved bonus-награду в ledger, выполнить ledger dry-run, запустить защищенный live dispatch и перейти к сверке баланса. UI привязывает эти действия к существующим backend-handlers и не создает отдельный обходной write-path в Langame.
 
 Критерии приемки:
 

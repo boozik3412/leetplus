@@ -752,6 +752,22 @@ describe('GuestGamificationService', () => {
         blockers: [],
       });
       expect(readiness.runbook.nextAction).toContain('dry-run');
+      expect(readiness.runbook.actions).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            key: 'OPEN_DRY_RUN',
+            enabled: true,
+          }),
+          expect.objectContaining({
+            key: 'QUEUE_BONUS_LEDGER',
+            enabled: false,
+          }),
+          expect.objectContaining({
+            key: 'DISPATCH_BONUS_LEDGER',
+            enabled: false,
+          }),
+        ]),
+      );
     });
 
     it('recommends one live-write canary when a bonus reward and autonomous ledger are ready', () => {
@@ -775,6 +791,27 @@ describe('GuestGamificationService', () => {
         canReconcile: false,
       });
       expect(readiness.runbook.nextAction).toContain('одной бонусной награде');
+      expect(readiness.runbook.actions).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            key: 'QUEUE_BONUS_LEDGER',
+            enabled: true,
+          }),
+          expect.objectContaining({
+            key: 'DRY_RUN_BONUS_LEDGER',
+            enabled: true,
+          }),
+          expect.objectContaining({
+            key: 'DISPATCH_BONUS_LEDGER',
+            enabled: true,
+            tone: 'PRIMARY',
+          }),
+          expect.objectContaining({
+            key: 'RECONCILE_BALANCE',
+            enabled: false,
+          }),
+        ]),
+      );
       const safeguardsText = JSON.stringify(readiness.runbook.safeguards);
       expect(safeguardsText).not.toContain('+7');
       expect(safeguardsText).not.toContain('sync-token');
@@ -806,6 +843,18 @@ describe('GuestGamificationService', () => {
         canReconcile: true,
       });
       expect(readiness.runbook.nextAction).toContain('snapshot');
+      expect(readiness.runbook.actions).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            key: 'DISPATCH_BONUS_LEDGER',
+            enabled: false,
+          }),
+          expect.objectContaining({
+            key: 'RECONCILE_BALANCE',
+            enabled: true,
+          }),
+        ]),
+      );
     });
   });
 

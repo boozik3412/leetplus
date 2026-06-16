@@ -711,6 +711,21 @@ export type GuestGamePilotRunbookStage =
   | "RECONCILIATION"
   | "READY";
 
+export type GuestGamePilotRunbookActionKey =
+  | "OPEN_DRY_RUN"
+  | "QUEUE_BONUS_LEDGER"
+  | "DRY_RUN_BONUS_LEDGER"
+  | "DISPATCH_BONUS_LEDGER"
+  | "RECONCILE_BALANCE";
+
+export type GuestGamePilotRunbookAction = {
+  key: GuestGamePilotRunbookActionKey;
+  label: string;
+  enabled: boolean;
+  tone: "PRIMARY" | "SECONDARY";
+  disabledReason: string | null;
+};
+
 export type GuestGamePilotRunbook = {
   stage: GuestGamePilotRunbookStage;
   stageLabel: string;
@@ -718,6 +733,7 @@ export type GuestGamePilotRunbook = {
   canRunCanary: boolean;
   canRunLive: boolean;
   canReconcile: boolean;
+  actions: GuestGamePilotRunbookAction[];
   blockers: string[];
   safeguards: string[];
   nextAction: string;

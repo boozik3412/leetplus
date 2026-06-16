@@ -1171,6 +1171,21 @@ export type GuestGamePilotRunbookStage =
   | 'RECONCILIATION'
   | 'READY';
 
+export type GuestGamePilotRunbookActionKey =
+  | 'OPEN_DRY_RUN'
+  | 'QUEUE_BONUS_LEDGER'
+  | 'DRY_RUN_BONUS_LEDGER'
+  | 'DISPATCH_BONUS_LEDGER'
+  | 'RECONCILE_BALANCE';
+
+export type GuestGamePilotRunbookAction = {
+  key: GuestGamePilotRunbookActionKey;
+  label: string;
+  enabled: boolean;
+  tone: 'PRIMARY' | 'SECONDARY';
+  disabledReason: string | null;
+};
+
 export type GuestGamePilotRunbook = {
   stage: GuestGamePilotRunbookStage;
   stageLabel: string;
@@ -1178,6 +1193,7 @@ export type GuestGamePilotRunbook = {
   canRunCanary: boolean;
   canRunLive: boolean;
   canReconcile: boolean;
+  actions: GuestGamePilotRunbookAction[];
   blockers: string[];
   safeguards: string[];
   nextAction: string;
@@ -1947,6 +1963,87 @@ const pilotRunbookPrerequisiteKeys = new Set<
   'ACTIVE_RULES',
 ]);
 
+function buildPilotRunbookActions({
+  stage,
+  canRunDryRun,
+  canRunCanary,
+  canRunLive,
+  canReconcile,
+  bonusRewards,
+}: {
+  stage: GuestGamePilotRunbookStage;
+  canRunDryRun: boolean;
+  canRunCanary: boolean;
+  canRunLive: boolean;
+  canReconcile: boolean;
+  bonusRewards: number;
+}): GuestGamePilotRunbookAction[] {
+  const canQueueLedger =
+    canRunCanary &&
+    bonusRewards > 0 &&
+    stage !== 'RECONCILIATION' &&
+    stage !== 'READY';
+  const ledgerDisabledReason = !canRunCanary
+    ? 'Сначала нужен тестовый event/process-event или approved reward.'
+    : bonusRewards <= 0
+      ? 'Нужна approved bonus-награда, которая попадет в bonus ledger.'
+      : stage === 'RECONCILIATION'
+        ? 'Первое начисление уже подтверждено: сначала завершите сверку баланса.'
+        : stage === 'READY'
+          ? 'Пилот уже прошел live-write и сверку.'
+          : null;
+
+  return [
+    {
+      key: 'OPEN_DRY_RUN',
+      label: 'Открыть dry-run',
+      enabled: canRunDryRun && stage !== 'READY',
+      tone: 'SECONDARY',
+      disabledReason:
+        canRunDryRun && stage !== 'READY'
+          ? null
+          : canRunDryRun
+            ? 'Пилот уже прошел базовый dry-run.'
+            : 'Сначала закройте базовые условия регистрации, OTP, профиля, Langame-связки и активного правила.',
+    },
+    {
+      key: 'QUEUE_BONUS_LEDGER',
+      label: 'Поставить в ledger',
+      enabled: canQueueLedger,
+      tone: 'SECONDARY',
+      disabledReason: ledgerDisabledReason,
+    },
+    {
+      key: 'DRY_RUN_BONUS_LEDGER',
+      label: 'Dry-run ledger',
+      enabled: canQueueLedger,
+      tone: 'SECONDARY',
+      disabledReason: ledgerDisabledReason,
+    },
+    {
+      key: 'DISPATCH_BONUS_LEDGER',
+      label: 'Live dispatch',
+      enabled: canRunLive && stage === 'LIVE_WRITE',
+      tone: 'PRIMARY',
+      disabledReason:
+        canRunLive && stage === 'LIVE_WRITE'
+          ? null
+          : canRunLive
+            ? 'Live-write уже не является текущей стадией пилота.'
+            : 'Нужны canary-награда, готовый scheduler и включенный Langame write-флаг.',
+    },
+    {
+      key: 'RECONCILE_BALANCE',
+      label: 'Открыть сверку',
+      enabled: canReconcile,
+      tone: 'SECONDARY',
+      disabledReason: canReconcile
+        ? null
+        : 'Сверка появится после первого confirmed ledger-начисления Langame.',
+    },
+  ];
+}
+
 function buildPilotRunbook({
   items,
   activeRuleCount,
@@ -1996,9 +2093,22 @@ function buildPilotRunbook({
     'Raw phone и токены не попадают в UI; ledger и delivery показывают маски и безопасные статусы.',
     'После подтверждения Langame обязательна сверка GuestBonusBalanceCurrent с новым snapshot.',
   ];
+  const withActions = (
+    runbook: Omit<GuestGamePilotRunbook, 'actions'>,
+  ): GuestGamePilotRunbook => ({
+    ...runbook,
+    actions: buildPilotRunbookActions({
+      stage: runbook.stage,
+      canRunDryRun: runbook.canRunDryRun,
+      canRunCanary: runbook.canRunCanary,
+      canRunLive: runbook.canRunLive,
+      canReconcile: runbook.canReconcile,
+      bonusRewards,
+    }),
+  });
 
   if (prerequisiteBlockers.length > 0) {
-    return {
+    return withActions({
       stage: 'BLOCKED',
       stageLabel: 'Стоп',
       canRunDryRun,
@@ -2011,12 +2121,12 @@ function buildPilotRunbook({
         prerequisiteBlockers[0]?.nextAction ??
         'Закрыть блокеры пилотного чек-листа.',
       note: 'Пилотный прогон первого бонуса нельзя запускать, пока не закрыты базовые условия регистрации, OTP, профиля, связки с Langame и активного правила.',
-    };
+    });
   }
 
   if (ledgerConfirmed > 0) {
     if (ledgerReconciliationMismatch > 0 || ledgerReconciliationPending > 0) {
-      return {
+      return withActions({
         stage: 'RECONCILIATION',
         stageLabel: 'Сверка',
         canRunDryRun,
@@ -2030,10 +2140,10 @@ function buildPilotRunbook({
             ? 'Разобрать расхождения ledger и Langame snapshot до следующего live-write.'
             : 'Дождаться свежего guest foundation sync и bonus balance snapshot после первого начисления.',
         note: 'Первое начисление уже подтверждено Langame; следующий обязательный этап - сверка баланса и отсутствие расхождений.',
-      };
+      });
     }
 
-    return {
+    return withActions({
       stage: 'READY',
       stageLabel: 'Готово',
       canRunDryRun,
@@ -2045,11 +2155,11 @@ function buildPilotRunbook({
       nextAction:
         'Сохранить пилот 1337 как эталонный сценарий и расширять лимит начислений только после проверки журнала.',
       note: 'Путь первого бонуса прошел до подтверждения Langame и последующей сверки баланса.',
-    };
+    });
   }
 
   if (!events || (!approvedRewards && !readyWalletRewards)) {
-    return {
+    return withActions({
       stage: 'DRY_RUN',
       stageLabel: 'Dry-run',
       canRunDryRun,
@@ -2061,11 +2171,11 @@ function buildPilotRunbook({
       nextAction:
         'Прогнать dry-run/process-event на тестовом госте 1337 и убедиться, что правило создает ожидаемую бонусную награду без записи в Langame.',
       note: 'Базовые условия готовы; теперь нужен контролируемый тест события и проверка idempotency до очереди бонусов.',
-    };
+    });
   }
 
   if (!canRunLive) {
-    return {
+    return withActions({
       stage: 'CANARY',
       stageLabel: 'Canary',
       canRunDryRun,
@@ -2078,10 +2188,10 @@ function buildPilotRunbook({
         ? 'Поставить одну approved bonus-награду в ledger и выполнить dry-run dispatcher перед включением live-write.'
         : 'Подготовить approved reward с бонусным rewardType, чтобы он попал в bonus ledger, а не в ручную выдачу.',
       note: 'Есть тестовая активность или награда, но до live-write нужен безопасный canary через ledger dry-run и проверку scheduler/write-флагов.',
-    };
+    });
   }
 
-  return {
+  return withActions({
     stage: 'LIVE_WRITE',
     stageLabel: 'Live write',
     canRunDryRun,
@@ -2093,7 +2203,7 @@ function buildPilotRunbook({
     nextAction:
       'Запустить первый live-write только на одной бонусной награде 1337, затем сразу проверить ledger status и ждать свежий snapshot баланса.',
     note: 'Все условия для первого боевого начисления есть; режим должен оставаться canary до подтвержденной сверки баланса.',
-  };
+  });
 }
 
 function pickPilotStore(stores: PilotStoreRow[]) {

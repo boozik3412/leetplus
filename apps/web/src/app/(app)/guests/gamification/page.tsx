@@ -227,6 +227,43 @@ const emptyWorkspace: GuestGamificationWorkspace = {
       canRunCanary: false,
       canRunLive: false,
       canReconcile: false,
+      actions: [
+        {
+          key: "OPEN_DRY_RUN",
+          label: "Открыть dry-run",
+          enabled: false,
+          tone: "SECONDARY",
+          disabledReason: "Дождаться ответа API workspace.",
+        },
+        {
+          key: "QUEUE_BONUS_LEDGER",
+          label: "Поставить в ledger",
+          enabled: false,
+          tone: "SECONDARY",
+          disabledReason: "Дождаться ответа API workspace.",
+        },
+        {
+          key: "DRY_RUN_BONUS_LEDGER",
+          label: "Dry-run ledger",
+          enabled: false,
+          tone: "SECONDARY",
+          disabledReason: "Дождаться ответа API workspace.",
+        },
+        {
+          key: "DISPATCH_BONUS_LEDGER",
+          label: "Live dispatch",
+          enabled: false,
+          tone: "PRIMARY",
+          disabledReason: "Дождаться ответа API workspace.",
+        },
+        {
+          key: "RECONCILE_BALANCE",
+          label: "Открыть сверку",
+          enabled: false,
+          tone: "SECONDARY",
+          disabledReason: "Дождаться ответа API workspace.",
+        },
+      ],
       blockers: [],
       safeguards: [
         "Пилотные гейты появятся после ответа API workspace.",

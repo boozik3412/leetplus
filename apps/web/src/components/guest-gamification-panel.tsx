@@ -23,6 +23,7 @@ import type {
   GuestGameDeliveryStatus,
   GuestGameLootBox,
   GuestGameMission,
+  GuestGamePilotRunbookAction,
   GuestGameProfile,
   GuestGameProfileStatus,
   GuestGamePipelineRunResult,
@@ -2480,7 +2481,20 @@ function OverviewTab({
       <EconomyControlCard economy={workspace.economy} />
       <EffectControlCard effect={workspace.effect} />
       <IntegrationReadinessCard readiness={workspace.integrationReadiness} />
-      <PilotReadinessCard readiness={workspace.pilotReadiness} />
+      <PilotReadinessCard
+        readiness={workspace.pilotReadiness}
+        saving={saving}
+        canApproveRewards={canApproveRewards}
+        onOpenDryRun={() => onOpenTab("testRun")}
+        onQueueBonusLedger={onQueueBonusLedger}
+        onDryRunBonusLedger={onDryRunBonusLedger}
+        onDispatchBonusLedger={onDispatchBonusLedger}
+        onOpenReconciliation={() =>
+          document
+            .getElementById("bonus-balance-reconciliation")
+            ?.scrollIntoView({ behavior: "smooth", block: "start" })
+        }
+      />
       <BonusLedgerAuditCard
         audit={workspace.bonusLedgerAudit}
         saving={saving}
@@ -2705,11 +2719,33 @@ function IntegrationReadinessCard({
 
 function PilotReadinessCard({
   readiness,
+  saving,
+  canApproveRewards,
+  onOpenDryRun,
+  onQueueBonusLedger,
+  onDryRunBonusLedger,
+  onDispatchBonusLedger,
+  onOpenReconciliation,
 }: {
   readiness: GuestGamificationWorkspace["pilotReadiness"];
+  saving: string | null;
+  canApproveRewards: boolean;
+  onOpenDryRun: () => void;
+  onQueueBonusLedger: () => void;
+  onDryRunBonusLedger: () => void;
+  onDispatchBonusLedger: () => void;
+  onOpenReconciliation: () => void;
 }) {
   const target = readiness.targetStore;
   const runbook = readiness.runbook;
+  const actionHandlers: Record<GuestGamePilotRunbookAction["key"], () => void> =
+    {
+      OPEN_DRY_RUN: onOpenDryRun,
+      QUEUE_BONUS_LEDGER: onQueueBonusLedger,
+      DRY_RUN_BONUS_LEDGER: onDryRunBonusLedger,
+      DISPATCH_BONUS_LEDGER: onDispatchBonusLedger,
+      RECONCILE_BALANCE: onOpenReconciliation,
+    };
   const nextIssue =
     readiness.items.find((item) => item.status === "BLOCKED") ??
     readiness.items.find((item) => item.status === "PARTIAL") ??
@@ -2827,6 +2863,45 @@ function PilotReadinessCard({
               Блокеры: {runbook.blockers.join(", ")}
             </p>
           ) : null}
+
+          {runbook.actions.length ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {runbook.actions.map((action) => {
+                const requiresRewardAccess =
+                  pilotRunbookActionRequiresRewardAccess(action.key);
+                const disabledByAccess =
+                  requiresRewardAccess && !canApproveRewards;
+                const disabledBySaving =
+                  requiresRewardAccess && saving !== null;
+                const disabled =
+                  !action.enabled || disabledByAccess || disabledBySaving;
+                const disabledReason = !action.enabled
+                  ? action.disabledReason
+                  : disabledByAccess
+                    ? "Для ledger-действий нужно право `Геймификация: награды`."
+                    : disabledBySaving
+                      ? "Дождитесь завершения текущего действия."
+                      : null;
+
+                return (
+                  <button
+                    key={action.key}
+                    type="button"
+                    className={
+                      action.tone === "PRIMARY"
+                        ? primaryButtonClass
+                        : smallButtonClass
+                    }
+                    onClick={actionHandlers[action.key]}
+                    disabled={disabled}
+                    title={disabledReason ?? undefined}
+                  >
+                    {pilotRunbookActionLabel(action.key, action.label, saving)}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
         </div>
 
         <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-3 dark:border-zinc-800 dark:bg-zinc-900/60">
@@ -2896,6 +2971,36 @@ function PilotGate({ label, enabled }: { label: string; enabled: boolean }) {
       {label}
     </div>
   );
+}
+
+function pilotRunbookActionRequiresRewardAccess(
+  key: GuestGamePilotRunbookAction["key"],
+) {
+  return (
+    key === "QUEUE_BONUS_LEDGER" ||
+    key === "DRY_RUN_BONUS_LEDGER" ||
+    key === "DISPATCH_BONUS_LEDGER"
+  );
+}
+
+function pilotRunbookActionLabel(
+  key: GuestGamePilotRunbookAction["key"],
+  fallback: string,
+  saving: string | null,
+) {
+  if (key === "QUEUE_BONUS_LEDGER" && saving === "bonus-ledger-queue") {
+    return "Ставим в ledger...";
+  }
+
+  if (key === "DRY_RUN_BONUS_LEDGER" && saving === "bonus-ledger-dry-run") {
+    return "Проверяем ledger...";
+  }
+
+  if (key === "DISPATCH_BONUS_LEDGER" && saving === "bonus-ledger-dispatch") {
+    return "Начисляем...";
+  }
+
+  return fallback;
 }
 
 function BonusLedgerAuditCard({
@@ -3146,7 +3251,10 @@ function BonusBalanceCurrentReconciliationCard({
     null;
 
   return (
-    <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+    <section
+      id="bonus-balance-reconciliation"
+      className="scroll-mt-4 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
+    >
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-cyan-600 dark:text-cyan-300">

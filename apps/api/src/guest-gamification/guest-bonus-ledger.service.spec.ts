@@ -312,6 +312,58 @@ describe('GuestBonusLedgerService', () => {
     );
   });
 
+  it('forces canary dispatch to one existing ledger entry without auto-queueing rewards', async () => {
+    const { service, prisma, langameSettingsService } = createService({
+      LANGAME_BONUS_ACCRUAL_ENABLED: 'true',
+    });
+    const entry = ledgerEntry();
+    const access = {
+      apiKey: 'secret',
+      sources: [],
+    };
+    const queueApprovedRewards = jest.spyOn(service, 'queueApprovedRewards');
+
+    prisma.guestBonusLedgerEntry.groupBy.mockResolvedValue([
+      { status: 'PENDING', _count: { _all: 4 } },
+    ]);
+    langameSettingsService.resolveTenantAccess.mockResolvedValue(access);
+    jest.spyOn(service as any, 'claimReadyEntries').mockResolvedValue([entry]);
+    jest.spyOn(service as any, 'processClaimedEntry').mockResolvedValue({
+      ledgerEntryId: 'ledger-1',
+      rewardId: 'reward-1',
+      status: 'CONFIRMED',
+      amount: 25,
+      externalDomain: 'club-1',
+      externalGuestId: 'lg-guest-1',
+      note: 'confirmed',
+    });
+
+    const result = await service.dispatch(user, {
+      dryRun: false,
+      canary: true,
+      queueApprovedRewards: true,
+      limit: 25,
+    });
+
+    expect(result).toMatchObject({
+      mode: 'READY',
+      dryRun: false,
+      canary: true,
+      ready: true,
+      queued: null,
+      checked: 1,
+      confirmed: 1,
+    });
+    expect(queueApprovedRewards).not.toHaveBeenCalled();
+    expect((service as any).claimReadyEntries).toHaveBeenCalledWith(
+      user.tenantId,
+      expect.objectContaining({
+        canary: true,
+        limit: 1,
+      }),
+    );
+  });
+
   it('queues approved rewards for the Langame phone balance endpoint without storing raw phones', async () => {
     const { service, prisma, secretEncryptionService } = createService();
 

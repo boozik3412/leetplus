@@ -53,6 +53,7 @@ export type GuestGameBonusLedgerQueueDto = {
 export type GuestGameBonusLedgerDispatchDto = GuestGameBonusLedgerQueueDto & {
   dryRun?: boolean | string | null;
   queueApprovedRewards?: boolean | string | null;
+  canary?: boolean | string | null;
 };
 
 export type GuestGameScheduledBonusLedgerDispatchDto =
@@ -102,6 +103,7 @@ export type GuestGameBonusLedgerQueueItem = {
 export type GuestGameBonusLedgerDispatchResult = {
   mode: BonusLedgerMode;
   dryRun: boolean;
+  canary: boolean;
   ready: boolean;
   queued: GuestGameBonusLedgerQueueResult | null;
   checked: number;
@@ -152,6 +154,7 @@ export type GuestGameScheduledBonusLedgerDispatchResult = {
 type BonusLedgerConfig = {
   mode: BonusLedgerMode;
   dryRun: boolean;
+  canary: boolean;
   ready: boolean;
   enabled: boolean;
   path: string | null;
@@ -371,7 +374,8 @@ export class GuestBonusLedgerService {
     dto: GuestGameBonusLedgerDispatchDto = {},
   ): Promise<GuestGameBonusLedgerDispatchResult> {
     const config = this.resolveConfig(dto);
-    const shouldQueue = booleanValue(dto.queueApprovedRewards, true);
+    const shouldQueue =
+      !config.canary && booleanValue(dto.queueApprovedRewards, true);
     const queued =
       shouldQueue && !config.dryRun
         ? await this.queueApprovedRewards(user, dto)
@@ -384,6 +388,7 @@ export class GuestBonusLedgerService {
       return {
         mode: 'DRY_RUN',
         dryRun: true,
+        canary: config.canary,
         ready: config.ready,
         queued,
         checked: preview.length,
@@ -411,6 +416,7 @@ export class GuestBonusLedgerService {
       return {
         mode: config.mode,
         dryRun: false,
+        canary: config.canary,
         ready: false,
         queued,
         checked: 0,
@@ -437,10 +443,18 @@ export class GuestBonusLedgerService {
     }
 
     const status = await this.getStatus(user, dto);
+    const dispatchNote = config.canary
+      ? entries.length > 0
+        ? 'Canary ledger обработан: ровно одна подготовленная запись прошла live dispatch.'
+        : 'Canary ledger не нашел подготовленную запись для live dispatch.'
+      : entries.length > 0
+        ? 'Ledger batch обработан: успешные записи подтверждены, ошибки поставлены на retry.'
+        : 'Готовых ledger-записей для обработки нет.';
 
     return {
       mode: 'READY',
       dryRun: false,
+      canary: config.canary,
       ready: true,
       queued,
       checked: entries.length,
@@ -450,10 +464,7 @@ export class GuestBonusLedgerService {
       blocked: items.filter((item) => item.status === 'BLOCKED').length,
       items,
       status,
-      note:
-        entries.length > 0
-          ? 'Ledger batch обработан: успешные записи подтверждены, ошибки поставлены на retry.'
-          : 'Готовых ledger-записей для обработки нет.',
+      note: dispatchNote,
     };
   }
 
@@ -1151,6 +1162,10 @@ export class GuestBonusLedgerService {
     const dryRun =
       forceDryRun ||
       booleanValue('dryRun' in dto ? dto.dryRun : undefined, !enabled);
+    const canary = booleanValue(
+      'canary' in dto ? dto.canary : undefined,
+      false,
+    );
     const ready = enabled && !dryRun;
     const mode: BonusLedgerMode = dryRun
       ? 'DRY_RUN'
@@ -1161,11 +1176,12 @@ export class GuestBonusLedgerService {
     return {
       mode,
       dryRun,
+      canary,
       ready,
       enabled,
       path,
       rewardTypes: this.resolveRewardTypes(dto.rewardTypes),
-      limit: positiveInt(dto.limit, 50, 250),
+      limit: canary ? 1 : positiveInt(dto.limit, 50, 250),
       maxAttempts: positiveInt(
         this.configService.get<string>('LANGAME_BONUS_ACCRUAL_MAX_ATTEMPTS'),
         5,

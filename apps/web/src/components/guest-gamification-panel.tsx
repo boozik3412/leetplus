@@ -1235,6 +1235,28 @@ export function GuestGamificationPanel({
     });
   }
 
+  async function dispatchBonusLedgerCanary() {
+    await saveAction("bonus-ledger-canary-dispatch", async () => {
+      assertCan(
+        access.canApproveRewards,
+        "Для запуска canary bonus ledger dispatch нужно право `Геймификация: награды`.",
+      );
+
+      const result = await postJson<GuestGameBonusLedgerDispatchResult>(
+        "/api/guests/gamification/bonus-ledger/dispatch",
+        {
+          dryRun: false,
+          queueApprovedRewards: false,
+          canary: true,
+          limit: 1,
+        },
+      );
+
+      setBonusLedgerResult({ kind: "dispatch", result });
+      await reloadWorkspace();
+    });
+  }
+
   async function updateDeliveryStatus(
     delivery: GuestGameDelivery,
     status: GuestGameDeliveryStatus,
@@ -1430,6 +1452,7 @@ export function GuestGamificationPanel({
           onQueueBonusLedger={queueBonusLedger}
           onDryRunBonusLedger={dryRunBonusLedgerDispatch}
           onDispatchBonusLedger={dispatchBonusLedger}
+          onDispatchBonusLedgerCanary={dispatchBonusLedgerCanary}
           bonusLedgerResult={bonusLedgerResult}
         />
       ) : null}
@@ -2369,6 +2392,7 @@ function OverviewTab({
   onQueueBonusLedger,
   onDryRunBonusLedger,
   onDispatchBonusLedger,
+  onDispatchBonusLedgerCanary,
   bonusLedgerResult,
 }: {
   workspace: GuestGamificationWorkspace;
@@ -2398,6 +2422,7 @@ function OverviewTab({
   onQueueBonusLedger: () => void;
   onDryRunBonusLedger: () => void;
   onDispatchBonusLedger: () => void;
+  onDispatchBonusLedgerCanary: () => void;
   bonusLedgerResult: BonusLedgerActionResult | null;
 }) {
   return (
@@ -2488,7 +2513,7 @@ function OverviewTab({
         onOpenDryRun={() => onOpenTab("testRun")}
         onQueueBonusLedger={onQueueBonusLedger}
         onDryRunBonusLedger={onDryRunBonusLedger}
-        onDispatchBonusLedger={onDispatchBonusLedger}
+        onDispatchBonusLedger={onDispatchBonusLedgerCanary}
         onOpenReconciliation={() =>
           document
             .getElementById("bonus-balance-reconciliation")
@@ -3000,6 +3025,13 @@ function pilotRunbookActionLabel(
     return "Начисляем...";
   }
 
+  if (
+    key === "DISPATCH_BONUS_LEDGER" &&
+    saving === "bonus-ledger-canary-dispatch"
+  ) {
+    return "Canary write...";
+  }
+
   return fallback;
 }
 
@@ -3412,7 +3444,14 @@ function BonusLedgerActionResultCard({
   return (
     <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
       <div className="grid gap-2 text-center text-xs sm:grid-cols-3 xl:grid-cols-6">
-        <MiniMetric label="режим" value={dispatch.status.modeLabel} />
+        <MiniMetric
+          label="режим"
+          value={
+            dispatch.canary
+              ? `${dispatch.status.modeLabel} · canary`
+              : dispatch.status.modeLabel
+          }
+        />
         <MiniMetric label="проверено" value={dispatch.checked} />
         <MiniMetric label="confirmed" value={dispatch.confirmed} />
         <MiniMetric label="skip" value={dispatch.skipped} />
@@ -3424,6 +3463,11 @@ function BonusLedgerActionResultCard({
         <p className="mt-3 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
           Перед dispatch поставлено в ledger: {dispatch.queued.queued} из{" "}
           {dispatch.queued.checkedRewards}, пропущено {dispatch.queued.skipped}.
+        </p>
+      ) : dispatch.canary ? (
+        <p className="mt-3 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+          Canary dispatch не ставит новые rewards в ledger и обрабатывает только
+          одну уже подготовленную запись.
         </p>
       ) : null}
 

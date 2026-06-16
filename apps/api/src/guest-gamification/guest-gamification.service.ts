@@ -2022,7 +2022,7 @@ function buildPilotRunbookActions({
     },
     {
       key: 'DISPATCH_BONUS_LEDGER',
-      label: 'Live dispatch',
+      label: 'Canary live dispatch',
       enabled: canRunLive && stage === 'LIVE_WRITE',
       tone: 'PRIMARY',
       disabledReason:

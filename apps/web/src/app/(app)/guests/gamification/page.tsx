@@ -251,7 +251,7 @@ const emptyWorkspace: GuestGamificationWorkspace = {
         },
         {
           key: "DISPATCH_BONUS_LEDGER",
-          label: "Live dispatch",
+          label: "Canary live dispatch",
           enabled: false,
           tone: "PRIMARY",
           disabledReason: "Дождаться ответа API workspace.",

@@ -824,6 +824,7 @@ export type GuestGameBonusLedgerDispatchItem = {
 export type GuestGameBonusLedgerDispatchResult = {
   mode: GuestGameBonusLedgerMode;
   dryRun: boolean;
+  canary: boolean;
   ready: boolean;
   queued: GuestGameBonusLedgerQueueResult | null;
   checked: number;

@@ -10,6 +10,7 @@ import {
 } from "react";
 import type { GuestAudience, GuestCrmLead, GuestDashboardRow } from "@/lib/guests";
 import type {
+  GuestGameBonusLedgerDispatchItem,
   GuestGameBonusLedgerDispatchResult,
   GuestGameBonusLedgerQueueResult,
   GuestGameEvent,
@@ -73,7 +74,8 @@ type GuestLogMappingPayload = {
 
 type BonusLedgerActionResult =
   | { kind: "queue"; result: GuestGameBonusLedgerQueueResult }
-  | { kind: "dispatch"; result: GuestGameBonusLedgerDispatchResult };
+  | { kind: "dispatch"; result: GuestGameBonusLedgerDispatchResult }
+  | { kind: "cancel"; result: GuestGameBonusLedgerDispatchItem };
 
 type BonusLedgerActionOptions = {
   storeId?: string | null;
@@ -1271,6 +1273,33 @@ export function GuestGamificationPanel({
     });
   }
 
+  async function cancelBonusLedgerEntry(entryId: string) {
+    if (
+      !window.confirm(
+        "Отменить ledger-запись до начисления в Langame? Связанная награда и неотправленные уведомления тоже будут отменены.",
+      )
+    ) {
+      return;
+    }
+
+    await saveAction(`bonus-ledger-cancel-${entryId}`, async () => {
+      assertCan(
+        access.canApproveRewards,
+        "Для отмены bonus ledger записи нужно право `Геймификация: награды`.",
+      );
+
+      const result = await postJson<GuestGameBonusLedgerDispatchItem>(
+        `/api/guests/gamification/bonus-ledger/${entryId}/cancel`,
+        {
+          reason: "pilot_preflight_operator_cancel",
+        },
+      );
+
+      setBonusLedgerResult({ kind: "cancel", result });
+      await reloadWorkspace();
+    });
+  }
+
   async function updateDeliveryStatus(
     delivery: GuestGameDelivery,
     status: GuestGameDeliveryStatus,
@@ -1467,6 +1496,7 @@ export function GuestGamificationPanel({
           onDryRunBonusLedger={dryRunBonusLedgerDispatch}
           onDispatchBonusLedger={dispatchBonusLedger}
           onDispatchBonusLedgerCanary={dispatchBonusLedgerCanary}
+          onCancelBonusLedgerEntry={cancelBonusLedgerEntry}
           bonusLedgerResult={bonusLedgerResult}
         />
       ) : null}
@@ -2407,6 +2437,7 @@ function OverviewTab({
   onDryRunBonusLedger,
   onDispatchBonusLedger,
   onDispatchBonusLedgerCanary,
+  onCancelBonusLedgerEntry,
   bonusLedgerResult,
 }: {
   workspace: GuestGamificationWorkspace;
@@ -2437,6 +2468,7 @@ function OverviewTab({
   onDryRunBonusLedger: (options?: BonusLedgerActionOptions) => void;
   onDispatchBonusLedger: () => void;
   onDispatchBonusLedgerCanary: (options?: BonusLedgerActionOptions) => void;
+  onCancelBonusLedgerEntry: (entryId: string) => void;
   bonusLedgerResult: BonusLedgerActionResult | null;
 }) {
   return (
@@ -2528,6 +2560,7 @@ function OverviewTab({
         onQueueBonusLedger={onQueueBonusLedger}
         onDryRunBonusLedger={onDryRunBonusLedger}
         onDispatchBonusLedger={onDispatchBonusLedgerCanary}
+        onCancelBonusLedgerEntry={onCancelBonusLedgerEntry}
         onOpenReconciliation={() =>
           document
             .getElementById("bonus-balance-reconciliation")
@@ -2764,6 +2797,7 @@ function PilotReadinessCard({
   onQueueBonusLedger,
   onDryRunBonusLedger,
   onDispatchBonusLedger,
+  onCancelBonusLedgerEntry,
   onOpenReconciliation,
 }: {
   readiness: GuestGamificationWorkspace["pilotReadiness"];
@@ -2773,6 +2807,7 @@ function PilotReadinessCard({
   onQueueBonusLedger: (options?: BonusLedgerActionOptions) => void;
   onDryRunBonusLedger: (options?: BonusLedgerActionOptions) => void;
   onDispatchBonusLedger: (options?: BonusLedgerActionOptions) => void;
+  onCancelBonusLedgerEntry: (entryId: string) => void;
   onOpenReconciliation: () => void;
 }) {
   const target = readiness.targetStore;
@@ -2950,41 +2985,74 @@ function PilotReadinessCard({
             </p>
             {ledgerPreflight.previewItems.length ? (
               <div className="mt-2 space-y-2">
-                {ledgerPreflight.previewItems.map((item) => (
-                  <div
-                    key={item.id}
-                    className="rounded-lg border border-cyan-200 bg-white/70 px-2 py-2 dark:border-cyan-900/60 dark:bg-zinc-950/60"
-                  >
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span
-                        className={[
-                          "rounded-full px-2 py-0.5 text-[11px] font-bold uppercase",
-                          bonusLedgerStatusClass(item.status),
-                        ].join(" ")}
-                      >
-                        {item.statusLabel}
-                      </span>
-                      <span className="font-bold text-zinc-950 dark:text-white">
-                        {item.amount} бонусов
-                      </span>
-                      <span className="text-zinc-500 dark:text-zinc-400">
-                        {item.guest.displayName}
-                        {item.guest.contact ? ` · ${item.guest.contact}` : ""}
-                      </span>
+                {ledgerPreflight.previewItems.map((item) => {
+                  const canCancelPreview = [
+                    "PENDING",
+                    "FAILED",
+                    "PROCESSING",
+                  ].includes(item.status);
+                  const cancelSaving = saving === `bonus-ledger-cancel-${item.id}`;
+                  const cancelDisabled =
+                    !canCancelPreview || !canApproveRewards || saving !== null;
+                  const cancelTitle = !canCancelPreview
+                    ? "Эту ledger-запись уже нельзя отменить из preflight."
+                    : !canApproveRewards
+                      ? "Для отмены ledger-записи нужно право `Геймификация: награды`."
+                      : saving !== null
+                        ? "Дождитесь завершения текущего действия."
+                        : "Отменить ledger-запись до начисления в Langame.";
+
+                  return (
+                    <div
+                      key={item.id}
+                      className="rounded-lg border border-cyan-200 bg-white/70 px-2 py-2 dark:border-cyan-900/60 dark:bg-zinc-950/60"
+                    >
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span
+                              className={[
+                                "rounded-full px-2 py-0.5 text-[11px] font-bold uppercase",
+                                bonusLedgerStatusClass(item.status),
+                              ].join(" ")}
+                            >
+                              {item.statusLabel}
+                            </span>
+                            <span className="font-bold text-zinc-950 dark:text-white">
+                              {item.amount} бонусов
+                            </span>
+                            <span className="text-zinc-500 dark:text-zinc-400">
+                              {item.guest.displayName}
+                              {item.guest.contact
+                                ? ` · ${item.guest.contact}`
+                                : ""}
+                            </span>
+                          </div>
+                          <p className="mt-1 leading-5 text-zinc-600 dark:text-zinc-300">
+                            {item.reward
+                              ? `${item.reward.rewardLabel} · ${item.reward.rewardType}`
+                              : item.source}
+                          </p>
+                          <p className="mt-1 text-[11px] leading-4 text-zinc-500 dark:text-zinc-400">
+                            attempts {item.attempts} ·{" "}
+                            {item.nextAttemptAt
+                              ? `retry ${formatDate(item.nextAttemptAt)}`
+                              : `создано ${formatDate(item.createdAt)}`}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => onCancelBonusLedgerEntry(item.id)}
+                          disabled={cancelDisabled}
+                          title={cancelTitle}
+                          className="shrink-0 rounded-lg border border-red-200 bg-white px-2 py-1 text-[11px] font-bold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/60 dark:bg-zinc-950 dark:text-red-200 dark:hover:bg-red-950/30"
+                        >
+                          {cancelSaving ? "Отмена..." : "Отменить запись"}
+                        </button>
+                      </div>
                     </div>
-                    <p className="mt-1 leading-5 text-zinc-600 dark:text-zinc-300">
-                      {item.reward
-                        ? `${item.reward.rewardLabel} · ${item.reward.rewardType}`
-                        : item.source}
-                    </p>
-                    <p className="mt-1 text-[11px] leading-4 text-zinc-500 dark:text-zinc-400">
-                      attempts {item.attempts} ·{" "}
-                      {item.nextAttemptAt
-                        ? `retry ${formatDate(item.nextAttemptAt)}`
-                        : `создано ${formatDate(item.createdAt)}`}
-                    </p>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : null}
           </div>
@@ -3540,6 +3608,23 @@ function BonusLedgerActionResultCard({
         </div>
         <p className="mt-3 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
           {result.result.note}
+        </p>
+      </div>
+    );
+  }
+
+  if (result.kind === "cancel") {
+    const item = result.result;
+
+    return (
+      <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
+        <div className="grid gap-2 text-center text-xs sm:grid-cols-3">
+          <MiniMetric label="ledger" value="отменено" />
+          <MiniMetric label="status" value={item.status} />
+          <MiniMetric label="сумма" value={formatMoney(item.amount)} />
+        </div>
+        <p className="mt-3 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+          {item.note}
         </p>
       </div>
     );

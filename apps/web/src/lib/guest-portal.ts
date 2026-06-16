@@ -462,7 +462,20 @@ export type GuestPortalGameSummary = {
   activity: Pick<
     GuestPortalPayload["activity"]["summary"],
     "sessionsCount" | "playMinutes" | "gameEventsCount" | "lastActivityAt"
-  >;
+  > & {
+    recent: Array<
+      Pick<
+        GuestPortalPayload["activity"]["timeline"][number],
+        | "id"
+        | "kind"
+        | "title"
+        | "description"
+        | "occurredAt"
+        | "storeName"
+        | "xpDelta"
+      >
+    >;
+  };
   communications: {
     phoneConsentStatus: GuestPortalPayload["communications"]["phone"]["consentStatus"];
     telegram: Pick<

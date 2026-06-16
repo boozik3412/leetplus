@@ -455,6 +455,16 @@ describe('GuestPortalService', () => {
           playMinutes: 360,
           gameEventsCount: 3,
           lastActivityAt: '2026-06-15T08:00:00.000Z',
+          recent: [
+            expect.objectContaining({
+              id: 'timeline-1',
+              kind: 'GAME_EVENT',
+              title: 'XP',
+              occurredAt: '2026-06-15T08:00:00.000Z',
+              storeName: '1337',
+              xpDelta: 80,
+            }),
+          ],
         },
         communications: {
           phoneConsentStatus: 'GRANTED',
@@ -468,6 +478,7 @@ describe('GuestPortalService', () => {
       expect(summary.generatedAt).toEqual(expect.any(String));
       expect(summary).not.toHaveProperty('guestSnapshot');
       expect(summary.activity).not.toHaveProperty('timeline');
+      expect(summary.activity).not.toHaveProperty('xpHistory');
     });
   });
 

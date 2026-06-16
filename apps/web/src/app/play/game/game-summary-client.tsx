@@ -340,6 +340,10 @@ function ReadyGameView({
         <BattlePassPanel battlePass={summary.battlePass.active} />
         <ChannelsPanel summary={summary} />
       </section>
+
+      <section className="mt-4">
+        <ActivityPanel activity={summary.activity} />
+      </section>
     </div>
   );
 }
@@ -737,6 +741,94 @@ function BattlePassPanel({
       )}
     </section>
   );
+}
+
+function ActivityPanel({
+  activity,
+}: {
+  activity: GuestPortalGameSummary["activity"];
+}) {
+  return (
+    <section className="rounded-lg border border-white/10 bg-white/[0.06] p-5">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
+            Активность
+          </p>
+          <h2 className="mt-1 text-xl font-black">Почему изменился прогресс</h2>
+        </div>
+        {activity.lastActivityAt ? (
+          <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-bold text-zinc-300">
+            обновлено {formatDate(activity.lastActivityAt)}
+          </span>
+        ) : null}
+      </div>
+
+      {activity.recent.length ? (
+        <div className="mt-5 grid gap-3 md:grid-cols-2">
+          {activity.recent.map((item) => (
+            <article
+              key={item.id}
+              className="rounded-lg border border-white/10 bg-zinc-950/45 p-4"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    {activityKindLabel(item.kind)}
+                  </p>
+                  <h3 className="mt-1 truncate text-sm font-black text-white">
+                    {item.title}
+                  </h3>
+                </div>
+                {item.xpDelta !== null ? (
+                  <span
+                    className={[
+                      "shrink-0 rounded-full px-2 py-1 text-xs font-black",
+                      item.xpDelta >= 0
+                        ? "bg-emerald-300 text-zinc-950"
+                        : "bg-rose-300 text-zinc-950",
+                    ].join(" ")}
+                  >
+                    {formatSignedNumber(item.xpDelta)} XP
+                  </span>
+                ) : null}
+              </div>
+              {item.description ? (
+                <p className="mt-2 text-sm leading-5 text-zinc-300">
+                  {item.description}
+                </p>
+              ) : null}
+              <div className="mt-3 flex flex-col gap-1 text-xs text-zinc-500 sm:flex-row sm:items-center sm:justify-between">
+                <span>{formatDate(item.occurredAt)}</span>
+                {item.storeName ? <span>{item.storeName}</span> : null}
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-5 text-sm leading-6 text-zinc-300">
+          История появится после первого чекина, XP-события или операции в
+          клубе.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function activityKindLabel(
+  kind: GuestPortalGameSummary["activity"]["recent"][number]["kind"],
+) {
+  const labels = {
+    SESSION: "сессия",
+    LOG: "событие",
+    TRANSACTION: "баланс",
+    GAME_EVENT: "XP",
+  } satisfies Record<
+    GuestPortalGameSummary["activity"]["recent"][number]["kind"],
+    string
+  >;
+
+  return labels[kind];
 }
 
 function ChannelsPanel({ summary }: { summary: GuestPortalGameSummary }) {

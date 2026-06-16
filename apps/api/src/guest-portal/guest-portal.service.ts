@@ -374,7 +374,20 @@ export type GuestPortalGameSummary = {
   activity: Pick<
     GuestPortalPayload['activity']['summary'],
     'sessionsCount' | 'playMinutes' | 'gameEventsCount' | 'lastActivityAt'
-  >;
+  > & {
+    recent: Array<
+      Pick<
+        GuestPortalActivityItem,
+        | 'id'
+        | 'kind'
+        | 'title'
+        | 'description'
+        | 'occurredAt'
+        | 'storeName'
+        | 'xpDelta'
+      >
+    >;
+  };
   communications: {
     phoneConsentStatus: GuestPortalCommunications['phone']['consentStatus'];
     telegram: Pick<
@@ -3485,6 +3498,15 @@ function buildGameSummaryFromPortal(
       playMinutes: portal.activity.summary.playMinutes,
       gameEventsCount: portal.activity.summary.gameEventsCount,
       lastActivityAt: portal.activity.summary.lastActivityAt,
+      recent: portal.activity.timeline.slice(0, 5).map((item) => ({
+        id: item.id,
+        kind: item.kind,
+        title: item.title,
+        description: item.description,
+        occurredAt: item.occurredAt,
+        storeName: item.storeName,
+        xpDelta: item.xpDelta,
+      })),
     },
     communications: {
       phoneConsentStatus: portal.communications.phone.consentStatus,

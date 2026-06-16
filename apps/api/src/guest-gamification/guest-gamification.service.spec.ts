@@ -819,6 +819,8 @@ describe('GuestGamificationService', () => {
             key: 'GUEST_LOGS',
             status: 'READY',
             metric: '12 логов / 1 типов',
+            actionHref: '/api/guests/gamification/guest-log-catalog/export',
+            actionLabel: 'Скачать CSV',
           }),
         ]),
       );
@@ -870,6 +872,8 @@ describe('GuestGamificationService', () => {
             ready: false,
             metric: 'текущие правила без guests/logs',
             nextAction: expect.stringContaining('Можно запускать dry-run'),
+            actionHref: '/sync',
+            actionLabel: 'Открыть /sync',
           }),
         ]),
       );
@@ -914,6 +918,8 @@ describe('GuestGamificationService', () => {
             ready: false,
             metric: '0 логов / 1 правил',
             nextAction: expect.stringContaining('/sync'),
+            actionHref: '/sync',
+            actionLabel: 'Открыть /sync',
           }),
         ]),
       );

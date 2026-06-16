@@ -702,6 +702,8 @@ export type GuestGamePilotReadinessItem = {
   metric: string;
   note: string;
   nextAction: string;
+  actionHref?: string | null;
+  actionLabel?: string | null;
 };
 
 export type GuestGamePilotLedgerPreflightStatus =

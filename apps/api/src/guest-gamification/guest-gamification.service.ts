@@ -1163,6 +1163,8 @@ export type GuestGamePilotReadinessItem = {
   metric: string;
   note: string;
   nextAction: string;
+  actionHref?: string | null;
+  actionLabel?: string | null;
 };
 
 export type GuestGamePilotLedgerPreflightStatus =
@@ -2994,6 +2996,8 @@ export class GuestGamificationService {
         nextAction: targetStore?.gamificationEnabled
           ? 'Оставить клуб включенным в публичном каталоге /play.'
           : 'Включить флаг геймификации у пилотного клуба на странице клубов.',
+        actionHref: '/stores',
+        actionLabel: 'Открыть клубы',
       },
       {
         key: 'PUBLIC_REGISTRATION',
@@ -3010,6 +3014,8 @@ export class GuestGamificationService {
         nextAction: registrationReady
           ? 'Проверить путь на тестовом телефоне и открыть гостевой кабинет клуба.'
           : 'Включить клуб в каталог /play через флаг геймификации или активное игровое правило.',
+        actionHref: '/play',
+        actionLabel: 'Открыть /play',
       },
       {
         key: 'OTP',
@@ -3040,6 +3046,8 @@ export class GuestGamificationService {
         nextAction: activeProfiles.length
           ? 'Использовать тестовый профиль для dry-run и первого события.'
           : 'Зарегистрировать тестового участника через /play.',
+        actionHref: '/play',
+        actionLabel: 'Открыть /play',
       },
       {
         key: 'LANGAME_MATCH',
@@ -3056,6 +3064,8 @@ export class GuestGamificationService {
         nextAction: linkedProfiles.length
           ? 'Перейти к проверке факта сессии и события.'
           : 'В гостевом кабинете нажать ручную проверку Langame или дождаться foundation sync.',
+        actionHref: targetStorePayload?.guestPortalPath ?? '/play',
+        actionLabel: targetStorePayload ? 'Открыть кабинет' : 'Открыть /play',
       },
       {
         key: 'ACTIVE_RULES',
@@ -3068,6 +3078,8 @@ export class GuestGamificationService {
         nextAction: activeRuleCount
           ? 'Запустить dry-run по тестовому профилю и пилотному клубу.'
           : 'Создать простую миссию или лутбокс для клуба 1337.',
+        actionHref: '/guests/gamification',
+        actionLabel: 'Открыть правила',
       },
       {
         key: 'GUEST_LOGS',
@@ -3110,6 +3122,10 @@ export class GuestGamificationService {
           : guestLogsRequiredByRules
             ? 'На /sync включить расширенную проверку guests/logs и дождаться сохраненных фактов перед dry-run.'
             : 'Можно запускать dry-run текущих правил; для расширенных квестов позже заполнить guests/logs на /sync.',
+        actionHref: guestLogsReady
+          ? '/api/guests/gamification/guest-log-catalog/export'
+          : '/sync',
+        actionLabel: guestLogsReady ? 'Скачать CSV' : 'Открыть /sync',
       },
       {
         key: 'TEST_EVENT',

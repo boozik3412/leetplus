@@ -2913,6 +2913,10 @@ function PilotReadinessCard({
         <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-100">
           <span className="font-bold">Следующий шаг:</span>{" "}
           {nextIssue.nextAction}
+          <PilotNextActionLink
+            href={nextIssue.actionHref}
+            label={nextIssue.actionLabel}
+          />
         </div>
       ) : null}
 
@@ -3146,9 +3150,13 @@ function PilotReadinessCard({
             <p className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
               {item.note}
             </p>
-            <p className="mt-2 rounded-lg border border-zinc-200 bg-white px-2 py-2 text-xs font-semibold leading-5 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300">
-              Следующее: {item.nextAction}
-            </p>
+            <div className="mt-2 rounded-lg border border-zinc-200 bg-white px-2 py-2 text-xs font-semibold leading-5 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300">
+              <p>Следующее: {item.nextAction}</p>
+              <PilotNextActionLink
+                href={item.actionHref}
+                label={item.actionLabel}
+              />
+            </div>
           </article>
         ))}
       </div>
@@ -3157,6 +3165,35 @@ function PilotReadinessCard({
         {readiness.note}
       </p>
     </section>
+  );
+}
+
+function PilotNextActionLink({
+  href,
+  label,
+}: {
+  href?: string | null;
+  label?: string | null;
+}) {
+  if (!href) {
+    return null;
+  }
+
+  const className =
+    "mt-2 inline-flex items-center rounded-lg border border-cyan-200 bg-cyan-50 px-2 py-1 text-xs font-bold text-cyan-700 transition hover:border-cyan-300 hover:bg-cyan-100 dark:border-cyan-900/60 dark:bg-cyan-950/30 dark:text-cyan-100 dark:hover:bg-cyan-950/60";
+
+  if (href.startsWith("/api/")) {
+    return (
+      <a href={href} className={className}>
+        {label ?? "Открыть"}
+      </a>
+    );
+  }
+
+  return (
+    <Link href={href} className={className}>
+      {label ?? "Открыть"}
+    </Link>
   );
 }
 

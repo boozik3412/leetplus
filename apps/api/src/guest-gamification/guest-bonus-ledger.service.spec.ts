@@ -330,6 +330,73 @@ describe('GuestBonusLedgerService', () => {
     ).not.toContain('79991112233');
   });
 
+  it('queues explicit money balance rewards with Langame balance type', async () => {
+    const { service, prisma, secretEncryptionService } = createService();
+
+    secretEncryptionService.decrypt.mockReturnValue('+7 (999) 111-22-33');
+    prisma.guestGameReward.findMany.mockResolvedValue([
+      {
+        id: 'reward-balance-1',
+        profileId: 'profile-1',
+        guestId: 'guest-1',
+        storeId: null,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: 'club-1',
+        guestExternalId: 'lg-guest-1',
+        rewardType: 'BALANCE',
+        rewardAmount: new Prisma.Decimal(100),
+        rewardLabel: '100 rub to balance',
+        rewardCode: 'LP-BALANCE',
+        guest: {
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'club-1',
+          externalGuestId: 'lg-guest-1',
+          phoneEncrypted: 'encrypted-phone',
+          phoneMasked: '+7 *** **-33',
+        },
+      },
+    ]);
+    prisma.guestBonusLedgerEntry.createMany.mockResolvedValue({ count: 1 });
+
+    const result = await service.queueApprovedRewards(user, {
+      rewardTypes: ['BALANCE'],
+    });
+
+    expect(result).toMatchObject({
+      checkedRewards: 1,
+      queued: 1,
+      skipped: 0,
+      rewardTypes: ['BALANCE'],
+    });
+    expect(prisma.guestGameReward.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: [
+            {
+              rewardType: { equals: 'BALANCE', mode: 'insensitive' },
+            },
+          ],
+        }),
+      }),
+    );
+    expect(prisma.guestBonusLedgerEntry.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          rewardId: 'reward-balance-1',
+          externalDomain: 'club-1',
+          externalGuestId: 'lg-guest-1',
+          amount: expect.any(Prisma.Decimal),
+          metadata: expect.objectContaining({
+            langameBalanceType: 'balance',
+            rewardType: 'BALANCE',
+            phoneMasked: '+7 *** **-33',
+          }),
+        }),
+      ],
+      skipDuplicates: true,
+    });
+  });
+
   it('dispatches claimed entries to Langame bonus_balance by decrypted phone and masks audit payloads', async () => {
     const { service, prisma, langameClient, secretEncryptionService } =
       createService();
@@ -397,6 +464,86 @@ describe('GuestBonusLedgerService', () => {
         phone: '+7 *** **-33',
         type: 'bonus_balance',
         sum: 25,
+      }),
+      expect.objectContaining({
+        status: true,
+        phone: '***2233',
+      }),
+    );
+  });
+
+  it('dispatches claimed money balance entries to Langame balance by phone', async () => {
+    const { service, prisma, langameClient, secretEncryptionService } =
+      createService();
+    const entry = ledgerEntry({
+      id: 'ledger-balance-1',
+      rewardId: 'reward-balance-1',
+      idempotencyKey: 'guest-game-reward:reward-balance-1:bonus:v1',
+      amount: new Prisma.Decimal(100),
+      metadata: { rewardType: 'BALANCE', langameBalanceType: 'balance' },
+    });
+    const access = {
+      apiKey: 'request-token',
+      sources: [
+        {
+          domain: 'club-1',
+          baseUrl: 'https://46.langamepro.ru/public_api',
+        },
+      ],
+    };
+
+    prisma.guest.findFirst.mockResolvedValue({
+      phoneEncrypted: 'encrypted-phone',
+      phoneMasked: '+7 *** **-33',
+    });
+    secretEncryptionService.decrypt.mockReturnValue('+7 (999) 111-22-33');
+    langameClient.adjustGuestBalanceByPhone.mockResolvedValue({
+      status: true,
+      phone: '79991112233',
+    });
+    jest.spyOn(service as any, 'confirmEntry').mockResolvedValue(null);
+
+    const result = await (service as any).processClaimedEntry(
+      user.id,
+      entry,
+      {
+        mode: 'READY',
+        dryRun: false,
+        ready: true,
+        enabled: true,
+        path: '/master_api/guests/balance/phone',
+        rewardTypes: ['BALANCE'],
+        limit: 50,
+        maxAttempts: 5,
+        retryMinutes: 15,
+        staleLockMinutes: 15,
+      },
+      access,
+    );
+
+    expect(result).toMatchObject({
+      ledgerEntryId: 'ledger-balance-1',
+      status: 'CONFIRMED',
+      amount: 100,
+    });
+    expect(langameClient.adjustGuestBalanceByPhone).toHaveBeenCalledWith(
+      'https://46.langamepro.ru/public_api',
+      'request-token',
+      {
+        phone: '79991112233',
+        type: 'balance',
+        sum: 100,
+        comment: expect.stringContaining('LeetPlus'),
+      },
+      '/master_api/guests/balance/phone',
+    );
+    expect((service as any).confirmEntry).toHaveBeenCalledWith(
+      user.id,
+      entry,
+      expect.objectContaining({
+        phone: '+7 *** **-33',
+        type: 'balance',
+        sum: 100,
       }),
       expect.objectContaining({
         status: true,

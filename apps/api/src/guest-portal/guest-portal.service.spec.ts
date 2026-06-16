@@ -1011,6 +1011,12 @@ describe('GuestPortalService', () => {
       expect(result.linkStatus).toBe('LINKED');
       expect(result.linkedGuestId).toBe('guest-1');
       expect(result.linkedProfileId).toBe('profile-1');
+      expect(result.backfilled).toEqual({
+        rewards: 2,
+        events: 3,
+        deliveries: 1,
+        bonusLedgerEntries: 4,
+      });
       expect(result.portal).toBe(portalPayload);
       expect(prisma.guestGameProfile.update).toHaveBeenCalledWith(
         expect.objectContaining({

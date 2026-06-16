@@ -581,6 +581,12 @@ export type GuestPortalLangameMatchResponse = {
     | "NOT_LINKED";
   linkedGuestId: string | null;
   linkedProfileId: string | null;
+  backfilled: {
+    rewards: number;
+    events: number;
+    deliveries: number;
+    bonusLedgerEntries: number;
+  };
   nextAction: string;
   portal: GuestPortalPayload | null;
   sources: Array<{

@@ -1836,6 +1836,24 @@ function LangameMatchPanel({
 }) {
   const totalResults =
     result?.sources.reduce((sum, source) => sum + source.resultsCount, 0) ?? 0;
+  const backfilled = result?.backfilled ?? null;
+  const backfilledItems = backfilled
+    ? [
+        ["награды", backfilled.rewards],
+        ["события", backfilled.events],
+        ["доставки", backfilled.deliveries],
+        ["ledger", backfilled.bonusLedgerEntries],
+      ]
+    : [];
+  const backfilledTotal = backfilledItems.reduce(
+    (sum, [, value]) => sum + Number(value),
+    0,
+  );
+  const showBackfilled =
+    Boolean(backfilled) &&
+    (backfilledTotal > 0 ||
+      result?.linkStatus === "LINKED" ||
+      result?.linkStatus === "ALREADY_LINKED");
 
   return (
     <section
@@ -1916,6 +1934,17 @@ function LangameMatchPanel({
               {langameLinkStatusLabel(result.linkStatus)}
             </span>
           </div>
+
+          {showBackfilled ? (
+            <div className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs leading-5 text-slate-300">
+              <span className="font-bold text-cyan-100">
+                Довязано к Langame-гостю:
+              </span>{" "}
+              {backfilledItems
+                .map(([label, value]) => `${label} ${value}`)
+                .join(" · ")}
+            </div>
+          ) : null}
 
           <div className="grid gap-3 lg:grid-cols-3">
             {result.sources.map((source) => (

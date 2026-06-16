@@ -99,11 +99,19 @@ type GuestPortalGameProfileLinkStatus =
   | 'CONFLICT'
   | 'NOT_LINKED';
 
+type GuestPortalGameProfileBackfillSummary = {
+  rewards: number;
+  events: number;
+  deliveries: number;
+  bonusLedgerEntries: number;
+};
+
 type GuestPortalGameProfileLinkResult = {
   status: GuestPortalGameProfileLinkStatus;
   guestId: string | null;
   profileId: string | null;
   linkedNow: boolean;
+  backfilled: GuestPortalGameProfileBackfillSummary;
 };
 
 type TenantStoreContext = {
@@ -703,6 +711,7 @@ export type GuestPortalLangameMatchResponse = {
   linkStatus: GuestPortalGameProfileLinkStatus;
   linkedGuestId: string | null;
   linkedProfileId: string | null;
+  backfilled: GuestPortalGameProfileBackfillSummary;
   nextAction: string;
   portal: GuestPortalPayload | null;
   sources: Array<{
@@ -2038,6 +2047,7 @@ export class GuestPortalService {
           guestId: null,
           profileId: localProfile?.id ?? payload.profileId,
           linkedNow: false,
+          backfilled: emptyGameProfileBackfillSummary(),
         } satisfies GuestPortalGameProfileLinkResult);
     const refreshedPayload =
       linkResult.linkedNow || linkResult.status === 'ALREADY_LINKED'
@@ -2059,6 +2069,7 @@ export class GuestPortalService {
       linkStatus: linkResult.status,
       linkedGuestId: linkResult.guestId,
       linkedProfileId: linkResult.profileId,
+      backfilled: linkResult.backfilled,
       nextAction: guestPortalLangameMatchNextAction(status, linkResult.status),
       portal: refreshedPayload,
       sources,
@@ -2077,6 +2088,7 @@ export class GuestPortalService {
         guestId,
         profileId: null,
         linkedNow: false,
+        backfilled: emptyGameProfileBackfillSummary(),
       };
     }
 
@@ -2131,6 +2143,7 @@ export class GuestPortalService {
           guestId,
           profileId: profile?.id ?? profileId,
           linkedNow: false,
+          backfilled: emptyGameProfileBackfillSummary(),
         };
       }
 
@@ -2140,6 +2153,7 @@ export class GuestPortalService {
           guestId: guest.id,
           profileId: profile.id,
           linkedNow: false,
+          backfilled: emptyGameProfileBackfillSummary(),
         };
       }
 
@@ -2152,6 +2166,7 @@ export class GuestPortalService {
           guestId: guest.id,
           profileId: profile.id,
           linkedNow: false,
+          backfilled: emptyGameProfileBackfillSummary(),
         };
       }
 
@@ -2197,6 +2212,7 @@ export class GuestPortalService {
         guestId: guest.id,
         profileId: profile.id,
         linkedNow: true,
+        backfilled,
       };
     });
   }
@@ -2247,12 +2263,7 @@ export class GuestPortalService {
       externalGuestId: string;
       phoneMasked: string | null;
       source: string;
-      backfilled: {
-        rewards: number;
-        events: number;
-        deliveries: number;
-        bonusLedgerEntries: number;
-      };
+      backfilled: GuestPortalGameProfileBackfillSummary;
       occurredAt: Date;
     },
   ) {
@@ -5731,6 +5742,15 @@ function decimalNumber(value: Prisma.Decimal | null | undefined) {
 
 function moneyNumber(value: number) {
   return Math.round(value * 100) / 100;
+}
+
+function emptyGameProfileBackfillSummary(): GuestPortalGameProfileBackfillSummary {
+  return {
+    rewards: 0,
+    events: 0,
+    deliveries: 0,
+    bonusLedgerEntries: 0,
+  };
 }
 
 function percent(value: number, total: number) {

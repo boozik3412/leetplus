@@ -701,8 +701,8 @@ export function PlayRegistrationClient({
             <p className="font-black">Вы открыли приглашение в LeetPlus Play</p>
             <p className="mt-1 leading-6 text-cyan-100/85">
               Код {referralCode} сохранен в ссылке. Выберите клуб, подтвердите
-              телефон и начните игру; начисление реферального бонуса будет
-              подключаться отдельным правилом Guest Game Hub.
+              телефон и начните игру; если правило рефералок активно, Guest Game
+              Hub засчитает приглашение пригласившему профилю.
             </p>
           </section>
         ) : null}

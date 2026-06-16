@@ -320,6 +320,111 @@ function rewardResult(
   };
 }
 
+function pilotStoreFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'store-1337',
+    name: '1337',
+    publicSlug: '1337',
+    address: 'Main street',
+    city: 'Ekaterinburg',
+    externalDomain: '1337.langame.ru',
+    externalClubId: '1337',
+    gamificationEnabled: true,
+    isActive: true,
+    ...overrides,
+  };
+}
+
+function integrationReadinessForPilot({
+  otpReady = true,
+  ledgerReady = false,
+}: {
+  otpReady?: boolean;
+  ledgerReady?: boolean;
+} = {}) {
+  return {
+    summary: {
+      total: 3,
+      ready: [otpReady, ledgerReady, ledgerReady].filter(Boolean).length,
+      partial: 0,
+      blocked: [otpReady, ledgerReady, ledgerReady].filter((value) => !value)
+        .length,
+      manualOnly: 0,
+    },
+    items: [
+      {
+        key: 'OTP',
+        title: 'OTP',
+        status: otpReady ? 'READY' : 'BLOCKED',
+        statusLabel: otpReady ? 'ready' : 'blocked',
+        ready: otpReady,
+        configured: otpReady,
+        enabled: otpReady,
+        requiredEnv: [],
+        note: 'OTP readiness',
+        nextAction: 'Configure OTP',
+      },
+      {
+        key: 'LANGAME_WRITE_API',
+        title: 'Langame write',
+        status: ledgerReady ? 'READY' : 'BLOCKED',
+        statusLabel: ledgerReady ? 'ready' : 'blocked',
+        ready: ledgerReady,
+        configured: ledgerReady,
+        enabled: ledgerReady,
+        requiredEnv: [],
+        note: 'Langame write readiness',
+        nextAction: 'Configure Langame write',
+      },
+      {
+        key: 'BONUS_LEDGER_SCHEDULER',
+        title: 'Bonus ledger scheduler',
+        status: ledgerReady ? 'READY' : 'BLOCKED',
+        statusLabel: ledgerReady ? 'ready' : 'blocked',
+        ready: ledgerReady,
+        configured: ledgerReady,
+        enabled: ledgerReady,
+        requiredEnv: [],
+        note: 'Scheduler readiness',
+        nextAction: 'Configure scheduler',
+      },
+    ],
+    note: 'Integration readiness',
+  };
+}
+
+function pilotReadinessInput(overrides: Record<string, unknown> = {}) {
+  return {
+    tenantSlug: user.tenantSlug,
+    stores: [pilotStoreFixture()],
+    profiles: [profileFixture()],
+    lootBoxes: [],
+    missions: [activeMission()],
+    seasons: [],
+    rewards: [],
+    events: [],
+    integrationReadiness: integrationReadinessForPilot(),
+    bonusLedgerAudit: {
+      summary: {
+        confirmed: 0,
+        reconciliationPending: 0,
+        reconciliationMismatch: 0,
+      },
+    },
+    communicationQueue: {
+      summary: {
+        readyForCashier: 0,
+      },
+    },
+    deliveryOutbox: {
+      summary: {
+        cashier: 0,
+      },
+    },
+    ...overrides,
+  };
+}
+
 function processResult(
   overrides: Partial<GuestGameProcessEventResult> = {},
 ): GuestGameProcessEventResult {
@@ -627,6 +732,80 @@ describe('GuestGamificationService', () => {
           process.env.NODE_ENV = originalNodeEnv;
         }
       }
+    });
+  });
+
+  describe('pilot readiness runbook', () => {
+    it('recommends dry-run when pilot prerequisites are ready but no event was processed yet', () => {
+      const { service } = createService();
+
+      const readiness = (service as any).buildPilotReadiness(
+        pilotReadinessInput(),
+      );
+
+      expect(readiness.runbook).toMatchObject({
+        stage: 'DRY_RUN',
+        canRunDryRun: true,
+        canRunCanary: false,
+        canRunLive: false,
+        canReconcile: false,
+        blockers: [],
+      });
+      expect(readiness.runbook.nextAction).toContain('dry-run');
+    });
+
+    it('recommends one live-write canary when a bonus reward and autonomous ledger are ready', () => {
+      const { service } = createService();
+
+      const readiness = (service as any).buildPilotReadiness(
+        pilotReadinessInput({
+          events: [eventResult()],
+          rewards: [rewardResult()],
+          integrationReadiness: integrationReadinessForPilot({
+            ledgerReady: true,
+          }),
+        }),
+      );
+
+      expect(readiness.runbook).toMatchObject({
+        stage: 'LIVE_WRITE',
+        canRunDryRun: true,
+        canRunCanary: true,
+        canRunLive: true,
+        canReconcile: false,
+      });
+      expect(readiness.runbook.nextAction).toContain('одной бонусной награде');
+      const safeguardsText = JSON.stringify(readiness.runbook.safeguards);
+      expect(safeguardsText).not.toContain('+7');
+      expect(safeguardsText).not.toContain('sync-token');
+    });
+
+    it('moves to reconciliation after Langame confirms the first ledger entry', () => {
+      const { service } = createService();
+
+      const readiness = (service as any).buildPilotReadiness(
+        pilotReadinessInput({
+          events: [eventResult()],
+          rewards: [rewardResult()],
+          integrationReadiness: integrationReadinessForPilot({
+            ledgerReady: true,
+          }),
+          bonusLedgerAudit: {
+            summary: {
+              confirmed: 1,
+              reconciliationPending: 1,
+              reconciliationMismatch: 0,
+            },
+          },
+        }),
+      );
+
+      expect(readiness.runbook).toMatchObject({
+        stage: 'RECONCILIATION',
+        canRunLive: false,
+        canReconcile: true,
+      });
+      expect(readiness.runbook.nextAction).toContain('snapshot');
     });
   });
 

@@ -2709,6 +2709,7 @@ function PilotReadinessCard({
   readiness: GuestGamificationWorkspace["pilotReadiness"];
 }) {
   const target = readiness.targetStore;
+  const runbook = readiness.runbook;
   const nextIssue =
     readiness.items.find((item) => item.status === "BLOCKED") ??
     readiness.items.find((item) => item.status === "PARTIAL") ??
@@ -2800,6 +2801,49 @@ function PilotReadinessCard({
         </div>
       ) : null}
 
+      <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-3 dark:border-cyan-900/60 dark:bg-cyan-950/20">
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              className={[
+                "rounded-full px-2 py-1 text-[11px] font-bold uppercase",
+                pilotRunbookStageClass(runbook.stage),
+              ].join(" ")}
+            >
+              {runbook.stageLabel}
+            </span>
+            <span className="text-xs font-semibold text-cyan-800 dark:text-cyan-100">
+              Пилотный режим
+            </span>
+          </div>
+          <p className="mt-2 text-sm font-semibold leading-6 text-zinc-950 dark:text-white">
+            {runbook.nextAction}
+          </p>
+          <p className="mt-2 text-xs leading-5 text-cyan-900 dark:text-cyan-100">
+            {runbook.note}
+          </p>
+          {runbook.blockers.length ? (
+            <p className="mt-2 text-xs leading-5 text-amber-800 dark:text-amber-100">
+              Блокеры: {runbook.blockers.join(", ")}
+            </p>
+          ) : null}
+        </div>
+
+        <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-3 dark:border-zinc-800 dark:bg-zinc-900/60">
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <PilotGate label="Dry-run" enabled={runbook.canRunDryRun} />
+            <PilotGate label="Canary" enabled={runbook.canRunCanary} />
+            <PilotGate label="Live" enabled={runbook.canRunLive} />
+            <PilotGate label="Сверка" enabled={runbook.canReconcile} />
+          </div>
+          <ul className="mt-3 space-y-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+            {runbook.safeguards.slice(0, 3).map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      </div>
+
       <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         {readiness.items.map((item, index) => (
           <article
@@ -2836,6 +2880,21 @@ function PilotReadinessCard({
         {readiness.note}
       </p>
     </section>
+  );
+}
+
+function PilotGate({ label, enabled }: { label: string; enabled: boolean }) {
+  return (
+    <div
+      className={[
+        "rounded-lg px-2 py-2 text-center font-bold",
+        enabled
+          ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-400/10 dark:text-emerald-200"
+          : "bg-zinc-200 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400",
+      ].join(" ")}
+    >
+      {label}
+    </div>
   );
 }
 
@@ -8122,6 +8181,26 @@ function integrationReadinessStatusClass(
       return "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200";
     case "MANUAL_ONLY":
       return "bg-cyan-100 text-cyan-800 dark:bg-cyan-950 dark:text-cyan-200";
+    case "BLOCKED":
+    default:
+      return "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200";
+  }
+}
+
+function pilotRunbookStageClass(
+  stage: GuestGamificationWorkspace["pilotReadiness"]["runbook"]["stage"],
+) {
+  switch (stage) {
+    case "READY":
+      return "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200";
+    case "LIVE_WRITE":
+      return "bg-fuchsia-100 text-fuchsia-800 dark:bg-fuchsia-950 dark:text-fuchsia-200";
+    case "RECONCILIATION":
+      return "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-200";
+    case "CANARY":
+      return "bg-cyan-100 text-cyan-800 dark:bg-cyan-950 dark:text-cyan-200";
+    case "DRY_RUN":
+      return "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200";
     case "BLOCKED":
     default:
       return "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200";

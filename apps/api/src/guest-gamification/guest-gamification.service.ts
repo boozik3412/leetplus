@@ -1163,6 +1163,27 @@ export type GuestGamePilotReadinessItem = {
   nextAction: string;
 };
 
+export type GuestGamePilotRunbookStage =
+  | 'BLOCKED'
+  | 'DRY_RUN'
+  | 'CANARY'
+  | 'LIVE_WRITE'
+  | 'RECONCILIATION'
+  | 'READY';
+
+export type GuestGamePilotRunbook = {
+  stage: GuestGamePilotRunbookStage;
+  stageLabel: string;
+  canRunDryRun: boolean;
+  canRunCanary: boolean;
+  canRunLive: boolean;
+  canReconcile: boolean;
+  blockers: string[];
+  safeguards: string[];
+  nextAction: string;
+  note: string;
+};
+
 export type GuestGamePilotReadiness = {
   targetStore: {
     id: string;
@@ -1185,6 +1206,7 @@ export type GuestGamePilotReadiness = {
     readinessPercent: number;
   };
   items: GuestGamePilotReadinessItem[];
+  runbook: GuestGamePilotRunbook;
   note: string;
 };
 
@@ -1914,6 +1936,166 @@ function maxDate(left: Date | null, right: Date | null) {
   return right.getTime() > left.getTime() ? right : left;
 }
 
+const pilotRunbookPrerequisiteKeys = new Set<
+  GuestGamePilotReadinessItem['key']
+>([
+  'CLUB',
+  'PUBLIC_REGISTRATION',
+  'OTP',
+  'GAME_PROFILE',
+  'LANGAME_MATCH',
+  'ACTIVE_RULES',
+]);
+
+function buildPilotRunbook({
+  items,
+  activeRuleCount,
+  events,
+  approvedRewards,
+  readyWalletRewards,
+  bonusRewards,
+  bonusLedgerAutonomousReady,
+  ledgerConfirmed,
+  ledgerReconciliationPending,
+  ledgerReconciliationMismatch,
+}: {
+  items: GuestGamePilotReadinessItem[];
+  activeRuleCount: number;
+  events: number;
+  approvedRewards: number;
+  readyWalletRewards: number;
+  bonusRewards: number;
+  bonusLedgerAutonomousReady: boolean;
+  ledgerConfirmed: number;
+  ledgerReconciliationPending: number;
+  ledgerReconciliationMismatch: number;
+}): GuestGamePilotRunbook {
+  const prerequisiteBlockers = items.filter(
+    (item) =>
+      item.status === 'BLOCKED' && pilotRunbookPrerequisiteKeys.has(item.key),
+  );
+  const prerequisiteBlockerTitles = prerequisiteBlockers.map(
+    (item) => item.title,
+  );
+  const downstreamBlockerTitles = items
+    .filter((item) => item.status === 'BLOCKED')
+    .filter((item) => !pilotRunbookPrerequisiteKeys.has(item.key))
+    .map((item) => item.title);
+  const hasPrerequisites = prerequisiteBlockers.length === 0;
+  const canRunDryRun = hasPrerequisites && activeRuleCount > 0;
+  const canRunCanary =
+    canRunDryRun &&
+    (events > 0 || approvedRewards > 0 || readyWalletRewards > 0);
+  const canRunLive =
+    canRunCanary && bonusLedgerAutonomousReady && bonusRewards > 0;
+  const canReconcile = ledgerConfirmed > 0;
+
+  const safeguards = [
+    'До live-стадии используются только сохраненные факты LeetPlus и dry-run без записи в Langame.',
+    'Первый live-write должен идти как canary: одна бонусная награда, один гость, один клуб 1337.',
+    'Raw phone и токены не попадают в UI; ledger и delivery показывают маски и безопасные статусы.',
+    'После подтверждения Langame обязательна сверка GuestBonusBalanceCurrent с новым snapshot.',
+  ];
+
+  if (prerequisiteBlockers.length > 0) {
+    return {
+      stage: 'BLOCKED',
+      stageLabel: 'Стоп',
+      canRunDryRun,
+      canRunCanary,
+      canRunLive,
+      canReconcile,
+      blockers: prerequisiteBlockerTitles,
+      safeguards,
+      nextAction:
+        prerequisiteBlockers[0]?.nextAction ??
+        'Закрыть блокеры пилотного чек-листа.',
+      note: 'Пилотный прогон первого бонуса нельзя запускать, пока не закрыты базовые условия регистрации, OTP, профиля, связки с Langame и активного правила.',
+    };
+  }
+
+  if (ledgerConfirmed > 0) {
+    if (ledgerReconciliationMismatch > 0 || ledgerReconciliationPending > 0) {
+      return {
+        stage: 'RECONCILIATION',
+        stageLabel: 'Сверка',
+        canRunDryRun,
+        canRunCanary,
+        canRunLive: false,
+        canReconcile,
+        blockers: downstreamBlockerTitles,
+        safeguards,
+        nextAction:
+          ledgerReconciliationMismatch > 0
+            ? 'Разобрать расхождения ledger и Langame snapshot до следующего live-write.'
+            : 'Дождаться свежего guest foundation sync и bonus balance snapshot после первого начисления.',
+        note: 'Первое начисление уже подтверждено Langame; следующий обязательный этап - сверка баланса и отсутствие расхождений.',
+      };
+    }
+
+    return {
+      stage: 'READY',
+      stageLabel: 'Готово',
+      canRunDryRun,
+      canRunCanary,
+      canRunLive: false,
+      canReconcile,
+      blockers: [],
+      safeguards,
+      nextAction:
+        'Сохранить пилот 1337 как эталонный сценарий и расширять лимит начислений только после проверки журнала.',
+      note: 'Путь первого бонуса прошел до подтверждения Langame и последующей сверки баланса.',
+    };
+  }
+
+  if (!events || (!approvedRewards && !readyWalletRewards)) {
+    return {
+      stage: 'DRY_RUN',
+      stageLabel: 'Dry-run',
+      canRunDryRun,
+      canRunCanary,
+      canRunLive: false,
+      canReconcile,
+      blockers: [],
+      safeguards,
+      nextAction:
+        'Прогнать dry-run/process-event на тестовом госте 1337 и убедиться, что правило создает ожидаемую бонусную награду без записи в Langame.',
+      note: 'Базовые условия готовы; теперь нужен контролируемый тест события и проверка idempotency до очереди бонусов.',
+    };
+  }
+
+  if (!canRunLive) {
+    return {
+      stage: 'CANARY',
+      stageLabel: 'Canary',
+      canRunDryRun,
+      canRunCanary,
+      canRunLive,
+      canReconcile,
+      blockers: downstreamBlockerTitles,
+      safeguards,
+      nextAction: bonusRewards
+        ? 'Поставить одну approved bonus-награду в ledger и выполнить dry-run dispatcher перед включением live-write.'
+        : 'Подготовить approved reward с бонусным rewardType, чтобы он попал в bonus ledger, а не в ручную выдачу.',
+      note: 'Есть тестовая активность или награда, но до live-write нужен безопасный canary через ledger dry-run и проверку scheduler/write-флагов.',
+    };
+  }
+
+  return {
+    stage: 'LIVE_WRITE',
+    stageLabel: 'Live write',
+    canRunDryRun,
+    canRunCanary,
+    canRunLive,
+    canReconcile,
+    blockers: [],
+    safeguards,
+    nextAction:
+      'Запустить первый live-write только на одной бонусной награде 1337, затем сразу проверить ledger status и ждать свежий snapshot баланса.',
+    note: 'Все условия для первого боевого начисления есть; режим должен оставаться canary до подтвержденной сверки баланса.',
+  };
+}
+
 function pickPilotStore(stores: PilotStoreRow[]) {
   return (
     stores.find((store) =>
@@ -2507,6 +2689,18 @@ export class GuestGamificationService {
           ((ready + partial * 0.5 + manualOnly * 0.5) / items.length) * 100,
         )
       : 0;
+    const runbook = buildPilotRunbook({
+      items,
+      activeRuleCount,
+      events: events.length,
+      approvedRewards: approvedRewards.length,
+      readyWalletRewards: readyWalletRewards.length,
+      bonusRewards: bonusRewards.length,
+      bonusLedgerAutonomousReady,
+      ledgerConfirmed,
+      ledgerReconciliationPending,
+      ledgerReconciliationMismatch,
+    });
 
     return {
       targetStore: targetStorePayload,
@@ -2519,6 +2713,7 @@ export class GuestGamificationService {
         readinessPercent,
       },
       items,
+      runbook,
       note: 'Пилотный чек-лист показывает путь от публичной регистрации до первого бонуса в Langame по уже сохраненным данным LeetPlus. Он не делает live-запросов и не раскрывает ПДн.',
     };
   }

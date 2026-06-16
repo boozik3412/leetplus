@@ -220,6 +220,20 @@ const emptyWorkspace: GuestGamificationWorkspace = {
       readinessPercent: 0,
     },
     items: [],
+    runbook: {
+      stage: "BLOCKED",
+      stageLabel: "Стоп",
+      canRunDryRun: false,
+      canRunCanary: false,
+      canRunLive: false,
+      canReconcile: false,
+      blockers: [],
+      safeguards: [
+        "Пилотные гейты появятся после ответа API workspace.",
+      ],
+      nextAction: "Дождаться ответа API workspace.",
+      note: "Пилотный режим безопасно заблокирован до загрузки данных.",
+    },
     note: "Пилотный чек-лист появится после ответа API workspace.",
   },
   bonusLedgerAudit: {

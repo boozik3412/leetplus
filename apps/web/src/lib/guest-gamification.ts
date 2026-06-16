@@ -703,6 +703,27 @@ export type GuestGamePilotReadinessItem = {
   nextAction: string;
 };
 
+export type GuestGamePilotRunbookStage =
+  | "BLOCKED"
+  | "DRY_RUN"
+  | "CANARY"
+  | "LIVE_WRITE"
+  | "RECONCILIATION"
+  | "READY";
+
+export type GuestGamePilotRunbook = {
+  stage: GuestGamePilotRunbookStage;
+  stageLabel: string;
+  canRunDryRun: boolean;
+  canRunCanary: boolean;
+  canRunLive: boolean;
+  canReconcile: boolean;
+  blockers: string[];
+  safeguards: string[];
+  nextAction: string;
+  note: string;
+};
+
 export type GuestGamePilotReadiness = {
   targetStore: {
     id: string;
@@ -725,6 +746,7 @@ export type GuestGamePilotReadiness = {
     readinessPercent: number;
   };
   items: GuestGamePilotReadinessItem[];
+  runbook: GuestGamePilotRunbook;
   note: string;
 };
 

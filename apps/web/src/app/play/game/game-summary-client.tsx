@@ -1,62 +1,110 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import type { GuestPortalGameSummary } from "@/lib/guest-portal";
+import type {
+  GuestPortalCheckInResponse,
+  GuestPortalGameSummary,
+} from "@/lib/guest-portal";
 
 type LoadState = "loading" | "ready" | "empty" | "error";
+type SubmitState = "idle" | "submitting";
+
+class EmptySessionError extends Error {}
 
 export function GameSummaryClient() {
   const [summary, setSummary] = useState<GuestPortalGameSummary | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [message, setMessage] = useState<string | null>(null);
+  const [checkInState, setCheckInState] = useState<SubmitState>("idle");
+  const [checkInMessage, setCheckInMessage] = useState<string | null>(null);
+
+  const refreshSummary = useCallback(async () => {
+    const nextSummary = await requestGameSummary();
+    setSummary(nextSummary);
+    setLoadState("ready");
+    setMessage(null);
+  }, []);
 
   useEffect(() => {
     let isActive = true;
 
-    async function loadSummary() {
+    async function loadInitialSummary() {
       try {
-        const response = await fetch("/api/guest-portal/session/game-summary", {
-          cache: "no-store",
-        });
+        const nextSummary = await requestGameSummary();
 
         if (!isActive) {
           return;
         }
 
-        if (response.status === 401) {
-          setLoadState("empty");
-          setMessage("Сначала подтвердите телефон и выберите клуб.");
-          return;
-        }
-
-        if (!response.ok) {
-          throw new Error(await readResponseMessage(response));
-        }
-
-        setSummary((await response.json()) as GuestPortalGameSummary);
+        setSummary(nextSummary);
         setLoadState("ready");
+        setMessage(null);
       } catch (error) {
         if (!isActive) {
           return;
         }
 
+        if (error instanceof EmptySessionError) {
+          setSummary(null);
+          setLoadState("empty");
+          setMessage(error.message);
+          return;
+        }
+
         setLoadState("error");
-        setMessage(
-          error instanceof Error
-            ? error.message
-            : "Не удалось загрузить игровой экран.",
-        );
+        setMessage(getErrorMessage(error, "Не удалось загрузить игровой экран."));
       }
     }
 
-    void loadSummary();
+    void loadInitialSummary();
 
     return () => {
       isActive = false;
     };
   }, []);
+
+  async function checkIn() {
+    setCheckInState("submitting");
+    setCheckInMessage(null);
+
+    try {
+      const response = await fetch("/api/guest-portal/session/check-in", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          note: "Чекин гостя из игрового экрана LeetPlus Play.",
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(
+          await readResponseMessage(response, "Не удалось выполнить чекин."),
+        );
+      }
+
+      const data = (await response.json()) as GuestPortalCheckInResponse;
+      const xpDelta = data.checkIn.processResult.summary.appliedXpDelta;
+      const rewards = data.checkIn.processResult.summary.createdRewards;
+      const rewardText = rewards
+        ? ` Наград в очереди: ${formatNumber(rewards)}.`
+        : "";
+
+      setCheckInMessage(
+        `Чекин подтвержден: ${formatDate(data.checkIn.checkedAt)}. XP: ${formatNumber(
+          xpDelta,
+        )}.${rewardText}`,
+      );
+      await refreshSummary();
+    } catch (error) {
+      setCheckInMessage(
+        getErrorMessage(error, "Не удалось выполнить чекин."),
+      );
+    } finally {
+      setCheckInState("idle");
+    }
+  }
 
   if (loadState === "loading") {
     return <GameShell body={<LoadingView />} />;
@@ -88,7 +136,18 @@ export function GameSummaryClient() {
     );
   }
 
-  return <GameShell body={<ReadyGameView summary={summary} />} />;
+  return (
+    <GameShell
+      body={
+        <ReadyGameView
+          summary={summary}
+          onCheckIn={checkIn}
+          isCheckingIn={checkInState === "submitting"}
+          checkInMessage={checkInMessage}
+        />
+      }
+    />
+  );
 }
 
 function GameShell({ body }: { body: ReactNode }) {
@@ -161,7 +220,17 @@ function EmptySessionView({
   );
 }
 
-function ReadyGameView({ summary }: { summary: GuestPortalGameSummary }) {
+function ReadyGameView({
+  summary,
+  onCheckIn,
+  isCheckingIn,
+  checkInMessage,
+}: {
+  summary: GuestPortalGameSummary;
+  onCheckIn: () => void;
+  isCheckingIn: boolean;
+  checkInMessage: string | null;
+}) {
   const guestPortalHref = useMemo(
     () =>
       `/guest/${encodeURIComponent(summary.tenant.slug)}/${encodeURIComponent(
@@ -235,12 +304,31 @@ function ReadyGameView({ summary }: { summary: GuestPortalGameSummary }) {
             {primaryAction?.description ??
               "Как только появится новая награда или квест, он будет здесь."}
           </p>
-          <Link
-            href={guestPortalHref}
-            className="mt-5 inline-flex rounded-lg bg-zinc-950 px-4 py-3 text-sm font-black text-white transition hover:bg-zinc-800"
-          >
-            Открыть кабинет
-          </Link>
+          <div className="mt-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+            <button
+              type="button"
+              onClick={onCheckIn}
+              disabled={isCheckingIn}
+              className="rounded-lg bg-zinc-950 px-4 py-3 text-sm font-black text-white transition hover:bg-zinc-800 disabled:cursor-wait disabled:opacity-70"
+            >
+              {isCheckingIn ? "Проверяем..." : "Чекин в клубе"}
+            </button>
+            <Link
+              href={guestPortalHref}
+              className="rounded-lg border border-zinc-950/25 px-4 py-3 text-center text-sm font-black text-zinc-950 transition hover:border-zinc-950/50"
+            >
+              Открыть кабинет
+            </Link>
+          </div>
+          {checkInMessage ? (
+            <p className="mt-3 text-xs font-semibold leading-5 text-zinc-800">
+              {checkInMessage}
+            </p>
+          ) : (
+            <p className="mt-3 text-xs leading-5 text-zinc-800">
+              Чекин ищет активную сессию Langame и сразу пересчитывает прогресс.
+            </p>
+          )}
         </div>
       </section>
 
@@ -500,15 +588,38 @@ function ChannelRow({
   );
 }
 
-async function readResponseMessage(response: Response) {
+async function requestGameSummary() {
+  const response = await fetch("/api/guest-portal/session/game-summary", {
+    cache: "no-store",
+  });
+
+  if (response.status === 401) {
+    throw new EmptySessionError("Сначала подтвердите телефон и выберите клуб.");
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      await readResponseMessage(response, "Не удалось загрузить игровой экран."),
+    );
+  }
+
+  return (await response.json()) as GuestPortalGameSummary;
+}
+
+async function readResponseMessage(
+  response: Response,
+  fallback = "Не удалось загрузить игровой экран.",
+) {
   try {
     const payload = (await response.json()) as { message?: unknown };
-    return typeof payload.message === "string"
-      ? payload.message
-      : "Не удалось загрузить игровой экран.";
+    return typeof payload.message === "string" ? payload.message : fallback;
   } catch {
-    return "Не удалось загрузить игровой экран.";
+    return fallback;
   }
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
 }
 
 function clampPercent(value: number) {

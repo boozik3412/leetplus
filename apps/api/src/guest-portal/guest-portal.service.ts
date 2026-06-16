@@ -46,6 +46,7 @@ const GAME_CONSENT_EVENT_TYPE = 'GAME_CONSENT_GRANTED';
 const GAME_CONSENT_VERSION = 'guest-game-v1-2026-06-15';
 const GAME_PROFILE_LINKED_EVENT_TYPE = 'GAME_PROFILE_LINKED';
 const GAME_PROFILE_LINK_SOURCE = 'GUEST_PORTAL_PROFILE_LINK';
+const GAME_SUMMARY_MISSION_LIMIT = 6;
 type JwtExpiresIn = NonNullable<JwtSignOptions['expiresIn']>;
 type GuestPortalOtpDeliveryChannel = 'DEV' | 'SMS' | 'TELEGRAM' | 'MAX';
 type GuestPortalOtpDeliveryStatus =
@@ -3554,7 +3555,7 @@ function buildGameSummaryFromPortal(
     }));
   const featuredMissions = [...portal.gamification.missions]
     .sort((left, right) => right.progressPercent - left.progressPercent)
-    .slice(0, 3)
+    .slice(0, GAME_SUMMARY_MISSION_LIMIT)
     .map((mission) => ({
       id: mission.id,
       name: mission.name,

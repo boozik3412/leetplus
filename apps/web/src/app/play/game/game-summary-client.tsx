@@ -15,6 +15,8 @@ type GameRewardWalletState =
   GuestPortalGameSummary["rewards"]["recent"][number]["walletState"];
 type GameBonusHistoryItem =
   GuestPortalGameSummary["rewards"]["bonusHistory"]["items"][number];
+type GameMission = GuestPortalGameSummary["missions"]["featured"][number];
+type MissionBoardFilter = "AVAILABLE" | "ALMOST_DONE" | "REWARD_PENDING" | "ALL";
 
 class EmptySessionError extends Error {}
 
@@ -951,6 +953,18 @@ function MissionsPanel({
 }: {
   missions: GuestPortalGameSummary["missions"]["featured"];
 }) {
+  const [activeFilter, setActiveFilter] =
+    useState<MissionBoardFilter>("AVAILABLE");
+  const filterOptions = useMemo(
+    () => buildMissionFilterOptions(missions),
+    [missions],
+  );
+  const visibleMissions = useMemo(
+    () =>
+      missions.filter((mission) => missionMatchesFilter(mission, activeFilter)),
+    [activeFilter, missions],
+  );
+
   return (
     <section
       id="missions"
@@ -959,128 +973,156 @@ function MissionsPanel({
       <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
         Миссии
       </p>
-      <h2 className="mt-1 text-xl font-black">Ближайшие квесты</h2>
+      <div className="mt-1 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 className="text-xl font-black">Ближайшие квесты</h2>
+          <p className="mt-1 text-xs leading-5 text-zinc-400">
+            Выберите цель: новый квест, почти готовый прогресс или награду.
+          </p>
+        </div>
+        {missions.length ? (
+          <span className="shrink-0 rounded-full bg-white/10 px-3 py-1 text-xs font-bold text-zinc-200">
+            {visibleMissions.length} из {missions.length}
+          </span>
+        ) : null}
+      </div>
+      {missions.length ? (
+        <MissionFilterTabs
+          activeFilter={activeFilter}
+          options={filterOptions}
+          onChange={setActiveFilter}
+        />
+      ) : null}
       <div className="mt-5 space-y-3">
         {missions.length ? (
-          missions.map((mission) => {
-            const activeStep =
-              mission.questSteps.find((step) => step.current) ??
-              mission.questSteps.find((step) => !step.completed) ??
-              null;
-            const progressTarget = mission.progressTarget ?? 1;
-            const progressUnit = mission.progressUnit
-              ? ` ${mission.progressUnit}`
-              : "";
-            const progressLabel =
-              mission.progressPercent >= 100
-                ? `Выполнено: ${formatNumber(
-                    mission.progressCurrent,
-                  )}/${formatNumber(progressTarget)}${progressUnit}`
-                : `Прогресс: ${formatNumber(
-                    mission.progressCurrent,
-                  )}/${formatNumber(progressTarget)}${progressUnit}`;
+          visibleMissions.length ? (
+            visibleMissions.map((mission) => {
+              const activeStep =
+                mission.questSteps.find((step) => step.current) ??
+                mission.questSteps.find((step) => !step.completed) ??
+                null;
+              const progressTarget = mission.progressTarget ?? 1;
+              const progressUnit = mission.progressUnit
+                ? ` ${mission.progressUnit}`
+                : "";
+              const progressLabel =
+                mission.progressPercent >= 100
+                  ? `Выполнено: ${formatNumber(
+                      mission.progressCurrent,
+                    )}/${formatNumber(progressTarget)}${progressUnit}`
+                  : `Прогресс: ${formatNumber(
+                      mission.progressCurrent,
+                    )}/${formatNumber(progressTarget)}${progressUnit}`;
 
-            return (
-              <article
-                key={mission.id}
-                className="rounded-lg border border-white/10 bg-zinc-950/45 p-4"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <h3 className="truncate text-sm font-black">
-                      {mission.name}
-                    </h3>
-                    <p className="mt-1 text-xs text-zinc-400">
-                      {mission.rewardLabel ?? `${mission.xpReward} XP`}
-                    </p>
+              return (
+                <article
+                  key={mission.id}
+                  className={missionCardClass(mission)}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h3 className="truncate text-sm font-black">
+                        {mission.name}
+                      </h3>
+                      <p className="mt-1 text-xs text-zinc-400">
+                        {mission.rewardLabel ?? `${mission.xpReward} XP`}
+                      </p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <span className="block text-sm font-black text-emerald-300">
+                        {Math.round(mission.progressPercent)}%
+                      </span>
+                      <span className={missionStatusBadgeClass(mission)}>
+                        {missionStateLabel(mission)}
+                      </span>
+                    </div>
                   </div>
-                  <div className="shrink-0 text-right">
-                    <span className="block text-sm font-black text-emerald-300">
-                      {Math.round(mission.progressPercent)}%
-                    </span>
-                    <span className="mt-1 block rounded-full bg-white/10 px-2 py-1 text-xs font-bold text-zinc-200">
+                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
+                    <div
+                      className="h-full rounded-full bg-emerald-300"
+                      style={{
+                        width: `${clampPercent(mission.progressPercent)}%`,
+                      }}
+                    />
+                  </div>
+                  <div className="mt-3 flex flex-col gap-2 text-xs text-zinc-400 sm:flex-row sm:items-center sm:justify-between">
+                    <span>{progressLabel}</span>
+                    <span className="font-bold text-zinc-200">
                       +{formatNumber(mission.xpReward)} XP
                     </span>
                   </div>
-                </div>
-                <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
-                  <div
-                    className="h-full rounded-full bg-emerald-300"
-                    style={{
-                      width: `${clampPercent(mission.progressPercent)}%`,
-                    }}
-                  />
-                </div>
-                <div className="mt-3 flex flex-col gap-2 text-xs text-zinc-400 sm:flex-row sm:items-center sm:justify-between">
-                  <span>{progressLabel}</span>
-                  <span>{missionStateLabel(mission)}</span>
-                </div>
 
-                {activeStep ? (
-                  <div className="mt-4 rounded-lg border border-emerald-300/25 bg-emerald-300/[0.08] p-3">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-emerald-200">
-                      Текущий шаг
-                    </p>
-                    <p className="mt-1 text-sm font-black text-white">
-                      {activeStep.title}
-                    </p>
-                    <p className="mt-1 text-xs text-emerald-100/80">
-                      {formatMissionStepProgress(activeStep)}
-                    </p>
-                  </div>
-                ) : null}
+                  {activeStep ? (
+                    <div className="mt-4 rounded-lg border border-emerald-300/25 bg-emerald-300/[0.08] p-3">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-emerald-200">
+                        Текущий шаг
+                      </p>
+                      <p className="mt-1 text-sm font-black text-white">
+                        {activeStep.title}
+                      </p>
+                      <p className="mt-1 text-xs text-emerald-100/80">
+                        {formatMissionStepProgress(activeStep)}
+                      </p>
+                    </div>
+                  ) : null}
 
-                {mission.questSteps.length ? (
-                  <div className="mt-3 grid gap-2">
-                    {mission.questSteps.map((step, index) => (
-                      <div
-                        key={step.id}
-                        className={[
-                          "flex items-center gap-3 rounded-lg border px-3 py-2",
-                          step.completed
-                            ? "border-emerald-300/30 bg-emerald-300/[0.07]"
-                            : step.current
-                              ? "border-emerald-300/25 bg-white/[0.06]"
-                              : "border-white/10 bg-white/[0.03]",
-                        ].join(" ")}
-                      >
-                        <span
+                  {mission.questSteps.length ? (
+                    <div className="mt-3 grid gap-2">
+                      {mission.questSteps.map((step, index) => (
+                        <div
+                          key={step.id}
                           className={[
-                            "grid h-7 w-7 shrink-0 place-items-center rounded-full text-xs font-black",
+                            "flex min-h-12 items-center gap-3 rounded-lg border px-3 py-2",
                             step.completed
-                              ? "bg-emerald-300 text-zinc-950"
+                              ? "border-emerald-300/30 bg-emerald-300/[0.07]"
                               : step.current
-                                ? "bg-white text-zinc-950"
-                                : "bg-white/10 text-zinc-300",
+                                ? "border-emerald-300/25 bg-white/[0.06]"
+                                : "border-white/10 bg-white/[0.03]",
                           ].join(" ")}
                         >
-                          {index + 1}
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-bold text-white">
-                            {step.title}
-                          </p>
-                          <p className="text-xs text-zinc-500">
-                            {formatMissionStepProgress(step)}
-                          </p>
+                          <span
+                            className={[
+                              "grid h-7 w-7 shrink-0 place-items-center rounded-full text-xs font-black",
+                              step.completed
+                                ? "bg-emerald-300 text-zinc-950"
+                                : step.current
+                                  ? "bg-white text-zinc-950"
+                                  : "bg-white/10 text-zinc-300",
+                            ].join(" ")}
+                          >
+                            {index + 1}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-bold text-white">
+                              {step.title}
+                            </p>
+                            <p className="text-xs text-zinc-500">
+                              {formatMissionStepProgress(step)}
+                            </p>
+                          </div>
+                          <span className="shrink-0 text-xs font-black text-zinc-300">
+                            {missionStepStateLabel(step)}
+                          </span>
                         </div>
-                        <span className="shrink-0 text-xs font-black text-zinc-300">
-                          {missionStepStateLabel(step)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-
-                <div className="mt-3 flex flex-col gap-1 text-xs text-zinc-500 sm:flex-row sm:items-center sm:justify-between">
-                  <span>{missionRewardNote(mission)}</span>
-                  {mission.periodTo ? (
-                    <span>до {formatDate(mission.periodTo)}</span>
+                      ))}
+                    </div>
                   ) : null}
-                </div>
-              </article>
-            );
-          })
+
+                  <div className="mt-3 flex flex-col gap-1 text-xs text-zinc-500 sm:flex-row sm:items-center sm:justify-between">
+                    <span>{missionRewardNote(mission)}</span>
+                    {mission.periodTo ? (
+                      <span>до {formatDate(mission.periodTo)}</span>
+                    ) : null}
+                  </div>
+                </article>
+              );
+            })
+          ) : (
+            <p className="rounded-lg border border-white/10 bg-zinc-950/45 p-4 text-sm leading-6 text-zinc-300">
+              В этой вкладке квестов пока нет. Откройте другую группу или
+              дождитесь нового события клуба.
+            </p>
+          )
         ) : (
           <p className="text-sm leading-6 text-zinc-300">
             Активных миссий пока нет. Клуб может включить их в Guest Game Hub.
@@ -1091,9 +1133,121 @@ function MissionsPanel({
   );
 }
 
-function missionStateLabel(
-  mission: GuestPortalGameSummary["missions"]["featured"][number],
+function MissionFilterTabs({
+  activeFilter,
+  options,
+  onChange,
+}: {
+  activeFilter: MissionBoardFilter;
+  options: Array<{ key: MissionBoardFilter; label: string; count: number }>;
+  onChange: (filter: MissionBoardFilter) => void;
+}) {
+  return (
+    <div
+      aria-label="Фильтр квестов"
+      className="mt-4 grid grid-cols-2 gap-2 rounded-lg border border-white/10 bg-zinc-950/35 p-1 sm:grid-cols-4"
+      role="tablist"
+    >
+      {options.map((option) => {
+        const active = option.key === activeFilter;
+
+        return (
+          <button
+            key={option.key}
+            aria-selected={active}
+            className={[
+              "min-h-11 rounded-md px-3 py-2 text-left text-xs font-bold transition",
+              active
+                ? "bg-emerald-300 text-zinc-950"
+                : "bg-transparent text-zinc-300 hover:bg-white/10 hover:text-white",
+            ].join(" ")}
+            onClick={() => onChange(option.key)}
+            role="tab"
+            type="button"
+          >
+            <span className="block truncate">{option.label}</span>
+            <span className="mt-1 block text-[11px] opacity-75">
+              {option.count}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function buildMissionFilterOptions(missions: GameMission[]) {
+  return [
+    {
+      key: "AVAILABLE" as const,
+      label: "Доступные",
+      count: missions.filter((mission) =>
+        missionMatchesFilter(mission, "AVAILABLE"),
+      ).length,
+    },
+    {
+      key: "ALMOST_DONE" as const,
+      label: "Почти готовы",
+      count: missions.filter((mission) =>
+        missionMatchesFilter(mission, "ALMOST_DONE"),
+      ).length,
+    },
+    {
+      key: "REWARD_PENDING" as const,
+      label: "Награда",
+      count: missions.filter((mission) =>
+        missionMatchesFilter(mission, "REWARD_PENDING"),
+      ).length,
+    },
+    {
+      key: "ALL" as const,
+      label: "Все",
+      count: missions.length,
+    },
+  ];
+}
+
+function missionMatchesFilter(
+  mission: GameMission,
+  filter: MissionBoardFilter,
 ) {
+  switch (filter) {
+    case "AVAILABLE":
+      return mission.progressPercent < 100;
+    case "ALMOST_DONE":
+      return mission.progressPercent >= 70 && mission.progressPercent < 100;
+    case "REWARD_PENDING":
+      return mission.progressPercent >= 100;
+    case "ALL":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function missionCardClass(mission: GameMission) {
+  return [
+    "rounded-lg border p-4",
+    mission.progressPercent >= 100
+      ? "border-emerald-300/30 bg-emerald-300/[0.07]"
+      : mission.progressPercent >= 70
+        ? "border-amber-300/25 bg-amber-300/[0.06]"
+        : "border-white/10 bg-zinc-950/45",
+  ].join(" ");
+}
+
+function missionStatusBadgeClass(mission: GameMission) {
+  return [
+    "mt-1 block rounded-full px-2 py-1 text-xs font-bold",
+    mission.progressPercent >= 100
+      ? "bg-emerald-300 text-zinc-950"
+      : mission.progressPercent >= 70
+        ? "bg-amber-300/20 text-amber-100"
+        : "bg-white/10 text-zinc-200",
+  ].join(" ");
+}
+
+function missionStateLabel(mission: GameMission) {
   if (mission.progressPercent >= 100) {
     return mission.manualApprovalRequired
       ? "ждет подтверждения"
@@ -1103,9 +1257,7 @@ function missionStateLabel(
   return "в процессе";
 }
 
-function missionRewardNote(
-  mission: GuestPortalGameSummary["missions"]["featured"][number],
-) {
+function missionRewardNote(mission: GameMission) {
   if (mission.manualApprovalRequired) {
     return "Награда появится после подтверждения команды.";
   }
@@ -1114,7 +1266,7 @@ function missionRewardNote(
 }
 
 function missionStepStateLabel(
-  step: GuestPortalGameSummary["missions"]["featured"][number]["questSteps"][number],
+  step: GameMission["questSteps"][number],
 ) {
   if (step.completed) {
     return "готово";
@@ -1124,7 +1276,7 @@ function missionStepStateLabel(
 }
 
 function formatMissionStepProgress(
-  step: GuestPortalGameSummary["missions"]["featured"][number]["questSteps"][number],
+  step: GameMission["questSteps"][number],
 ) {
   return `${formatNumber(step.progressCurrent)} / ${formatNumber(step.target)}`;
 }

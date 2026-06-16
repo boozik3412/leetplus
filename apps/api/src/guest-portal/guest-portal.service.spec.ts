@@ -640,6 +640,37 @@ describe('GuestPortalService', () => {
         ['ledger-1', 'ledger-2', 'ledger-3', 'ledger-4', 'ledger-5'],
       );
     });
+
+    it('limits mission board in compact game summary', async () => {
+      const { service } = createService();
+      const portal = portalPayloadFixture();
+      const baseMission = portal.gamification.missions[0];
+      portal.gamification.missions = Array.from({ length: 7 }, (_, index) => ({
+        ...baseMission,
+        id: `mission-${index + 1}`,
+        name: `Mission ${index + 1}`,
+        progressCurrent: 12 - index,
+        progressPercent: 100 - index * 8,
+        questSteps: baseMission.questSteps.map((step) => ({
+          ...step,
+          id: `${step.id}-${index + 1}`,
+        })),
+      }));
+      jest.spyOn(service, 'getSession').mockResolvedValue(portal as any);
+
+      const summary = await service.getGameSummary('Bearer guest-token');
+
+      expect(summary.missions.total).toBe(7);
+      expect(summary.missions.featured).toHaveLength(6);
+      expect(summary.missions.featured.map((mission) => mission.id)).toEqual([
+        'mission-1',
+        'mission-2',
+        'mission-3',
+        'mission-4',
+        'mission-5',
+        'mission-6',
+      ]);
+    });
   });
 
   describe('getGamificationClubDirectory', () => {

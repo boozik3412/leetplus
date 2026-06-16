@@ -20,6 +20,8 @@ import {
   type GuestPortalOtpVerifyResponse,
   type GuestPortalPayload,
   type GuestPortalPublicConfig,
+  type GuestPortalTelegramAuthStartResponse,
+  type GuestPortalTelegramAuthStatusResponse,
   type GuestPortalTelegramLinkConfirmResponse,
   type GuestPortalTelegramLinkStartResponse,
   type GuestPortalTelegramWebhookResponse,
@@ -66,6 +68,28 @@ export class GuestPortalController {
     @Body() dto: { challengeId?: unknown; code?: unknown },
   ): Promise<GuestPortalOtpVerifyResponse> {
     return this.guestPortalService.verifyOtp(tenantSlug, storeId, dto);
+  }
+
+  @Post(':tenantSlug/:storeId/telegram-auth/start')
+  startTelegramAuth(
+    @Param('tenantSlug') tenantSlug: string,
+    @Param('storeId') storeId: string,
+    @Body() dto: { gameConsentAccepted?: unknown },
+  ): Promise<GuestPortalTelegramAuthStartResponse> {
+    return this.guestPortalService.startTelegramAuth(tenantSlug, storeId, dto);
+  }
+
+  @Post(':tenantSlug/:storeId/telegram-auth/status')
+  getTelegramAuthStatus(
+    @Param('tenantSlug') tenantSlug: string,
+    @Param('storeId') storeId: string,
+    @Body() dto: { challengeId?: unknown },
+  ): Promise<GuestPortalTelegramAuthStatusResponse> {
+    return this.guestPortalService.getTelegramAuthStatus(
+      tenantSlug,
+      storeId,
+      dto,
+    );
   }
 
   @Get('session')

@@ -39,9 +39,16 @@ const OTP_RESEND_SECONDS = 60;
 const GUEST_TOKEN_EXPIRES_IN = '7d';
 const GUEST_PORTAL_PURPOSE = 'guest_portal';
 const TELEGRAM_LINK_TTL_MINUTES = 15;
+const TELEGRAM_AUTH_PROFILE_STATUS = 'PENDING_TELEGRAM_AUTH';
+const TELEGRAM_AUTH_MERGED_PROFILE_STATUS = 'MERGED_TELEGRAM_AUTH';
+const TELEGRAM_AUTH_PENDING_STATUS = 'AUTH_PENDING';
+const TELEGRAM_AUTH_AWAITING_CONTACT_STATUS = 'AUTH_AWAITING_CONTACT';
+const TELEGRAM_AUTH_VERIFIED_STATUS = 'AUTH_VERIFIED';
+const TELEGRAM_AUTH_SESSION_ISSUED_STATUS = 'AUTH_SESSION_ISSUED';
 const COMMUNICATION_PREFERENCE_EVENT_PREFIX =
   'guest_portal:communication_preference:';
 const TELEGRAM_LINK_EVENT_PREFIX = 'guest_portal:telegram_bot_link:';
+const TELEGRAM_AUTH_EVENT_PREFIX = 'guest_portal:telegram_auth:';
 const GAME_CONSENT_EVENT_TYPE = 'GAME_CONSENT_GRANTED';
 const GAME_CONSENT_VERSION = 'guest-game-v1-2026-06-15';
 const GAME_PROFILE_LINKED_EVENT_TYPE = 'GAME_PROFILE_LINKED';
@@ -268,6 +275,26 @@ export type GuestPortalMessengerUpdateResponse = {
   message: string;
 };
 
+export type GuestPortalTelegramAuthStartResponse = {
+  challengeId: string;
+  codeMasked: string;
+  expiresAt: string;
+  botUsername: string | null;
+  botDeepLink: string | null;
+  status: 'READY' | 'BOT_NOT_CONFIGURED';
+  message: string;
+};
+
+export type GuestPortalTelegramAuthStatusResponse = {
+  status: 'PENDING' | 'AWAITING_CONTACT' | 'CONFIRMED' | 'EXPIRED' | 'FAILED';
+  token?: string;
+  portal?: GuestPortalPayload;
+  profileId: string | null;
+  phoneMasked?: string | null;
+  telegramIdentityMasked?: string | null;
+  message: string;
+};
+
 export type GuestPortalTelegramLinkStartResponse = {
   code: string;
   codeMasked: string;
@@ -287,8 +314,18 @@ export type GuestPortalTelegramLinkConfirmResponse = {
 };
 
 export type GuestPortalTelegramWebhookResponse = {
-  status: 'CONFIRMED' | 'UNSUBSCRIBED' | 'IGNORED' | 'FAILED';
-  action: 'LINK_CODE' | 'UNSUBSCRIBE' | 'UNKNOWN';
+  status:
+    | 'CONFIRMED'
+    | 'AWAITING_CONTACT'
+    | 'UNSUBSCRIBED'
+    | 'IGNORED'
+    | 'FAILED';
+  action:
+    | 'LINK_CODE'
+    | 'TELEGRAM_AUTH_START'
+    | 'TELEGRAM_AUTH_CONTACT'
+    | 'UNSUBSCRIBE'
+    | 'UNKNOWN';
   profileId: string | null;
   profilesAffected?: number;
   deliveriesBlocked?: number;
@@ -1164,7 +1201,7 @@ export class GuestPortalService {
     const otpConfig = guestPortalOtpDeliveryConfig(this.configService);
     const devOtpEnabled = this.isDevOtpEnabled();
     const telegramBotUsername = this.telegramBotUsername();
-    const telegramLinkReady = Boolean(
+    const telegramAuthReady = Boolean(
       telegramBotUsername &&
       configString(
         this.configService,
@@ -1187,16 +1224,16 @@ export class GuestPortalService {
           rank: 1,
           channel: 'TELEGRAM_BOT',
           role: 'PRIMARY',
-          status: telegramLinkReady ? 'READY_AFTER_OTP' : 'PLANNED',
+          status: telegramAuthReady ? 'READY' : 'PLANNED',
           label: 'Telegram-бот',
-          statusLabel: telegramLinkReady ? 'готов после OTP' : 'целевой канал',
+          statusLabel: telegramAuthReady ? 'готов' : 'целевой канал',
           message:
             'Основной канал для регистрации, игровых уведомлений, рефералок и возврата гостей.',
-          nextAction: telegramLinkReady
-            ? 'Добавить первичный Telegram-login с передачей телефона из бота; текущая привязка работает после OTP.'
+          nextAction: telegramAuthReady
+            ? 'Использовать Telegram contact-share как основной вход на /play; SMS оставить резервом.'
             : 'Настроить Telegram bot username/link secret и добавить первичный Telegram-login с передачей телефона.',
           botUsername: telegramBotUsername,
-          requiredEnv: telegramLinkReady
+          requiredEnv: telegramAuthReady
             ? []
             : [
                 'GUEST_GAME_TELEGRAM_BOT_USERNAME',
@@ -1441,15 +1478,237 @@ export class GuestPortalService {
       profileId: profile.id,
       phoneHash: challenge.phoneHash,
     };
-    const token = await this.jwtService.signAsync(payload, {
-      expiresIn: (this.configService.get<string>(
-        'GUEST_PORTAL_JWT_EXPIRES_IN',
-      ) ?? GUEST_TOKEN_EXPIRES_IN) as JwtExpiresIn,
-    });
+    const token = await this.signGuestPortalToken(payload);
 
     return {
       token,
       portal: await this.buildPortalPayload(payload),
+    };
+  }
+
+  private async signGuestPortalToken(payload: GuestPortalTokenPayload) {
+    return this.jwtService.signAsync(payload, {
+      expiresIn: (this.configService.get<string>(
+        'GUEST_PORTAL_JWT_EXPIRES_IN',
+      ) ?? GUEST_TOKEN_EXPIRES_IN) as JwtExpiresIn,
+    });
+  }
+
+  async startTelegramAuth(
+    tenantSlug: string,
+    storeId: string,
+    dto: { gameConsentAccepted?: unknown },
+  ): Promise<GuestPortalTelegramAuthStartResponse> {
+    const context = await this.getTenantStore(tenantSlug, storeId);
+
+    if (dto.gameConsentAccepted !== true) {
+      throw new BadRequestException(
+        'Подтвердите участие в квестах и обработку телефона для игрового профиля.',
+      );
+    }
+
+    const now = new Date();
+    const expiresAt = new Date(
+      now.getTime() + TELEGRAM_LINK_TTL_MINUTES * 60 * 1000,
+    );
+    const code = this.generateTelegramLinkCode();
+    const botUsername = this.telegramBotUsername();
+
+    if (!botUsername) {
+      throw new BadRequestException(
+        'Telegram-бот еще не настроен. Используйте вход по коду телефона.',
+      );
+    }
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      await tx.guestGameTelegramLinkChallenge.updateMany({
+        where: {
+          tenantId: context.tenant.id,
+          storeId: context.store.id,
+          status: {
+            in: [
+              TELEGRAM_AUTH_PENDING_STATUS,
+              TELEGRAM_AUTH_AWAITING_CONTACT_STATUS,
+            ],
+          },
+          expiresAt: { lt: now },
+        },
+        data: { status: 'EXPIRED' },
+      });
+
+      const profile = await tx.guestGameProfile.create({
+        data: {
+          tenantId: context.tenant.id,
+          displayName: 'Гость клуба',
+          status: TELEGRAM_AUTH_PROFILE_STATUS,
+          lastActivityAt: now,
+        },
+        select: { id: true },
+      });
+      const challenge = await tx.guestGameTelegramLinkChallenge.create({
+        data: {
+          tenantId: context.tenant.id,
+          storeId: context.store.id,
+          profileId: profile.id,
+          codeHash: this.hashTelegramLinkCode(code),
+          status: TELEGRAM_AUTH_PENDING_STATUS,
+          expiresAt,
+        },
+        select: { id: true },
+      });
+
+      return { challengeId: challenge.id };
+    });
+
+    return {
+      challengeId: result.challengeId,
+      codeMasked: maskTelegramLinkCode(code),
+      expiresAt: expiresAt.toISOString(),
+      botUsername,
+      botDeepLink: `https://t.me/${botUsername}?start=${encodeURIComponent(
+        telegramStartPayload(code),
+      )}`,
+      status: 'READY',
+      message:
+        'Откройте Telegram-бота, нажмите Start и поделитесь телефоном кнопкой бота.',
+    };
+  }
+
+  async getTelegramAuthStatus(
+    tenantSlug: string,
+    storeId: string,
+    dto: { challengeId?: unknown },
+  ): Promise<GuestPortalTelegramAuthStatusResponse> {
+    const context = await this.getTenantStore(tenantSlug, storeId);
+    const challengeId = this.requiredString(dto.challengeId, 'challengeId');
+    const challenge =
+      await this.prisma.guestGameTelegramLinkChallenge.findFirst({
+        where: {
+          id: challengeId,
+          tenantId: context.tenant.id,
+          storeId: context.store.id,
+        },
+        include: {
+          profile: {
+            select: {
+              id: true,
+              guestId: true,
+              phoneHash: true,
+              telegramIdentity: true,
+              contactMasked: true,
+            },
+          },
+        },
+      });
+
+    if (!challenge) {
+      throw new BadRequestException('Telegram auth challenge не найден.');
+    }
+
+    if (
+      [
+        TELEGRAM_AUTH_PENDING_STATUS,
+        TELEGRAM_AUTH_AWAITING_CONTACT_STATUS,
+      ].includes(challenge.status) &&
+      challenge.expiresAt.getTime() <= Date.now()
+    ) {
+      await this.prisma.guestGameTelegramLinkChallenge.update({
+        where: { id: challenge.id },
+        data: { status: 'EXPIRED' },
+      });
+
+      return {
+        status: 'EXPIRED',
+        profileId: challenge.profileId,
+        telegramIdentityMasked: maskExternalIdentity(
+          challenge.profile.telegramIdentity,
+        ),
+        message: 'Срок действия Telegram-входа истек. Создайте новую ссылку.',
+      };
+    }
+
+    if (challenge.status === TELEGRAM_AUTH_PENDING_STATUS) {
+      return {
+        status: 'PENDING',
+        profileId: challenge.profileId,
+        telegramIdentityMasked: null,
+        message:
+          'Откройте Telegram-бота по ссылке и нажмите Start для продолжения.',
+      };
+    }
+
+    if (challenge.status === TELEGRAM_AUTH_AWAITING_CONTACT_STATUS) {
+      return {
+        status: 'AWAITING_CONTACT',
+        profileId: challenge.profileId,
+        telegramIdentityMasked: maskExternalIdentity(
+          challenge.profile.telegramIdentity,
+        ),
+        message:
+          'Telegram-бот открыт. Поделитесь телефоном кнопкой бота для завершения входа.',
+      };
+    }
+
+    if (
+      challenge.status === TELEGRAM_AUTH_VERIFIED_STATUS ||
+      challenge.status === TELEGRAM_AUTH_SESSION_ISSUED_STATUS
+    ) {
+      const phoneHash = challenge.phoneHash ?? challenge.profile.phoneHash;
+
+      if (!phoneHash) {
+        return {
+          status: 'FAILED',
+          profileId: challenge.profileId,
+          telegramIdentityMasked: maskExternalIdentity(
+            challenge.profile.telegramIdentity,
+          ),
+          message:
+            'Telegram подтвердил чат, но телефон не был безопасно подтвержден.',
+        };
+      }
+
+      const payload: GuestPortalTokenPayload = {
+        sub: `telegram-auth:${challenge.id}`,
+        purpose: GUEST_PORTAL_PURPOSE,
+        tenantId: context.tenant.id,
+        storeId: context.store.id,
+        guestId: challenge.guestId ?? challenge.profile.guestId,
+        profileId: challenge.profileId,
+        phoneHash,
+      };
+      const token = await this.signGuestPortalToken(payload);
+
+      if (challenge.status === TELEGRAM_AUTH_VERIFIED_STATUS) {
+        await this.prisma.guestGameTelegramLinkChallenge.update({
+          where: { id: challenge.id },
+          data: { status: TELEGRAM_AUTH_SESSION_ISSUED_STATUS },
+        });
+      }
+
+      return {
+        status: 'CONFIRMED',
+        token,
+        portal: await this.buildPortalPayload(payload),
+        profileId: challenge.profileId,
+        phoneMasked: challenge.profile.contactMasked,
+        telegramIdentityMasked: maskExternalIdentity(
+          challenge.profile.telegramIdentity,
+        ),
+        message:
+          'Телефон подтвержден через Telegram. Гостевой игровой профиль готов.',
+      };
+    }
+
+    return {
+      status: challenge.status === 'EXPIRED' ? 'EXPIRED' : 'FAILED',
+      profileId: challenge.profileId,
+      telegramIdentityMasked: maskExternalIdentity(
+        challenge.profile.telegramIdentity,
+      ),
+      message:
+        challenge.status === 'EXPIRED'
+          ? 'Срок действия Telegram-входа истек.'
+          : 'Telegram-вход не может быть завершен в текущем статусе.',
     };
   }
 
@@ -2049,44 +2308,326 @@ export class GuestPortalService {
 
     const code = telegramWebhookLinkCode(update.text);
 
-    if (!code) {
-      return {
-        status: 'IGNORED',
-        action: 'UNKNOWN',
-        profileId: null,
+    if (code) {
+      const authStart = await this.acceptTelegramAuthStart(
+        code,
+        update.telegramChatId,
+        update.telegramUsername,
         telegramIdentityMasked,
-        message:
-          'Telegram webhook получен, но команда привязки не найдена. Ожидается /start lp_CODE или /link CODE.',
-      };
+      );
+
+      if (authStart) {
+        return authStart;
+      }
+
+      try {
+        const result = await this.confirmTelegramLink(secret, {
+          code,
+          telegramChatId: update.telegramChatId,
+          telegramUsername: update.telegramUsername,
+        });
+
+        return {
+          status: 'CONFIRMED',
+          action: 'LINK_CODE',
+          profileId: result.profileId,
+          telegramIdentityMasked: result.telegramIdentityMasked,
+          message:
+            'Telegram webhook подтвердил код и сохранил chat_id гостя. Внешняя отправка наград остается под управлением delivery dispatcher.',
+        };
+      } catch (error) {
+        return {
+          status: 'FAILED',
+          action: 'LINK_CODE',
+          profileId: null,
+          telegramIdentityMasked,
+          message:
+            error instanceof Error
+              ? error.message
+              : 'Telegram webhook не смог подтвердить код.',
+        };
+      }
     }
 
-    try {
-      const result = await this.confirmTelegramLink(secret, {
-        code,
-        telegramChatId: update.telegramChatId,
-        telegramUsername: update.telegramUsername,
+    if (update.contactPhone) {
+      return this.completeTelegramAuthContact(update, telegramIdentityMasked);
+    }
+
+    return {
+      status: 'IGNORED',
+      action: 'UNKNOWN',
+      profileId: null,
+      telegramIdentityMasked,
+      message:
+        'Telegram webhook получен, но команда привязки или контакт телефона не найдены. Ожидается /start lp_CODE, /link CODE или Telegram contact-share.',
+    };
+  }
+
+  private async acceptTelegramAuthStart(
+    code: string,
+    telegramChatIdValue: string,
+    telegramUsernameValue: string | null,
+    telegramIdentityMasked: string | null,
+  ): Promise<GuestPortalTelegramWebhookResponse | null> {
+    const now = new Date();
+    const challenge =
+      await this.prisma.guestGameTelegramLinkChallenge.findFirst({
+        where: {
+          codeHash: this.hashTelegramLinkCode(code),
+          status: TELEGRAM_AUTH_PENDING_STATUS,
+        },
+        orderBy: { createdAt: 'desc' },
+        include: { profile: true },
+      });
+
+    if (!challenge) {
+      return null;
+    }
+
+    if (challenge.expiresAt.getTime() <= now.getTime()) {
+      await this.prisma.guestGameTelegramLinkChallenge.update({
+        where: { id: challenge.id },
+        data: { status: 'EXPIRED' },
       });
 
       return {
-        status: 'CONFIRMED',
-        action: 'LINK_CODE',
-        profileId: result.profileId,
-        telegramIdentityMasked: result.telegramIdentityMasked,
-        message:
-          'Telegram webhook подтвердил код и сохранил chat_id гостя. Внешняя отправка наград остается под управлением delivery dispatcher.',
+        status: 'FAILED',
+        action: 'TELEGRAM_AUTH_START',
+        profileId: challenge.profileId,
+        telegramIdentityMasked,
+        message: 'Срок действия Telegram-входа истек. Создайте новую ссылку.',
       };
-    } catch (error) {
+    }
+
+    const telegramIdentity = `chat:${telegramChatIdValue}`;
+    const telegramChatIdMasked = maskTelegramChatId(telegramChatIdValue);
+    const username = telegramUsername(telegramUsernameValue);
+
+    await this.prisma.$transaction([
+      this.prisma.guestGameProfile.update({
+        where: { id: challenge.profileId },
+        data: {
+          telegramIdentity,
+          status:
+            challenge.profile.status === TELEGRAM_AUTH_PROFILE_STATUS
+              ? TELEGRAM_AUTH_PROFILE_STATUS
+              : challenge.profile.status,
+          lastActivityAt: now,
+        },
+      }),
+      this.prisma.guestGameTelegramLinkChallenge.update({
+        where: { id: challenge.id },
+        data: {
+          status: TELEGRAM_AUTH_AWAITING_CONTACT_STATUS,
+          telegramChatIdMasked,
+          telegramUsername: username,
+        },
+      }),
+    ]);
+
+    return {
+      status: 'AWAITING_CONTACT',
+      action: 'TELEGRAM_AUTH_START',
+      profileId: challenge.profileId,
+      telegramIdentityMasked,
+      message:
+        'Telegram-бот связан с браузерным входом. Теперь гость должен поделиться телефоном кнопкой бота.',
+    };
+  }
+
+  private async completeTelegramAuthContact(
+    update: ReturnType<typeof telegramWebhookUpdate>,
+    telegramIdentityMasked: string | null,
+  ): Promise<GuestPortalTelegramWebhookResponse> {
+    if (
+      update.contactUserId &&
+      update.contactUserId !== update.telegramChatId
+    ) {
       return {
         status: 'FAILED',
-        action: 'LINK_CODE',
+        action: 'TELEGRAM_AUTH_CONTACT',
         profileId: null,
         telegramIdentityMasked,
         message:
-          error instanceof Error
-            ? error.message
-            : 'Telegram webhook не смог подтвердить код.',
+          'Telegram contact принадлежит другому пользователю. Для входа нужен собственный номер.',
       };
     }
+
+    const telegramIdentity = `chat:${update.telegramChatId}`;
+    const phone = this.phoneIdentity(update.contactPhone);
+    const now = new Date();
+    const challenge =
+      await this.prisma.guestGameTelegramLinkChallenge.findFirst({
+        where: {
+          status: TELEGRAM_AUTH_AWAITING_CONTACT_STATUS,
+          profile: {
+            telegramIdentity,
+            status: TELEGRAM_AUTH_PROFILE_STATUS,
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        include: { profile: true },
+      });
+
+    if (!challenge) {
+      return {
+        status: 'IGNORED',
+        action: 'TELEGRAM_AUTH_CONTACT',
+        profileId: null,
+        telegramIdentityMasked,
+        message:
+          'Telegram contact получен, но активный вход LeetPlus для этого чата не найден.',
+      };
+    }
+
+    if (challenge.expiresAt.getTime() <= now.getTime()) {
+      await this.prisma.guestGameTelegramLinkChallenge.update({
+        where: { id: challenge.id },
+        data: { status: 'EXPIRED' },
+      });
+
+      return {
+        status: 'FAILED',
+        action: 'TELEGRAM_AUTH_CONTACT',
+        profileId: challenge.profileId,
+        telegramIdentityMasked,
+        message: 'Срок действия Telegram-входа истек. Создайте новую ссылку.',
+      };
+    }
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const guest = await tx.guest.findFirst({
+        where: {
+          tenantId: challenge.tenantId,
+          phoneHash: phone.hash,
+          isDisabled: false,
+        },
+        orderBy: [{ lastActivityAt: 'desc' }, { updatedAt: 'desc' }],
+        select: {
+          id: true,
+          externalGuestId: true,
+          fullNameMasked: true,
+          phoneMasked: true,
+          emailMasked: true,
+        },
+      });
+      const existingByGuest = guest
+        ? await tx.guestGameProfile.findFirst({
+            where: {
+              tenantId: challenge.tenantId,
+              guestId: guest.id,
+              status: 'ACTIVE',
+            },
+            orderBy: { updatedAt: 'desc' },
+          })
+        : null;
+      const existingByPhone = existingByGuest
+        ? null
+        : await tx.guestGameProfile.findFirst({
+            where: {
+              tenantId: challenge.tenantId,
+              phoneHash: phone.hash,
+              status: 'ACTIVE',
+            },
+            orderBy: { updatedAt: 'desc' },
+          });
+      const existingProfile = existingByGuest ?? existingByPhone;
+      const commonData = {
+        telegramIdentity,
+        phoneHash: existingProfile?.phoneHash ?? phone.hash,
+        contactMasked:
+          existingProfile?.contactMasked ??
+          guest?.phoneMasked ??
+          guest?.emailMasked ??
+          phone.masked,
+        displayName:
+          existingProfile?.displayName ??
+          guest?.fullNameMasked ??
+          guest?.externalGuestId ??
+          'Гость клуба',
+        status: 'ACTIVE',
+        lastActivityAt: now,
+      };
+      const profile =
+        existingProfile && existingProfile.id !== challenge.profileId
+          ? await tx.guestGameProfile.update({
+              where: { id: existingProfile.id },
+              data: {
+                ...commonData,
+                ...(guest && !existingProfile.guestId
+                  ? { guestId: guest.id }
+                  : {}),
+              },
+              select: { id: true, guestId: true },
+            })
+          : await tx.guestGameProfile.update({
+              where: { id: challenge.profileId },
+              data: {
+                ...commonData,
+                ...(guest ? { guestId: guest.id } : {}),
+              },
+              select: { id: true, guestId: true },
+            });
+
+      if (existingProfile && existingProfile.id !== challenge.profileId) {
+        await tx.guestGameProfile.update({
+          where: { id: challenge.profileId },
+          data: {
+            status: TELEGRAM_AUTH_MERGED_PROFILE_STATUS,
+            phoneHash: phone.hash,
+            contactMasked: phone.masked,
+            lastActivityAt: now,
+          },
+        });
+      }
+
+      await tx.guestGameTelegramLinkChallenge.update({
+        where: { id: challenge.id },
+        data: {
+          status: TELEGRAM_AUTH_VERIFIED_STATUS,
+          consumedAt: now,
+          guestId: profile.guestId ?? guest?.id ?? null,
+          profileId: profile.id,
+          phoneHash: phone.hash,
+          telegramChatIdMasked: maskTelegramChatId(update.telegramChatId),
+          telegramUsername: telegramUsername(update.telegramUsername),
+        },
+      });
+      await tx.guestGameEvent.create({
+        data: {
+          tenantId: challenge.tenantId,
+          profileId: profile.id,
+          guestId: profile.guestId ?? guest?.id ?? null,
+          eventType: GAME_CONSENT_EVENT_TYPE,
+          source: 'GUEST_PORTAL',
+          externalId: `telegram-auth:${challenge.id}:game-consent`,
+          occurredAt: now,
+          payload: {
+            consentVersion: GAME_CONSENT_VERSION,
+            storeId: challenge.storeId,
+            phoneMasked: phone.masked,
+            telegramIdentityMasked,
+            acceptedAt: now.toISOString(),
+          },
+          note: `${TELEGRAM_AUTH_EVENT_PREFIX}contact_share_confirmed`,
+          createdAt: now,
+        },
+      });
+
+      return {
+        profileId: profile.id,
+        guestId: profile.guestId ?? guest?.id ?? null,
+      };
+    });
+
+    return {
+      status: 'CONFIRMED',
+      action: 'TELEGRAM_AUTH_CONTACT',
+      profileId: result.profileId,
+      telegramIdentityMasked,
+      message:
+        'Telegram contact подтвердил телефон. Гостевой игровой профиль готов к выдаче browser session.',
+    };
   }
 
   private async unsubscribeTelegramWebhookProfile(
@@ -4477,6 +5018,7 @@ function telegramWebhookUpdate(value: unknown) {
 
   const chat = objectRecord(message.chat);
   const from = objectRecord(message.from) ?? objectRecord(callbackQuery?.from);
+  const contact = objectRecord(message.contact);
   const chatId = chat?.id ?? from?.id;
   const text =
     stringField(message.text) ??
@@ -4488,11 +5030,22 @@ function telegramWebhookUpdate(value: unknown) {
       : typeof chat?.username === 'string'
         ? chat.username
         : null;
+  let contactUserId: string | null = null;
+
+  if (contact?.user_id !== undefined && contact.user_id !== null) {
+    try {
+      contactUserId = telegramChatId(contact.user_id);
+    } catch {
+      contactUserId = null;
+    }
+  }
 
   return {
     text,
     telegramChatId: telegramChatId(chatId),
     telegramUsername: username,
+    contactPhone: stringField(contact?.phone_number),
+    contactUserId,
   };
 }
 

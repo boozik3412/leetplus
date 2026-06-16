@@ -737,6 +737,26 @@ export type GuestPortalMessengerUpdateResponse = {
   message: string;
 };
 
+export type GuestPortalTelegramAuthStartResponse = {
+  challengeId: string;
+  codeMasked: string;
+  expiresAt: string;
+  botUsername: string | null;
+  botDeepLink: string | null;
+  status: "READY" | "BOT_NOT_CONFIGURED";
+  message: string;
+};
+
+export type GuestPortalTelegramAuthStatusResponse = {
+  status: "PENDING" | "AWAITING_CONTACT" | "CONFIRMED" | "EXPIRED" | "FAILED";
+  token?: string;
+  portal?: GuestPortalPayload;
+  profileId: string | null;
+  phoneMasked?: string | null;
+  telegramIdentityMasked?: string | null;
+  message: string;
+};
+
 export type GuestPortalTelegramLinkStartResponse = {
   code: string;
   codeMasked: string;

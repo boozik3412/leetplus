@@ -11,6 +11,8 @@ import type {
   GuestPortalOtpStartResponse,
   GuestPortalOtpVerifyResponse,
   GuestPortalPayload,
+  GuestPortalTelegramAuthStartResponse,
+  GuestPortalTelegramAuthStatusResponse,
 } from "@/lib/guest-portal";
 
 type PlayRegistrationClientProps = {
@@ -61,6 +63,10 @@ export function PlayRegistrationClient({
   const [code, setCode] = useState("");
   const [challenge, setChallenge] =
     useState<GuestPortalOtpStartResponse | null>(null);
+  const [telegramAuth, setTelegramAuth] =
+    useState<GuestPortalTelegramAuthStartResponse | null>(null);
+  const [telegramAuthStatus, setTelegramAuthStatus] =
+    useState<GuestPortalTelegramAuthStatusResponse | null>(null);
   const [portal, setPortal] = useState<GuestPortalPayload | null>(null);
   const [langameMatch, setLangameMatch] =
     useState<GuestPortalLangameMatchResponse | null>(null);
@@ -76,6 +82,8 @@ export function PlayRegistrationClient({
   const [locationMessage, setLocationMessage] = useState<string | null>(null);
   const [isLocating, setLocating] = useState(false);
   const [isSubmitting, setSubmitting] = useState(false);
+  const [isStartingTelegramAuth, setStartingTelegramAuth] = useState(false);
+  const [isPollingTelegramAuth, setPollingTelegramAuth] = useState(false);
   const [isCheckingLangame, setCheckingLangame] = useState(false);
 
   const visibleClubs = useMemo(() => {
@@ -160,11 +168,89 @@ export function PlayRegistrationClient({
   function selectClub(club: GuestPortalGamificationClub) {
     setSelectedClubId(club.id);
     setChallenge(null);
+    setTelegramAuth(null);
+    setTelegramAuthStatus(null);
     setCode("");
     setPortal(null);
     setLangameMatch(null);
     setMessage(null);
   }
+
+  useEffect(() => {
+    if (!selectedClub || !telegramAuth || portal) {
+      return;
+    }
+
+    let isActive = true;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
+    async function pollTelegramAuth() {
+      if (!selectedClub || !telegramAuth) {
+        return;
+      }
+
+      setPollingTelegramAuth(true);
+
+      try {
+        const response = await fetch(
+          `${clubApiPath(selectedClub)}/telegram-auth/status`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ challengeId: telegramAuth.challengeId }),
+          },
+        );
+
+        if (!isActive) {
+          return;
+        }
+
+        if (!response.ok) {
+          throw new Error(await readMessage(response));
+        }
+
+        const data =
+          (await response.json()) as GuestPortalTelegramAuthStatusResponse;
+        setTelegramAuthStatus(data);
+        setMessage(data.message);
+
+        if (data.status === "CONFIRMED" && data.portal) {
+          setPortal(data.portal);
+          setTelegramAuth(null);
+          setLangameMatch(null);
+        }
+
+        if (data.status === "EXPIRED" || data.status === "FAILED") {
+          setTelegramAuth(null);
+        }
+      } catch (error) {
+        if (!isActive) {
+          return;
+        }
+
+        setMessage(
+          error instanceof Error
+            ? error.message
+            : "Не удалось проверить Telegram-вход.",
+        );
+      } finally {
+        if (isActive) {
+          setPollingTelegramAuth(false);
+        }
+      }
+    }
+
+    void pollTelegramAuth();
+    intervalId = setInterval(() => void pollTelegramAuth(), 3000);
+
+    return () => {
+      isActive = false;
+
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [portal, selectedClub, telegramAuth]);
 
   async function locateClubs() {
     if (!navigator.geolocation) {
@@ -271,6 +357,8 @@ export function PlayRegistrationClient({
     setSubmitting(true);
     setMessage(null);
     setChallenge(null);
+    setTelegramAuth(null);
+    setTelegramAuthStatus(null);
     setCode("");
     setPortal(null);
     setLangameMatch(null);
@@ -297,6 +385,55 @@ export function PlayRegistrationClient({
       );
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function startTelegramAuth() {
+    if (!selectedClub) {
+      setMessage("Выберите клуб для участия.");
+      return;
+    }
+
+    setStartingTelegramAuth(true);
+    setMessage(null);
+    setChallenge(null);
+    setTelegramAuth(null);
+    setTelegramAuthStatus(null);
+    setCode("");
+    setPortal(null);
+    setLangameMatch(null);
+
+    try {
+      const response = await fetch(
+        `${clubApiPath(selectedClub)}/telegram-auth/start`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ gameConsentAccepted }),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(await readMessage(response));
+      }
+
+      const data =
+        (await response.json()) as GuestPortalTelegramAuthStartResponse;
+      setTelegramAuth(data);
+      setTelegramAuthStatus({
+        status: "PENDING",
+        profileId: null,
+        message: data.message,
+      });
+      setMessage(data.message);
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Не удалось создать Telegram-вход.",
+      );
+    } finally {
+      setStartingTelegramAuth(false);
     }
   }
 
@@ -539,6 +676,16 @@ export function PlayRegistrationClient({
                 ) : (
                   <div className="space-y-4">
                     <VerificationPlanPanel
+                      verification={directory.verification}
+                    />
+
+                    <TelegramAuthPanel
+                      disabled={!gameConsentAccepted}
+                      isPolling={isPollingTelegramAuth}
+                      isStarting={isStartingTelegramAuth}
+                      onStart={startTelegramAuth}
+                      telegramAuth={telegramAuth}
+                      telegramAuthStatus={telegramAuthStatus}
                       verification={directory.verification}
                     />
 
@@ -998,6 +1145,111 @@ function VerificationPlanPanel({
   );
 }
 
+function TelegramAuthPanel({
+  verification,
+  telegramAuth,
+  telegramAuthStatus,
+  disabled,
+  isStarting,
+  isPolling,
+  onStart,
+}: {
+  verification: GuestPortalGamificationClubDirectory["verification"];
+  telegramAuth: GuestPortalTelegramAuthStartResponse | null;
+  telegramAuthStatus: GuestPortalTelegramAuthStatusResponse | null;
+  disabled: boolean;
+  isStarting: boolean;
+  isPolling: boolean;
+  onStart: () => void;
+}) {
+  const telegramOption = verification.options.find(
+    (option) => option.channel === "TELEGRAM_BOT",
+  );
+  const ready = telegramOption?.status === "READY";
+
+  return (
+    <div className="rounded-lg border border-emerald-300/25 bg-emerald-300/[0.07] p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-bold uppercase text-emerald-200">
+            1 место
+          </p>
+          <h3 className="mt-1 text-lg font-black text-white">
+            Telegram-бот
+          </h3>
+          <p className="mt-1 text-sm leading-6 text-slate-300">
+            Вход через Telegram подтверждает телефон в боте и готовит канал
+            для наград.
+          </p>
+        </div>
+        <StatusPill tone={ready ? "emerald" : "amber"}>
+          {telegramOption?.statusLabel ?? "целевой канал"}
+        </StatusPill>
+      </div>
+
+      {telegramAuthStatus ? (
+        <div className="mt-3 rounded-lg border border-white/10 bg-[#070b12] px-3 py-2">
+          <p className="text-sm font-bold text-white">
+            {telegramAuthStatusLabel(telegramAuthStatus.status)}
+          </p>
+          <p className="mt-1 text-sm leading-6 text-slate-300">
+            {telegramAuthStatus.message}
+          </p>
+        </div>
+      ) : null}
+
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <button
+          className="min-h-11 rounded-lg bg-emerald-300 px-4 text-sm font-black text-slate-950 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={disabled || !ready || isStarting}
+          onClick={onStart}
+          type="button"
+        >
+          {isStarting ? "Создаем..." : "Войти через Telegram"}
+        </button>
+
+        {telegramAuth?.botDeepLink ? (
+          <a
+            className="flex min-h-11 items-center justify-center rounded-lg border border-emerald-300/35 px-4 text-sm font-black text-emerald-100 transition hover:border-emerald-300"
+            href={telegramAuth.botDeepLink}
+            rel="noreferrer"
+            target="_blank"
+          >
+            Открыть бота
+          </a>
+        ) : (
+          <button
+            className="min-h-11 rounded-lg border border-white/10 px-4 text-sm font-black text-slate-500"
+            disabled
+            type="button"
+          >
+            Бот не открыт
+          </button>
+        )}
+      </div>
+
+      {telegramAuth ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-400">
+          <span>Код {telegramAuth.codeMasked}</span>
+          {telegramAuth.botUsername ? <span>@{telegramAuth.botUsername}</span> : null}
+          {isPolling ? <span>проверяем...</span> : null}
+        </div>
+      ) : null}
+
+      {disabled ? (
+        <p className="mt-2 text-xs leading-5 text-amber-100">
+          Сначала подтвердите согласие на участие в квестах.
+        </p>
+      ) : !ready ? (
+        <p className="mt-2 text-xs leading-5 text-amber-100">
+          Telegram-вход включится после настройки бота; используйте код по
+          телефону.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function SelectedClubSummary({ club }: { club: GuestPortalGamificationClub }) {
   return (
     <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
@@ -1415,6 +1667,20 @@ function verificationStatusTone(
   }
 
   return "amber";
+}
+
+function telegramAuthStatusLabel(
+  status: GuestPortalTelegramAuthStatusResponse["status"],
+) {
+  const labels = {
+    PENDING: "Ожидаем Telegram",
+    AWAITING_CONTACT: "Ожидаем телефон",
+    CONFIRMED: "Телефон подтвержден",
+    EXPIRED: "Ссылка истекла",
+    FAILED: "Вход не завершен",
+  } satisfies Record<GuestPortalTelegramAuthStatusResponse["status"], string>;
+
+  return labels[status];
 }
 
 async function readMessage(response: Response) {

@@ -7,7 +7,9 @@ import { GuestPortalService } from './guest-portal.service';
 
 function createPrismaMock() {
   const prisma = {
-    $transaction: jest.fn((callback) => callback(prisma)),
+    $transaction: jest.fn((input) =>
+      typeof input === 'function' ? input(prisma) : Promise.all(input),
+    ),
     tenant: {
       findFirst: jest.fn(),
     },
@@ -26,6 +28,12 @@ function createPrismaMock() {
       findFirst: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+    },
+    guestGameTelegramLinkChallenge: {
+      findFirst: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+      updateMany: jest.fn(),
     },
     guestGameReward: {
       updateMany: jest.fn(),
@@ -85,6 +93,12 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   prisma.guestGameProfile.findFirst.mockResolvedValue(null);
   prisma.guestGameProfile.create.mockResolvedValue(null);
   prisma.guestGameProfile.update.mockResolvedValue(null);
+  prisma.guestGameTelegramLinkChallenge.findFirst.mockResolvedValue(null);
+  prisma.guestGameTelegramLinkChallenge.create.mockResolvedValue(null);
+  prisma.guestGameTelegramLinkChallenge.update.mockResolvedValue(null);
+  prisma.guestGameTelegramLinkChallenge.updateMany.mockResolvedValue({
+    count: 0,
+  });
   prisma.guestGameReward.updateMany.mockResolvedValue({ count: 0 });
   prisma.guestGameDelivery.updateMany.mockResolvedValue({ count: 0 });
   prisma.guestBonusLedgerEntry.findMany.mockResolvedValue([]);
@@ -931,6 +945,260 @@ describe('GuestPortalService', () => {
       });
       expect(nearbyDirectory.clubs).toHaveLength(1);
       expect(nearbyDirectory.clubs[0].id).toBe('leet:club-1337');
+    });
+  });
+
+  describe('telegram auth', () => {
+    it('creates a pending Telegram auth challenge for public play registration', async () => {
+      const { prisma, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+        GUEST_GAME_TELEGRAM_BOT_USERNAME: 'leetplus_bot',
+        GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+      });
+      jest
+        .spyOn(service as any, 'generateTelegramLinkCode')
+        .mockReturnValue('LP-ABCD-EF1234');
+
+      prisma.tenant.findFirst.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'Leet Clubs',
+        slug: 'leet',
+        stores: [
+          {
+            id: 'store-1',
+            publicSlug: 'club-1337',
+            name: '1337',
+            address: 'ул. Ленина, 1',
+          },
+        ],
+      });
+      prisma.guestGameProfile.create.mockResolvedValue({
+        id: 'pending-profile-1',
+      });
+      prisma.guestGameTelegramLinkChallenge.create.mockResolvedValue({
+        id: 'telegram-auth-1',
+      });
+
+      const result = await service.startTelegramAuth('leet', 'club-1337', {
+        gameConsentAccepted: true,
+      });
+
+      expect(prisma.guestGameProfile.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            tenantId: 'tenant-1',
+            displayName: 'Гость клуба',
+            status: 'PENDING_TELEGRAM_AUTH',
+          }),
+        }),
+      );
+      expect(prisma.guestGameTelegramLinkChallenge.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            tenantId: 'tenant-1',
+            storeId: 'store-1',
+            profileId: 'pending-profile-1',
+            status: 'AUTH_PENDING',
+          }),
+        }),
+      );
+      expect(result).toMatchObject({
+        challengeId: 'telegram-auth-1',
+        botUsername: 'leetplus_bot',
+        status: 'READY',
+      });
+      expect(result.botDeepLink).toContain('start=lp_ABCDEF1234');
+    });
+
+    it('accepts Telegram /start for auth and waits for contact share', async () => {
+      const { prisma, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+        GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+      });
+      const codeHash = createHmac('sha256', 'test-secret')
+        .update('telegram-link:ABCDEF1234')
+        .digest('hex');
+
+      prisma.guestGameTelegramLinkChallenge.findFirst.mockResolvedValue({
+        id: 'telegram-auth-1',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        profileId: 'pending-profile-1',
+        codeHash,
+        status: 'AUTH_PENDING',
+        expiresAt: new Date(Date.now() + 60_000),
+        profile: {
+          id: 'pending-profile-1',
+          status: 'PENDING_TELEGRAM_AUTH',
+        },
+      });
+
+      const result = await service.handleTelegramWebhook('telegram-secret', {
+        message: {
+          text: `/start lp_ABCDEF1234`,
+          chat: { id: 123456 },
+          from: { id: 123456, username: 'player_one' },
+        },
+      });
+
+      expect(prisma.guestGameProfile.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'pending-profile-1' },
+          data: expect.objectContaining({
+            telegramIdentity: 'chat:123456',
+            status: 'PENDING_TELEGRAM_AUTH',
+          }),
+        }),
+      );
+      expect(prisma.guestGameTelegramLinkChallenge.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'telegram-auth-1' },
+          data: expect.objectContaining({
+            status: 'AUTH_AWAITING_CONTACT',
+            telegramUsername: '@player_one',
+          }),
+        }),
+      );
+      expect(result).toMatchObject({
+        status: 'AWAITING_CONTACT',
+        action: 'TELEGRAM_AUTH_START',
+        profileId: 'pending-profile-1',
+      });
+    });
+
+    it('confirms Telegram contact and issues a guest session token', async () => {
+      const { jwtService, prisma, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+        GUEST_GAME_TELEGRAM_LINK_SECRET: 'telegram-secret',
+      });
+      const phoneHash = createHmac('sha256', 'test-secret')
+        .update('79991112233')
+        .digest('hex');
+      jest.spyOn(service as any, 'buildPortalPayload').mockResolvedValue({
+        profile: { id: 'profile-1' },
+      });
+
+      prisma.guestGameTelegramLinkChallenge.findFirst
+        .mockResolvedValueOnce({
+          id: 'telegram-auth-1',
+          tenantId: 'tenant-1',
+          storeId: 'store-1',
+          profileId: 'pending-profile-1',
+          status: 'AUTH_AWAITING_CONTACT',
+          expiresAt: new Date(Date.now() + 60_000),
+          profile: {
+            id: 'pending-profile-1',
+            status: 'PENDING_TELEGRAM_AUTH',
+          },
+        })
+        .mockResolvedValueOnce({
+          id: 'telegram-auth-1',
+          tenantId: 'tenant-1',
+          storeId: 'store-1',
+          profileId: 'profile-1',
+          guestId: null,
+          phoneHash,
+          status: 'AUTH_VERIFIED',
+          expiresAt: new Date(Date.now() + 60_000),
+          profile: {
+            id: 'profile-1',
+            guestId: null,
+            phoneHash,
+            telegramIdentity: 'chat:123456',
+            contactMasked: '***2233',
+          },
+        });
+      prisma.guestGameProfile.update.mockResolvedValue({
+        id: 'profile-1',
+        guestId: null,
+      });
+      jwtService.signAsync.mockResolvedValue('guest-token');
+      prisma.tenant.findFirst.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'Leet Clubs',
+        slug: 'leet',
+        stores: [
+          {
+            id: 'store-1',
+            publicSlug: 'club-1337',
+            name: '1337',
+            address: 'ул. Ленина, 1',
+          },
+        ],
+      });
+
+      const webhookResult = await service.handleTelegramWebhook(
+        'telegram-secret',
+        {
+          message: {
+            chat: { id: 123456 },
+            from: { id: 123456 },
+            contact: {
+              phone_number: '+7 999 111-22-33',
+              user_id: 123456,
+            },
+          },
+        },
+      );
+      const status = await service.getTelegramAuthStatus('leet', 'club-1337', {
+        challengeId: 'telegram-auth-1',
+      });
+
+      expect(prisma.guestGameProfile.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'pending-profile-1' },
+          data: expect.objectContaining({
+            telegramIdentity: 'chat:123456',
+            phoneHash,
+            contactMasked: '***2233',
+            status: 'ACTIVE',
+          }),
+        }),
+      );
+      expect(prisma.guestGameTelegramLinkChallenge.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'telegram-auth-1' },
+          data: expect.objectContaining({
+            status: 'AUTH_VERIFIED',
+            phoneHash,
+            profileId: 'profile-1',
+          }),
+        }),
+      );
+      expect(prisma.guestGameEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            tenantId: 'tenant-1',
+            profileId: 'profile-1',
+            eventType: 'GAME_CONSENT_GRANTED',
+            source: 'GUEST_PORTAL',
+            externalId: 'telegram-auth:telegram-auth-1:game-consent',
+            payload: expect.objectContaining({
+              phoneMasked: '***2233',
+              telegramIdentityMasked: 'ch...56',
+            }),
+          }),
+        }),
+      );
+      expect(webhookResult).toMatchObject({
+        status: 'CONFIRMED',
+        action: 'TELEGRAM_AUTH_CONTACT',
+        profileId: 'profile-1',
+      });
+      expect(jwtService.signAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sub: 'telegram-auth:telegram-auth-1',
+          guestId: null,
+          profileId: 'profile-1',
+          phoneHash,
+        }),
+        expect.any(Object),
+      );
+      expect(status).toMatchObject({
+        status: 'CONFIRMED',
+        token: 'guest-token',
+        profileId: 'profile-1',
+      });
     });
   });
 

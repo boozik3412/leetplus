@@ -765,6 +765,15 @@ describe('GuestGamificationService', () => {
     delete process.env.GUEST_GAME_BONUS_LEDGER_SCHEDULER_LIMIT;
     delete process.env.GUEST_GAME_BONUS_LEDGER_SCHEDULER_TENANT_SLUG;
     delete process.env.GUEST_GAME_BONUS_LEDGER_SCHEDULER_REWARD_TYPES;
+    delete process.env.GUEST_GAME_BOT_CONSUMER_SYNC_TOKEN;
+    delete process.env.GUEST_GAME_BOT_CONSUMER_TENANT_ID;
+    delete process.env.GUEST_GAME_BOT_CONSUMER_TENANT_SLUG;
+    delete process.env.GUEST_GAME_BOT_CONSUMER_CHANNELS;
+    delete process.env.GUEST_GAME_BOT_CONSUMER_DRY_RUN;
+    delete process.env.GUEST_GAME_BOT_CONSUMER_TELEGRAM_BOT_TOKEN;
+    delete process.env.GUEST_GAME_TELEGRAM_BOT_TOKEN;
+    delete process.env.GUEST_PORTAL_TELEGRAM_BOT_TOKEN;
+    delete process.env.TELEGRAM_BOT_TOKEN;
   });
 
   describe('integration readiness', () => {
@@ -1931,6 +1940,63 @@ describe('GuestGamificationService', () => {
   });
 
   describe('bot delivery consumer', () => {
+    it('summarizes api-visible runner readiness and saved ack events without secrets', () => {
+      process.env.GUEST_GAME_BOT_CONSUMER_SYNC_TOKEN = 'sync-token';
+      process.env.GUEST_GAME_BOT_CONSUMER_TENANT_SLUG = user.tenantSlug;
+      process.env.GUEST_GAME_BOT_CONSUMER_CHANNELS = 'telegram';
+      process.env.GUEST_GAME_BOT_CONSUMER_DRY_RUN = 'false';
+      process.env.GUEST_GAME_BOT_CONSUMER_TELEGRAM_BOT_TOKEN = 'telegram-token';
+      const { service } = createService();
+      const pending = deliveryRow();
+      const sent = deliveryRow({
+        id: 'delivery-sent',
+        rewardId: 'reward-sent',
+        reward: rewardRow({ id: 'reward-sent' }),
+        status: 'SENT',
+        sentAt: now,
+        events: [
+          {
+            id: 'event-sent',
+            eventType: 'DELIVERY_BOT_CONSUMER_SENT',
+            fromStatus: 'READY',
+            toStatus: 'SENT',
+            channel: 'TELEGRAM',
+            note: 'sent by bot',
+            payload: {
+              source: 'guest_game_bot_consumer',
+              status: 'SENT',
+              channel: 'TELEGRAM',
+              providerMessageId: 'message-1',
+            },
+            createdAt: isoNow,
+            actor: null,
+          },
+        ],
+      });
+
+      const outbox = (service as any).buildDeliveryOutbox([pending, sent]);
+
+      expect(outbox.botConsumer).toMatchObject({
+        mode: 'READY',
+        dryRun: false,
+        configured: true,
+        channels: ['TELEGRAM'],
+        requiredEnv: [],
+        pendingReady: 1,
+        pendingTelegram: 1,
+        pendingMax: 0,
+        sentAck: 1,
+        failedAck: 0,
+        blockedAck: 0,
+        lastAckAt: isoNow,
+      });
+      expect(outbox.botConsumer.nextAction).toContain('ack');
+      expect(JSON.stringify(outbox.botConsumer)).not.toContain(
+        'telegram-token',
+      );
+      expect(JSON.stringify(outbox.botConsumer)).not.toContain('sync-token');
+    });
+
     it('pulls only ready bot deliveries with a confirmed bot identity', async () => {
       const { service, prisma } = createService();
 

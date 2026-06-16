@@ -4082,6 +4082,7 @@ function CommunicationQueueCard({
 }) {
   const visibleItems = queue.items.slice(0, 6);
   const visibleDeliveries = outbox.items.slice(0, 5);
+  const botConsumer = outbox.botConsumer;
   const botReadyDeliveryCount = outbox.dispatcher.providers.reduce(
     (total, provider) => total + provider.pendingReady,
     0,
@@ -4177,11 +4178,36 @@ function CommunicationQueueCard({
           <MiniMetric label="Telegram/MAX" value={outbox.summary.telegram + outbox.summary.max} />
           <MiniMetric label="кассир/ручной" value={outbox.summary.cashier + outbox.summary.manual} />
         </div>
-        <div className="mt-3 grid gap-2 lg:grid-cols-3">
+        <div className="mt-3 grid gap-2 lg:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-lg border border-cyan-200 bg-cyan-100/60 p-3 text-xs leading-5 text-cyan-950 dark:border-cyan-900/60 dark:bg-cyan-950/40 dark:text-cyan-100">
             <p className="font-bold uppercase tracking-wide">Dispatcher</p>
             <p className="mt-1 text-sm font-semibold">{outbox.dispatcher.modeLabel}</p>
             <p className="mt-1">{outbox.dispatcher.note}</p>
+          </div>
+          <div className="rounded-lg border border-cyan-200 bg-white p-3 text-xs leading-5 text-zinc-600 dark:border-cyan-900/60 dark:bg-zinc-950 dark:text-zinc-300">
+            <div className="flex items-center justify-between gap-2">
+              <p className="font-bold text-zinc-950 dark:text-white">
+                VDS bot-consumer
+              </p>
+              <span className="rounded-full bg-zinc-100 px-2 py-1 font-semibold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
+                {botConsumer.modeLabel}
+              </span>
+            </div>
+            <p className="mt-1">
+              Готово: {botConsumer.pendingReady} · Telegram {botConsumer.pendingTelegram} · MAX{" "}
+              {botConsumer.pendingMax}
+            </p>
+            <p className="mt-1">
+              Ack: {botConsumer.sentAck} sent / {botConsumer.failedAck} failed /{" "}
+              {botConsumer.blockedAck} blocked
+              {botConsumer.lastAckAt ? ` · ${formatDate(botConsumer.lastAckAt)}` : ""}
+            </p>
+            <p className="mt-1">{botConsumer.nextAction}</p>
+            {botConsumer.requiredEnv.length ? (
+              <p className="mt-1 text-amber-700 dark:text-amber-200">
+                Env: {botConsumer.requiredEnv.join(", ")}
+              </p>
+            ) : null}
           </div>
           {outbox.dispatcher.providers.map((provider) => (
             <div

@@ -1586,6 +1586,8 @@ V2:
 - бюджет не превышается;
 - можно экспортировать награды.
 
+Для контроля запуска внешнего consumer Guest Game Hub показывает отдельный `VDS bot-consumer` summary в delivery outbox: режим по API-visible env, каналы, количество ожидающих `READY_FOR_BOT` Telegram/MAX delivery, счетчики сохраненных ack `SENT/FAILED/BLOCKED`, время последнего ack, required env и следующий безопасный шаг. Этот статус строится только из LeetPlus outbox/event и имен env, поэтому не раскрывает токены, raw phone, chat id, raw Telegram update или Langame payload; если systemd unit использует отдельный EnvironmentFile, фактическая работа подтверждается новыми ack-событиями.
+
 ## 20. Последующие этапы
 
 ### Этап 7: MAX

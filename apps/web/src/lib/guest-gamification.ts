@@ -548,6 +548,24 @@ export type GuestGameDeliveryDispatcherStatus = {
   note: string;
 };
 
+export type GuestGameBotConsumerStatus = {
+  mode: "BLOCKED" | "DRY_RUN" | "READY";
+  modeLabel: string;
+  dryRun: boolean;
+  configured: boolean;
+  channels: Array<"TELEGRAM" | "MAX">;
+  requiredEnv: string[];
+  pendingReady: number;
+  pendingTelegram: number;
+  pendingMax: number;
+  sentAck: number;
+  failedAck: number;
+  blockedAck: number;
+  lastAckAt: string | null;
+  nextAction: string;
+  note: string;
+};
+
 export type GuestGameDeliveryDispatchResult = {
   dryRun: boolean;
   realSendEnabled: boolean;
@@ -635,6 +653,7 @@ export type GuestGameDeliveryOutbox = {
     manual: number;
   };
   dispatcher: GuestGameDeliveryDispatcherStatus;
+  botConsumer: GuestGameBotConsumerStatus;
   items: GuestGameDelivery[];
   note: string;
 };

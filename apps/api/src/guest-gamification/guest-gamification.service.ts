@@ -1096,6 +1096,7 @@ export type GuestGameDeliveryOutbox = {
     manual: number;
   };
   dispatcher: GuestGameDeliveryDispatcherStatus;
+  botConsumer: GuestGameBotConsumerStatus;
   items: GuestGameDelivery[];
   note: string;
 };
@@ -1616,6 +1617,24 @@ export type GuestGameDeliveryDispatcherStatus = {
   modeLabel: string;
   realSendEnabled: boolean;
   providers: GuestGameDeliveryProviderStatus[];
+  note: string;
+};
+
+export type GuestGameBotConsumerStatus = {
+  mode: 'BLOCKED' | 'DRY_RUN' | 'READY';
+  modeLabel: string;
+  dryRun: boolean;
+  configured: boolean;
+  channels: Array<'TELEGRAM' | 'MAX'>;
+  requiredEnv: string[];
+  pendingReady: number;
+  pendingTelegram: number;
+  pendingMax: number;
+  sentAck: number;
+  failedAck: number;
+  blockedAck: number;
+  lastAckAt: string | null;
+  nextAction: string;
   note: string;
 };
 
@@ -6619,8 +6638,63 @@ export class GuestGamificationService {
         manual: deliveries.filter((item) => item.channel === 'MANUAL').length,
       },
       dispatcher: this.buildDeliveryDispatcherStatus(deliveries),
+      botConsumer: this.buildBotConsumerStatus(deliveries),
       items: deliveries.slice(0, 12),
       note: 'Outbox хранит подготовленные снимки выдачи наград. Внешний Telegram/MAX-бот пока не отправляет эти сообщения.',
+    };
+  }
+
+  private buildBotConsumerStatus(
+    deliveries: GuestGameDelivery[],
+  ): GuestGameBotConsumerStatus {
+    const config = botConsumerConfig();
+    const readyForBot = deliveries.filter(
+      (item) =>
+        item.status === 'READY' &&
+        item.readinessStatus === 'READY_FOR_BOT' &&
+        (item.channel === 'TELEGRAM' || item.channel === 'MAX'),
+    );
+    const ackEvents = deliveries
+      .flatMap((delivery) => delivery.events)
+      .filter((event) => event.eventType.startsWith('DELIVERY_BOT_CONSUMER_'));
+    const lastAckAt =
+      ackEvents
+        .map((event) => event.createdAt)
+        .sort((left, right) => Date.parse(right) - Date.parse(left))[0] ?? null;
+    const mode: GuestGameBotConsumerStatus['mode'] = !config.configured
+      ? 'BLOCKED'
+      : config.dryRun
+        ? 'DRY_RUN'
+        : 'READY';
+
+    return {
+      mode,
+      modeLabel:
+        mode === 'READY'
+          ? 'готов к real-send'
+          : mode === 'DRY_RUN'
+            ? 'dry-run'
+            : 'нужна настройка',
+      dryRun: config.dryRun,
+      configured: config.configured,
+      channels: config.channels,
+      requiredEnv: config.requiredEnv,
+      pendingReady: readyForBot.length,
+      pendingTelegram: readyForBot.filter((item) => item.channel === 'TELEGRAM')
+        .length,
+      pendingMax: readyForBot.filter((item) => item.channel === 'MAX').length,
+      sentAck: ackEvents.filter(
+        (event) => event.eventType === 'DELIVERY_BOT_CONSUMER_SENT',
+      ).length,
+      failedAck: ackEvents.filter(
+        (event) => event.eventType === 'DELIVERY_BOT_CONSUMER_FAILED',
+      ).length,
+      blockedAck: ackEvents.filter(
+        (event) => event.eventType === 'DELIVERY_BOT_CONSUMER_BLOCKED',
+      ).length,
+      lastAckAt,
+      nextAction: botConsumerNextAction(config, readyForBot.length, lastAckAt),
+      note: 'Статус собран из API-visible env, текущего outbox и сохраненных ack-событий. Если runner запущен отдельным systemd unit со своим EnvironmentFile, фактический запуск подтверждается по новым ack-событиям.',
     };
   }
 
@@ -9327,6 +9401,13 @@ type DeliveryProviderConfig = {
   };
 };
 
+type BotConsumerConfig = {
+  dryRun: boolean;
+  configured: boolean;
+  channels: Array<'TELEGRAM' | 'MAX'>;
+  requiredEnv: string[];
+};
+
 function deliveryProviderConfig(): DeliveryProviderConfig {
   return {
     realSendEnabled: envFlag('GUEST_GAME_DELIVERY_REAL_SEND_ENABLED'),
@@ -9346,6 +9427,96 @@ function deliveryProviderConfig(): DeliveryProviderConfig {
       endpoint: envString('GUEST_GAME_MAX_DELIVERY_ENDPOINT') ?? '',
     },
   };
+}
+
+function botConsumerConfig(): BotConsumerConfig {
+  const dryRunEnv = envString('GUEST_GAME_BOT_CONSUMER_DRY_RUN');
+  const dryRun = dryRunEnv === null ? true : booleanValue(dryRunEnv);
+  const syncTokenConfigured = Boolean(
+    envString('GUEST_GAME_BOT_CONSUMER_SYNC_TOKEN') ??
+    envString('SYNC_SERVICE_TOKEN'),
+  );
+  const tenantScopeConfigured = Boolean(
+    envString('GUEST_GAME_BOT_CONSUMER_TENANT_ID') ??
+    envString('GUEST_GAME_BOT_CONSUMER_TENANT_SLUG'),
+  );
+  const telegramTokenConfigured = Boolean(
+    envString('GUEST_GAME_BOT_CONSUMER_TELEGRAM_BOT_TOKEN') ??
+    envString('GUEST_GAME_TELEGRAM_BOT_TOKEN') ??
+    envString('GUEST_PORTAL_TELEGRAM_BOT_TOKEN') ??
+    envString('TELEGRAM_BOT_TOKEN'),
+  );
+  const channels = botConsumerChannels(
+    envString('GUEST_GAME_BOT_CONSUMER_CHANNELS'),
+  );
+  const requiredEnv: string[] = [];
+
+  if (!syncTokenConfigured) {
+    requiredEnv.push(
+      'GUEST_GAME_BOT_CONSUMER_SYNC_TOKEN or SYNC_SERVICE_TOKEN',
+    );
+  }
+
+  if (!tenantScopeConfigured) {
+    requiredEnv.push(
+      'GUEST_GAME_BOT_CONSUMER_TENANT_ID or GUEST_GAME_BOT_CONSUMER_TENANT_SLUG',
+    );
+  }
+
+  if (!dryRun && channels.includes('TELEGRAM') && !telegramTokenConfigured) {
+    requiredEnv.push(
+      'GUEST_GAME_BOT_CONSUMER_TELEGRAM_BOT_TOKEN or GUEST_GAME_TELEGRAM_BOT_TOKEN',
+    );
+  }
+
+  if (!dryRun && channels.includes('MAX')) {
+    requiredEnv.push('MAX bot API contract');
+  }
+
+  return {
+    dryRun,
+    configured: requiredEnv.length === 0,
+    channels,
+    requiredEnv,
+  };
+}
+
+function botConsumerChannels(value: string | null): Array<'TELEGRAM' | 'MAX'> {
+  const raw = value ? value.split(',') : ['TELEGRAM'];
+  const channels = raw
+    .map((item) => item.trim().toUpperCase())
+    .filter(
+      (item): item is 'TELEGRAM' | 'MAX' =>
+        item === 'TELEGRAM' || item === 'MAX',
+    );
+
+  return [...new Set(channels)].length ? [...new Set(channels)] : ['TELEGRAM'];
+}
+
+function botConsumerNextAction(
+  config: BotConsumerConfig,
+  pendingReady: number,
+  lastAckAt: string | null,
+) {
+  if (!config.configured) {
+    return `Настроить env внешнего bot-consumer: ${config.requiredEnv.join(', ')}.`;
+  }
+
+  if (config.dryRun) {
+    return pendingReady > 0
+      ? 'Запустить VDS runner в dry-run и проверить pull без внешней отправки и ack.'
+      : 'Ожидать READY_FOR_BOT доставку или подготовить outbox из готовых наград.';
+  }
+
+  if (pendingReady > 0) {
+    return lastAckAt
+      ? 'Проверить новый tick runner и ack-события; pending доставки еще ждут обработки.'
+      : 'Запустить real Telegram runner и дождаться первого SENT/FAILED ack.';
+  }
+
+  return lastAckAt
+    ? 'Очередь пуста; контролировать следующий ack после появления новых READY_FOR_BOT доставок.'
+    : 'Очередь пуста; сначала подготовить outbox и подтвердить Telegram-связь гостя.';
 }
 
 function deliveryDispatchChannels(

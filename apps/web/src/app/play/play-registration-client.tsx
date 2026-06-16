@@ -964,6 +964,10 @@ function VerifiedSummary({
   onCheckLangameMatch: () => void;
 }) {
   const nextActions = portal.gamification.nextActions.slice(0, 3);
+  const langameSources = langameMatch?.sources ?? [];
+  const langameResultsCount = countLangameResults(langameMatch);
+  const backfilled = langameMatch?.backfilled ?? null;
+  const hasBackfilled = hasBackfilledGameItems(backfilled);
 
   return (
     <div className="space-y-4">
@@ -1008,7 +1012,9 @@ function VerifiedSummary({
               Langame
             </p>
             <p className="mt-1 text-sm font-bold text-white">
-              {langameMatch
+              {isCheckingLangame && !langameMatch
+                ? "Проверяем подтвержденный телефон"
+                : langameMatch
                 ? langameMatchStatusLabel(langameMatch.status)
                 : "Проверка еще не выполнена"}
             </p>
@@ -1022,10 +1028,84 @@ function VerifiedSummary({
             {isCheckingLangame ? "Проверяем..." : "Проверить"}
           </button>
         </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <StatusPill
+            tone={
+              langameMatch
+                ? langameLinkStatusTone(langameMatch.linkStatus)
+                : isCheckingLangame
+                  ? "cyan"
+                  : "amber"
+            }
+          >
+            {langameMatch
+              ? langameLinkStatusLabel(langameMatch.linkStatus)
+              : isCheckingLangame
+                ? "автосверка"
+                : "ожидает проверки"}
+          </StatusPill>
+          {langameMatch ? (
+            <>
+              <StatusPill tone={langameResultsCount > 0 ? "cyan" : "amber"}>
+                {formatNumber(langameResultsCount)} совпадений
+              </StatusPill>
+              {langameSources.length > 0 ? (
+                <StatusPill tone="cyan">
+                  {formatNumber(langameSources.length)} источников
+                </StatusPill>
+              ) : null}
+            </>
+          ) : null}
+        </div>
         {langameMatch ? (
           <p className="mt-2 text-sm leading-6 text-slate-300">
             {langameMatch.nextAction}
           </p>
+        ) : null}
+        {hasBackfilled && backfilled ? (
+          <div className="mt-3 grid gap-2 sm:grid-cols-4">
+            <Metric label="Награды" value={backfilled.rewards} />
+            <Metric label="События" value={backfilled.events} />
+            <Metric label="Доставки" value={backfilled.deliveries} />
+            <Metric label="Ledger" value={backfilled.bonusLedgerEntries} />
+          </div>
+        ) : null}
+        {langameSources.length > 0 ? (
+          <div className="mt-3 space-y-2">
+            {langameSources.slice(0, 3).map((source) => {
+              const knownLocal = source.results.filter(
+                (result) => result.localGuestKnown,
+              ).length;
+
+              return (
+                <div
+                  className="rounded-lg border border-white/10 bg-[#070b12] px-3 py-2"
+                  key={source.id}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-bold text-white">
+                        {source.name || source.domain}
+                      </p>
+                      <p className="mt-1 truncate text-xs font-semibold text-slate-500">
+                        {source.domain}
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded-lg bg-white/[0.06] px-2 py-1 text-xs font-black text-slate-200">
+                      {langameSourceStatusLabel(source.status)}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-xs leading-5 text-slate-400">
+                    {formatNumber(source.resultsCount)} найдено в Langame
+                    {knownLocal > 0
+                      ? `, ${formatNumber(knownLocal)} уже есть в snapshot LeetPlus`
+                      : ""}
+                    {source.errorMessage ? `, ${source.errorMessage}` : ""}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
         ) : null}
       </div>
 
@@ -1277,4 +1357,62 @@ function langameMatchStatusLabel(
   } satisfies Record<GuestPortalLangameMatchResponse["status"], string>;
 
   return labels[status];
+}
+
+function langameLinkStatusLabel(
+  status: GuestPortalLangameMatchResponse["linkStatus"],
+) {
+  const labels = {
+    LINKED: "профиль связан",
+    ALREADY_LINKED: "уже связан",
+    WAITING_FOR_SYNC: "ждет sync",
+    CONFLICT: "нужна проверка",
+    NOT_LINKED: "не связан",
+  } satisfies Record<GuestPortalLangameMatchResponse["linkStatus"], string>;
+
+  return labels[status];
+}
+
+function langameLinkStatusTone(
+  status: GuestPortalLangameMatchResponse["linkStatus"],
+): "emerald" | "cyan" | "amber" {
+  if (status === "LINKED" || status === "ALREADY_LINKED") {
+    return "emerald";
+  }
+
+  if (status === "WAITING_FOR_SYNC") {
+    return "cyan";
+  }
+
+  return "amber";
+}
+
+function langameSourceStatusLabel(
+  status: GuestPortalLangameMatchResponse["sources"][number]["status"],
+) {
+  return status === "SUCCESS" ? "ok" : "ошибка";
+}
+
+function countLangameResults(
+  match: GuestPortalLangameMatchResponse | null,
+) {
+  return (
+    match?.sources.reduce((total, source) => total + source.resultsCount, 0) ??
+    0
+  );
+}
+
+function hasBackfilledGameItems(
+  backfilled: GuestPortalLangameMatchResponse["backfilled"] | null,
+) {
+  if (!backfilled) {
+    return false;
+  }
+
+  return (
+    backfilled.rewards > 0 ||
+    backfilled.events > 0 ||
+    backfilled.deliveries > 0 ||
+    backfilled.bonusLedgerEntries > 0
+  );
 }

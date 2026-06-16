@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { randomBytes } from 'crypto';
 import {
   IntegrationProvider,
@@ -1163,6 +1164,31 @@ export type GuestGamePilotReadinessItem = {
   nextAction: string;
 };
 
+export type GuestGamePilotLedgerPreflightStatus =
+  | 'NO_STORE'
+  | 'EMPTY'
+  | 'READY'
+  | 'MULTIPLE'
+  | 'PROCESSING'
+  | 'WAITING_RETRY';
+
+export type GuestGamePilotLedgerPreflight = {
+  status: GuestGamePilotLedgerPreflightStatus;
+  statusLabel: string;
+  ready: boolean;
+  scopedStoreId: string | null;
+  scopedStoreName: string | null;
+  readyCount: number;
+  pendingCount: number;
+  retryReadyCount: number;
+  staleProcessingCount: number;
+  processingCount: number;
+  failedWaitingRetryCount: number;
+  metric: string;
+  note: string;
+  nextAction: string;
+};
+
 export type GuestGamePilotRunbookStage =
   | 'BLOCKED'
   | 'DRY_RUN'
@@ -1193,6 +1219,7 @@ export type GuestGamePilotRunbook = {
   canRunCanary: boolean;
   canRunLive: boolean;
   canReconcile: boolean;
+  ledgerPreflight: GuestGamePilotLedgerPreflight;
   actions: GuestGamePilotRunbookAction[];
   blockers: string[];
   safeguards: string[];
@@ -1970,6 +1997,7 @@ function buildPilotRunbookActions({
   canRunLive,
   canReconcile,
   bonusRewards,
+  ledgerPreflight,
 }: {
   stage: GuestGamePilotRunbookStage;
   canRunDryRun: boolean;
@@ -1977,21 +2005,37 @@ function buildPilotRunbookActions({
   canRunLive: boolean;
   canReconcile: boolean;
   bonusRewards: number;
+  ledgerPreflight: GuestGamePilotLedgerPreflight;
 }): GuestGamePilotRunbookAction[] {
-  const canQueueLedger =
-    canRunCanary &&
-    bonusRewards > 0 &&
-    stage !== 'RECONCILIATION' &&
-    stage !== 'READY';
-  const ledgerDisabledReason = !canRunCanary
+  const stageClosedReason =
+    stage === 'RECONCILIATION'
+      ? 'Первое начисление уже подтверждено: сначала завершите сверку баланса.'
+      : stage === 'READY'
+        ? 'Пилот уже прошел live-write и сверку.'
+        : null;
+  const ledgerBaseDisabledReason = !canRunCanary
     ? 'Сначала нужен тестовый event/process-event или approved reward.'
     : bonusRewards <= 0
       ? 'Нужна approved bonus-награда, которая попадет в bonus ledger.'
-      : stage === 'RECONCILIATION'
-        ? 'Первое начисление уже подтверждено: сначала завершите сверку баланса.'
-        : stage === 'READY'
-          ? 'Пилот уже прошел live-write и сверку.'
-          : null;
+      : stageClosedReason;
+  const queueLedgerDisabledReason =
+    ledgerBaseDisabledReason ??
+    (ledgerPreflight.readyCount > 0
+      ? 'В pilot ledger уже есть готовая запись: не ставьте новую перед canary.'
+      : null);
+  const dryRunLedgerDisabledReason =
+    ledgerBaseDisabledReason ??
+    (ledgerPreflight.readyCount === 0
+      ? 'Сначала поставьте ровно одну approved bonus-награду 1337 в ledger.'
+      : ledgerPreflight.readyCount > 1
+        ? 'Перед dry-run/canary оставьте ровно одну готовую ledger-запись по 1337.'
+        : null);
+  const liveDisabledReason =
+    ledgerPreflight.readyCount === 0
+      ? 'В pilot ledger нет готовой записи по 1337 для canary.'
+      : ledgerPreflight.readyCount > 1
+        ? 'В pilot ledger больше одной готовой записи по 1337: canary заблокирован.'
+        : 'Нужны canary-награда, готовый scheduler и включенный Langame write-флаг.';
 
   return [
     {
@@ -2009,16 +2053,16 @@ function buildPilotRunbookActions({
     {
       key: 'QUEUE_BONUS_LEDGER',
       label: 'Поставить в ledger',
-      enabled: canQueueLedger,
+      enabled: !queueLedgerDisabledReason,
       tone: 'SECONDARY',
-      disabledReason: ledgerDisabledReason,
+      disabledReason: queueLedgerDisabledReason,
     },
     {
       key: 'DRY_RUN_BONUS_LEDGER',
       label: 'Dry-run ledger',
-      enabled: canQueueLedger,
+      enabled: !dryRunLedgerDisabledReason,
       tone: 'SECONDARY',
-      disabledReason: ledgerDisabledReason,
+      disabledReason: dryRunLedgerDisabledReason,
     },
     {
       key: 'DISPATCH_BONUS_LEDGER',
@@ -2030,7 +2074,7 @@ function buildPilotRunbookActions({
           ? null
           : canRunLive
             ? 'Live-write уже не является текущей стадией пилота.'
-            : 'Нужны canary-награда, готовый scheduler и включенный Langame write-флаг.',
+            : liveDisabledReason,
     },
     {
       key: 'RECONCILE_BALANCE',
@@ -2052,6 +2096,7 @@ function buildPilotRunbook({
   readyWalletRewards,
   bonusRewards,
   bonusLedgerAutonomousReady,
+  ledgerPreflight,
   ledgerConfirmed,
   ledgerReconciliationPending,
   ledgerReconciliationMismatch,
@@ -2063,6 +2108,7 @@ function buildPilotRunbook({
   readyWalletRewards: number;
   bonusRewards: number;
   bonusLedgerAutonomousReady: boolean;
+  ledgerPreflight: GuestGamePilotLedgerPreflight;
   ledgerConfirmed: number;
   ledgerReconciliationPending: number;
   ledgerReconciliationMismatch: number;
@@ -2084,19 +2130,33 @@ function buildPilotRunbook({
     canRunDryRun &&
     (events > 0 || approvedRewards > 0 || readyWalletRewards > 0);
   const canRunLive =
-    canRunCanary && bonusLedgerAutonomousReady && bonusRewards > 0;
+    canRunCanary &&
+    bonusLedgerAutonomousReady &&
+    bonusRewards > 0 &&
+    ledgerPreflight.ready;
   const canReconcile = ledgerConfirmed > 0;
+  const canaryNextAction = !bonusRewards
+    ? 'Подготовить approved reward с бонусным rewardType, чтобы он попал в bonus ledger, а не в ручную выдачу.'
+    : ledgerPreflight.readyCount === 0
+      ? 'Поставить ровно одну approved bonus-награду 1337 в ledger и выполнить dry-run dispatcher.'
+      : ledgerPreflight.readyCount > 1
+        ? 'Перед live-write отменить или разобрать лишние pending/retry ledger-записи 1337, оставив ровно одну.'
+        : bonusLedgerAutonomousReady
+          ? 'Выполнить dry-run ledger по единственной записи 1337, затем запускать canary live dispatch.'
+          : 'Проверить scheduler/write-флаги и выполнить dry-run ledger по единственной записи 1337.';
 
   const safeguards = [
     'До live-стадии используются только сохраненные факты LeetPlus и dry-run без записи в Langame.',
     'Первый live-write должен идти как canary: одна бонусная награда, один гость, один клуб 1337.',
+    'Live canary разблокируется только если preflight видит ровно одну готовую ledger-запись в scope пилотного клуба.',
     'Raw phone и токены не попадают в UI; ledger и delivery показывают маски и безопасные статусы.',
     'После подтверждения Langame обязательна сверка GuestBonusBalanceCurrent с новым snapshot.',
   ];
   const withActions = (
-    runbook: Omit<GuestGamePilotRunbook, 'actions'>,
+    runbook: Omit<GuestGamePilotRunbook, 'actions' | 'ledgerPreflight'>,
   ): GuestGamePilotRunbook => ({
     ...runbook,
+    ledgerPreflight,
     actions: buildPilotRunbookActions({
       stage: runbook.stage,
       canRunDryRun: runbook.canRunDryRun,
@@ -2104,6 +2164,7 @@ function buildPilotRunbook({
       canRunLive: runbook.canRunLive,
       canReconcile: runbook.canReconcile,
       bonusRewards,
+      ledgerPreflight,
     }),
   });
 
@@ -2184,9 +2245,7 @@ function buildPilotRunbook({
       canReconcile,
       blockers: downstreamBlockerTitles,
       safeguards,
-      nextAction: bonusRewards
-        ? 'Поставить одну approved bonus-награду в ledger и выполнить dry-run dispatcher перед включением live-write.'
-        : 'Подготовить approved reward с бонусным rewardType, чтобы он попал в bonus ledger, а не в ручную выдачу.',
+      nextAction: canaryNextAction,
       note: 'Есть тестовая активность или награда, но до live-write нужен безопасный canary через ledger dry-run и проверку scheduler/write-флагов.',
     });
   }
@@ -2250,12 +2309,168 @@ function isBonusLedgerRewardType(rewardType: string | null) {
   );
 }
 
+function positiveConfigInt(
+  value: string | undefined,
+  fallback: number,
+  max: number,
+) {
+  const parsed = Number(value);
+
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+
+  return Math.min(Math.floor(parsed), max);
+}
+
+function buildPilotLedgerPreflight({
+  targetStore,
+  pendingCount,
+  retryReadyCount,
+  staleProcessingCount,
+  processingCount,
+  failedWaitingRetryCount,
+}: {
+  targetStore: PilotStoreRow | null;
+  pendingCount: number;
+  retryReadyCount: number;
+  staleProcessingCount: number;
+  processingCount: number;
+  failedWaitingRetryCount: number;
+}): GuestGamePilotLedgerPreflight {
+  const readyCount = pendingCount + retryReadyCount + staleProcessingCount;
+  const freshProcessingCount = Math.max(
+    0,
+    processingCount - staleProcessingCount,
+  );
+  const metric = `${readyCount} ready / ${pendingCount} pending / ${retryReadyCount} retry`;
+
+  if (!targetStore) {
+    return {
+      status: 'NO_STORE',
+      statusLabel: 'нет клуба',
+      ready: false,
+      scopedStoreId: null,
+      scopedStoreName: null,
+      readyCount,
+      pendingCount,
+      retryReadyCount,
+      staleProcessingCount,
+      processingCount,
+      failedWaitingRetryCount,
+      metric,
+      note: 'Preflight не может проверить bonus ledger без выбранного пилотного клуба.',
+      nextAction:
+        'Выбрать активный клуб 1337 или включить геймификацию у пилотной точки.',
+    };
+  }
+
+  if (readyCount === 1) {
+    return {
+      status: 'READY',
+      statusLabel: '1 готова',
+      ready: true,
+      scopedStoreId: targetStore.id,
+      scopedStoreName: targetStore.name,
+      readyCount,
+      pendingCount,
+      retryReadyCount,
+      staleProcessingCount,
+      processingCount,
+      failedWaitingRetryCount,
+      metric,
+      note: 'В pilot ledger есть ровно одна запись, которую canary dispatch может забрать по scope клуба.',
+      nextAction:
+        'Выполнить ledger dry-run и запускать canary live dispatch только для этой записи.',
+    };
+  }
+
+  if (readyCount > 1) {
+    return {
+      status: 'MULTIPLE',
+      statusLabel: 'дубликаты',
+      ready: false,
+      scopedStoreId: targetStore.id,
+      scopedStoreName: targetStore.name,
+      readyCount,
+      pendingCount,
+      retryReadyCount,
+      staleProcessingCount,
+      processingCount,
+      failedWaitingRetryCount,
+      metric,
+      note: 'В scope пилотного клуба больше одной готовой ledger-записи: первый Langame write перестает быть canary.',
+      nextAction:
+        'Отменить или разобрать лишние pending/retry записи по 1337, оставив ровно одну для первого write.',
+    };
+  }
+
+  if (freshProcessingCount > 0) {
+    return {
+      status: 'PROCESSING',
+      statusLabel: 'обработка',
+      ready: false,
+      scopedStoreId: targetStore.id,
+      scopedStoreName: targetStore.name,
+      readyCount,
+      pendingCount,
+      retryReadyCount,
+      staleProcessingCount,
+      processingCount,
+      failedWaitingRetryCount,
+      metric,
+      note: 'По пилотному клубу уже есть свежая PROCESSING-запись; live canary ждет завершения или stale-lock.',
+      nextAction:
+        'Дождаться завершения worker или протухания lock перед новым canary-действием.',
+    };
+  }
+
+  if (failedWaitingRetryCount > 0) {
+    return {
+      status: 'WAITING_RETRY',
+      statusLabel: 'ждет retry',
+      ready: false,
+      scopedStoreId: targetStore.id,
+      scopedStoreName: targetStore.name,
+      readyCount,
+      pendingCount,
+      retryReadyCount,
+      staleProcessingCount,
+      processingCount,
+      failedWaitingRetryCount,
+      metric,
+      note: 'Есть failed ledger-запись по 1337, но nextAttemptAt еще не наступил для безопасного retry.',
+      nextAction:
+        'Дождаться nextAttemptAt или вручную отменить ошибочную запись перед постановкой новой.',
+    };
+  }
+
+  return {
+    status: 'EMPTY',
+    statusLabel: 'пусто',
+    ready: false,
+    scopedStoreId: targetStore.id,
+    scopedStoreName: targetStore.name,
+    readyCount,
+    pendingCount,
+    retryReadyCount,
+    staleProcessingCount,
+    processingCount,
+    failedWaitingRetryCount,
+    metric,
+    note: 'В pilot ledger пока нет готовой записи по клубу 1337 для первого Langame write.',
+    nextAction:
+      'Поставить одну approved bonus-награду в ledger, затем выполнить dry-run и canary.',
+  };
+}
+
 @Injectable()
 export class GuestGamificationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly langameSettingsService: LangameSettingsService,
     private readonly langameClient: LangameClient,
+    private readonly configService: ConfigService,
     private readonly bonusLedgerSchedulerService: GuestBonusLedgerSchedulerService,
   ) {}
 
@@ -2290,13 +2505,11 @@ export class GuestGamificationService {
       this.getBonusBalanceCurrentReconciliation(user),
     ]);
 
-    const effect = await this.buildEffect(
-      user,
-      lootBoxes,
-      missions,
-      seasons,
-      events,
-    );
+    const targetPilotStore = pickPilotStore(pilotStores);
+    const [effect, pilotLedgerPreflight] = await Promise.all([
+      this.buildEffect(user, lootBoxes, missions, seasons, events),
+      this.getPilotBonusLedgerPreflight(user, targetPilotStore),
+    ]);
     const integrationReadiness = this.buildIntegrationReadiness(deliveries);
     const communicationQueue = this.buildCommunicationQueue(profiles, rewards);
     const deliveryOutbox = this.buildDeliveryOutbox(deliveries);
@@ -2323,6 +2536,7 @@ export class GuestGamificationService {
         events,
         integrationReadiness,
         bonusLedgerAudit,
+        pilotLedgerPreflight,
         communicationQueue,
         deliveryOutbox,
       }),
@@ -2355,6 +2569,90 @@ export class GuestGamificationService {
         { name: 'asc' },
         { createdAt: 'asc' },
       ],
+    });
+  }
+
+  private async getPilotBonusLedgerPreflight(
+    user: AuthenticatedUser,
+    targetStore: PilotStoreRow | null,
+  ): Promise<GuestGamePilotLedgerPreflight> {
+    if (!targetStore) {
+      return buildPilotLedgerPreflight({
+        targetStore: null,
+        pendingCount: 0,
+        retryReadyCount: 0,
+        staleProcessingCount: 0,
+        processingCount: 0,
+        failedWaitingRetryCount: 0,
+      });
+    }
+
+    const now = new Date();
+    const maxAttempts = positiveConfigInt(
+      this.configService.get<string>('LANGAME_BONUS_ACCRUAL_MAX_ATTEMPTS'),
+      5,
+      20,
+    );
+    const staleLockMinutes = positiveConfigInt(
+      this.configService.get<string>(
+        'LANGAME_BONUS_ACCRUAL_STALE_LOCK_MINUTES',
+      ),
+      15,
+      24 * 60,
+    );
+    const staleLockedBefore = new Date(
+      now.getTime() - staleLockMinutes * 60 * 1000,
+    );
+    const baseWhere = {
+      tenantId: user.tenantId,
+      storeId: targetStore.id,
+    };
+    const [
+      pendingCount,
+      retryReadyCount,
+      staleProcessingCount,
+      processingCount,
+      failedWaitingRetryCount,
+    ] = await Promise.all([
+      this.prisma.guestBonusLedgerEntry.count({
+        where: { ...baseWhere, status: 'PENDING' },
+      }),
+      this.prisma.guestBonusLedgerEntry.count({
+        where: {
+          ...baseWhere,
+          status: 'FAILED',
+          attempts: { lt: maxAttempts },
+          OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }],
+        },
+      }),
+      this.prisma.guestBonusLedgerEntry.count({
+        where: {
+          ...baseWhere,
+          status: 'PROCESSING',
+          attempts: { lt: maxAttempts },
+          lockedAt: { lt: staleLockedBefore },
+        },
+      }),
+      this.prisma.guestBonusLedgerEntry.count({
+        where: { ...baseWhere, status: 'PROCESSING' },
+      }),
+      this.prisma.guestBonusLedgerEntry.count({
+        where: {
+          ...baseWhere,
+          status: 'FAILED',
+          attempts: { lt: maxAttempts },
+          nextAttemptAt: { gt: now },
+        },
+      }),
+    ]);
+
+    return buildPilotLedgerPreflight({
+      targetStore,
+      pendingCount,
+      retryReadyCount,
+      staleProcessingCount,
+      processingCount,
+      failedWaitingRetryCount,
     });
   }
 
@@ -2496,6 +2794,7 @@ export class GuestGamificationService {
     events,
     integrationReadiness,
     bonusLedgerAudit,
+    pilotLedgerPreflight,
     communicationQueue,
     deliveryOutbox,
   }: {
@@ -2509,6 +2808,7 @@ export class GuestGamificationService {
     events: GuestGameEvent[];
     integrationReadiness: GuestGameIntegrationReadiness;
     bonusLedgerAudit: GuestGameBonusLedgerAudit;
+    pilotLedgerPreflight: GuestGamePilotLedgerPreflight;
     communicationQueue: GuestGameCommunicationQueue;
     deliveryOutbox: GuestGameDeliveryOutbox;
   }): GuestGamePilotReadiness {
@@ -2721,29 +3021,39 @@ export class GuestGamificationService {
         key: 'BONUS_LEDGER',
         title: 'Bonus ledger -> Langame',
         status: bonusLedgerAutonomousReady
-          ? bonusRewards.length
+          ? pilotLedgerPreflight.ready
             ? 'READY'
-            : 'PARTIAL'
+            : pilotLedgerPreflight.readyCount > 1
+              ? 'BLOCKED'
+              : 'PARTIAL'
           : langameWriteItem?.ready || bonusLedgerSchedulerItem?.enabled
             ? 'PARTIAL'
             : cashierReady || approvedRewards.length
               ? 'MANUAL_ONLY'
               : 'BLOCKED',
         statusLabel: bonusLedgerAutonomousReady
-          ? bonusRewards.length
-            ? 'авто готово'
-            : 'ждет бонус'
+          ? pilotLedgerPreflight.ready
+            ? 'canary ready'
+            : pilotLedgerPreflight.readyCount > 1
+              ? 'лишние записи'
+              : bonusRewards.length
+                ? 'ждет ledger'
+                : 'ждет бонус'
           : langameWriteItem?.ready
             ? 'нужен scheduler'
             : bonusLedgerSchedulerItem?.enabled
               ? 'нужен write API'
               : 'ручной режим',
-        ready: Boolean(bonusLedgerAutonomousReady && bonusRewards.length),
-        metric: `${bonusRewards.length} bonus rewards`,
+        ready: Boolean(
+          bonusLedgerAutonomousReady &&
+          bonusRewards.length &&
+          pilotLedgerPreflight.ready,
+        ),
+        metric: `${bonusRewards.length} bonus rewards / ${pilotLedgerPreflight.readyCount} ledger ready`,
         note: 'Автономный scheduler должен поставить approved bonus rewards в ledger и отправить их через master endpoint Langame по телефону гостя без админского клика.',
         nextAction: bonusLedgerAutonomousReady
           ? bonusRewards.length
-            ? 'Дождаться ближайшего scheduler tick на тестовой записи и проверить ответ Langame.'
+            ? pilotLedgerPreflight.nextAction
             : 'Создать approved-награду с бонусным rewardType для ledger.'
           : langameWriteItem?.ready
             ? 'Включить GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED и сначала прогнать dry-run/canary для 1337.'
@@ -2807,6 +3117,7 @@ export class GuestGamificationService {
       readyWalletRewards: readyWalletRewards.length,
       bonusRewards: bonusRewards.length,
       bonusLedgerAutonomousReady,
+      ledgerPreflight: pilotLedgerPreflight,
       ledgerConfirmed,
       ledgerReconciliationPending,
       ledgerReconciliationMismatch,

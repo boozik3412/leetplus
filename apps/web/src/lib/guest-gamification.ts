@@ -703,6 +703,31 @@ export type GuestGamePilotReadinessItem = {
   nextAction: string;
 };
 
+export type GuestGamePilotLedgerPreflightStatus =
+  | "NO_STORE"
+  | "EMPTY"
+  | "READY"
+  | "MULTIPLE"
+  | "PROCESSING"
+  | "WAITING_RETRY";
+
+export type GuestGamePilotLedgerPreflight = {
+  status: GuestGamePilotLedgerPreflightStatus;
+  statusLabel: string;
+  ready: boolean;
+  scopedStoreId: string | null;
+  scopedStoreName: string | null;
+  readyCount: number;
+  pendingCount: number;
+  retryReadyCount: number;
+  staleProcessingCount: number;
+  processingCount: number;
+  failedWaitingRetryCount: number;
+  metric: string;
+  note: string;
+  nextAction: string;
+};
+
 export type GuestGamePilotRunbookStage =
   | "BLOCKED"
   | "DRY_RUN"
@@ -733,6 +758,7 @@ export type GuestGamePilotRunbook = {
   canRunCanary: boolean;
   canRunLive: boolean;
   canReconcile: boolean;
+  ledgerPreflight: GuestGamePilotLedgerPreflight;
   actions: GuestGamePilotRunbookAction[];
   blockers: string[];
   safeguards: string[];

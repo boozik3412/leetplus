@@ -80,6 +80,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added a scoped bonus-ledger preflight for the first Langame canary write: Guest Game Hub now exposes the exact ready count for pilot store 1337 and keeps `LIVE_WRITE` blocked unless there is exactly one claimable ledger entry in that scope.
 - Added a first-bonus pilot runbook to Guest Game Hub: `/guests/gamification` now turns the 1337 readiness checklist into explicit stages `BLOCKED`, `DRY_RUN`, `CANARY`, `LIVE_WRITE`, `RECONCILIATION`, and `READY`, with gates for dry-run/canary/live/reconciliation and safe next actions before the first Langame bonus write.
 - Made the first-bonus pilot runbook action-oriented: the API now returns stage-aware actions for opening dry-run, queueing bonus rewards into ledger, running ledger dry-run, launching the protected live dispatch, and jumping to balance reconciliation; the web UI wires those actions to the existing guarded handlers without adding a new Langame write path.
 - Added a backend-enforced canary mode for the pilot live bonus dispatch: `canary=true` clamps the bonus-ledger dispatch limit to one existing ledger entry, disables auto-queueing approved rewards inside that dispatch, and the runbook live action now uses this path instead of the general batch dispatch.

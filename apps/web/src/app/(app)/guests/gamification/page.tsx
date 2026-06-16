@@ -227,6 +227,22 @@ const emptyWorkspace: GuestGamificationWorkspace = {
       canRunCanary: false,
       canRunLive: false,
       canReconcile: false,
+      ledgerPreflight: {
+        status: "NO_STORE",
+        statusLabel: "нет клуба",
+        ready: false,
+        scopedStoreId: null,
+        scopedStoreName: null,
+        readyCount: 0,
+        pendingCount: 0,
+        retryReadyCount: 0,
+        staleProcessingCount: 0,
+        processingCount: 0,
+        failedWaitingRetryCount: 0,
+        metric: "0 ready / 0 pending / 0 retry",
+        note: "Preflight появится после ответа API workspace.",
+        nextAction: "Дождаться ответа API workspace.",
+      },
       actions: [
         {
           key: "OPEN_DRY_RUN",

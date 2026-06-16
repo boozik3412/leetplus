@@ -2777,6 +2777,7 @@ function PilotReadinessCard({
 }) {
   const target = readiness.targetStore;
   const runbook = readiness.runbook;
+  const ledgerPreflight = runbook.ledgerPreflight;
   const pilotLedgerScope = {
     storeId: target?.id ?? null,
     limit: 1,
@@ -2906,6 +2907,48 @@ function PilotReadinessCard({
               Блокеры: {runbook.blockers.join(", ")}
             </p>
           ) : null}
+
+          <div className="mt-3 border-t border-cyan-200 pt-3 text-xs dark:border-cyan-900/60">
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={[
+                  "rounded-full px-2 py-1 text-[11px] font-bold uppercase",
+                  pilotLedgerPreflightStatusClass(ledgerPreflight.status),
+                ].join(" ")}
+              >
+                {ledgerPreflight.statusLabel}
+              </span>
+              <span className="font-semibold text-cyan-800 dark:text-cyan-100">
+                Проверка ledger
+              </span>
+              {ledgerPreflight.scopedStoreName ? (
+                <span className="text-zinc-500 dark:text-zinc-400">
+                  {ledgerPreflight.scopedStoreName}
+                </span>
+              ) : null}
+            </div>
+            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <PilotGate
+                label={`К dispatch ${ledgerPreflight.readyCount}`}
+                enabled={ledgerPreflight.ready}
+              />
+              <PilotGate
+                label={`В очереди ${ledgerPreflight.pendingCount}`}
+                enabled={ledgerPreflight.pendingCount === 1}
+              />
+              <PilotGate
+                label={`Retry ${ledgerPreflight.retryReadyCount}`}
+                enabled={ledgerPreflight.retryReadyCount === 1}
+              />
+              <PilotGate
+                label={`Обработка ${ledgerPreflight.processingCount}`}
+                enabled={ledgerPreflight.processingCount === 0}
+              />
+            </div>
+            <p className="mt-2 leading-5 text-cyan-900 dark:text-cyan-100">
+              {ledgerPreflight.nextAction}
+            </p>
+          </div>
 
           {runbook.actions.length ? (
             <div className="mt-3 flex flex-wrap gap-2">
@@ -8380,6 +8423,25 @@ function pilotRunbookStageClass(
     case "BLOCKED":
     default:
       return "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200";
+  }
+}
+
+function pilotLedgerPreflightStatusClass(
+  status: GuestGamificationWorkspace["pilotReadiness"]["runbook"]["ledgerPreflight"]["status"],
+) {
+  switch (status) {
+    case "READY":
+      return "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200";
+    case "MULTIPLE":
+    case "NO_STORE":
+      return "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200";
+    case "PROCESSING":
+      return "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-200";
+    case "WAITING_RETRY":
+      return "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200";
+    case "EMPTY":
+    default:
+      return "bg-zinc-100 text-zinc-700 dark:bg-zinc-900 dark:text-zinc-200";
   }
 }
 

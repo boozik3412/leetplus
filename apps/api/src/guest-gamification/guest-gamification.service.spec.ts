@@ -15,6 +15,7 @@ import {
   type GuestGameEvent,
   type GuestGameMission,
   type GuestGamePipelineRunResult,
+  type GuestGamePilotLedgerPreflight,
   type GuestGameProcessEventResult,
   type GuestGameProfile,
   type GuestGameReward,
@@ -89,16 +90,21 @@ function createService(
   const bonusLedgerSchedulerService = {
     getRuntimeStatus: jest.fn(() => schedulerStatus),
   };
+  const configService = {
+    get: jest.fn(),
+  };
 
   return {
     prisma,
     langameSettingsService,
     langameClient,
+    configService,
     bonusLedgerSchedulerService,
     service: new GuestGamificationService(
       prisma,
       langameSettingsService as any,
       langameClient as any,
+      configService as any,
       bonusLedgerSchedulerService as any,
     ),
   };
@@ -335,6 +341,28 @@ function pilotStoreFixture(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function pilotLedgerPreflightFixture(
+  overrides: Partial<GuestGamePilotLedgerPreflight> = {},
+): GuestGamePilotLedgerPreflight {
+  return {
+    status: 'EMPTY',
+    statusLabel: 'пусто',
+    ready: false,
+    scopedStoreId: 'store-1337',
+    scopedStoreName: '1337',
+    readyCount: 0,
+    pendingCount: 0,
+    retryReadyCount: 0,
+    staleProcessingCount: 0,
+    processingCount: 0,
+    failedWaitingRetryCount: 0,
+    metric: '0 ready / 0 pending / 0 retry',
+    note: 'No pilot ledger entry is ready.',
+    nextAction: 'Queue one approved reward.',
+    ...overrides,
+  };
+}
+
 function integrationReadinessForPilot({
   otpReady = true,
   ledgerReady = false,
@@ -411,6 +439,7 @@ function pilotReadinessInput(overrides: Record<string, unknown> = {}) {
         reconciliationMismatch: 0,
       },
     },
+    pilotLedgerPreflight: pilotLedgerPreflightFixture(),
     communicationQueue: {
       summary: {
         readyForCashier: 0,
@@ -770,7 +799,7 @@ describe('GuestGamificationService', () => {
       );
     });
 
-    it('recommends one live-write canary when a bonus reward and autonomous ledger are ready', () => {
+    it('recommends one live-write canary when a bonus reward, autonomous ledger, and one scoped ledger entry are ready', () => {
       const { service } = createService();
 
       const readiness = (service as any).buildPilotReadiness(
@@ -779,6 +808,14 @@ describe('GuestGamificationService', () => {
           rewards: [rewardResult()],
           integrationReadiness: integrationReadinessForPilot({
             ledgerReady: true,
+          }),
+          pilotLedgerPreflight: pilotLedgerPreflightFixture({
+            status: 'READY',
+            statusLabel: '1 готова',
+            ready: true,
+            readyCount: 1,
+            pendingCount: 1,
+            metric: '1 ready / 1 pending / 0 retry',
           }),
         }),
       );
@@ -790,12 +827,17 @@ describe('GuestGamificationService', () => {
         canRunLive: true,
         canReconcile: false,
       });
+      expect(readiness.runbook.ledgerPreflight).toMatchObject({
+        ready: true,
+        readyCount: 1,
+        scopedStoreId: 'store-1337',
+      });
       expect(readiness.runbook.nextAction).toContain('одной бонусной награде');
       expect(readiness.runbook.actions).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             key: 'QUEUE_BONUS_LEDGER',
-            enabled: true,
+            enabled: false,
           }),
           expect.objectContaining({
             key: 'DRY_RUN_BONUS_LEDGER',
@@ -815,6 +857,59 @@ describe('GuestGamificationService', () => {
       const safeguardsText = JSON.stringify(readiness.runbook.safeguards);
       expect(safeguardsText).not.toContain('+7');
       expect(safeguardsText).not.toContain('sync-token');
+    });
+
+    it('blocks live-write canary when more than one scoped ledger entry is ready', () => {
+      const { service } = createService();
+
+      const readiness = (service as any).buildPilotReadiness(
+        pilotReadinessInput({
+          events: [eventResult()],
+          rewards: [rewardResult()],
+          integrationReadiness: integrationReadinessForPilot({
+            ledgerReady: true,
+          }),
+          pilotLedgerPreflight: pilotLedgerPreflightFixture({
+            status: 'MULTIPLE',
+            statusLabel: 'дубликаты',
+            ready: false,
+            readyCount: 2,
+            pendingCount: 2,
+            metric: '2 ready / 2 pending / 0 retry',
+            note: 'More than one entry is ready.',
+            nextAction: 'Оставить ровно одну запись.',
+          }),
+        }),
+      );
+
+      expect(readiness.runbook).toMatchObject({
+        stage: 'CANARY',
+        canRunCanary: true,
+        canRunLive: false,
+      });
+      expect(readiness.runbook.ledgerPreflight).toMatchObject({
+        status: 'MULTIPLE',
+        ready: false,
+        readyCount: 2,
+      });
+      expect(readiness.runbook.nextAction).toContain('лишние');
+      expect(readiness.runbook.actions).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            key: 'QUEUE_BONUS_LEDGER',
+            enabled: false,
+          }),
+          expect.objectContaining({
+            key: 'DRY_RUN_BONUS_LEDGER',
+            enabled: false,
+          }),
+          expect.objectContaining({
+            key: 'DISPATCH_BONUS_LEDGER',
+            enabled: false,
+            disabledReason: expect.stringContaining('больше одной'),
+          }),
+        ]),
+      );
     });
 
     it('moves to reconciliation after Langame confirms the first ledger entry', () => {

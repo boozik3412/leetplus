@@ -711,6 +711,32 @@ export type GuestGamePilotLedgerPreflightStatus =
   | "PROCESSING"
   | "WAITING_RETRY";
 
+export type GuestGamePilotLedgerPreflightItem = {
+  id: string;
+  status: string;
+  statusLabel: string;
+  entryType: string;
+  source: string;
+  amount: number;
+  attempts: number;
+  retryReady: boolean;
+  nextAttemptAt: string | null;
+  createdAt: string;
+  guest: {
+    id: string | null;
+    displayName: string;
+    contact: string | null;
+  };
+  reward: {
+    id: string;
+    status: string;
+    rewardType: string;
+    rewardLabel: string;
+  } | null;
+  store: { id: string; name: string } | null;
+  nextAction: string;
+};
+
 export type GuestGamePilotLedgerPreflight = {
   status: GuestGamePilotLedgerPreflightStatus;
   statusLabel: string;
@@ -723,6 +749,7 @@ export type GuestGamePilotLedgerPreflight = {
   staleProcessingCount: number;
   processingCount: number;
   failedWaitingRetryCount: number;
+  previewItems: GuestGamePilotLedgerPreflightItem[];
   metric: string;
   note: string;
   nextAction: string;

@@ -1172,6 +1172,32 @@ export type GuestGamePilotLedgerPreflightStatus =
   | 'PROCESSING'
   | 'WAITING_RETRY';
 
+export type GuestGamePilotLedgerPreflightItem = {
+  id: string;
+  status: string;
+  statusLabel: string;
+  entryType: string;
+  source: string;
+  amount: number;
+  attempts: number;
+  retryReady: boolean;
+  nextAttemptAt: string | null;
+  createdAt: string;
+  guest: {
+    id: string | null;
+    displayName: string;
+    contact: string | null;
+  };
+  reward: {
+    id: string;
+    status: string;
+    rewardType: string;
+    rewardLabel: string;
+  } | null;
+  store: { id: string; name: string } | null;
+  nextAction: string;
+};
+
 export type GuestGamePilotLedgerPreflight = {
   status: GuestGamePilotLedgerPreflightStatus;
   statusLabel: string;
@@ -1184,6 +1210,7 @@ export type GuestGamePilotLedgerPreflight = {
   staleProcessingCount: number;
   processingCount: number;
   failedWaitingRetryCount: number;
+  previewItems: GuestGamePilotLedgerPreflightItem[];
   metric: string;
   note: string;
   nextAction: string;
@@ -2330,6 +2357,7 @@ function buildPilotLedgerPreflight({
   staleProcessingCount,
   processingCount,
   failedWaitingRetryCount,
+  previewItems,
 }: {
   targetStore: PilotStoreRow | null;
   pendingCount: number;
@@ -2337,6 +2365,7 @@ function buildPilotLedgerPreflight({
   staleProcessingCount: number;
   processingCount: number;
   failedWaitingRetryCount: number;
+  previewItems: GuestGamePilotLedgerPreflightItem[];
 }): GuestGamePilotLedgerPreflight {
   const readyCount = pendingCount + retryReadyCount + staleProcessingCount;
   const freshProcessingCount = Math.max(
@@ -2358,6 +2387,7 @@ function buildPilotLedgerPreflight({
       staleProcessingCount,
       processingCount,
       failedWaitingRetryCount,
+      previewItems,
       metric,
       note: 'Preflight не может проверить bonus ledger без выбранного пилотного клуба.',
       nextAction:
@@ -2378,6 +2408,7 @@ function buildPilotLedgerPreflight({
       staleProcessingCount,
       processingCount,
       failedWaitingRetryCount,
+      previewItems,
       metric,
       note: 'В pilot ledger есть ровно одна запись, которую canary dispatch может забрать по scope клуба.',
       nextAction:
@@ -2398,6 +2429,7 @@ function buildPilotLedgerPreflight({
       staleProcessingCount,
       processingCount,
       failedWaitingRetryCount,
+      previewItems,
       metric,
       note: 'В scope пилотного клуба больше одной готовой ledger-записи: первый Langame write перестает быть canary.',
       nextAction:
@@ -2418,6 +2450,7 @@ function buildPilotLedgerPreflight({
       staleProcessingCount,
       processingCount,
       failedWaitingRetryCount,
+      previewItems,
       metric,
       note: 'По пилотному клубу уже есть свежая PROCESSING-запись; live canary ждет завершения или stale-lock.',
       nextAction:
@@ -2438,6 +2471,7 @@ function buildPilotLedgerPreflight({
       staleProcessingCount,
       processingCount,
       failedWaitingRetryCount,
+      previewItems,
       metric,
       note: 'Есть failed ledger-запись по 1337, но nextAttemptAt еще не наступил для безопасного retry.',
       nextAction:
@@ -2457,6 +2491,7 @@ function buildPilotLedgerPreflight({
     staleProcessingCount,
     processingCount,
     failedWaitingRetryCount,
+    previewItems,
     metric,
     note: 'В pilot ledger пока нет готовой записи по клубу 1337 для первого Langame write.',
     nextAction:
@@ -2584,6 +2619,7 @@ export class GuestGamificationService {
         staleProcessingCount: 0,
         processingCount: 0,
         failedWaitingRetryCount: 0,
+        previewItems: [],
       });
     }
 
@@ -2613,6 +2649,7 @@ export class GuestGamificationService {
       staleProcessingCount,
       processingCount,
       failedWaitingRetryCount,
+      readyPreviewIds,
     ] = await Promise.all([
       this.prisma.guestBonusLedgerEntry.count({
         where: { ...baseWhere, status: 'PENDING' },
@@ -2644,7 +2681,42 @@ export class GuestGamificationService {
           nextAttemptAt: { gt: now },
         },
       }),
+      this.prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT "id"
+        FROM "GuestBonusLedgerEntry"
+        WHERE "tenantId" = ${user.tenantId}
+          AND "storeId" = ${targetStore.id}
+          AND (
+            "status" = 'PENDING'
+            OR (
+              "status" = 'FAILED'
+              AND "attempts" < ${maxAttempts}
+              AND ("nextAttemptAt" IS NULL OR "nextAttemptAt" <= ${now})
+            )
+            OR (
+              "status" = 'PROCESSING'
+              AND "attempts" < ${maxAttempts}
+              AND "lockedAt" < ${staleLockedBefore}
+            )
+          )
+        ORDER BY COALESCE("nextAttemptAt", "createdAt"), "createdAt"
+        LIMIT 3
+      `),
     ]);
+    const previewRows = readyPreviewIds.length
+      ? await this.prisma.guestBonusLedgerEntry.findMany({
+          where: {
+            tenantId: user.tenantId,
+            id: { in: readyPreviewIds.map((item) => item.id) },
+          },
+          select: bonusLedgerAuditSelect,
+        })
+      : [];
+    const previewById = new Map(previewRows.map((row) => [row.id, row]));
+    const previewItems = readyPreviewIds
+      .map((item) => previewById.get(item.id))
+      .filter((row): row is BonusLedgerAuditRow => Boolean(row))
+      .map((row) => mapPilotLedgerPreflightItem(row, now));
 
     return buildPilotLedgerPreflight({
       targetStore,
@@ -2653,6 +2725,7 @@ export class GuestGamificationService {
       staleProcessingCount,
       processingCount,
       failedWaitingRetryCount,
+      previewItems,
     });
   }
 
@@ -7926,6 +7999,37 @@ function mapBonusLedgerAuditItem(
     processedBy: mapUser(row.processedByUser),
     reconciliation,
     nextAction: bonusLedgerNextAction(row, retryReady, reconciliation),
+  };
+}
+
+function mapPilotLedgerPreflightItem(
+  row: BonusLedgerAuditRow,
+  now: Date,
+): GuestGamePilotLedgerPreflightItem {
+  const item = mapBonusLedgerAuditItem(row, null, now);
+
+  return {
+    id: item.id,
+    status: item.status,
+    statusLabel: item.statusLabel,
+    entryType: item.entryType,
+    source: item.source,
+    amount: item.amount,
+    attempts: item.attempts,
+    retryReady: item.retryReady,
+    nextAttemptAt: item.nextAttemptAt,
+    createdAt: item.createdAt,
+    guest: item.guest,
+    reward: item.reward
+      ? {
+          id: item.reward.id,
+          status: item.reward.status,
+          rewardType: item.reward.rewardType,
+          rewardLabel: item.reward.rewardLabel,
+        }
+      : null,
+    store: item.store,
+    nextAction: item.nextAction,
   };
 }
 

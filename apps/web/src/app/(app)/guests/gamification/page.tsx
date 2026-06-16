@@ -239,6 +239,7 @@ const emptyWorkspace: GuestGamificationWorkspace = {
         staleProcessingCount: 0,
         processingCount: 0,
         failedWaitingRetryCount: 0,
+        previewItems: [],
         metric: "0 ready / 0 pending / 0 retry",
         note: "Preflight появится после ответа API workspace.",
         nextAction: "Дождаться ответа API workspace.",

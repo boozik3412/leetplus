@@ -56,6 +56,11 @@ function createPrismaMock() {
     guestBonusBalanceSnapshot: {
       findMany: jest.fn(),
     },
+    guestBonusLedgerEntry: {
+      count: jest.fn(),
+      findMany: jest.fn(),
+    },
+    $queryRaw: jest.fn(),
   } as any;
 }
 
@@ -356,6 +361,7 @@ function pilotLedgerPreflightFixture(
     staleProcessingCount: 0,
     processingCount: 0,
     failedWaitingRetryCount: 0,
+    previewItems: [],
     metric: '0 ready / 0 pending / 0 retry',
     note: 'No pilot ledger entry is ready.',
     nextAction: 'Queue one approved reward.',
@@ -950,6 +956,107 @@ describe('GuestGamificationService', () => {
           }),
         ]),
       );
+    });
+  });
+
+  describe('pilot ledger preflight', () => {
+    it('returns a safe claim-order preview without raw phone data', async () => {
+      const { service, prisma } = createService();
+      const createdAt = new Date('2026-06-10T09:00:00.000Z');
+      const ledgerRow = {
+        id: 'ledger-1',
+        guestId: 'guest-1',
+        profileId: 'profile-1',
+        rewardId: 'reward-1',
+        storeId: 'store-1337',
+        status: 'PENDING',
+        entryType: 'EARN',
+        source: 'GAMIFICATION_REWARD',
+        amount: new Prisma.Decimal(50),
+        balanceBefore: null,
+        balanceAfter: null,
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: '1337.langame.ru',
+        externalGuestId: 'lg-guest-1',
+        attempts: 0,
+        nextAttemptAt: null,
+        processedAt: null,
+        confirmedAt: null,
+        failedAt: null,
+        canceledAt: null,
+        errorCode: null,
+        errorMessage: null,
+        reason: 'Quest reward',
+        metadata: {
+          phoneMasked: '+7 *** **-99',
+          rawPhone: '79999999999',
+        },
+        createdAt,
+        updatedAt: createdAt,
+        reward: {
+          id: 'reward-1',
+          status: 'APPROVED',
+          rewardType: 'BONUS',
+          rewardLabel: 'Первый квест',
+          rewardCode: 'LP-1',
+          qualifiedAt: createdAt,
+          paidAt: null,
+        },
+        profile: {
+          id: 'profile-1',
+          displayName: 'Игрок 1337',
+          contactMasked: '+7 *** **-99',
+        },
+        guest: {
+          id: 'guest-1',
+          externalDomain: '1337.langame.ru',
+          externalGuestId: 'lg-guest-1',
+          fullNameMasked: 'И***',
+          phoneMasked: '+7 *** **-99',
+          emailMasked: null,
+        },
+        store: { id: 'store-1337', name: '1337' },
+        createdByUser: null,
+        processedByUser: null,
+      };
+
+      prisma.guestBonusLedgerEntry.count
+        .mockResolvedValueOnce(1)
+        .mockResolvedValueOnce(0)
+        .mockResolvedValueOnce(0)
+        .mockResolvedValueOnce(0)
+        .mockResolvedValueOnce(0);
+      prisma.$queryRaw.mockResolvedValue([{ id: 'ledger-1' }]);
+      prisma.guestBonusLedgerEntry.findMany.mockResolvedValue([ledgerRow]);
+
+      const preflight = await (service as any).getPilotBonusLedgerPreflight(
+        user,
+        pilotStoreFixture(),
+      );
+
+      expect(preflight).toMatchObject({
+        status: 'READY',
+        ready: true,
+        readyCount: 1,
+        pendingCount: 1,
+        previewItems: [
+          expect.objectContaining({
+            id: 'ledger-1',
+            amount: 50,
+            status: 'PENDING',
+            guest: expect.objectContaining({
+              displayName: 'Игрок 1337',
+              contact: '+7 *** **-99',
+            }),
+            reward: expect.objectContaining({
+              rewardType: 'BONUS',
+              rewardLabel: 'Первый квест',
+            }),
+          }),
+        ],
+      });
+      expect(JSON.stringify(preflight)).not.toContain('79999999999');
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
     });
   });
 

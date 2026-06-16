@@ -28,11 +28,17 @@ function createPrismaMock() {
     guestBonusLedgerEntry: {
       groupBy: jest.fn(),
       findMany: jest.fn(),
+      findFirst: jest.fn(),
       createMany: jest.fn(),
+      update: jest.fn(),
     },
     guestGameReward: {
       count: jest.fn(),
       findMany: jest.fn(),
+      updateMany: jest.fn(),
+    },
+    guestGameDelivery: {
+      updateMany: jest.fn(),
     },
     guest: {
       findFirst: jest.fn(),
@@ -64,10 +70,15 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   );
 
   prisma.guestBonusLedgerEntry.groupBy.mockResolvedValue([]);
+  prisma.guestBonusLedgerEntry.findFirst.mockResolvedValue(null);
   prisma.guestBonusLedgerEntry.createMany.mockResolvedValue({ count: 0 });
+  prisma.guestBonusLedgerEntry.update.mockResolvedValue({});
   prisma.guestGameReward.count.mockResolvedValue(0);
   prisma.guestGameReward.findMany.mockResolvedValue([]);
+  prisma.guestGameReward.updateMany.mockResolvedValue({ count: 0 });
+  prisma.guestGameDelivery.updateMany.mockResolvedValue({ count: 0 });
   prisma.guest.findFirst.mockResolvedValue(null);
+  prisma.$transaction.mockImplementation((callback) => callback(prisma));
 
   return {
     prisma,
@@ -760,5 +771,64 @@ describe('GuestBonusLedgerService', () => {
         }),
       }),
     );
+  });
+
+  it('cancels the linked approved reward and pending deliveries when a ledger entry is canceled', async () => {
+    const { service, prisma } = createService();
+    const entry = ledgerEntry({
+      id: 'ledger-cancel-1',
+      rewardId: 'reward-cancel-1',
+      amount: new Prisma.Decimal(40),
+      status: 'PENDING',
+    });
+
+    prisma.guestBonusLedgerEntry.findFirst.mockResolvedValue(entry);
+    prisma.guestGameReward.updateMany.mockResolvedValue({ count: 1 });
+    prisma.guestGameDelivery.updateMany.mockResolvedValue({ count: 2 });
+
+    const result = await service.cancelEntry(user, 'ledger-cancel-1', {
+      reason: 'Wrong guest match',
+    });
+
+    expect(prisma.guestBonusLedgerEntry.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'ledger-cancel-1' },
+        data: expect.objectContaining({
+          status: 'CANCELED',
+          processedByUserId: user.id,
+          lockedAt: null,
+          nextAttemptAt: null,
+          errorMessage: 'Wrong guest match',
+        }),
+      }),
+    );
+    expect(prisma.guestGameReward.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'reward-cancel-1',
+        tenantId: user.tenantId,
+        status: 'APPROVED',
+      },
+      data: { status: 'CANCELED' },
+    });
+    expect(prisma.guestGameDelivery.updateMany).toHaveBeenCalledWith({
+      where: {
+        tenantId: user.tenantId,
+        rewardId: 'reward-cancel-1',
+        status: { notIn: ['SENT', 'CANCELED'] },
+      },
+      data: expect.objectContaining({
+        status: 'CANCELED',
+        canceledAt: expect.any(Date),
+        note: expect.stringContaining('Wrong guest match'),
+      }),
+    });
+    expect(result).toMatchObject({
+      ledgerEntryId: 'ledger-cancel-1',
+      rewardId: 'reward-cancel-1',
+      status: 'CANCELED',
+      amount: 40,
+      note: expect.stringContaining('reward canceled: 1'),
+    });
+    expect(result.note).toContain('deliveries canceled: 2');
   });
 });

@@ -477,16 +477,55 @@ export class GuestBonusLedgerService {
       );
     }
 
-    await this.prisma.guestBonusLedgerEntry.update({
-      where: { id },
-      data: {
-        status: 'CANCELED',
-        processedByUserId: user.id,
-        canceledAt: new Date(),
-        lockedAt: null,
-        nextAttemptAt: null,
-        errorMessage: reason,
-      },
+    const canceled = await this.prisma.$transaction(async (tx) => {
+      const canceledAt = new Date();
+      await tx.guestBonusLedgerEntry.update({
+        where: { id },
+        data: {
+          status: 'CANCELED',
+          processedByUserId: user.id,
+          canceledAt,
+          lockedAt: null,
+          nextAttemptAt: null,
+          errorMessage: reason,
+        },
+      });
+
+      if (!row.rewardId) {
+        return { rewards: 0, deliveries: 0 };
+      }
+
+      const rewards = await tx.guestGameReward.updateMany({
+        where: {
+          id: row.rewardId,
+          tenantId: user.tenantId,
+          status: 'APPROVED',
+        },
+        data: {
+          status: 'CANCELED',
+        },
+      });
+
+      const deliveries =
+        rewards.count > 0
+          ? await tx.guestGameDelivery.updateMany({
+              where: {
+                tenantId: user.tenantId,
+                rewardId: row.rewardId,
+                status: { notIn: ['SENT', 'CANCELED'] },
+              },
+              data: {
+                status: 'CANCELED',
+                canceledAt,
+                note: truncate(
+                  `Отменено вместе с bonus ledger ${row.id}: ${reason}`,
+                  1000,
+                ),
+              },
+            })
+          : { count: 0 };
+
+      return { rewards: rewards.count, deliveries: deliveries.count };
     });
 
     return {
@@ -496,7 +535,7 @@ export class GuestBonusLedgerService {
       amount: decimalToNumber(row.amount),
       externalDomain: row.externalDomain,
       externalGuestId: row.externalGuestId,
-      note: reason,
+      note: bonusLedgerCancelNote(reason, canceled),
     };
   }
 
@@ -1247,6 +1286,18 @@ function langameBalanceConfirmationNote(entry: ClaimedBonusLedgerEntry) {
   const actionLabel = toDecimal(entry.amount).lt(0) ? 'списание' : 'начисление';
 
   return `Langame подтвердил ${actionLabel} ${balanceLabel}.`;
+}
+
+function bonusLedgerCancelNote(
+  reason: string,
+  canceled: { rewards: number; deliveries: number },
+) {
+  const details = [
+    canceled.rewards ? `reward canceled: ${canceled.rewards}` : null,
+    canceled.deliveries ? `deliveries canceled: ${canceled.deliveries}` : null,
+  ].filter(Boolean);
+
+  return details.length ? `${reason} ${details.join(', ')}.` : reason;
 }
 
 function normalizeLangamePhone(value: string | null) {

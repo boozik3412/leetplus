@@ -8177,32 +8177,62 @@ function mapProfile(row: ProfileRow): GuestGameProfile {
   };
 }
 
-function resolveProfileCommunication(row: ProfileRow): {
+type ProfileCommunicationConsent = {
   phoneConsentStatus: 'UNKNOWN' | 'GRANTED' | 'DENIED' | 'UNSUBSCRIBED';
   phoneConsentSource: string | null;
   phoneConsentAt: Date | null;
   unsubscribedAt: Date | null;
-} {
-  if (
-    row.guest &&
-    (row.guest.phoneConsentStatus !== 'UNKNOWN' ||
-      !row.lead ||
-      row.lead.phoneConsentStatus === 'UNKNOWN')
-  ) {
-    return {
-      phoneConsentStatus: row.guest.phoneConsentStatus,
-      phoneConsentSource: row.guest.phoneConsentSource,
-      phoneConsentAt: row.guest.phoneConsentAt,
-      unsubscribedAt: row.guest.unsubscribedAt,
-    };
-  }
+};
 
-  if (row.lead) {
+function resolveProfileCommunication(
+  row: ProfileRow,
+): ProfileCommunicationConsent {
+  const sources: ProfileCommunicationConsent[] = [
+    ...(row.guest
+      ? [
+          {
+            phoneConsentStatus: row.guest.phoneConsentStatus,
+            phoneConsentSource: row.guest.phoneConsentSource,
+            phoneConsentAt: row.guest.phoneConsentAt,
+            unsubscribedAt: row.guest.unsubscribedAt,
+          },
+        ]
+      : []),
+    ...(row.lead
+      ? [
+          {
+            phoneConsentStatus: row.lead.phoneConsentStatus,
+            phoneConsentSource: row.lead.phoneConsentSource,
+            phoneConsentAt: row.lead.phoneConsentAt,
+            unsubscribedAt: row.lead.unsubscribedAt,
+          },
+        ]
+      : []),
+    {
+      phoneConsentStatus: row.phoneConsentStatus,
+      phoneConsentSource: row.phoneConsentSource,
+      phoneConsentAt: row.phoneConsentAt,
+      unsubscribedAt: row.unsubscribedAt,
+    },
+  ];
+
+  const selected = sources
+    .filter(
+      (source) =>
+        source.phoneConsentStatus !== 'UNKNOWN' ||
+        Boolean(source.phoneConsentAt || source.unsubscribedAt),
+    )
+    .sort(
+      (left, right) =>
+        profileConsentTimestamp(right) - profileConsentTimestamp(left),
+    )[0];
+
+  if (selected) {
     return {
-      phoneConsentStatus: row.lead.phoneConsentStatus,
-      phoneConsentSource: row.lead.phoneConsentSource,
-      phoneConsentAt: row.lead.phoneConsentAt,
-      unsubscribedAt: row.lead.unsubscribedAt,
+      ...selected,
+      phoneConsentStatus: selected.unsubscribedAt
+        ? 'UNSUBSCRIBED'
+        : selected.phoneConsentStatus,
     };
   }
 
@@ -8212,6 +8242,16 @@ function resolveProfileCommunication(row: ProfileRow): {
     phoneConsentAt: null,
     unsubscribedAt: null,
   };
+}
+
+function profileConsentTimestamp(source: ProfileCommunicationConsent) {
+  const datedAt = source.unsubscribedAt ?? source.phoneConsentAt;
+
+  if (datedAt) {
+    return datedAt.getTime();
+  }
+
+  return source.phoneConsentStatus === 'UNKNOWN' ? 0 : 1;
 }
 
 function mapLootBox(row: LootBoxRow): GuestGameLootBox {

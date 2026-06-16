@@ -55,6 +55,12 @@ function createPrismaMock() {
     guestGameDeliveryEvent: {
       create: jest.fn(),
     },
+    guestGameProfile: {
+      findMany: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+      findFirst: jest.fn(),
+    },
     tenant: {
       findMany: jest.fn(),
       findFirst: jest.fn(),
@@ -778,6 +784,56 @@ describe('GuestGamificationService', () => {
     delete process.env.GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_BOT_TOKEN;
     delete process.env.GUEST_PORTAL_TELEGRAM_BOT_TOKEN;
     delete process.env.TELEGRAM_BOT_TOKEN;
+  });
+
+  describe('getProfiles', () => {
+    it('uses profile-level communication consent for game-only Telegram profiles', async () => {
+      const { service, prisma } = createService();
+
+      prisma.guestGameProfile.findMany.mockResolvedValue([
+        {
+          id: 'profile-telegram-only',
+          tenantId: user.tenantId,
+          guestId: null,
+          leadId: null,
+          createdByUserId: null,
+          displayName: 'Telegram player',
+          contactMasked: '+7 *** **-33',
+          phoneHash: 'phone-hash-telegram',
+          telegramIdentity: 'chat:123456',
+          maxIdentity: null,
+          phoneConsentStatus: 'GRANTED',
+          phoneConsentSource: 'telegram_auth_contact_share',
+          phoneConsentAt: now,
+          unsubscribedAt: null,
+          xp: 0,
+          level: 1,
+          status: 'ACTIVE',
+          lastActivityAt: now,
+          createdAt: now,
+          updatedAt: now,
+          guest: null,
+          lead: null,
+          createdByUser: null,
+        },
+      ]);
+
+      const result = await service.getProfiles(user);
+
+      expect(result[0]).toMatchObject({
+        id: 'profile-telegram-only',
+        guest: null,
+        lead: null,
+        telegramIdentity: 'chat:123456',
+        communication: {
+          phoneConsentStatus: 'GRANTED',
+          phoneConsentSource: 'telegram_auth_contact_share',
+          phoneConsentAt: isoNow,
+          telegramReady: true,
+          botReady: true,
+        },
+      });
+    });
   });
 
   describe('integration readiness', () => {

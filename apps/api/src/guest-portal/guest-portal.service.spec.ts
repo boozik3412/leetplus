@@ -17,6 +17,10 @@ function createPrismaMock() {
       findFirst: jest.fn(),
       findMany: jest.fn(),
     },
+    guestCrmLead: {
+      findFirst: jest.fn(),
+      update: jest.fn(),
+    },
     store: {
       findMany: jest.fn(),
     },
@@ -87,6 +91,8 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   prisma.tenant.findFirst.mockResolvedValue(null);
   prisma.guest.findFirst.mockResolvedValue(null);
   prisma.guest.findMany.mockResolvedValue([]);
+  prisma.guestCrmLead.findFirst.mockResolvedValue(null);
+  prisma.guestCrmLead.update.mockResolvedValue({});
   prisma.store.findMany.mockResolvedValue([]);
   prisma.guestPortalOtpChallenge.findFirst.mockResolvedValue(null);
   prisma.guestPortalOtpChallenge.update.mockResolvedValue({});
@@ -1250,6 +1256,10 @@ describe('GuestPortalService', () => {
             telegramIdentity: 'chat:123456',
             phoneHash,
             contactMasked: '***2233',
+            phoneConsentStatus: 'GRANTED',
+            phoneConsentSource: 'telegram_auth_contact_share',
+            phoneConsentAt: expect.any(Date),
+            unsubscribedAt: null,
             status: 'ACTIVE',
           }),
         }),
@@ -1525,6 +1535,10 @@ describe('GuestPortalService', () => {
             displayName: 'Гость клуба',
             contactMasked: '+7 *** ***-99-99',
             phoneHash: 'phone-hash-1',
+            phoneConsentStatus: 'GRANTED',
+            phoneConsentSource: 'guest_portal_game_consent',
+            phoneConsentAt: consentAcceptedAt,
+            unsubscribedAt: null,
             status: 'ACTIVE',
           }),
         }),
@@ -1569,6 +1583,88 @@ describe('GuestPortalService', () => {
         expect.objectContaining({ profileId: 'profile-1' }),
       );
       expect(result.token).toBe('guest-token');
+    });
+  });
+
+  describe('updateCommunicationPreferences', () => {
+    it('stores communication consent on a profile-only game participant', async () => {
+      const { jwtService, prisma, service } = createService();
+      const portalPayload = {
+        communications: {
+          phone: { consentStatus: 'GRANTED' },
+        },
+      };
+      jest
+        .spyOn(service as any, 'buildPortalPayload')
+        .mockResolvedValue(portalPayload);
+
+      jwtService.verifyAsync.mockResolvedValue({
+        sub: 'telegram-auth:1',
+        purpose: 'guest_portal',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        guestId: null,
+        profileId: 'profile-1',
+        phoneHash: 'phone-hash-1',
+      });
+      prisma.tenant.findFirst.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'Leet Clubs',
+        slug: 'leet',
+        stores: [
+          {
+            id: 'store-1',
+            publicSlug: 'club-1337',
+            name: '1337',
+            address: 'ул. Ленина, 1',
+          },
+        ],
+      });
+      prisma.guestGameProfile.findFirst.mockResolvedValue({
+        id: 'profile-1',
+        tenantId: 'tenant-1',
+        guestId: null,
+        leadId: null,
+        phoneHash: 'phone-hash-1',
+        phoneConsentStatus: 'UNKNOWN',
+        phoneConsentSource: null,
+        phoneConsentAt: null,
+        unsubscribedAt: null,
+      });
+
+      const result = await service.updateCommunicationPreferences(
+        'Bearer guest-token',
+        { action: 'GRANT' },
+      );
+
+      expect(prisma.guestGameProfile.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'profile-1' },
+          data: expect.objectContaining({
+            phoneConsentStatus: 'GRANTED',
+            phoneConsentSource: 'guest_portal',
+            phoneConsentAt: expect.any(Date),
+            unsubscribedAt: null,
+          }),
+        }),
+      );
+      expect(prisma.guestGameEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            tenantId: 'tenant-1',
+            profileId: 'profile-1',
+            guestId: null,
+            eventType: 'GAME_COMMUNICATION_CONSENT_UPDATED',
+            source: 'GUEST_PORTAL',
+            payload: expect.objectContaining({
+              action: 'GRANT',
+              consentStatus: 'GRANTED',
+              consentSource: 'guest_portal',
+            }),
+          }),
+        }),
+      );
+      expect(result.portal).toBe(portalPayload);
     });
   });
 

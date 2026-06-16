@@ -50,7 +50,11 @@ const COMMUNICATION_PREFERENCE_EVENT_PREFIX =
 const TELEGRAM_LINK_EVENT_PREFIX = 'guest_portal:telegram_bot_link:';
 const TELEGRAM_AUTH_EVENT_PREFIX = 'guest_portal:telegram_auth:';
 const GAME_CONSENT_EVENT_TYPE = 'GAME_CONSENT_GRANTED';
+const GAME_COMMUNICATION_CONSENT_EVENT_TYPE =
+  'GAME_COMMUNICATION_CONSENT_UPDATED';
 const GAME_CONSENT_VERSION = 'guest-game-v1-2026-06-15';
+const GAME_PROFILE_CONSENT_SOURCE = 'guest_portal_game_consent';
+const TELEGRAM_AUTH_CONSENT_SOURCE = 'telegram_auth_contact_share';
 const GAME_PROFILE_LINKED_EVENT_TYPE = 'GAME_PROFILE_LINKED';
 const GAME_PROFILE_LINK_SOURCE = 'GUEST_PORTAL_PROFILE_LINK';
 const GAME_SUMMARY_MISSION_LIMIT = 6;
@@ -1400,7 +1404,13 @@ export class GuestPortalService {
           status: 'ACTIVE',
         },
         orderBy: { updatedAt: 'desc' },
-        select: { id: true, telegramIdentity: true, maxIdentity: true },
+        select: {
+          id: true,
+          telegramIdentity: true,
+          maxIdentity: true,
+          phoneConsentStatus: true,
+          unsubscribedAt: true,
+        },
       }),
     ]);
 
@@ -1412,7 +1422,13 @@ export class GuestPortalService {
             status: 'ACTIVE',
           },
           orderBy: { updatedAt: 'desc' },
-          select: { id: true, telegramIdentity: true, maxIdentity: true },
+          select: {
+            id: true,
+            telegramIdentity: true,
+            maxIdentity: true,
+            phoneConsentStatus: true,
+            unsubscribedAt: true,
+          },
         })
       : profileByPhone;
 
@@ -1763,6 +1779,10 @@ export class GuestPortalService {
     challenge: GuestPortalOtpChallengeRegistration,
   ) {
     const now = new Date();
+    const profileConsentData = gameProfileConsentGrantData(
+      GAME_PROFILE_CONSENT_SOURCE,
+      challenge.gameConsentAcceptedAt,
+    );
 
     return this.prisma.$transaction(async (tx) => {
       const guest = challenge.guestId
@@ -1800,6 +1820,7 @@ export class GuestPortalService {
                 guest?.fullNameMasked ??
                 guest?.externalGuestId ??
                 'Гость клуба',
+              ...profileConsentData,
               status: 'ACTIVE',
               lastActivityAt: now,
             },
@@ -1818,6 +1839,7 @@ export class GuestPortalService {
                 guest?.emailMasked ??
                 challenge.phoneMasked,
               phoneHash: challenge.phoneHash,
+              ...profileConsentData,
               status: 'ACTIVE',
               lastActivityAt: now,
             },
@@ -1983,9 +2005,9 @@ export class GuestPortalService {
       guest?.id ?? null,
     );
 
-    if (!guest && !crmLead) {
+    if (!guest && !crmLead && !existingProfile) {
       throw new BadRequestException(
-        'Профиль гостя или CRM-заявка еще не найдены. Согласие можно сохранить после сопоставления с Langame или CRM-лидом.',
+        'Профиль гостя, игровой профиль или CRM-заявка еще не найдены. Согласие можно сохранить после регистрации в геймификации, сопоставления с Langame или CRM-лидом.',
       );
     }
 
@@ -2049,6 +2071,35 @@ export class GuestPortalService {
             this.prisma.guestCrmLead.update({
               where: { id: crmLead.id },
               data: leadData,
+            }),
+          ]
+        : []),
+      ...(existingProfile
+        ? [
+            this.prisma.guestGameProfile.update({
+              where: { id: existingProfile.id },
+              data: consentData,
+            }),
+            this.prisma.guestGameEvent.create({
+              data: {
+                tenantId: payload.tenantId,
+                profileId: existingProfile.id,
+                guestId: guest?.id ?? payload.guestId ?? null,
+                eventType: GAME_COMMUNICATION_CONSENT_EVENT_TYPE,
+                source: 'GUEST_PORTAL',
+                externalId: `communication:${existingProfile.id}:${now.getTime()}:${action.toLowerCase()}`,
+                occurredAt: now,
+                payload: {
+                  action,
+                  consentStatus: consentData.phoneConsentStatus,
+                  consentSource: consentData.phoneConsentSource,
+                  consentAt: consentData.phoneConsentAt?.toISOString() ?? null,
+                  unsubscribedAt:
+                    consentData.unsubscribedAt?.toISOString() ?? null,
+                },
+                note: communicationPreferenceEventNote(action),
+                createdAt: now,
+              },
             }),
           ]
         : []),
@@ -2617,6 +2668,7 @@ export class GuestPortalService {
           guest?.fullNameMasked ??
           guest?.externalGuestId ??
           'Гость клуба',
+        ...gameProfileConsentGrantData(TELEGRAM_AUTH_CONSENT_SOURCE, now),
         status: 'ACTIVE',
         lastActivityAt: now,
       };
@@ -4293,6 +4345,8 @@ export class GuestPortalService {
       id: string;
       telegramIdentity: string | null;
       maxIdentity: string | null;
+      phoneConsentStatus: GuestCommunicationConsentStatus;
+      unsubscribedAt: Date | null;
     } | null;
     guest: {
       id: string;
@@ -4368,7 +4422,7 @@ export class GuestPortalService {
     );
 
     if (config.telegram.enabled) {
-      if (input.guest?.unsubscribedAt) {
+      if (input.guest?.unsubscribedAt || input.profile?.unsubscribedAt) {
         return {
           channel: 'TELEGRAM',
           status: 'BLOCKED',
@@ -4414,7 +4468,7 @@ export class GuestPortalService {
     }
 
     if (config.max.enabled) {
-      if (input.guest?.unsubscribedAt) {
+      if (input.guest?.unsubscribedAt || input.profile?.unsubscribedAt) {
         return {
           channel: 'MAX',
           status: 'BLOCKED',
@@ -6958,6 +7012,10 @@ function buildCommunications(
     contactMasked: string | null;
     telegramIdentity: string | null;
     maxIdentity: string | null;
+    phoneConsentStatus: 'UNKNOWN' | 'GRANTED' | 'DENIED' | 'UNSUBSCRIBED';
+    phoneConsentSource: string | null;
+    phoneConsentAt: Date | null;
+    unsubscribedAt: Date | null;
   } | null,
   communicationEvents: Array<{
     id: string;
@@ -6972,7 +7030,11 @@ function buildCommunications(
     unsubscribedAt: Date | null;
   } | null,
 ): GuestPortalCommunications {
-  const consentSource = guest ?? lead ?? null;
+  const consentSource = resolvePortalCommunicationConsent(
+    guest,
+    lead ?? null,
+    profile,
+  );
   const consentStatus = consentSource?.unsubscribedAt
     ? 'UNSUBSCRIBED'
     : (consentSource?.phoneConsentStatus ?? 'UNKNOWN');
@@ -7004,6 +7066,66 @@ function buildCommunications(
     ),
     history: mapCommunicationPreferenceHistory(communicationEvents),
   };
+}
+
+function gameProfileConsentGrantData(source: string, consentAt?: Date | null) {
+  if (!consentAt) {
+    return {};
+  }
+
+  return {
+    phoneConsentStatus: GuestCommunicationConsentStatus.GRANTED,
+    phoneConsentSource: source,
+    phoneConsentAt: consentAt,
+    unsubscribedAt: null,
+  };
+}
+
+function resolvePortalCommunicationConsent(
+  guest: {
+    phoneConsentStatus: 'UNKNOWN' | 'GRANTED' | 'DENIED' | 'UNSUBSCRIBED';
+    phoneConsentSource: string | null;
+    phoneConsentAt: Date | null;
+    unsubscribedAt: Date | null;
+  } | null,
+  lead: {
+    phoneConsentStatus: 'UNKNOWN' | 'GRANTED' | 'DENIED' | 'UNSUBSCRIBED';
+    phoneConsentSource: string | null;
+    phoneConsentAt: Date | null;
+    unsubscribedAt: Date | null;
+  } | null,
+  profile: {
+    phoneConsentStatus: 'UNKNOWN' | 'GRANTED' | 'DENIED' | 'UNSUBSCRIBED';
+    phoneConsentSource: string | null;
+    phoneConsentAt: Date | null;
+    unsubscribedAt: Date | null;
+  } | null,
+) {
+  return [guest, lead, profile]
+    .filter((source): source is NonNullable<typeof source> => Boolean(source))
+    .filter(
+      (source) =>
+        source.phoneConsentStatus !== 'UNKNOWN' ||
+        Boolean(source.phoneConsentAt || source.unsubscribedAt),
+    )
+    .sort(
+      (left, right) =>
+        consentSourceTimestamp(right) - consentSourceTimestamp(left),
+    )[0];
+}
+
+function consentSourceTimestamp(source: {
+  phoneConsentStatus: 'UNKNOWN' | 'GRANTED' | 'DENIED' | 'UNSUBSCRIBED';
+  phoneConsentAt: Date | null;
+  unsubscribedAt: Date | null;
+}) {
+  const datedAt = source.unsubscribedAt ?? source.phoneConsentAt;
+
+  if (datedAt) {
+    return datedAt.getTime();
+  }
+
+  return source.phoneConsentStatus === 'UNKNOWN' ? 0 : 1;
 }
 
 function communicationChannel(

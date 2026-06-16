@@ -10,6 +10,7 @@ import type {
 
 type LoadState = "loading" | "ready" | "empty" | "error";
 type SubmitState = "idle" | "submitting";
+type GameNextAction = GuestPortalGameSummary["nextActions"][number];
 
 class EmptySessionError extends Error {}
 
@@ -239,10 +240,13 @@ function ReadyGameView({
     [summary.store.id, summary.store.publicSlug, summary.tenant.slug],
   );
   const primaryAction = summary.nextActions[0] ?? null;
+  const primaryActionHref = primaryAction
+    ? gameActionHref(primaryAction, guestPortalHref)
+    : null;
 
   return (
     <div className="py-5">
-      <section className="grid gap-4 lg:grid-cols-[1.3fr_0.7fr]">
+      <section id="profile" className="grid gap-4 lg:grid-cols-[1.3fr_0.7fr]">
         <div className="rounded-lg border border-white/10 bg-white/[0.06] p-5">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
@@ -303,7 +307,15 @@ function ReadyGameView({
             {primaryAction?.description ??
               "Как только появится новая награда или квест, он будет здесь."}
           </p>
-          <div className="mt-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+          <div className="mt-5 grid gap-2">
+            {primaryActionHref ? (
+              <Link
+                href={primaryActionHref}
+                className="rounded-lg border border-zinc-950/25 bg-white/45 px-4 py-3 text-center text-sm font-black text-zinc-950 transition hover:border-zinc-950/50 hover:bg-white/70"
+              >
+                {gameActionButtonLabel(primaryAction)}
+              </Link>
+            ) : null}
             <button
               type="button"
               onClick={onCheckIn}
@@ -342,7 +354,7 @@ function ReadyGameView({
 
       <section className="mt-4 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
         <BattlePassPanel battlePass={summary.battlePass.active} />
-        <ChannelsPanel summary={summary} />
+        <ChannelsPanel summary={summary} guestPortalHref={guestPortalHref} />
       </section>
 
       <section className="mt-4">
@@ -377,7 +389,10 @@ function RewardResultPanel({ summary }: { summary: GuestPortalGameSummary }) {
   const hasRewardResult = Boolean(reward || latestBonus);
 
   return (
-    <section className="rounded-lg border border-white/10 bg-white/[0.06] p-5">
+    <section
+      id="rewards"
+      className="rounded-lg border border-white/10 bg-white/[0.06] p-5"
+    >
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
@@ -513,7 +528,10 @@ function LootBoxesPanel({
   const [openedLootBoxId, setOpenedLootBoxId] = useState<string | null>(null);
 
   return (
-    <section className="rounded-lg border border-white/10 bg-white/[0.06] p-5">
+    <section
+      id="lootBoxes"
+      className="rounded-lg border border-white/10 bg-white/[0.06] p-5"
+    >
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
@@ -655,7 +673,10 @@ function MissionsPanel({
   missions: GuestPortalGameSummary["missions"]["featured"];
 }) {
   return (
-    <section className="rounded-lg border border-white/10 bg-white/[0.06] p-5">
+    <section
+      id="missions"
+      className="rounded-lg border border-white/10 bg-white/[0.06] p-5"
+    >
       <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
         Миссии
       </p>
@@ -835,7 +856,10 @@ function BattlePassPanel({
   battlePass: GuestPortalGameSummary["battlePass"]["active"];
 }) {
   return (
-    <section className="rounded-lg border border-white/10 bg-white/[0.06] p-5">
+    <section
+      id="battlePass"
+      className="rounded-lg border border-white/10 bg-white/[0.06] p-5"
+    >
       <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
         Battle Pass
       </p>
@@ -1013,9 +1037,23 @@ function walletStateHint(
   return hints[state];
 }
 
-function ChannelsPanel({ summary }: { summary: GuestPortalGameSummary }) {
+function ChannelsPanel({
+  summary,
+  guestPortalHref,
+}: {
+  summary: GuestPortalGameSummary;
+  guestPortalHref: string;
+}) {
+  const communicationsHref = `${guestPortalHref}#communications`;
+  const hasRewardChannel =
+    summary.communications.telegram.readyForRewards ||
+    summary.communications.max.readyForRewards;
+
   return (
-    <section className="rounded-lg border border-white/10 bg-white/[0.06] p-5">
+    <section
+      id="communications"
+      className="rounded-lg border border-white/10 bg-white/[0.06] p-5"
+    >
       <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
         Каналы
       </p>
@@ -1036,6 +1074,19 @@ function ChannelsPanel({ summary }: { summary: GuestPortalGameSummary }) {
           status={summary.communications.max.status}
           ready={summary.communications.max.readyForRewards}
         />
+      </div>
+      <div className="mt-4 rounded-lg border border-white/10 bg-zinc-950/45 p-3">
+        <p className="text-sm font-bold text-white">
+          {hasRewardChannel
+            ? "Игровые уведомления готовы к выдаче наград."
+            : "Награды можно забрать по коду кассиру, а уведомления включаются в кабинете."}
+        </p>
+        <Link
+          href={communicationsHref}
+          className="mt-3 flex min-h-10 items-center justify-center rounded-lg border border-emerald-300/35 px-3 text-sm font-black text-emerald-100 transition hover:border-emerald-300"
+        >
+          Открыть каналы
+        </Link>
       </div>
     </section>
   );
@@ -1068,6 +1119,26 @@ function ChannelRow({
       </span>
     </div>
   );
+}
+
+function gameActionHref(action: GameNextAction, guestPortalHref: string) {
+  if (action.kind === "MATCH_LANGAME") {
+    return `${guestPortalHref}#langame-match`;
+  }
+
+  return `#${action.anchor}`;
+}
+
+function gameActionButtonLabel(action: GameNextAction) {
+  const labels = {
+    CLAIM_REWARD: "Забрать награду",
+    OPEN_LOOT_BOX: "Открыть приз",
+    FINISH_MISSION: "Открыть квест",
+    BATTLE_PASS: "Открыть сезон",
+    MATCH_LANGAME: "Связать Langame",
+  } satisfies Record<GameNextAction["kind"], string>;
+
+  return labels[action.kind];
 }
 
 async function requestGameSummary() {

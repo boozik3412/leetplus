@@ -771,12 +771,70 @@ describe('GuestGamificationService', () => {
     delete process.env.GUEST_GAME_BOT_CONSUMER_CHANNELS;
     delete process.env.GUEST_GAME_BOT_CONSUMER_DRY_RUN;
     delete process.env.GUEST_GAME_BOT_CONSUMER_TELEGRAM_BOT_TOKEN;
+    delete process.env.GUEST_GAME_TELEGRAM_LINK_SECRET;
+    delete process.env.GUEST_GAME_TELEGRAM_WEBHOOK_SECRET;
     delete process.env.GUEST_GAME_TELEGRAM_BOT_TOKEN;
+    delete process.env.GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED;
+    delete process.env.GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_BOT_TOKEN;
     delete process.env.GUEST_PORTAL_TELEGRAM_BOT_TOKEN;
     delete process.env.TELEGRAM_BOT_TOKEN;
   });
 
   describe('integration readiness', () => {
+    it('shows Telegram auth reply sender as adapter-only until API-side sending is enabled', () => {
+      process.env.GUEST_GAME_TELEGRAM_WEBHOOK_SECRET = 'telegram-secret';
+      const { service } = createService();
+
+      const readiness = (service as any).buildIntegrationReadiness([]);
+      const sender = readiness.items.find(
+        (item: { key: string }) => item.key === 'TELEGRAM_AUTH_REPLY_SENDER',
+      );
+      const senderText = JSON.stringify(sender);
+
+      expect(sender).toMatchObject({
+        status: 'MANUAL_ONLY',
+        ready: false,
+        configured: false,
+        enabled: false,
+        requiredEnv: [
+          'GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED',
+          'GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_BOT_TOKEN or GUEST_GAME_TELEGRAM_BOT_TOKEN',
+        ],
+      });
+      expect(senderText).not.toContain('telegram-secret');
+    });
+
+    it('marks Telegram auth reply sender ready without exposing token values', () => {
+      process.env.GUEST_GAME_TELEGRAM_WEBHOOK_SECRET = 'telegram-secret';
+      process.env.GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED = 'true';
+      process.env.GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_BOT_TOKEN =
+        'telegram-token';
+      const { service } = createService();
+
+      const readiness = (service as any).buildIntegrationReadiness([]);
+      const sender = readiness.items.find(
+        (item: { key: string }) => item.key === 'TELEGRAM_AUTH_REPLY_SENDER',
+      );
+      const senderText = JSON.stringify(sender);
+
+      expect(sender).toMatchObject({
+        status: 'READY',
+        ready: true,
+        configured: true,
+        enabled: true,
+        requiredEnv: [],
+      });
+      expect(sender.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ label: 'Webhook' }),
+          expect.objectContaining({ label: 'Sender' }),
+          expect.objectContaining({ label: 'Bot token' }),
+        ]),
+      );
+      expect(senderText).not.toContain('telegram-secret');
+      expect(senderText).not.toContain('telegram-token');
+    });
+
     it('shows bonus ledger scheduler as blocked until service scheduling is configured', () => {
       const { service } = createService();
 

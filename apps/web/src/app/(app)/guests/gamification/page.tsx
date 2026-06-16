@@ -87,11 +87,11 @@ const emptyWorkspace: GuestGamificationWorkspace = {
   },
   integrationReadiness: {
     summary: {
-      total: 8,
+      total: 9,
       ready: 1,
       partial: 0,
       blocked: 4,
-      manualOnly: 3,
+      manualOnly: 4,
     },
     items: [
       {
@@ -144,6 +144,21 @@ const emptyWorkspace: GuestGamificationWorkspace = {
         requiredEnv: ["GUEST_GAME_TELEGRAM_WEBHOOK_SECRET"],
         note: "Webhook принимает link-code и отписки только с секретом.",
         nextAction: "Задать webhook secret и URL в Telegram.",
+      },
+      {
+        key: "TELEGRAM_AUTH_REPLY_SENDER",
+        title: "Telegram reply sender для входа",
+        status: "MANUAL_ONLY",
+        statusLabel: "adapter-only",
+        ready: false,
+        configured: false,
+        enabled: false,
+        requiredEnv: [
+          "GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED",
+          "GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_BOT_TOKEN",
+        ],
+        note: "API-side отправка request_contact в Telegram выключена; reply payload может отправлять внешний adapter.",
+        nextAction: "Включить sender и bot token или оставить внешний adapter.",
       },
       {
         key: "TELEGRAM_DELIVERY",

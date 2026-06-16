@@ -673,6 +673,7 @@ export type GuestGameIntegrationReadinessItem = {
     | "OTP_MAX"
     | "TELEGRAM_LINK"
     | "TELEGRAM_WEBHOOK"
+    | "TELEGRAM_AUTH_REPLY_SENDER"
     | "TELEGRAM_DELIVERY"
     | "MAX_DELIVERY"
     | "BONUS_LEDGER_SCHEDULER"

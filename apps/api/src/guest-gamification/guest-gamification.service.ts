@@ -1116,6 +1116,7 @@ export type GuestGameIntegrationReadinessItem = {
     | 'OTP_MAX'
     | 'TELEGRAM_LINK'
     | 'TELEGRAM_WEBHOOK'
+    | 'TELEGRAM_AUTH_REPLY_SENDER'
     | 'TELEGRAM_DELIVERY'
     | 'MAX_DELIVERY'
     | 'BONUS_LEDGER_SCHEDULER'
@@ -3576,6 +3577,13 @@ export class GuestGamificationService {
     const telegramWebhookSecret =
       envString('GUEST_GAME_TELEGRAM_WEBHOOK_SECRET') ??
       envString('GUEST_GAME_TELEGRAM_LINK_SECRET');
+    const telegramWebhookReplyEnabled = envFlag(
+      'GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED',
+    );
+    const telegramWebhookReplyToken =
+      envString('GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_BOT_TOKEN') ??
+      envString('GUEST_GAME_TELEGRAM_BOT_TOKEN') ??
+      envString('TELEGRAM_BOT_TOKEN');
     const publicApiUrl =
       envString('PUBLIC_API_URL') ??
       envString('NEXT_PUBLIC_API_URL') ??
@@ -3588,6 +3596,30 @@ export class GuestGamificationService {
     const telegramDeliveryConfigured = Boolean(
       telegramProvider?.configured && telegramProvider.enabledByEnv,
     );
+    const telegramWebhookReplyReady = Boolean(
+      telegramWebhookSecret &&
+      telegramWebhookReplyEnabled &&
+      telegramWebhookReplyToken,
+    );
+    const telegramWebhookReplyRequiredEnv = [
+      ...(telegramWebhookSecret ? [] : ['GUEST_GAME_TELEGRAM_WEBHOOK_SECRET']),
+      ...(telegramWebhookReplyEnabled
+        ? []
+        : ['GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED']),
+      ...(telegramWebhookReplyToken
+        ? []
+        : [
+            'GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_BOT_TOKEN or GUEST_GAME_TELEGRAM_BOT_TOKEN',
+          ]),
+    ];
+    const telegramWebhookReplyStatus: GuestGameIntegrationReadinessStatus =
+      telegramWebhookReplyReady
+        ? 'READY'
+        : !telegramWebhookSecret
+          ? 'BLOCKED'
+          : telegramWebhookReplyEnabled || telegramWebhookReplyToken
+            ? 'PARTIAL'
+            : 'MANUAL_ONLY';
     const maxDeliveryConfigured = Boolean(
       maxProvider?.configured && maxProvider.enabledByEnv,
     );
@@ -3696,6 +3728,44 @@ export class GuestGamificationService {
         nextAction: telegramWebhookConfigured
           ? `Убедиться, что webhook бота указывает на ${publicApiUrl.replace(/\/$/, '')}/guest-portal/telegram/webhook.`
           : 'Задать webhook secret и только потом подключать внешний бот к production webhook.',
+      },
+      {
+        key: 'TELEGRAM_AUTH_REPLY_SENDER',
+        title: 'Telegram reply sender для входа',
+        status: telegramWebhookReplyStatus,
+        statusLabel: telegramWebhookReplyReady
+          ? 'sender ready'
+          : telegramWebhookReplyStatus === 'MANUAL_ONLY'
+            ? 'adapter-only'
+            : telegramWebhookReplyStatus === 'PARTIAL'
+              ? 'частично'
+              : 'webhook нужен',
+        ready: telegramWebhookReplyReady,
+        configured: Boolean(telegramWebhookReplyToken),
+        enabled: telegramWebhookReplyEnabled,
+        requiredEnv: telegramWebhookReplyRequiredEnv,
+        details: [
+          {
+            label: 'Webhook',
+            value: telegramWebhookSecret ? 'секрет есть' : 'секрет нужен',
+          },
+          {
+            label: 'Sender',
+            value: telegramWebhookReplyEnabled ? 'включен' : 'выключен',
+          },
+          {
+            label: 'Bot token',
+            value: telegramWebhookReplyToken
+              ? 'настроен'
+              : 'нужен для API-side send',
+          },
+        ],
+        note: telegramWebhookReplyReady
+          ? 'API сам отправляет Telegram reply payload из webhook: кнопку request_contact после /start и remove_keyboard после подтверждения. Raw chat_id используется только из текущего update в памяти.'
+          : 'По умолчанию LeetPlus возвращает safe reply payload для внешнего adapter. Для прямой отправки нужны webhook secret, env-флаг sender и bot token.',
+        nextAction: telegramWebhookReplyReady
+          ? 'Проверить /play -> Telegram deep link -> contact-share на тестовом госте и смотреть replyDispatch=SENT без raw chat id.'
+          : 'Добавить недостающие env или оставить внешний adapter, который отправляет reply payload из webhook.',
       },
       {
         key: 'TELEGRAM_DELIVERY',

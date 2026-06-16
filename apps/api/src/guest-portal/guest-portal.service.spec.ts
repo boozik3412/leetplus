@@ -293,7 +293,71 @@ function portalPayloadFixture() {
           redeemedRewards: 2,
           nextRewardLabel: '50 бонусов',
           nextPremiumRewardLabel: null,
-          levels: [],
+          levels: [
+            {
+              level: 1,
+              xp: 0,
+              freeReward: '10 бонусов',
+              premiumReward: null,
+              reached: true,
+              current: false,
+              next: false,
+            },
+            {
+              level: 2,
+              xp: 300,
+              freeReward: '20 бонусов',
+              premiumReward: null,
+              reached: true,
+              current: false,
+              next: false,
+            },
+            {
+              level: 3,
+              xp: 600,
+              freeReward: '30 бонусов',
+              premiumReward: null,
+              reached: true,
+              current: true,
+              next: false,
+            },
+            {
+              level: 4,
+              xp: 900,
+              freeReward: '50 бонусов',
+              premiumReward: null,
+              reached: false,
+              current: false,
+              next: true,
+            },
+            {
+              level: 5,
+              xp: 1200,
+              freeReward: '70 бонусов',
+              premiumReward: null,
+              reached: false,
+              current: false,
+              next: false,
+            },
+            {
+              level: 6,
+              xp: 1500,
+              freeReward: '100 бонусов',
+              premiumReward: null,
+              reached: false,
+              current: false,
+              next: false,
+            },
+            {
+              level: 7,
+              xp: 1800,
+              freeReward: '150 бонусов',
+              premiumReward: null,
+              reached: false,
+              current: false,
+              next: false,
+            },
+          ],
         },
       ],
       rewardSummary: {
@@ -495,6 +559,13 @@ describe('GuestPortalService', () => {
             id: 'season-1',
             currentLevel: 3,
             nextLevel: 4,
+            levels: [
+              expect.objectContaining({ level: 2, reached: true }),
+              expect.objectContaining({ level: 3, current: true }),
+              expect.objectContaining({ level: 4, next: true }),
+              expect.objectContaining({ level: 5, reached: false }),
+              expect.objectContaining({ level: 6, reached: false }),
+            ],
           }),
         },
         activity: {
@@ -525,6 +596,9 @@ describe('GuestPortalService', () => {
       expect(summary.generatedAt).toEqual(expect.any(String));
       expect(summary.rewards.recent).toHaveLength(2);
       expect(summary.rewards.recent[0]).not.toHaveProperty('status');
+      expect(summary.battlePass.active?.levels).toHaveLength(5);
+      expect(summary.battlePass.active?.levels[0].level).toBe(2);
+      expect(summary.battlePass.active?.levels[4].level).toBe(6);
       expect(summary).not.toHaveProperty('guestSnapshot');
       expect(summary.activity).not.toHaveProperty('timeline');
       expect(summary.activity).not.toHaveProperty('xpHistory');

@@ -479,7 +479,7 @@ export type GuestPortalGameSummary = {
     >;
   };
   battlePass: {
-    active: Pick<
+    active: (Pick<
       GuestPortalPayload["gamification"]["seasons"][number],
       | "id"
       | "name"
@@ -490,7 +490,20 @@ export type GuestPortalGameSummary = {
       | "nextRewardLabel"
       | "readyRewards"
       | "waitingApprovalRewards"
-    > | null;
+    > & {
+      levels: Array<
+        Pick<
+          GuestPortalPayload["gamification"]["seasons"][number]["levels"][number],
+          | "level"
+          | "xp"
+          | "freeReward"
+          | "premiumReward"
+          | "reached"
+          | "current"
+          | "next"
+        >
+      >;
+    }) | null;
   };
   nextActions: GuestPortalPayload["gamification"]["nextActions"];
   activity: Pick<

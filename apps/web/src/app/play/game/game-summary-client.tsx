@@ -973,6 +973,73 @@ function BattlePassPanel({
               )} ждут`}
             />
           </div>
+          {battlePass.levels.length ? (
+            <div className="mt-5">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-sm font-black text-white">
+                  Дорожка уровней
+                </h3>
+                <span className="rounded-full bg-white/10 px-2 py-1 text-xs font-bold text-zinc-300">
+                  {formatNumber(battlePass.levels.length)} рядом
+                </span>
+              </div>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                {battlePass.levels.map((level) => {
+                  const rewardText =
+                    level.freeReward ??
+                    level.premiumReward ??
+                    `${formatNumber(level.xp)} XP`;
+
+                  return (
+                    <div
+                      key={level.level}
+                      className={[
+                        "rounded-lg border px-3 py-3",
+                        level.current
+                          ? "border-emerald-300/40 bg-emerald-300/[0.09]"
+                          : level.reached
+                            ? "border-white/10 bg-white/[0.06]"
+                            : level.next
+                              ? "border-amber-300/35 bg-amber-300/[0.08]"
+                              : "border-white/10 bg-zinc-950/45",
+                      ].join(" ")}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                            Уровень {formatNumber(level.level)}
+                          </p>
+                          <p className="mt-1 text-sm font-black text-white">
+                            {rewardText}
+                          </p>
+                        </div>
+                        <span
+                          className={[
+                            "shrink-0 rounded-full px-2 py-1 text-xs font-black",
+                            level.current
+                              ? "bg-emerald-300 text-zinc-950"
+                              : level.reached
+                                ? "bg-white/10 text-zinc-200"
+                                : level.next
+                                  ? "bg-amber-300 text-zinc-950"
+                                  : "bg-white/10 text-zinc-400",
+                          ].join(" ")}
+                        >
+                          {battlePassLevelLabel(level)}
+                        </span>
+                      </div>
+                      <div className="mt-3 flex flex-col gap-1 text-xs text-zinc-500">
+                        <span>{formatNumber(level.xp)} XP</span>
+                        {level.freeReward && level.premiumReward ? (
+                          <span>premium: {level.premiumReward}</span>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
         </>
       ) : (
         <p className="mt-4 text-sm leading-6 text-zinc-300">
@@ -982,6 +1049,22 @@ function BattlePassPanel({
       )}
     </section>
   );
+}
+
+function battlePassLevelLabel(
+  level: NonNullable<
+    GuestPortalGameSummary["battlePass"]["active"]
+  >["levels"][number],
+) {
+  if (level.current) {
+    return "сейчас";
+  }
+
+  if (level.reached) {
+    return "пройден";
+  }
+
+  return level.next ? "далее" : "закрыт";
 }
 
 function ActivityPanel({

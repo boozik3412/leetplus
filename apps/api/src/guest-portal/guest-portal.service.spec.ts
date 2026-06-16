@@ -591,6 +591,20 @@ describe('GuestPortalService', () => {
               ],
             }),
           ],
+          history: [
+            expect.objectContaining({
+              id: 'mission-2',
+              rewardStatus: expect.objectContaining({
+                state: 'CONFIRMED',
+              }),
+            }),
+            expect.objectContaining({
+              id: 'mission-1',
+              rewardStatus: expect.objectContaining({
+                state: 'IN_PROGRESS',
+              }),
+            }),
+          ],
         },
         battlePass: {
           active: expect.objectContaining({

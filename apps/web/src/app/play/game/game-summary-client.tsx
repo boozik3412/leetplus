@@ -16,6 +16,7 @@ type GameRewardWalletState =
 type GameBonusHistoryItem =
   GuestPortalGameSummary["rewards"]["bonusHistory"]["items"][number];
 type GameMission = GuestPortalGameSummary["missions"]["featured"][number];
+type GameMissionHistoryItem = GuestPortalGameSummary["missions"]["history"][number];
 type GameProgressTimelineItem =
   GuestPortalGameSummary["progress"]["timeline"][number];
 type MissionBoardFilter = "AVAILABLE" | "ALMOST_DONE" | "REWARD_PENDING" | "ALL";
@@ -365,6 +366,13 @@ function ReadyGameView({
       <section className="mt-4 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
         <RewardResultPanel summary={summary} />
         <MissionsPanel missions={summary.missions.featured} />
+      </section>
+
+      <section className="mt-4">
+        <MissionHistoryPanel
+          missions={summary.missions.history}
+          total={summary.missions.total}
+        />
       </section>
 
       <section className="mt-4">
@@ -1301,6 +1309,121 @@ function MissionsPanel({
       </div>
     </section>
   );
+}
+
+function MissionHistoryPanel({
+  missions,
+  total,
+}: {
+  missions: GameMissionHistoryItem[];
+  total: number;
+}) {
+  return (
+    <section
+      id="mission-history"
+      className="rounded-lg border border-white/10 bg-white/[0.06] p-5"
+    >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
+            История квестов
+          </p>
+          <h2 className="mt-1 text-xl font-black">Активные и завершенные</h2>
+        </div>
+        <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-black text-zinc-200">
+          {formatNumber(missions.length)} из {formatNumber(total)}
+        </span>
+      </div>
+
+      <div className="mt-5 space-y-2">
+        {missions.length ? (
+          missions.map((mission) => (
+            <MissionHistoryRow key={mission.id} mission={mission} />
+          ))
+        ) : (
+          <p className="rounded-lg border border-white/10 bg-zinc-950/45 p-4 text-sm leading-6 text-zinc-300">
+            История появится после первого игрового события в клубе.
+          </p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function MissionHistoryRow({
+  mission,
+}: {
+  mission: GameMissionHistoryItem;
+}) {
+  const progressTarget = mission.progressTarget ?? 1;
+  const progressUnit = mission.progressUnit ? ` ${mission.progressUnit}` : "";
+  const rewardLabel =
+    mission.rewardStatus.rewardLabel ??
+    mission.rewardLabel ??
+    `${formatNumber(mission.xpReward)} XP`;
+  const meta = [
+    `${Math.round(mission.progressPercent)}%`,
+    `${formatNumber(mission.progressCurrent)}/${formatNumber(
+      progressTarget,
+    )}${progressUnit}`,
+    rewardLabel,
+    mission.periodTo ? `до ${formatDate(mission.periodTo)}` : null,
+    mission.rewardStatus.occurredAt
+      ? formatDate(mission.rewardStatus.occurredAt)
+      : null,
+  ].filter((value): value is string => Boolean(value));
+
+  return (
+    <div className="grid gap-3 rounded-lg border border-white/10 bg-zinc-950/45 px-3 py-3 lg:grid-cols-[1fr_auto] lg:items-center">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={missionHistoryBadgeClass(mission.rewardStatus.state)}>
+            {mission.rewardStatus.label}
+          </span>
+          <p className="min-w-0 truncate text-sm font-black text-white">
+            {mission.name}
+          </p>
+        </div>
+        <p className="mt-1 text-xs leading-5 text-zinc-400">
+          {mission.rewardStatus.hint}
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-2 text-[11px] font-bold text-zinc-400 lg:max-w-md lg:justify-end">
+        {meta.map((value) => (
+          <span
+            key={value}
+            className="rounded-full border border-white/10 px-2 py-1"
+          >
+            {value}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function missionHistoryBadgeClass(
+  state: GameMissionHistoryItem["rewardStatus"]["state"],
+) {
+  const base = "rounded-full px-2 py-1 text-xs font-black";
+
+  switch (state) {
+    case "CONFIRMED":
+    case "READY":
+    case "REDEEMED":
+    case "COMPLETED":
+      return `${base} bg-emerald-300 text-zinc-950`;
+    case "QUEUED":
+    case "SENDING":
+    case "WAITING_APPROVAL":
+      return `${base} bg-amber-300/20 text-amber-100`;
+    case "FAILED":
+    case "CANCELED":
+    case "EXPIRED":
+      return `${base} bg-rose-300/20 text-rose-100`;
+    default:
+      return `${base} bg-white/10 text-zinc-200`;
+  }
 }
 
 function MissionFilterTabs({

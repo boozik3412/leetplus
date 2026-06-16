@@ -533,6 +533,23 @@ export type GuestPortalGameSummary = {
         | "rewardStatus"
       >
     >;
+    history: Array<
+      Pick<
+        GuestPortalPayload["gamification"]["missions"][number],
+        | "id"
+        | "name"
+        | "rewardLabel"
+        | "xpReward"
+        | "progressCurrent"
+        | "progressTarget"
+        | "progressUnit"
+        | "progressPercent"
+        | "questSteps"
+        | "periodTo"
+        | "manualApprovalRequired"
+        | "rewardStatus"
+      >
+    >;
   };
   battlePass: {
     active: (Pick<

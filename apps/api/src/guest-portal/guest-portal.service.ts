@@ -47,6 +47,7 @@ const GAME_CONSENT_VERSION = 'guest-game-v1-2026-06-15';
 const GAME_PROFILE_LINKED_EVENT_TYPE = 'GAME_PROFILE_LINKED';
 const GAME_PROFILE_LINK_SOURCE = 'GUEST_PORTAL_PROFILE_LINK';
 const GAME_SUMMARY_MISSION_LIMIT = 6;
+const GAME_SUMMARY_MISSION_HISTORY_LIMIT = 12;
 type JwtExpiresIn = NonNullable<JwtSignOptions['expiresIn']>;
 type GuestPortalOtpDeliveryChannel = 'DEV' | 'SMS' | 'TELEGRAM' | 'MAX';
 type GuestPortalOtpDeliveryStatus =
@@ -387,6 +388,23 @@ export type GuestPortalGameSummary = {
   missions: {
     total: number;
     featured: Array<
+      Pick<
+        GuestPortalMission,
+        | 'id'
+        | 'name'
+        | 'rewardLabel'
+        | 'xpReward'
+        | 'progressCurrent'
+        | 'progressTarget'
+        | 'progressUnit'
+        | 'progressPercent'
+        | 'questSteps'
+        | 'periodTo'
+        | 'manualApprovalRequired'
+        | 'rewardStatus'
+      >
+    >;
+    history: Array<
       Pick<
         GuestPortalMission,
         | 'id'
@@ -3627,20 +3645,11 @@ function buildGameSummaryFromPortal(
   const featuredMissions = [...portal.gamification.missions]
     .sort((left, right) => right.progressPercent - left.progressPercent)
     .slice(0, GAME_SUMMARY_MISSION_LIMIT)
-    .map((mission) => ({
-      id: mission.id,
-      name: mission.name,
-      rewardLabel: mission.rewardLabel,
-      xpReward: mission.xpReward,
-      progressCurrent: mission.progressCurrent,
-      progressTarget: mission.progressTarget,
-      progressUnit: mission.progressUnit,
-      progressPercent: mission.progressPercent,
-      questSteps: mission.questSteps,
-      periodTo: mission.periodTo,
-      manualApprovalRequired: mission.manualApprovalRequired,
-      rewardStatus: mission.rewardStatus,
-    }));
+    .map(mapGameSummaryMission);
+  const missionHistory = [...portal.gamification.missions]
+    .sort(missionHistorySort)
+    .slice(0, GAME_SUMMARY_MISSION_HISTORY_LIMIT)
+    .map(mapGameSummaryMission);
   const activeSeason = portal.gamification.seasons[0] ?? null;
   const progress = buildGameProgressSummary(portal, recentRewards);
 
@@ -3683,6 +3692,7 @@ function buildGameSummaryFromPortal(
     missions: {
       total: portal.gamification.missions.length,
       featured: featuredMissions,
+      history: missionHistory,
     },
     battlePass: {
       active: activeSeason
@@ -3731,6 +3741,80 @@ function buildGameSummaryFromPortal(
       },
     },
   };
+}
+
+function mapGameSummaryMission(
+  mission: GuestPortalMission,
+): GuestPortalGameSummary['missions']['featured'][number] {
+  return {
+    id: mission.id,
+    name: mission.name,
+    rewardLabel: mission.rewardLabel,
+    xpReward: mission.xpReward,
+    progressCurrent: mission.progressCurrent,
+    progressTarget: mission.progressTarget,
+    progressUnit: mission.progressUnit,
+    progressPercent: mission.progressPercent,
+    questSteps: mission.questSteps,
+    periodTo: mission.periodTo,
+    manualApprovalRequired: mission.manualApprovalRequired,
+    rewardStatus: mission.rewardStatus,
+  };
+}
+
+function missionHistorySort(
+  left: GuestPortalMission,
+  right: GuestPortalMission,
+) {
+  const timeDiff =
+    missionHistoryEventTime(right) - missionHistoryEventTime(left);
+
+  if (timeDiff !== 0) {
+    return timeDiff;
+  }
+
+  const stateDiff =
+    missionHistoryStateScore(right.rewardStatus.state) -
+    missionHistoryStateScore(left.rewardStatus.state);
+
+  if (stateDiff !== 0) {
+    return stateDiff;
+  }
+
+  return right.progressPercent - left.progressPercent;
+}
+
+function missionHistoryEventTime(mission: GuestPortalMission) {
+  if (!mission.rewardStatus.occurredAt) {
+    return 0;
+  }
+
+  const timestamp = Date.parse(mission.rewardStatus.occurredAt);
+
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function missionHistoryStateScore(
+  state: GuestPortalMissionRewardStatus['state'],
+) {
+  switch (state) {
+    case 'CONFIRMED':
+    case 'REDEEMED':
+      return 100;
+    case 'FAILED':
+    case 'CANCELED':
+    case 'EXPIRED':
+      return 90;
+    case 'READY':
+    case 'QUEUED':
+    case 'SENDING':
+      return 80;
+    case 'WAITING_APPROVAL':
+    case 'COMPLETED':
+      return 70;
+    default:
+      return 0;
+  }
 }
 
 function buildGameProgressSummary(

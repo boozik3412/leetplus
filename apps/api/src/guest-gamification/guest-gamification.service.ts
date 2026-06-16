@@ -1114,6 +1114,7 @@ export type GuestGameIntegrationReadinessItem = {
     | 'OTP_SMS'
     | 'OTP_TELEGRAM'
     | 'OTP_MAX'
+    | 'USER_CALL_AUTH'
     | 'TELEGRAM_LINK'
     | 'TELEGRAM_WEBHOOK'
     | 'TELEGRAM_AUTH_REPLY_SENDER'
@@ -3570,6 +3571,7 @@ export class GuestGamificationService {
       (provider) => provider.channel === 'MAX',
     );
     const otp = guestPortalOtpReadiness();
+    const userCallAuth = guestPortalUserCallAuthReadiness();
     const telegramBotUsername = envString('GUEST_GAME_TELEGRAM_BOT_USERNAME');
     const telegramLinkSecret =
       envString('GUEST_GAME_TELEGRAM_LINK_SECRET') ??
@@ -3690,6 +3692,7 @@ export class GuestGamificationService {
         note: otp.max.note,
         nextAction: otp.max.nextAction,
       },
+      userCallAuth,
       {
         key: 'TELEGRAM_LINK',
         title: 'Привязка Telegram-бота',
@@ -9510,6 +9513,59 @@ function guestPortalOtpReadiness(): GuestPortalOtpReadiness {
     sms,
     telegram,
     max,
+  };
+}
+
+function guestPortalUserCallAuthReadiness(): GuestGameIntegrationReadinessItem {
+  const enabled = envFlag('GUEST_PORTAL_USER_CALL_ENABLED');
+  const phoneNumber = envString('GUEST_PORTAL_USER_CALL_PHONE_NUMBER');
+  const secret = envString('GUEST_PORTAL_USER_CALL_SECRET');
+  const configured = Boolean(phoneNumber && secret);
+  const ready = enabled && configured;
+  const status: GuestGameIntegrationReadinessStatus = ready
+    ? 'READY'
+    : enabled || phoneNumber || secret
+      ? 'PARTIAL'
+      : 'BLOCKED';
+  const requiredEnv = [
+    ...(enabled ? [] : ['GUEST_PORTAL_USER_CALL_ENABLED']),
+    ...(phoneNumber ? [] : ['GUEST_PORTAL_USER_CALL_PHONE_NUMBER']),
+    ...(secret ? [] : ['GUEST_PORTAL_USER_CALL_SECRET']),
+  ];
+
+  return {
+    key: 'USER_CALL_AUTH',
+    title: 'Звонок пользователя для входа',
+    status,
+    statusLabel: ready
+      ? 'готов'
+      : status === 'PARTIAL'
+        ? 'частично'
+        : 'не настроен',
+    ready,
+    configured,
+    enabled,
+    requiredEnv,
+    details: [
+      {
+        label: 'Флаг',
+        value: enabled ? 'включен' : 'выключен',
+      },
+      {
+        label: 'Номер',
+        value: phoneNumber ? 'настроен' : 'нужен',
+      },
+      {
+        label: 'Callback secret',
+        value: secret ? 'настроен' : 'нужен',
+      },
+    ],
+    note: ready
+      ? 'Fallback-вход по звонку готов: /play создает USER_CALL challenge, гость звонит на настроенный номер, а call-provider подтверждает caller id сервисным callback.'
+      : 'Звонок пользователя остается вторым каналом после Telegram-бота, но требует номера для гостей и secret для защищенного provider callback.',
+    nextAction: ready
+      ? 'Проверить /play на тестовом госте: создать вход по звонку, позвонить с введенного номера и подтвердить callback без раскрытия raw phone.'
+      : 'Задать env GUEST_PORTAL_USER_CALL_ENABLED, GUEST_PORTAL_USER_CALL_PHONE_NUMBER и GUEST_PORTAL_USER_CALL_SECRET на VDS после выбора call-provider.',
   };
 }
 

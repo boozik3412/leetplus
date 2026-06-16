@@ -87,11 +87,11 @@ const emptyWorkspace: GuestGamificationWorkspace = {
   },
   integrationReadiness: {
     summary: {
-      total: 9,
+      total: 10,
       ready: 1,
       partial: 0,
-      blocked: 4,
-      manualOnly: 4,
+      blocked: 6,
+      manualOnly: 3,
     },
     items: [
       {
@@ -117,6 +117,27 @@ const emptyWorkspace: GuestGamificationWorkspace = {
         requiredEnv: ["GUEST_PORTAL_DEV_OTP_ENABLED"],
         note: "Реальная OTP-доставка не настроена.",
         nextAction: "Подключить SMS/Telegram/MAX provider после согласования.",
+      },
+      {
+        key: "USER_CALL_AUTH",
+        title: "Звонок пользователя для входа",
+        status: "BLOCKED",
+        statusLabel: "не настроен",
+        ready: false,
+        configured: false,
+        enabled: false,
+        requiredEnv: [
+          "GUEST_PORTAL_USER_CALL_ENABLED",
+          "GUEST_PORTAL_USER_CALL_PHONE_NUMBER",
+          "GUEST_PORTAL_USER_CALL_SECRET",
+        ],
+        details: [
+          { label: "Флаг", value: "выключен" },
+          { label: "Номер", value: "нужен" },
+          { label: "Callback secret", value: "нужен" },
+        ],
+        note: "Звонок пользователя остается вторым каналом после Telegram-бота, но требует номера для гостей и secret для защищенного provider callback.",
+        nextAction: "Задать env GUEST_PORTAL_USER_CALL_ENABLED, GUEST_PORTAL_USER_CALL_PHONE_NUMBER и GUEST_PORTAL_USER_CALL_SECRET на VDS после выбора call-provider.",
       },
       {
         key: "TELEGRAM_LINK",

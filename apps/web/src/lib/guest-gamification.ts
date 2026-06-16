@@ -671,6 +671,7 @@ export type GuestGameIntegrationReadinessItem = {
     | "OTP_SMS"
     | "OTP_TELEGRAM"
     | "OTP_MAX"
+    | "USER_CALL_AUTH"
     | "TELEGRAM_LINK"
     | "TELEGRAM_WEBHOOK"
     | "TELEGRAM_AUTH_REPLY_SENDER"

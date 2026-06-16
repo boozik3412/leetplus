@@ -783,6 +783,9 @@ describe('GuestGamificationService', () => {
     delete process.env.GUEST_GAME_TELEGRAM_BOT_TOKEN;
     delete process.env.GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED;
     delete process.env.GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_BOT_TOKEN;
+    delete process.env.GUEST_PORTAL_USER_CALL_ENABLED;
+    delete process.env.GUEST_PORTAL_USER_CALL_PHONE_NUMBER;
+    delete process.env.GUEST_PORTAL_USER_CALL_SECRET;
     delete process.env.GUEST_PORTAL_TELEGRAM_BOT_TOKEN;
     delete process.env.TELEGRAM_BOT_TOKEN;
   });
@@ -838,6 +841,60 @@ describe('GuestGamificationService', () => {
   });
 
   describe('integration readiness', () => {
+    it('shows user call auth as blocked until phone number and callback secret are configured', () => {
+      const { service } = createService();
+
+      const readiness = (service as any).buildIntegrationReadiness([]);
+      const userCall = readiness.items.find(
+        (item: { key: string }) => item.key === 'USER_CALL_AUTH',
+      );
+
+      expect(userCall).toMatchObject({
+        status: 'BLOCKED',
+        ready: false,
+        configured: false,
+        enabled: false,
+        requiredEnv: [
+          'GUEST_PORTAL_USER_CALL_ENABLED',
+          'GUEST_PORTAL_USER_CALL_PHONE_NUMBER',
+          'GUEST_PORTAL_USER_CALL_SECRET',
+        ],
+      });
+    });
+
+    it('marks user call auth ready without exposing the phone number or callback secret', () => {
+      process.env.GUEST_PORTAL_USER_CALL_ENABLED = 'true';
+      process.env.GUEST_PORTAL_USER_CALL_PHONE_NUMBER = '+7 343 000-00-00';
+      process.env.GUEST_PORTAL_USER_CALL_SECRET = 'call-secret';
+      const { service } = createService();
+
+      const readiness = (service as any).buildIntegrationReadiness([]);
+      const userCall = readiness.items.find(
+        (item: { key: string }) => item.key === 'USER_CALL_AUTH',
+      );
+      const userCallText = JSON.stringify(userCall);
+
+      expect(userCall).toMatchObject({
+        status: 'READY',
+        ready: true,
+        configured: true,
+        enabled: true,
+        requiredEnv: [],
+      });
+      expect(userCall.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ label: 'Флаг', value: 'включен' }),
+          expect.objectContaining({ label: 'Номер', value: 'настроен' }),
+          expect.objectContaining({
+            label: 'Callback secret',
+            value: 'настроен',
+          }),
+        ]),
+      );
+      expect(userCallText).not.toContain('+7 343 000-00-00');
+      expect(userCallText).not.toContain('call-secret');
+    });
+
     it('shows Telegram auth reply sender as adapter-only until API-side sending is enabled', () => {
       process.env.GUEST_GAME_TELEGRAM_WEBHOOK_SECRET = 'telegram-secret';
       const { service } = createService();

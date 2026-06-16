@@ -38,6 +38,8 @@
 
 Реферальный вход в геймификацию должен оставаться в отдельном игровом контуре. Гость получает `lp_ref_*` в `/play/game`, новый участник приходит на `/play` с `ref`, выбирает подключенный клуб и подтверждает телефон через Telegram-бота, звонок пользователя на номер или OTP/SMS-код. После успешной авторизации LeetPlus записывает `GuestGameEvent` `GAME_REFERRAL_ACCEPTED` с `source=GUEST_PORTAL_REFERRAL`, ищет пригласившего пересчетом HMAC по активным `GuestGameProfile` выбранного tenant/store и сохраняет только маску кода, `inviterProfileId`/`inviterGuestId`, `valid`, `selfReferral`, `eligibleForReward` и `clubId`. Общий `Guest` при публичной регистрации не создается, raw phone и Langame payload не сохраняются; связь с общей базой гостей появляется позже через обычную snapshot-синхронизацию по подтвержденному `phoneHash`.
 
+Начисление за реферала должно выполняться через обычные правила Guest Game Hub: eligible `GAME_REFERRAL_ACCEPTED` превращается в snapshot-fact `GUEST_GAME_REFERRAL` с `eventType=REFERRAL_ACCEPTED`, привязанным к `inviterProfileId`. Batch pipeline обрабатывает такой факт по игровому профилю даже без общего `Guest`, но пропускает invalid, self-referral и non-eligible payload; конкретная экономика задается отдельным правилом миссии/лутбокса/Battle Pass и дальше использует существующий reward wallet/bonus ledger.
+
 ## 2. Новая структура левой навигации
 
 Нужно разделить продуктовую навигацию на два смысловых блока: "Ассортимент" и "Гости".

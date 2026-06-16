@@ -41,6 +41,7 @@ function createPrismaMock() {
   return {
     guestGameEvent: {
       create: jest.fn(),
+      findMany: jest.fn(),
     },
     guestGameReward: {
       create: jest.fn(),
@@ -66,10 +67,37 @@ function createPrismaMock() {
       findMany: jest.fn(),
       findFirst: jest.fn(),
     },
+    store: {
+      findMany: jest.fn(),
+    },
+    guestSession: {
+      findMany: jest.fn(),
+    },
+    guestLog: {
+      findMany: jest.fn(),
+    },
+    guestTransaction: {
+      findMany: jest.fn(),
+    },
+    guestOperationLog: {
+      findMany: jest.fn(),
+    },
+    guestBalanceSnapshot: {
+      findMany: jest.fn(),
+    },
     guestBonusBalanceCurrent: {
       findMany: jest.fn(),
     },
     guestBonusBalanceSnapshot: {
+      findMany: jest.fn(),
+    },
+    guest: {
+      findMany: jest.fn(),
+    },
+    guestGroup: {
+      findMany: jest.fn(),
+    },
+    salesFact: {
       findMany: jest.fn(),
     },
     guestBonusLedgerEntry: {
@@ -1834,6 +1862,93 @@ describe('GuestGamificationService', () => {
     });
   });
 
+  describe('getSnapshotFacts', () => {
+    it('exposes eligible referral registrations as profile-linked facts', async () => {
+      const { service, prisma } = createService();
+
+      prisma.guestSession.findMany.mockResolvedValue([]);
+      prisma.guestLog.findMany.mockResolvedValue([]);
+      prisma.guestTransaction.findMany.mockResolvedValue([]);
+      prisma.guestOperationLog.findMany.mockResolvedValue([]);
+      prisma.guestBalanceSnapshot.findMany.mockResolvedValue([]);
+      prisma.guestBonusBalanceSnapshot.findMany.mockResolvedValue([]);
+      prisma.guest.findMany.mockResolvedValue([]);
+      prisma.guestGroup.findMany.mockResolvedValue([]);
+      prisma.salesFact.findMany.mockResolvedValue([]);
+      prisma.guestGameEvent.findMany.mockResolvedValue([
+        {
+          id: 'referral-event-1',
+          externalProvider: null,
+          externalDomain: null,
+          externalId: 'otp:referral:1',
+          occurredAt: now,
+          payload: {
+            channel: 'telegram',
+            storeId: 'store-1337',
+            clubId: 'demo:1337',
+            referralCodeMasked: 'lp_ref_...abcd',
+            inviterProfileId: 'inviter-profile-1',
+            inviterGuestId: null,
+            valid: true,
+            selfReferral: false,
+            eligibleForReward: true,
+            acceptedAt: isoNow,
+          },
+        },
+        {
+          id: 'self-referral-event',
+          externalProvider: null,
+          externalDomain: null,
+          externalId: 'otp:referral:self',
+          occurredAt: now,
+          payload: {
+            storeId: 'store-1337',
+            inviterProfileId: 'inviter-profile-1',
+            valid: true,
+            selfReferral: true,
+            eligibleForReward: false,
+          },
+        },
+      ]);
+      prisma.guestGameProfile.findMany.mockResolvedValue([
+        {
+          id: 'inviter-profile-1',
+          displayName: 'Inviter',
+          contactMasked: '+7 *** **-55',
+          guest: null,
+        },
+      ]);
+      prisma.store.findMany.mockResolvedValue([
+        { id: 'store-1337', name: '1337' },
+      ]);
+
+      const result = await service.getSnapshotFacts(user);
+
+      expect(prisma.guestGameEvent.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            eventType: 'GAME_REFERRAL_ACCEPTED',
+            source: 'GUEST_PORTAL_REFERRAL',
+          }),
+        }),
+      );
+      expect(result.summary.referrals).toBe(1);
+      expect(result.facts).toEqual([
+        expect.objectContaining({
+          id: 'referral:referral-event-1:inviter',
+          source: 'GUEST_GAME_REFERRAL',
+          eventType: 'REFERRAL_ACCEPTED',
+          profileId: 'inviter-profile-1',
+          guest: null,
+          store: { id: 'store-1337', name: '1337' },
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: 'leetplus-referral',
+          externalId: 'otp:referral:1',
+        }),
+      ]);
+    });
+  });
+
   describe('runSnapshotPipeline', () => {
     it('skips facts without guests, skips non-active eligible rules, and marks duplicates', async () => {
       const { service } = createService();
@@ -1865,6 +1980,7 @@ describe('GuestGamificationService', () => {
           bonusBalances: 0,
           loyaltyGroups: 0,
           productExpenses: 0,
+          referrals: 0,
           latestAt: isoNow,
         },
       });
@@ -1906,6 +2022,81 @@ describe('GuestGamificationService', () => {
         'DUPLICATE',
       ]);
       expect(service.processEvent).toHaveBeenCalledTimes(2);
+    });
+
+    it('processes referral facts that are linked only to a game profile', async () => {
+      const { service } = createService();
+      const activeDryRun = dryRunResult({
+        guest: null,
+        profile: {
+          id: 'inviter-profile-1',
+          displayName: 'Inviter',
+          contactMasked: '+7 *** **-55',
+          xp: 20,
+          level: 1,
+          status: 'ACTIVE',
+        },
+      });
+
+      jest.spyOn(service, 'getSnapshotFacts').mockResolvedValue({
+        facts: [
+          snapshotFact('referral-event-1', {
+            source: 'GUEST_GAME_REFERRAL',
+            eventType: 'REFERRAL_ACCEPTED',
+            profileId: 'inviter-profile-1',
+            guest: null,
+            externalProvider: IntegrationProvider.LANGAME,
+            externalDomain: 'leetplus-referral',
+            externalId: 'referral-event-1',
+            label: 'Реферал: Inviter',
+          }),
+        ],
+        summary: {
+          sessions: 0,
+          logs: 0,
+          transactions: 0,
+          operationLogs: 0,
+          balances: 0,
+          bonusBalances: 0,
+          loyaltyGroups: 0,
+          productExpenses: 0,
+          referrals: 1,
+          latestAt: isoNow,
+        },
+      });
+      jest.spyOn(service, 'dryRun').mockResolvedValue(activeDryRun);
+      jest.spyOn(service, 'processEvent').mockResolvedValue(
+        processResult({
+          dryRun: activeDryRun,
+          summary: {
+            profileCreated: false,
+            appliedXpDelta: activeDryRun.summary.projectedXpDelta,
+            createdRewards: 1,
+            queuedRewardAmount: 50,
+            idempotencyKey:
+              'guest-game:GUEST_GAME_REFERRAL:REFERRAL_ACCEPTED:referral-event-1',
+            langameWrite: false,
+          },
+        }),
+      );
+
+      const result = await service.runSnapshotPipeline(user, { limit: 10 });
+
+      expect(result).toMatchObject({
+        processedFacts: 1,
+        skippedFacts: 0,
+        duplicateFacts: 0,
+        erroredFacts: 0,
+      });
+      expect(service.processEvent).toHaveBeenCalledWith(
+        user,
+        expect.objectContaining({
+          profileId: 'inviter-profile-1',
+          guestId: null,
+          sourceFactKind: 'GUEST_GAME_REFERRAL',
+          eventType: 'REFERRAL_ACCEPTED',
+        }),
+      );
     });
   });
 

@@ -294,12 +294,14 @@ export type GuestGameSnapshotFact = {
     | "GUEST_BALANCE"
     | "GUEST_BONUS_BALANCE"
     | "GUEST_LOYALTY_GROUP"
-    | "PRODUCT_EXPENSE";
+    | "PRODUCT_EXPENSE"
+    | "GUEST_GAME_REFERRAL";
   eventType: string;
   occurredAt: string;
   externalProvider: string | null;
   externalDomain: string | null;
   externalId: string | null;
+  profileId?: string | null;
   guest: GuestGameProfile["guest"];
   store: { id: string; name: string } | null;
   sessionType: string | null;
@@ -325,6 +327,7 @@ export type GuestGameSnapshotFactsResult = {
     bonusBalances: number;
     loyaltyGroups: number;
     productExpenses: number;
+    referrals: number;
     latestAt: string | null;
   };
 };

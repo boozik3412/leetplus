@@ -71,6 +71,7 @@ const snapshotFactSources = [
   'GUEST_BONUS_BALANCE',
   'GUEST_LOYALTY_GROUP',
   'PRODUCT_EXPENSE',
+  'GUEST_GAME_REFERRAL',
 ] as const;
 const tariffSnapshotFreshMs = 24 * 60 * 60 * 1000;
 const gameEffectWindowDays = 14;
@@ -387,6 +388,22 @@ const snapshotStoreSelect = {
   name: true,
 } satisfies Prisma.StoreSelect;
 
+const snapshotGameProfileSelect = {
+  id: true,
+  displayName: true,
+  contactMasked: true,
+  guest: { select: snapshotGuestSelect },
+} satisfies Prisma.GuestGameProfileSelect;
+
+const snapshotReferralEventSelect = {
+  id: true,
+  externalProvider: true,
+  externalDomain: true,
+  externalId: true,
+  occurredAt: true,
+  payload: true,
+} satisfies Prisma.GuestGameEventSelect;
+
 const snapshotProductSelect = {
   id: true,
   article: true,
@@ -544,6 +561,12 @@ type GuestLogTypeMappingRow = Prisma.GuestGameLogTypeMappingGetPayload<{
 }>;
 type SnapshotGuestRow = Prisma.GuestGetPayload<{
   select: typeof snapshotGuestSelect;
+}>;
+type SnapshotGameProfileRow = Prisma.GuestGameProfileGetPayload<{
+  select: typeof snapshotGameProfileSelect;
+}>;
+type SnapshotReferralEventRow = Prisma.GuestGameEventGetPayload<{
+  select: typeof snapshotReferralEventSelect;
 }>;
 type SnapshotSessionRow = Prisma.GuestSessionGetPayload<{
   select: typeof snapshotSessionSelect;
@@ -1900,12 +1923,14 @@ export type GuestGameSnapshotFact = {
     | 'GUEST_BALANCE'
     | 'GUEST_BONUS_BALANCE'
     | 'GUEST_LOYALTY_GROUP'
-    | 'PRODUCT_EXPENSE';
+    | 'PRODUCT_EXPENSE'
+    | 'GUEST_GAME_REFERRAL';
   eventType: string;
   occurredAt: string;
   externalProvider: string | null;
   externalDomain: string | null;
   externalId: string | null;
+  profileId?: string | null;
   guest: GuestGameProfile['guest'];
   store: { id: string; name: string } | null;
   sessionType: string | null;
@@ -1931,6 +1956,7 @@ export type GuestGameSnapshotFactsResult = {
     bonusBalances: number;
     loyaltyGroups: number;
     productExpenses: number;
+    referrals: number;
     latestAt: string | null;
   };
 };
@@ -4301,6 +4327,7 @@ export class GuestGamificationService {
       loyaltyGuests,
       guestGroups,
       productExpenses,
+      referralEvents,
     ] = await Promise.all([
       this.prisma.guestSession.findMany({
         where: { tenantId: user.tenantId, startedAt: { not: null } },
@@ -4354,9 +4381,55 @@ export class GuestGamificationService {
         orderBy: [{ saleDate: 'desc' }, { createdAt: 'desc' }],
         take: 30,
       }),
+      this.prisma.guestGameEvent.findMany({
+        where: {
+          tenantId: user.tenantId,
+          eventType: 'GAME_REFERRAL_ACCEPTED',
+          source: 'GUEST_PORTAL_REFERRAL',
+        },
+        select: snapshotReferralEventSelect,
+        orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
+        take: 30,
+      }),
     ]);
     const guestGroupMap = new Map(
       guestGroups.map((group) => [snapshotGroupKey(group), group]),
+    );
+    const referralPayloads = referralEvents.map((event) =>
+      jsonRecord(event.payload),
+    );
+    const referralProfileIds = uniqueStrings(
+      referralPayloads
+        .map((payload) => nullableString(payload.inviterProfileId))
+        .filter((id): id is string => Boolean(id)),
+    );
+    const referralStoreIds = uniqueStrings(
+      referralPayloads
+        .map((payload) => nullableString(payload.storeId))
+        .filter((id): id is string => Boolean(id)),
+    );
+    const [referralProfiles, referralStores] = await Promise.all([
+      referralProfileIds.length
+        ? this.prisma.guestGameProfile.findMany({
+            where: { tenantId: user.tenantId, id: { in: referralProfileIds } },
+            select: snapshotGameProfileSelect,
+          })
+        : Promise.resolve([] as SnapshotGameProfileRow[]),
+      referralStoreIds.length
+        ? this.prisma.store.findMany({
+            where: { tenantId: user.tenantId, id: { in: referralStoreIds } },
+            select: snapshotStoreSelect,
+          })
+        : Promise.resolve([] as Array<{ id: string; name: string }>),
+    ]);
+    const referralProfileMap = new Map(
+      referralProfiles.map((profile) => [profile.id, profile]),
+    );
+    const referralStoreMap = new Map(
+      referralStores.map((store) => [store.id, store]),
+    );
+    const referralFacts = referralEvents.flatMap((event) =>
+      mapReferralFact(event, referralProfileMap, referralStoreMap),
     );
 
     const facts = [
@@ -4381,6 +4454,7 @@ export class GuestGamificationService {
         ),
       ),
       ...productExpenses.flatMap(mapProductExpenseFact),
+      ...referralFacts,
     ]
       .sort(
         (left, right) =>
@@ -4400,6 +4474,7 @@ export class GuestGamificationService {
         bonusBalances: bonusBalances.length,
         loyaltyGroups: loyaltyGuests.length,
         productExpenses: productExpenses.length,
+        referrals: referralFacts.length,
         latestAt: facts[0]?.occurredAt ?? null,
       },
     };
@@ -4419,12 +4494,12 @@ export class GuestGamificationService {
     const facts: GuestGamePipelineFactResult[] = [];
 
     for (const fact of candidates) {
-      if (!fact.guest?.id) {
+      if (!fact.guest?.id && !fact.profileId) {
         facts.push({
           ...pipelineFactBase(fact),
           status: 'SKIPPED',
           reason:
-            'Факт не привязан к гостю Langame, автоматический запуск пропущен.',
+            'Факт не привязан к гостю Langame или игровому профилю, автоматический запуск пропущен.',
           dryRun: null,
           process: null,
         });
@@ -4483,7 +4558,7 @@ export class GuestGamificationService {
 
         const process = await this.processEvent(user, {
           ...processDto,
-          note: 'Автоматический batch pipeline обработал сохраненный Langame snapshot-факт внутри LeetPlus. Запись в Langame не выполнялась.',
+          note: 'Автоматический batch pipeline обработал сохраненный LeetPlus/Langame факт внутри LeetPlus. Запись в Langame не выполнялась.',
         });
 
         facts.push({
@@ -10849,6 +10924,68 @@ function mapProductExpenseFact(
   ];
 }
 
+function mapReferralFact(
+  row: SnapshotReferralEventRow,
+  profileMap: Map<string, SnapshotGameProfileRow>,
+  storeMap: Map<string, { id: string; name: string }>,
+): GuestGameSnapshotFact[] {
+  const payload = jsonRecord(row.payload);
+  const valid = nullableBooleanValue(payload.valid) === true;
+  const eligibleForReward =
+    nullableBooleanValue(payload.eligibleForReward) === true;
+  const selfReferral = nullableBooleanValue(payload.selfReferral) === true;
+  const inviterProfileId = nullableString(payload.inviterProfileId);
+
+  if (!valid || !eligibleForReward || selfReferral || !inviterProfileId) {
+    return [];
+  }
+
+  const storeId = nullableString(payload.storeId);
+  const profile = profileMap.get(inviterProfileId) ?? null;
+  const store = storeId ? (storeMap.get(storeId) ?? null) : null;
+  const profileLabel =
+    profile?.displayName ??
+    profile?.contactMasked ??
+    `игровой профиль ${inviterProfileId.slice(0, 8)}`;
+  const channel = nullableString(payload.channel);
+  const referralCodeMasked = nullableString(payload.referralCodeMasked);
+  const clubId = nullableString(payload.clubId);
+  const acceptedAt = nullableString(payload.acceptedAt);
+
+  return [
+    {
+      id: `referral:${row.id}:inviter`,
+      source: 'GUEST_GAME_REFERRAL',
+      eventType: 'REFERRAL_ACCEPTED',
+      occurredAt: row.occurredAt.toISOString(),
+      externalProvider: row.externalProvider ?? IntegrationProvider.LANGAME,
+      externalDomain: row.externalDomain ?? 'leetplus-referral',
+      externalId: row.externalId ?? row.id,
+      profileId: inviterProfileId,
+      guest: profile?.guest
+        ? mapSnapshotGuest(profile.guest, profile.guest.externalGuestId)
+        : null,
+      store: mapSnapshotStore(store),
+      sessionType: null,
+      sessionPacket: null,
+      sessionMinutes: null,
+      spendAmount: null,
+      tariffGroupId: null,
+      tariffPeriodId: null,
+      tariffTypeId: null,
+      label: `Реферал: ${profileLabel}`,
+      details: [
+        store?.name ?? clubId,
+        channel ? `канал ${channel}` : null,
+        referralCodeMasked ? `код ${referralCodeMasked}` : null,
+        acceptedAt ? `принят ${acceptedAt}` : null,
+      ]
+        .filter(Boolean)
+        .join(' · '),
+    },
+  ];
+}
+
 function mapSnapshotGuest(
   row: SnapshotGuestRow | null,
   externalGuestId: string | null,
@@ -11023,6 +11160,7 @@ function pipelineProcessDtoFromFact(
   fact: GuestGameSnapshotFact,
 ): GuestGameProcessEventDto {
   return {
+    profileId: fact.profileId ?? null,
     guestId: fact.guest?.id ?? null,
     storeId: fact.store?.id ?? null,
     eventType: fact.eventType,

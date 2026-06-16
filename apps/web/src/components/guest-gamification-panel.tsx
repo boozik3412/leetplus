@@ -284,6 +284,7 @@ const dryRunEventOptions = [
   { value: "PRODUCT_PURCHASE", label: "Товарная покупка" },
   { value: "BALANCE_TOPUP", label: "Пополнение баланса" },
   { value: "GUEST_LOG", label: "Лог гостя" },
+  { value: "REFERRAL_ACCEPTED", label: "Реферал принят" },
   { value: "REPEAT_VISIT", label: "Повторный визит" },
   { value: "MISSION_COMPLETED", label: "Миссия выполнена" },
 ];
@@ -1101,7 +1102,7 @@ export function GuestGamificationPanel({
   function applySnapshotFact(fact: GuestGameSnapshotFact) {
     setDryRunForm((current) => ({
       ...current,
-      profileId: "",
+      profileId: fact.profileId ?? "",
       guestId: fact.guest?.id ?? current.guestId,
       storeId: fact.store?.id ?? current.storeId,
       eventType: fact.eventType,
@@ -1768,7 +1769,7 @@ function DryRunTab({
 
           {snapshotFacts ? (
             <div className="mt-3 space-y-3">
-              <div className="grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-5 2xl:grid-cols-9">
+              <div className="grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-5 2xl:grid-cols-10">
                 <MiniMetric
                   label="сессии"
                   value={snapshotFacts.summary.sessions}
@@ -1797,6 +1798,10 @@ function DryRunTab({
                 <MiniMetric
                   label="товары"
                   value={snapshotFacts.summary.productExpenses}
+                />
+                <MiniMetric
+                  label="рефералы"
+                  value={snapshotFacts.summary.referrals}
                 />
                 <MiniMetric
                   label="последний факт"
@@ -2264,6 +2269,7 @@ function SnapshotFactRow({
     GUEST_BONUS_BALANCE: "бонусы",
     GUEST_LOYALTY_GROUP: "группа",
     PRODUCT_EXPENSE: "товары",
+    GUEST_GAME_REFERRAL: "реферал",
   };
   const eventLabel =
     dryRunEventOptions.find((option) => option.value === fact.eventType)

@@ -436,8 +436,11 @@ export type GuestPortalGameSummary = {
         | "xpReward"
         | "progressCurrent"
         | "progressTarget"
+        | "progressUnit"
         | "progressPercent"
+        | "questSteps"
         | "periodTo"
+        | "manualApprovalRequired"
       >
     >;
   };

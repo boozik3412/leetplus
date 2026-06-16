@@ -214,7 +214,24 @@ function portalPayloadFixture() {
           progressTarget: 2,
           progressUnit: 'час',
           progressPercent: 50,
-          questSteps: [],
+          questSteps: [
+            {
+              id: 'play-first-hour',
+              title: 'Сыграть первый час',
+              target: 1,
+              progressCurrent: 1,
+              completed: true,
+              current: false,
+            },
+            {
+              id: 'play-second-hour',
+              title: 'Доиграть второй час',
+              target: 1,
+              progressCurrent: 0,
+              completed: false,
+              current: true,
+            },
+          ],
           periodTo: null,
           manualApprovalRequired: false,
         },
@@ -408,7 +425,22 @@ describe('GuestPortalService', () => {
           total: 2,
           featured: [
             expect.objectContaining({ id: 'mission-2', progressPercent: 100 }),
-            expect.objectContaining({ id: 'mission-1', progressPercent: 50 }),
+            expect.objectContaining({
+              id: 'mission-1',
+              progressPercent: 50,
+              progressUnit: 'час',
+              manualApprovalRequired: false,
+              questSteps: [
+                expect.objectContaining({
+                  id: 'play-first-hour',
+                  completed: true,
+                }),
+                expect.objectContaining({
+                  id: 'play-second-hour',
+                  current: true,
+                }),
+              ],
+            }),
           ],
         },
         battlePass: {

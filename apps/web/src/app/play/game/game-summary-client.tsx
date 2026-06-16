@@ -426,39 +426,125 @@ function MissionsPanel({
       <h2 className="mt-1 text-xl font-black">Ближайшие квесты</h2>
       <div className="mt-5 space-y-3">
         {missions.length ? (
-          missions.map((mission) => (
-            <article
-              key={mission.id}
-              className="rounded-lg border border-white/10 bg-zinc-950/45 p-4"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <h3 className="truncate text-sm font-black">
-                    {mission.name}
-                  </h3>
-                  <p className="mt-1 text-xs text-zinc-400">
-                    {mission.rewardLabel ?? `${mission.xpReward} XP`}
-                  </p>
+          missions.map((mission) => {
+            const activeStep =
+              mission.questSteps.find((step) => step.current) ??
+              mission.questSteps.find((step) => !step.completed) ??
+              null;
+            const progressTarget = mission.progressTarget ?? 1;
+            const progressUnit = mission.progressUnit
+              ? ` ${mission.progressUnit}`
+              : "";
+            const progressLabel =
+              mission.progressPercent >= 100
+                ? `Выполнено: ${formatNumber(
+                    mission.progressCurrent,
+                  )}/${formatNumber(progressTarget)}${progressUnit}`
+                : `Прогресс: ${formatNumber(
+                    mission.progressCurrent,
+                  )}/${formatNumber(progressTarget)}${progressUnit}`;
+
+            return (
+              <article
+                key={mission.id}
+                className="rounded-lg border border-white/10 bg-zinc-950/45 p-4"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="truncate text-sm font-black">
+                      {mission.name}
+                    </h3>
+                    <p className="mt-1 text-xs text-zinc-400">
+                      {mission.rewardLabel ?? `${mission.xpReward} XP`}
+                    </p>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <span className="block text-sm font-black text-emerald-300">
+                      {Math.round(mission.progressPercent)}%
+                    </span>
+                    <span className="mt-1 block rounded-full bg-white/10 px-2 py-1 text-xs font-bold text-zinc-200">
+                      +{formatNumber(mission.xpReward)} XP
+                    </span>
+                  </div>
                 </div>
-                <span className="shrink-0 text-sm font-black text-emerald-300">
-                  {mission.progressPercent}%
-                </span>
-              </div>
-              <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
-                <div
-                  className="h-full rounded-full bg-emerald-300"
-                  style={{ width: `${clampPercent(mission.progressPercent)}%` }}
-                />
-              </div>
-              <p className="mt-2 text-xs text-zinc-400">
-                {formatNumber(mission.progressCurrent)}
-                {mission.progressTarget !== null
-                  ? ` / ${formatNumber(mission.progressTarget)}`
-                  : ""}{" "}
-                выполнено
-              </p>
-            </article>
-          ))
+                <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
+                  <div
+                    className="h-full rounded-full bg-emerald-300"
+                    style={{
+                      width: `${clampPercent(mission.progressPercent)}%`,
+                    }}
+                  />
+                </div>
+                <div className="mt-3 flex flex-col gap-2 text-xs text-zinc-400 sm:flex-row sm:items-center sm:justify-between">
+                  <span>{progressLabel}</span>
+                  <span>{missionStateLabel(mission)}</span>
+                </div>
+
+                {activeStep ? (
+                  <div className="mt-4 rounded-lg border border-emerald-300/25 bg-emerald-300/[0.08] p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-emerald-200">
+                      Текущий шаг
+                    </p>
+                    <p className="mt-1 text-sm font-black text-white">
+                      {activeStep.title}
+                    </p>
+                    <p className="mt-1 text-xs text-emerald-100/80">
+                      {formatMissionStepProgress(activeStep)}
+                    </p>
+                  </div>
+                ) : null}
+
+                {mission.questSteps.length ? (
+                  <div className="mt-3 grid gap-2">
+                    {mission.questSteps.map((step, index) => (
+                      <div
+                        key={step.id}
+                        className={[
+                          "flex items-center gap-3 rounded-lg border px-3 py-2",
+                          step.completed
+                            ? "border-emerald-300/30 bg-emerald-300/[0.07]"
+                            : step.current
+                              ? "border-emerald-300/25 bg-white/[0.06]"
+                              : "border-white/10 bg-white/[0.03]",
+                        ].join(" ")}
+                      >
+                        <span
+                          className={[
+                            "grid h-7 w-7 shrink-0 place-items-center rounded-full text-xs font-black",
+                            step.completed
+                              ? "bg-emerald-300 text-zinc-950"
+                              : step.current
+                                ? "bg-white text-zinc-950"
+                                : "bg-white/10 text-zinc-300",
+                          ].join(" ")}
+                        >
+                          {index + 1}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-bold text-white">
+                            {step.title}
+                          </p>
+                          <p className="text-xs text-zinc-500">
+                            {formatMissionStepProgress(step)}
+                          </p>
+                        </div>
+                        <span className="shrink-0 text-xs font-black text-zinc-300">
+                          {missionStepStateLabel(step)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+
+                <div className="mt-3 flex flex-col gap-1 text-xs text-zinc-500 sm:flex-row sm:items-center sm:justify-between">
+                  <span>{missionRewardNote(mission)}</span>
+                  {mission.periodTo ? (
+                    <span>до {formatDate(mission.periodTo)}</span>
+                  ) : null}
+                </div>
+              </article>
+            );
+          })
         ) : (
           <p className="text-sm leading-6 text-zinc-300">
             Активных миссий пока нет. Клуб может включить их в Guest Game Hub.
@@ -467,6 +553,44 @@ function MissionsPanel({
       </div>
     </section>
   );
+}
+
+function missionStateLabel(
+  mission: GuestPortalGameSummary["missions"]["featured"][number],
+) {
+  if (mission.progressPercent >= 100) {
+    return mission.manualApprovalRequired
+      ? "ждет подтверждения"
+      : "квест выполнен";
+  }
+
+  return "в процессе";
+}
+
+function missionRewardNote(
+  mission: GuestPortalGameSummary["missions"]["featured"][number],
+) {
+  if (mission.manualApprovalRequired) {
+    return "Награда появится после подтверждения команды.";
+  }
+
+  return "Бонус начисляется автоматически после выполнения.";
+}
+
+function missionStepStateLabel(
+  step: GuestPortalGameSummary["missions"]["featured"][number]["questSteps"][number],
+) {
+  if (step.completed) {
+    return "готово";
+  }
+
+  return step.current ? "сейчас" : "далее";
+}
+
+function formatMissionStepProgress(
+  step: GuestPortalGameSummary["missions"]["featured"][number]["questSteps"][number],
+) {
+  return `${formatNumber(step.progressCurrent)} / ${formatNumber(step.target)}`;
 }
 
 function BattlePassPanel({

@@ -348,8 +348,11 @@ export type GuestPortalGameSummary = {
         | 'xpReward'
         | 'progressCurrent'
         | 'progressTarget'
+        | 'progressUnit'
         | 'progressPercent'
+        | 'questSteps'
         | 'periodTo'
+        | 'manualApprovalRequired'
       >
     >;
   };
@@ -3422,8 +3425,11 @@ function buildGameSummaryFromPortal(
       xpReward: mission.xpReward,
       progressCurrent: mission.progressCurrent,
       progressTarget: mission.progressTarget,
+      progressUnit: mission.progressUnit,
       progressPercent: mission.progressPercent,
+      questSteps: mission.questSteps,
       periodTo: mission.periodTo,
+      manualApprovalRequired: mission.manualApprovalRequired,
     }));
   const activeSeason = portal.gamification.seasons[0] ?? null;
 

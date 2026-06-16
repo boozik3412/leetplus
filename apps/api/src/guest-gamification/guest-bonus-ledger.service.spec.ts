@@ -24,6 +24,7 @@ const user: AuthenticatedUser = {
 function createPrismaMock() {
   return {
     $queryRaw: jest.fn(),
+    $transaction: jest.fn(),
     guestBonusLedgerEntry: {
       groupBy: jest.fn(),
       findMany: jest.fn(),
@@ -99,6 +100,27 @@ function ledgerEntry(overrides: Record<string, unknown> = {}) {
     metadata: {},
     createdAt: new Date('2026-06-10T10:00:00.000Z'),
     ...overrides,
+  };
+}
+
+function ledgerTransactionMock() {
+  return {
+    guestBonusBalanceCurrent: {
+      findUnique: jest.fn(),
+      findFirst: jest.fn(),
+      update: jest.fn(),
+      create: jest.fn(),
+    },
+    guestBonusLedgerEntry: {
+      update: jest.fn(),
+    },
+    guestGameReward: {
+      findFirst: jest.fn(),
+      update: jest.fn(),
+    },
+    guestGameEvent: {
+      create: jest.fn(),
+    },
   };
 }
 
@@ -548,6 +570,194 @@ describe('GuestBonusLedgerService', () => {
       expect.objectContaining({
         status: true,
         phone: '***2233',
+      }),
+    );
+  });
+
+  it.each([
+    {
+      ledgerId: 'ledger-negative-bonus-1',
+      amount: -10,
+      rewardType: 'BONUS',
+      langameType: 'bonus_balance',
+      expectedNote: 'Langame подтвердил списание бонусного баланса.',
+    },
+    {
+      ledgerId: 'ledger-negative-money-1',
+      amount: -50,
+      rewardType: 'BALANCE',
+      langameType: 'balance',
+      expectedNote: 'Langame подтвердил списание денежного баланса.',
+    },
+  ])(
+    'dispatches negative $langameType entries to Langame with signed sums and masked audit payloads',
+    async ({ ledgerId, amount, rewardType, langameType, expectedNote }) => {
+      const { service, prisma, langameClient, secretEncryptionService } =
+        createService();
+      const entry = ledgerEntry({
+        id: ledgerId,
+        rewardId: null,
+        entryType: 'SPEND',
+        idempotencyKey: `${ledgerId}:spend:v1`,
+        amount: new Prisma.Decimal(amount),
+        reason: 'Balance reversal',
+        metadata: { rewardType, langameBalanceType: langameType },
+      });
+      const access = {
+        apiKey: 'request-token',
+        sources: [
+          {
+            domain: 'club-1',
+            baseUrl: 'https://46.langamepro.ru/public_api',
+          },
+        ],
+      };
+
+      prisma.guest.findFirst.mockResolvedValue({
+        phoneEncrypted: 'encrypted-phone',
+        phoneMasked: '+7 *** **-33',
+      });
+      secretEncryptionService.decrypt.mockReturnValue('+7 (999) 111-22-33');
+      langameClient.adjustGuestBalanceByPhone.mockResolvedValue({
+        status: true,
+        phone: '79991112233',
+      });
+      jest.spyOn(service as any, 'confirmEntry').mockResolvedValue(null);
+
+      const result = await (service as any).processClaimedEntry(
+        user.id,
+        entry,
+        {
+          mode: 'READY',
+          dryRun: false,
+          ready: true,
+          enabled: true,
+          path: '/master_api/guests/balance/phone',
+          rewardTypes: [rewardType],
+          limit: 50,
+          maxAttempts: 5,
+          retryMinutes: 15,
+          staleLockMinutes: 15,
+        },
+        access,
+      );
+
+      expect(result).toMatchObject({
+        ledgerEntryId: ledgerId,
+        status: 'CONFIRMED',
+        amount,
+        note: expectedNote,
+      });
+      expect(langameClient.adjustGuestBalanceByPhone).toHaveBeenCalledWith(
+        'https://46.langamepro.ru/public_api',
+        'request-token',
+        {
+          phone: '79991112233',
+          type: langameType,
+          sum: amount,
+          comment: expect.stringContaining('LeetPlus'),
+        },
+        '/master_api/guests/balance/phone',
+      );
+      expect((service as any).confirmEntry).toHaveBeenCalledWith(
+        user.id,
+        entry,
+        expect.objectContaining({
+          phone: '+7 *** **-33',
+          type: langameType,
+          sum: amount,
+        }),
+        expect.objectContaining({
+          status: true,
+          phone: '***2233',
+        }),
+      );
+    },
+  );
+
+  it('confirms negative bonus balance entries by reducing GuestBonusBalanceCurrent', async () => {
+    const { service, prisma } = createService();
+    const tx = ledgerTransactionMock();
+    const entry = ledgerEntry({
+      id: 'ledger-negative-bonus-1',
+      rewardId: null,
+      entryType: 'SPEND',
+      idempotencyKey: 'ledger-negative-bonus-1:spend:v1',
+      amount: new Prisma.Decimal(-10),
+      metadata: { rewardType: 'BONUS', langameBalanceType: 'bonus_balance' },
+    });
+
+    tx.guestBonusBalanceCurrent.findUnique.mockResolvedValue({
+      id: 'current-1',
+      externalGuestId: 'lg-guest-1',
+      bonusBalance: new Prisma.Decimal(25),
+    });
+    prisma.$transaction.mockImplementation((callback) => callback(tx as any));
+
+    await (service as any).confirmEntry(
+      user.id,
+      entry,
+      { phone: '+7 *** **-33', type: 'bonus_balance', sum: -10 },
+      { status: true },
+    );
+
+    expect(tx.guestBonusBalanceCurrent.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'current-1' },
+      }),
+    );
+    const currentUpdate = tx.guestBonusBalanceCurrent.update.mock.calls[0][0];
+    expect(currentUpdate.data.bonusBalance.toString()).toBe('15');
+    expect(tx.guestBonusBalanceCurrent.create).not.toHaveBeenCalled();
+
+    const ledgerUpdate = tx.guestBonusLedgerEntry.update.mock.calls[0][0];
+    expect(ledgerUpdate).toEqual(
+      expect.objectContaining({
+        where: { id: 'ledger-negative-bonus-1' },
+        data: expect.objectContaining({
+          status: 'CONFIRMED',
+          balanceBefore: expect.any(Prisma.Decimal),
+          balanceAfter: expect.any(Prisma.Decimal),
+        }),
+      }),
+    );
+    expect(ledgerUpdate.data.balanceBefore.toString()).toBe('25');
+    expect(ledgerUpdate.data.balanceAfter.toString()).toBe('15');
+  });
+
+  it('keeps money balance confirmations out of GuestBonusBalanceCurrent', async () => {
+    const { service, prisma } = createService();
+    const tx = ledgerTransactionMock();
+    const entry = ledgerEntry({
+      id: 'ledger-negative-money-1',
+      rewardId: null,
+      entryType: 'SPEND',
+      idempotencyKey: 'ledger-negative-money-1:spend:v1',
+      amount: new Prisma.Decimal(-50),
+      metadata: { rewardType: 'BALANCE', langameBalanceType: 'balance' },
+    });
+
+    prisma.$transaction.mockImplementation((callback) => callback(tx as any));
+
+    await (service as any).confirmEntry(
+      user.id,
+      entry,
+      { phone: '+7 *** **-33', type: 'balance', sum: -50 },
+      { status: true },
+    );
+
+    expect(tx.guestBonusBalanceCurrent.findUnique).not.toHaveBeenCalled();
+    expect(tx.guestBonusBalanceCurrent.findFirst).not.toHaveBeenCalled();
+    expect(tx.guestBonusBalanceCurrent.update).not.toHaveBeenCalled();
+    expect(tx.guestBonusBalanceCurrent.create).not.toHaveBeenCalled();
+    expect(tx.guestBonusLedgerEntry.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'ledger-negative-money-1' },
+        data: expect.objectContaining({
+          status: 'CONFIRMED',
+          balanceBefore: null,
+          balanceAfter: null,
+        }),
       }),
     );
   });

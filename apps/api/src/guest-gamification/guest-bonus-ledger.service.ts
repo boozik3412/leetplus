@@ -712,7 +712,7 @@ export class GuestBonusLedgerService {
         amount: decimalToNumber(entry.amount),
         externalDomain: entry.externalDomain,
         externalGuestId: entry.externalGuestId,
-        note: 'Langame подтвердил начисление бонусов.',
+        note: langameBalanceConfirmationNote(entry),
       };
     } catch (error) {
       await this.failEntry(actorUserId, entry, config, error);
@@ -737,13 +737,19 @@ export class GuestBonusLedgerService {
   ) {
     const now = new Date();
     const amount = toDecimal(entry.amount);
+    const langameBalanceType = langameBalanceTypeForEntry(entry);
 
     await this.prisma.$transaction(async (tx) => {
-      const current = await this.findCurrentBalance(tx, entry);
-      const balanceBefore = current?.bonusBalance ?? new Prisma.Decimal(0);
-      const balanceAfter = balanceBefore.plus(amount);
+      const tracksBonusBalance = langameBalanceType === 'bonus_balance';
+      const current = tracksBonusBalance
+        ? await this.findCurrentBalance(tx, entry)
+        : null;
+      const balanceBefore = tracksBonusBalance
+        ? (current?.bonusBalance ?? new Prisma.Decimal(0))
+        : null;
+      const balanceAfter = balanceBefore ? balanceBefore.plus(amount) : null;
 
-      if (current) {
+      if (current && balanceAfter) {
         await tx.guestBonusBalanceCurrent.update({
           where: { id: current.id },
           data: {
@@ -757,7 +763,7 @@ export class GuestBonusLedgerService {
             externalGuestId: entry.externalGuestId ?? current.externalGuestId,
           },
         });
-      } else if (entry.externalGuestId) {
+      } else if (tracksBonusBalance && entry.externalGuestId && balanceAfter) {
         await tx.guestBonusBalanceCurrent.create({
           data: {
             tenantId: entry.tenantId,
@@ -843,8 +849,9 @@ export class GuestBonusLedgerService {
                 ledgerEntryId: entry.id,
                 idempotencyKey: entry.idempotencyKey,
                 amount: decimalToNumber(amount),
-                balanceBefore: decimalToNumber(balanceBefore),
-                balanceAfter: decimalToNumber(balanceAfter),
+                balanceType: langameBalanceType,
+                balanceBefore: decimalToNullableNumber(balanceBefore),
+                balanceAfter: decimalToNullableNumber(balanceAfter),
               },
               note: `${reward.rewardLabel} · ${reward.rewardCode ?? entry.idempotencyKey}`,
             },
@@ -1232,6 +1239,16 @@ function langameBalanceTypeForEntry(
   return langameBalanceTypeForRewardType(nullableString(metadata.rewardType));
 }
 
+function langameBalanceConfirmationNote(entry: ClaimedBonusLedgerEntry) {
+  const balanceLabel =
+    langameBalanceTypeForEntry(entry) === 'balance'
+      ? 'денежного баланса'
+      : 'бонусного баланса';
+  const actionLabel = toDecimal(entry.amount).lt(0) ? 'списание' : 'начисление';
+
+  return `Langame подтвердил ${actionLabel} ${balanceLabel}.`;
+}
+
 function normalizeLangamePhone(value: string | null) {
   const digits = value?.replace(/\D/g, '') ?? '';
 
@@ -1329,6 +1346,12 @@ function nullableString(value: unknown) {
 
 function decimalToNumber(value: Prisma.Decimal | number | string) {
   return Number(value.toString());
+}
+
+function decimalToNullableNumber(
+  value: Prisma.Decimal | number | string | null,
+) {
+  return value === null ? null : decimalToNumber(value);
 }
 
 function toDecimal(value: Prisma.Decimal | number | string) {

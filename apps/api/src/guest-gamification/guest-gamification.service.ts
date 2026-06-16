@@ -1677,6 +1677,69 @@ export type GuestGameScheduledDeliveryDispatchResult = {
   note: string;
 };
 
+export type GuestGameBotDeliveryPullDto = {
+  tenantId?: string | null;
+  tenantSlug?: string | null;
+  channels?: string[] | string | null;
+  limit?: number | string | null;
+};
+
+export type GuestGameBotDeliveryItem = {
+  tenantId: string;
+  tenantSlug: string;
+  deliveryId: string;
+  rewardId: string;
+  channel: 'TELEGRAM' | 'MAX';
+  channelLabel: string;
+  recipient: {
+    telegramChatId: string | null;
+    maxIdentity: string | null;
+    identityMasked: string | null;
+    recipientMasked: string | null;
+  };
+  message: {
+    title: string;
+    body: string;
+  };
+  reward: {
+    label: string;
+    amount: number;
+    type: string;
+    code: string | null;
+    expiresAt: string | null;
+  };
+  store: { id: string; name: string } | null;
+  preparedAt: string;
+};
+
+export type GuestGameBotDeliveryPullResult = {
+  checked: number;
+  ready: number;
+  skipped: number;
+  items: GuestGameBotDeliveryItem[];
+  note: string;
+};
+
+export type GuestGameBotDeliveryAckStatus = 'SENT' | 'FAILED' | 'BLOCKED';
+
+export type GuestGameBotDeliveryAckDto = {
+  tenantId?: string | null;
+  tenantSlug?: string | null;
+  deliveryId?: string | null;
+  status?: string | null;
+  note?: string | null;
+  providerMessageId?: string | null;
+  providerStatus?: string | null;
+  errorCode?: string | null;
+  externalEventId?: string | null;
+};
+
+export type GuestGameBotDeliveryAckResult = {
+  delivery: GuestGameDelivery;
+  eventType: string;
+  note: string;
+};
+
 export type GuestGameEventDto = {
   profileId?: string | null;
   guestId?: string | null;
@@ -4587,6 +4650,107 @@ export class GuestGamificationService {
     return this.buildScheduledDeliveryDispatchSummary(dryRun, tenantResults);
   }
 
+  async pullBotDeliveries(
+    dto: GuestGameBotDeliveryPullDto = {},
+  ): Promise<GuestGameBotDeliveryPullResult> {
+    const { user, tenantSlug } = await this.resolveScheduledTenantActor(dto);
+    const channels = deliveryDispatchChannels(dto.channels);
+    const limit = Math.min(50, Math.max(1, intValue(dto.limit) ?? 25));
+    const rows = await this.prisma.guestGameDelivery.findMany({
+      where: {
+        tenantId: user.tenantId,
+        status: 'READY',
+        readinessStatus: 'READY_FOR_BOT',
+        channel: { in: channels },
+      },
+      include: deliveryInclude,
+      orderBy: [{ preparedAt: 'asc' }, { createdAt: 'asc' }],
+      take: limit,
+    });
+    const items = rows
+      .map((row) => mapBotDeliveryItem(row, tenantSlug))
+      .filter((item): item is GuestGameBotDeliveryItem => Boolean(item));
+
+    return {
+      checked: rows.length,
+      ready: items.length,
+      skipped: rows.length - items.length,
+      items,
+      note: items.length
+        ? 'Bot consumer received ready Telegram/MAX deliveries. Send messages externally and ack each result back to LeetPlus.'
+        : 'No READY_FOR_BOT Telegram/MAX deliveries with a confirmed bot identity were found for this tenant.',
+    };
+  }
+
+  async ackBotDelivery(
+    dto: GuestGameBotDeliveryAckDto,
+  ): Promise<GuestGameBotDeliveryAckResult> {
+    const { user } = await this.resolveScheduledTenantActor(dto);
+    const deliveryId = nullableString(dto.deliveryId);
+
+    if (!deliveryId) {
+      throw new BadRequestException('deliveryId is required');
+    }
+
+    const nextStatus = botDeliveryAckStatusValue(dto.status);
+    const current = await this.assertDelivery(user, deliveryId);
+    const channel = deliveryChannelValue(current.channel, null);
+
+    if (channel !== 'TELEGRAM' && channel !== 'MAX') {
+      throw new BadRequestException(
+        'Bot consumer can ack only Telegram/MAX deliveries.',
+      );
+    }
+
+    if (current.readinessStatus !== 'READY_FOR_BOT') {
+      throw new BadRequestException(
+        'Delivery is not marked READY_FOR_BOT and cannot be acked by bot consumer.',
+      );
+    }
+
+    if (current.status === 'CANCELED') {
+      throw new ConflictException('Canceled delivery cannot be acked.');
+    }
+
+    if (current.status === 'SENT' && nextStatus !== 'SENT') {
+      throw new ConflictException('Sent delivery can only receive SENT ack.');
+    }
+
+    const now = new Date();
+    const note =
+      boundedString(dto.note, 500) ?? botDeliveryAckDefaultNote(nextStatus);
+    const row = await this.prisma.guestGameDelivery.update({
+      where: { id: deliveryId },
+      data: clean({
+        status: nextStatus,
+        note,
+        sentAt:
+          nextStatus === 'SENT' ? (current.sentAt ?? now) : current.sentAt,
+        failedAt:
+          nextStatus === 'FAILED'
+            ? (current.failedAt ?? now)
+            : current.failedAt,
+      }),
+      include: deliveryInclude,
+    });
+    const eventType = botDeliveryAckEventType(nextStatus);
+
+    await this.createDeliveryEvent(user, row.id, row.rewardId, {
+      eventType,
+      fromStatus: current.status,
+      toStatus: row.status,
+      channel,
+      note,
+      payload: botDeliveryAckPayload(dto, nextStatus, channel),
+    });
+
+    return {
+      delivery: mapDelivery(row),
+      eventType,
+      note,
+    };
+  }
+
   async getProfiles(user: AuthenticatedUser): Promise<GuestGameProfile[]> {
     const rows = await this.prisma.guestGameProfile.findMany({
       where: { tenantId: user.tenantId },
@@ -6141,6 +6305,78 @@ export class GuestGamificationService {
     });
 
     return rows.map(mapReward);
+  }
+
+  private async resolveScheduledTenantActor(dto: {
+    tenantId?: string | null;
+    tenantSlug?: string | null;
+  }): Promise<{ user: AuthenticatedUser; tenantSlug: string }> {
+    const tenantId = nullableString(dto.tenantId);
+    const tenantSlug = nullableString(dto.tenantSlug);
+
+    if (!tenantId && !tenantSlug) {
+      throw new BadRequestException('tenantId or tenantSlug is required');
+    }
+
+    const tenant = await this.prisma.tenant.findFirst({
+      where: clean({
+        id: tenantId,
+        slug: tenantSlug,
+      }) as Prisma.TenantWhereInput,
+      select: {
+        id: true,
+        slug: true,
+        status: true,
+        users: {
+          where: {
+            isActive: true,
+            role: { in: [...scheduledPipelineActorRoles] },
+          },
+          select: {
+            id: true,
+            email: true,
+            fullName: true,
+            role: true,
+            customRoleId: true,
+            isPlatformAdmin: true,
+          },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+    });
+
+    if (!tenant) {
+      throw new NotFoundException('Tenant was not found for bot consumer.');
+    }
+
+    if (tenant.status !== TenantLifecycleStatus.ACTIVE) {
+      throw new BadRequestException(
+        'Tenant is not active; bot consumer is disabled.',
+      );
+    }
+
+    const actor = this.pickScheduledPipelineActor(tenant.users);
+
+    if (!actor) {
+      throw new BadRequestException(
+        'No active owner, system administrator or network manager user found for audit-safe bot consumer.',
+      );
+    }
+
+    return {
+      user: {
+        id: actor.id,
+        email: actor.email,
+        fullName: actor.fullName,
+        role: actor.role,
+        customRoleId: actor.customRoleId,
+        isPlatformAdmin: actor.isPlatformAdmin,
+        tenantId: tenant.id,
+        tenantSlug: tenant.slug,
+        tenantStatus: tenant.status,
+      },
+      tenantSlug: tenant.slug,
+    };
   }
 
   private pickScheduledPipelineActor(
@@ -9132,6 +9368,116 @@ function deliveryDispatchChannels(
     : ['TELEGRAM', 'MAX'];
 }
 
+function mapBotDeliveryItem(
+  row: DeliveryRow,
+  tenantSlug: string,
+): GuestGameBotDeliveryItem | null {
+  const channel = deliveryChannelValue(row.channel, null);
+
+  if (channel !== 'TELEGRAM' && channel !== 'MAX') {
+    return null;
+  }
+
+  const telegramChatId =
+    channel === 'TELEGRAM'
+      ? telegramChatIdFromIdentity(row.profile?.telegramIdentity ?? null)
+      : null;
+  const maxIdentity =
+    channel === 'MAX'
+      ? (nullableString(row.profile?.maxIdentity) ?? null)
+      : null;
+
+  if (channel === 'TELEGRAM' && !telegramChatId) {
+    return null;
+  }
+
+  if (channel === 'MAX' && !maxIdentity) {
+    return null;
+  }
+
+  return {
+    tenantId: row.tenantId,
+    tenantSlug,
+    deliveryId: row.id,
+    rewardId: row.rewardId,
+    channel,
+    channelLabel: communicationQueueChannelLabel(channel),
+    recipient: {
+      telegramChatId,
+      maxIdentity,
+      identityMasked: row.channelIdentityMasked,
+      recipientMasked: row.recipientMasked,
+    },
+    message: {
+      title: row.messageTitle,
+      body: row.messageBody,
+    },
+    reward: {
+      label: row.reward.rewardLabel,
+      amount: numberValue(row.reward.rewardAmount),
+      type: row.reward.rewardType,
+      code: row.reward.rewardCode,
+      expiresAt: iso(row.reward.expiresAt),
+    },
+    store: row.store ? { id: row.store.id, name: row.store.name } : null,
+    preparedAt: row.preparedAt.toISOString(),
+  };
+}
+
+function botDeliveryAckStatusValue(
+  value: unknown,
+): GuestGameBotDeliveryAckStatus {
+  const status = typeof value === 'string' ? value.trim().toUpperCase() : '';
+
+  if (status === 'SENT' || status === 'FAILED' || status === 'BLOCKED') {
+    return status;
+  }
+
+  throw new BadRequestException(
+    'status must be one of SENT, FAILED or BLOCKED',
+  );
+}
+
+function botDeliveryAckEventType(status: GuestGameBotDeliveryAckStatus) {
+  if (status === 'SENT') {
+    return 'DELIVERY_BOT_CONSUMER_SENT';
+  }
+
+  if (status === 'FAILED') {
+    return 'DELIVERY_BOT_CONSUMER_FAILED';
+  }
+
+  return 'DELIVERY_BOT_CONSUMER_BLOCKED';
+}
+
+function botDeliveryAckDefaultNote(status: GuestGameBotDeliveryAckStatus) {
+  if (status === 'SENT') {
+    return 'External bot consumer reported successful delivery.';
+  }
+
+  if (status === 'FAILED') {
+    return 'External bot consumer reported delivery failure.';
+  }
+
+  return 'External bot consumer blocked delivery.';
+}
+
+function botDeliveryAckPayload(
+  dto: GuestGameBotDeliveryAckDto,
+  status: GuestGameBotDeliveryAckStatus,
+  channel: 'TELEGRAM' | 'MAX',
+): Prisma.InputJsonValue {
+  return clean({
+    source: 'guest_game_bot_consumer',
+    status,
+    channel,
+    providerMessageId: boundedString(dto.providerMessageId, 160),
+    providerStatus: boundedString(dto.providerStatus, 160),
+    errorCode: boundedString(dto.errorCode, 160),
+    externalEventId: boundedString(dto.externalEventId, 160),
+  });
+}
+
 function deliveryProviderForChannel(
   config: DeliveryProviderConfig,
   channel: 'TELEGRAM' | 'MAX',
@@ -11512,6 +11858,16 @@ function nullableString(value: unknown) {
   }
 
   return stringValue(value);
+}
+
+function boundedString(value: unknown, maxLength: number) {
+  const parsed = nullableString(value);
+
+  if (!parsed) {
+    return null;
+  }
+
+  return parsed.length > maxLength ? parsed.slice(0, maxLength) : parsed;
 }
 
 function nullableId(value: unknown) {

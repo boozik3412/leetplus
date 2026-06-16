@@ -49,7 +49,15 @@ function createPrismaMock() {
     },
     guestGameDelivery: {
       findMany: jest.fn(),
+      findFirst: jest.fn(),
       update: jest.fn(),
+    },
+    guestGameDeliveryEvent: {
+      create: jest.fn(),
+    },
+    tenant: {
+      findMany: jest.fn(),
+      findFirst: jest.fn(),
     },
     guestBonusBalanceCurrent: {
       findMany: jest.fn(),
@@ -640,6 +648,68 @@ function rewardRow(overrides: Record<string, unknown> = {}) {
     store: null,
     createdByUser: null,
     approvedByUser: null,
+    ...overrides,
+  };
+}
+
+function deliveryRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'delivery-1',
+    tenantId: user.tenantId,
+    rewardId: 'reward-1',
+    profileId: 'profile-1',
+    guestId: 'guest-1',
+    storeId: null,
+    createdByUserId: user.id,
+    channel: 'TELEGRAM',
+    status: 'READY',
+    readinessStatus: 'READY_FOR_BOT',
+    recipientMasked: 'Guest One',
+    channelIdentityMasked: 'tg:***',
+    messageTitle: 'Reward ready',
+    messageBody: 'Your reward is ready',
+    blockers: [],
+    metadata: {},
+    preparedAt: now,
+    sentAt: null,
+    failedAt: null,
+    canceledAt: null,
+    note: null,
+    createdAt: now,
+    updatedAt: now,
+    reward: rewardRow(),
+    profile: {
+      id: 'profile-1',
+      displayName: 'Guest One',
+      contactMasked: '+7 *** **-11',
+      telegramIdentity: 'tg:123456',
+      maxIdentity: null,
+      xp: 120,
+      level: 2,
+    },
+    guest: null,
+    store: null,
+    createdByUser: null,
+    events: [],
+    ...overrides,
+  };
+}
+
+function scheduledTenantRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: user.tenantId,
+    slug: user.tenantSlug,
+    status: TenantLifecycleStatus.ACTIVE,
+    users: [
+      {
+        id: user.id,
+        email: user.email,
+        fullName: user.fullName,
+        role: user.role,
+        customRoleId: null,
+        isPlatformAdmin: user.isPlatformAdmin,
+      },
+    ],
     ...overrides,
   };
 }
@@ -1857,6 +1927,142 @@ describe('GuestGamificationService', () => {
         }),
       );
       expect(prisma.guestGameDelivery.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('bot delivery consumer', () => {
+    it('pulls only ready bot deliveries with a confirmed bot identity', async () => {
+      const { service, prisma } = createService();
+
+      prisma.tenant.findFirst.mockResolvedValue(scheduledTenantRow());
+      prisma.guestGameDelivery.findMany.mockResolvedValue([
+        deliveryRow(),
+        deliveryRow({
+          id: 'delivery-without-chat',
+          rewardId: 'reward-without-chat',
+          reward: rewardRow({ id: 'reward-without-chat' }),
+          profile: {
+            id: 'profile-without-chat',
+            displayName: 'Guest Two',
+            contactMasked: '+7 *** **-22',
+            telegramIdentity: null,
+            maxIdentity: null,
+            xp: 20,
+            level: 1,
+          },
+        }),
+      ]);
+
+      const result = await service.pullBotDeliveries({
+        tenantSlug: user.tenantSlug,
+        channels: 'telegram',
+      });
+
+      expect(prisma.guestGameDelivery.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            tenantId: user.tenantId,
+            status: 'READY',
+            readinessStatus: 'READY_FOR_BOT',
+            channel: { in: ['TELEGRAM'] },
+          }),
+        }),
+      );
+      expect(result).toMatchObject({
+        checked: 2,
+        ready: 1,
+        skipped: 1,
+      });
+      expect(result.items[0]).toMatchObject({
+        tenantId: user.tenantId,
+        tenantSlug: user.tenantSlug,
+        deliveryId: 'delivery-1',
+        rewardId: 'reward-1',
+        channel: 'TELEGRAM',
+        recipient: {
+          telegramChatId: '123456',
+          maxIdentity: null,
+          identityMasked: 'tg:***',
+          recipientMasked: 'Guest One',
+        },
+        message: {
+          title: 'Reward ready',
+          body: 'Your reward is ready',
+        },
+        reward: {
+          label: '100 bonus points',
+          amount: 100,
+          type: 'BONUS',
+          code: 'LP-100',
+          expiresAt: null,
+        },
+      });
+    });
+
+    it('acks bot delivery result and records a sanitized audit event', async () => {
+      const { service, prisma } = createService();
+      const current = deliveryRow();
+      const sent = {
+        ...current,
+        status: 'SENT',
+        sentAt: now,
+        note: 'sent by bot',
+      };
+
+      prisma.tenant.findFirst.mockResolvedValue(scheduledTenantRow());
+      prisma.guestGameDelivery.findFirst.mockResolvedValue(current);
+      prisma.guestGameDelivery.update.mockResolvedValue(sent);
+
+      const result = await service.ackBotDelivery({
+        tenantSlug: user.tenantSlug,
+        deliveryId: 'delivery-1',
+        status: 'sent',
+        note: 'sent by bot',
+        providerMessageId: 'tg-message-1',
+        providerStatus: 'ok',
+        externalEventId: 'update-1',
+      });
+
+      expect(prisma.guestGameDelivery.update).toHaveBeenCalledWith({
+        where: { id: 'delivery-1' },
+        data: expect.objectContaining({
+          status: 'SENT',
+          note: 'sent by bot',
+          sentAt: expect.any(Date),
+          failedAt: null,
+        }),
+        include: expect.any(Object),
+      });
+      expect(prisma.guestGameDeliveryEvent.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          tenantId: user.tenantId,
+          deliveryId: 'delivery-1',
+          rewardId: 'reward-1',
+          actorUserId: user.id,
+          eventType: 'DELIVERY_BOT_CONSUMER_SENT',
+          fromStatus: 'READY',
+          toStatus: 'SENT',
+          channel: 'TELEGRAM',
+          note: 'sent by bot',
+          payload: {
+            source: 'guest_game_bot_consumer',
+            status: 'SENT',
+            channel: 'TELEGRAM',
+            providerMessageId: 'tg-message-1',
+            providerStatus: 'ok',
+            errorCode: null,
+            externalEventId: 'update-1',
+          },
+        }),
+      });
+      expect(result).toMatchObject({
+        eventType: 'DELIVERY_BOT_CONSUMER_SENT',
+        delivery: {
+          id: 'delivery-1',
+          status: 'SENT',
+          sentAt: isoNow,
+        },
+      });
     });
   });
 });

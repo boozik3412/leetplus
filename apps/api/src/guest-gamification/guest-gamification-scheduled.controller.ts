@@ -13,6 +13,10 @@ import {
 } from './guest-bonus-ledger.service';
 import {
   GuestGamificationService,
+  type GuestGameBotDeliveryAckDto,
+  type GuestGameBotDeliveryAckResult,
+  type GuestGameBotDeliveryPullDto,
+  type GuestGameBotDeliveryPullResult,
   type GuestGameScheduledDeliveryDispatchDto,
   type GuestGameScheduledDeliveryDispatchResult,
   type GuestGameScheduledPipelineRunDto,
@@ -45,6 +49,26 @@ export class GuestGamificationScheduledController {
     this.assertToken(token);
 
     return this.gamificationService.runDeliveryDispatchScheduled(dto);
+  }
+
+  @Post('deliveries/bot/pull')
+  pullBotDeliveries(
+    @Headers('x-sync-service-token') token: string | undefined,
+    @Body() dto: GuestGameBotDeliveryPullDto,
+  ): Promise<GuestGameBotDeliveryPullResult> {
+    this.assertToken(token);
+
+    return this.gamificationService.pullBotDeliveries(dto);
+  }
+
+  @Post('deliveries/bot/ack')
+  ackBotDelivery(
+    @Headers('x-sync-service-token') token: string | undefined,
+    @Body() dto: GuestGameBotDeliveryAckDto,
+  ): Promise<GuestGameBotDeliveryAckResult> {
+    this.assertToken(token);
+
+    return this.gamificationService.ackBotDelivery(dto);
   }
 
   @Post('bonus-ledger/dispatch')

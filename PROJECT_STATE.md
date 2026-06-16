@@ -1,6 +1,6 @@
 # LeetPlus Project State
 
-Last updated: 2026-06-15
+Last updated: 2026-06-16
 
 ## Current Workflow
 
@@ -80,6 +80,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added session resume to public gamification registration: `/play` now checks the existing guest-token through `GET /guest-portal/session/game-summary` and shows an active game panel with the current profile, club, XP, bonuses, ready rewards, and direct links to `/play/game` and the club portal, while guests without a session still see the club search and OTP registration.
 - Added the first lightweight public game screen: `/play/game` reads `GET /guest-portal/session/game-summary` through the guest-token web proxy and shows profile XP, bonus balance, ready rewards, featured missions, Battle Pass, next actions, and channel readiness; guests without a session are sent back to `/play`, `/play` now offers this game screen after OTP, and the game screen can run a club check-in through `POST /guest-portal/session/check-in` with immediate progress refresh.
 - Extended the lightweight game summary mission payload with public quest steps, progress units, manual approval state, and reward flow; `/play/game` now renders each featured mission as an actionable quest checklist with the current step, deadline, progress, XP, and automatic/manual reward note.
 - Connected the guest game screen reward outcome: `/play/game` now combines ready rewards, the latest guest-visible bonus ledger entry, and current bonus balance in a single "quest result" wallet block so a guest can see when a bonus was queued/confirmed and what balance is shown after the quest.

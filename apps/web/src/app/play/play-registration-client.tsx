@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import type { FormEvent, ReactNode } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   GuestPortalGamificationClub,
   GuestPortalGamificationClubDirectory,
+  GuestPortalGameSummary,
   GuestPortalLangameMatchResponse,
   GuestPortalOtpStartResponse,
   GuestPortalOtpVerifyResponse,
@@ -31,6 +32,7 @@ type MapViewport = {
 
 const RADIUS_OPTIONS = [null, 1, 3, 5, 10, 25] as const;
 type RadiusOption = (typeof RADIUS_OPTIONS)[number];
+type ActiveSessionState = "loading" | "ready" | "empty" | "error";
 
 export function PlayRegistrationClient({
   initialDirectory,
@@ -52,6 +54,13 @@ export function PlayRegistrationClient({
   const [portal, setPortal] = useState<GuestPortalPayload | null>(null);
   const [langameMatch, setLangameMatch] =
     useState<GuestPortalLangameMatchResponse | null>(null);
+  const [activeSummary, setActiveSummary] =
+    useState<GuestPortalGameSummary | null>(null);
+  const [activeSessionState, setActiveSessionState] =
+    useState<ActiveSessionState>("loading");
+  const [activeSessionMessage, setActiveSessionMessage] = useState<
+    string | null
+  >(null);
   const [gameConsentAccepted, setGameConsentAccepted] = useState(false);
   const [message, setMessage] = useState<string | null>(loadError);
   const [locationMessage, setLocationMessage] = useState<string | null>(null);
@@ -88,6 +97,55 @@ export function PlayRegistrationClient({
   const canEnterOtpCode =
     challenge?.delivery.status === "DEV_CODE" ||
     challenge?.delivery.status === "SENT";
+
+  useEffect(() => {
+    let isActive = true;
+
+    async function loadActiveSession() {
+      try {
+        const response = await fetch("/api/guest-portal/session/game-summary", {
+          cache: "no-store",
+        });
+
+        if (!isActive) {
+          return;
+        }
+
+        if (response.status === 401) {
+          setActiveSessionState("empty");
+          setActiveSummary(null);
+          setActiveSessionMessage(null);
+          return;
+        }
+
+        if (!response.ok) {
+          throw new Error(await readMessage(response));
+        }
+
+        setActiveSummary((await response.json()) as GuestPortalGameSummary);
+        setActiveSessionState("ready");
+        setActiveSessionMessage(null);
+      } catch (error) {
+        if (!isActive) {
+          return;
+        }
+
+        setActiveSessionState("error");
+        setActiveSummary(null);
+        setActiveSessionMessage(
+          error instanceof Error
+            ? error.message
+            : "Не удалось проверить активную игровую сессию.",
+        );
+      }
+    }
+
+    void loadActiveSession();
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
 
   function selectClub(club: GuestPortalGamificationClub) {
     setSelectedClubId(club.id);
@@ -336,6 +394,12 @@ export function PlayRegistrationClient({
           </div>
         </header>
 
+        <ActiveGameSessionPanel
+          message={activeSessionMessage}
+          state={activeSessionState}
+          summary={activeSummary}
+        />
+
         <section className="grid flex-1 gap-5 py-6 lg:grid-cols-[minmax(0,1fr)_430px]">
           <div className="space-y-4">
             <div className="rounded-lg border border-white/10 bg-[#0b111c] p-4 shadow-2xl shadow-black/20">
@@ -567,6 +631,106 @@ export function PlayRegistrationClient({
         </section>
       </div>
     </main>
+  );
+}
+
+function ActiveGameSessionPanel({
+  state,
+  summary,
+  message,
+}: {
+  state: ActiveSessionState;
+  summary: GuestPortalGameSummary | null;
+  message: string | null;
+}) {
+  if (state === "empty") {
+    return null;
+  }
+
+  if (state === "loading") {
+    return (
+      <section className="mt-5 rounded-lg border border-white/10 bg-[#0b111c] p-4">
+        <div className="h-3 w-24 rounded bg-white/10" />
+        <div className="mt-3 h-7 w-56 rounded bg-white/10" />
+        <div className="mt-4 grid gap-2 sm:grid-cols-4">
+          <div className="h-14 rounded-lg bg-white/[0.06]" />
+          <div className="h-14 rounded-lg bg-white/[0.06]" />
+          <div className="h-14 rounded-lg bg-white/[0.06]" />
+          <div className="h-14 rounded-lg bg-white/[0.06]" />
+        </div>
+      </section>
+    );
+  }
+
+  if (state === "error" || !summary) {
+    return (
+      <section className="mt-5 rounded-lg border border-amber-300/25 bg-amber-300/[0.08] p-4 text-sm leading-6 text-amber-100">
+        {message ?? "Активную игровую сессию сейчас не удалось проверить."}
+      </section>
+    );
+  }
+
+  const guestPortalHref = `/guest/${encodeURIComponent(
+    summary.tenant.slug,
+  )}/${encodeURIComponent(summary.store.publicSlug ?? summary.store.id)}`;
+
+  return (
+    <section className="mt-5 rounded-lg border border-emerald-300/25 bg-emerald-300/[0.08] p-4 shadow-2xl shadow-black/20">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-bold uppercase text-emerald-200">
+            Активная игра
+          </p>
+          <h2 className="mt-1 text-2xl font-black text-white">
+            {summary.profile.displayName}
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-slate-300">
+            {summary.store.name}
+            {summary.store.address ? `, ${summary.store.address}` : ""}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <StatusPill tone="emerald">Уровень {summary.profile.level}</StatusPill>
+            <StatusPill
+              tone={summary.account.langameLinked ? "cyan" : "amber"}
+            >
+              {summary.account.stateLabel}
+            </StatusPill>
+          </div>
+        </div>
+
+        <div className="flex shrink-0 flex-col gap-2 sm:flex-row lg:flex-col">
+          <Link
+            className="flex min-h-11 items-center justify-center rounded-lg bg-emerald-300 px-4 text-sm font-black text-slate-950 transition hover:bg-emerald-200"
+            href="/play/game"
+          >
+            Продолжить игру
+          </Link>
+          <Link
+            className="flex min-h-11 items-center justify-center rounded-lg border border-white/15 px-4 text-sm font-bold text-slate-100 transition hover:border-white/30"
+            href={guestPortalHref}
+          >
+            Кабинет клуба
+          </Link>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-2 sm:grid-cols-4">
+        <Metric label="XP" value={summary.profile.xp} />
+        <Metric
+          label="Бонусы"
+          value={
+            summary.loyalty.bonusBalance === null
+              ? "нет"
+              : formatNumber(summary.loyalty.bonusBalance)
+          }
+        />
+        <Metric
+          label="Награды"
+          value={summary.rewards.summary.ready}
+        />
+        <Metric label="Квесты" value={summary.missions.total} />
+      </div>
+    </section>
   );
 }
 

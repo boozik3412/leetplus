@@ -16,6 +16,8 @@ type GameRewardWalletState =
 type GameBonusHistoryItem =
   GuestPortalGameSummary["rewards"]["bonusHistory"]["items"][number];
 type GameMission = GuestPortalGameSummary["missions"]["featured"][number];
+type GameProgressTimelineItem =
+  GuestPortalGameSummary["progress"]["timeline"][number];
 type MissionBoardFilter = "AVAILABLE" | "ALMOST_DONE" | "REWARD_PENDING" | "ALL";
 
 class EmptySessionError extends Error {}
@@ -349,6 +351,10 @@ function ReadyGameView({
         </div>
       </section>
 
+      <section className="mt-4">
+        <ProgressPanel progress={summary.progress} />
+      </section>
+
       <div className="mt-4">
         <NextActionsPanel
           actions={summary.nextActions}
@@ -375,6 +381,168 @@ function ReadyGameView({
       </section>
     </div>
   );
+}
+
+function ProgressPanel({
+  progress,
+}: {
+  progress: GuestPortalGameSummary["progress"];
+}) {
+  const stats = progress.summary;
+
+  return (
+    <section
+      id="progress"
+      className="rounded-lg border border-white/10 bg-white/[0.06] p-5"
+    >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
+            Мой прогресс
+          </p>
+          <h2 className="mt-1 text-xl font-black">Что уже засчитано</h2>
+        </div>
+        <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-black text-zinc-200">
+          уровень {formatNumber(stats.level)}
+        </span>
+      </div>
+
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <ProgressMetric
+          label="XP"
+          value={formatNumber(stats.xp)}
+          note={
+            stats.xpToNextLevel > 0
+              ? `до уровня ${formatNumber(stats.xpToNextLevel)} XP`
+              : "следующий уровень рядом"
+          }
+        />
+        <ProgressMetric
+          label="Квесты"
+          value={`${formatNumber(stats.missionsCompleted)}/${formatNumber(
+            stats.missionsTotal,
+          )}`}
+          note={`${formatNumber(stats.missionsAlmostDone)} почти готовы`}
+        />
+        <ProgressMetric
+          label="Награды"
+          value={formatNumber(stats.rewardsReady)}
+          note={`${formatNumber(stats.rewardsWaitingApproval)} ждут проверки`}
+        />
+        <ProgressMetric
+          label="Бонусы Langame"
+          value={formatSignedNumber(stats.confirmedBonusAmount)}
+          note={`${formatSignedNumber(stats.pendingBonusAmount)} в очереди`}
+        />
+      </div>
+
+      <div className="mt-5 space-y-2">
+        {progress.timeline.length ? (
+          progress.timeline.map((item) => (
+            <ProgressTimelineRow key={item.id} item={item} />
+          ))
+        ) : (
+          <p className="rounded-lg border border-white/10 bg-zinc-950/45 p-4 text-sm leading-6 text-zinc-300">
+            Первые события появятся после чекина, квеста или начисления.
+          </p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function ProgressMetric({
+  label,
+  value,
+  note,
+}: {
+  label: string;
+  value: string;
+  note: string;
+}) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-zinc-950/45 p-3">
+      <p className="text-xs text-zinc-500">{label}</p>
+      <p className="mt-1 text-xl font-black text-white">{value}</p>
+      <p className="mt-1 text-xs text-zinc-400">{note}</p>
+    </div>
+  );
+}
+
+function ProgressTimelineRow({ item }: { item: GameProgressTimelineItem }) {
+  const meta = [
+    progressTimelineKindLabel(item.kind),
+    item.storeName,
+    item.xpDelta !== null ? `${formatSignedNumber(item.xpDelta)} XP` : null,
+    item.amount !== null ? `${formatSignedNumber(item.amount)} бонусов` : null,
+    formatDate(item.occurredAt),
+  ].filter((value): value is string => Boolean(value));
+
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-white/10 bg-zinc-950/45 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={progressTimelineStatusClass(item.status)}>
+            {progressTimelineStatusLabel(item.status)}
+          </span>
+          <p className="min-w-0 truncate text-sm font-black text-white">
+            {item.title}
+          </p>
+        </div>
+        {item.description ? (
+          <p className="mt-1 text-xs leading-5 text-zinc-400">
+            {item.description}
+          </p>
+        ) : null}
+      </div>
+      <div className="flex flex-wrap gap-2 text-[11px] font-bold text-zinc-400 sm:max-w-xs sm:justify-end">
+        {meta.map((value) => (
+          <span
+            key={value}
+            className="rounded-full border border-white/10 px-2 py-1"
+          >
+            {value}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function progressTimelineKindLabel(kind: GameProgressTimelineItem["kind"]) {
+  const labels = {
+    ACTIVITY: "событие",
+    REWARD: "награда",
+    BONUS_LEDGER: "Langame",
+  } satisfies Record<GameProgressTimelineItem["kind"], string>;
+
+  return labels[kind];
+}
+
+function progressTimelineStatusLabel(status: GameProgressTimelineItem["status"]) {
+  const labels = {
+    DONE: "засчитано",
+    READY: "готово",
+    WAITING: "ждет",
+    ATTENTION: "проверка",
+  } satisfies Record<GameProgressTimelineItem["status"], string>;
+
+  return labels[status];
+}
+
+function progressTimelineStatusClass(status: GameProgressTimelineItem["status"]) {
+  const base = "rounded-full px-2 py-1 text-xs font-black";
+
+  switch (status) {
+    case "DONE":
+      return `${base} bg-emerald-300 text-zinc-950`;
+    case "READY":
+      return `${base} bg-sky-300 text-zinc-950`;
+    case "WAITING":
+      return `${base} bg-amber-300/20 text-amber-100`;
+    default:
+      return `${base} bg-rose-300/20 text-rose-100`;
+  }
 }
 
 function Metric({

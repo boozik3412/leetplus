@@ -433,6 +433,23 @@ export type GuestPortalGameSummary = {
         })
       | null;
   };
+  progress: {
+    summary: {
+      xp: number;
+      level: number;
+      levelProgressPercent: number;
+      xpToNextLevel: number;
+      missionsTotal: number;
+      missionsCompleted: number;
+      missionsAlmostDone: number;
+      rewardsReady: number;
+      rewardsWaitingApproval: number;
+      confirmedBonusAmount: number;
+      pendingBonusAmount: number;
+      lastActivityAt: string | null;
+    };
+    timeline: GuestPortalGameProgressTimelineItem[];
+  };
   nextActions: GuestPortalNextAction[];
   activity: Pick<
     GuestPortalPayload['activity']['summary'],
@@ -462,6 +479,18 @@ export type GuestPortalGameSummary = {
       'connected' | 'readyForRewards' | 'status'
     >;
   };
+};
+
+export type GuestPortalGameProgressTimelineItem = {
+  id: string;
+  kind: 'ACTIVITY' | 'REWARD' | 'BONUS_LEDGER';
+  status: 'DONE' | 'READY' | 'WAITING' | 'ATTENTION';
+  title: string;
+  description: string | null;
+  occurredAt: string;
+  storeName: string | null;
+  xpDelta: number | null;
+  amount: number | null;
 };
 
 export type GuestPortalBonusHistory = {
@@ -3613,6 +3642,7 @@ function buildGameSummaryFromPortal(
       rewardStatus: mission.rewardStatus,
     }));
   const activeSeason = portal.gamification.seasons[0] ?? null;
+  const progress = buildGameProgressSummary(portal, recentRewards);
 
   return {
     generatedAt: new Date().toISOString(),
@@ -3670,6 +3700,7 @@ function buildGameSummaryFromPortal(
           }
         : null,
     },
+    progress,
     nextActions: portal.gamification.nextActions.slice(0, 5),
     activity: {
       sessionsCount: portal.activity.summary.sessionsCount,
@@ -3700,6 +3731,126 @@ function buildGameSummaryFromPortal(
       },
     },
   };
+}
+
+function buildGameProgressSummary(
+  portal: GuestPortalPayload,
+  recentRewards: GuestPortalGameSummary['rewards']['recent'],
+): GuestPortalGameSummary['progress'] {
+  const missionsCompleted = portal.gamification.missions.filter(
+    (mission) => mission.progressPercent >= 100,
+  ).length;
+  const missionsAlmostDone = portal.gamification.missions.filter(
+    (mission) => mission.progressPercent >= 70 && mission.progressPercent < 100,
+  ).length;
+  const timeline = [
+    ...portal.activity.timeline.slice(0, 5).map((item) => ({
+      id: `activity:${item.id}`,
+      kind: 'ACTIVITY' as const,
+      status: 'DONE' as const,
+      title: item.title,
+      description: item.description,
+      occurredAt: item.occurredAt,
+      storeName: item.storeName,
+      xpDelta: item.xpDelta,
+      amount: null,
+    })),
+    ...recentRewards.map((reward) => ({
+      id: `reward:${reward.id}`,
+      kind: 'REWARD' as const,
+      status: progressRewardStatus(reward.walletState),
+      title: reward.rewardLabel,
+      description:
+        reward.sourceLabel ?? progressRewardSourceLabel(reward.sourceKind),
+      occurredAt: reward.qualifiedAt,
+      storeName: null,
+      xpDelta: null,
+      amount: reward.rewardAmount,
+    })),
+    ...portal.gamification.bonusHistory.items.slice(0, 5).map((item) => ({
+      id: `bonus:${item.id}`,
+      kind: 'BONUS_LEDGER' as const,
+      status: progressBonusStatus(item.status),
+      title: item.title,
+      description: item.sourceLabel ?? bonusLedgerStatusLabel(item.status),
+      occurredAt: item.confirmedAt ?? item.processedAt ?? item.occurredAt,
+      storeName: item.storeName,
+      xpDelta: null,
+      amount: item.amount,
+    })),
+  ]
+    .sort(
+      (left, right) =>
+        Date.parse(right.occurredAt) - Date.parse(left.occurredAt),
+    )
+    .slice(0, 8);
+
+  return {
+    summary: {
+      xp: portal.profile.xp,
+      level: portal.profile.level,
+      levelProgressPercent: portal.profile.levelProgressPercent,
+      xpToNextLevel: Math.max(
+        0,
+        portal.profile.nextLevelXp - portal.profile.xp,
+      ),
+      missionsTotal: portal.gamification.missions.length,
+      missionsCompleted,
+      missionsAlmostDone,
+      rewardsReady: portal.gamification.rewardSummary.ready,
+      rewardsWaitingApproval: portal.gamification.rewardSummary.waitingApproval,
+      confirmedBonusAmount:
+        portal.gamification.bonusHistory.summary.confirmedAmount,
+      pendingBonusAmount:
+        portal.gamification.bonusHistory.summary.pendingAmount,
+      lastActivityAt: portal.activity.summary.lastActivityAt,
+    },
+    timeline,
+  };
+}
+
+function progressRewardStatus(
+  state: GuestPortalReward['walletState'],
+): GuestPortalGameProgressTimelineItem['status'] {
+  switch (state) {
+    case 'READY':
+      return 'READY';
+    case 'WAITING_APPROVAL':
+      return 'WAITING';
+    case 'REDEEMED':
+      return 'DONE';
+    default:
+      return 'ATTENTION';
+  }
+}
+
+function progressBonusStatus(
+  status: GuestPortalBonusHistoryItem['status'],
+): GuestPortalGameProgressTimelineItem['status'] {
+  switch (status) {
+    case 'CONFIRMED':
+      return 'DONE';
+    case 'PENDING':
+    case 'PROCESSING':
+      return 'WAITING';
+    default:
+      return 'ATTENTION';
+  }
+}
+
+function progressRewardSourceLabel(
+  sourceKind: GuestPortalReward['sourceKind'],
+) {
+  switch (sourceKind) {
+    case 'MISSION':
+      return 'Квест';
+    case 'LOOT_BOX':
+      return 'Лутбокс';
+    case 'BATTLE_PASS':
+      return 'Battle Pass';
+    default:
+      return 'Ручная награда';
+  }
 }
 
 function featuredSeasonLevels(levels: GuestPortalSeason['levels']) {

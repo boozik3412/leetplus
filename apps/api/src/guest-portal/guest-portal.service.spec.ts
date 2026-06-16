@@ -606,6 +606,41 @@ describe('GuestPortalService', () => {
             ],
           }),
         },
+        progress: {
+          summary: expect.objectContaining({
+            xp: 620,
+            level: 3,
+            xpToNextLevel: 280,
+            missionsTotal: 2,
+            missionsCompleted: 1,
+            missionsAlmostDone: 0,
+            rewardsReady: 1,
+            rewardsWaitingApproval: 1,
+            confirmedBonusAmount: 100,
+            pendingBonusAmount: 0,
+          }),
+          timeline: expect.arrayContaining([
+            expect.objectContaining({
+              id: 'activity:timeline-1',
+              kind: 'ACTIVITY',
+              status: 'DONE',
+              xpDelta: 80,
+            }),
+            expect.objectContaining({
+              id: 'reward:reward-1',
+              kind: 'REWARD',
+              status: 'READY',
+              amount: 100,
+            }),
+            expect.objectContaining({
+              id: 'bonus:ledger-1',
+              kind: 'BONUS_LEDGER',
+              status: 'DONE',
+              amount: 100,
+              storeName: '1337',
+            }),
+          ]),
+        },
         activity: {
           sessionsCount: 4,
           playMinutes: 360,

@@ -119,6 +119,18 @@ export type GuestPortalMissionRewardStatus = {
   occurredAt: string | null;
 };
 
+export type GuestPortalGameProgressTimelineItem = {
+  id: string;
+  kind: "ACTIVITY" | "REWARD" | "BONUS_LEDGER";
+  status: "DONE" | "READY" | "WAITING" | "ATTENTION";
+  title: string;
+  description: string | null;
+  occurredAt: string;
+  storeName: string | null;
+  xpDelta: number | null;
+  amount: number | null;
+};
+
 export type GuestPortalPayload = {
   tenant: GuestPortalPublicConfig["tenant"];
   store: GuestPortalPublicConfig["store"];
@@ -548,6 +560,23 @@ export type GuestPortalGameSummary = {
         >
       >;
     }) | null;
+  };
+  progress: {
+    summary: {
+      xp: number;
+      level: number;
+      levelProgressPercent: number;
+      xpToNextLevel: number;
+      missionsTotal: number;
+      missionsCompleted: number;
+      missionsAlmostDone: number;
+      rewardsReady: number;
+      rewardsWaitingApproval: number;
+      confirmedBonusAmount: number;
+      pendingBonusAmount: number;
+      lastActivityAt: string | null;
+    };
+    timeline: GuestPortalGameProgressTimelineItem[];
   };
   nextActions: GuestPortalPayload["gamification"]["nextActions"];
   activity: Pick<

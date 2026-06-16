@@ -2173,7 +2173,7 @@ export class GuestPortalService {
           lastActivityAt: now,
         },
       });
-      await this.backfillGameProfileGuestLinks(
+      const backfilled = await this.backfillGameProfileGuestLinks(
         tx,
         payload.tenantId,
         profile.id,
@@ -2188,6 +2188,7 @@ export class GuestPortalService {
         externalGuestId: guest.externalGuestId,
         phoneMasked: phoneMasked ?? guest.phoneMasked,
         source: 'guest_portal_langame_match',
+        backfilled,
         occurredAt: now,
       });
 
@@ -2206,24 +2207,33 @@ export class GuestPortalService {
     profileId: string,
     guestId: string,
   ) {
-    await Promise.all([
-      tx.guestGameReward.updateMany({
-        where: { tenantId, profileId, guestId: null },
-        data: { guestId },
-      }),
-      tx.guestGameEvent.updateMany({
-        where: { tenantId, profileId, guestId: null },
-        data: { guestId },
-      }),
-      tx.guestGameDelivery.updateMany({
-        where: { tenantId, profileId, guestId: null },
-        data: { guestId },
-      }),
-      tx.guestBonusLedgerEntry.updateMany({
-        where: { tenantId, profileId, guestId: null },
-        data: { guestId },
-      }),
-    ]);
+    const [rewards, events, deliveries, bonusLedgerEntries] = await Promise.all(
+      [
+        tx.guestGameReward.updateMany({
+          where: { tenantId, profileId, guestId: null },
+          data: { guestId },
+        }),
+        tx.guestGameEvent.updateMany({
+          where: { tenantId, profileId, guestId: null },
+          data: { guestId },
+        }),
+        tx.guestGameDelivery.updateMany({
+          where: { tenantId, profileId, guestId: null },
+          data: { guestId },
+        }),
+        tx.guestBonusLedgerEntry.updateMany({
+          where: { tenantId, profileId, guestId: null },
+          data: { guestId },
+        }),
+      ],
+    );
+
+    return {
+      rewards: rewards.count,
+      events: events.count,
+      deliveries: deliveries.count,
+      bonusLedgerEntries: bonusLedgerEntries.count,
+    };
   }
 
   private async createGameProfileLinkedEvent(
@@ -2237,6 +2247,12 @@ export class GuestPortalService {
       externalGuestId: string;
       phoneMasked: string | null;
       source: string;
+      backfilled: {
+        rewards: number;
+        events: number;
+        deliveries: number;
+        bonusLedgerEntries: number;
+      };
       occurredAt: Date;
     },
   ) {
@@ -2256,6 +2272,7 @@ export class GuestPortalService {
             source: input.source,
             phoneMasked: input.phoneMasked,
             externalGuestId: input.externalGuestId,
+            backfilled: input.backfilled,
           },
           note: 'Игровой профиль участника геймификации безопасно связан с синхронизированным гостем Langame.',
           createdAt: input.occurredAt,

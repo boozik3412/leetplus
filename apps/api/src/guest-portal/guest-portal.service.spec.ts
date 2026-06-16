@@ -998,6 +998,10 @@ describe('GuestPortalService', () => {
         id: 'profile-1',
         guestId: 'guest-1',
       });
+      prisma.guestGameReward.updateMany.mockResolvedValue({ count: 2 });
+      prisma.guestGameEvent.updateMany.mockResolvedValue({ count: 3 });
+      prisma.guestGameDelivery.updateMany.mockResolvedValue({ count: 1 });
+      prisma.guestBonusLedgerEntry.updateMany.mockResolvedValue({ count: 4 });
 
       const result = await service.matchLangameGuest('Bearer guest-token', {
         phone,
@@ -1033,6 +1037,22 @@ describe('GuestPortalService', () => {
         },
         data: { guestId: 'guest-1' },
       });
+      expect(prisma.guestGameDelivery.updateMany).toHaveBeenCalledWith({
+        where: {
+          tenantId: 'tenant-1',
+          profileId: 'profile-1',
+          guestId: null,
+        },
+        data: { guestId: 'guest-1' },
+      });
+      expect(prisma.guestBonusLedgerEntry.updateMany).toHaveBeenCalledWith({
+        where: {
+          tenantId: 'tenant-1',
+          profileId: 'profile-1',
+          guestId: null,
+        },
+        data: { guestId: 'guest-1' },
+      });
       expect(prisma.guestGameEvent.createMany).toHaveBeenCalledWith(
         expect.objectContaining({
           data: [
@@ -1049,6 +1069,12 @@ describe('GuestPortalService', () => {
                 source: 'guest_portal_langame_match',
                 phoneMasked: '***2233',
                 externalGuestId: '42',
+                backfilled: {
+                  rewards: 2,
+                  events: 3,
+                  deliveries: 1,
+                  bonusLedgerEntries: 4,
+                },
               }),
             }),
           ],

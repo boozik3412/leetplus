@@ -80,6 +80,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added safe backfill observability to guest game profile linking: `GAME_PROFILE_LINKED` audit events now include counts for game rewards, game events, deliveries, and bonus ledger entries that received the synced `guestId`, proving the separate `GuestGameProfile` was connected to the Langame guest without exposing raw phone data.
 - Fixed the Langame balance dispatch accounting boundary: signed `bonus_balance` ledger operations now update `GuestBonusBalanceCurrent`, while signed `balance` operations dispatch to `/master_api/guests/balance/phone` and stay in ledger/audit without mutating the bonus current balance; API tests cover negative sums and phone masking for both types.
 - Added bonus ledger test coverage for the Langame money-balance branch: explicit `BALANCE` reward types now have API tests proving they queue as `langameBalanceType=balance`, dispatch to `/master_api/guests/balance/phone` with `type: "balance"`, and keep raw phone numbers out of audit payloads.
 - Added action routing to the lightweight public game screen: `/play/game` now turns the primary next action into a direct link to the relevant local game block or the guest portal Langame matching anchor, adds stable game-section anchors, and links channel readiness to the guest portal `#communications` block for consent and Telegram/MAX setup without a new API.

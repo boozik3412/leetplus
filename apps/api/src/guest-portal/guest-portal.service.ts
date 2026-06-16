@@ -331,6 +331,26 @@ export type GuestPortalTelegramWebhookResponse = {
   deliveriesBlocked?: number;
   telegramIdentityMasked: string | null;
   message: string;
+  reply?: {
+    provider: 'TELEGRAM';
+    method: 'sendMessage';
+    chatIdMasked: string | null;
+    text: string;
+    replyMarkup?:
+      | {
+          keyboard: Array<
+            Array<{
+              text: string;
+              request_contact?: boolean;
+            }>
+          >;
+          resize_keyboard: boolean;
+          one_time_keyboard: boolean;
+        }
+      | {
+          remove_keyboard: boolean;
+        };
+  };
 };
 
 export type GuestPortalPayload = {
@@ -2396,6 +2416,10 @@ export class GuestPortalService {
         profileId: challenge.profileId,
         telegramIdentityMasked,
         message: 'Срок действия Telegram-входа истек. Создайте новую ссылку.',
+        reply: this.telegramWebhookRemoveKeyboardReply(
+          telegramIdentityMasked,
+          'Ссылка для входа в LeetPlus устарела. Вернитесь на страницу регистрации и создайте новую.',
+        ),
       };
     }
 
@@ -2432,6 +2456,7 @@ export class GuestPortalService {
       telegramIdentityMasked,
       message:
         'Telegram-бот связан с браузерным входом. Теперь гость должен поделиться телефоном кнопкой бота.',
+      reply: this.telegramWebhookContactRequestReply(telegramIdentityMasked),
     };
   }
 
@@ -2450,6 +2475,10 @@ export class GuestPortalService {
         telegramIdentityMasked,
         message:
           'Telegram contact принадлежит другому пользователю. Для входа нужен собственный номер.',
+        reply: this.telegramWebhookContactRequestReply(
+          telegramIdentityMasked,
+          'Для входа в LeetPlus нужен ваш собственный номер Telegram. Нажмите кнопку ниже и поделитесь телефоном этого аккаунта.',
+        ),
       };
     }
 
@@ -2477,6 +2506,10 @@ export class GuestPortalService {
         telegramIdentityMasked,
         message:
           'Telegram contact получен, но активный вход LeetPlus для этого чата не найден.',
+        reply: this.telegramWebhookRemoveKeyboardReply(
+          telegramIdentityMasked,
+          'Активный вход LeetPlus не найден. Откройте регистрацию на leetplus.ru/play и начните вход через Telegram заново.',
+        ),
       };
     }
 
@@ -2492,6 +2525,10 @@ export class GuestPortalService {
         profileId: challenge.profileId,
         telegramIdentityMasked,
         message: 'Срок действия Telegram-входа истек. Создайте новую ссылку.',
+        reply: this.telegramWebhookRemoveKeyboardReply(
+          telegramIdentityMasked,
+          'Ссылка для входа в LeetPlus устарела. Вернитесь на страницу регистрации и создайте новую.',
+        ),
       };
     }
 
@@ -2627,6 +2664,49 @@ export class GuestPortalService {
       telegramIdentityMasked,
       message:
         'Telegram contact подтвердил телефон. Гостевой игровой профиль готов к выдаче browser session.',
+      reply: this.telegramWebhookRemoveKeyboardReply(
+        telegramIdentityMasked,
+        'Готово: телефон подтвержден. Вернитесь на страницу LeetPlus, вход завершится автоматически.',
+      ),
+    };
+  }
+
+  private telegramWebhookContactRequestReply(
+    chatIdMasked: string | null,
+    text = 'Нажмите кнопку ниже и поделитесь телефоном Telegram. LeetPlus примет только номер этого аккаунта.',
+  ): GuestPortalTelegramWebhookResponse['reply'] {
+    return {
+      provider: 'TELEGRAM',
+      method: 'sendMessage',
+      chatIdMasked,
+      text,
+      replyMarkup: {
+        keyboard: [
+          [
+            {
+              text: 'Поделиться телефоном',
+              request_contact: true,
+            },
+          ],
+        ],
+        resize_keyboard: true,
+        one_time_keyboard: true,
+      },
+    };
+  }
+
+  private telegramWebhookRemoveKeyboardReply(
+    chatIdMasked: string | null,
+    text: string,
+  ): GuestPortalTelegramWebhookResponse['reply'] {
+    return {
+      provider: 'TELEGRAM',
+      method: 'sendMessage',
+      chatIdMasked,
+      text,
+      replyMarkup: {
+        remove_keyboard: true,
+      },
     };
   }
 

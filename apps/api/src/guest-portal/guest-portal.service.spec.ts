@@ -1063,6 +1063,23 @@ describe('GuestPortalService', () => {
         status: 'AWAITING_CONTACT',
         action: 'TELEGRAM_AUTH_START',
         profileId: 'pending-profile-1',
+        reply: {
+          provider: 'TELEGRAM',
+          method: 'sendMessage',
+          chatIdMasked: 'ch...56',
+          replyMarkup: {
+            keyboard: [
+              [
+                {
+                  text: 'Поделиться телефоном',
+                  request_contact: true,
+                },
+              ],
+            ],
+            resize_keyboard: true,
+            one_time_keyboard: true,
+          },
+        },
       });
     });
 
@@ -1184,6 +1201,14 @@ describe('GuestPortalService', () => {
         status: 'CONFIRMED',
         action: 'TELEGRAM_AUTH_CONTACT',
         profileId: 'profile-1',
+        reply: {
+          provider: 'TELEGRAM',
+          method: 'sendMessage',
+          chatIdMasked: 'ch...56',
+          replyMarkup: {
+            remove_keyboard: true,
+          },
+        },
       });
       expect(jwtService.signAsync).toHaveBeenCalledWith(
         expect.objectContaining({

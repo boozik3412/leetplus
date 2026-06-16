@@ -66,6 +66,17 @@ type GuestPortalOtpDeliveryResult = {
   identityMasked?: string | null;
   requiredEnv?: string[];
 };
+type GuestPortalVerificationChannel =
+  | 'TELEGRAM_BOT'
+  | 'USER_CALL'
+  | 'SMS_CODE'
+  | 'INCOMING_CALL_LAST4';
+type GuestPortalVerificationRole = 'PRIMARY' | 'FALLBACK' | 'RESERVE';
+type GuestPortalVerificationStatus =
+  | 'READY'
+  | 'READY_AFTER_OTP'
+  | 'NOT_CONFIGURED'
+  | 'PLANNED';
 type GuestPortalPhoneIdentity = {
   normalized: string;
   hash: string;
@@ -152,6 +163,22 @@ export type GuestPortalGamificationClubDirectory = {
   updatedAt: string;
   total: number;
   cities: string[];
+  verification: {
+    recommendedChannel: GuestPortalVerificationChannel;
+    phoneRequired: boolean;
+    options: Array<{
+      rank: number;
+      channel: GuestPortalVerificationChannel;
+      role: GuestPortalVerificationRole;
+      status: GuestPortalVerificationStatus;
+      label: string;
+      statusLabel: string;
+      message: string;
+      nextAction: string;
+      botUsername: string | null;
+      requiredEnv: string[];
+    }>;
+  };
   search: {
     locationReady: boolean;
     radiusKm: number | null;
@@ -1121,6 +1148,7 @@ export class GuestPortalService {
       updatedAt: new Date().toISOString(),
       total: clubs.length,
       cities,
+      verification: this.buildGamificationVerificationPlan(),
       search: {
         locationReady: Boolean(guestLocation),
         radiusKm,
@@ -1129,6 +1157,103 @@ export class GuestPortalService {
         hiddenWithoutCoordinates,
       },
       clubs,
+    };
+  }
+
+  private buildGamificationVerificationPlan(): GuestPortalGamificationClubDirectory['verification'] {
+    const otpConfig = guestPortalOtpDeliveryConfig(this.configService);
+    const devOtpEnabled = this.isDevOtpEnabled();
+    const telegramBotUsername = this.telegramBotUsername();
+    const telegramLinkReady = Boolean(
+      telegramBotUsername &&
+      configString(
+        this.configService,
+        'GUEST_GAME_TELEGRAM_LINK_SECRET',
+        'GUEST_GAME_TELEGRAM_WEBHOOK_SECRET',
+      ),
+    );
+    const smsReady =
+      devOtpEnabled ||
+      (otpConfig.realSendEnabled &&
+        otpConfig.sms.enabled &&
+        Boolean(otpConfig.sms.endpoint) &&
+        Boolean(otpConfig.sms.token));
+
+    return {
+      recommendedChannel: 'TELEGRAM_BOT',
+      phoneRequired: true,
+      options: [
+        {
+          rank: 1,
+          channel: 'TELEGRAM_BOT',
+          role: 'PRIMARY',
+          status: telegramLinkReady ? 'READY_AFTER_OTP' : 'PLANNED',
+          label: 'Telegram-бот',
+          statusLabel: telegramLinkReady ? 'готов после OTP' : 'целевой канал',
+          message:
+            'Основной канал для регистрации, игровых уведомлений, рефералок и возврата гостей.',
+          nextAction: telegramLinkReady
+            ? 'Добавить первичный Telegram-login с передачей телефона из бота; текущая привязка работает после OTP.'
+            : 'Настроить Telegram bot username/link secret и добавить первичный Telegram-login с передачей телефона.',
+          botUsername: telegramBotUsername,
+          requiredEnv: telegramLinkReady
+            ? []
+            : [
+                'GUEST_GAME_TELEGRAM_BOT_USERNAME',
+                'GUEST_GAME_TELEGRAM_LINK_SECRET or GUEST_GAME_TELEGRAM_WEBHOOK_SECRET',
+              ],
+        },
+        {
+          rank: 2,
+          channel: 'USER_CALL',
+          role: 'FALLBACK',
+          status: 'PLANNED',
+          label: 'Звонок на номер',
+          statusLabel: 'fallback',
+          message:
+            'Дешевый резерв: гость звонит на номер, а LeetPlus подтверждает телефон по входящему вызову.',
+          nextAction:
+            'Подключить номер или call-provider для входящих вызовов и связать caller id с OTP challenge.',
+          botUsername: null,
+          requiredEnv: [],
+        },
+        {
+          rank: 3,
+          channel: 'SMS_CODE',
+          role: 'RESERVE',
+          status: smsReady ? 'READY' : 'NOT_CONFIGURED',
+          label: 'SMS-код',
+          statusLabel: smsReady ? 'готов' : 'нужен provider',
+          message:
+            'Обязательный резервный способ входа по телефону; не основной из-за цены и риска накрутки.',
+          nextAction: smsReady
+            ? 'Держать SMS как резерв и лимитировать частоту отправки.'
+            : 'Включить real-send и SMS provider endpoint/token для production.',
+          botUsername: null,
+          requiredEnv: smsReady
+            ? []
+            : [
+                'GUEST_PORTAL_OTP_REAL_SEND_ENABLED',
+                'GUEST_PORTAL_OTP_SMS_ENABLED',
+                'GUEST_PORTAL_OTP_SMS_ENDPOINT',
+                'GUEST_PORTAL_OTP_SMS_TOKEN',
+              ],
+        },
+        {
+          rank: 4,
+          channel: 'INCOMING_CALL_LAST4',
+          role: 'RESERVE',
+          status: 'PLANNED',
+          label: 'Входящий звонок с 4 цифрами',
+          statusLabel: 'позже',
+          message:
+            'Возможный резервный UX, но не стартовый канал: пользователю сложнее понять механику.',
+          nextAction:
+            'Вернуться после Telegram-бота, звонка пользователя на номер и SMS-резерва.',
+          botUsername: null,
+          requiredEnv: [],
+        },
+      ],
     };
   }
 

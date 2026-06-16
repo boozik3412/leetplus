@@ -868,6 +868,28 @@ describe('GuestPortalService', () => {
         totalBeforeRadius: 2,
         hiddenWithoutCoordinates: 0,
       });
+      expect(directory.verification).toMatchObject({
+        recommendedChannel: 'TELEGRAM_BOT',
+        phoneRequired: true,
+      });
+      expect(
+        directory.verification.options.map((option) => option.channel),
+      ).toEqual([
+        'TELEGRAM_BOT',
+        'USER_CALL',
+        'SMS_CODE',
+        'INCOMING_CALL_LAST4',
+      ]);
+      expect(directory.verification.options[0]).toMatchObject({
+        rank: 1,
+        role: 'PRIMARY',
+        status: 'PLANNED',
+      });
+      expect(directory.verification.options[2]).toMatchObject({
+        rank: 3,
+        role: 'RESERVE',
+        status: 'READY',
+      });
       expect(directory.cities).toEqual(['Екатеринбург']);
       expect(directory.clubs[0]).toMatchObject({
         id: 'leet:club-1337',

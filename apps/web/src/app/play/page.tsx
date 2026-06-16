@@ -16,6 +16,11 @@ const emptyDirectory: GuestPortalGamificationClubDirectory = {
   updatedAt: new Date(0).toISOString(),
   total: 0,
   cities: [],
+  verification: {
+    recommendedChannel: "TELEGRAM_BOT",
+    phoneRequired: true,
+    options: [],
+  },
   search: {
     locationReady: false,
     radiusKm: null,

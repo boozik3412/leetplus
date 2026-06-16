@@ -35,6 +35,8 @@ type MapViewport = {
 const RADIUS_OPTIONS = [null, 1, 3, 5, 10, 25] as const;
 type RadiusOption = (typeof RADIUS_OPTIONS)[number];
 type ActiveSessionState = "loading" | "ready" | "empty" | "error";
+type VerificationStatus =
+  GuestPortalGamificationClubDirectory["verification"]["options"][number]["status"];
 
 export function PlayRegistrationClient({
   initialDirectory,
@@ -536,6 +538,10 @@ export function PlayRegistrationClient({
                   />
                 ) : (
                   <div className="space-y-4">
+                    <VerificationPlanPanel
+                      verification={directory.verification}
+                    />
+
                     <form className="space-y-3" onSubmit={submitPhone}>
                       <label className="block">
                         <span className="text-xs font-bold uppercase text-slate-400">
@@ -915,6 +921,80 @@ function ClubOption({
         />
       </div>
     </button>
+  );
+}
+
+function VerificationPlanPanel({
+  verification,
+}: {
+  verification: GuestPortalGamificationClubDirectory["verification"];
+}) {
+  const options = verification.options
+    .slice()
+    .sort((left, right) => left.rank - right.rank);
+
+  if (options.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-xs font-bold uppercase text-slate-400">
+            Вход участника
+          </p>
+          <h3 className="mt-1 text-lg font-black text-white">
+            Каналы верификации
+          </h3>
+        </div>
+        <StatusPill tone={verification.phoneRequired ? "cyan" : "emerald"}>
+          {verification.phoneRequired ? "телефон обязателен" : "без телефона"}
+        </StatusPill>
+      </div>
+
+      <div className="mt-3 space-y-2">
+        {options.map((option) => {
+          const recommended =
+            option.channel === verification.recommendedChannel;
+
+          return (
+            <div
+              className={`rounded-lg border px-3 py-2 ${
+                recommended
+                  ? "border-emerald-300/25 bg-emerald-300/[0.07]"
+                  : "border-white/10 bg-[#070b12]"
+              }`}
+              key={option.channel}
+            >
+              <div className="flex items-start gap-3">
+                <span
+                  className={`mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg text-xs font-black ${
+                    recommended
+                      ? "bg-emerald-300 text-slate-950"
+                      : "bg-white/[0.08] text-slate-200"
+                  }`}
+                >
+                  {option.rank}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-black text-white">{option.label}</p>
+                    <StatusPill tone={verificationStatusTone(option.status)}>
+                      {option.statusLabel}
+                    </StatusPill>
+                  </div>
+                  <p className="mt-1 text-sm leading-6 text-slate-300">
+                    {option.message}
+                    {option.botUsername ? ` @${option.botUsername}` : ""}
+                  </p>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -1321,6 +1401,20 @@ function radiusSearchMessage(directory: GuestPortalGamificationClubDirectory) {
   return `Показаны ${formatNumber(directory.total)} из ${formatNumber(
     directory.search.totalBeforeRadius,
   )} клубов в радиусе ${formatNumber(radius)} км.${hiddenText}`;
+}
+
+function verificationStatusTone(
+  status: VerificationStatus,
+): "emerald" | "cyan" | "amber" {
+  if (status === "READY") {
+    return "emerald";
+  }
+
+  if (status === "READY_AFTER_OTP") {
+    return "cyan";
+  }
+
+  return "amber";
 }
 
 async function readMessage(response: Response) {

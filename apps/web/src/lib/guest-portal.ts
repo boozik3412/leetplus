@@ -22,6 +22,7 @@ export type GuestPortalGamificationClubDirectory = {
   updatedAt: string;
   total: number;
   cities: string[];
+  verification: GuestPortalVerificationPlan;
   search: {
     locationReady: boolean;
     radiusKm: number | null;
@@ -30,6 +31,31 @@ export type GuestPortalGamificationClubDirectory = {
     hiddenWithoutCoordinates: number;
   };
   clubs: GuestPortalGamificationClub[];
+};
+
+export type GuestPortalVerificationChannel =
+  | "TELEGRAM_BOT"
+  | "USER_CALL"
+  | "SMS_CODE"
+  | "INCOMING_CALL_LAST4";
+
+export type GuestPortalVerificationOption = {
+  rank: number;
+  channel: GuestPortalVerificationChannel;
+  role: "PRIMARY" | "FALLBACK" | "RESERVE";
+  status: "READY" | "READY_AFTER_OTP" | "NOT_CONFIGURED" | "PLANNED";
+  label: string;
+  statusLabel: string;
+  message: string;
+  nextAction: string;
+  botUsername: string | null;
+  requiredEnv: string[];
+};
+
+export type GuestPortalVerificationPlan = {
+  recommendedChannel: GuestPortalVerificationChannel;
+  phoneRequired: boolean;
+  options: GuestPortalVerificationOption[];
 };
 
 export type GuestPortalGamificationClub = {

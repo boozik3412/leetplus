@@ -818,7 +818,7 @@ export type GuestPortalIncomingCallLast4StartResponse = {
   challengeId: string;
   phoneMasked: string;
   expiresAt: string;
-  status: "PENDING" | "NOT_CONFIGURED" | "FAILED";
+  status: "PENDING" | "NOT_CONFIGURED" | "BLOCKED" | "FAILED";
   delivery: {
     status: "DEV_CODE" | "SENT" | "NOT_CONFIGURED" | "BLOCKED" | "FAILED";
     devCode?: string;

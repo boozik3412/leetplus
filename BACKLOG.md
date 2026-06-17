@@ -1,5 +1,7 @@
 # LeetPlus Бэклог
 
+- Готово: `incoming-call-last4/start` больше не маскирует заблокированный входящий звонок под `NOT_CONFIGURED`. Если канал настроен, но гость отписан или provider/policy блокирует доставку, API возвращает верхний `status=BLOCKED`, а challenge сохраняется как `DELIVERY_BLOCKED`; frontend-тип `/play` поддерживает это состояние без raw phone, provider token или Langame payload.
+
 - Готово: `/play/game` теперь показывает гостю статус рефералок без обращения к общему массиву гостей. `GET /guest-portal/session/game-summary` отдает `referral.stats` с количеством принятых регистраций, eligible-регистраций для бонуса и датой последнего приглашения; backend считает это только по `GuestGameEvent` `GAME_REFERRAL_ACCEPTED` и `inviterProfileId` отдельного `GuestGameProfile`, не раскрывая raw phone, секреты, Langame payload или сырой profile id.
 
 - Готово: `/play` получил безопасную локальную сверку связки с Langame для каналов без возврата raw phone в браузер. `otp/verify`, `telegram-auth/status` и `user-call-auth/status` возвращают `match` со статусом локального snapshot, `linkStatus`, связанными profile/guest id и счетчиками backfill по rewards/events/delivery/bonus ledger; UI показывает это в карточке Langame сразу после Telegram contact-share или звонка пользователя. Backend теперь довязывает старые profile-only игровые записи даже при `ALREADY_LINKED`, когда `GuestGameProfile` уже имел `guestId`, поэтому ручная проверка больше не пропускает перенос наград, событий, доставок и ledger.

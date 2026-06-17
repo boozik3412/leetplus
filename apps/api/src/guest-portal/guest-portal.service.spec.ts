@@ -1677,6 +1677,67 @@ describe('GuestPortalService', () => {
       expect(JSON.stringify(result)).not.toContain('79999999999');
     });
 
+    it('returns BLOCKED for incoming-call last4 when communications are unsubscribed', async () => {
+      const { prisma, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+        NODE_ENV: 'production',
+        GUEST_PORTAL_INCOMING_CALL_LAST4_ENABLED: 'true',
+        GUEST_PORTAL_INCOMING_CALL_LAST4_ENDPOINT: 'https://provider.test/call',
+        GUEST_PORTAL_INCOMING_CALL_LAST4_TOKEN: 'provider-token',
+      });
+
+      prisma.tenant.findFirst.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'Leet Clubs',
+        slug: 'leet',
+        stores: [
+          {
+            id: 'store-1',
+            publicSlug: 'club-1337',
+            name: '1337',
+            address: 'Lenina, 1',
+          },
+        ],
+      });
+      prisma.guest.findFirst.mockResolvedValue({
+        id: 'guest-1',
+        phoneConsentStatus: 'UNSUBSCRIBED',
+        unsubscribedAt: new Date('2026-06-15T08:00:00.000Z'),
+      });
+
+      const result = await service.startIncomingCallLast4Auth(
+        'leet',
+        'club-1337',
+        {
+          phone: '+7 999 999-99-99',
+          gameConsentAccepted: true,
+        },
+      );
+
+      expect(prisma.guestPortalOtpChallenge.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            guestId: 'guest-1',
+            phoneMasked: '***9999',
+            status: 'DELIVERY_BLOCKED',
+            deliveryChannel: 'INCOMING_CALL_LAST4',
+            deliveredAt: null,
+          }),
+        }),
+      );
+      expect(result).toMatchObject({
+        phoneMasked: '***9999',
+        status: 'BLOCKED',
+        delivery: {
+          status: 'BLOCKED',
+          message: expect.stringContaining('заблокирован'),
+        },
+      });
+      expect(result.status).not.toBe('NOT_CONFIGURED');
+      expect(JSON.stringify(result)).not.toContain('79999999999');
+      expect(JSON.stringify(result)).not.toContain('provider-token');
+    });
+
     it('verifies the last 4 digits and issues a guest token for a separate game profile', async () => {
       const { jwtService, prisma, service } = createService({
         APP_ENCRYPTION_KEY: 'test-secret',

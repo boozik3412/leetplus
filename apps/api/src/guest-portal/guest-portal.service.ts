@@ -376,7 +376,7 @@ export type GuestPortalIncomingCallLast4StartResponse = {
   challengeId: string;
   phoneMasked: string;
   expiresAt: string;
-  status: 'PENDING' | 'NOT_CONFIGURED' | 'FAILED';
+  status: 'PENDING' | 'NOT_CONFIGURED' | 'BLOCKED' | 'FAILED';
   delivery: {
     status: GuestPortalOtpDeliveryStatus;
     devCode?: string;
@@ -2035,7 +2035,9 @@ export class GuestPortalService {
           ? 'PENDING'
           : delivery.status === 'FAILED'
             ? 'FAILED'
-            : 'NOT_CONFIGURED',
+            : delivery.status === 'BLOCKED'
+              ? 'BLOCKED'
+              : 'NOT_CONFIGURED',
       delivery: {
         status: delivery.status,
         ...(delivery.devCode ? { devCode: delivery.devCode } : {}),

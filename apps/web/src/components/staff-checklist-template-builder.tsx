@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, type DragEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useUnsavedDraftPrompt } from "@/hooks/use-unsaved-draft-prompt";
 import type {
@@ -66,6 +66,11 @@ type DraftTemplate = {
   storeId: string;
   sourceRegulationId: string;
   sections: StaffChecklistTemplateSection[];
+};
+
+type DraggedChecklistItem = {
+  sectionId: string;
+  itemId: string;
 };
 
 function createId(prefix: string) {
@@ -256,6 +261,11 @@ export function StaffChecklistTemplateBuilder({
   );
   const [isPending, setIsPending] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [draggedItem, setDraggedItem] = useState<DraggedChecklistItem | null>(
+    null,
+  );
+  const [dragOverItem, setDragOverItem] =
+    useState<DraggedChecklistItem | null>(null);
   const selectedStoreName =
     report.stores.find((store) => store.id === draft.storeId)?.name ??
     "Вся сеть";
@@ -405,6 +415,135 @@ export function StaffChecklistTemplateBuilder({
           : section,
       ),
     });
+  }
+
+  function moveItemByStep(sectionId: string, itemId: string, step: -1 | 1) {
+    setDraft((current) => ({
+      ...current,
+      sections: current.sections.map((section) => {
+        if (section.id !== sectionId) {
+          return section;
+        }
+
+        const currentIndex = section.items.findIndex(
+          (item) => item.id === itemId,
+        );
+        const nextIndex = currentIndex + step;
+
+        if (
+          currentIndex < 0 ||
+          nextIndex < 0 ||
+          nextIndex >= section.items.length
+        ) {
+          return section;
+        }
+
+        const items = [...section.items];
+        const [movedItem] = items.splice(currentIndex, 1);
+        items.splice(nextIndex, 0, movedItem);
+
+        return { ...section, items };
+      }),
+    }));
+  }
+
+  function moveDraggedItem(targetSectionId: string, targetItemId: string) {
+    if (!draggedItem) {
+      return;
+    }
+
+    setDraft((current) => {
+      if (
+        draggedItem.sectionId === targetSectionId &&
+        draggedItem.itemId === targetItemId
+      ) {
+        return current;
+      }
+
+      let movedItem: StaffChecklistTemplateSection["items"][number] | null =
+        null;
+
+      const sectionsWithoutMovedItem = current.sections.map((section) => {
+        if (section.id !== draggedItem.sectionId) {
+          return section;
+        }
+
+        movedItem =
+          section.items.find((item) => item.id === draggedItem.itemId) ?? null;
+
+        return {
+          ...section,
+          items: section.items.filter((item) => item.id !== draggedItem.itemId),
+        };
+      });
+
+      if (!movedItem) {
+        return current;
+      }
+
+      const itemToInsert = movedItem;
+
+      return {
+        ...current,
+        sections: sectionsWithoutMovedItem.map((section) => {
+          if (section.id !== targetSectionId) {
+            return section;
+          }
+
+          const targetIndex = section.items.findIndex(
+            (item) => item.id === targetItemId,
+          );
+          const items = [...section.items];
+          items.splice(
+            targetIndex < 0 ? items.length : targetIndex,
+            0,
+            itemToInsert,
+          );
+
+          return { ...section, items };
+        }),
+      };
+    });
+  }
+
+  function handleItemDragStart(
+    event: DragEvent<HTMLButtonElement>,
+    sectionId: string,
+    itemId: string,
+  ) {
+    setDraggedItem({ sectionId, itemId });
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", `${sectionId}:${itemId}`);
+  }
+
+  function handleItemDragOver(
+    event: DragEvent<HTMLDivElement>,
+    sectionId: string,
+    itemId: string,
+  ) {
+    if (!draggedItem) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setDragOverItem({ sectionId, itemId });
+  }
+
+  function handleItemDrop(
+    event: DragEvent<HTMLDivElement>,
+    sectionId: string,
+    itemId: string,
+  ) {
+    event.preventDefault();
+    moveDraggedItem(sectionId, itemId);
+    setDraggedItem(null);
+    setDragOverItem(null);
+  }
+
+  function clearItemDragState() {
+    setDraggedItem(null);
+    setDragOverItem(null);
   }
 
   async function saveTemplate(status?: StaffChecklistTemplateStatus) {
@@ -859,11 +998,79 @@ export function StaffChecklistTemplateBuilder({
               </div>
 
               <div className="divide-y divide-zinc-200 dark:divide-zinc-800">
-                {section.items.map((item) => (
+                {section.items.map((item, itemIndex) => (
                   <div
                     key={item.id}
-                    className="grid gap-3 p-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1.4fr)_8rem_8rem_7rem_auto]"
+                    onDragOver={(event) =>
+                      handleItemDragOver(event, section.id, item.id)
+                    }
+                    onDragLeave={(event) => {
+                      if (
+                        event.currentTarget.contains(
+                          event.relatedTarget as Node | null,
+                        )
+                      ) {
+                        return;
+                      }
+
+                      setDragOverItem(null);
+                    }}
+                    onDrop={(event) => handleItemDrop(event, section.id, item.id)}
+                    className={[
+                      "grid gap-3 p-3 transition lg:grid-cols-[2.75rem_minmax(0,1.2fr)_minmax(0,1.4fr)_8rem_8rem_7rem_auto]",
+                      draggedItem?.itemId === item.id
+                        ? "opacity-60"
+                        : "",
+                      dragOverItem?.sectionId === section.id &&
+                      dragOverItem.itemId === item.id
+                        ? "bg-emerald-50/70 dark:bg-emerald-500/10"
+                        : "",
+                    ].join(" ")}
                   >
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        draggable
+                        onDragStart={(event) =>
+                          handleItemDragStart(event, section.id, item.id)
+                        }
+                        onDragEnd={clearItemDragState}
+                        title="Перетащить пункт"
+                        aria-label="Перетащить пункт"
+                        className="inline-flex h-10 w-8 cursor-grab items-center justify-center rounded-xl border border-zinc-200 bg-white text-zinc-400 transition hover:border-emerald-300 hover:text-emerald-600 active:cursor-grabbing dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-emerald-500/40 dark:hover:text-emerald-300"
+                      >
+                        <span className="grid grid-cols-2 gap-0.5" aria-hidden>
+                          <span className="h-1 w-1 rounded-full bg-current" />
+                          <span className="h-1 w-1 rounded-full bg-current" />
+                          <span className="h-1 w-1 rounded-full bg-current" />
+                          <span className="h-1 w-1 rounded-full bg-current" />
+                          <span className="h-1 w-1 rounded-full bg-current" />
+                          <span className="h-1 w-1 rounded-full bg-current" />
+                        </span>
+                      </button>
+                      <div className="flex flex-col gap-1">
+                        <button
+                          type="button"
+                          onClick={() => moveItemByStep(section.id, item.id, -1)}
+                          disabled={itemIndex === 0}
+                          title="Выше"
+                          aria-label="Поднять пункт выше"
+                          className="h-4 w-4 rounded border border-zinc-200 text-[10px] leading-none text-zinc-500 transition hover:border-emerald-300 hover:text-emerald-600 disabled:cursor-not-allowed disabled:opacity-30 dark:border-zinc-800 dark:hover:border-emerald-500/40 dark:hover:text-emerald-300"
+                        >
+                          ^
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => moveItemByStep(section.id, item.id, 1)}
+                          disabled={itemIndex === section.items.length - 1}
+                          title="Ниже"
+                          aria-label="Опустить пункт ниже"
+                          className="h-4 w-4 rounded border border-zinc-200 text-[10px] leading-none text-zinc-500 transition hover:border-emerald-300 hover:text-emerald-600 disabled:cursor-not-allowed disabled:opacity-30 dark:border-zinc-800 dark:hover:border-emerald-500/40 dark:hover:text-emerald-300"
+                        >
+                          v
+                        </button>
+                      </div>
+                    </div>
                     <input
                       value={item.title}
                       onChange={(event) =>

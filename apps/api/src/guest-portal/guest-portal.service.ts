@@ -1458,11 +1458,11 @@ export class GuestPortalService {
           statusLabel: userCallReady ? 'готов' : 'fallback',
           message:
             userCallConfig.provider === USER_CALL_PROVIDER_SMS_RU_CALLCHECK
-              ? 'Дешевый резерв: SMS.ru выдает временный номер, гость звонит на него, а LeetPlus подтверждает телефон по Callcheck.'
+              ? 'Бесплатный звонок: провайдер выдает временный номер, а LeetPlus подтверждает телефон после вызова.'
               : 'Дешевый резерв: гость звонит на номер, а LeetPlus подтверждает телефон по входящему вызову.',
           nextAction: userCallReady
             ? 'Использовать звонок пользователя как дешевый fallback после Telegram-бота.'
-            : 'Подключить SMS.ru Callcheck или ручной call-provider для входящих вызовов и связать caller id с OTP challenge.',
+            : 'Подключить провайдера подтверждения звонка или ручной call-provider и связать caller id с OTP challenge.',
           botUsername: null,
           requiredEnv: userCallRequiredEnv,
           freeCall:
@@ -5502,7 +5502,7 @@ export class GuestPortalService {
     phone: GuestPortalPhoneIdentity,
   ): Promise<GuestPortalUserCallProviderStart> {
     if (!config.smsRu.apiId) {
-      throw new BadRequestException('SMS.ru Callcheck не настроен.');
+      throw new BadRequestException('Провайдер звонка не настроен.');
     }
 
     const url = smsRuCallcheckUrl(config.smsRu.baseUrl, 'add', {
@@ -5531,7 +5531,7 @@ export class GuestPortalService {
       !callPhone
     ) {
       throw new ServiceUnavailableException(
-        `SMS.ru Callcheck не выдал номер для звонка: ${
+        `Провайдер звонка не выдал номер для звонка: ${
           providerErrorText(payload) || statusCode || response.status
         }`,
       );
@@ -5543,7 +5543,7 @@ export class GuestPortalService {
       callNumber: prettyPhone,
       callHref: phoneTelHref(callPhone),
       freeCall: true,
-      message: `Позвоните на номер ${prettyPhone} с этого телефона. Звонок бесплатный: SMS.ru сбросит вызов сразу после проверки; номер действует ${SMS_RU_CALLCHECK_TTL_MINUTES} минут.`,
+      message: `Позвоните на номер ${prettyPhone} с этого телефона. Звонок будет сброшен сразу после проверки; номер действует ${SMS_RU_CALLCHECK_TTL_MINUTES} минут.`,
     };
   }
 
@@ -5562,7 +5562,7 @@ export class GuestPortalService {
 
       return {
         challenge: failedChallenge,
-        message: 'SMS.ru check_id не найден у call challenge.',
+        message: 'Идентификатор проверки звонка не найден у call challenge.',
       };
     }
 
@@ -5575,7 +5575,7 @@ export class GuestPortalService {
       return {
         challenge,
         message:
-          'SMS.ru Callcheck сейчас не настроен на сервере. Попробуйте другой способ входа.',
+          'Звонок сейчас не настроен на сервере. Попробуйте другой способ входа.',
       };
     }
 
@@ -5609,7 +5609,7 @@ export class GuestPortalService {
 
         return {
           challenge: expiredChallenge,
-          message: 'Срок ожидания звонка SMS.ru истек.',
+          message: 'Срок ожидания звонка истек.',
         };
       }
 
@@ -5622,20 +5622,20 @@ export class GuestPortalService {
 
         return {
           challenge: failedChallenge,
-          message: 'SMS.ru не смог подтвердить звонок для этого номера.',
+          message: 'Не удалось подтвердить звонок для этого номера.',
         };
       }
 
       return {
         challenge,
         message:
-          'Ожидаем звонок на номер SMS.ru. Страница проверяет статус автоматически.',
+          'Ожидаем звонок на выданный номер. Страница проверяет статус автоматически.',
       };
     } catch {
       return {
         challenge,
         message:
-          'SMS.ru временно не ответил на проверку звонка. Страница повторит запрос автоматически.',
+          'Проверка звонка временно недоступна. Страница повторит запрос автоматически.',
       };
     }
   }
@@ -5645,7 +5645,7 @@ export class GuestPortalService {
     checkId: string,
   ): Promise<'PENDING' | 'CONFIRMED' | 'EXPIRED' | 'FAILED'> {
     if (!config.smsRu.apiId) {
-      throw new ServiceUnavailableException('SMS.ru Callcheck не настроен.');
+      throw new ServiceUnavailableException('Провайдер звонка не настроен.');
     }
 
     const url = smsRuCallcheckUrl(config.smsRu.baseUrl, 'status', {
@@ -5665,7 +5665,7 @@ export class GuestPortalService {
 
     if (!response.ok || payload?.status !== 'OK') {
       throw new ServiceUnavailableException(
-        `SMS.ru Callcheck status failed: ${
+        `Проверка звонка у провайдера не удалась: ${
           providerErrorText(payload) || statusCode || response.status
         }`,
       );

@@ -1760,7 +1760,10 @@ describe('GuestPortalService', () => {
           freeCall: true,
           status: 'PENDING',
         });
-        expect(result.message).toContain('Звонок бесплатный');
+        expect(result.message).toContain(
+          'Звонок будет сброшен сразу после проверки',
+        );
+        expect(result.message).not.toContain('SMS.ru');
         expect(JSON.stringify(result)).not.toContain('smsru-api-id');
       } finally {
         fetchMock.mockRestore();

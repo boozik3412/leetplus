@@ -2002,7 +2002,7 @@ function UserCallAuthPanel({
 
       {freeCall ? (
         <p className="lp-game-auth-channel-note mt-3 rounded-lg border border-cyan-300/20 bg-cyan-300/[0.07] px-3 py-2 text-xs font-semibold leading-5 text-cyan-100">
-          Звонок бесплатный: SMS.ru сбросит вызов сразу после проверки.
+          Звонок будет сброшен сразу после проверки
         </p>
       ) : null}
 
@@ -2047,8 +2047,8 @@ function UserCallAuthPanel({
         </p>
       ) : !ready ? (
         <p className="lp-game-auth-channel-note mt-2 text-xs leading-5 text-amber-100">
-          Звонок включится после настройки SMS.ru Callcheck или другого
-          call-провайдера; используйте SMS-код.
+          Звонок включится после настройки провайдера подтверждения;
+          используйте SMS-код.
         </p>
       ) : null}
     </div>

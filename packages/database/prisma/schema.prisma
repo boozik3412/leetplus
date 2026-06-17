@@ -1826,6 +1826,8 @@ model GuestPortalOtpChallenge {
   codeHash        String
   status          String    @default("PENDING")
   deliveryChannel String    @default("DEV")
+  providerName    String?
+  providerChallengeId String?
   attempts        Int       @default(0)
   expiresAt       DateTime
   deliveredAt     DateTime?
@@ -1842,6 +1844,7 @@ model GuestPortalOtpChallenge {
 
   @@index([tenantId, storeId, status, createdAt], map: "guest_portal_otp_scope_idx")
   @@index([tenantId, phoneHash, createdAt], map: "guest_portal_otp_phone_idx")
+  @@index([deliveryChannel, providerName, providerChallengeId], map: "guest_portal_otp_provider_idx")
   @@index([expiresAt], map: "guest_portal_otp_expires_idx")
   @@index([guestId], map: "guest_portal_otp_guest_idx")
   @@index([profileId], map: "guest_portal_otp_profile_idx")

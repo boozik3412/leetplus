@@ -9666,18 +9666,34 @@ function guestPortalUserCallAuthReadiness(): GuestGameIntegrationReadinessItem {
   const enabled = envFlag('GUEST_PORTAL_USER_CALL_ENABLED');
   const phoneNumber = envString('GUEST_PORTAL_USER_CALL_PHONE_NUMBER');
   const secret = envString('GUEST_PORTAL_USER_CALL_SECRET');
-  const configured = Boolean(phoneNumber && secret);
+  const smsRuApiId = envString('GUEST_PORTAL_USER_CALL_SMS_RU_API_ID');
+  const provider = normalizeGuestPortalUserCallProviderEnv(
+    envString('GUEST_PORTAL_USER_CALL_PROVIDER') ??
+      (smsRuApiId ? 'SMS_RU_CALLCHECK' : 'MANUAL'),
+  );
+  const configured =
+    provider === 'SMS_RU_CALLCHECK'
+      ? Boolean(smsRuApiId)
+      : Boolean(phoneNumber && secret);
   const ready = enabled && configured;
   const status: GuestGameIntegrationReadinessStatus = ready
     ? 'READY'
-    : enabled || phoneNumber || secret
+    : enabled || phoneNumber || secret || smsRuApiId
       ? 'PARTIAL'
       : 'BLOCKED';
   const requiredEnv = [
     ...(enabled ? [] : ['GUEST_PORTAL_USER_CALL_ENABLED']),
-    ...(phoneNumber ? [] : ['GUEST_PORTAL_USER_CALL_PHONE_NUMBER']),
-    ...(secret ? [] : ['GUEST_PORTAL_USER_CALL_SECRET']),
+    ...(provider === 'SMS_RU_CALLCHECK'
+      ? smsRuApiId
+        ? []
+        : ['GUEST_PORTAL_USER_CALL_SMS_RU_API_ID']
+      : [
+          ...(phoneNumber ? [] : ['GUEST_PORTAL_USER_CALL_PHONE_NUMBER']),
+          ...(secret ? [] : ['GUEST_PORTAL_USER_CALL_SECRET']),
+        ]),
   ];
+  const providerLabel =
+    provider === 'SMS_RU_CALLCHECK' ? 'SMS.ru Callcheck' : 'ручной callback';
 
   return {
     key: 'USER_CALL_AUTH',
@@ -9698,20 +9714,35 @@ function guestPortalUserCallAuthReadiness(): GuestGameIntegrationReadinessItem {
         value: enabled ? 'включен' : 'выключен',
       },
       {
-        label: 'Номер',
-        value: phoneNumber ? 'настроен' : 'нужен',
+        label: 'Provider',
+        value: providerLabel,
       },
-      {
-        label: 'Callback secret',
-        value: secret ? 'настроен' : 'нужен',
-      },
+      ...(provider === 'SMS_RU_CALLCHECK'
+        ? [
+            {
+              label: 'SMS.ru api_id',
+              value: smsRuApiId ? 'настроен' : 'нужен',
+            },
+          ]
+        : [
+            {
+              label: 'Номер',
+              value: phoneNumber ? 'настроен' : 'нужен',
+            },
+            {
+              label: 'Callback secret',
+              value: secret ? 'настроен' : 'нужен',
+            },
+          ]),
     ],
     note: ready
-      ? 'Fallback-вход по звонку готов: /play создает USER_CALL challenge, гость звонит на настроенный номер, а call-provider подтверждает caller id сервисным callback.'
-      : 'Звонок пользователя остается вторым каналом после Telegram-бота, но требует номера для гостей и secret для защищенного provider callback.',
+      ? provider === 'SMS_RU_CALLCHECK'
+        ? 'Fallback-вход по SMS.ru Callcheck готов: /play создает USER_CALL challenge, гость звонит на выданный SMS.ru номер, а LeetPlus подтверждает статус polling-запросом.'
+        : 'Fallback-вход по звонку готов: /play создает USER_CALL challenge, гость звонит на настроенный номер, а call-provider подтверждает caller id сервисным callback.'
+      : 'Звонок пользователя остается вторым каналом после Telegram-бота; сейчас поддержаны ручной callback provider и SMS.ru Callcheck.',
     nextAction: ready
       ? 'Проверить /play на тестовом госте: создать вход по звонку, позвонить с введенного номера и подтвердить callback без раскрытия raw phone.'
-      : 'Задать env GUEST_PORTAL_USER_CALL_ENABLED, GUEST_PORTAL_USER_CALL_PHONE_NUMBER и GUEST_PORTAL_USER_CALL_SECRET на VDS после выбора call-provider.',
+      : 'Задать env GUEST_PORTAL_USER_CALL_ENABLED и либо GUEST_PORTAL_USER_CALL_SMS_RU_API_ID для SMS.ru, либо GUEST_PORTAL_USER_CALL_PHONE_NUMBER/GUEST_PORTAL_USER_CALL_SECRET для ручного provider.',
     runbook: guestAuthFallbackRunbook,
   };
 }
@@ -10291,6 +10322,24 @@ function envFlag(name: string) {
   const value = envString(name)?.toLowerCase();
 
   return value === '1' || value === 'true' || value === 'yes';
+}
+
+function normalizeGuestPortalUserCallProviderEnv(value: string) {
+  const normalized = value
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, '_');
+
+  if (
+    normalized === 'SMS_RU_CALLCHECK' ||
+    normalized === 'SMS_RU' ||
+    normalized === 'SMSRU' ||
+    normalized === 'SMSRU_CALLCHECK'
+  ) {
+    return 'SMS_RU_CALLCHECK';
+  }
+
+  return 'MANUAL';
 }
 
 function envOptionalFlag(name: string): boolean | null {

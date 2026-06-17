@@ -814,8 +814,11 @@ describe('GuestGamificationService', () => {
     delete process.env.GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED;
     delete process.env.GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_BOT_TOKEN;
     delete process.env.GUEST_PORTAL_USER_CALL_ENABLED;
+    delete process.env.GUEST_PORTAL_USER_CALL_PROVIDER;
     delete process.env.GUEST_PORTAL_USER_CALL_PHONE_NUMBER;
     delete process.env.GUEST_PORTAL_USER_CALL_SECRET;
+    delete process.env.GUEST_PORTAL_USER_CALL_SMS_RU_API_ID;
+    delete process.env.GUEST_PORTAL_USER_CALL_SMS_RU_BASE_URL;
     delete process.env.GUEST_PORTAL_TELEGRAM_BOT_TOKEN;
     delete process.env.TELEGRAM_BOT_TOKEN;
   });
@@ -933,6 +936,43 @@ describe('GuestGamificationService', () => {
       );
       expect(userCallText).not.toContain('+7 343 000-00-00');
       expect(userCallText).not.toContain('call-secret');
+    });
+
+    it('marks SMS.ru user call auth ready without requiring manual callback env', () => {
+      process.env.GUEST_PORTAL_USER_CALL_ENABLED = 'true';
+      process.env.GUEST_PORTAL_USER_CALL_PROVIDER = 'SMS_RU_CALLCHECK';
+      process.env.GUEST_PORTAL_USER_CALL_SMS_RU_API_ID = 'smsru-api-id';
+      const { service } = createService();
+
+      const readiness = (service as any).buildIntegrationReadiness([]);
+      const userCall = readiness.items.find(
+        (item: { key: string }) => item.key === 'USER_CALL_AUTH',
+      );
+      const userCallText = JSON.stringify(userCall);
+
+      expect(userCall).toMatchObject({
+        status: 'READY',
+        ready: true,
+        configured: true,
+        enabled: true,
+        requiredEnv: [],
+      });
+      expect(userCall.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ label: 'Флаг', value: 'включен' }),
+          expect.objectContaining({
+            label: 'Provider',
+            value: 'SMS.ru Callcheck',
+          }),
+          expect.objectContaining({
+            label: 'SMS.ru api_id',
+            value: 'настроен',
+          }),
+        ]),
+      );
+      expect(userCallText).not.toContain('smsru-api-id');
+      expect(userCallText).not.toContain('GUEST_PORTAL_USER_CALL_SECRET');
+      expect(userCallText).not.toContain('GUEST_PORTAL_USER_CALL_PHONE_NUMBER');
     });
 
     it('marks incoming call last4 auth ready without exposing provider endpoint or token', () => {

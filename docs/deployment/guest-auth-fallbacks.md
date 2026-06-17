@@ -11,12 +11,26 @@
 
 ## Звонок пользователя на номер
 
-Контур: `/play` создает `USER_CALL` challenge, гость звонит с введенного телефона на настроенный номер, внешний call-provider подтверждает caller id через защищенный callback, LeetPlus выдает guest-token и активирует отдельный `GuestGameProfile`.
+Контур с SMS.ru Callcheck: `/play` создает `USER_CALL` challenge, LeetPlus запрашивает у SMS.ru временный номер через `callcheck/add`, гость звонит на этот номер с введенного телефона, а browser status endpoint polling-ом проверяет `callcheck/status` по сохраненному `check_id`. После подтверждения LeetPlus выдает guest-token и активирует отдельный `GuestGameProfile` без callback от администратора.
 
-Env на VDS:
+Env на VDS для SMS.ru:
 
 ```env
 GUEST_PORTAL_USER_CALL_ENABLED="true"
+GUEST_PORTAL_USER_CALL_PROVIDER="SMS_RU_CALLCHECK"
+GUEST_PORTAL_USER_CALL_SMS_RU_API_ID="<sms-ru-api-id>"
+GUEST_PORTAL_USER_CALL_SMS_RU_BASE_URL="https://sms.ru"
+```
+
+`GUEST_PORTAL_USER_CALL_SMS_RU_API_ID` хранится только в production env. Не коммитить реальное значение в `.env.example`, runbook или issue.
+
+Ручной callback-provider остается совместимым контуром: `/play` создает `USER_CALL` challenge, гость звонит с введенного телефона на настроенный номер, внешний call-provider подтверждает caller id через защищенный callback.
+
+Env на VDS для ручного provider:
+
+```env
+GUEST_PORTAL_USER_CALL_ENABLED="true"
+GUEST_PORTAL_USER_CALL_PROVIDER="MANUAL"
 GUEST_PORTAL_USER_CALL_PHONE_NUMBER="<public-phone-number>"
 GUEST_PORTAL_USER_CALL_SECRET="<provider-callback-secret>"
 ```
@@ -28,7 +42,7 @@ POST /guest-portal/user-call/confirm
 x-guest-portal-user-call-secret: <provider-callback-secret>
 ```
 
-Callback должен передавать номер звонящего только backend-у LeetPlus. Frontend получает только статус, маски и safe local match; raw phone, callback secret и Langame payload не возвращаются в браузер.
+Callback должен передавать номер звонящего только backend-у LeetPlus. При SMS.ru callback secret не нужен: в challenge сохраняется только provider name и внешний `check_id`. Frontend получает только статус, маски и safe local match; raw phone, `api_id`, callback secret и Langame payload не возвращаются в браузер.
 
 ## Входящий звонок с 4 цифрами
 
@@ -50,8 +64,8 @@ GUEST_PORTAL_INCOMING_CALL_LAST4_TOKEN="<provider-token>"
 ## Безопасный запуск
 
 1. Сначала включить Telegram-runbook и убедиться, что `/play` показывает Telegram первым.
-2. Настроить `USER_CALL` env, перезапустить API и проверить readiness `Звонок пользователя для входа` в Guest Game Hub.
-3. Выполнить QA: открыть `/play`, выбрать клуб 1337, выбрать звонок пользователя, ввести телефон, позвонить на публичный номер, отправить provider callback и дождаться guest-token.
+2. Настроить `USER_CALL` env, перезапустить API и проверить readiness `Звонок пользователя для входа` в Guest Game Hub. Для текущего production-пути использовать SMS.ru Callcheck.
+3. Выполнить QA: открыть `/play`, выбрать клуб 1337, выбрать звонок пользователя, ввести телефон, позвонить на выданный SMS.ru номер и дождаться guest-token через polling status. Для ручного provider дополнительно отправить provider callback.
 4. Проверить, что создан или переиспользован отдельный `GuestGameProfile`, общий `Guest` публичной регистрацией не создан, а status response содержит только safe match/backfill.
 5. SMS держать как резервный канал после user-call.
 6. `INCOMING_CALL_LAST4` включать только после выбора provider-а исходящих звонков и отдельного теста блокировок: `NOT_CONFIGURED`, `BLOCKED`, успешный verify.
@@ -61,12 +75,12 @@ GUEST_PORTAL_INCOMING_CALL_LAST4_TOKEN="<provider-token>"
 
 - Отключить звонок пользователя: `GUEST_PORTAL_USER_CALL_ENABLED=false`, затем перезапустить `leetplus-api.service`.
 - Отключить входящий звонок с 4 цифрами: `GUEST_PORTAL_INCOMING_CALL_LAST4_ENABLED=false`.
-- Если provider callback скомпрометирован, заменить `GUEST_PORTAL_USER_CALL_SECRET` или `GUEST_PORTAL_INCOMING_CALL_LAST4_TOKEN` на VDS и перезапустить API.
+- Если SMS.ru `api_id` или provider callback скомпрометирован, заменить `GUEST_PORTAL_USER_CALL_SMS_RU_API_ID`, `GUEST_PORTAL_USER_CALL_SECRET` или `GUEST_PORTAL_INCOMING_CALL_LAST4_TOKEN` на VDS и перезапустить API.
 - `/play` автоматически откроет первый готовый канал из оставшихся: Telegram, user-call, SMS или incoming-call-last4.
 
 ## Инварианты
 
 - Публичная регистрация не создает общий `Guest`.
 - Сырой телефон не возвращается в браузер.
-- Секреты provider-ов, номера callback, endpoint token и Langame payload не попадают в readiness, audit и frontend.
+- Секреты provider-ов, SMS.ru `api_id`, номера callback, endpoint token и Langame payload не попадают в readiness, audit и frontend.
 - Связка с общей базой гостей появляется только через подтвержденный `phoneHash` и сохраненный Langame snapshot.

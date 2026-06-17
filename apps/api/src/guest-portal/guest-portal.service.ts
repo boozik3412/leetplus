@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -9,6 +10,7 @@ import { JwtService, type JwtSignOptions } from '@nestjs/jwt';
 import {
   GuestCommunicationConsentStatus,
   GuestCrmStatus,
+  type GuestPortalOtpChallenge,
   IntegrationProvider,
   Prisma,
   TenantLifecycleStatus,
@@ -48,6 +50,10 @@ const TELEGRAM_AUTH_SESSION_ISSUED_STATUS = 'AUTH_SESSION_ISSUED';
 const USER_CALL_AUTH_CHANNEL = 'USER_CALL';
 const USER_CALL_AUTH_CONFIRMED_STATUS = 'CALL_CONFIRMED';
 const USER_CALL_AUTH_SESSION_ISSUED_STATUS = 'CALL_SESSION_ISSUED';
+const USER_CALL_PROVIDER_MANUAL = 'MANUAL';
+const USER_CALL_PROVIDER_SMS_RU_CALLCHECK = 'SMS_RU_CALLCHECK';
+const SMS_RU_CALLCHECK_BASE_URL = 'https://sms.ru';
+const SMS_RU_CALLCHECK_TTL_MINUTES = 5;
 const INCOMING_CALL_LAST4_CHANNEL = 'INCOMING_CALL_LAST4';
 const COMMUNICATION_PREFERENCE_EVENT_PREFIX =
   'guest_portal:communication_preference:';
@@ -105,6 +111,31 @@ type GuestPortalPhoneIdentity = {
   normalized: string;
   hash: string;
   masked: string;
+};
+type GuestPortalUserCallProvider =
+  | typeof USER_CALL_PROVIDER_MANUAL
+  | typeof USER_CALL_PROVIDER_SMS_RU_CALLCHECK;
+type GuestPortalUserCallConfig = ReturnType<typeof guestPortalUserCallConfig>;
+type GuestPortalUserCallProviderStart = {
+  providerName: GuestPortalUserCallProvider;
+  providerChallengeId: string | null;
+  callNumber: string;
+  callHref: string;
+  message: string;
+};
+type SmsRuCallcheckAddResponse = {
+  status?: string;
+  status_code?: string | number;
+  check_id?: string | number;
+  call_phone?: string | number;
+  call_phone_pretty?: string;
+  status_text?: string;
+};
+type SmsRuCallcheckStatusResponse = {
+  status?: string;
+  status_code?: string | number;
+  check_status?: string | number;
+  status_text?: string;
 };
 
 type GuestPortalTokenPayload = {
@@ -1380,14 +1411,8 @@ export class GuestPortalService {
         otpConfig.sms.enabled &&
         Boolean(otpConfig.sms.endpoint) &&
         Boolean(otpConfig.sms.token));
-    const userCallRequiredEnv = [
-      ...(userCallConfig.enabled ? [] : ['GUEST_PORTAL_USER_CALL_ENABLED']),
-      ...(userCallConfig.phoneNumber
-        ? []
-        : ['GUEST_PORTAL_USER_CALL_PHONE_NUMBER']),
-      ...(userCallConfig.secret ? [] : ['GUEST_PORTAL_USER_CALL_SECRET']),
-    ];
-    const userCallReady = userCallRequiredEnv.length === 0;
+    const userCallRequiredEnv = userCallConfig.requiredEnv;
+    const userCallReady = userCallConfig.enabled && userCallConfig.configured;
     const incomingCallLast4RequiredEnv = [
       ...(incomingCallLast4Config.enabled
         ? []
@@ -1429,10 +1454,12 @@ export class GuestPortalService {
           label: 'Звонок на номер',
           statusLabel: userCallReady ? 'готов' : 'fallback',
           message:
-            'Дешевый резерв: гость звонит на номер, а LeetPlus подтверждает телефон по входящему вызову.',
+            userCallConfig.provider === USER_CALL_PROVIDER_SMS_RU_CALLCHECK
+              ? 'Дешевый резерв: SMS.ru выдает временный номер, гость звонит на него, а LeetPlus подтверждает телефон по Callcheck.'
+              : 'Дешевый резерв: гость звонит на номер, а LeetPlus подтверждает телефон по входящему вызову.',
           nextAction: userCallReady
             ? 'Использовать звонок пользователя как дешевый fallback после Telegram-бота.'
-            : 'Подключить номер или call-provider для входящих вызовов и связать caller id с OTP challenge.',
+            : 'Подключить SMS.ru Callcheck или ручной call-provider для входящих вызовов и связать caller id с OTP challenge.',
           botUsername: null,
           requiredEnv: userCallRequiredEnv,
         },
@@ -1632,7 +1659,7 @@ export class GuestPortalService {
       );
     }
 
-    if (!callConfig.enabled || !callConfig.phoneNumber || !callConfig.secret) {
+    if (!callConfig.enabled || !callConfig.configured) {
       throw new BadRequestException(
         'Звонок на номер пока не настроен. Используйте Telegram-бот или SMS-код.',
       );
@@ -1640,7 +1667,11 @@ export class GuestPortalService {
 
     const now = new Date();
     const resendAfter = new Date(now.getTime() - OTP_RESEND_SECONDS * 1000);
-    const expiresAt = new Date(now.getTime() + OTP_TTL_MINUTES * 60 * 1000);
+    const ttlMinutes =
+      callConfig.provider === USER_CALL_PROVIDER_SMS_RU_CALLCHECK
+        ? SMS_RU_CALLCHECK_TTL_MINUTES
+        : OTP_TTL_MINUTES;
+    const expiresAt = new Date(now.getTime() + ttlMinutes * 60 * 1000);
 
     await this.prisma.guestPortalOtpChallenge.updateMany({
       where: {
@@ -1721,6 +1752,10 @@ export class GuestPortalService {
       : profileByPhone;
     const id = randomUUID();
     const opaqueCode = randomBytes(18).toString('hex');
+    const providerStart = await this.startUserCallProvider({
+      config: callConfig,
+      phone,
+    });
 
     await this.prisma.guestPortalOtpChallenge.create({
       data: {
@@ -1734,6 +1769,8 @@ export class GuestPortalService {
         codeHash: this.hashOtpCode(id, opaqueCode),
         status: 'PENDING',
         deliveryChannel: USER_CALL_AUTH_CHANNEL,
+        providerName: providerStart.providerName,
+        providerChallengeId: providerStart.providerChallengeId,
         expiresAt,
         gameConsentAcceptedAt: now,
         gameConsentVersion: GAME_CONSENT_VERSION,
@@ -1743,12 +1780,11 @@ export class GuestPortalService {
     return {
       challengeId: id,
       phoneMasked: phone.masked,
-      callNumber: callConfig.phoneNumber,
-      callHref: callConfig.callHref,
+      callNumber: providerStart.callNumber,
+      callHref: providerStart.callHref,
       expiresAt: expiresAt.toISOString(),
       status: 'PENDING',
-      message:
-        'Позвоните на указанный номер с этого телефона. LeetPlus завершит вход после подтверждения входящего вызова провайдером.',
+      message: providerStart.message,
     };
   }
 
@@ -1760,7 +1796,7 @@ export class GuestPortalService {
     const context = await this.getTenantStore(tenantSlug, storeId);
     const challengeId = this.requiredString(dto.challengeId, 'challengeId');
     const referralCode = normalizeGameReferralCode(dto.referralCode);
-    const challenge = await this.prisma.guestPortalOtpChallenge.findFirst({
+    let challenge = await this.prisma.guestPortalOtpChallenge.findFirst({
       where: {
         id: challengeId,
         tenantId: context.tenant.id,
@@ -1791,13 +1827,37 @@ export class GuestPortalService {
     }
 
     if (challenge.status === 'PENDING') {
-      return {
-        status: 'PENDING',
-        profileId: challenge.profileId,
-        phoneMasked: challenge.phoneMasked,
-        message:
-          'Ожидаем входящий звонок с подтвержденного телефона. Страница проверяет статус автоматически.',
-      };
+      const syncResult = await this.syncUserCallProviderStatus(challenge);
+      challenge = syncResult.challenge;
+
+      if (challenge.status === USER_CALL_AUTH_CONFIRMED_STATUS) {
+        // Continue below and issue the guest session in the same polling request.
+      } else if (challenge.status === 'EXPIRED') {
+        return {
+          status: 'EXPIRED',
+          profileId: challenge.profileId,
+          phoneMasked: challenge.phoneMasked,
+          message: 'Срок ожидания звонка истек. Создайте новый вход.',
+        };
+      } else if (challenge.status !== 'PENDING') {
+        return {
+          status: 'FAILED',
+          profileId: challenge.profileId,
+          phoneMasked: challenge.phoneMasked,
+          message:
+            syncResult.message ??
+            'Звонок не может быть завершен в текущем статусе.',
+        };
+      } else {
+        return {
+          status: 'PENDING',
+          profileId: challenge.profileId,
+          phoneMasked: challenge.phoneMasked,
+          message:
+            syncResult.message ??
+            'Ожидаем входящий звонок с подтвержденного телефона. Страница проверяет статус автоматически.',
+        };
+      }
     }
 
     if (challenge.status === USER_CALL_AUTH_CONFIRMED_STATUS) {
@@ -2124,6 +2184,7 @@ export class GuestPortalService {
       data: {
         status: USER_CALL_AUTH_CONFIRMED_STATUS,
         deliveredAt: new Date(),
+        verifiedAt: new Date(),
       },
     });
 
@@ -5408,6 +5469,214 @@ export class GuestPortalService {
     }
   }
 
+  private async startUserCallProvider({
+    config,
+    phone,
+  }: {
+    config: GuestPortalUserCallConfig;
+    phone: GuestPortalPhoneIdentity;
+  }): Promise<GuestPortalUserCallProviderStart> {
+    if (config.provider === USER_CALL_PROVIDER_SMS_RU_CALLCHECK) {
+      return this.startSmsRuCallcheck(config, phone);
+    }
+
+    return {
+      providerName: USER_CALL_PROVIDER_MANUAL,
+      providerChallengeId: null,
+      callNumber: config.phoneNumber,
+      callHref: config.callHref,
+      message:
+        'Позвоните на указанный номер с этого телефона. LeetPlus завершит вход после подтверждения входящего вызова провайдером.',
+    };
+  }
+
+  private async startSmsRuCallcheck(
+    config: GuestPortalUserCallConfig,
+    phone: GuestPortalPhoneIdentity,
+  ): Promise<GuestPortalUserCallProviderStart> {
+    if (!config.smsRu.apiId) {
+      throw new BadRequestException('SMS.ru Callcheck не настроен.');
+    }
+
+    const url = smsRuCallcheckUrl(config.smsRu.baseUrl, 'add', {
+      api_id: config.smsRu.apiId,
+      phone: phone.normalized,
+      json: '1',
+    });
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { accept: 'application/json' },
+    });
+    const payload = (await safeJson(
+      response,
+    )) as SmsRuCallcheckAddResponse | null;
+    const statusCode = smsRuResponseString(payload?.status_code);
+    const checkId = smsRuResponseString(payload?.check_id);
+    const callPhone = smsRuResponseString(payload?.call_phone);
+    const prettyPhone =
+      smsRuResponseString(payload?.call_phone_pretty) || callPhone;
+
+    if (
+      !response.ok ||
+      payload?.status !== 'OK' ||
+      statusCode !== '100' ||
+      !checkId ||
+      !callPhone
+    ) {
+      throw new ServiceUnavailableException(
+        `SMS.ru Callcheck не выдал номер для звонка: ${
+          providerErrorText(payload) || statusCode || response.status
+        }`,
+      );
+    }
+
+    return {
+      providerName: USER_CALL_PROVIDER_SMS_RU_CALLCHECK,
+      providerChallengeId: checkId,
+      callNumber: prettyPhone,
+      callHref: phoneTelHref(callPhone),
+      message: `Позвоните на номер ${prettyPhone} с этого телефона. SMS.ru подтвердит вход по факту звонка; номер действует ${SMS_RU_CALLCHECK_TTL_MINUTES} минут.`,
+    };
+  }
+
+  private async syncUserCallProviderStatus(
+    challenge: GuestPortalOtpChallenge,
+  ): Promise<{ challenge: GuestPortalOtpChallenge; message?: string }> {
+    if (challenge.providerName !== USER_CALL_PROVIDER_SMS_RU_CALLCHECK) {
+      return { challenge };
+    }
+
+    if (!challenge.providerChallengeId) {
+      const failedChallenge = await this.prisma.guestPortalOtpChallenge.update({
+        where: { id: challenge.id },
+        data: { status: 'FAILED' },
+      });
+
+      return {
+        challenge: failedChallenge,
+        message: 'SMS.ru check_id не найден у call challenge.',
+      };
+    }
+
+    const config = guestPortalUserCallConfig(this.configService);
+
+    if (
+      config.provider !== USER_CALL_PROVIDER_SMS_RU_CALLCHECK ||
+      !config.smsRu.apiId
+    ) {
+      return {
+        challenge,
+        message:
+          'SMS.ru Callcheck сейчас не настроен на сервере. Попробуйте другой способ входа.',
+      };
+    }
+
+    try {
+      const providerStatus = await this.readSmsRuCallcheckStatus(
+        config,
+        challenge.providerChallengeId,
+      );
+
+      if (providerStatus === 'CONFIRMED') {
+        const confirmedAt = new Date();
+        const confirmedChallenge =
+          await this.prisma.guestPortalOtpChallenge.update({
+            where: { id: challenge.id },
+            data: {
+              status: USER_CALL_AUTH_CONFIRMED_STATUS,
+              deliveredAt: confirmedAt,
+              verifiedAt: confirmedAt,
+            },
+          });
+
+        return { challenge: confirmedChallenge };
+      }
+
+      if (providerStatus === 'EXPIRED') {
+        const expiredChallenge =
+          await this.prisma.guestPortalOtpChallenge.update({
+            where: { id: challenge.id },
+            data: { status: 'EXPIRED' },
+          });
+
+        return {
+          challenge: expiredChallenge,
+          message: 'Срок ожидания звонка SMS.ru истек.',
+        };
+      }
+
+      if (providerStatus === 'FAILED') {
+        const failedChallenge =
+          await this.prisma.guestPortalOtpChallenge.update({
+            where: { id: challenge.id },
+            data: { status: 'FAILED' },
+          });
+
+        return {
+          challenge: failedChallenge,
+          message: 'SMS.ru не смог подтвердить звонок для этого номера.',
+        };
+      }
+
+      return {
+        challenge,
+        message:
+          'Ожидаем звонок на номер SMS.ru. Страница проверяет статус автоматически.',
+      };
+    } catch {
+      return {
+        challenge,
+        message:
+          'SMS.ru временно не ответил на проверку звонка. Страница повторит запрос автоматически.',
+      };
+    }
+  }
+
+  private async readSmsRuCallcheckStatus(
+    config: GuestPortalUserCallConfig,
+    checkId: string,
+  ): Promise<'PENDING' | 'CONFIRMED' | 'EXPIRED' | 'FAILED'> {
+    if (!config.smsRu.apiId) {
+      throw new ServiceUnavailableException('SMS.ru Callcheck не настроен.');
+    }
+
+    const url = smsRuCallcheckUrl(config.smsRu.baseUrl, 'status', {
+      api_id: config.smsRu.apiId,
+      check_id: checkId,
+      json: '1',
+    });
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { accept: 'application/json' },
+    });
+    const payload = (await safeJson(
+      response,
+    )) as SmsRuCallcheckStatusResponse | null;
+    const statusCode = smsRuResponseString(payload?.status_code);
+    const checkStatus = smsRuResponseString(payload?.check_status);
+
+    if (!response.ok || payload?.status !== 'OK') {
+      throw new ServiceUnavailableException(
+        `SMS.ru Callcheck status failed: ${
+          providerErrorText(payload) || statusCode || response.status
+        }`,
+      );
+    }
+
+    switch (checkStatus || statusCode) {
+      case '401':
+        return 'CONFIRMED';
+      case '400':
+        return 'PENDING';
+      case '402':
+        return 'EXPIRED';
+      case '202':
+        return 'FAILED';
+      default:
+        return 'FAILED';
+    }
+  }
+
   private isDevOtpEnabled() {
     return (
       this.configService.get<string>('GUEST_PORTAL_DEV_OTP_ENABLED') ===
@@ -6375,13 +6644,52 @@ function guestPortalUserCallConfig(configService: ConfigService) {
     configService,
     'GUEST_PORTAL_USER_CALL_PHONE_NUMBER',
   );
-  const phoneNumber = rawPhoneNumber.replace(/[^\d+]/g, '');
+  const secret = configString(configService, 'GUEST_PORTAL_USER_CALL_SECRET');
+  const smsRuApiId = configString(
+    configService,
+    'GUEST_PORTAL_USER_CALL_SMS_RU_API_ID',
+  );
+  const rawProvider = configString(
+    configService,
+    'GUEST_PORTAL_USER_CALL_PROVIDER',
+  );
+  const provider = normalizeUserCallProvider(
+    rawProvider ||
+      (smsRuApiId
+        ? USER_CALL_PROVIDER_SMS_RU_CALLCHECK
+        : USER_CALL_PROVIDER_MANUAL),
+  );
+  const enabled = configFlag(configService, 'GUEST_PORTAL_USER_CALL_ENABLED');
+  const configured =
+    provider === USER_CALL_PROVIDER_SMS_RU_CALLCHECK
+      ? Boolean(smsRuApiId)
+      : Boolean(rawPhoneNumber && secret);
+  const requiredEnv = [
+    ...(enabled ? [] : ['GUEST_PORTAL_USER_CALL_ENABLED']),
+    ...(provider === USER_CALL_PROVIDER_SMS_RU_CALLCHECK
+      ? smsRuApiId
+        ? []
+        : ['GUEST_PORTAL_USER_CALL_SMS_RU_API_ID']
+      : [
+          ...(rawPhoneNumber ? [] : ['GUEST_PORTAL_USER_CALL_PHONE_NUMBER']),
+          ...(secret ? [] : ['GUEST_PORTAL_USER_CALL_SECRET']),
+        ]),
+  ];
 
   return {
-    enabled: configFlag(configService, 'GUEST_PORTAL_USER_CALL_ENABLED'),
+    enabled,
+    provider,
+    configured,
+    requiredEnv,
     phoneNumber: rawPhoneNumber,
-    callHref: phoneNumber ? `tel:${phoneNumber}` : '',
-    secret: configString(configService, 'GUEST_PORTAL_USER_CALL_SECRET'),
+    callHref: phoneTelHref(rawPhoneNumber),
+    secret,
+    smsRu: {
+      apiId: smsRuApiId,
+      baseUrl:
+        configString(configService, 'GUEST_PORTAL_USER_CALL_SMS_RU_BASE_URL') ||
+        SMS_RU_CALLCHECK_BASE_URL,
+    },
   };
 }
 
@@ -6400,6 +6708,59 @@ function guestPortalIncomingCallLast4Config(configService: ConfigService) {
       'GUEST_PORTAL_INCOMING_CALL_LAST4_TOKEN',
     ),
   };
+}
+
+function normalizeUserCallProvider(value: string): GuestPortalUserCallProvider {
+  const normalized = value
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, '_');
+
+  if (
+    normalized === USER_CALL_PROVIDER_SMS_RU_CALLCHECK ||
+    normalized === 'SMS_RU' ||
+    normalized === 'SMSRU' ||
+    normalized === 'SMSRU_CALLCHECK'
+  ) {
+    return USER_CALL_PROVIDER_SMS_RU_CALLCHECK;
+  }
+
+  return USER_CALL_PROVIDER_MANUAL;
+}
+
+function phoneTelHref(value: string) {
+  const phoneNumber = value.replace(/[^\d+]/g, '');
+
+  return phoneNumber ? `tel:${phoneNumber}` : '';
+}
+
+function smsRuCallcheckUrl(
+  baseUrl: string,
+  action: 'add' | 'status',
+  params: Record<string, string>,
+) {
+  const url = new URL(
+    `/callcheck/${action}`,
+    baseUrl || SMS_RU_CALLCHECK_BASE_URL,
+  );
+
+  Object.entries(params).forEach(([key, value]) => {
+    url.searchParams.set(key, value);
+  });
+
+  return url.toString();
+}
+
+function smsRuResponseString(value: unknown) {
+  if (typeof value === 'number') {
+    return String(value);
+  }
+
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+
+  return '';
 }
 
 function configFlag(configService: ConfigService, key: string) {
@@ -6570,9 +6931,11 @@ function providerErrorText(payload: unknown) {
       ? record.description
       : typeof record.error === 'string'
         ? record.error
-        : typeof record.message === 'string'
-          ? record.message
-          : '';
+        : typeof record.status_text === 'string'
+          ? record.status_text
+          : typeof record.message === 'string'
+            ? record.message
+            : '';
 
   return text.slice(0, 160);
 }

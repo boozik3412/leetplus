@@ -1693,6 +1693,77 @@ describe('GuestPortalService', () => {
       });
     });
 
+    it('starts SMS.ru callcheck without exposing provider secrets', async () => {
+      const fetchMock = jest.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            status: 'OK',
+            status_code: 100,
+            check_id: 'smsru-check-1',
+            call_phone: '73430000000',
+            call_phone_pretty: '+7 343 000-00-00',
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        ),
+      );
+      const { prisma, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+        GUEST_PORTAL_USER_CALL_ENABLED: 'true',
+        GUEST_PORTAL_USER_CALL_PROVIDER: 'SMS_RU_CALLCHECK',
+        GUEST_PORTAL_USER_CALL_SMS_RU_API_ID: 'smsru-api-id',
+      });
+
+      prisma.tenant.findFirst.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'Leet Clubs',
+        slug: 'leet',
+        stores: [
+          {
+            id: 'store-1',
+            publicSlug: 'club-1337',
+            name: '1337',
+            address: 'Lenina, 1',
+          },
+        ],
+      });
+
+      try {
+        const result = await service.startUserCallAuth('leet', 'club-1337', {
+          phone: '+7 999 999-99-99',
+          gameConsentAccepted: true,
+        });
+
+        expect(fetchMock).toHaveBeenCalledWith(
+          expect.stringContaining('https://sms.ru/callcheck/add?'),
+          expect.objectContaining({ method: 'GET' }),
+        );
+        const callcheckAddUrl = fetchMock.mock.calls[0][0] as string;
+        expect(callcheckAddUrl).toContain('phone=79999999999');
+        expect(prisma.guestPortalOtpChallenge.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              status: 'PENDING',
+              deliveryChannel: 'USER_CALL',
+              providerName: 'SMS_RU_CALLCHECK',
+              providerChallengeId: 'smsru-check-1',
+            }),
+          }),
+        );
+        expect(result).toMatchObject({
+          phoneMasked: '***9999',
+          callNumber: '+7 343 000-00-00',
+          callHref: 'tel:73430000000',
+          status: 'PENDING',
+        });
+        expect(JSON.stringify(result)).not.toContain('smsru-api-id');
+      } finally {
+        fetchMock.mockRestore();
+      }
+    });
+
     it('confirms a matching provider caller id without exposing raw phone', async () => {
       const { prisma, service } = createService({
         APP_ENCRYPTION_KEY: 'test-secret',
@@ -1731,6 +1802,127 @@ describe('GuestPortalService', () => {
         phoneMasked: '***9999',
       });
       expect(JSON.stringify(result)).not.toContain('79999999999');
+    });
+
+    it('issues a guest token when SMS.ru callcheck is confirmed by polling', async () => {
+      const fetchMock = jest.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            status: 'OK',
+            status_code: 100,
+            check_status: 401,
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        ),
+      );
+      const { jwtService, prisma, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+        GUEST_PORTAL_USER_CALL_ENABLED: 'true',
+        GUEST_PORTAL_USER_CALL_PROVIDER: 'SMS_RU_CALLCHECK',
+        GUEST_PORTAL_USER_CALL_SMS_RU_API_ID: 'smsru-api-id',
+      });
+      jest.spyOn(service as any, 'buildPortalPayload').mockResolvedValue({
+        profile: { id: 'profile-1' },
+      });
+
+      prisma.tenant.findFirst.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'Leet Clubs',
+        slug: 'leet',
+        stores: [
+          {
+            id: 'store-1',
+            publicSlug: 'club-1337',
+            name: '1337',
+            address: 'Lenina, 1',
+          },
+        ],
+      });
+      prisma.guestPortalOtpChallenge.findFirst.mockResolvedValue({
+        id: 'call-auth-1',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        guestId: null,
+        profileId: null,
+        phoneHash: 'phone-hash-1',
+        phoneMasked: '***9999',
+        status: 'PENDING',
+        deliveryChannel: 'USER_CALL',
+        providerName: 'SMS_RU_CALLCHECK',
+        providerChallengeId: 'smsru-check-1',
+        expiresAt: new Date(Date.now() + 60_000),
+        gameConsentAcceptedAt: new Date('2026-06-15T08:00:00.000Z'),
+        gameConsentVersion: 'guest-game-v1-2026-06-15',
+      });
+      prisma.guestPortalOtpChallenge.update.mockResolvedValueOnce({
+        id: 'call-auth-1',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        guestId: null,
+        profileId: null,
+        phoneHash: 'phone-hash-1',
+        phoneMasked: '***9999',
+        status: 'CALL_CONFIRMED',
+        deliveryChannel: 'USER_CALL',
+        providerName: 'SMS_RU_CALLCHECK',
+        providerChallengeId: 'smsru-check-1',
+        expiresAt: new Date(Date.now() + 60_000),
+        gameConsentAcceptedAt: new Date('2026-06-15T08:00:00.000Z'),
+        gameConsentVersion: 'guest-game-v1-2026-06-15',
+      });
+      prisma.guestGameProfile.create.mockResolvedValue({
+        id: 'profile-1',
+        guestId: null,
+      });
+      jwtService.signAsync.mockResolvedValue('guest-token');
+
+      try {
+        const status = await service.getUserCallAuthStatus(
+          'leet',
+          'club-1337',
+          {
+            challengeId: 'call-auth-1',
+          },
+        );
+
+        expect(fetchMock).toHaveBeenCalledWith(
+          expect.stringContaining('https://sms.ru/callcheck/status?'),
+          expect.objectContaining({ method: 'GET' }),
+        );
+        const callcheckStatusUrl = fetchMock.mock.calls[0][0] as string;
+        expect(callcheckStatusUrl).toContain('check_id=smsru-check-1');
+        expect(prisma.guestPortalOtpChallenge.update).toHaveBeenNthCalledWith(
+          1,
+          expect.objectContaining({
+            where: { id: 'call-auth-1' },
+            data: expect.objectContaining({
+              status: 'CALL_CONFIRMED',
+              deliveredAt: expect.any(Date),
+              verifiedAt: expect.any(Date),
+            }),
+          }),
+        );
+        expect(prisma.guestPortalOtpChallenge.update).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            where: { id: 'call-auth-1' },
+            data: expect.objectContaining({
+              status: 'CALL_SESSION_ISSUED',
+            }),
+          }),
+        );
+        expect(status).toMatchObject({
+          status: 'CONFIRMED',
+          token: 'guest-token',
+          profileId: 'profile-1',
+          phoneMasked: '***9999',
+        });
+        expect(JSON.stringify(status)).not.toContain('smsru-api-id');
+      } finally {
+        fetchMock.mockRestore();
+      }
     });
 
     it('issues a guest token after the confirmed call status is polled', async () => {

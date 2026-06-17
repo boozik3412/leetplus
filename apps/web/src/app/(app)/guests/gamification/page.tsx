@@ -128,16 +128,15 @@ const emptyWorkspace: GuestGamificationWorkspace = {
         enabled: false,
         requiredEnv: [
           "GUEST_PORTAL_USER_CALL_ENABLED",
-          "GUEST_PORTAL_USER_CALL_PHONE_NUMBER",
-          "GUEST_PORTAL_USER_CALL_SECRET",
+          "GUEST_PORTAL_USER_CALL_SMS_RU_API_ID or GUEST_PORTAL_USER_CALL_PHONE_NUMBER/GUEST_PORTAL_USER_CALL_SECRET",
         ],
         details: [
           { label: "Флаг", value: "выключен" },
-          { label: "Номер", value: "нужен" },
-          { label: "Callback secret", value: "нужен" },
+          { label: "Provider", value: "SMS.ru Callcheck или ручной callback" },
+          { label: "SMS.ru api_id", value: "нужен для Callcheck" },
         ],
-        note: "Звонок пользователя остается вторым каналом после Telegram-бота, но требует номера для гостей и secret для защищенного provider callback.",
-        nextAction: "Задать env GUEST_PORTAL_USER_CALL_ENABLED, GUEST_PORTAL_USER_CALL_PHONE_NUMBER и GUEST_PORTAL_USER_CALL_SECRET на VDS после выбора call-provider.",
+        note: "Звонок пользователя остается вторым каналом после Telegram-бота; поддержаны SMS.ru Callcheck и ручной provider callback.",
+        nextAction: "Задать env GUEST_PORTAL_USER_CALL_ENABLED и либо SMS.ru api_id, либо номер/secret ручного provider.",
       },
       {
         key: "INCOMING_CALL_LAST4_AUTH",

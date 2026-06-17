@@ -195,19 +195,6 @@ export default async function StaffOperationsDashboardPage({
     dashboard.filters.dateFrom,
     dashboard.filters.dateTo,
   );
-  const summaryCards = [
-    {
-      label: "Индекс дисциплины",
-      value: `${dashboard.summary.operationalScore}%`,
-      tone: dashboard.summary.riskLevel,
-    },
-    { label: "В срок", value: dashboard.summary.doneOnTime, tone: "LOW" },
-    { label: "Просрочено", value: dashboard.summary.overdue, tone: "HIGH" },
-    { label: "На проверке", value: dashboard.summary.unchecked, tone: "MEDIUM" },
-    { label: "Возвращено", value: dashboard.summary.returned, tone: "HIGH" },
-    { label: "Эскалации", value: dashboard.summary.escalated, tone: "HIGH" },
-    { label: "Повторы", value: dashboard.summary.recurringIssues, tone: "MEDIUM" },
-  ] as const;
 
   return (
     <main className="px-4 py-6 text-zinc-950 dark:text-zinc-100 sm:px-6 sm:py-8">
@@ -279,27 +266,6 @@ export default async function StaffOperationsDashboardPage({
               Полные сутки
             </div>
           </div>
-        </section>
-
-        <section className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-7">
-          {summaryCards.map((card) => (
-            <div
-              key={card.label}
-              className={[
-                "rounded-lg border bg-white p-4 dark:bg-zinc-950",
-                riskClass(card.tone),
-              ].join(" ")}
-            >
-              <p className="text-xs font-bold uppercase opacity-80">
-                {card.label}
-              </p>
-              <p className="mt-2 text-2xl font-semibold">
-                {typeof card.value === "number"
-                  ? formatNumber(card.value)
-                  : card.value}
-              </p>
-            </div>
-          ))}
         </section>
 
         <form className="mt-6 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">

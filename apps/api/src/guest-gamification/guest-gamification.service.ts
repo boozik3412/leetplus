@@ -1895,6 +1895,7 @@ export type GuestGameProcessEventResult = {
     createdRewards: number;
     queuedRewardAmount: number;
     idempotencyKey: string | null;
+    idempotent: boolean;
     langameWrite: false;
   };
   note: string;
@@ -4574,6 +4575,17 @@ export class GuestGamificationService {
           note: 'Автоматический batch pipeline обработал сохраненный LeetPlus/Langame факт внутри LeetPlus. Запись в Langame не выполнялась.',
         });
 
+        if (process.summary.idempotent) {
+          facts.push({
+            ...pipelineFactBase(fact),
+            status: 'DUPLICATE',
+            reason: 'Snapshot-факт уже был обработан ранее.',
+            dryRun: process.dryRun,
+            process,
+          });
+          continue;
+        }
+
         facts.push({
           ...pipelineFactBase(fact),
           status: 'PROCESSED',
@@ -6235,6 +6247,37 @@ export class GuestGamificationService {
     });
     const eventReference = buildProcessExternalReference(dto, dryRun.eventType);
     const processPayload = buildProcessPayload(dto, dryRun);
+    const existingEvent = eventReference
+      ? await this.prisma.guestGameEvent.findFirst({
+          where: {
+            tenantId: user.tenantId,
+            externalProvider: eventReference.externalProvider,
+            externalDomain: eventReference.externalDomain,
+            externalId: eventReference.externalId,
+          },
+          include: eventInclude,
+        })
+      : null;
+
+    if (eventReference && existingEvent) {
+      return {
+        processed: true,
+        dryRun,
+        event: mapEvent(existingEvent),
+        rewards: [],
+        summary: {
+          profileCreated: false,
+          appliedXpDelta: 0,
+          createdRewards: 0,
+          queuedRewardAmount: 0,
+          idempotencyKey: eventReference.externalId,
+          idempotent: true,
+          langameWrite: false,
+        },
+        note: 'Snapshot-событие уже было обработано ранее; повторный запуск не создал XP, события или награды.',
+      };
+    }
+
     const source: EventSource =
       nullableString(dto.sourceFactKind) === 'LIVE_CHECK_IN'
         ? 'CHECK_IN'
@@ -6273,6 +6316,7 @@ export class GuestGamificationService {
         createdRewards: rewards.length,
         queuedRewardAmount: sum(rewards.map((reward) => reward.rewardAmount)),
         idempotencyKey: eventReference?.externalId ?? null,
+        idempotent: false,
         langameWrite: false,
       },
       note: 'Событие и очередь наград созданы внутри LeetPlus. Запись в Langame не выполнялась.',

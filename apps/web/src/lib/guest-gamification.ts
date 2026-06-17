@@ -262,6 +262,7 @@ export type GuestGameProcessEventResult = {
     createdRewards: number;
     queuedRewardAmount: number;
     idempotencyKey: string | null;
+    idempotent: boolean;
     langameWrite: false;
   };
   note: string;

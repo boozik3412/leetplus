@@ -1,5 +1,7 @@
 # LeetPlus Бэклог
 
+- Готово: усилена идемпотентность `POST /guests/gamification/process-event`. Повторный запуск по тому же внешнему snapshot reference возвращает уже созданный `GuestGameEvent` с `summary.idempotent=true`, не создает новый XP, награды или Langame write и закреплен regression-тестом на no-mutation path.
+
 - Готово: readiness-карточки fallback-входа в Guest Game Hub получили ссылку на runbook `docs/deployment/guest-auth-fallbacks.md`. Документ фиксирует порядок каналов `/play`, настройку звонка пользователя на номер и входящего звонка с последними 4 цифрами, QA, rollback и инварианты без raw phone, provider token, callback secret, endpoint и Langame payload.
 
 - Готово: `/play` получил явный выбор канала входа для участника геймификации. План верификации стал кликабельным переключателем: Telegram-бот остается первым, но если он еще не настроен, страница открывает первый готовый fallback; поле телефона показывается только для звонка пользователя, SMS-кода и входящего звонка, а старые формы кодов скрываются при переключении канала.

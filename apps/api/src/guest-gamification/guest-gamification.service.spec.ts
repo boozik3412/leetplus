@@ -41,6 +41,7 @@ function createPrismaMock() {
   return {
     guestGameEvent: {
       create: jest.fn(),
+      findFirst: jest.fn(),
       findMany: jest.fn(),
     },
     guestGameReward: {
@@ -596,6 +597,7 @@ function processResult(
       createdRewards: rewards.length,
       queuedRewardAmount: 50,
       idempotencyKey: 'guest-game:GUEST_SESSION:SESSION_START:session-1',
+      idempotent: false,
       langameWrite: false,
     },
     note: 'Processed in LeetPlus only.',
@@ -1899,6 +1901,92 @@ describe('GuestGamificationService', () => {
       });
     });
 
+    it('returns an idempotent result for an already processed external event without creating rewards', async () => {
+      const { service, prisma } = createService();
+      const profile = profileFixture();
+      const createEventSpy = jest.spyOn(service as any, 'createProcessEvent');
+      const createRewardsSpy = jest.spyOn(
+        service as any,
+        'createProcessRewards',
+      );
+
+      jest.spyOn(service as any, 'ensureProcessProfile').mockResolvedValue({
+        profile,
+        profileCreated: false,
+      });
+      jest.spyOn(service, 'dryRun').mockResolvedValue(dryRunResult());
+      prisma.guestGameEvent.findFirst.mockResolvedValue({
+        id: 'event-existing',
+        eventType: 'SESSION_START',
+        source: 'API_IMPORT',
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: 'club-1',
+        externalId: 'guest-game:GUEST_SESSION:SESSION_START:session-1',
+        xpDelta: 30,
+        occurredAt: now,
+        payload: null,
+        note: null,
+        createdAt: now,
+        profile: {
+          id: profile.id,
+          displayName: profile.displayName,
+          contactMasked: profile.contactMasked,
+          xp: profile.xp,
+          level: profile.level,
+        },
+        guest: {
+          id: 'guest-1',
+          externalDomain: 'club-1',
+          externalGuestId: 'lg-guest-1',
+          fullNameMasked: 'Guest One',
+          phoneMasked: '+7 *** **-11',
+        },
+        lootBox: null,
+        mission: null,
+        season: null,
+        createdByUser: null,
+      });
+
+      const result = await service.processEvent(user, {
+        eventType: 'SESSION_START',
+        sourceFactKind: 'GUEST_SESSION',
+        sourceFactId: 'fact-1',
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: 'club-1',
+        externalId: 'session-1',
+      });
+
+      expect(prisma.guestGameEvent.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            tenantId: user.tenantId,
+            externalProvider: IntegrationProvider.LANGAME,
+            externalDomain: 'club-1',
+            externalId: 'guest-game:GUEST_SESSION:SESSION_START:session-1',
+          }),
+        }),
+      );
+      expect(createEventSpy).not.toHaveBeenCalled();
+      expect(createRewardsSpy).not.toHaveBeenCalled();
+      expect(prisma.guestGameReward.create).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        processed: true,
+        event: {
+          id: 'event-existing',
+          externalId: 'guest-game:GUEST_SESSION:SESSION_START:session-1',
+        },
+        rewards: [],
+        summary: {
+          appliedXpDelta: 0,
+          createdRewards: 0,
+          queuedRewardAmount: 0,
+          idempotencyKey: 'guest-game:GUEST_SESSION:SESSION_START:session-1',
+          idempotent: true,
+          langameWrite: false,
+        },
+      });
+    });
+
     it('auto-approves rewards when the rule does not require manual approval', async () => {
       const { service } = createService();
 
@@ -2065,7 +2153,20 @@ describe('GuestGamificationService', () => {
         );
       jest.spyOn(service, 'processEvent').mockImplementation((_user, dto) => {
         if (dto.sourceFactId === 'fact-duplicate') {
-          return Promise.reject(new ConflictException('duplicate'));
+          return Promise.resolve(
+            processResult({
+              summary: {
+                profileCreated: false,
+                appliedXpDelta: 0,
+                createdRewards: 0,
+                queuedRewardAmount: 0,
+                idempotencyKey:
+                  'guest-game:GUEST_SESSION:SESSION_START:fact-duplicate',
+                idempotent: true,
+                langameWrite: false,
+              },
+            }),
+          );
         }
 
         return Promise.resolve(processResult());
@@ -2147,6 +2248,7 @@ describe('GuestGamificationService', () => {
             queuedRewardAmount: 50,
             idempotencyKey:
               'guest-game:GUEST_GAME_REFERRAL:REFERRAL_ACCEPTED:referral-event-1',
+            idempotent: false,
             langameWrite: false,
           },
         }),

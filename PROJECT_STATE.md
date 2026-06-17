@@ -80,6 +80,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Hardened `POST /guests/gamification/process-event` idempotency: repeated calls for the same external snapshot reference now return the existing `GuestGameEvent` with `summary.idempotent=true` and do not create duplicate XP, rewards, or Langame writes; regression coverage verifies the no-mutation path.
 - Linked the Guest Game Hub fallback auth readiness items to a dedicated deployment runbook: `USER_CALL_AUTH` and `INCOMING_CALL_LAST4_AUTH` now return `docs/deployment/guest-auth-fallbacks.md` metadata, tests cover the link without leaking phone numbers/provider secrets, and the runbook documents user-call, incoming-call-last4, QA, rollback, and channel priority.
 - Linked the Guest Game Hub `TELEGRAM_AUTH_REPLY_SENDER` readiness item to a dedicated Telegram auth deployment runbook: the API now returns `docs/deployment/telegram-auth.md` metadata, tests cover the link without leaking secrets, and the runbook documents adapter-only/API-side sender setup, `/play -> Telegram -> contact-share` QA, and rollback.
 - Improved the public `/play` gamification registration UX: the agreed verification priority is now a clickable channel selector, Telegram remains first, and the page opens the first ready fallback when Telegram is not configured while keeping the separate `GuestGameProfile` flow unchanged.

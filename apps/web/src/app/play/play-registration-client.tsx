@@ -156,6 +156,8 @@ export function PlayRegistrationClient({
   )
     ? requestedVerificationChannel
     : resolveInitialVerificationChannel(visibleVerification);
+  const normalizedPhone = normalizeGuestPhoneForSubmit(phone);
+  const canUsePhoneAuth = Boolean(normalizedPhone);
   const activeVerificationOption = visibleVerification.options.find(
     (option) => option.channel === activeVerificationChannel,
   );
@@ -435,6 +437,26 @@ export function PlayRegistrationClient({
     void refreshDirectoryByLocation(locationCoords, nextRadiusKm);
   }
 
+  function handlePhoneChange(value: string) {
+    setPhone(formatGuestPhoneInputValue(value));
+  }
+
+  function ensurePhoneForSubmit() {
+    const formattedPhone = formatGuestPhoneInputValue(phone);
+    const phoneValue = normalizeGuestPhoneForSubmit(formattedPhone);
+
+    setPhone(formattedPhone);
+
+    if (!phoneValue) {
+      setMessage(
+        "Введите мобильный телефон: 10 цифр, 8XXXXXXXXXX или +7XXXXXXXXXX.",
+      );
+      return null;
+    }
+
+    return phoneValue;
+  }
+
   async function refreshDirectoryByLocation(
     coords: PlayLocation,
     nextRadiusKm: RadiusOption,
@@ -497,6 +519,12 @@ export function PlayRegistrationClient({
       return;
     }
 
+    const phoneValue = ensurePhoneForSubmit();
+
+    if (!phoneValue) {
+      return;
+    }
+
     setSubmitting(true);
     setMessage(null);
     setChallenge(null);
@@ -515,7 +543,7 @@ export function PlayRegistrationClient({
       const response = await fetch(`${clubApiPath(selectedClub)}/otp/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone, gameConsentAccepted }),
+        body: JSON.stringify({ phone: phoneValue, gameConsentAccepted }),
       });
 
       if (!response.ok) {
@@ -605,6 +633,12 @@ export function PlayRegistrationClient({
       return;
     }
 
+    const phoneValue = ensurePhoneForSubmit();
+
+    if (!phoneValue) {
+      return;
+    }
+
     setStartingUserCallAuth(true);
     setMessage(null);
     setChallenge(null);
@@ -625,7 +659,7 @@ export function PlayRegistrationClient({
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ phone, gameConsentAccepted }),
+          body: JSON.stringify({ phone: phoneValue, gameConsentAccepted }),
         },
       );
 
@@ -660,6 +694,12 @@ export function PlayRegistrationClient({
       return;
     }
 
+    const phoneValue = ensurePhoneForSubmit();
+
+    if (!phoneValue) {
+      return;
+    }
+
     setSubmitting(true);
     setMessage(null);
     setChallenge(null);
@@ -680,7 +720,7 @@ export function PlayRegistrationClient({
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ phone, gameConsentAccepted }),
+          body: JSON.stringify({ phone: phoneValue, gameConsentAccepted }),
         },
       );
 
@@ -791,10 +831,9 @@ export function PlayRegistrationClient({
   }
 
   async function checkLangameMatch() {
-    const phoneValue = phone.trim();
+    const phoneValue = ensurePhoneForSubmit();
 
     if (!phoneValue) {
-      setMessage("Введите подтвержденный телефон.");
       return;
     }
 
@@ -1107,7 +1146,7 @@ export function PlayRegistrationClient({
 
                 {portal ? (
                     <VerifiedSummary
-                      canCheckLangameMatch={Boolean(phone.trim())}
+                      canCheckLangameMatch={canUsePhoneAuth}
                       club={selectedClub}
                       isCheckingLangame={isCheckingLangame}
                       langameMatch={langameMatch}
@@ -1173,16 +1212,21 @@ export function PlayRegistrationClient({
                           </span>
                           <input
                             className="mt-2 min-h-11 w-full rounded-lg border border-white/10 bg-white/[0.05] px-3 text-base font-semibold text-white outline-none transition placeholder:text-slate-500 focus:border-emerald-300/70"
+                            autoComplete="tel"
                             inputMode="tel"
-                            onChange={(event) => setPhone(event.target.value)}
+                            onBlur={() => handlePhoneChange(phone)}
+                            onChange={(event) =>
+                              handlePhoneChange(event.target.value)
+                            }
                             placeholder="+7 999 999-99-99"
+                            type="tel"
                             value={phone}
                           />
                         </label>
 
                         {activeVerificationChannel === "USER_CALL" ? (
                           <UserCallAuthPanel
-                            disabled={!gameConsentAccepted || !phone.trim()}
+                            disabled={!gameConsentAccepted || !canUsePhoneAuth}
                             isPolling={isPollingUserCallAuth}
                             isStarting={isStartingUserCallAuth}
                             onStart={startUserCallAuth}
@@ -1222,7 +1266,7 @@ export function PlayRegistrationClient({
                               className="lp-game-auth-channel-primary mt-3 min-h-11 w-full rounded-lg bg-emerald-300 px-4 text-sm font-black text-slate-950 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-60"
                               disabled={
                                 isSubmitting ||
-                                !phone.trim() ||
+                                !canUsePhoneAuth ||
                                 !gameConsentAccepted
                               }
                               type="submit"
@@ -1235,7 +1279,7 @@ export function PlayRegistrationClient({
                         {activeVerificationChannel ===
                         "INCOMING_CALL_LAST4" ? (
                           <IncomingCallLast4Panel
-                            disabled={!gameConsentAccepted || !phone.trim()}
+                            disabled={!gameConsentAccepted || !canUsePhoneAuth}
                             incomingCallLast4={incomingCallLast4}
                             isStarting={isSubmitting}
                             onStart={startIncomingCallLast4Auth}
@@ -2599,6 +2643,59 @@ function normalizedIdParam(value: string | null) {
   const trimmed = value?.trim();
 
   return trimmed ? trimmed : null;
+}
+
+function normalizeGuestPhoneDigits(value: string) {
+  const digits = value.replace(/\D/g, "");
+
+  if (!digits) {
+    return "";
+  }
+
+  if (digits.startsWith("8")) {
+    return `7${digits.slice(1, 11)}`;
+  }
+
+  if (digits.startsWith("7")) {
+    return digits.slice(0, 11);
+  }
+
+  return `7${digits.slice(0, 10)}`;
+}
+
+function formatGuestPhoneInputValue(value: string) {
+  const digits = normalizeGuestPhoneDigits(value);
+
+  if (!digits) {
+    return "";
+  }
+
+  const localDigits = digits.slice(1);
+  let formatted = "+7";
+
+  if (localDigits.length > 0) {
+    formatted += ` ${localDigits.slice(0, 3)}`;
+  }
+
+  if (localDigits.length > 3) {
+    formatted += ` ${localDigits.slice(3, 6)}`;
+  }
+
+  if (localDigits.length > 6) {
+    formatted += `-${localDigits.slice(6, 8)}`;
+  }
+
+  if (localDigits.length > 8) {
+    formatted += `-${localDigits.slice(8, 10)}`;
+  }
+
+  return formatted;
+}
+
+function normalizeGuestPhoneForSubmit(value: string) {
+  const digits = normalizeGuestPhoneDigits(value);
+
+  return digits.length === 11 ? `+${digits}` : null;
 }
 
 function normalizeSearch(value: string) {

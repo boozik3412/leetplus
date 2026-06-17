@@ -421,6 +421,26 @@ function ReferralPanel({
     }
   }
 
+  const referralStats = [
+    {
+      label: "Регистраций",
+      value: formatNumber(referral.stats.acceptedCount),
+      hint: "по вашей ссылке",
+    },
+    {
+      label: "К бонусу",
+      value: formatNumber(referral.stats.eligibleCount),
+      hint: "без саморефералок",
+    },
+    {
+      label: "Последняя",
+      value: referral.stats.latestAcceptedAt
+        ? formatDate(referral.stats.latestAcceptedAt)
+        : "пока нет",
+      hint: "принятая регистрация",
+    },
+  ];
+
   return (
     <section
       id="referral"
@@ -437,6 +457,22 @@ function ReferralPanel({
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-300">
             {referral.channelHint}
           </p>
+          <div className="mt-4 grid gap-2 sm:grid-cols-3">
+            {referralStats.map((stat) => (
+              <div
+                key={stat.label}
+                className="rounded-lg border border-cyan-200/15 bg-zinc-950/35 px-3 py-2"
+              >
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-cyan-100/70">
+                  {stat.label}
+                </p>
+                <p className="mt-1 text-lg font-black text-white">
+                  {stat.value}
+                </p>
+                <p className="text-xs text-zinc-400">{stat.hint}</p>
+              </div>
+            ))}
+          </div>
         </div>
 
         <div className="grid gap-2">

@@ -542,6 +542,12 @@ export type GuestPortalGameJourney = {
   steps: GuestPortalGameJourneyStep[];
 };
 
+export type GuestPortalReferralStats = {
+  acceptedCount: number;
+  eligibleCount: number;
+  latestAcceptedAt: string | null;
+};
+
 export type GuestPortalGameSummary = {
   generatedAt: string;
   tenant: GuestPortalPayload['tenant'];
@@ -553,6 +559,7 @@ export type GuestPortalGameSummary = {
     link: string;
     shareText: string;
     channelHint: string;
+    stats: GuestPortalReferralStats;
   };
   account: {
     guestFound: boolean;
@@ -2852,10 +2859,69 @@ export class GuestPortalService {
   async getGameSummary(
     authorization: string | undefined,
   ): Promise<GuestPortalGameSummary> {
-    return buildGameSummaryFromPortal(await this.getSession(authorization), {
+    const payload = await this.verifyGuestToken(authorization);
+    const portal = await this.buildPortalPayload(payload);
+    const referralStats = await this.getGameReferralStats(
+      payload.tenantId,
+      portal.profile.id,
+    );
+
+    return buildGameSummaryFromPortal(portal, {
       referralSecret: this.referralSecret(),
       webUrl: this.publicWebUrl(),
+      referralStats,
     });
+  }
+
+  private async getGameReferralStats(
+    tenantId: string,
+    profileId: string | null,
+  ): Promise<GuestPortalReferralStats> {
+    if (!profileId) {
+      return emptyGameReferralStats();
+    }
+
+    const inviterFilter = {
+      payload: {
+        path: ['inviterProfileId'],
+        equals: profileId,
+      },
+    } satisfies Prisma.GuestGameEventWhereInput;
+    const baseWhere: Prisma.GuestGameEventWhereInput = {
+      tenantId,
+      eventType: GAME_REFERRAL_ACCEPTED_EVENT_TYPE,
+      source: GAME_REFERRAL_EVENT_SOURCE,
+      AND: [inviterFilter],
+    };
+    const eligibleWhere: Prisma.GuestGameEventWhereInput = {
+      tenantId,
+      eventType: GAME_REFERRAL_ACCEPTED_EVENT_TYPE,
+      source: GAME_REFERRAL_EVENT_SOURCE,
+      AND: [
+        inviterFilter,
+        {
+          payload: {
+            path: ['eligibleForReward'],
+            equals: true,
+          },
+        },
+      ],
+    };
+    const [acceptedCount, eligibleCount, latestAccepted] = await Promise.all([
+      this.prisma.guestGameEvent.count({ where: baseWhere }),
+      this.prisma.guestGameEvent.count({ where: eligibleWhere }),
+      this.prisma.guestGameEvent.findFirst({
+        where: baseWhere,
+        select: { occurredAt: true },
+        orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
+      }),
+    ]);
+
+    return {
+      acceptedCount,
+      eligibleCount,
+      latestAcceptedAt: latestAccepted?.occurredAt.toISOString() ?? null,
+    };
   }
 
   async checkIn(
@@ -5674,7 +5740,11 @@ export class GuestPortalService {
 
 function buildGameSummaryFromPortal(
   portal: GuestPortalPayload,
-  options: { referralSecret: string; webUrl: string },
+  options: {
+    referralSecret: string;
+    webUrl: string;
+    referralStats: GuestPortalReferralStats;
+  },
 ): GuestPortalGameSummary {
   const recentRewards = [...portal.gamification.rewards]
     .sort(
@@ -5825,7 +5895,11 @@ function buildGameSummaryFromPortal(
 
 function buildGameReferral(
   portal: GuestPortalPayload,
-  options: { referralSecret: string; webUrl: string },
+  options: {
+    referralSecret: string;
+    webUrl: string;
+    referralStats: GuestPortalReferralStats;
+  },
 ): GuestPortalGameSummary['referral'] {
   const code = buildGameReferralCode(portal, options.referralSecret);
   const clubId = `${portal.tenant.slug}:${portal.store.publicSlug ?? portal.store.id}`;
@@ -5838,6 +5912,15 @@ function buildGameReferral(
     shareText: `Я участвую в квестах ${portal.store.name}. Заходи в LeetPlus, выбирай клуб и забирай бонусы: ${link}`,
     channelHint:
       'Ссылку можно отправить в Telegram, MAX или личным сообщением; raw phone и внутренние id гостя в нее не попадают.',
+    stats: options.referralStats,
+  };
+}
+
+function emptyGameReferralStats(): GuestPortalReferralStats {
+  return {
+    acceptedCount: 0,
+    eligibleCount: 0,
+    latestAcceptedAt: null,
   };
 }
 

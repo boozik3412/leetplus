@@ -522,6 +522,11 @@ export type GuestPortalGameSummary = {
     link: string;
     shareText: string;
     channelHint: string;
+    stats: {
+      acceptedCount: number;
+      eligibleCount: number;
+      latestAcceptedAt: string | null;
+    };
   };
   account: {
     guestFound: boolean;

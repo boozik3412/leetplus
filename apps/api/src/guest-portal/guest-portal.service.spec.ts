@@ -53,6 +53,7 @@ function createPrismaMock() {
       updateMany: jest.fn(),
     },
     guestGameEvent: {
+      count: jest.fn(),
       create: jest.fn(),
       createMany: jest.fn(),
       findFirst: jest.fn(),
@@ -118,6 +119,7 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   prisma.guestBonusLedgerEntry.updateMany.mockResolvedValue({ count: 0 });
   prisma.guestGameEvent.create.mockResolvedValue({});
   prisma.guestGameEvent.createMany.mockResolvedValue({ count: 0 });
+  prisma.guestGameEvent.count.mockResolvedValue(0);
   prisma.guestGameEvent.findFirst.mockResolvedValue(null);
   prisma.guestGameEvent.updateMany.mockResolvedValue({ count: 0 });
   prisma.guestGameMission.findMany.mockResolvedValue([]);
@@ -548,21 +550,50 @@ function portalPayloadFixture() {
   };
 }
 
+function mockGameSummarySession(
+  service: GuestPortalService,
+  portal: ReturnType<typeof portalPayloadFixture>,
+) {
+  const tokenPayload = {
+    sub: 'profile-1',
+    purpose: 'guest_portal',
+    tenantId: 'tenant-1',
+    storeId: portal.store.id,
+    guestId: 'guest-1',
+    profileId: portal.profile.id,
+    phoneHash: 'phone-hash',
+  };
+  const verifyGuestToken = jest
+    .spyOn(service as any, 'verifyGuestToken')
+    .mockResolvedValue(tokenPayload);
+  const buildPortalPayload = jest
+    .spyOn(service as any, 'buildPortalPayload')
+    .mockResolvedValue(portal);
+
+  return { buildPortalPayload, tokenPayload, verifyGuestToken };
+}
+
 describe('GuestPortalService', () => {
   describe('getGameSummary', () => {
     it('returns compact game state from the existing guest session payload', async () => {
-      const { service } = createService({
+      const { prisma, service } = createService({
         GUEST_GAME_REFERRAL_SECRET: 'referral-secret',
         WEB_URL: 'https://leetplus.ru',
       });
       const portal = portalPayloadFixture();
-      const getSession = jest
-        .spyOn(service, 'getSession')
-        .mockResolvedValue(portal as any);
+      const { buildPortalPayload, tokenPayload, verifyGuestToken } =
+        mockGameSummarySession(service, portal);
+      prisma.guestGameEvent.count
+        .mockResolvedValueOnce(3)
+        .mockResolvedValueOnce(2);
+      prisma.guestGameEvent.findFirst.mockResolvedValueOnce({
+        occurredAt: new Date('2026-06-15T09:30:00.000Z'),
+      });
 
       const summary = await service.getGameSummary('Bearer guest-token');
 
-      expect(getSession).toHaveBeenCalledWith('Bearer guest-token');
+      expect(verifyGuestToken).toHaveBeenCalledWith('Bearer guest-token');
+      expect(buildPortalPayload).toHaveBeenCalledWith(tokenPayload);
       expect(summary).toMatchObject({
         tenant: portal.tenant,
         store: portal.store,
@@ -571,6 +602,11 @@ describe('GuestPortalService', () => {
           status: 'READY',
           code: expect.stringMatching(/^lp_ref_[A-Za-z0-9_-]{22}$/),
           channelHint: expect.stringContaining('raw phone'),
+          stats: {
+            acceptedCount: 3,
+            eligibleCount: 2,
+            latestAcceptedAt: '2026-06-15T09:30:00.000Z',
+          },
         },
         account: {
           guestFound: true,
@@ -790,6 +826,36 @@ describe('GuestPortalService', () => {
       expect(summary.referral.shareText).toContain(summary.referral.link);
       expect(summary.referral.link).not.toContain(portal.profile.id);
       expect(summary.referral.link).not.toContain(portal.profile.contactMasked);
+      expect(prisma.guestGameEvent.count).toHaveBeenCalledWith({
+        where: expect.objectContaining({
+          tenantId: tokenPayload.tenantId,
+          eventType: 'GAME_REFERRAL_ACCEPTED',
+          source: 'GUEST_PORTAL_REFERRAL',
+          AND: [
+            expect.objectContaining({
+              payload: {
+                path: ['inviterProfileId'],
+                equals: portal.profile.id,
+              },
+            }),
+          ],
+        }),
+      });
+      expect(prisma.guestGameEvent.count).toHaveBeenCalledWith({
+        where: expect.objectContaining({
+          tenantId: tokenPayload.tenantId,
+          eventType: 'GAME_REFERRAL_ACCEPTED',
+          source: 'GUEST_PORTAL_REFERRAL',
+          AND: expect.arrayContaining([
+            expect.objectContaining({
+              payload: {
+                path: ['eligibleForReward'],
+                equals: true,
+              },
+            }),
+          ]),
+        }),
+      });
       expect(summary.rewards.recent).toHaveLength(2);
       expect(summary.rewards.recent[0]).not.toHaveProperty('status');
       expect(summary.rewards.bonusHistory.items).toHaveLength(1);
@@ -822,7 +888,7 @@ describe('GuestPortalService', () => {
           occurredAt: `2026-06-15T08:0${index}:00.000Z`,
         })),
       };
-      jest.spyOn(service, 'getSession').mockResolvedValue(portal as any);
+      mockGameSummarySession(service, portal);
 
       const summary = await service.getGameSummary('Bearer guest-token');
 
@@ -848,7 +914,7 @@ describe('GuestPortalService', () => {
           id: `${step.id}-${index + 1}`,
         })),
       }));
-      jest.spyOn(service, 'getSession').mockResolvedValue(portal as any);
+      mockGameSummarySession(service, portal);
 
       const summary = await service.getGameSummary('Bearer guest-token');
 

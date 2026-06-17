@@ -80,6 +80,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Linked the Guest Game Hub `BONUS_LEDGER_SCHEDULER` readiness card to a dedicated VDS runbook: the API now returns `docs/deployment/bonus-ledger-scheduler.md` metadata, the web UI renders the link, and the runbook documents dry-run, canary, live-write, rollback, and reconciliation without exposing secrets or raw guest data.
 - Added regression coverage for the gamification bonus-ledger scheduler kill switch: explicit `GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED=false` now has a test proving it prevents startup even in production with `SYNC_SERVICE_TOKEN`.
 - Added regression coverage for autonomous gamification bonus-ledger scheduling: `guest-bonus-ledger.service.spec.ts` now verifies multi-tenant scheduled dispatch, audit-safe actor selection, inactive/no-actor tenant skips, isolated tenant errors, and aggregate counters without touching Langame.
 - Added explicit VDS gamification bot-consumer accounting for idempotent delivery acknowledgements: `guest-game:bot-consumer` now parses the LeetPlus `idempotent` ack flag, reports `idempotentAcks` in run results and CLI logs, and the runbook documents how to read the signal in systemd journal output.

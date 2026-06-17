@@ -1130,6 +1130,12 @@ export type GuestGameIntegrationReadinessStatus =
   | 'BLOCKED'
   | 'MANUAL_ONLY';
 
+export type GuestGameRunbookLink = {
+  label: string;
+  path: string;
+  href: string;
+};
+
 export type GuestGameIntegrationReadinessItem = {
   key:
     | 'PUBLIC_PORTAL'
@@ -1154,6 +1160,7 @@ export type GuestGameIntegrationReadinessItem = {
   enabled: boolean;
   requiredEnv: string[];
   details?: Array<{ label: string; value: string }>;
+  runbook?: GuestGameRunbookLink | null;
   note: string;
   nextAction: string;
 };
@@ -1653,11 +1660,7 @@ export type GuestGameBotConsumerStatus = {
   configured: boolean;
   channels: Array<'TELEGRAM' | 'MAX'>;
   requiredEnv: string[];
-  runbook: {
-    label: string;
-    path: string;
-    href: string;
-  };
+  runbook: GuestGameRunbookLink;
   pendingReady: number;
   pendingTelegram: number;
   pendingMax: number;
@@ -9792,6 +9795,12 @@ const botConsumerRunbook = {
   href: 'https://github.com/boozik3412/leetplus/tree/main/docs/deployment/systemd',
 };
 
+const bonusLedgerSchedulerRunbook = {
+  label: 'Runbook scheduler',
+  path: 'docs/deployment/bonus-ledger-scheduler.md',
+  href: 'https://github.com/boozik3412/leetplus/blob/main/docs/deployment/bonus-ledger-scheduler.md',
+};
+
 function deliveryProviderConfig(): DeliveryProviderConfig {
   return {
     realSendEnabled: envFlag('GUEST_GAME_DELIVERY_REAL_SEND_ENABLED'),
@@ -10330,6 +10339,7 @@ function bonusLedgerSchedulerReadiness(
       queueApprovedRewards,
       runtimeStatus,
     }),
+    runbook: bonusLedgerSchedulerRunbook,
     note: ready
       ? `Scheduler обрабатывает ledger каждые ${intervalMs} мс, лимит ${limit}, scope ${tenantScope}, reward types ${rewardTypes}. Queue approved rewards: ${queueApprovedRewards ? 'on' : 'off'}.`
       : enabled

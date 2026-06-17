@@ -2785,6 +2785,18 @@ function IntegrationReadinessCard({
               </div>
             ) : null}
 
+            {item.runbook ? (
+              <a
+                className="mt-3 inline-flex text-xs font-bold text-emerald-700 underline decoration-emerald-300 underline-offset-4 hover:text-emerald-900 dark:text-emerald-200 dark:decoration-emerald-700 dark:hover:text-emerald-100"
+                href={item.runbook.href}
+                target="_blank"
+                rel="noreferrer"
+                title={item.runbook.path}
+              >
+                {item.runbook.label}
+              </a>
+            ) : null}
+
             <p className="mt-3 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
               {item.nextAction}
             </p>

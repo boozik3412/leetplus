@@ -990,6 +990,11 @@ describe('GuestGamificationService', () => {
         ready: false,
         configured: false,
         enabled: false,
+        runbook: {
+          label: 'Runbook scheduler',
+          path: 'docs/deployment/bonus-ledger-scheduler.md',
+          href: 'https://github.com/boozik3412/leetplus/blob/main/docs/deployment/bonus-ledger-scheduler.md',
+        },
       });
       expect(scheduler.requiredEnv).toContain('SYNC_SERVICE_TOKEN');
       expect(scheduler.requiredEnv).toContain('LANGAME_BONUS_ACCRUAL_ENABLED');
@@ -1012,6 +1017,7 @@ describe('GuestGamificationService', () => {
         const scheduler = readiness.items.find(
           (item: { key: string }) => item.key === 'BONUS_LEDGER_SCHEDULER',
         );
+        const schedulerText = JSON.stringify(scheduler);
 
         expect(scheduler).toMatchObject({
           status: 'READY',
@@ -1019,10 +1025,14 @@ describe('GuestGamificationService', () => {
           ready: true,
           configured: true,
           enabled: true,
+          runbook: {
+            path: 'docs/deployment/bonus-ledger-scheduler.md',
+          },
         });
         expect(scheduler.note).toContain('60000');
         expect(scheduler.note).toContain('demo');
         expect(scheduler.note).toContain('BONUS,CASHBACK');
+        expect(schedulerText).not.toContain('sync-token');
       } finally {
         if (originalNodeEnv === undefined) {
           delete process.env.NODE_ENV;

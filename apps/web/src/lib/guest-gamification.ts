@@ -551,6 +551,12 @@ export type GuestGameDeliveryDispatcherStatus = {
   note: string;
 };
 
+export type GuestGameRunbookLink = {
+  label: string;
+  path: string;
+  href: string;
+};
+
 export type GuestGameBotConsumerStatus = {
   mode: "BLOCKED" | "DRY_RUN" | "READY";
   modeLabel: string;
@@ -558,11 +564,7 @@ export type GuestGameBotConsumerStatus = {
   configured: boolean;
   channels: Array<"TELEGRAM" | "MAX">;
   requiredEnv: string[];
-  runbook: {
-    label: string;
-    path: string;
-    href: string;
-  };
+  runbook: GuestGameRunbookLink;
   pendingReady: number;
   pendingTelegram: number;
   pendingMax: number;
@@ -696,6 +698,7 @@ export type GuestGameIntegrationReadinessItem = {
   enabled: boolean;
   requiredEnv: string[];
   details?: Array<{ label: string; value: string }>;
+  runbook?: GuestGameRunbookLink | null;
   note: string;
   nextAction: string;
 };

@@ -1193,21 +1193,22 @@ export function PlayRegistrationClient({
                         ) : null}
 
                         {activeVerificationChannel === "SMS_CODE" ? (
-                          <div className="rounded-lg border border-emerald-300/25 bg-emerald-300/[0.06] p-4">
+                          <div className="lp-game-auth-channel-detail rounded-lg border border-emerald-300/25 bg-emerald-300/[0.06] p-4">
                             <div className="flex flex-wrap items-start justify-between gap-3">
                               <div>
-                                <p className="text-xs font-bold uppercase text-emerald-200">
+                                <p className="lp-game-auth-channel-kicker text-xs font-bold uppercase text-emerald-200">
                                   3 место
                                 </p>
-                                <h3 className="mt-1 text-lg font-black text-white">
+                                <h3 className="lp-game-auth-channel-title mt-1 text-lg font-black text-white">
                                   SMS-код
                                 </h3>
-                                <p className="mt-1 text-sm leading-6 text-slate-300">
+                                <p className="lp-game-auth-channel-copy mt-1 text-sm leading-6 text-slate-300">
                                   Резервный вход по телефону. Используется,
                                   когда Telegram или звонок недоступны.
                                 </p>
                               </div>
                               <StatusPill
+                                className="lp-game-auth-channel-pill"
                                 tone={verificationStatusTone(
                                   activeVerificationOption?.status ??
                                     "NOT_CONFIGURED",
@@ -1218,7 +1219,7 @@ export function PlayRegistrationClient({
                               </StatusPill>
                             </div>
                             <button
-                              className="mt-3 min-h-11 w-full rounded-lg bg-emerald-300 px-4 text-sm font-black text-slate-950 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-60"
+                              className="lp-game-auth-channel-primary mt-3 min-h-11 w-full rounded-lg bg-emerald-300 px-4 text-sm font-black text-slate-950 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-60"
                               disabled={
                                 isSubmitting ||
                                 !phone.trim() ||
@@ -1831,21 +1832,21 @@ function TelegramAuthPanel({
   const ready = telegramOption?.status === "READY";
 
   return (
-    <div className="rounded-lg border border-emerald-300/25 bg-emerald-300/[0.07] p-4">
+    <div className="lp-game-auth-channel-detail rounded-lg border border-emerald-300/25 bg-emerald-300/[0.07] p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-xs font-bold uppercase text-emerald-200">
+          <p className="lp-game-auth-channel-kicker text-xs font-bold uppercase text-emerald-200">
             1 место
           </p>
-          <h3 className="mt-1 text-lg font-black text-white">
+          <h3 className="lp-game-auth-channel-title mt-1 text-lg font-black text-white">
             Telegram-бот
           </h3>
-          <p className="mt-1 text-sm leading-6 text-slate-300">
+          <p className="lp-game-auth-channel-copy mt-1 text-sm leading-6 text-slate-300">
             Вход через Telegram подтверждает телефон в боте и готовит канал
             для наград.
           </p>
         </div>
-        <StatusPill tone={ready ? "emerald" : "amber"}>
+        <StatusPill className="lp-game-auth-channel-pill" tone={ready ? "emerald" : "amber"}>
           {telegramOption?.statusLabel ?? "целевой канал"}
         </StatusPill>
       </div>
@@ -1861,9 +1862,9 @@ function TelegramAuthPanel({
         </div>
       ) : null}
 
-      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+      <div className="lp-game-auth-channel-actions mt-3 grid gap-2 sm:grid-cols-2">
         <button
-          className="min-h-11 rounded-lg bg-emerald-300 px-4 text-sm font-black text-slate-950 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-60"
+          className="lp-game-auth-channel-primary min-h-11 rounded-lg bg-emerald-300 px-4 text-sm font-black text-slate-950 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-60"
           disabled={disabled || !ready || isStarting}
           onClick={onStart}
           type="button"
@@ -1873,7 +1874,7 @@ function TelegramAuthPanel({
 
         {telegramAuth?.botDeepLink ? (
           <a
-            className="flex min-h-11 items-center justify-center rounded-lg border border-emerald-300/35 px-4 text-sm font-black text-emerald-100 transition hover:border-emerald-300"
+            className="lp-game-auth-channel-secondary flex min-h-11 items-center justify-center rounded-lg border border-emerald-300/35 px-4 text-sm font-black text-emerald-100 transition hover:border-emerald-300"
             href={telegramAuth.botDeepLink}
             rel="noreferrer"
             target="_blank"
@@ -1882,7 +1883,7 @@ function TelegramAuthPanel({
           </a>
         ) : (
           <button
-            className="min-h-11 rounded-lg border border-white/10 px-4 text-sm font-black text-slate-500"
+            className="lp-game-auth-channel-secondary min-h-11 rounded-lg border border-white/10 px-4 text-sm font-black text-slate-500"
             disabled
             type="button"
           >
@@ -1892,7 +1893,7 @@ function TelegramAuthPanel({
       </div>
 
       {telegramAuth ? (
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-400">
+        <div className="lp-game-auth-channel-meta mt-3 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-400">
           <span>Код {telegramAuth.codeMasked}</span>
           {telegramAuth.botUsername ? <span>@{telegramAuth.botUsername}</span> : null}
           {isPolling ? <span>проверяем...</span> : null}
@@ -1900,11 +1901,11 @@ function TelegramAuthPanel({
       ) : null}
 
       {disabled ? (
-        <p className="mt-2 text-xs leading-5 text-amber-100">
+        <p className="lp-game-auth-channel-note mt-2 text-xs leading-5 text-amber-100">
           Сначала подтвердите согласие на участие в квестах.
         </p>
       ) : !ready ? (
-        <p className="mt-2 text-xs leading-5 text-amber-100">
+        <p className="lp-game-auth-channel-note mt-2 text-xs leading-5 text-amber-100">
           Telegram-вход включится после настройки бота; используйте код по
           телефону.
         </p>
@@ -1936,21 +1937,21 @@ function UserCallAuthPanel({
   const ready = userCallOption?.status === "READY";
 
   return (
-    <div className="rounded-lg border border-cyan-300/25 bg-cyan-300/[0.06] p-4">
+    <div className="lp-game-auth-channel-detail rounded-lg border border-cyan-300/25 bg-cyan-300/[0.06] p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-xs font-bold uppercase text-cyan-200">
+          <p className="lp-game-auth-channel-kicker text-xs font-bold uppercase text-cyan-200">
             2 место
           </p>
-          <h3 className="mt-1 text-lg font-black text-white">
+          <h3 className="lp-game-auth-channel-title mt-1 text-lg font-black text-white">
             Звонок на телефон
           </h3>
-          <p className="mt-1 text-sm leading-6 text-slate-300">
+          <p className="lp-game-auth-channel-copy mt-1 text-sm leading-6 text-slate-300">
             Дешевый fallback: гость звонит с введенного телефона, а LeetPlus
             завершает вход после подтверждения caller id провайдером.
           </p>
         </div>
-        <StatusPill tone={ready ? "cyan" : "amber"}>
+        <StatusPill className="lp-game-auth-channel-pill" tone={ready ? "cyan" : "amber"}>
           {userCallOption?.statusLabel ?? "fallback"}
         </StatusPill>
       </div>
@@ -1966,9 +1967,9 @@ function UserCallAuthPanel({
         </div>
       ) : null}
 
-      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+      <div className="lp-game-auth-channel-actions mt-3 grid gap-2 sm:grid-cols-2">
         <button
-          className="min-h-11 rounded-lg bg-cyan-300 px-4 text-sm font-black text-slate-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-60"
+          className="lp-game-auth-channel-primary min-h-11 rounded-lg bg-cyan-300 px-4 text-sm font-black text-slate-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-60"
           disabled={disabled || !ready || isStarting}
           onClick={onStart}
           type="button"
@@ -1978,14 +1979,14 @@ function UserCallAuthPanel({
 
         {userCallAuth?.callHref ? (
           <a
-            className="flex min-h-11 items-center justify-center rounded-lg border border-cyan-300/35 px-4 text-sm font-black text-cyan-100 transition hover:border-cyan-300"
+            className="lp-game-auth-channel-secondary flex min-h-11 items-center justify-center rounded-lg border border-cyan-300/35 px-4 text-sm font-black text-cyan-100 transition hover:border-cyan-300"
             href={userCallAuth.callHref}
           >
             Позвонить {userCallAuth.callNumber}
           </a>
         ) : (
           <button
-            className="min-h-11 rounded-lg border border-white/10 px-4 text-sm font-black text-slate-500"
+            className="lp-game-auth-channel-secondary min-h-11 rounded-lg border border-white/10 px-4 text-sm font-black text-slate-500"
             disabled
             type="button"
           >
@@ -1995,18 +1996,18 @@ function UserCallAuthPanel({
       </div>
 
       {userCallAuth ? (
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-400">
+        <div className="lp-game-auth-channel-meta mt-3 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-400">
           <span>{userCallAuth.phoneMasked}</span>
           {isPolling ? <span>проверяем...</span> : null}
         </div>
       ) : null}
 
       {disabled ? (
-        <p className="mt-2 text-xs leading-5 text-amber-100">
+        <p className="lp-game-auth-channel-note mt-2 text-xs leading-5 text-amber-100">
           Введите телефон и подтвердите согласие, чтобы создать вход по звонку.
         </p>
       ) : !ready ? (
-        <p className="mt-2 text-xs leading-5 text-amber-100">
+        <p className="lp-game-auth-channel-note mt-2 text-xs leading-5 text-amber-100">
           Звонок включится после настройки SMS.ru Callcheck или другого
           call-провайдера; используйте SMS-код.
         </p>
@@ -2345,9 +2346,11 @@ function Metric({ label, value }: { label: string; value: number | string }) {
 function StatusPill({
   tone,
   children,
+  className = "",
 }: {
   tone: "emerald" | "cyan" | "amber";
   children: ReactNode;
+  className?: string;
 }) {
   const classes = {
     emerald: "bg-emerald-300/10 text-emerald-100",
@@ -2356,7 +2359,9 @@ function StatusPill({
   } satisfies Record<"emerald" | "cyan" | "amber", string>;
 
   return (
-    <span className={`rounded-lg px-3 py-1 text-xs font-black ${classes[tone]}`}>
+    <span
+      className={`rounded-lg px-3 py-1 text-xs font-black ${classes[tone]} ${className}`}
+    >
       {children}
     </span>
   );
@@ -3258,6 +3263,104 @@ const gameAuthCss = `
 
 .lp-game-auth-method.is-selected .lp-game-auth-method-state {
   color: #83e4ec;
+}
+
+.lp-game-auth-channel-detail {
+  position: relative;
+  overflow: hidden;
+  border-color: rgba(196, 224, 225, 0.16) !important;
+  border-radius: 7px !important;
+  background:
+    linear-gradient(90deg, rgba(131, 228, 236, 0.08), transparent 62%),
+    rgba(3, 9, 12, 0.72) !important;
+  box-shadow: none !important;
+}
+
+.lp-game-auth-channel-detail::before {
+  content: "";
+  position: absolute;
+  inset: 12px auto 12px -1px;
+  width: 2px;
+  background: #83e4ec;
+  box-shadow: 0 0 16px rgba(131, 228, 236, 0.72);
+}
+
+.lp-game-auth-channel-detail::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.035), transparent 36%);
+}
+
+.lp-game-auth-channel-detail > * {
+  position: relative;
+  z-index: 1;
+}
+
+.lp-game-auth-channel-kicker {
+  color: #83e4ec !important;
+  letter-spacing: 0 !important;
+  font-size: 10px !important;
+  font-weight: 820 !important;
+}
+
+.lp-game-auth-channel-title {
+  color: #edf7f8 !important;
+  font-size: 16px !important;
+  line-height: 1.2 !important;
+  font-weight: 760 !important;
+}
+
+.lp-game-auth-channel-copy {
+  color: #a9babc !important;
+  font-size: 13px !important;
+  line-height: 1.52 !important;
+}
+
+.lp-game-auth-channel-pill {
+  border: 1px solid rgba(208, 170, 108, 0.22) !important;
+  border-radius: 6px !important;
+  background: rgba(208, 170, 108, 0.1) !important;
+  color: #d8c08f !important;
+  letter-spacing: 0 !important;
+  font-size: 10px !important;
+  text-transform: uppercase;
+}
+
+.lp-game-auth-channel-primary,
+.lp-game-auth-channel-secondary {
+  border-radius: 7px !important;
+  min-height: 44px;
+}
+
+.lp-game-auth-channel-primary {
+  border: 1px solid rgba(131, 228, 236, 0.36) !important;
+  background: rgba(131, 228, 236, 0.13) !important;
+  color: #dffcff !important;
+}
+
+.lp-game-auth-channel-primary:hover:not(:disabled) {
+  border-color: rgba(131, 228, 236, 0.58) !important;
+  background: rgba(131, 228, 236, 0.19) !important;
+}
+
+.lp-game-auth-channel-secondary {
+  border-color: rgba(196, 224, 225, 0.14) !important;
+  background: rgba(196, 224, 225, 0.04) !important;
+  color: #71878a !important;
+}
+
+.lp-game-auth-channel-secondary:hover:not(:disabled) {
+  border-color: rgba(131, 228, 236, 0.36) !important;
+  color: #cceef1 !important;
+}
+
+.lp-game-auth-channel-meta,
+.lp-game-auth-channel-note {
+  color: #9eb3b6 !important;
+  font-size: 12px !important;
+  line-height: 1.5 !important;
 }
 
 .lp-game-auth-panel-foot {

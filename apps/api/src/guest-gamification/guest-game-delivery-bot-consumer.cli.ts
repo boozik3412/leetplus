@@ -27,6 +27,7 @@ async function main() {
         `blocked=${result.blocked}`,
         `skipped=${result.skipped}`,
         `acked=${result.acked}`,
+        `idempotentAcks=${result.idempotentAcks}`,
       ].join(' '),
     );
 

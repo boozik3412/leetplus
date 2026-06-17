@@ -75,6 +75,7 @@ export type BotConsumerRunResult = {
   blocked: number;
   skipped: number;
   acked: number;
+  idempotentAcks: number;
   items: BotConsumerRunItem[];
   note: string;
 };
@@ -85,6 +86,14 @@ type BotConsumerDeps = {
 };
 
 type JsonBody = Record<string, unknown>;
+
+type BotConsumerAckResponse = {
+  idempotent?: unknown;
+};
+
+type BotConsumerAckResult = {
+  idempotent: boolean;
+};
 
 const defaultLimit = 10;
 const defaultRequestTimeoutMs = 15_000;
@@ -179,6 +188,7 @@ export async function runBotConsumerOnce(
   let blocked = 0;
   let skipped = 0;
   let acked = 0;
+  let idempotentAcks = 0;
 
   for (const delivery of pull.items) {
     if (config.dryRun) {
@@ -201,7 +211,8 @@ export async function runBotConsumerOnce(
         errorCode: 'unsupported_channel',
       });
       blocked += 1;
-      acked += ack ? 1 : 0;
+      acked += 1;
+      idempotentAcks += ack.idempotent ? 1 : 0;
       items.push({
         deliveryId: delivery.deliveryId,
         rewardId: delivery.rewardId,
@@ -226,7 +237,8 @@ export async function runBotConsumerOnce(
         providerStatus: 'telegram:ok',
       });
       sent += 1;
-      acked += ack ? 1 : 0;
+      acked += 1;
+      idempotentAcks += ack.idempotent ? 1 : 0;
       items.push({
         deliveryId: delivery.deliveryId,
         rewardId: delivery.rewardId,
@@ -243,7 +255,8 @@ export async function runBotConsumerOnce(
         errorCode: 'telegram_send_failed',
       });
       failed += 1;
-      acked += ack ? 1 : 0;
+      acked += 1;
+      idempotentAcks += ack.idempotent ? 1 : 0;
       items.push({
         deliveryId: delivery.deliveryId,
         rewardId: delivery.rewardId,
@@ -263,6 +276,8 @@ export async function runBotConsumerOnce(
       `failed=${failed}`,
       `blocked=${blocked}`,
       `skipped=${skipped}`,
+      `acked=${acked}`,
+      `idempotentAcks=${idempotentAcks}`,
     ].join(' '),
   );
 
@@ -275,6 +290,7 @@ export async function runBotConsumerOnce(
     blocked,
     skipped,
     acked,
+    idempotentAcks,
     items,
     note: config.dryRun
       ? 'Bot consumer dry-run completed without external sends or LeetPlus ack writes.'
@@ -310,8 +326,8 @@ async function ackBotDelivery(
     providerStatus?: string | null;
     errorCode?: string | null;
   },
-) {
-  return postLeetPlusJson<JsonBody>(
+): Promise<BotConsumerAckResult> {
+  const response = await postLeetPlusJson<BotConsumerAckResponse>(
     config,
     '/guests/gamification/scheduled/deliveries/bot/ack',
     {
@@ -326,6 +342,10 @@ async function ackBotDelivery(
     },
     fetchImpl,
   );
+
+  return {
+    idempotent: response.idempotent === true,
+  };
 }
 
 async function sendTelegramDelivery(

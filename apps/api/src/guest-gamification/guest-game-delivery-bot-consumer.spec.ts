@@ -96,6 +96,7 @@ describe('guest game delivery bot consumer', () => {
       failed: 0,
       skipped: 1,
       acked: 0,
+      idempotentAcks: 0,
     });
   });
 
@@ -116,6 +117,7 @@ describe('guest game delivery bot consumer', () => {
         delivery: { id: 'delivery-1' },
         eventType: 'DELIVERY_BOT_CONSUMER_SENT',
         note: 'sent',
+        idempotent: false,
       }),
     ]);
 
@@ -158,6 +160,54 @@ describe('guest game delivery bot consumer', () => {
       failed: 0,
       skipped: 0,
       acked: 1,
+      idempotentAcks: 0,
+    });
+  });
+
+  it('counts idempotent LeetPlus ack responses in real mode', async () => {
+    const fetchMock = fetchMockOf([
+      jsonResponse({
+        checked: 1,
+        ready: 1,
+        skipped: 0,
+        items: [delivery],
+        note: 'ready',
+      }),
+      jsonResponse({
+        ok: true,
+        result: { message_id: 42 },
+      }),
+      jsonResponse({
+        delivery: { id: 'delivery-1' },
+        eventType: 'DELIVERY_BOT_CONSUMER_SENT',
+        note: 'Duplicate bot consumer ack ignored.',
+        idempotent: true,
+      }),
+    ]);
+
+    const result = await runBotConsumerOnce(
+      {
+        apiUrl: 'https://api.leetplus.ru',
+        syncToken: 'sync-token',
+        tenantId: null,
+        tenantSlug: 'demo',
+        channels: ['TELEGRAM'],
+        limit: 10,
+        dryRun: false,
+        telegramToken: 'telegram-token',
+        requestTimeoutMs: 1000,
+      },
+      { fetch: fetchMock },
+    );
+
+    expect(result).toMatchObject({
+      dryRun: false,
+      pulled: 1,
+      sent: 1,
+      failed: 0,
+      skipped: 0,
+      acked: 1,
+      idempotentAcks: 1,
     });
   });
 

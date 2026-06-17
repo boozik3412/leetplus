@@ -1,5 +1,7 @@
 # LeetPlus Бэклог
 
+- Готово: автономный scheduler bonus ledger получил regression-покрытие прохода по нескольким tenant. Тест проверяет, что воркер выбирает безопасного audit-actor с приоритетом `OWNER -> ADMIN -> MANAGER`, пропускает неактивные tenant и tenant без подходящего actor, изолирует ошибку одного tenant и агрегирует счетчики только по успешно обработанным результатам без обращения к Langame.
+
 - Готово: service-token ack для внешнего `guest-game:bot-consumer` стал идемпотентным для terminal-статусов. Повторный `SENT`/`FAILED`/`BLOCKED` ack с тем же статусом возвращает текущую delivery без нового `GuestGameDeliveryEvent` и без повторного update; попытка сменить terminal ack на другой статус блокируется до явного retry из Guest Game Hub.
 
 - Готово: карточка `VDS bot-consumer` в Guest Game Hub теперь получает из API ссылку на runbook `docs/deployment/systemd` и показывает ее рядом со статусом/env-подсказками. Оператор видит прямой путь к шаблонам service/timer/env без раскрытия токенов, raw phone, chat id или Langame payload.

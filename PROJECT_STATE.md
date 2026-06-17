@@ -80,6 +80,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added regression coverage for autonomous gamification bonus-ledger scheduling: `guest-bonus-ledger.service.spec.ts` now verifies multi-tenant scheduled dispatch, audit-safe actor selection, inactive/no-actor tenant skips, isolated tenant errors, and aggregate counters without touching Langame.
 - Added explicit VDS gamification bot-consumer accounting for idempotent delivery acknowledgements: `guest-game:bot-consumer` now parses the LeetPlus `idempotent` ack flag, reports `idempotentAcks` in run results and CLI logs, and the runbook documents how to read the signal in systemd journal output.
 - Hardened external gamification bot-consumer ack idempotency: repeated terminal `SENT`/`FAILED`/`BLOCKED` acknowledgements now return the current delivery without creating duplicate `GuestGameDeliveryEvent` rows, while terminal status changes are blocked until an explicit Guest Game Hub retry.
 - Linked the Guest Game Hub `VDS bot-consumer` status card to the deployment runbook: the API now includes the `docs/deployment/systemd` runbook metadata in `botConsumer`, and the web UI shows it without exposing tokens, raw phone, chat ids, or Langame payload.

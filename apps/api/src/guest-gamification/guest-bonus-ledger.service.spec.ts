@@ -8,7 +8,10 @@ import {
   UserRole,
 } from '@prisma/client';
 import type { AuthenticatedUser } from '../auth/auth.types';
-import { GuestBonusLedgerService } from './guest-bonus-ledger.service';
+import {
+  GuestBonusLedgerService,
+  type GuestGameBonusLedgerDispatchResult,
+} from './guest-bonus-ledger.service';
 
 const user: AuthenticatedUser = {
   id: 'user-1',
@@ -47,6 +50,9 @@ function createPrismaMock() {
     guest: {
       findFirst: jest.fn(),
     },
+    tenant: {
+      findMany: jest.fn(),
+    },
   } as any;
 }
 
@@ -84,6 +90,7 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   prisma.guestGameDelivery.updateMany.mockResolvedValue({ count: 0 });
   prisma.guestGameDeliveryEvent.createMany.mockResolvedValue({ count: 0 });
   prisma.guest.findFirst.mockResolvedValue(null);
+  prisma.tenant.findMany.mockResolvedValue([]);
   prisma.$transaction.mockImplementation((callback) => callback(prisma));
 
   return {
@@ -138,6 +145,41 @@ function ledgerTransactionMock() {
     guestGameEvent: {
       create: jest.fn(),
     },
+  };
+}
+
+function dispatchResult(
+  overrides: Partial<GuestGameBonusLedgerDispatchResult> = {},
+): GuestGameBonusLedgerDispatchResult {
+  return {
+    mode: 'READY',
+    dryRun: false,
+    canary: false,
+    ready: true,
+    queued: null,
+    checked: 0,
+    confirmed: 0,
+    failed: 0,
+    skipped: 0,
+    blocked: 0,
+    items: [],
+    status: {
+      mode: 'READY',
+      modeLabel: 'Готов к записи в Langame',
+      ready: true,
+      langamePath: '/master_api/guests/balance/phone',
+      rewardTypes: ['BONUS'],
+      pendingApprovedRewards: 0,
+      pending: 0,
+      processing: 0,
+      confirmed: 0,
+      failed: 0,
+      canceled: 0,
+      total: 0,
+      note: 'ready',
+    },
+    note: 'processed',
+    ...overrides,
   };
 }
 
@@ -382,6 +424,172 @@ describe('GuestBonusLedgerService', () => {
         storeId: 'store-1337',
       }),
     );
+  });
+
+  it('runs scheduled dispatch per active tenant with audit-safe actors and isolated failures', async () => {
+    const { service, prisma } = createService({
+      LANGAME_BONUS_ACCRUAL_ENABLED: 'true',
+    });
+    const dispatch = jest.spyOn(service, 'dispatch');
+
+    prisma.tenant.findMany.mockResolvedValue([
+      {
+        id: 'tenant-active',
+        slug: 'active',
+        status: TenantLifecycleStatus.ACTIVE,
+        users: [
+          {
+            id: 'manager-1',
+            email: 'manager@example.com',
+            fullName: 'Manager',
+            role: UserRole.MANAGER,
+            customRoleId: null,
+            isPlatformAdmin: false,
+          },
+          {
+            id: 'owner-1',
+            email: 'owner@example.com',
+            fullName: 'Owner',
+            role: UserRole.OWNER,
+            customRoleId: null,
+            isPlatformAdmin: false,
+          },
+        ],
+      },
+      {
+        id: 'tenant-suspended',
+        slug: 'suspended',
+        status: TenantLifecycleStatus.SUSPENDED,
+        users: [
+          {
+            id: 'owner-2',
+            email: 'owner2@example.com',
+            fullName: 'Owner 2',
+            role: UserRole.OWNER,
+            customRoleId: null,
+            isPlatformAdmin: false,
+          },
+        ],
+      },
+      {
+        id: 'tenant-no-actor',
+        slug: 'no-actor',
+        status: TenantLifecycleStatus.ACTIVE,
+        users: [],
+      },
+      {
+        id: 'tenant-error',
+        slug: 'error',
+        status: TenantLifecycleStatus.ACTIVE,
+        users: [
+          {
+            id: 'admin-1',
+            email: 'admin@example.com',
+            fullName: 'Admin',
+            role: UserRole.ADMIN,
+            customRoleId: null,
+            isPlatformAdmin: false,
+          },
+        ],
+      },
+    ]);
+    dispatch
+      .mockResolvedValueOnce(
+        dispatchResult({
+          queued: {
+            checkedRewards: 1,
+            queued: 1,
+            skipped: 0,
+            rewardTypes: ['BONUS'],
+            items: [],
+            note: 'queued',
+          },
+          checked: 2,
+          confirmed: 1,
+          failed: 1,
+        }),
+      )
+      .mockRejectedValueOnce(new Error('Langame timeout'));
+
+    const result = await service.runScheduledDispatch({
+      dryRun: false,
+      queueApprovedRewards: false,
+      tenantSlug: 'network',
+      limit: 3,
+    });
+
+    expect(prisma.tenant.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { slug: 'network' },
+        orderBy: { slug: 'asc' },
+        select: expect.objectContaining({
+          users: expect.objectContaining({
+            where: expect.objectContaining({
+              isActive: true,
+              role: { in: [UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER] },
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(dispatch).toHaveBeenNthCalledWith(
+      1,
+      { id: 'owner-1', tenantId: 'tenant-active' },
+      expect.objectContaining({
+        dryRun: false,
+        queueApprovedRewards: false,
+        tenantSlug: 'network',
+        limit: 3,
+      }),
+    );
+    expect(dispatch).toHaveBeenNthCalledWith(
+      2,
+      { id: 'admin-1', tenantId: 'tenant-error' },
+      expect.objectContaining({
+        dryRun: false,
+        tenantSlug: 'network',
+      }),
+    );
+    expect(result).toMatchObject({
+      mode: 'READY',
+      dryRun: false,
+      checkedTenants: 4,
+      processedTenants: 1,
+      skippedTenants: 2,
+      erroredTenants: 1,
+      queued: 1,
+      checked: 2,
+      confirmed: 1,
+      failed: 1,
+      skipped: 0,
+      blocked: 0,
+    });
+    expect(result.tenants).toEqual([
+      expect.objectContaining({
+        tenantId: 'tenant-active',
+        tenantSlug: 'active',
+        status: 'PROCESSED',
+        reason: null,
+      }),
+      expect.objectContaining({
+        tenantId: 'tenant-suspended',
+        tenantSlug: 'suspended',
+        status: 'SKIPPED',
+        reason: expect.stringContaining('not active'),
+      }),
+      expect.objectContaining({
+        tenantId: 'tenant-no-actor',
+        tenantSlug: 'no-actor',
+        status: 'SKIPPED',
+        reason: expect.stringContaining('No active owner'),
+      }),
+      expect.objectContaining({
+        tenantId: 'tenant-error',
+        tenantSlug: 'error',
+        status: 'ERROR',
+        reason: 'Langame timeout',
+      }),
+    ]);
   });
 
   it('queues approved rewards for the Langame phone balance endpoint without storing raw phones', async () => {

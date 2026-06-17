@@ -3807,6 +3807,7 @@ export class GuestGamificationService {
         nextAction: telegramWebhookReplyReady
           ? 'Проверить /play -> Telegram deep link -> contact-share на тестовом госте и смотреть replyDispatch=SENT без raw chat id.'
           : 'Добавить недостающие env или оставить внешний adapter, который отправляет reply payload из webhook.',
+        runbook: telegramAuthRunbook,
       },
       {
         key: 'TELEGRAM_DELIVERY',
@@ -9793,6 +9794,12 @@ const botConsumerRunbook = {
   label: 'Runbook VDS',
   path: 'docs/deployment/systemd/README.md',
   href: 'https://github.com/boozik3412/leetplus/tree/main/docs/deployment/systemd',
+};
+
+const telegramAuthRunbook = {
+  label: 'Runbook Telegram-входа',
+  path: 'docs/deployment/telegram-auth.md',
+  href: 'https://github.com/boozik3412/leetplus/blob/main/docs/deployment/telegram-auth.md',
 };
 
 const bonusLedgerSchedulerRunbook = {

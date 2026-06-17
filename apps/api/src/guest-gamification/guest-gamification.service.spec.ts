@@ -942,6 +942,11 @@ describe('GuestGamificationService', () => {
           'GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED',
           'GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_BOT_TOKEN or GUEST_GAME_TELEGRAM_BOT_TOKEN',
         ],
+        runbook: {
+          label: 'Runbook Telegram-входа',
+          path: 'docs/deployment/telegram-auth.md',
+          href: 'https://github.com/boozik3412/leetplus/blob/main/docs/deployment/telegram-auth.md',
+        },
       });
       expect(senderText).not.toContain('telegram-secret');
     });
@@ -965,6 +970,11 @@ describe('GuestGamificationService', () => {
         configured: true,
         enabled: true,
         requiredEnv: [],
+        runbook: {
+          label: 'Runbook Telegram-входа',
+          path: 'docs/deployment/telegram-auth.md',
+          href: 'https://github.com/boozik3412/leetplus/blob/main/docs/deployment/telegram-auth.md',
+        },
       });
       expect(sender.details).toEqual(
         expect.arrayContaining([

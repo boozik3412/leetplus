@@ -229,8 +229,6 @@ export function ModuleChoicePage({ analyticsHref }: ModuleChoicePageProps) {
             </button>
           </div>
         </section>
-      </main>
-
       <div className="lp-start-bottom-action">
         <div className="lp-start-action-inner">
           <Link
@@ -262,6 +260,7 @@ export function ModuleChoicePage({ analyticsHref }: ModuleChoicePageProps) {
       >
         {toast}
       </div>
+      </main>
 
       <style>{startCss}</style>
     </>
@@ -530,7 +529,7 @@ const startCss = `
   position: relative;
   min-height: 100vh;
   display: grid;
-  align-content: center;
+  align-content: start;
   padding: 108px var(--pad-x) 54px;
   overflow: hidden;
 }
@@ -581,6 +580,7 @@ const startCss = `
 
 .lp-start-content {
   width: min(560px, 100%);
+  margin-top: clamp(116px, 13vh, 150px);
   padding-bottom: 82px;
 }
 
@@ -909,11 +909,16 @@ const startCss = `
 }
 
 .lp-start-legal {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
   margin: 0;
   width: 100%;
   max-width: none;
-  border-color: rgba(196, 224, 225, 0.18) !important;
-  background: #000;
+  border: 0 !important;
+  background: transparent;
   padding: 0;
   color: rgba(168, 185, 186, 0.72) !important;
 }
@@ -921,7 +926,7 @@ const startCss = `
 .lp-start-legal > div {
   max-width: 1440px;
   margin: 0 auto;
-  padding: 10px clamp(14px, 4vw, 58px) 18px;
+  padding: 0 clamp(20px, 4vw, 58px) 14px;
 }
 
 .lp-start-legal p,
@@ -1238,6 +1243,7 @@ const startCss = `
   }
 
   .lp-start-legal {
+    position: static;
     padding-inline: 0;
   }
 

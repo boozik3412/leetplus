@@ -366,7 +366,13 @@ export class StaffOperationsDashboardService {
     tasks.forEach((task) => {
       this.addTaskToMetrics(summaryMetrics, task, now);
       this.addTaskToMetrics(
-        this.getClubDraft(clubDrafts, task.store, null),
+        this.getClubDraft(
+          clubDrafts,
+          task.store,
+          this.staffOperationsDashboardHref(filters, {
+            storeId: task.store?.id ?? null,
+          }),
+        ),
         task,
         now,
       );
@@ -380,7 +386,13 @@ export class StaffOperationsDashboardService {
     checklists.forEach((run) => {
       this.addChecklistToMetrics(summaryMetrics, run, now);
       this.addChecklistToMetrics(
-        this.getClubDraft(clubDrafts, run.store, null),
+        this.getClubDraft(
+          clubDrafts,
+          run.store,
+          this.staffOperationsDashboardHref(filters, {
+            storeId: run.store?.id ?? null,
+          }),
+        ),
         run,
         now,
       );
@@ -395,11 +407,16 @@ export class StaffOperationsDashboardService {
       readiness.rows,
       clubDrafts,
       employeeDrafts,
-      filters.storeId,
+      filters,
     );
 
     const recurringIssues = this.buildRecurringIssues(checklists);
-    this.applyRecurringIssues(recurringIssues, clubDrafts, employeeDrafts);
+    this.applyRecurringIssues(
+      recurringIssues,
+      clubDrafts,
+      employeeDrafts,
+      filters,
+    );
     summaryMetrics.repeatedIssues = recurringIssues.length;
     const staffControl = this.buildStaffControl(shifts, checklists, filters);
 
@@ -756,7 +773,7 @@ export class StaffOperationsDashboardService {
     rows: StaffReadinessRow[],
     clubDrafts: Map<string, RatingDraft>,
     employeeDrafts: Map<string, EmployeeRatingDraft>,
-    filteredStoreId: string | null,
+    filters: ResolvedStaffOperationsDashboardFilters,
   ) {
     rows.forEach((row) => {
       const employee = this.getEmployeeDraft(employeeDrafts, row.user);
@@ -772,9 +789,15 @@ export class StaffOperationsDashboardService {
 
       const stores = row.user.stores.length > 0 ? row.user.stores : [null];
       stores
-        .filter((store) => !filteredStoreId || store?.id === filteredStoreId)
+        .filter((store) => !filters.storeId || store?.id === filters.storeId)
         .forEach((store) => {
-          const club = this.getClubDraft(clubDrafts, store, null);
+          const club = this.getClubDraft(
+            clubDrafts,
+            store,
+            this.staffOperationsDashboardHref(filters, {
+              storeId: store?.id ?? null,
+            }),
+          );
 
           if (row.readinessStatus === 'BLOCKED') {
             club.readinessBlocked += 1;
@@ -865,9 +888,16 @@ export class StaffOperationsDashboardService {
     issues: StaffOperationsRecurringIssue[],
     clubDrafts: Map<string, RatingDraft>,
     employeeDrafts: Map<string, EmployeeRatingDraft>,
+    filters: ResolvedStaffOperationsDashboardFilters,
   ) {
     issues.forEach((issue) => {
-      this.getClubDraft(clubDrafts, issue.club, null).repeatedIssues += 1;
+      this.getClubDraft(
+        clubDrafts,
+        issue.club,
+        this.staffOperationsDashboardHref(filters, {
+          storeId: issue.club?.id ?? null,
+        }),
+      ).repeatedIssues += 1;
       this.getEmployeeDraft(employeeDrafts, issue.employee).repeatedIssues += 1;
     });
   }
@@ -1465,6 +1495,34 @@ export class StaffOperationsDashboardService {
     }
 
     return `/staff/checklists/report?${params.toString()}`;
+  }
+
+  private staffOperationsDashboardHref(
+    filters: ResolvedStaffOperationsDashboardFilters,
+    overrides: { storeId?: string | null; userId?: string | null } = {},
+  ) {
+    const params = new URLSearchParams({
+      dateFrom: filters.dateFrom,
+      dateTo: filters.dateTo,
+    });
+    const storeId =
+      overrides.storeId !== undefined ? overrides.storeId : filters.storeId;
+    const userId =
+      overrides.userId !== undefined ? overrides.userId : filters.userId;
+
+    if (storeId) {
+      params.set('storeId', storeId);
+    }
+
+    if (userId) {
+      params.set('userId', userId);
+    }
+
+    if (filters.search) {
+      params.set('search', filters.search);
+    }
+
+    return `/staff/operations-dashboard?${params.toString()}`;
   }
 
   private staffChecklistRunsHref(

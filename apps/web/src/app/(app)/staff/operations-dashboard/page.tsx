@@ -529,17 +529,24 @@ function RatingPanel({
 }) {
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold">{title}</h2>
-        <span className="text-xs font-semibold uppercase text-zinc-500">
-          Слабые сверху
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold">{title}</h2>
+          <p className="mt-1 text-sm text-zinc-500">
+            Сначала зоны, где руководителю стоит открыть разбор.
+          </p>
+        </div>
+        <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold uppercase text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
+          слабые сверху
         </span>
       </div>
       <div className="mt-4 space-y-3">
         {rows.length > 0 ? (
-          rows.map((row) => <RatingRow key={row.id} row={row} />)
+          rows.map((row, index) => (
+            <RatingRow key={row.id} row={row} rank={index + 1} />
+          ))
         ) : (
-          <EmptyState text="Нет задач, чеклистов или рисков за выбранный период." />
+          <EmptyState text="Нет задач, чек-листов или рисков за выбранный период." />
         )}
       </div>
     </section>
@@ -549,15 +556,22 @@ function RatingPanel({
 function EmployeeRatingPanel({ rows }: { rows: StaffOperationsEmployeeRating[] }) {
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold">Рейтинг сотрудников</h2>
-        <span className="text-xs font-semibold uppercase text-zinc-500">
-          Исполнение + обучение
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold">Рейтинг сотрудников</h2>
+          <p className="mt-1 text-sm text-zinc-500">
+            Фокус на тех, кому нужна проверка, обучение или управленческая реакция.
+          </p>
+        </div>
+        <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold uppercase text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
+          исполнение + обучение
         </span>
       </div>
       <div className="mt-4 space-y-3">
         {rows.length > 0 ? (
-          rows.map((row) => <EmployeeRatingRow key={row.id} row={row} />)
+          rows.map((row, index) => (
+            <EmployeeRatingRow key={row.id} row={row} rank={index + 1} />
+          ))
         ) : (
           <EmptyState text="Нет сотрудников или операционных фактов по фильтрам." />
         )}
@@ -566,68 +580,214 @@ function EmployeeRatingPanel({ rows }: { rows: StaffOperationsEmployeeRating[] }
   );
 }
 
-function RatingRow({ row }: { row: StaffOperationsRating }) {
+function RatingRow({
+  row,
+  rank,
+}: {
+  row: StaffOperationsRating;
+  rank: number;
+}) {
+  const insight = ratingInsight(row);
+  const href = row.href ?? `/staff/operations-dashboard?storeId=${row.id}`;
   const content = (
-    <>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
+    <div className="grid gap-3 lg:grid-cols-[76px_1fr_auto] lg:items-center">
+      <ScoreBadge score={row.score} level={row.riskLevel} rank={rank} />
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
           <p className="truncate text-sm font-semibold">{row.label}</p>
+          <RiskPill level={row.riskLevel} />
+        </div>
+        {row.caption ? (
+          <p className="mt-1 text-xs text-zinc-500">{row.caption}</p>
+        ) : null}
+        <p className="mt-2 text-sm font-medium text-zinc-900 dark:text-zinc-100">
+          {insight.title}
+        </p>
+        <p className="mt-1 text-xs leading-5 text-zinc-500">
+          {insight.detail}
+        </p>
+        <SignalStrip row={row} />
+      </div>
+      <div className="flex items-center justify-between gap-3 lg:block lg:text-right">
+        <ScoreLine score={row.score} level={row.riskLevel} compact />
+        <span className="mt-2 inline-flex h-8 items-center rounded-full border border-zinc-300 px-3 text-xs font-semibold text-zinc-700 transition group-hover:border-emerald-400 group-hover:text-emerald-700 dark:border-zinc-700 dark:text-zinc-300 dark:group-hover:border-emerald-500 dark:group-hover:text-emerald-200">
+          Открыть разбор
+        </span>
+      </div>
+    </div>
+  );
+
+  return (
+    <Link
+      href={href}
+      className="group block rounded-lg border border-zinc-200 p-3 transition hover:border-emerald-400 hover:bg-emerald-50/60 focus:outline-none focus:ring-2 focus:ring-emerald-400 dark:border-zinc-800 dark:hover:border-emerald-500/70 dark:hover:bg-emerald-500/10"
+    >
+      {content}
+    </Link>
+  );
+}
+
+function EmployeeRatingRow({
+  row,
+  rank,
+}: {
+  row: StaffOperationsEmployeeRating;
+  rank: number;
+}) {
+  const insight = ratingInsight(row);
+  const href = row.href ?? `/staff/operations-dashboard?userId=${row.id}`;
+
+  return (
+    <Link
+      href={href}
+      className="group block rounded-lg border border-zinc-200 p-3 transition hover:border-emerald-400 hover:bg-emerald-50/60 focus:outline-none focus:ring-2 focus:ring-emerald-400 dark:border-zinc-800 dark:hover:border-emerald-500/70 dark:hover:bg-emerald-500/10"
+    >
+      <div className="grid gap-3 lg:grid-cols-[76px_1fr_auto] lg:items-center">
+        <ScoreBadge score={row.score} level={row.riskLevel} rank={rank} />
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="truncate text-sm font-semibold">{row.label}</p>
+            <RiskPill level={row.riskLevel} />
+          </div>
           {row.caption ? (
             <p className="mt-1 text-xs text-zinc-500">{row.caption}</p>
           ) : null}
+          <p className="mt-2 text-sm font-medium text-zinc-900 dark:text-zinc-100">
+            {insight.title}
+          </p>
+          <p className="mt-1 text-xs leading-5 text-zinc-500">
+            {insight.detail}
+          </p>
+          <SignalStrip row={row} />
+          <div className="mt-2 flex flex-wrap gap-2 text-xs">
+            <span className="rounded-full bg-zinc-100 px-2 py-1 text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
+              Готовность:{" "}
+              {row.readinessStatus
+                ? `${readinessLabels[row.readinessStatus]} · ${row.readinessPercent ?? 0}%`
+                : "нет данных"}
+            </span>
+            {row.trainingBlockers > 0 ? (
+              <span className="rounded-full bg-red-50 px-2 py-1 text-red-700 dark:bg-red-500/15 dark:text-red-200">
+                Блокеры обучения: {row.trainingBlockers}
+              </span>
+            ) : null}
+          </div>
         </div>
-        <RiskPill level={row.riskLevel} />
+        <div className="flex items-center justify-between gap-3 lg:block lg:text-right">
+          <ScoreLine score={row.score} level={row.riskLevel} compact />
+          <span className="mt-2 inline-flex h-8 items-center rounded-full border border-zinc-300 px-3 text-xs font-semibold text-zinc-700 transition group-hover:border-emerald-400 group-hover:text-emerald-700 dark:border-zinc-700 dark:text-zinc-300 dark:group-hover:border-emerald-500 dark:group-hover:text-emerald-200">
+            Детализация
+          </span>
+        </div>
       </div>
-      <ScoreLine score={row.score} level={row.riskLevel} />
-      <MetricsLine row={row} />
-    </>
+    </Link>
   );
+}
 
-  if (row.href) {
-    return (
-      <Link
-        href={row.href}
-        className="block rounded-lg border border-zinc-200 p-3 transition hover:border-emerald-400 hover:bg-emerald-50/60 dark:border-zinc-800 dark:hover:border-emerald-500/70 dark:hover:bg-emerald-500/10"
-      >
-        {content}
-      </Link>
-    );
+function ratingInsight(row: StaffOperationsRating) {
+  if (row.overdue > 0) {
+    return {
+      title: "Сначала закрыть просрочки",
+      detail: `${formatNumber(row.overdue)} просроченных задач или чек-листов мешают нормальной оценке смены.`,
+    };
   }
 
+  if (row.unchecked > 0) {
+    return {
+      title: "Нужно принять работы на проверке",
+      detail: `${formatNumber(row.unchecked)} результатов ждут контроля: без решения рейтинг не показывает реальную картину.`,
+    };
+  }
+
+  if (row.failedItems > 0 || row.returned > 0) {
+    return {
+      title: "Разобрать качество выполнения",
+      detail: `${formatNumber(row.failedItems + row.returned)} сигналов по провалам или возвратам требуют обратной связи.`,
+    };
+  }
+
+  if (row.readinessBlocked > 0) {
+    return {
+      title: "Есть блокеры допуска",
+      detail: `${formatNumber(row.readinessBlocked)} сотрудников не готовы по обучению или аттестации.`,
+    };
+  }
+
+  if (row.repeatedIssues > 0) {
+    return {
+      title: "Повторяется одна и та же проблема",
+      detail: `${formatNumber(row.repeatedIssues)} повторов лучше закрыть через стандарт или короткое обучение.`,
+    };
+  }
+
+  return {
+    title: "Критичных сигналов нет",
+    detail: `Выполнено в срок: ${formatNumber(row.doneOnTime)}. Можно смотреть детализацию для планового контроля.`,
+  };
+}
+
+function ScoreBadge({
+  score,
+  level,
+  rank,
+}: {
+  score: number;
+  level: StaffOperationsRiskLevel;
+  rank: number;
+}) {
   return (
-    <div className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
-      {content}
+    <div className="flex items-center gap-3 lg:block">
+      <div
+        className={[
+          "flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border text-lg font-bold",
+          riskClass(level),
+        ].join(" ")}
+      >
+        {score}%
+      </div>
+      <div className="lg:mt-2">
+        <p className="text-[11px] font-bold uppercase text-zinc-500">
+          место {rank}
+        </p>
+        <p className="text-xs text-zinc-500">индекс</p>
+      </div>
     </div>
   );
 }
 
-function EmployeeRatingRow({ row }: { row: StaffOperationsEmployeeRating }) {
+function SignalStrip({ row }: { row: StaffOperationsRating }) {
+  const signals = [
+    { label: "Просрочено", value: row.overdue, tone: "HIGH" },
+    { label: "На проверке", value: row.unchecked, tone: "MEDIUM" },
+    { label: "Провалы", value: row.failedItems, tone: "HIGH" },
+    { label: "Возвраты", value: row.returned, tone: "HIGH" },
+    { label: "Повторы", value: row.repeatedIssues, tone: "MEDIUM" },
+    { label: "В срок", value: row.doneOnTime, tone: "LOW" },
+  ] as const;
+  const visibleSignals = signals.filter((signal) => signal.value > 0);
+
+  if (visibleSignals.length === 0) {
+    return (
+      <div className="mt-3 inline-flex rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200">
+        Без критичных сигналов
+      </div>
+    );
+  }
+
   return (
-    <div className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="truncate text-sm font-semibold">{row.label}</p>
-          {row.caption ? (
-            <p className="mt-1 text-xs text-zinc-500">{row.caption}</p>
-          ) : null}
-        </div>
-        <RiskPill level={row.riskLevel} />
-      </div>
-      <ScoreLine score={row.score} level={row.riskLevel} />
-      <MetricsLine row={row} />
-      <div className="mt-3 flex flex-wrap gap-2 text-xs">
-        <span className="rounded-full bg-zinc-100 px-2 py-1 text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
-          Готовность:{" "}
-          {row.readinessStatus
-            ? `${readinessLabels[row.readinessStatus]} · ${row.readinessPercent ?? 0}%`
-            : "нет данных"}
+    <div className="mt-3 flex flex-wrap gap-2">
+      {visibleSignals.slice(0, 5).map((signal) => (
+        <span
+          key={signal.label}
+          className={[
+            "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold",
+            riskClass(signal.tone),
+          ].join(" ")}
+        >
+          {signal.label}
+          <span>{formatNumber(signal.value)}</span>
         </span>
-        {row.trainingBlockers > 0 ? (
-          <span className="rounded-full bg-red-50 px-2 py-1 text-red-700 dark:bg-red-500/15 dark:text-red-200">
-            Блокеров обучения: {row.trainingBlockers}
-          </span>
-        ) : null}
-      </div>
+      ))}
     </div>
   );
 }
@@ -635,14 +795,16 @@ function EmployeeRatingRow({ row }: { row: StaffOperationsEmployeeRating }) {
 function ScoreLine({
   score,
   level,
+  compact = false,
 }: {
   score: number;
   level: StaffOperationsRiskLevel;
+  compact?: boolean;
 }) {
   return (
-    <div className="mt-3">
+    <div className={compact ? "min-w-32" : "mt-3"}>
       <div className="flex items-center justify-between text-xs text-zinc-500">
-        <span>Индекс</span>
+        <span>{compact ? "прогресс" : "Индекс"}</span>
         <span>{score}%</span>
       </div>
       <div className="mt-1 h-2 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-900">
@@ -651,32 +813,6 @@ function ScoreLine({
           style={{ width: `${score}%` }}
         />
       </div>
-    </div>
-  );
-}
-
-function MetricsLine({ row }: { row: StaffOperationsRating }) {
-  const items = [
-    ["В срок", row.doneOnTime],
-    ["Проср.", row.overdue],
-    ["Провалено", row.failedItems],
-    ["Возврат", row.returned],
-    ["Эскал.", row.escalated],
-    ["Проверка", row.unchecked],
-    ["Повтор", row.repeatedIssues],
-  ] as const;
-
-  return (
-    <div className="mt-3 grid grid-cols-3 gap-2 text-xs sm:grid-cols-7">
-      {items.map(([label, value]) => (
-        <div
-          key={label}
-          className="rounded-md bg-zinc-50 px-2 py-1.5 dark:bg-zinc-900/70"
-        >
-          <span className="block text-zinc-500">{label}</span>
-          <span className="font-semibold">{formatNumber(value)}</span>
-        </div>
-      ))}
     </div>
   );
 }

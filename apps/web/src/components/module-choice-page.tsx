@@ -526,10 +526,12 @@ const startCss = `
 
 .lp-start-zone {
   --pad-x: clamp(28px, 5vw, 72px);
+  --content-w: min(560px, calc(50vw - (var(--pad-x) * 2)));
   position: relative;
   min-height: 100vh;
   display: grid;
   align-content: start;
+  justify-items: center;
   padding: 108px var(--pad-x) 54px;
   overflow: hidden;
 }
@@ -579,13 +581,13 @@ const startCss = `
 }
 
 .lp-start-content {
-  width: min(560px, 100%);
+  width: min(var(--content-w), 100%);
   margin-top: clamp(116px, 13vh, 150px);
   padding-bottom: 82px;
 }
 
 .lp-start-game .lp-start-content {
-  justify-self: end;
+  justify-self: center;
 }
 
 .lp-start-label {
@@ -816,18 +818,19 @@ const startCss = `
 
 .lp-start-actions {
   position: absolute;
-  left: var(--pad-x);
+  left: 50%;
   bottom: 54px;
   z-index: 2;
-  width: min(560px, calc(100% - var(--pad-x) - var(--pad-x)));
+  width: min(var(--content-w), calc(100% - var(--pad-x) - var(--pad-x)));
   display: flex;
   align-items: center;
   gap: 12px;
+  transform: translateX(-50%);
 }
 
 .lp-start-game .lp-start-actions {
-  left: auto;
-  right: var(--pad-x);
+  left: 50%;
+  right: auto;
 }
 
 .lp-start-primary,

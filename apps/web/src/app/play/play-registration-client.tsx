@@ -8,6 +8,7 @@ import type {
   GuestPortalGamificationClubDirectory,
   GuestPortalGameSummary,
   GuestPortalLangameMatchResponse,
+  GuestPortalLocalGameProfileMatch,
   GuestPortalOtpStartResponse,
   GuestPortalOtpVerifyResponse,
   GuestPortalPayload,
@@ -78,6 +79,8 @@ export function PlayRegistrationClient({
   const [portal, setPortal] = useState<GuestPortalPayload | null>(null);
   const [langameMatch, setLangameMatch] =
     useState<GuestPortalLangameMatchResponse | null>(null);
+  const [localGameMatch, setLocalGameMatch] =
+    useState<GuestPortalLocalGameProfileMatch | null>(null);
   const [activeSummary, setActiveSummary] =
     useState<GuestPortalGameSummary | null>(null);
   const [activeSessionState, setActiveSessionState] =
@@ -189,6 +192,7 @@ export function PlayRegistrationClient({
     setCode("");
     setPortal(null);
     setLangameMatch(null);
+    setLocalGameMatch(null);
     setMessage(null);
   }
 
@@ -235,6 +239,7 @@ export function PlayRegistrationClient({
 
         if (data.status === "CONFIRMED" && data.portal) {
           setPortal(data.portal);
+          setLocalGameMatch(data.match ?? null);
           setTelegramAuth(null);
           setLangameMatch(null);
         }
@@ -314,6 +319,7 @@ export function PlayRegistrationClient({
 
         if (data.status === "CONFIRMED" && data.portal) {
           setPortal(data.portal);
+          setLocalGameMatch(data.match ?? null);
           setUserCallAuth(null);
           setLangameMatch(null);
         }
@@ -462,6 +468,7 @@ export function PlayRegistrationClient({
     setCode("");
     setPortal(null);
     setLangameMatch(null);
+    setLocalGameMatch(null);
 
     try {
       const response = await fetch(`${clubApiPath(selectedClub)}/otp/start`, {
@@ -504,6 +511,7 @@ export function PlayRegistrationClient({
     setCode("");
     setPortal(null);
     setLangameMatch(null);
+    setLocalGameMatch(null);
 
     try {
       const response = await fetch(
@@ -555,6 +563,7 @@ export function PlayRegistrationClient({
     setCode("");
     setPortal(null);
     setLangameMatch(null);
+    setLocalGameMatch(null);
 
     try {
       const response = await fetch(
@@ -618,6 +627,7 @@ export function PlayRegistrationClient({
 
       const data = (await response.json()) as GuestPortalOtpVerifyResponse;
       setPortal(data.portal);
+      setLocalGameMatch(data.match ?? null);
       setMessage("Телефон подтвержден. Гостевой профиль готов.");
       await checkLangameMatch();
     } catch (error) {
@@ -832,13 +842,15 @@ export function PlayRegistrationClient({
                 <SelectedClubSummary club={selectedClub} />
 
                 {portal ? (
-                  <VerifiedSummary
-                    club={selectedClub}
-                    isCheckingLangame={isCheckingLangame}
-                    langameMatch={langameMatch}
-                    onCheckLangameMatch={() => void checkLangameMatch()}
-                    portal={portal}
-                  />
+                    <VerifiedSummary
+                      canCheckLangameMatch={Boolean(phone.trim())}
+                      club={selectedClub}
+                      isCheckingLangame={isCheckingLangame}
+                      langameMatch={langameMatch}
+                      localGameMatch={localGameMatch}
+                      onCheckLangameMatch={() => void checkLangameMatch()}
+                      portal={portal}
+                    />
                 ) : (
                   <div className="space-y-4">
                     <VerificationPlanPanel
@@ -1565,19 +1577,24 @@ function VerifiedSummary({
   club,
   portal,
   langameMatch,
+  localGameMatch,
   isCheckingLangame,
+  canCheckLangameMatch,
   onCheckLangameMatch,
 }: {
   club: GuestPortalGamificationClub;
   portal: GuestPortalPayload;
   langameMatch: GuestPortalLangameMatchResponse | null;
+  localGameMatch: GuestPortalLocalGameProfileMatch | null;
   isCheckingLangame: boolean;
+  canCheckLangameMatch: boolean;
   onCheckLangameMatch: () => void;
 }) {
   const nextActions = portal.gamification.nextActions.slice(0, 3);
+  const profileMatch = langameMatch ?? localGameMatch;
   const langameSources = langameMatch?.sources ?? [];
   const langameResultsCount = countLangameResults(langameMatch);
-  const backfilled = langameMatch?.backfilled ?? null;
+  const backfilled = profileMatch?.backfilled ?? null;
   const hasBackfilled = hasBackfilledGameItems(backfilled);
 
   return (
@@ -1627,12 +1644,14 @@ function VerifiedSummary({
                 ? "Проверяем подтвержденный телефон"
                 : langameMatch
                 ? langameMatchStatusLabel(langameMatch.status)
+                : localGameMatch
+                ? localGameMatchStatusLabel(localGameMatch.status)
                 : "Проверка еще не выполнена"}
             </p>
           </div>
           <button
             className="rounded-lg border border-cyan-300/25 bg-cyan-300/[0.08] px-3 py-2 text-sm font-black text-cyan-100 transition hover:border-cyan-300/50 disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={isCheckingLangame}
+            disabled={isCheckingLangame || !canCheckLangameMatch}
             onClick={onCheckLangameMatch}
             type="button"
           >
@@ -1642,19 +1661,22 @@ function VerifiedSummary({
         <div className="mt-3 flex flex-wrap gap-2">
           <StatusPill
             tone={
-              langameMatch
-                ? langameLinkStatusTone(langameMatch.linkStatus)
+              profileMatch
+                ? langameLinkStatusTone(profileMatch.linkStatus)
                 : isCheckingLangame
                   ? "cyan"
                   : "amber"
             }
           >
-            {langameMatch
-              ? langameLinkStatusLabel(langameMatch.linkStatus)
+            {profileMatch
+              ? langameLinkStatusLabel(profileMatch.linkStatus)
               : isCheckingLangame
                 ? "автосверка"
                 : "ожидает проверки"}
           </StatusPill>
+          {localGameMatch && !langameMatch ? (
+            <StatusPill tone="cyan">локальный snapshot</StatusPill>
+          ) : null}
           {langameMatch ? (
             <>
               <StatusPill tone={langameResultsCount > 0 ? "cyan" : "amber"}>
@@ -1668,9 +1690,15 @@ function VerifiedSummary({
             </>
           ) : null}
         </div>
-        {langameMatch ? (
+        {profileMatch ? (
           <p className="mt-2 text-sm leading-6 text-slate-300">
-            {langameMatch.nextAction}
+            {profileMatch.nextAction}
+          </p>
+        ) : null}
+        {!canCheckLangameMatch && localGameMatch ? (
+          <p className="mt-2 text-xs leading-5 text-slate-500">
+            Полный номер не возвращается в браузер после Telegram или звонка,
+            поэтому здесь показана безопасная локальная связка.
           </p>
         ) : null}
         {hasBackfilled && backfilled ? (
@@ -2023,6 +2051,19 @@ function langameMatchStatusLabel(
     NOT_FOUND: "Гость не найден",
     FAILED: "Проверка не выполнена",
   } satisfies Record<GuestPortalLangameMatchResponse["status"], string>;
+
+  return labels[status];
+}
+
+function localGameMatchStatusLabel(
+  status: GuestPortalLocalGameProfileMatch["status"],
+) {
+  const labels = {
+    MATCHED_LOCAL: "Гость найден в LeetPlus",
+    WAITING_FOR_SYNC: "Ждем sync Langame",
+    CONFLICT: "Нужна проверка",
+    NOT_LINKED: "Профиль отдельный",
+  } satisfies Record<GuestPortalLocalGameProfileMatch["status"], string>;
 
   return labels[status];
 }

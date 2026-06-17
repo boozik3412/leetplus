@@ -699,6 +699,30 @@ export type GuestPortalGameSummary = {
 export type GuestPortalOtpVerifyResponse = {
   token: string;
   portal: GuestPortalPayload;
+  match: GuestPortalLocalGameProfileMatch;
+};
+
+export type GuestPortalLocalGameProfileMatch = {
+  checkedAt: string;
+  status: "MATCHED_LOCAL" | "WAITING_FOR_SYNC" | "CONFLICT" | "NOT_LINKED";
+  localGuestFound: boolean;
+  localGuestId: string | null;
+  profileId: string | null;
+  linkStatus:
+    | "LINKED"
+    | "ALREADY_LINKED"
+    | "WAITING_FOR_SYNC"
+    | "CONFLICT"
+    | "NOT_LINKED";
+  linkedGuestId: string | null;
+  linkedProfileId: string | null;
+  backfilled: {
+    rewards: number;
+    events: number;
+    deliveries: number;
+    bonusLedgerEntries: number;
+  };
+  nextAction: string;
 };
 
 export type GuestPortalCheckInResponse = {
@@ -758,6 +782,7 @@ export type GuestPortalTelegramAuthStatusResponse = {
   status: "PENDING" | "AWAITING_CONTACT" | "CONFIRMED" | "EXPIRED" | "FAILED";
   token?: string;
   portal?: GuestPortalPayload;
+  match?: GuestPortalLocalGameProfileMatch;
   profileId: string | null;
   phoneMasked?: string | null;
   telegramIdentityMasked?: string | null;
@@ -778,6 +803,7 @@ export type GuestPortalUserCallAuthStatusResponse = {
   status: "PENDING" | "CONFIRMED" | "EXPIRED" | "FAILED";
   token?: string;
   portal?: GuestPortalPayload;
+  match?: GuestPortalLocalGameProfileMatch;
   profileId: string | null;
   phoneMasked: string | null;
   message: string;

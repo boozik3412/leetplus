@@ -157,6 +157,25 @@ type GuestPortalGameProfileLinkResult = {
   backfilled: GuestPortalGameProfileBackfillSummary;
 };
 
+type GuestPortalLocalGameProfileMatchStatus =
+  | 'MATCHED_LOCAL'
+  | 'WAITING_FOR_SYNC'
+  | 'CONFLICT'
+  | 'NOT_LINKED';
+
+export type GuestPortalLocalGameProfileMatch = {
+  checkedAt: string;
+  status: GuestPortalLocalGameProfileMatchStatus;
+  localGuestFound: boolean;
+  localGuestId: string | null;
+  profileId: string | null;
+  linkStatus: GuestPortalGameProfileLinkStatus;
+  linkedGuestId: string | null;
+  linkedProfileId: string | null;
+  backfilled: GuestPortalGameProfileBackfillSummary;
+  nextAction: string;
+};
+
 type TenantStoreContext = {
   tenant: {
     id: string;
@@ -271,6 +290,7 @@ export type GuestPortalOtpStartResponse = {
 export type GuestPortalOtpVerifyResponse = {
   token: string;
   portal: GuestPortalPayload;
+  match: GuestPortalLocalGameProfileMatch;
 };
 
 export type GuestPortalCommunicationPreferenceAction =
@@ -312,6 +332,7 @@ export type GuestPortalTelegramAuthStatusResponse = {
   status: 'PENDING' | 'AWAITING_CONTACT' | 'CONFIRMED' | 'EXPIRED' | 'FAILED';
   token?: string;
   portal?: GuestPortalPayload;
+  match?: GuestPortalLocalGameProfileMatch;
   profileId: string | null;
   phoneMasked?: string | null;
   telegramIdentityMasked?: string | null;
@@ -332,6 +353,7 @@ export type GuestPortalUserCallAuthStatusResponse = {
   status: 'PENDING' | 'CONFIRMED' | 'EXPIRED' | 'FAILED';
   token?: string;
   portal?: GuestPortalPayload;
+  match?: GuestPortalLocalGameProfileMatch;
   profileId: string | null;
   phoneMasked: string | null;
   message: string;
@@ -1734,7 +1756,7 @@ export class GuestPortalService {
         channel: 'USER_CALL',
         externalId: `user-call:${challenge.id}:referral`,
       });
-      const payload: GuestPortalTokenPayload = {
+      const basePayload: GuestPortalTokenPayload = {
         sub: `user-call:${challenge.id}`,
         purpose: GUEST_PORTAL_PURPOSE,
         tenantId: context.tenant.id,
@@ -1743,18 +1765,28 @@ export class GuestPortalService {
         profileId: profile.id,
         phoneHash: challenge.phoneHash,
       };
+      const match = await this.buildLocalGameProfileMatch(basePayload, {
+        phoneMasked: challenge.phoneMasked,
+        source: 'guest_portal_user_call',
+      });
+      const payload = guestPortalPayloadWithLocalMatch(basePayload, match);
       const token = await this.signGuestPortalToken(payload);
 
       await this.prisma.guestPortalOtpChallenge.update({
         where: { id: challenge.id },
-        data: { status: USER_CALL_AUTH_SESSION_ISSUED_STATUS },
+        data: {
+          status: USER_CALL_AUTH_SESSION_ISSUED_STATUS,
+          guestId: payload.guestId,
+          profileId: payload.profileId,
+        },
       });
 
       return {
         status: 'CONFIRMED',
         token,
         portal: await this.buildPortalPayload(payload),
-        profileId: profile.id,
+        match,
+        profileId: payload.profileId ?? profile.id,
         phoneMasked: challenge.phoneMasked,
         message: 'Телефон подтвержден входящим звонком. Игровой профиль готов.',
       };
@@ -1781,7 +1813,7 @@ export class GuestPortalService {
         },
       });
 
-      const payload: GuestPortalTokenPayload = {
+      const basePayload: GuestPortalTokenPayload = {
         sub: `user-call:${challenge.id}`,
         purpose: GUEST_PORTAL_PURPOSE,
         tenantId: context.tenant.id,
@@ -1790,13 +1822,19 @@ export class GuestPortalService {
         profileId: challenge.profileId,
         phoneHash: challenge.phoneHash,
       };
+      const match = await this.buildLocalGameProfileMatch(basePayload, {
+        phoneMasked: challenge.phoneMasked,
+        source: 'guest_portal_user_call',
+      });
+      const payload = guestPortalPayloadWithLocalMatch(basePayload, match);
       const token = await this.signGuestPortalToken(payload);
 
       return {
         status: 'CONFIRMED',
         token,
         portal: await this.buildPortalPayload(payload),
-        profileId: challenge.profileId,
+        match,
+        profileId: payload.profileId ?? challenge.profileId,
         phoneMasked: challenge.phoneMasked,
         message: 'Телефон уже подтвержден входящим звонком.',
       };
@@ -1952,7 +1990,7 @@ export class GuestPortalService {
       externalId: `otp:${challenge.id}:referral`,
     });
 
-    const payload: GuestPortalTokenPayload = {
+    const basePayload: GuestPortalTokenPayload = {
       sub: challenge.id,
       purpose: GUEST_PORTAL_PURPOSE,
       tenantId: context.tenant.id,
@@ -1961,11 +1999,17 @@ export class GuestPortalService {
       profileId: profile.id,
       phoneHash: challenge.phoneHash,
     };
+    const match = await this.buildLocalGameProfileMatch(basePayload, {
+      phoneMasked: challenge.phoneMasked,
+      source: 'guest_portal_otp',
+    });
+    const payload = guestPortalPayloadWithLocalMatch(basePayload, match);
     const token = await this.signGuestPortalToken(payload);
 
     return {
       token,
       portal: await this.buildPortalPayload(payload),
+      match,
     };
   }
 
@@ -2151,7 +2195,7 @@ export class GuestPortalService {
         };
       }
 
-      const payload: GuestPortalTokenPayload = {
+      const basePayload: GuestPortalTokenPayload = {
         sub: `telegram-auth:${challenge.id}`,
         purpose: GUEST_PORTAL_PURPOSE,
         tenantId: context.tenant.id,
@@ -2160,6 +2204,11 @@ export class GuestPortalService {
         profileId: challenge.profileId,
         phoneHash,
       };
+      const match = await this.buildLocalGameProfileMatch(basePayload, {
+        phoneMasked: challenge.profile.contactMasked,
+        source: 'guest_portal_telegram_auth',
+      });
+      const payload = guestPortalPayloadWithLocalMatch(basePayload, match);
       const token = await this.signGuestPortalToken(payload);
 
       if (challenge.status === TELEGRAM_AUTH_VERIFIED_STATUS || referralCode) {
@@ -2168,7 +2217,11 @@ export class GuestPortalService {
           if (challenge.status === TELEGRAM_AUTH_VERIFIED_STATUS) {
             await tx.guestGameTelegramLinkChallenge.update({
               where: { id: challenge.id },
-              data: { status: TELEGRAM_AUTH_SESSION_ISSUED_STATUS },
+              data: {
+                status: TELEGRAM_AUTH_SESSION_ISSUED_STATUS,
+                guestId: payload.guestId,
+                profileId: payload.profileId ?? challenge.profileId,
+              },
             });
           }
 
@@ -2177,7 +2230,7 @@ export class GuestPortalService {
             channel: 'TELEGRAM_BOT',
             externalId: `telegram-auth:${challenge.id}:referral`,
             profile: {
-              id: challenge.profileId,
+              id: payload.profileId ?? challenge.profileId,
               guestId: payload.guestId,
             },
             now,
@@ -2189,7 +2242,8 @@ export class GuestPortalService {
         status: 'CONFIRMED',
         token,
         portal: await this.buildPortalPayload(payload),
-        profileId: challenge.profileId,
+        match,
+        profileId: payload.profileId ?? challenge.profileId,
         phoneMasked: challenge.profile.contactMasked,
         telegramIdentityMasked: maskExternalIdentity(
           challenge.profile.telegramIdentity,
@@ -3735,11 +3789,71 @@ export class GuestPortalService {
     };
   }
 
+  private async buildLocalGameProfileMatch(
+    payload: GuestPortalTokenPayload,
+    options: {
+      phoneMasked?: string | null;
+      source: string;
+    },
+  ): Promise<GuestPortalLocalGameProfileMatch> {
+    const checkedAt = new Date().toISOString();
+    const localGuest = await this.prisma.guest.findFirst({
+      where: {
+        tenantId: payload.tenantId,
+        phoneHash: payload.phoneHash,
+        isDisabled: false,
+        ...(payload.guestId ? { id: payload.guestId } : {}),
+      },
+      orderBy: [{ lastActivityAt: 'desc' }, { updatedAt: 'desc' }],
+      select: { id: true },
+    });
+
+    const linkResult = localGuest
+      ? await this.linkGameProfileToLocalGuest(
+          payload,
+          payload.profileId,
+          localGuest.id,
+          options.phoneMasked ?? null,
+          options.source,
+        )
+      : ({
+          status: payload.profileId ? 'WAITING_FOR_SYNC' : 'NOT_LINKED',
+          guestId: null,
+          profileId: payload.profileId,
+          linkedNow: false,
+          backfilled: emptyGameProfileBackfillSummary(),
+        } satisfies GuestPortalGameProfileLinkResult);
+    const status: GuestPortalLocalGameProfileMatchStatus = localGuest
+      ? linkResult.status === 'CONFLICT' || linkResult.status === 'NOT_LINKED'
+        ? linkResult.status
+        : 'MATCHED_LOCAL'
+      : payload.profileId
+        ? 'WAITING_FOR_SYNC'
+        : 'NOT_LINKED';
+
+    return {
+      checkedAt,
+      status,
+      localGuestFound: Boolean(localGuest),
+      localGuestId: localGuest?.id ?? null,
+      profileId: linkResult.profileId ?? payload.profileId,
+      linkStatus: linkResult.status,
+      linkedGuestId: linkResult.guestId,
+      linkedProfileId: linkResult.profileId,
+      backfilled: linkResult.backfilled,
+      nextAction: guestPortalLocalGameProfileMatchNextAction(
+        status,
+        linkResult.status,
+      ),
+    };
+  }
+
   private async linkGameProfileToLocalGuest(
     payload: GuestPortalTokenPayload,
     profileId: string | null,
     guestId: string,
     phoneMasked: string | null,
+    source = 'guest_portal_langame_match',
   ): Promise<GuestPortalGameProfileLinkResult> {
     if (!profileId) {
       return {
@@ -3807,12 +3921,31 @@ export class GuestPortalService {
       }
 
       if (profile.guestId === guest.id) {
+        const backfilled = await this.backfillGameProfileGuestLinks(
+          tx,
+          payload.tenantId,
+          profile.id,
+          guest.id,
+        );
+        await this.createGameProfileLinkedEvent(tx, {
+          tenantId: payload.tenantId,
+          profileId: profile.id,
+          guestId: guest.id,
+          externalProvider: guest.externalProvider,
+          externalDomain: guest.externalDomain,
+          externalGuestId: guest.externalGuestId,
+          phoneMasked: phoneMasked ?? guest.phoneMasked,
+          source,
+          backfilled,
+          occurredAt: now,
+        });
+
         return {
           status: 'ALREADY_LINKED',
           guestId: guest.id,
           profileId: profile.id,
           linkedNow: false,
-          backfilled: emptyGameProfileBackfillSummary(),
+          backfilled,
         };
       }
 
@@ -3861,7 +3994,7 @@ export class GuestPortalService {
         externalDomain: guest.externalDomain,
         externalGuestId: guest.externalGuestId,
         phoneMasked: phoneMasked ?? guest.phoneMasked,
-        source: 'guest_portal_langame_match',
+        source,
         backfilled,
         occurredAt: now,
       });
@@ -6330,6 +6463,47 @@ function guestPortalLangameMatchNextAction(
   }
 
   return 'Не удалось проверить Langame по активным источникам. Попробуйте позже или обратитесь к администратору клуба.';
+}
+
+function guestPortalLocalGameProfileMatchNextAction(
+  status: GuestPortalLocalGameProfileMatchStatus,
+  linkStatus: GuestPortalGameProfileLinkStatus,
+) {
+  if (linkStatus === 'LINKED') {
+    return 'Телефон совпал с сохраненным snapshot LeetPlus, игровой профиль связан с гостем Langame, старые игровые записи довязаны автоматически.';
+  }
+
+  if (linkStatus === 'ALREADY_LINKED') {
+    return 'Игровой профиль уже связан с сохраненным гостем Langame; LeetPlus дополнительно проверил старые игровые записи и довязал их при необходимости.';
+  }
+
+  if (linkStatus === 'CONFLICT' || status === 'CONFLICT') {
+    return 'По этому телефону найден локальный Langame-гость, но активная игровая связка конфликтует с другим профилем. Нужна ручная проверка администратора.';
+  }
+
+  if (status === 'WAITING_FOR_SYNC') {
+    return 'Вход завершен, но сохраненный snapshot Langame пока не содержит этого телефона. Связка появится после обычной синхронизации гостей.';
+  }
+
+  return 'Вход завершен, игровой профиль создан отдельно от общей базы гостей. Связка с Langame появится после синхронизации или ручной проверки.';
+}
+
+function guestPortalPayloadWithLocalMatch(
+  payload: GuestPortalTokenPayload,
+  match: GuestPortalLocalGameProfileMatch,
+): GuestPortalTokenPayload {
+  if (
+    (match.linkStatus === 'LINKED' || match.linkStatus === 'ALREADY_LINKED') &&
+    match.linkedGuestId
+  ) {
+    return {
+      ...payload,
+      guestId: match.linkedGuestId,
+      profileId: match.linkedProfileId ?? payload.profileId,
+    };
+  }
+
+  return payload;
 }
 
 function mapLootBox(

@@ -2123,5 +2123,131 @@ describe('GuestPortalService', () => {
         }),
       );
     });
+
+    it('backfills profile-only game records when the profile is already linked locally', async () => {
+      const { jwtService, langameSettingsService, prisma, service } =
+        createService({
+          APP_ENCRYPTION_KEY: 'test-secret',
+        });
+      const phone = '+7 999 111-22-33';
+      const phoneHash = createHmac('sha256', 'test-secret')
+        .update('79991112233')
+        .digest('hex');
+      const portalPayload = {
+        guestFound: true,
+        profile: { id: 'profile-1' },
+      };
+      jest
+        .spyOn(service as any, 'buildPortalPayload')
+        .mockResolvedValue(portalPayload);
+
+      jwtService.verifyAsync.mockResolvedValue({
+        sub: 'telegram-auth:1',
+        purpose: 'guest_portal',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        guestId: 'guest-1',
+        profileId: 'profile-1',
+        phoneHash,
+      });
+      prisma.tenant.findFirst.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'Leet Clubs',
+        slug: 'leet',
+        stores: [
+          {
+            id: 'store-1',
+            publicSlug: 'club-1337',
+            name: '1337',
+            address: 'ул. Ленина, 1',
+          },
+        ],
+      });
+      langameSettingsService.searchGuestByPhoneForPortal.mockResolvedValue({
+        checkedAt: '2026-06-15T08:00:00.000Z',
+        sources: [],
+      });
+      const guest = {
+        id: 'guest-1',
+        tenantId: 'tenant-1',
+        externalProvider: IntegrationProvider.LANGAME,
+        externalDomain: '1337.langame.ru',
+        externalGuestId: '42',
+        phoneHash,
+        phoneMasked: '***2233',
+        emailMasked: null,
+        fullNameMasked: 'I. P.',
+        isDisabled: false,
+      };
+      const profile = {
+        id: 'profile-1',
+        tenantId: 'tenant-1',
+        guestId: 'guest-1',
+        phoneHash,
+        contactMasked: '***2233',
+        displayName: 'I. P.',
+        status: 'ACTIVE',
+      };
+      prisma.guest.findFirst
+        .mockResolvedValueOnce(guest)
+        .mockResolvedValueOnce(guest);
+      prisma.guestGameProfile.findFirst
+        .mockResolvedValueOnce(profile)
+        .mockResolvedValueOnce(profile)
+        .mockResolvedValueOnce({ id: 'profile-1' });
+      prisma.guestGameReward.updateMany.mockResolvedValue({ count: 1 });
+      prisma.guestGameEvent.updateMany.mockResolvedValue({ count: 2 });
+      prisma.guestGameDelivery.updateMany.mockResolvedValue({ count: 3 });
+      prisma.guestBonusLedgerEntry.updateMany.mockResolvedValue({ count: 4 });
+
+      const result = await service.matchLangameGuest('Bearer guest-token', {
+        phone,
+      });
+
+      expect(result).toMatchObject({
+        status: 'MATCHED_LOCAL',
+        linkStatus: 'ALREADY_LINKED',
+        linkedGuestId: 'guest-1',
+        linkedProfileId: 'profile-1',
+        backfilled: {
+          rewards: 1,
+          events: 2,
+          deliveries: 3,
+          bonusLedgerEntries: 4,
+        },
+        portal: portalPayload,
+      });
+      expect(prisma.guestGameReward.updateMany).toHaveBeenCalledWith({
+        where: {
+          tenantId: 'tenant-1',
+          profileId: 'profile-1',
+          guestId: null,
+        },
+        data: { guestId: 'guest-1' },
+      });
+      expect(prisma.guestGameEvent.createMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: [
+            expect.objectContaining({
+              tenantId: 'tenant-1',
+              profileId: 'profile-1',
+              guestId: 'guest-1',
+              eventType: 'GAME_PROFILE_LINKED',
+              source: 'GUEST_PORTAL_PROFILE_LINK',
+              payload: expect.objectContaining({
+                source: 'guest_portal_langame_match',
+                backfilled: {
+                  rewards: 1,
+                  events: 2,
+                  deliveries: 3,
+                  bonusLedgerEntries: 4,
+                },
+              }),
+            }),
+          ],
+          skipDuplicates: true,
+        }),
+      );
+    });
   });
 });

@@ -9668,6 +9668,7 @@ function guestPortalUserCallAuthReadiness(): GuestGameIntegrationReadinessItem {
     nextAction: ready
       ? 'Проверить /play на тестовом госте: создать вход по звонку, позвонить с введенного номера и подтвердить callback без раскрытия raw phone.'
       : 'Задать env GUEST_PORTAL_USER_CALL_ENABLED, GUEST_PORTAL_USER_CALL_PHONE_NUMBER и GUEST_PORTAL_USER_CALL_SECRET на VDS после выбора call-provider.',
+    runbook: guestAuthFallbackRunbook,
   };
 }
 
@@ -9721,6 +9722,7 @@ function guestPortalIncomingCallLast4Readiness(): GuestGameIntegrationReadinessI
     nextAction: ready
       ? 'Проверить один тестовый вход: создать звонок, ввести последние 4 цифры номера и убедиться, что raw phone не попадает в UI.'
       : 'Подключать только после стабилизации первых трех каналов: задать GUEST_PORTAL_INCOMING_CALL_LAST4_ENABLED, endpoint и token.',
+    runbook: guestAuthFallbackRunbook,
   };
 }
 
@@ -9800,6 +9802,12 @@ const telegramAuthRunbook = {
   label: 'Runbook Telegram-входа',
   path: 'docs/deployment/telegram-auth.md',
   href: 'https://github.com/boozik3412/leetplus/blob/main/docs/deployment/telegram-auth.md',
+};
+
+const guestAuthFallbackRunbook = {
+  label: 'Runbook fallback-входа',
+  path: 'docs/deployment/guest-auth-fallbacks.md',
+  href: 'https://github.com/boozik3412/leetplus/blob/main/docs/deployment/guest-auth-fallbacks.md',
 };
 
 const bonusLedgerSchedulerRunbook = {

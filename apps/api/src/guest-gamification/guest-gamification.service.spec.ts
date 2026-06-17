@@ -887,6 +887,11 @@ describe('GuestGamificationService', () => {
           'GUEST_PORTAL_USER_CALL_PHONE_NUMBER',
           'GUEST_PORTAL_USER_CALL_SECRET',
         ],
+        runbook: {
+          label: 'Runbook fallback-входа',
+          path: 'docs/deployment/guest-auth-fallbacks.md',
+          href: 'https://github.com/boozik3412/leetplus/blob/main/docs/deployment/guest-auth-fallbacks.md',
+        },
       });
     });
 
@@ -908,6 +913,11 @@ describe('GuestGamificationService', () => {
         configured: true,
         enabled: true,
         requiredEnv: [],
+        runbook: {
+          label: 'Runbook fallback-входа',
+          path: 'docs/deployment/guest-auth-fallbacks.md',
+          href: 'https://github.com/boozik3412/leetplus/blob/main/docs/deployment/guest-auth-fallbacks.md',
+        },
       });
       expect(userCall.details).toEqual(
         expect.arrayContaining([
@@ -921,6 +931,48 @@ describe('GuestGamificationService', () => {
       );
       expect(userCallText).not.toContain('+7 343 000-00-00');
       expect(userCallText).not.toContain('call-secret');
+    });
+
+    it('marks incoming call last4 auth ready without exposing provider endpoint or token', () => {
+      process.env.GUEST_PORTAL_INCOMING_CALL_LAST4_ENABLED = 'true';
+      process.env.GUEST_PORTAL_INCOMING_CALL_LAST4_ENDPOINT =
+        'https://provider.test/calls';
+      process.env.GUEST_PORTAL_INCOMING_CALL_LAST4_TOKEN = 'provider-token';
+      const { service } = createService();
+
+      const readiness = (service as any).buildIntegrationReadiness([]);
+      const incomingCall = readiness.items.find(
+        (item: { key: string }) => item.key === 'INCOMING_CALL_LAST4_AUTH',
+      );
+      const incomingCallText = JSON.stringify(incomingCall);
+
+      expect(incomingCall).toMatchObject({
+        status: 'READY',
+        ready: true,
+        configured: true,
+        enabled: true,
+        requiredEnv: [],
+        runbook: {
+          label: 'Runbook fallback-входа',
+          path: 'docs/deployment/guest-auth-fallbacks.md',
+          href: 'https://github.com/boozik3412/leetplus/blob/main/docs/deployment/guest-auth-fallbacks.md',
+        },
+      });
+      expect(incomingCall.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ label: 'Флаг', value: 'включен' }),
+          expect.objectContaining({
+            label: 'Provider endpoint',
+            value: 'настроен',
+          }),
+          expect.objectContaining({
+            label: 'Provider token',
+            value: 'настроен',
+          }),
+        ]),
+      );
+      expect(incomingCallText).not.toContain('https://provider.test/calls');
+      expect(incomingCallText).not.toContain('provider-token');
     });
 
     it('shows Telegram auth reply sender as adapter-only until API-side sending is enabled', () => {

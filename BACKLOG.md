@@ -1,5 +1,7 @@
 # LeetPlus Бэклог
 
+- Готово: реферальная атрибуция `/play` теперь закреплена regression-тестами для всех рабочих каналов авторизации участника геймификации: Telegram-бот, звонок пользователя на номер, входящий звонок с последними 4 цифрами и уже существующий OTP/SMS. Тесты проверяют запись `GuestGameEvent` `GAME_REFERRAL_ACCEPTED` с `source=GUEST_PORTAL_REFERRAL`, корректным каналом, `inviterProfileId`/`inviterGuestId`, `eligibleForReward=true` и отсутствием сырого referral code/raw phone/Langame payload в публичном контуре.
+
 - Готово: карточка `Рефералка` на `/play/game` получила реальные действия для приглашения друга: копирование ссылки, нативный share с fallback на текст приглашения, отдельную отправку в Telegram через share-url и открытие самой ссылки. Это использует уже безопасный `referral.link/shareText`, не добавляет новый API-запрос и не раскрывает raw phone, secret или сырой profile id.
 
 - Готово: `incoming-call-last4/start` больше не маскирует заблокированный входящий звонок под `NOT_CONFIGURED`. Если канал настроен, но гость отписан или provider/policy блокирует доставку, API возвращает верхний `status=BLOCKED`, а challenge сохраняется как `DELIVERY_BLOCKED`; frontend-тип `/play` поддерживает это состояние без raw phone, provider token или Langame payload.

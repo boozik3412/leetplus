@@ -157,6 +157,83 @@ function buildTestReferralCode(
   return `lp_ref_${digest.slice(0, 22)}`;
 }
 
+function mockLeetTenant(prisma: any) {
+  prisma.tenant.findFirst.mockResolvedValue({
+    id: 'tenant-1',
+    name: 'Leet Clubs',
+    slug: 'leet',
+    stores: [
+      {
+        id: 'store-1',
+        publicSlug: 'club-1337',
+        name: '1337',
+        address: 'Lenina, 1',
+      },
+    ],
+  });
+}
+
+function referralCodeFor1337(
+  profileId = 'inviter-profile-1',
+  secret = 'referral-secret',
+) {
+  return buildTestReferralCode(
+    'leet',
+    'store-1',
+    'club-1337',
+    profileId,
+    secret,
+  );
+}
+
+function expectReferralEventCreated(
+  prisma: any,
+  options: {
+    channel: string;
+    externalId: string;
+    acceptedProfileId?: string;
+    acceptedGuestId?: string | null;
+    inviterProfileId?: string;
+    inviterGuestId?: string | null;
+    referralCode: string;
+  },
+) {
+  const acceptedProfileId = options.acceptedProfileId ?? 'profile-1';
+  const inviterProfileId = options.inviterProfileId ?? 'inviter-profile-1';
+  const inviterGuestId = options.inviterGuestId ?? 'guest-inviter';
+
+  expect(prisma.guestGameEvent.create).toHaveBeenCalledWith(
+    expect.objectContaining({
+      data: expect.objectContaining({
+        tenantId: 'tenant-1',
+        profileId: acceptedProfileId,
+        guestId: options.acceptedGuestId ?? null,
+        eventType: 'GAME_REFERRAL_ACCEPTED',
+        source: 'GUEST_PORTAL_REFERRAL',
+        externalId: options.externalId,
+        payload: expect.objectContaining({
+          channel: options.channel,
+          storeId: 'store-1',
+          storePublicSlug: 'club-1337',
+          clubId: 'leet:club-1337',
+          referralCodeMasked: expect.stringContaining('...'),
+          inviterProfileId,
+          inviterGuestId,
+          valid: true,
+          selfReferral: false,
+          eligibleForReward: true,
+        }),
+      }),
+    }),
+  );
+
+  const referralCalls = prisma.guestGameEvent.create.mock.calls.filter(
+    ([call]: [any]) => call?.data?.eventType === 'GAME_REFERRAL_ACCEPTED',
+  );
+
+  expect(JSON.stringify(referralCalls)).not.toContain(options.referralCode);
+}
+
 function portalPayloadFixture() {
   return {
     tenant: { name: 'LeetPlus', slug: 'demo' },
@@ -1437,6 +1514,65 @@ describe('GuestPortalService', () => {
         profileId: 'profile-1',
       });
     });
+
+    it('records referral attribution when Telegram status issues the game session', async () => {
+      const { jwtService, prisma, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+        GUEST_GAME_REFERRAL_SECRET: 'referral-secret',
+      });
+      const referralCode = referralCodeFor1337();
+      mockLeetTenant(prisma);
+      jest.spyOn(service as any, 'buildPortalPayload').mockResolvedValue({
+        profile: { id: 'profile-1' },
+      });
+
+      prisma.guestGameTelegramLinkChallenge.findFirst.mockResolvedValue({
+        id: 'telegram-auth-1',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        profileId: 'profile-1',
+        guestId: null,
+        phoneHash: 'phone-hash-1',
+        status: 'AUTH_VERIFIED',
+        expiresAt: new Date(Date.now() + 60_000),
+        profile: {
+          id: 'profile-1',
+          guestId: null,
+          phoneHash: 'phone-hash-1',
+          telegramIdentity: 'chat:123456',
+          contactMasked: '***2233',
+        },
+      });
+      prisma.guestGameProfile.findMany.mockResolvedValue([
+        { id: 'inviter-profile-1', guestId: 'guest-inviter' },
+      ]);
+      jwtService.signAsync.mockResolvedValue('guest-token');
+
+      const status = await service.getTelegramAuthStatus('leet', 'club-1337', {
+        challengeId: 'telegram-auth-1',
+        referralCode,
+      });
+
+      expect(status).toMatchObject({
+        status: 'CONFIRMED',
+        token: 'guest-token',
+        profileId: 'profile-1',
+      });
+      expect(prisma.guestGameTelegramLinkChallenge.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'telegram-auth-1' },
+          data: expect.objectContaining({
+            status: 'AUTH_SESSION_ISSUED',
+            profileId: 'profile-1',
+          }),
+        }),
+      );
+      expectReferralEventCreated(prisma, {
+        channel: 'TELEGRAM_BOT',
+        externalId: 'telegram-auth:telegram-auth-1:referral',
+        referralCode,
+      });
+    });
   });
 
   describe('user call auth', () => {
@@ -1612,6 +1748,56 @@ describe('GuestPortalService', () => {
         token: 'guest-token',
         profileId: 'profile-1',
         phoneMasked: '***9999',
+      });
+    });
+
+    it('records referral attribution when the user-call fallback issues the game session', async () => {
+      const { jwtService, prisma, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+        GUEST_GAME_REFERRAL_SECRET: 'referral-secret',
+      });
+      const referralCode = referralCodeFor1337();
+      mockLeetTenant(prisma);
+      jest.spyOn(service as any, 'buildPortalPayload').mockResolvedValue({
+        profile: { id: 'profile-1' },
+      });
+
+      prisma.guestPortalOtpChallenge.findFirst.mockResolvedValue({
+        id: 'call-auth-1',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        guestId: null,
+        profileId: null,
+        phoneHash: 'phone-hash-1',
+        phoneMasked: '***9999',
+        status: 'CALL_CONFIRMED',
+        expiresAt: new Date(Date.now() + 60_000),
+        gameConsentAcceptedAt: new Date('2026-06-15T08:00:00.000Z'),
+        gameConsentVersion: 'guest-game-v1-2026-06-15',
+      });
+      prisma.guestGameProfile.create.mockResolvedValue({
+        id: 'profile-1',
+        guestId: null,
+      });
+      prisma.guestGameProfile.findMany.mockResolvedValue([
+        { id: 'inviter-profile-1', guestId: 'guest-inviter' },
+      ]);
+      jwtService.signAsync.mockResolvedValue('guest-token');
+
+      const status = await service.getUserCallAuthStatus('leet', 'club-1337', {
+        challengeId: 'call-auth-1',
+        referralCode,
+      });
+
+      expect(status).toMatchObject({
+        status: 'CONFIRMED',
+        token: 'guest-token',
+        profileId: 'profile-1',
+      });
+      expectReferralEventCreated(prisma, {
+        channel: 'USER_CALL',
+        externalId: 'user-call:call-auth-1:referral',
+        referralCode,
       });
     });
   });
@@ -1836,6 +2022,68 @@ describe('GuestPortalService', () => {
           status: 'WAITING_FOR_SYNC',
           profileId: 'profile-1',
         },
+      });
+    });
+
+    it('records referral attribution when incoming-call last4 verifies the game session', async () => {
+      const { jwtService, prisma, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+        GUEST_GAME_REFERRAL_SECRET: 'referral-secret',
+      });
+      const challengeId = 'incoming-call-1';
+      const code = '4321';
+      const codeHash = (service as any).hashOtpCode(challengeId, code);
+      const referralCode = referralCodeFor1337();
+      mockLeetTenant(prisma);
+      jest.spyOn(service as any, 'buildPortalPayload').mockResolvedValue({
+        profile: { id: 'profile-1' },
+      });
+
+      prisma.guestPortalOtpChallenge.findFirst.mockResolvedValue({
+        id: challengeId,
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        guestId: null,
+        profileId: null,
+        phoneHash: 'phone-hash-1',
+        phoneMasked: '***9999',
+        codeHash,
+        attempts: 0,
+        status: 'PENDING',
+        expiresAt: new Date(Date.now() + 60_000),
+        gameConsentAcceptedAt: new Date('2026-06-15T08:00:00.000Z'),
+        gameConsentVersion: 'guest-game-v1-2026-06-15',
+      });
+      prisma.guestGameProfile.create.mockResolvedValue({
+        id: 'profile-1',
+        guestId: null,
+      });
+      prisma.guestGameProfile.findMany.mockResolvedValue([
+        { id: 'inviter-profile-1', guestId: 'guest-inviter' },
+      ]);
+      jwtService.signAsync.mockResolvedValue('guest-token');
+
+      const result = await service.verifyIncomingCallLast4Auth(
+        'leet',
+        'club-1337',
+        {
+          challengeId,
+          code,
+          referralCode,
+        },
+      );
+
+      expect(result).toMatchObject({
+        token: 'guest-token',
+        match: {
+          status: 'WAITING_FOR_SYNC',
+          profileId: 'profile-1',
+        },
+      });
+      expectReferralEventCreated(prisma, {
+        channel: 'INCOMING_CALL_LAST4',
+        externalId: 'incoming-call-last4:incoming-call-1:referral',
+        referralCode,
       });
     });
   });

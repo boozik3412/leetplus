@@ -958,6 +958,12 @@ describe('GuestPortalService', () => {
         role: 'RESERVE',
         status: 'READY',
       });
+      expect(directory.verification.options[3]).toMatchObject({
+        rank: 4,
+        role: 'RESERVE',
+        status: 'READY',
+        requiredEnv: [],
+      });
       expect(directory.cities).toEqual(['Екатеринбург']);
       expect(directory.clubs[0]).toMatchObject({
         id: 'leet:club-1337',
@@ -1540,6 +1546,169 @@ describe('GuestPortalService', () => {
         token: 'guest-token',
         profileId: 'profile-1',
         phoneMasked: '***9999',
+      });
+    });
+  });
+
+  describe('incoming call last4 auth', () => {
+    it('creates a pending incoming-call challenge in dev mode without exposing raw phone', async () => {
+      const { prisma, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+      });
+
+      prisma.tenant.findFirst.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'Leet Clubs',
+        slug: 'leet',
+        stores: [
+          {
+            id: 'store-1',
+            publicSlug: 'club-1337',
+            name: '1337',
+            address: 'Lenina, 1',
+          },
+        ],
+      });
+
+      const result = await service.startIncomingCallLast4Auth(
+        'leet',
+        'club-1337',
+        {
+          phone: '+7 999 999-99-99',
+          gameConsentAccepted: true,
+        },
+      );
+
+      expect(prisma.guestPortalOtpChallenge.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            deliveryChannel: 'INCOMING_CALL_LAST4',
+            status: 'PENDING',
+          }),
+          data: { status: 'EXPIRED' },
+        }),
+      );
+      expect(prisma.guestPortalOtpChallenge.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            tenantId: 'tenant-1',
+            storeId: 'store-1',
+            phoneMasked: '***9999',
+            status: 'PENDING',
+            deliveryChannel: 'INCOMING_CALL_LAST4',
+            gameConsentVersion: 'guest-game-v1-2026-06-15',
+          }),
+        }),
+      );
+      expect(result).toMatchObject({
+        phoneMasked: '***9999',
+        status: 'PENDING',
+        delivery: {
+          status: 'DEV_CODE',
+          devCode: expect.stringMatching(/^\d{4}$/),
+        },
+      });
+      expect(JSON.stringify(result)).not.toContain('79999999999');
+    });
+
+    it('verifies the last 4 digits and issues a guest token for a separate game profile', async () => {
+      const { jwtService, prisma, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+      });
+      const challengeId = 'incoming-call-1';
+      const code = '4321';
+      const codeHash = (service as any).hashOtpCode(challengeId, code);
+      jest.spyOn(service as any, 'buildPortalPayload').mockResolvedValue({
+        profile: { id: 'profile-1' },
+      });
+
+      prisma.tenant.findFirst.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'Leet Clubs',
+        slug: 'leet',
+        stores: [
+          {
+            id: 'store-1',
+            publicSlug: 'club-1337',
+            name: '1337',
+            address: 'Lenina, 1',
+          },
+        ],
+      });
+      prisma.guestPortalOtpChallenge.findFirst.mockResolvedValue({
+        id: challengeId,
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        guestId: null,
+        profileId: null,
+        phoneHash: 'phone-hash-1',
+        phoneMasked: '***9999',
+        codeHash,
+        attempts: 0,
+        status: 'PENDING',
+        expiresAt: new Date(Date.now() + 60_000),
+        gameConsentAcceptedAt: new Date('2026-06-15T08:00:00.000Z'),
+        gameConsentVersion: 'guest-game-v1-2026-06-15',
+      });
+      prisma.guestGameProfile.create.mockResolvedValue({
+        id: 'profile-1',
+        guestId: null,
+      });
+      jwtService.signAsync.mockResolvedValue('guest-token');
+
+      const result = await service.verifyIncomingCallLast4Auth(
+        'leet',
+        'club-1337',
+        {
+          challengeId,
+          code,
+        },
+      );
+
+      expect(prisma.guestPortalOtpChallenge.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: challengeId,
+            deliveryChannel: 'INCOMING_CALL_LAST4',
+          }),
+        }),
+      );
+      expect(prisma.guestGameProfile.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            tenantId: 'tenant-1',
+            contactMasked: '***9999',
+            phoneHash: 'phone-hash-1',
+            phoneConsentStatus: 'GRANTED',
+            status: 'ACTIVE',
+          }),
+        }),
+      );
+      expect(prisma.guestPortalOtpChallenge.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: challengeId },
+          data: expect.objectContaining({
+            status: 'VERIFIED',
+            guestId: null,
+            profileId: 'profile-1',
+          }),
+        }),
+      );
+      expect(jwtService.signAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sub: 'incoming-call-last4:incoming-call-1',
+          guestId: null,
+          profileId: 'profile-1',
+          phoneHash: 'phone-hash-1',
+        }),
+        expect.any(Object),
+      );
+      expect(result).toMatchObject({
+        token: 'guest-token',
+        match: {
+          status: 'WAITING_FOR_SYNC',
+          profileId: 'profile-1',
+        },
       });
     });
   });

@@ -89,7 +89,8 @@ export async function POST(request: Request, { params }: RouteContext) {
     path.length === 4 &&
     ((path[2] === "otp" && path[3] === "verify") ||
       (path[2] === "telegram-auth" && path[3] === "status") ||
-      (path[2] === "user-call-auth" && path[3] === "status")) &&
+      (path[2] === "user-call-auth" && path[3] === "status") ||
+      (path[2] === "incoming-call-last4" && path[3] === "verify")) &&
     typeof data?.token === "string"
   ) {
     nextResponse.cookies.set(GUEST_AUTH_COOKIE_NAME, data.token, {

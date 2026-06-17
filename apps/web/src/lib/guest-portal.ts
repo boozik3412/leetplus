@@ -809,6 +809,24 @@ export type GuestPortalUserCallAuthStatusResponse = {
   message: string;
 };
 
+export type GuestPortalIncomingCallLast4StartResponse = {
+  challengeId: string;
+  phoneMasked: string;
+  expiresAt: string;
+  status: "PENDING" | "NOT_CONFIGURED" | "FAILED";
+  delivery: {
+    status: "DEV_CODE" | "SENT" | "NOT_CONFIGURED" | "BLOCKED" | "FAILED";
+    devCode?: string;
+    message: string;
+    note?: string;
+    requiredEnv?: string[];
+  };
+  message: string;
+};
+
+export type GuestPortalIncomingCallLast4VerifyResponse =
+  GuestPortalOtpVerifyResponse;
+
 export type GuestPortalTelegramLinkStartResponse = {
   code: string;
   codeMasked: string;

@@ -12,6 +12,8 @@ import {
   type GuestPortalCommunicationPreferenceResponse,
   type GuestPortalGamificationClubDirectory,
   type GuestPortalGameSummary,
+  type GuestPortalIncomingCallLast4StartResponse,
+  type GuestPortalIncomingCallLast4VerifyResponse,
   type GuestPortalLangameDetailsResponse,
   type GuestPortalMessengerUpdateResponse,
   GuestPortalService,
@@ -90,6 +92,33 @@ export class GuestPortalController {
     @Body() dto: { challengeId?: unknown; referralCode?: unknown },
   ): Promise<GuestPortalUserCallAuthStatusResponse> {
     return this.guestPortalService.getUserCallAuthStatus(
+      tenantSlug,
+      storeId,
+      dto,
+    );
+  }
+
+  @Post(':tenantSlug/:storeId/incoming-call-last4/start')
+  startIncomingCallLast4Auth(
+    @Param('tenantSlug') tenantSlug: string,
+    @Param('storeId') storeId: string,
+    @Body() dto: { phone?: unknown; gameConsentAccepted?: unknown },
+  ): Promise<GuestPortalIncomingCallLast4StartResponse> {
+    return this.guestPortalService.startIncomingCallLast4Auth(
+      tenantSlug,
+      storeId,
+      dto,
+    );
+  }
+
+  @Post(':tenantSlug/:storeId/incoming-call-last4/verify')
+  verifyIncomingCallLast4Auth(
+    @Param('tenantSlug') tenantSlug: string,
+    @Param('storeId') storeId: string,
+    @Body()
+    dto: { challengeId?: unknown; code?: unknown; referralCode?: unknown },
+  ): Promise<GuestPortalIncomingCallLast4VerifyResponse> {
+    return this.guestPortalService.verifyIncomingCallLast4Auth(
       tenantSlug,
       storeId,
       dto,

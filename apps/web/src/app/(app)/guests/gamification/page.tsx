@@ -87,10 +87,10 @@ const emptyWorkspace: GuestGamificationWorkspace = {
   },
   integrationReadiness: {
     summary: {
-      total: 10,
+      total: 11,
       ready: 1,
       partial: 0,
-      blocked: 6,
+      blocked: 7,
       manualOnly: 3,
     },
     items: [
@@ -138,6 +138,27 @@ const emptyWorkspace: GuestGamificationWorkspace = {
         ],
         note: "Звонок пользователя остается вторым каналом после Telegram-бота, но требует номера для гостей и secret для защищенного provider callback.",
         nextAction: "Задать env GUEST_PORTAL_USER_CALL_ENABLED, GUEST_PORTAL_USER_CALL_PHONE_NUMBER и GUEST_PORTAL_USER_CALL_SECRET на VDS после выбора call-provider.",
+      },
+      {
+        key: "INCOMING_CALL_LAST4_AUTH",
+        title: "Входящий звонок с 4 цифрами",
+        status: "BLOCKED",
+        statusLabel: "не настроен",
+        ready: false,
+        configured: false,
+        enabled: false,
+        requiredEnv: [
+          "GUEST_PORTAL_INCOMING_CALL_LAST4_ENABLED",
+          "GUEST_PORTAL_INCOMING_CALL_LAST4_ENDPOINT",
+          "GUEST_PORTAL_INCOMING_CALL_LAST4_TOKEN",
+        ],
+        details: [
+          { label: "Флаг", value: "выключен" },
+          { label: "Provider endpoint", value: "нужен" },
+          { label: "Provider token", value: "нужен" },
+        ],
+        note: "Четвертый канал оставлен резервом после Telegram-бота, звонка пользователя на номер и SMS-кода; для запуска нужен отдельный provider исходящих звонков.",
+        nextAction: "Подключать только после стабилизации первых трех каналов: задать GUEST_PORTAL_INCOMING_CALL_LAST4_ENABLED, endpoint и token.",
       },
       {
         key: "TELEGRAM_LINK",

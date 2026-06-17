@@ -7,6 +7,8 @@ import type {
   GuestPortalGamificationClub,
   GuestPortalGamificationClubDirectory,
   GuestPortalGameSummary,
+  GuestPortalIncomingCallLast4StartResponse,
+  GuestPortalIncomingCallLast4VerifyResponse,
   GuestPortalLangameMatchResponse,
   GuestPortalLocalGameProfileMatch,
   GuestPortalOtpStartResponse,
@@ -76,6 +78,9 @@ export function PlayRegistrationClient({
     useState<GuestPortalUserCallAuthStartResponse | null>(null);
   const [userCallAuthStatus, setUserCallAuthStatus] =
     useState<GuestPortalUserCallAuthStatusResponse | null>(null);
+  const [incomingCallLast4, setIncomingCallLast4] =
+    useState<GuestPortalIncomingCallLast4StartResponse | null>(null);
+  const [incomingCallLast4Code, setIncomingCallLast4Code] = useState("");
   const [portal, setPortal] = useState<GuestPortalPayload | null>(null);
   const [langameMatch, setLangameMatch] =
     useState<GuestPortalLangameMatchResponse | null>(null);
@@ -132,6 +137,9 @@ export function PlayRegistrationClient({
   const canEnterOtpCode =
     challenge?.delivery.status === "DEV_CODE" ||
     challenge?.delivery.status === "SENT";
+  const canEnterIncomingCallLast4 =
+    incomingCallLast4?.delivery.status === "DEV_CODE" ||
+    incomingCallLast4?.delivery.status === "SENT";
 
   useEffect(() => {
     let isActive = true;
@@ -189,6 +197,8 @@ export function PlayRegistrationClient({
     setTelegramAuthStatus(null);
     setUserCallAuth(null);
     setUserCallAuthStatus(null);
+    setIncomingCallLast4(null);
+    setIncomingCallLast4Code("");
     setCode("");
     setPortal(null);
     setLangameMatch(null);
@@ -465,6 +475,8 @@ export function PlayRegistrationClient({
     setTelegramAuthStatus(null);
     setUserCallAuth(null);
     setUserCallAuthStatus(null);
+    setIncomingCallLast4(null);
+    setIncomingCallLast4Code("");
     setCode("");
     setPortal(null);
     setLangameMatch(null);
@@ -508,6 +520,8 @@ export function PlayRegistrationClient({
     setTelegramAuthStatus(null);
     setUserCallAuth(null);
     setUserCallAuthStatus(null);
+    setIncomingCallLast4(null);
+    setIncomingCallLast4Code("");
     setCode("");
     setPortal(null);
     setLangameMatch(null);
@@ -560,6 +574,8 @@ export function PlayRegistrationClient({
     setTelegramAuthStatus(null);
     setUserCallAuth(null);
     setUserCallAuthStatus(null);
+    setIncomingCallLast4(null);
+    setIncomingCallLast4Code("");
     setCode("");
     setPortal(null);
     setLangameMatch(null);
@@ -597,6 +613,101 @@ export function PlayRegistrationClient({
       );
     } finally {
       setStartingUserCallAuth(false);
+    }
+  }
+
+  async function startIncomingCallLast4Auth() {
+    if (!selectedClub) {
+      setMessage("Выберите клуб для участия.");
+      return;
+    }
+
+    setSubmitting(true);
+    setMessage(null);
+    setChallenge(null);
+    setTelegramAuth(null);
+    setTelegramAuthStatus(null);
+    setUserCallAuth(null);
+    setUserCallAuthStatus(null);
+    setIncomingCallLast4(null);
+    setIncomingCallLast4Code("");
+    setCode("");
+    setPortal(null);
+    setLangameMatch(null);
+    setLocalGameMatch(null);
+
+    try {
+      const response = await fetch(
+        `${clubApiPath(selectedClub)}/incoming-call-last4/start`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ phone, gameConsentAccepted }),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(await readMessage(response));
+      }
+
+      const data =
+        (await response.json()) as GuestPortalIncomingCallLast4StartResponse;
+      setIncomingCallLast4(data);
+      setMessage(data.message);
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Не удалось создать вход по входящему звонку.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function verifyIncomingCallLast4Auth(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!selectedClub || !incomingCallLast4) {
+      return;
+    }
+
+    setSubmitting(true);
+    setMessage(null);
+
+    try {
+      const response = await fetch(
+        `${clubApiPath(selectedClub)}/incoming-call-last4/verify`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            challengeId: incomingCallLast4.challengeId,
+            code: incomingCallLast4Code,
+            ...(referralCode ? { referralCode } : {}),
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(await readMessage(response));
+      }
+
+      const data =
+        (await response.json()) as GuestPortalIncomingCallLast4VerifyResponse;
+      setPortal(data.portal);
+      setLocalGameMatch(data.match ?? null);
+      setIncomingCallLast4(null);
+      setLangameMatch(null);
+      setMessage("Телефон подтвержден входящим звонком. Гостевой профиль готов.");
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Не удалось проверить последние 4 цифры звонка.",
+      );
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -917,6 +1028,14 @@ export function PlayRegistrationClient({
                       >
                         {isSubmitting ? "Отправляем..." : "Получить код"}
                       </button>
+
+                      <IncomingCallLast4Panel
+                        disabled={!gameConsentAccepted || !phone.trim()}
+                        incomingCallLast4={incomingCallLast4}
+                        isStarting={isSubmitting}
+                        onStart={startIncomingCallLast4Auth}
+                        verification={directory.verification}
+                      />
                     </form>
 
                     {challenge ? (
@@ -960,6 +1079,58 @@ export function PlayRegistrationClient({
                           type="submit"
                         >
                           {isSubmitting ? "Проверяем..." : "Подтвердить"}
+                        </button>
+                      </form>
+                    ) : null}
+
+                    {incomingCallLast4 ? (
+                      <form
+                        className="space-y-3"
+                        onSubmit={verifyIncomingCallLast4Auth}
+                      >
+                        <div className="rounded-lg border border-white/10 bg-white/[0.04] p-3">
+                          <p className="text-sm font-bold text-white">
+                            {incomingCallLast4StatusLabel(
+                              incomingCallLast4.delivery.status,
+                            )}
+                          </p>
+                          <p className="mt-1 text-sm leading-6 text-slate-300">
+                            {incomingCallLast4.delivery.message}
+                          </p>
+                          {incomingCallLast4.delivery.devCode ? (
+                            <p className="mt-2 rounded-lg bg-fuchsia-300/10 px-3 py-2 font-mono text-lg font-black tracking-[0.2em] text-fuchsia-100">
+                              {incomingCallLast4.delivery.devCode}
+                            </p>
+                          ) : null}
+                        </div>
+
+                        <label className="block">
+                          <span className="text-xs font-bold uppercase text-slate-400">
+                            Последние 4 цифры номера звонка
+                          </span>
+                          <input
+                            className="mt-2 min-h-11 w-full rounded-lg border border-white/10 bg-white/[0.05] px-3 text-center font-mono text-xl font-black tracking-[0.25em] text-white outline-none transition placeholder:text-slate-500 focus:border-fuchsia-300/70"
+                            inputMode="numeric"
+                            maxLength={4}
+                            onChange={(event) =>
+                              setIncomingCallLast4Code(
+                                event.target.value.replace(/\D/g, ""),
+                              )
+                            }
+                            placeholder="0000"
+                            value={incomingCallLast4Code}
+                          />
+                        </label>
+                        <button
+                          className="min-h-11 w-full rounded-lg bg-fuchsia-200 px-4 text-sm font-black text-slate-950 transition hover:bg-fuchsia-100 disabled:cursor-not-allowed disabled:opacity-60"
+                          disabled={
+                            isSubmitting ||
+                            !canEnterIncomingCallLast4 ||
+                            incomingCallLast4Code.length < 4
+                          }
+                          type="submit"
+                        >
+                          {isSubmitting ? "Проверяем..." : "Подтвердить звонок"}
                         </button>
                       </form>
                     ) : null}
@@ -1541,6 +1712,75 @@ function UserCallAuthPanel({
   );
 }
 
+function IncomingCallLast4Panel({
+  verification,
+  incomingCallLast4,
+  disabled,
+  isStarting,
+  onStart,
+}: {
+  verification: GuestPortalGamificationClubDirectory["verification"];
+  incomingCallLast4: GuestPortalIncomingCallLast4StartResponse | null;
+  disabled: boolean;
+  isStarting: boolean;
+  onStart: () => void;
+}) {
+  const option = verification.options.find(
+    (item) => item.channel === "INCOMING_CALL_LAST4",
+  );
+  const ready = option?.status === "READY";
+
+  return (
+    <div className="rounded-lg border border-fuchsia-300/25 bg-fuchsia-300/[0.05] p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-bold uppercase text-fuchsia-200">
+            4 место
+          </p>
+          <h3 className="mt-1 text-lg font-black text-white">
+            Входящий звонок
+          </h3>
+          <p className="mt-1 text-sm leading-6 text-slate-300">
+            Резерв: LeetPlus инициирует звонок, а гость вводит последние 4
+            цифры номера, с которого звонят.
+          </p>
+        </div>
+        <StatusPill tone={ready ? "cyan" : "amber"}>
+          {option?.statusLabel ?? "позже"}
+        </StatusPill>
+      </div>
+
+      <button
+        className="mt-3 min-h-11 w-full rounded-lg border border-fuchsia-300/35 px-4 text-sm font-black text-fuchsia-100 transition hover:border-fuchsia-300 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-slate-500 disabled:opacity-70"
+        disabled={disabled || !ready || isStarting}
+        onClick={onStart}
+        type="button"
+      >
+        {isStarting ? "Создаем..." : "Получить входящий звонок"}
+      </button>
+
+      {incomingCallLast4 ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-400">
+          <span>{incomingCallLast4.phoneMasked}</span>
+          <span>
+            {incomingCallLast4StatusLabel(incomingCallLast4.delivery.status)}
+          </span>
+        </div>
+      ) : null}
+
+      {disabled ? (
+        <p className="mt-2 text-xs leading-5 text-amber-100">
+          Введите телефон и подтвердите согласие, чтобы запросить звонок.
+        </p>
+      ) : !ready ? (
+        <p className="mt-2 text-xs leading-5 text-amber-100">
+          Канал оставлен резервом и включится после настройки call-provider.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function SelectedClubSummary({ club }: { club: GuestPortalGamificationClub }) {
   return (
     <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4">
@@ -1999,6 +2239,23 @@ function userCallAuthStatusLabel(
     EXPIRED: "Ожидание истекло",
     FAILED: "Вход не завершен",
   } satisfies Record<GuestPortalUserCallAuthStatusResponse["status"], string>;
+
+  return labels[status];
+}
+
+function incomingCallLast4StatusLabel(
+  status: GuestPortalIncomingCallLast4StartResponse["delivery"]["status"],
+) {
+  const labels = {
+    DEV_CODE: "Demo-код звонка",
+    SENT: "Звонок создан",
+    NOT_CONFIGURED: "Канал не настроен",
+    BLOCKED: "Звонок заблокирован",
+    FAILED: "Звонок не создан",
+  } satisfies Record<
+    GuestPortalIncomingCallLast4StartResponse["delivery"]["status"],
+    string
+  >;
 
   return labels[status];
 }

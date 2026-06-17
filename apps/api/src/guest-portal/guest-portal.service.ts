@@ -48,6 +48,7 @@ const TELEGRAM_AUTH_SESSION_ISSUED_STATUS = 'AUTH_SESSION_ISSUED';
 const USER_CALL_AUTH_CHANNEL = 'USER_CALL';
 const USER_CALL_AUTH_CONFIRMED_STATUS = 'CALL_CONFIRMED';
 const USER_CALL_AUTH_SESSION_ISSUED_STATUS = 'CALL_SESSION_ISSUED';
+const INCOMING_CALL_LAST4_CHANNEL = 'INCOMING_CALL_LAST4';
 const COMMUNICATION_PREFERENCE_EVENT_PREFIX =
   'guest_portal:communication_preference:';
 const TELEGRAM_LINK_EVENT_PREFIX = 'guest_portal:telegram_bot_link:';
@@ -85,6 +86,10 @@ type GuestPortalOtpDeliveryResult = {
   identityMasked?: string | null;
   requiredEnv?: string[];
 };
+type GuestPortalIncomingCallLast4DeliveryResult = Omit<
+  GuestPortalOtpDeliveryResult,
+  'channel' | 'identityMasked'
+>;
 type GuestPortalVerificationChannel =
   | 'TELEGRAM_BOT'
   | 'USER_CALL'
@@ -127,7 +132,8 @@ type GuestPortalOtpChallengeRegistration = {
 type GuestGameReferralRegistrationChannel =
   | 'OTP'
   | 'TELEGRAM_BOT'
-  | 'USER_CALL';
+  | 'USER_CALL'
+  | 'INCOMING_CALL_LAST4';
 
 type GuestGameReferralRegistrationOptions = {
   code: string | null;
@@ -365,6 +371,24 @@ export type GuestPortalUserCallConfirmResponse = {
   phoneMasked: string | null;
   message: string;
 };
+
+export type GuestPortalIncomingCallLast4StartResponse = {
+  challengeId: string;
+  phoneMasked: string;
+  expiresAt: string;
+  status: 'PENDING' | 'NOT_CONFIGURED' | 'FAILED';
+  delivery: {
+    status: GuestPortalOtpDeliveryStatus;
+    devCode?: string;
+    message: string;
+    note?: string;
+    requiredEnv?: string[];
+  };
+  message: string;
+};
+
+export type GuestPortalIncomingCallLast4VerifyResponse =
+  GuestPortalOtpVerifyResponse;
 
 export type GuestPortalTelegramLinkStartResponse = {
   code: string;
@@ -1306,6 +1330,9 @@ export class GuestPortalService {
   private buildGamificationVerificationPlan(): GuestPortalGamificationClubDirectory['verification'] {
     const otpConfig = guestPortalOtpDeliveryConfig(this.configService);
     const userCallConfig = guestPortalUserCallConfig(this.configService);
+    const incomingCallLast4Config = guestPortalIncomingCallLast4Config(
+      this.configService,
+    );
     const devOtpEnabled = this.isDevOtpEnabled();
     const telegramBotUsername = this.telegramBotUsername();
     const telegramWebhookSecret = configString(
@@ -1354,6 +1381,19 @@ export class GuestPortalService {
       ...(userCallConfig.secret ? [] : ['GUEST_PORTAL_USER_CALL_SECRET']),
     ];
     const userCallReady = userCallRequiredEnv.length === 0;
+    const incomingCallLast4RequiredEnv = [
+      ...(incomingCallLast4Config.enabled
+        ? []
+        : ['GUEST_PORTAL_INCOMING_CALL_LAST4_ENABLED']),
+      ...(incomingCallLast4Config.endpoint
+        ? []
+        : ['GUEST_PORTAL_INCOMING_CALL_LAST4_ENDPOINT']),
+      ...(incomingCallLast4Config.token
+        ? []
+        : ['GUEST_PORTAL_INCOMING_CALL_LAST4_TOKEN']),
+    ];
+    const incomingCallLast4Ready =
+      devOtpEnabled || incomingCallLast4RequiredEnv.length === 0;
 
     return {
       recommendedChannel: 'TELEGRAM_BOT',
@@ -1415,15 +1455,18 @@ export class GuestPortalService {
           rank: 4,
           channel: 'INCOMING_CALL_LAST4',
           role: 'RESERVE',
-          status: 'PLANNED',
+          status: incomingCallLast4Ready ? 'READY' : 'PLANNED',
           label: 'Входящий звонок с 4 цифрами',
-          statusLabel: 'позже',
+          statusLabel: incomingCallLast4Ready ? 'готов' : 'позже',
           message:
             'Возможный резервный UX, но не стартовый канал: пользователю сложнее понять механику.',
-          nextAction:
-            'Вернуться после Telegram-бота, звонка пользователя на номер и SMS-резерва.',
+          nextAction: incomingCallLast4Ready
+            ? 'Держать как резерв после Telegram-бота, звонка пользователя и SMS-кода.'
+            : 'Подключать только после Telegram-бота, звонка пользователя на номер и SMS-резерва.',
           botUsername: null,
-          requiredEnv: [],
+          requiredEnv: incomingCallLast4Ready
+            ? []
+            : incomingCallLast4RequiredEnv,
         },
       ],
     };
@@ -1851,6 +1894,154 @@ export class GuestPortalService {
     };
   }
 
+  async startIncomingCallLast4Auth(
+    tenantSlug: string,
+    storeId: string,
+    dto: { phone?: unknown; gameConsentAccepted?: unknown },
+  ): Promise<GuestPortalIncomingCallLast4StartResponse> {
+    const context = await this.getTenantStore(tenantSlug, storeId);
+    const phone = this.phoneIdentity(dto.phone);
+
+    if (dto.gameConsentAccepted !== true) {
+      throw new BadRequestException(
+        'Подтвердите участие в квестах и обработку телефона для игрового профиля.',
+      );
+    }
+
+    const now = new Date();
+    const resendAfter = new Date(now.getTime() - OTP_RESEND_SECONDS * 1000);
+    const expiresAt = new Date(now.getTime() + OTP_TTL_MINUTES * 60 * 1000);
+
+    await this.prisma.guestPortalOtpChallenge.updateMany({
+      where: {
+        deliveryChannel: INCOMING_CALL_LAST4_CHANNEL,
+        status: 'PENDING',
+        expiresAt: { lt: now },
+      },
+      data: { status: 'EXPIRED' },
+    });
+
+    const recentChallenge = await this.prisma.guestPortalOtpChallenge.findFirst(
+      {
+        where: {
+          tenantId: context.tenant.id,
+          storeId: context.store.id,
+          phoneHash: phone.hash,
+          deliveryChannel: INCOMING_CALL_LAST4_CHANNEL,
+          status: 'PENDING',
+          createdAt: { gt: resendAfter },
+        },
+        orderBy: { createdAt: 'desc' },
+      },
+    );
+
+    if (recentChallenge) {
+      throw new BadRequestException(
+        'Входящий звонок уже ожидается. Попробуйте повторить чуть позже.',
+      );
+    }
+
+    const [guest, profileByPhone] = await Promise.all([
+      this.prisma.guest.findFirst({
+        where: {
+          tenantId: context.tenant.id,
+          phoneHash: phone.hash,
+          isDisabled: false,
+        },
+        orderBy: [{ lastActivityAt: 'desc' }, { updatedAt: 'desc' }],
+        select: {
+          id: true,
+          phoneConsentStatus: true,
+          unsubscribedAt: true,
+        },
+      }),
+      this.prisma.guestGameProfile.findFirst({
+        where: {
+          tenantId: context.tenant.id,
+          phoneHash: phone.hash,
+          status: 'ACTIVE',
+        },
+        orderBy: { updatedAt: 'desc' },
+        select: {
+          id: true,
+          telegramIdentity: true,
+          maxIdentity: true,
+          phoneConsentStatus: true,
+          unsubscribedAt: true,
+        },
+      }),
+    ]);
+
+    const profile = guest
+      ? await this.prisma.guestGameProfile.findFirst({
+          where: {
+            tenantId: context.tenant.id,
+            guestId: guest.id,
+            status: 'ACTIVE',
+          },
+          orderBy: { updatedAt: 'desc' },
+          select: {
+            id: true,
+            telegramIdentity: true,
+            maxIdentity: true,
+            phoneConsentStatus: true,
+            unsubscribedAt: true,
+          },
+        })
+      : profileByPhone;
+    const id = randomUUID();
+    const code = this.generateIncomingCallLast4Code();
+    const delivery = await this.deliverIncomingCallLast4({
+      code,
+      context,
+      phone,
+      profile,
+      guest,
+    });
+    const status = otpChallengeStatus(delivery.status);
+
+    await this.prisma.guestPortalOtpChallenge.create({
+      data: {
+        id,
+        tenantId: context.tenant.id,
+        storeId: context.store.id,
+        phoneHash: phone.hash,
+        phoneMasked: phone.masked,
+        guestId: guest?.id ?? null,
+        profileId: profile?.id ?? null,
+        codeHash: this.hashOtpCode(id, code),
+        status,
+        deliveryChannel: INCOMING_CALL_LAST4_CHANNEL,
+        expiresAt,
+        deliveredAt: delivery.deliveredAt,
+        gameConsentAcceptedAt: now,
+        gameConsentVersion: GAME_CONSENT_VERSION,
+      },
+    });
+
+    return {
+      challengeId: id,
+      phoneMasked: phone.masked,
+      expiresAt: expiresAt.toISOString(),
+      status:
+        status === 'PENDING'
+          ? 'PENDING'
+          : delivery.status === 'FAILED'
+            ? 'FAILED'
+            : 'NOT_CONFIGURED',
+      delivery: {
+        status: delivery.status,
+        ...(delivery.devCode ? { devCode: delivery.devCode } : {}),
+        message: delivery.message,
+        ...(delivery.note ? { note: delivery.note } : {}),
+        ...(delivery.requiredEnv?.length
+          ? { requiredEnv: delivery.requiredEnv }
+          : {}),
+      },
+      message: delivery.message,
+    };
+  }
+
   async confirmUserCallAuth(
     secret: string | undefined,
     dto: { challengeId?: unknown; callerPhone?: unknown },
@@ -1933,6 +2124,88 @@ export class GuestPortalService {
       phoneMasked: challenge.phoneMasked,
       message:
         'Звонок подтвержден. Browser status endpoint выдаст гостевую сессию.',
+    };
+  }
+
+  async verifyIncomingCallLast4Auth(
+    tenantSlug: string,
+    storeId: string,
+    dto: { challengeId?: unknown; code?: unknown; referralCode?: unknown },
+  ): Promise<GuestPortalIncomingCallLast4VerifyResponse> {
+    const context = await this.getTenantStore(tenantSlug, storeId);
+    const challengeId = this.requiredString(dto.challengeId, 'challengeId');
+    const referralCode = normalizeGameReferralCode(dto.referralCode);
+    const code = this.requiredString(dto.code, 'Код').replace(/\D/g, '');
+
+    if (code.length !== 4) {
+      throw new BadRequestException(
+        'Введите последние 4 цифры номера входящего звонка.',
+      );
+    }
+
+    const challenge = await this.prisma.guestPortalOtpChallenge.findFirst({
+      where: {
+        id: challengeId,
+        tenantId: context.tenant.id,
+        storeId: context.store.id,
+        deliveryChannel: INCOMING_CALL_LAST4_CHANNEL,
+      },
+    });
+
+    if (!challenge || challenge.status !== 'PENDING') {
+      throw new BadRequestException(
+        'Входящий звонок не найден или уже использован.',
+      );
+    }
+
+    if (challenge.expiresAt.getTime() <= Date.now()) {
+      await this.prisma.guestPortalOtpChallenge.update({
+        where: { id: challenge.id },
+        data: { status: 'EXPIRED' },
+      });
+      throw new BadRequestException('Срок действия звонка истек.');
+    }
+
+    const isValid = challenge.codeHash === this.hashOtpCode(challenge.id, code);
+
+    if (!isValid) {
+      const attempts = challenge.attempts + 1;
+      await this.prisma.guestPortalOtpChallenge.update({
+        where: { id: challenge.id },
+        data: {
+          attempts,
+          status: attempts >= OTP_MAX_ATTEMPTS ? 'BLOCKED' : 'PENDING',
+        },
+      });
+      throw new BadRequestException('Последние 4 цифры введены неверно.');
+    }
+
+    const profile = await this.completeOtpRegistration(challenge, context, {
+      code: referralCode,
+      channel: 'INCOMING_CALL_LAST4',
+      externalId: `incoming-call-last4:${challenge.id}:referral`,
+    });
+
+    const basePayload: GuestPortalTokenPayload = {
+      sub: `incoming-call-last4:${challenge.id}`,
+      purpose: GUEST_PORTAL_PURPOSE,
+      tenantId: context.tenant.id,
+      storeId: context.store.id,
+      guestId: profile.guestId,
+      profileId: profile.id,
+      phoneHash: challenge.phoneHash,
+    };
+    const match = await this.buildLocalGameProfileMatch(basePayload, {
+      phoneMasked: challenge.phoneMasked,
+      source: 'guest_portal_incoming_call_last4',
+    });
+    const payload = guestPortalPayloadWithLocalMatch(basePayload, match);
+    const token = await this.signGuestPortalToken(payload);
+
+    return {
+      token,
+      portal: await this.buildPortalPayload(payload),
+      match,
     };
   }
 
@@ -5002,6 +5275,10 @@ export class GuestPortalService {
     return randomInt(0, 1_000_000).toString().padStart(6, '0');
   }
 
+  private generateIncomingCallLast4Code() {
+    return randomInt(0, 10_000).toString().padStart(4, '0');
+  }
+
   private generateTelegramLinkCode() {
     const raw = randomBytes(5).toString('hex').toUpperCase();
     return `LP-${raw.slice(0, 4)}-${raw.slice(4)}`;
@@ -5267,6 +5544,101 @@ export class GuestPortalService {
         'GUEST_PORTAL_OTP_MAX_ENABLED',
       ],
     };
+  }
+
+  private async deliverIncomingCallLast4(input: {
+    code: string;
+    context: TenantStoreContext;
+    phone: GuestPortalPhoneIdentity;
+    profile: {
+      id: string;
+      telegramIdentity: string | null;
+      maxIdentity: string | null;
+      phoneConsentStatus: GuestCommunicationConsentStatus;
+      unsubscribedAt: Date | null;
+    } | null;
+    guest: {
+      id: string;
+      phoneConsentStatus: GuestCommunicationConsentStatus;
+      unsubscribedAt: Date | null;
+    } | null;
+  }): Promise<GuestPortalIncomingCallLast4DeliveryResult> {
+    if (this.isDevOtpEnabled()) {
+      return {
+        status: 'DEV_CODE',
+        deliveredAt: new Date(),
+        devCode: input.code,
+        message:
+          'Demo-код входящего звонка показан на странице: введите последние 4 цифры.',
+      };
+    }
+
+    if (input.guest?.unsubscribedAt || input.profile?.unsubscribedAt) {
+      return {
+        status: 'BLOCKED',
+        deliveredAt: null,
+        message:
+          'Гость отписан от коммуникаций; входящий звонок с кодом заблокирован.',
+        note: 'Используйте Telegram contact-share или звонок пользователя на номер.',
+      };
+    }
+
+    const config = guestPortalIncomingCallLast4Config(this.configService);
+
+    if (!config.enabled) {
+      return {
+        status: 'NOT_CONFIGURED',
+        deliveredAt: null,
+        message: 'Входящий звонок с последними 4 цифрами пока не включен.',
+        requiredEnv: ['GUEST_PORTAL_INCOMING_CALL_LAST4_ENABLED'],
+      };
+    }
+
+    if (!config.endpoint || !config.token) {
+      return {
+        status: 'NOT_CONFIGURED',
+        deliveredAt: null,
+        message:
+          'Канал входящего звонка включен, но provider endpoint или token не настроены.',
+        requiredEnv: [
+          'GUEST_PORTAL_INCOMING_CALL_LAST4_ENDPOINT',
+          'GUEST_PORTAL_INCOMING_CALL_LAST4_TOKEN',
+        ],
+      };
+    }
+
+    try {
+      const payload = await sendHttpOtpDelivery({
+        endpoint: config.endpoint,
+        token: config.token,
+        body: {
+          channel: INCOMING_CALL_LAST4_CHANNEL,
+          phone: input.phone.normalized,
+          phoneMasked: input.phone.masked,
+          codeLast4: input.code,
+          purpose: 'guest_portal_incoming_call_last4',
+          ttlMinutes: OTP_TTL_MINUTES,
+          tenantSlug: input.context.tenant.slug,
+          storeId: input.context.store.id,
+          storeName: input.context.store.name,
+        },
+      });
+
+      return {
+        status: 'SENT',
+        deliveredAt: new Date(),
+        message:
+          'Сейчас поступит входящий звонок. Введите последние 4 цифры номера, с которого звонят.',
+        note: deliveryProviderNote(payload),
+      };
+    } catch (error) {
+      return {
+        status: 'FAILED',
+        deliveredAt: null,
+        message: 'Provider входящего звонка не смог создать звонок с кодом.',
+        note: safeDeliveryErrorMessage(error),
+      };
+    }
   }
 
   private piiSecret() {
@@ -5925,6 +6297,23 @@ function guestPortalUserCallConfig(configService: ConfigService) {
     phoneNumber: rawPhoneNumber,
     callHref: phoneNumber ? `tel:${phoneNumber}` : '',
     secret: configString(configService, 'GUEST_PORTAL_USER_CALL_SECRET'),
+  };
+}
+
+function guestPortalIncomingCallLast4Config(configService: ConfigService) {
+  return {
+    enabled: configFlag(
+      configService,
+      'GUEST_PORTAL_INCOMING_CALL_LAST4_ENABLED',
+    ),
+    endpoint: configString(
+      configService,
+      'GUEST_PORTAL_INCOMING_CALL_LAST4_ENDPOINT',
+    ),
+    token: configString(
+      configService,
+      'GUEST_PORTAL_INCOMING_CALL_LAST4_TOKEN',
+    ),
   };
 }
 

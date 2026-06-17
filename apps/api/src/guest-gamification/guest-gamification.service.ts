@@ -1138,6 +1138,7 @@ export type GuestGameIntegrationReadinessItem = {
     | 'OTP_TELEGRAM'
     | 'OTP_MAX'
     | 'USER_CALL_AUTH'
+    | 'INCOMING_CALL_LAST4_AUTH'
     | 'TELEGRAM_LINK'
     | 'TELEGRAM_WEBHOOK'
     | 'TELEGRAM_AUTH_REPLY_SENDER'
@@ -3598,6 +3599,7 @@ export class GuestGamificationService {
     );
     const otp = guestPortalOtpReadiness();
     const userCallAuth = guestPortalUserCallAuthReadiness();
+    const incomingCallLast4Auth = guestPortalIncomingCallLast4Readiness();
     const telegramBotUsername = envString('GUEST_GAME_TELEGRAM_BOT_USERNAME');
     const telegramLinkSecret =
       envString('GUEST_GAME_TELEGRAM_LINK_SECRET') ??
@@ -3719,6 +3721,7 @@ export class GuestGamificationService {
         nextAction: otp.max.nextAction,
       },
       userCallAuth,
+      incomingCallLast4Auth,
       {
         key: 'TELEGRAM_LINK',
         title: 'Привязка Telegram-бота',
@@ -9641,6 +9644,59 @@ function guestPortalUserCallAuthReadiness(): GuestGameIntegrationReadinessItem {
     nextAction: ready
       ? 'Проверить /play на тестовом госте: создать вход по звонку, позвонить с введенного номера и подтвердить callback без раскрытия raw phone.'
       : 'Задать env GUEST_PORTAL_USER_CALL_ENABLED, GUEST_PORTAL_USER_CALL_PHONE_NUMBER и GUEST_PORTAL_USER_CALL_SECRET на VDS после выбора call-provider.',
+  };
+}
+
+function guestPortalIncomingCallLast4Readiness(): GuestGameIntegrationReadinessItem {
+  const enabled = envFlag('GUEST_PORTAL_INCOMING_CALL_LAST4_ENABLED');
+  const endpoint = envString('GUEST_PORTAL_INCOMING_CALL_LAST4_ENDPOINT');
+  const token = envString('GUEST_PORTAL_INCOMING_CALL_LAST4_TOKEN');
+  const configured = Boolean(endpoint && token);
+  const ready = enabled && configured;
+  const status: GuestGameIntegrationReadinessStatus = ready
+    ? 'READY'
+    : enabled || endpoint || token
+      ? 'PARTIAL'
+      : 'BLOCKED';
+  const requiredEnv = [
+    ...(enabled ? [] : ['GUEST_PORTAL_INCOMING_CALL_LAST4_ENABLED']),
+    ...(endpoint ? [] : ['GUEST_PORTAL_INCOMING_CALL_LAST4_ENDPOINT']),
+    ...(token ? [] : ['GUEST_PORTAL_INCOMING_CALL_LAST4_TOKEN']),
+  ];
+
+  return {
+    key: 'INCOMING_CALL_LAST4_AUTH',
+    title: 'Входящий звонок с 4 цифрами',
+    status,
+    statusLabel: ready
+      ? 'готов'
+      : status === 'PARTIAL'
+        ? 'частично'
+        : 'не настроен',
+    ready,
+    configured,
+    enabled,
+    requiredEnv,
+    details: [
+      {
+        label: 'Флаг',
+        value: enabled ? 'включен' : 'выключен',
+      },
+      {
+        label: 'Provider endpoint',
+        value: endpoint ? 'настроен' : 'нужен',
+      },
+      {
+        label: 'Provider token',
+        value: token ? 'настроен' : 'нужен',
+      },
+    ],
+    note: ready
+      ? 'Резервный вход готов: /play создает challenge, provider звонит гостю с номером, последние 4 цифры которого проверяются в LeetPlus.'
+      : 'Четвертый канал оставлен резервом после Telegram-бота, звонка пользователя на номер и SMS-кода; для запуска нужен отдельный call-provider исходящих звонков.',
+    nextAction: ready
+      ? 'Проверить один тестовый вход: создать звонок, ввести последние 4 цифры номера и убедиться, что raw phone не попадает в UI.'
+      : 'Подключать только после стабилизации первых трех каналов: задать GUEST_PORTAL_INCOMING_CALL_LAST4_ENABLED, endpoint и token.',
   };
 }
 

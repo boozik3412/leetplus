@@ -1246,10 +1246,6 @@ export function PlayRegistrationClient({
                                 <h3 className="lp-game-auth-channel-title mt-1 text-lg font-black text-white">
                                   SMS-код
                                 </h3>
-                                <p className="lp-game-auth-channel-copy mt-1 text-sm leading-6 text-slate-300">
-                                  Резервный вход по телефону. Используется,
-                                  когда Telegram или звонок недоступны.
-                                </p>
                               </div>
                               <StatusPill
                                 className="lp-game-auth-channel-pill"
@@ -1885,10 +1881,6 @@ function TelegramAuthPanel({
           <h3 className="lp-game-auth-channel-title mt-1 text-lg font-black text-white">
             Telegram-бот
           </h3>
-          <p className="lp-game-auth-channel-copy mt-1 text-sm leading-6 text-slate-300">
-            Вход через Telegram подтверждает телефон в боте и готовит канал
-            для наград.
-          </p>
         </div>
         <StatusPill className="lp-game-auth-channel-pill" tone={ready ? "emerald" : "amber"}>
           {telegramOption?.statusLabel ?? "целевой канал"}
@@ -1990,10 +1982,6 @@ function UserCallAuthPanel({
           <h3 className="lp-game-auth-channel-title mt-1 text-lg font-black text-white">
             Звонок на телефон
           </h3>
-          <p className="lp-game-auth-channel-copy mt-1 text-sm leading-6 text-slate-300">
-            Дешевый fallback: гость звонит с введенного телефона, а LeetPlus
-            завершает вход после подтверждения caller id провайдером.
-          </p>
         </div>
         <StatusPill className="lp-game-auth-channel-pill" tone={ready ? "cyan" : "amber"}>
           {userCallOption?.statusLabel ?? "fallback"}
@@ -2088,10 +2076,6 @@ function IncomingCallLast4Panel({
           <h3 className="mt-1 text-lg font-black text-white">
             Входящий звонок
           </h3>
-          <p className="mt-1 text-sm leading-6 text-slate-300">
-            Резерв: LeetPlus инициирует звонок, а гость вводит последние 4
-            цифры номера, с которого звонят.
-          </p>
         </div>
         <StatusPill tone={ready ? "cyan" : "amber"}>
           {option?.statusLabel ?? "позже"}
@@ -3407,12 +3391,6 @@ const gameAuthCss = `
   font-size: 16px !important;
   line-height: 1.2 !important;
   font-weight: 760 !important;
-}
-
-.lp-game-auth-channel-copy {
-  color: #a9babc !important;
-  font-size: 13px !important;
-  line-height: 1.52 !important;
 }
 
 .lp-game-auth-channel-pill {

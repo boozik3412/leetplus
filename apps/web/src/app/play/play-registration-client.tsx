@@ -102,7 +102,7 @@ export function PlayRegistrationClient({
   const [activeSummary, setActiveSummary] =
     useState<GuestPortalGameSummary | null>(null);
   const [activeSessionState, setActiveSessionState] =
-    useState<ActiveSessionState>("loading");
+    useState<ActiveSessionState>(isGameAuth ? "empty" : "loading");
   const [activeSessionMessage, setActiveSessionMessage] = useState<
     string | null
   >(null);
@@ -167,6 +167,10 @@ export function PlayRegistrationClient({
     incomingCallLast4?.delivery.status === "SENT";
 
   useEffect(() => {
+    if (isGameAuth) {
+      return;
+    }
+
     let isActive = true;
 
     async function loadActiveSession() {
@@ -213,7 +217,7 @@ export function PlayRegistrationClient({
     return () => {
       isActive = false;
     };
-  }, []);
+  }, [isGameAuth]);
 
   function selectClub(club: GuestPortalGamificationClub) {
     setSelectedClubId(club.id);
@@ -954,9 +958,8 @@ export function PlayRegistrationClient({
             </div>
           ) : null}
 
-          <div
-            className={`space-y-4 ${isGameAuth ? "lp-game-auth-directory" : ""}`}
-          >
+          {isGameAuth ? null : (
+            <div className="space-y-4">
             <div className="lp-game-auth-search-card rounded-lg border border-white/10 bg-[#0b111c] p-4 shadow-2xl shadow-black/20">
               <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
                 <label className="block">
@@ -1061,7 +1064,8 @@ export function PlayRegistrationClient({
                 </div>
               )}
             </div>
-          </div>
+            </div>
+          )}
 
           <aside
             className={`rounded-lg border border-white/10 bg-[#0b111c] p-4 shadow-2xl shadow-black/25 sm:p-5 ${
@@ -3288,15 +3292,9 @@ const gameAuthCss = `
     grid-row: 1;
   }
 
-  .lp-game-auth-directory {
-    grid-column: 1;
-    grid-row: 2;
-    margin-top: 24px;
-  }
-
   .lp-game-auth-panel {
     grid-column: 2;
-    grid-row: 1 / span 2;
+    grid-row: 1;
   }
 }
 
@@ -3387,11 +3385,6 @@ const gameAuthCss = `
 
   .lp-game-auth-panel {
     order: 2;
-  }
-
-  .lp-game-auth-directory {
-    order: 3;
-    margin-top: 16px;
   }
 
   .lp-game-auth-intro {

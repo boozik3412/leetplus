@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { AuthForm } from "@/components/auth-form";
 import { redirectIfAuthenticated, sanitizeReturnTo } from "@/lib/auth";
 
@@ -31,18 +30,6 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
       </div>
 
       <AuthForm mode="login" returnTo={returnTo} />
-
-      <div className="mt-5 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
-        <p className="text-sm font-semibold text-emerald-950">
-          Хотите участвовать в клубных квестах?
-        </p>
-        <Link
-          className="mt-3 flex min-h-10 items-center justify-center rounded-lg bg-emerald-600 px-4 text-sm font-bold text-white transition hover:bg-emerald-700"
-          href="/game/auth"
-        >
-          Перейти в игровой модуль
-        </Link>
-      </div>
     </div>
   );
 }

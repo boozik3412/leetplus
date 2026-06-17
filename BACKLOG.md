@@ -1,5 +1,7 @@
 # LeetPlus Бэклог
 
+- Готово: карточка `Рефералка` на `/play/game` получила реальные действия для приглашения друга: копирование ссылки, нативный share с fallback на текст приглашения, отдельную отправку в Telegram через share-url и открытие самой ссылки. Это использует уже безопасный `referral.link/shareText`, не добавляет новый API-запрос и не раскрывает raw phone, secret или сырой profile id.
+
 - Готово: `incoming-call-last4/start` больше не маскирует заблокированный входящий звонок под `NOT_CONFIGURED`. Если канал настроен, но гость отписан или provider/policy блокирует доставку, API возвращает верхний `status=BLOCKED`, а challenge сохраняется как `DELIVERY_BLOCKED`; frontend-тип `/play` поддерживает это состояние без raw phone, provider token или Langame payload.
 
 - Готово: `/play/game` теперь показывает гостю статус рефералок без обращения к общему массиву гостей. `GET /guest-portal/session/game-summary` отдает `referral.stats` с количеством принятых регистраций, eligible-регистраций для бонуса и датой последнего приглашения; backend считает это только по `GuestGameEvent` `GAME_REFERRAL_ACCEPTED` и `inviterProfileId` отдельного `GuestGameProfile`, не раскрывая raw phone, секреты, Langame payload или сырой profile id.

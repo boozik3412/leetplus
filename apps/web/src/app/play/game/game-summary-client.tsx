@@ -411,6 +411,9 @@ function ReferralPanel({
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">(
     "idle",
   );
+  const [shareState, setShareState] = useState<"idle" | "shared" | "failed">(
+    "idle",
+  );
 
   async function copyReferralLink() {
     try {
@@ -421,6 +424,32 @@ function ReferralPanel({
     }
   }
 
+  async function shareReferralInvite() {
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: "LeetPlus Play",
+          text: referral.shareText,
+          url: referral.link,
+        });
+      } else {
+        await navigator.clipboard.writeText(referral.shareText);
+      }
+
+      setShareState("shared");
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return;
+      }
+
+      setShareState("failed");
+    }
+  }
+
+  const telegramShareText = referral.shareText.replace(referral.link, "").trim();
+  const telegramShareHref = `https://t.me/share/url?url=${encodeURIComponent(
+    referral.link,
+  )}&text=${encodeURIComponent(telegramShareText || referral.shareText)}`;
   const referralStats = [
     {
       label: "Регистраций",
@@ -484,7 +513,7 @@ function ReferralPanel({
               {referral.code}
             </p>
           </div>
-          <div className="flex flex-col gap-2 sm:flex-row">
+          <div className="grid gap-2 sm:grid-cols-2">
             <button
               type="button"
               onClick={copyReferralLink}
@@ -496,6 +525,25 @@ function ReferralPanel({
                   ? "Не удалось скопировать"
                   : "Скопировать ссылку"}
             </button>
+            <button
+              type="button"
+              onClick={shareReferralInvite}
+              className="rounded-lg border border-cyan-200/35 px-4 py-3 text-sm font-black text-cyan-100 transition hover:border-cyan-100 hover:text-white"
+            >
+              {shareState === "shared"
+                ? "Готово"
+                : shareState === "failed"
+                  ? "Не удалось"
+                  : "Поделиться"}
+            </button>
+            <a
+              href={telegramShareHref}
+              rel="noreferrer"
+              target="_blank"
+              className="rounded-lg border border-cyan-200/35 px-4 py-3 text-center text-sm font-black text-cyan-100 transition hover:border-cyan-100 hover:text-white"
+            >
+              В Telegram
+            </a>
             <a
               href={referral.link}
               className="rounded-lg border border-cyan-200/35 px-4 py-3 text-center text-sm font-black text-cyan-100 transition hover:border-cyan-100 hover:text-white"

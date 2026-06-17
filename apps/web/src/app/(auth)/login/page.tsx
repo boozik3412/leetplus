@@ -38,9 +38,9 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         </p>
         <Link
           className="mt-3 flex min-h-10 items-center justify-center rounded-lg bg-emerald-600 px-4 text-sm font-bold text-white transition hover:bg-emerald-700"
-          href="/play"
+          href="/game/auth"
         >
-          Перейти к регистрации гостя
+          Перейти в игровой модуль
         </Link>
       </div>
     </div>

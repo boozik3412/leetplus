@@ -80,6 +80,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Reworked the public start UX from the accepted mockups: `/` and `/start` now show a dark module selector for `Аналитика и управление` and `Игровой модуль`, while `/game/auth` opens the gamification auth surface with Telegram bot, phone call, and SMS code as the visible methods. Legacy `/play` remains compatible and keeps the fourth incoming-call-last4 reserve channel.
 - Published the LeetPlus legal entity details in a compact footer on the public homepage and in the left auth panel for SMS authorization operator verification: ООО "ЛИТ", ОГРН 1231800017063, ИНН 1800006677, КПП 180001001.
 - Added SMS.ru Callcheck as the current production provider for public gamification user-call auth: `/play` keeps the same `USER_CALL` flow, receives a temporary call number from SMS.ru, polls status by provider `check_id`, and Guest Game Hub readiness now supports either SMS.ru `api_id` or the previous manual callback provider without exposing secrets, raw phone, or Langame payload.
 - Surfaced idempotent duplicate facts in the Guest Game Hub batch pipeline result: duplicate rows that came from `summary.idempotent=true` now show a safe no-new-XP/no-new-reward explanation and idempotency key for QA.

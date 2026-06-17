@@ -1,9 +1,12 @@
-import { loadClubDirectory, searchParam } from "./load-club-directory";
-import { PlayRegistrationClient } from "./play-registration-client";
+import {
+  loadClubDirectory,
+  searchParam,
+} from "../../play/load-club-directory";
+import { PlayRegistrationClient } from "../../play/play-registration-client";
 
 export const dynamic = "force-dynamic";
 
-type PlayPageProps = {
+type GameAuthPageProps = {
   searchParams: Promise<{
     club?: string | string[];
     clubId?: string | string[];
@@ -12,7 +15,7 @@ type PlayPageProps = {
   }>;
 };
 
-export default async function PlayPage({ searchParams }: PlayPageProps) {
+export default async function GameAuthPage({ searchParams }: GameAuthPageProps) {
   const params = await searchParams;
   const { directory, loadError } = await loadClubDirectory();
 
@@ -23,6 +26,7 @@ export default async function PlayPage({ searchParams }: PlayPageProps) {
       initialReferralCode={searchParam(params.ref)}
       initialStoreId={searchParam(params.storeId)}
       loadError={loadError}
+      surface="game-auth"
     />
   );
 }

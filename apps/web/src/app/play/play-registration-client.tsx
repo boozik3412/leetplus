@@ -27,7 +27,10 @@ type PlayRegistrationClientProps = {
   initialReferralCode: string | null;
   initialStoreId: string | null;
   loadError: string | null;
+  surface?: PlayRegistrationSurface;
 };
+
+type PlayRegistrationSurface = "play" | "game-auth";
 
 type PlayLocation = {
   latitude: number;
@@ -46,6 +49,9 @@ type RadiusOption = (typeof RADIUS_OPTIONS)[number];
 type ActiveSessionState = "loading" | "ready" | "empty" | "error";
 type VerificationStatus =
   GuestPortalGamificationClubDirectory["verification"]["options"][number]["status"];
+const GAME_AUTH_VERIFICATION_CHANNELS = new Set<GuestPortalVerificationChannel>(
+  ["TELEGRAM_BOT", "USER_CALL", "SMS_CODE"],
+);
 
 export function PlayRegistrationClient({
   initialDirectory,
@@ -53,7 +59,9 @@ export function PlayRegistrationClient({
   initialReferralCode,
   initialStoreId,
   loadError,
+  surface = "play",
 }: PlayRegistrationClientProps) {
+  const isGameAuth = surface === "game-auth";
   const [directory, setDirectory] = useState(initialDirectory);
   const [query, setQuery] = useState("");
   const [locationCoords, setLocationCoords] = useState<PlayLocation | null>(
@@ -139,12 +147,16 @@ export function PlayRegistrationClient({
     directory.clubs.find((club) => club.id === selectedClubId) ??
     directory.clubs[0] ??
     null;
-  const activeVerificationChannel = directory.verification.options.some(
+  const visibleVerification = useMemo(
+    () => getVisibleVerificationPlan(directory.verification, surface),
+    [directory.verification, surface],
+  );
+  const activeVerificationChannel = visibleVerification.options.some(
     (option) => option.channel === requestedVerificationChannel,
   )
     ? requestedVerificationChannel
-    : resolveInitialVerificationChannel(directory.verification);
-  const activeVerificationOption = directory.verification.options.find(
+    : resolveInitialVerificationChannel(visibleVerification);
+  const activeVerificationOption = visibleVerification.options.find(
     (option) => option.channel === activeVerificationChannel,
   );
   const canEnterOtpCode =
@@ -812,24 +824,74 @@ export function PlayRegistrationClient({
     }
   }
 
+  const headerEyebrow = isGameAuth ? "LeetPlus Game" : "LeetPlus Play";
+  const headerTitle = isGameAuth
+    ? "Вход в игровой модуль"
+    : "Квесты и бонусы клубов";
+  const asideEyebrow = isGameAuth
+    ? "Авторизация игрока"
+    : "Регистрация участника";
+  const asideTitle = isGameAuth ? "Подтвердите телефон" : "Телефон и клуб";
+
   return (
-    <main className="min-h-screen bg-[#05080d] text-slate-100">
-      <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-5 sm:px-6 lg:px-8">
-        <header className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-4">
+    <main
+      className={`min-h-screen ${
+        isGameAuth ? "bg-black text-[#edf7f8]" : "bg-[#05080d] text-slate-100"
+      } ${isGameAuth ? "lp-game-auth-page" : ""}`}
+      style={
+        isGameAuth
+          ? {
+              backgroundImage:
+                "linear-gradient(rgba(131, 228, 236, 0.055) 1px, transparent 1px), linear-gradient(90deg, rgba(169, 228, 199, 0.045) 1px, transparent 1px), radial-gradient(circle at 18% 14%, rgba(131, 228, 236, 0.1), transparent 30%), radial-gradient(circle at 84% 10%, rgba(169, 228, 199, 0.08), transparent 28%)",
+              backgroundSize: "72px 72px, 72px 72px, auto, auto",
+            }
+          : undefined
+      }
+    >
+      {isGameAuth ? (
+        <>
+          <div className="lp-game-auth-backdrop" aria-hidden="true" />
+          <div className="lp-game-auth-veil" aria-hidden="true" />
+          <div className="lp-game-auth-scan" aria-hidden="true" />
+        </>
+      ) : null}
+
+      <div
+        className={`mx-auto flex min-h-screen w-full flex-col px-4 py-5 sm:px-6 lg:px-8 ${
+          isGameAuth ? "max-w-[1180px]" : "max-w-7xl"
+        }`}
+      >
+        <header
+          className={`flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-4 ${
+            isGameAuth ? "lp-game-auth-topbar" : ""
+          }`}
+        >
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex size-11 shrink-0 items-center justify-center rounded-lg border border-emerald-300/40 bg-emerald-300/[0.12] text-sm font-black text-emerald-100">
-              LP
-            </div>
+            {isGameAuth ? (
+              <span className="lp-game-auth-brand-mark" aria-hidden="true" />
+            ) : (
+              <div className="flex size-11 shrink-0 items-center justify-center rounded-lg border border-emerald-300/40 bg-emerald-300/[0.12] text-sm font-black text-emerald-100">
+                LP
+              </div>
+            )}
             <div className="min-w-0">
               <p className="text-xs font-bold uppercase text-emerald-300">
-                LeetPlus Play
+                {headerEyebrow}
               </p>
               <h1 className="truncate text-xl font-black text-white sm:text-2xl">
-                Квесты и бонусы клубов
+                {headerTitle}
               </h1>
             </div>
           </div>
           <div className="flex items-center gap-2 text-sm">
+            {isGameAuth ? (
+              <Link
+                className="rounded-lg border border-white/10 px-3 py-2 font-bold text-slate-200 transition hover:border-white/25 hover:bg-white/[0.06]"
+                href="/start"
+              >
+                Выбор модулей
+              </Link>
+            ) : null}
             <Link
               className="rounded-lg border border-white/10 px-3 py-2 font-bold text-slate-200 transition hover:border-white/25 hover:bg-white/[0.06]"
               href="/login"
@@ -850,14 +912,24 @@ export function PlayRegistrationClient({
           </section>
         ) : null}
 
-        <ActiveGameSessionPanel
-          message={activeSessionMessage}
-          state={activeSessionState}
-          summary={activeSummary}
-        />
+        {isGameAuth ? null : (
+          <ActiveGameSessionPanel
+            message={activeSessionMessage}
+            state={activeSessionState}
+            summary={activeSummary}
+          />
+        )}
 
-        <section className="grid flex-1 gap-5 py-6 lg:grid-cols-[minmax(0,1fr)_430px]">
+        <section
+          className={`grid flex-1 gap-5 py-6 ${
+            isGameAuth
+              ? "lg:grid-cols-[minmax(0,1fr)_436px] lg:items-start lg:gap-[clamp(32px,5vw,92px)] lg:pt-24"
+              : "lg:grid-cols-[minmax(0,1fr)_430px]"
+          }`}
+        >
           <div className="space-y-4">
+            {isGameAuth ? <GameAuthIntro /> : null}
+
             <div className="rounded-lg border border-white/10 bg-[#0b111c] p-4 shadow-2xl shadow-black/20">
               <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
                 <label className="block">
@@ -960,13 +1032,17 @@ export function PlayRegistrationClient({
             </div>
           </div>
 
-          <aside className="rounded-lg border border-white/10 bg-[#0b111c] p-4 shadow-2xl shadow-black/25 sm:p-5">
+          <aside
+            className={`rounded-lg border border-white/10 bg-[#0b111c] p-4 shadow-2xl shadow-black/25 sm:p-5 ${
+              isGameAuth ? "lp-game-auth-panel" : ""
+            }`}
+          >
             <div className="mb-5">
               <p className="text-xs font-bold uppercase text-emerald-300">
-                Регистрация участника
+                {asideEyebrow}
               </p>
               <h2 className="mt-1 text-2xl font-black text-white">
-                Телефон и клуб
+                {asideTitle}
               </h2>
             </div>
 
@@ -988,8 +1064,10 @@ export function PlayRegistrationClient({
                   <div className="space-y-4">
                     <VerificationPlanPanel
                       activeChannel={activeVerificationChannel}
+                      eyebrow={isGameAuth ? "Авторизация" : undefined}
                       onSelect={setActiveVerificationChannel}
-                      verification={directory.verification}
+                      title={isGameAuth ? "Способ входа" : undefined}
+                      verification={visibleVerification}
                     />
 
                     <label className="flex items-start gap-3 rounded-lg border border-white/10 bg-white/[0.04] p-3 text-sm leading-6 text-slate-300">
@@ -1016,7 +1094,7 @@ export function PlayRegistrationClient({
                         onStart={startTelegramAuth}
                         telegramAuth={telegramAuth}
                         telegramAuthStatus={telegramAuthStatus}
-                        verification={directory.verification}
+                        verification={visibleVerification}
                       />
                     ) : (
                       <form
@@ -1044,7 +1122,7 @@ export function PlayRegistrationClient({
                             onStart={startUserCallAuth}
                             userCallAuth={userCallAuth}
                             userCallAuthStatus={userCallAuthStatus}
-                            verification={directory.verification}
+                            verification={visibleVerification}
                           />
                         ) : null}
 
@@ -1094,7 +1172,7 @@ export function PlayRegistrationClient({
                             incomingCallLast4={incomingCallLast4}
                             isStarting={isSubmitting}
                             onStart={startIncomingCallLast4Auth}
-                            verification={directory.verification}
+                            verification={visibleVerification}
                           />
                         ) : null}
                       </form>
@@ -1214,7 +1292,28 @@ export function PlayRegistrationClient({
           </aside>
         </section>
       </div>
+      {isGameAuth ? <style>{gameAuthCss}</style> : null}
     </main>
+  );
+}
+
+function GameAuthIntro() {
+  return (
+    <div className="lp-game-auth-intro">
+      <div className="lp-game-auth-chapter">Сессия входа</div>
+      <h2>Вход в игровой модуль</h2>
+      <p>
+        Подтвердите доступ удобным способом, чтобы открыть задания, рейтинг и
+        награды выбранного игрового контура.
+      </p>
+      <div className="lp-game-auth-rank-strip" aria-label="Прогресс доступа">
+        <div>
+          <span>Сезон 04</span>
+          <span aria-hidden="true" />
+          <span>58%</span>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1496,11 +1595,15 @@ function ClubOption({
 
 function VerificationPlanPanel({
   activeChannel,
+  eyebrow = "Вход участника",
   onSelect,
+  title = "Каналы верификации",
   verification,
 }: {
   activeChannel: GuestPortalVerificationChannel;
+  eyebrow?: string;
   onSelect: (channel: GuestPortalVerificationChannel) => void;
+  title?: string;
   verification: GuestPortalGamificationClubDirectory["verification"];
 }) {
   const options = verification.options
@@ -1516,10 +1619,10 @@ function VerificationPlanPanel({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-xs font-bold uppercase text-slate-400">
-            Вход участника
+            {eyebrow}
           </p>
           <h3 className="mt-1 text-lg font-black text-white">
-            Каналы верификации
+            {title}
           </h3>
         </div>
         <StatusPill tone={verification.phoneRequired ? "cyan" : "emerald"}>
@@ -1714,7 +1817,7 @@ function UserCallAuthPanel({
             2 место
           </p>
           <h3 className="mt-1 text-lg font-black text-white">
-            Звонок пользователя
+            Звонок на телефон
           </h3>
           <p className="mt-1 text-sm leading-6 text-slate-300">
             Дешевый fallback: гость звонит с введенного телефона, а LeetPlus
@@ -1778,8 +1881,8 @@ function UserCallAuthPanel({
         </p>
       ) : !ready ? (
         <p className="mt-2 text-xs leading-5 text-amber-100">
-          Звонок включится после настройки номера и provider secret; используйте
-          SMS-код.
+          Звонок включится после настройки SMS.ru Callcheck или другого
+          call-провайдера; используйте SMS-код.
         </p>
       ) : null}
     </div>
@@ -2195,6 +2298,31 @@ function resolveInitialVerificationChannel(
   );
 }
 
+function getVisibleVerificationPlan(
+  verification: GuestPortalGamificationClubDirectory["verification"],
+  surface: PlayRegistrationSurface,
+): GuestPortalGamificationClubDirectory["verification"] {
+  if (surface !== "game-auth") {
+    return verification;
+  }
+
+  const options = verification.options.filter((option) =>
+    GAME_AUTH_VERIFICATION_CHANNELS.has(option.channel),
+  );
+  const recommendedChannel =
+    options.find((option) => option.channel === verification.recommendedChannel)
+      ?.channel ??
+    options.slice().sort((left, right) => left.rank - right.rank)[0]
+      ?.channel ??
+    "TELEGRAM_BOT";
+
+  return {
+    ...verification,
+    recommendedChannel,
+    options,
+  };
+}
+
 function normalizedIdParam(value: string | null) {
   const trimmed = value?.trim();
 
@@ -2478,3 +2606,250 @@ function hasBackfilledGameItems(
     backfilled.bonusLedgerEntries > 0
   );
 }
+
+const gameAuthCss = `
+.lp-game-auth-page {
+  position: relative;
+  isolation: isolate;
+  overflow-x: hidden;
+}
+
+.lp-game-auth-page::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, transparent 0 11%, rgba(140, 230, 237, 0.035) 11% 11.08%, transparent 11.08% 100%),
+    linear-gradient(90deg, transparent 0 54%, rgba(140, 230, 237, 0.035) 54% 54.06%, transparent 54.06% 100%),
+    radial-gradient(circle at 78% 22%, rgba(140, 230, 237, 0.065), transparent 24%),
+    radial-gradient(circle at 18% 68%, rgba(208, 170, 108, 0.035), transparent 22%);
+}
+
+.lp-game-auth-backdrop,
+.lp-game-auth-veil,
+.lp-game-auth-scan {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+.lp-game-auth-backdrop {
+  z-index: -4;
+  background: #000;
+}
+
+.lp-game-auth-veil {
+  z-index: -3;
+  background:
+    linear-gradient(90deg, rgba(0, 0, 0, 0.72), rgba(0, 0, 0, 0.48) 48%, rgba(0, 0, 0, 0.74)),
+    linear-gradient(180deg, rgba(0, 0, 0, 0.32), rgba(0, 0, 0, 0.72));
+}
+
+.lp-game-auth-scan {
+  z-index: -2;
+  opacity: 0.26;
+  background-image:
+    linear-gradient(rgba(160, 223, 225, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(160, 223, 225, 0.035) 1px, transparent 1px);
+  background-size: 92px 92px;
+  mask-image:
+    linear-gradient(90deg, rgba(0, 0, 0, 0.24), rgba(0, 0, 0, 0.9) 52%, rgba(0, 0, 0, 0.28)),
+    linear-gradient(180deg, transparent, #000 16%, #000 84%, transparent);
+}
+
+.lp-game-auth-topbar {
+  border-bottom: 0 !important;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.lp-game-auth-brand-mark {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(186, 236, 238, 0.42);
+  border-radius: 50%;
+  box-shadow: inset 0 0 18px rgba(140, 230, 237, 0.12);
+}
+
+.lp-game-auth-brand-mark::before,
+.lp-game-auth-brand-mark::after {
+  content: "";
+  position: absolute;
+  inset: 8px;
+  border: 1px solid rgba(140, 230, 237, 0.36);
+  transform: rotate(45deg);
+}
+
+.lp-game-auth-brand-mark::after {
+  inset: 14px;
+  border-color: #d0aa6c;
+}
+
+.lp-game-auth-intro {
+  max-width: 570px;
+  padding-top: 4vh;
+}
+
+.lp-game-auth-chapter {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 28px;
+  color: #9eb3b6;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 11px;
+  font-weight: 720;
+}
+
+.lp-game-auth-chapter::before {
+  content: "";
+  height: 1px;
+  background: linear-gradient(90deg, #8ce6ed, transparent);
+}
+
+.lp-game-auth-intro h2 {
+  max-width: 560px;
+  margin: 0;
+  color: #edf7f8;
+  font-size: clamp(42px, 6vw, 78px);
+  line-height: 0.96;
+  font-weight: 640;
+  letter-spacing: 0;
+}
+
+.lp-game-auth-intro p {
+  max-width: 470px;
+  margin: 24px 0 0;
+  color: #b6c7c9;
+  font-size: clamp(16px, 1.8vw, 18px);
+  line-height: 1.7;
+}
+
+.lp-game-auth-rank-strip {
+  width: min(480px, 100%);
+  margin-top: 42px;
+  border-top: 1px solid rgba(183, 224, 228, 0.28);
+  border-bottom: 1px solid rgba(183, 224, 228, 0.16);
+  background: linear-gradient(90deg, rgba(9, 20, 25, 0.72), rgba(9, 20, 25, 0.2));
+  backdrop-filter: blur(10px);
+}
+
+.lp-game-auth-rank-strip > div {
+  display: grid;
+  grid-template-columns: 90px 1fr 72px;
+  gap: 18px;
+  align-items: center;
+  padding: 16px 0;
+}
+
+.lp-game-auth-rank-strip span:first-child,
+.lp-game-auth-rank-strip span:last-child {
+  color: #8ce6ed;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.lp-game-auth-rank-strip span:last-child {
+  text-align: right;
+  color: #d0aa6c;
+}
+
+.lp-game-auth-rank-strip span:nth-child(2) {
+  position: relative;
+  height: 3px;
+  background: rgba(183, 224, 228, 0.18);
+  overflow: hidden;
+}
+
+.lp-game-auth-rank-strip span:nth-child(2)::before {
+  content: "";
+  position: absolute;
+  inset: 0 42% 0 0;
+  background: linear-gradient(90deg, #8ce6ed, #d0aa6c);
+  box-shadow: 0 0 18px rgba(140, 230, 237, 0.52);
+}
+
+.lp-game-auth-panel {
+  position: relative;
+  border-color: rgba(183, 224, 228, 0.22) !important;
+  border-radius: 8px !important;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.055), transparent 28%),
+    linear-gradient(180deg, rgba(10, 18, 22, 0.94), rgba(4, 8, 11, 0.94)) !important;
+  box-shadow: 0 26px 80px rgba(0, 0, 0, 0.46) !important;
+  backdrop-filter: blur(26px);
+}
+
+.lp-game-auth-panel::before,
+.lp-game-auth-panel::after {
+  content: "";
+  position: absolute;
+  width: 42px;
+  height: 42px;
+  pointer-events: none;
+}
+
+.lp-game-auth-panel::before {
+  top: -1px;
+  left: -1px;
+  border-top: 1px solid #8ce6ed;
+  border-left: 1px solid #8ce6ed;
+  border-top-left-radius: 8px;
+}
+
+.lp-game-auth-panel::after {
+  right: -1px;
+  bottom: -1px;
+  border-right: 1px solid #d0aa6c;
+  border-bottom: 1px solid #d0aa6c;
+  border-bottom-right-radius: 8px;
+}
+
+@media (max-width: 900px) {
+  .lp-game-auth-intro {
+    max-width: none;
+    padding-top: 0;
+  }
+
+  .lp-game-auth-intro h2 {
+    max-width: 500px;
+  }
+
+  .lp-game-auth-intro p {
+    max-width: 520px;
+    margin-top: 18px;
+  }
+
+  .lp-game-auth-rank-strip {
+    margin-top: 28px;
+  }
+}
+
+@media (max-width: 560px) {
+  .lp-game-auth-brand-mark {
+    width: 30px;
+    height: 30px;
+  }
+
+  .lp-game-auth-chapter {
+    margin-bottom: 18px;
+  }
+
+  .lp-game-auth-intro h2 {
+    font-size: clamp(36px, 11vw, 48px);
+  }
+
+  .lp-game-auth-rank-strip > div {
+    grid-template-columns: 74px 1fr 54px;
+    gap: 12px;
+  }
+}
+`;

@@ -2,6 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 
 const authCookieName = "leetplus_access_token";
 
+const publicExactPaths = ["/", "/start", "/game/auth"];
+
 const publicPathPrefixes = [
   "/api",
   "/_next",
@@ -48,6 +50,10 @@ export const config = {
 };
 
 function isPublicPath(pathname: string) {
+  if (publicExactPaths.includes(pathname)) {
+    return true;
+  }
+
   if (
     publicPathPrefixes.some(
       (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),

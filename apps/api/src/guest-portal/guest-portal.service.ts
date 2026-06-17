@@ -121,6 +121,7 @@ type GuestPortalUserCallProviderStart = {
   providerChallengeId: string | null;
   callNumber: string;
   callHref: string;
+  freeCall: boolean;
   message: string;
 };
 type SmsRuCallcheckAddResponse = {
@@ -263,6 +264,7 @@ export type GuestPortalGamificationClubDirectory = {
       nextAction: string;
       botUsername: string | null;
       requiredEnv: string[];
+      freeCall?: boolean;
     }>;
   };
   search: {
@@ -381,6 +383,7 @@ export type GuestPortalUserCallAuthStartResponse = {
   phoneMasked: string;
   callNumber: string;
   callHref: string;
+  freeCall: boolean;
   expiresAt: string;
   status: 'PENDING';
   message: string;
@@ -1462,6 +1465,8 @@ export class GuestPortalService {
             : 'Подключить SMS.ru Callcheck или ручной call-provider для входящих вызовов и связать caller id с OTP challenge.',
           botUsername: null,
           requiredEnv: userCallRequiredEnv,
+          freeCall:
+            userCallConfig.provider === USER_CALL_PROVIDER_SMS_RU_CALLCHECK,
         },
         {
           rank: 3,
@@ -1782,6 +1787,7 @@ export class GuestPortalService {
       phoneMasked: phone.masked,
       callNumber: providerStart.callNumber,
       callHref: providerStart.callHref,
+      freeCall: providerStart.freeCall,
       expiresAt: expiresAt.toISOString(),
       status: 'PENDING',
       message: providerStart.message,
@@ -5485,6 +5491,7 @@ export class GuestPortalService {
       providerChallengeId: null,
       callNumber: config.phoneNumber,
       callHref: config.callHref,
+      freeCall: false,
       message:
         'Позвоните на указанный номер с этого телефона. LeetPlus завершит вход после подтверждения входящего вызова провайдером.',
     };
@@ -5535,7 +5542,8 @@ export class GuestPortalService {
       providerChallengeId: checkId,
       callNumber: prettyPhone,
       callHref: phoneTelHref(callPhone),
-      message: `Позвоните на номер ${prettyPhone} с этого телефона. SMS.ru подтвердит вход по факту звонка; номер действует ${SMS_RU_CALLCHECK_TTL_MINUTES} минут.`,
+      freeCall: true,
+      message: `Позвоните на номер ${prettyPhone} с этого телефона. Звонок бесплатный: SMS.ru сбросит вызов сразу после проверки; номер действует ${SMS_RU_CALLCHECK_TTL_MINUTES} минут.`,
     };
   }
 

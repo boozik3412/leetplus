@@ -11,7 +11,7 @@
 
 ## Звонок пользователя на номер
 
-Контур с SMS.ru Callcheck: `/play` создает `USER_CALL` challenge, LeetPlus запрашивает у SMS.ru временный номер через `callcheck/add`, гость звонит на этот номер с введенного телефона, а browser status endpoint polling-ом проверяет `callcheck/status` по сохраненному `check_id`. После подтверждения LeetPlus выдает guest-token и активирует отдельный `GuestGameProfile` без callback от администратора.
+Контур с SMS.ru Callcheck: `/play` создает `USER_CALL` challenge, LeetPlus запрашивает у SMS.ru временный номер через `callcheck/add`, гость звонит на этот номер с введенного телефона, а browser status endpoint polling-ом проверяет `callcheck/status` по сохраненному `check_id`. SMS.ru сбрасывает вызов после проверки, поэтому звонок для гостя бесплатный; API возвращает `freeCall=true`, а frontend показывает это рядом с методом входа. После подтверждения LeetPlus выдает guest-token и активирует отдельный `GuestGameProfile` без callback от администратора.
 
 Env на VDS для SMS.ru:
 
@@ -65,7 +65,7 @@ GUEST_PORTAL_INCOMING_CALL_LAST4_TOKEN="<provider-token>"
 
 1. Сначала включить Telegram-runbook и убедиться, что `/play` показывает Telegram первым.
 2. Настроить `USER_CALL` env, перезапустить API и проверить readiness `Звонок пользователя для входа` в Guest Game Hub. Для текущего production-пути использовать SMS.ru Callcheck.
-3. Выполнить QA: открыть `/play`, выбрать клуб 1337, выбрать звонок пользователя, ввести телефон, позвонить на выданный SMS.ru номер и дождаться guest-token через polling status. Для ручного provider дополнительно отправить provider callback.
+3. Выполнить QA: открыть `/play`, выбрать клуб 1337, выбрать звонок пользователя, ввести телефон, убедиться, что UI показывает бесплатный звонок, позвонить на выданный SMS.ru номер и дождаться guest-token через polling status. Для ручного provider дополнительно отправить provider callback.
 4. Проверить, что создан или переиспользован отдельный `GuestGameProfile`, общий `Guest` публичной регистрацией не создан, а status response содержит только safe match/backfill.
 5. SMS держать как резервный канал после user-call.
 6. `INCOMING_CALL_LAST4` включать только после выбора provider-а исходящих звонков и отдельного теста блокировок: `NOT_CONFIGURED`, `BLOCKED`, успешный verify.

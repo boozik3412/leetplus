@@ -1689,6 +1689,7 @@ describe('GuestPortalService', () => {
         phoneMasked: '***9999',
         callNumber: '+7 343 000-00-00',
         callHref: 'tel:+73430000000',
+        freeCall: false,
         status: 'PENDING',
       });
     });
@@ -1756,8 +1757,10 @@ describe('GuestPortalService', () => {
           phoneMasked: '***9999',
           callNumber: '+7 343 000-00-00',
           callHref: 'tel:73430000000',
+          freeCall: true,
           status: 'PENDING',
         });
+        expect(result.message).toContain('Звонок бесплатный');
         expect(JSON.stringify(result)).not.toContain('smsru-api-id');
       } finally {
         fetchMock.mockRestore();

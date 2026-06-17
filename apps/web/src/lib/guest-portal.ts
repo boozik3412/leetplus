@@ -50,6 +50,7 @@ export type GuestPortalVerificationOption = {
   nextAction: string;
   botUsername: string | null;
   requiredEnv: string[];
+  freeCall?: boolean;
 };
 
 export type GuestPortalVerificationPlan = {
@@ -799,6 +800,7 @@ export type GuestPortalUserCallAuthStartResponse = {
   phoneMasked: string;
   callNumber: string;
   callHref: string;
+  freeCall: boolean;
   expiresAt: string;
   status: "PENDING";
   message: string;

@@ -1971,6 +1971,7 @@ function UserCallAuthPanel({
     (option) => option.channel === "USER_CALL",
   );
   const ready = userCallOption?.status === "READY";
+  const freeCall = Boolean(userCallOption?.freeCall || userCallAuth?.freeCall);
 
   return (
     <div className="lp-game-auth-channel-detail rounded-lg border border-cyan-300/25 bg-cyan-300/[0.06] p-4">
@@ -1997,6 +1998,12 @@ function UserCallAuthPanel({
             {userCallAuthStatus.message}
           </p>
         </div>
+      ) : null}
+
+      {freeCall ? (
+        <p className="lp-game-auth-channel-note mt-3 rounded-lg border border-cyan-300/20 bg-cyan-300/[0.07] px-3 py-2 text-xs font-semibold leading-5 text-cyan-100">
+          Звонок бесплатный: SMS.ru сбросит вызов сразу после проверки.
+        </p>
       ) : null}
 
       <div className="lp-game-auth-channel-actions mt-3 grid gap-2 sm:grid-cols-2">
@@ -2471,7 +2478,9 @@ function gameAuthMethodCopy(
   }
 
   if (option.channel === "USER_CALL") {
-    return "Короткий код через звонок";
+    return option.freeCall
+      ? "Бесплатный звонок для подтверждения"
+      : "Подтверждение через звонок";
   }
 
   if (option.channel === "SMS_CODE") {

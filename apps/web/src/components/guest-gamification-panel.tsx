@@ -2239,35 +2239,50 @@ function PipelineResultPanel({ result }: { result: GuestGamePipelineRunResult })
 
       {result.facts.length ? (
         <div className="divide-y divide-cyan-200/70 overflow-hidden rounded-lg border border-cyan-200/70 bg-white dark:divide-cyan-900/60 dark:border-cyan-900/60 dark:bg-zinc-950">
-          {result.facts.slice(0, 8).map((fact) => (
-            <div
-              key={`${fact.factId}-${fact.status}`}
-              className="grid gap-2 px-3 py-2 text-xs md:grid-cols-[1fr_auto]"
-            >
-              <div className="min-w-0">
-                <p className="truncate font-bold text-zinc-950 dark:text-white">
-                  {fact.label}
-                </p>
-                <p className="mt-1 text-zinc-500 dark:text-zinc-400">
-                  {formatDate(fact.occurredAt)} ·{" "}
-                  {fact.store?.name ?? "вся сеть"} · {fact.eventType}
-                </p>
-                {fact.reason ? (
-                  <p className="mt-1 text-zinc-500 dark:text-zinc-400">
-                    {fact.reason}
-                  </p>
-                ) : null}
-              </div>
-              <span
-                className={[
-                  "self-start rounded-full px-2 py-1 text-[11px] font-bold uppercase tracking-wide",
-                  statusClass[fact.status],
-                ].join(" ")}
+          {result.facts.slice(0, 8).map((fact) => {
+            const idempotentProcess = fact.process?.summary.idempotent === true;
+            const idempotencyKey = fact.process?.summary.idempotencyKey;
+
+            return (
+              <div
+                key={`${fact.factId}-${fact.status}`}
+                className="grid gap-2 px-3 py-2 text-xs md:grid-cols-[1fr_auto]"
               >
-                {statusLabel[fact.status] ?? fact.status}
-              </span>
-            </div>
-          ))}
+                <div className="min-w-0">
+                  <p className="truncate font-bold text-zinc-950 dark:text-white">
+                    {fact.label}
+                  </p>
+                  <p className="mt-1 text-zinc-500 dark:text-zinc-400">
+                    {formatDate(fact.occurredAt)} ·{" "}
+                    {fact.store?.name ?? "вся сеть"} · {fact.eventType}
+                  </p>
+                  {fact.reason ? (
+                    <p className="mt-1 text-zinc-500 dark:text-zinc-400">
+                      {fact.reason}
+                    </p>
+                  ) : null}
+                  {idempotentProcess ? (
+                    <p className="mt-1 text-amber-700 dark:text-amber-200">
+                      Повтор обработан безопасно: новых XP и наград нет.
+                    </p>
+                  ) : null}
+                  {idempotentProcess && idempotencyKey ? (
+                    <p className="mt-1 break-all text-[11px] text-amber-700/80 dark:text-amber-200/80">
+                      Idempotency: {idempotencyKey}
+                    </p>
+                  ) : null}
+                </div>
+                <span
+                  className={[
+                    "self-start rounded-full px-2 py-1 text-[11px] font-bold uppercase tracking-wide",
+                    statusClass[fact.status],
+                  ].join(" ")}
+                >
+                  {statusLabel[fact.status] ?? fact.status}
+                </span>
+              </div>
+            );
+          })}
         </div>
       ) : (
         <EmptyState text="Подходящих snapshot-фактов для batch пока нет." />

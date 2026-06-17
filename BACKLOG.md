@@ -1,5 +1,7 @@
 # LeetPlus Бэклог
 
+- Готово: batch pipeline в Guest Game Hub теперь раскрывает идемпотентные дубли. Если строка `DUPLICATE` пришла из `process.summary.idempotent=true`, UI показывает, что повтор обработан безопасно без новых XP/наград, и выводит idempotency key для QA.
+
 - Готово: Guest Game Hub показывает результат идемпотентного `process-event` в карточке подтвержденного запуска. Если backend вернул `summary.idempotent=true`, UI показывает статус `повтор`, ноль нового XP/наград и подсказку, что snapshot уже был обработан без дублей.
 
 - Готово: усилена идемпотентность `POST /guests/gamification/process-event`. Повторный запуск по тому же внешнему snapshot reference возвращает уже созданный `GuestGameEvent` с `summary.idempotent=true`, не создает новый XP, награды или Langame write и закреплен regression-тестом на no-mutation path.

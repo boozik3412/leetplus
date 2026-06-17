@@ -80,6 +80,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Surfaced idempotent duplicate facts in the Guest Game Hub batch pipeline result: duplicate rows that came from `summary.idempotent=true` now show a safe no-new-XP/no-new-reward explanation and idempotency key for QA.
 - Surfaced idempotent `process-event` results in Guest Game Hub: the confirmed-run result card now shows `повтор` with zero new XP/rewards when the backend returns `summary.idempotent=true`, so operators can distinguish safe duplicate handling from a fresh LeetPlus write.
 - Hardened `POST /guests/gamification/process-event` idempotency: repeated calls for the same external snapshot reference now return the existing `GuestGameEvent` with `summary.idempotent=true` and do not create duplicate XP, rewards, or Langame writes; regression coverage verifies the no-mutation path.
 - Linked the Guest Game Hub fallback auth readiness items to a dedicated deployment runbook: `USER_CALL_AUTH` and `INCOMING_CALL_LAST4_AUTH` now return `docs/deployment/guest-auth-fallbacks.md` metadata, tests cover the link without leaking phone numbers/provider secrets, and the runbook documents user-call, incoming-call-last4, QA, rollback, and channel priority.

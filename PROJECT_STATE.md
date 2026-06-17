@@ -80,6 +80,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Improved the public `/play` gamification registration UX: the agreed verification priority is now a clickable channel selector, Telegram remains first, and the page opens the first ready fallback when Telegram is not configured while keeping the separate `GuestGameProfile` flow unchanged.
 - Linked the Guest Game Hub `BONUS_LEDGER_SCHEDULER` readiness card to a dedicated VDS runbook: the API now returns `docs/deployment/bonus-ledger-scheduler.md` metadata, the web UI renders the link, and the runbook documents dry-run, canary, live-write, rollback, and reconciliation without exposing secrets or raw guest data.
 - Added regression coverage for the gamification bonus-ledger scheduler kill switch: explicit `GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED=false` now has a test proving it prevents startup even in production with `SYNC_SERVICE_TOKEN`.
 - Added regression coverage for autonomous gamification bonus-ledger scheduling: `guest-bonus-ledger.service.spec.ts` now verifies multi-tenant scheduled dispatch, audit-safe actor selection, inactive/no-actor tenant skips, isolated tenant errors, and aggregate counters without touching Langame.

@@ -1,5 +1,7 @@
 # LeetPlus Бэклог
 
+- Готово: `/play` получил явный выбор канала входа для участника геймификации. План верификации стал кликабельным переключателем: Telegram-бот остается первым, но если он еще не настроен, страница открывает первый готовый fallback; поле телефона показывается только для звонка пользователя, SMS-кода и входящего звонка, а старые формы кодов скрываются при переключении канала.
+
 - Готово: карточка `BONUS_LEDGER_SCHEDULER` в Guest Game Hub получила ссылку на отдельный runbook `docs/deployment/bonus-ledger-scheduler.md`. Оператор видит безопасный сценарий dry-run -> canary -> live write, rollback и сверку первого бонуса без раскрытия service token, raw phone или Langame payload.
 
 - Готово: стоп-флаг автономного scheduler bonus ledger закреплен тестом. Даже при `NODE_ENV=production` и настроенном `SYNC_SERVICE_TOKEN` явный `GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED=false` не запускает таймер, не вызывает `runOnce` и не дергает scheduled dispatch.

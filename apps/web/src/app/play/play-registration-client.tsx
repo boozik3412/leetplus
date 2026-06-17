@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import type {
   GuestPortalGamificationClub,
   GuestPortalGamificationClubDirectory,
+  GuestPortalVerificationChannel,
   GuestPortalGameSummary,
   GuestPortalIncomingCallLast4StartResponse,
   GuestPortalIncomingCallLast4VerifyResponse,
@@ -66,6 +67,10 @@ export function PlayRegistrationClient({
       initialStoreId,
     ),
   );
+  const [requestedVerificationChannel, setActiveVerificationChannel] =
+    useState<GuestPortalVerificationChannel>(() =>
+      resolveInitialVerificationChannel(initialDirectory.verification),
+    );
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [challenge, setChallenge] =
@@ -134,6 +139,14 @@ export function PlayRegistrationClient({
     directory.clubs.find((club) => club.id === selectedClubId) ??
     directory.clubs[0] ??
     null;
+  const activeVerificationChannel = directory.verification.options.some(
+    (option) => option.channel === requestedVerificationChannel,
+  )
+    ? requestedVerificationChannel
+    : resolveInitialVerificationChannel(directory.verification);
+  const activeVerificationOption = directory.verification.options.find(
+    (option) => option.channel === activeVerificationChannel,
+  );
   const canEnterOtpCode =
     challenge?.delivery.status === "DEV_CODE" ||
     challenge?.delivery.status === "SENT";
@@ -505,6 +518,15 @@ export function PlayRegistrationClient({
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function submitSelectedPhoneVerification(event: FormEvent<HTMLFormElement>) {
+    if (activeVerificationChannel === "SMS_CODE") {
+      void submitPhone(event);
+      return;
+    }
+
+    event.preventDefault();
   }
 
   async function startTelegramAuth() {
@@ -965,80 +987,120 @@ export function PlayRegistrationClient({
                 ) : (
                   <div className="space-y-4">
                     <VerificationPlanPanel
+                      activeChannel={activeVerificationChannel}
+                      onSelect={setActiveVerificationChannel}
                       verification={directory.verification}
                     />
 
-                    <TelegramAuthPanel
-                      disabled={!gameConsentAccepted}
-                      isPolling={isPollingTelegramAuth}
-                      isStarting={isStartingTelegramAuth}
-                      onStart={startTelegramAuth}
-                      telegramAuth={telegramAuth}
-                      telegramAuthStatus={telegramAuthStatus}
-                      verification={directory.verification}
-                    />
-
-                    <form className="space-y-3" onSubmit={submitPhone}>
-                      <label className="block">
-                        <span className="text-xs font-bold uppercase text-slate-400">
-                          Мобильный телефон
-                        </span>
-                        <input
-                          className="mt-2 min-h-11 w-full rounded-lg border border-white/10 bg-white/[0.05] px-3 text-base font-semibold text-white outline-none transition placeholder:text-slate-500 focus:border-emerald-300/70"
-                          inputMode="tel"
-                          onChange={(event) => setPhone(event.target.value)}
-                          placeholder="+7 999 999-99-99"
-                          value={phone}
-                        />
-                      </label>
-                      <label className="flex items-start gap-3 rounded-lg border border-white/10 bg-white/[0.04] p-3 text-sm leading-6 text-slate-300">
-                        <input
-                          checked={gameConsentAccepted}
-                          className="mt-1 size-4 rounded border-white/20 bg-white/[0.06]"
-                          onChange={(event) =>
-                            setGameConsentAccepted(event.target.checked)
-                          }
-                          type="checkbox"
-                        />
-                        <span>
-                          Я хочу участвовать в квестах LeetPlus и согласен на
-                          обработку телефона для входа, игрового профиля,
-                          начисления бонусов и безопасной сверки с Langame.
-                        </span>
-                      </label>
-
-                      <UserCallAuthPanel
-                        disabled={!gameConsentAccepted || !phone.trim()}
-                        isPolling={isPollingUserCallAuth}
-                        isStarting={isStartingUserCallAuth}
-                        onStart={startUserCallAuth}
-                        userCallAuth={userCallAuth}
-                        userCallAuthStatus={userCallAuthStatus}
-                        verification={directory.verification}
-                      />
-
-                      <button
-                        className="min-h-11 w-full rounded-lg bg-emerald-300 px-4 text-sm font-black text-slate-950 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-60"
-                        disabled={
-                          isSubmitting ||
-                          !phone.trim() ||
-                          !gameConsentAccepted
+                    <label className="flex items-start gap-3 rounded-lg border border-white/10 bg-white/[0.04] p-3 text-sm leading-6 text-slate-300">
+                      <input
+                        checked={gameConsentAccepted}
+                        className="mt-1 size-4 rounded border-white/20 bg-white/[0.06]"
+                        onChange={(event) =>
+                          setGameConsentAccepted(event.target.checked)
                         }
-                        type="submit"
-                      >
-                        {isSubmitting ? "Отправляем..." : "Получить код"}
-                      </button>
+                        type="checkbox"
+                      />
+                      <span>
+                        Я хочу участвовать в квестах LeetPlus и согласен на
+                        обработку телефона для входа, игрового профиля,
+                        начисления бонусов и безопасной сверки с Langame.
+                      </span>
+                    </label>
 
-                      <IncomingCallLast4Panel
-                        disabled={!gameConsentAccepted || !phone.trim()}
-                        incomingCallLast4={incomingCallLast4}
-                        isStarting={isSubmitting}
-                        onStart={startIncomingCallLast4Auth}
+                    {activeVerificationChannel === "TELEGRAM_BOT" ? (
+                      <TelegramAuthPanel
+                        disabled={!gameConsentAccepted}
+                        isPolling={isPollingTelegramAuth}
+                        isStarting={isStartingTelegramAuth}
+                        onStart={startTelegramAuth}
+                        telegramAuth={telegramAuth}
+                        telegramAuthStatus={telegramAuthStatus}
                         verification={directory.verification}
                       />
-                    </form>
+                    ) : (
+                      <form
+                        className="space-y-3"
+                        onSubmit={submitSelectedPhoneVerification}
+                      >
+                        <label className="block">
+                          <span className="text-xs font-bold uppercase text-slate-400">
+                            Мобильный телефон
+                          </span>
+                          <input
+                            className="mt-2 min-h-11 w-full rounded-lg border border-white/10 bg-white/[0.05] px-3 text-base font-semibold text-white outline-none transition placeholder:text-slate-500 focus:border-emerald-300/70"
+                            inputMode="tel"
+                            onChange={(event) => setPhone(event.target.value)}
+                            placeholder="+7 999 999-99-99"
+                            value={phone}
+                          />
+                        </label>
 
-                    {challenge ? (
+                        {activeVerificationChannel === "USER_CALL" ? (
+                          <UserCallAuthPanel
+                            disabled={!gameConsentAccepted || !phone.trim()}
+                            isPolling={isPollingUserCallAuth}
+                            isStarting={isStartingUserCallAuth}
+                            onStart={startUserCallAuth}
+                            userCallAuth={userCallAuth}
+                            userCallAuthStatus={userCallAuthStatus}
+                            verification={directory.verification}
+                          />
+                        ) : null}
+
+                        {activeVerificationChannel === "SMS_CODE" ? (
+                          <div className="rounded-lg border border-emerald-300/25 bg-emerald-300/[0.06] p-4">
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div>
+                                <p className="text-xs font-bold uppercase text-emerald-200">
+                                  3 место
+                                </p>
+                                <h3 className="mt-1 text-lg font-black text-white">
+                                  SMS-код
+                                </h3>
+                                <p className="mt-1 text-sm leading-6 text-slate-300">
+                                  Резервный вход по телефону. Используется,
+                                  когда Telegram или звонок недоступны.
+                                </p>
+                              </div>
+                              <StatusPill
+                                tone={verificationStatusTone(
+                                  activeVerificationOption?.status ??
+                                    "NOT_CONFIGURED",
+                                )}
+                              >
+                                {activeVerificationOption?.statusLabel ??
+                                  "резерв"}
+                              </StatusPill>
+                            </div>
+                            <button
+                              className="mt-3 min-h-11 w-full rounded-lg bg-emerald-300 px-4 text-sm font-black text-slate-950 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-60"
+                              disabled={
+                                isSubmitting ||
+                                !phone.trim() ||
+                                !gameConsentAccepted
+                              }
+                              type="submit"
+                            >
+                              {isSubmitting ? "Отправляем..." : "Получить код"}
+                            </button>
+                          </div>
+                        ) : null}
+
+                        {activeVerificationChannel ===
+                        "INCOMING_CALL_LAST4" ? (
+                          <IncomingCallLast4Panel
+                            disabled={!gameConsentAccepted || !phone.trim()}
+                            incomingCallLast4={incomingCallLast4}
+                            isStarting={isSubmitting}
+                            onStart={startIncomingCallLast4Auth}
+                            verification={directory.verification}
+                          />
+                        ) : null}
+                      </form>
+                    )}
+
+                    {activeVerificationChannel === "SMS_CODE" && challenge ? (
                       <form className="space-y-3" onSubmit={submitCode}>
                         <div className="rounded-lg border border-white/10 bg-white/[0.04] p-3">
                           <p className="text-sm font-bold text-white">
@@ -1083,7 +1145,8 @@ export function PlayRegistrationClient({
                       </form>
                     ) : null}
 
-                    {incomingCallLast4 ? (
+                    {activeVerificationChannel === "INCOMING_CALL_LAST4" &&
+                    incomingCallLast4 ? (
                       <form
                         className="space-y-3"
                         onSubmit={verifyIncomingCallLast4Auth}
@@ -1432,8 +1495,12 @@ function ClubOption({
 }
 
 function VerificationPlanPanel({
+  activeChannel,
+  onSelect,
   verification,
 }: {
+  activeChannel: GuestPortalVerificationChannel;
+  onSelect: (channel: GuestPortalVerificationChannel) => void;
   verification: GuestPortalGamificationClubDirectory["verification"];
 }) {
   const options = verification.options
@@ -1464,20 +1531,27 @@ function VerificationPlanPanel({
         {options.map((option) => {
           const recommended =
             option.channel === verification.recommendedChannel;
+          const active = option.channel === activeChannel;
 
           return (
-            <div
+            <button
               className={`rounded-lg border px-3 py-2 ${
-                recommended
+                active
+                  ? "border-emerald-300 bg-emerald-300/[0.11]"
+                  : recommended
                   ? "border-emerald-300/25 bg-emerald-300/[0.07]"
                   : "border-white/10 bg-[#070b12]"
-              }`}
+              } text-left transition hover:border-emerald-300/60 hover:bg-emerald-300/[0.08]`}
               key={option.channel}
+              onClick={() => onSelect(option.channel)}
+              type="button"
             >
               <div className="flex items-start gap-3">
                 <span
                   className={`mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg text-xs font-black ${
-                    recommended
+                    active
+                      ? "bg-white text-slate-950"
+                      : recommended
                       ? "bg-emerald-300 text-slate-950"
                       : "bg-white/[0.08] text-slate-200"
                   }`}
@@ -1497,7 +1571,7 @@ function VerificationPlanPanel({
                   </p>
                 </div>
               </div>
-            </div>
+            </button>
           );
         })}
       </div>
@@ -2097,6 +2171,28 @@ function resolveInitialClubId(
   }
 
   return clubs[0]?.id ?? "";
+}
+
+function resolveInitialVerificationChannel(
+  verification: GuestPortalGamificationClubDirectory["verification"],
+): GuestPortalVerificationChannel {
+  const options = verification.options
+    .slice()
+    .sort((left, right) => left.rank - right.rank);
+  const recommendedReady = options.find(
+    (option) =>
+      option.channel === verification.recommendedChannel &&
+      option.status === "READY",
+  );
+
+  if (recommendedReady) {
+    return recommendedReady.channel;
+  }
+
+  return (
+    options.find((option) => option.status === "READY")?.channel ??
+    verification.recommendedChannel
+  );
 }
 
 function normalizedIdParam(value: string | null) {

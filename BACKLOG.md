@@ -1,5 +1,7 @@
 # LeetPlus Бэклог
 
+- Готово: стоп-флаг автономного scheduler bonus ledger закреплен тестом. Даже при `NODE_ENV=production` и настроенном `SYNC_SERVICE_TOKEN` явный `GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED=false` не запускает таймер, не вызывает `runOnce` и не дергает scheduled dispatch.
+
 - Готово: автономный scheduler bonus ledger получил regression-покрытие прохода по нескольким tenant. Тест проверяет, что воркер выбирает безопасного audit-actor с приоритетом `OWNER -> ADMIN -> MANAGER`, пропускает неактивные tenant и tenant без подходящего actor, изолирует ошибку одного tenant и агрегирует счетчики только по успешно обработанным результатам без обращения к Langame.
 
 - Готово: service-token ack для внешнего `guest-game:bot-consumer` стал идемпотентным для terminal-статусов. Повторный `SENT`/`FAILED`/`BLOCKED` ack с тем же статусом возвращает текущую delivery без нового `GuestGameDeliveryEvent` и без повторного update; попытка сменить terminal ack на другой статус блокируется до явного retry из Guest Game Hub.

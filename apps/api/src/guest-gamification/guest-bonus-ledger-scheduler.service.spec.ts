@@ -81,6 +81,28 @@ describe('GuestBonusLedgerSchedulerService', () => {
     service.onModuleDestroy();
   });
 
+  it('stays disabled in production when scheduler is explicitly turned off', () => {
+    const { service, bonusLedgerService } = createService({
+      NODE_ENV: 'production',
+      SYNC_SERVICE_TOKEN: 'sync-token',
+      GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED: 'false',
+    });
+    const runOnce = jest.spyOn(service, 'runOnce');
+
+    service.onModuleInit();
+
+    expect(service.getRuntimeStatus()).toMatchObject({
+      enabled: false,
+      running: false,
+      intervalMs: null,
+      lastOutcome: null,
+      lastResult: null,
+    });
+    expect(runOnce).not.toHaveBeenCalled();
+    expect(bonusLedgerService.runScheduledDispatch).not.toHaveBeenCalled();
+    service.onModuleDestroy();
+  });
+
   it('passes scheduler env options to the scheduled bonus ledger dispatcher', async () => {
     const { service, bonusLedgerService } = createService({
       GUEST_GAME_BONUS_LEDGER_SCHEDULER_DRY_RUN: 'false',

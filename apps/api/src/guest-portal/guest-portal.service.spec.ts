@@ -1573,6 +1573,67 @@ describe('GuestPortalService', () => {
         referralCode,
       });
     });
+
+    it('does not duplicate referral attribution when Telegram status is polled again', async () => {
+      const { jwtService, prisma, service } = createService({
+        GUEST_GAME_REFERRAL_SECRET: 'referral-secret',
+      });
+      const referralCode = referralCodeFor1337();
+      mockLeetTenant(prisma);
+      jest.spyOn(service as any, 'buildPortalPayload').mockResolvedValue({
+        profile: { id: 'profile-1' },
+      });
+
+      prisma.guestGameTelegramLinkChallenge.findFirst.mockResolvedValue({
+        id: 'telegram-auth-1',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        profileId: 'profile-1',
+        guestId: null,
+        phoneHash: 'phone-hash-1',
+        status: 'AUTH_SESSION_ISSUED',
+        expiresAt: new Date(Date.now() + 60_000),
+        profile: {
+          id: 'profile-1',
+          guestId: null,
+          phoneHash: 'phone-hash-1',
+          telegramIdentity: 'chat:123456',
+          contactMasked: '***2233',
+        },
+      });
+      prisma.guestGameEvent.findFirst.mockResolvedValue({
+        id: 'existing-referral-event',
+      });
+      jwtService.signAsync.mockResolvedValue('guest-token');
+
+      const status = await service.getTelegramAuthStatus('leet', 'club-1337', {
+        challengeId: 'telegram-auth-1',
+        referralCode,
+      });
+
+      expect(status).toMatchObject({
+        status: 'CONFIRMED',
+        token: 'guest-token',
+        profileId: 'profile-1',
+      });
+      expect(prisma.guestGameEvent.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            tenantId: 'tenant-1',
+            source: 'GUEST_PORTAL_REFERRAL',
+            externalId: 'telegram-auth:telegram-auth-1:referral',
+          }),
+        }),
+      );
+      expect(
+        prisma.guestGameEvent.create.mock.calls.filter(
+          ([call]: [any]) => call?.data?.eventType === 'GAME_REFERRAL_ACCEPTED',
+        ),
+      ).toHaveLength(0);
+      expect(
+        JSON.stringify(prisma.guestGameEvent.findFirst.mock.calls),
+      ).not.toContain(referralCode);
+    });
   });
 
   describe('user call auth', () => {
@@ -1799,6 +1860,61 @@ describe('GuestPortalService', () => {
         externalId: 'user-call:call-auth-1:referral',
         referralCode,
       });
+    });
+
+    it('does not duplicate referral attribution when user-call status is polled again', async () => {
+      const { jwtService, prisma, service } = createService({
+        GUEST_GAME_REFERRAL_SECRET: 'referral-secret',
+      });
+      const referralCode = referralCodeFor1337();
+      mockLeetTenant(prisma);
+      jest.spyOn(service as any, 'buildPortalPayload').mockResolvedValue({
+        profile: { id: 'profile-1' },
+      });
+
+      prisma.guestPortalOtpChallenge.findFirst.mockResolvedValue({
+        id: 'call-auth-1',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        guestId: null,
+        profileId: 'profile-1',
+        phoneHash: 'phone-hash-1',
+        phoneMasked: '***9999',
+        status: 'CALL_SESSION_ISSUED',
+        expiresAt: new Date(Date.now() + 60_000),
+      });
+      prisma.guestGameEvent.findFirst.mockResolvedValue({
+        id: 'existing-referral-event',
+      });
+      jwtService.signAsync.mockResolvedValue('guest-token');
+
+      const status = await service.getUserCallAuthStatus('leet', 'club-1337', {
+        challengeId: 'call-auth-1',
+        referralCode,
+      });
+
+      expect(status).toMatchObject({
+        status: 'CONFIRMED',
+        token: 'guest-token',
+        profileId: 'profile-1',
+      });
+      expect(prisma.guestGameEvent.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            tenantId: 'tenant-1',
+            source: 'GUEST_PORTAL_REFERRAL',
+            externalId: 'user-call:call-auth-1:referral',
+          }),
+        }),
+      );
+      expect(
+        prisma.guestGameEvent.create.mock.calls.filter(
+          ([call]: [any]) => call?.data?.eventType === 'GAME_REFERRAL_ACCEPTED',
+        ),
+      ).toHaveLength(0);
+      expect(
+        JSON.stringify(prisma.guestGameEvent.findFirst.mock.calls),
+      ).not.toContain(referralCode);
     });
   });
 

@@ -167,18 +167,6 @@ function riskClass(level: StaffOperationsRiskLevel) {
   return "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-500/10 dark:text-emerald-200";
 }
 
-function scoreBarClass(level: StaffOperationsRiskLevel) {
-  if (level === "HIGH") {
-    return "bg-red-500";
-  }
-
-  if (level === "MEDIUM") {
-    return "bg-amber-400";
-  }
-
-  return "bg-emerald-500";
-}
-
 export default async function StaffOperationsDashboardPage({
   searchParams,
 }: {
@@ -499,7 +487,7 @@ function RatingPanel({
         <div>
           <h2 className="text-lg font-semibold">{title}</h2>
           <p className="mt-1 text-sm text-zinc-500">
-            Сначала лучшие показатели, внутри карточки — причины для разбора.
+            Компактный список: место, индекс и ключевой сигнал.
           </p>
         </div>
         <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold uppercase text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
@@ -526,7 +514,7 @@ function EmployeeRatingPanel({ rows }: { rows: StaffOperationsEmployeeRating[] }
         <div>
           <h2 className="text-lg font-semibold">Рейтинг сотрудников</h2>
           <p className="mt-1 text-sm text-zinc-500">
-            Сначала сильное исполнение; сигналы внимания остаются видимыми.
+            Компактный список: сильные сверху, детали по клику.
           </p>
         </div>
         <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold uppercase text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
@@ -553,30 +541,20 @@ function RatingRow({
   row: StaffOperationsRating;
   rank: number;
 }) {
-  const insight = ratingInsight(row);
   const href = row.href ?? `/staff/operations-dashboard?storeId=${row.id}`;
   const content = (
-    <div className="grid gap-3 lg:grid-cols-[76px_1fr_auto] lg:items-center">
-      <ScoreBadge score={row.score} level={row.riskLevel} rank={rank} />
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="truncate text-sm font-semibold">{row.label}</p>
-          <RiskPill level={row.riskLevel} />
-        </div>
+    <div className="grid gap-3 sm:grid-cols-[48px_1fr_auto] sm:items-center">
+      <RankBadge rank={rank} />
+      <div className="min-w-0 space-y-1">
+        <p className="truncate text-sm font-semibold">{row.label}</p>
         {row.caption ? (
-          <p className="mt-1 text-xs text-zinc-500">{row.caption}</p>
+          <p className="truncate text-xs text-zinc-500">{row.caption}</p>
         ) : null}
-        <p className="mt-2 text-sm font-medium text-zinc-900 dark:text-zinc-100">
-          {insight.title}
-        </p>
-        <p className="mt-1 text-xs leading-5 text-zinc-500">
-          {insight.detail}
-        </p>
-        <SignalStrip row={row} />
+        <CompactSignals row={row} />
       </div>
-      <div className="flex items-center justify-between gap-3 lg:block lg:text-right">
-        <ScoreLine score={row.score} level={row.riskLevel} compact />
-        <span className="mt-2 inline-flex h-8 items-center rounded-full border border-zinc-300 px-3 text-xs font-semibold text-zinc-700 transition group-hover:border-emerald-400 group-hover:text-emerald-700 dark:border-zinc-700 dark:text-zinc-300 dark:group-hover:border-emerald-500 dark:group-hover:text-emerald-200">
+      <div className="flex items-center justify-between gap-3 sm:justify-end">
+        <ScoreChip score={row.score} level={row.riskLevel} />
+        <span className="inline-flex h-8 items-center rounded-full border border-zinc-300 px-3 text-xs font-semibold text-zinc-700 transition group-hover:border-emerald-400 group-hover:text-emerald-700 dark:border-zinc-700 dark:text-zinc-300 dark:group-hover:border-emerald-500 dark:group-hover:text-emerald-200">
           Открыть разбор
         </span>
       </div>
@@ -586,7 +564,7 @@ function RatingRow({
   return (
     <Link
       href={href}
-      className="group block rounded-lg border border-zinc-200 p-3 transition hover:border-emerald-400 hover:bg-emerald-50/60 focus:outline-none focus:ring-2 focus:ring-emerald-400 dark:border-zinc-800 dark:hover:border-emerald-500/70 dark:hover:bg-emerald-500/10"
+      className="group block rounded-lg border border-zinc-200 px-3 py-2.5 transition hover:border-emerald-400 hover:bg-emerald-50/60 focus:outline-none focus:ring-2 focus:ring-emerald-400 dark:border-zinc-800 dark:hover:border-emerald-500/70 dark:hover:bg-emerald-500/10"
     >
       {content}
     </Link>
@@ -600,48 +578,36 @@ function EmployeeRatingRow({
   row: StaffOperationsEmployeeRating;
   rank: number;
 }) {
-  const insight = ratingInsight(row);
   const href = row.href ?? `/staff/operations-dashboard?userId=${row.id}`;
+  const readinessText = row.readinessStatus
+    ? `${readinessLabels[row.readinessStatus]} · ${row.readinessPercent ?? 0}%`
+    : null;
 
   return (
     <Link
       href={href}
-      className="group block rounded-lg border border-zinc-200 p-3 transition hover:border-emerald-400 hover:bg-emerald-50/60 focus:outline-none focus:ring-2 focus:ring-emerald-400 dark:border-zinc-800 dark:hover:border-emerald-500/70 dark:hover:bg-emerald-500/10"
+      className="group block rounded-lg border border-zinc-200 px-3 py-2.5 transition hover:border-emerald-400 hover:bg-emerald-50/60 focus:outline-none focus:ring-2 focus:ring-emerald-400 dark:border-zinc-800 dark:hover:border-emerald-500/70 dark:hover:bg-emerald-500/10"
     >
-      <div className="grid gap-3 lg:grid-cols-[76px_1fr_auto] lg:items-center">
-        <ScoreBadge score={row.score} level={row.riskLevel} rank={rank} />
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="truncate text-sm font-semibold">{row.label}</p>
-            <RiskPill level={row.riskLevel} />
-          </div>
+      <div className="grid gap-3 sm:grid-cols-[48px_1fr_auto] sm:items-center">
+        <RankBadge rank={rank} />
+        <div className="min-w-0 space-y-1">
+          <p className="truncate text-sm font-semibold">{row.label}</p>
           {row.caption ? (
-            <p className="mt-1 text-xs text-zinc-500">{row.caption}</p>
+            <p className="truncate text-xs text-zinc-500">{row.caption}</p>
           ) : null}
-          <p className="mt-2 text-sm font-medium text-zinc-900 dark:text-zinc-100">
-            {insight.title}
-          </p>
-          <p className="mt-1 text-xs leading-5 text-zinc-500">
-            {insight.detail}
-          </p>
-          <SignalStrip row={row} />
-          <div className="mt-2 flex flex-wrap gap-2 text-xs">
-            <span className="rounded-full bg-zinc-100 px-2 py-1 text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
-              Готовность:{" "}
-              {row.readinessStatus
-                ? `${readinessLabels[row.readinessStatus]} · ${row.readinessPercent ?? 0}%`
-                : "нет данных"}
-            </span>
-            {row.trainingBlockers > 0 ? (
-              <span className="rounded-full bg-red-50 px-2 py-1 text-red-700 dark:bg-red-500/15 dark:text-red-200">
-                Блокеры обучения: {row.trainingBlockers}
-              </span>
-            ) : null}
-          </div>
+          <CompactSignals
+            row={row}
+            suffix={[
+              readinessText ? `готовность ${readinessText}` : null,
+              row.trainingBlockers > 0
+                ? `блокеры обучения ${row.trainingBlockers}`
+                : null,
+            ]}
+          />
         </div>
-        <div className="flex items-center justify-between gap-3 lg:block lg:text-right">
-          <ScoreLine score={row.score} level={row.riskLevel} compact />
-          <span className="mt-2 inline-flex h-8 items-center rounded-full border border-zinc-300 px-3 text-xs font-semibold text-zinc-700 transition group-hover:border-emerald-400 group-hover:text-emerald-700 dark:border-zinc-700 dark:text-zinc-300 dark:group-hover:border-emerald-500 dark:group-hover:text-emerald-200">
+        <div className="flex items-center justify-between gap-3 sm:justify-end">
+          <ScoreChip score={row.score} level={row.riskLevel} />
+          <span className="inline-flex h-8 items-center rounded-full border border-zinc-300 px-3 text-xs font-semibold text-zinc-700 transition group-hover:border-emerald-400 group-hover:text-emerald-700 dark:border-zinc-700 dark:text-zinc-300 dark:group-hover:border-emerald-500 dark:group-hover:text-emerald-200">
             Детализация
           </span>
         </div>
@@ -650,136 +616,65 @@ function EmployeeRatingRow({
   );
 }
 
-function ratingInsight(row: StaffOperationsRating) {
-  if (row.overdue > 0) {
-    return {
-      title: "Сначала закрыть просрочки",
-      detail: `${formatNumber(row.overdue)} просроченных задач или чек-листов мешают нормальной оценке смены.`,
-    };
-  }
-
-  if (row.unchecked > 0) {
-    return {
-      title: "Нужно принять работы на проверке",
-      detail: `${formatNumber(row.unchecked)} результатов ждут контроля: без решения рейтинг не показывает реальную картину.`,
-    };
-  }
-
-  if (row.failedItems > 0 || row.returned > 0) {
-    return {
-      title: "Разобрать качество выполнения",
-      detail: `${formatNumber(row.failedItems + row.returned)} сигналов по провалам или возвратам требуют обратной связи.`,
-    };
-  }
-
-  if (row.readinessBlocked > 0) {
-    return {
-      title: "Есть блокеры допуска",
-      detail: `${formatNumber(row.readinessBlocked)} сотрудников не готовы по обучению или аттестации.`,
-    };
-  }
-
-  if (row.repeatedIssues > 0) {
-    return {
-      title: "Повторяется одна и та же проблема",
-      detail: `${formatNumber(row.repeatedIssues)} повторов лучше закрыть через стандарт или короткое обучение.`,
-    };
-  }
-
-  return {
-    title: "Критичных сигналов нет",
-    detail: `Выполнено в срок: ${formatNumber(row.doneOnTime)}. Можно смотреть детализацию для планового контроля.`,
-  };
-}
-
-function ScoreBadge({
-  score,
-  level,
-  rank,
-}: {
-  score: number;
-  level: StaffOperationsRiskLevel;
-  rank: number;
-}) {
+function RankBadge({ rank }: { rank: number }) {
   return (
-    <div className="flex items-center gap-3 lg:block">
-      <div
-        className={[
-          "flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border text-lg font-bold",
-          riskClass(level),
-        ].join(" ")}
-      >
-        {score}%
-      </div>
-      <div className="lg:mt-2">
-        <p className="text-[11px] font-bold uppercase text-zinc-500">
-          место {rank}
-        </p>
-        <p className="text-xs text-zinc-500">индекс</p>
-      </div>
+    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-bold text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">
+      {rank}
     </div>
   );
 }
 
-function SignalStrip({ row }: { row: StaffOperationsRating }) {
+function CompactSignals({
+  row,
+  suffix = [],
+}: {
+  row: StaffOperationsRating;
+  suffix?: Array<string | null>;
+}) {
   const signals = [
-    { label: "Просрочено", value: row.overdue, tone: "HIGH" },
-    { label: "На проверке", value: row.unchecked, tone: "MEDIUM" },
-    { label: "Провалы", value: row.failedItems, tone: "HIGH" },
-    { label: "Возвраты", value: row.returned, tone: "HIGH" },
-    { label: "Повторы", value: row.repeatedIssues, tone: "MEDIUM" },
-    { label: "В срок", value: row.doneOnTime, tone: "LOW" },
+    { label: "проср.", value: row.overdue },
+    { label: "проверка", value: row.unchecked },
+    { label: "провалы", value: row.failedItems },
+    { label: "возвраты", value: row.returned },
+    { label: "повторы", value: row.repeatedIssues },
   ] as const;
-  const visibleSignals = signals.filter((signal) => signal.value > 0);
+  const visibleSignals = signals
+    .filter((signal) => signal.value > 0)
+    .map((signal) => `${signal.label} ${formatNumber(signal.value)}`);
+  const textParts = [
+    ...visibleSignals,
+    ...suffix.filter((value): value is string => Boolean(value)),
+  ].slice(0, 3);
 
-  if (visibleSignals.length === 0) {
+  if (textParts.length === 0) {
     return (
-      <div className="mt-3 inline-flex rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200">
-        Без критичных сигналов
-      </div>
+      <p className="truncate text-xs text-emerald-700 dark:text-emerald-300">
+        без критичных сигналов
+      </p>
     );
   }
 
   return (
-    <div className="mt-3 flex flex-wrap gap-2">
-      {visibleSignals.slice(0, 5).map((signal) => (
-        <span
-          key={signal.label}
-          className={[
-            "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold",
-            riskClass(signal.tone),
-          ].join(" ")}
-        >
-          {signal.label}
-          <span>{formatNumber(signal.value)}</span>
-        </span>
-      ))}
-    </div>
+    <p className="truncate text-xs text-zinc-500">{textParts.join(" · ")}</p>
   );
 }
 
-function ScoreLine({
+function ScoreChip({
   score,
   level,
-  compact = false,
 }: {
   score: number;
   level: StaffOperationsRiskLevel;
-  compact?: boolean;
 }) {
   return (
-    <div className={compact ? "min-w-32" : "mt-3"}>
-      <div className="flex items-center justify-between text-xs text-zinc-500">
-        <span>{compact ? "прогресс" : "Индекс"}</span>
-        <span>{score}%</span>
-      </div>
-      <div className="mt-1 h-2 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-900">
-        <div
-          className={["h-full rounded-full", scoreBarClass(level)].join(" ")}
-          style={{ width: `${score}%` }}
-        />
-      </div>
-    </div>
+    <span
+      className={[
+        "inline-flex h-8 min-w-16 items-center justify-center rounded-full border px-3 text-sm font-bold",
+        riskClass(level),
+      ].join(" ")}
+    >
+      {score}%
+    </span>
   );
 }
 

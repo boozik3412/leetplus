@@ -1,3 +1,5 @@
+import { LegalEntityInfo } from "@/components/legal-entity-info";
+
 export default async function AuthLayout({
   children,
 }: Readonly<{
@@ -24,7 +26,10 @@ export default async function AuthLayout({
       </section>
 
       <section className="flex flex-1 items-center justify-center px-6 py-10">
-        <div className="w-full max-w-md">{children}</div>
+        <div className="w-full max-w-md space-y-4">
+          {children}
+          <LegalEntityInfo compact />
+        </div>
       </section>
     </main>
   );

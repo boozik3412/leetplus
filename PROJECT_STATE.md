@@ -80,6 +80,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Published the LeetPlus legal entity details on the public homepage and auth entry screens for SMS authorization operator verification: ООО "ЛИТ", ОГРН 1231800017063, ИНН 1800006677, КПП 180001001.
 - Surfaced idempotent duplicate facts in the Guest Game Hub batch pipeline result: duplicate rows that came from `summary.idempotent=true` now show a safe no-new-XP/no-new-reward explanation and idempotency key for QA.
 - Surfaced idempotent `process-event` results in Guest Game Hub: the confirmed-run result card now shows `повтор` with zero new XP/rewards when the backend returns `summary.idempotent=true`, so operators can distinguish safe duplicate handling from a fresh LeetPlus write.
 - Hardened `POST /guests/gamification/process-event` idempotency: repeated calls for the same external snapshot reference now return the existing `GuestGameEvent` with `summary.idempotent=true` and do not create duplicate XP, rewards, or Langame writes; regression coverage verifies the no-mutation path.

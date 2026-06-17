@@ -24,20 +24,22 @@ export function LegalEntityInfo({
         .filter(Boolean)
         .join(" ")}
     >
-      <dl className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <div className="flex items-center gap-1">
-          <dt className="sr-only">Раздел</dt>
-          <dd className="font-medium text-zinc-600">
-            {compact ? "Реквизиты" : "Юридическая информация"}
-          </dd>
-        </div>
-        {legalEntityRows.map(([label, value]) => (
-          <div className="flex items-center gap-1 whitespace-nowrap" key={label}>
-            <dt>{label}:</dt>
-            <dd className="font-medium text-zinc-600">{value}</dd>
-          </div>
-        ))}
-      </dl>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <p className="font-medium text-zinc-600">
+          {compact ? "Реквизиты" : "Юридическая информация"}
+        </p>
+        <dl className="contents">
+          {legalEntityRows.map(([label, value]) => (
+            <div
+              className="flex items-center gap-1 whitespace-nowrap"
+              key={label}
+            >
+              <dt>{label}:</dt>
+              <dd className="font-medium text-zinc-600">{value}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
     </footer>
   );
 }

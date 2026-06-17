@@ -20,15 +20,13 @@ export default async function AuthLayout({
             интерфейс к мультитенантной модели.
           </p>
         </div>
-        <p className="text-sm text-zinc-500">
-          MVP: email, организация, поддомен и защищенный tenant context.
-        </p>
+        <LegalEntityInfo compact />
       </section>
 
       <section className="flex flex-1 items-center justify-center px-6 py-10">
         <div className="w-full max-w-md space-y-4">
           {children}
-          <LegalEntityInfo compact />
+          <LegalEntityInfo compact className="lg:hidden" />
         </div>
       </section>
     </main>

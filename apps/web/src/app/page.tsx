@@ -32,7 +32,7 @@ export default async function Home() {
           </nav>
         </header>
 
-        <div className="grid flex-1 items-center gap-8 py-12 lg:grid-cols-[minmax(0,1fr)_25rem]">
+        <div className="flex flex-1 items-center py-12">
           <div className="max-w-2xl">
             <p className="text-sm font-semibold text-emerald-700">
               LeetPlus для компьютерных клубов
@@ -60,9 +60,9 @@ export default async function Home() {
               </Link>
             </div>
           </div>
-
-          <LegalEntityInfo />
         </div>
+
+        <LegalEntityInfo className="pb-2" />
       </section>
     </main>
   );

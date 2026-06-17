@@ -15,37 +15,29 @@ export function LegalEntityInfo({
   compact = false,
 }: LegalEntityInfoProps) {
   return (
-    <section
-      aria-labelledby="legal-entity-title"
+    <footer
+      aria-label="Юридическая информация"
       className={[
-        "rounded-lg border border-zinc-200 bg-white p-4 text-zinc-950 shadow-sm",
+        "border-t border-zinc-200 pt-4 text-xs leading-5 text-zinc-500",
         className,
       ]
         .filter(Boolean)
         .join(" ")}
     >
-      <div>
-        <h2 id="legal-entity-title" className="text-sm font-semibold">
-          Юридическая информация
-        </h2>
-        {!compact ? (
-          <p className="mt-2 text-sm leading-6 text-zinc-600">
-            Сайт LeetPlus принадлежит юридическому лицу, указанному ниже.
-          </p>
-        ) : null}
-      </div>
-
-      <dl className="mt-3 grid gap-2 text-sm">
+      <dl className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <div className="flex items-center gap-1">
+          <dt className="sr-only">Раздел</dt>
+          <dd className="font-medium text-zinc-600">
+            {compact ? "Реквизиты" : "Юридическая информация"}
+          </dd>
+        </div>
         {legalEntityRows.map(([label, value]) => (
-          <div
-            className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1"
-            key={label}
-          >
-            <dt className="text-zinc-500">{label}</dt>
-            <dd className="font-semibold text-zinc-950">{value}</dd>
+          <div className="flex items-center gap-1 whitespace-nowrap" key={label}>
+            <dt>{label}:</dt>
+            <dd className="font-medium text-zinc-600">{value}</dd>
           </div>
         ))}
       </dl>
-    </section>
+    </footer>
   );
 }

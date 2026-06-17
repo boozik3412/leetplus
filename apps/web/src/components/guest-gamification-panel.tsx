@@ -4214,6 +4214,15 @@ function CommunicationQueueCard({
                 Env: {botConsumer.requiredEnv.join(", ")}
               </p>
             ) : null}
+            <a
+              className="mt-2 inline-flex text-xs font-bold text-cyan-700 underline decoration-cyan-300 underline-offset-4 hover:text-cyan-900 dark:text-cyan-200 dark:decoration-cyan-700 dark:hover:text-cyan-100"
+              href={botConsumer.runbook.href}
+              target="_blank"
+              rel="noreferrer"
+              title={botConsumer.runbook.path}
+            >
+              {botConsumer.runbook.label}
+            </a>
           </div>
           {outbox.dispatcher.providers.map((provider) => (
             <div

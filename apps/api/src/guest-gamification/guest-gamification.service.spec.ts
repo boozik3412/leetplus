@@ -2546,6 +2546,11 @@ describe('GuestGamificationService', () => {
         configured: true,
         channels: ['TELEGRAM'],
         requiredEnv: [],
+        runbook: {
+          label: 'Runbook VDS',
+          path: 'docs/deployment/systemd/README.md',
+          href: 'https://github.com/boozik3412/leetplus/tree/main/docs/deployment/systemd',
+        },
         pendingReady: 1,
         pendingTelegram: 1,
         pendingMax: 0,

@@ -1653,6 +1653,11 @@ export type GuestGameBotConsumerStatus = {
   configured: boolean;
   channels: Array<'TELEGRAM' | 'MAX'>;
   requiredEnv: string[];
+  runbook: {
+    label: string;
+    path: string;
+    href: string;
+  };
   pendingReady: number;
   pendingTelegram: number;
   pendingMax: number;
@@ -6887,6 +6892,7 @@ export class GuestGamificationService {
       configured: config.configured,
       channels: config.channels,
       requiredEnv: config.requiredEnv,
+      runbook: botConsumerRunbook,
       pendingReady: readyForBot.length,
       pendingTelegram: readyForBot.filter((item) => item.channel === 'TELEGRAM')
         .length,
@@ -9764,6 +9770,12 @@ type BotConsumerConfig = {
   configured: boolean;
   channels: Array<'TELEGRAM' | 'MAX'>;
   requiredEnv: string[];
+};
+
+const botConsumerRunbook = {
+  label: 'Runbook VDS',
+  path: 'docs/deployment/systemd/README.md',
+  href: 'https://github.com/boozik3412/leetplus/tree/main/docs/deployment/systemd',
 };
 
 function deliveryProviderConfig(): DeliveryProviderConfig {

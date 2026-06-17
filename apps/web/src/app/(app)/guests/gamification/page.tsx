@@ -473,6 +473,11 @@ const emptyWorkspace: GuestGamificationWorkspace = {
         "GUEST_GAME_BOT_CONSUMER_SYNC_TOKEN or SYNC_SERVICE_TOKEN",
         "GUEST_GAME_BOT_CONSUMER_TENANT_ID or GUEST_GAME_BOT_CONSUMER_TENANT_SLUG",
       ],
+      runbook: {
+        label: "Runbook VDS",
+        path: "docs/deployment/systemd/README.md",
+        href: "https://github.com/boozik3412/leetplus/tree/main/docs/deployment/systemd",
+      },
       pendingReady: 0,
       pendingTelegram: 0,
       pendingMax: 0,

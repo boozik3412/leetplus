@@ -558,6 +558,11 @@ export type GuestGameBotConsumerStatus = {
   configured: boolean;
   channels: Array<"TELEGRAM" | "MAX">;
   requiredEnv: string[];
+  runbook: {
+    label: string;
+    path: string;
+    href: string;
+  };
   pendingReady: number;
   pendingTelegram: number;
   pendingMax: number;

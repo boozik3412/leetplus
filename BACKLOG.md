@@ -1,5 +1,7 @@
 # LeetPlus Бэклог
 
+- Готово: карточка `VDS bot-consumer` в Guest Game Hub теперь получает из API ссылку на runbook `docs/deployment/systemd` и показывает ее рядом со статусом/env-подсказками. Оператор видит прямой путь к шаблонам service/timer/env без раскрытия токенов, raw phone, chat id или Langame payload.
+
 - Готово: для внешнего `guest-game:bot-consumer` добавлен VDS deployment pack в `docs/deployment/systemd`: env-шаблон без секретов, one-shot `leetplus-guest-game-bot-consumer.service`, periodic `leetplus-guest-game-bot-consumer.timer` и runbook запуска. Шаблоны по умолчанию держат `dry-run`, `MAX_TICKS=1`, канал `TELEGRAM` и не включают real-send/MAX без отдельного env-шага на VDS.
 
 - Готово: закреплена идемпотентность реферальной атрибуции при повторном polling уже выданной гостевой сессии `/play`. Regression-тесты проверяют, что Telegram-бот и fallback-звонок пользователя на номер повторно возвращают guest-token по `AUTH_SESSION_ISSUED` / `CALL_SESSION_ISSUED`, но не создают второй `GuestGameEvent` `GAME_REFERRAL_ACCEPTED` для того же `externalId` и не сохраняют сырой `lp_ref_*` в проверочных вызовах.

@@ -80,6 +80,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Hardened external gamification bot-consumer ack idempotency: repeated terminal `SENT`/`FAILED`/`BLOCKED` acknowledgements now return the current delivery without creating duplicate `GuestGameDeliveryEvent` rows, while terminal status changes are blocked until an explicit Guest Game Hub retry.
 - Linked the Guest Game Hub `VDS bot-consumer` status card to the deployment runbook: the API now includes the `docs/deployment/systemd` runbook metadata in `botConsumer`, and the web UI shows it without exposing tokens, raw phone, chat ids, or Langame payload.
 - Added VDS deployment templates for the external gamification bot consumer: `docs/deployment/systemd` now contains a secret-free env example, a one-shot `leetplus-guest-game-bot-consumer.service`, a periodic timer, and a dry-run-first runbook for enabling Telegram delivery through `guest-game:bot-consumer` without enabling MAX real-send.
 - Hardened idempotency coverage for referral attribution on repeated public gamification auth polling: `guest-portal.service.spec.ts` now verifies that already issued Telegram and user-call guest sessions can return a token again without creating a duplicate `GAME_REFERRAL_ACCEPTED` event for the same `externalId` or leaking the raw `lp_ref_*` code.

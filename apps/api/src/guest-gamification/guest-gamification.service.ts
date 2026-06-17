@@ -1788,6 +1788,7 @@ export type GuestGameBotDeliveryAckResult = {
   delivery: GuestGameDelivery;
   eventType: string;
   note: string;
+  idempotent: boolean;
 };
 
 export type GuestGameEventDto = {
@@ -4887,8 +4888,21 @@ export class GuestGamificationService {
       throw new ConflictException('Canceled delivery cannot be acked.');
     }
 
-    if (current.status === 'SENT' && nextStatus !== 'SENT') {
-      throw new ConflictException('Sent delivery can only receive SENT ack.');
+    const eventType = botDeliveryAckEventType(nextStatus);
+
+    if (isTerminalBotAckStatus(current.status)) {
+      if (current.status !== nextStatus) {
+        throw new ConflictException(
+          'Terminal bot delivery ack can only be repeated with the same status. Retry the delivery from Guest Game Hub before sending it again.',
+        );
+      }
+
+      return {
+        delivery: mapDelivery(current),
+        eventType,
+        note: 'Duplicate bot consumer ack ignored.',
+        idempotent: true,
+      };
     }
 
     const now = new Date();
@@ -4908,7 +4922,6 @@ export class GuestGamificationService {
       }),
       include: deliveryInclude,
     });
-    const eventType = botDeliveryAckEventType(nextStatus);
 
     await this.createDeliveryEvent(user, row.id, row.rewardId, {
       eventType,
@@ -4923,6 +4936,7 @@ export class GuestGamificationService {
       delivery: mapDelivery(row),
       eventType,
       note,
+      idempotent: false,
     };
   }
 
@@ -9989,6 +10003,12 @@ function botDeliveryAckEventType(status: GuestGameBotDeliveryAckStatus) {
   }
 
   return 'DELIVERY_BOT_CONSUMER_BLOCKED';
+}
+
+function isTerminalBotAckStatus(
+  status: string,
+): status is GuestGameBotDeliveryAckStatus {
+  return status === 'SENT' || status === 'FAILED' || status === 'BLOCKED';
 }
 
 function botDeliveryAckDefaultNote(status: GuestGameBotDeliveryAckStatus) {

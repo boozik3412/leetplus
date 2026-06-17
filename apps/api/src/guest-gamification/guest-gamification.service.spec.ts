@@ -2692,12 +2692,88 @@ describe('GuestGamificationService', () => {
       });
       expect(result).toMatchObject({
         eventType: 'DELIVERY_BOT_CONSUMER_SENT',
+        idempotent: false,
         delivery: {
           id: 'delivery-1',
           status: 'SENT',
           sentAt: isoNow,
         },
       });
+    });
+
+    it('treats repeated terminal bot ack as idempotent without duplicating events', async () => {
+      const { service, prisma } = createService();
+      const current = deliveryRow({
+        status: 'SENT',
+        sentAt: now,
+        events: [
+          {
+            id: 'event-sent',
+            eventType: 'DELIVERY_BOT_CONSUMER_SENT',
+            fromStatus: 'READY',
+            toStatus: 'SENT',
+            channel: 'TELEGRAM',
+            note: 'sent by bot',
+            payload: {
+              source: 'guest_game_bot_consumer',
+              status: 'SENT',
+              channel: 'TELEGRAM',
+              providerMessageId: 'tg-message-1',
+            },
+            createdAt: now,
+            actor: null,
+          },
+        ],
+      });
+
+      prisma.tenant.findFirst.mockResolvedValue(scheduledTenantRow());
+      prisma.guestGameDelivery.findFirst.mockResolvedValue(current);
+
+      const result = await service.ackBotDelivery({
+        tenantSlug: user.tenantSlug,
+        deliveryId: 'delivery-1',
+        status: 'sent',
+        note: 'same provider retry',
+        providerMessageId: 'tg-message-1',
+      });
+
+      expect(prisma.guestGameDelivery.update).not.toHaveBeenCalled();
+      expect(prisma.guestGameDeliveryEvent.create).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        eventType: 'DELIVERY_BOT_CONSUMER_SENT',
+        idempotent: true,
+        note: 'Duplicate bot consumer ack ignored.',
+        delivery: {
+          id: 'delivery-1',
+          status: 'SENT',
+          sentAt: isoNow,
+        },
+      });
+    });
+
+    it('blocks changing a terminal bot ack to a different status', async () => {
+      const { service, prisma } = createService();
+
+      prisma.tenant.findFirst.mockResolvedValue(scheduledTenantRow());
+      prisma.guestGameDelivery.findFirst.mockResolvedValue(
+        deliveryRow({
+          status: 'FAILED',
+          failedAt: now,
+          note: 'provider failed',
+        }),
+      );
+
+      await expect(
+        service.ackBotDelivery({
+          tenantSlug: user.tenantSlug,
+          deliveryId: 'delivery-1',
+          status: 'sent',
+          note: 'late success',
+        }),
+      ).rejects.toThrow('Terminal bot delivery ack can only be repeated');
+
+      expect(prisma.guestGameDelivery.update).not.toHaveBeenCalled();
+      expect(prisma.guestGameDeliveryEvent.create).not.toHaveBeenCalled();
     });
   });
 });

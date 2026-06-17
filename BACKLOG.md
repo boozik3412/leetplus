@@ -1,5 +1,7 @@
 # LeetPlus Бэклог
 
+- Готово: service-token ack для внешнего `guest-game:bot-consumer` стал идемпотентным для terminal-статусов. Повторный `SENT`/`FAILED`/`BLOCKED` ack с тем же статусом возвращает текущую delivery без нового `GuestGameDeliveryEvent` и без повторного update; попытка сменить terminal ack на другой статус блокируется до явного retry из Guest Game Hub.
+
 - Готово: карточка `VDS bot-consumer` в Guest Game Hub теперь получает из API ссылку на runbook `docs/deployment/systemd` и показывает ее рядом со статусом/env-подсказками. Оператор видит прямой путь к шаблонам service/timer/env без раскрытия токенов, raw phone, chat id или Langame payload.
 
 - Готово: для внешнего `guest-game:bot-consumer` добавлен VDS deployment pack в `docs/deployment/systemd`: env-шаблон без секретов, one-shot `leetplus-guest-game-bot-consumer.service`, periodic `leetplus-guest-game-bot-consumer.timer` и runbook запуска. Шаблоны по умолчанию держат `dry-run`, `MAX_TICKS=1`, канал `TELEGRAM` и не включают real-send/MAX без отдельного env-шага на VDS.

@@ -909,12 +909,19 @@ const startCss = `
 }
 
 .lp-start-legal {
-  margin: 0 auto;
-  max-width: 1440px;
+  margin: 0;
+  width: 100%;
+  max-width: none;
   border-color: rgba(196, 224, 225, 0.18) !important;
   background: #000;
-  padding: 10px clamp(14px, 4vw, 58px) 18px;
+  padding: 0;
   color: rgba(168, 185, 186, 0.72) !important;
+}
+
+.lp-start-legal > div {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 10px clamp(14px, 4vw, 58px) 18px;
 }
 
 .lp-start-legal p,
@@ -1231,6 +1238,10 @@ const startCss = `
   }
 
   .lp-start-legal {
+    padding-inline: 0;
+  }
+
+  .lp-start-legal > div {
     padding-inline: 12px;
   }
 

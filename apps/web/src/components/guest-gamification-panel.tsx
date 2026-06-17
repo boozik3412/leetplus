@@ -2115,7 +2115,18 @@ function DryRunTab({
 
           {processResult ? (
             <div className="rounded-lg border border-cyan-200 bg-cyan-50/70 p-4 dark:border-cyan-900/60 dark:bg-cyan-950/20">
-              <div className="grid gap-3 md:grid-cols-4">
+              <div className="grid gap-3 md:grid-cols-5">
+                <StatusMetric
+                  label="статус"
+                  value={
+                    processResult.summary.idempotent ? "повтор" : "записано"
+                  }
+                  hint={
+                    processResult.summary.idempotent
+                      ? "без новых записей"
+                      : "создано в LeetPlus"
+                  }
+                />
                 <StatusMetric
                   label="событие"
                   value={processResult.event.eventType}
@@ -2125,7 +2136,9 @@ function DryRunTab({
                   label="XP применено"
                   value={`+${processResult.summary.appliedXpDelta}`}
                   hint={
-                    processResult.summary.profileCreated
+                    processResult.summary.idempotent
+                      ? "без повторного XP"
+                      : processResult.summary.profileCreated
                       ? "профиль создан"
                       : "профиль обновлен"
                   }
@@ -2133,7 +2146,11 @@ function DryRunTab({
                 <StatusMetric
                   label="наград в очереди"
                   value={processResult.summary.createdRewards}
-                  hint={formatMoney(processResult.summary.queuedRewardAmount)}
+                  hint={
+                    processResult.summary.idempotent
+                      ? "без дублей"
+                      : formatMoney(processResult.summary.queuedRewardAmount)
+                  }
                 />
                 <StatusMetric
                   label="Langame"
@@ -2141,6 +2158,12 @@ function DryRunTab({
                   hint="write API не использовался"
                 />
               </div>
+              {processResult.summary.idempotent ? (
+                <p className="mt-3 rounded-md border border-cyan-200 bg-white/70 px-3 py-2 text-xs font-semibold text-cyan-900 dark:border-cyan-900/60 dark:bg-cyan-950/40 dark:text-cyan-100">
+                  Snapshot уже был обработан: LeetPlus вернул существующее
+                  событие и не создавал повторный XP или награды.
+                </p>
+              ) : null}
               {processResult.summary.idempotencyKey ? (
                 <p className="mt-3 break-all text-xs text-cyan-800 dark:text-cyan-100">
                   Idempotency: {processResult.summary.idempotencyKey}

@@ -1,5 +1,7 @@
 # LeetPlus Бэклог
 
+- Готово: Guest Game Hub показывает результат идемпотентного `process-event` в карточке подтвержденного запуска. Если backend вернул `summary.idempotent=true`, UI показывает статус `повтор`, ноль нового XP/наград и подсказку, что snapshot уже был обработан без дублей.
+
 - Готово: усилена идемпотентность `POST /guests/gamification/process-event`. Повторный запуск по тому же внешнему snapshot reference возвращает уже созданный `GuestGameEvent` с `summary.idempotent=true`, не создает новый XP, награды или Langame write и закреплен regression-тестом на no-mutation path.
 
 - Готово: readiness-карточки fallback-входа в Guest Game Hub получили ссылку на runbook `docs/deployment/guest-auth-fallbacks.md`. Документ фиксирует порядок каналов `/play`, настройку звонка пользователя на номер и входящего звонка с последними 4 цифрами, QA, rollback и инварианты без raw phone, provider token, callback secret, endpoint и Langame payload.

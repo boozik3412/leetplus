@@ -533,11 +533,11 @@ function RatingPanel({
         <div>
           <h2 className="text-lg font-semibold">{title}</h2>
           <p className="mt-1 text-sm text-zinc-500">
-            Сначала зоны, где руководителю стоит открыть разбор.
+            Сначала лучшие показатели, внутри карточки — причины для разбора.
           </p>
         </div>
         <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold uppercase text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
-          слабые сверху
+          лучшие сверху
         </span>
       </div>
       <div className="mt-4 space-y-3">
@@ -560,7 +560,7 @@ function EmployeeRatingPanel({ rows }: { rows: StaffOperationsEmployeeRating[] }
         <div>
           <h2 className="text-lg font-semibold">Рейтинг сотрудников</h2>
           <p className="mt-1 text-sm text-zinc-500">
-            Фокус на тех, кому нужна проверка, обучение или управленческая реакция.
+            Сначала сильное исполнение; сигналы внимания остаются видимыми.
           </p>
         </div>
         <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold uppercase text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">

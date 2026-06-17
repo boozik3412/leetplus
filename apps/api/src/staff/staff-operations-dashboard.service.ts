@@ -1784,7 +1784,7 @@ export class StaffOperationsDashboardService {
   private finalizeRatings(drafts: Map<string, RatingDraft>) {
     return Array.from(drafts.values())
       .map((draft) => this.finalizeRating(draft))
-      .sort((a, b) => a.score - b.score || b.overdue - a.overdue)
+      .sort((a, b) => b.score - a.score || a.overdue - b.overdue)
       .slice(0, 20);
   }
 
@@ -1797,7 +1797,7 @@ export class StaffOperationsDashboardService {
         readinessPercent: draft.readinessPercent,
         trainingBlockers: draft.trainingBlockers,
       }))
-      .sort((a, b) => a.score - b.score || b.overdue - a.overdue)
+      .sort((a, b) => b.score - a.score || a.overdue - b.overdue)
       .slice(0, 30);
   }
 

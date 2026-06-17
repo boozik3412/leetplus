@@ -1,0 +1,12 @@
+[Unit]
+Description=Run LeetPlus guest game bot consumer periodically
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+AccuracySec=15s
+Persistent=false
+Unit=leetplus-guest-game-bot-consumer.service
+
+[Install]
+WantedBy=timers.target

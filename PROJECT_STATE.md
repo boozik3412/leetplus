@@ -80,6 +80,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added VDS deployment templates for the external gamification bot consumer: `docs/deployment/systemd` now contains a secret-free env example, a one-shot `leetplus-guest-game-bot-consumer.service`, a periodic timer, and a dry-run-first runbook for enabling Telegram delivery through `guest-game:bot-consumer` without enabling MAX real-send.
 - Hardened idempotency coverage for referral attribution on repeated public gamification auth polling: `guest-portal.service.spec.ts` now verifies that already issued Telegram and user-call guest sessions can return a token again without creating a duplicate `GAME_REFERRAL_ACCEPTED` event for the same `externalId` or leaking the raw `lp_ref_*` code.
 - Hardened referral attribution tests for public gamification registration: `guest-portal.service.spec.ts` now verifies that Telegram auth, user-call auth, incoming-call-last4, and the existing OTP path all record safe `GAME_REFERRAL_ACCEPTED` events with the inviter game profile and without raw referral codes, raw phone, or Langame payload.
 - Added direct referral sharing actions to the lightweight public game screen: `/play/game` now lets the guest copy the referral link, use native Web Share with clipboard fallback, open Telegram share, or open the invite link itself, all from the existing safe `referral.link/shareText` without extra API calls, raw phone, secrets, or raw profile ids.

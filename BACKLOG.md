@@ -1,5 +1,7 @@
 # LeetPlus Бэклог
 
+- Готово: серверный hotfix scheduled tenant filters забран в основной `main`. `runSnapshotPipelineScheduled`, `runDeliveryDispatchScheduled` и bot-consumer tenant lookup больше не передают `null` в Prisma `where` при пустом `tenantId`/`tenantSlug`, а regression-тест закрепляет пустой `{}` для общих scheduled-запусков и slug-only lookup для VDS bot-consumer. Это также убирает причину, по которой production auto-deploy застревал на старом commit из-за незакоммиченной серверной правки `guest-gamification.service.ts`.
+
 - Готово: production QA публичного игрового пути выявил, что `/game/clubs` без employee-cookie мог уходить в `/login?returnTo=/game/clubs`. Proxy теперь считает весь префикс `/game` публичным гостевым контуром, как `/play` и `/guest`, поэтому `/game/auth`, `/game/clubs` и `/game/app` не зависят от сотруднической авторизации.
 
 - Готово: action-ссылки пилотного чек-листа `Факты guests/logs` теперь ведут на `/sync?includeGuestLogs=1`, а страница `/sync` по этому query-параметру сразу включает расширенную проверку `guests/logs`. Это убирает ручной шаг с галочкой при подготовке квестов/anti-fraud и первого бонуса, сохраняя обычный `/sync` легким по умолчанию.

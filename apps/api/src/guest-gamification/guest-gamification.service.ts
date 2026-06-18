@@ -4724,9 +4724,9 @@ export class GuestGamificationService {
     const tenantSlug = nullableString(dto.tenantSlug);
     const tenants = await this.prisma.tenant.findMany({
       where: clean({
-        id: tenantId,
-        slug: tenantSlug,
-      }) as Prisma.TenantWhereInput,
+        id: tenantId ?? undefined,
+        slug: tenantSlug ?? undefined,
+      }),
       select: {
         id: true,
         slug: true,
@@ -4830,9 +4830,9 @@ export class GuestGamificationService {
         : booleanValue(dto.dryRun) || !config.realSendEnabled;
     const tenants = await this.prisma.tenant.findMany({
       where: clean({
-        id: tenantId,
-        slug: tenantSlug,
-      }) as Prisma.TenantWhereInput,
+        id: tenantId ?? undefined,
+        slug: tenantSlug ?? undefined,
+      }),
       select: {
         id: true,
         slug: true,
@@ -6696,9 +6696,9 @@ export class GuestGamificationService {
 
     const tenant = await this.prisma.tenant.findFirst({
       where: clean({
-        id: tenantId,
-        slug: tenantSlug,
-      }) as Prisma.TenantWhereInput,
+        id: tenantId ?? undefined,
+        slug: tenantSlug ?? undefined,
+      }),
       select: {
         id: true,
         slug: true,

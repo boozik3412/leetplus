@@ -2987,6 +2987,30 @@ describe('GuestGamificationService', () => {
       expect(JSON.stringify(outbox.botConsumer)).not.toContain('sync-token');
     });
 
+    it('omits empty tenant filters from scheduled gamification jobs', async () => {
+      const { service, prisma } = createService();
+
+      prisma.tenant.findMany.mockResolvedValue([]);
+
+      await service.runSnapshotPipelineScheduled({});
+
+      expect(prisma.tenant.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {},
+        }),
+      );
+
+      prisma.tenant.findMany.mockClear();
+
+      await service.runDeliveryDispatchScheduled({});
+
+      expect(prisma.tenant.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {},
+        }),
+      );
+    });
+
     it('pulls only ready bot deliveries with a confirmed bot identity', async () => {
       const { service, prisma } = createService();
 
@@ -3022,6 +3046,13 @@ describe('GuestGamificationService', () => {
             readinessStatus: 'READY_FOR_BOT',
             channel: { in: ['TELEGRAM'] },
           }),
+        }),
+      );
+      expect(prisma.tenant.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            slug: user.tenantSlug,
+          },
         }),
       );
       expect(result).toMatchObject({

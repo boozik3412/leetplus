@@ -81,6 +81,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Pulled the production hotfix for Guest Game scheduled tenant filters into `main`: scheduled pipeline, scheduled delivery dispatch, and bot-consumer tenant lookup now omit empty `tenantId`/`tenantSlug` values instead of passing `null` into Prisma `where`. This removes the local VDS diff that was blocking auto-deploy from updating production to the public `/game/*` route fix.
 - Hardened the public Guest Game route proxy after production QA: `/game/*` is now treated as a public guest-game surface alongside `/play` and `/guest`, so `/game/auth`, `/game/clubs`, and `/game/app` do not depend on an employee session.
 - Added the Guest Game Hub `guests/logs` sync deeplink: pilot readiness actions now point to `/sync?includeGuestLogs=1`, and `/sync` preselects the extended `guests/logs` checkbox from that query parameter while keeping ordinary sync lightweight by default.
 - Added a canary gate to the Guest Game Hub `VDS bot-consumer` readiness: API-visible status now returns safe `limit`, `canaryLimit`, and `canaryRequired` fields and blocks first real-send readiness when `GUEST_GAME_BOT_CONSUMER_DRY_RUN=false` but `GUEST_GAME_BOT_CONSUMER_LIMIT` is not `1` and no bot-consumer ack has been saved yet. The next action points the operator to one-shot canary without exposing tokens, raw phone, chat ids, Telegram updates, or Langame payload.

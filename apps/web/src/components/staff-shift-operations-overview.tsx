@@ -539,6 +539,49 @@ function MiniProgress({
   );
 }
 
+function operationsActivityTitle(kind: OverviewGroup["kind"]) {
+  return kind === "club" ? "Админы на смене" : "Активные работы";
+}
+
+function RowProgress({
+  value,
+  detail,
+}: {
+  value: number;
+  detail: string;
+}) {
+  const percent = clampPercent(value);
+
+  return (
+    <div className="min-w-0">
+      <div className="flex items-center justify-between gap-3 text-xs">
+        <span className="font-semibold text-zinc-950 dark:text-zinc-100">
+          {formatPercent(percent)}
+        </span>
+      </div>
+      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
+        <div
+          className={`h-full rounded-full ${progressTone(percent)}`}
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+      <p className="mt-1 truncate text-xs text-zinc-500">{detail}</p>
+    </div>
+  );
+}
+
+function OperationsRowsHeader({ kind }: { kind: OverviewGroup["kind"] }) {
+  return (
+    <div className="hidden border-t border-zinc-100 px-3 pt-3 text-[11px] font-semibold uppercase tracking-wide text-zinc-500 dark:border-zinc-800 sm:grid sm:grid-cols-[minmax(0,1.35fr)_7.5rem_minmax(0,1fr)_minmax(0,1fr)_1.5rem] sm:items-center sm:gap-3">
+      <span>{kind === "club" ? "Клуб" : "Администратор"}</span>
+      <span>{operationsActivityTitle(kind)}</span>
+      <span>Чек-листы</span>
+      <span>Задачи</span>
+      <span className="sr-only">Открыть</span>
+    </div>
+  );
+}
+
 function OperationsRow({
   group,
   onOpen,
@@ -552,14 +595,13 @@ function OperationsRow({
     group.kind === "club"
       ? group.activeAdmins
       : activeChecklistCount(group.checklist) + activeTaskCount(group.tasks);
-  const activityLabel = group.kind === "club" ? "админов" : "активных";
   const checklistGap = hasChecklistControlGap(group);
 
   return (
     <button
       type="button"
       onClick={onOpen}
-      className="group grid w-full gap-3 border-t border-zinc-100 py-3 text-left transition first:border-t-0 hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 dark:border-zinc-800 dark:hover:bg-zinc-900/70 sm:grid-cols-[minmax(0,1.35fr)_6.5rem_minmax(0,1fr)_minmax(0,1fr)_1.5rem] sm:items-center"
+      className="group grid w-full gap-3 border-t border-zinc-100 px-3 py-3 text-left transition first:border-t-0 hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 dark:border-zinc-800 dark:hover:bg-zinc-900/70 sm:grid-cols-[minmax(0,1.35fr)_7.5rem_minmax(0,1fr)_minmax(0,1fr)_1.5rem] sm:items-center"
     >
       <div className="min-w-0">
         <p className="truncate text-sm font-semibold text-zinc-950 dark:text-zinc-100">
@@ -574,19 +616,20 @@ function OperationsRow({
           </p>
         ) : null}
       </div>
-      <div className="inline-flex w-fit items-center gap-1 rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
-        <span>{formatNumber(activityCount)}</span>
-        <span className="font-medium text-zinc-500">{activityLabel}</span>
+      <div
+        className="inline-flex w-fit items-center rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
+        aria-label={`${operationsActivityTitle(group.kind)}: ${formatNumber(activityCount)}`}
+        title={`${operationsActivityTitle(group.kind)}: ${formatNumber(activityCount)}`}
+      >
+        {formatNumber(activityCount)}
       </div>
-      <MiniProgress
-        label="Чек-листы"
+      <RowProgress
         value={checklistPercent}
         detail={`${formatNumber(group.checklist.requiredItemsDone)}/${formatNumber(
           group.checklist.requiredItemsTotal,
         )} пунктов`}
       />
-      <MiniProgress
-        label="Задачи"
+      <RowProgress
         value={taskPercent}
         detail={`${formatNumber(group.tasks.done)}/${formatNumber(
           Math.max(group.tasks.total - group.tasks.canceled, 0),
@@ -601,7 +644,6 @@ function OperationsRow({
     </button>
   );
 }
-
 function Metric({
   label,
   value,
@@ -660,7 +702,7 @@ function DetailsBlock({
           {formatNumber(count)}
         </span>
       </summary>
-      <div className="px-3 pb-2">{children}</div>
+      <div className="pb-2">{children}</div>
     </details>
   );
 }
@@ -1224,13 +1266,16 @@ export function StaffShiftOperationsOverview({
             </div>
           ) : null}
           {displayClubGroups.length > 0 ? (
-            displayClubGroups.map((group) => (
-              <OperationsRow
-                key={group.key}
-                group={group}
-                onOpen={() => setModal({ type: "club", key: group.key })}
-              />
-            ))
+            <>
+              <OperationsRowsHeader kind="club" />
+              {displayClubGroups.map((group) => (
+                <OperationsRow
+                  key={group.key}
+                  group={group}
+                  onOpen={() => setModal({ type: "club", key: group.key })}
+                />
+              ))}
+            </>
           ) : (
             <p className="py-3 text-sm text-zinc-500">
               За сегодня нет сменных чек-листов и задач.
@@ -1247,13 +1292,16 @@ export function StaffShiftOperationsOverview({
             </div>
           ) : null}
           {displayEmployeeGroups.length > 0 ? (
-            displayEmployeeGroups.slice(0, 12).map((group) => (
-              <OperationsRow
-                key={group.key}
-                group={group}
-                onOpen={() => setModal({ type: "employee", key: group.key })}
-              />
-            ))
+            <>
+              <OperationsRowsHeader kind="employee" />
+              {displayEmployeeGroups.slice(0, 12).map((group) => (
+                <OperationsRow
+                  key={group.key}
+                  group={group}
+                  onOpen={() => setModal({ type: "employee", key: group.key })}
+                />
+              ))}
+            </>
           ) : (
             <p className="py-3 text-sm text-zinc-500">
               Пока нет назначенных чек-листов или задач.

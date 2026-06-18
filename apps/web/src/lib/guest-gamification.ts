@@ -1189,6 +1189,13 @@ export type GuestGameGuestLogCatalog = {
     logs: number;
     domains: number;
     latestAt: string | null;
+    lastSuccessfulSync: {
+      businessDate: string;
+      updatedAt: string;
+      guestLogs: number;
+      sources: number | null;
+      failedSources: number | null;
+    } | null;
   };
 };
 

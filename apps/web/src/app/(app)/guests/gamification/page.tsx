@@ -508,6 +508,7 @@ const emptyWorkspace: GuestGamificationWorkspace = {
       logs: 0,
       domains: 0,
       latestAt: null,
+      lastSuccessfulSync: null,
     },
   },
 };

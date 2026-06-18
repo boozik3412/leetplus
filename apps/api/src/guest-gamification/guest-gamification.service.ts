@@ -7,6 +7,8 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { randomBytes } from 'crypto';
 import {
+  DailyDataCoverageScope,
+  DailyDataCoverageStatus,
   IntegrationProvider,
   Prisma,
   TenantLifecycleStatus,
@@ -870,6 +872,13 @@ export type GuestGameGuestLogCatalog = {
     logs: number;
     domains: number;
     latestAt: string | null;
+    lastSuccessfulSync: {
+      businessDate: string;
+      updatedAt: string;
+      guestLogs: number;
+      sources: number | null;
+      failedSources: number | null;
+    } | null;
   };
 };
 
@@ -2152,6 +2161,16 @@ function jsonRecord(value: Prisma.JsonValue | null): Record<string, unknown> {
     : {};
 }
 
+function finiteJsonNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  const parsed = Number(value);
+
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function uniqueStrings(values: string[]) {
   return [...new Set(values)].slice(0, 16);
 }
@@ -3243,6 +3262,8 @@ export class GuestGamificationService {
     const guestLogMappings = guestLogCatalog.mappings.length;
     const guestLogLatestAt = guestLogCatalog.summary.latestAt;
     const guestLogsReady = guestLogTypes > 0 && guestLogRows > 0;
+    const guestLogLastSync = guestLogCatalog.summary.lastSuccessfulSync;
+    const guestLogsCheckedEmpty = Boolean(!guestLogsReady && guestLogLastSync);
     const guestLogRuleDependencies = [
       ...activeLootBoxes,
       ...activeMissions,
@@ -3419,10 +3440,14 @@ export class GuestGamificationService {
         statusLabel: guestLogsReady
           ? 'типы найдены'
           : guestLogsRequiredByRules
-            ? 'нужен sync'
+            ? guestLogsCheckedEmpty
+              ? '0 после sync'
+              : 'нужен sync'
             : guestLogMappings
               ? 'ждет sync'
-              : 'не требуется',
+              : guestLogsCheckedEmpty
+                ? 'проверено: 0'
+                : 'не требуется',
         ready: guestLogsReady,
         metric: guestLogsReady
           ? guestLogsRequiredByRules
@@ -3438,19 +3463,31 @@ export class GuestGamificationService {
             ? `Каталог событий готов для ${guestLogRuleDependencies} правил guests/logs: ${guestLogDomains} источников, последнее событие ${guestLogLatestAt ?? 'без даты'}.`
             : `Каталог событий сохранен для будущих квестов и anti-fraud: ${guestLogDomains} источников, последнее событие ${guestLogLatestAt ?? 'без даты'}. Текущие правила могут идти без guests/logs.`
           : guestLogsRequiredByRules
-            ? 'Активные правила используют типы guests/logs, но сохраненных фактов пока нет: dry-run по этим правилам будет неполным.'
+            ? guestLogsCheckedEmpty
+              ? `Активные правила используют guests/logs, но последний успешный foundation sync за ${guestLogLastSync?.businessDate ?? 'последнюю дату'} проверил endpoint и вернул 0 логов. Повтор sync без разбора Langame payload не снимет риск.`
+              : 'Активные правила используют типы guests/logs, но сохраненных фактов пока нет: dry-run по этим правилам будет неполным.'
             : guestLogMappings
               ? 'Словарь типов уже настроен, но текущие активные правила не требуют guests/logs.'
-              : 'Текущие активные правила не требуют guests/logs; каталог нужен для будущих квестов и anti-fraud.',
+              : guestLogsCheckedEmpty
+                ? `Текущие активные правила не требуют guests/logs; последний успешный foundation sync за ${guestLogLastSync?.businessDate ?? 'последнюю дату'} уже проверил endpoint и вернул 0 логов.`
+                : 'Текущие активные правила не требуют guests/logs; каталог нужен для будущих квестов и anti-fraud.',
         nextAction: guestLogsReady
           ? 'Скачать CSV каталога и выбрать реальные типы для правил 1337.'
           : guestLogsRequiredByRules
-            ? 'На /sync включить расширенную проверку guests/logs и дождаться сохраненных фактов перед dry-run.'
-            : 'Можно запускать dry-run текущих правил; для расширенных квестов позже заполнить guests/logs на /sync.',
+            ? guestLogsCheckedEmpty
+              ? 'Открыть диагностику /sync, проверить строки последнего foundation-run и временно убрать зависимость rules от guests/logs до подтверждения payload Langame.'
+              : 'На /sync включить расширенную проверку guests/logs и дождаться сохраненных фактов перед dry-run.'
+            : guestLogsCheckedEmpty
+              ? 'Можно запускать dry-run текущих правил; для guests/logs-квестов сначала подтвердить у Langame, почему endpoint возвращает 0 строк.'
+              : 'Можно запускать dry-run текущих правил; для расширенных квестов позже заполнить guests/logs на /sync.',
         actionHref: guestLogsReady
           ? '/api/guests/gamification/guest-log-catalog/export'
           : '/sync?includeGuestLogs=1',
-        actionLabel: guestLogsReady ? 'Скачать CSV' : 'Открыть /sync',
+        actionLabel: guestLogsReady
+          ? 'Скачать CSV'
+          : guestLogsCheckedEmpty
+            ? 'Открыть диагностику'
+            : 'Открыть /sync',
       },
       {
         key: 'TEST_EVENT',
@@ -3976,7 +4013,7 @@ export class GuestGamificationService {
     options: { limit?: number | null } = {},
   ): Promise<GuestGameGuestLogCatalog> {
     const limit = options.limit === null ? null : (options.limit ?? 80);
-    const [rows, mappings] = await Promise.all([
+    const [rows, mappings, recentFoundationRuns] = await Promise.all([
       this.prisma.guestLog.groupBy({
         by: ['type', 'externalDomain', 'externalProvider'],
         where: {
@@ -3993,6 +4030,20 @@ export class GuestGamificationService {
         where: { tenantId: user.tenantId },
         include: guestLogTypeMappingInclude,
         orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+      }),
+      this.prisma.dailyDataCoverage.findMany({
+        where: {
+          tenantId: user.tenantId,
+          scope: DailyDataCoverageScope.GUEST_FOUNDATION,
+          status: DailyDataCoverageStatus.SUCCESS,
+        },
+        select: {
+          businessDate: true,
+          updatedAt: true,
+          sourceCounts: true,
+        },
+        orderBy: [{ businessDate: 'desc' }, { updatedAt: 'desc' }],
+        take: 10,
       }),
     ]);
     const mappedMappings = mappings.map(mapGuestLogTypeMapping);
@@ -4069,6 +4120,25 @@ export class GuestGamificationService {
     const domains = new Set(
       items.flatMap((item) => item.domains.map((domain) => domain.domain)),
     );
+    const lastSuccessfulSync =
+      recentFoundationRuns
+        .map((run) => {
+          const counts = jsonRecord(run.sourceCounts);
+          const guestLogs = finiteJsonNumber(counts.guestLogs);
+
+          if (guestLogs === null) {
+            return null;
+          }
+
+          return {
+            businessDate: run.businessDate.toISOString().slice(0, 10),
+            updatedAt: run.updatedAt.toISOString(),
+            guestLogs,
+            sources: finiteJsonNumber(counts.sources),
+            failedSources: finiteJsonNumber(counts.failedSources),
+          };
+        })
+        .find((run) => run !== null) ?? null;
 
     return {
       items,
@@ -4078,6 +4148,7 @@ export class GuestGamificationService {
         logs: items.reduce((sum, item) => sum + item.count, 0),
         domains: domains.size,
         latestAt: latestAt?.toISOString() ?? null,
+        lastSuccessfulSync,
       },
     };
   }

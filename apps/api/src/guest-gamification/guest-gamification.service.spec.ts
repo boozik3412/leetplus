@@ -562,6 +562,13 @@ function pilotReadinessInput(overrides: Record<string, unknown> = {}) {
         logs: 12,
         domains: 1,
         latestAt: '2026-06-15T08:00:00.000Z',
+        lastSuccessfulSync: {
+          businessDate: '2026-06-15',
+          updatedAt: '2026-06-15T23:57:06.000Z',
+          guestLogs: 12,
+          sources: 3,
+          failedSources: 0,
+        },
       },
     },
     pilotLedgerPreflight: pilotLedgerPreflightFixture(),
@@ -1477,6 +1484,7 @@ describe('GuestGamificationService', () => {
               logs: 0,
               domains: 0,
               latestAt: null,
+              lastSuccessfulSync: null,
             },
           },
         }),
@@ -1521,6 +1529,7 @@ describe('GuestGamificationService', () => {
               logs: 0,
               domains: 0,
               latestAt: null,
+              lastSuccessfulSync: null,
             },
           },
         }),
@@ -1542,6 +1551,104 @@ describe('GuestGamificationService', () => {
             nextAction: expect.stringContaining('/sync'),
             actionHref: '/sync?includeGuestLogs=1',
             actionLabel: 'Открыть /sync',
+          }),
+        ]),
+      );
+    });
+
+    it('shows guests/logs as checked-empty when successful sync already returned zero rows', () => {
+      const { service } = createService();
+
+      const readiness = (service as any).buildPilotReadiness(
+        pilotReadinessInput({
+          guestLogCatalog: {
+            items: [],
+            mappings: [],
+            summary: {
+              types: 0,
+              logs: 0,
+              domains: 0,
+              latestAt: null,
+              lastSuccessfulSync: {
+                businessDate: '2026-06-17',
+                updatedAt: '2026-06-17T23:54:40.526Z',
+                guestLogs: 0,
+                sources: 3,
+                failedSources: 0,
+              },
+            },
+          },
+        }),
+      );
+
+      expect(readiness.runbook).toMatchObject({
+        stage: 'DRY_RUN',
+        canRunDryRun: true,
+      });
+      expect(readiness.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            key: 'GUEST_LOGS',
+            status: 'MANUAL_ONLY',
+            statusLabel: 'проверено: 0',
+            nextAction: expect.stringContaining(
+              'почему endpoint возвращает 0 строк',
+            ),
+            actionHref: '/sync?includeGuestLogs=1',
+            actionLabel: 'Открыть диагностику',
+          }),
+        ]),
+      );
+    });
+
+    it('blocks guests/logs rules with a checked-empty diagnostic instead of a blind sync prompt', () => {
+      const { service } = createService();
+
+      const readiness = (service as any).buildPilotReadiness(
+        pilotReadinessInput({
+          missions: [
+            activeMission({
+              conditions: {
+                guestLogTypes: ['session_start'],
+              },
+            }),
+          ],
+          guestLogCatalog: {
+            items: [],
+            mappings: [],
+            summary: {
+              types: 0,
+              logs: 0,
+              domains: 0,
+              latestAt: null,
+              lastSuccessfulSync: {
+                businessDate: '2026-06-17',
+                updatedAt: '2026-06-17T23:54:40.526Z',
+                guestLogs: 0,
+                sources: 3,
+                failedSources: 0,
+              },
+            },
+          },
+        }),
+      );
+
+      expect(readiness.runbook).toMatchObject({
+        stage: 'BLOCKED',
+        canRunDryRun: false,
+        blockers: ['Факты guests/logs'],
+      });
+      expect(readiness.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            key: 'GUEST_LOGS',
+            status: 'BLOCKED',
+            statusLabel: '0 после sync',
+            note: expect.stringContaining('последний успешный foundation sync'),
+            nextAction: expect.stringContaining(
+              'подтверждения payload Langame',
+            ),
+            actionLabel: 'Открыть диагностику',
           }),
         ]),
       );

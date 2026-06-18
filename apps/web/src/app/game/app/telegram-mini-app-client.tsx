@@ -747,20 +747,90 @@ function ProfilePanel({
           <ArrowIcon />
         </button>
       </form>
-      <button
-        className="grid min-h-11 place-items-center rounded-[7px] border border-[#c4e0e529] bg-[#c4e0e50a] text-[10px] font-black uppercase tracking-[0.12em] text-[#83e4ec]"
-        type="button"
-        onClick={() =>
-          showToast(
-            summary.rewards.bonusHistory.items.length
-              ? `История: ${summary.rewards.bonusHistory.items.length} операций.`
-              : "История наград пока пустая.",
-          )
-        }
-      >
-        История наград
-      </button>
+      <MiniBonusHistory history={summary.rewards.bonusHistory} />
     </Panel>
+  );
+}
+
+function MiniBonusHistory({
+  history,
+}: {
+  history: GuestPortalGameSummary["rewards"]["bonusHistory"];
+}) {
+  const items = history.items.slice(0, 3);
+
+  return (
+    <div className="rounded-[7px] border border-[#c4e0e529] bg-[#00060975] p-3">
+      <div className="flex items-start justify-between gap-3">
+        <span>
+          <strong className="block text-[10px] font-black uppercase tracking-[0.12em] text-[#83e4ec]">
+            История наград
+          </strong>
+          <small className="mt-1 block text-[10px] leading-4 text-[#71878a]">
+            {history.summary.total
+              ? `${formatNumber(history.summary.total)} операций`
+              : "пока пусто"}
+          </small>
+        </span>
+        <span className="text-right">
+          <strong className="block text-sm font-black leading-none text-[#edf7f8]">
+            +{formatNumber(history.summary.confirmedAmount)}
+          </strong>
+          <small className="mt-1 block text-[9px] uppercase tracking-[0.1em] text-[#a8b9ba]">
+            подтверждено
+          </small>
+        </span>
+      </div>
+
+      <div className="mt-3 grid gap-2">
+        {items.length ? (
+          items.map((item) => (
+            <div
+              className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 rounded-[7px] border border-[#c4e0e51f] bg-[#02080b8a] p-2.5"
+              key={item.id}
+            >
+              <span className="min-w-0">
+                <strong className="block truncate text-[12px] font-black leading-4 text-[#edf7f8]">
+                  {item.title}
+                </strong>
+                <small className="mt-1 block truncate text-[10px] leading-4 text-[#a8b9ba]">
+                  {[item.sourceLabel, item.storeName, bonusHistoryDate(item)]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </small>
+              </span>
+              <span className="text-right">
+                <strong
+                  className={[
+                    "block text-[13px] font-black leading-4",
+                    item.status === "FAILED" || item.status === "CANCELED"
+                      ? "text-[#d0aa6c]"
+                      : "text-[#83e4ec]",
+                  ].join(" ")}
+                >
+                  {item.amount > 0 ? "+" : ""}
+                  {formatNumber(item.amount)}
+                </strong>
+                <small className="mt-1 block whitespace-nowrap text-[9px] uppercase tracking-[0.08em] text-[#71878a]">
+                  {item.statusLabel}
+                </small>
+              </span>
+              {item.balanceAfter !== null ? (
+                <span className="col-span-2 text-[10px] leading-4 text-[#71878a]">
+                  Баланс после: {formatNumber(item.balanceAfter)}
+                </span>
+              ) : null}
+            </div>
+          ))
+        ) : (
+          <EmptyRow
+            icon={<RewardIcon />}
+            title="Начислений еще нет"
+            subtitle="Первый бонус появится после квеста"
+          />
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -1044,6 +1114,25 @@ function formatNumber(value: number | null | undefined) {
   return new Intl.NumberFormat("ru-RU", {
     maximumFractionDigits: 0,
   }).format(value ?? 0);
+}
+
+function bonusHistoryDate(
+  item: GuestPortalGameSummary["rewards"]["bonusHistory"]["items"][number],
+) {
+  const value = item.confirmedAt ?? item.processedAt ?? item.occurredAt;
+
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return new Intl.DateTimeFormat("ru-RU", {
+      day: "2-digit",
+      month: "short",
+    }).format(new Date(value));
+  } catch {
+    return null;
+  }
 }
 
 function MenuIcon() {

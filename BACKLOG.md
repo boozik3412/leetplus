@@ -34,7 +34,7 @@
 
 - Готово: `TG-MINI-03` web proxy exchange выставляет HttpOnly `leetplus_guest_token` после успешной проверки Mini App, поэтому `/game/app` переиспользует существующий `session/game-summary` без нового публичного token-контракта.
 
-- Готово: `TG-MINI-04` `/game/app` собран по готовому mobile/TG макету `gamification-club-home-mobile-app-mockup.html`: safe-area, sticky club/level header, XP/level/progress, события, квесты выше вторичных блоков, горизонтальные ленты, батлпасс, награды/лутбоксы, профиль, промокод, история наград и bottom navigation `Главная / Квесты / Награды / Профиль` без horizontal overflow.
+- Готово: `TG-MINI-04` `/game/app` собран по готовому mobile/TG макету `gamification-club-home-mobile-app-mockup.html`: safe-area, sticky club/level header, XP/level/progress, события, квесты выше вторичных блоков, горизонтальные ленты, батлпасс, награды/лутбоксы, профиль, промокод, история наград и bottom navigation `Главная / Квесты / Награды / Профиль` без horizontal overflow. История наград в профиле Mini App показывает последние безопасные bonus ledger операции: статус, сумму, источник, клуб, дату и баланс после начисления без raw phone, токенов и Langame payload.
 
 - Готово: `TG-MINI-05` добавлен выбор клуба внутри Mini App для Telegram identity, связанной с несколькими `GuestGameProfile`; scoped guest session выпускается только после выбора tenant/store.
 

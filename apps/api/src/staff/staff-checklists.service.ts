@@ -545,7 +545,7 @@ export class StaffChecklistsService {
         where,
         include: checklistRunInclude,
         orderBy: [
-          { submittedAt: 'desc' },
+          { startedAt: 'desc' },
           { scheduledAt: 'desc' },
           { createdAt: 'desc' },
         ],
@@ -1256,9 +1256,9 @@ export class StaffChecklistsService {
             : []),
         {
           OR: [
-            { submittedAt: dateRange },
-            { submittedAt: null, scheduledAt: dateRange },
-            { submittedAt: null, scheduledAt: null, createdAt: dateRange },
+            { startedAt: dateRange },
+            { startedAt: null, scheduledAt: dateRange },
+            { startedAt: null, scheduledAt: null, createdAt: dateRange },
           ],
         },
       ];
@@ -1890,7 +1890,7 @@ export class StaffChecklistsService {
   }
 
   private executionActivityDate(row: StaffChecklistRunRow) {
-    return row.submittedAt ?? row.scheduledAt ?? row.createdAt;
+    return row.startedAt ?? row.scheduledAt ?? row.createdAt;
   }
 
   private normalizeSections(value: unknown): StaffChecklistSection[] {

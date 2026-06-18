@@ -9,6 +9,7 @@ import {
   useTransition,
   type ReactNode,
 } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -1588,20 +1589,10 @@ function MessageCard({
           ].join(" ")}
         >
           {message.attachments.map((attachment) => (
-            <a
+            <MessageAttachmentCard
               key={attachment.id}
-              href={getAttachmentHref(attachment)}
-              className="inline-flex max-w-full items-center gap-2 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-semibold text-zinc-600 transition-colors hover:border-emerald-300 hover:text-emerald-700 dark:border-zinc-800 dark:text-zinc-300 dark:hover:border-emerald-500/50 dark:hover:text-emerald-200"
-              target="_blank"
-              rel="noreferrer"
-            >
-              <span className="max-w-[260px] truncate">
-                {attachment.fileName}
-              </span>
-              <span className="text-zinc-400">
-                {formatBytes(attachment.byteSize)}
-              </span>
-            </a>
+              attachment={attachment}
+            />
           ))}
         </div>
       ) : null}
@@ -1723,6 +1714,58 @@ function MessageCard({
         </div>
       ) : null}
     </article>
+  );
+}
+
+function MessageAttachmentCard({
+  attachment,
+}: {
+  attachment: StaffChatAttachment;
+}) {
+  const href = getAttachmentHref(attachment);
+  const isImage = isImageAttachment(attachment);
+
+  if (!isImage) {
+    return (
+      <a
+        href={href}
+        className="inline-flex max-w-full items-center gap-2 rounded-full border border-zinc-200 px-3 py-1.5 text-xs font-semibold text-zinc-600 transition-colors hover:border-emerald-300 hover:text-emerald-700 dark:border-zinc-800 dark:text-zinc-300 dark:hover:border-emerald-500/50 dark:hover:text-emerald-200"
+        target="_blank"
+        rel="noreferrer"
+      >
+        <span className="max-w-[260px] truncate">{attachment.fileName}</span>
+        <span className="text-zinc-400">{formatBytes(attachment.byteSize)}</span>
+      </a>
+    );
+  }
+
+  return (
+    <a
+      href={href}
+      className="group w-[148px] overflow-hidden rounded-lg border border-zinc-200 bg-white text-left shadow-sm transition-colors hover:border-emerald-300 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-emerald-500/50"
+      target="_blank"
+      rel="noreferrer"
+      title={attachment.fileName}
+    >
+      <span className="block aspect-[4/3] overflow-hidden bg-zinc-100 dark:bg-zinc-900">
+        <Image
+          src={href}
+          alt={attachment.fileName}
+          width={296}
+          height={222}
+          unoptimized
+          className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-105"
+        />
+      </span>
+      <span className="block space-y-0.5 p-2">
+        <span className="block truncate text-xs font-semibold text-zinc-700 dark:text-zinc-200">
+          {attachment.fileName}
+        </span>
+        <span className="block text-[11px] font-medium text-zinc-400">
+          {formatBytes(attachment.byteSize)}
+        </span>
+      </span>
+    </a>
   );
 }
 
@@ -1998,6 +2041,14 @@ function getAttachmentHref(attachment: StaffChatAttachment) {
   }
 
   return `/api${attachment.url}`;
+}
+
+function isImageAttachment(attachment: StaffChatAttachment) {
+  if (attachment.contentType.toLowerCase().startsWith("image/")) {
+    return true;
+  }
+
+  return /\.(avif|gif|jpe?g|png|webp)$/i.test(attachment.fileName);
 }
 
 function formatBytes(value: number) {

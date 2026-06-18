@@ -4,8 +4,22 @@ import { requireCurrentUser } from "@/lib/auth";
 import { getLangameSettings } from "@/lib/langame-settings";
 import { can } from "@/lib/permissions";
 
-export default async function SyncPage() {
+type SyncPageProps = {
+  searchParams?: Promise<{
+    includeGuestLogs?: string | string[];
+  }>;
+};
+
+export default async function SyncPage({ searchParams }: SyncPageProps) {
   const user = await requireCurrentUser();
+  const params = await searchParams;
+  const includeGuestLogsParam = Array.isArray(params?.includeGuestLogs)
+    ? params?.includeGuestLogs[0]
+    : params?.includeGuestLogs;
+  const initialIncludeGuestLogs =
+    includeGuestLogsParam === "1" ||
+    includeGuestLogsParam === "true" ||
+    includeGuestLogsParam === "yes";
 
   if (!can(user, "run_sync")) {
     return (
@@ -54,7 +68,10 @@ export default async function SyncPage() {
           </p>
         </div>
 
-        <LangameSyncPanel initialSettings={langameSettings} />
+        <LangameSyncPanel
+          initialSettings={langameSettings}
+          initialIncludeGuestLogs={initialIncludeGuestLogs}
+        />
       </div>
     </main>
   );

@@ -81,6 +81,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Added the Guest Game Hub `guests/logs` sync deeplink: pilot readiness actions now point to `/sync?includeGuestLogs=1`, and `/sync` preselects the extended `guests/logs` checkbox from that query parameter while keeping ordinary sync lightweight by default.
 - Added a canary gate to the Guest Game Hub `VDS bot-consumer` readiness: API-visible status now returns safe `limit`, `canaryLimit`, and `canaryRequired` fields and blocks first real-send readiness when `GUEST_GAME_BOT_CONSUMER_DRY_RUN=false` but `GUEST_GAME_BOT_CONSUMER_LIMIT` is not `1` and no bot-consumer ack has been saved yet. The next action points the operator to one-shot canary without exposing tokens, raw phone, chat ids, Telegram updates, or Langame payload.
 - Activated the current live Telegram bot + Mini App topology on server 1337 as a polling-first edge: `telegram-poller` consumes Telegram `getUpdates`, clears any public webhook without dropping pending updates, forwards safe updates to the main API, and `https://tg.leetplus.ru/game/app` serves the Mini App. Added polling env examples, a testable `guest-game:telegram-poller` CLI, regression tests, and renamed operator readiness to `Telegram update consumer (polling edge)`.
 - Saved the current 1337 Telegram bot + Mini App handoff as the source of truth: `docs/deployment/telegram-edge-vds/CURRENT_1337_HANDOFF.md` records the live `https://tg.leetplus.ru` edge, Docker Compose layout, polling mode, update process, checks, canary markers, env locations, and security rules.

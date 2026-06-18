@@ -942,15 +942,19 @@ function getErrorMessage(data: unknown) {
 
 export function LangameSyncPanel({
   initialSettings,
+  initialIncludeGuestLogs = false,
 }: {
   initialSettings: LangameSettings;
+  initialIncludeGuestLogs?: boolean;
 }) {
   const today = getTodayInputValue();
   const [settings, setSettings] = useState(initialSettings);
   const [syncPeriod, setSyncPeriod] = useState<SyncPeriod>("last7");
   const [syncDateFrom, setSyncDateFrom] = useState(shiftDateInput(today, -6));
   const [syncDateTo, setSyncDateTo] = useState(today);
-  const [includeGuestLogs, setIncludeGuestLogs] = useState(false);
+  const [includeGuestLogs, setIncludeGuestLogs] = useState(
+    initialIncludeGuestLogs,
+  );
   const [syncResult, setSyncResult] = useState<CombinedSyncResult | null>(null);
   const [latestGuestStatus, setLatestGuestStatus] =
     useState<GuestSyncStatus | null>(null);
@@ -1537,6 +1541,9 @@ export function LangameSyncPanel({
               Опционально загрузит типы событий гостя за выбранный период для
               миссий, лутбоксов, battle pass и anti-fraud. Обычная
               синхронизация остается легче, если флаг выключен.
+              {initialIncludeGuestLogs
+                ? " Флаг включен по ссылке из чек-листа геймификации."
+                : ""}
             </span>
           </span>
         </label>

@@ -3449,7 +3449,7 @@ export class GuestGamificationService {
             : 'Можно запускать dry-run текущих правил; для расширенных квестов позже заполнить guests/logs на /sync.',
         actionHref: guestLogsReady
           ? '/api/guests/gamification/guest-log-catalog/export'
-          : '/sync',
+          : '/sync?includeGuestLogs=1',
         actionLabel: guestLogsReady ? 'Скачать CSV' : 'Открыть /sync',
       },
       {

@@ -1383,6 +1383,7 @@ export class GuestPortalService {
         const storeSlug = store.publicSlug ?? store.id;
         const latitude = decimalNumber(store.latitude);
         const longitude = decimalNumber(store.longitude);
+        const city = publicStoreCity(store.city, store.address);
         const distanceKm =
           guestLocation && latitude !== null && longitude !== null
             ? haversineDistanceKm(guestLocation, { latitude, longitude })
@@ -1398,11 +1399,11 @@ export class GuestPortalService {
             id: store.id,
             publicSlug: store.publicSlug,
             name: store.name,
-            city: store.city,
+            city,
             address: store.address,
           },
           location: {
-            city: store.city,
+            city,
             address: store.address,
             latitude,
             longitude,
@@ -1445,9 +1446,9 @@ export class GuestPortalService {
     const clubs = radiusFilteredClubs.sort((left, right) =>
       compareDirectoryClubs(left, right),
     );
-    const cities = uniqueStrings(
-      clubs.map((club) => club.store.city?.trim() || null),
-    ).sort((left, right) => left.localeCompare(right, 'ru'));
+    const cities = uniqueStrings(clubs.map((club) => club.store.city)).sort(
+      (left, right) => left.localeCompare(right, 'ru'),
+    );
     const hiddenWithoutCoordinates = radiusApplied
       ? allClubs.filter((club) => club.location.distanceKm === null).length
       : 0;
@@ -8490,6 +8491,49 @@ function uniqueStrings(values: Array<string | null | undefined>) {
   return [
     ...new Set(values.filter((value): value is string => Boolean(value))),
   ];
+}
+
+function publicStoreCity(city: string | null, address: string | null) {
+  const explicitCity = city?.trim();
+
+  if (explicitCity) {
+    return explicitCity;
+  }
+
+  return cityFromAddress(address);
+}
+
+function cityFromAddress(address: string | null) {
+  const normalized = address?.replace(/\s+/g, ' ').trim();
+
+  if (!normalized) {
+    return null;
+  }
+
+  const prefixedCity = normalized.match(
+    /(?:^|[,\s])(?:г\.?|город)\s*([А-ЯЁA-Z][А-ЯЁA-Zа-яёa-z -]{1,60})/u,
+  );
+
+  if (prefixedCity?.[1]) {
+    return cleanupCityName(prefixedCity[1]);
+  }
+
+  const firstPart = normalized.split(',')[0]?.trim() ?? '';
+
+  if (/^[А-ЯЁA-Z][А-ЯЁA-Zа-яёa-z -]{1,60}$/u.test(firstPart)) {
+    return cleanupCityName(firstPart);
+  }
+
+  return null;
+}
+
+function cleanupCityName(value: string) {
+  const cleaned = value
+    .replace(/\b(?:ул|улица|пр|проспект|пер|переулок|ш|шоссе)\.?$/iu, '')
+    .trim()
+    .replace(/\s+$/, '');
+
+  return cleaned || null;
 }
 
 function booleanEnv(value: string | undefined) {

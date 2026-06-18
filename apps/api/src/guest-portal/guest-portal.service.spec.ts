@@ -1189,8 +1189,8 @@ describe('GuestPortalService', () => {
           id: 'store-2',
           publicSlug: 'silent',
           name: 'Silent Club',
-          city: 'Екатеринбург',
-          address: 'ул. Малышева, 2',
+          city: null,
+          address: 'г. Ижевск, ул. Пушкинская, 217',
           latitude: null,
           longitude: null,
           gamificationEnabled: true,
@@ -1260,7 +1260,7 @@ describe('GuestPortalService', () => {
         status: 'READY',
         requiredEnv: [],
       });
-      expect(directory.cities).toEqual(['Екатеринбург']);
+      expect(directory.cities).toEqual(['Екатеринбург', 'Ижевск']);
       expect(directory.clubs[0]).toMatchObject({
         id: 'leet:club-1337',
         tenant: { slug: 'leet' },
@@ -1278,6 +1278,8 @@ describe('GuestPortalService', () => {
       expect(directory.clubs[0].location.distanceKm).toBeLessThan(1);
       expect(directory.clubs[1]).toMatchObject({
         id: 'no-games:silent',
+        store: { city: 'Ижевск' },
+        location: { city: 'Ижевск' },
         gamification: {
           activeRules: 0,
           gamificationEnabled: true,

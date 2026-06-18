@@ -131,13 +131,18 @@ export function useUnsavedDraftPrompt({
     };
   }, [guardAction]);
 
-  const leaveWithoutSaving = useCallback(() => {
+  const runPendingAction = useCallback(() => {
     const action = pendingActionRef.current;
     pendingActionRef.current = null;
+    enabledRef.current = false;
     setIsOpen(false);
     setSaveError(null);
     action?.();
   }, []);
+
+  const leaveWithoutSaving = useCallback(() => {
+    runPendingAction();
+  }, [runPendingAction]);
 
   const saveAndLeave = useCallback(async () => {
     const saveDraft = saveDraftRef.current;
@@ -158,10 +163,7 @@ export function useUnsavedDraftPrompt({
         return;
       }
 
-      const action = pendingActionRef.current;
-      pendingActionRef.current = null;
-      setIsOpen(false);
-      action?.();
+      runPendingAction();
     } catch (caught) {
       setSaveError(
         caught instanceof Error
@@ -171,7 +173,7 @@ export function useUnsavedDraftPrompt({
     } finally {
       setIsSaving(false);
     }
-  }, [leaveWithoutSaving]);
+  }, [leaveWithoutSaving, runPendingAction]);
 
   const stay = useCallback(() => {
     pendingActionRef.current = null;

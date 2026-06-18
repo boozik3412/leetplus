@@ -465,8 +465,10 @@ export function StaffChecklistWorkspace({
                   <div>
                     <p className="text-sm font-semibold">{run.title}</p>
                     <p className="mt-1 text-xs text-zinc-500">
-                      {run.store?.name ?? "Вся сеть"} ·{" "}
-                      {formatDateTime(run.scheduledAt)}
+                      {run.assignedToUser?.fullName ??
+                        run.assignedToUser?.email ??
+                        "Не назначен"} · {run.store?.name ?? "Вся сеть"} ·{" "}
+                      {formatDateTime(run.startedAt ?? run.scheduledAt)}
                     </p>
                   </div>
                   <span className={statusClass(run.status, run.isOverdue)}>

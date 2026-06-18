@@ -44,6 +44,22 @@ x-guest-portal-user-call-secret: <provider-callback-secret>
 
 Callback должен передавать номер звонящего только backend-у LeetPlus. При SMS.ru callback secret не нужен: в challenge сохраняется только provider name и внешний `check_id`. Frontend получает только статус, маски и safe local match; raw phone, `api_id`, callback secret и Langame payload не возвращаются в браузер.
 
+## SMS-код
+
+SMS-код остается резервным каналом после Telegram-бота и звонка пользователя. Production-путь поддерживает SMS.ru `/sms/send`: backend отправляет код только при включенном real-send, не возвращает `api_id` и raw provider payload на frontend, а challenge хранит только статус доставки, маску телефона и hash кода.
+
+Env на VDS для SMS.ru:
+
+```env
+GUEST_PORTAL_OTP_REAL_SEND_ENABLED="true"
+GUEST_PORTAL_OTP_SMS_ENABLED="true"
+GUEST_PORTAL_OTP_SMS_RU_API_ID="<sms-ru-api-id>"
+GUEST_PORTAL_OTP_SMS_RU_BASE_URL="https://sms.ru"
+GUEST_PORTAL_OTP_SMS_RU_TEST_MODE="false"
+```
+
+Если `GUEST_PORTAL_OTP_SMS_RU_API_ID` не задан, backend может переиспользовать `GUEST_PORTAL_USER_CALL_SMS_RU_API_ID` из Callcheck. Для staged QA можно временно включить `GUEST_PORTAL_OTP_SMS_RU_TEST_MODE=true`: SMS.ru примет запрос с `test=1`, но сообщение не будет отправлено и баланс не будет списан. Старый generic provider через `GUEST_PORTAL_OTP_SMS_ENDPOINT` + `GUEST_PORTAL_OTP_SMS_TOKEN` остается fallback-адаптером для другого SMS-шлюза.
+
 ## Входящий звонок с 4 цифрами
 
 Контур: `/play` создает `INCOMING_CALL_LAST4` challenge, backend отправляет запрос call-provider, provider звонит гостю, гость вводит последние 4 цифры номера входящего звонка в `/play`, LeetPlus сверяет код и выдает guest-token.

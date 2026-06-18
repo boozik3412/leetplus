@@ -1302,6 +1302,87 @@ describe('GuestPortalService', () => {
     });
   });
 
+  describe('otp delivery', () => {
+    it('sends production SMS OTP through SMS.ru without exposing api_id', async () => {
+      const { prisma, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+        NODE_ENV: 'production',
+        GUEST_PORTAL_OTP_REAL_SEND_ENABLED: 'true',
+        GUEST_PORTAL_OTP_SMS_ENABLED: 'true',
+        GUEST_PORTAL_OTP_SMS_RU_API_ID: 'smsru-api-id',
+        GUEST_PORTAL_OTP_SMS_RU_TEST_MODE: 'true',
+      });
+      const fetchMock = jest.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            status: 'OK',
+            status_code: 100,
+            sms: {
+              '79999999999': {
+                status: 'OK',
+                status_code: 100,
+                sms_id: 'sms-1',
+              },
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      );
+      jest.spyOn(service as any, 'generateOtp').mockReturnValue('1234');
+
+      prisma.tenant.findFirst.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'Leet Clubs',
+        slug: 'leet',
+        stores: [
+          {
+            id: 'store-1',
+            publicSlug: 'club-1337',
+            name: '1337',
+            address: 'ул. Ленина, 1',
+          },
+        ],
+      });
+
+      const result = await service.startOtp('leet', 'club-1337', {
+        phone: '+7 999 999-99-99',
+        gameConsentAccepted: true,
+      });
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('https://sms.ru/sms/send?'),
+        { method: 'POST' },
+      );
+      const smsRuUrl = new URL(fetchMock.mock.calls[0][0] as string);
+      expect(smsRuUrl.searchParams.get('api_id')).toBe('smsru-api-id');
+      expect(smsRuUrl.searchParams.get('to')).toBe('79999999999');
+      expect(smsRuUrl.searchParams.get('json')).toBe('1');
+      expect(smsRuUrl.searchParams.get('ttl')).toBe('10');
+      expect(smsRuUrl.searchParams.get('test')).toBe('1');
+      expect(smsRuUrl.searchParams.get('msg')).toContain('1234');
+      expect(prisma.guestPortalOtpChallenge.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            tenantId: 'tenant-1',
+            storeId: 'store-1',
+            phoneMasked: '***9999',
+            status: 'PENDING',
+            deliveryChannel: 'SMS',
+            deliveredAt: expect.any(Date),
+          }),
+        }),
+      );
+      expect(result.delivery).toMatchObject({
+        channel: 'SMS',
+        status: 'SENT',
+        message: 'Код отправлен по SMS на ***9999.',
+      });
+      expect(JSON.stringify(result)).not.toContain('smsru-api-id');
+
+      fetchMock.mockRestore();
+    });
+  });
+
   describe('telegram auth', () => {
     it('creates a pending Telegram auth challenge for public play registration', async () => {
       const { prisma, service } = createService({

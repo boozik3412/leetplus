@@ -56,6 +56,7 @@ const USER_CALL_PROVIDER_MANUAL = 'MANUAL';
 const USER_CALL_PROVIDER_SMS_RU_CALLCHECK = 'SMS_RU_CALLCHECK';
 const SMS_RU_CALLCHECK_BASE_URL = 'https://sms.ru';
 const SMS_RU_CALLCHECK_TTL_MINUTES = 5;
+const SMS_RU_OTP_BASE_URL = 'https://sms.ru';
 const INCOMING_CALL_LAST4_CHANNEL = 'INCOMING_CALL_LAST4';
 const COMMUNICATION_PREFERENCE_EVENT_PREFIX =
   'guest_portal:communication_preference:';
@@ -1515,12 +1516,7 @@ export class GuestPortalService {
           ]),
     ];
     const telegramAuthReady = telegramAuthRequiredEnv.length === 0;
-    const smsReady =
-      devOtpEnabled ||
-      (otpConfig.realSendEnabled &&
-        otpConfig.sms.enabled &&
-        Boolean(otpConfig.sms.endpoint) &&
-        Boolean(otpConfig.sms.token));
+    const smsReady = devOtpEnabled || otpSmsReady(otpConfig);
     const userCallRequiredEnv = userCallConfig.requiredEnv;
     const userCallReady = userCallConfig.enabled && userCallConfig.configured;
     const incomingCallLast4RequiredEnv = [
@@ -1586,16 +1582,9 @@ export class GuestPortalService {
             'Обязательный резервный способ входа по телефону; не основной из-за цены и риска накрутки.',
           nextAction: smsReady
             ? 'Держать SMS как резерв и лимитировать частоту отправки.'
-            : 'Включить real-send и SMS provider endpoint/token для production.',
+            : 'Включить real-send и SMS.ru api_id или резервный SMS provider endpoint/token для production.',
           botUsername: null,
-          requiredEnv: smsReady
-            ? []
-            : [
-                'GUEST_PORTAL_OTP_REAL_SEND_ENABLED',
-                'GUEST_PORTAL_OTP_SMS_ENABLED',
-                'GUEST_PORTAL_OTP_SMS_ENDPOINT',
-                'GUEST_PORTAL_OTP_SMS_TOKEN',
-              ],
+          requiredEnv: smsReady ? [] : otpSmsRequiredEnv(otpConfig),
         },
         {
           rank: 4,
@@ -6675,6 +6664,29 @@ export class GuestPortalService {
     }
 
     if (config.sms.enabled) {
+      if (config.sms.smsRu.apiId) {
+        try {
+          const payload = await sendSmsRuOtpDelivery({
+            apiId: config.sms.smsRu.apiId,
+            baseUrl: config.sms.smsRu.baseUrl,
+            phone: input.phone.normalized,
+            text: otpMessage(input.code, input.context),
+            ttlMinutes: OTP_TTL_MINUTES,
+            testMode: config.sms.smsRu.testMode,
+          });
+
+          return {
+            channel: 'SMS',
+            status: 'SENT',
+            deliveredAt: new Date(),
+            message: `Код отправлен по SMS на ${input.phone.masked}.`,
+            note: deliveryProviderNote(payload),
+          };
+        } catch (error) {
+          return failedOtpDelivery('SMS', error);
+        }
+      }
+
       if (config.sms.endpoint && config.sms.token) {
         try {
           const payload = await sendHttpOtpDelivery({
@@ -6705,11 +6717,9 @@ export class GuestPortalService {
         channel: 'SMS',
         status: 'NOT_CONFIGURED',
         deliveredAt: null,
-        message: 'SMS OTP включен, но endpoint или token не настроены.',
-        requiredEnv: [
-          'GUEST_PORTAL_OTP_SMS_ENDPOINT',
-          'GUEST_PORTAL_OTP_SMS_TOKEN',
-        ],
+        message:
+          'SMS OTP включен, но SMS.ru api_id или endpoint/token не настроены.',
+        requiredEnv: otpSmsRequiredEnv(config),
       };
     }
 
@@ -7717,6 +7727,20 @@ function guestPortalOtpDeliveryConfig(configService: ConfigService) {
       enabled: configFlag(configService, 'GUEST_PORTAL_OTP_SMS_ENABLED'),
       endpoint: configString(configService, 'GUEST_PORTAL_OTP_SMS_ENDPOINT'),
       token: configString(configService, 'GUEST_PORTAL_OTP_SMS_TOKEN'),
+      smsRu: {
+        apiId: configString(
+          configService,
+          'GUEST_PORTAL_OTP_SMS_RU_API_ID',
+          'GUEST_PORTAL_USER_CALL_SMS_RU_API_ID',
+        ),
+        baseUrl:
+          configString(configService, 'GUEST_PORTAL_OTP_SMS_RU_BASE_URL') ||
+          SMS_RU_OTP_BASE_URL,
+        testMode: configFlag(
+          configService,
+          'GUEST_PORTAL_OTP_SMS_RU_TEST_MODE',
+        ),
+      },
     },
     telegram: {
       enabled: configFlag(configService, 'GUEST_PORTAL_OTP_TELEGRAM_ENABLED'),
@@ -7733,6 +7757,35 @@ function guestPortalOtpDeliveryConfig(configService: ConfigService) {
       token: configString(configService, 'GUEST_PORTAL_OTP_MAX_TOKEN'),
     },
   };
+}
+
+type GuestPortalOtpDeliveryConfig = ReturnType<
+  typeof guestPortalOtpDeliveryConfig
+>;
+
+function otpSmsReady(config: GuestPortalOtpDeliveryConfig) {
+  return (
+    config.realSendEnabled &&
+    config.sms.enabled &&
+    (Boolean(config.sms.smsRu.apiId) ||
+      Boolean(config.sms.endpoint && config.sms.token))
+  );
+}
+
+function otpSmsRequiredEnv(config: GuestPortalOtpDeliveryConfig) {
+  const required = [
+    ...(config.realSendEnabled ? [] : ['GUEST_PORTAL_OTP_REAL_SEND_ENABLED']),
+    ...(config.sms.enabled ? [] : ['GUEST_PORTAL_OTP_SMS_ENABLED']),
+  ];
+
+  if (!config.sms.smsRu.apiId && !(config.sms.endpoint && config.sms.token)) {
+    required.push(
+      'GUEST_PORTAL_OTP_SMS_RU_API_ID or GUEST_PORTAL_USER_CALL_SMS_RU_API_ID',
+      'or GUEST_PORTAL_OTP_SMS_ENDPOINT + GUEST_PORTAL_OTP_SMS_TOKEN',
+    );
+  }
+
+  return required;
 }
 
 function guestPortalUserCallConfig(configService: ConfigService) {
@@ -7922,6 +7975,84 @@ async function sendHttpOtpDelivery({
   }
 
   return payload;
+}
+
+async function sendSmsRuOtpDelivery({
+  apiId,
+  baseUrl,
+  phone,
+  text,
+  ttlMinutes,
+  testMode,
+}: {
+  apiId: string;
+  baseUrl: string;
+  phone: string;
+  text: string;
+  ttlMinutes: number;
+  testMode: boolean;
+}) {
+  const url = new URL('/sms/send', baseUrl || SMS_RU_OTP_BASE_URL);
+  url.searchParams.set('api_id', apiId);
+  url.searchParams.set('to', phone);
+  url.searchParams.set('msg', text);
+  url.searchParams.set('json', '1');
+  url.searchParams.set('ttl', String(ttlMinutes));
+
+  if (testMode) {
+    url.searchParams.set('test', '1');
+  }
+
+  const response = await fetch(url.toString(), { method: 'POST' });
+  const payload = await safeJson(response);
+  const record =
+    payload && typeof payload === 'object'
+      ? (payload as Record<string, unknown>)
+      : null;
+  const statusCode = smsRuResponseString(record?.status_code);
+  const smsMap =
+    record?.sms && typeof record.sms === 'object'
+      ? (record.sms as Record<string, unknown>)
+      : null;
+  const smsResult = smsMap?.[phone] ?? null;
+  const smsStatusCode =
+    smsResult && typeof smsResult === 'object'
+      ? smsRuResponseString(
+          (smsResult as { status_code?: unknown }).status_code,
+        )
+      : '';
+
+  if (!response.ok || statusCode !== '100' || smsStatusCode !== '100') {
+    throw new Error(
+      `SMS.ru OTP failed: ${smsRuSafeError(payload, phone) || response.status}`,
+    );
+  }
+
+  return payload;
+}
+
+function smsRuSafeError(payload: unknown, phone: string) {
+  if (!payload || typeof payload !== 'object') {
+    return '';
+  }
+
+  const record = payload as Record<string, unknown>;
+  const smsMap =
+    record.sms && typeof record.sms === 'object'
+      ? (record.sms as Record<string, unknown>)
+      : null;
+  const smsResult = smsMap?.[phone];
+  const smsText =
+    smsResult && typeof smsResult === 'object'
+      ? stringFromUnknown((smsResult as Record<string, unknown>).status_text)
+      : null;
+
+  return (
+    smsText ??
+    stringFromUnknown(record.status_text) ??
+    stringFromUnknown(record.status) ??
+    ''
+  ).slice(0, 160);
 }
 
 async function sendTelegramOtpDelivery({

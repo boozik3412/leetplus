@@ -344,7 +344,7 @@ Deployment-порядок для fallback-входа закреплен в `docs
 
 ### Этап 7. Модуль `Гости`
 
-Статус: MVP 1 read-only аналитики гостей развернут в production; write-back в Langame, автоматические награды и коммуникации еще не реализованы.
+Статус: MVP 1 аналитики гостей развернут в production; ядро геймификации тоже собрано: отдельный `GuestGameProfile`, публичный вход через Telegram-бот/Mini App и звонок пользователя, выбор клуба, Guest Game Hub, reward wallet и bonus ledger для защищенного write-back в Langame. Реальная выдача бонусов и коммуникации остаются под production-gate: dry-run/canary, сверка первого бонуса, VDS bot-consumer и подтвержденные `guests/logs`-типы.
 
 - Исходный документ: `GUEST_MANAGEMENT_MODULE_TZ.md`.
 - Done: отдельный блок `Гости` в навигации, свернутые подразделы, `/guests`, `/guests/report`, `/guests/[id]`, `/guests/staff-control`.

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { ReactNode } from "react";
+import type { CSSProperties, FormEvent, ReactNode } from "react";
 import type {
   GuestPortalCheckInResponse,
   GuestPortalGameSummary,
@@ -21,6 +21,29 @@ type GameProgressTimelineItem =
   GuestPortalGameSummary["progress"]["timeline"][number];
 type GameJourneyStep = GuestPortalGameSummary["journey"]["steps"][number];
 type MissionBoardFilter = "AVAILABLE" | "ALMOST_DONE" | "REWARD_PENDING" | "ALL";
+type HomeBanner = {
+  id: string;
+  label: string;
+  title: string;
+  description: string;
+  tag: string;
+  featured?: boolean;
+  href: string;
+};
+type HomeLootCard = {
+  id: string;
+  title: string;
+  description: string;
+  status: string;
+  active: boolean;
+};
+type HomeBattleQuest = {
+  id: string;
+  title: string;
+  description: string;
+  state: "complete" | "current" | "locked";
+  label: string;
+};
 
 class EmptySessionError extends Error {}
 
@@ -163,34 +186,25 @@ export function GameSummaryClient() {
 
 function GameShell({ body }: { body: ReactNode }) {
   return (
-    <main className="min-h-screen bg-zinc-950 text-white">
-      <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-4 py-4 sm:px-6 lg:px-8">
-        <header className="flex items-center justify-between gap-3 border-b border-white/10 pb-4">
-          <Link href="/play" className="text-sm font-bold tracking-tight">
-            LeetPlus Play
-          </Link>
-          <Link
-            href="/play"
-            className="rounded-lg border border-white/15 px-3 py-2 text-xs font-semibold text-zinc-200 transition hover:border-emerald-300 hover:text-white"
-          >
-            Выбрать клуб
-          </Link>
-        </header>
-        {body}
-      </div>
+    <main className="lp-club-home-page">
+      {body}
+      <style>{clubHomeCss}</style>
     </main>
   );
 }
 
 function LoadingView() {
   return (
-    <div className="grid flex-1 place-items-center py-16">
-      <div className="w-full max-w-sm rounded-lg border border-white/10 bg-white/5 p-5">
-        <div className="h-3 w-24 rounded bg-white/10" />
-        <div className="mt-4 h-8 w-48 rounded bg-white/10" />
-        <div className="mt-6 space-y-2">
-          <div className="h-3 rounded bg-white/10" />
-          <div className="h-3 w-4/5 rounded bg-white/10" />
+    <div className="lp-club-home-static">
+      <div className="lp-club-static-card" aria-busy="true">
+        <div className="lp-club-skeleton lp-club-skeleton-short" />
+        <div className="lp-club-skeleton lp-club-skeleton-title" />
+        <div className="lp-club-skeleton" />
+        <div className="lp-club-skeleton lp-club-skeleton-mid" />
+        <div className="lp-club-static-grid">
+          <div className="lp-club-skeleton" />
+          <div className="lp-club-skeleton" />
+          <div className="lp-club-skeleton" />
         </div>
       </div>
     </div>
@@ -205,23 +219,23 @@ function EmptySessionView({
   message: string;
 }) {
   return (
-    <section className="grid flex-1 place-items-center py-16">
-      <div className="w-full max-w-xl rounded-lg border border-white/10 bg-white/[0.06] p-6">
-        <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
+    <section className="lp-club-home-static">
+      <div className="lp-club-static-card">
+        <p className="lp-club-small-label">
           Игровой вход
         </p>
-        <h1 className="mt-2 text-2xl font-black tracking-tight">{title}</h1>
-        <p className="mt-3 text-sm leading-6 text-zinc-300">{message}</p>
-        <div className="mt-5 flex flex-col gap-2 sm:flex-row">
+        <h1 className="lp-club-static-title">{title}</h1>
+        <p className="lp-club-static-copy">{message}</p>
+        <div className="lp-club-static-actions">
           <Link
             href="/play"
-            className="rounded-lg bg-emerald-300 px-4 py-3 text-center text-sm font-black text-zinc-950 transition hover:bg-emerald-200"
+            className="lp-club-primary-link"
           >
             Зарегистрироваться
           </Link>
           <Link
             href="/"
-            className="rounded-lg border border-white/15 px-4 py-3 text-center text-sm font-semibold text-zinc-200 transition hover:border-white/30 hover:text-white"
+            className="lp-club-ghost-link"
           >
             На главную
           </Link>
@@ -253,153 +267,730 @@ function ReadyGameView({
   const primaryActionHref = primaryAction
     ? gameActionHref(primaryAction, guestPortalHref)
     : null;
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [selectedLootId, setSelectedLootId] = useState<string | null>(null);
+  const [promoCode, setPromoCode] = useState("");
+  const homeBanners = buildHomeBanners(
+    summary,
+    primaryAction,
+    primaryActionHref,
+    guestPortalHref,
+  );
+  const lootCards = buildHomeLootCards(summary, selectedLootId);
+  const battleQuests = buildHomeBattleQuests(summary);
+  const quickQuestCount = battleQuests.filter(
+    (quest) => quest.state === "complete",
+  ).length;
+  const battlePassProgress = clampPercent(
+    summary.battlePass.active?.progressPercent ?? summary.journey.summary.readyPercent,
+  );
+  const mainRewardLabel =
+    summary.battlePass.active?.nextRewardLabel ??
+    summary.rewards.ready[0]?.rewardLabel ??
+    summary.rewards.latestBonus?.title ??
+    "Главная награда";
+  const rankLabel = buildRankLabel(summary.profile.level);
+  const rankPercent = buildRankPercent(summary);
+
+  useEffect(() => {
+    if (!toastMessage) {
+      return;
+    }
+
+    const timerId = window.setTimeout(() => setToastMessage(null), 2200);
+
+    return () => window.clearTimeout(timerId);
+  }, [toastMessage]);
+
+  function showToast(message: string) {
+    setToastMessage(message);
+  }
+
+  function handlePromoSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    showToast(
+      promoCode.trim()
+        ? "Промокод принят в проверку."
+        : "Введите промокод для активации.",
+    );
+  }
 
   return (
-    <div className="py-5">
-      <section id="profile" className="grid gap-4 lg:grid-cols-[1.3fr_0.7fr]">
-        <div className="rounded-lg border border-white/10 bg-white/[0.06] p-5">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
-                {summary.store.name}
-              </p>
-              <h1 className="mt-2 text-3xl font-black tracking-tight sm:text-4xl">
-                {summary.profile.displayName}
-              </h1>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-300">
-                Уровень {summary.profile.level} · {summary.profile.xp} XP ·{" "}
-                {summary.account.stateLabel}
-              </p>
-            </div>
-            <div className="w-full sm:w-44">
-              <div className="flex items-center justify-between text-xs text-zinc-400">
-                <span>До уровня</span>
-                <span>{summary.profile.levelProgressPercent}%</span>
-              </div>
-              <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
-                <div
-                  className="h-full rounded-full bg-emerald-300"
-                  style={{
-                    width: `${clampPercent(summary.profile.levelProgressPercent)}%`,
-                  }}
-                />
-              </div>
-            </div>
-          </div>
+    <div className="lp-club-home">
+      <header className="lp-club-topbar">
+        <button
+          type="button"
+          className="lp-club-menu-button"
+          aria-label="Открыть меню"
+          onClick={() => showToast("Меню игрового модуля скоро появится.")}
+        >
+          <MenuIcon />
+        </button>
 
-          <div className="mt-5 grid gap-3 sm:grid-cols-3">
-            <Metric
-              label="Бонусы"
-              value={formatNumber(summary.loyalty.bonusBalance ?? 0)}
-              note={summary.loyalty.bonusBalanceSource ?? "нет данных"}
-            />
-            <Metric
-              label="Готово наград"
-              value={formatNumber(summary.rewards.summary.ready)}
-              note={`всего ${formatNumber(summary.rewards.summary.total)}`}
-            />
-            <Metric
-              label="Игровое время"
-              value={formatMinutes(summary.activity.playMinutes)}
-              note={`${formatNumber(summary.activity.sessionsCount)} визитов`}
-            />
-          </div>
+        <div className="lp-club-network">
+          <Link href="/start" className="lp-club-brand" aria-label="LeetPlus">
+            <BrandMark />
+            <span>{summary.tenant.name}</span>
+          </Link>
+          <Link href="/game/clubs" className="lp-club-switch">
+            <ClubIcon />
+            <span>{summary.store.name}</span>
+          </Link>
         </div>
 
-        <div className="rounded-lg border border-emerald-300/30 bg-emerald-300 p-5 text-zinc-950">
-          <p className="text-xs font-black uppercase tracking-wide">
-            Следующий шаг
-          </p>
-          <h2 className="mt-2 text-xl font-black">
-            {primaryAction?.title ?? "Продолжайте играть"}
-          </h2>
-          <p className="mt-2 text-sm leading-6 text-zinc-800">
-            {primaryAction?.description ??
-              "Как только появится новая награда или квест, он будет здесь."}
-          </p>
-          <div className="mt-5 grid gap-2">
-            {primaryActionHref ? (
-              <Link
-                href={primaryActionHref}
-                className="rounded-lg border border-zinc-950/25 bg-white/45 px-4 py-3 text-center text-sm font-black text-zinc-950 transition hover:border-zinc-950/50 hover:bg-white/70"
-              >
-                {gameActionButtonLabel(primaryAction)}
-              </Link>
-            ) : null}
-            <button
-              type="button"
-              onClick={onCheckIn}
-              disabled={isCheckingIn}
-              className="rounded-lg bg-zinc-950 px-4 py-3 text-sm font-black text-white transition hover:bg-zinc-800 disabled:cursor-wait disabled:opacity-70"
-            >
-              {isCheckingIn ? "Проверяем..." : "Чекин в клубе"}
-            </button>
-            <Link
-              href={guestPortalHref}
-              className="rounded-lg border border-zinc-950/25 px-4 py-3 text-center text-sm font-black text-zinc-950 transition hover:border-zinc-950/50"
-            >
-              Открыть кабинет
-            </Link>
-          </div>
-          {checkInMessage ? (
-            <p className="mt-3 text-xs font-semibold leading-5 text-zinc-800">
-              {checkInMessage}
-            </p>
-          ) : (
-            <p className="mt-3 text-xs leading-5 text-zinc-800">
-              Чекин ищет активную сессию Langame и сразу пересчитывает прогресс.
-            </p>
-          )}
-        </div>
-      </section>
+        <div className="lp-club-session-state">Игровая сессия активна</div>
+      </header>
 
-      <section className="mt-4">
+      <div className="lp-club-shell">
+        <div className="lp-club-main-flow">
+          <section className="lp-club-stage" aria-label="Главный блок клуба">
+            <div id="profile" className="lp-club-card">
+              <div className="lp-club-label">Главная геймификации</div>
+              <h1>Клубная карта игрока</h1>
+              <p>
+                {summary.profile.displayName} играет в клубе {summary.store.name}.
+                Здесь собраны активности, награды, лутбоксы и прогресс сезона.
+              </p>
+
+              <div className="lp-club-quick-metrics" aria-label="Краткая статистика">
+                <div className="lp-club-metric">
+                  <strong>{formatNumber(summary.profile.level)}</strong>
+                  <span>уровень</span>
+                </div>
+                <div className="lp-club-metric">
+                  <strong>{formatNumber(rankPercent)}%</strong>
+                  <span>ранг</span>
+                </div>
+                <div className="lp-club-metric">
+                  <strong>{formatNumber(summary.rewards.summary.ready)}</strong>
+                  <span>награды</span>
+                </div>
+              </div>
+            </div>
+
+            <HomeBannerGrid
+              banners={homeBanners}
+              onToast={showToast}
+            />
+          </section>
+
+          <HomeLootBoxes
+            cards={lootCards}
+            onSelect={(card) => {
+              setSelectedLootId(card.id);
+              showToast(`Выбран лутбокс: ${card.title}.`);
+            }}
+          />
+
+          <HomeBattlePass
+            quests={battleQuests}
+            progress={battlePassProgress}
+            rewardLabel={mainRewardLabel}
+            seasonName={summary.battlePass.active?.name ?? "Сезон клуба"}
+            onToast={showToast}
+          />
+        </div>
+
+        <PlayerProfilePanel
+          summary={summary}
+          guestPortalHref={guestPortalHref}
+          rankLabel={rankLabel}
+          rankPercent={rankPercent}
+          quickQuestCount={quickQuestCount}
+          quickQuests={battleQuests.slice(0, 3)}
+          promoCode={promoCode}
+          onPromoCodeChange={setPromoCode}
+          onPromoSubmit={handlePromoSubmit}
+          onCheckIn={() => {
+            showToast("Проверяем активную сессию клуба.");
+            onCheckIn();
+          }}
+          isCheckingIn={isCheckingIn}
+          checkInMessage={checkInMessage}
+        />
+      </div>
+
+      <section className="lp-club-detail-stack" aria-label="Подробности игрового профиля">
+        <div className="lp-club-detail-head">
+          <span>
+            <span className="lp-club-small-label">Подробности</span>
+            <h2>Квесты, награды и связь с клубом</h2>
+          </span>
+          <Link href="/game/clubs" className="lp-club-ghost-link">
+            Сменить клуб
+          </Link>
+        </div>
+
         <JourneyPanel
           journey={summary.journey}
           guestPortalHref={guestPortalHref}
         />
-      </section>
 
-      <section className="mt-4">
         <ReferralPanel referral={summary.referral} />
-      </section>
 
-      <section className="mt-4">
         <ProgressPanel progress={summary.progress} />
-      </section>
 
-      <div className="mt-4">
         <NextActionsPanel
           actions={summary.nextActions}
           guestPortalHref={guestPortalHref}
         />
-      </div>
 
-      <section className="mt-4 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
-        <RewardResultPanel summary={summary} />
-        <MissionsPanel missions={summary.missions.featured} />
-      </section>
+        <section className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+          <RewardResultPanel summary={summary} />
+          <MissionsPanel missions={summary.missions.featured} />
+        </section>
 
-      <section className="mt-4">
         <MissionHistoryPanel
           missions={summary.missions.history}
           total={summary.missions.total}
         />
+
+        <section className="grid gap-4 lg:grid-cols-[1fr_1fr]">
+          <LootBoxesPanel lootBoxes={summary.lootBoxes.featured} />
+          <BattlePassPanel battlePass={summary.battlePass.active} />
+        </section>
+
+        <section className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+          <ChannelsPanel summary={summary} guestPortalHref={guestPortalHref} />
+          <ActivityPanel activity={summary.activity} />
+        </section>
       </section>
 
-      <section className="mt-4">
-        <LootBoxesPanel lootBoxes={summary.lootBoxes.featured} />
-      </section>
-
-      <section className="mt-4 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-        <BattlePassPanel battlePass={summary.battlePass.active} />
-        <ChannelsPanel summary={summary} guestPortalHref={guestPortalHref} />
-      </section>
-
-      <section className="mt-4">
-        <ActivityPanel activity={summary.activity} />
-      </section>
+      <div
+        className={[
+          "lp-club-toast",
+          toastMessage ? "is-visible" : "",
+        ].join(" ")}
+        role="status"
+        aria-live="polite"
+      >
+        {toastMessage}
+      </div>
     </div>
+  );
+}
+
+function HomeBannerGrid({
+  banners,
+  onToast,
+}: {
+  banners: HomeBanner[];
+  onToast: (message: string) => void;
+}) {
+  return (
+    <div className="lp-club-banner-grid" aria-label="Баннеры клуба">
+      {banners.map((banner) => (
+        <Link
+          key={banner.id}
+          href={banner.href}
+          className={[
+            "lp-club-banner",
+            banner.featured ? "is-featured" : "",
+          ].join(" ")}
+          onClick={() => onToast(`Открыт раздел: ${banner.title}.`)}
+        >
+          <span className="lp-club-banner-content">
+            <span>
+              <span className="lp-club-banner-kicker">{banner.label}</span>
+              <span className="lp-club-banner-title">{banner.title}</span>
+              <span className="lp-club-banner-copy">{banner.description}</span>
+            </span>
+            <span className="lp-club-banner-tag">{banner.tag}</span>
+          </span>
+        </Link>
+      ))}
+    </div>
+  );
+}
+
+function HomeLootBoxes({
+  cards,
+  onSelect,
+}: {
+  cards: HomeLootCard[];
+  onSelect: (card: HomeLootCard) => void;
+}) {
+  return (
+    <section id="lootBoxes" className="lp-club-panel lp-club-lootboxes" aria-label="Лутбоксы">
+      <div className="lp-club-section-head">
+        <span>
+          <h2>Лутбоксы</h2>
+          <p>
+            Быстрые награды за активность в клубе и прохождение цепочки заданий.
+          </p>
+        </span>
+        <span className="lp-club-icon-badge" aria-hidden="true">
+          <RefreshIcon />
+        </span>
+      </div>
+
+      <div className="lp-club-loot-grid">
+        {cards.map((card) => (
+          <button
+            key={card.id}
+            type="button"
+            className={[
+              "lp-club-loot-card",
+              card.active ? "is-active" : "",
+            ].join(" ")}
+            onClick={() => onSelect(card)}
+          >
+            <em>{card.status}</em>
+            <strong>{card.title}</strong>
+            <span>{card.description}</span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function HomeBattlePass({
+  quests,
+  progress,
+  rewardLabel,
+  seasonName,
+  onToast,
+}: {
+  quests: HomeBattleQuest[];
+  progress: number;
+  rewardLabel: string;
+  seasonName: string;
+  onToast: (message: string) => void;
+}) {
+  return (
+    <section id="battlePass" className="lp-club-panel lp-club-battlepass" aria-label="Батлпасс">
+      <div className="lp-club-section-head">
+        <span>
+          <h2>Батлпасс клуба</h2>
+          <p>Цепочка заданий ведет к главной награде текущего сезона.</p>
+        </span>
+        <span className="lp-club-small-label">
+          {seasonName} / {formatNumber(progress)}% завершено
+        </span>
+      </div>
+
+      <div className="lp-club-battle-track">
+        {quests.map((quest) => (
+          <button
+            key={quest.id}
+            type="button"
+            className={[
+              "lp-club-quest",
+              quest.state === "complete" ? "is-complete" : "",
+              quest.state === "current" ? "is-current" : "",
+            ].join(" ")}
+            onClick={() => onToast(`${quest.title}: ${quest.description}`)}
+          >
+            <span>
+              <strong>{quest.title}</strong>
+              <span>{quest.description}</span>
+            </span>
+            <small>{quest.label}</small>
+          </button>
+        ))}
+
+        <div className="lp-club-reward" aria-label="Главная награда">
+          <span className="lp-club-reward-shape" aria-hidden="true" />
+          <span className="lp-club-reward-content">
+            <strong>{rewardLabel}</strong>
+            <span>season drop</span>
+          </span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function PlayerProfilePanel({
+  summary,
+  guestPortalHref,
+  rankLabel,
+  rankPercent,
+  quickQuestCount,
+  quickQuests,
+  promoCode,
+  onPromoCodeChange,
+  onPromoSubmit,
+  onCheckIn,
+  isCheckingIn,
+  checkInMessage,
+}: {
+  summary: GuestPortalGameSummary;
+  guestPortalHref: string;
+  rankLabel: string;
+  rankPercent: number;
+  quickQuestCount: number;
+  quickQuests: HomeBattleQuest[];
+  promoCode: string;
+  onPromoCodeChange: (value: string) => void;
+  onPromoSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onCheckIn: () => void;
+  isCheckingIn: boolean;
+  checkInMessage: string | null;
+}) {
+  return (
+    <aside className="lp-club-profile-panel" aria-label="Профиль игрока">
+      <div className="lp-club-profile-logo">
+        <div className="lp-club-avatar" aria-hidden="true">
+          <ProfileIcon />
+        </div>
+        <span>
+          <strong>{profileInitials(summary.profile.displayName)}</strong>
+          <span>Гость клуба</span>
+        </span>
+      </div>
+
+      <div className="lp-club-profile-section">
+        <div className="lp-club-profile-row">
+          <span className="lp-club-small-label">Уровень</span>
+          <strong>{formatNumber(summary.profile.level)}</strong>
+        </div>
+        <div className="lp-club-progress" aria-label="Прогресс уровня">
+          <span
+            style={
+              {
+                "--value": `${clampPercent(summary.profile.levelProgressPercent)}%`,
+              } as CSSProperties
+            }
+          />
+        </div>
+      </div>
+
+      <div className="lp-club-profile-section rank">
+        <div className="lp-club-profile-row">
+          <span className="lp-club-small-label">Ранг</span>
+          <strong>{rankLabel}</strong>
+        </div>
+        <div className="lp-club-progress" aria-label="Прогресс ранга">
+          <span
+            style={{ "--value": `${rankPercent}%` } as CSSProperties}
+          />
+        </div>
+      </div>
+
+      <div className="lp-club-profile-section lp-club-profile-stats">
+        <div>
+          <span className="lp-club-small-label">Бонусы</span>
+          <strong>{formatNumber(summary.loyalty.bonusBalance ?? 0)}</strong>
+        </div>
+        <div>
+          <span className="lp-club-small-label">Время</span>
+          <strong>{formatMinutes(summary.activity.playMinutes)}</strong>
+        </div>
+      </div>
+
+      <form className="lp-club-promo" onSubmit={onPromoSubmit}>
+        <label className="lp-club-small-label" htmlFor="promoCode">
+          Промокод
+        </label>
+        <input
+          id="promoCode"
+          type="text"
+          placeholder="Введите код"
+          autoComplete="off"
+          value={promoCode}
+          onChange={(event) => onPromoCodeChange(event.target.value)}
+        />
+        <button type="submit">Активировать</button>
+        <Link className="lp-club-side-link" href="#rewards">
+          История наград
+        </Link>
+      </form>
+
+      <div className="lp-club-quick-actions">
+        <button
+          type="button"
+          onClick={onCheckIn}
+          disabled={isCheckingIn}
+        >
+          {isCheckingIn ? "Проверяем..." : "Чекин в клубе"}
+        </button>
+        <Link href={guestPortalHref}>Открыть кабинет</Link>
+        {checkInMessage ? <p>{checkInMessage}</p> : null}
+      </div>
+
+      <section className="lp-club-quest-widget" aria-label="Квесты игрока">
+        <div className="lp-club-quest-widget-head">
+          <span>
+            <span className="lp-club-small-label">Квесты</span>
+            <strong>Быстрые задачи</strong>
+          </span>
+          <span className="lp-club-quest-count">
+            {formatNumber(quickQuestCount)} / {formatNumber(quickQuests.length)}
+          </span>
+        </div>
+
+        <div className="lp-club-side-quest-list">
+          {quickQuests.map((quest) => (
+            <Link
+              key={quest.id}
+              href="#battlePass"
+              className={[
+                "lp-club-side-quest",
+                quest.state === "complete" ? "is-done" : "",
+                quest.state === "current" ? "is-current" : "",
+              ].join(" ")}
+            >
+              <span className="lp-club-side-quest-icon" aria-hidden="true">
+                {quest.state === "complete" ? <CheckIcon /> : <QuestIcon />}
+              </span>
+              <span>
+                <strong>{quest.title}</strong>
+                <span>{quest.description}</span>
+              </span>
+              <span className="lp-club-side-quest-state">{quest.label}</span>
+            </Link>
+          ))}
+        </div>
+      </section>
+    </aside>
+  );
+}
+
+function buildHomeBanners(
+  summary: GuestPortalGameSummary,
+  primaryAction: GameNextAction | null,
+  primaryActionHref: string | null,
+  guestPortalHref: string,
+): HomeBanner[] {
+  const featuredMission = summary.missions.featured[0] ?? null;
+  const secondMission = summary.missions.featured[1] ?? null;
+
+  return [
+    {
+      id: "primary",
+      label: primaryAction ? "Акция / квест" : "Акция / реклама",
+      title: primaryAction?.title ?? "Ночной рейд",
+      description:
+        primaryAction?.description ??
+        "Бонусные часы и XP за вечернюю активность в выбранном клубе.",
+      tag: primaryAction ? gameActionButtonLabel(primaryAction) : "до 30 июня",
+      featured: true,
+      href: primaryActionHref ?? "#missions",
+    },
+    {
+      id: "tournament",
+      label: "Событие",
+      title: featuredMission?.name ?? "Клубный турнир",
+      description:
+        featuredMission?.rewardLabel ??
+        "Соберите стак и получите очки ранга за участие.",
+      tag: featuredMission ? `${formatNumber(featuredMission.xpReward)} XP` : "регистрация",
+      href: "#missions",
+    },
+    {
+      id: "drop",
+      label: "Коллаб",
+      title: secondMission?.name ?? "Партнерский дроп",
+      description:
+        secondMission?.rewardLabel ??
+        summary.referral.channelHint ??
+        "Лимитированные предметы и бонусы для гостей клуба.",
+      tag: secondMission ? "квест" : "получить",
+      href: guestPortalHref,
+    },
+  ];
+}
+
+function buildHomeLootCards(
+  summary: GuestPortalGameSummary,
+  selectedLootId: string | null,
+): HomeLootCard[] {
+  const fallback: HomeLootCard[] = [
+    {
+      id: "daily-container",
+      title: "Ежедневный контейнер",
+      description: "Открывается за визит, авторизацию и активность в клубе.",
+      status: summary.rewards.summary.ready > 0 ? "ready" : "daily",
+      active: false,
+    },
+    {
+      id: "team-drop",
+      title: "Командный дроп",
+      description: "Награда за игру компанией и выполнение клубных задач.",
+      status: `${formatNumber(summary.journey.summary.completed)}/${formatNumber(
+        summary.journey.summary.total,
+      )}`,
+      active: false,
+    },
+    {
+      id: "rank-case",
+      title: "Ранговый кейс",
+      description: "Откроется после следующей ступени уровня или ранга.",
+      status: "rank",
+      active: false,
+    },
+  ];
+  const realCards = summary.lootBoxes.featured.slice(0, 3).map((lootBox) => ({
+    id: lootBox.id,
+    title: lootBox.name,
+    description:
+      lootBox.latestReward?.rewardLabel ??
+      lootBox.rewardLabel ??
+      "Лутбокс с наградой за активность в клубе.",
+    status:
+      lootBox.readyRewards > 0
+        ? "ready"
+        : lootBox.openedCount > 0
+          ? formatNumber(lootBox.openedCount)
+          : "rank",
+    active: false,
+  }));
+  const cards = [...realCards, ...fallback].slice(0, 3);
+  const activeId = selectedLootId ?? cards[0]?.id ?? null;
+
+  return cards.map((card) => ({
+    ...card,
+    active: card.id === activeId,
+  }));
+}
+
+function buildHomeBattleQuests(summary: GuestPortalGameSummary): HomeBattleQuest[] {
+  const journeyQuests: HomeBattleQuest[] = summary.journey.steps.map((step) => ({
+    id: step.id,
+    title: step.label,
+    description: step.hint,
+    state: homeQuestState(step.status),
+    label: homeQuestStateLabel(step.status),
+  }));
+  const missionQuests: HomeBattleQuest[] = summary.missions.featured.map((mission) => ({
+    id: mission.id,
+    title: mission.name,
+    description: mission.rewardLabel ?? "Клубный квест с XP и наградой.",
+    state: mission.progressPercent >= 100 ? "complete" : "locked",
+    label: mission.progressPercent >= 100 ? "готово" : "квест",
+  }));
+  const fallback: HomeBattleQuest[] = [
+    {
+      id: "promo",
+      title: "Промокод",
+      description: "Активировать клубный код.",
+      state: "locked",
+      label: "next",
+    },
+    {
+      id: "season-final",
+      title: "Финальный чек",
+      description: "Забрать сезонный дроп.",
+      state: "locked",
+      label: "reward",
+    },
+  ];
+
+  return [...journeyQuests, ...missionQuests, ...fallback].slice(0, 6);
+}
+
+function homeQuestState(
+  status: GameJourneyStep["status"],
+): HomeBattleQuest["state"] {
+  if (status === "DONE") {
+    return "complete";
+  }
+
+  return status === "CURRENT" || status === "ATTENTION" ? "current" : "locked";
+}
+
+function homeQuestStateLabel(status: GameJourneyStep["status"]) {
+  if (status === "DONE") {
+    return "готово";
+  }
+
+  if (status === "CURRENT") {
+    return "сейчас";
+  }
+
+  return status === "ATTENTION" ? "проверить" : "locked";
+}
+
+function buildRankLabel(level: number) {
+  const tiers = ["Bronze", "Silver", "Gold", "Platinum", "Diamond"];
+  const safeLevel = Math.max(1, level);
+  const tier = tiers[Math.min(tiers.length - 1, Math.floor((safeLevel - 1) / 3))];
+  const romans = ["IV", "III", "II", "I"];
+  const roman = romans[(safeLevel - 1) % romans.length] ?? "I";
+
+  return `${tier} ${roman}`;
+}
+
+function buildRankPercent(summary: GuestPortalGameSummary) {
+  const explicitProgress = summary.profile.levelProgressPercent;
+  const readiness = summary.account.readinessPercent;
+
+  return clampPercent(Math.max(explicitProgress, Math.min(100, readiness)));
+}
+
+function profileInitials(name: string) {
+  const letters = name
+    .trim()
+    .split(/\s+/)
+    .map((part) => part[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("");
+
+  return letters.toUpperCase() || "LP";
+}
+
+function BrandMark() {
+  return <span className="lp-club-brand-mark" aria-hidden="true" />;
+}
+
+function MenuIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+      <path d="M4 7h16" />
+      <path d="M4 12h16" />
+      <path d="M4 17h16" />
+    </svg>
+  );
+}
+
+function ClubIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+      <path d="M4 9h16" />
+      <path d="M6 9v10h12V9" />
+      <path d="M8 9V6a4 4 0 0 1 8 0v3" />
+    </svg>
+  );
+}
+
+function RefreshIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+      <path d="M20 11a8 8 0 0 0-14.4-4.8L4 8" />
+      <path d="M4 4v4h4" />
+      <path d="M4 13a8 8 0 0 0 14.4 4.8L20 16" />
+      <path d="M20 20v-4h-4" />
+    </svg>
+  );
+}
+
+function ProfileIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+      <path d="M12 3 4.5 7.4v8.8L12 21l7.5-4.8V7.4L12 3Z" />
+      <path d="M9 12.2 11.2 14 15.4 9.6" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+      <path d="m5 12 4 4L19 6" />
+    </svg>
+  );
+}
+
+function QuestIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+      <path d="M4 7h16v10H4z" />
+      <path d="M8 7v10" />
+      <path d="M16 7v10" />
+    </svg>
   );
 }
 
@@ -2395,6 +2986,1289 @@ function ChannelRow({
     </div>
   );
 }
+
+const clubHomeCss = `
+.lp-club-home-page {
+  min-height: 100vh;
+  color: #edf7f8;
+  background: #000;
+  letter-spacing: 0;
+  overflow-x: hidden;
+}
+
+.lp-club-home-page *,
+.lp-club-home-page *::before,
+.lp-club-home-page *::after {
+  box-sizing: border-box;
+}
+
+.lp-club-home {
+  --bg: #000;
+  --panel: rgba(8, 14, 18, 0.9);
+  --panel-strong: rgba(10, 18, 22, 0.96);
+  --line: rgba(196, 224, 225, 0.18);
+  --line-strong: rgba(140, 230, 237, 0.56);
+  --text: #edf7f8;
+  --muted: #a8b9ba;
+  --quiet: #71878a;
+  --cyan: #83e4ec;
+  --teal: #54bfc6;
+  --amber: #d0aa6c;
+  --good: #94d6b8;
+  --radius: 8px;
+  --shadow: 0 30px 90px rgba(0, 0, 0, 0.48);
+  position: relative;
+  min-height: 100vh;
+  isolation: isolate;
+  background:
+    radial-gradient(circle at 72% 8%, rgba(131, 228, 236, 0.08), transparent 28%),
+    radial-gradient(circle at 18% 68%, rgba(208, 170, 108, 0.045), transparent 26%),
+    #000;
+}
+
+.lp-club-home::before,
+.lp-club-home-static::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.72;
+  background-image:
+    linear-gradient(rgba(160, 223, 225, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(160, 223, 225, 0.028) 1px, transparent 1px);
+  background-size: 96px 96px;
+  mask-image: linear-gradient(180deg, transparent, #000 12%, #000 86%, transparent);
+}
+
+.lp-club-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  min-height: 78px;
+  padding: 18px clamp(18px, 3.4vw, 46px);
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.96), rgba(0, 0, 0, 0.72), transparent);
+  backdrop-filter: blur(14px);
+}
+
+.lp-club-menu-button,
+.lp-club-icon-badge {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(196, 224, 225, 0.2);
+  border-radius: 8px;
+  color: #edf7f8;
+  background: rgba(196, 224, 225, 0.035);
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    transform 180ms ease;
+}
+
+.lp-club-menu-button {
+  cursor: pointer;
+}
+
+.lp-club-menu-button:hover,
+.lp-club-icon-badge:hover {
+  border-color: rgba(131, 228, 236, 0.58);
+  background: rgba(131, 228, 236, 0.08);
+  transform: translateY(-1px);
+}
+
+.lp-club-home svg,
+.lp-club-home-static svg {
+  width: 20px;
+  height: 20px;
+  stroke-width: 1.8;
+}
+
+.lp-club-network {
+  display: flex;
+  align-items: center;
+  gap: clamp(18px, 4vw, 54px);
+  min-width: 0;
+}
+
+.lp-club-brand,
+.lp-club-switch {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+
+.lp-club-brand {
+  gap: 12px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 820;
+  letter-spacing: 0.14em;
+}
+
+.lp-club-brand-mark {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(196, 224, 225, 0.36);
+  border-radius: 50%;
+}
+
+.lp-club-brand-mark::before,
+.lp-club-brand-mark::after {
+  content: "";
+  position: absolute;
+  inset: 8px;
+  border: 1px solid rgba(131, 228, 236, 0.38);
+  transform: rotate(45deg);
+}
+
+.lp-club-brand-mark::after {
+  inset: 14px;
+  border-color: var(--amber);
+}
+
+.lp-club-switch {
+  gap: 9px;
+  color: var(--cyan);
+  font-size: 12px;
+  font-weight: 820;
+  letter-spacing: 0.12em;
+}
+
+.lp-club-switch span,
+.lp-club-brand span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lp-club-session-state {
+  justify-self: end;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 13px;
+  border: 1px solid rgba(196, 224, 225, 0.18);
+  border-radius: 8px;
+  background: rgba(7, 12, 16, 0.56);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 820;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.lp-club-session-state::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--cyan);
+  box-shadow: 0 0 16px rgba(131, 228, 236, 0.64);
+}
+
+.lp-club-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 20px;
+  width: min(1480px, 100%);
+  min-height: calc(100vh - 78px);
+  margin: 0 auto;
+  padding: 18px clamp(18px, 3.4vw, 46px) 32px;
+}
+
+.lp-club-main-flow {
+  display: grid;
+  grid-template-rows: minmax(250px, auto) auto minmax(220px, 1fr);
+  gap: 20px;
+  min-width: 0;
+}
+
+.lp-club-stage {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(500px, 590px);
+  gap: 20px;
+  min-width: 0;
+}
+
+.lp-club-card,
+.lp-club-panel,
+.lp-club-profile-panel,
+.lp-club-static-card {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.045), transparent 26%),
+    var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.lp-club-card::before,
+.lp-club-panel::before,
+.lp-club-profile-panel::before,
+.lp-club-static-card::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: -1px;
+  width: 42px;
+  height: 42px;
+  border-top: 1px solid var(--cyan);
+  border-left: 1px solid var(--cyan);
+  border-top-left-radius: var(--radius);
+  pointer-events: none;
+}
+
+.lp-club-card {
+  min-height: 250px;
+  overflow: hidden;
+  padding: 24px;
+}
+
+.lp-club-card::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(131, 228, 236, 0.58), transparent);
+}
+
+.lp-club-label,
+.lp-club-small-label {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 820;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.lp-club-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.lp-club-label::before {
+  content: "";
+  width: 36px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--cyan), transparent);
+}
+
+.lp-club-home h1,
+.lp-club-home h2,
+.lp-club-home h3,
+.lp-club-home p,
+.lp-club-home-static h1,
+.lp-club-home-static p {
+  margin: 0;
+}
+
+.lp-club-card h1 {
+  max-width: 560px;
+  margin-top: 34px;
+  color: var(--text);
+  font-size: clamp(42px, 5.2vw, 76px);
+  line-height: 0.92;
+  font-weight: 760;
+}
+
+.lp-club-card p {
+  max-width: 560px;
+  margin-top: 18px;
+  color: #c2d0d1;
+  font-size: 16px;
+  line-height: 1.62;
+}
+
+.lp-club-quick-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, auto);
+  gap: 12px;
+  margin-top: 28px;
+}
+
+.lp-club-metric {
+  min-width: 92px;
+  padding: 12px 13px;
+  border: 1px solid rgba(196, 224, 225, 0.14);
+  border-radius: 7px;
+  background: rgba(2, 8, 11, 0.46);
+}
+
+.lp-club-metric strong {
+  display: block;
+  color: var(--cyan);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.lp-club-metric span {
+  display: block;
+  margin-top: 7px;
+  color: var(--quiet);
+  font-size: 9px;
+  font-weight: 820;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.lp-club-banner-grid {
+  display: grid;
+  grid-template-columns: 1.05fr 1fr 1fr;
+  gap: 14px;
+  min-width: 0;
+}
+
+.lp-club-banner {
+  position: relative;
+  min-height: 250px;
+  overflow: hidden;
+  border: 1px solid rgba(196, 224, 225, 0.18);
+  border-radius: var(--radius);
+  color: inherit;
+  text-decoration: none;
+  background:
+    linear-gradient(180deg, rgba(131, 228, 236, 0.11), transparent 34%),
+    rgba(5, 11, 14, 0.82);
+  transition:
+    border-color 180ms ease,
+    transform 180ms ease,
+    background 180ms ease;
+}
+
+.lp-club-banner:hover {
+  border-color: rgba(131, 228, 236, 0.58);
+  transform: translateY(-2px);
+}
+
+.lp-club-banner::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0.7;
+  background:
+    linear-gradient(135deg, transparent 0 34%, rgba(131, 228, 236, 0.12) 34% 35%, transparent 35% 100%),
+    radial-gradient(circle at 72% 18%, rgba(131, 228, 236, 0.16), transparent 24%);
+}
+
+.lp-club-banner.is-featured {
+  background:
+    linear-gradient(180deg, rgba(208, 170, 108, 0.17), transparent 36%),
+    rgba(7, 12, 16, 0.86);
+}
+
+.lp-club-banner.is-featured::before {
+  background:
+    radial-gradient(circle at 70% 18%, rgba(208, 170, 108, 0.2), transparent 24%),
+    linear-gradient(135deg, transparent 0 38%, rgba(208, 170, 108, 0.15) 38% 39%, transparent 39% 100%);
+}
+
+.lp-club-banner-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 18px;
+}
+
+.lp-club-banner-kicker,
+.lp-club-banner-title,
+.lp-club-banner-copy {
+  display: block;
+}
+
+.lp-club-banner-kicker {
+  color: var(--quiet);
+  font-size: 9px;
+  font-weight: 820;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.lp-club-banner-title {
+  margin-top: 18px;
+  color: var(--text);
+  font-size: 24px;
+  line-height: 1.05;
+  font-weight: 780;
+}
+
+.lp-club-banner-copy {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.lp-club-banner-tag {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid rgba(196, 224, 225, 0.14);
+  border-radius: 7px;
+  color: var(--cyan);
+  font-size: 9px;
+  font-weight: 860;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.lp-club-lootboxes,
+.lp-club-battlepass,
+.lp-club-profile-panel {
+  padding: 18px;
+}
+
+.lp-club-section-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.lp-club-section-head h2,
+.lp-club-detail-head h2 {
+  color: var(--text);
+  font-size: 24px;
+  line-height: 1.08;
+  font-weight: 740;
+}
+
+.lp-club-section-head p {
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.lp-club-loot-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.lp-club-loot-card {
+  position: relative;
+  min-height: 116px;
+  overflow: hidden;
+  padding: 16px;
+  border: 1px solid rgba(196, 224, 225, 0.15);
+  border-radius: var(--radius);
+  color: inherit;
+  text-align: left;
+  background: rgba(2, 8, 11, 0.54);
+  cursor: pointer;
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    transform 180ms ease;
+}
+
+.lp-club-loot-card:hover,
+.lp-club-loot-card.is-active {
+  border-color: rgba(131, 228, 236, 0.64);
+  background:
+    linear-gradient(90deg, rgba(131, 228, 236, 0.12), transparent),
+    rgba(8, 18, 22, 0.86);
+  transform: translateY(-1px);
+}
+
+.lp-club-loot-card::after {
+  content: "";
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  width: 52px;
+  height: 38px;
+  border: 1px solid rgba(131, 228, 236, 0.38);
+  border-radius: 6px;
+  background:
+    linear-gradient(90deg, transparent 0 45%, rgba(131, 228, 236, 0.24) 45% 55%, transparent 55% 100%),
+    linear-gradient(180deg, rgba(196, 224, 225, 0.1), rgba(196, 224, 225, 0.02));
+  box-shadow: inset 0 0 0 7px rgba(0, 0, 0, 0.22);
+}
+
+.lp-club-loot-card strong {
+  display: block;
+  max-width: 70%;
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.lp-club-loot-card span {
+  display: block;
+  margin-top: 10px;
+  max-width: 70%;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.lp-club-loot-card em {
+  position: absolute;
+  right: 16px;
+  top: 14px;
+  color: var(--cyan);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 860;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.lp-club-battlepass {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+
+.lp-club-battle-track {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(104px, 1fr)) 178px;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.lp-club-quest {
+  position: relative;
+  display: grid;
+  align-content: space-between;
+  min-height: 96px;
+  padding: 13px;
+  border: 1px solid rgba(196, 224, 225, 0.16);
+  border-radius: 7px;
+  color: inherit;
+  text-align: left;
+  background: rgba(2, 8, 11, 0.58);
+  cursor: pointer;
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    transform 180ms ease;
+}
+
+.lp-club-quest:hover,
+.lp-club-quest.is-complete,
+.lp-club-quest.is-current {
+  transform: translateY(-1px);
+}
+
+.lp-club-quest.is-complete {
+  border-color: rgba(148, 214, 184, 0.54);
+  background: rgba(23, 48, 40, 0.38);
+}
+
+.lp-club-quest.is-current {
+  border-color: rgba(131, 228, 236, 0.68);
+  background:
+    linear-gradient(90deg, rgba(131, 228, 236, 0.12), transparent),
+    rgba(8, 18, 22, 0.86);
+}
+
+.lp-club-quest:not(:last-of-type)::after {
+  content: "";
+  position: absolute;
+  top: calc(50% - 7px);
+  right: -19px;
+  z-index: 2;
+  width: 14px;
+  height: 14px;
+  border-top: 2px solid rgba(196, 224, 225, 0.7);
+  border-right: 2px solid rgba(196, 224, 225, 0.7);
+  transform: rotate(45deg);
+}
+
+.lp-club-quest strong {
+  display: block;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.22;
+}
+
+.lp-club-quest span span {
+  display: block;
+  margin-top: 9px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.lp-club-quest small {
+  color: var(--cyan);
+  font-size: 9px;
+  font-weight: 860;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.lp-club-reward {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 176px;
+}
+
+.lp-club-reward-shape {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(135deg, rgba(208, 170, 108, 0.26), rgba(131, 228, 236, 0.12)),
+    rgba(7, 13, 16, 0.98);
+  clip-path: polygon(50% 0%, 62% 30%, 96% 21%, 76% 50%, 96% 79%, 62% 70%, 50% 100%, 38% 70%, 4% 79%, 24% 50%, 4% 21%, 38% 30%);
+  filter: drop-shadow(0 0 32px rgba(208, 170, 108, 0.16));
+}
+
+.lp-club-reward::before {
+  content: "";
+  position: absolute;
+  inset: 8px;
+  border: 1px solid rgba(208, 170, 108, 0.6);
+  clip-path: polygon(50% 0%, 62% 30%, 96% 21%, 76% 50%, 96% 79%, 62% 70%, 50% 100%, 38% 70%, 4% 79%, 24% 50%, 4% 21%, 38% 30%);
+  pointer-events: none;
+}
+
+.lp-club-reward-content {
+  position: relative;
+  z-index: 1;
+  max-width: 128px;
+  text-align: center;
+}
+
+.lp-club-reward-content strong {
+  display: block;
+  color: var(--text);
+  font-size: 17px;
+  line-height: 1.1;
+  font-weight: 860;
+}
+
+.lp-club-reward-content span {
+  display: block;
+  margin-top: 9px;
+  color: var(--amber);
+  font-size: 10px;
+  font-weight: 860;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.lp-club-profile-panel {
+  align-self: start;
+  min-height: 100%;
+}
+
+.lp-club-profile-logo {
+  display: grid;
+  min-height: 92px;
+  grid-template-columns: 58px minmax(0, 1fr);
+  align-items: center;
+  gap: 13px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid rgba(196, 224, 225, 0.12);
+}
+
+.lp-club-avatar {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  border: 1px solid rgba(131, 228, 236, 0.4);
+  border-radius: 50%;
+  color: var(--cyan);
+  background: rgba(131, 228, 236, 0.06);
+}
+
+.lp-club-profile-logo strong {
+  display: block;
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.18;
+}
+
+.lp-club-profile-logo span span {
+  display: block;
+  margin-top: 7px;
+  color: var(--quiet);
+  font-size: 10px;
+  font-weight: 820;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.lp-club-profile-section {
+  padding: 17px 0;
+  border-bottom: 1px solid rgba(196, 224, 225, 0.12);
+}
+
+.lp-club-profile-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.lp-club-profile-row strong {
+  color: var(--text);
+  font-size: 20px;
+  line-height: 1;
+}
+
+.lp-club-progress {
+  height: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(196, 224, 225, 0.16);
+  border-radius: 999px;
+  background: rgba(0, 6, 9, 0.72);
+}
+
+.lp-club-progress span {
+  display: block;
+  width: var(--value);
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--cyan), var(--teal));
+  box-shadow: 0 0 20px rgba(131, 228, 236, 0.34);
+}
+
+.lp-club-profile-section.rank .lp-club-progress span {
+  background: linear-gradient(90deg, var(--amber), rgba(208, 170, 108, 0.48));
+}
+
+.lp-club-profile-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.lp-club-profile-stats strong {
+  display: block;
+  margin-top: 6px;
+  color: var(--text);
+  font-size: 18px;
+}
+
+.lp-club-promo {
+  display: grid;
+  gap: 10px;
+  padding-top: 17px;
+}
+
+.lp-club-promo input {
+  width: 100%;
+  height: 46px;
+  min-width: 0;
+  padding: 0 12px;
+  border: 1px solid rgba(196, 224, 225, 0.16);
+  border-radius: 7px;
+  outline: 0;
+  color: var(--text);
+  background: rgba(0, 6, 9, 0.68);
+  font-size: 13px;
+}
+
+.lp-club-promo input:focus {
+  border-color: rgba(131, 228, 236, 0.58);
+  box-shadow: 0 0 0 3px rgba(131, 228, 236, 0.08);
+}
+
+.lp-club-promo button,
+.lp-club-quick-actions button,
+.lp-club-quick-actions a,
+.lp-club-primary-link,
+.lp-club-ghost-link {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 860;
+  letter-spacing: 0.08em;
+  text-align: center;
+  text-decoration: none;
+  text-transform: uppercase;
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    color 180ms ease,
+    transform 180ms ease;
+}
+
+.lp-club-promo button,
+.lp-club-primary-link {
+  border: 1px solid rgba(131, 228, 236, 0.4);
+  color: #001012;
+  background: linear-gradient(135deg, #83e4ec, #94d6b8);
+}
+
+.lp-club-promo button:hover,
+.lp-club-primary-link:hover {
+  transform: translateY(-1px);
+}
+
+.lp-club-side-link,
+.lp-club-ghost-link {
+  color: var(--cyan);
+  border: 1px solid rgba(131, 228, 236, 0.22);
+  background: rgba(196, 224, 225, 0.035);
+}
+
+.lp-club-side-link {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.lp-club-quick-actions {
+  display: grid;
+  gap: 10px;
+  padding-top: 17px;
+}
+
+.lp-club-quick-actions button {
+  border: 1px solid rgba(131, 228, 236, 0.4);
+  color: #001012;
+  background: linear-gradient(135deg, #83e4ec, #94d6b8);
+}
+
+.lp-club-quick-actions button:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.lp-club-quick-actions a {
+  border: 1px solid rgba(196, 224, 225, 0.18);
+  color: var(--text);
+  background: rgba(0, 6, 9, 0.46);
+}
+
+.lp-club-quick-actions p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.lp-club-quest-widget {
+  margin-top: 18px;
+  padding-top: 17px;
+  border-top: 1px solid rgba(196, 224, 225, 0.12);
+}
+
+.lp-club-quest-widget-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.lp-club-quest-widget-head strong {
+  display: block;
+  margin-top: 6px;
+  color: var(--text);
+  font-size: 14px;
+}
+
+.lp-club-quest-count {
+  border-radius: 999px;
+  padding: 6px 8px;
+  color: var(--cyan);
+  background: rgba(131, 228, 236, 0.08);
+  font-size: 10px;
+  font-weight: 860;
+}
+
+.lp-club-side-quest-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.lp-club-side-quest {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 58px;
+  padding: 10px;
+  border: 1px solid rgba(196, 224, 225, 0.14);
+  border-radius: 7px;
+  color: inherit;
+  text-decoration: none;
+  background: rgba(2, 8, 11, 0.48);
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    transform 180ms ease;
+}
+
+.lp-club-side-quest:hover,
+.lp-club-side-quest.is-current {
+  border-color: rgba(131, 228, 236, 0.58);
+  background:
+    linear-gradient(90deg, rgba(131, 228, 236, 0.1), transparent),
+    rgba(8, 18, 22, 0.82);
+  transform: translateY(-1px);
+}
+
+.lp-club-side-quest.is-done {
+  border-color: rgba(148, 214, 184, 0.42);
+  background: rgba(23, 48, 40, 0.3);
+}
+
+.lp-club-side-quest-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(131, 228, 236, 0.26);
+  border-radius: 7px;
+  color: var(--cyan);
+  background: rgba(196, 224, 225, 0.045);
+}
+
+.lp-club-side-quest strong {
+  display: block;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lp-club-side-quest span span {
+  display: block;
+  margin-top: 5px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lp-club-side-quest-state {
+  color: var(--quiet);
+  font-size: 9px;
+  font-weight: 860;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.lp-club-side-quest.is-current .lp-club-side-quest-state,
+.lp-club-side-quest.is-done .lp-club-side-quest-state {
+  color: var(--cyan);
+}
+
+.lp-club-detail-stack {
+  display: grid;
+  gap: 18px;
+  width: min(1480px, 100%);
+  margin: 0 auto;
+  padding: 4px clamp(18px, 3.4vw, 46px) 48px;
+}
+
+.lp-club-detail-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 10px;
+}
+
+.lp-club-toast {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: 18px;
+  z-index: 20;
+  max-width: 420px;
+  margin: 0 auto;
+  padding: 13px 14px;
+  border: 1px solid rgba(131, 228, 236, 0.28);
+  border-radius: 7px;
+  background: rgba(7, 13, 16, 0.94);
+  color: #d7e5e6;
+  box-shadow: var(--shadow);
+  font-size: 13px;
+  line-height: 1.45;
+  opacity: 0;
+  transform: translateY(12px);
+  pointer-events: none;
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
+  backdrop-filter: blur(18px);
+}
+
+.lp-club-toast.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.lp-club-home-static {
+  --panel: rgba(8, 14, 18, 0.9);
+  --line: rgba(196, 224, 225, 0.18);
+  --cyan: #83e4ec;
+  --text: #edf7f8;
+  --muted: #a8b9ba;
+  --radius: 8px;
+  --shadow: 0 30px 90px rgba(0, 0, 0, 0.48);
+  position: relative;
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+  isolation: isolate;
+  background:
+    radial-gradient(circle at 72% 8%, rgba(131, 228, 236, 0.08), transparent 28%),
+    #000;
+}
+
+.lp-club-static-card {
+  width: min(560px, 100%);
+  padding: 26px;
+}
+
+.lp-club-static-title {
+  margin-top: 12px;
+  color: var(--text);
+  font-size: clamp(28px, 6vw, 44px);
+  line-height: 1;
+  font-weight: 780;
+}
+
+.lp-club-static-copy {
+  margin-top: 14px;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+.lp-club-static-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.lp-club-skeleton {
+  height: 12px;
+  border-radius: 999px;
+  background: rgba(196, 224, 225, 0.12);
+}
+
+.lp-club-skeleton + .lp-club-skeleton {
+  margin-top: 12px;
+}
+
+.lp-club-skeleton-short {
+  width: 120px;
+}
+
+.lp-club-skeleton-title {
+  width: 68%;
+  height: 42px;
+  margin-top: 18px;
+}
+
+.lp-club-skeleton-mid {
+  width: 76%;
+}
+
+.lp-club-static-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.lp-club-static-grid .lp-club-skeleton {
+  height: 64px;
+  margin-top: 0;
+  border-radius: 8px;
+}
+
+@media (max-width: 1180px) {
+  .lp-club-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .lp-club-profile-panel {
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 1.1fr 1fr 1fr;
+    gap: 16px;
+  }
+
+  .lp-club-profile-logo,
+  .lp-club-profile-section {
+    padding: 0;
+    border-bottom: 0;
+  }
+
+  .lp-club-promo,
+  .lp-club-quick-actions {
+    padding-top: 0;
+  }
+
+  .lp-club-quest-widget {
+    grid-column: span 2;
+    margin-top: 0;
+    padding-top: 0;
+    border-top: 0;
+  }
+}
+
+@media (max-width: 920px) {
+  .lp-club-topbar {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .lp-club-session-state {
+    display: none;
+  }
+
+  .lp-club-stage,
+  .lp-club-banner-grid,
+  .lp-club-loot-grid,
+  .lp-club-profile-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .lp-club-card {
+    min-height: 0;
+  }
+
+  .lp-club-quick-metrics {
+    margin-top: 22px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .lp-club-banner {
+    min-height: 156px;
+  }
+
+  .lp-club-battle-track {
+    display: flex;
+    align-items: stretch;
+    overflow-x: auto;
+    padding-bottom: 6px;
+    scroll-snap-type: x proximity;
+  }
+
+  .lp-club-quest {
+    min-width: 132px;
+    scroll-snap-align: start;
+  }
+
+  .lp-club-reward {
+    min-width: 170px;
+  }
+
+  .lp-club-quest-widget {
+    grid-column: auto;
+    margin-top: 18px;
+    padding-top: 17px;
+    border-top: 1px solid rgba(196, 224, 225, 0.12);
+  }
+
+  .lp-club-detail-head {
+    align-items: start;
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 560px) {
+  .lp-club-topbar {
+    min-height: 70px;
+    padding: 14px;
+  }
+
+  .lp-club-network {
+    gap: 12px;
+  }
+
+  .lp-club-brand {
+    gap: 9px;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+  }
+
+  .lp-club-brand-mark {
+    width: 30px;
+    height: 30px;
+  }
+
+  .lp-club-switch {
+    display: none;
+  }
+
+  .lp-club-shell {
+    padding: 12px 12px 28px;
+  }
+
+  .lp-club-card h1 {
+    font-size: 40px;
+  }
+
+  .lp-club-card,
+  .lp-club-lootboxes,
+  .lp-club-battlepass,
+  .lp-club-profile-panel {
+    padding: 16px;
+  }
+
+  .lp-club-quick-metrics,
+  .lp-club-profile-stats,
+  .lp-club-static-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .lp-club-section-head {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .lp-club-quest:not(:last-of-type)::after {
+    right: -18px;
+  }
+
+  .lp-club-detail-stack {
+    padding: 0 12px 36px;
+  }
+
+  .lp-club-static-actions {
+    flex-direction: column;
+  }
+}
+`;
 
 function gameActionHref(action: GameNextAction, guestPortalHref: string) {
   if (action.kind === "MATCH_LANGAME") {

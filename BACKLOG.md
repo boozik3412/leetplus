@@ -1,5 +1,7 @@
 # LeetPlus Бэклог
 
+- Готово: `/play/game` обновлен по макету `gamification-club-home-mockup.html`. Главный экран гостя теперь открывается как игровая домашняя страница клуба: верхнее меню сети/клуба, клубная карта игрока, три баннера активностей, правый профиль с уровнем/рангом/промокодом, блок лутбоксов и батлпасс с цепочкой заданий и главной наградой; существующие подробные блоки прогресса, рефералок, наград, каналов и активности сохранены ниже основного экрана.
+
 - Готово: на `/game/auth` после подтверждения участника больше нет двух CTA. Подтвержденный блок показывает одну кнопку `Продолжить`: для нового входа она ведет на `/game/clubs`, а если у гостя уже есть активная выбранная клубная сессия, `/game/auth` сразу переводит его в игровой модуль `/play/game`.
 
 - Готово: live-схема Telegram-бота и TG Mini App для геймификации зафиксирована как polling edge на 1337. `https://tg.leetplus.ru` работает через Docker Compose (`telegram-edge`, `telegram-mini-app-web`, `telegram-poller`), основной путь читает Telegram `getUpdates`, на старте очищает public webhook без `drop_pending_updates` и передает safe update во внутренний API `/guest-portal/telegram/webhook`; публичный Telegram webhook не является основным способом доставки. Добавлены env-примеры polling, тестируемый CLI `guest-game:telegram-poller`, regression-тесты poller-а и новая операторская формулировка readiness `Telegram update consumer (polling edge)`. Источник правды по live-развертыванию: `docs/deployment/telegram-edge-vds/CURRENT_1337_HANDOFF.md`.

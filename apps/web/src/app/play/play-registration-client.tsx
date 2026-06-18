@@ -1308,20 +1308,6 @@ export function PlayRegistrationClient({
                       </form>
                     )}
 
-                    {isGameAuth ? (
-                      <div className="lp-game-auth-panel-foot">
-                        <span>
-                          {gameAuthMethodSessionLabel(activeVerificationChannel)}
-                        </span>
-                        <span className="lp-game-auth-access-state">
-                          {gameAuthMethodStateLabel(
-                            activeVerificationChannel,
-                            activeVerificationOption?.status ?? "NOT_CONFIGURED",
-                          )}
-                        </span>
-                      </div>
-                    ) : null}
-
                     {activeVerificationChannel === "SMS_CODE" && challenge ? (
                       <form className="space-y-3" onSubmit={submitCode}>
                         <div className="rounded-lg border border-white/10 bg-white/[0.04] p-3">
@@ -2029,22 +2015,30 @@ function UserCallAuthPanel({
         </p>
       ) : null}
 
-      <div className="lp-game-auth-channel-actions mt-3 grid gap-2 sm:grid-cols-2">
+      <div
+        className={`lp-game-auth-channel-actions mt-3 grid gap-2 ${
+          userCallAuth?.callHref ? "sm:grid-cols-[0.8fr_1.2fr]" : "sm:grid-cols-2"
+        }`}
+      >
         <button
           className="lp-game-auth-channel-primary min-h-11 rounded-lg bg-cyan-300 px-4 text-sm font-black text-slate-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={disabled || !ready || isStarting}
+          disabled={disabled || !ready || isStarting || Boolean(userCallAuth?.callHref)}
           onClick={onStart}
           type="button"
         >
-          {isStarting ? "Создаем..." : "Создать вход по звонку"}
+          {userCallAuth?.callHref
+            ? "Вход создан"
+            : isStarting
+              ? "Создаем..."
+              : "Создать вход по звонку"}
         </button>
 
         {userCallAuth?.callHref ? (
           <a
-            className="lp-game-auth-channel-secondary flex min-h-11 items-center justify-center rounded-lg border border-cyan-300/35 px-4 text-sm font-black text-cyan-100 transition hover:border-cyan-300"
+            className="lp-game-auth-call-action flex min-h-11 items-center justify-center rounded-lg border border-cyan-300/35 px-4 text-sm font-black text-cyan-100 transition hover:border-cyan-300"
             href={userCallAuth.callHref}
           >
-            Позвонить {userCallAuth.callNumber}
+            Позвонить бесплатно: {userCallAuth.callNumber}
           </a>
         ) : (
           <button
@@ -2520,45 +2514,6 @@ function gameAuthMethodSummary(channel: GuestPortalVerificationChannel) {
   }
 
   return "Выберите доступный способ подтверждения игрового профиля.";
-}
-
-function gameAuthMethodSessionLabel(channel: GuestPortalVerificationChannel) {
-  if (channel === "TELEGRAM_BOT") {
-    return "Метод: Telegram";
-  }
-
-  if (channel === "USER_CALL") {
-    return "Метод: звонок";
-  }
-
-  if (channel === "SMS_CODE") {
-    return "Метод: SMS";
-  }
-
-  return "Метод: резерв";
-}
-
-function gameAuthMethodStateLabel(
-  channel: GuestPortalVerificationChannel,
-  status: VerificationStatus,
-) {
-  if (status !== "READY") {
-    return "Нужна настройка";
-  }
-
-  if (channel === "TELEGRAM_BOT") {
-    return "Ожидает бота";
-  }
-
-  if (channel === "USER_CALL") {
-    return "Ожидает звонок";
-  }
-
-  if (channel === "SMS_CODE") {
-    return "Ожидает SMS";
-  }
-
-  return "Готово";
 }
 
 function clubApiPath(club: GuestPortalGamificationClub) {
@@ -3448,7 +3403,8 @@ const gameAuthCss = `
   background: rgba(131, 228, 236, 0.19) !important;
 }
 
-.lp-game-auth-channel-secondary {
+.lp-game-auth-channel-secondary,
+.lp-game-auth-call-action {
   border-color: rgba(196, 224, 225, 0.14) !important;
   background: rgba(196, 224, 225, 0.04) !important;
   color: #71878a !important;
@@ -3459,29 +3415,27 @@ const gameAuthCss = `
   color: #cceef1 !important;
 }
 
+.lp-game-auth-call-action {
+  border-color: rgba(131, 228, 236, 0.74) !important;
+  background:
+    linear-gradient(90deg, rgba(131, 228, 236, 0.32), rgba(169, 228, 199, 0.18)),
+    rgba(131, 228, 236, 0.12) !important;
+  color: #effdff !important;
+  box-shadow: 0 0 0 1px rgba(131, 228, 236, 0.16), 0 0 26px rgba(131, 228, 236, 0.16);
+}
+
+.lp-game-auth-call-action:hover {
+  border-color: rgba(131, 228, 236, 0.95) !important;
+  background:
+    linear-gradient(90deg, rgba(131, 228, 236, 0.42), rgba(169, 228, 199, 0.24)),
+    rgba(131, 228, 236, 0.16) !important;
+}
+
 .lp-game-auth-channel-meta,
 .lp-game-auth-channel-note {
   color: #9eb3b6 !important;
   font-size: 12px !important;
   line-height: 1.5 !important;
-}
-
-.lp-game-auth-panel-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 2px;
-  padding-top: 16px;
-  border-top: 1px solid rgba(196, 224, 225, 0.12);
-  color: #71878a;
-  font-size: 10px;
-  font-weight: 820;
-  text-transform: uppercase;
-}
-
-.lp-game-auth-access-state {
-  color: #83e4ec;
 }
 
 @media (min-width: 1024px) {

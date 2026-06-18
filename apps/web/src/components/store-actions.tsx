@@ -17,6 +17,11 @@ type AddressSuggestion = {
   timeZone: string | null;
 };
 
+type AddressGeocodeResult = AddressSuggestion & {
+  latitude: number;
+  longitude: number;
+};
+
 function getErrorMessage(data: unknown) {
   if (
     data &&
@@ -61,7 +66,7 @@ export function StoreCreateForm() {
       className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm"
     >
       <h2 className="text-base font-semibold">Новая торговая точка</h2>
-      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-8">
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-9">
         <StoreInputs />
       </div>
 
@@ -106,8 +111,8 @@ export function StoreEditForm({ store }: { store: Store }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="grid min-w-[1040px] gap-2">
-      <div className="grid gap-2 md:grid-cols-8">
+    <form onSubmit={handleSubmit} className="grid min-w-[1160px] gap-2">
+      <div className="grid gap-2 md:grid-cols-9">
         <StoreInputs store={store} />
       </div>
       <div className="flex items-center gap-3">
@@ -153,13 +158,22 @@ export function StoreArchiveButton({ id }: { id: string }) {
 }
 
 function StoreInputs({ store }: { store?: Store }) {
+  const [address, setAddress] = useState(store?.address ?? "");
   const [city, setCity] = useState(store?.city ?? "");
   const [timeZone, setTimeZone] = useState(store?.timeZone ?? "");
   const [cityFiasId, setCityFiasId] = useState(store?.cityFiasId ?? "");
   const [cityKladrId, setCityKladrId] = useState(store?.cityKladrId ?? "");
+  const [latitude, setLatitude] = useState(
+    formatCoordinateValue(store?.latitude),
+  );
+  const [longitude, setLongitude] = useState(
+    formatCoordinateValue(store?.longitude),
+  );
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
   const [isSuggesting, setIsSuggesting] = useState(false);
   const [isSuggestionOpen, setIsSuggestionOpen] = useState(false);
+  const [isGeocoding, setIsGeocoding] = useState(false);
+  const [geocodeStatus, setGeocodeStatus] = useState<string | null>(null);
 
   useEffect(() => {
     const query = city.trim();
@@ -223,6 +237,48 @@ function StoreInputs({ store }: { store?: Store }) {
     setIsSuggestionOpen(false);
   }
 
+  async function handleAddressGeocode() {
+    const query = address.trim();
+
+    if (query.length < 5) {
+      setGeocodeStatus("Укажите адрес");
+      return;
+    }
+
+    setIsGeocoding(true);
+    setGeocodeStatus(null);
+
+    try {
+      const response = await fetch(
+        `/api/stores/address-geocode?q=${encodeURIComponent(query)}`,
+      );
+      const data = (await response.json()) as
+        | AddressGeocodeResult
+        | ErrorResponse;
+
+      if (!response.ok) {
+        setGeocodeStatus(getErrorMessage(data));
+        return;
+      }
+
+      const geocode = data as AddressGeocodeResult;
+      setAddress(geocode.value);
+      setCity(geocode.city);
+      setTimeZone(geocode.timeZone ?? "");
+      setCityFiasId(geocode.cityFiasId ?? "");
+      setCityKladrId(geocode.cityKladrId ?? "");
+      setLatitude(String(geocode.latitude));
+      setLongitude(String(geocode.longitude));
+      setSuggestions([]);
+      setIsSuggestionOpen(false);
+      setGeocodeStatus("Координаты найдены");
+    } catch {
+      setGeocodeStatus("Не удалось получить координаты");
+    } finally {
+      setIsGeocoding(false);
+    }
+  }
+
   return (
     <>
       <input
@@ -234,7 +290,8 @@ function StoreInputs({ store }: { store?: Store }) {
       />
       <input
         name="address"
-        defaultValue={store?.address ?? ""}
+        value={address}
+        onChange={(event) => setAddress(event.target.value)}
         placeholder="Адрес"
         className="rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
       />
@@ -294,7 +351,8 @@ function StoreInputs({ store }: { store?: Store }) {
       />
       <input
         name="latitude"
-        defaultValue={formatCoordinateValue(store?.latitude)}
+        value={latitude}
+        onChange={(event) => setLatitude(event.target.value)}
         inputMode="decimal"
         placeholder="Широта"
         title="От -90 до 90. Нужно для карты и поиска рядом в игровом модуле"
@@ -302,12 +360,25 @@ function StoreInputs({ store }: { store?: Store }) {
       />
       <input
         name="longitude"
-        defaultValue={formatCoordinateValue(store?.longitude)}
+        value={longitude}
+        onChange={(event) => setLongitude(event.target.value)}
         inputMode="decimal"
         placeholder="Долгота"
         title="От -180 до 180. Нужно для карты и поиска рядом в игровом модуле"
         className="rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
       />
+      <button
+        type="button"
+        onClick={handleAddressGeocode}
+        disabled={isGeocoding || address.trim().length < 5}
+        title={geocodeStatus ?? "Найти координаты по адресу"}
+        className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+      >
+        {isGeocoding ? "..." : "Координаты"}
+      </button>
+      {geocodeStatus ? (
+        <p className="text-xs text-zinc-500 md:col-span-2">{geocodeStatus}</p>
+      ) : null}
       <input name="cityFiasId" type="hidden" value={cityFiasId} readOnly />
       <input name="cityKladrId" type="hidden" value={cityKladrId} readOnly />
       <label className="flex min-h-10 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700">

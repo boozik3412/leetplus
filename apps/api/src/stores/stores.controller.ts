@@ -45,6 +45,13 @@ export class StoresController {
 
   @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
   @UseGuards(JwtAuthGuard, RolesGuard)
+  @Get('address-geocode')
+  geocodeAddress(@Query('q') query?: string) {
+    return this.storesService.geocodeAddress(query);
+  }
+
+  @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Patch(':id')
   update(
     @Param('id') id: string,

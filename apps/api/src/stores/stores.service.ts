@@ -30,6 +30,8 @@ type DadataAddressSuggestion = {
     city_kladr_id?: string | null;
     settlement_kladr_id?: string | null;
     timezone?: string | null;
+    geo_lat?: string | null;
+    geo_lon?: string | null;
   };
 };
 
@@ -40,6 +42,11 @@ export type StoreAddressSuggestion = {
   cityFiasId: string | null;
   cityKladrId: string | null;
   timeZone: string | null;
+};
+
+export type StoreAddressGeocode = StoreAddressSuggestion & {
+  latitude: number;
+  longitude: number;
 };
 
 @Injectable()
@@ -140,6 +147,53 @@ export class StoresService {
       .filter((suggestion): suggestion is StoreAddressSuggestion =>
         Boolean(suggestion),
       );
+  }
+
+  async geocodeAddress(query: string | undefined) {
+    const cleanQuery = this.normalizeOptionalString(query);
+
+    if (!cleanQuery || cleanQuery.length < 5) {
+      throw new BadRequestException('Укажите адрес клуба');
+    }
+
+    const token = this.configService.get<string>('DADATA_API_KEY')?.trim();
+
+    if (!token) {
+      throw new BadRequestException('Адресный справочник не настроен');
+    }
+
+    const response = await fetch(DADATA_SUGGEST_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Token ${token}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({
+        query: cleanQuery,
+        count: 1,
+        locations: [{ country: 'Россия' }],
+      }),
+    });
+
+    if (!response.ok) {
+      throw new BadRequestException('Адресный справочник временно недоступен');
+    }
+
+    const data = (await response.json()) as {
+      suggestions?: DadataAddressSuggestion[];
+    };
+    const geocode = (data.suggestions ?? [])
+      .map((suggestion) => this.toStoreAddressGeocode(suggestion))
+      .find((suggestion): suggestion is StoreAddressGeocode =>
+        Boolean(suggestion),
+      );
+
+    if (!geocode) {
+      throw new BadRequestException('Координаты для адреса не найдены');
+    }
+
+    return geocode;
   }
 
   async update(id: string, dto: UpdateStoreDto, user: AuthenticatedUser) {
@@ -299,6 +353,39 @@ export class StoresService {
         suggestion.data?.city_kladr_id ?? suggestion.data?.settlement_kladr_id,
       ),
       timeZone,
+    };
+  }
+
+  private toStoreAddressGeocode(
+    suggestion: DadataAddressSuggestion,
+  ): StoreAddressGeocode | null {
+    const base = this.toStoreAddressSuggestion(suggestion);
+
+    if (!base) {
+      return null;
+    }
+
+    const latitude = this.normalizeCoordinate(
+      suggestion.data?.geo_lat,
+      -90,
+      90,
+      'Широта',
+    );
+    const longitude = this.normalizeCoordinate(
+      suggestion.data?.geo_lon,
+      -180,
+      180,
+      'Долгота',
+    );
+
+    if (latitude === null || longitude === null) {
+      return null;
+    }
+
+    return {
+      ...base,
+      latitude,
+      longitude,
     };
   }
 

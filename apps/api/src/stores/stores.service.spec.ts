@@ -32,6 +32,7 @@ function createPrismaMock(): StoresPrismaMock {
 describe('StoresService', () => {
   let prisma: StoresPrismaMock;
   let tenantContext: TenantContextMock;
+  let config: { get: jest.Mock };
   let service: StoresService;
   const user: AuthenticatedUser = {
     id: 'user-1',
@@ -50,11 +51,16 @@ describe('StoresService', () => {
         tenantSlug: 'demo',
       }),
     };
+    config = { get: jest.fn() };
     service = new StoresService(
       prisma as unknown as PrismaService,
       tenantContext as unknown as TenantContextService,
-      { get: jest.fn() } as unknown as ConfigService,
+      config as unknown as ConfigService,
     );
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   it('filters stores by resolved tenant', async () => {
@@ -152,6 +158,54 @@ describe('StoresService', () => {
       service.update('store-1', { latitude: '91' }, user),
     ).rejects.toThrow('Широта должна быть числом от -90 до 90');
     expect(prisma.store.update).not.toHaveBeenCalled();
+  });
+
+  it('geocodes address coordinates through configured Dadata token', async () => {
+    config.get.mockReturnValue('dadata-token');
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          suggestions: [
+            {
+              value: 'г Екатеринбург, ул Радищева, д 12',
+              data: {
+                city: 'Екатеринбург',
+                region_with_type: 'Свердловская обл',
+                city_fias_id: 'city-fias',
+                city_kladr_id: 'city-kladr',
+                timezone: 'UTC+5',
+                geo_lat: '56.8291234',
+                geo_lon: '60.5969876',
+              },
+            },
+          ],
+        }),
+    } as unknown as Response);
+
+    await expect(
+      service.geocodeAddress('г. Екатеринбург, ул. Радищева, 12'),
+    ).resolves.toEqual({
+      value: 'г Екатеринбург, ул Радищева, д 12',
+      city: 'Екатеринбург',
+      region: 'Свердловская обл',
+      cityFiasId: 'city-fias',
+      cityKladrId: 'city-kladr',
+      timeZone: 'Asia/Yekaterinburg',
+      latitude: 56.829123,
+      longitude: 60.596988,
+    });
+    const [requestUrl, requestInit] = fetchMock.mock.calls[0] as [
+      string,
+      RequestInit,
+    ];
+    expect(requestUrl).toBe(
+      'https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/address',
+    );
+    expect(requestInit.method).toBe('POST');
+    expect(requestInit.headers).toMatchObject({
+      Authorization: 'Token dadata-token',
+    });
   });
 
   it('archives store only after resolving it inside tenant', async () => {

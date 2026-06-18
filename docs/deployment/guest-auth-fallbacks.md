@@ -60,6 +60,8 @@ GUEST_PORTAL_OTP_SMS_RU_TEST_MODE="false"
 
 Если `GUEST_PORTAL_OTP_SMS_RU_API_ID` не задан, backend может переиспользовать `GUEST_PORTAL_USER_CALL_SMS_RU_API_ID` из Callcheck. Для staged QA можно временно включить `GUEST_PORTAL_OTP_SMS_RU_TEST_MODE=true`: SMS.ru примет запрос с `test=1`, но сообщение не будет отправлено и баланс не будет списан. Старый generic provider через `GUEST_PORTAL_OTP_SMS_ENDPOINT` + `GUEST_PORTAL_OTP_SMS_TOKEN` остается fallback-адаптером для другого SMS-шлюза.
 
+Readiness `OTP_SMS` в Guest Game Hub должен показывать только безопасные признаки: real-send, флаг SMS-канала, provider `SMS.ru /sms/send` или generic fallback, `test=1` и наличие `api_id`/endpoint без самих значений. Если в карточке появляется raw `api_id`, endpoint, token, телефон или provider payload, запуск SMS-резерва нужно остановить до исправления.
+
 ## Входящий звонок с 4 цифрами
 
 Контур: `/play` создает `INCOMING_CALL_LAST4` challenge, backend отправляет запрос call-provider, provider звонит гостю, гость вводит последние 4 цифры номера входящего звонка в `/play`, LeetPlus сверяет код и выдает guest-token.

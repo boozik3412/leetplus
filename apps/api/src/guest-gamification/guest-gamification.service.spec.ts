@@ -823,6 +823,13 @@ describe('GuestGamificationService', () => {
     delete process.env.GUEST_PORTAL_USER_CALL_SECRET;
     delete process.env.GUEST_PORTAL_USER_CALL_SMS_RU_API_ID;
     delete process.env.GUEST_PORTAL_USER_CALL_SMS_RU_BASE_URL;
+    delete process.env.GUEST_PORTAL_OTP_REAL_SEND_ENABLED;
+    delete process.env.GUEST_PORTAL_OTP_SMS_ENABLED;
+    delete process.env.GUEST_PORTAL_OTP_SMS_RU_API_ID;
+    delete process.env.GUEST_PORTAL_OTP_SMS_RU_BASE_URL;
+    delete process.env.GUEST_PORTAL_OTP_SMS_RU_TEST_MODE;
+    delete process.env.GUEST_PORTAL_OTP_SMS_ENDPOINT;
+    delete process.env.GUEST_PORTAL_OTP_SMS_TOKEN;
     delete process.env.GUEST_PORTAL_TELEGRAM_BOT_TOKEN;
     delete process.env.TELEGRAM_BOT_TOKEN;
   });
@@ -878,6 +885,85 @@ describe('GuestGamificationService', () => {
   });
 
   describe('integration readiness', () => {
+    it('marks SMS OTP ready through SMS.ru without exposing api_id', () => {
+      process.env.GUEST_PORTAL_OTP_REAL_SEND_ENABLED = 'true';
+      process.env.GUEST_PORTAL_OTP_SMS_ENABLED = 'true';
+      process.env.GUEST_PORTAL_OTP_SMS_RU_API_ID = 'smsru-api-id';
+      process.env.GUEST_PORTAL_OTP_SMS_RU_TEST_MODE = 'true';
+      const { service } = createService();
+
+      const readiness = (service as any).buildIntegrationReadiness([]);
+      const otp = readiness.items.find(
+        (item: { key: string }) => item.key === 'OTP',
+      );
+      const sms = readiness.items.find(
+        (item: { key: string }) => item.key === 'OTP_SMS',
+      );
+      const smsText = JSON.stringify(sms);
+
+      expect(otp).toMatchObject({
+        status: 'READY',
+        ready: true,
+      });
+      expect(sms).toMatchObject({
+        status: 'READY',
+        ready: true,
+        configured: true,
+        enabled: true,
+      });
+      expect(sms.requiredEnv).toEqual(
+        expect.arrayContaining([
+          'GUEST_PORTAL_OTP_SMS_RU_API_ID or GUEST_PORTAL_USER_CALL_SMS_RU_API_ID',
+        ]),
+      );
+      expect(sms.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            label: 'Provider',
+            value: 'SMS.ru /sms/send',
+          }),
+          expect.objectContaining({
+            label: 'SMS.ru api_id',
+            value: 'настроен',
+          }),
+          expect.objectContaining({
+            label: 'SMS.ru test-mode',
+            value: 'test=1',
+          }),
+        ]),
+      );
+      expect(smsText).not.toContain('smsru-api-id');
+    });
+
+    it('lets SMS OTP reuse the SMS.ru Callcheck api_id without exposing it', () => {
+      process.env.GUEST_PORTAL_OTP_REAL_SEND_ENABLED = 'true';
+      process.env.GUEST_PORTAL_OTP_SMS_ENABLED = 'true';
+      process.env.GUEST_PORTAL_USER_CALL_SMS_RU_API_ID = 'callcheck-api-id';
+      const { service } = createService();
+
+      const readiness = (service as any).buildIntegrationReadiness([]);
+      const sms = readiness.items.find(
+        (item: { key: string }) => item.key === 'OTP_SMS',
+      );
+      const smsText = JSON.stringify(sms);
+
+      expect(sms).toMatchObject({
+        status: 'READY',
+        ready: true,
+        configured: true,
+        enabled: true,
+      });
+      expect(sms.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            label: 'Provider',
+            value: 'SMS.ru /sms/send',
+          }),
+        ]),
+      );
+      expect(smsText).not.toContain('callcheck-api-id');
+    });
+
     it('shows user call auth as blocked until phone number and callback secret are configured', () => {
       const { service } = createService();
 

@@ -687,6 +687,7 @@ export type GuestGameIntegrationReadinessItem = {
     | "TELEGRAM_LINK"
     | "TELEGRAM_WEBHOOK"
     | "TELEGRAM_AUTH_REPLY_SENDER"
+    | "TELEGRAM_MINI_APP"
     | "TELEGRAM_DELIVERY"
     | "MAX_DELIVERY"
     | "BONUS_LEDGER_SCHEDULER"

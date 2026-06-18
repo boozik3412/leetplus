@@ -3739,6 +3739,7 @@ export class GuestGamificationService {
         configured: otp.sms.configured,
         enabled: otp.sms.enabled,
         requiredEnv: otp.sms.requiredEnv,
+        details: otp.sms.details,
         note: otp.sms.note,
         nextAction: otp.sms.nextAction,
       },
@@ -9603,6 +9604,7 @@ type GuestPortalOtpProviderReadiness = {
   configured: boolean;
   enabled: boolean;
   requiredEnv: string[];
+  details?: Array<{ label: string; value: string }>;
   note: string;
   nextAction: string;
 };
@@ -9617,10 +9619,21 @@ function guestPortalOtpReadiness(): GuestPortalOtpReadiness {
   const devEnabled = envFlag('GUEST_PORTAL_DEV_OTP_ENABLED');
   const realSendEnabled = envFlag('GUEST_PORTAL_OTP_REAL_SEND_ENABLED');
   const smsEnabled = envFlag('GUEST_PORTAL_OTP_SMS_ENABLED');
-  const smsConfigured = Boolean(
+  const smsRuApiId =
+    envString('GUEST_PORTAL_OTP_SMS_RU_API_ID') ??
+    envString('GUEST_PORTAL_USER_CALL_SMS_RU_API_ID');
+  const smsRuConfigured = Boolean(smsRuApiId);
+  const smsRuTestMode = envFlag('GUEST_PORTAL_OTP_SMS_RU_TEST_MODE');
+  const genericSmsConfigured = Boolean(
     envString('GUEST_PORTAL_OTP_SMS_ENDPOINT') &&
     envString('GUEST_PORTAL_OTP_SMS_TOKEN'),
   );
+  const smsConfigured = smsRuConfigured || genericSmsConfigured;
+  const smsProviderLabel = smsRuConfigured
+    ? 'SMS.ru /sms/send'
+    : genericSmsConfigured
+      ? 'generic endpoint'
+      : 'provider не настроен';
   const telegramEnabled = envFlag('GUEST_PORTAL_OTP_TELEGRAM_ENABLED');
   const telegramConfigured = Boolean(
     envString('GUEST_PORTAL_TELEGRAM_BOT_TOKEN') ??
@@ -9641,15 +9654,41 @@ function guestPortalOtpReadiness(): GuestPortalOtpReadiness {
     requiredEnv: [
       'GUEST_PORTAL_OTP_REAL_SEND_ENABLED',
       'GUEST_PORTAL_OTP_SMS_ENABLED',
-      'GUEST_PORTAL_OTP_SMS_ENDPOINT',
-      'GUEST_PORTAL_OTP_SMS_TOKEN',
+      'GUEST_PORTAL_OTP_SMS_RU_API_ID or GUEST_PORTAL_USER_CALL_SMS_RU_API_ID',
+      'GUEST_PORTAL_OTP_SMS_ENDPOINT + GUEST_PORTAL_OTP_SMS_TOKEN',
+    ],
+    details: [
+      {
+        label: 'Real send',
+        value: realSendEnabled ? 'включен' : 'выключен',
+      },
+      {
+        label: 'Канал SMS',
+        value: smsEnabled ? 'включен' : 'выключен',
+      },
+      {
+        label: 'Provider',
+        value: smsProviderLabel,
+      },
+      {
+        label: 'SMS.ru api_id',
+        value: smsRuConfigured ? 'настроен' : 'нужен или fallback Callcheck',
+      },
+      {
+        label: 'Generic provider',
+        value: genericSmsConfigured ? 'настроен' : 'не используется',
+      },
+      {
+        label: 'SMS.ru test-mode',
+        value: smsRuTestMode ? 'test=1' : 'выключен',
+      },
     ],
     configuredNote:
-      'SMS provider имеет endpoint и token; внешний вызов включится только при общем флаге реальной отправки.',
+      'SMS-код готов как резервный канал: backend отправит OTP через SMS.ru /sms/send или совместимый generic SMS provider только при включенном real-send.',
     blockedNote:
-      'SMS OTP не готов: нужен provider endpoint, token и явное включение канала.',
+      'SMS OTP не готов: нужен real-send, флаг SMS-канала и SMS.ru api_id либо generic endpoint/token.',
     nextAction:
-      'После выбора SMS-провайдера задать endpoint/token на VDS, включить канал на тестовом госте и проверить audit без раскрытия кода.',
+      'Провести staged QA с GUEST_PORTAL_OTP_SMS_RU_TEST_MODE=true, затем перевести SMS-код в резервный live-режим после проверки delivery audit без раскрытия кода.',
   });
   const telegram = guestPortalOtpProviderReadiness({
     channelLabel: 'Telegram',
@@ -9884,6 +9923,7 @@ function guestPortalOtpProviderReadiness({
   channelEnabled,
   configured,
   requiredEnv,
+  details,
   configuredNote,
   blockedNote,
   nextAction,
@@ -9893,6 +9933,7 @@ function guestPortalOtpProviderReadiness({
   channelEnabled: boolean;
   configured: boolean;
   requiredEnv: string[];
+  details?: Array<{ label: string; value: string }>;
   configuredNote: string;
   blockedNote: string;
   nextAction: string;
@@ -9915,6 +9956,7 @@ function guestPortalOtpProviderReadiness({
     configured,
     enabled: realSendEnabled && channelEnabled,
     requiredEnv,
+    details,
     note: ready
       ? configuredNote
       : status === 'PARTIAL'

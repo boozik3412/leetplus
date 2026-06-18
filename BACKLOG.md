@@ -1,5 +1,7 @@
 # LeetPlus Бэклог
 
+- Готово: production QA публичного игрового пути выявил, что `/game/clubs` без employee-cookie мог уходить в `/login?returnTo=/game/clubs`. Proxy теперь считает весь префикс `/game` публичным гостевым контуром, как `/play` и `/guest`, поэтому `/game/auth`, `/game/clubs` и `/game/app` не зависят от сотруднической авторизации.
+
 - Готово: action-ссылки пилотного чек-листа `Факты guests/logs` теперь ведут на `/sync?includeGuestLogs=1`, а страница `/sync` по этому query-параметру сразу включает расширенную проверку `guests/logs`. Это убирает ручной шаг с галочкой при подготовке квестов/anti-fraud и первого бонуса, сохраняя обычный `/sync` легким по умолчанию.
 
 - Готово: readiness `VDS bot-consumer` получил canary-gate первого real-send. API теперь возвращает безопасные поля `limit`, `canaryLimit`, `canaryRequired` и переводит карточку `VDS bot-consumer` в `BLOCKED`, если `GUEST_GAME_BOT_CONSUMER_DRY_RUN=false`, первый ack еще не сохранен, а `GUEST_GAME_BOT_CONSUMER_LIMIT` не равен `1`; next action ведет оператора на one-shot canary без раскрытия токенов, raw phone, chat id или Langame payload.

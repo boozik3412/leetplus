@@ -13,6 +13,7 @@ const publicExactPaths = [
 const publicPathPrefixes = [
   "/api",
   "/_next",
+  "/game",
   "/login",
   "/play",
   "/register",

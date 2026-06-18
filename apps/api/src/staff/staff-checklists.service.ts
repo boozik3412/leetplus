@@ -108,6 +108,7 @@ export type StaffChecklistsQuery = {
   shiftKind?: StaffChecklistShiftKind | 'all';
   runId?: string;
   regulationId?: string;
+  templateId?: string;
   storeId?: string;
   assignedToUserId?: string;
   search?: string;
@@ -195,6 +196,7 @@ export type StaffChecklistReport = {
     shiftKind: StaffChecklistShiftKind | 'all';
     runId: string | null;
     regulationId: string | null;
+    templateId?: string | null;
     storeId: string | null;
     assignedToUserId: string | null;
     search: string | null;
@@ -289,6 +291,7 @@ export type StaffChecklistExecutionReport = {
   runs: StaffChecklistExecutionRun[];
   stores: Array<{ id: string; name: string; isActive: boolean }>;
   users: Array<{ id: string; email: string; fullName: string | null }>;
+  checklistTemplates: StaffChecklistTemplateOption[];
 };
 
 export type StaffChecklistRegulationOption = {
@@ -537,7 +540,7 @@ export class StaffChecklistsService {
     const filters = this.resolveExecutionFilters(query);
     const where = this.buildExecutionWhere(tenantId, filters);
 
-    const [rows, stores, users] = await Promise.all([
+    const [rows, stores, users, checklistTemplates] = await Promise.all([
       this.prisma.staffChecklistRun.findMany({
         where,
         include: checklistRunInclude,
@@ -557,6 +560,21 @@ export class StaffChecklistsService {
         where: { tenantId, isActive: true },
         select: { id: true, email: true, fullName: true },
         orderBy: [{ fullName: 'asc' }, { email: 'asc' }],
+      }),
+      this.prisma.staffChecklistTemplate.findMany({
+        where: { tenantId, status: 'ACTIVE' },
+        select: {
+          id: true,
+          title: true,
+          shiftKind: true,
+          roleScope: true,
+          status: true,
+          version: true,
+          sections: true,
+          store: { select: { id: true, name: true, isActive: true } },
+        },
+        orderBy: [{ title: 'asc' }, { updatedAt: 'desc' }],
+        take: 300,
       }),
     ]);
     const reportRows = this.applyExecutionTableFilters(rows, filters);
@@ -622,6 +640,9 @@ export class StaffChecklistsService {
       runs: reportRows.slice(0, 300).map((row) => this.toExecutionRun(row)),
       stores,
       users,
+      checklistTemplates: checklistTemplates.map((row) =>
+        this.toTemplateOption(row),
+      ),
     };
   }
 
@@ -1391,6 +1412,7 @@ export class StaffChecklistsService {
       ),
       runId: this.normalizeOptionalString(query.runId),
       regulationId: this.normalizeOptionalString(query.regulationId),
+      templateId: this.normalizeOptionalString(query.templateId),
       storeId: this.normalizeOptionalString(query.storeId),
       assignedToUserId: this.normalizeOptionalString(query.assignedToUserId),
       search: this.normalizeOptionalString(query.search),
@@ -1423,6 +1445,10 @@ export class StaffChecklistsService {
 
     if (filters.regulationId) {
       where.regulationId = filters.regulationId;
+    }
+
+    if (filters.templateId) {
+      where.templateId = filters.templateId;
     }
 
     if (filters.storeId) {

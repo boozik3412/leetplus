@@ -179,6 +179,7 @@ export type StaffChecklistFilters = {
   shiftKind?: StaffChecklistShiftKind | "all";
   runId?: string;
   regulationId?: string;
+  templateId?: string;
   storeId?: string;
   assignedToUserId?: string;
   search?: string;
@@ -200,6 +201,7 @@ export type StaffChecklistReport = {
     shiftKind: StaffChecklistShiftKind | "all";
     runId: string | null;
     regulationId: string | null;
+    templateId?: string | null;
     storeId: string | null;
     assignedToUserId: string | null;
     search: string | null;
@@ -294,6 +296,7 @@ export type StaffChecklistExecutionReport = {
   runs: StaffChecklistExecutionRun[];
   stores: StaffChecklistStore[];
   users: StaffChecklistUser[];
+  checklistTemplates: StaffChecklistTemplateOption[];
 };
 
 export async function getStaffChecklistReport(

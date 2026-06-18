@@ -181,6 +181,7 @@ function resolveFilters(
   const problems = searchParam(params.problems);
   const scoreRange = searchParam(params.scoreRange);
   const sourceType = searchParam(params.sourceType);
+  const templateId = searchParam(params.templateId);
 
   return {
     status: isStatus(status) ? status : "all",
@@ -195,6 +196,7 @@ function resolveFilters(
     problems: isExecutionProblems(problems) ? problems : "all",
     scoreRange: isExecutionScoreRange(scoreRange) ? scoreRange : "all",
     sourceType: isExecutionSourceType(sourceType) ? sourceType : "all",
+    templateId,
   };
 }
 
@@ -253,6 +255,7 @@ const reportFilterNames = [
   "problems",
   "scoreRange",
   "sourceType",
+  "templateId",
 ];
 
 function formatDate(value: string | null) {
@@ -463,7 +466,6 @@ export default async function StaffChecklistExecutionReportPage({
                 ))}
               </select>
             </label>
-
             <label className="block text-sm">
               <span className="text-xs font-semibold uppercase text-zinc-500">
                 Поиск
@@ -471,7 +473,7 @@ export default async function StaffChecklistExecutionReportPage({
               <input
                 name="search"
                 defaultValue={report.filters.search ?? ""}
-                placeholder="Название чеклиста"
+                placeholder="Название чек-листа"
                 className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
               />
             </label>
@@ -521,12 +523,12 @@ export default async function StaffChecklistExecutionReportPage({
                     activeFilter={
                       report.filters.sourceType !== "all" ||
                       report.filters.status !== "all" ||
-                      Boolean(report.filters.search)
+                      Boolean(report.filters.templateId)
                     }
                   >
                     <HeaderFilterForm
                       filters={report.filters}
-                      resetNames={["sourceType", "status", "search"]}
+                      resetNames={["sourceType", "status", "templateId"]}
                     >
                       <SelectField
                         label="Источник"
@@ -544,14 +546,20 @@ export default async function StaffChecklistExecutionReportPage({
                       />
                       <label className="block text-sm">
                         <span className="text-xs font-semibold uppercase text-zinc-500">
-                          Поиск
+                          Шаблон чек-листа
                         </span>
-                        <input
-                          name="search"
-                          defaultValue={report.filters.search ?? ""}
-                          placeholder="Название чек-листа"
+                        <select
+                          name="templateId"
+                          defaultValue={report.filters.templateId ?? ""}
                           className="mt-1 h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm dark:border-zinc-800 dark:bg-zinc-950"
-                        />
+                        >
+                          <option value="">Все шаблоны</option>
+                          {report.checklistTemplates.map((template) => (
+                            <option key={template.id} value={template.id}>
+                              {template.title}
+                            </option>
+                          ))}
+                        </select>
                       </label>
                     </HeaderFilterForm>
                   </TableHeaderMenu>

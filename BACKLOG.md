@@ -58,6 +58,8 @@
 
 - Готово: для live/staged SMS-кода добавлен первый anti-abuse rate-limit и provider-budget guard перед вызовом provider-а. Backend считает уже созданные SMS OTP challenge по `tenantId+phoneHash`, `tenantId+storeId` и `tenantId`, по умолчанию блокирует больше 3 SMS на телефон за 60 минут, больше 30 SMS на клуб за 10 минут и больше 300 SMS на tenant за 24 часа, возвращает безопасный 429 без вызова SMS.ru/generic provider и без раскрытия raw phone, `api_id`, endpoint/token или внутренних счетчиков. Лимиты настраиваются env `GUEST_PORTAL_OTP_SMS_RATE_LIMIT_PHONE_WINDOW_MINUTES`, `GUEST_PORTAL_OTP_SMS_RATE_LIMIT_PHONE_MAX`, `GUEST_PORTAL_OTP_SMS_RATE_LIMIT_STORE_WINDOW_MINUTES`, `GUEST_PORTAL_OTP_SMS_RATE_LIMIT_STORE_MAX`, `GUEST_PORTAL_OTP_SMS_RATE_LIMIT_TENANT_WINDOW_MINUTES`, `GUEST_PORTAL_OTP_SMS_RATE_LIMIT_TENANT_MAX`.
 
+- Готово: readiness `OTP_SMS` в Guest Game Hub теперь показывает safe summary SMS rate-limit/budget guards (`Лимит телефона`, `Лимит клуба`, `Лимит tenant`) и переводит SMS-карточку в `PARTIAL`, если любой guard отключен значением `0`, даже при настроенном SMS.ru/generic provider. Это не раскрывает raw phone, `api_id`, endpoint/token или реальные счетчики попыток.
+
 - Готово: на публичной главной странице и в левой колонке экранов входа/регистрации опубликованы компактные реквизиты владельца сайта для проверки оператором авторизационных SMS: ООО "ЛИТ", ОГРН 1231800017063, ИНН 1800006677, КПП 180001001.
 
 - Готово: batch pipeline в Guest Game Hub теперь раскрывает идемпотентные дубли. Если строка `DUPLICATE` пришла из `process.summary.idempotent=true`, UI показывает, что повтор обработан безопасно без новых XP/наград, и выводит idempotency key для QA.

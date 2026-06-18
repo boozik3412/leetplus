@@ -55,6 +55,14 @@ const deliveryStatuses = [
   'FAILED',
   'CANCELED',
 ] as const;
+const otpSmsRateLimitDefaults = {
+  phoneWindowMinutes: 60,
+  phoneMax: 3,
+  storeWindowMinutes: 10,
+  storeMax: 30,
+  tenantWindowMinutes: 24 * 60,
+  tenantMax: 300,
+};
 const guestLogMappingPresets = [
   'visit_or_session_start',
   'session_finish',
@@ -9718,6 +9726,7 @@ function guestPortalOtpReadiness(): GuestPortalOtpReadiness {
     envString('GUEST_PORTAL_OTP_SMS_ENDPOINT') &&
     envString('GUEST_PORTAL_OTP_SMS_TOKEN'),
   );
+  const smsRateLimits = guestPortalOtpSmsRateLimitReadiness();
   const smsConfigured = smsRuConfigured || genericSmsConfigured;
   const smsProviderLabel = smsRuConfigured
     ? 'SMS.ru /sms/send'
@@ -9772,13 +9781,19 @@ function guestPortalOtpReadiness(): GuestPortalOtpReadiness {
         label: 'SMS.ru test-mode',
         value: smsRuTestMode ? 'test=1' : 'выключен',
       },
+      ...smsRateLimits.details,
     ],
     configuredNote:
-      'SMS-код готов как резервный канал: backend отправит OTP через SMS.ru /sms/send или совместимый generic SMS provider только при включенном real-send.',
+      'SMS-код готов как резервный канал: backend отправит OTP через SMS.ru /sms/send или совместимый generic SMS provider только при включенном real-send и активных rate-limit/budget guards.',
     blockedNote:
       'SMS OTP не готов: нужен real-send, флаг SMS-канала и SMS.ru api_id либо generic endpoint/token.',
+    safetyReady: smsRateLimits.ready,
+    safetyRequiredEnv: smsRateLimits.requiredEnv,
+    partialNote: smsRateLimits.ready
+      ? undefined
+      : 'SMS OTP provider настроен, но live-режим нельзя считать готовым: один или несколько rate-limit/budget env отключены.',
     nextAction:
-      'Провести staged QA с GUEST_PORTAL_OTP_SMS_RU_TEST_MODE=true, затем перевести SMS-код в резервный live-режим после проверки delivery audit без раскрытия кода.',
+      'Провести staged QA с GUEST_PORTAL_OTP_SMS_RU_TEST_MODE=true, затем перевести SMS-код в резервный live-режим только с активными лимитами, provider-бюджетом и delivery audit без раскрытия кода.',
   });
   const telegram = guestPortalOtpProviderReadiness({
     channelLabel: 'Telegram',
@@ -10016,6 +10031,9 @@ function guestPortalOtpProviderReadiness({
   details,
   configuredNote,
   blockedNote,
+  safetyReady = true,
+  safetyRequiredEnv = [],
+  partialNote,
   nextAction,
 }: {
   channelLabel: string;
@@ -10026,12 +10044,15 @@ function guestPortalOtpProviderReadiness({
   details?: Array<{ label: string; value: string }>;
   configuredNote: string;
   blockedNote: string;
+  safetyReady?: boolean;
+  safetyRequiredEnv?: string[];
+  partialNote?: string;
   nextAction: string;
 }): GuestPortalOtpProviderReadiness {
-  const ready = realSendEnabled && channelEnabled && configured;
+  const ready = realSendEnabled && channelEnabled && configured && safetyReady;
   const status: GuestGameIntegrationReadinessStatus = ready
     ? 'READY'
-    : realSendEnabled || channelEnabled || configured
+    : realSendEnabled || channelEnabled || configured || !safetyReady
       ? 'PARTIAL'
       : 'BLOCKED';
 
@@ -10045,15 +10066,92 @@ function guestPortalOtpProviderReadiness({
     ready,
     configured,
     enabled: realSendEnabled && channelEnabled,
-    requiredEnv,
+    requiredEnv: [...requiredEnv, ...safetyRequiredEnv],
     details,
     note: ready
       ? configuredNote
       : status === 'PARTIAL'
-        ? `${channelLabel} OTP настроен частично: проверьте общий флаг реальной отправки, флаг канала и provider-секреты.`
+        ? (partialNote ??
+          `${channelLabel} OTP настроен частично: проверьте общий флаг реальной отправки, флаг канала и provider-секреты.`)
         : blockedNote,
     nextAction,
   };
+}
+
+function guestPortalOtpSmsRateLimitReadiness() {
+  const limits = {
+    phoneWindowMinutes: envNonNegativeInt(
+      'GUEST_PORTAL_OTP_SMS_RATE_LIMIT_PHONE_WINDOW_MINUTES',
+      otpSmsRateLimitDefaults.phoneWindowMinutes,
+    ),
+    phoneMax: envNonNegativeInt(
+      'GUEST_PORTAL_OTP_SMS_RATE_LIMIT_PHONE_MAX',
+      otpSmsRateLimitDefaults.phoneMax,
+    ),
+    storeWindowMinutes: envNonNegativeInt(
+      'GUEST_PORTAL_OTP_SMS_RATE_LIMIT_STORE_WINDOW_MINUTES',
+      otpSmsRateLimitDefaults.storeWindowMinutes,
+    ),
+    storeMax: envNonNegativeInt(
+      'GUEST_PORTAL_OTP_SMS_RATE_LIMIT_STORE_MAX',
+      otpSmsRateLimitDefaults.storeMax,
+    ),
+    tenantWindowMinutes: envNonNegativeInt(
+      'GUEST_PORTAL_OTP_SMS_RATE_LIMIT_TENANT_WINDOW_MINUTES',
+      otpSmsRateLimitDefaults.tenantWindowMinutes,
+    ),
+    tenantMax: envNonNegativeInt(
+      'GUEST_PORTAL_OTP_SMS_RATE_LIMIT_TENANT_MAX',
+      otpSmsRateLimitDefaults.tenantMax,
+    ),
+  };
+  const disabled = [
+    ...(limits.phoneWindowMinutes > 0 && limits.phoneMax > 0
+      ? []
+      : [
+          'GUEST_PORTAL_OTP_SMS_RATE_LIMIT_PHONE_WINDOW_MINUTES',
+          'GUEST_PORTAL_OTP_SMS_RATE_LIMIT_PHONE_MAX',
+        ]),
+    ...(limits.storeWindowMinutes > 0 && limits.storeMax > 0
+      ? []
+      : [
+          'GUEST_PORTAL_OTP_SMS_RATE_LIMIT_STORE_WINDOW_MINUTES',
+          'GUEST_PORTAL_OTP_SMS_RATE_LIMIT_STORE_MAX',
+        ]),
+    ...(limits.tenantWindowMinutes > 0 && limits.tenantMax > 0
+      ? []
+      : [
+          'GUEST_PORTAL_OTP_SMS_RATE_LIMIT_TENANT_WINDOW_MINUTES',
+          'GUEST_PORTAL_OTP_SMS_RATE_LIMIT_TENANT_MAX',
+        ]),
+  ];
+
+  return {
+    ready: disabled.length === 0,
+    requiredEnv: Array.from(new Set(disabled)),
+    details: [
+      {
+        label: 'Лимит телефона',
+        value: rateLimitDetail(limits.phoneMax, limits.phoneWindowMinutes),
+      },
+      {
+        label: 'Лимит клуба',
+        value: rateLimitDetail(limits.storeMax, limits.storeWindowMinutes),
+      },
+      {
+        label: 'Лимит tenant',
+        value: rateLimitDetail(limits.tenantMax, limits.tenantWindowMinutes),
+      },
+    ],
+  };
+}
+
+function rateLimitDetail(max: number, windowMinutes: number) {
+  if (max <= 0 || windowMinutes <= 0) {
+    return 'отключен';
+  }
+
+  return `${max} за ${windowMinutes} мин`;
 }
 
 type DeliveryProviderConfig = {
@@ -10594,6 +10692,20 @@ function envPositiveInt(name: string, fallback: number) {
   const value = Number.isFinite(parsed) ? Math.trunc(parsed) : fallback;
 
   return value > 0 ? value : fallback;
+}
+
+function envNonNegativeInt(name: string, fallback: number) {
+  const raw = envString(name);
+  if (!raw) {
+    return fallback;
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  return Math.max(0, Math.trunc(parsed));
 }
 
 function bonusLedgerSchedulerReadiness(

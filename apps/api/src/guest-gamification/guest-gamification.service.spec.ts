@@ -837,6 +837,12 @@ describe('GuestGamificationService', () => {
     delete process.env.GUEST_PORTAL_OTP_SMS_RU_TEST_MODE;
     delete process.env.GUEST_PORTAL_OTP_SMS_ENDPOINT;
     delete process.env.GUEST_PORTAL_OTP_SMS_TOKEN;
+    delete process.env.GUEST_PORTAL_OTP_SMS_RATE_LIMIT_PHONE_WINDOW_MINUTES;
+    delete process.env.GUEST_PORTAL_OTP_SMS_RATE_LIMIT_PHONE_MAX;
+    delete process.env.GUEST_PORTAL_OTP_SMS_RATE_LIMIT_STORE_WINDOW_MINUTES;
+    delete process.env.GUEST_PORTAL_OTP_SMS_RATE_LIMIT_STORE_MAX;
+    delete process.env.GUEST_PORTAL_OTP_SMS_RATE_LIMIT_TENANT_WINDOW_MINUTES;
+    delete process.env.GUEST_PORTAL_OTP_SMS_RATE_LIMIT_TENANT_MAX;
     delete process.env.GUEST_PORTAL_TELEGRAM_BOT_TOKEN;
     delete process.env.TELEGRAM_BOT_TOKEN;
   });
@@ -942,8 +948,64 @@ describe('GuestGamificationService', () => {
             label: 'SMS.ru test-mode',
             value: 'test=1',
           }),
+          expect.objectContaining({
+            label: 'Лимит телефона',
+            value: '3 за 60 мин',
+          }),
+          expect.objectContaining({
+            label: 'Лимит клуба',
+            value: '30 за 10 мин',
+          }),
+          expect.objectContaining({
+            label: 'Лимит tenant',
+            value: '300 за 1440 мин',
+          }),
         ]),
       );
+      expect(smsText).not.toContain('smsru-api-id');
+    });
+
+    it('keeps SMS OTP partial when rate-limit or budget guards are disabled', () => {
+      process.env.GUEST_PORTAL_OTP_REAL_SEND_ENABLED = 'true';
+      process.env.GUEST_PORTAL_OTP_SMS_ENABLED = 'true';
+      process.env.GUEST_PORTAL_OTP_SMS_RU_API_ID = 'smsru-api-id';
+      process.env.GUEST_PORTAL_OTP_SMS_RATE_LIMIT_TENANT_MAX = '0';
+      const { service } = createService();
+
+      const readiness = (service as any).buildIntegrationReadiness([]);
+      const otp = readiness.items.find(
+        (item: { key: string }) => item.key === 'OTP',
+      );
+      const sms = readiness.items.find(
+        (item: { key: string }) => item.key === 'OTP_SMS',
+      );
+      const smsText = JSON.stringify(sms);
+
+      expect(otp).toMatchObject({
+        status: 'PARTIAL',
+        ready: false,
+      });
+      expect(sms).toMatchObject({
+        status: 'PARTIAL',
+        ready: false,
+        configured: true,
+        enabled: true,
+      });
+      expect(sms.requiredEnv).toEqual(
+        expect.arrayContaining([
+          'GUEST_PORTAL_OTP_SMS_RATE_LIMIT_TENANT_WINDOW_MINUTES',
+          'GUEST_PORTAL_OTP_SMS_RATE_LIMIT_TENANT_MAX',
+        ]),
+      );
+      expect(sms.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            label: 'Лимит tenant',
+            value: 'отключен',
+          }),
+        ]),
+      );
+      expect(sms.note).toContain('live-режим нельзя считать готовым');
       expect(smsText).not.toContain('smsru-api-id');
     });
 

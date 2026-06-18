@@ -70,7 +70,7 @@ GUEST_PORTAL_OTP_SMS_RATE_LIMIT_TENANT_MAX="300"
 
 Перед вызовом SMS.ru backend применяет бюджетные anti-abuse лимиты по уже созданным SMS-challenge: по умолчанию не больше 3 SMS на один подтверждаемый телефон за 60 минут, не больше 30 SMS на клуб за 10 минут и не больше 300 SMS на tenant за 24 часа. Значение `0` у соответствующего `*_MAX` или `*_WINDOW_MINUTES` отключает конкретный лимит, но для live-режима это допускается только на короткий controlled QA. При срабатывании лимита API возвращает безопасный 429 без вызова provider-а и без раскрытия телефона, `api_id` или счетчиков.
 
-Readiness `OTP_SMS` в Guest Game Hub должен показывать только безопасные признаки: real-send, флаг SMS-канала, provider `SMS.ru /sms/send` или generic fallback, `test=1` и наличие `api_id`/endpoint без самих значений. Если в карточке появляется raw `api_id`, endpoint, token, телефон или provider payload, запуск SMS-резерва нужно остановить до исправления.
+Readiness `OTP_SMS` в Guest Game Hub должен показывать только безопасные признаки: real-send, флаг SMS-канала, provider `SMS.ru /sms/send` или generic fallback, `test=1`, наличие `api_id`/endpoint без самих значений и safe summary лимитов. Если любой SMS rate-limit/budget guard отключен env-ом, карточка должна оставаться `PARTIAL` до возвращения лимита. Если в карточке появляется raw `api_id`, endpoint, token, телефон, реальные счетчики попыток или provider payload, запуск SMS-резерва нужно остановить до исправления.
 
 ## Входящий звонок с 4 цифрами
 

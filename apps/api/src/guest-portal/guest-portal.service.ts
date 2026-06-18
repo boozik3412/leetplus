@@ -45,6 +45,8 @@ const OTP_SMS_RATE_LIMIT_PHONE_WINDOW_MINUTES = 60;
 const OTP_SMS_RATE_LIMIT_PHONE_MAX = 3;
 const OTP_SMS_RATE_LIMIT_STORE_WINDOW_MINUTES = 10;
 const OTP_SMS_RATE_LIMIT_STORE_MAX = 30;
+const OTP_SMS_RATE_LIMIT_TENANT_WINDOW_MINUTES = 24 * 60;
+const OTP_SMS_RATE_LIMIT_TENANT_MAX = 300;
 const GUEST_TOKEN_EXPIRES_IN = '7d';
 const GUEST_PORTAL_PURPOSE = 'guest_portal';
 const TELEGRAM_LINK_TTL_MINUTES = 15;
@@ -6931,6 +6933,26 @@ export class GuestPortalService {
         );
       }
     }
+
+    if (config.tenantMax > 0 && config.tenantWindowMinutes > 0) {
+      const tenantWindowStart = new Date(
+        input.now.getTime() - config.tenantWindowMinutes * 60 * 1000,
+      );
+      const tenantCount = await this.prisma.guestPortalOtpChallenge.count({
+        where: {
+          tenantId: input.tenantId,
+          deliveryChannel: 'SMS',
+          createdAt: { gte: tenantWindowStart },
+        },
+      });
+
+      if (tenantCount >= config.tenantMax) {
+        throw new HttpException(
+          'Слишком много попыток. Попробуйте позже.',
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
+    }
   }
 
   private async deliverIncomingCallLast4(input: {
@@ -7900,6 +7922,16 @@ function guestPortalOtpSmsRateLimitConfig(configService: ConfigService) {
       configService,
       'GUEST_PORTAL_OTP_SMS_RATE_LIMIT_STORE_MAX',
       OTP_SMS_RATE_LIMIT_STORE_MAX,
+    ),
+    tenantWindowMinutes: configPositiveInteger(
+      configService,
+      'GUEST_PORTAL_OTP_SMS_RATE_LIMIT_TENANT_WINDOW_MINUTES',
+      OTP_SMS_RATE_LIMIT_TENANT_WINDOW_MINUTES,
+    ),
+    tenantMax: configPositiveInteger(
+      configService,
+      'GUEST_PORTAL_OTP_SMS_RATE_LIMIT_TENANT_MAX',
+      OTP_SMS_RATE_LIMIT_TENANT_MAX,
     ),
   };
 }

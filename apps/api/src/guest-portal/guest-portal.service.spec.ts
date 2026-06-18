@@ -1541,6 +1541,61 @@ describe('GuestPortalService', () => {
 
       fetchMock.mockRestore();
     });
+
+    it('blocks SMS OTP when the tenant SMS budget is reached before provider call', async () => {
+      const { prisma, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+        NODE_ENV: 'production',
+        GUEST_PORTAL_OTP_REAL_SEND_ENABLED: 'true',
+        GUEST_PORTAL_OTP_SMS_ENABLED: 'true',
+        GUEST_PORTAL_OTP_SMS_RU_API_ID: 'smsru-api-id',
+        GUEST_PORTAL_OTP_SMS_RATE_LIMIT_TENANT_WINDOW_MINUTES: '1440',
+        GUEST_PORTAL_OTP_SMS_RATE_LIMIT_TENANT_MAX: '5',
+      });
+      const fetchMock = jest.spyOn(globalThis, 'fetch');
+
+      prisma.tenant.findFirst.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'Leet Clubs',
+        slug: 'leet',
+        stores: [
+          {
+            id: 'store-1',
+            publicSlug: 'club-1337',
+            name: '1337',
+            address: 'ул. Ленина, 1',
+          },
+        ],
+      });
+      prisma.guestPortalOtpChallenge.count
+        .mockResolvedValueOnce(0)
+        .mockResolvedValueOnce(0)
+        .mockResolvedValueOnce(5);
+
+      const promise = service.startOtp('leet', 'club-1337', {
+        phone: '+7 999 999-99-99',
+        gameConsentAccepted: true,
+      });
+
+      await expect(promise).rejects.toThrow(
+        'Слишком много попыток. Попробуйте позже.',
+      );
+      await expect(promise).rejects.toMatchObject({ status: 429 });
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(prisma.guestPortalOtpChallenge.create).not.toHaveBeenCalled();
+      expect(prisma.guestPortalOtpChallenge.count).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            tenantId: 'tenant-1',
+            deliveryChannel: 'SMS',
+            createdAt: { gte: expect.any(Date) },
+          }),
+        }),
+      );
+
+      fetchMock.mockRestore();
+    });
   });
 
   describe('telegram auth', () => {

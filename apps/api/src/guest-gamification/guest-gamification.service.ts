@@ -3625,11 +3625,6 @@ export class GuestGamificationService {
       envString('GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_BOT_TOKEN') ??
       envString('GUEST_GAME_TELEGRAM_BOT_TOKEN') ??
       envString('TELEGRAM_BOT_TOKEN');
-    const publicApiUrl =
-      envString('PUBLIC_API_URL') ??
-      envString('NEXT_PUBLIC_API_URL') ??
-      envString('API_PUBLIC_URL') ??
-      'https://api.leetplus.ru';
     const publicWebUrl =
       envString('WEB_URL') ??
       envString('FRONTEND_URL') ??
@@ -3795,22 +3790,22 @@ export class GuestGamificationService {
         ],
         note: 'Гость после OTP может создать одноразовый link-code и открыть deep link бота; LeetPlus хранит только chat:<id>.',
         nextAction: telegramLinkConfigured
-          ? 'Проверить deep link в гостевом кабинете и webhook consumer.'
+          ? 'Проверить deep link в гостевом кабинете и 1337 polling edge.'
           : 'Настроить username бота и link secret до публичного запуска привязки.',
       },
       {
         key: 'TELEGRAM_WEBHOOK',
-        title: 'Telegram webhook consumer',
+        title: 'Telegram update consumer (polling edge)',
         status: telegramWebhookConfigured ? 'READY' : 'BLOCKED',
         statusLabel: telegramWebhookConfigured ? 'секрет есть' : 'секрет нужен',
         ready: telegramWebhookConfigured,
         configured: telegramWebhookConfigured,
         enabled: telegramWebhookConfigured,
         requiredEnv: ['GUEST_GAME_TELEGRAM_WEBHOOK_SECRET'],
-        note: 'Webhook принимает /start link-code и команды отписки, не хранит raw update и не отправляет внешние ответы.',
+        note: 'Основной API принимает /start link-code и команды отписки от 1337 polling edge, не хранит raw update и не отправляет внешние ответы.',
         nextAction: telegramWebhookConfigured
-          ? `Убедиться, что webhook бота указывает на ${publicApiUrl.replace(/\/$/, '')}/guest-portal/telegram/webhook.`
-          : 'Задать webhook secret и только потом подключать внешний бот к production webhook.',
+          ? 'На 1337 проверить telegram-poller: webhook url=-, затем пройти Telegram canary.'
+          : 'Задать update secret и только потом подключать 1337 polling edge к production API.',
       },
       {
         key: 'TELEGRAM_AUTH_REPLY_SENDER',
@@ -3822,14 +3817,14 @@ export class GuestGamificationService {
             ? 'adapter-only'
             : telegramWebhookReplyStatus === 'PARTIAL'
               ? 'частично'
-              : 'webhook нужен',
+              : 'secret нужен',
         ready: telegramWebhookReplyReady,
         configured: Boolean(telegramWebhookReplyToken),
         enabled: telegramWebhookReplyEnabled,
         requiredEnv: telegramWebhookReplyRequiredEnv,
         details: [
           {
-            label: 'Webhook',
+            label: 'Update secret',
             value: telegramWebhookSecret ? 'секрет есть' : 'секрет нужен',
           },
           {
@@ -3844,11 +3839,11 @@ export class GuestGamificationService {
           },
         ],
         note: telegramWebhookReplyReady
-          ? 'API сам отправляет Telegram reply payload из webhook: кнопку request_contact после /start и remove_keyboard после подтверждения. Raw chat_id используется только из текущего update в памяти.'
-          : 'По умолчанию LeetPlus возвращает safe reply payload для внешнего adapter. Для прямой отправки нужны webhook secret, env-флаг sender и bot token.',
+          ? 'API сам отправляет Telegram reply payload из текущего update: кнопку request_contact после /start и remove_keyboard после подтверждения. Raw chat_id используется только из текущего update в памяти.'
+          : 'По умолчанию LeetPlus возвращает safe reply payload для 1337 edge adapter. Для прямой отправки нужны update secret, env-флаг sender и bot token.',
         nextAction: telegramWebhookReplyReady
           ? 'Проверить /play -> Telegram deep link -> contact-share на тестовом госте и смотреть replyDispatch=SENT без raw chat id.'
-          : 'Добавить недостающие env или оставить внешний adapter, который отправляет reply payload из webhook.',
+          : 'Добавить недостающие env или оставить 1337 polling edge, который отправляет reply payload.',
         runbook: telegramAuthRunbook,
       },
       {

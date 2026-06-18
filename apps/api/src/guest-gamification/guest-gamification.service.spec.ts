@@ -1076,7 +1076,7 @@ describe('GuestGamificationService', () => {
       });
       expect(sender.details).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ label: 'Webhook' }),
+          expect.objectContaining({ label: 'Update secret' }),
           expect.objectContaining({ label: 'Sender' }),
           expect.objectContaining({ label: 'Bot token' }),
         ]),

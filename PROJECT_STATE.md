@@ -22,6 +22,7 @@ Last updated: 2026-06-18
 - Database: PostgreSQL, Prisma
 - Production VDS: Ubuntu 24.04 LTS on reg.ru, IP `168.222.143.243`
 - Production mail: `reports@leetplus.ru` through Mail.ru/VK WorkSpace SMTP
+- Telegram bot and Mini App edge: current handoff is `docs/deployment/telegram-edge-vds/CURRENT_1337_HANDOFF.md`; the live edge is `https://tg.leetplus.ru` on server 1337 (`188.234.220.76`) and currently uses Telegram polling, not webhook.
 
 ## Product Context
 
@@ -80,6 +81,8 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Activated the current live Telegram bot + Mini App topology on server 1337 as a polling-first edge: `telegram-poller` consumes Telegram `getUpdates`, clears any public webhook without dropping pending updates, forwards safe updates to the main API, and `https://tg.leetplus.ru/game/app` serves the Mini App. Added polling env examples, a testable `guest-game:telegram-poller` CLI, regression tests, and renamed operator readiness to `Telegram update consumer (polling edge)`.
+- Saved the current 1337 Telegram bot + Mini App handoff as the source of truth: `docs/deployment/telegram-edge-vds/CURRENT_1337_HANDOFF.md` records the live `https://tg.leetplus.ru` edge, Docker Compose layout, polling mode, update process, checks, canary markers, env locations, and security rules.
 - Prepared the Telegram bot and Mini App split onto a separate non-RF edge VDS: added a standalone `guest-game:telegram-edge` adapter for `/tg/webhook`, Bot API proxy/base URL configuration, edge-side Mini App `initData` validation with shared-secret assertion to the main API, systemd/nginx/env templates under `docs/deployment/telegram-edge-vds`, and dry-run/canary/rollback runbooks.
 - Implemented the Telegram Mini App layer for gamification: `/game/app` is a public Telegram WebApp route, `POST /guest-portal/telegram-mini-app/session` validates Telegram `initData` and issues the existing HttpOnly guest session for confirmed `GuestGameProfile` records, multi-club Telegram identities get a safe club selector, and the mobile UI renders the accepted club-card mockup over `GET /guest-portal/session/game-summary`.
 - Added the post-auth gamification club selector: `/game/clubs` opens after `/game/auth` or `/play` authorization, highlights the current club from the latest HttpOnly guest session, supports search/city chips/collapsed map, and `POST /guest-portal/session/select-club` safely reissues the guest token for the selected connected club without creating a common `Guest`.

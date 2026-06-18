@@ -1,85 +1,192 @@
-# Telegram-вход в геймификацию
+# Telegram-вход и Mini App на 1337
 
-Этот runbook описывает production-запуск основного канала регистрации участника геймификации: `/play` -> Telegram-бот -> contact-share -> отдельный `GuestGameProfile` -> guest-token. Из-за размещения основной VDS в РФ Telegram webhook, отправка сообщений и Mini App выносятся на отдельную не-РФ edge VDS. Детальный pack лежит в `docs/deployment/telegram-edge-vds`.
+Этот runbook описывает текущий production-контур регистрации участника геймификации: `/play` -> Telegram bot -> contact-share -> отдельный `GuestGameProfile` -> guest-token -> Telegram Mini App.
+
+Актуальная правда по edge-серверу сохранена в `docs/deployment/telegram-edge-vds/CURRENT_1337_HANDOFF.md`.
+
+## Текущее размещение
+
+Telegram bot и Mini App вынесены на 1337:
+
+- edge domain: `https://tg.leetplus.ru`
+- public IP: `188.234.220.76`
+- project root: `/srv/leetplus-telegram-edge`
+- compose: `/srv/leetplus-telegram-edge/docker-compose.yml`
+- secrets env: `/srv/leetplus-telegram-edge/secrets/telegram-edge.env`
+- runtime data: `/srv/leetplus-telegram-edge/data`
+
+Основной LeetPlus API остается на основной VDS:
+
+- API URL: `https://api.leetplus.ru`
+- бизнес-логика Telegram auth остается в основном API
+- edge только poll-ит Telegram updates, проксирует Mini App и отправляет ответы в Telegram
+
+Важно: используется Telegram long polling, не webhook. Telegram webhook должен быть пустым. `telegram-poller` сам вызывает `deleteWebhook(drop_pending_updates=false)` на старте.
 
 ## Что делает контур
 
 - `/play` создает одноразовый Telegram auth challenge для выбранного клуба и открывает deep link бота.
-- Edge webhook `/tg/webhook` принимает update от Telegram, проверяет Telegram secret token и пересылает update в LeetPlus API.
-- Webhook LeetPlus принимает `/start lp_...`, переводит challenge в ожидание contact-share и возвращает safe `reply` payload.
+- `telegram-poller` на 1337 получает updates через `getUpdates`.
+- Edge adapter пересылает safe update в основной API `/guest-portal/telegram/webhook` с Telegram secret header.
+- Основной API принимает `/start lp_...`, переводит challenge в ожидание contact-share и возвращает safe `reply` payload.
 - Edge adapter отправляет safe reply в Telegram через Bot API/proxy: сначала кнопку `request_contact`, затем кнопку `Открыть Mini App`.
-- LeetPlus принимает только contact того же Telegram-пользователя, активирует или сливает отдельный `GuestGameProfile` по `phoneHash`, выдает guest-token через browser status endpoint и возвращает кнопку `Открыть Mini App`.
-- `/game/app` открывается на edge VDS, проверяет Telegram Mini App `initData` bot token-ом на edge, передает в основной API edge assertion по shared secret, получает обычную HttpOnly guest-session и читает существующий `GET /guest-portal/session/game-summary`.
-- Общий `Guest` публичной регистрацией не создается; связь с Langame-гостем появляется через сохраненный snapshot и обычную guest foundation sync.
-- Raw phone, raw chat id, raw Telegram update, bot token и Langame payload не возвращаются на frontend и не сохраняются в audit.
+- LeetPlus принимает только contact того же Telegram-пользователя, активирует или сливает отдельный `GuestGameProfile` по `phoneHash`, выдает guest-token через browser status endpoint и возвращает кнопку Mini App.
+- `/game/app` открывается на `https://tg.leetplus.ru`, проверяет Telegram Mini App `initData` bot token-ом на edge, передает в основной API edge assertion по shared secret, получает обычную HttpOnly guest-session и читает `GET /guest-portal/session/game-summary`.
 
-## Env на VDS
+Raw phone, raw chat id, raw Telegram update, bot token и Langame payload не возвращаются на frontend и не сохраняются в audit.
 
-Минимальные переменные на основной VDS для публичного deep link, webhook-логики и edge assertion:
+## Env основной VDS
 
 ```env
-GUEST_GAME_TELEGRAM_BOT_USERNAME="<bot-username-without-@>"
-GUEST_GAME_TELEGRAM_WEBHOOK_SECRET="<telegram-webhook-secret>"
-GUEST_GAME_TG_EDGE_SHARED_SECRET="<long-random-edge-shared-secret>"
-GUEST_GAME_TELEGRAM_MINI_APP_URL="https://tg.leetplus.example/game/app"
-WEB_URL="https://leetplus.ru"
-API_URL="https://api.leetplus.ru"
+GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED=false
+GUEST_GAME_TELEGRAM_MINI_APP_URL=https://tg.leetplus.ru/game/app
+GUEST_GAME_TELEGRAM_BOT_USERNAME=leetplusru_bot
+GUEST_GAME_TG_EDGE_SHARED_SECRET=<same-as-edge>
+GUEST_GAME_TELEGRAM_WEBHOOK_SECRET=<same-as-edge-update-secret>
+WEB_URL=https://leetplus.ru
+API_URL=https://api.leetplus.ru
 ```
 
-На основной VDS нужно держать API-side sender выключенным. LeetPlus возвращает `reply` payload из `/guest-portal/telegram/webhook`, а отправляет его edge adapter.
+На основной VDS не включать API-side Telegram sender. Основной API возвращает `reply` payload, а отправляет его edge adapter на 1337.
 
-Не включать на основной VDS:
+## Env 1337 edge
 
-```env
-GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED="false"
-GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_BOT_TOKEN=""
+Реальные значения брать только с сервера:
+
+```text
+/srv/leetplus-telegram-edge/secrets/telegram-edge.env
 ```
 
-Переменные на edge VDS описаны в `docs/deployment/telegram-edge-vds/telegram-edge.env.example`. На edge VDS должны жить реальные:
+Ключевые переменные:
 
 ```env
-GUEST_GAME_TG_EDGE_BOT_TOKEN="<telegram-bot-token>"
-GUEST_GAME_TG_EDGE_WEBHOOK_SECRET="<telegram-webhook-secret>"
-GUEST_GAME_TG_EDGE_SHARED_SECRET="<same-long-random-edge-shared-secret>"
-GUEST_GAME_TG_EDGE_TELEGRAM_API_BASE_URL="https://api.telegram.org"
-GUEST_GAME_TELEGRAM_MINI_APP_INIT_DATA_TTL_SECONDS="86400"
+GUEST_GAME_TG_EDGE_DRY_RUN=false
+GUEST_GAME_TG_EDGE_BOT_TOKEN=<secret>
+GUEST_GAME_TG_EDGE_WEBHOOK_SECRET=<secret>
+GUEST_GAME_TG_EDGE_SHARED_SECRET=<secret>
+GUEST_GAME_TG_EDGE_TELEGRAM_API_BASE_URL=https://api.telegram.org
+
+GUEST_GAME_TG_EDGE_POLLING_DELETE_WEBHOOK_ON_START=true
+GUEST_GAME_TG_EDGE_POLLING_DROP_PENDING_UPDATES=false
+GUEST_GAME_TG_EDGE_POLLING_TIMEOUT_SECONDS=50
+GUEST_GAME_TG_EDGE_POLLING_LIMIT=100
+GUEST_GAME_TG_EDGE_POLLING_ALLOWED_UPDATES=message,edited_message,callback_query
+GUEST_GAME_TG_EDGE_POLLING_STATE_PATH=/app/data/telegram-poller-state.json
+GUEST_GAME_TG_EDGE_POLLING_RETRY_DELAY_MS=5000
+
+GUEST_GAME_BOT_CONSUMER_DRY_RUN=true
 ```
 
 Если используется Bot API proxy, `GUEST_GAME_TG_EDGE_TELEGRAM_API_BASE_URL` указывает на proxy base URL, сохраняющий путь `/bot<TOKEN>/<method>`.
 
-## Безопасный запуск
-
-1. Поднять edge VDS по `docs/deployment/telegram-edge-vds/README.md`.
-2. Настроить Telegram Bot API webhook на `https://tg.leetplus.example/tg/webhook` с secret token из `GUEST_GAME_TG_EDGE_WEBHOOK_SECRET`.
-3. Проверить в Guest Game Hub readiness: `Telegram webhook consumer` должен видеть secret на основной VDS, `Telegram reply sender для входа` остается `adapter-only`, `Telegram Mini App` готов по edge assertion.
-4. Перезапустить основной API после env:
+## Сервисы на 1337
 
 ```bash
-sudo systemctl restart leetplus-api.service
-sudo journalctl -u leetplus-api.service -n 100 --no-pager
+cd /srv/leetplus-telegram-edge
+docker compose ps
 ```
 
-5. Открыть `https://leetplus.ru/play`, выбрать клуб 1337 или другой подключенный клуб, принять согласие и выбрать Telegram-бота.
-6. В Telegram открыть deep link, отправить `/start lp_...`, затем поделиться контактом через кнопку Telegram. Contact должен принадлежать тому же Telegram-пользователю.
-7. После contact-share edge adapter должен показать кнопку `Открыть Mini App`; при нажатии открывается `https://tg.leetplus.example/game/app`.
-8. Внутри Telegram Mini App edge web должен принять валидный `initData`, передать edge assertion в основной API, получить guest-session через HttpOnly cookie и загрузить клубную карту из `session/game-summary`.
-9. Вернуться на `/play`: status endpoint также должен выдать guest-token, отдельный `GuestGameProfile`, safe local match и не создавать общий `Guest`.
-10. В Guest Game Hub проверить readiness `Telegram Mini App`, отсутствие raw chat id/update/phone в ответах и возможность продолжить путь к квесту и bonus ledger.
+Ожидаемые сервисы:
 
-## QA-чек
+- `telegram-edge` - edge adapter, порт 4010 локально
+- `telegram-mini-app-web` - Next.js Mini App, порт 3100 локально
+- `telegram-poller` - Telegram long polling
+- `bot-consumer` - optional, profile `consumer`, сейчас не live
 
-- Telegram остается первым вариантом входа в `/play`, даже если временно активен fallback.
-- При `adapter-only` webhook возвращает `reply`, но LeetPlus сам не отправляет сообщение; отправка идет только с edge VDS.
-- После `/start` гость получает запрос contact-share; после успешного contact-share бот предлагает кнопку `Открыть Mini App`.
-- `/game/app` на edge VDS в обычном браузере без Telegram `initData` может открыть уже существующую guest-session, но полноценный Mini App вход требует Telegram WebView.
-- Неверный `hash`, просроченный `auth_date` или Telegram-пользователь без подтвержденного `GuestGameProfile` не создают общий `Guest` и возвращают безопасный статус.
-- `GuestGameProfile` создается или переиспользуется по подтвержденному `phoneHash`, а общий `Guest` появляется только после snapshot-синхронизации.
-- Реферальный `ref` передается в игровое событие только после успешной авторизации и не сохраняется как сырой код в публичном контуре.
+## Обновление bot / Mini App
+
+1. Локально проверить сборку:
+
+```powershell
+node C:\Users\ALIENWARE\Desktop\leetplus\.codex-tools\node_modules\pnpm\bin\pnpm.cjs --filter api build
+node C:\Users\ALIENWARE\Desktop\leetplus\.codex-tools\node_modules\pnpm\bin\pnpm.cjs --filter web build
+```
+
+2. На 1337 перед заменой сделать backup:
+
+```bash
+cd /srv/leetplus-telegram-edge
+mkdir -p backups
+tar -czf backups/app-before-update-$(date +%Y%m%d-%H%M%S).tgz app docker-compose.yml secrets/telegram-edge.env
+```
+
+3. Заменить `/srv/leetplus-telegram-edge/app` новой версией кода.
+
+Не перетирать:
+
+```text
+/srv/leetplus-telegram-edge/secrets/telegram-edge.env
+/srv/leetplus-telegram-edge/data
+/srv/leetplus-telegram-edge/backups
+```
+
+4. Пересобрать и поднять сервисы:
+
+```bash
+cd /srv/leetplus-telegram-edge
+docker compose build telegram-edge telegram-poller telegram-mini-app-web
+docker compose up -d telegram-edge telegram-poller telegram-mini-app-web
+```
+
+## Проверка
+
+```bash
+cd /srv/leetplus-telegram-edge
+docker compose ps
+docker compose logs --tail=120 telegram-poller
+docker compose logs --tail=80 telegram-edge
+docker compose logs --tail=80 telegram-mini-app-web
+./telegram-webhook-remote.sh info
+./check-nginx-https-site.sh
+```
+
+Ожидаемо:
+
+- webhook `url=-`
+- `pending_update_count=0` или небольшое число
+- `https_game_app_http=200`
+- `https_webhook_wrong_secret_http=401`
+- `https_root_http=404`
+
+Mini App API proxy:
+
+```bash
+curl -ksS -o /dev/null -w 'HTTP:%{http_code}:BYTES:%{size_download}\n' \
+  https://tg.leetplus.ru/api/guest-portal/gamification/clubs
+```
+
+Ожидаемо: `HTTP:200`.
+
+Финальный Telegram canary:
+
+- создать Telegram auth через LeetPlus/Mini App flow
+- перейти в `@leetplusru_bot` по deep-link `/start lp_CODE`
+- поделиться контактом
+- в логах poller должны быть:
+
+```text
+TELEGRAM_AUTH_START status=AWAITING_CONTACT replySent=true
+TELEGRAM_AUTH_CONTACT status=CONFIRMED replySent=true
+```
 
 ## Откат
 
-- Остановить edge adapter: `sudo systemctl disable --now leetplus-telegram-edge.service`.
-- Удалить webhook у Telegram или вернуть на старый временный endpoint.
-- Отключить Mini App кнопку: убрать `GUEST_GAME_TELEGRAM_MINI_APP_URL` или временно вернуть текст reply без `web_app` в адаптере; `/play/game` остается совместимым web-экраном.
-- Полностью остановить Telegram-вход: снять webhook у бота или убрать `GUEST_GAME_TELEGRAM_WEBHOOK_SECRET`; `/play` автоматически откроет первый готовый fallback, например звонок пользователя на номер или SMS.
-- Подготовленные Telegram delivery-награды остаются отдельным outbox-контуром и не зависят от этого auth rollback.
+- Поставить `GUEST_GAME_TG_EDGE_DRY_RUN=true`.
+- Перезапустить сервисы edge:
+
+```bash
+cd /srv/leetplus-telegram-edge
+docker compose up -d telegram-edge telegram-poller telegram-mini-app-web
+```
+
+- Для отключения Mini App кнопки временно убрать `GUEST_GAME_TELEGRAM_MINI_APP_URL` на основной VDS.
+- Для полного отключения Telegram-входа остановить `telegram-poller` или убрать `GUEST_GAME_TELEGRAM_WEBHOOK_SECRET` на основной VDS; `/play` откроет первый готовый fallback.
+
+## Правила безопасности
+
+- Не включать Telegram webhook, пока используется polling.
+- Запускать ровно один `telegram-poller` на bot token.
+- Не коммитить `.env`, bot token, sync token, SSH credentials.
+- `bot-consumer` держать в dry-run, если отдельно не принято решение включать live-доставки.
+- После каждого обновления проверять Telegram canary, а не только `docker compose ps`.
+- Telegram bot token лучше перевыпустить, если он светился в чате.

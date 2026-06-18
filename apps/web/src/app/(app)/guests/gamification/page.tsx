@@ -176,15 +176,15 @@ const emptyWorkspace: GuestGamificationWorkspace = {
       },
       {
         key: "TELEGRAM_WEBHOOK",
-        title: "Telegram webhook consumer",
+        title: "Telegram update consumer (polling edge)",
         status: "BLOCKED",
         statusLabel: "секрет нужен",
         ready: false,
         configured: false,
         enabled: false,
         requiredEnv: ["GUEST_GAME_TELEGRAM_WEBHOOK_SECRET"],
-        note: "Webhook принимает link-code и отписки только с секретом.",
-        nextAction: "Задать webhook secret и URL в Telegram.",
+        note: "Основной API принимает link-code и отписки только от 1337 polling edge с секретом.",
+        nextAction: "Задать update secret и проверить telegram-poller на 1337.",
       },
       {
         key: "TELEGRAM_AUTH_REPLY_SENDER",

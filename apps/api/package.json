@@ -14,6 +14,7 @@
     "start:prod": "node dist/main",
     "guest-game:bot-consumer": "node dist/guest-gamification/guest-game-delivery-bot-consumer.cli",
     "guest-game:telegram-edge": "node dist/guest-portal/telegram-edge-adapter.cli",
+    "guest-game:telegram-poller": "node dist/guest-portal/telegram-edge-poller.cli",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "test": "jest",
     "test:watch": "jest --watch",

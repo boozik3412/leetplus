@@ -1659,6 +1659,9 @@ export type GuestGameBotConsumerStatus = {
   modeLabel: string;
   dryRun: boolean;
   configured: boolean;
+  limit: number;
+  canaryLimit: boolean;
+  canaryRequired: boolean;
   channels: Array<'TELEGRAM' | 'MAX'>;
   requiredEnv: string[];
   runbook: GuestGameRunbookLink;
@@ -7015,7 +7018,13 @@ export class GuestGamificationService {
       ackEvents
         .map((event) => event.createdAt)
         .sort((left, right) => Date.parse(right) - Date.parse(left))[0] ?? null;
-    const mode: GuestGameBotConsumerStatus['mode'] = !config.configured
+    const canaryRequired =
+      config.configured && !config.dryRun && !config.canaryLimit && !lastAckAt;
+    const requiredEnv = canaryRequired
+      ? [...config.requiredEnv, 'GUEST_GAME_BOT_CONSUMER_LIMIT=1']
+      : config.requiredEnv;
+    const configured = config.configured && !canaryRequired;
+    const mode: GuestGameBotConsumerStatus['mode'] = !configured
       ? 'BLOCKED'
       : config.dryRun
         ? 'DRY_RUN'
@@ -7023,16 +7032,20 @@ export class GuestGamificationService {
 
     return {
       mode,
-      modeLabel:
-        mode === 'READY'
+      modeLabel: canaryRequired
+        ? 'нужен canary LIMIT=1'
+        : mode === 'READY'
           ? 'готов к real-send'
           : mode === 'DRY_RUN'
             ? 'dry-run'
             : 'нужна настройка',
       dryRun: config.dryRun,
-      configured: config.configured,
+      configured,
+      limit: config.limit,
+      canaryLimit: config.canaryLimit,
+      canaryRequired,
       channels: config.channels,
-      requiredEnv: config.requiredEnv,
+      requiredEnv,
       runbook: botConsumerRunbook,
       pendingReady: readyForBot.length,
       pendingTelegram: readyForBot.filter((item) => item.channel === 'TELEGRAM')
@@ -7048,7 +7061,12 @@ export class GuestGamificationService {
         (event) => event.eventType === 'DELIVERY_BOT_CONSUMER_BLOCKED',
       ).length,
       lastAckAt,
-      nextAction: botConsumerNextAction(config, readyForBot.length, lastAckAt),
+      nextAction: botConsumerNextAction(
+        config,
+        readyForBot.length,
+        lastAckAt,
+        canaryRequired,
+      ),
       note: 'Статус собран из API-visible env, текущего outbox и сохраненных ack-событий. Если runner запущен отдельным systemd unit со своим EnvironmentFile, фактический запуск подтверждается по новым ack-событиям.',
     };
   }
@@ -9983,6 +10001,8 @@ type DeliveryProviderConfig = {
 type BotConsumerConfig = {
   dryRun: boolean;
   configured: boolean;
+  limit: number;
+  canaryLimit: boolean;
   channels: Array<'TELEGRAM' | 'MAX'>;
   requiredEnv: string[];
 };
@@ -10035,6 +10055,7 @@ function deliveryProviderConfig(): DeliveryProviderConfig {
 function botConsumerConfig(): BotConsumerConfig {
   const dryRunEnv = envString('GUEST_GAME_BOT_CONSUMER_DRY_RUN');
   const dryRun = dryRunEnv === null ? true : booleanValue(dryRunEnv);
+  const limit = botConsumerLimit(envString('GUEST_GAME_BOT_CONSUMER_LIMIT'));
   const syncTokenConfigured = Boolean(
     envString('GUEST_GAME_BOT_CONSUMER_SYNC_TOKEN') ??
     envString('SYNC_SERVICE_TOKEN'),
@@ -10079,9 +10100,21 @@ function botConsumerConfig(): BotConsumerConfig {
   return {
     dryRun,
     configured: requiredEnv.length === 0,
+    limit,
+    canaryLimit: limit === 1,
     channels,
     requiredEnv,
   };
+}
+
+function botConsumerLimit(value: string | null) {
+  const parsed = value === null ? NaN : Number(value);
+
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return 10;
+  }
+
+  return Math.min(Math.floor(parsed), 50);
 }
 
 function botConsumerChannels(value: string | null): Array<'TELEGRAM' | 'MAX'> {
@@ -10100,9 +10133,14 @@ function botConsumerNextAction(
   config: BotConsumerConfig,
   pendingReady: number,
   lastAckAt: string | null,
+  canaryRequired = false,
 ) {
   if (!config.configured) {
     return `Настроить env внешнего bot-consumer: ${config.requiredEnv.join(', ')}.`;
+  }
+
+  if (canaryRequired) {
+    return 'Перед первым real-send поставить GUEST_GAME_BOT_CONSUMER_LIMIT=1, запустить one-shot canary и проверить первый SENT/FAILED/BLOCKED ack в Guest Game Hub.';
   }
 
   if (config.dryRun) {

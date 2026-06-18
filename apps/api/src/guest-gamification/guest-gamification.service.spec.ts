@@ -2928,6 +2928,9 @@ describe('GuestGamificationService', () => {
         mode: 'READY',
         dryRun: false,
         configured: true,
+        limit: 10,
+        canaryLimit: false,
+        canaryRequired: false,
         channels: ['TELEGRAM'],
         requiredEnv: [],
         runbook: {
@@ -2944,6 +2947,40 @@ describe('GuestGamificationService', () => {
         lastAckAt: isoNow,
       });
       expect(outbox.botConsumer.nextAction).toContain('ack');
+      expect(JSON.stringify(outbox.botConsumer)).not.toContain(
+        'telegram-token',
+      );
+      expect(JSON.stringify(outbox.botConsumer)).not.toContain('sync-token');
+    });
+
+    it('requires canary limit before the first real-send ack', () => {
+      process.env.GUEST_GAME_BOT_CONSUMER_SYNC_TOKEN = 'sync-token';
+      process.env.GUEST_GAME_BOT_CONSUMER_TENANT_SLUG = user.tenantSlug;
+      process.env.GUEST_GAME_BOT_CONSUMER_CHANNELS = 'telegram';
+      process.env.GUEST_GAME_BOT_CONSUMER_DRY_RUN = 'false';
+      process.env.GUEST_GAME_BOT_CONSUMER_LIMIT = '10';
+      process.env.GUEST_GAME_BOT_CONSUMER_TELEGRAM_BOT_TOKEN = 'telegram-token';
+      const { service } = createService();
+      const outbox = (service as any).buildDeliveryOutbox([deliveryRow()]);
+
+      expect(outbox.botConsumer).toMatchObject({
+        mode: 'BLOCKED',
+        modeLabel: 'нужен canary LIMIT=1',
+        dryRun: false,
+        configured: false,
+        limit: 10,
+        canaryLimit: false,
+        canaryRequired: true,
+        channels: ['TELEGRAM'],
+        requiredEnv: ['GUEST_GAME_BOT_CONSUMER_LIMIT=1'],
+        pendingReady: 1,
+        pendingTelegram: 1,
+        pendingMax: 0,
+        lastAckAt: null,
+      });
+      expect(outbox.botConsumer.nextAction).toContain(
+        'GUEST_GAME_BOT_CONSUMER_LIMIT=1',
+      );
       expect(JSON.stringify(outbox.botConsumer)).not.toContain(
         'telegram-token',
       );

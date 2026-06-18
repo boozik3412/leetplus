@@ -467,6 +467,9 @@ const emptyWorkspace: GuestGamificationWorkspace = {
       modeLabel: "нужна настройка",
       dryRun: true,
       configured: false,
+      limit: 10,
+      canaryLimit: false,
+      canaryRequired: false,
       channels: ["TELEGRAM"],
       requiredEnv: [
         "GUEST_GAME_BOT_CONSUMER_SYNC_TOKEN or SYNC_SERVICE_TOKEN",

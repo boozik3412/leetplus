@@ -49,7 +49,7 @@ sudo systemctl enable --now leetplus-guest-game-bot-consumer.timer
 systemctl list-timers leetplus-guest-game-bot-consumer.timer
 ```
 
-4. Для canary real-send поставить `GUEST_GAME_BOT_CONSUMER_DRY_RUN=false` и временно `GUEST_GAME_BOT_CONSUMER_LIMIT=1`, затем запустить service вручную и проверить карточку `VDS bot-consumer` в Guest Game Hub: должны появиться реальные `GuestGameDeliveryEvent` `SENT` или безопасные `FAILED/BLOCKED`. В journal итоговая строка содержит `acked` и `idempotentAcks`; ненулевой `idempotentAcks` означает, что LeetPlus принял повторный terminal ack как безопасный дубль без нового события.
+4. Для canary real-send поставить `GUEST_GAME_BOT_CONSUMER_DRY_RUN=false` и временно `GUEST_GAME_BOT_CONSUMER_LIMIT=1`, затем запустить service вручную и проверить карточку `VDS bot-consumer` в Guest Game Hub: должны появиться реальные `GuestGameDeliveryEvent` `SENT` или безопасные `FAILED/BLOCKED`. До первого сохраненного ack карточка намеренно показывает `нужен canary LIMIT=1` и блокирует readiness real-send, если лимит не равен `1`. В journal итоговая строка содержит `acked` и `idempotentAcks`; ненулевой `idempotentAcks` означает, что LeetPlus принял повторный terminal ack как безопасный дубль без нового события.
 5. Rollback: вернуть `GUEST_GAME_BOT_CONSUMER_DRY_RUN=true` или остановить timer командой `sudo systemctl disable --now leetplus-guest-game-bot-consumer.timer`.
 
 ## Ограничения

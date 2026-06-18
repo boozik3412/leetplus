@@ -563,6 +563,9 @@ export type GuestGameBotConsumerStatus = {
   modeLabel: string;
   dryRun: boolean;
   configured: boolean;
+  limit: number;
+  canaryLimit: boolean;
+  canaryRequired: boolean;
   channels: Array<"TELEGRAM" | "MAX">;
   requiredEnv: string[];
   runbook: GuestGameRunbookLink;

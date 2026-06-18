@@ -26,6 +26,11 @@ const catalogOnlyRoles = new Set([
   "TRAINEE",
 ]);
 
+const headerActionBase =
+  "inline-flex h-11 w-full min-w-0 items-center justify-center gap-2 rounded-md border px-4 text-center text-sm font-semibold transition";
+const headerActionPrimary = `${headerActionBase} border-emerald-500 bg-emerald-500 text-zinc-950 hover:bg-emerald-400`;
+const headerActionSecondary = `${headerActionBase} border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-900`;
+
 const statusLabels: Record<StaffShiftRegulationFilterStatus, string> = {
   all: "Все статусы",
   DRAFT: "Черновики",
@@ -264,11 +269,11 @@ export default async function StaffShiftRegulationsPage({
                 : "Открывайте опубликованные регламенты, материалы и чек-листы смены. Если регламент требует ознакомления, подтвердите его после прочтения."}
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 lg:w-[34rem] lg:justify-end">
             {canManageRegulations ? (
               <Link
                 href="/staff/checklist-templates?new=1"
-                className="inline-flex h-11 min-w-44 items-center justify-center rounded-md bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400"
+                className={headerActionPrimary}
               >
                 Новый чек-лист
               </Link>
@@ -276,20 +281,20 @@ export default async function StaffShiftRegulationsPage({
             {canManageRegulations ? (
               <Link
                 href="/staff/checklists"
-                className="inline-flex h-11 min-w-44 items-center justify-center rounded-md border border-emerald-200 bg-emerald-50 px-4 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100 dark:hover:bg-emerald-500/15"
+                className={headerActionSecondary}
               >
                 Открыть чек-листы
               </Link>
             ) : null}
             <Link
               href={canManageRegulations ? "/staff/tasks" : "/staff/checklists"}
-              className="inline-flex h-11 min-w-44 items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+              className={headerActionSecondary}
             >
               {canManageRegulations ? "Задачи персонала" : "Открыть чек-листы"}
             </Link>
             <Link
               href="/staff/checklists/report"
-              className="inline-flex h-11 min-w-44 items-center justify-center gap-2 rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+              className={headerActionSecondary}
             >
               <ChecklistHistoryIcon className="size-5 shrink-0" />
               <span>История чек-листов</span>

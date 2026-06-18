@@ -58,9 +58,15 @@ GUEST_PORTAL_OTP_SMS_ENABLED="true"
 GUEST_PORTAL_OTP_SMS_RU_API_ID="<sms-ru-api-id>"
 GUEST_PORTAL_OTP_SMS_RU_BASE_URL="https://sms.ru"
 GUEST_PORTAL_OTP_SMS_RU_TEST_MODE="false"
+GUEST_PORTAL_OTP_SMS_RATE_LIMIT_PHONE_WINDOW_MINUTES="60"
+GUEST_PORTAL_OTP_SMS_RATE_LIMIT_PHONE_MAX="3"
+GUEST_PORTAL_OTP_SMS_RATE_LIMIT_STORE_WINDOW_MINUTES="10"
+GUEST_PORTAL_OTP_SMS_RATE_LIMIT_STORE_MAX="30"
 ```
 
 Если `GUEST_PORTAL_OTP_SMS_RU_API_ID` не задан, backend может переиспользовать `GUEST_PORTAL_USER_CALL_SMS_RU_API_ID` из Callcheck. Для staged QA можно временно включить `GUEST_PORTAL_OTP_SMS_RU_TEST_MODE=true`: SMS.ru примет запрос с `test=1`, но сообщение не будет отправлено и баланс не будет списан. Старый generic provider через `GUEST_PORTAL_OTP_SMS_ENDPOINT` + `GUEST_PORTAL_OTP_SMS_TOKEN` остается fallback-адаптером для другого SMS-шлюза.
+
+Перед вызовом SMS.ru backend применяет два бюджетных anti-abuse лимита по уже созданным SMS-challenge: по умолчанию не больше 3 SMS на один подтверждаемый телефон за 60 минут и не больше 30 SMS на клуб за 10 минут. Значение `0` у соответствующего `*_MAX` или `*_WINDOW_MINUTES` отключает конкретный лимит, но для live-режима это допускается только на короткий controlled QA. При срабатывании лимита API возвращает безопасный 429 без вызова provider-а и без раскрытия телефона, `api_id` или счетчиков.
 
 Readiness `OTP_SMS` в Guest Game Hub должен показывать только безопасные признаки: real-send, флаг SMS-канала, provider `SMS.ru /sms/send` или generic fallback, `test=1` и наличие `api_id`/endpoint без самих значений. Если в карточке появляется raw `api_id`, endpoint, token, телефон или provider payload, запуск SMS-резерва нужно остановить до исправления.
 
@@ -87,7 +93,7 @@ GUEST_PORTAL_INCOMING_CALL_LAST4_TOKEN="<provider-token>"
 2. Настроить `USER_CALL` env, перезапустить API и проверить readiness `Звонок пользователя для входа` в Guest Game Hub. Для текущего production-пути использовать SMS.ru Callcheck.
 3. Выполнить QA: открыть `/play`, выбрать клуб 1337, выбрать звонок пользователя, ввести телефон, убедиться, что UI показывает нейтральное сообщение о сбросе звонка после проверки, позвонить на выданный номер и дождаться guest-token через polling status. Для ручного provider дополнительно отправить provider callback.
 4. Проверить, что создан или переиспользован отдельный `GuestGameProfile`, общий `Guest` публичной регистрацией не создан, а status response содержит только safe match/backfill.
-5. SMS держать как резервный канал после user-call: в staged/test-mode проверять provider acceptance и отсутствие утечек, а live-режим включать отдельно только после rate limits, anti-abuse guard и бюджетного контроля.
+5. SMS держать как резервный канал после user-call: в staged/test-mode проверять provider acceptance и отсутствие утечек; live-режим включать отдельно только с включенными rate limits, anti-abuse guard и бюджетным контролем.
 6. `INCOMING_CALL_LAST4` включать только после выбора provider-а исходящих звонков и отдельного теста блокировок: `NOT_CONFIGURED`, `BLOCKED`, успешный verify.
 7. В Guest Game Hub проверить readiness `USER_CALL_AUTH` и `INCOMING_CALL_LAST4_AUTH`: карточки должны показывать только наличие env, required env и QA-шаг, без номера, endpoint, token, raw phone и Langame payload.
 

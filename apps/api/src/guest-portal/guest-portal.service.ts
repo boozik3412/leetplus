@@ -1,5 +1,7 @@
 import {
   BadRequestException,
+  HttpException,
+  HttpStatus,
   Injectable,
   NotFoundException,
   ServiceUnavailableException,
@@ -39,6 +41,10 @@ import { PrismaService } from '../prisma/prisma.service';
 const OTP_TTL_MINUTES = 10;
 const OTP_MAX_ATTEMPTS = 5;
 const OTP_RESEND_SECONDS = 60;
+const OTP_SMS_RATE_LIMIT_PHONE_WINDOW_MINUTES = 60;
+const OTP_SMS_RATE_LIMIT_PHONE_MAX = 3;
+const OTP_SMS_RATE_LIMIT_STORE_WINDOW_MINUTES = 10;
+const OTP_SMS_RATE_LIMIT_STORE_MAX = 30;
 const GUEST_TOKEN_EXPIRES_IN = '7d';
 const GUEST_PORTAL_PURPOSE = 'guest_portal';
 const TELEGRAM_LINK_TTL_MINUTES = 15;
@@ -1667,6 +1673,16 @@ export class GuestPortalService {
       throw new BadRequestException(
         'Код уже отправлен. Попробуйте повторить чуть позже.',
       );
+    }
+
+    const otpConfig = guestPortalOtpDeliveryConfig(this.configService);
+    if (!this.isDevOtpEnabled() && otpSmsReady(otpConfig)) {
+      await this.assertSmsOtpRateLimit({
+        tenantId: context.tenant.id,
+        storeId: context.store.id,
+        phoneHash: phone.hash,
+        now,
+      });
     }
 
     const [guest, profileByPhone] = await Promise.all([
@@ -6866,6 +6882,57 @@ export class GuestPortalService {
     };
   }
 
+  private async assertSmsOtpRateLimit(input: {
+    tenantId: string;
+    storeId: string;
+    phoneHash: string;
+    now: Date;
+  }) {
+    const config = guestPortalOtpSmsRateLimitConfig(this.configService);
+
+    if (config.phoneMax > 0 && config.phoneWindowMinutes > 0) {
+      const phoneWindowStart = new Date(
+        input.now.getTime() - config.phoneWindowMinutes * 60 * 1000,
+      );
+      const phoneCount = await this.prisma.guestPortalOtpChallenge.count({
+        where: {
+          tenantId: input.tenantId,
+          phoneHash: input.phoneHash,
+          deliveryChannel: 'SMS',
+          createdAt: { gte: phoneWindowStart },
+        },
+      });
+
+      if (phoneCount >= config.phoneMax) {
+        throw new HttpException(
+          'Слишком много попыток. Попробуйте позже.',
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
+    }
+
+    if (config.storeMax > 0 && config.storeWindowMinutes > 0) {
+      const storeWindowStart = new Date(
+        input.now.getTime() - config.storeWindowMinutes * 60 * 1000,
+      );
+      const storeCount = await this.prisma.guestPortalOtpChallenge.count({
+        where: {
+          tenantId: input.tenantId,
+          storeId: input.storeId,
+          deliveryChannel: 'SMS',
+          createdAt: { gte: storeWindowStart },
+        },
+      });
+
+      if (storeCount >= config.storeMax) {
+        throw new HttpException(
+          'Слишком много попыток. Попробуйте позже.',
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
+    }
+  }
+
   private async deliverIncomingCallLast4(input: {
     code: string;
     context: TenantStoreContext;
@@ -7812,6 +7879,31 @@ function otpSmsRequiredEnv(config: GuestPortalOtpDeliveryConfig) {
   return required;
 }
 
+function guestPortalOtpSmsRateLimitConfig(configService: ConfigService) {
+  return {
+    phoneWindowMinutes: configPositiveInteger(
+      configService,
+      'GUEST_PORTAL_OTP_SMS_RATE_LIMIT_PHONE_WINDOW_MINUTES',
+      OTP_SMS_RATE_LIMIT_PHONE_WINDOW_MINUTES,
+    ),
+    phoneMax: configPositiveInteger(
+      configService,
+      'GUEST_PORTAL_OTP_SMS_RATE_LIMIT_PHONE_MAX',
+      OTP_SMS_RATE_LIMIT_PHONE_MAX,
+    ),
+    storeWindowMinutes: configPositiveInteger(
+      configService,
+      'GUEST_PORTAL_OTP_SMS_RATE_LIMIT_STORE_WINDOW_MINUTES',
+      OTP_SMS_RATE_LIMIT_STORE_WINDOW_MINUTES,
+    ),
+    storeMax: configPositiveInteger(
+      configService,
+      'GUEST_PORTAL_OTP_SMS_RATE_LIMIT_STORE_MAX',
+      OTP_SMS_RATE_LIMIT_STORE_MAX,
+    ),
+  };
+}
+
 function guestPortalUserCallConfig(configService: ConfigService) {
   const rawPhoneNumber = configString(
     configService,
@@ -7950,6 +8042,24 @@ function configString(configService: ConfigService, ...keys: string[]) {
   }
 
   return '';
+}
+
+function configPositiveInteger(
+  configService: ConfigService,
+  key: string,
+  fallback: number,
+) {
+  const raw = configService.get<string>(key)?.trim();
+  if (!raw) {
+    return fallback;
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  return Math.max(0, Math.floor(parsed));
 }
 
 function otpMessage(code: string, context: TenantStoreContext) {

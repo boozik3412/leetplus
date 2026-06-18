@@ -26,6 +26,7 @@ function createPrismaMock() {
     },
     guestPortalOtpChallenge: {
       findFirst: jest.fn(),
+      count: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
       updateMany: jest.fn(),
@@ -100,6 +101,7 @@ function createService(configValues: Record<string, string | undefined> = {}) {
   prisma.guestCrmLead.update.mockResolvedValue({});
   prisma.store.findMany.mockResolvedValue([]);
   prisma.guestPortalOtpChallenge.findFirst.mockResolvedValue(null);
+  prisma.guestPortalOtpChallenge.count.mockResolvedValue(0);
   prisma.guestPortalOtpChallenge.create.mockResolvedValue({});
   prisma.guestPortalOtpChallenge.update.mockResolvedValue({});
   prisma.guestPortalOtpChallenge.updateMany.mockResolvedValue({ count: 0 });
@@ -1428,6 +1430,114 @@ describe('GuestPortalService', () => {
         message: 'Код отправлен по SMS на ***9999.',
       });
       expect(JSON.stringify(result)).not.toContain('smsru-api-id');
+
+      fetchMock.mockRestore();
+    });
+
+    it('blocks SMS OTP when the phone rate limit is reached before provider call', async () => {
+      const { prisma, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+        NODE_ENV: 'production',
+        GUEST_PORTAL_OTP_REAL_SEND_ENABLED: 'true',
+        GUEST_PORTAL_OTP_SMS_ENABLED: 'true',
+        GUEST_PORTAL_OTP_SMS_RU_API_ID: 'smsru-api-id',
+        GUEST_PORTAL_OTP_SMS_RATE_LIMIT_PHONE_WINDOW_MINUTES: '60',
+        GUEST_PORTAL_OTP_SMS_RATE_LIMIT_PHONE_MAX: '2',
+      });
+      const fetchMock = jest.spyOn(globalThis, 'fetch');
+
+      prisma.tenant.findFirst.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'Leet Clubs',
+        slug: 'leet',
+        stores: [
+          {
+            id: 'store-1',
+            publicSlug: 'club-1337',
+            name: '1337',
+            address: 'ул. Ленина, 1',
+          },
+        ],
+      });
+      prisma.guestPortalOtpChallenge.count.mockResolvedValueOnce(2);
+
+      const promise = service.startOtp('leet', 'club-1337', {
+        phone: '+7 999 999-99-99',
+        gameConsentAccepted: true,
+      });
+
+      await expect(promise).rejects.toThrow(
+        'Слишком много попыток. Попробуйте позже.',
+      );
+      await expect(promise).rejects.toMatchObject({ status: 429 });
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(prisma.guestPortalOtpChallenge.create).not.toHaveBeenCalled();
+      expect(prisma.guestPortalOtpChallenge.count).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            tenantId: 'tenant-1',
+            phoneHash: expect.any(String),
+            deliveryChannel: 'SMS',
+            createdAt: { gte: expect.any(Date) },
+          }),
+        }),
+      );
+
+      fetchMock.mockRestore();
+    });
+
+    it('blocks SMS OTP when the store rate limit is reached before provider call', async () => {
+      const { prisma, service } = createService({
+        APP_ENCRYPTION_KEY: 'test-secret',
+        NODE_ENV: 'production',
+        GUEST_PORTAL_OTP_REAL_SEND_ENABLED: 'true',
+        GUEST_PORTAL_OTP_SMS_ENABLED: 'true',
+        GUEST_PORTAL_OTP_SMS_RU_API_ID: 'smsru-api-id',
+        GUEST_PORTAL_OTP_SMS_RATE_LIMIT_STORE_WINDOW_MINUTES: '10',
+        GUEST_PORTAL_OTP_SMS_RATE_LIMIT_STORE_MAX: '4',
+      });
+      const fetchMock = jest.spyOn(globalThis, 'fetch');
+
+      prisma.tenant.findFirst.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'Leet Clubs',
+        slug: 'leet',
+        stores: [
+          {
+            id: 'store-1',
+            publicSlug: 'club-1337',
+            name: '1337',
+            address: 'ул. Ленина, 1',
+          },
+        ],
+      });
+      prisma.guestPortalOtpChallenge.count
+        .mockResolvedValueOnce(0)
+        .mockResolvedValueOnce(4);
+
+      const promise = service.startOtp('leet', 'club-1337', {
+        phone: '+7 999 999-99-99',
+        gameConsentAccepted: true,
+      });
+
+      await expect(promise).rejects.toThrow(
+        'Слишком много попыток. Попробуйте позже.',
+      );
+      await expect(promise).rejects.toMatchObject({ status: 429 });
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(prisma.guestPortalOtpChallenge.create).not.toHaveBeenCalled();
+      expect(prisma.guestPortalOtpChallenge.count).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            tenantId: 'tenant-1',
+            storeId: 'store-1',
+            deliveryChannel: 'SMS',
+            createdAt: { gte: expect.any(Date) },
+          }),
+        }),
+      );
 
       fetchMock.mockRestore();
     });

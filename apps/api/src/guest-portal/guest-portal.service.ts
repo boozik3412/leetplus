@@ -1499,6 +1499,21 @@ export class GuestPortalService {
       'GUEST_GAME_TELEGRAM_BOT_TOKEN',
       'TELEGRAM_BOT_TOKEN',
     );
+    const telegramMiniAppUrl = configString(
+      this.configService,
+      'GUEST_GAME_TELEGRAM_MINI_APP_URL',
+    );
+    const telegramEdgeSharedSecret = configString(
+      this.configService,
+      'GUEST_GAME_TG_EDGE_SHARED_SECRET',
+    );
+    const telegramReplySenderReady =
+      telegramReplySenderEnabled && Boolean(telegramReplySenderToken);
+    const telegramPollingEdgeReady = Boolean(
+      telegramMiniAppUrl && telegramEdgeSharedSecret,
+    );
+    const telegramTransportReady =
+      telegramReplySenderReady || telegramPollingEdgeReady;
     const telegramAuthRequiredEnv = [
       ...(telegramBotUsername ? [] : ['GUEST_GAME_TELEGRAM_BOT_USERNAME']),
       ...(telegramWebhookSecret
@@ -1506,16 +1521,23 @@ export class GuestPortalService {
         : [
             'GUEST_GAME_TELEGRAM_LINK_SECRET or GUEST_GAME_TELEGRAM_WEBHOOK_SECRET',
           ]),
-      ...(telegramReplySenderEnabled
-        ? []
-        : ['GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED']),
-      ...(telegramReplySenderToken
+      ...(telegramTransportReady
         ? []
         : [
-            'GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_BOT_TOKEN or GUEST_GAME_TELEGRAM_BOT_TOKEN',
+            'GUEST_GAME_TG_EDGE_SHARED_SECRET and GUEST_GAME_TELEGRAM_MINI_APP_URL (polling edge) or GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED',
+          ]),
+      ...(telegramTransportReady
+        ? []
+        : [
+            'GUEST_GAME_TG_EDGE_BOT_TOKEN on edge or GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_BOT_TOKEN on API',
           ]),
     ];
     const telegramAuthReady = telegramAuthRequiredEnv.length === 0;
+    const telegramAuthMode = telegramPollingEdgeReady
+      ? 'polling edge'
+      : telegramReplySenderReady
+        ? 'API-side sender'
+        : 'not configured';
     const smsReady = devOtpEnabled || otpSmsReady(otpConfig);
     const userCallRequiredEnv = userCallConfig.requiredEnv;
     const userCallReady = userCallConfig.enabled && userCallConfig.configured;
@@ -1547,7 +1569,9 @@ export class GuestPortalService {
           message:
             'Основной канал для регистрации, игровых уведомлений, рефералок и возврата гостей.',
           nextAction: telegramAuthReady
-            ? 'Использовать Telegram contact-share как основной вход на /play; SMS оставить резервом.'
+            ? telegramAuthMode === 'polling edge'
+              ? 'Провести QA /game/auth -> Telegram contact-share -> /game/clubs -> /play/game; API-side sender не требуется.'
+              : 'Использовать Telegram contact-share как основной вход на /play; SMS оставить резервом.'
             : 'Настроить Telegram bot username/link secret и добавить первичный Telegram-login с передачей телефона.',
           botUsername: telegramBotUsername,
           requiredEnv: telegramAuthRequiredEnv,

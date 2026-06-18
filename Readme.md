@@ -33,6 +33,8 @@ Main API не обязан хранить bot token для Mini App: edge вал
 
 Guest Game Hub на `/guests/gamification` показывает readiness как `Telegram update consumer (polling edge)`: видны только режим polling edge, required env и следующий QA-шаг; сами секреты, raw chat id и raw Telegram update не выводятся.
 
+Публичный каталог `GET /guest-portal/gamification/clubs` использует ту же polling-edge модель для плана входа: Telegram-бот считается готовым по `GUEST_GAME_TELEGRAM_BOT_USERNAME`, `GUEST_GAME_TELEGRAM_WEBHOOK_SECRET` или `GUEST_GAME_TELEGRAM_LINK_SECRET`, `GUEST_GAME_TELEGRAM_MINI_APP_URL` и `GUEST_GAME_TG_EDGE_SHARED_SECRET`; bot token на основной VDS для этого не нужен.
+
 Deployment-порядок закреплен в `docs/deployment/telegram-auth.md` и `docs/deployment/telegram-edge-vds/CURRENT_1337_HANDOFF.md`: live-схема 1337, Docker Compose, polling, Mini App `/game/app`, QA `/play -> Telegram -> contact-share -> Mini App` и rollback без раскрытия токенов, raw phone, raw chat id или Langame payload.
 
 ### Реферальная регистрация в геймификации

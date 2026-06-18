@@ -1300,6 +1300,56 @@ describe('GuestPortalService', () => {
       expect(nearbyDirectory.clubs).toHaveLength(1);
       expect(nearbyDirectory.clubs[0].id).toBe('leet:club-1337');
     });
+
+    it('marks Telegram auth ready for the polling edge without API-side sender', async () => {
+      const { prisma, service } = createService({
+        GUEST_GAME_TELEGRAM_BOT_USERNAME: 'leetplusru_bot',
+        GUEST_GAME_TELEGRAM_WEBHOOK_SECRET: 'telegram-secret',
+        GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED: 'false',
+        GUEST_GAME_TELEGRAM_MINI_APP_URL: 'https://tg.leetplus.ru/game/app',
+        GUEST_GAME_TG_EDGE_SHARED_SECRET: 'edge-secret',
+      });
+
+      prisma.store.findMany.mockResolvedValue([
+        {
+          id: 'store-1',
+          publicSlug: 'club-1337',
+          name: '1337',
+          city: 'Екатеринбург',
+          address: 'ул. Ленина, 1',
+          latitude: null,
+          longitude: null,
+          gamificationEnabled: true,
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: '46',
+          tenant: {
+            id: 'tenant-1',
+            name: 'Leet Clubs',
+            slug: 'leet',
+          },
+        },
+      ]);
+      prisma.guestGameMission.findMany.mockResolvedValue([]);
+      prisma.guestGameLootBox.findMany.mockResolvedValue([]);
+      prisma.guestGameSeason.findMany.mockResolvedValue([]);
+
+      const directory = await service.getGamificationClubDirectory({});
+      const telegramOption = directory.verification.options.find(
+        (option) => option.channel === 'TELEGRAM_BOT',
+      );
+
+      expect(telegramOption).toMatchObject({
+        rank: 1,
+        role: 'PRIMARY',
+        status: 'READY',
+        statusLabel: 'готов',
+        botUsername: 'leetplusru_bot',
+        requiredEnv: [],
+      });
+      expect(telegramOption?.nextAction).toContain(
+        'API-side sender не требуется',
+      );
+    });
   });
 
   describe('otp delivery', () => {

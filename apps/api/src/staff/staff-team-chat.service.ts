@@ -337,9 +337,9 @@ export class StaffTeamChatService {
       channels: channels.map((channel) =>
         this.toChannelResponse(channel, stats.get(channel.id)),
       ),
-      messages: messages
-        .map((message) => this.toMessageResponse(message, user.id))
-        .reverse(),
+      messages: messages.map((message) =>
+        this.toMessageResponse(message, user.id),
+      ),
       stores,
       users,
       roleScopes: [

@@ -810,7 +810,11 @@ describe('GuestGamificationService', () => {
     delete process.env.GUEST_GAME_BOT_CONSUMER_TELEGRAM_BOT_TOKEN;
     delete process.env.GUEST_GAME_TELEGRAM_LINK_SECRET;
     delete process.env.GUEST_GAME_TELEGRAM_WEBHOOK_SECRET;
+    delete process.env.GUEST_GAME_TELEGRAM_BOT_USERNAME;
     delete process.env.GUEST_GAME_TELEGRAM_BOT_TOKEN;
+    delete process.env.GUEST_GAME_TELEGRAM_MINI_APP_BOT_TOKEN;
+    delete process.env.GUEST_GAME_TELEGRAM_MINI_APP_URL;
+    delete process.env.GUEST_GAME_TG_EDGE_SHARED_SECRET;
     delete process.env.GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_ENABLED;
     delete process.env.GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_BOT_TOKEN;
     delete process.env.GUEST_PORTAL_USER_CALL_ENABLED;
@@ -1079,6 +1083,81 @@ describe('GuestGamificationService', () => {
       );
       expect(senderText).not.toContain('telegram-secret');
       expect(senderText).not.toContain('telegram-token');
+    });
+
+    it('marks Telegram Mini App ready without exposing bot token values', () => {
+      process.env.GUEST_GAME_TELEGRAM_BOT_USERNAME = 'leetplus_bot';
+      process.env.GUEST_GAME_TELEGRAM_MINI_APP_BOT_TOKEN = 'mini-app-token';
+      process.env.GUEST_GAME_TELEGRAM_MINI_APP_URL =
+        'https://leetplus.ru/game/app';
+      const { service } = createService();
+
+      const readiness = (service as any).buildIntegrationReadiness([]);
+      const miniApp = readiness.items.find(
+        (item: { key: string }) => item.key === 'TELEGRAM_MINI_APP',
+      );
+      const miniAppText = JSON.stringify(miniApp);
+
+      expect(miniApp).toMatchObject({
+        status: 'READY',
+        ready: true,
+        configured: true,
+        enabled: true,
+        requiredEnv: [],
+        runbook: {
+          label: 'Runbook Telegram-входа',
+          path: 'docs/deployment/telegram-auth.md',
+          href: 'https://github.com/boozik3412/leetplus/blob/main/docs/deployment/telegram-auth.md',
+        },
+      });
+      expect(miniApp.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ label: 'Route', value: '/game/app' }),
+          expect.objectContaining({
+            label: 'Bot username',
+            value: 'настроен',
+          }),
+          expect.objectContaining({
+            label: 'initData token',
+            value: 'настроен',
+          }),
+        ]),
+      );
+      expect(miniAppText).not.toContain('mini-app-token');
+    });
+
+    it('marks Telegram Mini App ready with edge assertion instead of bot token on main API', () => {
+      process.env.GUEST_GAME_TELEGRAM_BOT_USERNAME = 'leetplus_bot';
+      process.env.GUEST_GAME_TELEGRAM_MINI_APP_URL =
+        'https://tg.leetplus.example/game/app';
+      process.env.GUEST_GAME_TG_EDGE_SHARED_SECRET = 'edge-secret';
+      const { service } = createService();
+
+      const readiness = (service as any).buildIntegrationReadiness([]);
+      const miniApp = readiness.items.find(
+        (item: { key: string }) => item.key === 'TELEGRAM_MINI_APP',
+      );
+      const miniAppText = JSON.stringify(miniApp);
+
+      expect(miniApp).toMatchObject({
+        status: 'READY',
+        ready: true,
+        configured: true,
+        requiredEnv: [],
+      });
+      expect(miniApp.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            label: 'initData token',
+            value: 'edge/shared',
+          }),
+          expect.objectContaining({
+            label: 'Edge assertion',
+            value: 'настроен',
+          }),
+        ]),
+      );
+      expect(miniAppText).not.toContain('edge-secret');
     });
 
     it('shows bonus ledger scheduler as blocked until service scheduling is configured', () => {

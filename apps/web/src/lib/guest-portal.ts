@@ -702,6 +702,14 @@ export type GuestPortalGameSummary = {
   };
 };
 
+export type GuestPortalClubSelectResponse = {
+  token: string;
+  portal: GuestPortalPayload;
+  summary: GuestPortalGameSummary;
+  clubId: string;
+  message: string;
+};
+
 export type GuestPortalOtpVerifyResponse = {
   token: string;
   portal: GuestPortalPayload;
@@ -710,7 +718,14 @@ export type GuestPortalOtpVerifyResponse = {
 
 export type GuestPortalLocalGameProfileMatch = {
   checkedAt: string;
-  status: "MATCHED_LOCAL" | "WAITING_FOR_SYNC" | "CONFLICT" | "NOT_LINKED";
+  status:
+    | "MATCHED_LOCAL"
+    | "FOUND_IN_LANGAME"
+    | "WAITING_FOR_SYNC"
+    | "CONFLICT"
+    | "NOT_FOUND"
+    | "FAILED"
+    | "NOT_LINKED";
   localGuestFound: boolean;
   localGuestId: string | null;
   profileId: string | null;
@@ -792,6 +807,35 @@ export type GuestPortalTelegramAuthStatusResponse = {
   profileId: string | null;
   phoneMasked?: string | null;
   telegramIdentityMasked?: string | null;
+  message: string;
+};
+
+export type GuestPortalTelegramMiniAppClub = {
+  tenantId: string;
+  tenantSlug: string;
+  tenantName: string;
+  storeId: string;
+  storePublicSlug: string | null;
+  storeName: string;
+  storeAddress: string | null;
+  clubId: string;
+  profileId: string;
+};
+
+export type GuestPortalTelegramMiniAppSessionResponse = {
+  status:
+    | "CONFIRMED"
+    | "AUTH_REQUIRED"
+    | "CLUB_SELECTION_REQUIRED"
+    | "EXPIRED"
+    | "FAILED";
+  token?: string;
+  portal?: GuestPortalPayload;
+  summary?: GuestPortalGameSummary;
+  profileId: string | null;
+  phoneMasked?: string | null;
+  telegramIdentityMasked: string | null;
+  clubs?: GuestPortalTelegramMiniAppClub[];
   message: string;
 };
 

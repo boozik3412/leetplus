@@ -967,6 +967,7 @@ export class LangameSettingsService {
   async searchGuestByPhoneForPortal(
     tenantId: string,
     phone: string,
+    options: { sourceId?: string | null; sourceDomain?: string | null } = {},
   ): Promise<LangameGuestSearchDiagnosticsResult> {
     const { apiKey, sources } = await this.resolveTenantAccess(tenantId);
     const query = phone.trim();
@@ -979,9 +980,25 @@ export class LangameSettingsService {
 
     const queryField: LangameGuestSearchField = 'phone';
     const requestPayload = this.buildGuestSearchPayload(query, queryField);
+    const filteredSources = sources.filter((source) => {
+      if (options.sourceId) {
+        return source.id === options.sourceId;
+      }
+
+      if (options.sourceDomain) {
+        return source.domain === options.sourceDomain;
+      }
+
+      return true;
+    });
+
+    if (filteredSources.length === 0) {
+      throw new BadRequestException('Langame source for portal is not found');
+    }
+
     const checkedAt = new Date().toISOString();
     const diagnostics = await Promise.all(
-      sources.map(async (source) => {
+      filteredSources.map(async (source) => {
         try {
           const payload = await this.langameClient.searchGuests(
             source.baseUrl,

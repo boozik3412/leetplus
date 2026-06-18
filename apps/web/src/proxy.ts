@@ -2,7 +2,13 @@ import { NextResponse, type NextRequest } from "next/server";
 
 const authCookieName = "leetplus_access_token";
 
-const publicExactPaths = ["/", "/start", "/game/auth"];
+const publicExactPaths = [
+  "/",
+  "/start",
+  "/game/auth",
+  "/game/app",
+  "/game/clubs",
+];
 
 const publicPathPrefixes = [
   "/api",

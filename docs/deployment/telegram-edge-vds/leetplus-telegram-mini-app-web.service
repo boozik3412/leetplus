@@ -1,0 +1,18 @@
+[Unit]
+Description=LeetPlus Telegram Mini App edge web
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/admin/leetplus/apps/web
+EnvironmentFile=/etc/leetplus/telegram-edge.env
+ExecStart=/usr/bin/env sh -c 'node node_modules/next/dist/bin/next start -H "${TG_EDGE_WEB_HOST:-127.0.0.1}" -p "${TG_EDGE_WEB_PORT:-3100}"'
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

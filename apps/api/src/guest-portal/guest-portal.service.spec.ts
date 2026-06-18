@@ -157,6 +157,47 @@ function buildTestReferralCode(
   return `lp_ref_${digest.slice(0, 22)}`;
 }
 
+function buildTelegramMiniAppInitData({
+  token = 'telegram-token',
+  userId = '123456',
+  username = 'player_one',
+  authDate = Math.floor(Date.now() / 1000),
+  hashOverride,
+}: {
+  token?: string;
+  userId?: string;
+  username?: string | null;
+  authDate?: number;
+  hashOverride?: string;
+} = {}) {
+  const params = new URLSearchParams();
+
+  params.set('query_id', 'mini-app-query-1');
+  params.set(
+    'user',
+    JSON.stringify({
+      id: Number(userId),
+      first_name: 'Player',
+      username,
+      language_code: 'ru',
+    }),
+  );
+  params.set('auth_date', String(authDate));
+
+  const dataCheckString = [...params.entries()]
+    .map(([key, value]) => `${key}=${value}`)
+    .sort()
+    .join('\n');
+  const secret = createHmac('sha256', 'WebAppData').update(token).digest();
+  const hash = createHmac('sha256', secret)
+    .update(dataCheckString)
+    .digest('hex');
+
+  params.set('hash', hashOverride ?? hash);
+
+  return params.toString();
+}
+
 function mockLeetTenant(prisma: any) {
   prisma.tenant.findFirst.mockResolvedValue({
     id: 'tenant-1',
@@ -1008,6 +1049,116 @@ describe('GuestPortalService', () => {
     });
   });
 
+  describe('selectGameClub', () => {
+    it('issues a scoped guest token for the selected game club without creating a common guest', async () => {
+      const { jwtService, prisma, service } = createService({
+        GUEST_GAME_REFERRAL_SECRET: 'referral-secret',
+        WEB_URL: 'https://leetplus.ru',
+      });
+      const tokenPayload = {
+        sub: 'guest-portal:profile-1',
+        purpose: 'guest_portal',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        guestId: null,
+        profileId: 'profile-1',
+        phoneHash: 'phone-hash-1',
+      };
+      const targetProfile = {
+        id: 'profile-2',
+        guestId: null,
+        phoneHash: 'phone-hash-1',
+        displayName: 'Игрок 1337',
+        contactMasked: '+7 *** **-11',
+        phoneConsentStatus: 'GRANTED',
+        phoneConsentSource: 'guest_portal_game_consent',
+        phoneConsentAt: new Date('2026-06-15T08:00:00.000Z'),
+        unsubscribedAt: null,
+      };
+      const portal = {
+        ...portalPayloadFixture(),
+        tenant: { name: 'Leet Clubs', slug: 'leet' },
+        store: {
+          id: 'store-2',
+          publicSlug: 'club-2',
+          name: 'Club 2',
+          address: 'ул. Мира, 2',
+        },
+        profile: {
+          ...portalPayloadFixture().profile,
+          id: targetProfile.id,
+        },
+      };
+
+      jest
+        .spyOn(service as any, 'verifyGuestToken')
+        .mockResolvedValue(tokenPayload);
+      jest.spyOn(service as any, 'getTenantStore').mockResolvedValue({
+        tenant: { id: 'tenant-1', name: 'Leet Clubs', slug: 'leet' },
+        store: {
+          id: 'store-2',
+          publicSlug: 'club-2',
+          name: 'Club 2',
+          address: 'ул. Мира, 2',
+        },
+      });
+      jest
+        .spyOn(service as any, 'ensureGamificationClubAvailable')
+        .mockResolvedValue(undefined);
+      jest
+        .spyOn(service as any, 'findGuest')
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null);
+      jest
+        .spyOn(service as any, 'findProfile')
+        .mockResolvedValueOnce({
+          ...targetProfile,
+          id: 'profile-1',
+        })
+        .mockResolvedValueOnce(null);
+      jest
+        .spyOn(service as any, 'buildPortalPayload')
+        .mockResolvedValue(portal);
+      prisma.guestGameProfile.create.mockResolvedValue(targetProfile);
+      jwtService.signAsync.mockResolvedValue('selected-club-token');
+
+      const result = await service.selectGameClub('Bearer guest-token', {
+        clubId: 'leet:club-2',
+      });
+
+      expect(prisma.guest.findFirst).not.toHaveBeenCalled();
+      expect(prisma.guestGameProfile.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          tenantId: 'tenant-1',
+          guestId: undefined,
+          phoneHash: 'phone-hash-1',
+          status: 'ACTIVE',
+        }),
+      });
+      expect(jwtService.signAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sub: 'game-club:profile-2:store-2',
+          tenantId: 'tenant-1',
+          storeId: 'store-2',
+          guestId: null,
+          profileId: 'profile-2',
+          phoneHash: 'phone-hash-1',
+        }),
+        expect.any(Object),
+      );
+      expect(result).toMatchObject({
+        token: 'selected-club-token',
+        clubId: 'leet:club-2',
+        portal,
+        summary: {
+          tenant: portal.tenant,
+          store: portal.store,
+          profile: portal.profile,
+        },
+      });
+    });
+  });
+
   describe('getGamificationClubDirectory', () => {
     it('returns only active gamification clubs and calculates distance when coordinates are provided', async () => {
       const { prisma, service } = createService({
@@ -1495,7 +1646,18 @@ describe('GuestPortalService', () => {
           method: 'sendMessage',
           chatIdMasked: 'ch...56',
           replyMarkup: {
-            remove_keyboard: true,
+            keyboard: [
+              [
+                {
+                  text: 'Открыть Mini App',
+                  web_app: {
+                    url: 'http://localhost:3000/game/app',
+                  },
+                },
+              ],
+            ],
+            resize_keyboard: true,
+            one_time_keyboard: true,
           },
         },
       });
@@ -1633,6 +1795,276 @@ describe('GuestPortalService', () => {
       expect(
         JSON.stringify(prisma.guestGameEvent.findFirst.mock.calls),
       ).not.toContain(referralCode);
+    });
+
+    it('exchanges valid Telegram Mini App initData for a guest session', async () => {
+      const { jwtService, prisma, service } = createService({
+        GUEST_GAME_TELEGRAM_BOT_TOKEN: 'telegram-token',
+      });
+      const portalPayload = {
+        profile: { id: 'profile-1' },
+      };
+
+      jest
+        .spyOn(service as any, 'buildPortalPayload')
+        .mockResolvedValue(portalPayload);
+      prisma.guestGameProfile.findMany.mockResolvedValue([
+        {
+          id: 'profile-1',
+          guestId: null,
+          phoneHash: 'phone-hash-1',
+          contactMasked: '***2233',
+          tenant: {
+            id: 'tenant-1',
+            slug: 'leet',
+            name: 'Leet Clubs',
+          },
+          telegramLinkChallenges: [
+            {
+              id: 'telegram-auth-1',
+              store: {
+                id: 'store-1',
+                publicSlug: 'club-1337',
+                name: '1337',
+                address: 'Lenina, 1',
+              },
+            },
+          ],
+        },
+      ]);
+      jwtService.signAsync.mockResolvedValue('guest-token');
+
+      const result = await service.exchangeTelegramMiniAppSession({
+        initData: buildTelegramMiniAppInitData(),
+      });
+
+      expect(prisma.guestGameProfile.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            telegramIdentity: 'chat:123456',
+            status: 'ACTIVE',
+            phoneHash: { not: null },
+          }),
+        }),
+      );
+      expect(jwtService.signAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sub: 'telegram-mini-app:profile-1',
+          tenantId: 'tenant-1',
+          storeId: 'store-1',
+          guestId: null,
+          profileId: 'profile-1',
+          phoneHash: 'phone-hash-1',
+        }),
+        expect.any(Object),
+      );
+      expect(result).toMatchObject({
+        status: 'CONFIRMED',
+        token: 'guest-token',
+        portal: portalPayload,
+        profileId: 'profile-1',
+        phoneMasked: '***2233',
+        telegramIdentityMasked: 'ch...56',
+      });
+      expect(JSON.stringify(result)).not.toContain('chat:123456');
+    });
+
+    it('accepts Telegram Mini App edge assertion without a bot token on the main API', async () => {
+      const { jwtService, prisma, service } = createService({
+        GUEST_GAME_TG_EDGE_SHARED_SECRET: 'edge-secret',
+      });
+
+      jest.spyOn(service as any, 'buildPortalPayload').mockResolvedValue({
+        profile: { id: 'profile-1' },
+      });
+      prisma.guestGameProfile.findMany.mockResolvedValue([
+        {
+          id: 'profile-1',
+          guestId: null,
+          phoneHash: 'phone-hash-1',
+          contactMasked: '***2233',
+          tenant: {
+            id: 'tenant-1',
+            slug: 'leet',
+            name: 'Leet Clubs',
+          },
+          telegramLinkChallenges: [
+            {
+              id: 'telegram-auth-1',
+              store: {
+                id: 'store-1',
+                publicSlug: 'club-1337',
+                name: '1337',
+                address: 'Lenina, 1',
+              },
+            },
+          ],
+        },
+      ]);
+      jwtService.signAsync.mockResolvedValue('guest-token');
+
+      const result = await service.exchangeTelegramMiniAppSession({
+        edgeSecret: 'edge-secret',
+        telegramUserId: '123456',
+        authDate: Math.floor(Date.now() / 1000),
+      });
+
+      expect(result).toMatchObject({
+        status: 'CONFIRMED',
+        token: 'guest-token',
+        profileId: 'profile-1',
+        telegramIdentityMasked: 'ch...56',
+      });
+      expect(jwtService.signAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sub: 'telegram-mini-app:profile-1',
+          tenantId: 'tenant-1',
+          storeId: 'store-1',
+        }),
+        expect.any(Object),
+      );
+    });
+
+    it('rejects Telegram Mini App initData with an invalid hash before profile lookup', async () => {
+      const { jwtService, prisma, service } = createService({
+        GUEST_GAME_TELEGRAM_BOT_TOKEN: 'telegram-token',
+      });
+
+      const result = await service.exchangeTelegramMiniAppSession({
+        initData: buildTelegramMiniAppInitData({
+          hashOverride:
+            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        }),
+      });
+
+      expect(result).toMatchObject({
+        status: 'FAILED',
+        profileId: null,
+        telegramIdentityMasked: null,
+      });
+      expect(prisma.guestGameProfile.findMany).not.toHaveBeenCalled();
+      expect(jwtService.signAsync).not.toHaveBeenCalled();
+    });
+
+    it('expires old Telegram Mini App initData by auth_date', async () => {
+      const { jwtService, prisma, service } = createService({
+        GUEST_GAME_TELEGRAM_BOT_TOKEN: 'telegram-token',
+        GUEST_GAME_TELEGRAM_MINI_APP_INIT_DATA_TTL_SECONDS: '60',
+      });
+
+      const result = await service.exchangeTelegramMiniAppSession({
+        initData: buildTelegramMiniAppInitData({
+          authDate: Math.floor(Date.now() / 1000) - 120,
+        }),
+      });
+
+      expect(result).toMatchObject({
+        status: 'EXPIRED',
+        profileId: null,
+      });
+      expect(prisma.guestGameProfile.findMany).not.toHaveBeenCalled();
+      expect(jwtService.signAsync).not.toHaveBeenCalled();
+    });
+
+    it('requires Telegram contact-share before Mini App can open a game profile', async () => {
+      const { jwtService, prisma, service } = createService({
+        GUEST_GAME_TELEGRAM_BOT_TOKEN: 'telegram-token',
+      });
+
+      prisma.guestGameProfile.findMany.mockResolvedValue([]);
+
+      const result = await service.exchangeTelegramMiniAppSession({
+        initData: buildTelegramMiniAppInitData(),
+      });
+
+      expect(result).toMatchObject({
+        status: 'AUTH_REQUIRED',
+        profileId: null,
+        telegramIdentityMasked: 'ch...56',
+      });
+      expect(jwtService.signAsync).not.toHaveBeenCalled();
+    });
+
+    it('returns safe club choices when Telegram identity has multiple game scopes', async () => {
+      const { jwtService, prisma, service } = createService({
+        GUEST_GAME_TELEGRAM_BOT_TOKEN: 'telegram-token',
+      });
+
+      prisma.guestGameProfile.findMany.mockResolvedValue([
+        {
+          id: 'profile-1',
+          guestId: null,
+          phoneHash: 'phone-hash-1',
+          contactMasked: '***2233',
+          tenant: {
+            id: 'tenant-1',
+            slug: 'leet',
+            name: 'Leet Clubs',
+          },
+          telegramLinkChallenges: [
+            {
+              id: 'telegram-auth-1',
+              store: {
+                id: 'store-1',
+                publicSlug: 'club-1337',
+                name: '1337',
+                address: 'Lenina, 1',
+              },
+            },
+            {
+              id: 'telegram-auth-2',
+              store: {
+                id: 'store-2',
+                publicSlug: 'club-arena',
+                name: 'Arena',
+                address: 'Mira, 2',
+              },
+            },
+          ],
+        },
+      ]);
+      jwtService.signAsync.mockResolvedValue('guest-token');
+      jest.spyOn(service as any, 'buildPortalPayload').mockResolvedValue({
+        profile: { id: 'profile-1' },
+      });
+
+      const selectionRequired = await service.exchangeTelegramMiniAppSession({
+        initData: buildTelegramMiniAppInitData(),
+      });
+
+      expect(selectionRequired).toMatchObject({
+        status: 'CLUB_SELECTION_REQUIRED',
+        clubs: [
+          {
+            clubId: 'leet:club-1337',
+            storeName: '1337',
+            profileId: 'profile-1',
+          },
+          {
+            clubId: 'leet:club-arena',
+            storeName: 'Arena',
+            profileId: 'profile-1',
+          },
+        ],
+      });
+      expect(jwtService.signAsync).not.toHaveBeenCalled();
+
+      const confirmed = await service.exchangeTelegramMiniAppSession({
+        initData: buildTelegramMiniAppInitData(),
+        clubId: 'leet:club-arena',
+      });
+
+      expect(confirmed).toMatchObject({
+        status: 'CONFIRMED',
+        token: 'guest-token',
+        profileId: 'profile-1',
+      });
+      expect(jwtService.signAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          storeId: 'store-2',
+        }),
+        expect.any(Object),
+      );
     });
   });
 
@@ -3104,6 +3536,196 @@ describe('GuestPortalService', () => {
             }),
           ],
           skipDuplicates: true,
+        }),
+      );
+    });
+
+    it('runs a club-scoped Langame auto-match once and stores the result', async () => {
+      const { jwtService, langameSettingsService, prisma, service } =
+        createService({
+          APP_ENCRYPTION_KEY: 'test-secret',
+        });
+      const phone = '+7 999 111-22-33';
+      const phoneHash = createHmac('sha256', 'test-secret')
+        .update('79991112233')
+        .digest('hex');
+
+      jwtService.verifyAsync.mockResolvedValue({
+        sub: 'challenge-1',
+        purpose: 'guest_portal',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        guestId: null,
+        profileId: 'profile-1',
+        phoneHash,
+      });
+      prisma.tenant.findFirst.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'Leet Clubs',
+        slug: 'leet',
+        stores: [
+          {
+            id: 'store-1',
+            publicSlug: 'club-1337',
+            name: '1337',
+            address: 'ул. Ленина, 1',
+            externalDomain: '1337.langame.ru',
+            integrationSourceId: 'source-1',
+          },
+        ],
+      });
+      prisma.guest.findFirst.mockResolvedValue(null);
+      prisma.guestGameProfile.findFirst.mockResolvedValue({
+        id: 'profile-1',
+        guestId: null,
+        phoneHash,
+        contactMasked: '***2233',
+        displayName: 'Гость клуба',
+      });
+      langameSettingsService.searchGuestByPhoneForPortal.mockResolvedValue({
+        checkedAt: '2026-06-15T08:00:00.000Z',
+        sources: [
+          {
+            id: 'source-1',
+            name: 'Langame 1337',
+            domain: '1337.langame.ru',
+            status: 'SUCCESS',
+            resultsCount: 1,
+            errorMessage: null,
+            results: [
+              {
+                externalGuestId: '42',
+                guestTypeId: '7',
+                phoneMasked: '***2233',
+                emailMasked: null,
+                fullNameMasked: 'I. P.',
+                bonusProgramNumberMasked: null,
+                dateLastActivity: null,
+                rawKeys: ['guest_id', 'phone'],
+              },
+            ],
+          },
+        ],
+      });
+
+      const result = await service.matchLangameGuest('Bearer guest-token', {
+        phone,
+      });
+
+      expect(result.status).toBe('FOUND_IN_LANGAME');
+      expect(result.linkStatus).toBe('WAITING_FOR_SYNC');
+      expect(
+        langameSettingsService.searchGuestByPhoneForPortal,
+      ).toHaveBeenCalledWith('tenant-1', '79991112233', {
+        sourceDomain: '1337.langame.ru',
+        sourceId: 'source-1',
+      });
+      expect(prisma.guestGameEvent.createMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: [
+            expect.objectContaining({
+              tenantId: 'tenant-1',
+              profileId: 'profile-1',
+              eventType: 'GAME_PROFILE_LANGAME_AUTO_MATCH',
+              source: 'GUEST_PORTAL_LANGAME_AUTO_MATCH',
+              externalDomain: '1337.langame.ru',
+              externalId: 'game-profile-langame-auto-match:profile-1:store-1',
+              payload: expect.objectContaining({
+                matchStatus: 'FOUND_IN_LANGAME',
+                localStatus: 'FOUND_IN_LANGAME',
+                sourceDomain: '1337.langame.ru',
+                sourceId: 'source-1',
+                phoneMasked: '***2233',
+              }),
+            }),
+          ],
+          skipDuplicates: true,
+        }),
+      );
+    });
+
+    it('uses a cached club auto-match event without calling Langame again', async () => {
+      const { jwtService, langameSettingsService, prisma, service } =
+        createService({
+          APP_ENCRYPTION_KEY: 'test-secret',
+        });
+      const phone = '+7 999 111-22-33';
+      const phoneHash = createHmac('sha256', 'test-secret')
+        .update('79991112233')
+        .digest('hex');
+
+      jwtService.verifyAsync.mockResolvedValue({
+        sub: 'challenge-1',
+        purpose: 'guest_portal',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        guestId: null,
+        profileId: 'profile-1',
+        phoneHash,
+      });
+      prisma.tenant.findFirst.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'Leet Clubs',
+        slug: 'leet',
+        stores: [
+          {
+            id: 'store-1',
+            publicSlug: 'club-1337',
+            name: '1337',
+            address: 'ул. Ленина, 1',
+            externalDomain: '1337.langame.ru',
+            integrationSourceId: 'source-1',
+          },
+        ],
+      });
+      prisma.guest.findFirst.mockResolvedValue(null);
+      prisma.guestGameProfile.findFirst.mockResolvedValue({
+        id: 'profile-1',
+        guestId: null,
+        phoneHash,
+        contactMasked: '***2233',
+        displayName: 'Гость клуба',
+      });
+      prisma.guestGameEvent.findFirst.mockResolvedValue({
+        id: 'event-1',
+        profileId: 'profile-1',
+        guestId: null,
+        occurredAt: new Date('2026-06-15T08:00:00.000Z'),
+        payload: {
+          checkedAt: '2026-06-15T08:00:00.000Z',
+          phoneMasked: '+7 999 ***-**-33',
+          matchStatus: 'FOUND_IN_LANGAME',
+          localStatus: 'FOUND_IN_LANGAME',
+          linkStatus: 'WAITING_FOR_SYNC',
+          localGuestId: null,
+          linkedGuestId: null,
+          linkedProfileId: 'profile-1',
+          backfilled: {
+            rewards: 0,
+            events: 0,
+            deliveries: 0,
+            bonusLedgerEntries: 0,
+          },
+          sources: [],
+        },
+      });
+
+      const result = await service.matchLangameGuest('Bearer guest-token', {
+        phone,
+      });
+
+      expect(result.status).toBe('FOUND_IN_LANGAME');
+      expect(result.linkStatus).toBe('WAITING_FOR_SYNC');
+      expect(
+        langameSettingsService.searchGuestByPhoneForPortal,
+      ).not.toHaveBeenCalled();
+      expect(prisma.guestGameEvent.createMany).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: [
+            expect.objectContaining({
+              eventType: 'GAME_PROFILE_LANGAME_AUTO_MATCH',
+            }),
+          ],
         }),
       );
     });

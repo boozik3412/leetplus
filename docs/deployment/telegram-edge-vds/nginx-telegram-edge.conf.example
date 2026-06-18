@@ -1,0 +1,72 @@
+# Copy to /etc/nginx/sites-available/leetplus-telegram-edge and replace
+# tg.leetplus.example with the real non-RF edge domain.
+
+server {
+    listen 80;
+    server_name tg.leetplus.example;
+
+    client_max_body_size 1m;
+
+    # Telegram Bot API webhook target.
+    location = /tg/webhook {
+        proxy_pass http://127.0.0.1:4010/tg/webhook;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 20s;
+    }
+
+    # Optional health probe. Protect with GUEST_GAME_TG_EDGE_HEALTH_SECRET.
+    location = /health {
+        proxy_pass http://127.0.0.1:4010/health;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 5s;
+    }
+
+    # Telegram Mini App shell.
+    location = /game/app {
+        proxy_pass http://127.0.0.1:3100/game/app;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+
+    # Next static chunks required by /game/app.
+    location /_next/ {
+        proxy_pass http://127.0.0.1:3100/_next/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # Mini App talks only to the safe guest portal proxy.
+    location /api/guest-portal/ {
+        proxy_pass http://127.0.0.1:3100/api/guest-portal/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+
+    location = /favicon.ico {
+        proxy_pass http://127.0.0.1:3100/favicon.ico;
+    }
+
+    # Do not expose the full LeetPlus web app from the Telegram edge host.
+    location / {
+        return 404;
+    }
+}

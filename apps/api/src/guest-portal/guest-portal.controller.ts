@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import {
   type GuestPortalCheckInResponse,
+  type GuestPortalClubSelectResponse,
   type GuestPortalCommunicationPreferenceResponse,
   type GuestPortalGamificationClubDirectory,
   type GuestPortalGameSummary,
@@ -26,6 +27,7 @@ import {
   type GuestPortalTelegramAuthStatusResponse,
   type GuestPortalTelegramLinkConfirmResponse,
   type GuestPortalTelegramLinkStartResponse,
+  type GuestPortalTelegramMiniAppSessionResponse,
   type GuestPortalTelegramWebhookResponse,
   type GuestPortalUserCallAuthStartResponse,
   type GuestPortalUserCallAuthStatusResponse,
@@ -159,6 +161,34 @@ export class GuestPortalController {
     @Headers('authorization') authorization: string | undefined,
   ): Promise<GuestPortalGameSummary> {
     return this.guestPortalService.getGameSummary(authorization);
+  }
+
+  @Post('session/select-club')
+  selectGameClub(
+    @Headers('authorization') authorization: string | undefined,
+    @Body() dto: { clubId?: unknown; tenantSlug?: unknown; storeId?: unknown },
+  ): Promise<GuestPortalClubSelectResponse> {
+    return this.guestPortalService.selectGameClub(authorization, dto);
+  }
+
+  @Post('telegram-mini-app/session')
+  exchangeTelegramMiniAppSession(
+    @Headers('x-guest-game-telegram-edge-secret')
+    edgeSecret: string | undefined,
+    @Body()
+    dto: {
+      initData?: unknown;
+      telegramUserId?: unknown;
+      authDate?: unknown;
+      clubId?: unknown;
+      tenantSlug?: unknown;
+      storeId?: unknown;
+    },
+  ): Promise<GuestPortalTelegramMiniAppSessionResponse> {
+    return this.guestPortalService.exchangeTelegramMiniAppSession({
+      ...dto,
+      edgeSecret,
+    });
   }
 
   @Post('session/check-in')

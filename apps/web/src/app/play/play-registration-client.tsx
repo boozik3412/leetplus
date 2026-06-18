@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { FormEvent, ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   GuestPortalGamificationClub,
   GuestPortalGamificationClubDirectory,
@@ -61,6 +62,7 @@ export function PlayRegistrationClient({
   loadError,
   surface = "play",
 }: PlayRegistrationClientProps) {
+  const router = useRouter();
   const isGameAuth = surface === "game-auth";
   const [directory, setDirectory] = useState(initialDirectory);
   const [query, setQuery] = useState("");
@@ -120,6 +122,9 @@ export function PlayRegistrationClient({
     () => normalizeReferralCode(initialReferralCode),
     [initialReferralCode],
   );
+  const openClubSelectionAfterAuth = useCallback(() => {
+    router.replace("/game/clubs");
+  }, [router]);
 
   const visibleClubs = useMemo(() => {
     const needle = normalizeSearch(query);
@@ -283,6 +288,7 @@ export function PlayRegistrationClient({
           setLocalGameMatch(data.match ?? null);
           setTelegramAuth(null);
           setLangameMatch(null);
+          openClubSelectionAfterAuth();
         }
 
         if (data.status === "EXPIRED" || data.status === "FAILED") {
@@ -315,7 +321,110 @@ export function PlayRegistrationClient({
         clearInterval(intervalId);
       }
     };
-  }, [portal, referralCode, selectedClub, telegramAuth]);
+  }, [
+    openClubSelectionAfterAuth,
+    portal,
+    referralCode,
+    selectedClub,
+    telegramAuth,
+  ]);
+
+  async function locateClubs() {
+    if (!navigator.geolocation) {
+      setLocationMessage("Браузер не отдает геолокацию.");
+      return;
+    }
+
+    setLocating(true);
+    setLocationMessage("Запрашиваем геолокацию.");
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const coords = {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        };
+        void refreshDirectoryByLocation(coords, radiusKm);
+      },
+      () => {
+        setLocating(false);
+        setLocationMessage("Не удалось получить геолокацию.");
+      },
+      {
+        enableHighAccuracy: false,
+        maximumAge: 60_000,
+        timeout: 8_000,
+      },
+    );
+  }
+
+  function applyRadius(nextRadiusKm: RadiusOption) {
+    setRadiusKm(nextRadiusKm);
+
+    if (!locationCoords) {
+      setLocationMessage("Сначала нажмите «Найти рядом».");
+      return;
+    }
+
+    void refreshDirectoryByLocation(locationCoords, nextRadiusKm);
+  }
+
+  function handlePhoneChange(value: string) {
+    setPhone(formatGuestPhoneInputValue(value));
+  }
+
+  const ensurePhoneForSubmit = useCallback(() => {
+    const formattedPhone = formatGuestPhoneInputValue(phone);
+    const phoneValue = normalizeGuestPhoneForSubmit(formattedPhone);
+
+    setPhone(formattedPhone);
+
+    if (!phoneValue) {
+      setMessage(
+        "Введите мобильный телефон: 10 цифр, 8XXXXXXXXXX или +7XXXXXXXXXX.",
+      );
+      return null;
+    }
+
+    return phoneValue;
+  }, [phone]);
+
+  const checkLangameMatch = useCallback(async () => {
+    const phoneValue = ensurePhoneForSubmit();
+
+    if (!phoneValue) {
+      return;
+    }
+
+    setCheckingLangame(true);
+    setLangameMatch(null);
+
+    try {
+      const response = await fetch("/api/guest-portal/session/langame-match", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: phoneValue }),
+      });
+
+      if (!response.ok) {
+        throw new Error(await readMessage(response));
+      }
+
+      const data = (await response.json()) as GuestPortalLangameMatchResponse;
+      setLangameMatch(data);
+      if (data.portal) {
+        setPortal(data.portal);
+      }
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Не удалось проверить гостя в Langame.",
+      );
+    } finally {
+      setCheckingLangame(false);
+    }
+  }, [ensurePhoneForSubmit]);
 
   useEffect(() => {
     if (!selectedClub || !userCallAuth || portal) {
@@ -363,6 +472,8 @@ export function PlayRegistrationClient({
           setLocalGameMatch(data.match ?? null);
           setUserCallAuth(null);
           setLangameMatch(null);
+          await checkLangameMatch();
+          openClubSelectionAfterAuth();
         }
 
         if (data.status === "EXPIRED" || data.status === "FAILED") {
@@ -395,67 +506,14 @@ export function PlayRegistrationClient({
         clearInterval(intervalId);
       }
     };
-  }, [portal, referralCode, selectedClub, userCallAuth]);
-
-  async function locateClubs() {
-    if (!navigator.geolocation) {
-      setLocationMessage("Браузер не отдает геолокацию.");
-      return;
-    }
-
-    setLocating(true);
-    setLocationMessage("Запрашиваем геолокацию.");
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const coords = {
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-        };
-        void refreshDirectoryByLocation(coords, radiusKm);
-      },
-      () => {
-        setLocating(false);
-        setLocationMessage("Не удалось получить геолокацию.");
-      },
-      {
-        enableHighAccuracy: false,
-        maximumAge: 60_000,
-        timeout: 8_000,
-      },
-    );
-  }
-
-  function applyRadius(nextRadiusKm: RadiusOption) {
-    setRadiusKm(nextRadiusKm);
-
-    if (!locationCoords) {
-      setLocationMessage("Сначала нажмите «Найти рядом».");
-      return;
-    }
-
-    void refreshDirectoryByLocation(locationCoords, nextRadiusKm);
-  }
-
-  function handlePhoneChange(value: string) {
-    setPhone(formatGuestPhoneInputValue(value));
-  }
-
-  function ensurePhoneForSubmit() {
-    const formattedPhone = formatGuestPhoneInputValue(phone);
-    const phoneValue = normalizeGuestPhoneForSubmit(formattedPhone);
-
-    setPhone(formattedPhone);
-
-    if (!phoneValue) {
-      setMessage(
-        "Введите мобильный телефон: 10 цифр, 8XXXXXXXXXX или +7XXXXXXXXXX.",
-      );
-      return null;
-    }
-
-    return phoneValue;
-  }
+  }, [
+    checkLangameMatch,
+    openClubSelectionAfterAuth,
+    portal,
+    referralCode,
+    selectedClub,
+    userCallAuth,
+  ]);
 
   async function refreshDirectoryByLocation(
     coords: PlayLocation,
@@ -778,6 +836,8 @@ export function PlayRegistrationClient({
       setIncomingCallLast4(null);
       setLangameMatch(null);
       setMessage("Телефон подтвержден входящим звонком. Гостевой профиль готов.");
+      await checkLangameMatch();
+      openClubSelectionAfterAuth();
     } catch (error) {
       setMessage(
         error instanceof Error
@@ -819,6 +879,7 @@ export function PlayRegistrationClient({
       setLocalGameMatch(data.match ?? null);
       setMessage("Телефон подтвержден. Гостевой профиль готов.");
       await checkLangameMatch();
+      openClubSelectionAfterAuth();
     } catch (error) {
       setMessage(
         error instanceof Error
@@ -827,43 +888,6 @@ export function PlayRegistrationClient({
       );
     } finally {
       setSubmitting(false);
-    }
-  }
-
-  async function checkLangameMatch() {
-    const phoneValue = ensurePhoneForSubmit();
-
-    if (!phoneValue) {
-      return;
-    }
-
-    setCheckingLangame(true);
-    setLangameMatch(null);
-
-    try {
-      const response = await fetch("/api/guest-portal/session/langame-match", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: phoneValue }),
-      });
-
-      if (!response.ok) {
-        throw new Error(await readMessage(response));
-      }
-
-      const data = (await response.json()) as GuestPortalLangameMatchResponse;
-      setLangameMatch(data);
-      if (data.portal) {
-        setPortal(data.portal);
-      }
-    } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : "Не удалось проверить гостя в Langame.",
-      );
-    } finally {
-      setCheckingLangame(false);
     }
   }
 
@@ -1151,7 +1175,6 @@ export function PlayRegistrationClient({
                       isCheckingLangame={isCheckingLangame}
                       langameMatch={langameMatch}
                       localGameMatch={localGameMatch}
-                      onCheckLangameMatch={() => void checkLangameMatch()}
                       portal={portal}
                     />
                 ) : (
@@ -2159,7 +2182,6 @@ function VerifiedSummary({
   localGameMatch,
   isCheckingLangame,
   canCheckLangameMatch,
-  onCheckLangameMatch,
 }: {
   club: GuestPortalGamificationClub;
   portal: GuestPortalPayload;
@@ -2167,7 +2189,6 @@ function VerifiedSummary({
   localGameMatch: GuestPortalLocalGameProfileMatch | null;
   isCheckingLangame: boolean;
   canCheckLangameMatch: boolean;
-  onCheckLangameMatch: () => void;
 }) {
   const nextActions = portal.gamification.nextActions.slice(0, 3);
   const profileMatch = langameMatch ?? localGameMatch;
@@ -2228,14 +2249,9 @@ function VerifiedSummary({
                 : "Проверка еще не выполнена"}
             </p>
           </div>
-          <button
-            className="rounded-lg border border-cyan-300/25 bg-cyan-300/[0.08] px-3 py-2 text-sm font-black text-cyan-100 transition hover:border-cyan-300/50 disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={isCheckingLangame || !canCheckLangameMatch}
-            onClick={onCheckLangameMatch}
-            type="button"
-          >
-            {isCheckingLangame ? "Проверяем..." : "Проверить"}
-          </button>
+          <span className="rounded-lg border border-cyan-300/25 bg-cyan-300/[0.08] px-3 py-2 text-xs font-black uppercase text-cyan-100">
+            {isCheckingLangame ? "сверяем" : "автоматически"}
+          </span>
         </div>
         <div className="mt-3 flex flex-wrap gap-2">
           <StatusPill
@@ -2254,7 +2270,7 @@ function VerifiedSummary({
                 : "ожидает проверки"}
           </StatusPill>
           {localGameMatch && !langameMatch ? (
-            <StatusPill tone="cyan">локальный snapshot</StatusPill>
+            <StatusPill tone="cyan">клубная автосверка</StatusPill>
           ) : null}
           {langameMatch ? (
             <>
@@ -2276,8 +2292,8 @@ function VerifiedSummary({
         ) : null}
         {!canCheckLangameMatch && localGameMatch ? (
           <p className="mt-2 text-xs leading-5 text-slate-500">
-            Полный номер не возвращается в браузер после Telegram или звонка,
-            поэтому здесь показана безопасная локальная связка.
+            Полный номер не возвращается в браузер. Клубная сверка выполняется
+            сервером один раз по подтвержденному телефону.
           </p>
         ) : null}
         {hasBackfilled && backfilled ? (
@@ -2903,8 +2919,11 @@ function localGameMatchStatusLabel(
 ) {
   const labels = {
     MATCHED_LOCAL: "Гость найден в LeetPlus",
-    WAITING_FOR_SYNC: "Ждем sync Langame",
+    FOUND_IN_LANGAME: "Гость найден в Langame",
+    WAITING_FOR_SYNC: "Клубная сверка",
     CONFLICT: "Нужна проверка",
+    NOT_FOUND: "Гость не найден в клубе",
+    FAILED: "Сверка недоступна",
     NOT_LINKED: "Профиль отдельный",
   } satisfies Record<GuestPortalLocalGameProfileMatch["status"], string>;
 
@@ -2917,7 +2936,7 @@ function langameLinkStatusLabel(
   const labels = {
     LINKED: "профиль связан",
     ALREADY_LINKED: "уже связан",
-    WAITING_FOR_SYNC: "ждет sync",
+    WAITING_FOR_SYNC: "сверка сохранена",
     CONFLICT: "нужна проверка",
     NOT_LINKED: "не связан",
   } satisfies Record<GuestPortalLangameMatchResponse["linkStatus"], string>;

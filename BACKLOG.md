@@ -1,5 +1,27 @@
 # LeetPlus Бэклог
 
+- Готово: после авторизации участника геймификации `/game/auth` и `/play` переводят гостя на `/game/clubs`. Страница собрана по макету `gamification-club-select-mockup.html`: карта свернута по умолчанию, есть поиск по городу/клубу, быстрые городские чипы, список подключенных к LeetPlus Game клубов, empty-state и мобильная адаптация. Текущий клуб подсвечивается из последней HttpOnly guest-сессии, а `POST /guest-portal/session/select-club` выпускает новый guest-token под выбранный tenant/store scope без создания записи в общем `Guest`.
+
+- Готово: Langame-сверка участника геймификации переведена в клубный одноразовый контур. `POST /guest-portal/session/langame-match` теперь ограничивает `guests/search` источником выбранного клуба (`Store.integrationSourceId`/`externalDomain`), сохраняет safe `GuestGameEvent` `GAME_PROFILE_LANGAME_AUTO_MATCH` с idempotency key `profileId+storeId` и при повторном входе не дергает Langame повторно. UI `/game/auth` и `/play` больше не показывает ручную кнопку `Проверить`: для OTP/звонка/входящего звонка фронт запускает сверку автоматически после подтверждения, а Telegram contact-share запускает backend-сверку в webhook; общий `Guest` публичной регистрацией по-прежнему не создается, raw phone и Langame payload не сохраняются.
+
+- Готово: подготовлен перенос Telegram-бота и Mini App на отдельную не-РФ edge VDS. Добавлен standalone `guest-game:telegram-edge` для `/tg/webhook`, edge-side валидация Mini App `initData` с передачей shared-secret assertion в основной API, Bot API proxy/base URL для webhook replies и outbox bot-consumer, а также deployment pack `docs/deployment/telegram-edge-vds` с env/systemd/nginx, dry-run, canary, rollback и требованиями безопасности.
+
+- План и реализация: TG Mini App для геймификации оформлен в `docs/gamification-telegram-mini-app-plan.md` и реализован как отдельный маршрут `/game/app` поверх Telegram `initData`, существующего `GuestGameProfile`, HttpOnly guest-token и `GET /guest-portal/session/game-summary`; `/play/game` остается совместимым web-экраном после обычной регистрации.
+
+- Готово: `TG-MINI-01` `/game/app` утвержден как отдельный Telegram WebApp route и открыт в public proxy без employee-cookie; роли `/game/auth`, `/play` и `/play/game` сохранены.
+
+- Готово: `TG-MINI-02` реализован backend exchange `initData -> guest-token`: API валидирует Telegram `hash/auth_date` по bot token, находит только подтвержденный `GuestGameProfile`, не создает общий `Guest`, не возвращает raw phone/chat id/update/secrets и покрыт сценариями валидного, неверного, просроченного и неподтвержденного initData.
+
+- Готово: `TG-MINI-03` web proxy exchange выставляет HttpOnly `leetplus_guest_token` после успешной проверки Mini App, поэтому `/game/app` переиспользует существующий `session/game-summary` без нового публичного token-контракта.
+
+- Готово: `TG-MINI-04` `/game/app` собран по готовому mobile/TG макету `gamification-club-home-mobile-app-mockup.html`: safe-area, sticky club/level header, XP/level/progress, события, квесты выше вторичных блоков, горизонтальные ленты, батлпасс, награды/лутбоксы, профиль, промокод, история наград и bottom navigation `Главная / Квесты / Награды / Профиль` без horizontal overflow.
+
+- Готово: `TG-MINI-05` добавлен выбор клуба внутри Mini App для Telegram identity, связанной с несколькими `GuestGameProfile`; scoped guest session выпускается только после выбора tenant/store.
+
+- Готово: `TG-MINI-06` после успешного contact-share бот возвращает кнопку открытия Mini App, Guest Game Hub получил readiness-пункт `TELEGRAM_MINI_APP`, а runbook `docs/deployment/telegram-auth.md` обновлен без раскрытия токенов, raw chat id, raw phone или Telegram update.
+
+- Готово: `TG-MINI-07` проведены targeted API tests, mobile browser smoke с Telegram WebView mock, проверка отсутствия raw data в ответах/readiness/docs и `lint/build` перед merge/deploy.
+
 - Готово: `/game/auth` получил отдельную мобильную компоновку по макету `gamification-auth-mobile-mockup.html`: первый экран теперь строится как topbar `Игровой модуль`, intro `Вход в игровой модуль`, auth-panel `Способ входа` и только затем компактный выбор клуба; методы входа в игровом варианте рендерятся крупными radio-строками с иконками Telegram, звонка и SMS, а `/play` сохраняет прежний полный регистрационный интерфейс.
 
 - Готово: стартовый UX обновлен под выбор модулей по готовым макетам. Корень `/` и `/start` теперь показывают темный split-screen выбор `Аналитика и управление` / `Игровой модуль` с mobile-selected состоянием и CTA `Открыть аналитику` / `Перейти в модуль`; новый `/game/auth` ведет в игровой вход с тремя основными каналами авторизации из макета: Telegram-бот, звонок на телефон и SMS-код. Старый `/play` остается совместимым публичным маршрутом регистрации и сохраняет резервный входящий звонок с последними 4 цифрами.
@@ -157,7 +179,7 @@
 
 - Готово: мобильный первый экран `/dashboard` перестроен без горизонтального overflow: фильтры и кнопка обновления складываются по ширине экрана, KPI выручки больше не уезжают вправо, а вторичные блоки сценариев грузятся через streaming `Suspense`, чтобы после логина сначала показывался главный summary, а не ожидались все CRM/OOS/no-sales отчеты.
 
-Последнее обновление: 2026-06-08
+Последнее обновление: 2026-06-17
 
 Этот файл - источник правды по продуктовому бэклогу, ближайшей дорожной карте, планируемым модулям и отложенным идеям. `PROJECT_STATE.md` должен оставаться документом про текущее состояние проекта, рабочий процесс, production-контекст и правила данных.
 
@@ -497,7 +519,7 @@ LeetPlus должен развиваться из набора отчетов в
 - Готово: UX-разведение `/marketing/missions` и Guest Game Hub. В sidebar маркетинговый пункт переименован в `Промо-сценарии`, первый экран маркетинга объясняет границу `промо-эффект/кампания`, а `/guests/gamification` показывает обратную границу `игровая экономика/XP/уровни/кошелек` со ссылкой на маркетинговые промо-сценарии. API, модели и URL пока сохранены стабильными.
 - Следующее: связать реальные tariff-id из Langame с snapshot-фактами `guests/sessions`/`guests/logs`, если API начнет возвращать эти поля; до этого тарифные условия работают как ручной business-filter для dry-run и правил, а автоматическую выдачу держим через очередь/подтверждение до утвержденного write API.
 - Готово: добавлен совместимый технический слой `MarketingPromoScenario` для маркетинговых промо-сценариев: API получил новые endpoints `/marketing/promo-scenarios` и `/marketing/promo-scenario-rewards`, web-proxy и web-типы получили новые alias-функции, а актуальная страница промо-сценариев использует новые маршруты. Legacy `/marketing/missions`, `/marketing/mission-rewards` и Prisma-модели `MarketingMission`/`MarketingMissionReward` оставлены рабочими, чтобы не ломать старые URL, историю и production-интеграции; полный physical rename таблиц делать только отдельным миграционным окном при подтвержденной необходимости.
-- Запланировано: Telegram bot/Mini App как первый гостевой интерфейс для входа по телефону, открытия лутбокса, просмотра миссий, battle pass и кода награды; MAX подключать вторым адаптером после юридической и технической подготовки.
+- Запланировано: Telegram Mini App как первый полноценный гостевой mobile-интерфейс после уже реализованного Telegram contact-share входа: `/game/app` должен открывать квесты, лутбоксы, Battle Pass, награды, профиль и код/историю наград через существующий `game-summary`; MAX подключать вторым адаптером после юридической и технической подготовки.
 - Текущее ограничение: автоматическая запись наград, бонусов или промокодов в Langame выключена до подтвержденного write API, идемпотентности, аудита, ролей, лимитов и rollback-сценария.
 
 Сценарная цепочка:

@@ -22,6 +22,7 @@ import {
   randomBytes,
   randomInt,
   randomUUID,
+  timingSafeEqual,
 } from 'node:crypto';
 import type { AuthenticatedUser } from '../auth/auth.types';
 import {
@@ -41,6 +42,7 @@ const OTP_RESEND_SECONDS = 60;
 const GUEST_TOKEN_EXPIRES_IN = '7d';
 const GUEST_PORTAL_PURPOSE = 'guest_portal';
 const TELEGRAM_LINK_TTL_MINUTES = 15;
+const TELEGRAM_MINI_APP_INIT_DATA_TTL_SECONDS = 60 * 60 * 24;
 const TELEGRAM_AUTH_PROFILE_STATUS = 'PENDING_TELEGRAM_AUTH';
 const TELEGRAM_AUTH_MERGED_PROFILE_STATUS = 'MERGED_TELEGRAM_AUTH';
 const TELEGRAM_AUTH_PENDING_STATUS = 'AUTH_PENDING';
@@ -67,6 +69,10 @@ const GAME_PROFILE_CONSENT_SOURCE = 'guest_portal_game_consent';
 const TELEGRAM_AUTH_CONSENT_SOURCE = 'telegram_auth_contact_share';
 const GAME_PROFILE_LINKED_EVENT_TYPE = 'GAME_PROFILE_LINKED';
 const GAME_PROFILE_LINK_SOURCE = 'GUEST_PORTAL_PROFILE_LINK';
+const GAME_PROFILE_LANGAME_AUTO_MATCH_EVENT_TYPE =
+  'GAME_PROFILE_LANGAME_AUTO_MATCH';
+const GAME_PROFILE_LANGAME_AUTO_MATCH_SOURCE =
+  'GUEST_PORTAL_LANGAME_AUTO_MATCH';
 const GAME_SUMMARY_MISSION_LIMIT = 6;
 const GAME_SUMMARY_MISSION_HISTORY_LIMIT = 12;
 const GUEST_GAME_REFERRAL_CODE_PREFIX = 'lp_ref_';
@@ -173,6 +179,46 @@ type GuestGameReferralRegistrationOptions = {
   externalId: string;
 };
 
+type TelegramMiniAppValidationResult =
+  | {
+      ok: true;
+      userId: string;
+      username: string | null;
+      authDate: Date;
+    }
+  | {
+      ok: false;
+      status: 'AUTH_REQUIRED' | 'EXPIRED' | 'FAILED';
+      telegramIdentityMasked: string | null;
+      message: string;
+    };
+
+type TelegramMiniAppClubSelection = {
+  clubId: string | null;
+  tenantSlug: string | null;
+  storeId: string | null;
+};
+
+type TelegramMiniAppClubCandidate = {
+  profile: {
+    id: string;
+    guestId: string | null;
+    phoneHash: string;
+    contactMasked: string | null;
+  };
+  tenant: {
+    id: string;
+    slug: string;
+    name: string;
+  };
+  store: {
+    id: string;
+    publicSlug: string | null;
+    name: string;
+    address: string | null;
+  };
+};
+
 type GuestPortalGameProfileLinkStatus =
   | 'LINKED'
   | 'ALREADY_LINKED'
@@ -197,8 +243,11 @@ type GuestPortalGameProfileLinkResult = {
 
 type GuestPortalLocalGameProfileMatchStatus =
   | 'MATCHED_LOCAL'
+  | 'FOUND_IN_LANGAME'
   | 'WAITING_FOR_SYNC'
   | 'CONFLICT'
+  | 'NOT_FOUND'
+  | 'FAILED'
   | 'NOT_LINKED';
 
 export type GuestPortalLocalGameProfileMatch = {
@@ -225,6 +274,8 @@ type TenantStoreContext = {
     publicSlug: string | null;
     name: string;
     address: string | null;
+    externalDomain: string | null;
+    integrationSourceId: string | null;
   };
 };
 
@@ -378,6 +429,35 @@ export type GuestPortalTelegramAuthStatusResponse = {
   message: string;
 };
 
+export type GuestPortalTelegramMiniAppClub = {
+  tenantId: string;
+  tenantSlug: string;
+  tenantName: string;
+  storeId: string;
+  storePublicSlug: string | null;
+  storeName: string;
+  storeAddress: string | null;
+  clubId: string;
+  profileId: string;
+};
+
+export type GuestPortalTelegramMiniAppSessionResponse = {
+  status:
+    | 'CONFIRMED'
+    | 'AUTH_REQUIRED'
+    | 'CLUB_SELECTION_REQUIRED'
+    | 'EXPIRED'
+    | 'FAILED';
+  token?: string;
+  portal?: GuestPortalPayload;
+  summary?: GuestPortalGameSummary;
+  profileId: string | null;
+  phoneMasked?: string | null;
+  telegramIdentityMasked: string | null;
+  clubs?: GuestPortalTelegramMiniAppClub[];
+  message: string;
+};
+
 export type GuestPortalUserCallAuthStartResponse = {
   challengeId: string;
   phoneMasked: string;
@@ -471,6 +551,9 @@ export type GuestPortalTelegramWebhookResponse = {
             Array<{
               text: string;
               request_contact?: boolean;
+              web_app?: {
+                url: string;
+              };
             }>
           >;
           resize_keyboard: boolean;
@@ -1124,6 +1207,14 @@ export type GuestPortalCheckInResponse = {
   portal: GuestPortalPayload;
 };
 
+export type GuestPortalClubSelectResponse = {
+  token: string;
+  portal: GuestPortalPayload;
+  summary: GuestPortalGameSummary;
+  clubId: string;
+  message: string;
+};
+
 type GuestPortalMissionProgress = {
   current: number;
   percent: number;
@@ -1366,6 +1457,22 @@ export class GuestPortalService {
       },
       clubs,
     };
+  }
+
+  private async ensureGamificationClubAvailable(
+    tenantSlug: string,
+    storeId: string,
+  ) {
+    const directory = await this.getGamificationClubDirectory();
+    const club = directory.clubs.find(
+      (item) => item.tenant.slug === tenantSlug && item.store.id === storeId,
+    );
+
+    if (!club) {
+      throw new BadRequestException(
+        'Этот клуб пока не подключен к игровому модулю LeetPlus.',
+      );
+    }
   }
 
   private buildGamificationVerificationPlan(): GuestPortalGamificationClubDirectory['verification'] {
@@ -2942,6 +3049,197 @@ export class GuestPortalService {
     });
   }
 
+  async selectGameClub(
+    authorization: string | undefined,
+    dto: { clubId?: unknown; tenantSlug?: unknown; storeId?: unknown },
+  ): Promise<GuestPortalClubSelectResponse> {
+    const payload = await this.verifyGuestToken(authorization);
+    const selectedClub = normalizeMiniAppClubSelection(dto);
+
+    if (!selectedClub?.tenantSlug || !selectedClub.storeId) {
+      throw new BadRequestException('Выберите клуб игрового модуля.');
+    }
+
+    const context = await this.getTenantStore(
+      selectedClub.tenantSlug,
+      selectedClub.storeId,
+    );
+
+    await this.ensureGamificationClubAvailable(
+      context.tenant.slug,
+      context.store.id,
+    );
+
+    const sourceGuest = await this.findGuest(payload);
+    const sourceProfile = await this.findProfile(
+      payload,
+      sourceGuest?.id ?? null,
+    );
+    const targetPayloadBase: GuestPortalTokenPayload = {
+      ...payload,
+      tenantId: context.tenant.id,
+      storeId: context.store.id,
+      guestId: null,
+      profileId:
+        context.tenant.id === payload.tenantId ? payload.profileId : null,
+    };
+    const targetGuest = await this.findGuest(targetPayloadBase);
+    let targetProfile = await this.findProfile(
+      targetPayloadBase,
+      targetGuest?.id ?? null,
+    );
+    const now = new Date();
+
+    if (!targetProfile) {
+      targetProfile = await this.prisma.guestGameProfile.create({
+        data: {
+          tenantId: context.tenant.id,
+          guestId: targetGuest?.id,
+          displayName:
+            sourceProfile?.displayName ??
+            sourceGuest?.fullNameMasked ??
+            sourceGuest?.externalGuestId ??
+            'Гость клуба',
+          contactMasked:
+            sourceProfile?.contactMasked ??
+            sourceGuest?.phoneMasked ??
+            sourceGuest?.emailMasked ??
+            null,
+          phoneHash: payload.phoneHash,
+          phoneConsentStatus:
+            sourceProfile?.phoneConsentStatus ??
+            GuestCommunicationConsentStatus.UNKNOWN,
+          phoneConsentSource:
+            sourceProfile?.phoneConsentSource ?? 'guest_portal_club_selection',
+          phoneConsentAt: sourceProfile?.phoneConsentAt ?? null,
+          unsubscribedAt: sourceProfile?.unsubscribedAt ?? null,
+          status: 'ACTIVE',
+          lastActivityAt: now,
+        },
+      });
+    } else {
+      targetProfile = await this.prisma.guestGameProfile.update({
+        where: { id: targetProfile.id },
+        data: {
+          guestId: targetProfile.guestId ?? targetGuest?.id ?? undefined,
+          phoneHash: targetProfile.phoneHash ?? payload.phoneHash,
+          status: 'ACTIVE',
+          lastActivityAt: now,
+        },
+      });
+    }
+
+    const nextPayload: GuestPortalTokenPayload = {
+      ...targetPayloadBase,
+      sub: `game-club:${targetProfile.id}:${context.store.id}`,
+      guestId: targetGuest?.id ?? targetProfile.guestId ?? null,
+      profileId: targetProfile.id,
+    };
+    const token = await this.signGuestPortalToken(nextPayload);
+    const portal = await this.buildPortalPayload(nextPayload);
+    const referralStats = await this.getGameReferralStats(
+      nextPayload.tenantId,
+      portal.profile.id,
+    );
+    const summary = buildGameSummaryFromPortal(portal, {
+      referralSecret: this.referralSecret(),
+      webUrl: this.publicWebUrl(),
+      referralStats,
+    });
+    const clubId = `${context.tenant.slug}:${
+      context.store.publicSlug ?? context.store.id
+    }`;
+
+    return {
+      token,
+      portal,
+      summary,
+      clubId,
+      message: `Выбран клуб ${context.store.name}. Игровая сессия обновлена.`,
+    };
+  }
+
+  async exchangeTelegramMiniAppSession(dto: {
+    initData?: unknown;
+    telegramUserId?: unknown;
+    authDate?: unknown;
+    clubId?: unknown;
+    tenantSlug?: unknown;
+    storeId?: unknown;
+    edgeSecret?: unknown;
+  }): Promise<GuestPortalTelegramMiniAppSessionResponse> {
+    const validation =
+      typeof dto.initData === 'string' && dto.initData.trim()
+        ? this.validateTelegramMiniAppInitData(dto.initData)
+        : this.validateTelegramMiniAppEdgeAssertion(dto);
+
+    if (!validation.ok) {
+      return {
+        status: validation.status,
+        profileId: null,
+        telegramIdentityMasked: validation.telegramIdentityMasked,
+        message: validation.message,
+      };
+    }
+
+    const telegramIdentity = `chat:${validation.userId}`;
+    const telegramIdentityMasked = maskExternalIdentity(telegramIdentity);
+    const selectedClub = normalizeMiniAppClubSelection(dto);
+    const candidates = await this.findTelegramMiniAppClubs(telegramIdentity);
+
+    if (candidates.length === 0) {
+      return {
+        status: 'AUTH_REQUIRED',
+        profileId: null,
+        telegramIdentityMasked,
+        message:
+          'Telegram Mini App открыт, но подтвержденный игровой профиль LeetPlus для этого Telegram еще не найден. Начните вход через /game/auth или /play и поделитесь телефоном в боте.',
+      };
+    }
+
+    const selectedCandidate = selectedClub
+      ? candidates.find((candidate) =>
+          miniAppClubMatchesSelection(candidate, selectedClub),
+        )
+      : candidates.length === 1
+        ? candidates[0]
+        : null;
+
+    if (!selectedCandidate) {
+      return {
+        status: 'CLUB_SELECTION_REQUIRED',
+        profileId: null,
+        telegramIdentityMasked,
+        clubs: candidates.map(mapTelegramMiniAppClub),
+        message:
+          'Telegram связан с несколькими игровыми клубами. Выберите клуб, чтобы открыть Mini App в нужном tenant/store scope.',
+      };
+    }
+
+    const payload: GuestPortalTokenPayload = {
+      sub: `telegram-mini-app:${selectedCandidate.profile.id}`,
+      purpose: GUEST_PORTAL_PURPOSE,
+      tenantId: selectedCandidate.tenant.id,
+      storeId: selectedCandidate.store.id,
+      guestId: selectedCandidate.profile.guestId,
+      profileId: selectedCandidate.profile.id,
+      phoneHash: selectedCandidate.profile.phoneHash,
+    };
+    const token = await this.signGuestPortalToken(payload);
+    const portal = await this.buildPortalPayload(payload);
+
+    return {
+      status: 'CONFIRMED',
+      token,
+      portal,
+      profileId: selectedCandidate.profile.id,
+      phoneMasked: selectedCandidate.profile.contactMasked,
+      telegramIdentityMasked,
+      message:
+        'Telegram Mini App подтвержден. Гостевая игровая сессия открыта безопасно через GuestGameProfile.',
+    };
+  }
+
   private async getGameReferralStats(
     tenantId: string,
     profileId: string | null,
@@ -3789,6 +4087,29 @@ export class GuestPortalService {
       };
     });
 
+    try {
+      const context = await this.getTenantStoreByIds(
+        challenge.tenantId,
+        challenge.storeId,
+      );
+      await this.matchLangamePhoneForPortal(
+        {
+          sub: `telegram-auth:${challenge.id}`,
+          purpose: GUEST_PORTAL_PURPOSE,
+          tenantId: challenge.tenantId,
+          storeId: challenge.storeId,
+          guestId: result.guestId,
+          profileId: result.profileId,
+          phoneHash: phone.hash,
+        },
+        context,
+        phone,
+        'guest_portal_telegram_auth',
+      );
+    } catch {
+      // Langame auto-match should not block a verified Telegram login.
+    }
+
     return {
       status: 'CONFIRMED',
       action: 'TELEGRAM_AUTH_CONTACT',
@@ -3796,9 +4117,9 @@ export class GuestPortalService {
       telegramIdentityMasked,
       message:
         'Telegram contact подтвердил телефон. Гостевой игровой профиль готов к выдаче browser session.',
-      reply: this.telegramWebhookRemoveKeyboardReply(
+      reply: this.telegramWebhookMiniAppReply(
         telegramIdentityMasked,
-        'Готово: телефон подтвержден. Вернитесь на страницу LeetPlus, вход завершится автоматически.',
+        'Готово: телефон подтвержден. Откройте клубную карту игрока в Mini App.',
       ),
     };
   }
@@ -3838,6 +4159,32 @@ export class GuestPortalService {
       text,
       replyMarkup: {
         remove_keyboard: true,
+      },
+    };
+  }
+
+  private telegramWebhookMiniAppReply(
+    chatIdMasked: string | null,
+    text: string,
+  ): GuestPortalTelegramWebhookResponse['reply'] {
+    return {
+      provider: 'TELEGRAM',
+      method: 'sendMessage',
+      chatIdMasked,
+      text,
+      replyMarkup: {
+        keyboard: [
+          [
+            {
+              text: 'Открыть Mini App',
+              web_app: {
+                url: this.telegramMiniAppUrl(),
+              },
+            },
+          ],
+        ],
+        resize_keyboard: true,
+        one_time_keyboard: true,
       },
     };
   }
@@ -4072,6 +4419,10 @@ export class GuestPortalService {
     dto: { phone?: unknown },
   ): Promise<GuestPortalLangameMatchResponse> {
     const payload = await this.verifyGuestToken(authorization);
+    const context = await this.getTenantStoreByIds(
+      payload.tenantId,
+      payload.storeId,
+    );
     const phone = this.phoneIdentity(dto.phone);
 
     if (phone.hash !== payload.phoneHash) {
@@ -4080,14 +4431,98 @@ export class GuestPortalService {
       );
     }
 
-    const [diagnostics, localGuest, localProfile] = await Promise.all([
-      this.langameSettingsService.searchGuestByPhoneForPortal(
-        payload.tenantId,
-        phone.normalized,
-      ),
+    return this.matchLangamePhoneForPortal(
+      payload,
+      context,
+      phone,
+      'guest_portal_langame_match',
+    );
+  }
+
+  private async matchLangamePhoneForPortal(
+    payload: GuestPortalTokenPayload,
+    context: TenantStoreContext,
+    phone: GuestPortalPhoneIdentity,
+    source: string,
+  ): Promise<GuestPortalLangameMatchResponse> {
+    const [localGuest, localProfile] = await Promise.all([
       this.findGuest(payload),
       this.findProfile(payload, payload.guestId),
     ]);
+
+    if (localGuest) {
+      const checkedAt = new Date().toISOString();
+      const linkResult = await this.linkGameProfileToLocalGuest(
+        payload,
+        localProfile?.id ?? payload.profileId,
+        localGuest.id,
+        phone.masked,
+        source,
+      );
+      const localGuestFound = true;
+      const status: GuestPortalLangameMatchResponse['status'] = 'MATCHED_LOCAL';
+      const portal =
+        (linkResult.linkedNow || linkResult.status === 'ALREADY_LINKED') &&
+        linkResult.guestId
+          ? await this.buildPortalPayload({
+              ...payload,
+              guestId: linkResult.guestId,
+              profileId: linkResult.profileId ?? payload.profileId,
+            })
+          : null;
+
+      await this.recordLangameAutoMatchEvent({
+        payload,
+        context,
+        phoneMasked: phone.masked,
+        status,
+        linkResult,
+        sources: [],
+        source,
+        checkedAt,
+      });
+
+      return {
+        checkedAt,
+        queryField: 'phone',
+        phoneMasked: phone.masked,
+        status,
+        localGuestFound,
+        localGuestId: linkResult.guestId ?? localGuest.id,
+        profileId:
+          linkResult.profileId ?? localProfile?.id ?? payload.profileId,
+        linkStatus: linkResult.status,
+        linkedGuestId: linkResult.guestId,
+        linkedProfileId: linkResult.profileId,
+        backfilled: linkResult.backfilled,
+        nextAction: guestPortalLangameMatchNextAction(
+          status,
+          linkResult.status,
+        ),
+        portal,
+        sources: [],
+      };
+    }
+
+    const cachedEvent = await this.findLangameAutoMatchEvent(payload);
+    const cachedResponse = cachedEvent
+      ? await this.buildLangameMatchResponseFromAutoMatchEvent(
+          cachedEvent,
+          payload,
+          phone.masked,
+        )
+      : null;
+
+    if (cachedResponse) {
+      return cachedResponse;
+    }
+
+    const diagnostics =
+      await this.langameSettingsService.searchGuestByPhoneForPortal(
+        payload.tenantId,
+        phone.normalized,
+        this.langamePortalSearchScope(context),
+      );
     const externalPairs = diagnostics.sources.flatMap((source) =>
       source.results
         .filter((result) => result.externalGuestId)
@@ -4145,7 +4580,7 @@ export class GuestPortalService {
       sources
         .flatMap((source) => source.results)
         .find((result) => result.localGuestId)?.localGuestId ?? null;
-    const localGuestId = localGuest?.id ?? firstMappedGuestId;
+    const localGuestId = firstMappedGuestId;
     const localGuestFound = Boolean(localGuestId);
     const foundInLangame = sources.some((source) => source.resultsCount > 0);
     const anySuccess = sources.some((source) => source.status === 'SUCCESS');
@@ -4162,6 +4597,7 @@ export class GuestPortalService {
           localProfile?.id ?? payload.profileId,
           localGuestId,
           phone.masked,
+          source,
         )
       : ({
           status: foundInLangame ? 'WAITING_FOR_SYNC' : 'NOT_LINKED',
@@ -4179,6 +4615,17 @@ export class GuestPortalService {
           })
         : null;
 
+    await this.recordLangameAutoMatchEvent({
+      payload,
+      context,
+      phoneMasked: phone.masked,
+      status,
+      linkResult,
+      sources,
+      source,
+      checkedAt: diagnostics.checkedAt,
+    });
+
     return {
       checkedAt: diagnostics.checkedAt,
       queryField: 'phone',
@@ -4194,6 +4641,206 @@ export class GuestPortalService {
       nextAction: guestPortalLangameMatchNextAction(status, linkResult.status),
       portal: refreshedPayload,
       sources,
+    };
+  }
+
+  private langamePortalSearchScope(context: TenantStoreContext) {
+    return {
+      sourceId: context.store.integrationSourceId,
+      sourceDomain: context.store.externalDomain,
+    };
+  }
+
+  private langameAutoMatchExternalId(payload: GuestPortalTokenPayload) {
+    if (!payload.profileId) {
+      return null;
+    }
+
+    return `game-profile-langame-auto-match:${payload.profileId}:${payload.storeId}`;
+  }
+
+  private langameAutoMatchExternalDomain(context: TenantStoreContext) {
+    return (
+      context.store.externalDomain ??
+      context.store.integrationSourceId ??
+      `store:${context.store.id}`
+    );
+  }
+
+  private async findLangameAutoMatchEvent(payload: GuestPortalTokenPayload) {
+    const externalId = this.langameAutoMatchExternalId(payload);
+
+    if (!payload.profileId || !externalId) {
+      return null;
+    }
+
+    return this.prisma.guestGameEvent.findFirst({
+      where: {
+        tenantId: payload.tenantId,
+        profileId: payload.profileId,
+        eventType: GAME_PROFILE_LANGAME_AUTO_MATCH_EVENT_TYPE,
+        source: GAME_PROFILE_LANGAME_AUTO_MATCH_SOURCE,
+        externalId,
+      },
+      orderBy: { occurredAt: 'desc' },
+      select: {
+        id: true,
+        profileId: true,
+        guestId: true,
+        occurredAt: true,
+        payload: true,
+      },
+    });
+  }
+
+  private async recordLangameAutoMatchEvent(input: {
+    payload: GuestPortalTokenPayload;
+    context: TenantStoreContext;
+    phoneMasked: string | null;
+    status: GuestPortalLangameMatchResponse['status'];
+    linkResult: GuestPortalGameProfileLinkResult;
+    sources: GuestPortalLangameMatchResponse['sources'];
+    source: string;
+    checkedAt: string;
+  }) {
+    const profileId = input.linkResult.profileId ?? input.payload.profileId;
+    const externalId = this.langameAutoMatchExternalId({
+      ...input.payload,
+      profileId,
+    });
+
+    if (!profileId || !externalId) {
+      return;
+    }
+
+    const occurredAt = new Date(input.checkedAt);
+    const eventPayload = {
+      checkedAt: input.checkedAt,
+      source: input.source,
+      storeId: input.context.store.id,
+      storePublicSlug: input.context.store.publicSlug,
+      sourceId: input.context.store.integrationSourceId,
+      sourceDomain: input.context.store.externalDomain,
+      phoneMasked: input.phoneMasked,
+      matchStatus: input.status,
+      localStatus: langameMatchStatusToLocalStatus(input.status),
+      localGuestFound: Boolean(input.linkResult.guestId),
+      localGuestId: input.linkResult.guestId,
+      profileId,
+      linkStatus: input.linkResult.status,
+      linkedGuestId: input.linkResult.guestId,
+      linkedProfileId: input.linkResult.profileId,
+      backfilled: input.linkResult.backfilled,
+      sources: input.sources,
+    } satisfies Prisma.InputJsonObject;
+
+    await this.prisma.guestGameEvent.createMany({
+      data: [
+        {
+          tenantId: input.payload.tenantId,
+          profileId,
+          guestId: input.linkResult.guestId,
+          eventType: GAME_PROFILE_LANGAME_AUTO_MATCH_EVENT_TYPE,
+          source: GAME_PROFILE_LANGAME_AUTO_MATCH_SOURCE,
+          externalProvider: IntegrationProvider.LANGAME,
+          externalDomain: this.langameAutoMatchExternalDomain(input.context),
+          externalId,
+          occurredAt,
+          payload: eventPayload,
+          note: 'Одноразовая клубная автосверка игрового профиля с Langame по подтвержденному телефону.',
+          createdAt: occurredAt,
+        },
+      ],
+      skipDuplicates: true,
+    });
+  }
+
+  private buildLocalMatchFromAutoMatchEvent(
+    event: {
+      profileId: string | null;
+      guestId: string | null;
+      occurredAt: Date;
+      payload: Prisma.JsonValue | null;
+    },
+    payload: GuestPortalTokenPayload,
+  ): GuestPortalLocalGameProfileMatch | null {
+    const cached = guestPortalLangameAutoMatchPayload(event.payload);
+
+    if (!cached) {
+      return null;
+    }
+
+    const status =
+      cached.localStatus ?? langameMatchStatusToLocalStatus(cached.matchStatus);
+    const linkStatus = cached.linkStatus;
+    const linkedGuestId = cached.linkedGuestId ?? event.guestId ?? null;
+    const linkedProfileId =
+      cached.linkedProfileId ?? event.profileId ?? payload.profileId;
+
+    return {
+      checkedAt: cached.checkedAt ?? event.occurredAt.toISOString(),
+      status,
+      localGuestFound: Boolean(cached.localGuestId ?? linkedGuestId),
+      localGuestId: cached.localGuestId ?? linkedGuestId,
+      profileId: linkedProfileId,
+      linkStatus,
+      linkedGuestId,
+      linkedProfileId,
+      backfilled: cached.backfilled,
+      nextAction: guestPortalLocalGameProfileMatchNextAction(
+        status,
+        linkStatus,
+      ),
+    };
+  }
+
+  private async buildLangameMatchResponseFromAutoMatchEvent(
+    event: {
+      profileId: string | null;
+      guestId: string | null;
+      occurredAt: Date;
+      payload: Prisma.JsonValue | null;
+    },
+    payload: GuestPortalTokenPayload,
+    phoneMasked: string,
+  ): Promise<GuestPortalLangameMatchResponse | null> {
+    const cached = guestPortalLangameAutoMatchPayload(event.payload);
+
+    if (!cached) {
+      return null;
+    }
+
+    const linkedGuestId = cached.linkedGuestId ?? event.guestId ?? null;
+    const linkedProfileId =
+      cached.linkedProfileId ?? event.profileId ?? payload.profileId;
+    const portal =
+      linkedGuestId &&
+      (cached.linkStatus === 'LINKED' || cached.linkStatus === 'ALREADY_LINKED')
+        ? await this.buildPortalPayload({
+            ...payload,
+            guestId: linkedGuestId,
+            profileId: linkedProfileId,
+          })
+        : null;
+
+    return {
+      checkedAt: cached.checkedAt ?? event.occurredAt.toISOString(),
+      queryField: 'phone',
+      phoneMasked: cached.phoneMasked ?? phoneMasked,
+      status: cached.matchStatus,
+      localGuestFound: Boolean(cached.localGuestId ?? linkedGuestId),
+      localGuestId: cached.localGuestId ?? linkedGuestId,
+      profileId: linkedProfileId,
+      linkStatus: cached.linkStatus,
+      linkedGuestId,
+      linkedProfileId,
+      backfilled: cached.backfilled,
+      nextAction: guestPortalLangameMatchNextAction(
+        cached.matchStatus,
+        cached.linkStatus,
+      ),
+      portal,
+      sources: cached.sources,
     };
   }
 
@@ -4231,6 +4878,18 @@ export class GuestPortalService {
           linkedNow: false,
           backfilled: emptyGameProfileBackfillSummary(),
         } satisfies GuestPortalGameProfileLinkResult);
+
+    if (!localGuest) {
+      const cachedEvent = await this.findLangameAutoMatchEvent(payload);
+      const cachedMatch = cachedEvent
+        ? this.buildLocalMatchFromAutoMatchEvent(cachedEvent, payload)
+        : null;
+
+      if (cachedMatch) {
+        return cachedMatch;
+      }
+    }
+
     const status: GuestPortalLocalGameProfileMatchStatus = localGuest
       ? linkResult.status === 'CONFLICT' || linkResult.status === 'NOT_LINKED'
         ? linkResult.status
@@ -5314,6 +5973,8 @@ export class GuestPortalService {
             publicSlug: true,
             name: true,
             address: true,
+            externalDomain: true,
+            integrationSourceId: true,
           },
           take: 1,
         },
@@ -5359,6 +6020,8 @@ export class GuestPortalService {
             publicSlug: true,
             name: true,
             address: true,
+            externalDomain: true,
+            integrationSourceId: true,
           },
           take: 1,
         },
@@ -5396,6 +6059,284 @@ export class GuestPortalService {
         .digest('hex'),
       masked: normalized.length <= 4 ? '****' : `***${normalized.slice(-4)}`,
     };
+  }
+
+  private validateTelegramMiniAppInitData(
+    value: unknown,
+  ): TelegramMiniAppValidationResult {
+    if (typeof value !== 'string' || !value.trim()) {
+      return {
+        ok: false,
+        status: 'AUTH_REQUIRED',
+        telegramIdentityMasked: null,
+        message:
+          'Telegram Mini App initData не найден. Откройте экран из Telegram или начните вход через /game/auth.',
+      };
+    }
+
+    const token = this.telegramMiniAppBotToken();
+
+    if (!token) {
+      return {
+        ok: false,
+        status: 'FAILED',
+        telegramIdentityMasked: null,
+        message:
+          'Telegram Mini App пока не настроен: на сервере нет bot token для проверки initData.',
+      };
+    }
+
+    const params = new URLSearchParams(value);
+    const hash = params.get('hash')?.trim() ?? '';
+
+    if (!hash) {
+      return {
+        ok: false,
+        status: 'FAILED',
+        telegramIdentityMasked: null,
+        message:
+          'Telegram Mini App initData отклонен: подпись Telegram не найдена.',
+      };
+    }
+
+    const dataCheckString = [...params.entries()]
+      .filter(([key]) => key !== 'hash')
+      .map(([key, paramValue]) => `${key}=${paramValue}`)
+      .sort()
+      .join('\n');
+    const secret = createHmac('sha256', 'WebAppData').update(token).digest();
+    const expectedHash = createHmac('sha256', secret)
+      .update(dataCheckString)
+      .digest('hex');
+
+    if (!safeCompareHex(hash, expectedHash)) {
+      return {
+        ok: false,
+        status: 'FAILED',
+        telegramIdentityMasked: null,
+        message:
+          'Telegram Mini App initData отклонен: подпись Telegram не прошла проверку.',
+      };
+    }
+
+    const authDateValue = Number(params.get('auth_date') ?? NaN);
+
+    if (!Number.isFinite(authDateValue) || authDateValue <= 0) {
+      return {
+        ok: false,
+        status: 'FAILED',
+        telegramIdentityMasked: null,
+        message:
+          'Telegram Mini App initData отклонен: дата авторизации не найдена.',
+      };
+    }
+
+    const ageSeconds = Math.floor(Date.now() / 1000) - authDateValue;
+
+    if (ageSeconds > this.telegramMiniAppInitDataTtlSeconds()) {
+      return {
+        ok: false,
+        status: 'EXPIRED',
+        telegramIdentityMasked: null,
+        message:
+          'Сессия Telegram Mini App устарела. Закройте Mini App и откройте его из Telegram заново.',
+      };
+    }
+
+    const user = parseTelegramMiniAppUser(params.get('user'));
+
+    if (!user) {
+      return {
+        ok: false,
+        status: 'AUTH_REQUIRED',
+        telegramIdentityMasked: null,
+        message:
+          'Telegram Mini App не передал пользователя. Откройте экран из личного чата с ботом LeetPlus.',
+      };
+    }
+
+    return {
+      ok: true,
+      userId: user.id,
+      username: user.username,
+      authDate: new Date(authDateValue * 1000),
+    };
+  }
+
+  private validateTelegramMiniAppEdgeAssertion(dto: {
+    telegramUserId?: unknown;
+    authDate?: unknown;
+    edgeSecret?: unknown;
+  }): TelegramMiniAppValidationResult {
+    const configuredSecret = this.telegramMiniAppEdgeSharedSecret();
+    const providedSecret = stringOrNull(dto.edgeSecret);
+
+    if (!configuredSecret || !providedSecret) {
+      return {
+        ok: false,
+        status: 'AUTH_REQUIRED',
+        telegramIdentityMasked: null,
+        message:
+          'Telegram Mini App initData не найден. Откройте экран из Telegram или начните вход через /game/auth.',
+      };
+    }
+
+    if (!safeCompareText(configuredSecret, providedSecret)) {
+      return {
+        ok: false,
+        status: 'FAILED',
+        telegramIdentityMasked: null,
+        message:
+          'Telegram Mini App edge assertion отклонен: подпись edge VDS не прошла проверку.',
+      };
+    }
+
+    const userId = telegramUserIdString(dto.telegramUserId);
+
+    if (!userId) {
+      return {
+        ok: false,
+        status: 'FAILED',
+        telegramIdentityMasked: null,
+        message:
+          'Telegram Mini App edge assertion отклонен: Telegram user id не найден.',
+      };
+    }
+
+    const authDateValue = Number(dto.authDate ?? NaN);
+
+    if (!Number.isFinite(authDateValue) || authDateValue <= 0) {
+      return {
+        ok: false,
+        status: 'FAILED',
+        telegramIdentityMasked: maskExternalIdentity(`chat:${userId}`),
+        message:
+          'Telegram Mini App edge assertion отклонен: дата авторизации не найдена.',
+      };
+    }
+
+    const ageSeconds = Math.floor(Date.now() / 1000) - authDateValue;
+
+    if (ageSeconds > this.telegramMiniAppInitDataTtlSeconds()) {
+      return {
+        ok: false,
+        status: 'EXPIRED',
+        telegramIdentityMasked: maskExternalIdentity(`chat:${userId}`),
+        message:
+          'Сессия Telegram Mini App устарела. Закройте Mini App и откройте его из Telegram заново.',
+      };
+    }
+
+    return {
+      ok: true,
+      userId,
+      username: null,
+      authDate: new Date(authDateValue * 1000),
+    };
+  }
+
+  private async findTelegramMiniAppClubs(
+    telegramIdentity: string,
+  ): Promise<TelegramMiniAppClubCandidate[]> {
+    const profiles = await this.prisma.guestGameProfile.findMany({
+      where: {
+        telegramIdentity,
+        status: 'ACTIVE',
+        phoneHash: { not: null },
+        tenant: { status: TenantLifecycleStatus.ACTIVE },
+      },
+      include: {
+        tenant: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+          },
+        },
+        telegramLinkChallenges: {
+          where: {
+            status: {
+              in: [
+                'CONSUMED',
+                TELEGRAM_AUTH_VERIFIED_STATUS,
+                TELEGRAM_AUTH_SESSION_ISSUED_STATUS,
+              ],
+            },
+            store: { isActive: true },
+          },
+          orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+          take: 5,
+          include: {
+            store: {
+              select: {
+                id: true,
+                publicSlug: true,
+                name: true,
+                address: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+    const candidates = new Map<string, TelegramMiniAppClubCandidate>();
+
+    for (const profile of profiles) {
+      if (!profile.phoneHash) {
+        continue;
+      }
+
+      for (const challenge of profile.telegramLinkChallenges) {
+        const key = `${profile.id}:${challenge.store.id}`;
+
+        if (candidates.has(key)) {
+          continue;
+        }
+
+        candidates.set(key, {
+          profile: {
+            id: profile.id,
+            guestId: profile.guestId,
+            phoneHash: profile.phoneHash,
+            contactMasked: profile.contactMasked,
+          },
+          tenant: profile.tenant,
+          store: challenge.store,
+        });
+      }
+    }
+
+    return [...candidates.values()];
+  }
+
+  private telegramMiniAppBotToken() {
+    return configString(
+      this.configService,
+      'GUEST_GAME_TELEGRAM_MINI_APP_BOT_TOKEN',
+      'GUEST_GAME_TELEGRAM_WEBHOOK_REPLY_BOT_TOKEN',
+      'GUEST_GAME_TELEGRAM_BOT_TOKEN',
+      'TELEGRAM_BOT_TOKEN',
+    );
+  }
+
+  private telegramMiniAppEdgeSharedSecret() {
+    return configString(
+      this.configService,
+      'GUEST_GAME_TG_EDGE_SHARED_SECRET',
+      'GUEST_GAME_TELEGRAM_MINI_APP_EDGE_SECRET',
+    );
+  }
+
+  private telegramMiniAppInitDataTtlSeconds() {
+    const raw = this.configService
+      .get<string>('GUEST_GAME_TELEGRAM_MINI_APP_INIT_DATA_TTL_SECONDS')
+      ?.trim();
+    const parsed = raw ? Number(raw) : NaN;
+
+    return Number.isFinite(parsed) && parsed > 0
+      ? Math.floor(parsed)
+      : TELEGRAM_MINI_APP_INIT_DATA_TTL_SECONDS;
   }
 
   private requiredString(value: unknown, label: string) {
@@ -6015,6 +6956,18 @@ export class GuestPortalService {
       'http://localhost:3000'
     );
   }
+
+  private telegramMiniAppUrl() {
+    const configured = this.configService
+      .get<string>('GUEST_GAME_TELEGRAM_MINI_APP_URL')
+      ?.trim();
+
+    if (configured) {
+      return configured;
+    }
+
+    return `${this.publicWebUrl().replace(/\/$/, '')}/game/app`;
+  }
 }
 
 function buildGameSummaryFromPortal(
@@ -6201,6 +7154,141 @@ function emptyGameReferralStats(): GuestPortalReferralStats {
     eligibleCount: 0,
     latestAcceptedAt: null,
   };
+}
+
+function stringOrNull(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function telegramUserIdString(value: unknown) {
+  const raw =
+    typeof value === 'number' && Number.isFinite(value)
+      ? String(Math.trunc(value))
+      : stringOrNull(value);
+
+  return raw && /^[0-9]+$/.test(raw) ? raw : null;
+}
+
+function normalizeMiniAppClubSelection(dto: {
+  clubId?: unknown;
+  tenantSlug?: unknown;
+  storeId?: unknown;
+}): TelegramMiniAppClubSelection | null {
+  const clubId = stringOrNull(dto.clubId);
+  const [clubTenantSlug, clubStoreId] = clubId?.includes(':')
+    ? clubId.split(':', 2)
+    : [null, null];
+  const tenantSlug = stringOrNull(dto.tenantSlug) ?? clubTenantSlug;
+  const storeId = stringOrNull(dto.storeId) ?? clubStoreId;
+
+  if (!clubId && !tenantSlug && !storeId) {
+    return null;
+  }
+
+  return {
+    clubId,
+    tenantSlug,
+    storeId,
+  };
+}
+
+function miniAppClubMatchesSelection(
+  candidate: TelegramMiniAppClubCandidate,
+  selection: TelegramMiniAppClubSelection,
+) {
+  const clubId = `${candidate.tenant.slug}:${
+    candidate.store.publicSlug ?? candidate.store.id
+  }`;
+
+  if (selection.clubId && selection.clubId !== clubId) {
+    return false;
+  }
+
+  if (selection.tenantSlug && selection.tenantSlug !== candidate.tenant.slug) {
+    return false;
+  }
+
+  if (
+    selection.storeId &&
+    selection.storeId !== candidate.store.id &&
+    selection.storeId !== candidate.store.publicSlug
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function mapTelegramMiniAppClub(
+  candidate: TelegramMiniAppClubCandidate,
+): GuestPortalTelegramMiniAppClub {
+  const publicStoreId = candidate.store.publicSlug ?? candidate.store.id;
+
+  return {
+    tenantId: candidate.tenant.id,
+    tenantSlug: candidate.tenant.slug,
+    tenantName: candidate.tenant.name,
+    storeId: candidate.store.id,
+    storePublicSlug: candidate.store.publicSlug,
+    storeName: candidate.store.name,
+    storeAddress: candidate.store.address,
+    clubId: `${candidate.tenant.slug}:${publicStoreId}`,
+    profileId: candidate.profile.id,
+  };
+}
+
+function parseTelegramMiniAppUser(
+  value: string | null,
+): { id: string; username: string | null } | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(value) as { id?: unknown; username?: unknown };
+    const id =
+      typeof parsed.id === 'number' || typeof parsed.id === 'string'
+        ? String(parsed.id)
+        : null;
+
+    if (!id || !/^\d+$/.test(id)) {
+      return null;
+    }
+
+    return {
+      id,
+      username:
+        typeof parsed.username === 'string' && parsed.username.trim()
+          ? parsed.username.trim()
+          : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function safeCompareHex(left: string, right: string) {
+  if (!/^[a-f0-9]+$/i.test(left) || !/^[a-f0-9]+$/i.test(right)) {
+    return false;
+  }
+
+  const leftBuffer = Buffer.from(left, 'hex');
+  const rightBuffer = Buffer.from(right, 'hex');
+
+  return (
+    leftBuffer.length === rightBuffer.length &&
+    timingSafeEqual(leftBuffer, rightBuffer)
+  );
+}
+
+function safeCompareText(left: string, right: string) {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+
+  return (
+    leftBuffer.length === rightBuffer.length &&
+    timingSafeEqual(leftBuffer, rightBuffer)
+  );
 }
 
 function normalizeGameReferralCode(value: unknown) {
@@ -7279,6 +8367,128 @@ function normalizeTelegramBotUsername(value: string | null) {
   return normalized;
 }
 
+type GuestPortalLangameAutoMatchCachedPayload = {
+  checkedAt: string | null;
+  phoneMasked: string | null;
+  matchStatus: GuestPortalLangameMatchResponse['status'];
+  localStatus: GuestPortalLocalGameProfileMatchStatus | null;
+  localGuestId: string | null;
+  linkStatus: GuestPortalGameProfileLinkStatus;
+  linkedGuestId: string | null;
+  linkedProfileId: string | null;
+  backfilled: GuestPortalGameProfileBackfillSummary;
+  sources: GuestPortalLangameMatchResponse['sources'];
+};
+
+function guestPortalLangameAutoMatchPayload(
+  value: Prisma.JsonValue | null,
+): GuestPortalLangameAutoMatchCachedPayload | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const payload = value as Record<string, unknown>;
+  const matchStatus = guestPortalLangameMatchStatus(payload.matchStatus);
+  const linkStatus = guestPortalGameProfileLinkStatus(payload.linkStatus);
+
+  if (!matchStatus || !linkStatus) {
+    return null;
+  }
+
+  return {
+    checkedAt: stringOrNull(payload.checkedAt),
+    phoneMasked: stringOrNull(payload.phoneMasked),
+    matchStatus,
+    localStatus: guestPortalLocalMatchStatus(payload.localStatus),
+    localGuestId: stringOrNull(payload.localGuestId),
+    linkStatus,
+    linkedGuestId: stringOrNull(payload.linkedGuestId),
+    linkedProfileId: stringOrNull(payload.linkedProfileId),
+    backfilled: guestPortalBackfillSummary(payload.backfilled),
+    sources: Array.isArray(payload.sources)
+      ? (payload.sources as GuestPortalLangameMatchResponse['sources'])
+      : [],
+  };
+}
+
+function guestPortalLangameMatchStatus(value: unknown) {
+  const statuses: GuestPortalLangameMatchResponse['status'][] = [
+    'MATCHED_LOCAL',
+    'FOUND_IN_LANGAME',
+    'NOT_FOUND',
+    'FAILED',
+  ];
+
+  return statuses.find((status) => status === value) ?? null;
+}
+
+function guestPortalLocalMatchStatus(value: unknown) {
+  const statuses: GuestPortalLocalGameProfileMatchStatus[] = [
+    'MATCHED_LOCAL',
+    'FOUND_IN_LANGAME',
+    'WAITING_FOR_SYNC',
+    'CONFLICT',
+    'NOT_FOUND',
+    'FAILED',
+    'NOT_LINKED',
+  ];
+
+  return statuses.find((status) => status === value) ?? null;
+}
+
+function guestPortalGameProfileLinkStatus(value: unknown) {
+  const statuses: GuestPortalGameProfileLinkStatus[] = [
+    'LINKED',
+    'ALREADY_LINKED',
+    'WAITING_FOR_SYNC',
+    'CONFLICT',
+    'NOT_LINKED',
+  ];
+
+  return statuses.find((status) => status === value) ?? null;
+}
+
+function guestPortalBackfillSummary(
+  value: unknown,
+): GuestPortalGameProfileBackfillSummary {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return emptyGameProfileBackfillSummary();
+  }
+
+  const payload = value as Record<string, unknown>;
+
+  return {
+    rewards: nonNegativeInteger(payload.rewards),
+    events: nonNegativeInteger(payload.events),
+    deliveries: nonNegativeInteger(payload.deliveries),
+    bonusLedgerEntries: nonNegativeInteger(payload.bonusLedgerEntries),
+  };
+}
+
+function nonNegativeInteger(value: unknown) {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0
+    ? value
+    : 0;
+}
+
+function langameMatchStatusToLocalStatus(
+  status: GuestPortalLangameMatchResponse['status'],
+): GuestPortalLocalGameProfileMatchStatus {
+  if (status === 'MATCHED_LOCAL') {
+    return 'MATCHED_LOCAL';
+  }
+
+  if (status === 'FOUND_IN_LANGAME') {
+    return 'FOUND_IN_LANGAME';
+  }
+
+  if (status === 'NOT_FOUND') {
+    return 'NOT_FOUND';
+  }
+
+  return 'FAILED';
+}
+
 function guestPortalLangameMatchNextAction(
   status: GuestPortalLangameMatchResponse['status'],
   linkStatus: GuestPortalGameProfileLinkStatus,
@@ -7288,7 +8498,7 @@ function guestPortalLangameMatchNextAction(
   }
 
   if (linkStatus === 'ALREADY_LINKED') {
-    return 'Игровой профиль уже связан с синхронизированным гостем Langame. Данные лояльности и геймификации обновляются обычной синхронизацией.';
+    return 'Игровой профиль уже связан с гостем Langame. Данные лояльности и геймификации обновляются в контуре выбранного клуба.';
   }
 
   if (linkStatus === 'CONFLICT') {
@@ -7296,11 +8506,11 @@ function guestPortalLangameMatchNextAction(
   }
 
   if (status === 'MATCHED_LOCAL') {
-    return 'Профиль найден в LeetPlus. Если связь не появилась автоматически, дождитесь следующей синхронизации Langame или обратитесь к администратору клуба.';
+    return 'Профиль найден в LeetPlus и проверен для выбранного клуба. Повторная ручная проверка Langame не требуется.';
   }
 
   if (status === 'FOUND_IN_LANGAME') {
-    return 'Langame нашел профиль по подтвержденному телефону. После ближайшей синхронизации или ручного сопоставления он появится в гостевом кабинете.';
+    return 'Langame нашел гостя по подтвержденному телефону в выбранном клубе. Проверка сохранена и не будет запускаться повторно для этого клуба.';
   }
 
   if (status === 'NOT_FOUND') {
@@ -7327,10 +8537,22 @@ function guestPortalLocalGameProfileMatchNextAction(
   }
 
   if (status === 'WAITING_FOR_SYNC') {
-    return 'Вход завершен, но сохраненный snapshot Langame пока не содержит этого телефона. Связка появится после обычной синхронизации гостей.';
+    return 'Вход завершен. Клубная сверка Langame будет выполнена автоматически по подтвержденному телефону.';
   }
 
-  return 'Вход завершен, игровой профиль создан отдельно от общей базы гостей. Связка с Langame появится после синхронизации или ручной проверки.';
+  if (status === 'FOUND_IN_LANGAME') {
+    return 'Langame уже подтвердил гостя по телефону для выбранного клуба. Ручная проверка и повторная синхронизация не нужны.';
+  }
+
+  if (status === 'NOT_FOUND') {
+    return 'Клубная сверка выполнена один раз: Langame не нашел гостя по этому телефону в выбранном клубе.';
+  }
+
+  if (status === 'FAILED') {
+    return 'Клубная сверка Langame не завершилась. Вход уже работает, а повторную проверку можно будет запустить после настройки интеграции.';
+  }
+
+  return 'Вход завершен, игровой профиль создан отдельно от общей базы гостей. Клубная связка с Langame выполняется автоматически по подтвержденному телефону.';
 }
 
 function guestPortalPayloadWithLocalMatch(

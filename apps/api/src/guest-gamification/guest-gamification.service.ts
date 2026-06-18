@@ -1148,6 +1148,7 @@ export type GuestGameIntegrationReadinessItem = {
     | 'TELEGRAM_LINK'
     | 'TELEGRAM_WEBHOOK'
     | 'TELEGRAM_AUTH_REPLY_SENDER'
+    | 'TELEGRAM_MINI_APP'
     | 'TELEGRAM_DELIVERY'
     | 'MAX_DELIVERY'
     | 'BONUS_LEDGER_SCHEDULER'
@@ -3629,6 +3630,20 @@ export class GuestGamificationService {
       envString('NEXT_PUBLIC_API_URL') ??
       envString('API_PUBLIC_URL') ??
       'https://api.leetplus.ru';
+    const publicWebUrl =
+      envString('WEB_URL') ??
+      envString('FRONTEND_URL') ??
+      envString('NEXT_PUBLIC_WEB_URL') ??
+      'https://leetplus.ru';
+    const telegramMiniAppUrl =
+      envString('GUEST_GAME_TELEGRAM_MINI_APP_URL') ??
+      `${publicWebUrl.replace(/\/$/, '')}/game/app`;
+    const telegramMiniAppToken =
+      envString('GUEST_GAME_TELEGRAM_MINI_APP_BOT_TOKEN') ??
+      telegramWebhookReplyToken;
+    const telegramMiniAppEdgeSecret = envString(
+      'GUEST_GAME_TG_EDGE_SHARED_SECRET',
+    );
     const telegramLinkConfigured = Boolean(
       telegramBotUsername && telegramLinkSecret,
     );
@@ -3660,6 +3675,32 @@ export class GuestGamificationService {
           : telegramWebhookReplyEnabled || telegramWebhookReplyToken
             ? 'PARTIAL'
             : 'MANUAL_ONLY';
+    const telegramMiniAppReady = Boolean(
+      telegramBotUsername &&
+      telegramMiniAppUrl &&
+      (telegramMiniAppToken || telegramMiniAppEdgeSecret),
+    );
+    const telegramMiniAppStatus: GuestGameIntegrationReadinessStatus =
+      telegramMiniAppReady
+        ? 'READY'
+        : telegramBotUsername ||
+            telegramMiniAppToken ||
+            telegramMiniAppEdgeSecret
+          ? 'PARTIAL'
+          : 'BLOCKED';
+    const telegramMiniAppRequiredEnv = [
+      ...(telegramBotUsername ? [] : ['GUEST_GAME_TELEGRAM_BOT_USERNAME']),
+      ...(telegramMiniAppToken
+        ? []
+        : telegramMiniAppEdgeSecret
+          ? []
+          : [
+              'GUEST_GAME_TELEGRAM_MINI_APP_BOT_TOKEN or GUEST_GAME_TG_EDGE_SHARED_SECRET',
+            ]),
+      ...(telegramMiniAppUrl
+        ? []
+        : ['GUEST_GAME_TELEGRAM_MINI_APP_URL or WEB_URL']),
+    ];
     const maxDeliveryConfigured = Boolean(
       maxProvider?.configured && maxProvider.enabledByEnv,
     );
@@ -3808,6 +3849,47 @@ export class GuestGamificationService {
         nextAction: telegramWebhookReplyReady
           ? 'Проверить /play -> Telegram deep link -> contact-share на тестовом госте и смотреть replyDispatch=SENT без raw chat id.'
           : 'Добавить недостающие env или оставить внешний adapter, который отправляет reply payload из webhook.',
+        runbook: telegramAuthRunbook,
+      },
+      {
+        key: 'TELEGRAM_MINI_APP',
+        title: 'Telegram Mini App',
+        status: telegramMiniAppStatus,
+        statusLabel: telegramMiniAppReady
+          ? 'готов'
+          : telegramMiniAppStatus === 'PARTIAL'
+            ? 'частично'
+            : 'не настроено',
+        ready: telegramMiniAppReady,
+        configured: Boolean(telegramMiniAppToken || telegramMiniAppEdgeSecret),
+        enabled: Boolean(
+          telegramBotUsername ||
+          telegramMiniAppToken ||
+          telegramMiniAppEdgeSecret,
+        ),
+        requiredEnv: telegramMiniAppRequiredEnv,
+        details: [
+          {
+            label: 'Route',
+            value: telegramMiniAppUrl ? '/game/app' : 'нужен URL',
+          },
+          {
+            label: 'Bot username',
+            value: telegramBotUsername ? 'настроен' : 'нужен',
+          },
+          {
+            label: 'initData token',
+            value: telegramMiniAppToken ? 'настроен' : 'edge/shared',
+          },
+          {
+            label: 'Edge assertion',
+            value: telegramMiniAppEdgeSecret ? 'настроен' : 'не используется',
+          },
+        ],
+        note: 'Mini App открывает /game/app и выдает обычную guest-session для существующего GuestGameProfile. InitData можно валидировать на API bot token-ом или на отдельной edge VDS с передачей edge assertion.',
+        nextAction: telegramMiniAppReady
+          ? 'Проверить кнопку Open Mini App после Telegram contact-share и mobile WebView /game/app на тестовом госте.'
+          : 'Настроить bot username, Mini App URL и bot token на edge VDS или shared secret для edge assertion.',
         runbook: telegramAuthRunbook,
       },
       {

@@ -9,6 +9,7 @@ export type BotConsumerConfig = {
   limit: number;
   dryRun: boolean;
   telegramToken: string | null;
+  telegramApiBaseUrl: string;
   requestTimeoutMs: number;
 };
 
@@ -125,6 +126,12 @@ export function loadBotConsumerConfig(
     trimmed(env.GUEST_GAME_TELEGRAM_BOT_TOKEN) ??
     trimmed(env.GUEST_PORTAL_TELEGRAM_BOT_TOKEN) ??
     trimmed(env.TELEGRAM_BOT_TOKEN);
+  const telegramApiBaseUrl = normalizeBaseUrl(
+    env.GUEST_GAME_BOT_CONSUMER_TELEGRAM_API_BASE_URL ??
+      env.GUEST_GAME_TG_EDGE_TELEGRAM_API_BASE_URL ??
+      env.TELEGRAM_API_BASE_URL ??
+      'https://api.telegram.org',
+  );
   const requestTimeoutMs = parseBoundedInt(
     env.GUEST_GAME_BOT_CONSUMER_REQUEST_TIMEOUT_MS,
     defaultRequestTimeoutMs,
@@ -140,6 +147,7 @@ export function loadBotConsumerConfig(
     limit,
     dryRun,
     telegramToken,
+    telegramApiBaseUrl,
     requestTimeoutMs,
   };
 
@@ -364,7 +372,7 @@ async function sendTelegramDelivery(
   }
 
   const response = await postJson<TelegramSendMessageResponse>(
-    `https://api.telegram.org/bot${config.telegramToken}/sendMessage`,
+    `${config.telegramApiBaseUrl}/bot${config.telegramToken}/sendMessage`,
     {
       chat_id: chatId,
       text: formatTelegramText(delivery),

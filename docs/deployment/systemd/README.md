@@ -25,9 +25,10 @@ sudo systemctl daemon-reload
 
 В `/etc/leetplus/guest-game-bot-consumer.env` нужно заполнить:
 
-- `GUEST_GAME_BOT_CONSUMER_SYNC_TOKEN` - тот же service token, который защищает scheduled endpoints, или оставить пустым, если token уже передается как `SYNC_SERVICE_TOKEN` в окружении unit.
-- `GUEST_GAME_BOT_CONSUMER_TENANT_SLUG` или `GUEST_GAME_BOT_CONSUMER_TENANT_ID`.
+- `GUEST_GAME_BOT_CONSUMER_SYNC_TOKEN` - значение `SYNC_SERVICE_TOKEN` с основной LeetPlus VDS/API, не из Langame/1337. Этот token защищает `POST /guests/gamification/scheduled/deliveries/bot/pull` и `/ack`; если его еще нет на основной VDS, сгенерировать `openssl rand -hex 32` и прописать одинаковое значение в основном API как `SYNC_SERVICE_TOKEN`, а на edge/VDS consumer как `GUEST_GAME_BOT_CONSUMER_SYNC_TOKEN`.
+- `GUEST_GAME_BOT_CONSUMER_TENANT_SLUG` или `GUEST_GAME_BOT_CONSUMER_TENANT_ID` - значение из основной базы LeetPlus, таблица `Tenant`; обычно удобнее использовать `tenant.slug`.
 - `GUEST_GAME_BOT_CONSUMER_TELEGRAM_BOT_TOKEN`.
+- `GUEST_GAME_BOT_CONSUMER_TELEGRAM_API_BASE_URL` - `https://api.telegram.org` или base URL Bot API proxy, сохраняющий путь `/bot<TOKEN>/<method>`.
 
 ## Безопасный запуск
 
@@ -54,6 +55,7 @@ systemctl list-timers leetplus-guest-game-bot-consumer.timer
 ## Ограничения
 
 - Не коммитить реальный `/etc/leetplus/guest-game-bot-consumer.env`.
+- На Telegram edge VDS можно использовать тот же Bot API proxy/base URL, что и для `leetplus-telegram-edge.service`.
 - До подтвержденного MAX API-контракта оставлять `GUEST_GAME_BOT_CONSUMER_CHANNELS=TELEGRAM`; real-send для `MAX` в runner заблокирован.
 - Cadence задает systemd timer, поэтому `GUEST_GAME_BOT_CONSUMER_INTERVAL_MS` в env-шаблоне намеренно пустой.
 - Unit принудительно использует one-shot режим через `GUEST_GAME_BOT_CONSUMER_MAX_TICKS=1`, чтобы restart/deploy не создавал бесконечный процесс.

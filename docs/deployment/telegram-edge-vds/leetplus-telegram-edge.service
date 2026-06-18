@@ -1,0 +1,18 @@
+[Unit]
+Description=LeetPlus Telegram edge webhook adapter
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/admin/leetplus
+EnvironmentFile=/etc/leetplus/telegram-edge.env
+ExecStart=/usr/bin/env pnpm --filter api guest-game:telegram-edge
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

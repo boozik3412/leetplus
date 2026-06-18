@@ -8,6 +8,8 @@ export type Store = {
   city?: string | null;
   cityFiasId?: string | null;
   cityKladrId?: string | null;
+  latitude?: string | number | null;
+  longitude?: string | number | null;
   timeZone?: string | null;
   externalDomain?: string | null;
   externalClubId?: string | null;

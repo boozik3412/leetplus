@@ -90,6 +90,8 @@ describe('StoresService', () => {
         city: 'Екатеринбург',
         cityFiasId: null,
         cityKladrId: null,
+        latitude: null,
+        longitude: null,
         timeZone: 'Asia/Yekaterinburg',
         gamificationEnabled: false,
       },
@@ -112,6 +114,44 @@ describe('StoresService', () => {
       where: { id: 'store-1' },
       data: { gamificationEnabled: true },
     });
+  });
+
+  it('updates coordinates with comma decimals for game club geosearch', async () => {
+    prisma.store.findFirst.mockResolvedValue({
+      id: 'store-1',
+      name: 'Club A',
+    });
+    prisma.store.update.mockResolvedValue({
+      id: 'store-1',
+      latitude: '56.838011',
+      longitude: '60.597465',
+    });
+
+    await service.update(
+      'store-1',
+      { latitude: '56,838011', longitude: '60.597465' },
+      user,
+    );
+
+    expect(prisma.store.update).toHaveBeenCalledWith({
+      where: { id: 'store-1' },
+      data: {
+        latitude: 56.838011,
+        longitude: 60.597465,
+      },
+    });
+  });
+
+  it('rejects invalid coordinate values', async () => {
+    prisma.store.findFirst.mockResolvedValue({
+      id: 'store-1',
+      name: 'Club A',
+    });
+
+    await expect(
+      service.update('store-1', { latitude: '91' }, user),
+    ).rejects.toThrow('Широта должна быть числом от -90 до 90');
+    expect(prisma.store.update).not.toHaveBeenCalled();
   });
 
   it('archives store only after resolving it inside tenant', async () => {

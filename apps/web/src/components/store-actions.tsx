@@ -61,7 +61,7 @@ export function StoreCreateForm() {
       className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm"
     >
       <h2 className="text-base font-semibold">Новая торговая точка</h2>
-      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-8">
         <StoreInputs />
       </div>
 
@@ -106,8 +106,8 @@ export function StoreEditForm({ store }: { store: Store }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="grid min-w-[860px] gap-2">
-      <div className="grid gap-2 md:grid-cols-6">
+    <form onSubmit={handleSubmit} className="grid min-w-[1040px] gap-2">
+      <div className="grid gap-2 md:grid-cols-8">
         <StoreInputs store={store} />
       </div>
       <div className="flex items-center gap-3">
@@ -292,6 +292,22 @@ function StoreInputs({ store }: { store?: Store }) {
         title="Подставляется автоматически по городу"
         className="rounded-md border border-zinc-300 bg-zinc-50 px-3 py-2 text-sm text-zinc-600 outline-none"
       />
+      <input
+        name="latitude"
+        defaultValue={formatCoordinateValue(store?.latitude)}
+        inputMode="decimal"
+        placeholder="Широта"
+        title="От -90 до 90. Нужно для карты и поиска рядом в игровом модуле"
+        className="rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+      />
+      <input
+        name="longitude"
+        defaultValue={formatCoordinateValue(store?.longitude)}
+        inputMode="decimal"
+        placeholder="Долгота"
+        title="От -180 до 180. Нужно для карты и поиска рядом в игровом модуле"
+        className="rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+      />
       <input name="cityFiasId" type="hidden" value={cityFiasId} readOnly />
       <input name="cityKladrId" type="hidden" value={cityKladrId} readOnly />
       <label className="flex min-h-10 items-center gap-2 rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700">
@@ -326,6 +342,8 @@ async function submitStoreForm(
       city: optionalString(formData.get("city")) ?? null,
       cityFiasId: optionalString(formData.get("cityFiasId")) ?? null,
       cityKladrId: optionalString(formData.get("cityKladrId")) ?? null,
+      latitude: optionalString(formData.get("latitude")) ?? null,
+      longitude: optionalString(formData.get("longitude")) ?? null,
       timeZone: optionalString(formData.get("timeZone")) ?? null,
       gamificationEnabled: formData.get("gamificationEnabled") === "on",
     }),
@@ -335,4 +353,8 @@ async function submitStoreForm(
 function optionalString(value: FormDataEntryValue | null) {
   const stringValue = String(value ?? "").trim();
   return stringValue || undefined;
+}
+
+function formatCoordinateValue(value: Store["latitude"]) {
+  return value === null || value === undefined ? "" : String(value);
 }

@@ -89,6 +89,17 @@ export default async function StoresPage() {
                             ? "Квесты включены"
                             : "Квесты выключены"}
                         </p>
+                        <p
+                          className={
+                            hasCoordinates(store)
+                              ? "text-cyan-700"
+                              : "text-amber-700"
+                          }
+                        >
+                          {hasCoordinates(store)
+                            ? "Координаты для карты есть"
+                            : "Координаты для карты не указаны"}
+                        </p>
                       </div>
                     </td>
                     {canEditStores ? (
@@ -110,5 +121,17 @@ export default async function StoresPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+function hasCoordinates(store: {
+  latitude?: string | number | null;
+  longitude?: string | number | null;
+}) {
+  return (
+    store.latitude !== null &&
+    store.latitude !== undefined &&
+    store.longitude !== null &&
+    store.longitude !== undefined
   );
 }

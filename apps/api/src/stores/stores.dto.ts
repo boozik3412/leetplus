@@ -5,6 +5,8 @@ export type CreateStoreDto = {
   city?: string | null;
   cityFiasId?: string | null;
   cityKladrId?: string | null;
+  latitude?: number | string | null;
+  longitude?: number | string | null;
   timeZone?: string | null;
   gamificationEnabled?: boolean;
 };

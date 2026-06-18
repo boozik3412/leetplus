@@ -82,6 +82,13 @@ export class StoresService {
         city: location.city,
         cityFiasId: location.cityFiasId,
         cityKladrId: location.cityKladrId,
+        latitude: this.normalizeCoordinate(dto.latitude, -90, 90, 'Широта'),
+        longitude: this.normalizeCoordinate(
+          dto.longitude,
+          -180,
+          180,
+          'Долгота',
+        ),
         timeZone: location.timeZone,
         gamificationEnabled: this.normalizeBoolean(
           dto.gamificationEnabled,
@@ -167,6 +174,26 @@ export class StoresService {
               dto.cityFiasId,
               dto.cityKladrId,
             )
+          : {}),
+        ...(dto.latitude !== undefined
+          ? {
+              latitude: this.normalizeCoordinate(
+                dto.latitude,
+                -90,
+                90,
+                'Широта',
+              ),
+            }
+          : {}),
+        ...(dto.longitude !== undefined
+          ? {
+              longitude: this.normalizeCoordinate(
+                dto.longitude,
+                -180,
+                180,
+                'Долгота',
+              ),
+            }
           : {}),
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
         ...(dto.gamificationEnabled !== undefined
@@ -281,6 +308,34 @@ export class StoresService {
     }
 
     return value.trim() || null;
+  }
+
+  private normalizeCoordinate(
+    value: number | string | null | undefined,
+    min: number,
+    max: number,
+    label: string,
+  ) {
+    if (value === null || value === undefined) {
+      return null;
+    }
+
+    const normalized =
+      typeof value === 'string' ? value.trim().replace(',', '.') : value;
+
+    if (normalized === '') {
+      return null;
+    }
+
+    const coordinate = Number(normalized);
+
+    if (!Number.isFinite(coordinate) || coordinate < min || coordinate > max) {
+      throw new BadRequestException(
+        `${label} должна быть числом от ${min} до ${max}`,
+      );
+    }
+
+    return Math.round(coordinate * 1_000_000) / 1_000_000;
   }
 
   private normalizeBoolean(value: unknown, fallback: boolean) {

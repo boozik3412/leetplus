@@ -3742,6 +3742,7 @@ export class GuestGamificationService {
         details: otp.sms.details,
         note: otp.sms.note,
         nextAction: otp.sms.nextAction,
+        runbook: guestAuthFallbackRunbook,
       },
       {
         key: 'OTP_TELEGRAM',

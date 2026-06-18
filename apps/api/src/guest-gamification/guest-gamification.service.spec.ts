@@ -910,6 +910,11 @@ describe('GuestGamificationService', () => {
         ready: true,
         configured: true,
         enabled: true,
+        runbook: {
+          label: 'Runbook fallback-входа',
+          path: 'docs/deployment/guest-auth-fallbacks.md',
+          href: 'https://github.com/boozik3412/leetplus/blob/main/docs/deployment/guest-auth-fallbacks.md',
+        },
       });
       expect(sms.requiredEnv).toEqual(
         expect.arrayContaining([

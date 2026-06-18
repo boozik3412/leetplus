@@ -38,6 +38,8 @@
 
 - Готово: readiness `OTP_SMS` в Guest Game Hub теперь соответствует фактическому production-provider: карточка считает готовым SMS.ru `/sms/send` через `GUEST_PORTAL_OTP_SMS_RU_API_ID` или переиспользованный `GUEST_PORTAL_USER_CALL_SMS_RU_API_ID`, показывает provider/test-mode/generic fallback только как безопасные признаки и не раскрывает `api_id`, endpoint/token, raw phone или provider payload. Регрессионные тесты закрепляют отдельный SMS.ru ключ и reuse Callcheck `api_id`.
 
+- Готово: карточка `OTP_SMS` в Guest Game Hub получила ссылку на `docs/deployment/guest-auth-fallbacks.md`, чтобы staged/test-mode и live QA SMS-резерва запускались из того же runbook, что и остальные fallback-каналы, без раскрытия секретов.
+
 - Готово: на публичной главной странице и в левой колонке экранов входа/регистрации опубликованы компактные реквизиты владельца сайта для проверки оператором авторизационных SMS: ООО "ЛИТ", ОГРН 1231800017063, ИНН 1800006677, КПП 180001001.
 
 - Готово: batch pipeline в Guest Game Hub теперь раскрывает идемпотентные дубли. Если строка `DUPLICATE` пришла из `process.summary.idempotent=true`, UI показывает, что повтор обработан безопасно без новых XP/наград, и выводит idempotency key для QA.

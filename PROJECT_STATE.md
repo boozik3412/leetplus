@@ -81,6 +81,7 @@ Connected production Langame sources:
 
 ## Recent Work
 
+- Applied the production VDS `guest-game:bot-consumer` systemd setup in safe dry-run mode: `/etc/leetplus/guest-game-bot-consumer.env` exists with `SYNC_SERVICE_TOKEN`, tenant scope `demo`, Telegram channel, and `GUEST_GAME_BOT_CONSUMER_DRY_RUN=true`; the one-shot smoke run completed with zero pulled/sent/acked items, and the timer is enabled every 2 minutes. Real-send canary is intentionally still pending until the Telegram bot token is copied from the 1337 edge and `GUEST_GAME_BOT_CONSUMER_LIMIT=1` is used.
 - Pulled the production hotfix for Guest Game scheduled tenant filters into `main`: scheduled pipeline, scheduled delivery dispatch, and bot-consumer tenant lookup now omit empty `tenantId`/`tenantSlug` values instead of passing `null` into Prisma `where`. This removes the local VDS diff that was blocking auto-deploy from updating production to the public `/game/*` route fix.
 - Hardened the public Guest Game route proxy after production QA: `/game/*` is now treated as a public guest-game surface alongside `/play` and `/guest`, so `/game/auth`, `/game/clubs`, and `/game/app` do not depend on an employee session.
 - Added the Guest Game Hub `guests/logs` sync deeplink: pilot readiness actions now point to `/sync?includeGuestLogs=1`, and `/sync` preselects the extended `guests/logs` checkbox from that query parameter while keeping ordinary sync lightweight by default.

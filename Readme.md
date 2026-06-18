@@ -61,6 +61,8 @@ Payload: `phone`, `type`, `sum`, `comment`, где `type` может быть `b
 
 Готовые VDS-шаблоны для этого runner лежат в `docs/deployment/systemd`: env-example без секретов, one-shot `leetplus-guest-game-bot-consumer.service`, periodic `leetplus-guest-game-bot-consumer.timer` и runbook dry-run -> timer -> canary real-send. Реальный `/etc/leetplus/guest-game-bot-consumer.env` хранится только на VDS; шаблоны по умолчанию оставляют `GUEST_GAME_BOT_CONSUMER_DRY_RUN=true`, `GUEST_GAME_BOT_CONSUMER_MAX_TICKS=1` и канал `TELEGRAM`.
 
+Текущее production-состояние: на основной VDS service/timer уже установлены и timer включен в dry-run каждые 2 минуты. Smoke-run прошел без отправок и ack (`pulled=0`, `sent=0`, `acked=0`). Real-send canary остается выключенным до переноса Telegram bot token с edge 1337 и временного `GUEST_GAME_BOT_CONSUMER_LIMIT=1`.
+
 Guest Game Hub дополнительно защищает первый real-send: до первого сохраненного bot-consumer ack карточка `VDS bot-consumer` требует `GUEST_GAME_BOT_CONSUMER_LIMIT=1`, если `GUEST_GAME_BOT_CONSUMER_DRY_RUN=false`, и не показывает runner как готовый к real-send без canary-лимита.
 
 В Guest Game Hub блок `Outbox выдачи` дополнительно показывает `VDS bot-consumer`: API-visible режим runner, pending `READY_FOR_BOT` по Telegram/MAX, счетчики сохраненных ack `SENT/FAILED/BLOCKED`, последний ack, required env, следующий безопасный шаг и ссылку на runbook `docs/deployment/systemd`. Это наблюдаемость по сохраненным delivery/event и env-именам без токенов, raw phone, chat id, raw Telegram update или Langame payload.

@@ -1,5 +1,7 @@
 # LeetPlus Бэклог
 
+- Готово: VDS `guest-game:bot-consumer` применен на основной production VDS в безопасном dry-run режиме. Создан `/etc/leetplus/guest-game-bot-consumer.env` с `SYNC_SERVICE_TOKEN`, tenant scope `demo`, каналом `TELEGRAM`, `GUEST_GAME_BOT_CONSUMER_DRY_RUN=true`, установлены systemd service/timer из `docs/deployment/systemd`, one-shot smoke-run прошел с `pulled=0 sent=0 failed=0 blocked=0 skipped=0 acked=0 idempotentAcks=0`, timer включен раз в 2 минуты. Canary real-send остается следующим отдельным шагом после переноса Telegram bot token с edge 1337 и временного `GUEST_GAME_BOT_CONSUMER_LIMIT=1`.
+
 - Готово: серверный hotfix scheduled tenant filters забран в основной `main`. `runSnapshotPipelineScheduled`, `runDeliveryDispatchScheduled` и bot-consumer tenant lookup больше не передают `null` в Prisma `where` при пустом `tenantId`/`tenantSlug`, а regression-тест закрепляет пустой `{}` для общих scheduled-запусков и slug-only lookup для VDS bot-consumer. Это также убирает причину, по которой production auto-deploy застревал на старом commit из-за незакоммиченной серверной правки `guest-gamification.service.ts`.
 
 - Готово: production QA публичного игрового пути выявил, что `/game/clubs` без employee-cookie мог уходить в `/login?returnTo=/game/clubs`. Proxy теперь считает весь префикс `/game` публичным гостевым контуром, как `/play` и `/guest`, поэтому `/game/auth`, `/game/clubs` и `/game/app` не зависят от сотруднической авторизации.

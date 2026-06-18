@@ -289,11 +289,10 @@ export default async function StaffShiftRegulationsPage({
             </Link>
             <Link
               href="/staff/checklists/report"
-              title="История чек-листов"
-              aria-label="История чек-листов"
-              className="inline-flex size-11 items-center justify-center rounded-md border border-zinc-300 text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+              className="inline-flex h-11 min-w-44 items-center justify-center gap-2 rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
             >
               <ChecklistHistoryIcon className="size-5 shrink-0" />
+              <span>История чек-листов</span>
             </Link>
           </div>
         </header>

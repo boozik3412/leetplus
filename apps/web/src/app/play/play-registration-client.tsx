@@ -172,12 +172,9 @@ export function PlayRegistrationClient({
   const canEnterIncomingCallLast4 =
     incomingCallLast4?.delivery.status === "DEV_CODE" ||
     incomingCallLast4?.delivery.status === "SENT";
+  const isRedirectingGameAuth = isGameAuth && Boolean(portal);
 
   useEffect(() => {
-    if (isGameAuth) {
-      return;
-    }
-
     let isActive = true;
 
     async function loadActiveSession() {
@@ -191,9 +188,11 @@ export function PlayRegistrationClient({
         }
 
         if (response.status === 401) {
-          setActiveSessionState("empty");
-          setActiveSummary(null);
-          setActiveSessionMessage(null);
+          if (!isGameAuth) {
+            setActiveSessionState("empty");
+            setActiveSummary(null);
+            setActiveSessionMessage(null);
+          }
           return;
         }
 
@@ -201,11 +200,25 @@ export function PlayRegistrationClient({
           throw new Error(await readMessage(response));
         }
 
+        if (isGameAuth) {
+          openClubSelectionAfterAuth();
+          return;
+        }
+
         setActiveSummary((await response.json()) as GuestPortalGameSummary);
         setActiveSessionState("ready");
         setActiveSessionMessage(null);
       } catch (error) {
         if (!isActive) {
+          return;
+        }
+
+        if (isGameAuth) {
+          setMessage(
+            error instanceof Error
+              ? error.message
+              : "Не удалось проверить активную игровую сессию.",
+          );
           return;
         }
 
@@ -224,7 +237,7 @@ export function PlayRegistrationClient({
     return () => {
       isActive = false;
     };
-  }, [isGameAuth]);
+  }, [isGameAuth, openClubSelectionAfterAuth]);
 
   function selectClub(club: GuestPortalGamificationClub) {
     setSelectedClubId(club.id);
@@ -1168,7 +1181,9 @@ export function PlayRegistrationClient({
               >
                 {isGameAuth ? null : <SelectedClubSummary club={selectedClub} />}
 
-                {portal ? (
+                {isRedirectingGameAuth ? (
+                  <GameAuthRedirectSummary />
+                ) : portal ? (
                     <VerifiedSummary
                       canCheckLangameMatch={canUsePhoneAuth}
                       club={selectedClub}
@@ -2165,6 +2180,28 @@ function SelectedClubSummary({ club }: { club: GuestPortalGamificationClub }) {
             : "Бонусы через очередь"}
         </StatusPill>
       </div>
+    </div>
+  );
+}
+
+function GameAuthRedirectSummary() {
+  return (
+    <div className="rounded-lg border border-cyan-300/30 bg-cyan-300/[0.08] p-4">
+      <p className="text-xs font-bold uppercase text-cyan-200">
+        Вход подтвержден
+      </p>
+      <h3 className="mt-1 text-xl font-black text-white">
+        Открываем выбор клуба
+      </h3>
+      <p className="mt-2 text-sm leading-6 text-slate-300">
+        Сейчас покажем клубы, подключенные к LeetPlus Game.
+      </p>
+      <Link
+        className="mt-4 flex min-h-11 items-center justify-center rounded-lg bg-cyan-300 px-4 text-sm font-black text-slate-950 transition hover:bg-cyan-200"
+        href="/game/clubs"
+      >
+        Перейти к выбору клуба
+      </Link>
     </div>
   );
 }

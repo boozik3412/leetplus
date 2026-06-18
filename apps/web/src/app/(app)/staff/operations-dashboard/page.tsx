@@ -234,27 +234,10 @@ export default async function StaffOperationsDashboardPage({
         <BusinessSnapshotGate
           snapshot={staffSnapshot}
           type="STAFF_SHIFTS_CASH"
+          compactPeriodLabel={staffControlPeriodLabel}
+          compactPeriodBadge="Полные сутки"
+          compact
         />
-
-        <section className="mt-6 rounded-lg border border-emerald-200 bg-emerald-50/80 p-4 text-emerald-950 dark:border-emerald-900/70 dark:bg-emerald-500/10 dark:text-emerald-100">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <p className="text-xs font-bold uppercase text-emerald-700 dark:text-emerald-300">
-                Период staff-control
-              </p>
-              <p className="mt-1 text-xl font-semibold tracking-tight">
-                {staffControlPeriodLabel}
-              </p>
-              <p className="mt-1 text-sm text-emerald-800/80 dark:text-emerald-100/75">
-                По умолчанию берется текущий месяц без текущего неполного дня:
-                только полностью закрытые сутки.
-              </p>
-            </div>
-            <div className="inline-flex w-fit rounded-full bg-white px-3 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-200 dark:ring-emerald-800">
-              Полные сутки
-            </div>
-          </div>
-        </section>
 
         <form className="mt-6 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
           <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-6">

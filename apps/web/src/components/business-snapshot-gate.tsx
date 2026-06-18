@@ -8,6 +8,9 @@ import type {
 type BusinessSnapshotGateProps = {
   snapshot: BusinessSnapshotTypeStatus | null;
   type: BusinessSnapshotType;
+  compact?: boolean;
+  compactPeriodLabel?: string;
+  compactPeriodBadge?: string;
 };
 
 const statusConfig: Record<
@@ -120,12 +123,60 @@ function sourceEntries(snapshot: BusinessSnapshotTypeStatus | null) {
 export function BusinessSnapshotGate({
   snapshot,
   type,
+  compact = false,
+  compactPeriodLabel,
+  compactPeriodBadge,
 }: BusinessSnapshotGateProps) {
   const status = snapshot?.status ?? "EMPTY";
   const config = statusConfig[status];
   const latest = snapshot?.latestSuccessfulRun ?? null;
   const latestRunError = snapshot?.latestRun?.errorMessage ?? null;
   const sources = sourceEntries(snapshot);
+  const periodLabel = `${formatDate(latest?.periodFrom)} - ${formatDate(
+    latest?.periodTo,
+  )}`;
+
+  if (compact) {
+    return (
+      <section
+        className={[
+          "mt-6 rounded-lg border px-4 py-2.5 shadow-sm",
+          config.className,
+        ].join(" ")}
+      >
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+            <span className="flex items-center gap-2 font-semibold">
+              <span className="h-2.5 w-2.5 rounded-full bg-current" />
+              {typeLabels[type]}
+            </span>
+            <span className="rounded-full bg-white/70 px-2 py-0.5 text-xs font-semibold dark:bg-white/10">
+              {config.label}
+            </span>
+            <span className="text-xs font-medium opacity-80">
+              Snapshot: {periodLabel}
+            </span>
+            {compactPeriodLabel ? (
+              <span className="text-xs font-medium opacity-80">
+                Staff-control: {compactPeriodLabel}
+              </span>
+            ) : null}
+            {compactPeriodBadge ? (
+              <span className="rounded-full bg-white/70 px-2 py-0.5 text-xs font-semibold dark:bg-white/10">
+                {compactPeriodBadge}
+              </span>
+            ) : null}
+          </div>
+          <Link
+            href="/sync"
+            className="inline-flex h-8 shrink-0 items-center justify-center rounded-md border border-current/20 bg-white/70 px-3 text-xs font-semibold transition hover:bg-white dark:bg-white/10 dark:hover:bg-white/15"
+          >
+            Синхронизация
+          </Link>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section

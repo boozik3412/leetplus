@@ -273,6 +273,14 @@ export default async function StaffShiftRegulationsPage({
                 Новый чек-лист
               </Link>
             ) : null}
+            {canManageRegulations ? (
+              <Link
+                href="/staff/checklists"
+                className="inline-flex h-11 min-w-44 items-center justify-center rounded-md border border-emerald-200 bg-emerald-50 px-4 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100 dark:hover:bg-emerald-500/15"
+              >
+                Открыть чек-листы
+              </Link>
+            ) : null}
             <Link
               href={canManageRegulations ? "/staff/tasks" : "/staff/checklists"}
               className="inline-flex h-11 min-w-44 items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"

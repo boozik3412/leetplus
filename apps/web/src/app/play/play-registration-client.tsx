@@ -125,6 +125,9 @@ export function PlayRegistrationClient({
   const openClubSelectionAfterAuth = useCallback(() => {
     router.replace("/game/clubs");
   }, [router]);
+  const openActiveGameAfterAuth = useCallback(() => {
+    router.replace("/play/game");
+  }, [router]);
 
   const visibleClubs = useMemo(() => {
     const needle = normalizeSearch(query);
@@ -201,7 +204,7 @@ export function PlayRegistrationClient({
         }
 
         if (isGameAuth) {
-          openClubSelectionAfterAuth();
+          openActiveGameAfterAuth();
           return;
         }
 
@@ -237,7 +240,7 @@ export function PlayRegistrationClient({
     return () => {
       isActive = false;
     };
-  }, [isGameAuth, openClubSelectionAfterAuth]);
+  }, [isGameAuth, openActiveGameAfterAuth]);
 
   function selectClub(club: GuestPortalGamificationClub) {
     setSelectedClubId(club.id);
@@ -1186,7 +1189,7 @@ export function PlayRegistrationClient({
                 ) : portal ? (
                     <VerifiedSummary
                       canCheckLangameMatch={canUsePhoneAuth}
-                      club={selectedClub}
+                      continueHref={isGameAuth ? "/game/clubs" : "/play/game"}
                       isCheckingLangame={isCheckingLangame}
                       langameMatch={langameMatch}
                       localGameMatch={localGameMatch}
@@ -2207,14 +2210,14 @@ function GameAuthRedirectSummary() {
 }
 
 function VerifiedSummary({
-  club,
+  continueHref,
   portal,
   langameMatch,
   localGameMatch,
   isCheckingLangame,
   canCheckLangameMatch,
 }: {
-  club: GuestPortalGamificationClub;
+  continueHref: string;
   portal: GuestPortalPayload;
   langameMatch: GuestPortalLangameMatchResponse | null;
   localGameMatch: GuestPortalLocalGameProfileMatch | null;
@@ -2396,17 +2399,10 @@ function VerifiedSummary({
       ) : null}
 
       <Link
-        className="flex min-h-11 items-center justify-center rounded-lg border border-emerald-300/40 px-4 text-sm font-black text-emerald-100 transition hover:border-emerald-300"
-        href="/play/game"
-      >
-        Открыть игру
-      </Link>
-
-      <Link
         className="flex min-h-11 items-center justify-center rounded-lg bg-emerald-300 px-4 text-sm font-black text-slate-950 transition hover:bg-emerald-200"
-        href={club.links.guestPortalPath}
+        href={continueHref}
       >
-        Открыть кабинет клуба
+        Продолжить
       </Link>
     </div>
   );

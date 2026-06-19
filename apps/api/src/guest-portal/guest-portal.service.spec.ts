@@ -1231,6 +1231,12 @@ describe('GuestPortalService', () => {
         radiusApplied: false,
         totalBeforeRadius: 2,
         hiddenWithoutCoordinates: 0,
+        coordinates: {
+          total: 2,
+          ready: 1,
+          missing: 1,
+          readyPercent: 50,
+        },
       });
       expect(directory.verification).toMatchObject({
         recommendedChannel: 'TELEGRAM_BOT',
@@ -1300,6 +1306,12 @@ describe('GuestPortalService', () => {
         radiusApplied: true,
         totalBeforeRadius: 2,
         hiddenWithoutCoordinates: 1,
+        coordinates: {
+          total: 2,
+          ready: 1,
+          missing: 1,
+          readyPercent: 50,
+        },
       });
       expect(nearbyDirectory.clubs).toHaveLength(1);
       expect(nearbyDirectory.clubs[0].id).toBe('leet:club-1337');

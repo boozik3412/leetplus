@@ -29,6 +29,12 @@ export type GuestPortalGamificationClubDirectory = {
     radiusApplied: boolean;
     totalBeforeRadius: number;
     hiddenWithoutCoordinates: number;
+    coordinates: {
+      total: number;
+      ready: number;
+      missing: number;
+      readyPercent: number;
+    };
   };
   clubs: GuestPortalGamificationClub[];
 };

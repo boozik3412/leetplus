@@ -333,6 +333,12 @@ export type GuestPortalGamificationClubDirectory = {
     radiusApplied: boolean;
     totalBeforeRadius: number;
     hiddenWithoutCoordinates: number;
+    coordinates: {
+      total: number;
+      ready: number;
+      missing: number;
+      readyPercent: number;
+    };
   };
   clubs: Array<{
     id: string;
@@ -1452,6 +1458,15 @@ export class GuestPortalService {
     const hiddenWithoutCoordinates = radiusApplied
       ? allClubs.filter((club) => club.location.distanceKm === null).length
       : 0;
+    const coordinatesReady = allClubs.filter(
+      (club) => club.location.coordinatesReady,
+    ).length;
+    const coordinatesTotal = allClubs.length;
+    const coordinatesMissing = Math.max(coordinatesTotal - coordinatesReady, 0);
+    const coordinatesReadyPercent =
+      coordinatesTotal > 0
+        ? Math.round((coordinatesReady / coordinatesTotal) * 100)
+        : 0;
 
     return {
       updatedAt: new Date().toISOString(),
@@ -1464,6 +1479,12 @@ export class GuestPortalService {
         radiusApplied,
         totalBeforeRadius: allClubs.length,
         hiddenWithoutCoordinates,
+        coordinates: {
+          total: coordinatesTotal,
+          ready: coordinatesReady,
+          missing: coordinatesMissing,
+          readyPercent: coordinatesReadyPercent,
+        },
       },
       clubs,
     };

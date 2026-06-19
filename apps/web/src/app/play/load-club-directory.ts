@@ -16,6 +16,12 @@ const emptyDirectory: GuestPortalGamificationClubDirectory = {
     radiusApplied: false,
     totalBeforeRadius: 0,
     hiddenWithoutCoordinates: 0,
+    coordinates: {
+      total: 0,
+      ready: 0,
+      missing: 0,
+      readyPercent: 0,
+    },
   },
   clubs: [],
 };

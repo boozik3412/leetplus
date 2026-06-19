@@ -113,6 +113,7 @@ export function GameClubSelectClient({
     null;
   const currentSessionClubId = summary ? clubIdFromSummary(summary) : null;
   const activeFilterLabel = cityFilter || query.trim() || "Все города";
+  const coordinateReadiness = coordinateReadinessLabel(directory);
 
   async function selectClub(club: GuestPortalGamificationClub) {
     setSelectedClubId(club.id);
@@ -341,7 +342,12 @@ export function GameClubSelectClient({
                       : "очередь"
                   }
                 />
+                <SmallRow label="Геопоиск" value={coordinateReadiness.status} />
               </div>
+            </SideBlock>
+            <SideBlock label="Карта и поиск рядом">
+              <strong>{coordinateReadiness.title}</strong>
+              <p className="lp-club-side-note">{coordinateReadiness.note}</p>
             </SideBlock>
             <SideBlock label="Игрок">
               <strong>
@@ -542,6 +548,50 @@ function normalizeSearch(value: string | null | undefined) {
 
 function formatClubLocation(club: GuestPortalGamificationClub) {
   return [club.store.city, club.store.address].filter(Boolean).join(" · ");
+}
+
+function coordinateReadinessLabel(
+  directory: GuestPortalGamificationClubDirectory,
+) {
+  const coordinates = directory.search.coordinates;
+
+  if (coordinates.total === 0) {
+    return {
+      status: "нет клубов",
+      title: "Клубы не найдены",
+      note: "Подключите клубы к LeetPlus Game, чтобы открыть выбор площадки.",
+    };
+  }
+
+  if (coordinates.missing === 0) {
+    return {
+      status: "готов",
+      title: "Геопоиск готов",
+      note: `${formatNumber(coordinates.ready)} из ${formatNumber(
+        coordinates.total,
+      )} клубов имеют координаты.`,
+    };
+  }
+
+  if (coordinates.ready === 0) {
+    return {
+      status: "нет координат",
+      title: "Координаты не заполнены",
+      note: `Заполните координаты для ${formatNumber(
+        coordinates.missing,
+      )} клубов в /stores, чтобы заработал поиск рядом.`,
+    };
+  }
+
+  return {
+    status: `${coordinates.readyPercent}%`,
+    title: "Геопоиск частично готов",
+    note: `${formatNumber(coordinates.ready)} из ${formatNumber(
+      coordinates.total,
+    )} клубов с координатами; без координат: ${formatNumber(
+      coordinates.missing,
+    )}.`,
+  };
 }
 
 function distanceLabel(club: GuestPortalGamificationClub) {
@@ -1222,6 +1272,12 @@ function ClubSelectStyles() {
   color: var(--text);
   font-size: 20px;
   line-height: 1.05;
+}
+.lp-club-side-note {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
 }
 .lp-club-progress {
   height: 9px;

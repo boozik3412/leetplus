@@ -332,8 +332,21 @@ export type GuestGameDryRunRule = {
   selectedRewardLabel: string | null;
   xpDelta: number;
   budgetAmount: number | null;
+  progress: GuestGameDryRunProgress | null;
   reasons: string[];
   blockers: string[];
+};
+
+export type GuestGameDryRunProgress = {
+  applicable: boolean;
+  aggregation: "count" | "sum" | "duration" | "distinctDays" | "exists";
+  current: number;
+  target: number;
+  percent: number;
+  completed: boolean;
+  matchedEvents: number;
+  unit: string | null;
+  windowDays: number | null;
 };
 
 export type GuestGameDryRunResult = {
@@ -355,6 +368,13 @@ export type GuestGameDryRunResult = {
     tariffPeriodId: string | null;
     tariffTypeId: string | null;
     guestLogType: string | null;
+    productId: string | null;
+    externalProductId: string | null;
+    categoryId: string | null;
+    productName: string | null;
+    categoryName: string | null;
+    supplierName: string | null;
+    quantity: number;
   };
   summary: {
     checkedRules: number;

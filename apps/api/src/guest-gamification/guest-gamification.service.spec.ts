@@ -349,6 +349,13 @@ function dryRunResult(
       tariffPeriodId: null,
       tariffTypeId: null,
       guestLogType: null,
+      productId: null,
+      externalProductId: null,
+      categoryId: null,
+      productName: null,
+      categoryName: null,
+      supplierName: null,
+      quantity: null,
     },
     summary: {
       checkedRules: 1,
@@ -371,6 +378,7 @@ function dryRunResult(
         manualApprovalRequired: false,
         xpDelta: 30,
         budgetAmount: null,
+        progress: null,
         reasons: [],
         blockers: [],
       },
@@ -2696,6 +2704,117 @@ describe('GuestGamificationService', () => {
       expect(prisma.guestGameEvent.create).not.toHaveBeenCalled();
       expect(prisma.guestGameReward.create).not.toHaveBeenCalled();
       expect(langameClient.postEndpoint).not.toHaveBeenCalled();
+    });
+
+    it('blocks a mission until the configured progress metric reaches its target', async () => {
+      const { service } = createService();
+
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([
+        activeMission({
+          triggerKind: 'CHECK_IN',
+          progressTarget: 3,
+          progressUnit: 'чекин',
+          conditions: {
+            windowDays: 7,
+            metric: {
+              aggregation: 'count',
+              eventTypes: ['CHECK_IN'],
+              windowDays: 7,
+            },
+          },
+        }),
+      ]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunProgressEvents').mockResolvedValue([
+        {
+          eventType: 'CHECK_IN',
+          occurredAt: new Date('2026-06-09T10:00:00.000Z'),
+          storeId: null,
+        },
+      ]);
+
+      const result = await service.dryRun(user, {
+        eventType: 'CHECK_IN',
+        occurredAt: isoNow,
+      });
+
+      expect(result.rules[0]).toMatchObject({
+        eligible: false,
+        progress: {
+          applicable: true,
+          current: 2,
+          target: 3,
+          completed: false,
+        },
+      });
+      expect(result.summary).toMatchObject({
+        eligibleRules: 0,
+        blockedRules: 1,
+      });
+    });
+
+    it('makes an aggregated mission eligible on the event that reaches target', async () => {
+      const { service } = createService();
+
+      jest
+        .spyOn(service as any, 'resolveDryRunProfile')
+        .mockResolvedValue(profileFixture());
+      jest.spyOn(service, 'getLootBoxes').mockResolvedValue([]);
+      jest.spyOn(service, 'getMissions').mockResolvedValue([
+        activeMission({
+          triggerKind: 'CHECK_IN',
+          progressTarget: 3,
+          progressUnit: 'чекин',
+          conditions: {
+            windowDays: 7,
+            metric: {
+              aggregation: 'count',
+              eventTypes: ['CHECK_IN'],
+              windowDays: 7,
+            },
+          },
+        }),
+      ]);
+      jest.spyOn(service, 'getSeasons').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunRewards').mockResolvedValue([]);
+      jest.spyOn(service as any, 'getDryRunProgressEvents').mockResolvedValue([
+        {
+          eventType: 'CHECK_IN',
+          occurredAt: new Date('2026-06-08T10:00:00.000Z'),
+          storeId: null,
+        },
+        {
+          eventType: 'CHECK_IN',
+          occurredAt: new Date('2026-06-09T10:00:00.000Z'),
+          storeId: null,
+        },
+      ]);
+
+      const result = await service.dryRun(user, {
+        eventType: 'CHECK_IN',
+        occurredAt: isoNow,
+      });
+
+      expect(result.rules[0]).toMatchObject({
+        eligible: true,
+        progress: {
+          applicable: true,
+          current: 3,
+          target: 3,
+          completed: true,
+        },
+      });
+      expect(result.summary).toMatchObject({
+        eligibleRules: 1,
+        blockedRules: 0,
+        estimatedRewardAmount: 75,
+        projectedXpDelta: 40,
+      });
     });
   });
 

@@ -164,6 +164,13 @@ type MissionForm = {
   tariffTypeId: string;
   guestLogTypes: string;
   blockedGuestLogTypes: string;
+  metricAggregation: string;
+  metricEventTypes: string;
+  metricHours: string;
+  metricProductIds: string;
+  metricExternalProductIds: string;
+  metricCategoryIds: string;
+  metricCategoryNames: string;
   windowDays: string;
   weekdaysOnly: boolean;
   minSessionMinutes: string;
@@ -265,6 +272,13 @@ type DryRunForm = {
   tariffPeriodId: string;
   tariffTypeId: string;
   guestLogType: string;
+  productId: string;
+  externalProductId: string;
+  categoryId: string;
+  productName: string;
+  categoryName: string;
+  supplierName: string;
+  quantity: string;
   sessionMinutes: string;
   spendAmount: string;
   sourceFactId: string;
@@ -468,6 +482,13 @@ const defaultMissionForm: MissionForm = {
   tariffTypeId: "",
   guestLogTypes: "",
   blockedGuestLogTypes: "",
+  metricAggregation: "count",
+  metricEventTypes: "",
+  metricHours: "",
+  metricProductIds: "",
+  metricExternalProductIds: "",
+  metricCategoryIds: "",
+  metricCategoryNames: "",
   windowDays: "7",
   weekdaysOnly: true,
   minSessionMinutes: "90",
@@ -609,6 +630,13 @@ const defaultDryRunForm: DryRunForm = {
   tariffPeriodId: "",
   tariffTypeId: "",
   guestLogType: "",
+  productId: "",
+  externalProductId: "",
+  categoryId: "",
+  productName: "",
+  categoryName: "",
+  supplierName: "",
+  quantity: "",
   sessionMinutes: "120",
   spendAmount: "0",
   ...emptyDryRunSource,
@@ -1003,6 +1031,13 @@ export function GuestGamificationPanel({
           tariffPeriodId: nullable(dryRunForm.tariffPeriodId),
           tariffTypeId: nullable(dryRunForm.tariffTypeId),
           guestLogType: nullable(dryRunForm.guestLogType),
+          productId: nullable(dryRunForm.productId),
+          externalProductId: nullable(dryRunForm.externalProductId),
+          categoryId: nullable(dryRunForm.categoryId),
+          productName: nullable(dryRunForm.productName),
+          categoryName: nullable(dryRunForm.categoryName),
+          supplierName: nullable(dryRunForm.supplierName),
+          quantity: dryRunForm.quantity,
           sessionMinutes: dryRunForm.sessionMinutes,
           spendAmount: dryRunForm.spendAmount,
         },
@@ -1034,6 +1069,13 @@ export function GuestGamificationPanel({
           tariffPeriodId: nullable(dryRunForm.tariffPeriodId),
           tariffTypeId: nullable(dryRunForm.tariffTypeId),
           guestLogType: nullable(dryRunForm.guestLogType),
+          productId: nullable(dryRunForm.productId),
+          externalProductId: nullable(dryRunForm.externalProductId),
+          categoryId: nullable(dryRunForm.categoryId),
+          productName: nullable(dryRunForm.productName),
+          categoryName: nullable(dryRunForm.categoryName),
+          supplierName: nullable(dryRunForm.supplierName),
+          quantity: dryRunForm.quantity,
           sessionMinutes: dryRunForm.sessionMinutes,
           spendAmount: dryRunForm.spendAmount,
           sourceFactId: nullable(dryRunForm.sourceFactId),
@@ -2035,6 +2077,75 @@ function DryRunTab({
               />
             </label>
           </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 lg:col-span-3 lg:grid-cols-4">
+            <label className="space-y-1 text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+              Название товара
+              <input
+                className={fieldClass}
+                placeholder="Например: энергетик"
+                value={form.productName}
+                onChange={(event) => update("productName", event.target.value)}
+              />
+            </label>
+            <label className="space-y-1 text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+              Категория товара
+              <input
+                className={fieldClass}
+                placeholder="Бар, напитки"
+                value={form.categoryName}
+                onChange={(event) => update("categoryName", event.target.value)}
+              />
+            </label>
+            <label className="space-y-1 text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+              ID товара
+              <input
+                className={fieldClass}
+                placeholder="productId"
+                value={form.productId}
+                onChange={(event) => update("productId", event.target.value)}
+              />
+            </label>
+            <label className="space-y-1 text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+              Внешний ID товара
+              <input
+                className={fieldClass}
+                placeholder="Langame id"
+                value={form.externalProductId}
+                onChange={(event) =>
+                  update("externalProductId", event.target.value)
+                }
+              />
+            </label>
+            <label className="space-y-1 text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+              ID категории
+              <input
+                className={fieldClass}
+                placeholder="categoryId"
+                value={form.categoryId}
+                onChange={(event) => update("categoryId", event.target.value)}
+              />
+            </label>
+            <label className="space-y-1 text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+              Поставщик
+              <input
+                className={fieldClass}
+                placeholder="supplier"
+                value={form.supplierName}
+                onChange={(event) => update("supplierName", event.target.value)}
+              />
+            </label>
+            <label className="space-y-1 text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+              Количество
+              <input
+                className={fieldClass}
+                type="number"
+                min="0"
+                value={form.quantity}
+                onChange={(event) => update("quantity", event.target.value)}
+              />
+            </label>
+          </div>
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -2475,6 +2586,30 @@ function DryRunRuleCard({ rule }: { rule: GuestGameDryRunResult["rules"][number]
           +{rule.xpDelta}
         </div>
       </div>
+
+      {rule.progress?.applicable ? (
+        <div className="mt-3 rounded-md border border-cyan-100 bg-cyan-50/70 p-3 dark:border-cyan-900/50 dark:bg-cyan-950/20">
+          <div className="flex items-center justify-between gap-3 text-xs font-bold uppercase text-cyan-800 dark:text-cyan-100">
+            <span>Прогресс</span>
+            <span>
+              {rule.progress.current}/{rule.progress.target}
+              {rule.progress.unit ? ` ${rule.progress.unit}` : ""}
+            </span>
+          </div>
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-white dark:bg-zinc-900">
+            <div
+              className="h-full rounded-full bg-cyan-500"
+              style={{ width: `${rule.progress.percent}%` }}
+            />
+          </div>
+          <p className="mt-2 text-xs text-cyan-900/70 dark:text-cyan-100/70">
+            Событий учтено: {rule.progress.matchedEvents}
+            {rule.progress.windowDays
+              ? ` за ${rule.progress.windowDays} дн.`
+              : ""}
+          </p>
+        </div>
+      ) : null}
 
       {rule.blockers.length ? (
         <div className="mt-3 space-y-1">
@@ -5789,6 +5924,7 @@ function MissionsTab({
             packetModeLabel(stringRule(item.conditions, "packetMode", "ANY")),
             tariffRuleSummary(item.conditions),
             guestLogRuleSummary(item.conditions, item.antiFraudRules),
+            missionMetricSummary(item.conditions),
             questRuleSummary(item.conditions),
             `${item.progressTarget ?? 1} ${item.progressUnit ?? "шаг"}`,
             formatMoney(item.budgetAmount ?? 0),
@@ -6566,6 +6702,90 @@ function MissionBusinessRules({
         catalog={guestLogCatalog}
         onChange={onChange}
       />
+      <div className="rounded-lg border border-zinc-200 bg-white/70 p-3 dark:border-zinc-800 dark:bg-zinc-950/60">
+        <p className="text-sm font-semibold text-zinc-950 dark:text-white">
+          Метрика прогресса
+        </p>
+        <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+          Система считает прогресс по сохраненным фактам гостя: чекины, сессии,
+          пополнения, покупки бара и рефералы.
+        </p>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <Field label="Как считать">
+            <select
+              className={fieldClass}
+              value={form.metricAggregation}
+              onChange={(event) =>
+                onChange({ metricAggregation: event.target.value })
+              }
+            >
+              <option value="count">Количество действий</option>
+              <option value="sum">Сумма, руб</option>
+              <option value="duration">Минуты игры</option>
+              <option value="distinctDays">Уникальные дни</option>
+              <option value="exists">Факт события</option>
+            </select>
+          </Field>
+          <Field label="События">
+            <input
+              className={fieldClass}
+              placeholder="Например: CHECK_IN, SESSION_START"
+              value={form.metricEventTypes}
+              onChange={(event) =>
+                onChange({ metricEventTypes: event.target.value })
+              }
+            />
+          </Field>
+          <Field label="Окна времени">
+            <input
+              className={fieldClass}
+              placeholder="22:00-06:00"
+              value={form.metricHours}
+              onChange={(event) => onChange({ metricHours: event.target.value })}
+            />
+          </Field>
+          <Field label="Категории товара">
+            <input
+              className={fieldClass}
+              placeholder="Бар, Напитки"
+              value={form.metricCategoryNames}
+              onChange={(event) =>
+                onChange({ metricCategoryNames: event.target.value })
+              }
+            />
+          </Field>
+          <Field label="ID категорий">
+            <input
+              className={fieldClass}
+              placeholder="Внутренние categoryId"
+              value={form.metricCategoryIds}
+              onChange={(event) =>
+                onChange({ metricCategoryIds: event.target.value })
+              }
+            />
+          </Field>
+          <Field label="ID товаров">
+            <input
+              className={fieldClass}
+              placeholder="Внутренние productId"
+              value={form.metricProductIds}
+              onChange={(event) =>
+                onChange({ metricProductIds: event.target.value })
+              }
+            />
+          </Field>
+          <Field label="Внешние ID товаров">
+            <input
+              className={fieldClass}
+              placeholder="Langame goods/product id"
+              value={form.metricExternalProductIds}
+              onChange={(event) =>
+                onChange({ metricExternalProductIds: event.target.value })
+              }
+            />
+          </Field>
+        </div>
+      </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Окно выполнения, дней">
           <input
@@ -8115,6 +8335,23 @@ function missionToForm(mission: GuestGameMission): MissionForm {
       mission.antiFraudRules,
       "blockedGuestLogTypes",
     ),
+    metricAggregation: stringRule(
+      metricRule(mission.conditions),
+      "aggregation",
+      "count",
+    ),
+    metricEventTypes: stringListRule(metricRule(mission.conditions), "eventTypes"),
+    metricHours: stringListRule(metricRule(mission.conditions), "hours"),
+    metricProductIds: stringListRule(metricRule(mission.conditions), "productIds"),
+    metricExternalProductIds: stringListRule(
+      metricRule(mission.conditions),
+      "externalProductIds",
+    ),
+    metricCategoryIds: stringListRule(metricRule(mission.conditions), "categoryIds"),
+    metricCategoryNames: stringListRule(
+      metricRule(mission.conditions),
+      "categoryNames",
+    ),
     windowDays: numberRule(mission.conditions, "windowDays", "7"),
     weekdaysOnly: booleanRule(mission.conditions, "weekdaysOnly", true),
     minSessionMinutes: numberRule(mission.conditions, "minSessionMinutes", "90"),
@@ -8369,9 +8606,21 @@ function buildLootBoxAntiFraudRules(form: LootBoxForm) {
 
 function buildMissionConditions(form: MissionForm) {
   const questSteps = buildMissionQuestSteps(form);
+  const metric = {
+    aggregation: form.metricAggregation || "count",
+    eventTypes: csvList(form.metricEventTypes),
+    hours: csvList(form.metricHours),
+    productIds: csvList(form.metricProductIds),
+    externalProductIds: csvList(form.metricExternalProductIds),
+    categoryIds: csvList(form.metricCategoryIds),
+    categoryNames: csvList(form.metricCategoryNames),
+    target: optionalNumber(form.progressTarget),
+    windowDays: optionalNumber(form.windowDays),
+  };
 
   return {
     source: "business_controls",
+    metric,
     windowDays: optionalNumber(form.windowDays),
     weekdaysOnly: form.weekdaysOnly,
     sessionType: nullable(form.sessionType),
@@ -8508,6 +8757,11 @@ function arrayRule(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
+function metricRule(value: unknown) {
+  const record = asRecord(value);
+  return asRecord(record.metric ?? record.progressMetric);
+}
+
 function numberRule(value: unknown, key: string, fallback: string) {
   const raw = asRecord(value)[key];
   if (typeof raw === "number" && Number.isFinite(raw)) {
@@ -8624,6 +8878,23 @@ function missionQuestStepTitle(value: unknown, index: number, fallback: string) 
 function questRuleSummary(value: unknown) {
   const steps = missionQuestSteps(value);
   return steps.length ? `квест: ${steps.length} шага` : "один шаг";
+}
+
+function missionMetricSummary(value: unknown) {
+  const metric = metricRule(value);
+  const aggregation = stringRule(metric, "aggregation", "count");
+  const labels: Record<string, string> = {
+    count: "счетчик",
+    sum: "сумма",
+    duration: "минуты",
+    distinctDays: "дни",
+    exists: "факт",
+  };
+  const eventTypes = stringListRule(metric, "eventTypes");
+
+  return eventTypes
+    ? `${labels[aggregation] ?? aggregation}: ${eventTypes}`
+    : labels[aggregation] ?? aggregation;
 }
 
 function booleanRule(value: unknown, key: string, fallback: boolean) {

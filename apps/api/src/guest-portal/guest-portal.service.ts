@@ -31,6 +31,10 @@ import {
   GuestGamificationService,
   type GuestGameCheckInResult,
 } from '../guest-gamification/guest-gamification.service';
+import {
+  evaluateGuestGameProgress,
+  type GuestGameProgressEvent,
+} from '../guest-gamification/guest-game-progress';
 import { LangameSettingsService } from '../integrations/langame-settings.service';
 import type {
   LangameGuestDetailsPortalResult,
@@ -5890,9 +5894,13 @@ export class GuestPortalService {
     profile: { id: string } | null,
     missions: Array<{
       id: string;
+      triggerKind: string;
+      conditions: Prisma.JsonValue;
+      storeIds: Prisma.JsonValue | null;
       periodFrom: Date | null;
       periodTo: Date | null;
       progressTarget: number | null;
+      progressUnit: string | null;
     }>,
   ): Promise<Map<string, GuestPortalMissionProgress>> {
     if ((!guest && !profile) || missions.length === 0) {
@@ -5916,15 +5924,15 @@ export class GuestPortalService {
       this.prisma.guestGameEvent.findMany({
         where: {
           tenantId,
-          missionId: { in: missionIds },
           OR: eventScope,
         },
         select: {
-          missionId: true,
           eventType: true,
-          source: true,
           occurredAt: true,
+          payload: true,
         },
+        orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
+        take: 1000,
       }),
       this.prisma.guestGameReward.findMany({
         where: {
@@ -5940,21 +5948,8 @@ export class GuestPortalService {
       }),
     ]);
 
-    const eventCounts = new Map<string, number>();
+    const progressEvents = eventRows.map(portalEventToProgressEvent);
     const rewardCounts = new Map<string, number>();
-
-    eventRows.forEach((row) => {
-      if (!row.missionId || !missionProgressEvent(row)) {
-        return;
-      }
-
-      const mission = missionById.get(row.missionId);
-      if (!mission || !dateWithinMission(row.occurredAt, mission)) {
-        return;
-      }
-
-      eventCounts.set(row.missionId, (eventCounts.get(row.missionId) ?? 0) + 1);
-    });
 
     rewardRows.forEach((row) => {
       if (!row.missionId) {
@@ -5979,8 +5974,21 @@ export class GuestPortalService {
         typeof mission.progressTarget === 'number' && mission.progressTarget > 0
           ? mission.progressTarget
           : 1;
+      const metricProgress = evaluateGuestGameProgress(
+        {
+          triggerKind: mission.triggerKind,
+          progressTarget: mission.progressTarget,
+          progressUnit: mission.progressUnit,
+          conditions: mission.conditions,
+          storeIds: stringArray(mission.storeIds),
+          periodFrom: mission.periodFrom,
+          periodTo: mission.periodTo,
+        },
+        null,
+        progressEvents,
+      );
       const current = Math.max(
-        eventCounts.get(mission.id) ?? 0,
+        metricProgress.applicable ? metricProgress.current : 0,
         rewardCounts.get(mission.id) ?? 0,
       );
 
@@ -11301,18 +11309,47 @@ function dateWithinMission(
   );
 }
 
-function missionProgressEvent(row: { eventType: string; source: string }) {
-  return (
-    row.source !== 'SYSTEM' ||
-    row.eventType === 'MISSION_COMPLETED' ||
-    row.eventType === 'REWARD_QUALIFIED'
-  );
-}
-
 function stringArray(value: Prisma.JsonValue | null) {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === 'string')
     : [];
+}
+
+function portalEventToProgressEvent(row: {
+  eventType: string;
+  occurredAt: Date;
+  payload: Prisma.JsonValue | null;
+}): GuestGameProgressEvent {
+  const payload = jsonRecord(row.payload);
+  const input = jsonRecord(payload.input);
+  const store = jsonRecord(payload.store);
+
+  return {
+    eventType: row.eventType,
+    occurredAt: row.occurredAt,
+    storeId: stringField(store.id),
+    sessionType: stringField(input.sessionType),
+    sessionPacket: booleanField(input.sessionPacket),
+    sessionMinutes: numberField(input.sessionMinutes),
+    spendAmount: numberField(input.spendAmount),
+    tariffGroupId: stringField(input.tariffGroupId),
+    tariffPeriodId: stringField(input.tariffPeriodId),
+    tariffTypeId: stringField(input.tariffTypeId),
+    guestLogType: stringField(input.guestLogType),
+    productId: stringField(input.productId),
+    externalProductId: stringField(input.externalProductId),
+    categoryId: stringField(input.categoryId),
+    productName: stringField(input.productName),
+    categoryName: stringField(input.categoryName),
+    supplierName: stringField(input.supplierName),
+    quantity: numberField(input.quantity),
+  };
+}
+
+function jsonRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
 function stringField(value: unknown) {
@@ -11327,6 +11364,18 @@ function numberField(value: unknown) {
   if (typeof value === 'string' && value.trim()) {
     const number = Number(value);
     return Number.isFinite(number) ? number : null;
+  }
+
+  return null;
+}
+
+function booleanField(value: unknown) {
+  if (value === true || value === 'true' || value === '1') {
+    return true;
+  }
+
+  if (value === false || value === 'false' || value === '0') {
+    return false;
   }
 
   return null;

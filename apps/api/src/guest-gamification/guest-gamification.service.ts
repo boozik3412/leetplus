@@ -24,6 +24,12 @@ import {
   GuestBonusLedgerSchedulerService,
   type GuestBonusLedgerSchedulerRuntimeStatus,
 } from './guest-bonus-ledger-scheduler.service';
+import {
+  evaluateGuestGameProgress,
+  guestGameTriggerMatches,
+  type GuestGameProgressEvent,
+  type GuestGameProgressResult,
+} from './guest-game-progress';
 
 const statusValues = [
   'DRAFT',
@@ -435,8 +441,8 @@ const snapshotProductSelect = {
   id: true,
   article: true,
   name: true,
-  category: { select: { name: true } },
-  supplier: { select: { name: true } },
+  category: { select: { id: true, name: true } },
+  supplier: { select: { id: true, name: true } },
 } satisfies Prisma.ProductSelect;
 
 const snapshotSessionSelect = {
@@ -543,6 +549,7 @@ const snapshotGuestGroupSelect = {
 
 const snapshotProductExpenseSelect = {
   id: true,
+  productId: true,
   externalProvider: true,
   externalDomain: true,
   externalSaleId: true,
@@ -2012,6 +2019,13 @@ export type GuestGameDryRunDto = {
   tariffPeriodId?: string | null;
   tariffTypeId?: string | null;
   guestLogType?: string | null;
+  productId?: string | null;
+  externalProductId?: string | null;
+  categoryId?: string | null;
+  productName?: string | null;
+  categoryName?: string | null;
+  supplierName?: string | null;
+  quantity?: number | string | null;
 };
 
 export type GuestGameProcessEventDto = GuestGameDryRunDto & {
@@ -2036,6 +2050,7 @@ export type GuestGameDryRunRule = {
   selectedRewardLabel: string | null;
   xpDelta: number;
   budgetAmount: number | null;
+  progress: GuestGameProgressResult | null;
   reasons: string[];
   blockers: string[];
 };
@@ -2059,6 +2074,13 @@ export type GuestGameDryRunResult = {
     tariffPeriodId: string | null;
     tariffTypeId: string | null;
     guestLogType: string | null;
+    productId: string | null;
+    externalProductId: string | null;
+    categoryId: string | null;
+    productName: string | null;
+    categoryName: string | null;
+    supplierName: string | null;
+    quantity: number | null;
   };
   summary: {
     checkedRules: number;
@@ -2139,6 +2161,13 @@ export type GuestGameSnapshotFact = {
   tariffPeriodId: string | null;
   tariffTypeId: string | null;
   guestLogType?: string | null;
+  productId?: string | null;
+  externalProductId?: string | null;
+  categoryId?: string | null;
+  productName?: string | null;
+  categoryName?: string | null;
+  supplierName?: string | null;
+  quantity?: number | null;
   label: string;
   details: string | null;
 };
@@ -7063,6 +7092,13 @@ export class GuestGamificationService {
     const tariffPeriodId = nullableString(dto.tariffPeriodId) ?? null;
     const tariffTypeId = nullableString(dto.tariffTypeId) ?? null;
     const guestLogType = nullableString(dto.guestLogType) ?? null;
+    const productId = nullableString(dto.productId) ?? null;
+    const externalProductId = nullableString(dto.externalProductId) ?? null;
+    const categoryId = nullableString(dto.categoryId) ?? null;
+    const productName = nullableString(dto.productName) ?? null;
+    const categoryName = nullableString(dto.categoryName) ?? null;
+    const supplierName = nullableString(dto.supplierName) ?? null;
+    const quantity = dryRunOptionalNumber(dto.quantity);
     const [profile, lootBoxes, missions, seasons, rewards] = await Promise.all([
       this.resolveDryRunProfile(user, dto),
       this.getLootBoxes(user),
@@ -7078,6 +7114,10 @@ export class GuestGamificationService {
     const store = dto.storeId
       ? await this.assertStore(user, dto.storeId)
       : null;
+    const progressEvents = await this.getDryRunProgressEvents(user, {
+      profileId: profile?.id ?? null,
+      guestId: guest?.id ?? null,
+    });
     const context: DryRunContext = {
       eventType,
       occurredAt,
@@ -7092,7 +7132,15 @@ export class GuestGamificationService {
       tariffPeriodId,
       tariffTypeId,
       guestLogType,
+      productId,
+      externalProductId,
+      categoryId,
+      productName,
+      categoryName,
+      supplierName,
+      quantity,
       rewards,
+      progressEvents,
     };
     const rules = [
       ...lootBoxes.map((item) => evaluateLootBoxDryRun(item, context)),
@@ -7126,6 +7174,13 @@ export class GuestGamificationService {
         tariffPeriodId,
         tariffTypeId,
         guestLogType,
+        productId,
+        externalProductId,
+        categoryId,
+        productName,
+        categoryName,
+        supplierName,
+        quantity,
       },
       summary: {
         checkedRules: rules.length,
@@ -7514,6 +7569,40 @@ export class GuestGamificationService {
     });
 
     return rows.map(mapReward);
+  }
+
+  private async getDryRunProgressEvents(
+    user: AuthenticatedUser,
+    scope: { profileId?: string | null; guestId?: string | null },
+  ): Promise<GuestGameProgressEvent[]> {
+    const conditions: Prisma.GuestGameEventWhereInput[] = [
+      ...(scope.profileId ? [{ profileId: scope.profileId }] : []),
+      ...(scope.guestId ? [{ guestId: scope.guestId }] : []),
+    ];
+
+    if (!conditions.length) {
+      return [];
+    }
+
+    const rows = await this.prisma.guestGameEvent.findMany({
+      where: {
+        tenantId: user.tenantId,
+        OR: conditions,
+      },
+      select: {
+        eventType: true,
+        occurredAt: true,
+        payload: true,
+      },
+      orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
+      take: 1000,
+    });
+
+    if (!Array.isArray(rows)) {
+      return [];
+    }
+
+    return rows.map(storedEventToProgressEvent);
   }
 
   private async resolveScheduledTenantActor(dto: {
@@ -12485,6 +12574,8 @@ function mapProductExpenseFact(
   const quantity = numberValue(row.quantity);
   const productName =
     row.productNameAtSale ?? row.product?.name ?? row.externalProductId;
+  const categoryName = row.product?.category?.name ?? null;
+  const supplierName = row.product?.supplier?.name ?? null;
   const guestName = snapshotGuestName(row.guest, row.externalGuestId);
 
   return [
@@ -12505,12 +12596,19 @@ function mapProductExpenseFact(
       tariffGroupId: null,
       tariffPeriodId: null,
       tariffTypeId: null,
+      productId: row.productId,
+      externalProductId: row.externalProductId,
+      categoryId: row.product?.category?.id ?? null,
+      productName,
+      categoryName,
+      supplierName,
+      quantity,
       label: `РўРѕРІР°СЂРЅР°СЏ РїРѕРєСѓРїРєР°: ${productName ?? 'С‚РѕРІР°СЂ'} В· ${guestName}`,
       details: [
         row.storeNameAtSale ?? row.store?.name,
         productName,
-        row.product?.category?.name,
-        row.product?.supplier?.name,
+        categoryName,
+        supplierName,
         quantity ? `${quantity} С€С‚` : null,
         revenue ? `${Math.abs(revenue)} СЂСѓР±` : null,
         cost ? `СЃРµР±РµСЃС‚РѕРёРјРѕСЃС‚СЊ ${Math.abs(cost)} СЂСѓР±` : null,
@@ -12772,6 +12870,13 @@ function pipelineProcessDtoFromFact(
     tariffPeriodId: fact.tariffPeriodId,
     tariffTypeId: fact.tariffTypeId,
     guestLogType: fact.guestLogType ?? null,
+    productId: fact.productId ?? null,
+    externalProductId: fact.externalProductId ?? null,
+    categoryId: fact.categoryId ?? null,
+    productName: fact.productName ?? null,
+    categoryName: fact.categoryName ?? null,
+    supplierName: fact.supplierName ?? null,
+    quantity: fact.quantity ?? null,
     sourceFactId: fact.id,
     sourceFactKind: fact.source,
     externalProvider: fact.externalProvider,
@@ -12834,6 +12939,7 @@ function buildProcessPayload(
       rewardLabel: rule.rewardLabel,
       selectedRewardLabel: rule.selectedRewardLabel,
       xpDelta: rule.xpDelta,
+      progress: rule.progress,
       blockers: rule.blockers,
     })),
   };
@@ -12963,6 +13069,62 @@ function mapProfileSummary(
   };
 }
 
+function storedEventToProgressEvent(row: {
+  eventType: string;
+  occurredAt: Date;
+  payload: Prisma.JsonValue | null;
+}): GuestGameProgressEvent {
+  const payload = jsonRecord(row.payload);
+  const input = jsonRecord(payload.input as Prisma.JsonValue | null);
+  const store = jsonRecord(payload.store as Prisma.JsonValue | null);
+
+  return {
+    eventType: row.eventType,
+    occurredAt: row.occurredAt,
+    storeId: nullableString(store.id),
+    sessionType: nullableString(input.sessionType),
+    sessionPacket: nullableBooleanValue(input.sessionPacket),
+    sessionMinutes: dryRunOptionalNumber(input.sessionMinutes),
+    spendAmount: dryRunOptionalNumber(input.spendAmount),
+    tariffGroupId: nullableString(input.tariffGroupId),
+    tariffPeriodId: nullableString(input.tariffPeriodId),
+    tariffTypeId: nullableString(input.tariffTypeId),
+    guestLogType: nullableString(input.guestLogType),
+    productId: nullableString(input.productId),
+    externalProductId: nullableString(input.externalProductId),
+    categoryId: nullableString(input.categoryId),
+    productName: nullableString(input.productName),
+    categoryName: nullableString(input.categoryName),
+    supplierName: nullableString(input.supplierName),
+    quantity: dryRunOptionalNumber(input.quantity),
+  };
+}
+
+function currentEventToProgressEvent(
+  context: DryRunContext,
+): GuestGameProgressEvent {
+  return {
+    eventType: context.eventType,
+    occurredAt: context.occurredAt,
+    storeId: context.storeId,
+    sessionType: context.sessionType,
+    sessionPacket: context.sessionPacket,
+    sessionMinutes: context.sessionMinutes,
+    spendAmount: context.spendAmount,
+    tariffGroupId: context.tariffGroupId,
+    tariffPeriodId: context.tariffPeriodId,
+    tariffTypeId: context.tariffTypeId,
+    guestLogType: context.guestLogType,
+    productId: context.productId,
+    externalProductId: context.externalProductId,
+    categoryId: context.categoryId,
+    productName: context.productName,
+    categoryName: context.categoryName,
+    supplierName: context.supplierName,
+    quantity: context.quantity,
+  };
+}
+
 type DryRunContext = {
   eventType: string;
   occurredAt: Date;
@@ -12977,7 +13139,15 @@ type DryRunContext = {
   tariffPeriodId: string | null;
   tariffTypeId: string | null;
   guestLogType: string | null;
+  productId: string | null;
+  externalProductId: string | null;
+  categoryId: string | null;
+  productName: string | null;
+  categoryName: string | null;
+  supplierName: string | null;
+  quantity: number | null;
   rewards: GuestGameReward[];
+  progressEvents: GuestGameProgressEvent[];
 };
 
 function evaluateLootBoxDryRun(
@@ -13049,6 +13219,7 @@ function evaluateLootBoxDryRun(
     selectedRewardLabel,
     xpDelta: 0,
     budgetAmount: rule.budgetAmount,
+    progress: null,
     reasons,
     blockers,
   });
@@ -13074,6 +13245,12 @@ function evaluateMissionDryRun(
     reasons,
   );
   appendDryRunMissionConditions(rule, context, blockers, reasons);
+  const progress = appendDryRunMissionProgress(
+    rule,
+    context,
+    blockers,
+    reasons,
+  );
   appendDryRunBudgetCheck(
     rule.budgetAmount,
     rule.rewardAmount ?? 0,
@@ -13104,6 +13281,7 @@ function evaluateMissionDryRun(
     selectedRewardLabel: rule.rewardLabel ?? rule.name,
     xpDelta: rule.xpReward,
     budgetAmount: rule.budgetAmount,
+    progress,
     reasons,
     blockers,
   });
@@ -13156,6 +13334,7 @@ function evaluateSeasonDryRun(
     selectedRewardLabel,
     xpDelta,
     budgetAmount: rule.budgetAmount,
+    progress: null,
     reasons,
     blockers,
   });
@@ -13215,17 +13394,7 @@ function appendDryRunTriggerCheck(
   eventType: string,
   blockers: string[],
 ) {
-  const expected = triggerKind.trim().toUpperCase();
-  const actual = eventType.trim().toUpperCase();
-
-  if (
-    !expected ||
-    expected === actual ||
-    (expected === 'VISIT' &&
-      (actual === 'SESSION_START' || actual === 'CHECK_IN')) ||
-    (expected === 'BAR_PURCHASE' && actual === 'PRODUCT_PURCHASE') ||
-    (expected === 'PRODUCT_PURCHASE' && actual === 'BAR_PURCHASE')
-  ) {
+  if (guestGameTriggerMatches(triggerKind, eventType)) {
     return;
   }
 
@@ -13623,6 +13792,47 @@ function appendDryRunMissionConditions(
   if (windowDays != null) {
     reasons.push(`РћРєРЅРѕ РІС‹РїРѕР»РЅРµРЅРёСЏ: ${windowDays} РґРЅ.`);
   }
+}
+
+function appendDryRunMissionProgress(
+  rule: GuestGameMission,
+  context: DryRunContext,
+  blockers: string[],
+  reasons: string[],
+) {
+  const progress = evaluateGuestGameProgress(
+    {
+      triggerKind: rule.triggerKind,
+      progressTarget: rule.progressTarget,
+      progressUnit: rule.progressUnit,
+      conditions: rule.conditions,
+      storeIds: rule.storeIds,
+      periodFrom: rule.periodFrom,
+      periodTo: rule.periodTo,
+    },
+    currentEventToProgressEvent(context),
+    context.progressEvents,
+  );
+
+  if (!progress.applicable) {
+    return null;
+  }
+
+  const unit = progress.unit ? ` ${progress.unit}` : '';
+  const windowLabel = progress.windowDays
+    ? ` Р·Р° ${progress.windowDays} РґРЅ.`
+    : '';
+  reasons.push(
+    `РџСЂРѕРіСЂРµСЃСЃ РјРёСЃСЃРёРё: ${progress.current}/${progress.target}${unit}${windowLabel}`,
+  );
+
+  if (!progress.completed) {
+    blockers.push(
+      `Р¦РµР»СЊ РјРёСЃСЃРёРё РµС‰Рµ РЅРµ РІС‹РїРѕР»РЅРµРЅР°: ${progress.current}/${progress.target}${unit}`,
+    );
+  }
+
+  return progress;
 }
 
 function appendDryRunSeasonXpRules(

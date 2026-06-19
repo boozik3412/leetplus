@@ -208,6 +208,82 @@ describe('StoresService', () => {
     });
   });
 
+  it('fills missing store coordinates from address geocode inside tenant', async () => {
+    config.get.mockReturnValue('dadata-token');
+    prisma.store.findMany.mockResolvedValue([
+      {
+        id: 'store-1',
+        name: '1337 Радищева',
+        address: 'г. Екатеринбург, ул. Радищева, 12',
+        city: null,
+      },
+      {
+        id: 'store-2',
+        name: '1337 Родонитовая',
+        address: 'г. Екатеринбург, ул. Родонитовая, 33',
+        city: 'Екатеринбург',
+      },
+    ]);
+    prisma.store.update.mockResolvedValue({ id: 'store-1' });
+    jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          suggestions: [
+            {
+              value: 'г Екатеринбург, ул Радищева, д 12',
+              data: {
+                city: 'Екатеринбург',
+                city_fias_id: 'city-fias',
+                city_kladr_id: 'city-kladr',
+                timezone: 'UTC+5',
+                geo_lat: '56.8291234',
+                geo_lon: '60.5969876',
+              },
+            },
+          ],
+        }),
+    } as unknown as Response);
+
+    await expect(
+      service.geocodeMissingStoreCoordinates(user),
+    ).resolves.toMatchObject({
+      checked: 2,
+      updated: 2,
+      skipped: 0,
+      failed: 0,
+      limit: 25,
+    });
+    expect(prisma.store.findMany).toHaveBeenCalledWith({
+      where: {
+        tenantId: 'tenant-demo',
+        isActive: true,
+        address: { not: null },
+        OR: [{ latitude: null }, { longitude: null }],
+      },
+      orderBy: { name: 'asc' },
+      take: 25,
+    });
+    expect(prisma.store.update).toHaveBeenNthCalledWith(1, {
+      where: { id: 'store-1' },
+      data: {
+        latitude: 56.829123,
+        longitude: 60.596988,
+        city: 'Екатеринбург',
+        cityFiasId: 'city-fias',
+        cityKladrId: 'city-kladr',
+        timeZone: 'Asia/Yekaterinburg',
+      },
+    });
+    expect(prisma.store.update).toHaveBeenNthCalledWith(2, {
+      where: { id: 'store-2' },
+      data: {
+        latitude: 56.829123,
+        longitude: 60.596988,
+      },
+    });
+  });
+
   it('archives store only after resolving it inside tenant', async () => {
     prisma.store.findFirst.mockResolvedValue({
       id: 'store-1',

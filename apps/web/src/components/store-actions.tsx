@@ -22,6 +22,14 @@ type AddressGeocodeResult = AddressSuggestion & {
   longitude: number;
 };
 
+type BulkGeocodeResponse = {
+  checked: number;
+  updated: number;
+  skipped: number;
+  failed: number;
+  limit: number;
+};
+
 function getErrorMessage(data: unknown) {
   if (
     data &&
@@ -154,6 +162,62 @@ export function StoreArchiveButton({ id }: { id: string }) {
     >
       {isSubmitting ? "..." : "В архив"}
     </button>
+  );
+}
+
+export function StoreBulkGeocodeButton({
+  missingCount,
+}: {
+  missingCount: number;
+}) {
+  const router = useRouter();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+
+  async function handleClick() {
+    setIsSubmitting(true);
+    setStatus(null);
+
+    try {
+      const response = await fetch("/api/stores/address-geocode/missing", {
+        method: "POST",
+      });
+      const data = (await response.json()) as BulkGeocodeResponse | ErrorResponse;
+
+      if (!response.ok) {
+        setStatus(getErrorMessage(data));
+        return;
+      }
+
+      const result = data as BulkGeocodeResponse;
+      setStatus(
+        `Заполнено: ${result.updated}, ошибок: ${result.failed}, пропущено: ${result.skipped}`,
+      );
+      router.refresh();
+    } catch {
+      setStatus("Не удалось заполнить координаты");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <button
+        type="button"
+        onClick={handleClick}
+        disabled={isSubmitting || missingCount === 0}
+        className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+      >
+        {isSubmitting ? "Ищем..." : "Заполнить координаты"}
+      </button>
+      <span className="text-xs text-zinc-500">
+        {missingCount > 0
+          ? `Без координат: ${missingCount}`
+          : "Все активные клубы с координатами"}
+      </span>
+      {status ? <span className="text-xs text-zinc-500">{status}</span> : null}
+    </div>
   );
 }
 

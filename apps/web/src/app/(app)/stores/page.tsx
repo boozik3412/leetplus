@@ -1,5 +1,6 @@
 import {
   StoreArchiveButton,
+  StoreBulkGeocodeButton,
   StoreCreateForm,
   StoreEditForm,
 } from "@/components/store-actions";
@@ -12,6 +13,9 @@ export default async function StoresPage() {
   const user = await requireCurrentUser();
   const stores = await getStores();
   const canEditStores = can(user, "edit_stores");
+  const missingCoordinates = stores.filter(
+    (store) => store.isActive && !hasCoordinates(store) && store.address,
+  ).length;
 
   return (
     <main className="px-6 py-8 text-zinc-950">
@@ -36,8 +40,11 @@ export default async function StoresPage() {
         {canEditStores ? <StoreCreateForm /> : null}
 
         <div className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
-          <div className="border-b border-zinc-200 px-5 py-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 px-5 py-4">
             <h2 className="text-base font-semibold">Список точек</h2>
+            {canEditStores ? (
+              <StoreBulkGeocodeButton missingCount={missingCoordinates} />
+            ) : null}
           </div>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[960px] text-left text-sm">

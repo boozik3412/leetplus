@@ -49,6 +49,16 @@ export type StoreAddressGeocode = StoreAddressSuggestion & {
   longitude: number;
 };
 
+type StoreAddressGeocodeResult = {
+  storeId: string;
+  name: string;
+  address: string | null;
+  status: 'UPDATED' | 'SKIPPED' | 'FAILED';
+  reason?: string;
+  latitude?: number;
+  longitude?: number;
+};
+
 @Injectable()
 export class StoresService {
   constructor(
@@ -162,6 +172,97 @@ export class StoresService {
       throw new BadRequestException('Адресный справочник не настроен');
     }
 
+    return this.geocodeAddressWithToken(cleanQuery, token);
+  }
+
+  async geocodeMissingStoreCoordinates(user: AuthenticatedUser) {
+    const { tenantId } = await this.tenantContextService.resolve(user);
+    const stores = await this.prisma.store.findMany({
+      where: {
+        tenantId,
+        isActive: true,
+        address: { not: null },
+        OR: [{ latitude: null }, { longitude: null }],
+      },
+      orderBy: { name: 'asc' },
+      take: 25,
+    });
+    const token = this.configService.get<string>('DADATA_API_KEY')?.trim();
+
+    if (!token) {
+      throw new BadRequestException('Адресный справочник не настроен');
+    }
+
+    const results: StoreAddressGeocodeResult[] = [];
+
+    for (const store of stores) {
+      const address = this.normalizeOptionalString(store.address);
+
+      if (!address || address.length < 5) {
+        results.push({
+          storeId: store.id,
+          name: store.name,
+          address,
+          status: 'SKIPPED',
+          reason: 'Адрес не указан',
+        });
+        continue;
+      }
+
+      try {
+        const geocode = await this.geocodeAddressWithToken(address, token);
+        await this.prisma.store.update({
+          where: { id: store.id },
+          data: {
+            latitude: geocode.latitude,
+            longitude: geocode.longitude,
+            ...(store.city
+              ? {}
+              : {
+                  city: geocode.city,
+                  cityFiasId: geocode.cityFiasId,
+                  cityKladrId: geocode.cityKladrId,
+                  timeZone:
+                    geocode.timeZone ?? timeZoneForStoreCity(geocode.city),
+                }),
+          },
+        });
+        results.push({
+          storeId: store.id,
+          name: store.name,
+          address,
+          status: 'UPDATED',
+          latitude: geocode.latitude,
+          longitude: geocode.longitude,
+        });
+      } catch (error) {
+        results.push({
+          storeId: store.id,
+          name: store.name,
+          address,
+          status: 'FAILED',
+          reason:
+            error instanceof BadRequestException
+              ? String(error.message)
+              : 'Не удалось получить координаты',
+        });
+      }
+    }
+
+    return {
+      checked: results.length,
+      updated: results.filter((result) => result.status === 'UPDATED').length,
+      skipped: results.filter((result) => result.status === 'SKIPPED').length,
+      failed: results.filter((result) => result.status === 'FAILED').length,
+      limit: 25,
+      results,
+    };
+  }
+
+  private async geocodeAddressWithToken(
+    cleanQuery: string,
+    token: string,
+  ): Promise<StoreAddressGeocode> {
     const response = await fetch(DADATA_SUGGEST_URL, {
       method: 'POST',
       headers: {

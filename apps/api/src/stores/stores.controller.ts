@@ -52,6 +52,13 @@ export class StoresController {
 
   @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
   @UseGuards(JwtAuthGuard, RolesGuard)
+  @Post('address-geocode/missing')
+  geocodeMissingStoreCoordinates(@CurrentUser() user: AuthenticatedUser) {
+    return this.storesService.geocodeMissingStoreCoordinates(user);
+  }
+
+  @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Patch(':id')
   update(
     @Param('id') id: string,

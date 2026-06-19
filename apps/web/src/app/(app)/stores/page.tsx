@@ -16,6 +16,14 @@ export default async function StoresPage() {
   const missingCoordinates = stores.filter(
     (store) => store.isActive && !hasCoordinates(store) && store.address,
   ).length;
+  const gameStores = stores.filter(
+    (store) => store.isActive && store.gamificationEnabled,
+  );
+  const gameStoresWithCoordinates = gameStores.filter(hasCoordinates).length;
+  const gameStoresMissingCoordinates = Math.max(
+    gameStores.length - gameStoresWithCoordinates,
+    0,
+  );
 
   return (
     <main className="px-6 py-8 text-zinc-950">
@@ -38,6 +46,51 @@ export default async function StoresPage() {
         </div>
 
         {canEditStores ? <StoreCreateForm /> : null}
+
+        <section className="mt-6 rounded-lg border border-cyan-100 bg-cyan-50/70 px-5 py-4 text-sm text-zinc-800">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">
+                LeetPlus Game
+              </p>
+              <h2 className="mt-1 text-base font-semibold text-zinc-950">
+                Карта игрового модуля
+              </h2>
+              <p className="mt-1 text-zinc-600">
+                {gameStores.length > 0
+                  ? `${gameStoresWithCoordinates} из ${gameStores.length} активных игровых клубов с координатами`
+                  : "Игровые клубы пока не включены"}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span
+                className={
+                  gameStoresMissingCoordinates === 0 && gameStores.length > 0
+                    ? "rounded-full bg-emerald-100 px-3 py-1 font-semibold text-emerald-800"
+                    : "rounded-full bg-amber-100 px-3 py-1 font-semibold text-amber-800"
+                }
+              >
+                {gameStores.length === 0
+                  ? "Квесты не включены"
+                  : gameStoresMissingCoordinates === 0
+                    ? "Геопоиск готов"
+                    : `Без координат: ${gameStoresMissingCoordinates}`}
+              </span>
+              <a
+                className="rounded-md border border-cyan-200 bg-white px-3 py-2 font-semibold text-cyan-800 hover:bg-cyan-50"
+                href="/game/clubs"
+              >
+                Проверить выбор клуба
+              </a>
+              <a
+                className="rounded-md border border-cyan-200 bg-white px-3 py-2 font-semibold text-cyan-800 hover:bg-cyan-50"
+                href="/play"
+              >
+                Проверить /play
+              </a>
+            </div>
+          </div>
+        </section>
 
         <div className="mt-6 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 px-5 py-4">

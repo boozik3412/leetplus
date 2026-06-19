@@ -1,4 +1,4 @@
-﻿ALTER TABLE "GuestGameSeason"
+ALTER TABLE "GuestGameSeason"
   ADD COLUMN "storeIds" JSONB;
 
 CREATE TABLE "GuestGamePromoCard" (

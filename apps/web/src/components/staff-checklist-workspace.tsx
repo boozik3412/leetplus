@@ -218,7 +218,13 @@ export function StaffChecklistWorkspace({
       ? focusRunId
       : report.rows[0]?.id) ?? "";
   const [selectedRunId, setSelectedRunId] = useState(initialRunId);
+  const [openedRunId, setOpenedRunId] = useState(initialRunId);
   const selectedRun =
+    report.rows.find((run) => run.id === selectedRunId) ??
+    report.rows[0] ??
+    null;
+  const openedRun =
+    report.rows.find((run) => run.id === openedRunId) ??
     report.rows.find((run) => run.id === selectedRunId) ??
     report.rows[0] ??
     null;
@@ -288,6 +294,7 @@ export function StaffChecklistWorkspace({
 
     const run = (await response.json()) as StaffChecklistRun;
     setSelectedRunId(run.id);
+    setOpenedRunId(run.id);
     setMessage("Чеклист смены создан.");
     router.refresh();
   }
@@ -454,6 +461,18 @@ export function StaffChecklistWorkspace({
                 id={`run-${run.id}`}
                 type="button"
                 onClick={() => setSelectedRunId(run.id)}
+                onDoubleClick={() => {
+                  setSelectedRunId(run.id);
+                  setOpenedRunId(run.id);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setSelectedRunId(run.id);
+                    setOpenedRunId(run.id);
+                  }
+                }}
+                title="Один клик выберет чек-лист, двойной клик откроет его"
                 className={[
                   "scroll-mt-24 w-full rounded-lg border px-3 py-3 text-left transition hover:border-emerald-400 hover:bg-emerald-50/60 dark:hover:bg-emerald-500/10",
                   selectedRun?.id === run.id
@@ -482,10 +501,10 @@ export function StaffChecklistWorkspace({
       </section>
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-        {selectedRun ? (
+        {openedRun ? (
           <ChecklistRunEditor
-            key={selectedRun.id}
-            run={selectedRun}
+            key={openedRun.id}
+            run={openedRun}
             canReviewRun={canReviewRuns}
           />
         ) : (

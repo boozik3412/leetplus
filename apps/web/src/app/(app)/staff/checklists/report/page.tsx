@@ -983,12 +983,14 @@ function GroupTable({
 
 function ExecutionRow({ run }: { run: StaffChecklistExecutionRun }) {
   const problems = problemCount(run);
+  const runHref = `/staff/checklists?runId=${encodeURIComponent(run.id)}#run-${run.id}`;
 
   return (
     <tr>
       <td className="px-4 py-3">
         <Link
-          href={`/staff/checklists?search=${encodeURIComponent(run.title)}`}
+          href={runHref}
+          title="Открыть этот чек-лист для проверки"
           className="font-medium text-zinc-950 transition hover:text-emerald-600 dark:text-zinc-100 dark:hover:text-emerald-300"
         >
           {run.title}

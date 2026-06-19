@@ -4138,12 +4138,18 @@ export class GuestGamificationService {
         requiredEnv: maxProvider?.requiredEnv ?? [
           'GUEST_GAME_DELIVERY_REAL_SEND_ENABLED',
           'GUEST_GAME_MAX_DELIVERY_ENABLED',
+          'GUEST_GAME_MAX_DELIVERY_LIVE_CANARY_ENABLED',
           'GUEST_GAME_MAX_BOT_TOKEN',
           'GUEST_GAME_MAX_DELIVERY_ENDPOINT',
         ],
-        note: 'MAX остается вторым адаптером: нужна юридическая подготовка и подтвержденный API-контракт.',
-        nextAction:
-          'Не включать автоматизацию MAX до утвержденного endpoint, токена, согласий и обработки отписок.',
+        note:
+          maxProvider?.note ??
+          'MAX остается вторым адаптером: нужна юридическая подготовка и подтвержденный API-контракт.',
+        nextAction: maxDeliveryCanAttempt
+          ? 'Провести один MAX canary на согласованном госте и проверить SENT/FAILED/BLOCKED audit без raw payload.'
+          : maxDeliveryConfigured
+            ? 'Включать GUEST_GAME_MAX_DELIVERY_LIVE_CANARY_ENABLED только после утвержденного endpoint, токена, согласий и обработки отписок.'
+            : 'Не включать автоматизацию MAX до утвержденного endpoint, токена, согласий и обработки отписок.',
       },
       bonusLedgerScheduler,
       {

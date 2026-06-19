@@ -1618,6 +1618,73 @@ describe('GuestGamificationService', () => {
         }
       }
     });
+
+    it('keeps MAX delivery readiness partial until the live canary flag is enabled', () => {
+      process.env.GUEST_GAME_DELIVERY_REAL_SEND_ENABLED = 'true';
+      process.env.GUEST_GAME_MAX_DELIVERY_ENABLED = 'true';
+      process.env.GUEST_GAME_MAX_DELIVERY_ENDPOINT =
+        'https://max-provider.example/send';
+      process.env.GUEST_GAME_MAX_BOT_TOKEN = 'max-token';
+      const { service } = createService();
+
+      const readiness = (service as any).buildIntegrationReadiness([]);
+      const maxDelivery = readiness.items.find(
+        (item: { key: string }) => item.key === 'MAX_DELIVERY',
+      );
+      const maxDeliveryText = JSON.stringify(maxDelivery);
+
+      expect(maxDelivery).toMatchObject({
+        status: 'PARTIAL',
+        statusLabel: 'нужен canary',
+        ready: false,
+        configured: true,
+        enabled: true,
+      });
+      expect(maxDelivery.requiredEnv).toEqual(
+        expect.arrayContaining(['GUEST_GAME_MAX_DELIVERY_LIVE_CANARY_ENABLED']),
+      );
+      expect(maxDelivery.note).toContain('live-send заблокирован');
+      expect(maxDelivery.nextAction).toContain(
+        'GUEST_GAME_MAX_DELIVERY_LIVE_CANARY_ENABLED',
+      );
+      expect(maxDeliveryText).not.toContain('max-token');
+      expect(maxDeliveryText).not.toContain(
+        'https://max-provider.example/send',
+      );
+    });
+
+    it('shows MAX delivery canary as explicitly allowed without exposing provider secrets', () => {
+      process.env.GUEST_GAME_DELIVERY_REAL_SEND_ENABLED = 'true';
+      process.env.GUEST_GAME_MAX_DELIVERY_ENABLED = 'true';
+      process.env.GUEST_GAME_MAX_DELIVERY_LIVE_CANARY_ENABLED = 'true';
+      process.env.GUEST_GAME_MAX_DELIVERY_ENDPOINT =
+        'https://max-provider.example/send';
+      process.env.GUEST_GAME_MAX_BOT_TOKEN = 'max-token';
+      const { service } = createService();
+
+      const readiness = (service as any).buildIntegrationReadiness([]);
+      const maxDelivery = readiness.items.find(
+        (item: { key: string }) => item.key === 'MAX_DELIVERY',
+      );
+      const maxDeliveryText = JSON.stringify(maxDelivery);
+
+      expect(maxDelivery).toMatchObject({
+        status: 'MANUAL_ONLY',
+        statusLabel: 'canary разрешен',
+        ready: false,
+        configured: true,
+        enabled: true,
+      });
+      expect(maxDelivery.requiredEnv).toEqual(
+        expect.arrayContaining(['GUEST_GAME_MAX_DELIVERY_LIVE_CANARY_ENABLED']),
+      );
+      expect(maxDelivery.note).toContain('live-canary');
+      expect(maxDelivery.nextAction).toContain('MAX canary');
+      expect(maxDeliveryText).not.toContain('max-token');
+      expect(maxDeliveryText).not.toContain(
+        'https://max-provider.example/send',
+      );
+    });
   });
 
   describe('pilot readiness runbook', () => {

@@ -320,7 +320,7 @@ export default async function StaffChecklistExecutionReportPage({
     <main className="px-4 py-6 text-zinc-950 dark:text-zinc-100 sm:px-6 sm:py-8">
       <div className="mx-auto max-w-7xl">
         <ReportBreadcrumbs
-          current="Отчет по чеклистам"
+          current="Отчет по чек-листам"
           items={[
             { href: "/dashboard", label: "Дашборд" },
             { href: "/staff/tasks", label: "Персонал" },

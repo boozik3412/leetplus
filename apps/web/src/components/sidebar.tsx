@@ -77,7 +77,7 @@ const navGroups: NavGroup[] = [
       { href: "/staff/knowledge-base", label: "База знаний" },
       { href: "/staff/administrator-ratings", label: "Контроль и мотивация" },
       { href: "/staff/directory", label: "Сотрудники" },
-      { href: "/guests/staff-control", label: "Смены и администраторы" },
+      { href: "/staff/staff-control", label: "Контроль персонала" },
     ],
   },
   {

@@ -229,7 +229,7 @@ const roleAccessPreviewRoutes: RoleAccessPreviewRoute[] = [
   { group: "Персонал", href: "/staff/salary", label: "Зарплата" },
   {
     group: "Персонал",
-    href: "/guests/staff-control",
+    href: "/staff/staff-control",
     label: "Смены и администраторы",
   },
   { group: "Маркетинг", href: "/marketing", label: "Кампании" },

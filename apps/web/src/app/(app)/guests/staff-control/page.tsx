@@ -157,7 +157,7 @@ function staffControlHref({
   params.set("staffSort", nextControls.staffSort);
   params.set("staffDirection", nextControls.staffDirection);
 
-  return `/guests/staff-control?${params.toString()}`;
+  return `/staff/staff-control?${params.toString()}`;
 }
 
 function staffAdminsHref(
@@ -189,7 +189,7 @@ function staffAdminsHref(
   params.set("staffSort", controls.staffSort);
   params.set("staffDirection", controls.staffDirection);
 
-  return `/guests/staff-control/admins?${params.toString()}`;
+  return `/staff/staff-control/admins?${params.toString()}`;
 }
 
 export default async function StaffControlPage({
@@ -396,8 +396,8 @@ function ReportPurposePanel({
         label="3. На чем основаны выводы"
         title="Первичные источники"
         description="Операционный журнал и диагностика показывают, какие данные реально пришли из Langame и где пока не хватает надежной связки с администратором."
-        href={`/guests/staff-control/operations?${periodQuery}`}
-        secondaryHref={`/guests/staff-control/diagnostics?${periodQuery}`}
+        href={`/staff/staff-control/operations?${periodQuery}`}
+        secondaryHref={`/staff/staff-control/diagnostics?${periodQuery}`}
         action="Открыть операции"
         secondaryAction="Диагностика"
         meta={`${formatNumber(report.operationLogsCount)} операций`}
@@ -719,7 +719,7 @@ function staffOperatorsHref(
   params.set("sort", drilldown?.sort ?? "cash");
   params.set("direction", drilldown?.direction ?? "desc");
 
-  return `/guests/staff-control/operators?${params.toString()}`;
+  return `/staff/staff-control/operators?${params.toString()}`;
 }
 
 function staffOperationsHref(
@@ -741,7 +741,7 @@ function staffOperationsHref(
   params.set("sort", "amount");
   params.set("direction", "desc");
 
-  return `/guests/staff-control/operations?${params.toString()}`;
+  return `/staff/staff-control/operations?${params.toString()}`;
 }
 
 function staffAnomalyDrilldown(anomaly: StaffControlAnomalyType): {
@@ -1268,7 +1268,7 @@ function OperationsPanel({ report }: { report: StaffControlReport }) {
             </p>
           </div>
           <Link
-            href={`/guests/staff-control/operations?dateFrom=${report.periodFrom}&dateTo=${report.periodTo}${report.storeId ? `&storeId=${report.storeId}` : ""}`}
+            href={`/staff/staff-control/operations?dateFrom=${report.periodFrom}&dateTo=${report.periodTo}${report.storeId ? `&storeId=${report.storeId}` : ""}`}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
@@ -1332,7 +1332,7 @@ function UnmatchedOperatorsPanel({ report }: { report: StaffControlReport }) {
             </p>
           </div>
           <Link
-            href={`/guests/staff-control/operators?dateFrom=${report.periodFrom}&dateTo=${report.periodTo}${report.storeId ? `&storeId=${report.storeId}` : ""}`}
+            href={`/staff/staff-control/operators?dateFrom=${report.periodFrom}&dateTo=${report.periodTo}${report.storeId ? `&storeId=${report.storeId}` : ""}`}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
@@ -1447,7 +1447,7 @@ function DiagnosticsPanel({ report }: { report: StaffControlReport }) {
             </p>
           </div>
           <Link
-            href={`/guests/staff-control/diagnostics?dateFrom=${report.periodFrom}&dateTo=${report.periodTo}${report.storeId ? `&storeId=${report.storeId}` : ""}`}
+            href={`/staff/staff-control/diagnostics?dateFrom=${report.periodFrom}&dateTo=${report.periodTo}${report.storeId ? `&storeId=${report.storeId}` : ""}`}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"

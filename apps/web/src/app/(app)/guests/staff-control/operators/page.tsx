@@ -181,7 +181,7 @@ function operatorReportHref(report: StaffOperatorReport) {
     params.set("storeId", report.storeId);
   }
 
-  return `/guests/staff-control?${params.toString()}`;
+  return `/staff/staff-control?${params.toString()}`;
 }
 
 function currentOperatorReportHref(report: StaffOperatorReport, view?: "full") {
@@ -205,7 +205,7 @@ function currentOperatorReportHref(report: StaffOperatorReport, view?: "full") {
     params.set("view", view);
   }
 
-  return `/guests/staff-control/operators?${params.toString()}`;
+  return `/staff/staff-control/operators?${params.toString()}`;
 }
 
 function operatorExportHref(report: StaffOperatorReport) {
@@ -263,7 +263,7 @@ export default async function StaffOperatorsPage({
           current="Администраторы"
           items={[
             { href: "/dashboard", label: "Дашборд" },
-            { href: "/guests/staff-control", label: "Контроль персонала" },
+            { href: "/staff/staff-control", label: "Контроль персонала" },
           ]}
         />
         <header className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">

@@ -62,8 +62,8 @@ const staffAreas: StaffArea[] = [
     links: [
       { href: "/staff/discipline", label: "Предупреждения и штрафы" },
       { href: "/staff/salary", label: "Зарплата" },
-      { href: "/guests/staff-control", label: "Контроль смен" },
-      { href: "/guests/staff-control/operators", label: "Администраторы" },
+      { href: "/staff/staff-control", label: "Контроль смен" },
+      { href: "/staff/staff-control/operators", label: "Администраторы" },
     ],
   },
   {

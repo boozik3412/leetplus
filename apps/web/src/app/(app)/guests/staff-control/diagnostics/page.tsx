@@ -51,7 +51,7 @@ export default async function StaffDiagnosticsReportPage({
           current="Диагностика связки"
           items={[
             { href: "/dashboard", label: "Дашборд" },
-            { href: "/guests/staff-control", label: "Контроль персонала" },
+            { href: "/staff/staff-control", label: "Контроль персонала" },
           ]}
         />
         <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -70,7 +70,7 @@ export default async function StaffDiagnosticsReportPage({
             </p>
           </div>
           <Link
-            href={`/guests/staff-control?dateFrom=${report.periodFrom}&dateTo=${report.periodTo}${report.storeId ? `&storeId=${report.storeId}` : ""}`}
+            href={`/staff/staff-control?dateFrom=${report.periodFrom}&dateTo=${report.periodTo}${report.storeId ? `&storeId=${report.storeId}` : ""}`}
             className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-4 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
           >
             Назад в контроль персонала

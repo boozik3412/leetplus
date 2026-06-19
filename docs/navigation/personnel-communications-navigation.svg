@@ -1,0 +1,197 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1260" viewBox="0 0 1800 1260" role="img" aria-labelledby="title desc">
+  <title id="title">Схема навигации разделов Персонал и Коммуникации</title>
+  <desc id="desc">Карта страниц LeetPlus: разделы Персонал и Коммуникации, основные маршруты и переходы между рабочими страницами.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f7f7f4; }
+      .panel { fill: #ffffff; stroke: #d9ded8; stroke-width: 2; }
+      .panel-green { fill: #ecfdf5; stroke: #10b981; stroke-width: 2; }
+      .panel-blue { fill: #eff6ff; stroke: #60a5fa; stroke-width: 2; }
+      .panel-amber { fill: #fffbeb; stroke: #f59e0b; stroke-width: 2; }
+      .node { fill: #ffffff; stroke: #d4d4d8; stroke-width: 1.5; }
+      .node-green { fill: #f0fdf4; stroke: #22c55e; stroke-width: 1.5; }
+      .node-blue { fill: #eff6ff; stroke: #3b82f6; stroke-width: 1.5; }
+      .node-amber { fill: #fffbeb; stroke: #f59e0b; stroke-width: 1.5; }
+      .node-muted { fill: #f4f4f5; stroke: #d4d4d8; stroke-width: 1.5; }
+      .title { font: 700 38px Arial, sans-serif; fill: #111827; }
+      .subtitle { font: 400 21px Arial, sans-serif; fill: #4b5563; }
+      .h2 { font: 700 25px Arial, sans-serif; fill: #111827; }
+      .h3 { font: 700 20px Arial, sans-serif; fill: #111827; }
+      .label { font: 700 17px Arial, sans-serif; fill: #111827; }
+      .path { font: 400 14px Consolas, monospace; fill: #6b7280; }
+      .note { font: 400 15px Arial, sans-serif; fill: #6b7280; }
+      .pill { font: 700 13px Arial, sans-serif; fill: #047857; }
+      .line { fill: none; stroke: #94a3b8; stroke-width: 2; }
+      .line-green { fill: none; stroke: #10b981; stroke-width: 2.5; }
+      .line-blue { fill: none; stroke: #3b82f6; stroke-width: 2.5; }
+      .line-amber { fill: none; stroke: #f59e0b; stroke-width: 2.5; }
+    </style>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#94a3b8"/>
+    </marker>
+    <marker id="arrowGreen" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#10b981"/>
+    </marker>
+    <marker id="arrowBlue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#3b82f6"/>
+    </marker>
+    <marker id="arrowAmber" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#f59e0b"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1800" height="1260"/>
+  <text x="70" y="78" class="title">Навигация LeetPlus: Персонал и Коммуникации</text>
+  <text x="70" y="114" class="subtitle">Рабочая карта страниц, смыслов и переходов. Staff-control перенесен в контур “Персонал”.</text>
+
+  <rect x="70" y="146" width="1660" height="70" rx="16" class="panel"/>
+  <text x="96" y="176" class="h3">Правила упорядочивания</text>
+  <text x="96" y="202" class="note">Операционные роли видят только рабочие страницы смены. Управленческие страницы скрываются из меню и проверяются правами доступа.</text>
+  <rect x="1256" y="164" width="130" height="32" rx="16" fill="#dcfce7"/>
+  <text x="1280" y="185" class="pill">Персонал</text>
+  <rect x="1402" y="164" width="152" height="32" rx="16" fill="#dbeafe"/>
+  <text x="1426" y="185" class="pill" fill="#1d4ed8">Коммуникации</text>
+  <rect x="1570" y="164" width="134" height="32" rx="16" fill="#fef3c7"/>
+  <text x="1594" y="185" class="pill" fill="#b45309">Staff-control</text>
+
+  <rect x="70" y="260" width="780" height="890" rx="22" class="panel-green"/>
+  <text x="100" y="304" class="h2">Персонал</text>
+  <text x="100" y="333" class="note">Единый рабочий контур: смена, задачи, обучение, регламенты, контроль и справочник сотрудников.</text>
+
+  <rect x="110" y="372" width="310" height="76" rx="14" class="node-green"/>
+  <text x="132" y="401" class="label">Хаб персонала</text>
+  <text x="132" y="426" class="path">/staff</text>
+  <rect x="510" y="372" width="300" height="76" rx="14" class="node-green"/>
+  <text x="532" y="401" class="label">Моя смена</text>
+  <text x="532" y="426" class="path">/staff/shift-workspace</text>
+
+  <path d="M420 410 C450 410 480 410 510 410" class="line-green" marker-end="url(#arrowGreen)"/>
+
+  <rect x="110" y="498" width="310" height="94" rx="14" class="node"/>
+  <text x="132" y="528" class="label">Задачи персонала</text>
+  <text x="132" y="553" class="path">/staff/tasks</text>
+  <text x="132" y="575" class="note">Создание, согласование, исполнение и проверка задач.</text>
+
+  <rect x="110" y="622" width="310" height="94" rx="14" class="node"/>
+  <text x="132" y="652" class="label">Регламенты и чек-листы</text>
+  <text x="132" y="677" class="path">/staff/shift-regulations</text>
+  <text x="132" y="699" class="note">Центр каталога и конструкторов стандартов смены.</text>
+
+  <rect x="110" y="746" width="310" height="94" rx="14" class="node"/>
+  <text x="132" y="776" class="label">Отчет по чек-листам</text>
+  <text x="132" y="801" class="path">/staff/checklists/report</text>
+  <text x="132" y="823" class="note">История запусков, фильтры, сортировка и контроль.</text>
+
+  <rect x="110" y="870" width="310" height="94" rx="14" class="node"/>
+  <text x="132" y="900" class="label">Справочник сотрудников</text>
+  <text x="132" y="925" class="path">/staff/directory</text>
+  <text x="132" y="947" class="note">Карточки сотрудников и привязки к Langame.</text>
+
+  <rect x="110" y="994" width="310" height="94" rx="14" class="node"/>
+  <text x="132" y="1024" class="label">Операционная дисциплина</text>
+  <text x="132" y="1049" class="path">/staff/operations-dashboard</text>
+  <text x="132" y="1071" class="note">Итоги по сменам, задачам, чек-листам и рискам.</text>
+
+  <rect x="510" y="498" width="300" height="74" rx="14" class="node-muted"/>
+  <text x="532" y="527" class="label">Текущие чек-листы</text>
+  <text x="532" y="552" class="path">/staff/checklists</text>
+
+  <rect x="510" y="594" width="300" height="74" rx="14" class="node-muted"/>
+  <text x="532" y="623" class="label">Конструктор чек-листа</text>
+  <text x="532" y="648" class="path">/staff/checklist-templates</text>
+
+  <rect x="510" y="690" width="300" height="74" rx="14" class="node-muted"/>
+  <text x="532" y="719" class="label">Курсы обучения</text>
+  <text x="532" y="744" class="path">/staff/training-courses</text>
+
+  <rect x="510" y="786" width="300" height="74" rx="14" class="node-muted"/>
+  <text x="532" y="815" class="label">База знаний</text>
+  <text x="532" y="840" class="path">/staff/knowledge-base</text>
+
+  <rect x="510" y="882" width="300" height="74" rx="14" class="node-muted"/>
+  <text x="532" y="911" class="label">Рейтинг администраторов</text>
+  <text x="532" y="936" class="path">/staff/administrator-ratings</text>
+
+  <rect x="510" y="978" width="300" height="74" rx="14" class="node-muted"/>
+  <text x="532" y="1007" class="label">Зарплаты и дисциплина</text>
+  <text x="532" y="1032" class="path">/staff/salary · /staff/discipline</text>
+
+  <path d="M265 448 L265 498" class="line" marker-end="url(#arrow)"/>
+  <path d="M265 592 L265 622" class="line" marker-end="url(#arrow)"/>
+  <path d="M265 716 L265 746" class="line" marker-end="url(#arrow)"/>
+  <path d="M265 840 L265 870" class="line" marker-end="url(#arrow)"/>
+  <path d="M265 964 L265 994" class="line" marker-end="url(#arrow)"/>
+  <path d="M660 448 L660 498" class="line" marker-end="url(#arrow)"/>
+  <path d="M660 572 L660 594" class="line" marker-end="url(#arrow)"/>
+  <path d="M660 668 L660 690" class="line" marker-end="url(#arrow)"/>
+  <path d="M660 764 L660 786" class="line" marker-end="url(#arrow)"/>
+
+  <rect x="900" y="260" width="830" height="418" rx="22" class="panel-amber"/>
+  <text x="930" y="304" class="h2">Staff-control внутри Персонала</text>
+  <text x="930" y="333" class="note">Бывшие страницы /guests/staff-control/* теперь открываются через /staff/staff-control/*.</text>
+
+  <rect x="940" y="372" width="330" height="80" rx="14" class="node-amber"/>
+  <text x="962" y="402" class="label">Контроль персонала</text>
+  <text x="962" y="427" class="path">/staff/staff-control</text>
+
+  <rect x="1340" y="372" width="330" height="80" rx="14" class="node-amber"/>
+  <text x="1362" y="402" class="label">Операторы Langame</text>
+  <text x="1362" y="427" class="path">/staff/staff-control/operators</text>
+
+  <rect x="940" y="486" width="330" height="80" rx="14" class="node-amber"/>
+  <text x="962" y="516" class="label">Администраторы</text>
+  <text x="962" y="541" class="path">/staff/staff-control/admins</text>
+
+  <rect x="1340" y="486" width="330" height="80" rx="14" class="node-amber"/>
+  <text x="1362" y="516" class="label">Операции смен</text>
+  <text x="1362" y="541" class="path">/staff/staff-control/operations</text>
+
+  <rect x="1140" y="600" width="330" height="58" rx="14" class="node-amber"/>
+  <text x="1162" y="625" class="label">Диагностика данных</text>
+  <text x="1162" y="648" class="path">/staff/staff-control/diagnostics</text>
+
+  <path d="M1270 412 C1292 412 1316 412 1340 412" class="line-amber" marker-end="url(#arrowAmber)"/>
+  <path d="M1105 452 L1105 486" class="line-amber" marker-end="url(#arrowAmber)"/>
+  <path d="M1270 526 C1292 526 1316 526 1340 526" class="line-amber" marker-end="url(#arrowAmber)"/>
+  <path d="M1505 566 C1505 590 1470 622 1470 622" class="line-amber" marker-end="url(#arrowAmber)"/>
+  <path d="M1105 566 C1105 590 1140 622 1140 622" class="line-amber" marker-end="url(#arrowAmber)"/>
+
+  <rect x="900" y="724" width="830" height="426" rx="22" class="panel-blue"/>
+  <text x="930" y="768" class="h2">Коммуникации</text>
+  <text x="930" y="797" class="note">Рабочие сообщения, уведомления, отчеты смен и командные каналы.</text>
+
+  <rect x="940" y="838" width="330" height="88" rx="14" class="node-blue"/>
+  <text x="962" y="868" class="label">Обзор коммуникаций</text>
+  <text x="962" y="893" class="path">/communications</text>
+  <text x="962" y="914" class="note">Для админов и стажеров открывается сразу чат.</text>
+
+  <rect x="1340" y="838" width="330" height="88" rx="14" class="node-blue"/>
+  <text x="1362" y="868" class="label">Командный чат</text>
+  <text x="1362" y="893" class="path">/staff/team-chat</text>
+  <text x="1362" y="914" class="note">Клубные каналы, уведомления и отчетность.</text>
+
+  <rect x="940" y="968" width="330" height="74" rx="14" class="node-blue"/>
+  <text x="962" y="997" class="label">Уведомления</text>
+  <text x="962" y="1022" class="path">канал “Уведомления”</text>
+
+  <rect x="1340" y="968" width="330" height="74" rx="14" class="node-blue"/>
+  <text x="1362" y="997" class="label">Отчетность</text>
+  <text x="1362" y="1022" class="path">канал “Отчетность”</text>
+
+  <rect x="1140" y="1072" width="330" height="58" rx="14" class="node-blue"/>
+  <text x="1162" y="1097" class="label">Сообщения из задач и регламентов</text>
+  <text x="1162" y="1120" class="path">ссылки на рабочие страницы</text>
+
+  <path d="M1270 882 C1292 882 1316 882 1340 882" class="line-blue" marker-end="url(#arrowBlue)"/>
+  <path d="M1105 926 L1105 968" class="line-blue" marker-end="url(#arrowBlue)"/>
+  <path d="M1505 926 L1505 968" class="line-blue" marker-end="url(#arrowBlue)"/>
+  <path d="M1105 1042 C1105 1068 1140 1098 1140 1098" class="line-blue" marker-end="url(#arrowBlue)"/>
+  <path d="M1505 1042 C1505 1068 1470 1098 1470 1098" class="line-blue" marker-end="url(#arrowBlue)"/>
+
+  <path d="M810 535 C870 535 880 412 940 412" class="line-amber" marker-end="url(#arrowAmber)"/>
+  <path d="M810 631 C858 631 890 800 940 882" class="line-blue" marker-end="url(#arrowBlue)"/>
+  <path d="M810 727 C860 727 888 760 940 882" class="line-blue" marker-end="url(#arrowBlue)"/>
+
+  <rect x="70" y="1186" width="1660" height="44" rx="12" fill="#ffffff" stroke="#e5e7eb"/>
+  <text x="96" y="1214" class="note">Файл можно открыть в браузере или скачать как SVG. Для PNG достаточно экспортировать SVG из браузера или дизайн-редактора.</text>
+</svg>

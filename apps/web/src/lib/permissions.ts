@@ -681,7 +681,7 @@ function canAccessShiftStaffPath(href: string) {
 function resolveStaffPathCapability(href: string): Capability {
   const path = href.split("?")[0]?.split("#")[0] ?? href;
 
-  if (path.startsWith("/guests/staff-control")) {
+  if (path.startsWith("/staff/staff-control") || path.startsWith("/guests/staff-control")) {
     return "view_staff_control";
   }
 

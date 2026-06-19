@@ -122,7 +122,7 @@ function staffControlHref(report: {
     params.set("storeId", report.storeId);
   }
 
-  return `/guests/staff-control?${params.toString()}`;
+  return `/staff/staff-control?${params.toString()}`;
 }
 
 function operationsExportHref(report: {
@@ -178,7 +178,7 @@ function sortHref(
     params.set("search", report.search);
   }
 
-  return `/guests/staff-control/operations?${params.toString()}`;
+  return `/staff/staff-control/operations?${params.toString()}`;
 }
 
 export default async function StaffOperationsReportPage({
@@ -506,7 +506,7 @@ function KindCard({
 
   return (
     <Link
-      href={`/guests/staff-control/operations?${params.toString()}`}
+      href={`/staff/staff-control/operations?${params.toString()}`}
       className="block rounded-lg border border-zinc-200 bg-zinc-50 p-4 transition hover:border-emerald-300 hover:bg-emerald-50/60 dark:border-zinc-800 dark:bg-zinc-900/40 dark:hover:border-emerald-800 dark:hover:bg-emerald-950/20"
     >
       <p className="text-xs font-semibold uppercase text-emerald-700 dark:text-emerald-300">

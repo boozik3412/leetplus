@@ -486,7 +486,7 @@ export default async function StaffTasksPage({
           current="Задачи персонала"
           items={[
             { href: "/dashboard", label: "Дашборд" },
-            { href: "/guests/staff-control", label: "Контроль персонала" },
+            { href: "/staff/staff-control", label: "Контроль персонала" },
           ]}
         />
 
@@ -524,7 +524,7 @@ export default async function StaffTasksPage({
               Шаблоны задач
             </Link>
             <Link
-              href="/guests/staff-control"
+              href="/staff/staff-control"
               className="inline-flex h-10 items-center justify-center rounded-md border border-zinc-300 px-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
             >
               Контроль администраторов

@@ -3157,7 +3157,6 @@ export class GuestPortalService {
           where: {
             tenantId: context.tenant.id,
             guestId: targetGuest.id,
-            status: 'ACTIVE',
           },
           orderBy: { updatedAt: 'desc' },
         })

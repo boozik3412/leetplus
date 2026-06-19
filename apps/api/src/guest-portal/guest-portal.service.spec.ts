@@ -1159,6 +1159,126 @@ describe('GuestPortalService', () => {
         },
       });
     });
+
+    it('reactivates a profile already linked to the selected club guest', async () => {
+      const { jwtService, prisma, service } = createService({
+        GUEST_GAME_REFERRAL_SECRET: 'referral-secret',
+        WEB_URL: 'https://leetplus.ru',
+      });
+      const tokenPayload = {
+        sub: 'guest-portal:profile-1',
+        purpose: 'guest_portal',
+        tenantId: 'tenant-1',
+        storeId: 'store-1',
+        guestId: null,
+        profileId: 'profile-1',
+        phoneHash: 'phone-hash-1',
+      };
+      const targetGuest = {
+        id: 'guest-2',
+        externalGuestId: 'langame-2',
+        fullNameMasked: 'Игрок 1337',
+        phoneMasked: '+7 *** **-22',
+        emailMasked: null,
+      };
+      const sourceProfile = {
+        id: 'profile-1',
+        guestId: null,
+        phoneHash: 'phone-hash-1',
+        displayName: 'Гость клуба',
+        contactMasked: '+7 *** **-11',
+        phoneConsentStatus: 'GRANTED',
+        phoneConsentSource: 'guest_portal_game_consent',
+        phoneConsentAt: new Date('2026-06-15T08:00:00.000Z'),
+        unsubscribedAt: null,
+      };
+      const inactiveTargetProfile = {
+        ...sourceProfile,
+        id: 'profile-2',
+        guestId: targetGuest.id,
+        contactMasked: targetGuest.phoneMasked,
+        status: 'INACTIVE',
+      };
+      const portal = {
+        ...portalPayloadFixture(),
+        tenant: { name: 'Leet Clubs', slug: 'leet' },
+        store: {
+          id: 'store-2',
+          publicSlug: 'club-2',
+          name: 'Club 2',
+          address: 'ул. Мира, 2',
+        },
+        profile: {
+          ...portalPayloadFixture().profile,
+          id: inactiveTargetProfile.id,
+        },
+      };
+
+      jest
+        .spyOn(service as any, 'verifyGuestToken')
+        .mockResolvedValue(tokenPayload);
+      jest.spyOn(service as any, 'getTenantStore').mockResolvedValue({
+        tenant: { id: 'tenant-1', name: 'Leet Clubs', slug: 'leet' },
+        store: {
+          id: 'store-2',
+          publicSlug: 'club-2',
+          name: 'Club 2',
+          address: 'ул. Мира, 2',
+        },
+      });
+      jest
+        .spyOn(service as any, 'ensureGamificationClubAvailable')
+        .mockResolvedValue(undefined);
+      jest
+        .spyOn(service as any, 'findGuest')
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(targetGuest);
+      jest
+        .spyOn(service as any, 'findProfile')
+        .mockResolvedValueOnce(sourceProfile);
+      jest
+        .spyOn(service as any, 'buildPortalPayload')
+        .mockResolvedValue(portal);
+      prisma.guestGameProfile.findFirst.mockResolvedValueOnce(
+        inactiveTargetProfile,
+      );
+      prisma.guestGameProfile.update.mockResolvedValue({
+        ...inactiveTargetProfile,
+        status: 'ACTIVE',
+      });
+      jwtService.signAsync.mockResolvedValue('selected-club-token');
+
+      const result = await service.selectGameClub('Bearer guest-token', {
+        clubId: 'leet:club-2',
+      });
+
+      expect(prisma.guestGameProfile.findFirst).toHaveBeenCalledWith({
+        where: {
+          tenantId: 'tenant-1',
+          guestId: targetGuest.id,
+        },
+        orderBy: { updatedAt: 'desc' },
+      });
+      expect(service['findProfile']).toHaveBeenCalledTimes(1);
+      expect(prisma.guestGameProfile.create).not.toHaveBeenCalled();
+      expect(prisma.guestGameProfile.update).toHaveBeenCalledWith({
+        where: { id: inactiveTargetProfile.id },
+        data: expect.objectContaining({
+          guestId: targetGuest.id,
+          phoneHash: 'phone-hash-1',
+          status: 'ACTIVE',
+        }),
+      });
+      expect(jwtService.signAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sub: 'game-club:profile-2:store-2',
+          guestId: targetGuest.id,
+          profileId: inactiveTargetProfile.id,
+        }),
+        expect.any(Object),
+      );
+      expect(result.clubId).toBe('leet:club-2');
+    });
   });
 
   describe('getGamificationClubDirectory', () => {

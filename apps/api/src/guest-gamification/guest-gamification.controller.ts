@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
@@ -45,6 +46,7 @@ import {
   type GuestGameMission,
   type GuestGameMissionDto,
   type GuestGameMissionUpdateDto,
+  type GuestGamePromoCard,
   type GuestGameProfile,
   type GuestGameProfileDto,
   type GuestGameProfileUpdateDto,
@@ -63,6 +65,9 @@ import {
   type GuestGameSeasonDto,
   type GuestGameSeasonUpdateDto,
   type GuestGameSnapshotFactsResult,
+  type GuestGameVisualDraft,
+  type GuestGameVisualDraftDto,
+  type GuestGameVisualEditorPreview,
   type GuestGamificationWorkspace,
 } from './guest-gamification.service';
 
@@ -249,6 +254,53 @@ export class GuestGamificationController {
     @Body() dto: GuestGameSeasonUpdateDto,
   ): Promise<GuestGameSeason> {
     return this.gamificationService.updateSeason(user, id, dto);
+  }
+
+  @Get('promo-cards')
+  getPromoCards(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<GuestGamePromoCard[]> {
+    return this.gamificationService.getPromoCards(user);
+  }
+
+  @Get('visual-editor/draft')
+  getVisualEditorDraft(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('id') id?: string,
+    @Query('storeId') storeId?: string,
+  ): Promise<GuestGameVisualDraft> {
+    return this.gamificationService.getVisualEditorDraft(user, {
+      id,
+      storeId,
+    });
+  }
+
+  @Patch('visual-editor/draft')
+  updateVisualEditorDraft(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: GuestGameVisualDraftDto,
+  ): Promise<GuestGameVisualDraft> {
+    return this.gamificationService.updateVisualEditorDraft(user, dto);
+  }
+
+  @Post('visual-editor/draft/publish')
+  publishVisualEditorDraft(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: GuestGameVisualDraftDto,
+  ): Promise<GuestGameVisualEditorPreview> {
+    return this.gamificationService.publishVisualEditorDraft(user, dto);
+  }
+
+  @Get('visual-editor/preview')
+  getVisualEditorPreview(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('id') id?: string,
+    @Query('storeId') storeId?: string,
+  ): Promise<GuestGameVisualEditorPreview> {
+    return this.gamificationService.getVisualEditorPreview(user, {
+      id,
+      storeId,
+    });
   }
 
   @Get('rewards')

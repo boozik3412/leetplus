@@ -70,6 +70,7 @@ function createPrismaMock() {
     },
     store: {
       findMany: jest.fn(),
+      findFirst: jest.fn(),
     },
     guestSession: {
       findMany: jest.fn(),
@@ -97,6 +98,31 @@ function createPrismaMock() {
     },
     guestGroup: {
       findMany: jest.fn(),
+    },
+    guestGameLootBox: {
+      findMany: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+    },
+    guestGameMission: {
+      findMany: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+    },
+    guestGameSeason: {
+      findMany: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+    },
+    guestGamePromoCard: {
+      findMany: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+    },
+    guestGameVisualDraft: {
+      findFirst: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
     },
     salesFact: {
       findMany: jest.fn(),
@@ -227,6 +253,71 @@ function activeMission(
     perGuestLimit: null,
     totalRewardLimit: null,
     antiFraudRules: null,
+    ...overrides,
+  };
+}
+
+function visualEditorStore(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'store-1',
+    name: '1337 Test',
+    publicSlug: 'store-1',
+    address: 'Test street',
+    city: 'Р•РєР°С‚РµСЂРёРЅР±СѓСЂРі',
+    latitude: null,
+    longitude: null,
+    isActive: true,
+    gamificationEnabled: true,
+    externalDomain: 'club-1',
+    externalClubId: 'club-1',
+    ...overrides,
+  };
+}
+
+function visualEditorPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    version: 1,
+    battlePass: {
+      id: null,
+      enabled: true,
+      title: 'РљР»СѓР±РЅС‹Р№ СЃРµР·РѕРЅ',
+      status: 'ACTIVE',
+      levelCount: 4,
+      xpPerLevel: 250,
+      mainPrize: 'Р¤РёРЅР°Р»СЊРЅС‹Р№ РїСЂРёР·',
+      levelRewards: [{ level: 2, reward: 'РџСЂРѕРјРѕРєРѕРґ' }],
+    },
+    lootBoxes: [],
+    missions: [],
+    promoCards: [],
+    checkIn: {
+      enabled: false,
+      rewardMode: '',
+      xp: null,
+      bonusAmount: null,
+      rewardLabel: null,
+    },
+    ...overrides,
+  };
+}
+
+function visualDraftRow(overrides: Record<string, unknown> = {}) {
+  const store = visualEditorStore();
+
+  return {
+    id: 'draft-1',
+    tenantId: user.tenantId,
+    storeId: store.id,
+    status: 'DRAFT',
+    payload: visualEditorPayload(),
+    note: null,
+    publishedAt: null,
+    createdAt: now,
+    updatedAt: now,
+    createdByUser: null,
+    updatedByUser: null,
+    publishedByUser: null,
+    store,
     ...overrides,
   };
 }
@@ -2501,6 +2592,70 @@ describe('GuestGamificationService', () => {
         }),
       );
       expect(JSON.stringify(reconciliation)).not.toContain('79999999999');
+    });
+  });
+
+  describe('visual editor draft', () => {
+    it('builds a preview draft without mutating live gamification rules', async () => {
+      const { service, prisma } = createService();
+      const store = visualEditorStore();
+      const draft = visualDraftRow({ store });
+
+      prisma.store.findFirst.mockResolvedValue(store);
+      prisma.guestGameVisualDraft.findFirst.mockResolvedValue(null);
+      prisma.guestGameSeason.findMany.mockResolvedValue([]);
+      prisma.guestGameLootBox.findMany.mockResolvedValue([]);
+      prisma.guestGameMission.findMany.mockResolvedValue([]);
+      prisma.guestGamePromoCard.findMany.mockResolvedValue([]);
+      prisma.guestGameVisualDraft.create.mockResolvedValue(draft);
+
+      const result = await service.getVisualEditorPreview(user, {
+        storeId: store.id,
+      });
+
+      expect(result.draft.id).toBe(draft.id);
+      expect(result.summary.store.id).toBe(store.id);
+      expect(prisma.guestGameVisualDraft.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            tenantId: user.tenantId,
+            storeId: store.id,
+          }),
+        }),
+      );
+      expect(prisma.guestGameSeason.create).not.toHaveBeenCalled();
+      expect(prisma.guestGameSeason.update).not.toHaveBeenCalled();
+      expect(prisma.guestGameLootBox.create).not.toHaveBeenCalled();
+      expect(prisma.guestGameMission.create).not.toHaveBeenCalled();
+      expect(prisma.guestGamePromoCard.create).not.toHaveBeenCalled();
+    });
+
+    it('blocks publishing enabled check-in when no reward mode is selected', async () => {
+      const { service, prisma } = createService();
+      const store = visualEditorStore();
+      const payload = visualEditorPayload({
+        checkIn: {
+          enabled: true,
+          rewardMode: '',
+          xp: null,
+          bonusAmount: null,
+          rewardLabel: null,
+        },
+      });
+
+      prisma.guestGameVisualDraft.findFirst.mockResolvedValue(
+        visualDraftRow({ store, payload }),
+      );
+
+      await expect(
+        service.publishVisualEditorDraft(user, { id: 'draft-1' }),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(prisma.guestGameVisualDraft.update).not.toHaveBeenCalled();
+      expect(prisma.guestGameSeason.create).not.toHaveBeenCalled();
+      expect(prisma.guestGameLootBox.create).not.toHaveBeenCalled();
+      expect(prisma.guestGameMission.create).not.toHaveBeenCalled();
+      expect(prisma.guestGamePromoCard.create).not.toHaveBeenCalled();
     });
   });
 

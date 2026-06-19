@@ -8,6 +8,7 @@ import {
   type ReactNode,
   type SetStateAction,
 } from "react";
+import { GuestGamificationVisualEditor } from "@/components/guest-gamification-visual-editor";
 import type { GuestAudience, GuestCrmLead, GuestDashboardRow } from "@/lib/guests";
 import type {
   GuestGameBonusLedgerDispatchItem,
@@ -63,6 +64,8 @@ type TabId =
   | "seasons"
   | "rewards"
   | "testRun";
+
+type EditorMode = "advanced" | "visual";
 
 type GuestLogMappingPayload = {
   rawType: string;
@@ -178,6 +181,7 @@ type SeasonForm = {
   status: GuestGameStatus;
   seasonType: string;
   audienceId: string;
+  storeIds: string[];
   periodFrom: string;
   periodTo: string;
   xpVisit: string;
@@ -489,6 +493,7 @@ const defaultSeasonForm: SeasonForm = {
   status: "DRAFT",
   seasonType: "CLUB_SEASON",
   audienceId: "",
+  storeIds: [],
   periodFrom: "",
   periodTo: "",
   xpVisit: "20",
@@ -615,6 +620,7 @@ export function GuestGamificationPanel({
 }: Props) {
   const [workspace, setWorkspace] = useState(initialWorkspace);
   const [activeTab, setActiveTab] = useState<TabId>("overview");
+  const [editorMode, setEditorMode] = useState<EditorMode>("advanced");
   const [profileForm, setProfileForm] =
     useState<ProfileForm>(defaultProfileForm);
   const [lootBoxForm, setLootBoxForm] =
@@ -889,6 +895,7 @@ export function GuestGamificationPanel({
         status: seasonForm.status,
         seasonType: seasonForm.seasonType,
         audienceId: nullable(seasonForm.audienceId),
+        storeIds: seasonForm.storeIds,
         periodFrom: nullable(seasonForm.periodFrom),
         periodTo: nullable(seasonForm.periodTo),
         xpRules: buildSeasonXpRules(seasonForm),
@@ -1457,6 +1464,40 @@ export function GuestGamificationPanel({
         ) : null}
       </section>
 
+      <div className="flex flex-wrap gap-2 rounded-lg border border-zinc-200 bg-white p-1 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+        {(
+          [
+            ["advanced", "Расширенные настройки"],
+            ["visual", "Визуальный редактор"],
+          ] as const
+        ).map(([mode, label]) => (
+          <button
+            key={mode}
+            type="button"
+            onClick={() => setEditorMode(mode)}
+            className={[
+              "rounded-md px-4 py-2 text-sm font-semibold transition",
+              editorMode === mode
+                ? "bg-zinc-950 text-white dark:bg-cyan-300 dark:text-zinc-950"
+                : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-white",
+            ].join(" ")}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {editorMode === "visual" ? (
+        <GuestGamificationVisualEditor
+          workspace={workspace}
+          stores={stores}
+          canManage={access.canManageRules}
+          onPublished={reloadWorkspace}
+        />
+      ) : null}
+
+      {editorMode === "advanced" ? (
+        <>
       <div className="flex gap-2 overflow-x-auto border-b border-zinc-200 pb-2 dark:border-zinc-800">
         {tabs.map((tab) => (
           <button
@@ -1568,6 +1609,7 @@ export function GuestGamificationPanel({
           setForm={setSeasonForm}
           seasons={workspace.seasons}
           audiences={audiences}
+          stores={stores}
           tariffSnapshots={workspace.tariffSnapshots}
           guestLogCatalog={workspace.guestLogCatalog}
           editingId={editingSeasonId}
@@ -1626,6 +1668,8 @@ export function GuestGamificationPanel({
           saving={saving}
           canManage={access.canManageRules}
         />
+      ) : null}
+        </>
       ) : null}
     </div>
   );
@@ -5763,6 +5807,7 @@ function SeasonsTab({
   setForm,
   seasons,
   audiences,
+  stores,
   tariffSnapshots,
   guestLogCatalog,
   editingId,
@@ -5777,6 +5822,7 @@ function SeasonsTab({
   setForm: (form: SeasonForm) => void;
   seasons: GuestGameSeason[];
   audiences: GuestAudience[];
+  stores: Store[];
   tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
   guestLogCatalog: GuestGameGuestLogCatalog;
   editingId: string | null;
@@ -5830,6 +5876,11 @@ function SeasonsTab({
               onChange={(audienceId) => setForm({ ...form, audienceId })}
             />
           </div>
+          <StoreSelect
+            stores={stores}
+            value={form.storeIds}
+            onChange={(storeIds) => setForm({ ...form, storeIds })}
+          />
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Начало">
               <input
@@ -8114,6 +8165,7 @@ function seasonToForm(season: GuestGameSeason): SeasonForm {
     status: season.status,
     seasonType: season.seasonType,
     audienceId: season.audience?.id ?? "",
+    storeIds: season.storeIds,
     periodFrom: dateInputValue(season.periodFrom),
     periodTo: dateInputValue(season.periodTo),
     xpVisit: numberRule(season.xpRules, "visit", "20"),

@@ -637,6 +637,7 @@ export type GuestPortalPayload = {
     lootBoxes: GuestPortalLootBox[];
     missions: GuestPortalMission[];
     seasons: GuestPortalSeason[];
+    promoCards: GuestPortalPromoCard[];
     rewardSummary: GuestPortalRewardSummary;
     rewards: GuestPortalReward[];
     bonusHistory: GuestPortalBonusHistory;
@@ -693,6 +694,16 @@ export type GuestPortalReferralStats = {
   acceptedCount: number;
   eligibleCount: number;
   latestAcceptedAt: string | null;
+};
+
+export type GuestPortalPromoCard = {
+  id: string;
+  label: string | null;
+  title: string;
+  description: string | null;
+  tag: string | null;
+  targetAnchor: string | null;
+  periodTo: string | null;
 };
 
 export type GuestPortalGameSummary = {
@@ -765,6 +776,10 @@ export type GuestPortalGameSummary = {
         | 'latestReward'
       >
     >;
+  };
+  promoCards: {
+    total: number;
+    featured: GuestPortalPromoCard[];
   };
   missions: {
     total: number;
@@ -1023,13 +1038,20 @@ export type GuestPortalNextAction = {
     | 'OPEN_LOOT_BOX'
     | 'FINISH_MISSION'
     | 'BATTLE_PASS'
+    | 'CHECK_IN'
     | 'MATCH_LANGAME';
   title: string;
   description: string;
   priority: 'HIGH' | 'MEDIUM' | 'LOW';
   statusLabel: string;
   progressPercent: number | null;
-  anchor: 'rewards' | 'lootBoxes' | 'missions' | 'battlePass' | 'profile';
+  anchor:
+    | 'rewards'
+    | 'lootBoxes'
+    | 'missions'
+    | 'battlePass'
+    | 'profile'
+    | 'progress';
 };
 
 export type GuestPortalLootBox = {
@@ -5587,6 +5609,7 @@ export class GuestPortalService {
       lootBoxes,
       missions,
       seasons,
+      promoCards,
       rewards,
       bonusLedgerRows,
       communicationEvents,
@@ -5654,6 +5677,17 @@ export class GuestPortalService {
           status: 'ACTIVE',
         },
         orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+      }),
+      this.prisma.guestGamePromoCard.findMany({
+        where: {
+          tenantId: context.tenant.id,
+          status: 'ACTIVE',
+        },
+        orderBy: [
+          { priority: 'desc' },
+          { updatedAt: 'desc' },
+          { createdAt: 'desc' },
+        ],
       }),
       guest || profile
         ? this.prisma.guestGameReward.findMany({
@@ -5781,9 +5815,15 @@ export class GuestPortalService {
       mapMission(item, missionProgress.get(item.id), rewards, bonusLedgerRows),
     );
     const portalSeasons = seasons
+      .filter((item) => matchesStore(item.storeIds, context.store.id))
       .filter((item) => activePeriod(item.periodFrom, item.periodTo))
       .slice(0, 2)
       .map((item) => mapSeason(item, xp, rewards));
+    const portalPromoCards = promoCards
+      .filter((item) => matchesStore(item.storeIds, context.store.id))
+      .filter((item) => activePeriod(item.periodFrom, item.periodTo))
+      .slice(0, 6)
+      .map(mapPromoCard);
     const nextActions = buildNextActions({
       guestFound: Boolean(guest || profile),
       lootBoxes: portalLootBoxes,
@@ -5829,6 +5869,7 @@ export class GuestPortalService {
         lootBoxes: portalLootBoxes,
         missions: portalMissions,
         seasons: portalSeasons,
+        promoCards: portalPromoCards,
         rewardSummary: buildRewardSummary(portalRewards),
         rewards: portalRewards,
         bonusHistory,
@@ -7541,6 +7582,10 @@ function buildGameSummaryFromPortal(
       total: portal.gamification.lootBoxes.length,
       featured: featuredLootBoxes,
     },
+    promoCards: {
+      total: portal.gamification.promoCards.length,
+      featured: portal.gamification.promoCards.slice(0, 3),
+    },
     missions: {
       total: portal.gamification.missions.length,
       featured: featuredMissions,
@@ -8781,9 +8826,7 @@ function telegramWebhookUpdate(value: unknown) {
   const chatId = chat?.id ?? from?.id;
   const callbackData = stringField(callbackQuery?.data);
   const text =
-    stringField(message.text) ??
-    stringField(message.caption) ??
-    callbackData;
+    stringField(message.text) ?? stringField(message.caption) ?? callbackData;
   const username =
     typeof from?.username === 'string'
       ? from.username
@@ -9767,6 +9810,26 @@ function mapSeason(
   };
 }
 
+function mapPromoCard(row: {
+  id: string;
+  label: string | null;
+  title: string;
+  description: string | null;
+  tag: string | null;
+  targetAnchor: string | null;
+  periodTo: Date | null;
+}): GuestPortalPromoCard {
+  return {
+    id: row.id,
+    label: row.label,
+    title: row.title,
+    description: row.description,
+    tag: row.tag,
+    targetAnchor: row.targetAnchor,
+    periodTo: iso(row.periodTo),
+  };
+}
+
 function mapReward(row: {
   id: string;
   status: string;
@@ -9953,6 +10016,11 @@ function buildNextActions(input: {
     (mission) =>
       mission.progressPercent >= 100 && mission.manualApprovalRequired,
   );
+  const checkInMission = input.missions.find(
+    (mission) =>
+      mission.missionType === 'CHECK_IN' &&
+      mission.rewardStatus.state === 'IN_PROGRESS',
+  );
   const season = input.seasons[0] ?? null;
 
   if (readyReward) {
@@ -9986,6 +10054,23 @@ function buildNextActions(input: {
           : 'на проверке',
       progressPercent: 100,
       anchor: 'lootBoxes',
+    });
+  }
+
+  if (checkInMission) {
+    actions.push({
+      id: `check-in:${checkInMission.id}`,
+      kind: 'CHECK_IN',
+      title: 'Сделайте чекин в клубе',
+      description:
+        checkInMission.rewardLabel ??
+        (checkInMission.xpReward > 0
+          ? `${checkInMission.xpReward} XP за чекин.`
+          : 'Чекин доступен для выбранного клуба.'),
+      priority: actions.length ? 'MEDIUM' : 'HIGH',
+      statusLabel: 'доступно',
+      progressPercent: checkInMission.progressPercent,
+      anchor: 'progress',
     });
   }
 

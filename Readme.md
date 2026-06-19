@@ -38,6 +38,12 @@ Guest Game Hub на `/guests/gamification` показывает readiness как
 
 Deployment-порядок закреплен в `docs/deployment/telegram-auth.md` и `docs/deployment/telegram-edge-vds/CURRENT_1337_HANDOFF.md`: live-схема 1337, Docker Compose, polling, Mini App `/game/app`, QA `/game/auth или /play -> Telegram -> contact-share -> выбор сайт/Mini App/бот` и rollback без раскрытия токенов, raw phone, raw chat id или Langame payload.
 
+### Визуальный редактор геймификации
+
+Бизнес-раздел `/guests/gamification` имеет два режима: `Расширенные настройки` остается рабочим видом по умолчанию, а `Визуальный редактор` показывает безопасный preview гостевой главной страницы выбранного клуба и инспектор редактируемого блока. Через editor v1 настраиваются Battle Pass, лутбоксы, квесты, события/акции и чек-ин; изменения сначала сохраняются в `GuestGameVisualDraft` и попадают в live-правила только после публикации.
+
+Публикация применяет изменения в `GuestGameSeason.storeIds`, `GuestGameLootBox`, `GuestGameMission`, `GuestGamePromoCard` и управляемое правило `CHECK_IN`. Чек-ин нельзя включить без награды XP или бонусами. Preview не требует guest-token, не пишет игровые события и не раскрывает raw phone, токены или Langame payload. Подробности зафиксированы в `docs/gamification-visual-editor.md`.
+
 ### Реферальная регистрация в геймификации
 
 `/play/game` выдает участнику геймификации непрозрачный HMAC-код `lp_ref_*` и ссылку вида `/play?clubId=<tenant:club>&ref=<code>`. `/play` принимает этот `ref`, показывает безопасный баннер приглашения и передает код только в момент успешного завершения авторизации: OTP/SMS-код, Telegram-бот с contact-share или звонок пользователя на номер.

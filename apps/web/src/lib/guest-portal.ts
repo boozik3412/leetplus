@@ -270,13 +270,20 @@ export type GuestPortalPayload = {
         | "OPEN_LOOT_BOX"
         | "FINISH_MISSION"
         | "BATTLE_PASS"
+        | "CHECK_IN"
         | "MATCH_LANGAME";
       title: string;
       description: string;
       priority: "HIGH" | "MEDIUM" | "LOW";
       statusLabel: string;
       progressPercent: number | null;
-      anchor: "rewards" | "lootBoxes" | "missions" | "battlePass" | "profile";
+      anchor:
+        | "rewards"
+        | "lootBoxes"
+        | "missions"
+        | "battlePass"
+        | "profile"
+        | "progress";
     }>;
     lootBoxes: Array<{
       id: string;
@@ -355,6 +362,15 @@ export type GuestPortalPayload = {
         current: boolean;
         next: boolean;
       }>;
+    }>;
+    promoCards: Array<{
+      id: string;
+      label: string | null;
+      title: string;
+      description: string | null;
+      tag: string | null;
+      targetAnchor: string | null;
+      periodTo: string | null;
     }>;
     rewardSummary: {
       total: number;
@@ -594,6 +610,10 @@ export type GuestPortalGameSummary = {
         | "latestReward"
       >
     >;
+  };
+  promoCards: {
+    total: number;
+    featured: GuestPortalPayload["gamification"]["promoCards"];
   };
   missions: {
     total: number;

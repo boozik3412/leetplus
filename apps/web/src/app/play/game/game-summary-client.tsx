@@ -636,8 +636,7 @@ function buildHomeBanners(
 ): HomeBanner[] {
   const featuredMission = summary.missions.featured[0] ?? null;
   const secondMission = summary.missions.featured[1] ?? null;
-
-  return [
+  const fallbackBanners: HomeBanner[] = [
     {
       id: "primary",
       label: primaryAction ? "Акция / квест" : "Акция / реклама",
@@ -661,7 +660,7 @@ function buildHomeBanners(
     },
     {
       id: "drop",
-      label: "Коллаб",
+      label: "Событие",
       title: secondMission?.name ?? "Партнерский дроп",
       description:
         secondMission?.rewardLabel ??
@@ -671,6 +670,24 @@ function buildHomeBanners(
       href: "#rewards",
     },
   ];
+  const promoBanners = summary.promoCards.featured.slice(0, 3).map(
+    (card, index): HomeBanner => ({
+      id: `promo-${card.id}`,
+      label: card.label ?? (index === 0 ? "Акция" : "Событие"),
+      title: card.title,
+      description:
+        card.description ??
+        fallbackBanners[index]?.description ??
+        "Клубное событие для участников игрового модуля.",
+      tag:
+        card.tag ??
+        (card.periodTo ? `до ${formatDate(card.periodTo)}` : "активно"),
+      featured: index === 0,
+      href: card.targetAnchor ? `#${card.targetAnchor}` : (fallbackBanners[index]?.href ?? "#missions"),
+    }),
+  );
+
+  return [...promoBanners, ...fallbackBanners].slice(0, 3);
 }
 
 function buildHomeLootCards(
@@ -4112,6 +4129,7 @@ function gameActionButtonLabel(action: GameNextAction) {
     OPEN_LOOT_BOX: "Открыть приз",
     FINISH_MISSION: "Открыть квест",
     BATTLE_PASS: "Открыть сезон",
+    CHECK_IN: "Чекин в клубе",
     MATCH_LANGAME: "Связать Langame",
   } satisfies Record<GameNextAction["kind"], string>;
 

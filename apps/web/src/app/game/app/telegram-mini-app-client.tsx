@@ -997,6 +997,19 @@ function Toast({ message }: { message: string | null }) {
 }
 
 function buildEvents(summary: GuestPortalGameSummary) {
+  const promoCards = summary.promoCards.featured.slice(0, 3).map((card) => ({
+    label: card.label ?? "Событие",
+    title: card.title,
+    action:
+      card.tag ??
+      (card.periodTo ? `до ${formatDate(card.periodTo)}` : "активно"),
+    toast: card.description ?? card.title,
+  }));
+
+  if (promoCards.length) {
+    return promoCards;
+  }
+
   const nextActions = summary.nextActions.slice(0, 3).map((action) => ({
     label: "План игры",
     title: action.title,
@@ -1022,7 +1035,7 @@ function buildEvents(summary: GuestPortalGameSummary) {
       toast: "Открыт клубный турнир.",
     },
     {
-      label: "Коллаб",
+      label: "Событие",
       title: "Партнерский дроп",
       action: "получить",
       toast: "Открыт партнерский дроп.",
@@ -1080,6 +1093,13 @@ async function readResponseMessage(response: Response, fallback: string) {
   } catch {
     return fallback;
   }
+}
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "short",
+  }).format(new Date(value));
 }
 
 function readTelegramInitData() {

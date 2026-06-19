@@ -18,6 +18,7 @@ import type { AuthenticatedUser } from '../auth/auth.types';
 import { LangameClient } from '../integrations/langame.client';
 import { LangameSettingsService } from '../integrations/langame-settings.service';
 import type { LangameGuestSession } from '../integrations/langame.types';
+import type { GuestPortalGameSummary } from '../guest-portal/guest-portal.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   GuestBonusLedgerSchedulerService,
@@ -89,26 +90,30 @@ const tariffSnapshotDefinitions = [
   {
     endpointKey: 'tariffsByDays',
     endpointPath: '/tariffs/by_days/list',
-    title: 'Тарифы по дням',
-    description: 'Дни недели и ограничения периода для миссий и loot box.',
+    title: 'РўР°СЂРёС„С‹ РїРѕ РґРЅСЏРј',
+    description:
+      'Р”РЅРё РЅРµРґРµР»Рё Рё РѕРіСЂР°РЅРёС‡РµРЅРёСЏ РїРµСЂРёРѕРґР° РґР»СЏ РјРёСЃСЃРёР№ Рё loot box.',
   },
   {
     endpointKey: 'tariffsGroups',
     endpointPath: '/tariffs/groups/list',
-    title: 'Группы тарифов',
-    description: 'Группы тарифов и пакетов для условий сессий.',
+    title: 'Р“СЂСѓРїРїС‹ С‚Р°СЂРёС„РѕРІ',
+    description:
+      'Р“СЂСѓРїРїС‹ С‚Р°СЂРёС„РѕРІ Рё РїР°РєРµС‚РѕРІ РґР»СЏ СѓСЃР»РѕРІРёР№ СЃРµСЃСЃРёР№.',
   },
   {
     endpointKey: 'tariffsTimePeriod',
     endpointPath: '/tariffs/time_period/list',
-    title: 'Тарифные периоды',
-    description: 'Окна тихих часов, ночных пакетов и специальных периодов.',
+    title: 'РўР°СЂРёС„РЅС‹Рµ РїРµСЂРёРѕРґС‹',
+    description:
+      'РћРєРЅР° С‚РёС…РёС… С‡Р°СЃРѕРІ, РЅРѕС‡РЅС‹С… РїР°РєРµС‚РѕРІ Рё СЃРїРµС†РёР°Р»СЊРЅС‹С… РїРµСЂРёРѕРґРѕРІ.',
   },
   {
     endpointKey: 'tariffsTypesGroups',
     endpointPath: '/tariffs/types_groups/list',
-    title: 'Типы тарифных групп',
-    description: 'Типы тарифов для разделения обычной игры и пакетов часов.',
+    title: 'РўРёРїС‹ С‚Р°СЂРёС„РЅС‹С… РіСЂСѓРїРї',
+    description:
+      'РўРёРїС‹ С‚Р°СЂРёС„РѕРІ РґР»СЏ СЂР°Р·РґРµР»РµРЅРёСЏ РѕР±С‹С‡РЅРѕР№ РёРіСЂС‹ Рё РїР°РєРµС‚РѕРІ С‡Р°СЃРѕРІ.',
   },
 ] as const;
 
@@ -292,6 +297,16 @@ const seasonInclude = {
   createdByUser: { select: creatorSelect },
 } satisfies Prisma.GuestGameSeasonInclude;
 
+const promoCardInclude = {
+  createdByUser: { select: creatorSelect },
+} satisfies Prisma.GuestGamePromoCardInclude;
+
+const visualDraftInclude = {
+  store: { select: pilotStoreSelect },
+  createdByUser: { select: creatorSelect },
+  updatedByUser: { select: creatorSelect },
+  publishedByUser: { select: creatorSelect },
+} satisfies Prisma.GuestGameVisualDraftInclude;
 const rewardInclude = {
   profile: {
     select: {
@@ -556,6 +571,12 @@ type MissionRow = Prisma.GuestGameMissionGetPayload<{
 type SeasonRow = Prisma.GuestGameSeasonGetPayload<{
   include: typeof seasonInclude;
 }>;
+type PromoCardRow = Prisma.GuestGamePromoCardGetPayload<{
+  include: typeof promoCardInclude;
+}>;
+type VisualDraftRow = Prisma.GuestGameVisualDraftGetPayload<{
+  include: typeof visualDraftInclude;
+}>;
 type RewardRow = Prisma.GuestGameRewardGetPayload<{
   include: typeof rewardInclude;
 }>;
@@ -726,6 +747,7 @@ export type GuestGameSeason = {
   premiumRewards: Prisma.JsonValue | null;
   premiumEnabled: boolean;
   premiumUpgradeMode: string | null;
+  storeIds: string[];
   budgetAmount: number | null;
   manualApprovalRequired: boolean;
   note: string | null;
@@ -735,6 +757,127 @@ export type GuestGameSeason = {
   createdBy: GuestGameUser | null;
 };
 
+export type GuestGamePromoCard = {
+  id: string;
+  title: string;
+  label: string | null;
+  description: string | null;
+  tag: string | null;
+  status: StatusValue;
+  targetAnchor: string | null;
+  priority: number;
+  storeIds: string[];
+  periodFrom: string | null;
+  periodTo: string | null;
+  metadata: Prisma.JsonValue | null;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: GuestGameUser | null;
+};
+
+export type GuestGameVisualEditorRewardMode = 'XP' | 'BONUS' | '';
+
+export type GuestGameVisualEditorBattlePass = {
+  id: string | null;
+  enabled: boolean;
+  title: string;
+  status: StatusValue;
+  levelCount: number;
+  xpPerLevel: number;
+  mainPrize: string | null;
+  levelRewards: Array<{ level: number; reward: string }>;
+};
+
+export type GuestGameVisualEditorLootBox = {
+  id: string | null;
+  title: string;
+  status: StatusValue;
+  triggerKind: string;
+  rewardType: string;
+  rewardAmount: number | null;
+  rewardLabel: string;
+  condition: string;
+  limitPerGuest: number | null;
+};
+
+export type GuestGameVisualEditorMission = {
+  id: string | null;
+  title: string;
+  status: StatusValue;
+  missionType: string;
+  triggerKind: string;
+  xpReward: number;
+  rewardType: string;
+  rewardAmount: number | null;
+  rewardLabel: string;
+  progressTarget: number | null;
+  progressUnit: string | null;
+  questSteps: Array<{ id: string; title: string; target: number }>;
+};
+
+export type GuestGameVisualEditorPromoCard = {
+  id: string | null;
+  label: string | null;
+  title: string;
+  description: string | null;
+  tag: string | null;
+  status: StatusValue;
+  targetAnchor: string | null;
+  periodFrom: string | null;
+  periodTo: string | null;
+};
+
+export type GuestGameVisualEditorCheckIn = {
+  enabled: boolean;
+  rewardMode: GuestGameVisualEditorRewardMode;
+  xp: number | null;
+  bonusAmount: number | null;
+  rewardLabel: string | null;
+};
+
+export type GuestGameVisualEditorPayload = {
+  version: 1;
+  battlePass: GuestGameVisualEditorBattlePass;
+  lootBoxes: GuestGameVisualEditorLootBox[];
+  missions: GuestGameVisualEditorMission[];
+  promoCards: GuestGameVisualEditorPromoCard[];
+  checkIn: GuestGameVisualEditorCheckIn;
+};
+
+export type GuestGameVisualEditorStore = {
+  id: string;
+  name: string;
+  publicSlug: string | null;
+  city: string | null;
+  address: string | null;
+  gamificationEnabled: boolean;
+};
+
+export type GuestGameVisualDraft = {
+  id: string;
+  status: string;
+  payload: GuestGameVisualEditorPayload;
+  note: string | null;
+  publishedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  store: GuestGameVisualEditorStore | null;
+  createdBy: GuestGameUser | null;
+  updatedBy: GuestGameUser | null;
+  publishedBy: GuestGameUser | null;
+};
+
+export type GuestGameVisualDraftDto = {
+  id?: string | null;
+  storeId?: string | null;
+  payload?: Prisma.InputJsonValue | null;
+  note?: string | null;
+};
+
+export type GuestGameVisualEditorPreview = {
+  draft: GuestGameVisualDraft;
+  summary: GuestPortalGameSummary;
+};
 export type GuestGameReward = {
   id: string;
   status: RewardStatus;
@@ -1514,6 +1657,7 @@ export type GuestGamificationWorkspace = {
   lootBoxes: GuestGameLootBox[];
   missions: GuestGameMission[];
   seasons: GuestGameSeason[];
+  promoCards: GuestGamePromoCard[];
   rewards: GuestGameReward[];
   events: GuestGameEvent[];
   tariffSnapshots: GuestGameTariffSnapshotEndpoint[];
@@ -1597,6 +1741,7 @@ export type GuestGameSeasonDto = {
   premiumRewards?: Prisma.InputJsonValue | null;
   premiumEnabled?: boolean;
   premiumUpgradeMode?: string | null;
+  storeIds?: string[];
   budgetAmount?: number | string | null;
   manualApprovalRequired?: boolean;
   note?: string | null;
@@ -2153,16 +2298,16 @@ function tariffSnapshotStatus({
 function tariffSnapshotNextAction(status: GuestGameTariffSnapshotStatus) {
   switch (status) {
     case 'READY':
-      return 'Источник готов: можно использовать как проверенный тарифный контекст для правил.';
+      return 'РСЃС‚РѕС‡РЅРёРє РіРѕС‚РѕРІ: РјРѕР¶РЅРѕ РёСЃРїРѕР»СЊР·РѕРІР°С‚СЊ РєР°Рє РїСЂРѕРІРµСЂРµРЅРЅС‹Р№ С‚Р°СЂРёС„РЅС‹Р№ РєРѕРЅС‚РµРєСЃС‚ РґР»СЏ РїСЂР°РІРёР».';
     case 'PARTIAL':
-      return 'Часть клубов еще не дала успешный snapshot. Обновите endpoint в /sync перед точным запуском.';
+      return 'Р§Р°СЃС‚СЊ РєР»СѓР±РѕРІ РµС‰Рµ РЅРµ РґР°Р»Р° СѓСЃРїРµС€РЅС‹Р№ snapshot. РћР±РЅРѕРІРёС‚Рµ endpoint РІ /sync РїРµСЂРµРґ С‚РѕС‡РЅС‹Рј Р·Р°РїСѓСЃРєРѕРј.';
     case 'STALE':
-      return 'Snapshot устарел старше суток. Перед запуском правил обновите тарифные endpoints в /sync.';
+      return 'Snapshot СѓСЃС‚Р°СЂРµР» СЃС‚Р°СЂС€Рµ СЃСѓС‚РѕРє. РџРµСЂРµРґ Р·Р°РїСѓСЃРєРѕРј РїСЂР°РІРёР» РѕР±РЅРѕРІРёС‚Рµ С‚Р°СЂРёС„РЅС‹Рµ endpoints РІ /sync.';
     case 'FAILED':
-      return 'Последний snapshot неуспешен. Сначала разберите ошибку endpoint в /sync.';
+      return 'РџРѕСЃР»РµРґРЅРёР№ snapshot РЅРµСѓСЃРїРµС€РµРЅ. РЎРЅР°С‡Р°Р»Р° СЂР°Р·Р±РµСЂРёС‚Рµ РѕС€РёР±РєСѓ endpoint РІ /sync.';
     case 'UNPROFILED':
     default:
-      return 'Snapshot еще не создан. Сначала профилируйте и сохраните endpoint в /sync.';
+      return 'Snapshot РµС‰Рµ РЅРµ СЃРѕР·РґР°РЅ. РЎРЅР°С‡Р°Р»Р° РїСЂРѕС„РёР»РёСЂСѓР№С‚Рµ Рё СЃРѕС…СЂР°РЅРёС‚Рµ endpoint РІ /sync.';
   }
 }
 
@@ -2248,50 +2393,50 @@ function buildPilotRunbookActions({
 }): GuestGamePilotRunbookAction[] {
   const stageClosedReason =
     stage === 'RECONCILIATION'
-      ? 'Первое начисление уже подтверждено: сначала завершите сверку баланса.'
+      ? 'РџРµСЂРІРѕРµ РЅР°С‡РёСЃР»РµРЅРёРµ СѓР¶Рµ РїРѕРґС‚РІРµСЂР¶РґРµРЅРѕ: СЃРЅР°С‡Р°Р»Р° Р·Р°РІРµСЂС€РёС‚Рµ СЃРІРµСЂРєСѓ Р±Р°Р»Р°РЅСЃР°.'
       : stage === 'READY'
-        ? 'Пилот уже прошел live-write и сверку.'
+        ? 'РџРёР»РѕС‚ СѓР¶Рµ РїСЂРѕС€РµР» live-write Рё СЃРІРµСЂРєСѓ.'
         : null;
   const ledgerBaseDisabledReason = !canRunCanary
-    ? 'Сначала нужен тестовый event/process-event или approved reward.'
+    ? 'РЎРЅР°С‡Р°Р»Р° РЅСѓР¶РµРЅ С‚РµСЃС‚РѕРІС‹Р№ event/process-event РёР»Рё approved reward.'
     : bonusRewards <= 0
-      ? 'Нужна approved bonus-награда, которая попадет в bonus ledger.'
+      ? 'РќСѓР¶РЅР° approved bonus-РЅР°РіСЂР°РґР°, РєРѕС‚РѕСЂР°СЏ РїРѕРїР°РґРµС‚ РІ bonus ledger.'
       : stageClosedReason;
   const queueLedgerDisabledReason =
     ledgerBaseDisabledReason ??
     (ledgerPreflight.readyCount > 0
-      ? 'В pilot ledger уже есть готовая запись: не ставьте новую перед canary.'
+      ? 'Р’ pilot ledger СѓР¶Рµ РµСЃС‚СЊ РіРѕС‚РѕРІР°СЏ Р·Р°РїРёСЃСЊ: РЅРµ СЃС‚Р°РІСЊС‚Рµ РЅРѕРІСѓСЋ РїРµСЂРµРґ canary.'
       : null);
   const dryRunLedgerDisabledReason =
     ledgerBaseDisabledReason ??
     (ledgerPreflight.readyCount === 0
-      ? 'Сначала поставьте ровно одну approved bonus-награду 1337 в ledger.'
+      ? 'РЎРЅР°С‡Р°Р»Р° РїРѕСЃС‚Р°РІСЊС‚Рµ СЂРѕРІРЅРѕ РѕРґРЅСѓ approved bonus-РЅР°РіСЂР°РґСѓ 1337 РІ ledger.'
       : ledgerPreflight.readyCount > 1
-        ? 'Перед dry-run/canary оставьте ровно одну готовую ledger-запись по 1337.'
+        ? 'РџРµСЂРµРґ dry-run/canary РѕСЃС‚Р°РІСЊС‚Рµ СЂРѕРІРЅРѕ РѕРґРЅСѓ РіРѕС‚РѕРІСѓСЋ ledger-Р·Р°РїРёСЃСЊ РїРѕ 1337.'
         : null);
   const liveDisabledReason =
     ledgerPreflight.readyCount === 0
-      ? 'В pilot ledger нет готовой записи по 1337 для canary.'
+      ? 'Р’ pilot ledger РЅРµС‚ РіРѕС‚РѕРІРѕР№ Р·Р°РїРёСЃРё РїРѕ 1337 РґР»СЏ canary.'
       : ledgerPreflight.readyCount > 1
-        ? 'В pilot ledger больше одной готовой записи по 1337: canary заблокирован.'
-        : 'Нужны canary-награда, готовый scheduler и включенный Langame write-флаг.';
+        ? 'Р’ pilot ledger Р±РѕР»СЊС€Рµ РѕРґРЅРѕР№ РіРѕС‚РѕРІРѕР№ Р·Р°РїРёСЃРё РїРѕ 1337: canary Р·Р°Р±Р»РѕРєРёСЂРѕРІР°РЅ.'
+        : 'РќСѓР¶РЅС‹ canary-РЅР°РіСЂР°РґР°, РіРѕС‚РѕРІС‹Р№ scheduler Рё РІРєР»СЋС‡РµРЅРЅС‹Р№ Langame write-С„Р»Р°Рі.';
 
   return [
     {
       key: 'OPEN_DRY_RUN',
-      label: 'Открыть dry-run',
+      label: 'РћС‚РєСЂС‹С‚СЊ dry-run',
       enabled: canRunDryRun && stage !== 'READY',
       tone: 'SECONDARY',
       disabledReason:
         canRunDryRun && stage !== 'READY'
           ? null
           : canRunDryRun
-            ? 'Пилот уже прошел базовый dry-run.'
-            : 'Сначала закройте базовые условия регистрации, OTP, профиля, Langame-связки и активного правила.',
+            ? 'РџРёР»РѕС‚ СѓР¶Рµ РїСЂРѕС€РµР» Р±Р°Р·РѕРІС‹Р№ dry-run.'
+            : 'РЎРЅР°С‡Р°Р»Р° Р·Р°РєСЂРѕР№С‚Рµ Р±Р°Р·РѕРІС‹Рµ СѓСЃР»РѕРІРёСЏ СЂРµРіРёСЃС‚СЂР°С†РёРё, OTP, РїСЂРѕС„РёР»СЏ, Langame-СЃРІСЏР·РєРё Рё Р°РєС‚РёРІРЅРѕРіРѕ РїСЂР°РІРёР»Р°.',
     },
     {
       key: 'QUEUE_BONUS_LEDGER',
-      label: 'Поставить в ledger',
+      label: 'РџРѕСЃС‚Р°РІРёС‚СЊ РІ ledger',
       enabled: !queueLedgerDisabledReason,
       tone: 'SECONDARY',
       disabledReason: queueLedgerDisabledReason,
@@ -2312,17 +2457,17 @@ function buildPilotRunbookActions({
         canRunLive && stage === 'LIVE_WRITE'
           ? null
           : canRunLive
-            ? 'Live-write уже не является текущей стадией пилота.'
+            ? 'Live-write СѓР¶Рµ РЅРµ СЏРІР»СЏРµС‚СЃСЏ С‚РµРєСѓС‰РµР№ СЃС‚Р°РґРёРµР№ РїРёР»РѕС‚Р°.'
             : liveDisabledReason,
     },
     {
       key: 'RECONCILE_BALANCE',
-      label: 'Открыть сверку',
+      label: 'РћС‚РєСЂС‹С‚СЊ СЃРІРµСЂРєСѓ',
       enabled: canReconcile,
       tone: 'SECONDARY',
       disabledReason: canReconcile
         ? null
-        : 'Сверка появится после первого confirmed ledger-начисления Langame.',
+        : 'РЎРІРµСЂРєР° РїРѕСЏРІРёС‚СЃСЏ РїРѕСЃР»Рµ РїРµСЂРІРѕРіРѕ confirmed ledger-РЅР°С‡РёСЃР»РµРЅРёСЏ Langame.',
     },
   ];
 }
@@ -2371,21 +2516,21 @@ function buildPilotRunbook({
     ledgerPreflight.ready;
   const canReconcile = Boolean(firstBonusReconciliation.ledgerEntry);
   const canaryNextAction = !bonusRewards
-    ? 'Подготовить approved reward с бонусным rewardType, чтобы он попал в bonus ledger, а не в ручную выдачу.'
+    ? 'РџРѕРґРіРѕС‚РѕРІРёС‚СЊ approved reward СЃ Р±РѕРЅСѓСЃРЅС‹Рј rewardType, С‡С‚РѕР±С‹ РѕРЅ РїРѕРїР°Р» РІ bonus ledger, Р° РЅРµ РІ СЂСѓС‡РЅСѓСЋ РІС‹РґР°С‡Сѓ.'
     : ledgerPreflight.readyCount === 0
-      ? 'Поставить ровно одну approved bonus-награду 1337 в ledger и выполнить dry-run dispatcher.'
+      ? 'РџРѕСЃС‚Р°РІРёС‚СЊ СЂРѕРІРЅРѕ РѕРґРЅСѓ approved bonus-РЅР°РіСЂР°РґСѓ 1337 РІ ledger Рё РІС‹РїРѕР»РЅРёС‚СЊ dry-run dispatcher.'
       : ledgerPreflight.readyCount > 1
-        ? 'Перед live-write отменить или разобрать лишние pending/retry ledger-записи 1337, оставив ровно одну.'
+        ? 'РџРµСЂРµРґ live-write РѕС‚РјРµРЅРёС‚СЊ РёР»Рё СЂР°Р·РѕР±СЂР°С‚СЊ Р»РёС€РЅРёРµ pending/retry ledger-Р·Р°РїРёСЃРё 1337, РѕСЃС‚Р°РІРёРІ СЂРѕРІРЅРѕ РѕРґРЅСѓ.'
         : bonusLedgerAutonomousReady
-          ? 'Выполнить dry-run ledger по единственной записи 1337, затем запускать canary live dispatch.'
-          : 'Проверить scheduler/write-флаги и выполнить dry-run ledger по единственной записи 1337.';
+          ? 'Р’С‹РїРѕР»РЅРёС‚СЊ dry-run ledger РїРѕ РµРґРёРЅСЃС‚РІРµРЅРЅРѕР№ Р·Р°РїРёСЃРё 1337, Р·Р°С‚РµРј Р·Р°РїСѓСЃРєР°С‚СЊ canary live dispatch.'
+          : 'РџСЂРѕРІРµСЂРёС‚СЊ scheduler/write-С„Р»Р°РіРё Рё РІС‹РїРѕР»РЅРёС‚СЊ dry-run ledger РїРѕ РµРґРёРЅСЃС‚РІРµРЅРЅРѕР№ Р·Р°РїРёСЃРё 1337.';
 
   const safeguards = [
-    'До live-стадии используются только сохраненные факты LeetPlus и dry-run без записи в Langame.',
-    'Первый live-write должен идти как canary: одна бонусная награда, один гость, один клуб 1337.',
-    'Live canary разблокируется только если preflight видит ровно одну готовую ledger-запись в scope пилотного клуба.',
-    'Raw phone и токены не попадают в UI; ledger и delivery показывают маски и безопасные статусы.',
-    'После подтверждения Langame обязательна сверка GuestBonusBalanceCurrent с новым snapshot.',
+    'Р”Рѕ live-СЃС‚Р°РґРёРё РёСЃРїРѕР»СЊР·СѓСЋС‚СЃСЏ С‚РѕР»СЊРєРѕ СЃРѕС…СЂР°РЅРµРЅРЅС‹Рµ С„Р°РєС‚С‹ LeetPlus Рё dry-run Р±РµР· Р·Р°РїРёСЃРё РІ Langame.',
+    'РџРµСЂРІС‹Р№ live-write РґРѕР»Р¶РµРЅ РёРґС‚Рё РєР°Рє canary: РѕРґРЅР° Р±РѕРЅСѓСЃРЅР°СЏ РЅР°РіСЂР°РґР°, РѕРґРёРЅ РіРѕСЃС‚СЊ, РѕРґРёРЅ РєР»СѓР± 1337.',
+    'Live canary СЂР°Р·Р±Р»РѕРєРёСЂСѓРµС‚СЃСЏ С‚РѕР»СЊРєРѕ РµСЃР»Рё preflight РІРёРґРёС‚ СЂРѕРІРЅРѕ РѕРґРЅСѓ РіРѕС‚РѕРІСѓСЋ ledger-Р·Р°РїРёСЃСЊ РІ scope РїРёР»РѕС‚РЅРѕРіРѕ РєР»СѓР±Р°.',
+    'Raw phone Рё С‚РѕРєРµРЅС‹ РЅРµ РїРѕРїР°РґР°СЋС‚ РІ UI; ledger Рё delivery РїРѕРєР°Р·С‹РІР°СЋС‚ РјР°СЃРєРё Рё Р±РµР·РѕРїР°СЃРЅС‹Рµ СЃС‚Р°С‚СѓСЃС‹.',
+    'РџРѕСЃР»Рµ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ Langame РѕР±СЏР·Р°С‚РµР»СЊРЅР° СЃРІРµСЂРєР° GuestBonusBalanceCurrent СЃ РЅРѕРІС‹Рј snapshot.',
   ];
   const withActions = (
     runbook: Omit<
@@ -2410,7 +2555,7 @@ function buildPilotRunbook({
   if (prerequisiteBlockers.length > 0) {
     return withActions({
       stage: 'BLOCKED',
-      stageLabel: 'Стоп',
+      stageLabel: 'РЎС‚РѕРї',
       canRunDryRun,
       canRunCanary,
       canRunLive,
@@ -2419,15 +2564,15 @@ function buildPilotRunbook({
       safeguards,
       nextAction:
         prerequisiteBlockers[0]?.nextAction ??
-        'Закрыть блокеры пилотного чек-листа.',
-      note: 'Пилотный прогон первого бонуса нельзя запускать, пока не закрыты базовые условия регистрации, OTP, профиля, связки с Langame, активного правила и обязательных snapshot-фактов.',
+        'Р—Р°РєСЂС‹С‚СЊ Р±Р»РѕРєРµСЂС‹ РїРёР»РѕС‚РЅРѕРіРѕ С‡РµРє-Р»РёСЃС‚Р°.',
+      note: 'РџРёР»РѕС‚РЅС‹Р№ РїСЂРѕРіРѕРЅ РїРµСЂРІРѕРіРѕ Р±РѕРЅСѓСЃР° РЅРµР»СЊР·СЏ Р·Р°РїСѓСЃРєР°С‚СЊ, РїРѕРєР° РЅРµ Р·Р°РєСЂС‹С‚С‹ Р±Р°Р·РѕРІС‹Рµ СѓСЃР»РѕРІРёСЏ СЂРµРіРёСЃС‚СЂР°С†РёРё, OTP, РїСЂРѕС„РёР»СЏ, СЃРІСЏР·РєРё СЃ Langame, Р°РєС‚РёРІРЅРѕРіРѕ РїСЂР°РІРёР»Р° Рё РѕР±СЏР·Р°С‚РµР»СЊРЅС‹С… snapshot-С„Р°РєС‚РѕРІ.',
     });
   }
 
   if (firstBonusReconciliation.status === 'MATCHED') {
     return withActions({
       stage: 'READY',
-      stageLabel: 'Готово',
+      stageLabel: 'Р“РѕС‚РѕРІРѕ',
       canRunDryRun,
       canRunCanary,
       canRunLive: false,
@@ -2435,8 +2580,8 @@ function buildPilotRunbook({
       blockers: [],
       safeguards,
       nextAction:
-        'Сохранить пилот 1337 как эталонный сценарий и расширять лимит начислений только после проверки журнала.',
-      note: 'Путь первого bonus_balance начисления прошел до подтверждения Langame и последующей сверки баланса.',
+        'РЎРѕС…СЂР°РЅРёС‚СЊ РїРёР»РѕС‚ 1337 РєР°Рє СЌС‚Р°Р»РѕРЅРЅС‹Р№ СЃС†РµРЅР°СЂРёР№ Рё СЂР°СЃС€РёСЂСЏС‚СЊ Р»РёРјРёС‚ РЅР°С‡РёСЃР»РµРЅРёР№ С‚РѕР»СЊРєРѕ РїРѕСЃР»Рµ РїСЂРѕРІРµСЂРєРё Р¶СѓСЂРЅР°Р»Р°.',
+      note: 'РџСѓС‚СЊ РїРµСЂРІРѕРіРѕ bonus_balance РЅР°С‡РёСЃР»РµРЅРёСЏ РїСЂРѕС€РµР» РґРѕ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ Langame Рё РїРѕСЃР»РµРґСѓСЋС‰РµР№ СЃРІРµСЂРєРё Р±Р°Р»Р°РЅСЃР°.',
     });
   }
 
@@ -2446,7 +2591,7 @@ function buildPilotRunbook({
   ) {
     return withActions({
       stage: 'RECONCILIATION',
-      stageLabel: 'Сверка',
+      stageLabel: 'РЎРІРµСЂРєР°',
       canRunDryRun,
       canRunCanary,
       canRunLive: false,
@@ -2454,7 +2599,7 @@ function buildPilotRunbook({
       blockers: downstreamBlockerTitles,
       safeguards,
       nextAction: firstBonusReconciliation.nextAction,
-      note: 'Первое начисление уже подтверждено Langame; следующий обязательный этап - сверка баланса и отсутствие расхождений.',
+      note: 'РџРµСЂРІРѕРµ РЅР°С‡РёСЃР»РµРЅРёРµ СѓР¶Рµ РїРѕРґС‚РІРµСЂР¶РґРµРЅРѕ Langame; СЃР»РµРґСѓСЋС‰РёР№ РѕР±СЏР·Р°С‚РµР»СЊРЅС‹Р№ СЌС‚Р°Рї - СЃРІРµСЂРєР° Р±Р°Р»Р°РЅСЃР° Рё РѕС‚СЃСѓС‚СЃС‚РІРёРµ СЂР°СЃС…РѕР¶РґРµРЅРёР№.',
     });
   }
 
@@ -2469,8 +2614,8 @@ function buildPilotRunbook({
       blockers: [],
       safeguards,
       nextAction:
-        'Прогнать dry-run/process-event на тестовом госте 1337 и убедиться, что правило создает ожидаемую бонусную награду без записи в Langame.',
-      note: 'Базовые условия готовы; теперь нужен контролируемый тест события и проверка idempotency до очереди бонусов.',
+        'РџСЂРѕРіРЅР°С‚СЊ dry-run/process-event РЅР° С‚РµСЃС‚РѕРІРѕРј РіРѕСЃС‚Рµ 1337 Рё СѓР±РµРґРёС‚СЊСЃСЏ, С‡С‚Рѕ РїСЂР°РІРёР»Рѕ СЃРѕР·РґР°РµС‚ РѕР¶РёРґР°РµРјСѓСЋ Р±РѕРЅСѓСЃРЅСѓСЋ РЅР°РіСЂР°РґСѓ Р±РµР· Р·Р°РїРёСЃРё РІ Langame.',
+      note: 'Р‘Р°Р·РѕРІС‹Рµ СѓСЃР»РѕРІРёСЏ РіРѕС‚РѕРІС‹; С‚РµРїРµСЂСЊ РЅСѓР¶РµРЅ РєРѕРЅС‚СЂРѕР»РёСЂСѓРµРјС‹Р№ С‚РµСЃС‚ СЃРѕР±С‹С‚РёСЏ Рё РїСЂРѕРІРµСЂРєР° idempotency РґРѕ РѕС‡РµСЂРµРґРё Р±РѕРЅСѓСЃРѕРІ.',
     });
   }
 
@@ -2485,7 +2630,7 @@ function buildPilotRunbook({
       blockers: downstreamBlockerTitles,
       safeguards,
       nextAction: canaryNextAction,
-      note: 'Есть тестовая активность или награда, но до live-write нужен безопасный canary через ledger dry-run и проверку scheduler/write-флагов.',
+      note: 'Р•СЃС‚СЊ С‚РµСЃС‚РѕРІР°СЏ Р°РєС‚РёРІРЅРѕСЃС‚СЊ РёР»Рё РЅР°РіСЂР°РґР°, РЅРѕ РґРѕ live-write РЅСѓР¶РµРЅ Р±РµР·РѕРїР°СЃРЅС‹Р№ canary С‡РµСЂРµР· ledger dry-run Рё РїСЂРѕРІРµСЂРєСѓ scheduler/write-С„Р»Р°РіРѕРІ.',
     });
   }
 
@@ -2499,8 +2644,8 @@ function buildPilotRunbook({
     blockers: [],
     safeguards,
     nextAction:
-      'Запустить первый live-write только на одной бонусной награде 1337, затем сразу проверить ledger status и ждать свежий snapshot баланса.',
-    note: 'Все условия для первого боевого начисления есть; режим должен оставаться canary до подтвержденной сверки баланса.',
+      'Р—Р°РїСѓСЃС‚РёС‚СЊ РїРµСЂРІС‹Р№ live-write С‚РѕР»СЊРєРѕ РЅР° РѕРґРЅРѕР№ Р±РѕРЅСѓСЃРЅРѕР№ РЅР°РіСЂР°РґРµ 1337, Р·Р°С‚РµРј СЃСЂР°Р·Сѓ РїСЂРѕРІРµСЂРёС‚СЊ ledger status Рё Р¶РґР°С‚СЊ СЃРІРµР¶РёР№ snapshot Р±Р°Р»Р°РЅСЃР°.',
+    note: 'Р’СЃРµ СѓСЃР»РѕРІРёСЏ РґР»СЏ РїРµСЂРІРѕРіРѕ Р±РѕРµРІРѕРіРѕ РЅР°С‡РёСЃР»РµРЅРёСЏ РµСЃС‚СЊ; СЂРµР¶РёРј РґРѕР»Р¶РµРЅ РѕСЃС‚Р°РІР°С‚СЊСЃСЏ canary РґРѕ РїРѕРґС‚РІРµСЂР¶РґРµРЅРЅРѕР№ СЃРІРµСЂРєРё Р±Р°Р»Р°РЅСЃР°.',
   });
 }
 
@@ -2589,7 +2734,7 @@ function buildPilotLedgerPreflight({
   if (!targetStore) {
     return {
       status: 'NO_STORE',
-      statusLabel: 'нет клуба',
+      statusLabel: 'РЅРµС‚ РєР»СѓР±Р°',
       ready: false,
       scopedStoreId: null,
       scopedStoreName: null,
@@ -2601,16 +2746,16 @@ function buildPilotLedgerPreflight({
       failedWaitingRetryCount,
       previewItems,
       metric,
-      note: 'Preflight не может проверить bonus ledger без выбранного пилотного клуба.',
+      note: 'Preflight РЅРµ РјРѕР¶РµС‚ РїСЂРѕРІРµСЂРёС‚СЊ bonus ledger Р±РµР· РІС‹Р±СЂР°РЅРЅРѕРіРѕ РїРёР»РѕС‚РЅРѕРіРѕ РєР»СѓР±Р°.',
       nextAction:
-        'Выбрать активный клуб 1337 или включить геймификацию у пилотной точки.',
+        'Р’С‹Р±СЂР°С‚СЊ Р°РєС‚РёРІРЅС‹Р№ РєР»СѓР± 1337 РёР»Рё РІРєР»СЋС‡РёС‚СЊ РіРµР№РјРёС„РёРєР°С†РёСЋ Сѓ РїРёР»РѕС‚РЅРѕР№ С‚РѕС‡РєРё.',
     };
   }
 
   if (readyCount === 1) {
     return {
       status: 'READY',
-      statusLabel: '1 готова',
+      statusLabel: '1 РіРѕС‚РѕРІР°',
       ready: true,
       scopedStoreId: targetStore.id,
       scopedStoreName: targetStore.name,
@@ -2622,16 +2767,16 @@ function buildPilotLedgerPreflight({
       failedWaitingRetryCount,
       previewItems,
       metric,
-      note: 'В pilot ledger есть ровно одна запись, которую canary dispatch может забрать по scope клуба.',
+      note: 'Р’ pilot ledger РµСЃС‚СЊ СЂРѕРІРЅРѕ РѕРґРЅР° Р·Р°РїРёСЃСЊ, РєРѕС‚РѕСЂСѓСЋ canary dispatch РјРѕР¶РµС‚ Р·Р°Р±СЂР°С‚СЊ РїРѕ scope РєР»СѓР±Р°.',
       nextAction:
-        'Выполнить ledger dry-run и запускать canary live dispatch только для этой записи.',
+        'Р’С‹РїРѕР»РЅРёС‚СЊ ledger dry-run Рё Р·Р°РїСѓСЃРєР°С‚СЊ canary live dispatch С‚РѕР»СЊРєРѕ РґР»СЏ СЌС‚РѕР№ Р·Р°РїРёСЃРё.',
     };
   }
 
   if (readyCount > 1) {
     return {
       status: 'MULTIPLE',
-      statusLabel: 'дубликаты',
+      statusLabel: 'РґСѓР±Р»РёРєР°С‚С‹',
       ready: false,
       scopedStoreId: targetStore.id,
       scopedStoreName: targetStore.name,
@@ -2643,16 +2788,16 @@ function buildPilotLedgerPreflight({
       failedWaitingRetryCount,
       previewItems,
       metric,
-      note: 'В scope пилотного клуба больше одной готовой ledger-записи: первый Langame write перестает быть canary.',
+      note: 'Р’ scope РїРёР»РѕС‚РЅРѕРіРѕ РєР»СѓР±Р° Р±РѕР»СЊС€Рµ РѕРґРЅРѕР№ РіРѕС‚РѕРІРѕР№ ledger-Р·Р°РїРёСЃРё: РїРµСЂРІС‹Р№ Langame write РїРµСЂРµСЃС‚Р°РµС‚ Р±С‹С‚СЊ canary.',
       nextAction:
-        'Отменить или разобрать лишние pending/retry записи по 1337, оставив ровно одну для первого write.',
+        'РћС‚РјРµРЅРёС‚СЊ РёР»Рё СЂР°Р·РѕР±СЂР°С‚СЊ Р»РёС€РЅРёРµ pending/retry Р·Р°РїРёСЃРё РїРѕ 1337, РѕСЃС‚Р°РІРёРІ СЂРѕРІРЅРѕ РѕРґРЅСѓ РґР»СЏ РїРµСЂРІРѕРіРѕ write.',
     };
   }
 
   if (freshProcessingCount > 0) {
     return {
       status: 'PROCESSING',
-      statusLabel: 'обработка',
+      statusLabel: 'РѕР±СЂР°Р±РѕС‚РєР°',
       ready: false,
       scopedStoreId: targetStore.id,
       scopedStoreName: targetStore.name,
@@ -2664,16 +2809,16 @@ function buildPilotLedgerPreflight({
       failedWaitingRetryCount,
       previewItems,
       metric,
-      note: 'По пилотному клубу уже есть свежая PROCESSING-запись; live canary ждет завершения или stale-lock.',
+      note: 'РџРѕ РїРёР»РѕС‚РЅРѕРјСѓ РєР»СѓР±Сѓ СѓР¶Рµ РµСЃС‚СЊ СЃРІРµР¶Р°СЏ PROCESSING-Р·Р°РїРёСЃСЊ; live canary Р¶РґРµС‚ Р·Р°РІРµСЂС€РµРЅРёСЏ РёР»Рё stale-lock.',
       nextAction:
-        'Дождаться завершения worker или протухания lock перед новым canary-действием.',
+        'Р”РѕР¶РґР°С‚СЊСЃСЏ Р·Р°РІРµСЂС€РµРЅРёСЏ worker РёР»Рё РїСЂРѕС‚СѓС…Р°РЅРёСЏ lock РїРµСЂРµРґ РЅРѕРІС‹Рј canary-РґРµР№СЃС‚РІРёРµРј.',
     };
   }
 
   if (failedWaitingRetryCount > 0) {
     return {
       status: 'WAITING_RETRY',
-      statusLabel: 'ждет retry',
+      statusLabel: 'Р¶РґРµС‚ retry',
       ready: false,
       scopedStoreId: targetStore.id,
       scopedStoreName: targetStore.name,
@@ -2685,15 +2830,15 @@ function buildPilotLedgerPreflight({
       failedWaitingRetryCount,
       previewItems,
       metric,
-      note: 'Есть failed ledger-запись по 1337, но nextAttemptAt еще не наступил для безопасного retry.',
+      note: 'Р•СЃС‚СЊ failed ledger-Р·Р°РїРёСЃСЊ РїРѕ 1337, РЅРѕ nextAttemptAt РµС‰Рµ РЅРµ РЅР°СЃС‚СѓРїРёР» РґР»СЏ Р±РµР·РѕРїР°СЃРЅРѕРіРѕ retry.',
       nextAction:
-        'Дождаться nextAttemptAt или вручную отменить ошибочную запись перед постановкой новой.',
+        'Р”РѕР¶РґР°С‚СЊСЃСЏ nextAttemptAt РёР»Рё РІСЂСѓС‡РЅСѓСЋ РѕС‚РјРµРЅРёС‚СЊ РѕС€РёР±РѕС‡РЅСѓСЋ Р·Р°РїРёСЃСЊ РїРµСЂРµРґ РїРѕСЃС‚Р°РЅРѕРІРєРѕР№ РЅРѕРІРѕР№.',
     };
   }
 
   return {
     status: 'EMPTY',
-    statusLabel: 'пусто',
+    statusLabel: 'РїСѓСЃС‚Рѕ',
     ready: false,
     scopedStoreId: targetStore.id,
     scopedStoreName: targetStore.name,
@@ -2705,9 +2850,9 @@ function buildPilotLedgerPreflight({
     failedWaitingRetryCount,
     previewItems,
     metric,
-    note: 'В pilot ledger пока нет готовой записи по клубу 1337 для первого Langame write.',
+    note: 'Р’ pilot ledger РїРѕРєР° РЅРµС‚ РіРѕС‚РѕРІРѕР№ Р·Р°РїРёСЃРё РїРѕ РєР»СѓР±Сѓ 1337 РґР»СЏ РїРµСЂРІРѕРіРѕ Langame write.',
     nextAction:
-      'Поставить одну approved bonus-награду в ledger, затем выполнить dry-run и canary.',
+      'РџРѕСЃС‚Р°РІРёС‚СЊ РѕРґРЅСѓ approved bonus-РЅР°РіСЂР°РґСѓ РІ ledger, Р·Р°С‚РµРј РІС‹РїРѕР»РЅРёС‚СЊ dry-run Рё canary.',
   };
 }
 
@@ -2721,30 +2866,30 @@ function buildPilotFirstBonusReconciliation({
   if (!targetStore) {
     return {
       status: 'NO_STORE',
-      statusLabel: 'нет клуба',
+      statusLabel: 'РЅРµС‚ РєР»СѓР±Р°',
       ready: false,
       scopedStoreId: null,
       scopedStoreName: null,
       ledgerEntry: null,
-      metric: 'клуб не выбран',
-      note: 'Первую сверку bonus_balance нельзя проверить без выбранного пилотного клуба.',
+      metric: 'РєР»СѓР± РЅРµ РІС‹Р±СЂР°РЅ',
+      note: 'РџРµСЂРІСѓСЋ СЃРІРµСЂРєСѓ bonus_balance РЅРµР»СЊР·СЏ РїСЂРѕРІРµСЂРёС‚СЊ Р±РµР· РІС‹Р±СЂР°РЅРЅРѕРіРѕ РїРёР»РѕС‚РЅРѕРіРѕ РєР»СѓР±Р°.',
       nextAction:
-        'Выбрать активный клуб 1337 или включить геймификацию у пилотной точки.',
+        'Р’С‹Р±СЂР°С‚СЊ Р°РєС‚РёРІРЅС‹Р№ РєР»СѓР± 1337 РёР»Рё РІРєР»СЋС‡РёС‚СЊ РіРµР№РјРёС„РёРєР°С†РёСЋ Сѓ РїРёР»РѕС‚РЅРѕР№ С‚РѕС‡РєРё.',
     };
   }
 
   if (!ledgerEntry) {
     return {
       status: 'WAITING_LIVE',
-      statusLabel: 'ждет live',
+      statusLabel: 'Р¶РґРµС‚ live',
       ready: false,
       scopedStoreId: targetStore.id,
       scopedStoreName: targetStore.name,
       ledgerEntry: null,
       metric: '0 confirmed bonus_balance',
-      note: 'В scope пилотного клуба еще нет подтвержденного положительного bonus_balance начисления через Langame.',
+      note: 'Р’ scope РїРёР»РѕС‚РЅРѕРіРѕ РєР»СѓР±Р° РµС‰Рµ РЅРµС‚ РїРѕРґС‚РІРµСЂР¶РґРµРЅРЅРѕРіРѕ РїРѕР»РѕР¶РёС‚РµР»СЊРЅРѕРіРѕ bonus_balance РЅР°С‡РёСЃР»РµРЅРёСЏ С‡РµСЂРµР· Langame.',
       nextAction:
-        'Довести canary до одного confirmed bonus_balance начисления по 1337, затем ждать свежий snapshot баланса.',
+        'Р”РѕРІРµСЃС‚Рё canary РґРѕ РѕРґРЅРѕРіРѕ confirmed bonus_balance РЅР°С‡РёСЃР»РµРЅРёСЏ РїРѕ 1337, Р·Р°С‚РµРј Р¶РґР°С‚СЊ СЃРІРµР¶РёР№ snapshot Р±Р°Р»Р°РЅСЃР°.',
     };
   }
 
@@ -2771,44 +2916,44 @@ function buildPilotFirstBonusReconciliation({
   if (status === 'MATCHED') {
     return {
       status,
-      statusLabel: 'сверено',
+      statusLabel: 'СЃРІРµСЂРµРЅРѕ',
       ready: true,
       scopedStoreId: targetStore.id,
       scopedStoreName: targetStore.name,
       ledgerEntry: ledgerPayload,
-      metric: `${ledgerEntry.amount} бонусов / snapshot совпал`,
-      note: 'Первая bonus_balance операция пилота подтверждена Langame и совпала с последующим snapshot баланса.',
+      metric: `${ledgerEntry.amount} Р±РѕРЅСѓСЃРѕРІ / snapshot СЃРѕРІРїР°Р»`,
+      note: 'РџРµСЂРІР°СЏ bonus_balance РѕРїРµСЂР°С†РёСЏ РїРёР»РѕС‚Р° РїРѕРґС‚РІРµСЂР¶РґРµРЅР° Langame Рё СЃРѕРІРїР°Р»Р° СЃ РїРѕСЃР»РµРґСѓСЋС‰РёРј snapshot Р±Р°Р»Р°РЅСЃР°.',
       nextAction:
-        'Сохранить эту ledger-запись как эталон пилотного начисления перед расширением лимитов.',
+        'РЎРѕС…СЂР°РЅРёС‚СЊ СЌС‚Сѓ ledger-Р·Р°РїРёСЃСЊ РєР°Рє СЌС‚Р°Р»РѕРЅ РїРёР»РѕС‚РЅРѕРіРѕ РЅР°С‡РёСЃР»РµРЅРёСЏ РїРµСЂРµРґ СЂР°СЃС€РёСЂРµРЅРёРµРј Р»РёРјРёС‚РѕРІ.',
     };
   }
 
   if (status === 'MISMATCH') {
     return {
       status,
-      statusLabel: 'расхождение',
+      statusLabel: 'СЂР°СЃС…РѕР¶РґРµРЅРёРµ',
       ready: false,
       scopedStoreId: targetStore.id,
       scopedStoreName: targetStore.name,
       ledgerEntry: ledgerPayload,
-      metric: `${ledgerEntry.amount} бонусов / diff ${reconciliation.diff ?? 'n/a'}`,
-      note: 'Первая bonus_balance операция пилота подтверждена, но сохраненный Langame snapshot не совпал с ожидаемым balanceAfter.',
+      metric: `${ledgerEntry.amount} Р±РѕРЅСѓСЃРѕРІ / diff ${reconciliation.diff ?? 'n/a'}`,
+      note: 'РџРµСЂРІР°СЏ bonus_balance РѕРїРµСЂР°С†РёСЏ РїРёР»РѕС‚Р° РїРѕРґС‚РІРµСЂР¶РґРµРЅР°, РЅРѕ СЃРѕС…СЂР°РЅРµРЅРЅС‹Р№ Langame snapshot РЅРµ СЃРѕРІРїР°Р» СЃ РѕР¶РёРґР°РµРјС‹Рј balanceAfter.',
       nextAction:
-        'Разобрать первую ledger-запись 1337 в журнале, сверить гостя в Langame и не расширять live-write до устранения расхождения.',
+        'Р Р°Р·РѕР±СЂР°С‚СЊ РїРµСЂРІСѓСЋ ledger-Р·Р°РїРёСЃСЊ 1337 РІ Р¶СѓСЂРЅР°Р»Рµ, СЃРІРµСЂРёС‚СЊ РіРѕСЃС‚СЏ РІ Langame Рё РЅРµ СЂР°СЃС€РёСЂСЏС‚СЊ live-write РґРѕ СѓСЃС‚СЂР°РЅРµРЅРёСЏ СЂР°СЃС…РѕР¶РґРµРЅРёСЏ.',
     };
   }
 
   return {
     status,
-    statusLabel: 'ждет snapshot',
+    statusLabel: 'Р¶РґРµС‚ snapshot',
     ready: false,
     scopedStoreId: targetStore.id,
     scopedStoreName: targetStore.name,
     ledgerEntry: ledgerPayload,
-    metric: `${ledgerEntry.amount} бонусов / snapshot нужен`,
-    note: 'Первая bonus_balance операция пилота уже подтверждена Langame, но еще нет свежего snapshot после confirmedAt.',
+    metric: `${ledgerEntry.amount} Р±РѕРЅСѓСЃРѕРІ / snapshot РЅСѓР¶РµРЅ`,
+    note: 'РџРµСЂРІР°СЏ bonus_balance РѕРїРµСЂР°С†РёСЏ РїРёР»РѕС‚Р° СѓР¶Рµ РїРѕРґС‚РІРµСЂР¶РґРµРЅР° Langame, РЅРѕ РµС‰Рµ РЅРµС‚ СЃРІРµР¶РµРіРѕ snapshot РїРѕСЃР»Рµ confirmedAt.',
     nextAction:
-      'Дождаться guest foundation sync и нового bonus balance snapshot после первого начисления.',
+      'Р”РѕР¶РґР°С‚СЊСЃСЏ guest foundation sync Рё РЅРѕРІРѕРіРѕ bonus balance snapshot РїРѕСЃР»Рµ РїРµСЂРІРѕРіРѕ РЅР°С‡РёСЃР»РµРЅРёСЏ.',
   };
 }
 
@@ -2853,6 +2998,7 @@ export class GuestGamificationService {
       lootBoxes,
       missions,
       seasons,
+      promoCards,
       rewards,
       deliveries,
       events,
@@ -2866,6 +3012,7 @@ export class GuestGamificationService {
       this.getLootBoxes(user),
       this.getMissions(user),
       this.getSeasons(user),
+      this.getPromoCards(user),
       this.getRewards(user),
       this.getDeliveries(user),
       this.getEvents(user),
@@ -2922,6 +3069,7 @@ export class GuestGamificationService {
       lootBoxes,
       missions,
       seasons,
+      promoCards,
       rewards,
       events,
       tariffSnapshots,
@@ -3283,7 +3431,9 @@ export class GuestGamificationService {
     const activeMissions = missions.filter((item) =>
       ruleMatchesPilotStore(item, targetStoreId),
     );
-    const activeSeasons = seasons.filter((item) => item.status === 'ACTIVE');
+    const activeSeasons = seasons.filter((item) =>
+      ruleMatchesPilotStore(item, targetStoreId),
+    );
     const activeRuleCount =
       activeLootBoxes.length + activeMissions.length + activeSeasons.length;
     const guestLogTypes = guestLogCatalog.summary.types;
@@ -3361,7 +3511,7 @@ export class GuestGamificationService {
       publicAuthChannels.push('Telegram');
     }
     if (userCallReady) {
-      publicAuthChannels.push('звонок');
+      publicAuthChannels.push('Р·РІРѕРЅРѕРє');
     }
     if (smsReserveReady) {
       publicAuthChannels.push('SMS');
@@ -3398,7 +3548,7 @@ export class GuestGamificationService {
     const items: GuestGamePilotReadinessItem[] = [
       {
         key: 'CLUB',
-        title: 'Клуб пилота',
+        title: 'РљР»СѓР± РїРёР»РѕС‚Р°',
         status: targetStore
           ? targetStore.gamificationEnabled
             ? 'READY'
@@ -3406,23 +3556,23 @@ export class GuestGamificationService {
           : 'BLOCKED',
         statusLabel: targetStore
           ? targetStore.gamificationEnabled
-            ? 'в каталоге'
-            : 'нужен флаг'
-          : 'нет клуба',
+            ? 'РІ РєР°С‚Р°Р»РѕРіРµ'
+            : 'РЅСѓР¶РµРЅ С„Р»Р°Рі'
+          : 'РЅРµС‚ РєР»СѓР±Р°',
         ready: Boolean(targetStore?.gamificationEnabled),
-        metric: targetStore?.name ?? 'клуб не выбран',
+        metric: targetStore?.name ?? 'РєР»СѓР± РЅРµ РІС‹Р±СЂР°РЅ',
         note: targetStore
-          ? 'Пилот выбирает клуб 1337, если он найден среди активных клубов; иначе берется первый клуб с включенной геймификацией.'
-          : 'В tenant нет активного клуба для пилотного запуска геймификации.',
+          ? 'РџРёР»РѕС‚ РІС‹Р±РёСЂР°РµС‚ РєР»СѓР± 1337, РµСЃР»Рё РѕРЅ РЅР°Р№РґРµРЅ СЃСЂРµРґРё Р°РєС‚РёРІРЅС‹С… РєР»СѓР±РѕРІ; РёРЅР°С‡Рµ Р±РµСЂРµС‚СЃСЏ РїРµСЂРІС‹Р№ РєР»СѓР± СЃ РІРєР»СЋС‡РµРЅРЅРѕР№ РіРµР№РјРёС„РёРєР°С†РёРµР№.'
+          : 'Р’ tenant РЅРµС‚ Р°РєС‚РёРІРЅРѕРіРѕ РєР»СѓР±Р° РґР»СЏ РїРёР»РѕС‚РЅРѕРіРѕ Р·Р°РїСѓСЃРєР° РіРµР№РјРёС„РёРєР°С†РёРё.',
         nextAction: targetStore?.gamificationEnabled
-          ? 'Оставить клуб включенным в публичном каталоге /play.'
-          : 'Включить флаг геймификации у пилотного клуба на странице клубов.',
+          ? 'РћСЃС‚Р°РІРёС‚СЊ РєР»СѓР± РІРєР»СЋС‡РµРЅРЅС‹Рј РІ РїСѓР±Р»РёС‡РЅРѕРј РєР°С‚Р°Р»РѕРіРµ /play.'
+          : 'Р’РєР»СЋС‡РёС‚СЊ С„Р»Р°Рі РіРµР№РјРёС„РёРєР°С†РёРё Сѓ РїРёР»РѕС‚РЅРѕРіРѕ РєР»СѓР±Р° РЅР° СЃС‚СЂР°РЅРёС†Рµ РєР»СѓР±РѕРІ.',
         actionHref: '/stores',
-        actionLabel: 'Открыть клубы',
+        actionLabel: 'РћС‚РєСЂС‹С‚СЊ РєР»СѓР±С‹',
       },
       {
         key: 'GEOSEARCH',
-        title: 'Карта и поиск рядом',
+        title: 'РљР°СЂС‚Р° Рё РїРѕРёСЃРє СЂСЏРґРѕРј',
         status: targetStore
           ? targetStoreCoordinatesReady
             ? 'READY'
@@ -3430,49 +3580,49 @@ export class GuestGamificationService {
           : 'BLOCKED',
         statusLabel: targetStore
           ? targetStoreCoordinatesReady
-            ? 'координаты есть'
+            ? 'РєРѕРѕСЂРґРёРЅР°С‚С‹ РµСЃС‚СЊ'
             : targetStoreCoordinatesPartial
-              ? 'частично'
-              : 'нет координат'
-          : 'нет клуба',
+              ? 'С‡Р°СЃС‚РёС‡РЅРѕ'
+              : 'РЅРµС‚ РєРѕРѕСЂРґРёРЅР°С‚'
+          : 'РЅРµС‚ РєР»СѓР±Р°',
         ready: targetStoreCoordinatesReady,
         metric: targetStore
           ? targetStoreCoordinatesReady
-            ? 'широта и долгота'
+            ? 'С€РёСЂРѕС‚Р° Рё РґРѕР»РіРѕС‚Р°'
             : targetStoreCoordinatesPartial
-              ? 'заполнена одна координата'
-              : 'координат нет'
-          : 'клуб не выбран',
-        note: 'Перед production QA первого бонуса пилотный клуб должен участвовать в карте и поиске рядом на /game/clubs и /play.',
+              ? 'Р·Р°РїРѕР»РЅРµРЅР° РѕРґРЅР° РєРѕРѕСЂРґРёРЅР°С‚Р°'
+              : 'РєРѕРѕСЂРґРёРЅР°С‚ РЅРµС‚'
+          : 'РєР»СѓР± РЅРµ РІС‹Р±СЂР°РЅ',
+        note: 'РџРµСЂРµРґ production QA РїРµСЂРІРѕРіРѕ Р±РѕРЅСѓСЃР° РїРёР»РѕС‚РЅС‹Р№ РєР»СѓР± РґРѕР»Р¶РµРЅ СѓС‡Р°СЃС‚РІРѕРІР°С‚СЊ РІ РєР°СЂС‚Рµ Рё РїРѕРёСЃРєРµ СЂСЏРґРѕРј РЅР° /game/clubs Рё /play.',
         nextAction: targetStoreCoordinatesReady
-          ? 'Проверить /game/clubs и /play с фильтром рядом на реальной геолокации.'
-          : 'Заполнить широту и долготу пилотного клуба в /stores вручную или через bulk-действие Заполнить координаты.',
+          ? 'РџСЂРѕРІРµСЂРёС‚СЊ /game/clubs Рё /play СЃ С„РёР»СЊС‚СЂРѕРј СЂСЏРґРѕРј РЅР° СЂРµР°Р»СЊРЅРѕР№ РіРµРѕР»РѕРєР°С†РёРё.'
+          : 'Р—Р°РїРѕР»РЅРёС‚СЊ С€РёСЂРѕС‚Сѓ Рё РґРѕР»РіРѕС‚Сѓ РїРёР»РѕС‚РЅРѕРіРѕ РєР»СѓР±Р° РІ /stores РІСЂСѓС‡РЅСѓСЋ РёР»Рё С‡РµСЂРµР· bulk-РґРµР№СЃС‚РІРёРµ Р—Р°РїРѕР»РЅРёС‚СЊ РєРѕРѕСЂРґРёРЅР°С‚С‹.',
         actionHref: '/stores',
         actionLabel: targetStoreCoordinatesReady
-          ? 'Открыть клубы'
-          : 'Заполнить координаты',
+          ? 'РћС‚РєСЂС‹С‚СЊ РєР»СѓР±С‹'
+          : 'Р—Р°РїРѕР»РЅРёС‚СЊ РєРѕРѕСЂРґРёРЅР°С‚С‹',
       },
       {
         key: 'PUBLIC_REGISTRATION',
-        title: 'Публичная регистрация',
+        title: 'РџСѓР±Р»РёС‡РЅР°СЏ СЂРµРіРёСЃС‚СЂР°С†РёСЏ',
         status: registrationReady
           ? 'READY'
           : targetStore
             ? 'PARTIAL'
             : 'BLOCKED',
-        statusLabel: registrationReady ? 'готово' : 'не готово',
+        statusLabel: registrationReady ? 'РіРѕС‚РѕРІРѕ' : 'РЅРµ РіРѕС‚РѕРІРѕ',
         ready: registrationReady,
-        metric: registrationReady ? '/play' : 'нужна настройка',
-        note: 'Гость должен пройти путь /play -> выбор клуба -> согласие -> OTP без сотруднической авторизации.',
+        metric: registrationReady ? '/play' : 'РЅСѓР¶РЅР° РЅР°СЃС‚СЂРѕР№РєР°',
+        note: 'Р“РѕСЃС‚СЊ РґРѕР»Р¶РµРЅ РїСЂРѕР№С‚Рё РїСѓС‚СЊ /play -> РІС‹Р±РѕСЂ РєР»СѓР±Р° -> СЃРѕРіР»Р°СЃРёРµ -> OTP Р±РµР· СЃРѕС‚СЂСѓРґРЅРёС‡РµСЃРєРѕР№ Р°РІС‚РѕСЂРёР·Р°С†РёРё.',
         nextAction: registrationReady
-          ? 'Проверить путь на тестовом телефоне и открыть гостевой кабинет клуба.'
-          : 'Включить клуб в каталог /play через флаг геймификации или активное игровое правило.',
+          ? 'РџСЂРѕРІРµСЂРёС‚СЊ РїСѓС‚СЊ РЅР° С‚РµСЃС‚РѕРІРѕРј С‚РµР»РµС„РѕРЅРµ Рё РѕС‚РєСЂС‹С‚СЊ РіРѕСЃС‚РµРІРѕР№ РєР°Р±РёРЅРµС‚ РєР»СѓР±Р°.'
+          : 'Р’РєР»СЋС‡РёС‚СЊ РєР»СѓР± РІ РєР°С‚Р°Р»РѕРі /play С‡РµСЂРµР· С„Р»Р°Рі РіРµР№РјРёС„РёРєР°С†РёРё РёР»Рё Р°РєС‚РёРІРЅРѕРµ РёРіСЂРѕРІРѕРµ РїСЂР°РІРёР»Рѕ.',
         actionHref: targetStorePayload?.playPath ?? '/play',
-        actionLabel: 'Открыть /play',
+        actionLabel: 'РћС‚РєСЂС‹С‚СЊ /play',
       },
       {
         key: 'PUBLIC_GAME_QA',
-        title: 'Публичный QA-путь',
+        title: 'РџСѓР±Р»РёС‡РЅС‹Р№ QA-РїСѓС‚СЊ',
         status:
           registrationReady && targetStoreCoordinatesReady && publicAuthReady
             ? 'READY'
@@ -3485,33 +3635,33 @@ export class GuestGamificationService {
                   : 'PARTIAL',
         statusLabel:
           registrationReady && targetStoreCoordinatesReady && publicAuthReady
-            ? 'готов к QA'
+            ? 'РіРѕС‚РѕРІ Рє QA'
             : !targetStore
-              ? 'нет клуба'
+              ? 'РЅРµС‚ РєР»СѓР±Р°'
               : !registrationReady
-                ? 'нужен каталог'
+                ? 'РЅСѓР¶РµРЅ РєР°С‚Р°Р»РѕРі'
                 : !publicAuthReady && !publicAuthPartial
-                  ? 'нет входа'
-                  : 'частично',
+                  ? 'РЅРµС‚ РІС…РѕРґР°'
+                  : 'С‡Р°СЃС‚РёС‡РЅРѕ',
         ready: Boolean(
           registrationReady && targetStoreCoordinatesReady && publicAuthReady,
         ),
         metric: publicAuthChannels.length
-          ? `вход: ${publicAuthChannels.join(' / ')}`
-          : 'нет готового входа',
-        note: 'Проверяет основной гостевой путь /game/auth -> Telegram contact-share или бесплатный звонок/SMS -> /game/clubs -> /play/game без сотруднической сессии, live Langame reads и ПДн.',
+          ? `РІС…РѕРґ: ${publicAuthChannels.join(' / ')}`
+          : 'РЅРµС‚ РіРѕС‚РѕРІРѕРіРѕ РІС…РѕРґР°',
+        note: 'РџСЂРѕРІРµСЂСЏРµС‚ РѕСЃРЅРѕРІРЅРѕР№ РіРѕСЃС‚РµРІРѕР№ РїСѓС‚СЊ /game/auth -> Telegram contact-share РёР»Рё Р±РµСЃРїР»Р°С‚РЅС‹Р№ Р·РІРѕРЅРѕРє/SMS -> /game/clubs -> /play/game Р±РµР· СЃРѕС‚СЂСѓРґРЅРёС‡РµСЃРєРѕР№ СЃРµСЃСЃРёРё, live Langame reads Рё РџР”РЅ.',
         nextAction:
           registrationReady && targetStoreCoordinatesReady && publicAuthReady
-            ? 'Пройти production QA: /game/auth -> вход -> /game/clubs -> /play/game на тестовом телефоне.'
+            ? 'РџСЂРѕР№С‚Рё production QA: /game/auth -> РІС…РѕРґ -> /game/clubs -> /play/game РЅР° С‚РµСЃС‚РѕРІРѕРј С‚РµР»РµС„РѕРЅРµ.'
             : !targetStore
-              ? 'Создать или включить пилотный клуб в LeetPlus Game.'
+              ? 'РЎРѕР·РґР°С‚СЊ РёР»Рё РІРєР»СЋС‡РёС‚СЊ РїРёР»РѕС‚РЅС‹Р№ РєР»СѓР± РІ LeetPlus Game.'
               : !registrationReady
-                ? 'Включить клуб в публичный игровой каталог через флаг геймификации или активное правило.'
+                ? 'Р’РєР»СЋС‡РёС‚СЊ РєР»СѓР± РІ РїСѓР±Р»РёС‡РЅС‹Р№ РёРіСЂРѕРІРѕР№ РєР°С‚Р°Р»РѕРі С‡РµСЂРµР· С„Р»Р°Рі РіРµР№РјРёС„РёРєР°С†РёРё РёР»Рё Р°РєС‚РёРІРЅРѕРµ РїСЂР°РІРёР»Рѕ.'
                 : !targetStoreCoordinatesReady
-                  ? 'Заполнить координаты пилотного клуба перед проверкой /game/clubs и поиска рядом.'
+                  ? 'Р—Р°РїРѕР»РЅРёС‚СЊ РєРѕРѕСЂРґРёРЅР°С‚С‹ РїРёР»РѕС‚РЅРѕРіРѕ РєР»СѓР±Р° РїРµСЂРµРґ РїСЂРѕРІРµСЂРєРѕР№ /game/clubs Рё РїРѕРёСЃРєР° СЂСЏРґРѕРј.'
                   : publicAuthPartial
-                    ? 'Завершить настройку Telegram polling edge, бесплатного звонка или SMS-резерва и затем пройти /game/auth.'
-                    : 'Настроить хотя бы один канал входа: Telegram-бот, бесплатный звонок или SMS-резерв.',
+                    ? 'Р—Р°РІРµСЂС€РёС‚СЊ РЅР°СЃС‚СЂРѕР№РєСѓ Telegram polling edge, Р±РµСЃРїР»Р°С‚РЅРѕРіРѕ Р·РІРѕРЅРєР° РёР»Рё SMS-СЂРµР·РµСЂРІР° Рё Р·Р°С‚РµРј РїСЂРѕР№С‚Рё /game/auth.'
+                    : 'РќР°СЃС‚СЂРѕРёС‚СЊ С…РѕС‚СЏ Р±С‹ РѕРґРёРЅ РєР°РЅР°Р» РІС…РѕРґР°: Telegram-Р±РѕС‚, Р±РµСЃРїР»Р°С‚РЅС‹Р№ Р·РІРѕРЅРѕРє РёР»Рё SMS-СЂРµР·РµСЂРІ.',
         actionHref:
           registrationReady && targetStoreCoordinatesReady && publicAuthReady
             ? '/game/auth'
@@ -3520,78 +3670,86 @@ export class GuestGamificationService {
               : '/guests/gamification',
         actionLabel:
           registrationReady && targetStoreCoordinatesReady && publicAuthReady
-            ? 'Открыть /game/auth'
+            ? 'РћС‚РєСЂС‹С‚СЊ /game/auth'
             : !targetStoreCoordinatesReady
-              ? 'Заполнить координаты'
-              : 'Открыть readiness',
+              ? 'Р—Р°РїРѕР»РЅРёС‚СЊ РєРѕРѕСЂРґРёРЅР°С‚С‹'
+              : 'РћС‚РєСЂС‹С‚СЊ readiness',
       },
       {
         key: 'OTP',
-        title: 'OTP-доставка',
+        title: 'OTP-РґРѕСЃС‚Р°РІРєР°',
         status: otpItem?.status ?? 'BLOCKED',
-        statusLabel: otpItem?.statusLabel ?? 'нет данных',
+        statusLabel: otpItem?.statusLabel ?? 'РЅРµС‚ РґР°РЅРЅС‹С…',
         ready: Boolean(otpItem?.ready),
-        metric: otpItem?.enabled ? 'включено' : 'выключено',
+        metric: otpItem?.enabled ? 'РІРєР»СЋС‡РµРЅРѕ' : 'РІС‹РєР»СЋС‡РµРЅРѕ',
         note:
           otpItem?.note ??
-          'Для production-пилота нужен явный OTP-канал или контролируемый dev-режим.',
+          'Р”Р»СЏ production-РїРёР»РѕС‚Р° РЅСѓР¶РµРЅ СЏРІРЅС‹Р№ OTP-РєР°РЅР°Р» РёР»Рё РєРѕРЅС‚СЂРѕР»РёСЂСѓРµРјС‹Р№ dev-СЂРµР¶РёРј.',
         nextAction:
           otpItem?.nextAction ??
-          'Настроить SMS/Telegram/MAX provider или временно согласовать dev OTP.',
+          'РќР°СЃС‚СЂРѕРёС‚СЊ SMS/Telegram/MAX provider РёР»Рё РІСЂРµРјРµРЅРЅРѕ СЃРѕРіР»Р°СЃРѕРІР°С‚СЊ dev OTP.',
       },
       {
         key: 'GAME_PROFILE',
-        title: 'Игровой профиль',
+        title: 'РРіСЂРѕРІРѕР№ РїСЂРѕС„РёР»СЊ',
         status: activeProfiles.length
           ? 'READY'
           : registrationReady
             ? 'PARTIAL'
             : 'BLOCKED',
-        statusLabel: activeProfiles.length ? 'есть профиль' : 'ожидает гостя',
+        statusLabel: activeProfiles.length
+          ? 'РµСЃС‚СЊ РїСЂРѕС„РёР»СЊ'
+          : 'РѕР¶РёРґР°РµС‚ РіРѕСЃС‚СЏ',
         ready: activeProfiles.length > 0,
-        metric: `${activeProfiles.length} активных`,
-        note: 'Регистрация не создает общий Guest, а создает отдельный GuestGameProfile для XP, миссий и наград.',
+        metric: `${activeProfiles.length} Р°РєС‚РёРІРЅС‹С…`,
+        note: 'Р РµРіРёСЃС‚СЂР°С†РёСЏ РЅРµ СЃРѕР·РґР°РµС‚ РѕР±С‰РёР№ Guest, Р° СЃРѕР·РґР°РµС‚ РѕС‚РґРµР»СЊРЅС‹Р№ GuestGameProfile РґР»СЏ XP, РјРёСЃСЃРёР№ Рё РЅР°РіСЂР°Рґ.',
         nextAction: activeProfiles.length
-          ? 'Использовать тестовый профиль для dry-run и первого события.'
-          : 'Зарегистрировать тестового участника через /play.',
+          ? 'РСЃРїРѕР»СЊР·РѕРІР°С‚СЊ С‚РµСЃС‚РѕРІС‹Р№ РїСЂРѕС„РёР»СЊ РґР»СЏ dry-run Рё РїРµСЂРІРѕРіРѕ СЃРѕР±С‹С‚РёСЏ.'
+          : 'Р—Р°СЂРµРіРёСЃС‚СЂРёСЂРѕРІР°С‚СЊ С‚РµСЃС‚РѕРІРѕРіРѕ СѓС‡Р°СЃС‚РЅРёРєР° С‡РµСЂРµР· /play.',
         actionHref: targetStorePayload?.playPath ?? '/play',
-        actionLabel: 'Открыть /play',
+        actionLabel: 'РћС‚РєСЂС‹С‚СЊ /play',
       },
       {
         key: 'LANGAME_MATCH',
-        title: 'Связка с Langame',
+        title: 'РЎРІСЏР·РєР° СЃ Langame',
         status: linkedProfiles.length
           ? 'READY'
           : activeProfiles.length
             ? 'PARTIAL'
             : 'BLOCKED',
-        statusLabel: linkedProfiles.length ? 'связан' : 'нужна сверка',
+        statusLabel: linkedProfiles.length
+          ? 'СЃРІСЏР·Р°РЅ'
+          : 'РЅСѓР¶РЅР° СЃРІРµСЂРєР°',
         ready: linkedProfiles.length > 0,
         metric: `${linkedProfiles.length}/${activeProfiles.length}`,
-        note: 'Для бонусной записи нужен связанный Langame-гость или следующий guest foundation sync по phoneHash.',
+        note: 'Р”Р»СЏ Р±РѕРЅСѓСЃРЅРѕР№ Р·Р°РїРёСЃРё РЅСѓР¶РµРЅ СЃРІСЏР·Р°РЅРЅС‹Р№ Langame-РіРѕСЃС‚СЊ РёР»Рё СЃР»РµРґСѓСЋС‰РёР№ guest foundation sync РїРѕ phoneHash.',
         nextAction: linkedProfiles.length
-          ? 'Перейти к проверке факта сессии и события.'
-          : 'В гостевом кабинете нажать ручную проверку Langame или дождаться foundation sync.',
+          ? 'РџРµСЂРµР№С‚Рё Рє РїСЂРѕРІРµСЂРєРµ С„Р°РєС‚Р° СЃРµСЃСЃРёРё Рё СЃРѕР±С‹С‚РёСЏ.'
+          : 'Р’ РіРѕСЃС‚РµРІРѕРј РєР°Р±РёРЅРµС‚Рµ РЅР°Р¶Р°С‚СЊ СЂСѓС‡РЅСѓСЋ РїСЂРѕРІРµСЂРєСѓ Langame РёР»Рё РґРѕР¶РґР°С‚СЊСЃСЏ foundation sync.',
         actionHref: targetStorePayload?.guestPortalPath ?? '/play',
-        actionLabel: targetStorePayload ? 'Открыть кабинет' : 'Открыть /play',
+        actionLabel: targetStorePayload
+          ? 'РћС‚РєСЂС‹С‚СЊ РєР°Р±РёРЅРµС‚'
+          : 'РћС‚РєСЂС‹С‚СЊ /play',
       },
       {
         key: 'ACTIVE_RULES',
-        title: 'Активные правила',
+        title: 'РђРєС‚РёРІРЅС‹Рµ РїСЂР°РІРёР»Р°',
         status: activeRuleCount ? 'READY' : targetStore ? 'PARTIAL' : 'BLOCKED',
-        statusLabel: activeRuleCount ? 'есть сценарии' : 'нет правил',
+        statusLabel: activeRuleCount
+          ? 'РµСЃС‚СЊ СЃС†РµРЅР°СЂРёРё'
+          : 'РЅРµС‚ РїСЂР°РІРёР»',
         ready: activeRuleCount > 0,
-        metric: `${activeRuleCount} правил`,
-        note: 'Пилоту нужен хотя бы один активный лутбокс, миссия или Battle Pass, применимый к клубу.',
+        metric: `${activeRuleCount} РїСЂР°РІРёР»`,
+        note: 'РџРёР»РѕС‚Сѓ РЅСѓР¶РµРЅ С…РѕС‚СЏ Р±С‹ РѕРґРёРЅ Р°РєС‚РёРІРЅС‹Р№ Р»СѓС‚Р±РѕРєСЃ, РјРёСЃСЃРёСЏ РёР»Рё Battle Pass, РїСЂРёРјРµРЅРёРјС‹Р№ Рє РєР»СѓР±Сѓ.',
         nextAction: activeRuleCount
-          ? 'Запустить dry-run по тестовому профилю и пилотному клубу.'
-          : 'Создать простую миссию или лутбокс для клуба 1337.',
+          ? 'Р—Р°РїСѓСЃС‚РёС‚СЊ dry-run РїРѕ С‚РµСЃС‚РѕРІРѕРјСѓ РїСЂРѕС„РёР»СЋ Рё РїРёР»РѕС‚РЅРѕРјСѓ РєР»СѓР±Сѓ.'
+          : 'РЎРѕР·РґР°С‚СЊ РїСЂРѕСЃС‚СѓСЋ РјРёСЃСЃРёСЋ РёР»Рё Р»СѓС‚Р±РѕРєСЃ РґР»СЏ РєР»СѓР±Р° 1337.',
         actionHref: '/guests/gamification',
-        actionLabel: 'Открыть правила',
+        actionLabel: 'РћС‚РєСЂС‹С‚СЊ РїСЂР°РІРёР»Р°',
       },
       {
         key: 'GUEST_LOGS',
-        title: 'Факты guests/logs',
+        title: 'Р¤Р°РєС‚С‹ guests/logs',
         status: guestLogsReady
           ? 'READY'
           : guestLogsRequiredByRules
@@ -3600,94 +3758,96 @@ export class GuestGamificationService {
               ? 'PARTIAL'
               : 'MANUAL_ONLY',
         statusLabel: guestLogsReady
-          ? 'типы найдены'
+          ? 'С‚РёРїС‹ РЅР°Р№РґРµРЅС‹'
           : guestLogsRequiredByRules
             ? guestLogsCheckedEmpty
-              ? '0 после sync'
-              : 'нужен sync'
+              ? '0 РїРѕСЃР»Рµ sync'
+              : 'РЅСѓР¶РµРЅ sync'
             : guestLogMappings
-              ? 'ждет sync'
+              ? 'Р¶РґРµС‚ sync'
               : guestLogsCheckedEmpty
-                ? 'проверено: 0'
-                : 'не требуется',
+                ? 'РїСЂРѕРІРµСЂРµРЅРѕ: 0'
+                : 'РЅРµ С‚СЂРµР±СѓРµС‚СЃСЏ',
         ready: guestLogsReady,
         metric: guestLogsReady
           ? guestLogsRequiredByRules
-            ? `${guestLogRows} логов / ${guestLogTypes} типов / ${guestLogRuleDependencies} правил`
-            : `${guestLogRows} логов / ${guestLogTypes} типов`
+            ? `${guestLogRows} Р»РѕРіРѕРІ / ${guestLogTypes} С‚РёРїРѕРІ / ${guestLogRuleDependencies} РїСЂР°РІРёР»`
+            : `${guestLogRows} Р»РѕРіРѕРІ / ${guestLogTypes} С‚РёРїРѕРІ`
           : guestLogsRequiredByRules
-            ? `0 логов / ${guestLogRuleDependencies} правил`
+            ? `0 Р»РѕРіРѕРІ / ${guestLogRuleDependencies} РїСЂР°РІРёР»`
             : guestLogMappings
-              ? `${guestLogMappings} сопоставлений`
-              : 'текущие правила без guests/logs',
+              ? `${guestLogMappings} СЃРѕРїРѕСЃС‚Р°РІР»РµРЅРёР№`
+              : 'С‚РµРєСѓС‰РёРµ РїСЂР°РІРёР»Р° Р±РµР· guests/logs',
         note: guestLogsReady
           ? guestLogsRequiredByRules
-            ? `Каталог событий готов для ${guestLogRuleDependencies} правил guests/logs: ${guestLogDomains} источников, последнее событие ${guestLogLatestAt ?? 'без даты'}.`
-            : `Каталог событий сохранен для будущих квестов и anti-fraud: ${guestLogDomains} источников, последнее событие ${guestLogLatestAt ?? 'без даты'}. Текущие правила могут идти без guests/logs.`
+            ? `РљР°С‚Р°Р»РѕРі СЃРѕР±С‹С‚РёР№ РіРѕС‚РѕРІ РґР»СЏ ${guestLogRuleDependencies} РїСЂР°РІРёР» guests/logs: ${guestLogDomains} РёСЃС‚РѕС‡РЅРёРєРѕРІ, РїРѕСЃР»РµРґРЅРµРµ СЃРѕР±С‹С‚РёРµ ${guestLogLatestAt ?? 'Р±РµР· РґР°С‚С‹'}.`
+            : `РљР°С‚Р°Р»РѕРі СЃРѕР±С‹С‚РёР№ СЃРѕС…СЂР°РЅРµРЅ РґР»СЏ Р±СѓРґСѓС‰РёС… РєРІРµСЃС‚РѕРІ Рё anti-fraud: ${guestLogDomains} РёСЃС‚РѕС‡РЅРёРєРѕРІ, РїРѕСЃР»РµРґРЅРµРµ СЃРѕР±С‹С‚РёРµ ${guestLogLatestAt ?? 'Р±РµР· РґР°С‚С‹'}. РўРµРєСѓС‰РёРµ РїСЂР°РІРёР»Р° РјРѕРіСѓС‚ РёРґС‚Рё Р±РµР· guests/logs.`
           : guestLogsRequiredByRules
             ? guestLogsCheckedEmpty
-              ? `Активные правила используют guests/logs, но последний успешный foundation sync за ${guestLogLastSync?.businessDate ?? 'последнюю дату'} проверил endpoint и вернул 0 логов. Повтор sync без разбора Langame payload не снимет риск.`
-              : 'Активные правила используют типы guests/logs, но сохраненных фактов пока нет: dry-run по этим правилам будет неполным.'
+              ? `РђРєС‚РёРІРЅС‹Рµ РїСЂР°РІРёР»Р° РёСЃРїРѕР»СЊР·СѓСЋС‚ guests/logs, РЅРѕ РїРѕСЃР»РµРґРЅРёР№ СѓСЃРїРµС€РЅС‹Р№ foundation sync Р·Р° ${guestLogLastSync?.businessDate ?? 'РїРѕСЃР»РµРґРЅСЋСЋ РґР°С‚Сѓ'} РїСЂРѕРІРµСЂРёР» endpoint Рё РІРµСЂРЅСѓР» 0 Р»РѕРіРѕРІ. РџРѕРІС‚РѕСЂ sync Р±РµР· СЂР°Р·Р±РѕСЂР° Langame payload РЅРµ СЃРЅРёРјРµС‚ СЂРёСЃРє.`
+              : 'РђРєС‚РёРІРЅС‹Рµ РїСЂР°РІРёР»Р° РёСЃРїРѕР»СЊР·СѓСЋС‚ С‚РёРїС‹ guests/logs, РЅРѕ СЃРѕС…СЂР°РЅРµРЅРЅС‹С… С„Р°РєС‚РѕРІ РїРѕРєР° РЅРµС‚: dry-run РїРѕ СЌС‚РёРј РїСЂР°РІРёР»Р°Рј Р±СѓРґРµС‚ РЅРµРїРѕР»РЅС‹Рј.'
             : guestLogMappings
-              ? 'Словарь типов уже настроен, но текущие активные правила не требуют guests/logs.'
+              ? 'РЎР»РѕРІР°СЂСЊ С‚РёРїРѕРІ СѓР¶Рµ РЅР°СЃС‚СЂРѕРµРЅ, РЅРѕ С‚РµРєСѓС‰РёРµ Р°РєС‚РёРІРЅС‹Рµ РїСЂР°РІРёР»Р° РЅРµ С‚СЂРµР±СѓСЋС‚ guests/logs.'
               : guestLogsCheckedEmpty
-                ? `Текущие активные правила не требуют guests/logs; последний успешный foundation sync за ${guestLogLastSync?.businessDate ?? 'последнюю дату'} уже проверил endpoint и вернул 0 логов.`
-                : 'Текущие активные правила не требуют guests/logs; каталог нужен для будущих квестов и anti-fraud.',
+                ? `РўРµРєСѓС‰РёРµ Р°РєС‚РёРІРЅС‹Рµ РїСЂР°РІРёР»Р° РЅРµ С‚СЂРµР±СѓСЋС‚ guests/logs; РїРѕСЃР»РµРґРЅРёР№ СѓСЃРїРµС€РЅС‹Р№ foundation sync Р·Р° ${guestLogLastSync?.businessDate ?? 'РїРѕСЃР»РµРґРЅСЋСЋ РґР°С‚Сѓ'} СѓР¶Рµ РїСЂРѕРІРµСЂРёР» endpoint Рё РІРµСЂРЅСѓР» 0 Р»РѕРіРѕРІ.`
+                : 'РўРµРєСѓС‰РёРµ Р°РєС‚РёРІРЅС‹Рµ РїСЂР°РІРёР»Р° РЅРµ С‚СЂРµР±СѓСЋС‚ guests/logs; РєР°С‚Р°Р»РѕРі РЅСѓР¶РµРЅ РґР»СЏ Р±СѓРґСѓС‰РёС… РєРІРµСЃС‚РѕРІ Рё anti-fraud.',
         nextAction: guestLogsReady
-          ? 'Скачать CSV каталога и выбрать реальные типы для правил 1337.'
+          ? 'РЎРєР°С‡Р°С‚СЊ CSV РєР°С‚Р°Р»РѕРіР° Рё РІС‹Р±СЂР°С‚СЊ СЂРµР°Р»СЊРЅС‹Рµ С‚РёРїС‹ РґР»СЏ РїСЂР°РІРёР» 1337.'
           : guestLogsRequiredByRules
             ? guestLogsCheckedEmpty
-              ? 'Открыть диагностику /sync, проверить строки последнего foundation-run и временно убрать зависимость rules от guests/logs до подтверждения payload Langame.'
-              : 'На /sync включить расширенную проверку guests/logs и дождаться сохраненных фактов перед dry-run.'
+              ? 'РћС‚РєСЂС‹С‚СЊ РґРёР°РіРЅРѕСЃС‚РёРєСѓ /sync, РїСЂРѕРІРµСЂРёС‚СЊ СЃС‚СЂРѕРєРё РїРѕСЃР»РµРґРЅРµРіРѕ foundation-run Рё РІСЂРµРјРµРЅРЅРѕ СѓР±СЂР°С‚СЊ Р·Р°РІРёСЃРёРјРѕСЃС‚СЊ rules РѕС‚ guests/logs РґРѕ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ payload Langame.'
+              : 'РќР° /sync РІРєР»СЋС‡РёС‚СЊ СЂР°СЃС€РёСЂРµРЅРЅСѓСЋ РїСЂРѕРІРµСЂРєСѓ guests/logs Рё РґРѕР¶РґР°С‚СЊСЃСЏ СЃРѕС…СЂР°РЅРµРЅРЅС‹С… С„Р°РєС‚РѕРІ РїРµСЂРµРґ dry-run.'
             : guestLogsCheckedEmpty
-              ? 'Можно запускать dry-run текущих правил; для guests/logs-квестов сначала подтвердить у Langame, почему endpoint возвращает 0 строк.'
-              : 'Можно запускать dry-run текущих правил; для расширенных квестов позже заполнить guests/logs на /sync.',
+              ? 'РњРѕР¶РЅРѕ Р·Р°РїСѓСЃРєР°С‚СЊ dry-run С‚РµРєСѓС‰РёС… РїСЂР°РІРёР»; РґР»СЏ guests/logs-РєРІРµСЃС‚РѕРІ СЃРЅР°С‡Р°Р»Р° РїРѕРґС‚РІРµСЂРґРёС‚СЊ Сѓ Langame, РїРѕС‡РµРјСѓ endpoint РІРѕР·РІСЂР°С‰Р°РµС‚ 0 СЃС‚СЂРѕРє.'
+              : 'РњРѕР¶РЅРѕ Р·Р°РїСѓСЃРєР°С‚СЊ dry-run С‚РµРєСѓС‰РёС… РїСЂР°РІРёР»; РґР»СЏ СЂР°СЃС€РёСЂРµРЅРЅС‹С… РєРІРµСЃС‚РѕРІ РїРѕР·Р¶Рµ Р·Р°РїРѕР»РЅРёС‚СЊ guests/logs РЅР° /sync.',
         actionHref: guestLogsReady
           ? '/api/guests/gamification/guest-log-catalog/export'
           : '/sync?includeGuestLogs=1',
         actionLabel: guestLogsReady
-          ? 'Скачать CSV'
+          ? 'РЎРєР°С‡Р°С‚СЊ CSV'
           : guestLogsCheckedEmpty
-            ? 'Открыть диагностику'
-            : 'Открыть /sync',
+            ? 'РћС‚РєСЂС‹С‚СЊ РґРёР°РіРЅРѕСЃС‚РёРєСѓ'
+            : 'РћС‚РєСЂС‹С‚СЊ /sync',
       },
       {
         key: 'TEST_EVENT',
-        title: 'Тестовое событие',
+        title: 'РўРµСЃС‚РѕРІРѕРµ СЃРѕР±С‹С‚РёРµ',
         status: events.length
           ? 'READY'
           : activeRuleCount && linkedProfiles.length
             ? 'PARTIAL'
             : 'BLOCKED',
-        statusLabel: events.length ? 'есть история' : 'нужен dry-run',
+        statusLabel: events.length
+          ? 'РµСЃС‚СЊ РёСЃС‚РѕСЂРёСЏ'
+          : 'РЅСѓР¶РµРЅ dry-run',
         ready: events.length > 0,
-        metric: `${events.length} событий`,
-        note: 'Перед боевым начислением нужно подтвердить dry-run/process-event на сохраненном snapshot-факте или ручном событии.',
+        metric: `${events.length} СЃРѕР±С‹С‚РёР№`,
+        note: 'РџРµСЂРµРґ Р±РѕРµРІС‹Рј РЅР°С‡РёСЃР»РµРЅРёРµРј РЅСѓР¶РЅРѕ РїРѕРґС‚РІРµСЂРґРёС‚СЊ dry-run/process-event РЅР° СЃРѕС…СЂР°РЅРµРЅРЅРѕРј snapshot-С„Р°РєС‚Рµ РёР»Рё СЂСѓС‡РЅРѕРј СЃРѕР±С‹С‚РёРё.',
         nextAction: events.length
-          ? 'Проверить созданные награды и idempotency по событию.'
-          : 'Во вкладке тестового запуска выполнить dry-run и подтвердить одно событие.',
+          ? 'РџСЂРѕРІРµСЂРёС‚СЊ СЃРѕР·РґР°РЅРЅС‹Рµ РЅР°РіСЂР°РґС‹ Рё idempotency РїРѕ СЃРѕР±С‹С‚РёСЋ.'
+          : 'Р’Рѕ РІРєР»Р°РґРєРµ С‚РµСЃС‚РѕРІРѕРіРѕ Р·Р°РїСѓСЃРєР° РІС‹РїРѕР»РЅРёС‚СЊ dry-run Рё РїРѕРґС‚РІРµСЂРґРёС‚СЊ РѕРґРЅРѕ СЃРѕР±С‹С‚РёРµ.',
       },
       {
         key: 'REWARD_QUEUE',
-        title: 'Очередь наград',
+        title: 'РћС‡РµСЂРµРґСЊ РЅР°РіСЂР°Рґ',
         status: readyWalletRewards.length
           ? 'READY'
           : pendingRewards.length || activeRuleCount
             ? 'PARTIAL'
             : 'BLOCKED',
         statusLabel: readyWalletRewards.length
-          ? 'готово к выдаче'
+          ? 'РіРѕС‚РѕРІРѕ Рє РІС‹РґР°С‡Рµ'
           : pendingRewards.length
-            ? 'ждет проверки'
-            : 'пусто',
+            ? 'Р¶РґРµС‚ РїСЂРѕРІРµСЂРєРё'
+            : 'РїСѓСЃС‚Рѕ',
         ready: readyWalletRewards.length > 0,
-        metric: `${readyWalletRewards.length} готово`,
-        note: 'Награда должна появиться в кошельке с кодом кассиру или как approved bonus reward для ledger.',
+        metric: `${readyWalletRewards.length} РіРѕС‚РѕРІРѕ`,
+        note: 'РќР°РіСЂР°РґР° РґРѕР»Р¶РЅР° РїРѕСЏРІРёС‚СЊСЃСЏ РІ РєРѕС€РµР»СЊРєРµ СЃ РєРѕРґРѕРј РєР°СЃСЃРёСЂСѓ РёР»Рё РєР°Рє approved bonus reward РґР»СЏ ledger.',
         nextAction: readyWalletRewards.length
-          ? 'Проверить код выдачи или подготовку ledger-записи.'
+          ? 'РџСЂРѕРІРµСЂРёС‚СЊ РєРѕРґ РІС‹РґР°С‡Рё РёР»Рё РїРѕРґРіРѕС‚РѕРІРєСѓ ledger-Р·Р°РїРёСЃРё.'
           : pendingRewards.length
-            ? 'Подтвердить тестовую награду или включить auto-approve для безопасного правила.'
-            : 'Создать событие, которое формирует награду.',
+            ? 'РџРѕРґС‚РІРµСЂРґРёС‚СЊ С‚РµСЃС‚РѕРІСѓСЋ РЅР°РіСЂР°РґСѓ РёР»Рё РІРєР»СЋС‡РёС‚СЊ auto-approve РґР»СЏ Р±РµР·РѕРїР°СЃРЅРѕРіРѕ РїСЂР°РІРёР»Р°.'
+            : 'РЎРѕР·РґР°С‚СЊ СЃРѕР±С‹С‚РёРµ, РєРѕС‚РѕСЂРѕРµ С„РѕСЂРјРёСЂСѓРµС‚ РЅР°РіСЂР°РґСѓ.',
       },
       {
         key: 'BONUS_LEDGER',
@@ -3707,35 +3867,35 @@ export class GuestGamificationService {
           ? pilotLedgerPreflight.ready
             ? 'canary ready'
             : pilotLedgerPreflight.readyCount > 1
-              ? 'лишние записи'
+              ? 'Р»РёС€РЅРёРµ Р·Р°РїРёСЃРё'
               : bonusRewards.length
-                ? 'ждет ledger'
-                : 'ждет бонус'
+                ? 'Р¶РґРµС‚ ledger'
+                : 'Р¶РґРµС‚ Р±РѕРЅСѓСЃ'
           : langameWriteItem?.ready
-            ? 'нужен scheduler'
+            ? 'РЅСѓР¶РµРЅ scheduler'
             : bonusLedgerSchedulerItem?.enabled
-              ? 'нужен write API'
-              : 'ручной режим',
+              ? 'РЅСѓР¶РµРЅ write API'
+              : 'СЂСѓС‡РЅРѕР№ СЂРµР¶РёРј',
         ready: Boolean(
           bonusLedgerAutonomousReady &&
           bonusRewards.length &&
           pilotLedgerPreflight.ready,
         ),
         metric: `${bonusRewards.length} bonus rewards / ${pilotLedgerPreflight.readyCount} ledger ready`,
-        note: 'Автономный scheduler должен поставить approved bonus rewards в ledger и отправить их через master endpoint Langame по телефону гостя без админского клика.',
+        note: 'РђРІС‚РѕРЅРѕРјРЅС‹Р№ scheduler РґРѕР»Р¶РµРЅ РїРѕСЃС‚Р°РІРёС‚СЊ approved bonus rewards РІ ledger Рё РѕС‚РїСЂР°РІРёС‚СЊ РёС… С‡РµСЂРµР· master endpoint Langame РїРѕ С‚РµР»РµС„РѕРЅСѓ РіРѕСЃС‚СЏ Р±РµР· Р°РґРјРёРЅСЃРєРѕРіРѕ РєР»РёРєР°.',
         nextAction: bonusLedgerAutonomousReady
           ? bonusRewards.length
             ? pilotLedgerPreflight.nextAction
-            : 'Создать approved-награду с бонусным rewardType для ledger.'
+            : 'РЎРѕР·РґР°С‚СЊ approved-РЅР°РіСЂР°РґСѓ СЃ Р±РѕРЅСѓСЃРЅС‹Рј rewardType РґР»СЏ ledger.'
           : langameWriteItem?.ready
-            ? 'Включить GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED и сначала прогнать dry-run/canary для 1337.'
+            ? 'Р’РєР»СЋС‡РёС‚СЊ GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED Рё СЃРЅР°С‡Р°Р»Р° РїСЂРѕРіРЅР°С‚СЊ dry-run/canary РґР»СЏ 1337.'
             : bonusLedgerSchedulerItem?.enabled
-              ? 'После dry-run включить LANGAME_BONUS_ACCRUAL_ENABLED=true для реальной записи в Langame.'
-              : 'До включения LANGAME_BONUS_ACCRUAL_ENABLED использовать claim-код или ручную выдачу.',
+              ? 'РџРѕСЃР»Рµ dry-run РІРєР»СЋС‡РёС‚СЊ LANGAME_BONUS_ACCRUAL_ENABLED=true РґР»СЏ СЂРµР°Р»СЊРЅРѕР№ Р·Р°РїРёСЃРё РІ Langame.'
+              : 'Р”Рѕ РІРєР»СЋС‡РµРЅРёСЏ LANGAME_BONUS_ACCRUAL_ENABLED РёСЃРїРѕР»СЊР·РѕРІР°С‚СЊ claim-РєРѕРґ РёР»Рё СЂСѓС‡РЅСѓСЋ РІС‹РґР°С‡Сѓ.',
       },
       {
         key: 'BALANCE_RECONCILIATION',
-        title: 'Сверка после начисления',
+        title: 'РЎРІРµСЂРєР° РїРѕСЃР»Рµ РЅР°С‡РёСЃР»РµРЅРёСЏ',
         status: pilotFirstBonusReconciliation.ready
           ? 'READY'
           : pilotFirstBonusReconciliation.status === 'MISMATCH'
@@ -3756,7 +3916,7 @@ export class GuestGamificationService {
           ? '#bonus-balance-reconciliation'
           : null,
         actionLabel: pilotFirstBonusReconciliation.ledgerEntry
-          ? 'Открыть сверку'
+          ? 'РћС‚РєСЂС‹С‚СЊ СЃРІРµСЂРєСѓ'
           : null,
       },
     ];
@@ -3795,7 +3955,7 @@ export class GuestGamificationService {
       },
       items,
       runbook,
-      note: 'Пилотный чек-лист показывает путь от публичной регистрации до первого бонуса в Langame по уже сохраненным данным LeetPlus. Он не делает live-запросов и не раскрывает ПДн.',
+      note: 'РџРёР»РѕС‚РЅС‹Р№ С‡РµРє-Р»РёСЃС‚ РїРѕРєР°Р·С‹РІР°РµС‚ РїСѓС‚СЊ РѕС‚ РїСѓР±Р»РёС‡РЅРѕР№ СЂРµРіРёСЃС‚СЂР°С†РёРё РґРѕ РїРµСЂРІРѕРіРѕ Р±РѕРЅСѓСЃР° РІ Langame РїРѕ СѓР¶Рµ СЃРѕС…СЂР°РЅРµРЅРЅС‹Рј РґР°РЅРЅС‹Рј LeetPlus. РћРЅ РЅРµ РґРµР»Р°РµС‚ live-Р·Р°РїСЂРѕСЃРѕРІ Рё РЅРµ СЂР°СЃРєСЂС‹РІР°РµС‚ РџР”РЅ.',
     };
   }
 
@@ -3910,20 +4070,20 @@ export class GuestGamificationService {
     const items: GuestGameIntegrationReadinessItem[] = [
       {
         key: 'PUBLIC_PORTAL',
-        title: 'Публичный гостевой кабинет',
+        title: 'РџСѓР±Р»РёС‡РЅС‹Р№ РіРѕСЃС‚РµРІРѕР№ РєР°Р±РёРЅРµС‚',
         status: 'READY',
-        statusLabel: 'готов',
+        statusLabel: 'РіРѕС‚РѕРІ',
         ready: true,
         configured: true,
         enabled: true,
         requiredEnv: [],
-        note: 'Маршрут /guest/[tenantSlug]/[storeId] работает отдельно от внутреннего кабинета и использует guest-token.',
+        note: 'РњР°СЂС€СЂСѓС‚ /guest/[tenantSlug]/[storeId] СЂР°Р±РѕС‚Р°РµС‚ РѕС‚РґРµР»СЊРЅРѕ РѕС‚ РІРЅСѓС‚СЂРµРЅРЅРµРіРѕ РєР°Р±РёРЅРµС‚Р° Рё РёСЃРїРѕР»СЊР·СѓРµС‚ guest-token.',
         nextAction:
-          'Проверяйте гостевые ссылки по клубам из блока публичных ссылок ниже.',
+          'РџСЂРѕРІРµСЂСЏР№С‚Рµ РіРѕСЃС‚РµРІС‹Рµ СЃСЃС‹Р»РєРё РїРѕ РєР»СѓР±Р°Рј РёР· Р±Р»РѕРєР° РїСѓР±Р»РёС‡РЅС‹С… СЃСЃС‹Р»РѕРє РЅРёР¶Рµ.',
       },
       {
         key: 'OTP',
-        title: 'OTP-вход гостя',
+        title: 'OTP-РІС…РѕРґ РіРѕСЃС‚СЏ',
         status: otp.status,
         statusLabel: otp.statusLabel,
         ready: otp.ready,
@@ -3975,17 +4135,17 @@ export class GuestGamificationService {
       incomingCallLast4Auth,
       {
         key: 'TELEGRAM_LINK',
-        title: 'Привязка Telegram-бота',
+        title: 'РџСЂРёРІСЏР·РєР° Telegram-Р±РѕС‚Р°',
         status: telegramLinkConfigured
           ? 'READY'
           : telegramBotUsername || telegramLinkSecret
             ? 'PARTIAL'
             : 'BLOCKED',
         statusLabel: telegramLinkConfigured
-          ? 'готово'
+          ? 'РіРѕС‚РѕРІРѕ'
           : telegramBotUsername || telegramLinkSecret
-            ? 'частично'
-            : 'не настроено',
+            ? 'С‡Р°СЃС‚РёС‡РЅРѕ'
+            : 'РЅРµ РЅР°СЃС‚СЂРѕРµРЅРѕ',
         ready: telegramLinkConfigured,
         configured: telegramLinkConfigured,
         enabled: Boolean(telegramBotUsername || telegramLinkSecret),
@@ -3993,36 +4153,38 @@ export class GuestGamificationService {
           'GUEST_GAME_TELEGRAM_BOT_USERNAME',
           'GUEST_GAME_TELEGRAM_LINK_SECRET',
         ],
-        note: 'Гость после OTP может создать одноразовый link-code и открыть deep link бота; LeetPlus хранит только chat:<id>.',
+        note: 'Р“РѕСЃС‚СЊ РїРѕСЃР»Рµ OTP РјРѕР¶РµС‚ СЃРѕР·РґР°С‚СЊ РѕРґРЅРѕСЂР°Р·РѕРІС‹Р№ link-code Рё РѕС‚РєСЂС‹С‚СЊ deep link Р±РѕС‚Р°; LeetPlus С…СЂР°РЅРёС‚ С‚РѕР»СЊРєРѕ chat:<id>.',
         nextAction: telegramLinkConfigured
-          ? 'Проверить deep link в гостевом кабинете и 1337 polling edge.'
-          : 'Настроить username бота и link secret до публичного запуска привязки.',
+          ? 'РџСЂРѕРІРµСЂРёС‚СЊ deep link РІ РіРѕСЃС‚РµРІРѕРј РєР°Р±РёРЅРµС‚Рµ Рё 1337 polling edge.'
+          : 'РќР°СЃС‚СЂРѕРёС‚СЊ username Р±РѕС‚Р° Рё link secret РґРѕ РїСѓР±Р»РёС‡РЅРѕРіРѕ Р·Р°РїСѓСЃРєР° РїСЂРёРІСЏР·РєРё.',
       },
       {
         key: 'TELEGRAM_WEBHOOK',
         title: 'Telegram update consumer (polling edge)',
         status: telegramWebhookConfigured ? 'READY' : 'BLOCKED',
-        statusLabel: telegramWebhookConfigured ? 'секрет есть' : 'секрет нужен',
+        statusLabel: telegramWebhookConfigured
+          ? 'СЃРµРєСЂРµС‚ РµСЃС‚СЊ'
+          : 'СЃРµРєСЂРµС‚ РЅСѓР¶РµРЅ',
         ready: telegramWebhookConfigured,
         configured: telegramWebhookConfigured,
         enabled: telegramWebhookConfigured,
         requiredEnv: ['GUEST_GAME_TELEGRAM_WEBHOOK_SECRET'],
-        note: 'Основной API принимает /start link-code и команды отписки от 1337 polling edge, не хранит raw update и не отправляет внешние ответы.',
+        note: 'РћСЃРЅРѕРІРЅРѕР№ API РїСЂРёРЅРёРјР°РµС‚ /start link-code Рё РєРѕРјР°РЅРґС‹ РѕС‚РїРёСЃРєРё РѕС‚ 1337 polling edge, РЅРµ С…СЂР°РЅРёС‚ raw update Рё РЅРµ РѕС‚РїСЂР°РІР»СЏРµС‚ РІРЅРµС€РЅРёРµ РѕС‚РІРµС‚С‹.',
         nextAction: telegramWebhookConfigured
-          ? 'На 1337 проверить telegram-poller: webhook url=-, затем пройти Telegram canary.'
-          : 'Задать update secret и только потом подключать 1337 polling edge к production API.',
+          ? 'РќР° 1337 РїСЂРѕРІРµСЂРёС‚СЊ telegram-poller: webhook url=-, Р·Р°С‚РµРј РїСЂРѕР№С‚Рё Telegram canary.'
+          : 'Р—Р°РґР°С‚СЊ update secret Рё С‚РѕР»СЊРєРѕ РїРѕС‚РѕРј РїРѕРґРєР»СЋС‡Р°С‚СЊ 1337 polling edge Рє production API.',
       },
       {
         key: 'TELEGRAM_AUTH_REPLY_SENDER',
-        title: 'Telegram reply sender для входа',
+        title: 'Telegram reply sender РґР»СЏ РІС…РѕРґР°',
         status: telegramWebhookReplyStatus,
         statusLabel: telegramWebhookReplyReady
           ? 'sender ready'
           : telegramWebhookReplyStatus === 'MANUAL_ONLY'
             ? 'adapter-only'
             : telegramWebhookReplyStatus === 'PARTIAL'
-              ? 'частично'
-              : 'secret нужен',
+              ? 'С‡Р°СЃС‚РёС‡РЅРѕ'
+              : 'secret РЅСѓР¶РµРЅ',
         ready: telegramWebhookReplyReady,
         configured: Boolean(telegramWebhookReplyToken),
         enabled: telegramWebhookReplyEnabled,
@@ -4030,25 +4192,29 @@ export class GuestGamificationService {
         details: [
           {
             label: 'Update secret',
-            value: telegramWebhookSecret ? 'секрет есть' : 'секрет нужен',
+            value: telegramWebhookSecret
+              ? 'СЃРµРєСЂРµС‚ РµСЃС‚СЊ'
+              : 'СЃРµРєСЂРµС‚ РЅСѓР¶РµРЅ',
           },
           {
             label: 'Sender',
-            value: telegramWebhookReplyEnabled ? 'включен' : 'выключен',
+            value: telegramWebhookReplyEnabled
+              ? 'РІРєР»СЋС‡РµРЅ'
+              : 'РІС‹РєР»СЋС‡РµРЅ',
           },
           {
             label: 'Bot token',
             value: telegramWebhookReplyToken
-              ? 'настроен'
-              : 'нужен для API-side send',
+              ? 'РЅР°СЃС‚СЂРѕРµРЅ'
+              : 'РЅСѓР¶РµРЅ РґР»СЏ API-side send',
           },
         ],
         note: telegramWebhookReplyReady
-          ? 'API сам отправляет Telegram reply payload из текущего update: кнопку request_contact после /start и remove_keyboard после подтверждения. Raw chat_id используется только из текущего update в памяти.'
-          : 'По умолчанию LeetPlus возвращает safe reply payload для 1337 edge adapter. Для прямой отправки нужны update secret, env-флаг sender и bot token.',
+          ? 'API СЃР°Рј РѕС‚РїСЂР°РІР»СЏРµС‚ Telegram reply payload РёР· С‚РµРєСѓС‰РµРіРѕ update: РєРЅРѕРїРєСѓ request_contact РїРѕСЃР»Рµ /start Рё remove_keyboard РїРѕСЃР»Рµ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ. Raw chat_id РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ С‚РѕР»СЊРєРѕ РёР· С‚РµРєСѓС‰РµРіРѕ update РІ РїР°РјСЏС‚Рё.'
+          : 'РџРѕ СѓРјРѕР»С‡Р°РЅРёСЋ LeetPlus РІРѕР·РІСЂР°С‰Р°РµС‚ safe reply payload РґР»СЏ 1337 edge adapter. Р”Р»СЏ РїСЂСЏРјРѕР№ РѕС‚РїСЂР°РІРєРё РЅСѓР¶РЅС‹ update secret, env-С„Р»Р°Рі sender Рё bot token.',
         nextAction: telegramWebhookReplyReady
-          ? 'Проверить /play -> Telegram deep link -> contact-share на тестовом госте и смотреть replyDispatch=SENT без raw chat id.'
-          : 'Добавить недостающие env или оставить 1337 polling edge, который отправляет reply payload.',
+          ? 'РџСЂРѕРІРµСЂРёС‚СЊ /play -> Telegram deep link -> contact-share РЅР° С‚РµСЃС‚РѕРІРѕРј РіРѕСЃС‚Рµ Рё СЃРјРѕС‚СЂРµС‚СЊ replyDispatch=SENT Р±РµР· raw chat id.'
+          : 'Р”РѕР±Р°РІРёС‚СЊ РЅРµРґРѕСЃС‚Р°СЋС‰РёРµ env РёР»Рё РѕСЃС‚Р°РІРёС‚СЊ 1337 polling edge, РєРѕС‚РѕСЂС‹Р№ РѕС‚РїСЂР°РІР»СЏРµС‚ reply payload.',
         runbook: telegramAuthRunbook,
       },
       {
@@ -4056,10 +4222,10 @@ export class GuestGamificationService {
         title: 'Telegram Mini App',
         status: telegramMiniAppStatus,
         statusLabel: telegramMiniAppReady
-          ? 'готов'
+          ? 'РіРѕС‚РѕРІ'
           : telegramMiniAppStatus === 'PARTIAL'
-            ? 'частично'
-            : 'не настроено',
+            ? 'С‡Р°СЃС‚РёС‡РЅРѕ'
+            : 'РЅРµ РЅР°СЃС‚СЂРѕРµРЅРѕ',
         ready: telegramMiniAppReady,
         configured: Boolean(telegramMiniAppToken || telegramMiniAppEdgeSecret),
         enabled: Boolean(
@@ -4071,39 +4237,41 @@ export class GuestGamificationService {
         details: [
           {
             label: 'Route',
-            value: telegramMiniAppUrl ? '/game/app' : 'нужен URL',
+            value: telegramMiniAppUrl ? '/game/app' : 'РЅСѓР¶РµРЅ URL',
           },
           {
             label: 'Bot username',
-            value: telegramBotUsername ? 'настроен' : 'нужен',
+            value: telegramBotUsername ? 'РЅР°СЃС‚СЂРѕРµРЅ' : 'РЅСѓР¶РµРЅ',
           },
           {
             label: 'initData token',
-            value: telegramMiniAppToken ? 'настроен' : 'edge/shared',
+            value: telegramMiniAppToken ? 'РЅР°СЃС‚СЂРѕРµРЅ' : 'edge/shared',
           },
           {
             label: 'Edge assertion',
-            value: telegramMiniAppEdgeSecret ? 'настроен' : 'не используется',
+            value: telegramMiniAppEdgeSecret
+              ? 'РЅР°СЃС‚СЂРѕРµРЅ'
+              : 'РЅРµ РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ',
           },
         ],
-        note: 'Mini App открывает /game/app и выдает обычную guest-session для существующего GuestGameProfile. InitData можно валидировать на API bot token-ом или на отдельной edge VDS с передачей edge assertion.',
+        note: 'Mini App РѕС‚РєСЂС‹РІР°РµС‚ /game/app Рё РІС‹РґР°РµС‚ РѕР±С‹С‡РЅСѓСЋ guest-session РґР»СЏ СЃСѓС‰РµСЃС‚РІСѓСЋС‰РµРіРѕ GuestGameProfile. InitData РјРѕР¶РЅРѕ РІР°Р»РёРґРёСЂРѕРІР°С‚СЊ РЅР° API bot token-РѕРј РёР»Рё РЅР° РѕС‚РґРµР»СЊРЅРѕР№ edge VDS СЃ РїРµСЂРµРґР°С‡РµР№ edge assertion.',
         nextAction: telegramMiniAppReady
-          ? 'Проверить кнопку Open Mini App после Telegram contact-share и mobile WebView /game/app на тестовом госте.'
-          : 'Настроить bot username, Mini App URL и bot token на edge VDS или shared secret для edge assertion.',
+          ? 'РџСЂРѕРІРµСЂРёС‚СЊ РєРЅРѕРїРєСѓ Open Mini App РїРѕСЃР»Рµ Telegram contact-share Рё mobile WebView /game/app РЅР° С‚РµСЃС‚РѕРІРѕРј РіРѕСЃС‚Рµ.'
+          : 'РќР°СЃС‚СЂРѕРёС‚СЊ bot username, Mini App URL Рё bot token РЅР° edge VDS РёР»Рё shared secret РґР»СЏ edge assertion.',
         runbook: telegramAuthRunbook,
       },
       {
         key: 'TELEGRAM_DELIVERY',
-        title: 'Отправка наград в Telegram',
+        title: 'РћС‚РїСЂР°РІРєР° РЅР°РіСЂР°Рґ РІ Telegram',
         status: telegramDeliveryConfigured
           ? 'READY'
           : deliveryConfig.realSendEnabled || telegramProvider?.configured
             ? 'PARTIAL'
             : 'BLOCKED',
         statusLabel: telegramDeliveryConfigured
-          ? 'provider готов'
+          ? 'provider РіРѕС‚РѕРІ'
           : deliveryConfig.realSendEnabled || telegramProvider?.configured
-            ? 'частично'
+            ? 'С‡Р°СЃС‚РёС‡РЅРѕ'
             : 'dry-run',
         ready: telegramDeliveryConfigured,
         configured: Boolean(telegramProvider?.configured),
@@ -4115,9 +4283,9 @@ export class GuestGamificationService {
         ],
         note:
           telegramProvider?.note ??
-          'Telegram delivery provider еще не настроен; dispatcher работает безопасно.',
+          'Telegram delivery provider РµС‰Рµ РЅРµ РЅР°СЃС‚СЂРѕРµРЅ; dispatcher СЂР°Р±РѕС‚Р°РµС‚ Р±РµР·РѕРїР°СЃРЅРѕ.',
         nextAction:
-          'Включать реальную отправку только после согласий, numeric chat_id, bot token и production-аудита outbox.',
+          'Р’РєР»СЋС‡Р°С‚СЊ СЂРµР°Р»СЊРЅСѓСЋ РѕС‚РїСЂР°РІРєСѓ С‚РѕР»СЊРєРѕ РїРѕСЃР»Рµ СЃРѕРіР»Р°СЃРёР№, numeric chat_id, bot token Рё production-Р°СѓРґРёС‚Р° outbox.',
       },
       {
         key: 'MAX_DELIVERY',
@@ -4128,10 +4296,10 @@ export class GuestGamificationService {
             ? 'PARTIAL'
             : 'BLOCKED',
         statusLabel: maxDeliveryCanAttempt
-          ? 'canary разрешен'
+          ? 'canary СЂР°Р·СЂРµС€РµРЅ'
           : maxDeliveryConfigured
-            ? 'нужен canary'
-            : 'не настроено',
+            ? 'РЅСѓР¶РµРЅ canary'
+            : 'РЅРµ РЅР°СЃС‚СЂРѕРµРЅРѕ',
         ready: false,
         configured: Boolean(maxProvider?.configured),
         enabled: Boolean(maxProvider?.enabledByEnv),
@@ -4144,30 +4312,30 @@ export class GuestGamificationService {
         ],
         note:
           maxProvider?.note ??
-          'MAX остается вторым адаптером: нужна юридическая подготовка и подтвержденный API-контракт.',
+          'MAX РѕСЃС‚Р°РµС‚СЃСЏ РІС‚РѕСЂС‹Рј Р°РґР°РїС‚РµСЂРѕРј: РЅСѓР¶РЅР° СЋСЂРёРґРёС‡РµСЃРєР°СЏ РїРѕРґРіРѕС‚РѕРІРєР° Рё РїРѕРґС‚РІРµСЂР¶РґРµРЅРЅС‹Р№ API-РєРѕРЅС‚СЂР°РєС‚.',
         nextAction: maxDeliveryCanAttempt
-          ? 'Провести один MAX canary на согласованном госте и проверить SENT/FAILED/BLOCKED audit без raw payload.'
+          ? 'РџСЂРѕРІРµСЃС‚Рё РѕРґРёРЅ MAX canary РЅР° СЃРѕРіР»Р°СЃРѕРІР°РЅРЅРѕРј РіРѕСЃС‚Рµ Рё РїСЂРѕРІРµСЂРёС‚СЊ SENT/FAILED/BLOCKED audit Р±РµР· raw payload.'
           : maxDeliveryConfigured
-            ? 'Включать GUEST_GAME_MAX_DELIVERY_LIVE_CANARY_ENABLED только после утвержденного endpoint, токена, согласий и обработки отписок.'
-            : 'Не включать автоматизацию MAX до утвержденного endpoint, токена, согласий и обработки отписок.',
+            ? 'Р’РєР»СЋС‡Р°С‚СЊ GUEST_GAME_MAX_DELIVERY_LIVE_CANARY_ENABLED С‚РѕР»СЊРєРѕ РїРѕСЃР»Рµ СѓС‚РІРµСЂР¶РґРµРЅРЅРѕРіРѕ endpoint, С‚РѕРєРµРЅР°, СЃРѕРіР»Р°СЃРёР№ Рё РѕР±СЂР°Р±РѕС‚РєРё РѕС‚РїРёСЃРѕРє.'
+            : 'РќРµ РІРєР»СЋС‡Р°С‚СЊ Р°РІС‚РѕРјР°С‚РёР·Р°С†РёСЋ MAX РґРѕ СѓС‚РІРµСЂР¶РґРµРЅРЅРѕРіРѕ endpoint, С‚РѕРєРµРЅР°, СЃРѕРіР»Р°СЃРёР№ Рё РѕР±СЂР°Р±РѕС‚РєРё РѕС‚РїРёСЃРѕРє.',
       },
       bonusLedgerScheduler,
       {
         key: 'LANGAME_WRITE_API',
-        title: 'Запись бонусов в Langame',
+        title: 'Р—Р°РїРёСЃСЊ Р±РѕРЅСѓСЃРѕРІ РІ Langame',
         status: langameBonusAccrualEnabled ? 'READY' : 'MANUAL_ONLY',
         statusLabel: langameBonusAccrualEnabled
-          ? 'master endpoint готов'
-          : 'выключено',
+          ? 'master endpoint РіРѕС‚РѕРІ'
+          : 'РІС‹РєР»СЋС‡РµРЅРѕ',
         ready: langameBonusAccrualEnabled,
         configured: true,
         enabled: langameBonusAccrualEnabled,
         requiredEnv: ['LANGAME_BONUS_ACCRUAL_ENABLED'],
         note: langameBonusAccrualEnabled
-          ? 'Бонусный ledger может начислять bonus_balance или balance через /master_api/guests/balance/phone по телефону гостя.'
-          : 'Бонусный ledger готов к Langame master balance endpoint, но боевые списания и начисления выключены env-флагом.',
+          ? 'Р‘РѕРЅСѓСЃРЅС‹Р№ ledger РјРѕР¶РµС‚ РЅР°С‡РёСЃР»СЏС‚СЊ bonus_balance РёР»Рё balance С‡РµСЂРµР· /master_api/guests/balance/phone РїРѕ С‚РµР»РµС„РѕРЅСѓ РіРѕСЃС‚СЏ.'
+          : 'Р‘РѕРЅСѓСЃРЅС‹Р№ ledger РіРѕС‚РѕРІ Рє Langame master balance endpoint, РЅРѕ Р±РѕРµРІС‹Рµ СЃРїРёСЃР°РЅРёСЏ Рё РЅР°С‡РёСЃР»РµРЅРёСЏ РІС‹РєР»СЋС‡РµРЅС‹ env-С„Р»Р°РіРѕРј.',
         nextAction:
-          'Включать только после проверки dry-run, tenant Langame ключа и расписания ledger-диспетчера.',
+          'Р’РєР»СЋС‡Р°С‚СЊ С‚РѕР»СЊРєРѕ РїРѕСЃР»Рµ РїСЂРѕРІРµСЂРєРё dry-run, tenant Langame РєР»СЋС‡Р° Рё СЂР°СЃРїРёСЃР°РЅРёСЏ ledger-РґРёСЃРїРµС‚С‡РµСЂР°.',
       },
     ];
 
@@ -4181,7 +4349,7 @@ export class GuestGamificationService {
           .length,
       },
       items,
-      note: 'Готовность интеграций показывает, что уже можно тестировать, а что требует внешнего провайдера, секрета, согласий или подтвержденного API. Значения секретов не раскрываются.',
+      note: 'Р“РѕС‚РѕРІРЅРѕСЃС‚СЊ РёРЅС‚РµРіСЂР°С†РёР№ РїРѕРєР°Р·С‹РІР°РµС‚, С‡С‚Рѕ СѓР¶Рµ РјРѕР¶РЅРѕ С‚РµСЃС‚РёСЂРѕРІР°С‚СЊ, Р° С‡С‚Рѕ С‚СЂРµР±СѓРµС‚ РІРЅРµС€РЅРµРіРѕ РїСЂРѕРІР°Р№РґРµСЂР°, СЃРµРєСЂРµС‚Р°, СЃРѕРіР»Р°СЃРёР№ РёР»Рё РїРѕРґС‚РІРµСЂР¶РґРµРЅРЅРѕРіРѕ API. Р—РЅР°С‡РµРЅРёСЏ СЃРµРєСЂРµС‚РѕРІ РЅРµ СЂР°СЃРєСЂС‹РІР°СЋС‚СЃСЏ.',
     };
   }
 
@@ -4333,19 +4501,19 @@ export class GuestGamificationService {
   async exportGuestLogCatalogCsv(user: AuthenticatedUser): Promise<string> {
     const catalog = await this.getGuestLogCatalog(user, { limit: null });
     const header = [
-      'Раздел',
-      'Raw тип guests/logs',
-      'Нормализованный тип',
-      'Название в LeetPlus',
-      'Бизнес-пресет',
-      'Применение',
-      'Логи всего',
-      'Домен',
-      'Провайдер',
-      'Логи в источнике',
-      'Последняя активность',
-      'Заметка',
-      'Маппинг обновлен',
+      'Р Р°Р·РґРµР»',
+      'Raw С‚РёРї guests/logs',
+      'РќРѕСЂРјР°Р»РёР·РѕРІР°РЅРЅС‹Р№ С‚РёРї',
+      'РќР°Р·РІР°РЅРёРµ РІ LeetPlus',
+      'Р‘РёР·РЅРµСЃ-РїСЂРµСЃРµС‚',
+      'РџСЂРёРјРµРЅРµРЅРёРµ',
+      'Р›РѕРіРё РІСЃРµРіРѕ',
+      'Р”РѕРјРµРЅ',
+      'РџСЂРѕРІР°Р№РґРµСЂ',
+      'Р›РѕРіРё РІ РёСЃС‚РѕС‡РЅРёРєРµ',
+      'РџРѕСЃР»РµРґРЅСЏСЏ Р°РєС‚РёРІРЅРѕСЃС‚СЊ',
+      'Р—Р°РјРµС‚РєР°',
+      'РњР°РїРїРёРЅРі РѕР±РЅРѕРІР»РµРЅ',
     ];
     const rows: unknown[][] = [];
     const exportedTypes = new Set<string>();
@@ -4365,7 +4533,7 @@ export class GuestGamificationService {
 
       for (const domain of domains) {
         rows.push([
-          'Факт guests/logs',
+          'Р¤Р°РєС‚ guests/logs',
           item.type,
           item.normalizedType,
           item.mapping?.label ?? '',
@@ -4388,7 +4556,7 @@ export class GuestGamificationService {
       }
 
       rows.push([
-        'Маппинг без факта',
+        'РњР°РїРїРёРЅРі Р±РµР· С„Р°РєС‚Р°',
         mapping.rawType,
         mapping.normalizedType,
         mapping.label,
@@ -4417,13 +4585,17 @@ export class GuestGamificationService {
     const rawType = stringValue(dto.rawType);
 
     if (!rawType) {
-      throw new BadRequestException('Укажите raw-тип события guests/logs');
+      throw new BadRequestException(
+        'РЈРєР°Р¶РёС‚Рµ raw-С‚РёРї СЃРѕР±С‹С‚РёСЏ guests/logs',
+      );
     }
 
     const normalizedType = normalizeGuestLogType(rawType);
 
     if (!normalizedType) {
-      throw new BadRequestException('Не удалось нормализовать тип события');
+      throw new BadRequestException(
+        'РќРµ СѓРґР°Р»РѕСЃСЊ РЅРѕСЂРјР°Р»РёР·РѕРІР°С‚СЊ С‚РёРї СЃРѕР±С‹С‚РёСЏ',
+      );
     }
 
     const label = stringValue(dto.label) ?? rawType;
@@ -4469,7 +4641,9 @@ export class GuestGamificationService {
     });
 
     if (!existing) {
-      throw new NotFoundException('Сопоставление типа события не найдено');
+      throw new NotFoundException(
+        'РЎРѕРїРѕСЃС‚Р°РІР»РµРЅРёРµ С‚РёРїР° СЃРѕР±С‹С‚РёСЏ РЅРµ РЅР°Р№РґРµРЅРѕ',
+      );
     }
 
     await this.prisma.guestGameLogTypeMapping.delete({ where: { id } });
@@ -4843,7 +5017,7 @@ export class GuestGamificationService {
           ...pipelineFactBase(fact),
           status: 'SKIPPED',
           reason:
-            'Факт не привязан к гостю Langame или игровому профилю, автоматический запуск пропущен.',
+            'Р¤Р°РєС‚ РЅРµ РїСЂРёРІСЏР·Р°РЅ Рє РіРѕСЃС‚СЋ Langame РёР»Рё РёРіСЂРѕРІРѕРјСѓ РїСЂРѕС„РёР»СЋ, Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРёР№ Р·Р°РїСѓСЃРє РїСЂРѕРїСѓС‰РµРЅ.',
           dryRun: null,
           process: null,
         });
@@ -4869,7 +5043,7 @@ export class GuestGamificationService {
           facts.push({
             ...pipelineFactBase(fact),
             status: 'DRY_RUN',
-            reason: `${activeEligibleRules.length} активных правил сработает, ${dryRun.summary.blockedRules} правил заблокировано.`,
+            reason: `${activeEligibleRules.length} Р°РєС‚РёРІРЅС‹С… РїСЂР°РІРёР» СЃСЂР°Р±РѕС‚Р°РµС‚, ${dryRun.summary.blockedRules} РїСЂР°РІРёР» Р·Р°Р±Р»РѕРєРёСЂРѕРІР°РЅРѕ.`,
             dryRun,
             process: null,
           });
@@ -4881,7 +5055,7 @@ export class GuestGamificationService {
             ...pipelineFactBase(fact),
             status: 'SKIPPED',
             reason:
-              'Нет активных сработавших правил или XP для записи события.',
+              'РќРµС‚ Р°РєС‚РёРІРЅС‹С… СЃСЂР°Р±РѕС‚Р°РІС€РёС… РїСЂР°РІРёР» РёР»Рё XP РґР»СЏ Р·Р°РїРёСЃРё СЃРѕР±С‹С‚РёСЏ.',
             dryRun,
             process: null,
           });
@@ -4893,7 +5067,7 @@ export class GuestGamificationService {
             ...pipelineFactBase(fact),
             status: 'SKIPPED',
             reason:
-              'Есть сработавшие правила не в ACTIVE-статусе. Подтвердите такой факт вручную в тестовом запуске.',
+              'Р•СЃС‚СЊ СЃСЂР°Р±РѕС‚Р°РІС€РёРµ РїСЂР°РІРёР»Р° РЅРµ РІ ACTIVE-СЃС‚Р°С‚СѓСЃРµ. РџРѕРґС‚РІРµСЂРґРёС‚Рµ С‚Р°РєРѕР№ С„Р°РєС‚ РІСЂСѓС‡РЅСѓСЋ РІ С‚РµСЃС‚РѕРІРѕРј Р·Р°РїСѓСЃРєРµ.',
             dryRun,
             process: null,
           });
@@ -4902,14 +5076,15 @@ export class GuestGamificationService {
 
         const process = await this.processEvent(user, {
           ...processDto,
-          note: 'Автоматический batch pipeline обработал сохраненный LeetPlus/Langame факт внутри LeetPlus. Запись в Langame не выполнялась.',
+          note: 'РђРІС‚РѕРјР°С‚РёС‡РµСЃРєРёР№ batch pipeline РѕР±СЂР°Р±РѕС‚Р°Р» СЃРѕС…СЂР°РЅРµРЅРЅС‹Р№ LeetPlus/Langame С„Р°РєС‚ РІРЅСѓС‚СЂРё LeetPlus. Р—Р°РїРёСЃСЊ РІ Langame РЅРµ РІС‹РїРѕР»РЅСЏР»Р°СЃСЊ.',
         });
 
         if (process.summary.idempotent) {
           facts.push({
             ...pipelineFactBase(fact),
             status: 'DUPLICATE',
-            reason: 'Snapshot-факт уже был обработан ранее.',
+            reason:
+              'Snapshot-С„Р°РєС‚ СѓР¶Рµ Р±С‹Р» РѕР±СЂР°Р±РѕС‚Р°РЅ СЂР°РЅРµРµ.',
             dryRun: process.dryRun,
             process,
           });
@@ -4919,7 +5094,7 @@ export class GuestGamificationService {
         facts.push({
           ...pipelineFactBase(fact),
           status: 'PROCESSED',
-          reason: `${process.summary.createdRewards} наград в очереди, XP ${process.summary.appliedXpDelta}.`,
+          reason: `${process.summary.createdRewards} РЅР°РіСЂР°Рґ РІ РѕС‡РµСЂРµРґРё, XP ${process.summary.appliedXpDelta}.`,
           dryRun: process.dryRun,
           process,
         });
@@ -4929,7 +5104,7 @@ export class GuestGamificationService {
           status: error instanceof ConflictException ? 'DUPLICATE' : 'ERROR',
           reason:
             error instanceof ConflictException
-              ? 'Snapshot-факт уже был обработан ранее.'
+              ? 'Snapshot-С„Р°РєС‚ СѓР¶Рµ Р±С‹Р» РѕР±СЂР°Р±РѕС‚Р°РЅ СЂР°РЅРµРµ.'
               : pipelineErrorMessage(error),
           dryRun: null,
           process: null,
@@ -4960,8 +5135,8 @@ export class GuestGamificationService {
       ),
       facts,
       note: dryRunOnly
-        ? 'Предпросмотр batch: события, XP, награды и Langame-записи не создавались.'
-        : 'Batch обработал только сохраненные snapshot-факты внутри LeetPlus. Запись в Langame не выполнялась.',
+        ? 'РџСЂРµРґРїСЂРѕСЃРјРѕС‚СЂ batch: СЃРѕР±С‹С‚РёСЏ, XP, РЅР°РіСЂР°РґС‹ Рё Langame-Р·Р°РїРёСЃРё РЅРµ СЃРѕР·РґР°РІР°Р»РёСЃСЊ.'
+        : 'Batch РѕР±СЂР°Р±РѕС‚Р°Р» С‚РѕР»СЊРєРѕ СЃРѕС…СЂР°РЅРµРЅРЅС‹Рµ snapshot-С„Р°РєС‚С‹ РІРЅСѓС‚СЂРё LeetPlus. Р—Р°РїРёСЃСЊ РІ Langame РЅРµ РІС‹РїРѕР»РЅСЏР»Р°СЃСЊ.',
     };
   }
 
@@ -5316,7 +5491,7 @@ export class GuestGamificationService {
       guestId: row.guestId,
       eventType: 'PROFILE_CREATED',
       xpDelta: 0,
-      note: 'Игровой профиль создан в LeetPlus.',
+      note: 'РРіСЂРѕРІРѕР№ РїСЂРѕС„РёР»СЊ СЃРѕР·РґР°РЅ РІ LeetPlus.',
     });
 
     return mapProfile(row);
@@ -5467,6 +5642,394 @@ export class GuestGamificationService {
     return mapSeason(row);
   }
 
+  async getPromoCards(user: AuthenticatedUser): Promise<GuestGamePromoCard[]> {
+    const rows = await this.prisma.guestGamePromoCard.findMany({
+      where: { tenantId: user.tenantId },
+      include: promoCardInclude,
+      orderBy: [
+        { priority: 'desc' },
+        { updatedAt: 'desc' },
+        { createdAt: 'desc' },
+      ],
+    });
+
+    return rows.map(mapPromoCard);
+  }
+
+  async getVisualEditorDraft(
+    user: AuthenticatedUser,
+    dto: Pick<GuestGameVisualDraftDto, 'id' | 'storeId'> = {},
+  ): Promise<GuestGameVisualDraft> {
+    if (dto.id) {
+      return mapVisualDraft(await this.assertVisualDraft(user, dto.id));
+    }
+
+    const store = await this.resolveVisualEditorStore(user, dto.storeId);
+    const row = await this.prisma.guestGameVisualDraft.findFirst({
+      where: {
+        tenantId: user.tenantId,
+        storeId: store.id,
+        status: 'DRAFT',
+      },
+      include: visualDraftInclude,
+      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+    });
+
+    if (row) {
+      return mapVisualDraft(row);
+    }
+
+    return mapVisualDraft(await this.createVisualEditorDraft(user, store));
+  }
+
+  async updateVisualEditorDraft(
+    user: AuthenticatedUser,
+    dto: GuestGameVisualDraftDto,
+  ): Promise<GuestGameVisualDraft> {
+    const store = await this.resolveVisualEditorStore(user, dto.storeId);
+    const payload = normalizeVisualEditorPayload(dto.payload);
+    const note = nullableString(dto.note) ?? null;
+    const updatedByUserId = actorUserId(user);
+    const row = dto.id
+      ? await this.prisma.guestGameVisualDraft.update({
+          where: { id: (await this.assertVisualDraft(user, dto.id)).id },
+          data: {
+            storeId: store.id,
+            payload: payload,
+            note,
+            updatedByUserId,
+          },
+          include: visualDraftInclude,
+        })
+      : await this.upsertVisualEditorDraft(user, store, payload, note);
+
+    return mapVisualDraft(row);
+  }
+
+  async publishVisualEditorDraft(
+    user: AuthenticatedUser,
+    dto: GuestGameVisualDraftDto,
+  ): Promise<GuestGameVisualEditorPreview> {
+    const draft = dto.id
+      ? await this.assertVisualDraft(user, dto.id)
+      : await this.assertVisualDraft(
+          user,
+          (await this.getVisualEditorDraft(user, dto)).id,
+        );
+    const store =
+      draft.store ?? (await this.resolveVisualEditorStore(user, draft.storeId));
+    const payload = normalizeVisualEditorPayload(dto.payload ?? draft.payload);
+
+    validateVisualEditorPublish(payload);
+    await this.applyVisualEditorPayload(user, store, payload);
+
+    const row = await this.prisma.guestGameVisualDraft.update({
+      where: { id: draft.id },
+      data: {
+        status: 'PUBLISHED',
+        payload: payload,
+        note: nullableString(dto.note) ?? draft.note,
+        updatedByUserId: actorUserId(user),
+        publishedByUserId: actorUserId(user),
+        publishedAt: new Date(),
+      },
+      include: visualDraftInclude,
+    });
+    const mapped = mapVisualDraft(row);
+
+    return {
+      draft: mapped,
+      summary: this.buildVisualEditorPreviewSummary(user, store, payload),
+    };
+  }
+
+  async getVisualEditorPreview(
+    user: AuthenticatedUser,
+    dto: Pick<GuestGameVisualDraftDto, 'id' | 'storeId'> = {},
+  ): Promise<GuestGameVisualEditorPreview> {
+    const draft = await this.getVisualEditorDraft(user, dto);
+    const store = await this.resolveVisualEditorStore(
+      user,
+      draft.store?.id ?? dto.storeId,
+    );
+
+    return {
+      draft,
+      summary: this.buildVisualEditorPreviewSummary(user, store, draft.payload),
+    };
+  }
+
+  private async upsertVisualEditorDraft(
+    user: AuthenticatedUser,
+    store: PilotStoreRow,
+    payload: GuestGameVisualEditorPayload,
+    note: string | null,
+  ): Promise<VisualDraftRow> {
+    const existing = await this.prisma.guestGameVisualDraft.findFirst({
+      where: { tenantId: user.tenantId, storeId: store.id, status: 'DRAFT' },
+      include: visualDraftInclude,
+      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+    });
+
+    if (existing) {
+      return this.prisma.guestGameVisualDraft.update({
+        where: { id: existing.id },
+        data: {
+          payload: payload,
+          note,
+          updatedByUserId: actorUserId(user),
+        },
+        include: visualDraftInclude,
+      });
+    }
+
+    return this.prisma.guestGameVisualDraft.create({
+      data: {
+        tenantId: user.tenantId,
+        storeId: store.id,
+        createdByUserId: actorUserId(user),
+        updatedByUserId: actorUserId(user),
+        payload: payload,
+        note,
+      },
+      include: visualDraftInclude,
+    });
+  }
+
+  private async createVisualEditorDraft(
+    user: AuthenticatedUser,
+    store: PilotStoreRow,
+  ): Promise<VisualDraftRow> {
+    return this.prisma.guestGameVisualDraft.create({
+      data: {
+        tenantId: user.tenantId,
+        storeId: store.id,
+        createdByUserId: actorUserId(user),
+        updatedByUserId: actorUserId(user),
+        payload: await this.buildVisualEditorPayloadFromLive(user, store.id),
+      },
+      include: visualDraftInclude,
+    });
+  }
+
+  private async resolveVisualEditorStore(
+    user: AuthenticatedUser,
+    storeId?: string | null,
+  ): Promise<PilotStoreRow> {
+    if (storeId) {
+      const row = await this.prisma.store.findFirst({
+        where: { id: storeId, tenantId: user.tenantId, isActive: true },
+        select: pilotStoreSelect,
+      });
+
+      if (!row) {
+        throw new NotFoundException('Клуб для визуального редактора не найден');
+      }
+
+      return row;
+    }
+
+    const store = pickPilotStore(await this.getPilotStores(user));
+
+    if (!store) {
+      throw new BadRequestException(
+        'Для визуального редактора нужен активный клуб',
+      );
+    }
+
+    return store;
+  }
+
+  private async assertVisualDraft(
+    user: AuthenticatedUser,
+    id: string,
+  ): Promise<VisualDraftRow> {
+    const row = await this.prisma.guestGameVisualDraft.findFirst({
+      where: { id, tenantId: user.tenantId },
+      include: visualDraftInclude,
+    });
+
+    if (!row) {
+      throw new NotFoundException('Черновик визуального редактора не найден');
+    }
+
+    return row;
+  }
+
+  private async buildVisualEditorPayloadFromLive(
+    user: AuthenticatedUser,
+    storeId: string,
+  ): Promise<GuestGameVisualEditorPayload> {
+    const [seasons, lootBoxes, missions, promoCards] = await Promise.all([
+      this.getSeasons(user),
+      this.getLootBoxes(user),
+      this.getMissions(user),
+      this.getPromoCards(user),
+    ]);
+    const season =
+      seasons.find((item) => ruleMatchesPilotStore(item, storeId)) ?? null;
+    const checkInMission = missions.find(
+      (item) =>
+        item.status === 'ACTIVE' &&
+        (item.missionType === 'CHECK_IN' || item.triggerKind === 'CHECK_IN') &&
+        ruleMatchesStoreIds(item.storeIds, storeId),
+    );
+
+    return normalizeVisualEditorPayload({
+      version: 1,
+      battlePass: visualBattlePassFromSeason(season),
+      lootBoxes: lootBoxes
+        .filter((item) => ruleMatchesPilotStore(item, storeId))
+        .slice(0, 8)
+        .map(visualLootBoxFromRule),
+      missions: missions
+        .filter(
+          (item) =>
+            item.missionType !== 'CHECK_IN' &&
+            item.triggerKind !== 'CHECK_IN' &&
+            ruleMatchesPilotStore(item, storeId),
+        )
+        .slice(0, 8)
+        .map(visualMissionFromRule),
+      promoCards: promoCards
+        .filter(
+          (item) =>
+            item.status === 'ACTIVE' &&
+            ruleMatchesStoreIds(item.storeIds, storeId),
+        )
+        .slice(0, 6)
+        .map(visualPromoFromRule),
+      checkIn: visualCheckInFromMission(checkInMission ?? null),
+    });
+  }
+
+  private async applyVisualEditorPayload(
+    user: AuthenticatedUser,
+    store: PilotStoreRow,
+    payload: GuestGameVisualEditorPayload,
+  ): Promise<void> {
+    const storeIds = [store.id];
+
+    if (payload.battlePass.enabled) {
+      const seasonData = buildVisualSeasonData(user, storeIds, payload);
+      if (payload.battlePass.id) {
+        await this.assertSeason(user, payload.battlePass.id);
+        await this.prisma.guestGameSeason.update({
+          where: { id: payload.battlePass.id },
+          data: seasonData,
+        });
+      } else {
+        await this.prisma.guestGameSeason.create({
+          data: seasonData,
+        });
+      }
+    }
+
+    for (const lootBox of payload.lootBoxes) {
+      const data = buildVisualLootBoxData(user, storeIds, lootBox);
+      if (lootBox.id) {
+        await this.assertLootBox(user, lootBox.id);
+        await this.prisma.guestGameLootBox.update({
+          where: { id: lootBox.id },
+          data,
+        });
+      } else {
+        await this.prisma.guestGameLootBox.create({
+          data: data,
+        });
+      }
+    }
+
+    for (const mission of payload.missions) {
+      const data = buildVisualMissionData(user, storeIds, mission);
+      if (mission.id) {
+        await this.assertMission(user, mission.id);
+        await this.prisma.guestGameMission.update({
+          where: { id: mission.id },
+          data,
+        });
+      } else {
+        await this.prisma.guestGameMission.create({
+          data: data,
+        });
+      }
+    }
+
+    for (const promoCard of payload.promoCards) {
+      const data = buildVisualPromoCardData(user, storeIds, promoCard);
+      if (promoCard.id) {
+        await this.assertPromoCard(user, promoCard.id);
+        await this.prisma.guestGamePromoCard.update({
+          where: { id: promoCard.id },
+          data,
+        });
+      } else {
+        await this.prisma.guestGamePromoCard.create({
+          data: data,
+        });
+      }
+    }
+
+    await this.applyVisualCheckInRule(user, store.id, payload.checkIn);
+  }
+
+  private async assertPromoCard(user: AuthenticatedUser, id: string) {
+    const row = await this.prisma.guestGamePromoCard.findFirst({
+      where: { id, tenantId: user.tenantId },
+    });
+
+    if (!row) {
+      throw new NotFoundException('Промо-карточка не найдена');
+    }
+
+    return row;
+  }
+
+  private async applyVisualCheckInRule(
+    user: AuthenticatedUser,
+    storeId: string,
+    checkIn: GuestGameVisualEditorCheckIn,
+  ) {
+    const existingRows = await this.prisma.guestGameMission.findMany({
+      where: {
+        tenantId: user.tenantId,
+        OR: [{ missionType: 'CHECK_IN' }, { triggerKind: 'CHECK_IN' }],
+      },
+    });
+    const existing = existingRows.find((row) =>
+      ruleMatchesStoreIds(stringArray(row.storeIds), storeId),
+    );
+
+    if (!checkIn.enabled) {
+      if (existing) {
+        await this.prisma.guestGameMission.update({
+          where: { id: existing.id },
+          data: { status: 'PAUSED' },
+        });
+      }
+      return;
+    }
+
+    const data = buildVisualCheckInMissionData(user, storeId, checkIn);
+    if (existing) {
+      await this.prisma.guestGameMission.update({
+        where: { id: existing.id },
+        data,
+      });
+    } else {
+      await this.prisma.guestGameMission.create({
+        data: data,
+      });
+    }
+  }
+
+  private buildVisualEditorPreviewSummary(
+    user: AuthenticatedUser,
+    store: PilotStoreRow,
+    payload: GuestGameVisualEditorPayload,
+  ): GuestPortalGameSummary {
+    return buildVisualEditorPreviewSummary(user, store, payload);
+  }
   async getRewards(
     user: AuthenticatedUser,
     options: { take?: number | null } = {},
@@ -5485,22 +6048,22 @@ export class GuestGamificationService {
   async exportRewardsCsv(user: AuthenticatedUser): Promise<string> {
     const rewards = await this.getRewards(user);
     const header = [
-      'Статус',
-      'Состояние кошелька',
-      'Гость',
-      'Контакт',
-      'Клуб',
-      'Тип награды',
-      'Название награды',
-      'Сумма',
-      'Код',
+      'РЎС‚Р°С‚СѓСЃ',
+      'РЎРѕСЃС‚РѕСЏРЅРёРµ РєРѕС€РµР»СЊРєР°',
+      'Р“РѕСЃС‚СЊ',
+      'РљРѕРЅС‚Р°РєС‚',
+      'РљР»СѓР±',
+      'РўРёРї РЅР°РіСЂР°РґС‹',
+      'РќР°Р·РІР°РЅРёРµ РЅР°РіСЂР°РґС‹',
+      'РЎСѓРјРјР°',
+      'РљРѕРґ',
       'QR payload',
-      'Создано',
-      'Сгорает',
-      'Выдано',
-      'Источник',
-      'Связанный сценарий',
-      'Заметка',
+      'РЎРѕР·РґР°РЅРѕ',
+      'РЎРіРѕСЂР°РµС‚',
+      'Р’С‹РґР°РЅРѕ',
+      'РСЃС‚РѕС‡РЅРёРє',
+      'РЎРІСЏР·Р°РЅРЅС‹Р№ СЃС†РµРЅР°СЂРёР№',
+      'Р—Р°РјРµС‚РєР°',
     ];
     const rows = rewards.map((reward) => [
       reward.status,
@@ -5590,14 +6153,14 @@ export class GuestGamificationService {
           rewardId: row.rewardId,
           channel: channel ?? 'MANUAL',
           status: 'SKIPPED',
-          note: 'Dispatcher обрабатывает только Telegram/MAX outbox.',
+          note: 'Dispatcher РѕР±СЂР°Р±Р°С‚С‹РІР°РµС‚ С‚РѕР»СЊРєРѕ Telegram/MAX outbox.',
         });
         continue;
       }
 
       if (row.readinessStatus !== 'READY_FOR_BOT') {
         const note =
-          'Delivery не готова к бот-доставке: сначала нужны согласие, канал и подтвержденная награда.';
+          'Delivery РЅРµ РіРѕС‚РѕРІР° Рє Р±РѕС‚-РґРѕСЃС‚Р°РІРєРµ: СЃРЅР°С‡Р°Р»Р° РЅСѓР¶РЅС‹ СЃРѕРіР»Р°СЃРёРµ, РєР°РЅР°Р» Рё РїРѕРґС‚РІРµСЂР¶РґРµРЅРЅР°СЏ РЅР°РіСЂР°РґР°.';
         blocked += 1;
         items.push({
           deliveryId: row.id,
@@ -5660,7 +6223,7 @@ export class GuestGamificationService {
 
       if (dryRun) {
         const note =
-          'Dry-run dispatcher: сообщение проверено, внешняя отправка не выполнялась.';
+          'Dry-run dispatcher: СЃРѕРѕР±С‰РµРЅРёРµ РїСЂРѕРІРµСЂРµРЅРѕ, РІРЅРµС€РЅСЏСЏ РѕС‚РїСЂР°РІРєР° РЅРµ РІС‹РїРѕР»РЅСЏР»Р°СЃСЊ.';
         skipped += 1;
         items.push({
           deliveryId: row.id,
@@ -5732,7 +6295,7 @@ export class GuestGamificationService {
           data: {
             status: 'SENT',
             sentAt: now,
-            note: `${communicationQueueChannelLabel(channel)} dispatcher: отправлено.`,
+            note: `${communicationQueueChannelLabel(channel)} dispatcher: РѕС‚РїСЂР°РІР»РµРЅРѕ.`,
           },
           include: deliveryInclude,
         });
@@ -5742,14 +6305,14 @@ export class GuestGamificationService {
           rewardId: row.rewardId,
           channel,
           status: 'SENT',
-          note: 'Сообщение отправлено через настроенный provider.',
+          note: 'РЎРѕРѕР±С‰РµРЅРёРµ РѕС‚РїСЂР°РІР»РµРЅРѕ С‡РµСЂРµР· РЅР°СЃС‚СЂРѕРµРЅРЅС‹Р№ provider.',
         });
         await this.createDeliveryEvent(user, updated.id, updated.rewardId, {
           eventType: 'DELIVERY_SENT_BY_PROVIDER',
           fromStatus: row.status,
           toStatus: updated.status,
           channel,
-          note: 'Сообщение отправлено через настроенный provider.',
+          note: 'РЎРѕРѕР±С‰РµРЅРёРµ РѕС‚РїСЂР°РІР»РµРЅРѕ С‡РµСЂРµР· РЅР°СЃС‚СЂРѕРµРЅРЅС‹Р№ provider.',
           payload: providerPayload,
         });
       } catch (error) {
@@ -5802,8 +6365,8 @@ export class GuestGamificationService {
       deliveries: deliveries.slice(0, 12),
       dispatcher,
       note: dryRun
-        ? 'Dispatcher запущен в безопасном dry-run: события записаны, внешних Telegram/MAX-отправок не было.'
-        : 'Dispatcher обработал готовые Telegram/MAX delivery через настроенные providers.',
+        ? 'Dispatcher Р·Р°РїСѓС‰РµРЅ РІ Р±РµР·РѕРїР°СЃРЅРѕРј dry-run: СЃРѕР±С‹С‚РёСЏ Р·Р°РїРёСЃР°РЅС‹, РІРЅРµС€РЅРёС… Telegram/MAX-РѕС‚РїСЂР°РІРѕРє РЅРµ Р±С‹Р»Рѕ.'
+        : 'Dispatcher РѕР±СЂР°Р±РѕС‚Р°Р» РіРѕС‚РѕРІС‹Рµ Telegram/MAX delivery С‡РµСЂРµР· РЅР°СЃС‚СЂРѕРµРЅРЅС‹Рµ providers.',
     };
   }
 
@@ -6026,18 +6589,18 @@ export class GuestGamificationService {
   async exportDeliveriesCsv(user: AuthenticatedUser): Promise<string> {
     const deliveries = await this.getDeliveries(user, { take: null });
     const header = [
-      'Статус outbox',
-      'Готовность',
-      'Канал',
-      'Гость',
-      'Контакт',
-      'Клуб',
-      'Награда',
-      'Сумма',
-      'Блокировки',
-      'Подготовлено',
-      'Отправлено',
-      'Заметка',
+      'РЎС‚Р°С‚СѓСЃ outbox',
+      'Р“РѕС‚РѕРІРЅРѕСЃС‚СЊ',
+      'РљР°РЅР°Р»',
+      'Р“РѕСЃС‚СЊ',
+      'РљРѕРЅС‚Р°РєС‚',
+      'РљР»СѓР±',
+      'РќР°РіСЂР°РґР°',
+      'РЎСѓРјРјР°',
+      'Р‘Р»РѕРєРёСЂРѕРІРєРё',
+      'РџРѕРґРіРѕС‚РѕРІР»РµРЅРѕ',
+      'РћС‚РїСЂР°РІР»РµРЅРѕ',
+      'Р—Р°РјРµС‚РєР°',
     ];
     const rows = deliveries.map((delivery) => [
       delivery.statusLabel,
@@ -6070,7 +6633,7 @@ export class GuestGamificationService {
     });
 
     if (!delivery) {
-      throw new NotFoundException('Запись outbox не найдена');
+      throw new NotFoundException('Р—Р°РїРёСЃСЊ outbox РЅРµ РЅР°Р№РґРµРЅР°');
     }
 
     return delivery;
@@ -6120,37 +6683,37 @@ export class GuestGamificationService {
       this.buildEffect(user, lootBoxes, missions, seasons, events, null),
     ]);
     const header = [
-      'Раздел',
-      'Тип',
-      'Сценарий',
-      'Статус',
-      'События',
-      'Уникальные гости',
-      'Награды всего',
-      'Очередь наград',
-      'Плановый бюджет',
-      'Использовано бюджета',
-      'Использование бюджета, %',
-      'Погашено наград',
-      'Погашено, сумма',
+      'Р Р°Р·РґРµР»',
+      'РўРёРї',
+      'РЎС†РµРЅР°СЂРёР№',
+      'РЎС‚Р°С‚СѓСЃ',
+      'РЎРѕР±С‹С‚РёСЏ',
+      'РЈРЅРёРєР°Р»СЊРЅС‹Рµ РіРѕСЃС‚Рё',
+      'РќР°РіСЂР°РґС‹ РІСЃРµРіРѕ',
+      'РћС‡РµСЂРµРґСЊ РЅР°РіСЂР°Рґ',
+      'РџР»Р°РЅРѕРІС‹Р№ Р±СЋРґР¶РµС‚',
+      'РСЃРїРѕР»СЊР·РѕРІР°РЅРѕ Р±СЋРґР¶РµС‚Р°',
+      'РСЃРїРѕР»СЊР·РѕРІР°РЅРёРµ Р±СЋРґР¶РµС‚Р°, %',
+      'РџРѕРіР°С€РµРЅРѕ РЅР°РіСЂР°Рґ',
+      'РџРѕРіР°С€РµРЅРѕ, СЃСѓРјРјР°',
       'XP',
-      'Измеряемые события',
-      'Вернувшиеся гости',
-      'Возврат, %',
-      'Сессии после события',
-      'Игровые минуты после события',
-      'Бар/товары после события',
-      'Пополнения после события',
-      'Итого выручка после события',
-      'Средняя выручка на вернувшегося',
-      'Окно эффекта, дней',
-      'Рекомендация',
+      'РР·РјРµСЂСЏРµРјС‹Рµ СЃРѕР±С‹С‚РёСЏ',
+      'Р’РµСЂРЅСѓРІС€РёРµСЃСЏ РіРѕСЃС‚Рё',
+      'Р’РѕР·РІСЂР°С‚, %',
+      'РЎРµСЃСЃРёРё РїРѕСЃР»Рµ СЃРѕР±С‹С‚РёСЏ',
+      'РРіСЂРѕРІС‹Рµ РјРёРЅСѓС‚С‹ РїРѕСЃР»Рµ СЃРѕР±С‹С‚РёСЏ',
+      'Р‘Р°СЂ/С‚РѕРІР°СЂС‹ РїРѕСЃР»Рµ СЃРѕР±С‹С‚РёСЏ',
+      'РџРѕРїРѕР»РЅРµРЅРёСЏ РїРѕСЃР»Рµ СЃРѕР±С‹С‚РёСЏ',
+      'РС‚РѕРіРѕ РІС‹СЂСѓС‡РєР° РїРѕСЃР»Рµ СЃРѕР±С‹С‚РёСЏ',
+      'РЎСЂРµРґРЅСЏСЏ РІС‹СЂСѓС‡РєР° РЅР° РІРµСЂРЅСѓРІС€РµРіРѕСЃСЏ',
+      'РћРєРЅРѕ СЌС„С„РµРєС‚Р°, РґРЅРµР№',
+      'Р РµРєРѕРјРµРЅРґР°С†РёСЏ',
     ];
     const rows: unknown[][] = [
       [
-        'Экономика',
-        'Сводка',
-        'Все сценарии',
+        'Р­РєРѕРЅРѕРјРёРєР°',
+        'РЎРІРѕРґРєР°',
+        'Р’СЃРµ СЃС†РµРЅР°СЂРёРё',
         '',
         economy.summary.eventsCount,
         economy.summary.uniqueGuests,
@@ -6173,11 +6736,11 @@ export class GuestGamificationService {
         '',
         '',
         economy.summary.rulesWithoutBudget
-          ? `Активных сценариев без бюджета: ${economy.summary.rulesWithoutBudget}`
+          ? `РђРєС‚РёРІРЅС‹С… СЃС†РµРЅР°СЂРёРµРІ Р±РµР· Р±СЋРґР¶РµС‚Р°: ${economy.summary.rulesWithoutBudget}`
           : '',
       ],
       ...economy.scenarios.map((scenario) => [
-        'Экономика',
+        'Р­РєРѕРЅРѕРјРёРєР°',
         gameScenarioKindLabel(scenario.kind),
         scenario.name,
         gameScenarioStatusLabel(scenario.status),
@@ -6204,9 +6767,9 @@ export class GuestGamificationService {
         scenario.recommendation,
       ]),
       [
-        'Эффект',
-        'Сводка',
-        'Все сценарии',
+        'Р­С„С„РµРєС‚',
+        'РЎРІРѕРґРєР°',
+        'Р’СЃРµ СЃС†РµРЅР°СЂРёРё',
         '',
         effect.summary.eventsCount,
         effect.summary.reachedGuests,
@@ -6231,7 +6794,7 @@ export class GuestGamificationService {
         '',
       ],
       ...effect.scenarios.map((scenario) => [
-        'Эффект',
+        'Р­С„С„РµРєС‚',
         gameScenarioKindLabel(scenario.kind),
         scenario.name,
         gameScenarioStatusLabel(scenario.status),
@@ -6339,7 +6902,9 @@ export class GuestGamificationService {
     const claim = parseRewardClaimInput(dto);
 
     if (!claim.code) {
-      throw new BadRequestException('Укажите код награды или QR payload');
+      throw new BadRequestException(
+        'РЈРєР°Р¶РёС‚Рµ РєРѕРґ РЅР°РіСЂР°РґС‹ РёР»Рё QR payload',
+      );
     }
 
     if (dto.storeId) {
@@ -6357,23 +6922,29 @@ export class GuestGamificationService {
     });
 
     if (!row) {
-      throw new NotFoundException('Награда с таким кодом не найдена');
+      throw new NotFoundException(
+        'РќР°РіСЂР°РґР° СЃ С‚Р°РєРёРј РєРѕРґРѕРј РЅРµ РЅР°Р№РґРµРЅР°',
+      );
     }
 
     if (dto.storeId && row.storeId && row.storeId !== dto.storeId) {
-      throw new BadRequestException('Эта награда привязана к другому клубу');
+      throw new BadRequestException(
+        'Р­С‚Р° РЅР°РіСЂР°РґР° РїСЂРёРІСЏР·Р°РЅР° Рє РґСЂСѓРіРѕРјСѓ РєР»СѓР±Сѓ',
+      );
     }
 
     if (row.status === 'PENDING') {
-      throw new BadRequestException('Награда еще не согласована');
+      throw new BadRequestException(
+        'РќР°РіСЂР°РґР° РµС‰Рµ РЅРµ СЃРѕРіР»Р°СЃРѕРІР°РЅР°',
+      );
     }
 
     if (row.status === 'PAID') {
-      throw new ConflictException('Награда уже погашена');
+      throw new ConflictException('РќР°РіСЂР°РґР° СѓР¶Рµ РїРѕРіР°С€РµРЅР°');
     }
 
     if (row.status === 'CANCELED') {
-      throw new BadRequestException('Награда отменена');
+      throw new BadRequestException('РќР°РіСЂР°РґР° РѕС‚РјРµРЅРµРЅР°');
     }
 
     if (
@@ -6397,12 +6968,14 @@ export class GuestGamificationService {
         });
       }
 
-      throw new BadRequestException('Срок действия награды истек');
+      throw new BadRequestException(
+        'РЎСЂРѕРє РґРµР№СЃС‚РІРёСЏ РЅР°РіСЂР°РґС‹ РёСЃС‚РµРє',
+      );
     }
 
     if (row.status !== 'APPROVED') {
       throw new BadRequestException(
-        'Погасить можно только согласованную награду',
+        'РџРѕРіР°СЃРёС‚СЊ РјРѕР¶РЅРѕ С‚РѕР»СЊРєРѕ СЃРѕРіР»Р°СЃРѕРІР°РЅРЅСѓСЋ РЅР°РіСЂР°РґСѓ',
       );
     }
 
@@ -6432,7 +7005,7 @@ export class GuestGamificationService {
       seasonId: redeemed.seasonId,
       eventType: 'REWARD_PAID',
       xpDelta: 0,
-      note: `${redeemed.rewardLabel} · ${redeemed.rewardCode ?? claim.code}`,
+      note: `${redeemed.rewardLabel} В· ${redeemed.rewardCode ?? claim.code}`,
     });
 
     return mapReward(redeemed);
@@ -6610,7 +7183,7 @@ export class GuestGamificationService {
           idempotent: true,
           langameWrite: false,
         },
-        note: 'Snapshot-событие уже было обработано ранее; повторный запуск не создал XP, события или награды.',
+        note: 'Snapshot-СЃРѕР±С‹С‚РёРµ СѓР¶Рµ Р±С‹Р»Рѕ РѕР±СЂР°Р±РѕС‚Р°РЅРѕ СЂР°РЅРµРµ; РїРѕРІС‚РѕСЂРЅС‹Р№ Р·Р°РїСѓСЃРє РЅРµ СЃРѕР·РґР°Р» XP, СЃРѕР±С‹С‚РёСЏ РёР»Рё РЅР°РіСЂР°РґС‹.',
       };
     }
 
@@ -6631,7 +7204,7 @@ export class GuestGamificationService {
       payload: processPayload,
       note:
         nullableString(dto.note) ??
-        'Подтвержденный запуск события геймификации в LeetPlus.',
+        'РџРѕРґС‚РІРµСЂР¶РґРµРЅРЅС‹Р№ Р·Р°РїСѓСЃРє СЃРѕР±С‹С‚РёСЏ РіРµР№РјРёС„РёРєР°С†РёРё РІ LeetPlus.',
     });
     const rewards = await this.createProcessRewards(
       user,
@@ -6655,7 +7228,7 @@ export class GuestGamificationService {
         idempotent: false,
         langameWrite: false,
       },
-      note: 'Событие и очередь наград созданы внутри LeetPlus. Запись в Langame не выполнялась.',
+      note: 'РЎРѕР±С‹С‚РёРµ Рё РѕС‡РµСЂРµРґСЊ РЅР°РіСЂР°Рґ СЃРѕР·РґР°РЅС‹ РІРЅСѓС‚СЂРё LeetPlus. Р—Р°РїРёСЃСЊ РІ Langame РЅРµ РІС‹РїРѕР»РЅСЏР»Р°СЃСЊ.',
     };
   }
 
@@ -6666,14 +7239,16 @@ export class GuestGamificationService {
     const guestId = nullableId(dto.guestId);
 
     if (!guestId) {
-      throw new BadRequestException('Выберите гостя для чекина');
+      throw new BadRequestException(
+        'Р’С‹Р±РµСЂРёС‚Рµ РіРѕСЃС‚СЏ РґР»СЏ С‡РµРєРёРЅР°',
+      );
     }
 
     const guest = await this.getTenantGuest(user, guestId);
 
     if (!nullableString(guest.externalGuestId)) {
       throw new BadRequestException(
-        'У гостя нет Langame guest_id, поэтому проверить активную сессию нельзя.',
+        'РЈ РіРѕСЃС‚СЏ РЅРµС‚ Langame guest_id, РїРѕСЌС‚РѕРјСѓ РїСЂРѕРІРµСЂРёС‚СЊ Р°РєС‚РёРІРЅСѓСЋ СЃРµСЃСЃРёСЋ РЅРµР»СЊР·СЏ.',
       );
     }
 
@@ -6683,13 +7258,13 @@ export class GuestGamificationService {
       liveSession = await this.findActiveCheckInSession(user.tenantId, guest);
     } catch (error) {
       throw new BadRequestException(
-        `Не удалось проверить активную сессию Langame: ${this.checkInErrorMessage(error)}`,
+        `РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕРІРµСЂРёС‚СЊ Р°РєС‚РёРІРЅСѓСЋ СЃРµСЃСЃРёСЋ Langame: ${this.checkInErrorMessage(error)}`,
       );
     }
 
     if (!liveSession) {
       throw new BadRequestException(
-        'Активная сессия гостя в Langame не найдена. Чекин доступен только гостю, который сейчас находится в клубе.',
+        'РђРєС‚РёРІРЅР°СЏ СЃРµСЃСЃРёСЏ РіРѕСЃС‚СЏ РІ Langame РЅРµ РЅР°Р№РґРµРЅР°. Р§РµРєРёРЅ РґРѕСЃС‚СѓРїРµРЅ С‚РѕР»СЊРєРѕ РіРѕСЃС‚СЋ, РєРѕС‚РѕСЂС‹Р№ СЃРµР№С‡Р°СЃ РЅР°С…РѕРґРёС‚СЃСЏ РІ РєР»СѓР±Рµ.',
       );
     }
 
@@ -6700,7 +7275,7 @@ export class GuestGamificationService {
       (!liveSession.store || liveSession.store.id !== expectedStoreId)
     ) {
       throw new BadRequestException(
-        'Не удалось подтвердить, что активная сессия гостя открыта в этом клубе.',
+        'РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕРґС‚РІРµСЂРґРёС‚СЊ, С‡С‚Рѕ Р°РєС‚РёРІРЅР°СЏ СЃРµСЃСЃРёСЏ РіРѕСЃС‚СЏ РѕС‚РєСЂС‹С‚Р° РІ СЌС‚РѕРј РєР»СѓР±Рµ.',
       );
     }
 
@@ -6726,7 +7301,7 @@ export class GuestGamificationService {
       externalId: eventExternalId,
       note:
         nullableString(dto.note) ??
-        'Гость прошел чекин в активной сессии Langame.',
+        'Р“РѕСЃС‚СЊ РїСЂРѕС€РµР» С‡РµРєРёРЅ РІ Р°РєС‚РёРІРЅРѕР№ СЃРµСЃСЃРёРё Langame.',
     });
 
     return {
@@ -6743,7 +7318,7 @@ export class GuestGamificationService {
         store: liveSession.store,
       },
       processResult,
-      note: 'Чекин подтвержден активной сессией Langame и обработан правилами геймификации.',
+      note: 'Р§РµРєРёРЅ РїРѕРґС‚РІРµСЂР¶РґРµРЅ Р°РєС‚РёРІРЅРѕР№ СЃРµСЃСЃРёРµР№ Langame Рё РѕР±СЂР°Р±РѕС‚Р°РЅ РїСЂР°РІРёР»Р°РјРё РіРµР№РјРёС„РёРєР°С†РёРё.',
     };
   }
 
@@ -6756,7 +7331,7 @@ export class GuestGamificationService {
     } catch (error) {
       if (isUniqueConstraintError(error)) {
         throw new ConflictException(
-          'Это событие snapshot уже обработано. Обновите список событий или выберите другой факт.',
+          'Р­С‚Рѕ СЃРѕР±С‹С‚РёРµ snapshot СѓР¶Рµ РѕР±СЂР°Р±РѕС‚Р°РЅРѕ. РћР±РЅРѕРІРёС‚Рµ СЃРїРёСЃРѕРє СЃРѕР±С‹С‚РёР№ РёР»Рё РІС‹Р±РµСЂРёС‚Рµ РґСЂСѓРіРѕР№ С„Р°РєС‚.',
         );
       }
 
@@ -6802,7 +7377,7 @@ export class GuestGamificationService {
             rule.rewardLabel ??
             `${processRuleKindLabel(rule.kind)}: ${rule.name}`,
           qualifiedAt: dryRun.occurredAt,
-          note: 'Создано подтвержденным запуском события геймификации.',
+          note: 'РЎРѕР·РґР°РЅРѕ РїРѕРґС‚РІРµСЂР¶РґРµРЅРЅС‹Рј Р·Р°РїСѓСЃРєРѕРј СЃРѕР±С‹С‚РёСЏ РіРµР№РјРёС„РёРєР°С†РёРё.',
           evidence: {
             source: 'guest_gamification_process_event',
             langameWrite: false,
@@ -6819,7 +7394,7 @@ export class GuestGamificationService {
       } catch (error) {
         if (isUniqueConstraintError(error)) {
           throw new ConflictException(
-            'Одна из наград по этому snapshot уже создана. Обновите очередь наград.',
+            'РћРґРЅР° РёР· РЅР°РіСЂР°Рґ РїРѕ СЌС‚РѕРјСѓ snapshot СѓР¶Рµ СЃРѕР·РґР°РЅР°. РћР±РЅРѕРІРёС‚Рµ РѕС‡РµСЂРµРґСЊ РЅР°РіСЂР°Рґ.',
           );
         }
 
@@ -6838,7 +7413,9 @@ export class GuestGamificationService {
       const profile = await this.resolveDryRunProfile(user, dto);
 
       if (!profile) {
-        throw new NotFoundException('Игровой профиль не найден');
+        throw new NotFoundException(
+          'РРіСЂРѕРІРѕР№ РїСЂРѕС„РёР»СЊ РЅРµ РЅР°Р№РґРµРЅ',
+        );
       }
 
       return { profile, profileCreated: false };
@@ -6846,7 +7423,7 @@ export class GuestGamificationService {
 
     if (!dto.guestId) {
       throw new BadRequestException(
-        'Для подтвержденного запуска выберите игровой профиль или гостя Langame.',
+        'Р”Р»СЏ РїРѕРґС‚РІРµСЂР¶РґРµРЅРЅРѕРіРѕ Р·Р°РїСѓСЃРєР° РІС‹Р±РµСЂРёС‚Рµ РёРіСЂРѕРІРѕР№ РїСЂРѕС„РёР»СЊ РёР»Рё РіРѕСЃС‚СЏ Langame.',
       );
     }
 
@@ -6875,7 +7452,7 @@ export class GuestGamificationService {
         guestId: row.guestId,
         eventType: 'PROFILE_CREATED',
         xpDelta: 0,
-        note: 'Игровой профиль создан подтвержденным запуском события.',
+        note: 'РРіСЂРѕРІРѕР№ РїСЂРѕС„РёР»СЊ СЃРѕР·РґР°РЅ РїРѕРґС‚РІРµСЂР¶РґРµРЅРЅС‹Рј Р·Р°РїСѓСЃРєРѕРј СЃРѕР±С‹С‚РёСЏ.',
       });
 
       return { profile: mapProfile(row), profileCreated: true };
@@ -6915,7 +7492,9 @@ export class GuestGamificationService {
     });
 
     if (!row && dto.profileId) {
-      throw new NotFoundException('Игровой профиль не найден');
+      throw new NotFoundException(
+        'РРіСЂРѕРІРѕР№ РїСЂРѕС„РёР»СЊ РЅРµ РЅР°Р№РґРµРЅ',
+      );
     }
 
     return row ? mapProfile(row) : null;
@@ -7226,7 +7805,7 @@ export class GuestGamificationService {
         ).length,
       },
       items,
-      note: 'Это внутренняя готовность LeetPlus: Telegram/MAX, SMS и Langame write API здесь не вызываются. После подключения бота этот слой можно использовать как безопасную очередь отправки и выдачи.',
+      note: 'Р­С‚Рѕ РІРЅСѓС‚СЂРµРЅРЅСЏСЏ РіРѕС‚РѕРІРЅРѕСЃС‚СЊ LeetPlus: Telegram/MAX, SMS Рё Langame write API Р·РґРµСЃСЊ РЅРµ РІС‹Р·С‹РІР°СЋС‚СЃСЏ. РџРѕСЃР»Рµ РїРѕРґРєР»СЋС‡РµРЅРёСЏ Р±РѕС‚Р° СЌС‚РѕС‚ СЃР»РѕР№ РјРѕР¶РЅРѕ РёСЃРїРѕР»СЊР·РѕРІР°С‚СЊ РєР°Рє Р±РµР·РѕРїР°СЃРЅСѓСЋ РѕС‡РµСЂРµРґСЊ РѕС‚РїСЂР°РІРєРё Рё РІС‹РґР°С‡Рё.',
     };
   }
 
@@ -7251,7 +7830,7 @@ export class GuestGamificationService {
       dispatcher: this.buildDeliveryDispatcherStatus(deliveries),
       botConsumer: this.buildBotConsumerStatus(deliveries),
       items: deliveries.slice(0, 12),
-      note: 'Outbox хранит подготовленные снимки выдачи наград. Внешний Telegram/MAX-бот пока не отправляет эти сообщения.',
+      note: 'Outbox С…СЂР°РЅРёС‚ РїРѕРґРіРѕС‚РѕРІР»РµРЅРЅС‹Рµ СЃРЅРёРјРєРё РІС‹РґР°С‡Рё РЅР°РіСЂР°Рґ. Р’РЅРµС€РЅРёР№ Telegram/MAX-Р±РѕС‚ РїРѕРєР° РЅРµ РѕС‚РїСЂР°РІР»СЏРµС‚ СЌС‚Рё СЃРѕРѕР±С‰РµРЅРёСЏ.',
     };
   }
 
@@ -7293,12 +7872,12 @@ export class GuestGamificationService {
     return {
       mode,
       modeLabel: canaryRequired
-        ? 'нужен canary LIMIT=1'
+        ? 'РЅСѓР¶РµРЅ canary LIMIT=1'
         : mode === 'READY'
-          ? 'готов к real-send'
+          ? 'РіРѕС‚РѕРІ Рє real-send'
           : mode === 'DRY_RUN'
             ? 'dry-run'
-            : 'нужна настройка',
+            : 'РЅСѓР¶РЅР° РЅР°СЃС‚СЂРѕР№РєР°',
       dryRun: config.dryRun,
       configured,
       limit: config.limit,
@@ -7328,7 +7907,7 @@ export class GuestGamificationService {
         lastAckAt,
         canaryRequired,
       ),
-      note: 'Статус собран из API-visible env, текущего outbox и сохраненных ack-событий. Если runner запущен отдельным systemd unit со своим EnvironmentFile, фактический запуск подтверждается по новым ack-событиям.',
+      note: 'РЎС‚Р°С‚СѓСЃ СЃРѕР±СЂР°РЅ РёР· API-visible env, С‚РµРєСѓС‰РµРіРѕ outbox Рё СЃРѕС…СЂР°РЅРµРЅРЅС‹С… ack-СЃРѕР±С‹С‚РёР№. Р•СЃР»Рё runner Р·Р°РїСѓС‰РµРЅ РѕС‚РґРµР»СЊРЅС‹Рј systemd unit СЃРѕ СЃРІРѕРёРј EnvironmentFile, С„Р°РєС‚РёС‡РµСЃРєРёР№ Р·Р°РїСѓСЃРє РїРѕРґС‚РІРµСЂР¶РґР°РµС‚СЃСЏ РїРѕ РЅРѕРІС‹Рј ack-СЃРѕР±С‹С‚РёСЏРј.',
     };
   }
 
@@ -7400,18 +7979,18 @@ export class GuestGamificationService {
       mode,
       modeLabel:
         mode === 'READY'
-          ? 'готов к отправке'
+          ? 'РіРѕС‚РѕРІ Рє РѕС‚РїСЂР°РІРєРµ'
           : mode === 'DRY_RUN'
             ? 'dry-run'
-            : 'отключен',
+            : 'РѕС‚РєР»СЋС‡РµРЅ',
       realSendEnabled: config.realSendEnabled,
       providers,
       note:
         mode === 'READY'
-          ? 'Dispatcher может отправлять только готовые Telegram/MAX delivery с подтвержденным numeric chat_id или настроенным provider.'
+          ? 'Dispatcher РјРѕР¶РµС‚ РѕС‚РїСЂР°РІР»СЏС‚СЊ С‚РѕР»СЊРєРѕ РіРѕС‚РѕРІС‹Рµ Telegram/MAX delivery СЃ РїРѕРґС‚РІРµСЂР¶РґРµРЅРЅС‹Рј numeric chat_id РёР»Рё РЅР°СЃС‚СЂРѕРµРЅРЅС‹Рј provider.'
           : mode === 'DRY_RUN'
-            ? 'Безопасный режим: dispatcher проверяет outbox и пишет audit-события, но не отправляет внешние сообщения.'
-            : 'Внешние providers не готовы: включите env-флаги и настройте токены после юридической и технической подготовки.',
+            ? 'Р‘РµР·РѕРїР°СЃРЅС‹Р№ СЂРµР¶РёРј: dispatcher РїСЂРѕРІРµСЂСЏРµС‚ outbox Рё РїРёС€РµС‚ audit-СЃРѕР±С‹С‚РёСЏ, РЅРѕ РЅРµ РѕС‚РїСЂР°РІР»СЏРµС‚ РІРЅРµС€РЅРёРµ СЃРѕРѕР±С‰РµРЅРёСЏ.'
+            : 'Р’РЅРµС€РЅРёРµ providers РЅРµ РіРѕС‚РѕРІС‹: РІРєР»СЋС‡РёС‚Рµ env-С„Р»Р°РіРё Рё РЅР°СЃС‚СЂРѕР№С‚Рµ С‚РѕРєРµРЅС‹ РїРѕСЃР»Рµ СЋСЂРёРґРёС‡РµСЃРєРѕР№ Рё С‚РµС…РЅРёС‡РµСЃРєРѕР№ РїРѕРґРіРѕС‚РѕРІРєРё.',
     };
   }
 
@@ -7470,7 +8049,7 @@ export class GuestGamificationService {
         this.buildEconomyScenario({
           kind: 'MANUAL',
           id: 'manual',
-          name: 'Ручные награды и события',
+          name: 'Р СѓС‡РЅС‹Рµ РЅР°РіСЂР°РґС‹ Рё СЃРѕР±С‹С‚РёСЏ',
           status: 'ACTIVE',
           plannedBudget: null,
           rewards: manualRewards,
@@ -7795,7 +8374,7 @@ export class GuestGamificationService {
         this.buildEffectScenario({
           kind: 'MANUAL',
           id: 'manual',
-          name: 'Ручные события',
+          name: 'Р СѓС‡РЅС‹Рµ СЃРѕР±С‹С‚РёСЏ',
           status: 'ACTIVE',
           events: manualEvents,
           sessions,
@@ -8031,7 +8610,11 @@ export class GuestGamificationService {
       tenantId: isCreate ? user.tenantId : undefined,
       audienceId: nullableId(dto.audienceId),
       createdByUserId: isCreate ? actorUserId(user) : undefined,
-      name: requiredString(dto.name, 'Название лутбокса', isCreate),
+      name: requiredString(
+        dto.name,
+        'РќР°Р·РІР°РЅРёРµ Р»СѓС‚Р±РѕРєСЃР°',
+        isCreate,
+      ),
       status: enumValue(
         dto.status,
         statusValues,
@@ -8076,7 +8659,7 @@ export class GuestGamificationService {
       tenantId: isCreate ? user.tenantId : undefined,
       audienceId: nullableId(dto.audienceId),
       createdByUserId: isCreate ? actorUserId(user) : undefined,
-      name: requiredString(dto.name, 'Название миссии', isCreate),
+      name: requiredString(dto.name, 'РќР°Р·РІР°РЅРёРµ РјРёСЃСЃРёРё', isCreate),
       status: enumValue(
         dto.status,
         statusValues,
@@ -8125,7 +8708,7 @@ export class GuestGamificationService {
       tenantId: isCreate ? user.tenantId : undefined,
       audienceId: nullableId(dto.audienceId),
       createdByUserId: isCreate ? actorUserId(user) : undefined,
-      name: requiredString(dto.name, 'Название сезона', isCreate),
+      name: requiredString(dto.name, 'РќР°Р·РІР°РЅРёРµ СЃРµР·РѕРЅР°', isCreate),
       status: enumValue(
         dto.status,
         statusValues,
@@ -8142,6 +8725,7 @@ export class GuestGamificationService {
       premiumRewards: jsonValue(dto.premiumRewards),
       premiumEnabled: dto.premiumEnabled ?? (isCreate ? false : undefined),
       premiumUpgradeMode: nullableString(dto.premiumUpgradeMode),
+      storeIds: jsonValue(dto.storeIds),
       budgetAmount: decimalValue(dto.budgetAmount),
       manualApprovalRequired:
         dto.manualApprovalRequired ?? (isCreate ? true : undefined),
@@ -8203,13 +8787,17 @@ export class GuestGamificationService {
       externalDomain: nullableString(dto.externalDomain),
       externalId: nullableString(dto.externalId),
       guestExternalId: nullableString(dto.guestExternalId),
-      rewardType: requiredString(dto.rewardType, 'Тип награды', isCreate),
+      rewardType: requiredString(
+        dto.rewardType,
+        'РўРёРї РЅР°РіСЂР°РґС‹',
+        isCreate,
+      ),
       rewardAmount:
         decimalValue(dto.rewardAmount) ??
         (isCreate ? new Prisma.Decimal(0) : undefined),
       rewardLabel: requiredString(
         dto.rewardLabel,
-        'Название награды',
+        'РќР°Р·РІР°РЅРёРµ РЅР°РіСЂР°РґС‹',
         isCreate,
       ),
       rewardCode:
@@ -8252,7 +8840,7 @@ export class GuestGamificationService {
       missionId: nullableId(dto.missionId),
       seasonId: nullableId(dto.seasonId),
       createdByUserId: actorUserId(user),
-      eventType: requiredString(dto.eventType, 'Тип события', true),
+      eventType: requiredString(dto.eventType, 'РўРёРї СЃРѕР±С‹С‚РёСЏ', true),
       source: enumValue(dto.source, eventSources, 'MANUAL'),
       externalProvider: integrationProviderValue(dto.externalProvider),
       externalDomain: nullableString(dto.externalDomain),
@@ -8310,7 +8898,9 @@ export class GuestGamificationService {
     });
 
     if (!row) {
-      throw new NotFoundException('Игровой профиль не найден');
+      throw new NotFoundException(
+        'РРіСЂРѕРІРѕР№ РїСЂРѕС„РёР»СЊ РЅРµ РЅР°Р№РґРµРЅ',
+      );
     }
 
     return row;
@@ -8322,7 +8912,7 @@ export class GuestGamificationService {
     });
 
     if (!row) {
-      throw new NotFoundException('Лутбокс не найден');
+      throw new NotFoundException('Р›СѓС‚Р±РѕРєСЃ РЅРµ РЅР°Р№РґРµРЅ');
     }
 
     return row;
@@ -8334,7 +8924,9 @@ export class GuestGamificationService {
     });
 
     if (!row) {
-      throw new NotFoundException('Игровая миссия не найдена');
+      throw new NotFoundException(
+        'РРіСЂРѕРІР°СЏ РјРёСЃСЃРёСЏ РЅРµ РЅР°Р№РґРµРЅР°',
+      );
     }
 
     return row;
@@ -8346,7 +8938,7 @@ export class GuestGamificationService {
     });
 
     if (!row) {
-      throw new NotFoundException('Сезон не найден');
+      throw new NotFoundException('РЎРµР·РѕРЅ РЅРµ РЅР°Р№РґРµРЅ');
     }
 
     return row;
@@ -8358,7 +8950,7 @@ export class GuestGamificationService {
     });
 
     if (!row) {
-      throw new NotFoundException('Награда не найдена');
+      throw new NotFoundException('РќР°РіСЂР°РґР° РЅРµ РЅР°Р№РґРµРЅР°');
     }
 
     return row;
@@ -8370,7 +8962,9 @@ export class GuestGamificationService {
     });
 
     if (!row) {
-      throw new NotFoundException('Группа гостей не найдена');
+      throw new NotFoundException(
+        'Р“СЂСѓРїРїР° РіРѕСЃС‚РµР№ РЅРµ РЅР°Р№РґРµРЅР°',
+      );
     }
 
     return row;
@@ -8382,7 +8976,7 @@ export class GuestGamificationService {
     });
 
     if (!row) {
-      throw new NotFoundException('Клуб не найден');
+      throw new NotFoundException('РљР»СѓР± РЅРµ РЅР°Р№РґРµРЅ');
     }
 
     return row;
@@ -8660,10 +9254,10 @@ export class GuestGamificationService {
     const message =
       error instanceof Error && error.message
         ? error.message
-        : 'неизвестная ошибка';
+        : 'РЅРµРёР·РІРµСЃС‚РЅР°СЏ РѕС€РёР±РєР°';
 
     if (message.toLowerCase().includes('not configured')) {
-      return 'интеграция Langame не настроена';
+      return 'РёРЅС‚РµРіСЂР°С†РёСЏ Langame РЅРµ РЅР°СЃС‚СЂРѕРµРЅР°';
     }
 
     return message;
@@ -8683,7 +9277,7 @@ export class GuestGamificationService {
     });
 
     if (!row) {
-      throw new NotFoundException('Гость не найден');
+      throw new NotFoundException('Р“РѕСЃС‚СЊ РЅРµ РЅР°Р№РґРµРЅ');
     }
 
     return row;
@@ -8701,7 +9295,7 @@ export class GuestGamificationService {
     });
 
     if (!row) {
-      throw new NotFoundException('CRM-гость не найден');
+      throw new NotFoundException('CRM-РіРѕСЃС‚СЊ РЅРµ РЅР°Р№РґРµРЅ');
     }
 
     return row;
@@ -8718,7 +9312,7 @@ function mapProfile(row: ProfileRow): GuestGameProfile {
       row.guest?.fullNameMasked ??
       row.lead?.fullNameMasked ??
       row.guest?.externalGuestId ??
-      'Игровой профиль',
+      'РРіСЂРѕРІРѕР№ РїСЂРѕС„РёР»СЊ',
     contactMasked:
       row.contactMasked ??
       row.guest?.phoneMasked ??
@@ -8742,15 +9336,19 @@ function mapProfile(row: ProfileRow): GuestGameProfile {
           externalGuestId: row.guest.externalGuestId,
           displayName: row.guest.fullNameMasked ?? row.guest.externalGuestId,
           contact:
-            row.guest.phoneMasked ?? row.guest.emailMasked ?? 'нет контакта',
+            row.guest.phoneMasked ??
+            row.guest.emailMasked ??
+            'РЅРµС‚ РєРѕРЅС‚Р°РєС‚Р°',
         }
       : null,
     lead: row.lead
       ? {
           id: row.lead.id,
-          displayName: row.lead.fullNameMasked ?? 'CRM-гость',
+          displayName: row.lead.fullNameMasked ?? 'CRM-РіРѕСЃС‚СЊ',
           contact:
-            row.lead.phoneMasked ?? row.lead.emailMasked ?? 'нет контакта',
+            row.lead.phoneMasked ??
+            row.lead.emailMasked ??
+            'РЅРµС‚ РєРѕРЅС‚Р°РєС‚Р°',
           matchedGuestId: row.lead.matchedGuestId,
         }
       : null,
@@ -8916,6 +9514,7 @@ function mapSeason(row: SeasonRow): GuestGameSeason {
     premiumRewards: row.premiumRewards,
     premiumEnabled: row.premiumEnabled,
     premiumUpgradeMode: row.premiumUpgradeMode,
+    storeIds: stringArray(row.storeIds),
     budgetAmount: numberOrNull(row.budgetAmount),
     manualApprovalRequired: row.manualApprovalRequired,
     note: row.note,
@@ -8926,6 +9525,52 @@ function mapSeason(row: SeasonRow): GuestGameSeason {
   };
 }
 
+function mapPromoCard(row: PromoCardRow): GuestGamePromoCard {
+  return {
+    id: row.id,
+    title: row.title,
+    label: row.label,
+    description: row.description,
+    tag: row.tag,
+    status: row.status as StatusValue,
+    targetAnchor: row.targetAnchor,
+    priority: row.priority,
+    storeIds: stringArray(row.storeIds),
+    periodFrom: iso(row.periodFrom),
+    periodTo: iso(row.periodTo),
+    metadata: row.metadata,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+    createdBy: mapUser(row.createdByUser),
+  };
+}
+
+function mapVisualDraft(row: VisualDraftRow): GuestGameVisualDraft {
+  return {
+    id: row.id,
+    status: row.status,
+    payload: normalizeVisualEditorPayload(row.payload),
+    note: row.note,
+    publishedAt: iso(row.publishedAt),
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+    store: row.store ? mapVisualEditorStore(row.store) : null,
+    createdBy: mapUser(row.createdByUser),
+    updatedBy: mapUser(row.updatedByUser),
+    publishedBy: mapUser(row.publishedByUser),
+  };
+}
+
+function mapVisualEditorStore(row: PilotStoreRow): GuestGameVisualEditorStore {
+  return {
+    id: row.id,
+    name: row.name,
+    publicSlug: row.publicSlug,
+    city: row.city,
+    address: row.address,
+    gamificationEnabled: row.gamificationEnabled,
+  };
+}
 function mapReward(row: RewardRow): GuestGameReward {
   const walletState = rewardWalletState(row.status, row.expiresAt);
 
@@ -8961,7 +9606,9 @@ function mapReward(row: RewardRow): GuestGameReward {
           externalGuestId: row.guest.externalGuestId,
           displayName: row.guest.fullNameMasked ?? row.guest.externalGuestId,
           contact:
-            row.guest.phoneMasked ?? row.guest.emailMasked ?? 'нет контакта',
+            row.guest.phoneMasked ??
+            row.guest.emailMasked ??
+            'РЅРµС‚ РєРѕРЅС‚Р°РєС‚Р°',
         }
       : null,
     lootBox: row.lootBox,
@@ -9030,7 +9677,7 @@ function buildBonusBalanceCurrentReconciliation(
       latestSnapshotAt: iso(latestSnapshotAt),
     },
     items,
-    note: 'Сверка сравнивает текущий GuestBonusBalanceCurrent с последним сохраненным GuestBonusBalanceSnapshot по guestId или внешнему Langame-id. Live-запросы в Langame при открытии страницы не выполняются.',
+    note: 'РЎРІРµСЂРєР° СЃСЂР°РІРЅРёРІР°РµС‚ С‚РµРєСѓС‰РёР№ GuestBonusBalanceCurrent СЃ РїРѕСЃР»РµРґРЅРёРј СЃРѕС…СЂР°РЅРµРЅРЅС‹Рј GuestBonusBalanceSnapshot РїРѕ guestId РёР»Рё РІРЅРµС€РЅРµРјСѓ Langame-id. Live-Р·Р°РїСЂРѕСЃС‹ РІ Langame РїСЂРё РѕС‚РєСЂС‹С‚РёРё СЃС‚СЂР°РЅРёС†С‹ РЅРµ РІС‹РїРѕР»РЅСЏСЋС‚СЃСЏ.',
   };
 }
 
@@ -9050,7 +9697,9 @@ function mapBonusBalanceCurrentReconciliationItem(
       ? null
       : roundMoney(latestSnapshotBalance - currentBalance);
   const guestDisplay =
-    row.guest?.fullNameMasked ?? row.externalGuestId ?? 'гость без профиля';
+    row.guest?.fullNameMasked ??
+    row.externalGuestId ??
+    'РіРѕСЃС‚СЊ Р±РµР· РїСЂРѕС„РёР»СЏ';
   const guestContact = row.guest?.phoneMasked ?? row.guest?.emailMasked ?? null;
   const reconciliation = bonusBalanceCurrentReconciliationState({
     source: row.source,
@@ -9100,34 +9749,34 @@ function bonusBalanceCurrentReconciliationState({
   if (!snapshot) {
     return {
       state: 'NO_SNAPSHOT',
-      stateLabel: 'нет snapshot',
-      note: 'Для текущего бонусного баланса еще нет исторического Langame snapshot. Нужен следующий guest foundation sync.',
+      stateLabel: 'РЅРµС‚ snapshot',
+      note: 'Р”Р»СЏ С‚РµРєСѓС‰РµРіРѕ Р±РѕРЅСѓСЃРЅРѕРіРѕ Р±Р°Р»Р°РЅСЃР° РµС‰Рµ РЅРµС‚ РёСЃС‚РѕСЂРёС‡РµСЃРєРѕРіРѕ Langame snapshot. РќСѓР¶РµРЅ СЃР»РµРґСѓСЋС‰РёР№ guest foundation sync.',
     };
   }
 
   if (!snapshotIsFresh) {
     return {
       state: 'WAITING_SYNC',
-      stateLabel: 'ждет sync',
+      stateLabel: 'Р¶РґРµС‚ sync',
       note:
         source === 'LANGAME_LEDGER'
-          ? 'Баланс уже обновлен ledger-начислением, но ночной Langame snapshot еще не подтвердил новое значение.'
-          : 'Текущая запись свежее последнего найденного snapshot: дождитесь следующей синхронизации балансов.',
+          ? 'Р‘Р°Р»Р°РЅСЃ СѓР¶Рµ РѕР±РЅРѕРІР»РµРЅ ledger-РЅР°С‡РёСЃР»РµРЅРёРµРј, РЅРѕ РЅРѕС‡РЅРѕР№ Langame snapshot РµС‰Рµ РЅРµ РїРѕРґС‚РІРµСЂРґРёР» РЅРѕРІРѕРµ Р·РЅР°С‡РµРЅРёРµ.'
+          : 'РўРµРєСѓС‰Р°СЏ Р·Р°РїРёСЃСЊ СЃРІРµР¶РµРµ РїРѕСЃР»РµРґРЅРµРіРѕ РЅР°Р№РґРµРЅРЅРѕРіРѕ snapshot: РґРѕР¶РґРёС‚РµСЃСЊ СЃР»РµРґСѓСЋС‰РµР№ СЃРёРЅС…СЂРѕРЅРёР·Р°С†РёРё Р±Р°Р»Р°РЅСЃРѕРІ.',
     };
   }
 
   if (diff !== null && Math.abs(diff) <= 0.01) {
     return {
       state: 'MATCHED',
-      stateLabel: 'сошлось',
-      note: 'Последний Langame snapshot совпадает с текущим бонусным балансом LeetPlus.',
+      stateLabel: 'СЃРѕС€Р»РѕСЃСЊ',
+      note: 'РџРѕСЃР»РµРґРЅРёР№ Langame snapshot СЃРѕРІРїР°РґР°РµС‚ СЃ С‚РµРєСѓС‰РёРј Р±РѕРЅСѓСЃРЅС‹Рј Р±Р°Р»Р°РЅСЃРѕРј LeetPlus.',
     };
   }
 
   return {
     state: 'MISMATCH',
-    stateLabel: 'расхождение',
-    note: 'Текущий бонусный баланс LeetPlus отличается от последнего Langame snapshot: нужна ручная сверка гостя и ledger-операций.',
+    stateLabel: 'СЂР°СЃС…РѕР¶РґРµРЅРёРµ',
+    note: 'РўРµРєСѓС‰РёР№ Р±РѕРЅСѓСЃРЅС‹Р№ Р±Р°Р»Р°РЅСЃ LeetPlus РѕС‚Р»РёС‡Р°РµС‚СЃСЏ РѕС‚ РїРѕСЃР»РµРґРЅРµРіРѕ Langame snapshot: РЅСѓР¶РЅР° СЂСѓС‡РЅР°СЏ СЃРІРµСЂРєР° РіРѕСЃС‚СЏ Рё ledger-РѕРїРµСЂР°С†РёР№.',
   };
 }
 
@@ -9200,7 +9849,7 @@ function buildBonusLedgerAudit(
       latestConfirmedAt: iso(latestConfirmedAt),
     },
     items,
-    note: 'Журнал показывает последние bonus-ledger операции геймификации без raw phone, токенов и полного Langame payload. Сверка считается только по сохраненным GuestBonusBalanceSnapshot после подтвержденного начисления.',
+    note: 'Р–СѓСЂРЅР°Р» РїРѕРєР°Р·С‹РІР°РµС‚ РїРѕСЃР»РµРґРЅРёРµ bonus-ledger РѕРїРµСЂР°С†РёРё РіРµР№РјРёС„РёРєР°С†РёРё Р±РµР· raw phone, С‚РѕРєРµРЅРѕРІ Рё РїРѕР»РЅРѕРіРѕ Langame payload. РЎРІРµСЂРєР° СЃС‡РёС‚Р°РµС‚СЃСЏ С‚РѕР»СЊРєРѕ РїРѕ СЃРѕС…СЂР°РЅРµРЅРЅС‹Рј GuestBonusBalanceSnapshot РїРѕСЃР»Рµ РїРѕРґС‚РІРµСЂР¶РґРµРЅРЅРѕРіРѕ РЅР°С‡РёСЃР»РµРЅРёСЏ.',
   };
 }
 
@@ -9219,7 +9868,7 @@ function mapBonusLedgerAuditItem(
     row.profile?.displayName ??
     row.guest?.fullNameMasked ??
     row.externalGuestId ??
-    'Гость не связан';
+    'Р“РѕСЃС‚СЊ РЅРµ СЃРІСЏР·Р°РЅ';
   const guestContact =
     row.profile?.contactMasked ??
     row.guest?.phoneMasked ??
@@ -9317,24 +9966,24 @@ function bonusLedgerReconciliation(
   if (['FAILED', 'CANCELED'].includes(row.status)) {
     return {
       state: 'NOT_APPLICABLE',
-      stateLabel: 'не требуется',
+      stateLabel: 'РЅРµ С‚СЂРµР±СѓРµС‚СЃСЏ',
       latestSnapshotAt: null,
       latestSnapshotBalance: null,
       expectedBalance,
       diff: null,
-      note: 'Запись не подтверждена в Langame, сверка баланса не требуется.',
+      note: 'Р—Р°РїРёСЃСЊ РЅРµ РїРѕРґС‚РІРµСЂР¶РґРµРЅР° РІ Langame, СЃРІРµСЂРєР° Р±Р°Р»Р°РЅСЃР° РЅРµ С‚СЂРµР±СѓРµС‚СЃСЏ.',
     };
   }
 
   if (row.status !== 'CONFIRMED') {
     return {
       state: 'NOT_READY',
-      stateLabel: 'рано сверять',
+      stateLabel: 'СЂР°РЅРѕ СЃРІРµСЂСЏС‚СЊ',
       latestSnapshotAt: null,
       latestSnapshotBalance: null,
       expectedBalance,
       diff: null,
-      note: 'Сначала нужно подтвердить начисление через bonus ledger dispatcher.',
+      note: 'РЎРЅР°С‡Р°Р»Р° РЅСѓР¶РЅРѕ РїРѕРґС‚РІРµСЂРґРёС‚СЊ РЅР°С‡РёСЃР»РµРЅРёРµ С‡РµСЂРµР· bonus ledger dispatcher.',
     };
   }
 
@@ -9345,14 +9994,14 @@ function bonusLedgerReconciliation(
   ) {
     return {
       state: 'WAITING_SYNC',
-      stateLabel: 'ждет snapshot',
+      stateLabel: 'Р¶РґРµС‚ snapshot',
       latestSnapshotAt: snapshot ? snapshot.snapshotDate.toISOString() : null,
       latestSnapshotBalance: snapshot
         ? numberValue(snapshot.bonusBalance)
         : null,
       expectedBalance,
       diff: null,
-      note: 'Начисление подтверждено, но еще нет свежего Langame snapshot после операции.',
+      note: 'РќР°С‡РёСЃР»РµРЅРёРµ РїРѕРґС‚РІРµСЂР¶РґРµРЅРѕ, РЅРѕ РµС‰Рµ РЅРµС‚ СЃРІРµР¶РµРіРѕ Langame snapshot РїРѕСЃР»Рµ РѕРїРµСЂР°С†РёРё.',
     };
   }
 
@@ -9365,14 +10014,14 @@ function bonusLedgerReconciliation(
 
   return {
     state: matched ? 'MATCHED' : 'MISMATCH',
-    stateLabel: matched ? 'сошлось' : 'расхождение',
+    stateLabel: matched ? 'СЃРѕС€Р»РѕСЃСЊ' : 'СЂР°СЃС…РѕР¶РґРµРЅРёРµ',
     latestSnapshotAt: snapshot.snapshotDate.toISOString(),
     latestSnapshotBalance,
     expectedBalance,
     diff,
     note: matched
-      ? 'Последний Langame snapshot совпадает с ожидаемым балансом после ledger-начисления.'
-      : 'Langame snapshot отличается от ожидаемого баланса: нужна ручная сверка по гостю и операции.',
+      ? 'РџРѕСЃР»РµРґРЅРёР№ Langame snapshot СЃРѕРІРїР°РґР°РµС‚ СЃ РѕР¶РёРґР°РµРјС‹Рј Р±Р°Р»Р°РЅСЃРѕРј РїРѕСЃР»Рµ ledger-РЅР°С‡РёСЃР»РµРЅРёСЏ.'
+      : 'Langame snapshot РѕС‚Р»РёС‡Р°РµС‚СЃСЏ РѕС‚ РѕР¶РёРґР°РµРјРѕРіРѕ Р±Р°Р»Р°РЅСЃР°: РЅСѓР¶РЅР° СЂСѓС‡РЅР°СЏ СЃРІРµСЂРєР° РїРѕ РіРѕСЃС‚СЋ Рё РѕРїРµСЂР°С†РёРё.',
   };
 }
 
@@ -9382,50 +10031,50 @@ function bonusLedgerNextAction(
   reconciliation: GuestGameBonusLedgerAuditItem['reconciliation'],
 ) {
   if (row.status === 'PENDING') {
-    return 'Запустить bonus-ledger dispatch или дождаться scheduled dispatcher.';
+    return 'Р—Р°РїСѓСЃС‚РёС‚СЊ bonus-ledger dispatch РёР»Рё РґРѕР¶РґР°С‚СЊСЃСЏ scheduled dispatcher.';
   }
 
   if (row.status === 'PROCESSING') {
-    return 'Проверить, не завис ли worker; stale-lock вернет запись в обработку по расписанию.';
+    return 'РџСЂРѕРІРµСЂРёС‚СЊ, РЅРµ Р·Р°РІРёСЃ Р»Рё worker; stale-lock РІРµСЂРЅРµС‚ Р·Р°РїРёСЃСЊ РІ РѕР±СЂР°Р±РѕС‚РєСѓ РїРѕ СЂР°СЃРїРёСЃР°РЅРёСЋ.';
   }
 
   if (row.status === 'FAILED') {
     return retryReady
-      ? 'Повторить dispatch после проверки Langame-ключа, телефона гостя и домена клуба.'
-      : 'Дождаться nextAttemptAt или вручную разобрать ошибку перед повтором.';
+      ? 'РџРѕРІС‚РѕСЂРёС‚СЊ dispatch РїРѕСЃР»Рµ РїСЂРѕРІРµСЂРєРё Langame-РєР»СЋС‡Р°, С‚РµР»РµС„РѕРЅР° РіРѕСЃС‚СЏ Рё РґРѕРјРµРЅР° РєР»СѓР±Р°.'
+      : 'Р”РѕР¶РґР°С‚СЊСЃСЏ nextAttemptAt РёР»Рё РІСЂСѓС‡РЅСѓСЋ СЂР°Р·РѕР±СЂР°С‚СЊ РѕС€РёР±РєСѓ РїРµСЂРµРґ РїРѕРІС‚РѕСЂРѕРј.';
   }
 
   if (row.status === 'CONFIRMED') {
     if (reconciliation.state === 'MATCHED') {
-      return 'Операция закрыта: можно использовать ее как эталон пилотного начисления.';
+      return 'РћРїРµСЂР°С†РёСЏ Р·Р°РєСЂС‹С‚Р°: РјРѕР¶РЅРѕ РёСЃРїРѕР»СЊР·РѕРІР°С‚СЊ РµРµ РєР°Рє СЌС‚Р°Р»РѕРЅ РїРёР»РѕС‚РЅРѕРіРѕ РЅР°С‡РёСЃР»РµРЅРёСЏ.';
     }
 
     if (reconciliation.state === 'MISMATCH') {
-      return 'Сверить гостя в Langame и при необходимости оформить обратную/корректирующую операцию.';
+      return 'РЎРІРµСЂРёС‚СЊ РіРѕСЃС‚СЏ РІ Langame Рё РїСЂРё РЅРµРѕР±С…РѕРґРёРјРѕСЃС‚Рё РѕС„РѕСЂРјРёС‚СЊ РѕР±СЂР°С‚РЅСѓСЋ/РєРѕСЂСЂРµРєС‚РёСЂСѓСЋС‰СѓСЋ РѕРїРµСЂР°С†РёСЋ.';
     }
 
-    return 'Дождаться guest foundation sync и ночного bonus balance snapshot для финальной сверки.';
+    return 'Р”РѕР¶РґР°С‚СЊСЃСЏ guest foundation sync Рё РЅРѕС‡РЅРѕРіРѕ bonus balance snapshot РґР»СЏ С„РёРЅР°Р»СЊРЅРѕР№ СЃРІРµСЂРєРё.';
   }
 
   if (row.status === 'CANCELED') {
-    return 'Оставить отмену в аудите; для подтвержденных операций использовать отдельную обратную запись.';
+    return 'РћСЃС‚Р°РІРёС‚СЊ РѕС‚РјРµРЅСѓ РІ Р°СѓРґРёС‚Рµ; РґР»СЏ РїРѕРґС‚РІРµСЂР¶РґРµРЅРЅС‹С… РѕРїРµСЂР°С†РёР№ РёСЃРїРѕР»СЊР·РѕРІР°С‚СЊ РѕС‚РґРµР»СЊРЅСѓСЋ РѕР±СЂР°С‚РЅСѓСЋ Р·Р°РїРёСЃСЊ.';
   }
 
-  return 'Проверить статус ledger-записи перед следующей операцией.';
+  return 'РџСЂРѕРІРµСЂРёС‚СЊ СЃС‚Р°С‚СѓСЃ ledger-Р·Р°РїРёСЃРё РїРµСЂРµРґ СЃР»РµРґСѓСЋС‰РµР№ РѕРїРµСЂР°С†РёРµР№.';
 }
 
 function bonusLedgerStatusLabel(status: string) {
   switch (status) {
     case 'PENDING':
-      return 'в очереди';
+      return 'РІ РѕС‡РµСЂРµРґРё';
     case 'PROCESSING':
-      return 'обработка';
+      return 'РѕР±СЂР°Р±РѕС‚РєР°';
     case 'CONFIRMED':
-      return 'подтверждено';
+      return 'РїРѕРґС‚РІРµСЂР¶РґРµРЅРѕ';
     case 'FAILED':
-      return 'ошибка';
+      return 'РѕС€РёР±РєР°';
     case 'CANCELED':
-      return 'отменено';
+      return 'РѕС‚РјРµРЅРµРЅРѕ';
     default:
       return status.toLowerCase();
   }
@@ -9520,7 +10169,9 @@ function mapDelivery(row: DeliveryRow): GuestGameDelivery {
           externalGuestId: row.guest.externalGuestId,
           displayName: row.guest.fullNameMasked ?? row.guest.externalGuestId,
           contact:
-            row.guest.phoneMasked ?? row.guest.emailMasked ?? 'нет контакта',
+            row.guest.phoneMasked ??
+            row.guest.emailMasked ??
+            'РЅРµС‚ РєРѕРЅС‚Р°РєС‚Р°',
         }
       : null,
     store: row.store,
@@ -9567,28 +10218,40 @@ function buildCommunicationQueueItem(
   const blockers: string[] = [];
 
   if (!profile) {
-    blockers.push('Нет связанного игрового профиля гостя.');
+    blockers.push(
+      'РќРµС‚ СЃРІСЏР·Р°РЅРЅРѕРіРѕ РёРіСЂРѕРІРѕРіРѕ РїСЂРѕС„РёР»СЏ РіРѕСЃС‚СЏ.',
+    );
   }
 
   if (reward.walletState === 'WAITING_APPROVAL') {
-    blockers.push('Награду нужно подтвердить перед выдачей или уведомлением.');
+    blockers.push(
+      'РќР°РіСЂР°РґСѓ РЅСѓР¶РЅРѕ РїРѕРґС‚РІРµСЂРґРёС‚СЊ РїРµСЂРµРґ РІС‹РґР°С‡РµР№ РёР»Рё СѓРІРµРґРѕРјР»РµРЅРёРµРј.',
+    );
   }
 
   if (reward.walletState === 'READY') {
     if (consentStatus === 'UNSUBSCRIBED') {
-      blockers.push('Гость отписался от игровых коммуникаций.');
+      blockers.push(
+        'Р“РѕСЃС‚СЊ РѕС‚РїРёСЃР°Р»СЃСЏ РѕС‚ РёРіСЂРѕРІС‹С… РєРѕРјРјСѓРЅРёРєР°С†РёР№.',
+      );
     } else if (consentStatus === 'DENIED') {
-      blockers.push('Гость отказался от игровых коммуникаций.');
+      blockers.push(
+        'Р“РѕСЃС‚СЊ РѕС‚РєР°Р·Р°Р»СЃСЏ РѕС‚ РёРіСЂРѕРІС‹С… РєРѕРјРјСѓРЅРёРєР°С†РёР№.',
+      );
     } else if (consentStatus !== 'GRANTED') {
-      blockers.push('Нет подтвержденного согласия на игровые коммуникации.');
+      blockers.push(
+        'РќРµС‚ РїРѕРґС‚РІРµСЂР¶РґРµРЅРЅРѕРіРѕ СЃРѕРіР»Р°СЃРёСЏ РЅР° РёРіСЂРѕРІС‹Рµ РєРѕРјРјСѓРЅРёРєР°С†РёРё.',
+      );
     }
 
     if (!telegramReady && !maxReady) {
-      blockers.push('Telegram/MAX alias еще не привязан.');
+      blockers.push('Telegram/MAX alias РµС‰Рµ РЅРµ РїСЂРёРІСЏР·Р°РЅ.');
     }
 
     if (!rewardCodeReady) {
-      blockers.push('Код кассира еще не создан для ручной выдачи.');
+      blockers.push(
+        'РљРѕРґ РєР°СЃСЃРёСЂР° РµС‰Рµ РЅРµ СЃРѕР·РґР°РЅ РґР»СЏ СЂСѓС‡РЅРѕР№ РІС‹РґР°С‡Рё.',
+      );
     }
   }
 
@@ -9613,7 +10276,7 @@ function buildCommunicationQueueItem(
       reward.profile?.displayName ??
       reward.guest?.displayName ??
       reward.guestExternalId ??
-      'Гость',
+      'Р“РѕСЃС‚СЊ',
     contactMasked:
       profile?.contactMasked ??
       reward.profile?.contactMasked ??
@@ -9708,15 +10371,15 @@ function communicationQueueStatusLabel(
   status: GuestGameCommunicationQueueStatus,
 ) {
   const labels: Record<GuestGameCommunicationQueueStatus, string> = {
-    READY_FOR_BOT: 'готово к боту',
-    READY_FOR_CASHIER: 'готово кассиру',
-    NEEDS_APPROVAL: 'нужно подтвердить',
-    NEEDS_CONSENT: 'нет согласия',
-    NEEDS_CHANNEL: 'нет канала',
-    UNSUBSCRIBED: 'отписался',
-    EXPIRED: 'срок истек',
-    REDEEMED: 'погашено',
-    CANCELED: 'отменено',
+    READY_FOR_BOT: 'РіРѕС‚РѕРІРѕ Рє Р±РѕС‚Сѓ',
+    READY_FOR_CASHIER: 'РіРѕС‚РѕРІРѕ РєР°СЃСЃРёСЂСѓ',
+    NEEDS_APPROVAL: 'РЅСѓР¶РЅРѕ РїРѕРґС‚РІРµСЂРґРёС‚СЊ',
+    NEEDS_CONSENT: 'РЅРµС‚ СЃРѕРіР»Р°СЃРёСЏ',
+    NEEDS_CHANNEL: 'РЅРµС‚ РєР°РЅР°Р»Р°',
+    UNSUBSCRIBED: 'РѕС‚РїРёСЃР°Р»СЃСЏ',
+    EXPIRED: 'СЃСЂРѕРє РёСЃС‚РµРє',
+    REDEEMED: 'РїРѕРіР°С€РµРЅРѕ',
+    CANCELED: 'РѕС‚РјРµРЅРµРЅРѕ',
   };
 
   return labels[status];
@@ -9727,18 +10390,21 @@ function communicationQueueNextAction(
 ) {
   const actions: Record<GuestGameCommunicationQueueStatus, string> = {
     READY_FOR_BOT:
-      'После подключения Telegram/MAX-бота можно отправить игровое уведомление.',
+      'РџРѕСЃР»Рµ РїРѕРґРєР»СЋС‡РµРЅРёСЏ Telegram/MAX-Р±РѕС‚Р° РјРѕР¶РЅРѕ РѕС‚РїСЂР°РІРёС‚СЊ РёРіСЂРѕРІРѕРµ СѓРІРµРґРѕРјР»РµРЅРёРµ.',
     READY_FOR_CASHIER:
-      'Выдайте награду по коду кассира или попросите гостя привязать Telegram/MAX.',
-    NEEDS_APPROVAL: 'Подтвердите награду в кошельке.',
+      'Р’С‹РґР°Р№С‚Рµ РЅР°РіСЂР°РґСѓ РїРѕ РєРѕРґСѓ РєР°СЃСЃРёСЂР° РёР»Рё РїРѕРїСЂРѕСЃРёС‚Рµ РіРѕСЃС‚СЏ РїСЂРёРІСЏР·Р°С‚СЊ Telegram/MAX.',
+    NEEDS_APPROVAL:
+      'РџРѕРґС‚РІРµСЂРґРёС‚Рµ РЅР°РіСЂР°РґСѓ РІ РєРѕС€РµР»СЊРєРµ.',
     NEEDS_CONSENT:
-      'Получите согласие гостя в публичном кабинете или при ручном контакте.',
+      'РџРѕР»СѓС‡РёС‚Рµ СЃРѕРіР»Р°СЃРёРµ РіРѕСЃС‚СЏ РІ РїСѓР±Р»РёС‡РЅРѕРј РєР°Р±РёРЅРµС‚Рµ РёР»Рё РїСЂРё СЂСѓС‡РЅРѕРј РєРѕРЅС‚Р°РєС‚Рµ.',
     NEEDS_CHANNEL:
-      'Привяжите Telegram/MAX alias или выдайте награду через ручной код.',
-    UNSUBSCRIBED: 'Не отправляйте сообщения; доступна только ручная обработка.',
-    EXPIRED: 'Проверьте срок и при необходимости создайте новую награду.',
-    REDEEMED: 'Действий не требуется.',
-    CANCELED: 'Действий не требуется.',
+      'РџСЂРёРІСЏР¶РёС‚Рµ Telegram/MAX alias РёР»Рё РІС‹РґР°Р№С‚Рµ РЅР°РіСЂР°РґСѓ С‡РµСЂРµР· СЂСѓС‡РЅРѕР№ РєРѕРґ.',
+    UNSUBSCRIBED:
+      'РќРµ РѕС‚РїСЂР°РІР»СЏР№С‚Рµ СЃРѕРѕР±С‰РµРЅРёСЏ; РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ СЂСѓС‡РЅР°СЏ РѕР±СЂР°Р±РѕС‚РєР°.',
+    EXPIRED:
+      'РџСЂРѕРІРµСЂСЊС‚Рµ СЃСЂРѕРє Рё РїСЂРё РЅРµРѕР±С…РѕРґРёРјРѕСЃС‚Рё СЃРѕР·РґР°Р№С‚Рµ РЅРѕРІСѓСЋ РЅР°РіСЂР°РґСѓ.',
+    REDEEMED: 'Р”РµР№СЃС‚РІРёР№ РЅРµ С‚СЂРµР±СѓРµС‚СЃСЏ.',
+    CANCELED: 'Р”РµР№СЃС‚РІРёР№ РЅРµ С‚СЂРµР±СѓРµС‚СЃСЏ.',
   };
 
   return actions[status];
@@ -9750,8 +10416,8 @@ function communicationQueueChannelLabel(
   const labels: Record<GuestGameCommunicationQueueItem['channel'], string> = {
     TELEGRAM: 'Telegram',
     MAX: 'MAX',
-    CASHIER: 'Кассир',
-    MANUAL: 'Ручная выдача',
+    CASHIER: 'РљР°СЃСЃРёСЂ',
+    MANUAL: 'Р СѓС‡РЅР°СЏ РІС‹РґР°С‡Р°',
   };
 
   return labels[channel];
@@ -9777,18 +10443,18 @@ function communicationQueueStatusRank(
 
 function communicationQueueSourceLabel(reward: GuestGameReward) {
   if (reward.lootBox) {
-    return `Лутбокс: ${reward.lootBox.name}`;
+    return `Р›СѓС‚Р±РѕРєСЃ: ${reward.lootBox.name}`;
   }
 
   if (reward.mission) {
-    return `Миссия: ${reward.mission.name}`;
+    return `РњРёСЃСЃРёСЏ: ${reward.mission.name}`;
   }
 
   if (reward.season) {
     return `Battle Pass: ${reward.season.name}`;
   }
 
-  return 'Ручная награда';
+  return 'Р СѓС‡РЅР°СЏ РЅР°РіСЂР°РґР°';
 }
 
 function communicationQueueStatusValue(
@@ -9852,11 +10518,11 @@ function deliveryChannelValue(
 
 function deliveryStatusLabel(status: GuestGameDeliveryStatus) {
   const labels: Record<GuestGameDeliveryStatus, string> = {
-    READY: 'готово',
-    BLOCKED: 'нужно действие',
-    SENT: 'отправлено/выдано',
-    FAILED: 'ошибка',
-    CANCELED: 'отменено',
+    READY: 'РіРѕС‚РѕРІРѕ',
+    BLOCKED: 'РЅСѓР¶РЅРѕ РґРµР№СЃС‚РІРёРµ',
+    SENT: 'РѕС‚РїСЂР°РІР»РµРЅРѕ/РІС‹РґР°РЅРѕ',
+    FAILED: 'РѕС€РёР±РєР°',
+    CANCELED: 'РѕС‚РјРµРЅРµРЅРѕ',
   };
 
   return labels[status];
@@ -9877,17 +10543,18 @@ function deliveryMetadata(
 }
 
 function buildDeliveryMessageTitle(item: GuestGameCommunicationQueueItem) {
-  return `Ваша награда: ${item.rewardLabel}`;
+  return `Р’Р°С€Р° РЅР°РіСЂР°РґР°: ${item.rewardLabel}`;
 }
 
 function buildDeliveryMessageBody(item: GuestGameCommunicationQueueItem) {
-  const amount = item.rewardAmount > 0 ? ` на ${item.rewardAmount} руб.` : '';
-  const club = item.store ? ` в клубе ${item.store.name}` : '';
+  const amount =
+    item.rewardAmount > 0 ? ` РЅР° ${item.rewardAmount} СЂСѓР±.` : '';
+  const club = item.store ? ` РІ РєР»СѓР±Рµ ${item.store.name}` : '';
   const expires = item.expiresAt
-    ? ` Действует до ${new Date(item.expiresAt).toLocaleDateString('ru-RU')}.`
+    ? ` Р”РµР№СЃС‚РІСѓРµС‚ РґРѕ ${new Date(item.expiresAt).toLocaleDateString('ru-RU')}.`
     : '';
 
-  return `В LeetPlus для вас подготовлена награда${amount}${club}: ${item.rewardLabel}.${expires} Покажите код кассиру или откройте личный кабинет гостя.`;
+  return `Р’ LeetPlus РґР»СЏ РІР°СЃ РїРѕРґРіРѕС‚РѕРІР»РµРЅР° РЅР°РіСЂР°РґР°${amount}${club}: ${item.rewardLabel}.${expires} РџРѕРєР°Р¶РёС‚Рµ РєРѕРґ РєР°СЃСЃРёСЂСѓ РёР»Рё РѕС‚РєСЂРѕР№С‚Рµ Р»РёС‡РЅС‹Р№ РєР°Р±РёРЅРµС‚ РіРѕСЃС‚СЏ.`;
 }
 
 function deliveryChannelIdentityMasked(
@@ -9947,7 +10614,7 @@ function guestPortalOtpReadiness(): GuestPortalOtpReadiness {
     ? 'SMS.ru /sms/send'
     : genericSmsConfigured
       ? 'generic endpoint'
-      : 'provider не настроен';
+      : 'provider РЅРµ РЅР°СЃС‚СЂРѕРµРЅ';
   const telegramEnabled = envFlag('GUEST_PORTAL_OTP_TELEGRAM_ENABLED');
   const telegramConfigured = Boolean(
     envString('GUEST_PORTAL_TELEGRAM_BOT_TOKEN') ??
@@ -9974,11 +10641,11 @@ function guestPortalOtpReadiness(): GuestPortalOtpReadiness {
     details: [
       {
         label: 'Real send',
-        value: realSendEnabled ? 'включен' : 'выключен',
+        value: realSendEnabled ? 'РІРєР»СЋС‡РµРЅ' : 'РІС‹РєР»СЋС‡РµРЅ',
       },
       {
-        label: 'Канал SMS',
-        value: smsEnabled ? 'включен' : 'выключен',
+        label: 'РљР°РЅР°Р» SMS',
+        value: smsEnabled ? 'РІРєР»СЋС‡РµРЅ' : 'РІС‹РєР»СЋС‡РµРЅ',
       },
       {
         label: 'Provider',
@@ -9986,15 +10653,19 @@ function guestPortalOtpReadiness(): GuestPortalOtpReadiness {
       },
       {
         label: 'SMS.ru api_id',
-        value: smsRuConfigured ? 'настроен' : 'нужен или fallback Callcheck',
+        value: smsRuConfigured
+          ? 'РЅР°СЃС‚СЂРѕРµРЅ'
+          : 'РЅСѓР¶РµРЅ РёР»Рё fallback Callcheck',
       },
       {
         label: 'Generic provider',
-        value: genericSmsConfigured ? 'настроен' : 'не используется',
+        value: genericSmsConfigured
+          ? 'РЅР°СЃС‚СЂРѕРµРЅ'
+          : 'РЅРµ РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ',
       },
       {
         label: 'SMS.ru test-mode',
-        value: smsRuTestMode ? 'test=1' : 'выключен',
+        value: smsRuTestMode ? 'test=1' : 'РІС‹РєР»СЋС‡РµРЅ',
       },
       {
         label: 'SMS.ru live canary',
@@ -10002,16 +10673,16 @@ function guestPortalOtpReadiness(): GuestPortalOtpReadiness {
           ? smsRuLiveCanaryReady
             ? smsRuTestMode
               ? 'staged test-mode'
-              : 'canary включен'
-            : 'нужен canary'
-          : 'не используется',
+              : 'canary РІРєР»СЋС‡РµРЅ'
+            : 'РЅСѓР¶РµРЅ canary'
+          : 'РЅРµ РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ',
       },
       ...smsRateLimits.details,
     ],
     configuredNote:
-      'SMS-код готов как резервный канал: backend отправит OTP через SMS.ru /sms/send или совместимый generic SMS provider только при включенном real-send и активных rate-limit/budget guards.',
+      'SMS-РєРѕРґ РіРѕС‚РѕРІ РєР°Рє СЂРµР·РµСЂРІРЅС‹Р№ РєР°РЅР°Р»: backend РѕС‚РїСЂР°РІРёС‚ OTP С‡РµСЂРµР· SMS.ru /sms/send РёР»Рё СЃРѕРІРјРµСЃС‚РёРјС‹Р№ generic SMS provider С‚РѕР»СЊРєРѕ РїСЂРё РІРєР»СЋС‡РµРЅРЅРѕРј real-send Рё Р°РєС‚РёРІРЅС‹С… rate-limit/budget guards.',
     blockedNote:
-      'SMS OTP не готов: нужен real-send, флаг SMS-канала и SMS.ru api_id либо generic endpoint/token.',
+      'SMS OTP РЅРµ РіРѕС‚РѕРІ: РЅСѓР¶РµРЅ real-send, С„Р»Р°Рі SMS-РєР°РЅР°Р»Р° Рё SMS.ru api_id Р»РёР±Рѕ generic endpoint/token.',
     safetyReady: smsRateLimits.ready && smsRuLiveCanaryReady,
     safetyRequiredEnv: [
       ...smsRateLimits.requiredEnv,
@@ -10022,12 +10693,12 @@ function guestPortalOtpReadiness(): GuestPortalOtpReadiness {
           ]),
     ],
     partialNote: !smsRuLiveCanaryReady
-      ? 'SMS.ru provider настроен, но live-режим нельзя считать готовым без staged test-mode или отдельного controlled canary-флага.'
+      ? 'SMS.ru provider РЅР°СЃС‚СЂРѕРµРЅ, РЅРѕ live-СЂРµР¶РёРј РЅРµР»СЊР·СЏ СЃС‡РёС‚Р°С‚СЊ РіРѕС‚РѕРІС‹Рј Р±РµР· staged test-mode РёР»Рё РѕС‚РґРµР»СЊРЅРѕРіРѕ controlled canary-С„Р»Р°РіР°.'
       : smsRateLimits.ready
         ? undefined
-        : 'SMS OTP provider настроен, но live-режим нельзя считать готовым: один или несколько rate-limit/budget env отключены.',
+        : 'SMS OTP provider РЅР°СЃС‚СЂРѕРµРЅ, РЅРѕ live-СЂРµР¶РёРј РЅРµР»СЊР·СЏ СЃС‡РёС‚Р°С‚СЊ РіРѕС‚РѕРІС‹Рј: РѕРґРёРЅ РёР»Рё РЅРµСЃРєРѕР»СЊРєРѕ rate-limit/budget env РѕС‚РєР»СЋС‡РµРЅС‹.',
     nextAction:
-      'Провести staged QA с GUEST_PORTAL_OTP_SMS_RU_TEST_MODE=true, затем включать live SMS только через GUEST_PORTAL_OTP_SMS_RU_LIVE_CANARY_ENABLED=true, активные лимиты, provider-бюджет и delivery audit без раскрытия кода.',
+      'РџСЂРѕРІРµСЃС‚Рё staged QA СЃ GUEST_PORTAL_OTP_SMS_RU_TEST_MODE=true, Р·Р°С‚РµРј РІРєР»СЋС‡Р°С‚СЊ live SMS С‚РѕР»СЊРєРѕ С‡РµСЂРµР· GUEST_PORTAL_OTP_SMS_RU_LIVE_CANARY_ENABLED=true, Р°РєС‚РёРІРЅС‹Рµ Р»РёРјРёС‚С‹, provider-Р±СЋРґР¶РµС‚ Рё delivery audit Р±РµР· СЂР°СЃРєСЂС‹С‚РёСЏ РєРѕРґР°.',
   });
   const telegram = guestPortalOtpProviderReadiness({
     channelLabel: 'Telegram',
@@ -10042,11 +10713,11 @@ function guestPortalOtpReadiness(): GuestPortalOtpReadiness {
       'TELEGRAM_BOT_TOKEN',
     ],
     configuredNote:
-      'Telegram token найден; OTP можно отправить только гостю с уже подтвержденным numeric chat_id.',
+      'Telegram token РЅР°Р№РґРµРЅ; OTP РјРѕР¶РЅРѕ РѕС‚РїСЂР°РІРёС‚СЊ С‚РѕР»СЊРєРѕ РіРѕСЃС‚СЋ СЃ СѓР¶Рµ РїРѕРґС‚РІРµСЂР¶РґРµРЅРЅС‹Рј numeric chat_id.',
     blockedNote:
-      'Telegram OTP не готов: нужен bot token, включенный канал и заранее привязанный гостем Telegram.',
+      'Telegram OTP РЅРµ РіРѕС‚РѕРІ: РЅСѓР¶РµРЅ bot token, РІРєР»СЋС‡РµРЅРЅС‹Р№ РєР°РЅР°Р» Рё Р·Р°СЂР°РЅРµРµ РїСЂРёРІСЏР·Р°РЅРЅС‹Р№ РіРѕСЃС‚РµРј Telegram.',
     nextAction:
-      'Сначала проверить deep link и webhook привязки бота, затем включать OTP только для профилей с сохраненным chat:<id>.',
+      'РЎРЅР°С‡Р°Р»Р° РїСЂРѕРІРµСЂРёС‚СЊ deep link Рё webhook РїСЂРёРІСЏР·РєРё Р±РѕС‚Р°, Р·Р°С‚РµРј РІРєР»СЋС‡Р°С‚СЊ OTP С‚РѕР»СЊРєРѕ РґР»СЏ РїСЂРѕС„РёР»РµР№ СЃ СЃРѕС…СЂР°РЅРµРЅРЅС‹Рј chat:<id>.',
   });
   const max = guestPortalOtpProviderReadiness({
     channelLabel: 'MAX',
@@ -10060,11 +10731,11 @@ function guestPortalOtpReadiness(): GuestPortalOtpReadiness {
       'GUEST_PORTAL_OTP_MAX_TOKEN',
     ],
     configuredNote:
-      'MAX provider имеет endpoint и token, но канал остается вторым адаптером до подтвержденного production-контракта.',
+      'MAX provider РёРјРµРµС‚ endpoint Рё token, РЅРѕ РєР°РЅР°Р» РѕСЃС‚Р°РµС‚СЃСЏ РІС‚РѕСЂС‹Рј Р°РґР°РїС‚РµСЂРѕРј РґРѕ РїРѕРґС‚РІРµСЂР¶РґРµРЅРЅРѕРіРѕ production-РєРѕРЅС‚СЂР°РєС‚Р°.',
     blockedNote:
-      'MAX OTP не готов: нужен подтвержденный provider endpoint/token, юридическая схема и отписки.',
+      'MAX OTP РЅРµ РіРѕС‚РѕРІ: РЅСѓР¶РµРЅ РїРѕРґС‚РІРµСЂР¶РґРµРЅРЅС‹Р№ provider endpoint/token, СЋСЂРёРґРёС‡РµСЃРєР°СЏ СЃС…РµРјР° Рё РѕС‚РїРёСЃРєРё.',
     nextAction:
-      'MAX включать только после утверждения API-контракта, consent-сценария, обработки отписок и теста на отдельном госте.',
+      'MAX РІРєР»СЋС‡Р°С‚СЊ С‚РѕР»СЊРєРѕ РїРѕСЃР»Рµ СѓС‚РІРµСЂР¶РґРµРЅРёСЏ API-РєРѕРЅС‚СЂР°РєС‚Р°, consent-СЃС†РµРЅР°СЂРёСЏ, РѕР±СЂР°Р±РѕС‚РєРё РѕС‚РїРёСЃРѕРє Рё С‚РµСЃС‚Р° РЅР° РѕС‚РґРµР»СЊРЅРѕРј РіРѕСЃС‚Рµ.',
   });
   const providers = [sms, telegram, max];
   const readyProviders = providers.filter((provider) => provider.ready);
@@ -10073,7 +10744,7 @@ function guestPortalOtpReadiness(): GuestPortalOtpReadiness {
   );
   const ready = readyProviders.length > 0;
   const readyProviderLabels = readyProviders
-    .map((provider) => provider.statusLabel.replace(' готов', ''))
+    .map((provider) => provider.statusLabel.replace(' РіРѕС‚РѕРІ', ''))
     .join(', ');
   const hasAnyProviderSignal =
     partialProviders.length > 0 ||
@@ -10087,12 +10758,12 @@ function guestPortalOtpReadiness(): GuestPortalOtpReadiness {
   return {
     status,
     statusLabel: ready
-      ? 'provider готов'
+      ? 'provider РіРѕС‚РѕРІ'
       : devEnabled
-        ? 'demo-код'
+        ? 'demo-РєРѕРґ'
         : status === 'PARTIAL'
-          ? 'частично'
-          : 'нужен provider',
+          ? 'С‡Р°СЃС‚РёС‡РЅРѕ'
+          : 'РЅСѓР¶РµРЅ provider',
     ready,
     configured: devEnabled || providers.some((provider) => provider.configured),
     enabled: devEnabled || providers.some((provider) => provider.enabled),
@@ -10104,13 +10775,13 @@ function guestPortalOtpReadiness(): GuestPortalOtpReadiness {
       'GUEST_PORTAL_OTP_MAX_ENABLED',
     ],
     note: ready
-      ? `Production OTP имеет готовый канал: ${readyProviderLabels}. Гостевой портал не показывает код и использует безопасный guest-token.`
+      ? `Production OTP РёРјРµРµС‚ РіРѕС‚РѕРІС‹Р№ РєР°РЅР°Р»: ${readyProviderLabels}. Р“РѕСЃС‚РµРІРѕР№ РїРѕСЂС‚Р°Р» РЅРµ РїРѕРєР°Р·С‹РІР°РµС‚ РєРѕРґ Рё РёСЃРїРѕР»СЊР·СѓРµС‚ Р±РµР·РѕРїР°СЃРЅС‹Р№ guest-token.`
       : devEnabled
-        ? 'Включен dev/demo OTP: подходит для теста, но не для production-верификации гостей.'
-        : 'Реальная SMS/Telegram/MAX-доставка OTP еще не подключена; без dev/demo-кода гостевой вход не пройдет.',
+        ? 'Р’РєР»СЋС‡РµРЅ dev/demo OTP: РїРѕРґС…РѕРґРёС‚ РґР»СЏ С‚РµСЃС‚Р°, РЅРѕ РЅРµ РґР»СЏ production-РІРµСЂРёС„РёРєР°С†РёРё РіРѕСЃС‚РµР№.'
+        : 'Р РµР°Р»СЊРЅР°СЏ SMS/Telegram/MAX-РґРѕСЃС‚Р°РІРєР° OTP РµС‰Рµ РЅРµ РїРѕРґРєР»СЋС‡РµРЅР°; Р±РµР· dev/demo-РєРѕРґР° РіРѕСЃС‚РµРІРѕР№ РІС…РѕРґ РЅРµ РїСЂРѕР№РґРµС‚.',
     nextAction: ready
-      ? 'Проверить один тестовый вход гостя и delivery audit по выбранному каналу, не включая массовые коммуникации.'
-      : 'Согласовать OTP-провайдера и consent-сценарий; demo-код включать только для тестов, production запускать по одному каналу.',
+      ? 'РџСЂРѕРІРµСЂРёС‚СЊ РѕРґРёРЅ С‚РµСЃС‚РѕРІС‹Р№ РІС…РѕРґ РіРѕСЃС‚СЏ Рё delivery audit РїРѕ РІС‹Р±СЂР°РЅРЅРѕРјСѓ РєР°РЅР°Р»Сѓ, РЅРµ РІРєР»СЋС‡Р°СЏ РјР°СЃСЃРѕРІС‹Рµ РєРѕРјРјСѓРЅРёРєР°С†РёРё.'
+      : 'РЎРѕРіР»Р°СЃРѕРІР°С‚СЊ OTP-РїСЂРѕРІР°Р№РґРµСЂР° Рё consent-СЃС†РµРЅР°СЂРёР№; demo-РєРѕРґ РІРєР»СЋС‡Р°С‚СЊ С‚РѕР»СЊРєРѕ РґР»СЏ С‚РµСЃС‚РѕРІ, production Р·Р°РїСѓСЃРєР°С‚СЊ РїРѕ РѕРґРЅРѕРјСѓ РєР°РЅР°Р»Сѓ.',
     sms,
     telegram,
     max,
@@ -10148,25 +10819,27 @@ function guestPortalUserCallAuthReadiness(): GuestGameIntegrationReadinessItem {
         ]),
   ];
   const providerLabel =
-    provider === 'SMS_RU_CALLCHECK' ? 'SMS.ru Callcheck' : 'ручной callback';
+    provider === 'SMS_RU_CALLCHECK'
+      ? 'SMS.ru Callcheck'
+      : 'СЂСѓС‡РЅРѕР№ callback';
 
   return {
     key: 'USER_CALL_AUTH',
-    title: 'Звонок пользователя для входа',
+    title: 'Р—РІРѕРЅРѕРє РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ РґР»СЏ РІС…РѕРґР°',
     status,
     statusLabel: ready
-      ? 'готов'
+      ? 'РіРѕС‚РѕРІ'
       : status === 'PARTIAL'
-        ? 'частично'
-        : 'не настроен',
+        ? 'С‡Р°СЃС‚РёС‡РЅРѕ'
+        : 'РЅРµ РЅР°СЃС‚СЂРѕРµРЅ',
     ready,
     configured,
     enabled,
     requiredEnv,
     details: [
       {
-        label: 'Флаг',
-        value: enabled ? 'включен' : 'выключен',
+        label: 'Р¤Р»Р°Рі',
+        value: enabled ? 'РІРєР»СЋС‡РµРЅ' : 'РІС‹РєР»СЋС‡РµРЅ',
       },
       {
         label: 'Provider',
@@ -10176,28 +10849,28 @@ function guestPortalUserCallAuthReadiness(): GuestGameIntegrationReadinessItem {
         ? [
             {
               label: 'SMS.ru api_id',
-              value: smsRuApiId ? 'настроен' : 'нужен',
+              value: smsRuApiId ? 'РЅР°СЃС‚СЂРѕРµРЅ' : 'РЅСѓР¶РµРЅ',
             },
           ]
         : [
             {
-              label: 'Номер',
-              value: phoneNumber ? 'настроен' : 'нужен',
+              label: 'РќРѕРјРµСЂ',
+              value: phoneNumber ? 'РЅР°СЃС‚СЂРѕРµРЅ' : 'РЅСѓР¶РµРЅ',
             },
             {
               label: 'Callback secret',
-              value: secret ? 'настроен' : 'нужен',
+              value: secret ? 'РЅР°СЃС‚СЂРѕРµРЅ' : 'РЅСѓР¶РµРЅ',
             },
           ]),
     ],
     note: ready
       ? provider === 'SMS_RU_CALLCHECK'
-        ? 'Fallback-вход по SMS.ru Callcheck готов: /play создает USER_CALL challenge, гость звонит на выданный SMS.ru номер, а LeetPlus подтверждает статус polling-запросом.'
-        : 'Fallback-вход по звонку готов: /play создает USER_CALL challenge, гость звонит на настроенный номер, а call-provider подтверждает caller id сервисным callback.'
-      : 'Звонок пользователя остается вторым каналом после Telegram-бота; сейчас поддержаны ручной callback provider и SMS.ru Callcheck.',
+        ? 'Fallback-РІС…РѕРґ РїРѕ SMS.ru Callcheck РіРѕС‚РѕРІ: /play СЃРѕР·РґР°РµС‚ USER_CALL challenge, РіРѕСЃС‚СЊ Р·РІРѕРЅРёС‚ РЅР° РІС‹РґР°РЅРЅС‹Р№ SMS.ru РЅРѕРјРµСЂ, Р° LeetPlus РїРѕРґС‚РІРµСЂР¶РґР°РµС‚ СЃС‚Р°С‚СѓСЃ polling-Р·Р°РїСЂРѕСЃРѕРј.'
+        : 'Fallback-РІС…РѕРґ РїРѕ Р·РІРѕРЅРєСѓ РіРѕС‚РѕРІ: /play СЃРѕР·РґР°РµС‚ USER_CALL challenge, РіРѕСЃС‚СЊ Р·РІРѕРЅРёС‚ РЅР° РЅР°СЃС‚СЂРѕРµРЅРЅС‹Р№ РЅРѕРјРµСЂ, Р° call-provider РїРѕРґС‚РІРµСЂР¶РґР°РµС‚ caller id СЃРµСЂРІРёСЃРЅС‹Рј callback.'
+      : 'Р—РІРѕРЅРѕРє РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ РѕСЃС‚Р°РµС‚СЃСЏ РІС‚РѕСЂС‹Рј РєР°РЅР°Р»РѕРј РїРѕСЃР»Рµ Telegram-Р±РѕС‚Р°; СЃРµР№С‡Р°СЃ РїРѕРґРґРµСЂР¶Р°РЅС‹ СЂСѓС‡РЅРѕР№ callback provider Рё SMS.ru Callcheck.',
     nextAction: ready
-      ? 'Проверить /play на тестовом госте: создать вход по звонку, позвонить с введенного номера и подтвердить callback без раскрытия raw phone.'
-      : 'Задать env GUEST_PORTAL_USER_CALL_ENABLED и либо GUEST_PORTAL_USER_CALL_SMS_RU_API_ID для SMS.ru, либо GUEST_PORTAL_USER_CALL_PHONE_NUMBER/GUEST_PORTAL_USER_CALL_SECRET для ручного provider.',
+      ? 'РџСЂРѕРІРµСЂРёС‚СЊ /play РЅР° С‚РµСЃС‚РѕРІРѕРј РіРѕСЃС‚Рµ: СЃРѕР·РґР°С‚СЊ РІС…РѕРґ РїРѕ Р·РІРѕРЅРєСѓ, РїРѕР·РІРѕРЅРёС‚СЊ СЃ РІРІРµРґРµРЅРЅРѕРіРѕ РЅРѕРјРµСЂР° Рё РїРѕРґС‚РІРµСЂРґРёС‚СЊ callback Р±РµР· СЂР°СЃРєСЂС‹С‚РёСЏ raw phone.'
+      : 'Р—Р°РґР°С‚СЊ env GUEST_PORTAL_USER_CALL_ENABLED Рё Р»РёР±Рѕ GUEST_PORTAL_USER_CALL_SMS_RU_API_ID РґР»СЏ SMS.ru, Р»РёР±Рѕ GUEST_PORTAL_USER_CALL_PHONE_NUMBER/GUEST_PORTAL_USER_CALL_SECRET РґР»СЏ СЂСѓС‡РЅРѕРіРѕ provider.',
     runbook: guestAuthFallbackRunbook,
   };
 }
@@ -10221,37 +10894,37 @@ function guestPortalIncomingCallLast4Readiness(): GuestGameIntegrationReadinessI
 
   return {
     key: 'INCOMING_CALL_LAST4_AUTH',
-    title: 'Входящий звонок с 4 цифрами',
+    title: 'Р’С…РѕРґСЏС‰РёР№ Р·РІРѕРЅРѕРє СЃ 4 С†РёС„СЂР°РјРё',
     status,
     statusLabel: ready
-      ? 'готов'
+      ? 'РіРѕС‚РѕРІ'
       : status === 'PARTIAL'
-        ? 'частично'
-        : 'не настроен',
+        ? 'С‡Р°СЃС‚РёС‡РЅРѕ'
+        : 'РЅРµ РЅР°СЃС‚СЂРѕРµРЅ',
     ready,
     configured,
     enabled,
     requiredEnv,
     details: [
       {
-        label: 'Флаг',
-        value: enabled ? 'включен' : 'выключен',
+        label: 'Р¤Р»Р°Рі',
+        value: enabled ? 'РІРєР»СЋС‡РµРЅ' : 'РІС‹РєР»СЋС‡РµРЅ',
       },
       {
         label: 'Provider endpoint',
-        value: endpoint ? 'настроен' : 'нужен',
+        value: endpoint ? 'РЅР°СЃС‚СЂРѕРµРЅ' : 'РЅСѓР¶РµРЅ',
       },
       {
         label: 'Provider token',
-        value: token ? 'настроен' : 'нужен',
+        value: token ? 'РЅР°СЃС‚СЂРѕРµРЅ' : 'РЅСѓР¶РµРЅ',
       },
     ],
     note: ready
-      ? 'Резервный вход готов: /play создает challenge, provider звонит гостю с номером, последние 4 цифры которого проверяются в LeetPlus.'
-      : 'Четвертый канал оставлен резервом после Telegram-бота, звонка пользователя на номер и SMS-кода; для запуска нужен отдельный call-provider исходящих звонков.',
+      ? 'Р РµР·РµСЂРІРЅС‹Р№ РІС…РѕРґ РіРѕС‚РѕРІ: /play СЃРѕР·РґР°РµС‚ challenge, provider Р·РІРѕРЅРёС‚ РіРѕСЃС‚СЋ СЃ РЅРѕРјРµСЂРѕРј, РїРѕСЃР»РµРґРЅРёРµ 4 С†РёС„СЂС‹ РєРѕС‚РѕСЂРѕРіРѕ РїСЂРѕРІРµСЂСЏСЋС‚СЃСЏ РІ LeetPlus.'
+      : 'Р§РµС‚РІРµСЂС‚С‹Р№ РєР°РЅР°Р» РѕСЃС‚Р°РІР»РµРЅ СЂРµР·РµСЂРІРѕРј РїРѕСЃР»Рµ Telegram-Р±РѕС‚Р°, Р·РІРѕРЅРєР° РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ РЅР° РЅРѕРјРµСЂ Рё SMS-РєРѕРґР°; РґР»СЏ Р·Р°РїСѓСЃРєР° РЅСѓР¶РµРЅ РѕС‚РґРµР»СЊРЅС‹Р№ call-provider РёСЃС…РѕРґСЏС‰РёС… Р·РІРѕРЅРєРѕРІ.',
     nextAction: ready
-      ? 'Проверить один тестовый вход: создать звонок, ввести последние 4 цифры номера и убедиться, что raw phone не попадает в UI.'
-      : 'Подключать только после стабилизации первых трех каналов: задать GUEST_PORTAL_INCOMING_CALL_LAST4_ENABLED, endpoint и token.',
+      ? 'РџСЂРѕРІРµСЂРёС‚СЊ РѕРґРёРЅ С‚РµСЃС‚РѕРІС‹Р№ РІС…РѕРґ: СЃРѕР·РґР°С‚СЊ Р·РІРѕРЅРѕРє, РІРІРµСЃС‚Рё РїРѕСЃР»РµРґРЅРёРµ 4 С†РёС„СЂС‹ РЅРѕРјРµСЂР° Рё СѓР±РµРґРёС‚СЊСЃСЏ, С‡С‚Рѕ raw phone РЅРµ РїРѕРїР°РґР°РµС‚ РІ UI.'
+      : 'РџРѕРґРєР»СЋС‡Р°С‚СЊ С‚РѕР»СЊРєРѕ РїРѕСЃР»Рµ СЃС‚Р°Р±РёР»РёР·Р°С†РёРё РїРµСЂРІС‹С… С‚СЂРµС… РєР°РЅР°Р»РѕРІ: Р·Р°РґР°С‚СЊ GUEST_PORTAL_INCOMING_CALL_LAST4_ENABLED, endpoint Рё token.',
     runbook: guestAuthFallbackRunbook,
   };
 }
@@ -10293,10 +10966,10 @@ function guestPortalOtpProviderReadiness({
   return {
     status,
     statusLabel: ready
-      ? `${channelLabel} готов`
+      ? `${channelLabel} РіРѕС‚РѕРІ`
       : status === 'PARTIAL'
-        ? 'частично'
-        : 'не настроено',
+        ? 'С‡Р°СЃС‚РёС‡РЅРѕ'
+        : 'РЅРµ РЅР°СЃС‚СЂРѕРµРЅРѕ',
     ready,
     configured,
     enabled: realSendEnabled && channelEnabled,
@@ -10306,7 +10979,7 @@ function guestPortalOtpProviderReadiness({
       ? configuredNote
       : status === 'PARTIAL'
         ? (partialNote ??
-          `${channelLabel} OTP настроен частично: проверьте общий флаг реальной отправки, флаг канала и provider-секреты.`)
+          `${channelLabel} OTP РЅР°СЃС‚СЂРѕРµРЅ С‡Р°СЃС‚РёС‡РЅРѕ: РїСЂРѕРІРµСЂСЊС‚Рµ РѕР±С‰РёР№ С„Р»Р°Рі СЂРµР°Р»СЊРЅРѕР№ РѕС‚РїСЂР°РІРєРё, С„Р»Р°Рі РєР°РЅР°Р»Р° Рё provider-СЃРµРєСЂРµС‚С‹.`)
         : blockedNote,
     nextAction,
   };
@@ -10365,15 +11038,15 @@ function guestPortalOtpSmsRateLimitReadiness() {
     requiredEnv: Array.from(new Set(disabled)),
     details: [
       {
-        label: 'Лимит телефона',
+        label: 'Р›РёРјРёС‚ С‚РµР»РµС„РѕРЅР°',
         value: rateLimitDetail(limits.phoneMax, limits.phoneWindowMinutes),
       },
       {
-        label: 'Лимит клуба',
+        label: 'Р›РёРјРёС‚ РєР»СѓР±Р°',
         value: rateLimitDetail(limits.storeMax, limits.storeWindowMinutes),
       },
       {
-        label: 'Лимит tenant',
+        label: 'Р›РёРјРёС‚ tenant',
         value: rateLimitDetail(limits.tenantMax, limits.tenantWindowMinutes),
       },
     ],
@@ -10382,10 +11055,10 @@ function guestPortalOtpSmsRateLimitReadiness() {
 
 function rateLimitDetail(max: number, windowMinutes: number) {
   if (max <= 0 || windowMinutes <= 0) {
-    return 'отключен';
+    return 'РѕС‚РєР»СЋС‡РµРЅ';
   }
 
-  return `${max} за ${windowMinutes} мин`;
+  return `${max} Р·Р° ${windowMinutes} РјРёРЅ`;
 }
 
 type DeliveryProviderConfig = {
@@ -10418,13 +11091,13 @@ const botConsumerRunbook = {
 };
 
 const telegramAuthRunbook = {
-  label: 'Runbook Telegram-входа',
+  label: 'Runbook Telegram-РІС…РѕРґР°',
   path: 'docs/deployment/telegram-auth.md',
   href: 'https://github.com/boozik3412/leetplus/blob/main/docs/deployment/telegram-auth.md',
 };
 
 const guestAuthFallbackRunbook = {
-  label: 'Runbook fallback-входа',
+  label: 'Runbook fallback-РІС…РѕРґР°',
   path: 'docs/deployment/guest-auth-fallbacks.md',
   href: 'https://github.com/boozik3412/leetplus/blob/main/docs/deployment/guest-auth-fallbacks.md',
 };
@@ -10583,28 +11256,28 @@ function botConsumerNextAction(
   canaryRequired = false,
 ) {
   if (!config.configured) {
-    return `Настроить env внешнего bot-consumer: ${config.requiredEnv.join(', ')}.`;
+    return `РќР°СЃС‚СЂРѕРёС‚СЊ env РІРЅРµС€РЅРµРіРѕ bot-consumer: ${config.requiredEnv.join(', ')}.`;
   }
 
   if (canaryRequired) {
-    return 'Перед первым real-send поставить GUEST_GAME_BOT_CONSUMER_LIMIT=1, запустить one-shot canary и проверить первый SENT/FAILED/BLOCKED ack в Guest Game Hub.';
+    return 'РџРµСЂРµРґ РїРµСЂРІС‹Рј real-send РїРѕСЃС‚Р°РІРёС‚СЊ GUEST_GAME_BOT_CONSUMER_LIMIT=1, Р·Р°РїСѓСЃС‚РёС‚СЊ one-shot canary Рё РїСЂРѕРІРµСЂРёС‚СЊ РїРµСЂРІС‹Р№ SENT/FAILED/BLOCKED ack РІ Guest Game Hub.';
   }
 
   if (config.dryRun) {
     return pendingReady > 0
-      ? 'Запустить VDS runner в dry-run и проверить pull без внешней отправки и ack.'
-      : 'Ожидать READY_FOR_BOT доставку или подготовить outbox из готовых наград.';
+      ? 'Р—Р°РїСѓСЃС‚РёС‚СЊ VDS runner РІ dry-run Рё РїСЂРѕРІРµСЂРёС‚СЊ pull Р±РµР· РІРЅРµС€РЅРµР№ РѕС‚РїСЂР°РІРєРё Рё ack.'
+      : 'РћР¶РёРґР°С‚СЊ READY_FOR_BOT РґРѕСЃС‚Р°РІРєСѓ РёР»Рё РїРѕРґРіРѕС‚РѕРІРёС‚СЊ outbox РёР· РіРѕС‚РѕРІС‹С… РЅР°РіСЂР°Рґ.';
   }
 
   if (pendingReady > 0) {
     return lastAckAt
-      ? 'Проверить новый tick runner и ack-события; pending доставки еще ждут обработки.'
-      : 'Запустить real Telegram runner и дождаться первого SENT/FAILED ack.';
+      ? 'РџСЂРѕРІРµСЂРёС‚СЊ РЅРѕРІС‹Р№ tick runner Рё ack-СЃРѕР±С‹С‚РёСЏ; pending РґРѕСЃС‚Р°РІРєРё РµС‰Рµ Р¶РґСѓС‚ РѕР±СЂР°Р±РѕС‚РєРё.'
+      : 'Р—Р°РїСѓСЃС‚РёС‚СЊ real Telegram runner Рё РґРѕР¶РґР°С‚СЊСЃСЏ РїРµСЂРІРѕРіРѕ SENT/FAILED ack.';
   }
 
   return lastAckAt
-    ? 'Очередь пуста; контролировать следующий ack после появления новых READY_FOR_BOT доставок.'
-    : 'Очередь пуста; сначала подготовить outbox и подтвердить Telegram-связь гостя.';
+    ? 'РћС‡РµСЂРµРґСЊ РїСѓСЃС‚Р°; РєРѕРЅС‚СЂРѕР»РёСЂРѕРІР°С‚СЊ СЃР»РµРґСѓСЋС‰РёР№ ack РїРѕСЃР»Рµ РїРѕСЏРІР»РµРЅРёСЏ РЅРѕРІС‹С… READY_FOR_BOT РґРѕСЃС‚Р°РІРѕРє.'
+    : 'РћС‡РµСЂРµРґСЊ РїСѓСЃС‚Р°; СЃРЅР°С‡Р°Р»Р° РїРѕРґРіРѕС‚РѕРІРёС‚СЊ outbox Рё РїРѕРґС‚РІРµСЂРґРёС‚СЊ Telegram-СЃРІСЏР·СЊ РіРѕСЃС‚СЏ.';
 }
 
 function deliveryDispatchChannels(
@@ -10774,12 +11447,12 @@ function deliveryProviderStatus(
         'GUEST_GAME_TELEGRAM_BOT_TOKEN',
       ],
       note: !config.realSendEnabled
-        ? 'Безопасный dry-run: включите GUEST_GAME_DELIVERY_REAL_SEND_ENABLED только после настройки согласий и бота.'
+        ? 'Р‘РµР·РѕРїР°СЃРЅС‹Р№ dry-run: РІРєР»СЋС‡РёС‚Рµ GUEST_GAME_DELIVERY_REAL_SEND_ENABLED С‚РѕР»СЊРєРѕ РїРѕСЃР»Рµ РЅР°СЃС‚СЂРѕР№РєРё СЃРѕРіР»Р°СЃРёР№ Рё Р±РѕС‚Р°.'
         : !config.telegram.enabled
-          ? 'Telegram provider выключен env-флагом GUEST_GAME_TELEGRAM_DELIVERY_ENABLED.'
+          ? 'Telegram provider РІС‹РєР»СЋС‡РµРЅ env-С„Р»Р°РіРѕРј GUEST_GAME_TELEGRAM_DELIVERY_ENABLED.'
           : !configured
-            ? 'Telegram bot token не настроен.'
-            : 'Telegram provider настроен; отправка требует подтвержденный numeric chat_id гостя.',
+            ? 'Telegram bot token РЅРµ РЅР°СЃС‚СЂРѕРµРЅ.'
+            : 'Telegram provider РЅР°СЃС‚СЂРѕРµРЅ; РѕС‚РїСЂР°РІРєР° С‚СЂРµР±СѓРµС‚ РїРѕРґС‚РІРµСЂР¶РґРµРЅРЅС‹Р№ numeric chat_id РіРѕСЃС‚СЏ.',
     };
   }
 
@@ -10805,10 +11478,10 @@ function deliveryProviderStatus(
       'GUEST_GAME_MAX_DELIVERY_ENDPOINT',
     ],
     note: canAttemptSend
-      ? 'MAX provider настроен через generic delivery endpoint; real-send разрешен только явным live-canary флагом.'
+      ? 'MAX provider РЅР°СЃС‚СЂРѕРµРЅ С‡РµСЂРµР· generic delivery endpoint; real-send СЂР°Р·СЂРµС€РµРЅ С‚РѕР»СЊРєРѕ СЏРІРЅС‹Рј live-canary С„Р»Р°РіРѕРј.'
       : configured && enabledByEnv && !config.max.liveCanaryEnabled
-        ? 'MAX provider настроен, но live-send заблокирован до явного GUEST_GAME_MAX_DELIVERY_LIVE_CANARY_ENABLED=true.'
-        : 'MAX provider не настроен или не включен; нужен подтвержденный endpoint и токен.',
+        ? 'MAX provider РЅР°СЃС‚СЂРѕРµРЅ, РЅРѕ live-send Р·Р°Р±Р»РѕРєРёСЂРѕРІР°РЅ РґРѕ СЏРІРЅРѕРіРѕ GUEST_GAME_MAX_DELIVERY_LIVE_CANARY_ENABLED=true.'
+        : 'MAX provider РЅРµ РЅР°СЃС‚СЂРѕРµРЅ РёР»Рё РЅРµ РІРєР»СЋС‡РµРЅ; РЅСѓР¶РµРЅ РїРѕРґС‚РІРµСЂР¶РґРµРЅРЅС‹Р№ endpoint Рё С‚РѕРєРµРЅ.',
   };
 }
 
@@ -10819,20 +11492,20 @@ function deliveryProviderBlockerNote(
 ) {
   if (!options.identityReady) {
     return channel === 'TELEGRAM'
-      ? 'Telegram alias не является numeric chat_id: гость должен открыть бота, чтобы LeetPlus получил безопасный chat_id.'
-      : 'MAX identity гостя еще не привязана к игровому профилю.';
+      ? 'Telegram alias РЅРµ СЏРІР»СЏРµС‚СЃСЏ numeric chat_id: РіРѕСЃС‚СЊ РґРѕР»Р¶РµРЅ РѕС‚РєСЂС‹С‚СЊ Р±РѕС‚Р°, С‡С‚РѕР±С‹ LeetPlus РїРѕР»СѓС‡РёР» Р±РµР·РѕРїР°СЃРЅС‹Р№ chat_id.'
+      : 'MAX identity РіРѕСЃС‚СЏ РµС‰Рµ РЅРµ РїСЂРёРІСЏР·Р°РЅР° Рє РёРіСЂРѕРІРѕРјСѓ РїСЂРѕС„РёР»СЋ.';
   }
 
   if (provider.dryRunOnly) {
-    return 'Dispatcher работает в безопасном dry-run или provider пока не поддерживает реальную отправку.';
+    return 'Dispatcher СЂР°Р±РѕС‚Р°РµС‚ РІ Р±РµР·РѕРїР°СЃРЅРѕРј dry-run РёР»Рё provider РїРѕРєР° РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚ СЂРµР°Р»СЊРЅСѓСЋ РѕС‚РїСЂР°РІРєСѓ.';
   }
 
   if (!provider.enabledByEnv) {
-    return `${provider.channelLabel} provider выключен env-настройками.`;
+    return `${provider.channelLabel} provider РІС‹РєР»СЋС‡РµРЅ env-РЅР°СЃС‚СЂРѕР№РєР°РјРё.`;
   }
 
   if (!provider.configured) {
-    return `${provider.channelLabel} provider не настроен токеном/endpoint.`;
+    return `${provider.channelLabel} provider РЅРµ РЅР°СЃС‚СЂРѕРµРЅ С‚РѕРєРµРЅРѕРј/endpoint.`;
   }
 
   return provider.note;
@@ -10860,7 +11533,9 @@ function deliveryDispatchPayload(data: {
 }
 
 function deliveryProviderMessage(row: DeliveryRow) {
-  const code = row.reward.rewardCode ? `\nКод: ${row.reward.rewardCode}` : '';
+  const code = row.reward.rewardCode
+    ? `\nРљРѕРґ: ${row.reward.rewardCode}`
+    : '';
 
   return `${row.messageTitle}\n\n${row.messageBody}${code}\n\nLeetPlus`;
 }
@@ -11108,7 +11783,7 @@ function bonusLedgerSchedulerReadiness(
   const tenantScope =
     envString('GUEST_GAME_BONUS_LEDGER_SCHEDULER_TENANT_SLUG') ??
     envString('GUEST_GAME_BONUS_LEDGER_SCHEDULER_TENANT_ID') ??
-    'все tenant';
+    'РІСЃРµ tenant';
   const rewardTypes =
     envString('GUEST_GAME_BONUS_LEDGER_SCHEDULER_REWARD_TYPES') ??
     envString('LANGAME_BONUS_ACCRUAL_REWARD_TYPES') ??
@@ -11128,17 +11803,17 @@ function bonusLedgerSchedulerReadiness(
 
   return {
     key: 'BONUS_LEDGER_SCHEDULER',
-    title: 'Автозапуск bonus ledger',
+    title: 'РђРІС‚РѕР·Р°РїСѓСЃРє bonus ledger',
     status,
     statusLabel: ready
-      ? 'автоначисление'
+      ? 'Р°РІС‚РѕРЅР°С‡РёСЃР»РµРЅРёРµ'
       : enabled
         ? forcedDryRun
           ? 'dry-run'
-          : 'ждет write API'
+          : 'Р¶РґРµС‚ write API'
         : configured
-          ? 'выключен'
-          : 'нужен token',
+          ? 'РІС‹РєР»СЋС‡РµРЅ'
+          : 'РЅСѓР¶РµРЅ token',
     ready,
     configured,
     enabled,
@@ -11159,23 +11834,23 @@ function bonusLedgerSchedulerReadiness(
     }),
     runbook: bonusLedgerSchedulerRunbook,
     note: ready
-      ? `Scheduler обрабатывает ledger каждые ${intervalMs} мс, лимит ${limit}, scope ${tenantScope}, reward types ${rewardTypes}. Queue approved rewards: ${queueApprovedRewards ? 'on' : 'off'}.`
+      ? `Scheduler РѕР±СЂР°Р±Р°С‚С‹РІР°РµС‚ ledger РєР°Р¶РґС‹Рµ ${intervalMs} РјСЃ, Р»РёРјРёС‚ ${limit}, scope ${tenantScope}, reward types ${rewardTypes}. Queue approved rewards: ${queueApprovedRewards ? 'on' : 'off'}.`
       : enabled
         ? forcedDryRun
-          ? `Scheduler включен в dry-run: проверяет очередь каждые ${intervalMs} мс без claim и записи в Langame.`
-          : 'Scheduler включен, но реальные начисления ждут LANGAME_BONUS_ACCRUAL_ENABLED=true.'
+          ? `Scheduler РІРєР»СЋС‡РµРЅ РІ dry-run: РїСЂРѕРІРµСЂСЏРµС‚ РѕС‡РµСЂРµРґСЊ РєР°Р¶РґС‹Рµ ${intervalMs} РјСЃ Р±РµР· claim Рё Р·Р°РїРёСЃРё РІ Langame.`
+          : 'Scheduler РІРєР»СЋС‡РµРЅ, РЅРѕ СЂРµР°Р»СЊРЅС‹Рµ РЅР°С‡РёСЃР»РµРЅРёСЏ Р¶РґСѓС‚ LANGAME_BONUS_ACCRUAL_ENABLED=true.'
         : configured
-          ? 'Scheduler настроен частично или выключен явно; автономная обработка bonus ledger не запущена.'
-          : 'Scheduler не запущен: нужен SYNC_SERVICE_TOKEN или явное включение на VDS.',
+          ? 'Scheduler РЅР°СЃС‚СЂРѕРµРЅ С‡Р°СЃС‚РёС‡РЅРѕ РёР»Рё РІС‹РєР»СЋС‡РµРЅ СЏРІРЅРѕ; Р°РІС‚РѕРЅРѕРјРЅР°СЏ РѕР±СЂР°Р±РѕС‚РєР° bonus ledger РЅРµ Р·Р°РїСѓС‰РµРЅР°.'
+          : 'Scheduler РЅРµ Р·Р°РїСѓС‰РµРЅ: РЅСѓР¶РµРЅ SYNC_SERVICE_TOKEN РёР»Рё СЏРІРЅРѕРµ РІРєР»СЋС‡РµРЅРёРµ РЅР° VDS.',
     nextAction: ready
-      ? 'Проверить первый production batch на одной награде и затем сверить GuestBonusBalanceCurrent с ночным Langame snapshot.'
+      ? 'РџСЂРѕРІРµСЂРёС‚СЊ РїРµСЂРІС‹Р№ production batch РЅР° РѕРґРЅРѕР№ РЅР°РіСЂР°РґРµ Рё Р·Р°С‚РµРј СЃРІРµСЂРёС‚СЊ GuestBonusBalanceCurrent СЃ РЅРѕС‡РЅС‹Рј Langame snapshot.'
       : enabled
         ? forcedDryRun
-          ? 'Снять dry-run только после проверки очереди, tenant Langame ключа и тестовой записи.'
-          : 'Включить LANGAME_BONUS_ACCRUAL_ENABLED=true только после dry-run и проверки tenant Langame ключа.'
+          ? 'РЎРЅСЏС‚СЊ dry-run С‚РѕР»СЊРєРѕ РїРѕСЃР»Рµ РїСЂРѕРІРµСЂРєРё РѕС‡РµСЂРµРґРё, tenant Langame РєР»СЋС‡Р° Рё С‚РµСЃС‚РѕРІРѕР№ Р·Р°РїРёСЃРё.'
+          : 'Р’РєР»СЋС‡РёС‚СЊ LANGAME_BONUS_ACCRUAL_ENABLED=true С‚РѕР»СЊРєРѕ РїРѕСЃР»Рµ dry-run Рё РїСЂРѕРІРµСЂРєРё tenant Langame РєР»СЋС‡Р°.'
         : configured
-          ? 'Включить GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED=true или убрать явное выключение после согласования VDS/env.'
-          : 'Задать SYNC_SERVICE_TOKEN на VDS и включить scheduler сначала в dry-run/canary для 1337.',
+          ? 'Р’РєР»СЋС‡РёС‚СЊ GUEST_GAME_BONUS_LEDGER_SCHEDULER_ENABLED=true РёР»Рё СѓР±СЂР°С‚СЊ СЏРІРЅРѕРµ РІС‹РєР»СЋС‡РµРЅРёРµ РїРѕСЃР»Рµ СЃРѕРіР»Р°СЃРѕРІР°РЅРёСЏ VDS/env.'
+          : 'Р—Р°РґР°С‚СЊ SYNC_SERVICE_TOKEN РЅР° VDS Рё РІРєР»СЋС‡РёС‚СЊ scheduler СЃРЅР°С‡Р°Р»Р° РІ dry-run/canary РґР»СЏ 1337.',
   };
 }
 
@@ -11198,15 +11873,15 @@ function bonusLedgerSchedulerDetails({
 }): GuestGameIntegrationReadinessItem['details'] {
   const details: GuestGameIntegrationReadinessItem['details'] = [
     {
-      label: 'Состояние',
+      label: 'РЎРѕСЃС‚РѕСЏРЅРёРµ',
       value: runtimeStatus?.running
-        ? 'выполняется'
+        ? 'РІС‹РїРѕР»РЅСЏРµС‚СЃСЏ'
         : enabled
-          ? 'включен'
-          : 'выключен',
+          ? 'РІРєР»СЋС‡РµРЅ'
+          : 'РІС‹РєР»СЋС‡РµРЅ',
     },
-    { label: 'Интервал', value: `${intervalMs} мс` },
-    { label: 'Лимит', value: String(limit) },
+    { label: 'РРЅС‚РµСЂРІР°Р»', value: `${intervalMs} РјСЃ` },
+    { label: 'Р›РёРјРёС‚', value: String(limit) },
     { label: 'Scope', value: tenantScope },
     { label: 'Reward types', value: rewardTypes },
     {
@@ -11214,18 +11889,18 @@ function bonusLedgerSchedulerDetails({
       value: queueApprovedRewards ? 'on' : 'off',
     },
     {
-      label: 'Последний запуск',
+      label: 'РџРѕСЃР»РµРґРЅРёР№ Р·Р°РїСѓСЃРє',
       value: bonusLedgerSchedulerLastRunLabel(runtimeStatus),
     },
     {
-      label: 'Последний результат',
+      label: 'РџРѕСЃР»РµРґРЅРёР№ СЂРµР·СѓР»СЊС‚Р°С‚',
       value: bonusLedgerSchedulerLastResultLabel(runtimeStatus),
     },
   ];
 
   if (runtimeStatus?.lastSkippedAt) {
     details.push({
-      label: 'Последний skip',
+      label: 'РџРѕСЃР»РµРґРЅРёР№ skip',
       value: `${runtimeStatus.lastSkippedAt}: ${
         runtimeStatus.lastSkipReason ?? 'previous dispatch is still running'
       }`,
@@ -11239,23 +11914,25 @@ function bonusLedgerSchedulerLastRunLabel(
   runtimeStatus?: GuestBonusLedgerSchedulerRuntimeStatus | null,
 ) {
   if (!runtimeStatus?.lastStartedAt) {
-    return runtimeStatus?.running ? 'выполняется' : 'еще не запускался';
+    return runtimeStatus?.running
+      ? 'РІС‹РїРѕР»РЅСЏРµС‚СЃСЏ'
+      : 'РµС‰Рµ РЅРµ Р·Р°РїСѓСЃРєР°Р»СЃСЏ';
   }
 
   const outcome =
     runtimeStatus.lastOutcome === 'SUCCESS'
-      ? 'успех'
+      ? 'СѓСЃРїРµС…'
       : runtimeStatus.lastOutcome === 'ERROR'
-        ? 'ошибка'
+        ? 'РѕС€РёР±РєР°'
         : runtimeStatus.running
-          ? 'выполняется'
-          : 'нет результата';
+          ? 'РІС‹РїРѕР»РЅСЏРµС‚СЃСЏ'
+          : 'РЅРµС‚ СЂРµР·СѓР»СЊС‚Р°С‚Р°';
 
   if (!runtimeStatus.lastFinishedAt) {
-    return `${outcome} · старт ${runtimeStatus.lastStartedAt}`;
+    return `${outcome} В· СЃС‚Р°СЂС‚ ${runtimeStatus.lastStartedAt}`;
   }
 
-  return `${outcome} · ${runtimeStatus.lastFinishedAt}`;
+  return `${outcome} В· ${runtimeStatus.lastFinishedAt}`;
 }
 
 function bonusLedgerSchedulerLastResultLabel(
@@ -11265,8 +11942,8 @@ function bonusLedgerSchedulerLastResultLabel(
 
   if (!result) {
     return runtimeStatus?.lastError
-      ? `ошибка: ${runtimeStatus.lastError}`
-      : 'нет результата';
+      ? `РѕС€РёР±РєР°: ${runtimeStatus.lastError}`
+      : 'РЅРµС‚ СЂРµР·СѓР»СЊС‚Р°С‚Р°';
   }
 
   return [
@@ -11392,29 +12069,29 @@ function csvCell(value: unknown) {
 function gameScenarioKindLabel(kind: GuestGameEconomyScenario['kind']) {
   switch (kind) {
     case 'LOOT_BOX':
-      return 'Лутбокс';
+      return 'Р›СѓС‚Р±РѕРєСЃ';
     case 'MISSION':
-      return 'Миссия';
+      return 'РњРёСЃСЃРёСЏ';
     case 'SEASON':
       return 'Battle Pass';
     case 'MANUAL':
     default:
-      return 'Ручное';
+      return 'Р СѓС‡РЅРѕРµ';
   }
 }
 
 function gameScenarioStatusLabel(status: StatusValue | 'ACTIVE') {
   switch (status) {
     case 'DRAFT':
-      return 'Черновик';
+      return 'Р§РµСЂРЅРѕРІРёРє';
     case 'ACTIVE':
-      return 'Активно';
+      return 'РђРєС‚РёРІРЅРѕ';
     case 'PAUSED':
-      return 'Пауза';
+      return 'РџР°СѓР·Р°';
     case 'FINISHED':
-      return 'Завершено';
+      return 'Р—Р°РІРµСЂС€РµРЅРѕ';
     case 'ARCHIVED':
-      return 'Архив';
+      return 'РђСЂС…РёРІ';
     default:
       return status;
   }
@@ -11425,17 +12102,17 @@ function guestLogMappingPresetLabel(
 ) {
   switch (preset) {
     case 'visit_or_session_start':
-      return 'Визит или старт сессии';
+      return 'Р’РёР·РёС‚ РёР»Рё СЃС‚Р°СЂС‚ СЃРµСЃСЃРёРё';
     case 'session_finish':
-      return 'Завершение сессии';
+      return 'Р—Р°РІРµСЂС€РµРЅРёРµ СЃРµСЃСЃРёРё';
     case 'events_and_tournaments':
-      return 'События и турниры';
+      return 'РЎРѕР±С‹С‚РёСЏ Рё С‚СѓСЂРЅРёСЂС‹';
     case 'balance_and_payment':
-      return 'Баланс и оплаты';
+      return 'Р‘Р°Р»Р°РЅСЃ Рё РѕРїР»Р°С‚С‹';
     case 'manual_or_risk':
-      return 'Ручные или риск-события';
+      return 'Р СѓС‡РЅС‹Рµ РёР»Рё СЂРёСЃРє-СЃРѕР±С‹С‚РёСЏ';
     case 'custom':
-      return 'Кастомный тип';
+      return 'РљР°СЃС‚РѕРјРЅС‹Р№ С‚РёРї';
     default:
       return '';
   }
@@ -11446,9 +12123,9 @@ function guestLogMappingIntentLabel(
 ) {
   switch (intent) {
     case 'allow':
-      return 'Можно использовать в правилах';
+      return 'РњРѕР¶РЅРѕ РёСЃРїРѕР»СЊР·РѕРІР°С‚СЊ РІ РїСЂР°РІРёР»Р°С…';
     case 'block':
-      return 'Блокировать как anti-fraud';
+      return 'Р‘Р»РѕРєРёСЂРѕРІР°С‚СЊ РєР°Рє anti-fraud';
     default:
       return '';
   }
@@ -11474,7 +12151,7 @@ function mapEvent(row: EventRow): GuestGameEvent {
           externalDomain: row.guest.externalDomain,
           externalGuestId: row.guest.externalGuestId,
           displayName: row.guest.fullNameMasked ?? row.guest.externalGuestId,
-          contact: row.guest.phoneMasked ?? 'нет контакта',
+          contact: row.guest.phoneMasked ?? 'РЅРµС‚ РєРѕРЅС‚Р°РєС‚Р°',
         }
       : null,
     lootBox: row.lootBox,
@@ -11514,15 +12191,17 @@ function mapSessionFacts(row: SnapshotSessionRow): GuestGameSnapshotFact[] {
       tariffGroupId: null,
       tariffPeriodId: null,
       tariffTypeId: null,
-      label: `Старт сессии: ${guestName}`,
+      label: `РЎС‚Р°СЂС‚ СЃРµСЃСЃРёРё: ${guestName}`,
       details: [
         row.store?.name,
-        sessionMinutes ? `${sessionMinutes} мин` : null,
-        row.packet ? 'пакет' : null,
-        row.normalStop === false ? 'нестандартное завершение' : null,
+        sessionMinutes ? `${sessionMinutes} РјРёРЅ` : null,
+        row.packet ? 'РїР°РєРµС‚' : null,
+        row.normalStop === false
+          ? 'РЅРµСЃС‚Р°РЅРґР°СЂС‚РЅРѕРµ Р·Р°РІРµСЂС€РµРЅРёРµ'
+          : null,
       ]
         .filter(Boolean)
-        .join(' · '),
+        .join(' В· '),
     },
   ];
 
@@ -11544,13 +12223,13 @@ function mapSessionFacts(row: SnapshotSessionRow): GuestGameSnapshotFact[] {
       tariffGroupId: null,
       tariffPeriodId: null,
       tariffTypeId: null,
-      label: `Игровое время: ${guestName}`,
+      label: `РРіСЂРѕРІРѕРµ РІСЂРµРјСЏ: ${guestName}`,
       details: [
         row.store?.name,
-        `${Math.round((sessionMinutes / 60) * 10) / 10} ч`,
+        `${Math.round((sessionMinutes / 60) * 10) / 10} С‡`,
       ]
         .filter(Boolean)
-        .join(' · '),
+        .join(' В· '),
     });
   }
 
@@ -11584,8 +12263,8 @@ function mapLogFact(row: SnapshotLogRow): GuestGameSnapshotFact[] {
       tariffPeriodId: null,
       tariffTypeId: null,
       guestLogType,
-      label: `Лог гостя: ${snapshotGuestName(row.guest, row.externalGuestId)}`,
-      details: row.type ?? 'тип не указан',
+      label: `Р›РѕРі РіРѕСЃС‚СЏ: ${snapshotGuestName(row.guest, row.externalGuestId)}`,
+      details: row.type ?? 'С‚РёРї РЅРµ СѓРєР°Р·Р°РЅ',
     },
   ];
 }
@@ -11620,19 +12299,21 @@ function mapTransactionFact(
       tariffGroupId: null,
       tariffPeriodId: null,
       tariffTypeId: null,
-      label: `${eventType === 'BALANCE_TOPUP' ? 'Пополнение баланса' : 'Покупка/списание'}: ${snapshotGuestName(
+      label: `${eventType === 'BALANCE_TOPUP' ? 'РџРѕРїРѕР»РЅРµРЅРёРµ Р±Р°Р»Р°РЅСЃР°' : 'РџРѕРєСѓРїРєР°/СЃРїРёСЃР°РЅРёРµ'}: ${snapshotGuestName(
         row.guest,
         row.externalGuestId,
       )}`,
       details: [
         row.type,
-        amount ? `${Math.abs(amount)} руб` : null,
+        amount ? `${Math.abs(amount)} СЂСѓР±` : null,
         row.store?.name,
-        row.balance ? `баланс ${numberValue(row.balance)} руб` : null,
-        row.bonusBalance ? `бонусы ${numberValue(row.bonusBalance)} руб` : null,
+        row.balance ? `Р±Р°Р»Р°РЅСЃ ${numberValue(row.balance)} СЂСѓР±` : null,
+        row.bonusBalance
+          ? `Р±РѕРЅСѓСЃС‹ ${numberValue(row.bonusBalance)} СЂСѓР±`
+          : null,
       ]
         .filter(Boolean)
-        .join(' · '),
+        .join(' В· '),
     },
   ];
 }
@@ -11670,17 +12351,17 @@ function mapOperationLogFact(
       label:
         row.operationName ??
         (eventType === 'BALANCE_TOPUP'
-          ? 'Операция пополнения'
-          : 'Операция покупки/списания'),
+          ? 'РћРїРµСЂР°С†РёСЏ РїРѕРїРѕР»РЅРµРЅРёСЏ'
+          : 'РћРїРµСЂР°С†РёСЏ РїРѕРєСѓРїРєРё/СЃРїРёСЃР°РЅРёСЏ'),
       details: [
         row.type,
         row.operationSource,
         row.operationForm,
-        amount ? `${Math.abs(amount)} руб` : null,
+        amount ? `${Math.abs(amount)} СЂСѓР±` : null,
         row.store?.name,
       ]
         .filter(Boolean)
-        .join(' · '),
+        .join(' В· '),
     },
   ];
 }
@@ -11706,8 +12387,8 @@ function mapBalanceFact(row: SnapshotBalanceRow): GuestGameSnapshotFact[] {
       tariffGroupId: null,
       tariffPeriodId: null,
       tariffTypeId: null,
-      label: `Баланс гостя: ${snapshotGuestName(row.guest, row.externalGuestId)}`,
-      details: `Баланс ${balance} руб`,
+      label: `Р‘Р°Р»Р°РЅСЃ РіРѕСЃС‚СЏ: ${snapshotGuestName(row.guest, row.externalGuestId)}`,
+      details: `Р‘Р°Р»Р°РЅСЃ ${balance} СЂСѓР±`,
     },
   ];
 }
@@ -11735,8 +12416,8 @@ function mapBonusBalanceFact(
       tariffGroupId: null,
       tariffPeriodId: null,
       tariffTypeId: null,
-      label: `Бонусный баланс: ${snapshotGuestName(row.guest, row.externalGuestId)}`,
-      details: `Бонусы ${bonusBalance} руб`,
+      label: `Р‘РѕРЅСѓСЃРЅС‹Р№ Р±Р°Р»Р°РЅСЃ: ${snapshotGuestName(row.guest, row.externalGuestId)}`,
+      details: `Р‘РѕРЅСѓСЃС‹ ${bonusBalance} СЂСѓР±`,
     },
   ];
 }
@@ -11778,20 +12459,20 @@ function mapLoyaltyGroupFact(
       tariffGroupId: null,
       tariffPeriodId: null,
       tariffTypeId: null,
-      label: `Группа лояльности: ${groupName}`,
+      label: `Р“СЂСѓРїРїР° Р»РѕСЏР»СЊРЅРѕСЃС‚Рё: ${groupName}`,
       details: [
         snapshotGuestName(row, row.externalGuestId),
-        percent != null ? `скидка ${percent}%` : null,
-        currentHours != null ? `${currentHours} ч у гостя` : null,
+        percent != null ? `СЃРєРёРґРєР° ${percent}%` : null,
+        currentHours != null ? `${currentHours} С‡ Сѓ РіРѕСЃС‚СЏ` : null,
         hoursFrom != null || hoursTo != null
-          ? `диапазон ${hoursFrom ?? 0}-${hoursTo ?? '∞'} ч`
+          ? `РґРёР°РїР°Р·РѕРЅ ${hoursFrom ?? 0}-${hoursTo ?? 'в€ћ'} С‡`
           : null,
         group?.lastSyncedAt
-          ? `группа обновлена ${group.lastSyncedAt.toISOString()}`
+          ? `РіСЂСѓРїРїР° РѕР±РЅРѕРІР»РµРЅР° ${group.lastSyncedAt.toISOString()}`
           : null,
       ]
         .filter(Boolean)
-        .join(' · '),
+        .join(' В· '),
     },
   ];
 }
@@ -11824,18 +12505,18 @@ function mapProductExpenseFact(
       tariffGroupId: null,
       tariffPeriodId: null,
       tariffTypeId: null,
-      label: `Товарная покупка: ${productName ?? 'товар'} · ${guestName}`,
+      label: `РўРѕРІР°СЂРЅР°СЏ РїРѕРєСѓРїРєР°: ${productName ?? 'С‚РѕРІР°СЂ'} В· ${guestName}`,
       details: [
         row.storeNameAtSale ?? row.store?.name,
         productName,
         row.product?.category?.name,
         row.product?.supplier?.name,
-        quantity ? `${quantity} шт` : null,
-        revenue ? `${Math.abs(revenue)} руб` : null,
-        cost ? `себестоимость ${Math.abs(cost)} руб` : null,
+        quantity ? `${quantity} С€С‚` : null,
+        revenue ? `${Math.abs(revenue)} СЂСѓР±` : null,
+        cost ? `СЃРµР±РµСЃС‚РѕРёРјРѕСЃС‚СЊ ${Math.abs(cost)} СЂСѓР±` : null,
       ]
         .filter(Boolean)
-        .join(' · '),
+        .join(' В· '),
     },
   ];
 }
@@ -11862,7 +12543,7 @@ function mapReferralFact(
   const profileLabel =
     profile?.displayName ??
     profile?.contactMasked ??
-    `игровой профиль ${inviterProfileId.slice(0, 8)}`;
+    `РёРіСЂРѕРІРѕР№ РїСЂРѕС„РёР»СЊ ${inviterProfileId.slice(0, 8)}`;
   const channel = nullableString(payload.channel);
   const referralCodeMasked = nullableString(payload.referralCodeMasked);
   const clubId = nullableString(payload.clubId);
@@ -11892,12 +12573,12 @@ function mapReferralFact(
       label: `Реферал: ${profileLabel}`,
       details: [
         store?.name ?? clubId,
-        channel ? `канал ${channel}` : null,
-        referralCodeMasked ? `код ${referralCodeMasked}` : null,
-        acceptedAt ? `принят ${acceptedAt}` : null,
+        channel ? `РєР°РЅР°Р» ${channel}` : null,
+        referralCodeMasked ? `РєРѕРґ ${referralCodeMasked}` : null,
+        acceptedAt ? `РїСЂРёРЅСЏС‚ ${acceptedAt}` : null,
       ]
         .filter(Boolean)
-        .join(' · '),
+        .join(' В· '),
     },
   ];
 }
@@ -11918,7 +12599,7 @@ function mapSnapshotGuest(
       externalDomain: null,
       externalGuestId: guestId,
       displayName: guestId,
-      contact: 'нет контакта',
+      contact: 'РЅРµС‚ РєРѕРЅС‚Р°РєС‚Р°',
     };
   }
 
@@ -11927,7 +12608,7 @@ function mapSnapshotGuest(
     externalDomain: row.externalDomain,
     externalGuestId: row.externalGuestId,
     displayName: row.fullNameMasked ?? row.externalGuestId,
-    contact: row.phoneMasked ?? row.emailMasked ?? 'нет контакта',
+    contact: row.phoneMasked ?? row.emailMasked ?? 'РЅРµС‚ РєРѕРЅС‚Р°РєС‚Р°',
   };
 }
 
@@ -11941,7 +12622,9 @@ function snapshotGuestName(
   row: SnapshotGuestRow | null,
   externalGuestId: string | null,
 ) {
-  return row?.fullNameMasked ?? externalGuestId ?? 'гость без профиля';
+  return (
+    row?.fullNameMasked ?? externalGuestId ?? 'РіРѕСЃС‚СЊ Р±РµР· РїСЂРѕС„РёР»СЏ'
+  );
 }
 
 function snapshotGroupKey(row: {
@@ -11975,8 +12658,8 @@ function guestLogEventType(type: string | null) {
     normalized.includes('session') ||
     normalized.includes('visit') ||
     normalized.includes('login') ||
-    normalized.includes('вход') ||
-    normalized.includes('визит')
+    normalized.includes('РІС…РѕРґ') ||
+    normalized.includes('РІРёР·РёС‚')
   ) {
     return 'VISIT';
   }
@@ -11993,8 +12676,8 @@ function isTopUpFactType(type: string | null) {
     normalized.includes('topup') ||
     normalized.includes('top_up') ||
     normalized.includes('balance_add') ||
-    normalized.includes('пополн') ||
-    normalized.includes('зачисл')
+    normalized.includes('РїРѕРїРѕР»РЅ') ||
+    normalized.includes('Р·Р°С‡РёСЃР»')
   );
 }
 
@@ -12046,7 +12729,7 @@ function pipelineSourceValue(value: unknown) {
     !snapshotFactSources.includes(parsed as GuestGameSnapshotFact['source'])
   ) {
     throw new BadRequestException(
-      `Недопустимый источник snapshot-фактов: ${parsed}`,
+      `РќРµРґРѕРїСѓСЃС‚РёРјС‹Р№ РёСЃС‚РѕС‡РЅРёРє snapshot-С„Р°РєС‚РѕРІ: ${parsed}`,
     );
   }
 
@@ -12123,7 +12806,7 @@ function pipelineErrorMessage(error: unknown) {
     return error.message;
   }
 
-  return 'Не удалось обработать snapshot-факт.';
+  return 'РќРµ СѓРґР°Р»РѕСЃСЊ РѕР±СЂР°Р±РѕС‚Р°С‚СЊ snapshot-С„Р°РєС‚.';
 }
 
 function buildProcessPayload(
@@ -12195,11 +12878,11 @@ function rewardRuleLink(rule: GuestGameDryRunRule) {
 
 function processRuleKindLabel(kind: GuestGameDryRunRule['kind']) {
   if (kind === 'LOOT_BOX') {
-    return 'Лутбокс';
+    return 'Р›СѓС‚Р±РѕРєСЃ';
   }
 
   if (kind === 'MISSION') {
-    return 'Миссия';
+    return 'РњРёСЃСЃРёСЏ';
   }
 
   return 'Battle Pass';
@@ -12273,7 +12956,7 @@ function mapProfileSummary(
 
   return {
     id: row.id,
-    displayName: row.displayName ?? 'Игровой профиль',
+    displayName: row.displayName ?? 'РРіСЂРѕРІРѕР№ РїСЂРѕС„РёР»СЊ',
     contactMasked: row.contactMasked,
     xp: row.xp,
     level: row.level,
@@ -12343,13 +13026,15 @@ function evaluateLootBoxDryRun(
   appendDryRunLootBoxLimits(rule, context, ruleRewards, blockers, reasons);
 
   if (rule.audience) {
-    reasons.push(`Аудитория: ${rule.audience.name}`);
+    reasons.push(`РђСѓРґРёС‚РѕСЂРёСЏ: ${rule.audience.name}`);
   }
   if (rule.segment) {
-    reasons.push(`Сегмент: ${rule.segment}`);
+    reasons.push(`РЎРµРіРјРµРЅС‚: ${rule.segment}`);
   }
   if (rule.manualApprovalRequired) {
-    reasons.push('Выдача требует подтверждения сотрудником');
+    reasons.push(
+      'Р’С‹РґР°С‡Р° С‚СЂРµР±СѓРµС‚ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ СЃРѕС‚СЂСѓРґРЅРёРєРѕРј',
+    );
   }
 
   return dryRunRuleResult({
@@ -12399,10 +13084,12 @@ function evaluateMissionDryRun(
   appendDryRunMissionLimits(rule, context, ruleRewards, blockers, reasons);
 
   if (rule.audience) {
-    reasons.push(`Аудитория: ${rule.audience.name}`);
+    reasons.push(`РђСѓРґРёС‚РѕСЂРёСЏ: ${rule.audience.name}`);
   }
   if (rule.manualApprovalRequired) {
-    reasons.push('Выдача требует подтверждения сотрудником');
+    reasons.push(
+      'Р’С‹РґР°С‡Р° С‚СЂРµР±СѓРµС‚ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ СЃРѕС‚СЂСѓРґРЅРёРєРѕРј',
+    );
   }
 
   return dryRunRuleResult({
@@ -12434,6 +13121,7 @@ function evaluateSeasonDryRun(
 
   appendDryRunProfileCheck(context, blockers, reasons);
   appendDryRunStatusCheck(rule.status, blockers, reasons);
+  appendDryRunStoreCheck(rule.storeIds, context.storeId, blockers, reasons);
   appendDryRunDateBounds(
     rule.periodFrom,
     rule.periodTo,
@@ -12445,13 +13133,15 @@ function evaluateSeasonDryRun(
   appendDryRunBudgetCheck(rule.budgetAmount, 0, ruleRewards, blockers, reasons);
 
   if (rule.audience) {
-    reasons.push(`Аудитория: ${rule.audience.name}`);
+    reasons.push(`РђСѓРґРёС‚РѕСЂРёСЏ: ${rule.audience.name}`);
   }
   if (rule.premiumEnabled) {
-    reasons.push('Есть premium-дорожка');
+    reasons.push('Р•СЃС‚СЊ premium-РґРѕСЂРѕР¶РєР°');
   }
   if (rule.manualApprovalRequired) {
-    reasons.push('Награды сезона требуют подтверждения сотрудником');
+    reasons.push(
+      'РќР°РіСЂР°РґС‹ СЃРµР·РѕРЅР° С‚СЂРµР±СѓСЋС‚ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ СЃРѕС‚СЂСѓРґРЅРёРєРѕРј',
+    );
   }
 
   return dryRunRuleResult({
@@ -12484,15 +13174,19 @@ function appendDryRunStatusCheck(
   reasons: string[],
 ) {
   if (status === 'ACTIVE') {
-    reasons.push('Правило активно');
+    reasons.push('РџСЂР°РІРёР»Рѕ Р°РєС‚РёРІРЅРѕ');
     return;
   }
   if (status === 'DRAFT') {
-    reasons.push('Черновик проверяется в тестовом режиме');
+    reasons.push(
+      'Р§РµСЂРЅРѕРІРёРє РїСЂРѕРІРµСЂСЏРµС‚СЃСЏ РІ С‚РµСЃС‚РѕРІРѕРј СЂРµР¶РёРјРµ',
+    );
     return;
   }
 
-  blockers.push(`Статус правила не позволяет запуск: ${status}`);
+  blockers.push(
+    `РЎС‚Р°С‚СѓСЃ РїСЂР°РІРёР»Р° РЅРµ РїРѕР·РІРѕР»СЏРµС‚ Р·Р°РїСѓСЃРє: ${status}`,
+  );
 }
 
 function appendDryRunProfileCheck(
@@ -12501,15 +13195,19 @@ function appendDryRunProfileCheck(
   reasons: string[],
 ) {
   if (!context.profile && !context.guest) {
-    reasons.push('Гость не выбран: проверяются только общие условия');
+    reasons.push(
+      'Р“РѕСЃС‚СЊ РЅРµ РІС‹Р±СЂР°РЅ: РїСЂРѕРІРµСЂСЏСЋС‚СЃСЏ С‚РѕР»СЊРєРѕ РѕР±С‰РёРµ СѓСЃР»РѕРІРёСЏ',
+    );
     return;
   }
   if (context.profile?.status && context.profile.status !== 'ACTIVE') {
-    blockers.push(`Профиль гостя не активен: ${context.profile.status}`);
+    blockers.push(
+      `РџСЂРѕС„РёР»СЊ РіРѕСЃС‚СЏ РЅРµ Р°РєС‚РёРІРµРЅ: ${context.profile.status}`,
+    );
     return;
   }
 
-  reasons.push('Гость выбран для проверки');
+  reasons.push('Р“РѕСЃС‚СЊ РІС‹Р±СЂР°РЅ РґР»СЏ РїСЂРѕРІРµСЂРєРё');
 }
 
 function appendDryRunTriggerCheck(
@@ -12531,7 +13229,9 @@ function appendDryRunTriggerCheck(
     return;
   }
 
-  blockers.push(`Триггер ${triggerKind} не совпадает с событием ${eventType}`);
+  blockers.push(
+    `РўСЂРёРіРіРµСЂ ${triggerKind} РЅРµ СЃРѕРІРїР°РґР°РµС‚ СЃ СЃРѕР±С‹С‚РёРµРј ${eventType}`,
+  );
 }
 
 function appendDryRunStoreCheck(
@@ -12541,21 +13241,25 @@ function appendDryRunStoreCheck(
   reasons: string[],
 ) {
   if (!storeIds.length) {
-    reasons.push('Доступно для всей сети');
+    reasons.push('Р”РѕСЃС‚СѓРїРЅРѕ РґР»СЏ РІСЃРµР№ СЃРµС‚Рё');
     return;
   }
   if (!storeId) {
     reasons.push(
-      'Правило ограничено клубами, выберите клуб для точной проверки',
+      'РџСЂР°РІРёР»Рѕ РѕРіСЂР°РЅРёС‡РµРЅРѕ РєР»СѓР±Р°РјРё, РІС‹Р±РµСЂРёС‚Рµ РєР»СѓР± РґР»СЏ С‚РѕС‡РЅРѕР№ РїСЂРѕРІРµСЂРєРё',
     );
     return;
   }
   if (!storeIds.includes(storeId)) {
-    blockers.push('Выбранный клуб не входит в область правила');
+    blockers.push(
+      'Р’С‹Р±СЂР°РЅРЅС‹Р№ РєР»СѓР± РЅРµ РІС…РѕРґРёС‚ РІ РѕР±Р»Р°СЃС‚СЊ РїСЂР°РІРёР»Р°',
+    );
     return;
   }
 
-  reasons.push('Выбранный клуб входит в область правила');
+  reasons.push(
+    'Р’С‹Р±СЂР°РЅРЅС‹Р№ РєР»СѓР± РІС…РѕРґРёС‚ РІ РѕР±Р»Р°СЃС‚СЊ РїСЂР°РІРёР»Р°',
+  );
 }
 
 function appendDryRunPeriodRules(
@@ -12570,11 +13274,15 @@ function appendDryRunPeriodRules(
   const weekdaysOnly = rules.weekdaysOnly === true;
 
   if (weekdays.length && !weekdays.includes(weekday)) {
-    blockers.push('День недели не входит в период правила');
+    blockers.push(
+      'Р”РµРЅСЊ РЅРµРґРµР»Рё РЅРµ РІС…РѕРґРёС‚ РІ РїРµСЂРёРѕРґ РїСЂР°РІРёР»Р°',
+    );
   } else if (weekdaysOnly && (weekday === 0 || weekday === 6)) {
-    blockers.push('Правило доступно только по будням');
+    blockers.push(
+      'РџСЂР°РІРёР»Рѕ РґРѕСЃС‚СѓРїРЅРѕ С‚РѕР»СЊРєРѕ РїРѕ Р±СѓРґРЅСЏРј',
+    );
   } else if (weekdays.length || weekdaysOnly) {
-    reasons.push('День недели подходит');
+    reasons.push('Р”РµРЅСЊ РЅРµРґРµР»Рё РїРѕРґС…РѕРґРёС‚');
   }
 
   const hours = dryRunStringArray(rules.hours);
@@ -12583,9 +13291,11 @@ function appendDryRunPeriodRules(
   }
 
   if (hours.some((window) => dryRunIsWithinTimeWindow(occurredAt, window))) {
-    reasons.push(`Время входит в окно ${hours.join(', ')}`);
+    reasons.push(`Р’СЂРµРјСЏ РІС…РѕРґРёС‚ РІ РѕРєРЅРѕ ${hours.join(', ')}`);
   } else {
-    blockers.push(`Время не входит в окно ${hours.join(', ')}`);
+    blockers.push(
+      `Р’СЂРµРјСЏ РЅРµ РІС…РѕРґРёС‚ РІ РѕРєРЅРѕ ${hours.join(', ')}`,
+    );
   }
 }
 
@@ -12601,43 +13311,57 @@ function appendDryRunSessionConditionCheck(
 
   if (expectedType && isActionableSessionType(expectedType)) {
     if (!actualType) {
-      blockers.push('Тип сессии не указан для проверки правила');
+      blockers.push(
+        'РўРёРї СЃРµСЃСЃРёРё РЅРµ СѓРєР°Р·Р°РЅ РґР»СЏ РїСЂРѕРІРµСЂРєРё РїСЂР°РІРёР»Р°',
+      );
     } else if (
       normalizeSessionType(expectedType) !== normalizeSessionType(actualType)
     ) {
-      blockers.push(`Тип сессии не подходит: нужен ${expectedType}`);
+      blockers.push(
+        `РўРёРї СЃРµСЃСЃРёРё РЅРµ РїРѕРґС…РѕРґРёС‚: РЅСѓР¶РµРЅ ${expectedType}`,
+      );
     } else {
-      reasons.push(`Тип сессии подходит: ${actualType}`);
+      reasons.push(`РўРёРї СЃРµСЃСЃРёРё РїРѕРґС…РѕРґРёС‚: ${actualType}`);
     }
   } else if (expectedType) {
-    reasons.push(`Тип сессии правила: ${expectedType}`);
+    reasons.push(`РўРёРї СЃРµСЃСЃРёРё РїСЂР°РІРёР»Р°: ${expectedType}`);
   }
 
   const packetMode = dryRunString(packetModeValue)?.toUpperCase() ?? 'ANY';
   if (packetMode === 'ANY' || packetMode === 'ALL') {
-    reasons.push('Пакет часов не ограничен');
+    reasons.push('РџР°РєРµС‚ С‡Р°СЃРѕРІ РЅРµ РѕРіСЂР°РЅРёС‡РµРЅ');
     return;
   }
 
   if (context.sessionPacket == null) {
-    blockers.push('Факт сессии не содержит признак пакета часов');
+    blockers.push(
+      'Р¤Р°РєС‚ СЃРµСЃСЃРёРё РЅРµ СЃРѕРґРµСЂР¶РёС‚ РїСЂРёР·РЅР°Рє РїР°РєРµС‚Р° С‡Р°СЃРѕРІ',
+    );
     return;
   }
 
   if (packetMode === 'PACKET_ONLY') {
     if (context.sessionPacket) {
-      reasons.push('Сессия проходит по пакету часов');
+      reasons.push(
+        'РЎРµСЃСЃРёСЏ РїСЂРѕС…РѕРґРёС‚ РїРѕ РїР°РєРµС‚Сѓ С‡Р°СЃРѕРІ',
+      );
     } else {
-      blockers.push('Правило доступно только для пакетов часов');
+      blockers.push(
+        'РџСЂР°РІРёР»Рѕ РґРѕСЃС‚СѓРїРЅРѕ С‚РѕР»СЊРєРѕ РґР»СЏ РїР°РєРµС‚РѕРІ С‡Р°СЃРѕРІ',
+      );
     }
     return;
   }
 
   if (packetMode === 'NON_PACKET_ONLY') {
     if (!context.sessionPacket) {
-      reasons.push('Сессия обычная, без пакета часов');
+      reasons.push(
+        'РЎРµСЃСЃРёСЏ РѕР±С‹С‡РЅР°СЏ, Р±РµР· РїР°РєРµС‚Р° С‡Р°СЃРѕРІ',
+      );
     } else {
-      blockers.push('Правило доступно только для обычных сессий');
+      blockers.push(
+        'РџСЂР°РІРёР»Рѕ РґРѕСЃС‚СѓРїРЅРѕ С‚РѕР»СЊРєРѕ РґР»СЏ РѕР±С‹С‡РЅС‹С… СЃРµСЃСЃРёР№',
+      );
     }
   }
 }
@@ -12651,21 +13375,21 @@ function appendDryRunTariffConditionCheck(
   const rules = dryRunRecord(value);
 
   appendDryRunTariffSingleCheck(
-    'Тарифная группа',
+    'РўР°СЂРёС„РЅР°СЏ РіСЂСѓРїРїР°',
     dryRunStringValues(rules.tariffGroupIds, rules.tariffGroupId),
     context.tariffGroupId,
     blockers,
     reasons,
   );
   appendDryRunTariffSingleCheck(
-    'Тарифный период',
+    'РўР°СЂРёС„РЅС‹Р№ РїРµСЂРёРѕРґ',
     dryRunStringValues(rules.tariffPeriodIds, rules.tariffPeriodId),
     context.tariffPeriodId,
     blockers,
     reasons,
   );
   appendDryRunTariffSingleCheck(
-    'Тип тарифа',
+    'РўРёРї С‚Р°СЂРёС„Р°',
     dryRunStringValues(rules.tariffTypeIds, rules.tariffTypeId),
     context.tariffTypeId,
     blockers,
@@ -12687,16 +13411,20 @@ function appendDryRunTariffSingleCheck(
   }
 
   if (!actualValue) {
-    blockers.push(`${label}: значение не указано для проверки правила`);
+    blockers.push(
+      `${label}: Р·РЅР°С‡РµРЅРёРµ РЅРµ СѓРєР°Р·Р°РЅРѕ РґР»СЏ РїСЂРѕРІРµСЂРєРё РїСЂР°РІРёР»Р°`,
+    );
     return;
   }
 
   if (!uniqueExpected.includes(actualValue)) {
-    blockers.push(`${label} не подходит: нужен ${uniqueExpected.join(', ')}`);
+    blockers.push(
+      `${label} РЅРµ РїРѕРґС…РѕРґРёС‚: РЅСѓР¶РµРЅ ${uniqueExpected.join(', ')}`,
+    );
     return;
   }
 
-  reasons.push(`${label} подходит`);
+  reasons.push(`${label} РїРѕРґС…РѕРґРёС‚`);
 }
 
 function guestGameRuleUsesGuestLogs(
@@ -12768,19 +13496,23 @@ function appendDryRunGuestLogTypeCheck(
     : null;
 
   if (!actualType) {
-    blockers.push('Тип события guests/logs не указан для проверки правила');
+    blockers.push(
+      'РўРёРї СЃРѕР±С‹С‚РёСЏ guests/logs РЅРµ СѓРєР°Р·Р°РЅ РґР»СЏ РїСЂРѕРІРµСЂРєРё РїСЂР°РІРёР»Р°',
+    );
     return;
   }
 
   if (blockedTypes.includes(actualType)) {
     blockers.push(
-      `Тип guests/logs заблокирован anti-fraud правилом: ${context.guestLogType}`,
+      `РўРёРї guests/logs Р·Р°Р±Р»РѕРєРёСЂРѕРІР°РЅ anti-fraud РїСЂР°РІРёР»РѕРј: ${context.guestLogType}`,
     );
     return;
   }
 
   if (blockedTypes.length) {
-    reasons.push('Тип guests/logs не входит в anti-fraud блокировки');
+    reasons.push(
+      'РўРёРї guests/logs РЅРµ РІС…РѕРґРёС‚ РІ anti-fraud Р±Р»РѕРєРёСЂРѕРІРєРё',
+    );
   }
 
   if (!allowedTypes.length) {
@@ -12789,12 +13521,12 @@ function appendDryRunGuestLogTypeCheck(
 
   if (!allowedTypes.includes(actualType)) {
     blockers.push(
-      `Тип guests/logs не подходит: нужен ${allowedTypes.join(', ')}`,
+      `РўРёРї guests/logs РЅРµ РїРѕРґС…РѕРґРёС‚: РЅСѓР¶РµРЅ ${allowedTypes.join(', ')}`,
     );
     return;
   }
 
-  reasons.push(`Тип guests/logs подходит: ${context.guestLogType}`);
+  reasons.push(`РўРёРї guests/logs РїРѕРґС…РѕРґРёС‚: ${context.guestLogType}`);
 }
 
 function normalizedGuestLogTypes(values: string[]) {
@@ -12816,13 +13548,15 @@ function appendDryRunDateBounds(
   const to = periodTo ? new Date(periodTo) : null;
 
   if (from && occurredAt < from) {
-    blockers.push('Событие раньше периода действия');
+    blockers.push(
+      'РЎРѕР±С‹С‚РёРµ СЂР°РЅСЊС€Рµ РїРµСЂРёРѕРґР° РґРµР№СЃС‚РІРёСЏ',
+    );
   }
   if (to && occurredAt > to) {
-    blockers.push('Событие позже периода действия');
+    blockers.push('РЎРѕР±С‹С‚РёРµ РїРѕР·Р¶Рµ РїРµСЂРёРѕРґР° РґРµР№СЃС‚РІРёСЏ');
   }
   if (from || to) {
-    reasons.push('Период действия проверен');
+    reasons.push('РџРµСЂРёРѕРґ РґРµР№СЃС‚РІРёСЏ РїСЂРѕРІРµСЂРµРЅ');
   }
 }
 
@@ -12855,31 +13589,39 @@ function appendDryRunMissionConditions(
 
   if (minSessionMinutes != null && context.sessionMinutes < minSessionMinutes) {
     blockers.push(
-      `Сессия короче условия: ${context.sessionMinutes}/${minSessionMinutes} мин`,
+      `РЎРµСЃСЃРёСЏ РєРѕСЂРѕС‡Рµ СѓСЃР»РѕРІРёСЏ: ${context.sessionMinutes}/${minSessionMinutes} РјРёРЅ`,
     );
   } else if (minSessionMinutes != null) {
-    reasons.push(`Длительность сессии подходит: ${context.sessionMinutes} мин`);
+    reasons.push(
+      `Р”Р»РёС‚РµР»СЊРЅРѕСЃС‚СЊ СЃРµСЃСЃРёРё РїРѕРґС…РѕРґРёС‚: ${context.sessionMinutes} РјРёРЅ`,
+    );
   }
 
   if (minSpendAmount != null && context.spendAmount < minSpendAmount) {
     blockers.push(
-      `Сумма покупки ниже условия: ${context.spendAmount}/${minSpendAmount} руб`,
+      `РЎСѓРјРјР° РїРѕРєСѓРїРєРё РЅРёР¶Рµ СѓСЃР»РѕРІРёСЏ: ${context.spendAmount}/${minSpendAmount} СЂСѓР±`,
     );
   } else if (minSpendAmount != null) {
-    reasons.push(`Сумма покупки подходит: ${context.spendAmount} руб`);
+    reasons.push(
+      `РЎСѓРјРјР° РїРѕРєСѓРїРєРё РїРѕРґС…РѕРґРёС‚: ${context.spendAmount} СЂСѓР±`,
+    );
   }
 
   if (
     conditions.weekdaysOnly === true &&
     [0, 6].includes(context.occurredAt.getDay())
   ) {
-    blockers.push('Миссия доступна только по будням');
+    blockers.push(
+      'РњРёСЃСЃРёСЏ РґРѕСЃС‚СѓРїРЅР° С‚РѕР»СЊРєРѕ РїРѕ Р±СѓРґРЅСЏРј',
+    );
   }
   if (conditions.requiresLangameFact === true) {
-    reasons.push('Факт Langame обязателен для боевого подтверждения');
+    reasons.push(
+      'Р¤Р°РєС‚ Langame РѕР±СЏР·Р°С‚РµР»РµРЅ РґР»СЏ Р±РѕРµРІРѕРіРѕ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ',
+    );
   }
   if (windowDays != null) {
-    reasons.push(`Окно выполнения: ${windowDays} дн.`);
+    reasons.push(`РћРєРЅРѕ РІС‹РїРѕР»РЅРµРЅРёСЏ: ${windowDays} РґРЅ.`);
   }
 }
 
@@ -12902,7 +13644,9 @@ function appendDryRunSeasonXpRules(
   appendDryRunGuestLogTypeCheck(rules, context, blockers, reasons);
 
   if (dryRunOptionalNumber(rules.packetSessionBonus) != null) {
-    reasons.push('Battle Pass учитывает бонус за пакет часов');
+    reasons.push(
+      'Battle Pass СѓС‡РёС‚С‹РІР°РµС‚ Р±РѕРЅСѓСЃ Р·Р° РїР°РєРµС‚ С‡Р°СЃРѕРІ',
+    );
   }
 }
 
@@ -12914,18 +13658,20 @@ function appendDryRunBudgetCheck(
   reasons: string[],
 ) {
   if (budgetAmount == null) {
-    reasons.push('Бюджет не задан');
+    reasons.push('Р‘СЋРґР¶РµС‚ РЅРµ Р·Р°РґР°РЅ');
     return;
   }
 
   const spent = sum(rewards.map((reward) => reward.rewardAmount));
   const projected = spent + projectedAmount;
-  reasons.push(`Бюджет: ${spent}/${budgetAmount} руб`);
+  reasons.push(`Р‘СЋРґР¶РµС‚: ${spent}/${budgetAmount} СЂСѓР±`);
 
   if (spent >= budgetAmount) {
-    blockers.push('Бюджет правила уже исчерпан');
+    blockers.push('Р‘СЋРґР¶РµС‚ РїСЂР°РІРёР»Р° СѓР¶Рµ РёСЃС‡РµСЂРїР°РЅ');
   } else if (projectedAmount > 0 && projected > budgetAmount) {
-    blockers.push('Награда превысит бюджет правила');
+    blockers.push(
+      'РќР°РіСЂР°РґР° РїСЂРµРІС‹СЃРёС‚ Р±СЋРґР¶РµС‚ РїСЂР°РІРёР»Р°',
+    );
   }
 }
 
@@ -12949,14 +13695,16 @@ function appendDryRunLootBoxLimits(
     ).length;
 
     if (!context.profile && !context.guest) {
-      blockers.push('Для проверки лимита на гостя выберите профиль или гостя');
+      blockers.push(
+        'Р”Р»СЏ РїСЂРѕРІРµСЂРєРё Р»РёРјРёС‚Р° РЅР° РіРѕСЃС‚СЏ РІС‹Р±РµСЂРёС‚Рµ РїСЂРѕС„РёР»СЊ РёР»Рё РіРѕСЃС‚СЏ',
+      );
     } else if (weeklyCount >= perGuestPerWeek) {
       blockers.push(
-        `Лимит на гостя за неделю исчерпан: ${weeklyCount}/${perGuestPerWeek}`,
+        `Р›РёРјРёС‚ РЅР° РіРѕСЃС‚СЏ Р·Р° РЅРµРґРµР»СЋ РёСЃС‡РµСЂРїР°РЅ: ${weeklyCount}/${perGuestPerWeek}`,
       );
     } else {
       reasons.push(
-        `Лимит на гостя за неделю: ${weeklyCount}/${perGuestPerWeek}`,
+        `Р›РёРјРёС‚ РЅР° РіРѕСЃС‚СЏ Р·Р° РЅРµРґРµР»СЋ: ${weeklyCount}/${perGuestPerWeek}`,
       );
     }
   }
@@ -12968,10 +13716,12 @@ function appendDryRunLootBoxLimits(
 
     if (dayCount >= totalPerDay) {
       blockers.push(
-        `Дневной лимит лутбокса исчерпан: ${dayCount}/${totalPerDay}`,
+        `Р”РЅРµРІРЅРѕР№ Р»РёРјРёС‚ Р»СѓС‚Р±РѕРєСЃР° РёСЃС‡РµСЂРїР°РЅ: ${dayCount}/${totalPerDay}`,
       );
     } else {
-      reasons.push(`Дневной лимит лутбокса: ${dayCount}/${totalPerDay}`);
+      reasons.push(
+        `Р”РЅРµРІРЅРѕР№ Р»РёРјРёС‚ Р»СѓС‚Р±РѕРєСЃР°: ${dayCount}/${totalPerDay}`,
+      );
     }
   }
 }
@@ -12989,14 +13739,16 @@ function appendDryRunMissionLimits(
     ).length;
 
     if (!context.profile && !context.guest) {
-      blockers.push('Для проверки лимита на гостя выберите профиль или гостя');
+      blockers.push(
+        'Р”Р»СЏ РїСЂРѕРІРµСЂРєРё Р»РёРјРёС‚Р° РЅР° РіРѕСЃС‚СЏ РІС‹Р±РµСЂРёС‚Рµ РїСЂРѕС„РёР»СЊ РёР»Рё РіРѕСЃС‚СЏ',
+      );
     } else if (guestCount >= rule.perGuestLimit) {
       blockers.push(
-        `Лимит миссии на гостя исчерпан: ${guestCount}/${rule.perGuestLimit}`,
+        `Р›РёРјРёС‚ РјРёСЃСЃРёРё РЅР° РіРѕСЃС‚СЏ РёСЃС‡РµСЂРїР°РЅ: ${guestCount}/${rule.perGuestLimit}`,
       );
     } else {
       reasons.push(
-        `Лимит миссии на гостя: ${guestCount}/${rule.perGuestLimit}`,
+        `Р›РёРјРёС‚ РјРёСЃСЃРёРё РЅР° РіРѕСЃС‚СЏ: ${guestCount}/${rule.perGuestLimit}`,
       );
     }
   }
@@ -13004,11 +13756,11 @@ function appendDryRunMissionLimits(
   if (rule.totalRewardLimit != null) {
     if (rewards.length >= rule.totalRewardLimit) {
       blockers.push(
-        `Общий лимит наград миссии исчерпан: ${rewards.length}/${rule.totalRewardLimit}`,
+        `РћР±С‰РёР№ Р»РёРјРёС‚ РЅР°РіСЂР°Рґ РјРёСЃСЃРёРё РёСЃС‡РµСЂРїР°РЅ: ${rewards.length}/${rule.totalRewardLimit}`,
       );
     } else {
       reasons.push(
-        `Общий лимит наград миссии: ${rewards.length}/${rule.totalRewardLimit}`,
+        `РћР±С‰РёР№ Р»РёРјРёС‚ РЅР°РіСЂР°Рґ РјРёСЃСЃРёРё: ${rewards.length}/${rule.totalRewardLimit}`,
       );
     }
   }
@@ -13133,7 +13885,7 @@ function dryRunGuestSummary(row: {
     externalDomain: row.externalDomain,
     externalGuestId: row.externalGuestId,
     displayName: row.fullNameMasked ?? row.externalGuestId,
-    contact: row.phoneMasked ?? row.emailMasked ?? 'нет контакта',
+    contact: row.phoneMasked ?? row.emailMasked ?? 'РЅРµС‚ РєРѕРЅС‚Р°РєС‚Р°',
   };
 }
 
@@ -13268,7 +14020,7 @@ function requiredString(value: unknown, label: string, required: boolean) {
   const parsed = stringValue(value);
 
   if (required && !parsed) {
-    throw new BadRequestException(`${label} обязательно`);
+    throw new BadRequestException(`${label} РѕР±СЏР·Р°С‚РµР»СЊРЅРѕ`);
   }
 
   return parsed;
@@ -13338,7 +14090,9 @@ function intValue(value: unknown) {
   const number = Number(value);
 
   if (!Number.isFinite(number)) {
-    throw new BadRequestException('Числовое поле заполнено неверно');
+    throw new BadRequestException(
+      'Р§РёСЃР»РѕРІРѕРµ РїРѕР»Рµ Р·Р°РїРѕР»РЅРµРЅРѕ РЅРµРІРµСЂРЅРѕ',
+    );
   }
 
   return Math.trunc(number);
@@ -13352,7 +14106,9 @@ function decimalValue(value: unknown) {
   const number = Number(value);
 
   if (!Number.isFinite(number)) {
-    throw new BadRequestException('Сумма заполнена неверно');
+    throw new BadRequestException(
+      'РЎСѓРјРјР° Р·Р°РїРѕР»РЅРµРЅР° РЅРµРІРµСЂРЅРѕ',
+    );
   }
 
   return new Prisma.Decimal(number);
@@ -13368,13 +14124,13 @@ function dateValue(value: unknown) {
   }
 
   if (typeof value !== 'string') {
-    throw new BadRequestException('Дата заполнена неверно');
+    throw new BadRequestException('Р”Р°С‚Р° Р·Р°РїРѕР»РЅРµРЅР° РЅРµРІРµСЂРЅРѕ');
   }
 
   const date = new Date(value);
 
   if (Number.isNaN(date.getTime())) {
-    throw new BadRequestException('Дата заполнена неверно');
+    throw new BadRequestException('Р”Р°С‚Р° Р·Р°РїРѕР»РЅРµРЅР° РЅРµРІРµСЂРЅРѕ');
   }
 
   return date;
@@ -13406,7 +14162,9 @@ function enumValue<T extends readonly string[]>(
   }
 
   if (!allowed.includes(parsed)) {
-    throw new BadRequestException(`Недопустимый статус: ${parsed}`);
+    throw new BadRequestException(
+      `РќРµРґРѕРїСѓСЃС‚РёРјС‹Р№ СЃС‚Р°С‚СѓСЃ: ${parsed}`,
+    );
   }
 
   return parsed as T[number];
@@ -13424,7 +14182,9 @@ function integrationProviderValue(value: unknown) {
   }
 
   if (parsed !== IntegrationProvider.LANGAME) {
-    throw new BadRequestException('Поддерживается только Langame provider');
+    throw new BadRequestException(
+      'РџРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ С‚РѕР»СЊРєРѕ Langame provider',
+    );
   }
 
   return IntegrationProvider.LANGAME;
@@ -13522,22 +14282,22 @@ function effectRecommendation({
   totalRevenue: number;
 }) {
   if (status === 'ACTIVE' && eventsCount === 0) {
-    return 'Сценарий активен, но событий еще нет: проверьте dry-run и batch по snapshot-фактам.';
+    return 'РЎС†РµРЅР°СЂРёР№ Р°РєС‚РёРІРµРЅ, РЅРѕ СЃРѕР±С‹С‚РёР№ РµС‰Рµ РЅРµС‚: РїСЂРѕРІРµСЂСЊС‚Рµ dry-run Рё batch РїРѕ snapshot-С„Р°РєС‚Р°Рј.';
   }
 
   if (reachedGuests > 0 && returnedGuests === 0) {
-    return 'События есть, возврата пока нет: проверьте ценность награды и условия повторного визита.';
+    return 'РЎРѕР±С‹С‚РёСЏ РµСЃС‚СЊ, РІРѕР·РІСЂР°С‚Р° РїРѕРєР° РЅРµС‚: РїСЂРѕРІРµСЂСЊС‚Рµ С†РµРЅРЅРѕСЃС‚СЊ РЅР°РіСЂР°РґС‹ Рё СѓСЃР»РѕРІРёСЏ РїРѕРІС‚РѕСЂРЅРѕРіРѕ РІРёР·РёС‚Р°.';
   }
 
   if (returnedGuests > 0 && totalRevenue === 0) {
-    return 'Гости возвращаются, но денежный эффект не виден: проверьте продажи бара и пополнения после визита.';
+    return 'Р“РѕСЃС‚Рё РІРѕР·РІСЂР°С‰Р°СЋС‚СЃСЏ, РЅРѕ РґРµРЅРµР¶РЅС‹Р№ СЌС„С„РµРєС‚ РЅРµ РІРёРґРµРЅ: РїСЂРѕРІРµСЂСЊС‚Рµ РїСЂРѕРґР°Р¶Рё Р±Р°СЂР° Рё РїРѕРїРѕР»РЅРµРЅРёСЏ РїРѕСЃР»Рµ РІРёР·РёС‚Р°.';
   }
 
   if (totalRevenue > 0) {
-    return 'Есть измеримый денежный эффект: сравните его со стоимостью наград и масштабируйте аккуратно.';
+    return 'Р•СЃС‚СЊ РёР·РјРµСЂРёРјС‹Р№ РґРµРЅРµР¶РЅС‹Р№ СЌС„С„РµРєС‚: СЃСЂР°РІРЅРёС‚Рµ РµРіРѕ СЃРѕ СЃС‚РѕРёРјРѕСЃС‚СЊСЋ РЅР°РіСЂР°Рґ Рё РјР°СЃС€С‚Р°Р±РёСЂСѓР№С‚Рµ Р°РєРєСѓСЂР°С‚РЅРѕ.';
   }
 
-  return 'Эффект будет считаться по сессиям, продажам и пополнениям после игровых событий.';
+  return 'Р­С„С„РµРєС‚ Р±СѓРґРµС‚ СЃС‡РёС‚Р°С‚СЊСЃСЏ РїРѕ СЃРµСЃСЃРёСЏРј, РїСЂРѕРґР°Р¶Р°Рј Рё РїРѕРїРѕР»РЅРµРЅРёСЏРј РїРѕСЃР»Рµ РёРіСЂРѕРІС‹С… СЃРѕР±С‹С‚РёР№.';
 }
 
 function gameEconomyGuestKey(row: GuestGameReward | GuestGameEvent) {
@@ -13572,26 +14332,26 @@ function economyRecommendation({
   paidRewards: number;
 }) {
   if (status === 'ACTIVE' && !plannedBudget) {
-    return 'Задайте бюджет до масштабного запуска, чтобы контролировать стоимость наград.';
+    return 'Р—Р°РґР°Р№С‚Рµ Р±СЋРґР¶РµС‚ РґРѕ РјР°СЃС€С‚Р°Р±РЅРѕРіРѕ Р·Р°РїСѓСЃРєР°, С‡С‚РѕР±С‹ РєРѕРЅС‚СЂРѕР»РёСЂРѕРІР°С‚СЊ СЃС‚РѕРёРјРѕСЃС‚СЊ РЅР°РіСЂР°Рґ.';
   }
 
   if (budgetUsagePercent !== null && budgetUsagePercent >= 90) {
-    return 'Бюджет почти выбран: проверьте лимиты, период действия и очередь выдач.';
+    return 'Р‘СЋРґР¶РµС‚ РїРѕС‡С‚Рё РІС‹Р±СЂР°РЅ: РїСЂРѕРІРµСЂСЊС‚Рµ Р»РёРјРёС‚С‹, РїРµСЂРёРѕРґ РґРµР№СЃС‚РІРёСЏ Рё РѕС‡РµСЂРµРґСЊ РІС‹РґР°С‡.';
   }
 
   if (backlog >= 10) {
-    return 'В очереди накопились награды: проверьте подтверждения и кассирскую выдачу.';
+    return 'Р’ РѕС‡РµСЂРµРґРё РЅР°РєРѕРїРёР»РёСЃСЊ РЅР°РіСЂР°РґС‹: РїСЂРѕРІРµСЂСЊС‚Рµ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ Рё РєР°СЃСЃРёСЂСЃРєСѓСЋ РІС‹РґР°С‡Сѓ.';
   }
 
   if (status === 'ACTIVE' && eventsCount === 0) {
-    return 'Активный сценарий еще не дал событий: запустите dry-run или batch по snapshot-фактам.';
+    return 'РђРєС‚РёРІРЅС‹Р№ СЃС†РµРЅР°СЂРёР№ РµС‰Рµ РЅРµ РґР°Р» СЃРѕР±С‹С‚РёР№: Р·Р°РїСѓСЃС‚РёС‚Рµ dry-run РёР»Рё batch РїРѕ snapshot-С„Р°РєС‚Р°Рј.';
   }
 
   if (paidRewards > 0) {
-    return 'Есть погашенные награды: можно сверить фактический эффект с визитами и выручкой.';
+    return 'Р•СЃС‚СЊ РїРѕРіР°С€РµРЅРЅС‹Рµ РЅР°РіСЂР°РґС‹: РјРѕР¶РЅРѕ СЃРІРµСЂРёС‚СЊ С„Р°РєС‚РёС‡РµСЃРєРёР№ СЌС„С„РµРєС‚ СЃ РІРёР·РёС‚Р°РјРё Рё РІС‹СЂСѓС‡РєРѕР№.';
   }
 
-  return 'Контур под контролем: следите за бюджетом, очередью и XP-событиями.';
+  return 'РљРѕРЅС‚СѓСЂ РїРѕРґ РєРѕРЅС‚СЂРѕР»РµРј: СЃР»РµРґРёС‚Рµ Р·Р° Р±СЋРґР¶РµС‚РѕРј, РѕС‡РµСЂРµРґСЊСЋ Рё XP-СЃРѕР±С‹С‚РёСЏРјРё.';
 }
 
 function sum(values: number[]) {
@@ -13611,8 +14371,8 @@ function defaultProbabilityRules(): Prisma.InputJsonValue {
     type: 'weighted',
     items: [
       { label: 'XP battle pass', weight: 50 },
-      { label: 'Промокод бара', weight: 30 },
-      { label: 'Миссия на повторный визит', weight: 20 },
+      { label: 'РџСЂРѕРјРѕРєРѕРґ Р±Р°СЂР°', weight: 30 },
+      { label: 'РњРёСЃСЃРёСЏ РЅР° РїРѕРІС‚РѕСЂРЅС‹Р№ РІРёР·РёС‚', weight: 20 },
     ],
   };
 }
@@ -13637,9 +14397,856 @@ function defaultXpRules(): Prisma.InputJsonValue {
 
 function defaultLevels(): Prisma.InputJsonValue {
   return [
-    { level: 1, xp: 0, freeReward: 'Старт сезона' },
-    { level: 2, xp: 250, freeReward: 'Промокод бара' },
-    { level: 3, xp: 500, freeReward: 'Бонус на следующий визит' },
-    { level: 4, xp: 900, freeReward: 'Часы игры с подтверждением' },
+    { level: 1, xp: 0, freeReward: 'РЎС‚Р°СЂС‚ СЃРµР·РѕРЅР°' },
+    { level: 2, xp: 250, freeReward: 'РџСЂРѕРјРѕРєРѕРґ Р±Р°СЂР°' },
+    {
+      level: 3,
+      xp: 500,
+      freeReward: 'Р‘РѕРЅСѓСЃ РЅР° СЃР»РµРґСѓСЋС‰РёР№ РІРёР·РёС‚',
+    },
+    {
+      level: 4,
+      xp: 900,
+      freeReward: 'Р§Р°СЃС‹ РёРіСЂС‹ СЃ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёРµРј',
+    },
   ];
+}
+
+function normalizeVisualEditorPayload(
+  value: unknown,
+): GuestGameVisualEditorPayload {
+  const record = visualRecord(value);
+  const battlePass = visualRecord(record.battlePass);
+  const checkIn = visualRecord(record.checkIn);
+
+  return {
+    version: 1,
+    battlePass: {
+      id: visualId(battlePass.id),
+      enabled: visualBool(battlePass.enabled, true),
+      title: visualString(battlePass.title, 'Клубный сезон'),
+      status: visualStatus(battlePass.status, 'DRAFT'),
+      levelCount: visualInt(battlePass.levelCount, 6, 1, 60),
+      xpPerLevel: visualInt(battlePass.xpPerLevel, 250, 1, 100000),
+      mainPrize: visualNullableString(battlePass.mainPrize),
+      levelRewards: visualArray(battlePass.levelRewards)
+        .map((item, index) => {
+          const itemRecord = visualRecord(item);
+          return {
+            level: visualInt(itemRecord.level, index + 1, 1, 60),
+            reward: visualString(itemRecord.reward, ''),
+          };
+        })
+        .filter((item) => item.reward.trim())
+        .slice(0, 60),
+    },
+    lootBoxes: visualArray(record.lootBoxes)
+      .map((item) => {
+        const itemRecord = visualRecord(item);
+        return {
+          id: visualId(itemRecord.id),
+          title: visualString(
+            itemRecord.title,
+            visualString(itemRecord.name, 'Лутбокс'),
+          ),
+          status: visualStatus(itemRecord.status, 'DRAFT'),
+          triggerKind: visualString(
+            itemRecord.triggerKind,
+            'SESSION_START',
+          ).toUpperCase(),
+          rewardType: visualString(
+            itemRecord.rewardType,
+            'PROMOCODE',
+          ).toUpperCase(),
+          rewardAmount: visualNumberOrNull(itemRecord.rewardAmount),
+          rewardLabel: visualString(itemRecord.rewardLabel, 'Награда клуба'),
+          condition: visualString(itemRecord.condition, 'Активность в клубе'),
+          limitPerGuest: visualIntOrNull(itemRecord.limitPerGuest, 1, 1000),
+        };
+      })
+      .slice(0, 12),
+    missions: visualArray(record.missions)
+      .map((item) => {
+        const itemRecord = visualRecord(item);
+        return {
+          id: visualId(itemRecord.id),
+          title: visualString(
+            itemRecord.title,
+            visualString(itemRecord.name, 'Квест'),
+          ),
+          status: visualStatus(itemRecord.status, 'DRAFT'),
+          missionType: visualString(
+            itemRecord.missionType,
+            'CUSTOM',
+          ).toUpperCase(),
+          triggerKind: visualString(
+            itemRecord.triggerKind,
+            'SESSION_START',
+          ).toUpperCase(),
+          xpReward: visualInt(itemRecord.xpReward, 50, 0, 100000),
+          rewardType: visualString(
+            itemRecord.rewardType,
+            'PROMOCODE',
+          ).toUpperCase(),
+          rewardAmount: visualNumberOrNull(itemRecord.rewardAmount),
+          rewardLabel: visualString(itemRecord.rewardLabel, 'Награда за квест'),
+          progressTarget: visualIntOrNull(itemRecord.progressTarget, 1, 100000),
+          progressUnit: visualNullableString(itemRecord.progressUnit),
+          questSteps: visualArray(itemRecord.questSteps)
+            .map((step, index) => {
+              const stepRecord = visualRecord(step);
+              return {
+                id: visualString(stepRecord.id, `step-${index + 1}`),
+                title: visualString(stepRecord.title, ''),
+                target: visualInt(stepRecord.target, index + 1, 1, 100000),
+              };
+            })
+            .filter((step) => step.title.trim())
+            .slice(0, 12),
+        };
+      })
+      .slice(0, 24),
+    promoCards: visualArray(record.promoCards)
+      .map((item) => {
+        const itemRecord = visualRecord(item);
+        return {
+          id: visualId(itemRecord.id),
+          label: visualNullableString(itemRecord.label),
+          title: visualString(itemRecord.title, 'Событие клуба'),
+          description: visualNullableString(itemRecord.description),
+          tag: visualNullableString(itemRecord.tag),
+          status: visualStatus(itemRecord.status, 'DRAFT'),
+          targetAnchor: visualNullableString(itemRecord.targetAnchor),
+          periodFrom: visualDateString(itemRecord.periodFrom),
+          periodTo: visualDateString(itemRecord.periodTo),
+        };
+      })
+      .slice(0, 12),
+    checkIn: {
+      enabled: visualBool(checkIn.enabled, false),
+      rewardMode: visualRewardMode(checkIn.rewardMode),
+      xp: visualIntOrNull(checkIn.xp, 1, 100000),
+      bonusAmount: visualNumberOrNull(checkIn.bonusAmount),
+      rewardLabel: visualNullableString(checkIn.rewardLabel),
+    },
+  };
+}
+
+function validateVisualEditorPublish(payload: GuestGameVisualEditorPayload) {
+  if (!payload.checkIn.enabled) {
+    return;
+  }
+
+  if (payload.checkIn.rewardMode === 'XP') {
+    if (!payload.checkIn.xp || payload.checkIn.xp <= 0) {
+      throw new BadRequestException('Для чек-ина выберите количество XP');
+    }
+    return;
+  }
+
+  if (payload.checkIn.rewardMode === 'BONUS') {
+    if (!payload.checkIn.bonusAmount || payload.checkIn.bonusAmount <= 0) {
+      throw new BadRequestException('Для чек-ина выберите сумму бонусов');
+    }
+    return;
+  }
+
+  throw new BadRequestException(
+    'Для включенного чек-ина выберите награду: XP или бонусы',
+  );
+}
+
+function visualBattlePassFromSeason(
+  season: GuestGameSeason | null,
+): GuestGameVisualEditorBattlePass {
+  const levels = visualArray(season?.levels).map((item) => visualRecord(item));
+  const xpPerLevel =
+    levels.length > 1
+      ? Math.max(1, Number(levels[1]?.xp ?? 250) - Number(levels[0]?.xp ?? 0))
+      : 250;
+  const levelRewards = levels
+    .map((item) => ({
+      level: visualInt(item.level, 1, 1, 60),
+      reward: visualString(item.freeReward ?? item.premiumReward, ''),
+    }))
+    .filter((item) => item.reward.trim());
+
+  return {
+    id: season?.id ?? null,
+    enabled: Boolean(season),
+    title: season?.name ?? 'Клубный сезон',
+    status: season?.status ?? 'DRAFT',
+    levelCount: levels.length || 6,
+    xpPerLevel,
+    mainPrize: levelRewards.at(-1)?.reward ?? null,
+    levelRewards,
+  };
+}
+
+function visualLootBoxFromRule(
+  rule: GuestGameLootBox,
+): GuestGameVisualEditorLootBox {
+  const limits = visualRecord(rule.limits);
+
+  return {
+    id: rule.id,
+    title: rule.name,
+    status: rule.status,
+    triggerKind: rule.triggerKind,
+    rewardType: rule.rewardType,
+    rewardAmount: rule.rewardAmount,
+    rewardLabel: rule.rewardLabel ?? rule.name,
+    condition: visualString(
+      visualRecord(rule.periodRules).condition,
+      rule.triggerKind,
+    ),
+    limitPerGuest: visualIntOrNull(
+      limits.perGuest ?? limits.perGuestPerWeek,
+      1,
+      1000,
+    ),
+  };
+}
+
+function visualMissionFromRule(
+  rule: GuestGameMission,
+): GuestGameVisualEditorMission {
+  const conditions = visualRecord(rule.conditions);
+
+  return {
+    id: rule.id,
+    title: rule.name,
+    status: rule.status,
+    missionType: rule.missionType,
+    triggerKind: rule.triggerKind,
+    xpReward: rule.xpReward,
+    rewardType: rule.rewardType,
+    rewardAmount: rule.rewardAmount,
+    rewardLabel: rule.rewardLabel ?? rule.name,
+    progressTarget: rule.progressTarget,
+    progressUnit: rule.progressUnit,
+    questSteps: visualArray(conditions.questSteps)
+      .map((item, index) => {
+        const record = visualRecord(item);
+        return {
+          id: visualString(record.id, `step-${index + 1}`),
+          title: visualString(record.title, ''),
+          target: visualInt(record.target, index + 1, 1, 100000),
+        };
+      })
+      .filter((item) => item.title.trim()),
+  };
+}
+
+function visualPromoFromRule(
+  rule: GuestGamePromoCard,
+): GuestGameVisualEditorPromoCard {
+  return {
+    id: rule.id,
+    label: rule.label,
+    title: rule.title,
+    description: rule.description,
+    tag: rule.tag,
+    status: rule.status,
+    targetAnchor: rule.targetAnchor,
+    periodFrom: rule.periodFrom,
+    periodTo: rule.periodTo,
+  };
+}
+
+function visualCheckInFromMission(
+  mission: GuestGameMission | null,
+): GuestGameVisualEditorCheckIn {
+  if (!mission) {
+    return {
+      enabled: false,
+      rewardMode: '',
+      xp: null,
+      bonusAmount: null,
+      rewardLabel: null,
+    };
+  }
+
+  const bonusMode = isBonusLedgerRewardType(mission.rewardType);
+
+  return {
+    enabled: mission.status === 'ACTIVE',
+    rewardMode: bonusMode ? 'BONUS' : mission.xpReward > 0 ? 'XP' : '',
+    xp: mission.xpReward || null,
+    bonusAmount: bonusMode ? mission.rewardAmount : null,
+    rewardLabel: mission.rewardLabel,
+  };
+}
+
+function buildVisualSeasonData(
+  user: AuthenticatedUser,
+  storeIds: string[],
+  payload: GuestGameVisualEditorPayload,
+) {
+  const battlePass = payload.battlePass;
+
+  return clean({
+    tenantId: user.tenantId,
+    createdByUserId: actorUserId(user),
+    name: battlePass.title,
+    status: battlePass.status,
+    seasonType: 'CLUB_SEASON',
+    xpRules: {
+      source: 'visual_editor',
+      visit: 20,
+      checkIn: 0,
+      playHour: 10,
+      missionCompletion: 50,
+    },
+    levels: buildVisualSeasonLevels(battlePass),
+    freeRewards: buildVisualSeasonRewards(battlePass),
+    premiumRewards: [],
+    premiumEnabled: false,
+    premiumUpgradeMode: null,
+    storeIds,
+    manualApprovalRequired: true,
+    note: 'Опубликовано из визуального редактора.',
+  });
+}
+
+function buildVisualLootBoxData(
+  user: AuthenticatedUser,
+  storeIds: string[],
+  item: GuestGameVisualEditorLootBox,
+) {
+  return clean({
+    tenantId: user.tenantId,
+    createdByUserId: actorUserId(user),
+    name: item.title,
+    status: item.status,
+    triggerKind: item.triggerKind,
+    rewardType: item.rewardType,
+    rewardAmount:
+      item.rewardAmount == null ? null : new Prisma.Decimal(item.rewardAmount),
+    rewardLabel: item.rewardLabel,
+    storeIds,
+    periodRules: {
+      source: 'visual_editor',
+      condition: item.condition,
+    },
+    limits: {
+      source: 'visual_editor',
+      perGuest: item.limitPerGuest,
+    },
+    probabilityRules: {
+      type: 'single',
+      source: 'visual_editor',
+      items: [{ label: item.rewardLabel, weight: 100 }],
+    },
+    manualApprovalRequired: false,
+    note: 'Опубликовано из визуального редактора.',
+  });
+}
+
+function buildVisualMissionData(
+  user: AuthenticatedUser,
+  storeIds: string[],
+  item: GuestGameVisualEditorMission,
+) {
+  return clean({
+    tenantId: user.tenantId,
+    createdByUserId: actorUserId(user),
+    name: item.title,
+    status: item.status,
+    missionType: item.missionType,
+    triggerKind: item.triggerKind,
+    rewardType: item.rewardType,
+    rewardAmount:
+      item.rewardAmount == null ? null : new Prisma.Decimal(item.rewardAmount),
+    rewardLabel: item.rewardLabel,
+    xpReward: item.xpReward,
+    progressTarget: item.progressTarget,
+    progressUnit: item.progressUnit,
+    storeIds,
+    conditions: {
+      source: 'visual_editor',
+      questEnabled: item.questSteps.length > 0,
+      questMode: item.questSteps.length > 1 ? 'CHAIN' : 'SINGLE',
+      questSteps: item.questSteps,
+      progressTarget: item.progressTarget,
+      progressUnit: item.progressUnit,
+    },
+    manualApprovalRequired: false,
+    note: 'Опубликовано из визуального редактора.',
+  });
+}
+
+function buildVisualPromoCardData(
+  user: AuthenticatedUser,
+  storeIds: string[],
+  item: GuestGameVisualEditorPromoCard,
+) {
+  return clean({
+    tenantId: user.tenantId,
+    createdByUserId: actorUserId(user),
+    title: item.title,
+    label: item.label,
+    description: item.description,
+    tag: item.tag,
+    status: item.status,
+    targetAnchor: item.targetAnchor,
+    storeIds,
+    periodFrom: item.periodFrom ? new Date(item.periodFrom) : null,
+    periodTo: item.periodTo ? new Date(item.periodTo) : null,
+    metadata: { source: 'visual_editor' },
+  });
+}
+
+function buildVisualCheckInMissionData(
+  user: AuthenticatedUser,
+  storeId: string,
+  checkIn: GuestGameVisualEditorCheckIn,
+) {
+  const bonusMode = checkIn.rewardMode === 'BONUS';
+  const amount = bonusMode ? (checkIn.bonusAmount ?? 0) : 0;
+  const xp = checkIn.rewardMode === 'XP' ? (checkIn.xp ?? 0) : 0;
+
+  return clean({
+    tenantId: user.tenantId,
+    createdByUserId: actorUserId(user),
+    name: 'Чекин в клубе',
+    status: 'ACTIVE',
+    missionType: 'CHECK_IN',
+    triggerKind: 'CHECK_IN',
+    rewardType: bonusMode ? 'BONUS_BALANCE' : 'XP',
+    rewardAmount: new Prisma.Decimal(amount),
+    rewardLabel:
+      checkIn.rewardLabel ?? (bonusMode ? 'Бонусы за чекин' : 'XP за чекин'),
+    xpReward: xp,
+    progressTarget: 1,
+    progressUnit: 'check-in',
+    storeIds: [storeId],
+    conditions: {
+      source: 'visual_editor',
+      checkIn: true,
+      progressTarget: 1,
+      progressUnit: 'check-in',
+    },
+    manualApprovalRequired: false,
+    note: 'Управляемое правило CHECK_IN из визуального редактора.',
+  });
+}
+
+function buildVisualSeasonLevels(
+  battlePass: GuestGameVisualEditorBattlePass,
+): Prisma.InputJsonValue {
+  const rewardByLevel = new Map(
+    battlePass.levelRewards.map((item) => [item.level, item.reward]),
+  );
+
+  return Array.from({ length: battlePass.levelCount }, (_, index) => {
+    const level = index + 1;
+    const reward =
+      rewardByLevel.get(level) ??
+      (level === battlePass.levelCount ? battlePass.mainPrize : null);
+
+    return {
+      level,
+      xp: index * battlePass.xpPerLevel,
+      freeReward: reward,
+      premiumReward: null,
+    };
+  });
+}
+
+function buildVisualSeasonRewards(
+  battlePass: GuestGameVisualEditorBattlePass,
+): Prisma.InputJsonValue {
+  return visualArray(buildVisualSeasonLevels(battlePass))
+    .map((item) => visualRecord(item))
+    .filter(
+      (item) => typeof item.freeReward === 'string' && item.freeReward.trim(),
+    )
+    .map((item) => ({
+      level: Number(item.level) || 1,
+      reward: String(item.freeReward),
+    }));
+}
+
+function buildVisualEditorPreviewSummary(
+  user: AuthenticatedUser,
+  store: PilotStoreRow,
+  payload: GuestGameVisualEditorPayload,
+): GuestPortalGameSummary {
+  const now = new Date().toISOString();
+  const activeBattlePass = payload.battlePass.enabled
+    ? buildVisualPreviewBattlePass(payload.battlePass)
+    : null;
+  const missions = payload.missions.slice(0, 6).map((mission) => ({
+    id: mission.id ?? `preview-mission-${mission.title}`,
+    name: mission.title,
+    rewardLabel: mission.rewardLabel,
+    xpReward: mission.xpReward,
+    progressCurrent: 0,
+    progressTarget: mission.progressTarget,
+    progressUnit: mission.progressUnit,
+    progressPercent: 0,
+    questSteps: mission.questSteps.map((step) => ({
+      ...step,
+      progressCurrent: 0,
+      completed: false,
+      current: step.target === 1,
+    })),
+    periodTo: null,
+    manualApprovalRequired: false,
+    rewardStatus: {
+      state: 'IN_PROGRESS',
+      label: 'Награда впереди',
+      hint: 'Квест доступен в выбранном клубе.',
+      rewardLabel: mission.rewardLabel,
+      rewardAmount: mission.rewardAmount,
+      rewardWalletState: null,
+      ledgerStatus: null,
+      balanceAfter: null,
+      occurredAt: null,
+    },
+  }));
+  const nextActions = [
+    ...(payload.checkIn.enabled
+      ? [
+          {
+            id: 'check-in',
+            kind: 'CHECK_IN',
+            title: 'Сделайте чекин в клубе',
+            description:
+              payload.checkIn.rewardLabel ??
+              (payload.checkIn.rewardMode === 'BONUS'
+                ? 'Получите бонусы за подтверждение визита.'
+                : 'Получите XP за подтверждение визита.'),
+            priority: 'HIGH',
+            statusLabel: 'доступно',
+            progressPercent: 0,
+            anchor: 'progress',
+          },
+        ]
+      : []),
+    ...(activeBattlePass?.nextLevel
+      ? [
+          {
+            id: 'battle-pass-preview',
+            kind: 'BATTLE_PASS',
+            title: `Дойдите до уровня ${activeBattlePass.nextLevel}`,
+            description: activeBattlePass.nextRewardLabel ?? 'Награда сезона',
+            priority: payload.checkIn.enabled ? 'MEDIUM' : 'HIGH',
+            statusLabel: `${activeBattlePass.xpToNextLevel ?? 0} XP`,
+            progressPercent: activeBattlePass.progressPercent,
+            anchor: 'battlePass',
+          },
+        ]
+      : []),
+  ];
+
+  return {
+    generatedAt: now,
+    tenant: { name: user.tenantSlug ?? 'LeetPlus', slug: user.tenantSlug },
+    store: {
+      id: store.id,
+      name: store.name,
+      publicSlug: store.publicSlug,
+      city: store.city,
+      address: store.address,
+      latitude: store.latitude == null ? null : Number(store.latitude),
+      longitude: store.longitude == null ? null : Number(store.longitude),
+      yandexMapsUrl: null,
+      gamificationEnabled: store.gamificationEnabled,
+      isActive: store.isActive,
+    },
+    profile: {
+      id: null,
+      displayName: 'Гость клуба',
+      contactMasked: null,
+      xp: 0,
+      level: 1,
+      nextLevelXp: 500,
+      levelProgressPercent: 0,
+      frame: 'starter',
+    },
+    referral: {
+      status: 'READY',
+      code: 'PREVIEW',
+      link: '',
+      shareText: '',
+      channelHint: 'Предпросмотр без реферальной отправки.',
+      stats: { acceptedCount: 0, eligibleCount: 0, latestAcceptedAt: null },
+    },
+    account: {
+      guestFound: true,
+      state: 'GAME_PROFILE',
+      stateLabel: 'Игровой профиль LeetPlus',
+      readinessPercent: 80,
+      langameLinked: false,
+    },
+    loyalty: {
+      groupName: null,
+      discountPercent: null,
+      bonusBalance: null,
+      bonusBalanceSource: null,
+      bonusBalanceSyncedAt: null,
+    },
+    rewards: {
+      summary: {
+        total: 0,
+        ready: 0,
+        waitingApproval: 0,
+        redeemed: 0,
+        expired: 0,
+        nextExpiresAt: null,
+      },
+      ready: [],
+      recent: [],
+      latestBonus: null,
+      bonusHistory: {
+        summary: {
+          total: 0,
+          confirmedAmount: 0,
+          pendingAmount: 0,
+          failed: 0,
+          latestAt: null,
+        },
+        items: [],
+      },
+    },
+    promoCards: {
+      total: payload.promoCards.length,
+      featured: payload.promoCards.slice(0, 3).map((item, index) => ({
+        id: item.id ?? `preview-promo-${index}`,
+        label: item.label,
+        title: item.title,
+        description: item.description,
+        tag: item.tag,
+        targetAnchor: item.targetAnchor,
+        periodTo: item.periodTo,
+      })),
+    },
+    lootBoxes: {
+      total: payload.lootBoxes.length,
+      featured: payload.lootBoxes.slice(0, 3).map((item, index) => ({
+        id: item.id ?? `preview-loot-${index}`,
+        name: item.title,
+        triggerKind: item.triggerKind,
+        rewardLabel: item.rewardLabel,
+        rewardType: item.rewardType,
+        openedCount: 0,
+        readyRewards: 0,
+        waitingApprovalRewards: 0,
+        redeemedRewards: 0,
+        latestReward: null,
+      })),
+    },
+    missions: {
+      total: payload.missions.length,
+      featured: missions,
+      history: missions,
+    },
+    battlePass: { active: activeBattlePass },
+    progress: {
+      summary: {
+        xp: 0,
+        level: 1,
+        levelProgressPercent: 0,
+        xpToNextLevel: 500,
+        missionsTotal: payload.missions.length,
+        missionsCompleted: 0,
+        missionsAlmostDone: 0,
+        rewardsReady: 0,
+        rewardsWaitingApproval: 0,
+        confirmedBonusAmount: 0,
+        pendingBonusAmount: 0,
+        lastActivityAt: null,
+      },
+      timeline: [],
+    },
+    journey: {
+      summary: {
+        completed: 1,
+        total: payload.checkIn.enabled ? 6 : 5,
+        readyPercent: payload.checkIn.enabled ? 16 : 20,
+        nextStepId: payload.checkIn.enabled ? 'CHECK_IN' : 'MISSION',
+        nextStepLabel: payload.checkIn.enabled ? 'Чекин' : 'Квест',
+      },
+      steps: [
+        {
+          id: 'PROFILE',
+          label: 'Регистрация',
+          status: 'DONE',
+          hint: 'Профиль создан.',
+          anchor: 'profile',
+        },
+        {
+          id: 'LANGAME',
+          label: 'Связь с Langame',
+          status: 'WAITING',
+          hint: 'Связь выполняется по телефону.',
+          anchor: 'langame-match',
+        },
+        ...(payload.checkIn.enabled
+          ? [
+              {
+                id: 'CHECK_IN',
+                label: 'Чекин',
+                status: 'CURRENT',
+                hint: 'Чекин включен для клуба.',
+                anchor: 'progress',
+              },
+            ]
+          : []),
+        {
+          id: 'MISSION',
+          label: 'Квест',
+          status: payload.missions.length ? 'CURRENT' : 'WAITING',
+          hint: 'Квесты показываются после публикации.',
+          anchor: 'missions',
+        },
+        {
+          id: 'REWARD',
+          label: 'Награда',
+          status: 'WAITING',
+          hint: 'Награда появится после выполнения.',
+          anchor: 'rewards',
+        },
+        {
+          id: 'BONUS',
+          label: 'Бонус в Langame',
+          status: 'WAITING',
+          hint: 'Бонусы уходят через ledger.',
+          anchor: 'rewards',
+        },
+      ],
+    },
+    nextActions: nextActions.slice(0, 5),
+    activity: {
+      sessionsCount: 0,
+      playMinutes: 0,
+      gameEventsCount: 0,
+      lastActivityAt: null,
+      recent: [],
+    },
+    communications: {
+      phoneConsentStatus: 'GRANTED',
+      telegram: {
+        connected: false,
+        readyForRewards: false,
+        status: 'NOT_CONNECTED',
+      },
+      max: {
+        connected: false,
+        readyForRewards: false,
+        status: 'NOT_CONNECTED',
+      },
+    },
+  } as GuestPortalGameSummary;
+}
+
+function buildVisualPreviewBattlePass(
+  battlePass: GuestGameVisualEditorBattlePass,
+): NonNullable<GuestPortalGameSummary['battlePass']['active']> {
+  const levels = visualArray(buildVisualSeasonLevels(battlePass)).map(
+    (item) => {
+      const record = visualRecord(item);
+      const level = visualInt(record.level, 1, 1, 60);
+
+      return {
+        level,
+        xp: visualInt(record.xp, 0, 0, 1000000),
+        freeReward: visualNullableString(record.freeReward),
+        premiumReward: visualNullableString(record.premiumReward),
+        reached: level === 1,
+        current: level === 1,
+        next: level === 2,
+      };
+    },
+  );
+  const next = levels.find((item) => item.next) ?? null;
+
+  return {
+    id: battlePass.id ?? 'preview-season',
+    name: battlePass.title,
+    currentLevel: 1,
+    nextLevel: next?.level ?? null,
+    progressPercent: 0,
+    xpToNextLevel: next?.xp ?? null,
+    nextRewardLabel: next?.freeReward ?? battlePass.mainPrize,
+    readyRewards: 0,
+    waitingApprovalRewards: 0,
+    levels,
+  };
+}
+
+function ruleMatchesStoreIds(storeIds: string[], storeId: string | null) {
+  return !storeIds.length || Boolean(storeId && storeIds.includes(storeId));
+}
+
+function visualRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function visualArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function visualString(value: unknown, fallback: string) {
+  return typeof value === 'string' && value.trim() ? value.trim() : fallback;
+}
+
+function visualNullableString(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function visualId(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function visualBool(value: unknown, fallback: boolean) {
+  return typeof value === 'boolean' ? value : fallback;
+}
+
+function visualStatus(value: unknown, fallback: StatusValue): StatusValue {
+  const parsed = visualString(value, fallback).toUpperCase();
+  return statusValues.includes(parsed as StatusValue)
+    ? (parsed as StatusValue)
+    : fallback;
+}
+
+function visualRewardMode(value: unknown): GuestGameVisualEditorRewardMode {
+  const parsed = visualString(value, '').toUpperCase();
+  return parsed === 'XP' || parsed === 'BONUS' ? parsed : '';
+}
+
+function visualNumberOrNull(value: unknown) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function visualInt(value: unknown, fallback: number, min: number, max: number) {
+  const parsed = visualNumberOrNull(value);
+  if (parsed == null) {
+    return fallback;
+  }
+  return Math.min(max, Math.max(min, Math.trunc(parsed)));
+}
+
+function visualIntOrNull(value: unknown, min: number, max: number) {
+  const parsed = visualNumberOrNull(value);
+  if (parsed == null) {
+    return null;
+  }
+  return Math.min(max, Math.max(min, Math.trunc(parsed)));
+}
+
+function visualDateString(value: unknown) {
+  if (typeof value !== 'string' || !value.trim()) {
+    return null;
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }

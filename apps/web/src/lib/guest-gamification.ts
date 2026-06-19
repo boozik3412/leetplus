@@ -132,6 +132,7 @@ export type GuestGameSeason = {
   premiumRewards: unknown;
   premiumEnabled: boolean;
   premiumUpgradeMode: string | null;
+  storeIds: string[];
   budgetAmount: number | null;
   manualApprovalRequired: boolean;
   note: string | null;
@@ -139,6 +140,121 @@ export type GuestGameSeason = {
   updatedAt: string;
   audience: GuestGameAudience | null;
   createdBy: GuestGameUser | null;
+};
+
+export type GuestGamePromoCard = {
+  id: string;
+  title: string;
+  status: GuestGameStatus;
+  label: string | null;
+  description: string | null;
+  tag: string | null;
+  priority: number;
+  storeIds: string[];
+  periodFrom: string | null;
+  periodTo: string | null;
+  targetAnchor: string | null;
+  payload: unknown;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: GuestGameUser | null;
+};
+
+export type GuestGameVisualEditorRewardMode = "XP" | "BONUS" | "";
+
+export type GuestGameVisualEditorBattlePass = {
+  id: string | null;
+  enabled: boolean;
+  title: string;
+  status: GuestGameStatus;
+  levelCount: number;
+  xpPerLevel: number;
+  mainPrize: string | null;
+  levelRewards: Array<{ level: number; reward: string }>;
+};
+
+export type GuestGameVisualEditorLootBox = {
+  id: string | null;
+  title: string;
+  status: GuestGameStatus;
+  triggerKind: string;
+  rewardType: string;
+  rewardAmount: number | null;
+  rewardLabel: string;
+  condition: string;
+  limitPerGuest: number | null;
+};
+
+export type GuestGameVisualEditorMission = {
+  id: string | null;
+  title: string;
+  status: GuestGameStatus;
+  missionType: string;
+  triggerKind: string;
+  xpReward: number;
+  rewardType: string;
+  rewardAmount: number | null;
+  rewardLabel: string;
+  progressTarget: number | null;
+  progressUnit: string | null;
+  questSteps: Array<{ id: string; title: string; target: number }>;
+};
+
+export type GuestGameVisualEditorPromoCard = {
+  id: string | null;
+  label: string | null;
+  title: string;
+  description: string | null;
+  tag: string | null;
+  status: GuestGameStatus;
+  targetAnchor: string | null;
+  periodFrom: string | null;
+  periodTo: string | null;
+};
+
+export type GuestGameVisualEditorCheckIn = {
+  enabled: boolean;
+  rewardMode: GuestGameVisualEditorRewardMode;
+  xp: number | null;
+  bonusAmount: number | null;
+  rewardLabel: string | null;
+};
+
+export type GuestGameVisualEditorPayload = {
+  version: 1;
+  battlePass: GuestGameVisualEditorBattlePass;
+  lootBoxes: GuestGameVisualEditorLootBox[];
+  missions: GuestGameVisualEditorMission[];
+  promoCards: GuestGameVisualEditorPromoCard[];
+  checkIn: GuestGameVisualEditorCheckIn;
+};
+
+export type GuestGameVisualEditorStore = {
+  id: string;
+  name: string;
+  city: string | null;
+  address: string | null;
+  publicSlug: string | null;
+};
+
+export type GuestGameVisualDraft = {
+  id: string;
+  status: "DRAFT" | "PUBLISHED" | "ARCHIVED";
+  payload: GuestGameVisualEditorPayload;
+  note: string | null;
+  publishedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  store: GuestGameVisualEditorStore | null;
+  createdBy: GuestGameUser | null;
+  updatedBy: GuestGameUser | null;
+  publishedBy: GuestGameUser | null;
+};
+
+export type GuestGameVisualEditorPreview = {
+  draft: GuestGameVisualDraft;
+  summary: unknown;
 };
 
 export type GuestGameReward = {
@@ -1232,6 +1348,7 @@ export type GuestGamificationWorkspace = {
   lootBoxes: GuestGameLootBox[];
   missions: GuestGameMission[];
   seasons: GuestGameSeason[];
+  promoCards: GuestGamePromoCard[];
   rewards: GuestGameReward[];
   events: GuestGameEvent[];
   tariffSnapshots: GuestGameTariffSnapshotEndpoint[];

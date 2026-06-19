@@ -498,6 +498,7 @@ const emptyWorkspace: GuestGamificationWorkspace = {
   lootBoxes: [],
   missions: [],
   seasons: [],
+  promoCards: [],
   rewards: [],
   events: [],
   tariffSnapshots: [],

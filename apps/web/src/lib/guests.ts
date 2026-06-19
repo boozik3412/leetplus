@@ -474,6 +474,7 @@ export type StaffUnmatchedOperatorRow = {
   lastClosedShiftExternalShiftId: string | null;
   lastClosedShiftStartedAt: string | null;
   lastClosedShiftStoppedAt: string | null;
+  lastClosedShiftStoreTimeZone: string | null;
   shiftsCount: number;
   shiftHours: number;
   shiftPaymentAmount: number;
@@ -562,6 +563,7 @@ export type StaffControlAnomalyType =
 export type StaffOperatorShiftDetail = {
   externalShiftId: string | null;
   storeName: string | null;
+  storeTimeZone: string | null;
   startedAt: string | null;
   stoppedAt: string | null;
   durationHours: number;
@@ -587,6 +589,7 @@ export type StaffOperatorReportRow = {
   lastClosedShiftExternalShiftId: string | null;
   lastClosedShiftStartedAt: string | null;
   lastClosedShiftStoppedAt: string | null;
+  lastClosedShiftStoreTimeZone: string | null;
   shiftsCount: number;
   shiftHours: number;
   shiftPaymentAmount: number;

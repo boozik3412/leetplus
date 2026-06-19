@@ -700,6 +700,7 @@ export type StaffUnmatchedOperatorRow = {
   lastClosedShiftExternalShiftId: string | null;
   lastClosedShiftStartedAt: string | null;
   lastClosedShiftStoppedAt: string | null;
+  lastClosedShiftStoreTimeZone: string | null;
   shiftsCount: number;
   shiftHours: number;
   shiftPaymentAmount: number;
@@ -801,6 +802,7 @@ export type StaffIdentityMappingResult = {
 export type StaffOperatorShiftDetail = {
   externalShiftId: string | null;
   storeName: string | null;
+  storeTimeZone: string | null;
   startedAt: string | null;
   stoppedAt: string | null;
   durationHours: number;
@@ -826,6 +828,7 @@ export type StaffOperatorReportRow = {
   lastClosedShiftExternalShiftId: string | null;
   lastClosedShiftStartedAt: string | null;
   lastClosedShiftStoppedAt: string | null;
+  lastClosedShiftStoreTimeZone: string | null;
   shiftsCount: number;
   shiftHours: number;
   shiftPaymentAmount: number;
@@ -909,6 +912,7 @@ type StaffShiftMetrics = {
   lastClosedShiftExternalShiftId: string | null;
   lastClosedShiftStartedAt: Date | null;
   lastClosedShiftStoppedAt: Date | null;
+  lastClosedShiftStoreTimeZone: string | null;
   shiftsCount: number;
   linkedShiftsCount: number;
   shiftMinutes: number;
@@ -4632,7 +4636,7 @@ export class GuestsService {
           yandexPay: true,
           incassAmount: true,
           middleCheck: true,
-          store: { select: { name: true } },
+          store: { select: { name: true, timeZone: true } },
         },
       }),
       this.loadLangameStaffUsersByOperatorKey(tenantId),
@@ -4661,6 +4665,7 @@ export class GuestsService {
         externalShiftId: row.externalShiftId,
         startedAt: row.startedAt,
         stoppedAt: row.stoppedAt,
+        storeTimeZone: row.store?.timeZone ?? null,
         durationMinutes: row.durationMinutes ?? 0,
         paymentAmount,
         refundAmount,
@@ -4691,6 +4696,7 @@ export class GuestsService {
             externalShiftId: row.externalShiftId,
             startedAt: row.startedAt,
             stoppedAt: row.stoppedAt,
+            storeTimeZone: row.store?.timeZone ?? null,
             durationMinutes: row.durationMinutes ?? 0,
             paymentAmount,
             refundAmount,
@@ -4713,6 +4719,7 @@ export class GuestsService {
         externalShiftId: row.externalShiftId,
         startedAt: row.startedAt,
         stoppedAt: row.stoppedAt,
+        storeTimeZone: row.store?.timeZone ?? null,
         durationMinutes: row.durationMinutes ?? 0,
         paymentAmount,
         refundAmount,
@@ -4765,7 +4772,7 @@ export class GuestsService {
             yandexPay: true,
             incassAmount: true,
             middleCheck: true,
-            store: { select: { name: true } },
+            store: { select: { name: true, timeZone: true } },
             guest: { select: this.guestSelect() },
           },
         }),
@@ -4877,6 +4884,7 @@ export class GuestsService {
         externalShiftId: row.externalShiftId,
         startedAt: row.startedAt,
         stoppedAt: row.stoppedAt,
+        storeTimeZone: row.store?.timeZone ?? null,
         durationMinutes: row.durationMinutes ?? 0,
         paymentAmount,
         refundAmount,
@@ -4886,6 +4894,7 @@ export class GuestsService {
       const shiftDetail: StaffOperatorShiftDetail = {
         externalShiftId: row.externalShiftId,
         storeName: row.store?.name ?? null,
+        storeTimeZone: row.store?.timeZone ?? null,
         startedAt: this.toIsoDateTime(row.startedAt),
         stoppedAt: this.toIsoDateTime(row.stoppedAt),
         durationHours: this.round((row.durationMinutes ?? 0) / 60, 1),
@@ -5142,6 +5151,7 @@ export class GuestsService {
       lastClosedShiftExternalShiftId: null,
       lastClosedShiftStartedAt: null,
       lastClosedShiftStoppedAt: null,
+      lastClosedShiftStoreTimeZone: null,
       shiftsCount: 0,
       linkedShiftsCount: 0,
       shiftMinutes: 0,
@@ -5162,6 +5172,7 @@ export class GuestsService {
       externalShiftId: string | null;
       startedAt: Date | null;
       stoppedAt: Date | null;
+      storeTimeZone: string | null;
       durationMinutes: number;
       paymentAmount: number;
       refundAmount: number;
@@ -5185,6 +5196,7 @@ export class GuestsService {
       metrics.lastClosedShiftExternalShiftId = values.externalShiftId;
       metrics.lastClosedShiftStartedAt = values.startedAt;
       metrics.lastClosedShiftStoppedAt = values.stoppedAt;
+      metrics.lastClosedShiftStoreTimeZone = values.storeTimeZone;
     }
 
     if (values.middleCheck !== null) {
@@ -5244,6 +5256,7 @@ export class GuestsService {
       lastClosedShiftStoppedAt: this.toIsoDateTime(
         metrics.lastClosedShiftStoppedAt,
       ),
+      lastClosedShiftStoreTimeZone: metrics.lastClosedShiftStoreTimeZone,
       shiftsCount: metrics.shiftsCount,
       shiftHours: this.round(metrics.shiftMinutes / 60, 1),
       shiftPaymentAmount: this.round(metrics.shiftPaymentAmount, 2),
@@ -5276,6 +5289,7 @@ export class GuestsService {
       lastClosedShiftStoppedAt: this.toIsoDateTime(
         metrics.lastClosedShiftStoppedAt,
       ),
+      lastClosedShiftStoreTimeZone: metrics.lastClosedShiftStoreTimeZone,
       shiftsCount: metrics.shiftsCount,
       shiftHours: this.round(metrics.shiftMinutes / 60, 1),
       shiftPaymentAmount: this.round(metrics.shiftPaymentAmount, 2),

@@ -81,26 +81,34 @@ function formatPeriodDate(value: string) {
   }).format(new Date(`${value}T00:00:00.000Z`));
 }
 
-function formatShiftDateTime(value: string) {
+const DEFAULT_STAFF_CONTROL_TIME_ZONE = "Europe/Moscow";
+
+function formatShiftDateTime(value: string, timeZone?: string | null) {
+  const displayTimeZone = timeZone?.trim() || DEFAULT_STAFF_CONTROL_TIME_ZONE;
+
   return new Intl.DateTimeFormat("ru-RU", {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
-    timeZone: "UTC",
+    timeZone: displayTimeZone,
   }).format(new Date(value));
 }
 
 function formatLastClosedShift(
   startedAt: string | null,
   stoppedAt: string | null,
+  timeZone?: string | null,
 ) {
   if (!startedAt || !stoppedAt) {
     return "Нет закрытых смен";
   }
 
-  return `${formatShiftDateTime(startedAt)} - ${formatShiftDateTime(stoppedAt)}`;
+  return `${formatShiftDateTime(startedAt, timeZone)} - ${formatShiftDateTime(
+    stoppedAt,
+    timeZone,
+  )}`;
 }
 
 function formatShiftId(value: string | null) {
@@ -529,6 +537,7 @@ export default async function StaffOperatorsPage({
                             {formatLastClosedShift(
                               row.lastClosedShiftStartedAt,
                               row.lastClosedShiftStoppedAt,
+                              row.lastClosedShiftStoreTimeZone,
                             )}
                           </p>
                           <p className="mt-1 text-xs text-zinc-500">
@@ -1216,7 +1225,11 @@ function ShiftDetailsPreview({
               <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
                   <p className="font-semibold">
-                    {formatLastClosedShift(shift.startedAt, shift.stoppedAt)}
+                    {formatLastClosedShift(
+                      shift.startedAt,
+                      shift.stoppedAt,
+                      shift.storeTimeZone,
+                    )}
                   </p>
                   <p className="mt-1 text-xs text-zinc-500">
                     {formatShiftId(shift.externalShiftId)}
@@ -1351,6 +1364,7 @@ function OperatorCard({
           {formatLastClosedShift(
             row.lastClosedShiftStartedAt,
             row.lastClosedShiftStoppedAt,
+            row.lastClosedShiftStoreTimeZone,
           )}
         </p>
         <p className="mt-1 text-xs text-zinc-500">

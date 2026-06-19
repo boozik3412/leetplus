@@ -11,6 +11,7 @@ const STORE_CITY_TIME_ZONES = [
   { city: 'Краснодар', timeZone: 'Europe/Moscow' },
   { city: 'Ростов-на-Дону', timeZone: 'Europe/Moscow' },
   { city: 'Самара', timeZone: 'Europe/Samara' },
+  { city: 'Ижевск', timeZone: 'Europe/Samara' },
   { city: 'Саратов', timeZone: 'Europe/Saratov' },
   { city: 'Волгоград', timeZone: 'Europe/Volgograd' },
   { city: 'Калининград', timeZone: 'Europe/Kaliningrad' },

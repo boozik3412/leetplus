@@ -742,6 +742,7 @@ export type GuestGamePilotReadinessItem = {
     | "CLUB"
     | "GEOSEARCH"
     | "PUBLIC_REGISTRATION"
+    | "PUBLIC_GAME_QA"
     | "OTP"
     | "GAME_PROFILE"
     | "LANGAME_MATCH"

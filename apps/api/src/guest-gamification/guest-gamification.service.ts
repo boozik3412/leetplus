@@ -1202,6 +1202,7 @@ export type GuestGamePilotReadinessItem = {
     | 'CLUB'
     | 'GEOSEARCH'
     | 'PUBLIC_REGISTRATION'
+    | 'PUBLIC_GAME_QA'
     | 'OTP'
     | 'GAME_PROFILE'
     | 'LANGAME_MATCH'
@@ -2221,7 +2222,7 @@ const pilotRunbookPrerequisiteKeys = new Set<
   'CLUB',
   'GEOSEARCH',
   'PUBLIC_REGISTRATION',
-  'OTP',
+  'PUBLIC_GAME_QA',
   'GAME_PROFILE',
   'LANGAME_MATCH',
   'ACTIVE_RULES',
@@ -3328,6 +3329,43 @@ export class GuestGamificationService {
     const bonusLedgerSchedulerItem = integrationReadiness.items.find(
       (item) => item.key === 'BONUS_LEDGER_SCHEDULER',
     );
+    const telegramLinkItem = integrationReadiness.items.find(
+      (item) => item.key === 'TELEGRAM_LINK',
+    );
+    const telegramConsumerItem = integrationReadiness.items.find(
+      (item) => item.key === 'TELEGRAM_WEBHOOK',
+    );
+    const userCallItem = integrationReadiness.items.find(
+      (item) => item.key === 'USER_CALL_AUTH',
+    );
+    const telegramAuthReady = Boolean(
+      telegramLinkItem?.ready && telegramConsumerItem?.ready,
+    );
+    const userCallReady = Boolean(userCallItem?.ready);
+    const smsReserveReady = Boolean(otpItem?.ready);
+    const publicAuthReady = Boolean(
+      telegramAuthReady || userCallReady || smsReserveReady,
+    );
+    const publicAuthPartial = Boolean(
+      telegramLinkItem?.enabled ||
+      telegramLinkItem?.configured ||
+      telegramConsumerItem?.enabled ||
+      telegramConsumerItem?.configured ||
+      userCallItem?.enabled ||
+      userCallItem?.configured ||
+      otpItem?.enabled ||
+      otpItem?.configured,
+    );
+    const publicAuthChannels: string[] = [];
+    if (telegramAuthReady) {
+      publicAuthChannels.push('Telegram');
+    }
+    if (userCallReady) {
+      publicAuthChannels.push('звонок');
+    }
+    if (smsReserveReady) {
+      publicAuthChannels.push('SMS');
+    }
     const bonusLedgerAutonomousReady = Boolean(
       langameWriteItem?.ready && bonusLedgerSchedulerItem?.ready,
     );
@@ -3431,6 +3469,61 @@ export class GuestGamificationService {
           : 'Включить клуб в каталог /play через флаг геймификации или активное игровое правило.',
         actionHref: targetStorePayload?.playPath ?? '/play',
         actionLabel: 'Открыть /play',
+      },
+      {
+        key: 'PUBLIC_GAME_QA',
+        title: 'Публичный QA-путь',
+        status:
+          registrationReady && targetStoreCoordinatesReady && publicAuthReady
+            ? 'READY'
+            : !targetStore
+              ? 'BLOCKED'
+              : !registrationReady
+                ? 'PARTIAL'
+                : !publicAuthReady && !publicAuthPartial
+                  ? 'BLOCKED'
+                  : 'PARTIAL',
+        statusLabel:
+          registrationReady && targetStoreCoordinatesReady && publicAuthReady
+            ? 'готов к QA'
+            : !targetStore
+              ? 'нет клуба'
+              : !registrationReady
+                ? 'нужен каталог'
+                : !publicAuthReady && !publicAuthPartial
+                  ? 'нет входа'
+                  : 'частично',
+        ready: Boolean(
+          registrationReady && targetStoreCoordinatesReady && publicAuthReady,
+        ),
+        metric: publicAuthChannels.length
+          ? `вход: ${publicAuthChannels.join(' / ')}`
+          : 'нет готового входа',
+        note: 'Проверяет основной гостевой путь /game/auth -> Telegram contact-share или бесплатный звонок/SMS -> /game/clubs -> /play/game без сотруднической сессии, live Langame reads и ПДн.',
+        nextAction:
+          registrationReady && targetStoreCoordinatesReady && publicAuthReady
+            ? 'Пройти production QA: /game/auth -> вход -> /game/clubs -> /play/game на тестовом телефоне.'
+            : !targetStore
+              ? 'Создать или включить пилотный клуб в LeetPlus Game.'
+              : !registrationReady
+                ? 'Включить клуб в публичный игровой каталог через флаг геймификации или активное правило.'
+                : !targetStoreCoordinatesReady
+                  ? 'Заполнить координаты пилотного клуба перед проверкой /game/clubs и поиска рядом.'
+                  : publicAuthPartial
+                    ? 'Завершить настройку Telegram polling edge, бесплатного звонка или SMS-резерва и затем пройти /game/auth.'
+                    : 'Настроить хотя бы один канал входа: Telegram-бот, бесплатный звонок или SMS-резерв.',
+        actionHref:
+          registrationReady && targetStoreCoordinatesReady && publicAuthReady
+            ? '/game/auth'
+            : !targetStoreCoordinatesReady
+              ? '/stores'
+              : '/guests/gamification',
+        actionLabel:
+          registrationReady && targetStoreCoordinatesReady && publicAuthReady
+            ? 'Открыть /game/auth'
+            : !targetStoreCoordinatesReady
+              ? 'Заполнить координаты'
+              : 'Открыть readiness',
       },
       {
         key: 'OTP',

@@ -467,57 +467,106 @@ function pilotFirstBonusLedgerEntryFixture(
 function integrationReadinessForPilot({
   otpReady = true,
   ledgerReady = false,
+  telegramReady = false,
+  userCallReady = false,
 }: {
   otpReady?: boolean;
   ledgerReady?: boolean;
+  telegramReady?: boolean;
+  userCallReady?: boolean;
 } = {}) {
+  const items = [
+    {
+      key: 'OTP',
+      title: 'OTP',
+      status: otpReady ? 'READY' : 'BLOCKED',
+      statusLabel: otpReady ? 'ready' : 'blocked',
+      ready: otpReady,
+      configured: otpReady,
+      enabled: otpReady,
+      requiredEnv: [],
+      note: 'OTP readiness',
+      nextAction: 'Configure OTP',
+    },
+    ...(telegramReady
+      ? [
+          {
+            key: 'TELEGRAM_LINK',
+            title: 'Telegram link',
+            status: 'READY',
+            statusLabel: 'ready',
+            ready: true,
+            configured: true,
+            enabled: true,
+            requiredEnv: [],
+            note: 'Telegram link readiness',
+            nextAction: 'Run Telegram QA',
+          },
+          {
+            key: 'TELEGRAM_WEBHOOK',
+            title: 'Telegram update consumer',
+            status: 'READY',
+            statusLabel: 'ready',
+            ready: true,
+            configured: true,
+            enabled: true,
+            requiredEnv: [],
+            note: 'Telegram consumer readiness',
+            nextAction: 'Run Telegram QA',
+          },
+        ]
+      : []),
+    ...(userCallReady
+      ? [
+          {
+            key: 'USER_CALL_AUTH',
+            title: 'User call auth',
+            status: 'READY',
+            statusLabel: 'ready',
+            ready: true,
+            configured: true,
+            enabled: true,
+            requiredEnv: [],
+            note: 'User call readiness',
+            nextAction: 'Run user-call QA',
+          },
+        ]
+      : []),
+    {
+      key: 'LANGAME_WRITE_API',
+      title: 'Langame write',
+      status: ledgerReady ? 'READY' : 'BLOCKED',
+      statusLabel: ledgerReady ? 'ready' : 'blocked',
+      ready: ledgerReady,
+      configured: ledgerReady,
+      enabled: ledgerReady,
+      requiredEnv: [],
+      note: 'Langame write readiness',
+      nextAction: 'Configure Langame write',
+    },
+    {
+      key: 'BONUS_LEDGER_SCHEDULER',
+      title: 'Bonus ledger scheduler',
+      status: ledgerReady ? 'READY' : 'BLOCKED',
+      statusLabel: ledgerReady ? 'ready' : 'blocked',
+      ready: ledgerReady,
+      configured: ledgerReady,
+      enabled: ledgerReady,
+      requiredEnv: [],
+      note: 'Scheduler readiness',
+      nextAction: 'Configure scheduler',
+    },
+  ];
+
   return {
     summary: {
-      total: 3,
-      ready: [otpReady, ledgerReady, ledgerReady].filter(Boolean).length,
-      partial: 0,
-      blocked: [otpReady, ledgerReady, ledgerReady].filter((value) => !value)
-        .length,
-      manualOnly: 0,
+      total: items.length,
+      ready: items.filter((item) => item.status === 'READY').length,
+      partial: items.filter((item) => item.status === 'PARTIAL').length,
+      blocked: items.filter((item) => item.status === 'BLOCKED').length,
+      manualOnly: items.filter((item) => item.status === 'MANUAL_ONLY').length,
     },
-    items: [
-      {
-        key: 'OTP',
-        title: 'OTP',
-        status: otpReady ? 'READY' : 'BLOCKED',
-        statusLabel: otpReady ? 'ready' : 'blocked',
-        ready: otpReady,
-        configured: otpReady,
-        enabled: otpReady,
-        requiredEnv: [],
-        note: 'OTP readiness',
-        nextAction: 'Configure OTP',
-      },
-      {
-        key: 'LANGAME_WRITE_API',
-        title: 'Langame write',
-        status: ledgerReady ? 'READY' : 'BLOCKED',
-        statusLabel: ledgerReady ? 'ready' : 'blocked',
-        ready: ledgerReady,
-        configured: ledgerReady,
-        enabled: ledgerReady,
-        requiredEnv: [],
-        note: 'Langame write readiness',
-        nextAction: 'Configure Langame write',
-      },
-      {
-        key: 'BONUS_LEDGER_SCHEDULER',
-        title: 'Bonus ledger scheduler',
-        status: ledgerReady ? 'READY' : 'BLOCKED',
-        statusLabel: ledgerReady ? 'ready' : 'blocked',
-        ready: ledgerReady,
-        configured: ledgerReady,
-        enabled: ledgerReady,
-        requiredEnv: [],
-        note: 'Scheduler readiness',
-        nextAction: 'Configure scheduler',
-      },
-    ],
+    items,
     note: 'Integration readiness',
   };
 }
@@ -1599,6 +1648,14 @@ describe('GuestGamificationService', () => {
             actionLabel: 'Открыть /play',
           }),
           expect.objectContaining({
+            key: 'PUBLIC_GAME_QA',
+            status: 'READY',
+            ready: true,
+            metric: 'вход: SMS',
+            actionHref: '/game/auth',
+            actionLabel: 'Открыть /game/auth',
+          }),
+          expect.objectContaining({
             key: 'GUEST_LOGS',
             status: 'READY',
             metric: '12 логов / 1 типов',
@@ -1620,6 +1677,70 @@ describe('GuestGamificationService', () => {
           expect.objectContaining({
             key: 'DISPATCH_BONUS_LEDGER',
             enabled: false,
+          }),
+        ]),
+      );
+    });
+
+    it('keeps the public QA path ready through user-call auth even when OTP is not ready', () => {
+      const { service } = createService();
+
+      const readiness = (service as any).buildPilotReadiness(
+        pilotReadinessInput({
+          integrationReadiness: integrationReadinessForPilot({
+            otpReady: false,
+            userCallReady: true,
+          }),
+        }),
+      );
+
+      expect(readiness.runbook).toMatchObject({
+        stage: 'DRY_RUN',
+        canRunDryRun: true,
+        blockers: [],
+      });
+      expect(readiness.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            key: 'OTP',
+            status: 'BLOCKED',
+            ready: false,
+          }),
+          expect.objectContaining({
+            key: 'PUBLIC_GAME_QA',
+            status: 'READY',
+            ready: true,
+            metric: 'вход: звонок',
+            actionHref: '/game/auth',
+          }),
+        ]),
+      );
+    });
+
+    it('blocks the pilot runbook when no public game auth channel is ready', () => {
+      const { service } = createService();
+
+      const readiness = (service as any).buildPilotReadiness(
+        pilotReadinessInput({
+          integrationReadiness: integrationReadinessForPilot({
+            otpReady: false,
+          }),
+        }),
+      );
+
+      expect(readiness.runbook).toMatchObject({
+        stage: 'BLOCKED',
+        canRunDryRun: false,
+        blockers: ['Публичный QA-путь'],
+      });
+      expect(readiness.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            key: 'PUBLIC_GAME_QA',
+            status: 'BLOCKED',
+            ready: false,
+            metric: 'нет готового входа',
+            actionHref: '/guests/gamification',
           }),
         ]),
       );

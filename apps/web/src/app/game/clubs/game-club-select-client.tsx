@@ -29,6 +29,7 @@ export function GameClubSelectClient({
   const [cityFilter, setCityFilter] = useState("");
   const [mapExpanded, setMapExpanded] = useState(false);
   const [selectedClubId, setSelectedClubId] = useState<string | null>(null);
+  const [currentClubId, setCurrentClubId] = useState<string | null>(null);
   const [submittingClubId, setSubmittingClubId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -65,6 +66,7 @@ export function GameClubSelectClient({
 
         setSummary(data);
         setSelectedClubId(clubId);
+        setCurrentClubId(clubId);
         setSessionState("ready");
         setMessage(loadError);
       } catch (error) {
@@ -111,9 +113,9 @@ export function GameClubSelectClient({
     visibleClubs[0] ??
     directory.clubs[0] ??
     null;
-  const currentSessionClubId = summary ? clubIdFromSummary(summary) : null;
+  const currentSessionClubId =
+    currentClubId ?? (summary ? clubIdFromSummary(summary) : null);
   const activeFilterLabel = cityFilter || query.trim() || "Все города";
-  const coordinateReadiness = coordinateReadinessLabel(directory);
 
   async function selectClub(club: GuestPortalGamificationClub) {
     setSelectedClubId(club.id);
@@ -140,6 +142,7 @@ export function GameClubSelectClient({
 
       setSummary(data.summary);
       setSelectedClubId(data.clubId);
+      setCurrentClubId(data.clubId);
       setSessionState("ready");
       showToast(data.message);
     } catch (error) {
@@ -342,12 +345,7 @@ export function GameClubSelectClient({
                       : "очередь"
                   }
                 />
-                <SmallRow label="Геопоиск" value={coordinateReadiness.status} />
               </div>
-            </SideBlock>
-            <SideBlock label="Карта и поиск рядом">
-              <strong>{coordinateReadiness.title}</strong>
-              <p className="lp-club-side-note">{coordinateReadiness.note}</p>
             </SideBlock>
             <SideBlock label="Игрок">
               <strong>
@@ -445,8 +443,14 @@ function ClubCard({
   submitting: boolean;
   onSelect: () => void;
 }) {
+  const distance = distanceLabel(club);
+
   return (
-    <article className={`lp-club-card ${selected ? "is-selected" : ""}`}>
+    <article
+      className={`lp-club-card ${selected ? "is-selected" : ""} ${
+        current ? "is-current" : ""
+      }`}
+    >
       <div>
         <div className="lp-club-title">
           <span className="lp-club-card-icon" aria-hidden="true">
@@ -466,11 +470,12 @@ function ClubCard({
         </div>
       </div>
       <div className="lp-club-card-side">
-        <span className="lp-club-distance">{distanceLabel(club)}</span>
+        {distance ? <span className="lp-club-distance">{distance}</span> : null}
         <button
-          className="lp-club-card-action"
+          className={`lp-club-card-action ${current ? "is-current" : ""}`}
           type="button"
           disabled={submitting}
+          aria-pressed={current}
           onClick={onSelect}
         >
           {submitting ? "Сохраняем" : current ? "Выбран" : "Выбрать"}
@@ -550,55 +555,11 @@ function formatClubLocation(club: GuestPortalGamificationClub) {
   return [club.store.city, club.store.address].filter(Boolean).join(" · ");
 }
 
-function coordinateReadinessLabel(
-  directory: GuestPortalGamificationClubDirectory,
-) {
-  const coordinates = directory.search.coordinates;
-
-  if (coordinates.total === 0) {
-    return {
-      status: "нет клубов",
-      title: "Клубы не найдены",
-      note: "Подключите клубы к LeetPlus Game, чтобы открыть выбор площадки.",
-    };
-  }
-
-  if (coordinates.missing === 0) {
-    return {
-      status: "готов",
-      title: "Геопоиск готов",
-      note: `${formatNumber(coordinates.ready)} из ${formatNumber(
-        coordinates.total,
-      )} клубов имеют координаты.`,
-    };
-  }
-
-  if (coordinates.ready === 0) {
-    return {
-      status: "нет координат",
-      title: "Координаты не заполнены",
-      note: `Заполните координаты для ${formatNumber(
-        coordinates.missing,
-      )} клубов в /stores, чтобы заработал поиск рядом.`,
-    };
-  }
-
-  return {
-    status: `${coordinates.readyPercent}%`,
-    title: "Геопоиск частично готов",
-    note: `${formatNumber(coordinates.ready)} из ${formatNumber(
-      coordinates.total,
-    )} клубов с координатами; без координат: ${formatNumber(
-      coordinates.missing,
-    )}.`,
-  };
-}
-
 function distanceLabel(club: GuestPortalGamificationClub) {
   const distance = club.location.distanceKm;
 
   if (distance === null) {
-    return club.location.coordinatesReady ? "рядом" : "без координат";
+    return club.location.coordinatesReady ? "рядом" : null;
   }
 
   return `${distance.toFixed(distance >= 10 ? 0 : 1)} км`;
@@ -1150,13 +1111,23 @@ function ClubSelectStyles() {
   border: 1px solid rgba(196, 224, 225, 0.14);
   border-radius: 7px;
   background: rgba(2, 8, 11, .52);
-  transition: border-color 180ms ease, background 180ms ease, transform 180ms ease;
+  transition: border-color 180ms ease, background 180ms ease, box-shadow 180ms ease, transform 180ms ease;
 }
 .lp-club-card.is-selected,
 .lp-club-card:hover {
   border-color: rgba(131, 228, 236, 0.58);
   background: linear-gradient(90deg, rgba(131,228,236,.1), transparent), rgba(8, 18, 22, .82);
   transform: translateY(-1px);
+}
+.lp-club-card.is-current {
+  border-color: rgba(148, 214, 184, 0.72);
+  background:
+    linear-gradient(90deg, rgba(148, 214, 184, .18), rgba(131, 228, 236, .08), transparent),
+    rgba(8, 18, 22, .92);
+  box-shadow:
+    inset 0 0 0 1px rgba(148, 214, 184, .2),
+    0 0 0 1px rgba(148, 214, 184, .1),
+    0 16px 42px rgba(84, 191, 198, .13);
 }
 .lp-club-title {
   display: flex;
@@ -1233,6 +1204,7 @@ function ClubSelectStyles() {
 .lp-club-card-action {
   min-height: 42px;
   padding: 0 15px;
+  border: 1px solid transparent;
   border-radius: 7px;
   background: linear-gradient(90deg, rgba(131, 228, 236, .96), rgba(84, 191, 198, .82));
   color: #041012;
@@ -1240,6 +1212,11 @@ function ClubSelectStyles() {
   font-weight: 880;
   letter-spacing: .12em;
   text-transform: uppercase;
+}
+.lp-club-card-action.is-current {
+  border-color: rgba(148, 214, 184, .62);
+  background: linear-gradient(90deg, rgba(148, 214, 184, .98), rgba(169, 228, 199, .86));
+  box-shadow: 0 0 0 1px rgba(148, 214, 184, .18), 0 10px 28px rgba(148, 214, 184, .16);
 }
 .lp-club-card-action:disabled {
   cursor: wait;

@@ -383,6 +383,8 @@ function pilotStoreFixture(overrides: Record<string, unknown> = {}) {
     publicSlug: '1337',
     address: 'Main street',
     city: 'Ekaterinburg',
+    latitude: new Prisma.Decimal(56.838011),
+    longitude: new Prisma.Decimal(60.597465),
     externalDomain: '1337.langame.ru',
     externalClubId: '1337',
     gamificationEnabled: true,
@@ -1528,6 +1530,40 @@ describe('GuestGamificationService', () => {
           expect.objectContaining({
             key: 'DISPATCH_BONUS_LEDGER',
             enabled: false,
+          }),
+        ]),
+      );
+    });
+
+    it('blocks pilot dry-run when the selected club has no coordinates for geosearch QA', () => {
+      const { service } = createService();
+
+      const readiness = (service as any).buildPilotReadiness(
+        pilotReadinessInput({
+          stores: [
+            pilotStoreFixture({
+              latitude: null,
+              longitude: null,
+            }),
+          ],
+        }),
+      );
+
+      expect(readiness.runbook).toMatchObject({
+        stage: 'BLOCKED',
+        canRunDryRun: false,
+        blockers: ['Карта и поиск рядом'],
+      });
+      expect(readiness.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            key: 'GEOSEARCH',
+            status: 'BLOCKED',
+            ready: false,
+            metric: 'координат нет',
+            nextAction: expect.stringContaining('Заполнить координаты'),
+            actionHref: '/stores',
+            actionLabel: 'Заполнить координаты',
           }),
         ]),
       );

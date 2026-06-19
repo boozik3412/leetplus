@@ -49,6 +49,13 @@ export type StoreAddressGeocode = StoreAddressSuggestion & {
   longitude: number;
 };
 
+export type StoreYandexMapsGeocode = {
+  value: string;
+  latitude: number;
+  longitude: number;
+  source: 'll' | 'pt' | 'sll' | 'whatshere' | 'rtext' | 'text';
+};
+
 type StoreAddressGeocodeResult = {
   storeId: string;
   name: string;
@@ -89,6 +96,10 @@ export class StoresService {
       dto.publicSlug == null
         ? await this.generateUniquePublicSlug(tenantId, name)
         : await this.normalizePublicSlug(dto.publicSlug, tenantId);
+    const yandexMapsUrl = this.normalizeOptionalString(dto.yandexMapsUrl);
+    const yandexGeocode = yandexMapsUrl
+      ? this.parseYandexMapsGeocode(yandexMapsUrl)
+      : null;
 
     return this.prisma.store.create({
       data: {
@@ -99,13 +110,13 @@ export class StoresService {
         city: location.city,
         cityFiasId: location.cityFiasId,
         cityKladrId: location.cityKladrId,
-        latitude: this.normalizeCoordinate(dto.latitude, -90, 90, 'Широта'),
-        longitude: this.normalizeCoordinate(
-          dto.longitude,
-          -180,
-          180,
-          'Долгота',
-        ),
+        latitude:
+          yandexGeocode?.latitude ??
+          this.normalizeCoordinate(dto.latitude, -90, 90, 'Широта'),
+        longitude:
+          yandexGeocode?.longitude ??
+          this.normalizeCoordinate(dto.longitude, -180, 180, 'Долгота'),
+        yandexMapsUrl,
         timeZone: location.timeZone,
         gamificationEnabled: this.normalizeBoolean(
           dto.gamificationEnabled,
@@ -173,6 +184,16 @@ export class StoresService {
     }
 
     return this.geocodeAddressWithToken(cleanQuery, token);
+  }
+
+  geocodeYandexMapsLink(link: string | undefined) {
+    const cleanLink = this.normalizeOptionalString(link);
+
+    if (!cleanLink || cleanLink.length < 10) {
+      throw new BadRequestException('Укажите ссылку Яндекс Карт');
+    }
+
+    return this.parseYandexMapsGeocode(cleanLink);
   }
 
   async geocodeMissingStoreCoordinates(user: AuthenticatedUser) {
@@ -297,9 +318,142 @@ export class StoresService {
     return geocode;
   }
 
+  private parseYandexMapsGeocode(cleanLink: string): StoreYandexMapsGeocode {
+    const url = parseHttpUrl(cleanLink);
+
+    if (!url || !isSupportedYandexMapsUrl(url)) {
+      throw new BadRequestException('Укажите ссылку Яндекс Карт');
+    }
+
+    const params = this.collectUrlParams(url);
+    const lonLatParams: Array<
+      [StoreYandexMapsGeocode['source'], string | null]
+    > = [
+      ['ll', params.get('ll')],
+      ['sll', params.get('sll')],
+      ['whatshere', params.get('whatshere[point]')],
+    ];
+
+    for (const [source, value] of lonLatParams) {
+      const pair = this.parseCoordinatePair(value, 'lonlat');
+
+      if (pair) {
+        return {
+          value: cleanLink,
+          latitude: pair.latitude,
+          longitude: pair.longitude,
+          source,
+        };
+      }
+    }
+
+    const pointPair = this.parseCoordinatePair(
+      firstYandexPoint(params.get('pt')),
+      'lonlat',
+    );
+
+    if (pointPair) {
+      return {
+        value: cleanLink,
+        latitude: pointPair.latitude,
+        longitude: pointPair.longitude,
+        source: 'pt',
+      };
+    }
+
+    const routePair = this.parseCoordinatePair(
+      firstYandexPoint(params.get('rtext')),
+      'latlon',
+    );
+
+    if (routePair) {
+      return {
+        value: cleanLink,
+        latitude: routePair.latitude,
+        longitude: routePair.longitude,
+        source: 'rtext',
+      };
+    }
+
+    const textPair = this.parseCoordinatePair(params.get('text'), 'latlon');
+
+    if (textPair) {
+      return {
+        value: cleanLink,
+        latitude: textPair.latitude,
+        longitude: textPair.longitude,
+        source: 'text',
+      };
+    }
+
+    throw new BadRequestException(
+      'В ссылке Яндекс Карт не найдены координаты. Откройте полную ссылку с параметрами ll, pt или "Что здесь".',
+    );
+  }
+
+  private collectUrlParams(url: URL) {
+    const params = new URLSearchParams(url.search);
+    const hash = url.hash.replace(/^#/, '');
+
+    if (hash.includes('=')) {
+      const hashParams = new URLSearchParams(
+        hash.startsWith('?') ? hash.slice(1) : hash,
+      );
+
+      for (const [key, value] of hashParams.entries()) {
+        params.append(key, value);
+      }
+    }
+
+    return params;
+  }
+
+  private parseCoordinatePair(
+    value: string | null | undefined,
+    order: 'lonlat' | 'latlon',
+  ) {
+    const numbers = coordinateNumbers(value);
+
+    if (numbers.length < 2) {
+      return null;
+    }
+
+    const latitudeValue = order === 'lonlat' ? numbers[1] : numbers[0];
+    const longitudeValue = order === 'lonlat' ? numbers[0] : numbers[1];
+
+    try {
+      const latitude = this.normalizeCoordinate(
+        latitudeValue,
+        -90,
+        90,
+        'Широта',
+      );
+      const longitude = this.normalizeCoordinate(
+        longitudeValue,
+        -180,
+        180,
+        'Долгота',
+      );
+
+      return latitude === null || longitude === null
+        ? null
+        : { latitude, longitude };
+    } catch {
+      return null;
+    }
+  }
+
   async update(id: string, dto: UpdateStoreDto, user: AuthenticatedUser) {
     const { tenantId } = await this.tenantContextService.resolve(user);
     const current = await this.findOneForTenant(id, tenantId);
+    const yandexMapsUrl =
+      dto.yandexMapsUrl === undefined
+        ? undefined
+        : this.normalizeOptionalString(dto.yandexMapsUrl);
+    const yandexGeocode =
+      yandexMapsUrl && yandexMapsUrl !== current.yandexMapsUrl
+        ? this.parseYandexMapsGeocode(yandexMapsUrl)
+        : null;
 
     return this.prisma.store.update({
       where: { id: current.id },
@@ -330,26 +484,35 @@ export class StoresService {
               dto.cityKladrId,
             )
           : {}),
-        ...(dto.latitude !== undefined
+        ...(yandexGeocode
           ? {
-              latitude: this.normalizeCoordinate(
-                dto.latitude,
-                -90,
-                90,
-                'Широта',
-              ),
+              latitude: yandexGeocode.latitude,
             }
-          : {}),
-        ...(dto.longitude !== undefined
+          : dto.latitude !== undefined
+            ? {
+                latitude: this.normalizeCoordinate(
+                  dto.latitude,
+                  -90,
+                  90,
+                  'Широта',
+                ),
+              }
+            : {}),
+        ...(yandexGeocode
           ? {
-              longitude: this.normalizeCoordinate(
-                dto.longitude,
-                -180,
-                180,
-                'Долгота',
-              ),
+              longitude: yandexGeocode.longitude,
             }
-          : {}),
+          : dto.longitude !== undefined
+            ? {
+                longitude: this.normalizeCoordinate(
+                  dto.longitude,
+                  -180,
+                  180,
+                  'Долгота',
+                ),
+              }
+            : {}),
+        ...(dto.yandexMapsUrl !== undefined ? { yandexMapsUrl } : {}),
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
         ...(dto.gamificationEnabled !== undefined
           ? {
@@ -590,6 +753,62 @@ function slugify(value: string) {
     .replace(/^-+|-+$/g, '')
     .replace(/-{2,}/g, '-')
     .slice(0, 64);
+}
+
+function parseHttpUrl(value: string) {
+  const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(value)
+    ? value
+    : `https://${value}`;
+
+  try {
+    const url = new URL(candidate);
+
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+function isSupportedYandexMapsUrl(url: URL) {
+  const host = url.hostname.toLowerCase().replace(/^www\./, '');
+  const path = url.pathname.toLowerCase();
+
+  if (!isYandexHost(host)) {
+    return false;
+  }
+
+  return (
+    host.startsWith('maps.') || path.includes('/maps') || path.includes('/navi')
+  );
+}
+
+function isYandexHost(host: string) {
+  const roots = [
+    'yandex.ru',
+    'yandex.com',
+    'yandex.kz',
+    'yandex.by',
+    'yandex.uz',
+    'yandex.com.tr',
+    'ya.ru',
+  ];
+
+  return roots.some((root) => host === root || host.endsWith(`.${root}`));
+}
+
+function firstYandexPoint(value: string | null) {
+  return value?.split('~').find((point) => point.trim()) ?? null;
+}
+
+function coordinateNumbers(value: string | null | undefined) {
+  if (!value) {
+    return [];
+  }
+
+  return Array.from(value.matchAll(/[+-]?\d{1,3}(?:[.,]\d+)?/g))
+    .slice(0, 2)
+    .map((match) => Number(match[0].replace(',', '.')))
+    .filter((number) => Number.isFinite(number));
 }
 
 const cyrillicSlugMap: Record<string, string> = {

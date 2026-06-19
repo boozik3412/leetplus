@@ -7,6 +7,7 @@ export type CreateStoreDto = {
   cityKladrId?: string | null;
   latitude?: number | string | null;
   longitude?: number | string | null;
+  yandexMapsUrl?: string | null;
   timeZone?: string | null;
   gamificationEnabled?: boolean;
 };

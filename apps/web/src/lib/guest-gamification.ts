@@ -723,6 +723,7 @@ export type GuestGameIntegrationReadiness = {
 export type GuestGamePilotReadinessItem = {
   key:
     | "CLUB"
+    | "GEOSEARCH"
     | "PUBLIC_REGISTRATION"
     | "OTP"
     | "GAME_PROFILE"

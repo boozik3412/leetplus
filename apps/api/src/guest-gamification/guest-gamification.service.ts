@@ -176,6 +176,8 @@ const pilotStoreSelect = {
   publicSlug: true,
   address: true,
   city: true,
+  latitude: true,
+  longitude: true,
   externalDomain: true,
   externalClubId: true,
   gamificationEnabled: true,
@@ -1198,6 +1200,7 @@ export type GuestGameIntegrationReadiness = {
 export type GuestGamePilotReadinessItem = {
   key:
     | 'CLUB'
+    | 'GEOSEARCH'
     | 'PUBLIC_REGISTRATION'
     | 'OTP'
     | 'GAME_PROFILE'
@@ -2199,6 +2202,7 @@ const pilotRunbookPrerequisiteKeys = new Set<
   GuestGamePilotReadinessItem['key']
 >([
   'CLUB',
+  'GEOSEARCH',
   'PUBLIC_REGISTRATION',
   'OTP',
   'GAME_PROFILE',
@@ -3313,6 +3317,14 @@ export class GuestGamificationService {
     const registrationReady = Boolean(
       targetStore && (targetStore.gamificationEnabled || activeRuleCount > 0),
     );
+    const targetStoreCoordinatesReady = Boolean(
+      targetStore?.latitude != null && targetStore?.longitude != null,
+    );
+    const targetStoreCoordinatesPartial = Boolean(
+      targetStore &&
+      !targetStoreCoordinatesReady &&
+      (targetStore.latitude != null || targetStore.longitude != null),
+    );
     const storeSlugOrId = targetStore?.publicSlug ?? targetStore?.id ?? null;
     const targetStorePayload = targetStore
       ? {
@@ -3352,6 +3364,38 @@ export class GuestGamificationService {
           : 'Включить флаг геймификации у пилотного клуба на странице клубов.',
         actionHref: '/stores',
         actionLabel: 'Открыть клубы',
+      },
+      {
+        key: 'GEOSEARCH',
+        title: 'Карта и поиск рядом',
+        status: targetStore
+          ? targetStoreCoordinatesReady
+            ? 'READY'
+            : 'BLOCKED'
+          : 'BLOCKED',
+        statusLabel: targetStore
+          ? targetStoreCoordinatesReady
+            ? 'координаты есть'
+            : targetStoreCoordinatesPartial
+              ? 'частично'
+              : 'нет координат'
+          : 'нет клуба',
+        ready: targetStoreCoordinatesReady,
+        metric: targetStore
+          ? targetStoreCoordinatesReady
+            ? 'широта и долгота'
+            : targetStoreCoordinatesPartial
+              ? 'заполнена одна координата'
+              : 'координат нет'
+          : 'клуб не выбран',
+        note: 'Перед production QA первого бонуса пилотный клуб должен участвовать в карте и поиске рядом на /game/clubs и /play.',
+        nextAction: targetStoreCoordinatesReady
+          ? 'Проверить /game/clubs и /play с фильтром рядом на реальной геолокации.'
+          : 'Заполнить широту и долготу пилотного клуба в /stores вручную или через bulk-действие Заполнить координаты.',
+        actionHref: '/stores',
+        actionLabel: targetStoreCoordinatesReady
+          ? 'Открыть клубы'
+          : 'Заполнить координаты',
       },
       {
         key: 'PUBLIC_REGISTRATION',

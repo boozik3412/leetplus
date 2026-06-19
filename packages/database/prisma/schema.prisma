@@ -481,6 +481,7 @@ model Store {
   cityKladrId           String?
   latitude              Decimal?             @db.Decimal(9, 6)
   longitude             Decimal?             @db.Decimal(9, 6)
+  yandexMapsUrl         String?
   gamificationEnabled   Boolean              @default(false)
   timeZone              String?
   isActive              Boolean              @default(true)

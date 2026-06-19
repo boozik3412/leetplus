@@ -52,6 +52,13 @@ export class StoresController {
 
   @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
   @UseGuards(JwtAuthGuard, RolesGuard)
+  @Get('yandex-maps-geocode')
+  geocodeYandexMapsLink(@Query('q') query?: string) {
+    return this.storesService.geocodeYandexMapsLink(query);
+  }
+
+  @Roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Post('address-geocode/missing')
   geocodeMissingStoreCoordinates(@CurrentUser() user: AuthenticatedUser) {
     return this.storesService.geocodeMissingStoreCoordinates(user);

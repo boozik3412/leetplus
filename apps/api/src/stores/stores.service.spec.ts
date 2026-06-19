@@ -98,6 +98,7 @@ describe('StoresService', () => {
         cityKladrId: null,
         latitude: null,
         longitude: null,
+        yandexMapsUrl: null,
         timeZone: 'Asia/Yekaterinburg',
         gamificationEnabled: false,
       },
@@ -146,6 +147,66 @@ describe('StoresService', () => {
         longitude: 60.597465,
       },
     });
+  });
+
+  it('extracts coordinates from a Yandex Maps ll link without external requests', () => {
+    expect(
+      service.geocodeYandexMapsLink(
+        'https://yandex.ru/maps/54/yekaterinburg/?ll=60.597465%2C56.838011&z=17',
+      ),
+    ).toEqual({
+      value:
+        'https://yandex.ru/maps/54/yekaterinburg/?ll=60.597465%2C56.838011&z=17',
+      latitude: 56.838011,
+      longitude: 60.597465,
+      source: 'll',
+    });
+  });
+
+  it('extracts coordinates from a Yandex Maps whatshere link', () => {
+    expect(
+      service.geocodeYandexMapsLink(
+        'https://yandex.ru/maps/?whatshere%5Bpoint%5D=60.596988%2C56.829123&whatshere%5Bzoom%5D=17',
+      ),
+    ).toMatchObject({
+      latitude: 56.829123,
+      longitude: 60.596988,
+      source: 'whatshere',
+    });
+  });
+
+  it('fills coordinates from a new Yandex Maps link on store update', async () => {
+    prisma.store.findFirst.mockResolvedValue({
+      id: 'store-1',
+      name: 'Club A',
+      yandexMapsUrl: null,
+    });
+    prisma.store.update.mockResolvedValue({ id: 'store-1' });
+
+    await service.update(
+      'store-1',
+      {
+        yandexMapsUrl: 'https://yandex.ru/maps/?pt=60.597465,56.838011,pm2rdm',
+      },
+      user,
+    );
+
+    expect(prisma.store.update).toHaveBeenCalledWith({
+      where: { id: 'store-1' },
+      data: {
+        latitude: 56.838011,
+        longitude: 60.597465,
+        yandexMapsUrl: 'https://yandex.ru/maps/?pt=60.597465,56.838011,pm2rdm',
+      },
+    });
+  });
+
+  it('rejects unsupported map links', () => {
+    expect(() =>
+      service.geocodeYandexMapsLink(
+        'https://maps.google.com/?q=56.838011,60.597465',
+      ),
+    ).toThrow('Укажите ссылку Яндекс Карт');
   });
 
   it('rejects invalid coordinate values', async () => {

@@ -22,6 +22,13 @@ type AddressGeocodeResult = AddressSuggestion & {
   longitude: number;
 };
 
+type YandexMapsGeocodeResult = {
+  value: string;
+  latitude: number;
+  longitude: number;
+  source: string;
+};
+
 type BulkGeocodeResponse = {
   checked: number;
   updated: number;
@@ -233,10 +240,14 @@ function StoreInputs({ store }: { store?: Store }) {
   const [longitude, setLongitude] = useState(
     formatCoordinateValue(store?.longitude),
   );
+  const [yandexMapsUrl, setYandexMapsUrl] = useState(
+    store?.yandexMapsUrl ?? "",
+  );
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
   const [isSuggesting, setIsSuggesting] = useState(false);
   const [isSuggestionOpen, setIsSuggestionOpen] = useState(false);
   const [isGeocoding, setIsGeocoding] = useState(false);
+  const [isYandexGeocoding, setIsYandexGeocoding] = useState(false);
   const [geocodeStatus, setGeocodeStatus] = useState<string | null>(null);
 
   useEffect(() => {
@@ -343,6 +354,41 @@ function StoreInputs({ store }: { store?: Store }) {
     }
   }
 
+  async function handleYandexMapsGeocode() {
+    const query = yandexMapsUrl.trim();
+
+    if (query.length < 10) {
+      setGeocodeStatus("Вставьте ссылку Яндекс Карт");
+      return;
+    }
+
+    setIsYandexGeocoding(true);
+    setGeocodeStatus(null);
+
+    try {
+      const response = await fetch(
+        `/api/stores/yandex-maps-geocode?q=${encodeURIComponent(query)}`,
+      );
+      const data = (await response.json()) as
+        | YandexMapsGeocodeResult
+        | ErrorResponse;
+
+      if (!response.ok) {
+        setGeocodeStatus(getErrorMessage(data));
+        return;
+      }
+
+      const geocode = data as YandexMapsGeocodeResult;
+      setLatitude(String(geocode.latitude));
+      setLongitude(String(geocode.longitude));
+      setGeocodeStatus("Координаты из Яндекс Карт найдены");
+    } catch {
+      setGeocodeStatus("Не удалось разобрать ссылку Яндекс Карт");
+    } finally {
+      setIsYandexGeocoding(false);
+    }
+  }
+
   return (
     <>
       <input
@@ -431,6 +477,24 @@ function StoreInputs({ store }: { store?: Store }) {
         title="От -180 до 180. Нужно для карты и поиска рядом в игровом модуле"
         className="rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
       />
+      <input
+        name="yandexMapsUrl"
+        value={yandexMapsUrl}
+        onChange={(event) => setYandexMapsUrl(event.target.value)}
+        placeholder="Ссылка Яндекс Карт"
+        autoComplete="off"
+        title="Полная ссылка Яндекс Карт с координатами клуба"
+        className="rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 md:col-span-2"
+      />
+      <button
+        type="button"
+        onClick={handleYandexMapsGeocode}
+        disabled={isYandexGeocoding || yandexMapsUrl.trim().length < 10}
+        title={geocodeStatus ?? "Подставить координаты из ссылки Яндекс Карт"}
+        className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+      >
+        {isYandexGeocoding ? "..." : "Из ссылки"}
+      </button>
       <button
         type="button"
         onClick={handleAddressGeocode}
@@ -479,6 +543,7 @@ async function submitStoreForm(
       cityKladrId: optionalString(formData.get("cityKladrId")) ?? null,
       latitude: optionalString(formData.get("latitude")) ?? null,
       longitude: optionalString(formData.get("longitude")) ?? null,
+      yandexMapsUrl: optionalString(formData.get("yandexMapsUrl")) ?? null,
       timeZone: optionalString(formData.get("timeZone")) ?? null,
       gamificationEnabled: formData.get("gamificationEnabled") === "on",
     }),

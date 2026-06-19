@@ -10,6 +10,7 @@ export type Store = {
   cityKladrId?: string | null;
   latitude?: string | number | null;
   longitude?: string | number | null;
+  yandexMapsUrl?: string | null;
   timeZone?: string | null;
   externalDomain?: string | null;
   externalClubId?: string | null;

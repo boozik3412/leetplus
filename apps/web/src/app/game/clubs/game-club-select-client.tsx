@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import type { CSSProperties, FormEvent, ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   GuestPortalClubSelectResponse,
   GuestPortalGameSummary,
@@ -32,10 +32,19 @@ export function GameClubSelectClient({
   const [currentClubId, setCurrentClubId] = useState<string | null>(null);
   const [submittingClubId, setSubmittingClubId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const gameActionsRef = useRef<HTMLDivElement | null>(null);
 
   const showToast = useCallback((nextMessage: string) => {
     setToast(nextMessage);
     window.setTimeout(() => setToast(null), 2400);
+  }, []);
+  const scrollToGameActions = useCallback(() => {
+    window.setTimeout(() => {
+      gameActionsRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }, 80);
   }, []);
 
   useEffect(() => {
@@ -118,7 +127,11 @@ export function GameClubSelectClient({
   const activeFilterLabel = cityFilter || query.trim() || "Все города";
 
   async function selectClub(club: GuestPortalGamificationClub) {
+    const previousCurrentClubId = currentSessionClubId;
+    const previousSelectedClubId = selectedClubId;
+
     setSelectedClubId(club.id);
+    setCurrentClubId(club.id);
     setSubmittingClubId(club.id);
     setMessage(null);
 
@@ -141,11 +154,14 @@ export function GameClubSelectClient({
       const data = (await response.json()) as GuestPortalClubSelectResponse;
 
       setSummary(data.summary);
-      setSelectedClubId(data.clubId);
-      setCurrentClubId(data.clubId);
+      setSelectedClubId(club.id);
+      setCurrentClubId(club.id);
       setSessionState("ready");
       showToast(data.message);
+      scrollToGameActions();
     } catch (error) {
+      setSelectedClubId(previousSelectedClubId ?? previousCurrentClubId);
+      setCurrentClubId(previousCurrentClubId);
       setMessage(
         error instanceof Error ? error.message : "Не удалось выбрать клуб.",
       );
@@ -354,7 +370,7 @@ export function GameClubSelectClient({
                   : "Ожидает вход"}
               </strong>
             </SideBlock>
-            <div className="lp-club-actions">
+            <div className="lp-club-actions" ref={gameActionsRef}>
               <Link className="lp-club-primary" href="/game/app">
                 Открыть игру
                 <ArrowRightIcon />

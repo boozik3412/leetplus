@@ -156,6 +156,14 @@ export function TelegramMiniAppClient() {
     try {
       const data = await requestMiniAppSession({ initData, clubId });
       await handleSessionResponse(data);
+      if (data.status === "CONFIRMED") {
+        setSelectedTab("home");
+        window.setTimeout(() => {
+          document
+            .getElementById("home")
+            ?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 80);
+      }
     } catch (error) {
       setLoadState("error");
       setMessage(getErrorMessage(error, "Не удалось выбрать клуб."));
